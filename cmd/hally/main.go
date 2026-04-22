@@ -35,7 +35,15 @@ func main() {
 		Short: "Hally — deterministic LLM orchestrator",
 		Long: `Hally lets a human drive a structured application with free-text input.
 The LLM translates natural language into a finite alphabet of intents defined
-by the application; the state machine decides what happens next. See design.md.`,
+by the application; the state machine decides what happens next.
+
+Embedded documentation (ships inside this binary):
+  hally docs             list available topics
+  hally docs llm-guide   condensed manual for an LLM driving hally
+  hally docs app-schema  authoritative reference for app.yaml
+  hally docs all         print every topic, concatenated
+
+See also the full design document (design.md) in the repo.`,
 	}
 
 	root.AddCommand(versionCmd())
@@ -45,6 +53,7 @@ by the application; the state machine decides what happens next. See design.md.`
 	root.AddCommand(replayCmd())
 	root.AddCommand(testCmd())
 	root.AddCommand(serveCmd())
+	root.AddCommand(docsCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -78,6 +87,23 @@ func runCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run <app.yaml>",
 		Short: "Start an interactive session for an app (TUI)",
+		Long: `Load an app definition and open an interactive TUI session. The user
+types free text; an LLM harness maps it to one of the app's intents; the
+state machine applies the transition; the view is re-rendered.
+
+Harness auto-selection (when --harness is omitted):
+  1. 'claude' binary on PATH       → claude harness (no API key needed)
+  2. ANTHROPIC_API_KEY set         → live harness (direct SDK)
+  3. otherwise                     → replay (requires --oracle)
+
+Examples:
+  hally run testdata/apps/cloak/app.yaml
+  hally run myapp.yaml --harness claude --claude-model opus
+  hally run myapp.yaml --harness replay --oracle oracle.yaml
+  hally run myapp.yaml --harness recording --record /tmp/rec.jsonl
+  hally run myapp.yaml --trace /tmp/t.jsonl --trace-pretty -
+
+See 'hally docs llm-guide' for the full operator guide.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appPath := args[0]
@@ -308,10 +334,15 @@ func vizCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "viz <app.yaml>",
 		Short: "Emit a Graphviz DOT graph for an app",
-		Long: `Emit a Graphviz DOT graph for the given app definition.
+		Long: `Emit a Graphviz DOT graph for the given app definition. Useful for
+getting a visual overview of a state machine before authoring/debugging.
 
 The output is written to <appname>-viz.dot by default, or to --out.
-Render it with: dot -Tpng <appname>-viz.dot -o graph.png`,
+Render it with: dot -Tpng <appname>-viz.dot -o graph.png
+
+Examples:
+  hally viz testdata/apps/cloak/app.yaml
+  hally viz myapp.yaml --out /tmp/g.dot && dot -Tsvg /tmp/g.dot -o /tmp/g.svg`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appPath := args[0]
@@ -366,7 +397,14 @@ func testCmd() *cobra.Command {
 		Short: "Run Mode 1 and Mode 2 tests for an app",
 		Long: `Test sub-commands:
   hally test flows   <app.yaml>   — Mode 2: deterministic flow tests (no LLM)
-  hally test intents <app.yaml>   — Mode 1: intent pass-rate tests`,
+  hally test intents <app.yaml>   — Mode 1: intent pass-rate tests
+
+Fixture layout (defaults):
+  <app-dir>/flows/*.yaml      — flow fixtures (run under 'test flows')
+  <app-dir>/intents/*.yaml    — intent fixtures (run under 'test intents')
+  <app-dir>/oracle.yaml       — oracle YAML (seeds replay/static harness)
+
+See 'hally docs llm-guide' §7 for fixture shape.`,
 	}
 	cmd.AddCommand(testFlowsCmd())
 	cmd.AddCommand(testIntentsCmd())
@@ -392,7 +430,19 @@ func serveCmd() *cobra.Command {
 single 'transition' tool.
 
 The server reads MCP JSON-RPC messages from stdin and writes responses
-to stdout. It blocks until stdin is closed.`,
+to stdout. It blocks until stdin is closed.
+
+The 'transition' tool accepts:
+  { intent: <string>, slots: <object?>, confidence: <float?>, session_id: <string> }
+
+and returns either:
+  { ok: true,  state: <path>, view: <string>, menu: [<intent>,...], world: <obj> }
+or:
+  { ok: false, error: { code: <string>, message: <string>, ... } }
+
+Without --db, sessions are in-memory and lost on exit.
+
+See 'hally docs llm-guide' for the full operator guide.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appPath := args[0]
