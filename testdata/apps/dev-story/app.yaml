@@ -11,6 +11,7 @@ app:
 hosts:
   - host.run
   - host.workspace_manager.get
+  - host.oracle.ask
 
 # World schema: typed variables used across all rooms.
 world:
@@ -33,6 +34,10 @@ world:
   job_bg_result:       { type: string, default: "" }
   clarification_asked:  { type: bool,   default: false }
   clarification_answer: { type: string, default: "" }
+  oracle_session_id:    { type: string, default: "" }
+  oracle_question:      { type: string, default: "" }
+  oracle_answer:        { type: string, default: "" }
+  oracle_turns:         { type: int,    default: 0 }
 
 # Root state is the Main Room.
 root: main

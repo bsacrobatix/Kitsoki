@@ -1,40 +1,46 @@
-# Oracle Room — open-ended Q&A with Claude (conversational mode stub).
-# ConversationalHarness is a stub; replies are formatted stubs, not real Claude.
-# Entry is push_history: false (stackless) so back returns to the caller.
+# Oracle Room — interactive Claude Code session that persists across turns.
+#
+# Each ask_question / explore_area / brainstorm invokes `host.oracle.ask`
+# (backed by the `claude -p --session-id <uuid>` CLI). The session_id is
+# stored in world so subsequent turns resume the same Claude session — tools,
+# context, and memory all carry over. Exiting the room (go_back / go_main)
+# keeps the session_id; re-entering continues where the user left off.
 
 states:
   oracle:
     mode: conversational
-    description: "Oracle Room — ask Claude anything. Architectural questions, rubber-ducking, code exploration."
+    description: "Oracle Room — an interactive Claude Code session. Ask anything; the session persists."
     view: |
-      Oracle Room.
+      Oracle Room — interactive Claude session.
 
-      Ask me anything: architectural questions, how-does-X-work, brainstorming,
-      or exploring an unfamiliar codebase area.
+      Session: {{ world.oracle_session_id }}{{ if world.oracle_session_id == "" }}(new){{ end }}
+      Turns so far: {{ world.oracle_turns }}
 
-      [Note: Oracle replies are stubs in this v1 build.]
+      Ask a question, explore an area of the codebase, or brainstorm an approach.
+      Your session persists — leaving and returning resumes the same Claude context.
 
-      Type your question, or use:
         ask question "..."
         explore area "..."
         brainstorm "..."
-    relevant_world: []
+
+      Use "back" to return to the previous room (session is preserved).
+    relevant_world: [oracle_session_id, oracle_turns]
     relevant_slots: []
     on:
       ask_question:
         - target: oracle_answering
           effects:
-            - set: { proposal_cmd: "{{ slots.question }}" }
+            - set: { oracle_question: "{{ slots.question }}" }
 
       explore_area:
         - target: oracle_answering
           effects:
-            - set: { proposal_cmd: "Explore: {{ slots.area }}" }
+            - set: { oracle_question: "Walk me through: {{ slots.area }}" }
 
       brainstorm:
         - target: oracle_answering
           effects:
-            - set: { proposal_cmd: "Brainstorm: {{ slots.topic }}" }
+            - set: { oracle_question: "Let's brainstorm: {{ slots.topic }}" }
 
       go_back:
         - target: "{{ world.prev_state }}"
@@ -48,36 +54,48 @@ states:
 
   oracle_answering:
     mode: conversational
-    description: "Oracle is processing your question..."
+    description: "Oracle is working on your question..."
     view: |
-      Question: {{ world.proposal_cmd }}
+      Q: {{ world.oracle_question }}
 
-      [stub] Oracle response:
-      This is a stub response from the ConversationalHarness. In a production
-      build, this would be a real Claude response with code search, doc lookup,
-      and architectural analysis capabilities.
+      A: {{ world.oracle_answer }}{{ if world.oracle_answer == "" }}
+      [Claude is thinking...]{{ end }}
 
-      The Oracle has read-only access to: file reads, code search (grep), doc
-      search, and web fetch. It cannot execute commands or modify state.
-
-      Ask another question or go back.
-    relevant_world: [proposal_cmd]
+      Ask another question, or use "back" to return (session is preserved).
+      Session: {{ world.oracle_session_id }}
+    relevant_world: [oracle_question, oracle_answer, oracle_session_id, oracle_turns]
     relevant_slots: []
+    on_enter:
+      - invoke: host.oracle.ask
+        with:
+          question: "{{ world.oracle_question }}"
+          session_id: "{{ world.oracle_session_id }}"
+        bind:
+          oracle_answer: "answer"
+          oracle_session_id: "session_id"
+        on_error: oracle_error
+      - set: { oracle_turns: "{{ world.oracle_turns + 1 }}" }
     on:
       ask_question:
         - target: oracle_answering
           effects:
-            - set: { proposal_cmd: "{{ slots.question }}" }
+            - set:
+                oracle_question: "{{ slots.question }}"
+                oracle_answer: ""
 
       explore_area:
         - target: oracle_answering
           effects:
-            - set: { proposal_cmd: "Explore: {{ slots.area }}" }
+            - set:
+                oracle_question: "Walk me through: {{ slots.area }}"
+                oracle_answer: ""
 
       brainstorm:
         - target: oracle_answering
           effects:
-            - set: { proposal_cmd: "Brainstorm: {{ slots.topic }}" }
+            - set:
+                oracle_question: "Let's brainstorm: {{ slots.topic }}"
+                oracle_answer: ""
 
       go_back:
         - target: "{{ world.prev_state }}"
@@ -88,3 +106,30 @@ states:
       go_inbox:
         - target: inbox
           push_history: false
+
+  oracle_error:
+    description: "Oracle call failed — Claude was unavailable or errored."
+    view: |
+      Oracle error: {{ world.last_error }}
+
+      Try asking again, or use "back" to leave the room.
+      Session: {{ world.oracle_session_id }} (preserved for retry)
+    relevant_world: [last_error, oracle_session_id]
+    relevant_slots: []
+    on:
+      ask_question:
+        - target: oracle_answering
+          effects:
+            - set:
+                oracle_question: "{{ slots.question }}"
+                oracle_answer: ""
+                last_error: ""
+
+      retry:
+        - target: oracle_answering
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main

@@ -85,4 +85,5 @@ func RunHandler(ctx context.Context, args map[string]any) (Result, error) {
 func RegisterBuiltins(r *Registry) {
 	r.Register("host.workspace_manager.get", WorkspaceManagerGetHandler)
 	r.Register("host.run", RunHandler)
+	r.Register("host.oracle.ask", OracleAskHandler)
 }
