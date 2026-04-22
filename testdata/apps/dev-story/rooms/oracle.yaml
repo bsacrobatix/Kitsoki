@@ -1,0 +1,90 @@
+# Oracle Room — open-ended Q&A with Claude (conversational mode stub).
+# ConversationalHarness is a stub; replies are formatted stubs, not real Claude.
+# Entry is push_history: false (stackless) so back returns to the caller.
+
+states:
+  oracle:
+    mode: conversational
+    description: "Oracle Room — ask Claude anything. Architectural questions, rubber-ducking, code exploration."
+    view: |
+      Oracle Room.
+
+      Ask me anything: architectural questions, how-does-X-work, brainstorming,
+      or exploring an unfamiliar codebase area.
+
+      [Note: Oracle replies are stubs in this v1 build.]
+
+      Type your question, or use:
+        ask question "..."
+        explore area "..."
+        brainstorm "..."
+    relevant_world: []
+    relevant_slots: []
+    on:
+      ask_question:
+        - target: oracle_answering
+          effects:
+            - set: { proposal_cmd: "{{ slots.question }}" }
+
+      explore_area:
+        - target: oracle_answering
+          effects:
+            - set: { proposal_cmd: "Explore: {{ slots.area }}" }
+
+      brainstorm:
+        - target: oracle_answering
+          effects:
+            - set: { proposal_cmd: "Brainstorm: {{ slots.topic }}" }
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  oracle_answering:
+    mode: conversational
+    description: "Oracle is processing your question..."
+    view: |
+      Question: {{ world.proposal_cmd }}
+
+      [stub] Oracle response:
+      This is a stub response from the ConversationalHarness. In a production
+      build, this would be a real Claude response with code search, doc lookup,
+      and architectural analysis capabilities.
+
+      The Oracle has read-only access to: file reads, code search (grep), doc
+      search, and web fetch. It cannot execute commands or modify state.
+
+      Ask another question or go back.
+    relevant_world: [proposal_cmd]
+    relevant_slots: []
+    on:
+      ask_question:
+        - target: oracle_answering
+          effects:
+            - set: { proposal_cmd: "{{ slots.question }}" }
+
+      explore_area:
+        - target: oracle_answering
+          effects:
+            - set: { proposal_cmd: "Explore: {{ slots.area }}" }
+
+      brainstorm:
+        - target: oracle_answering
+          effects:
+            - set: { proposal_cmd: "Brainstorm: {{ slots.topic }}" }
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false

@@ -1,0 +1,157 @@
+# Inbox Room — unified attention queue.
+# Shows completed background jobs, clarification requests, and external notifications.
+
+states:
+  inbox:
+    description: "Inbox — your unified notification and background-job queue."
+    view: |
+      Inbox ({{ world.inbox_unread }} unread)
+
+      [stub] Items:
+      {{ if world.job_bg_running }}
+        1. [running] Background job: {{ world.proposal_cmd }}
+      {{ end }}
+      {{ if world.job_bg_result != "" }}
+        1. [done] Job result available: {{ world.job_bg_result }}
+      {{ end }}
+      {{ if world.clarification_asked }}
+        2. [action_required] Clarification needed for background job
+      {{ end }}
+      {{ if world.inbox_unread > 0 }}
+        Background job completed — teleport to result? Use "open item 1".
+      {{ else }}
+        No unread items.
+      {{ end }}
+
+      Options: show inbox, open item, answer clarification, dismiss, cancel job.
+    relevant_world: [inbox_unread, job_bg_running, job_bg_result, clarification_asked, proposal_cmd]
+    relevant_slots: []
+    on:
+      show_inbox:
+        - target: inbox
+
+      open_inbox_item:
+        - when: "world.job_bg_result != '' && slots.item_id == '1'"
+          target: terminal_bg_result_view
+          effects:
+            - set: { inbox_unread: 0 }
+        - when: "world.clarification_asked && slots.item_id == '2'"
+          target: inbox_clarifying
+          effects:
+            - set: { inbox_unread: 0 }
+        - default: true
+          target: inbox
+          effects:
+            - say: "Item {{ slots.item_id }} not found or already handled."
+
+      answer_clarification:
+        - when: "world.clarification_asked"
+          target: inbox_clarification_answered
+          effects:
+            - set:
+                clarification_answer: "{{ slots.answer }}"
+                clarification_asked: false
+        - default: true
+          target: inbox
+          guard_hint: "No clarification is pending."
+          effects:
+            - say: "No clarification is currently pending."
+
+      dismiss_item:
+        - target: inbox
+          effects:
+            - set: { inbox_unread: 0 }
+            - say: "Item dismissed."
+
+      cancel_job:
+        - target: inbox
+          effects:
+            - set:
+                job_bg_running: false
+                job_bg_result: ""
+            - say: "Background job cancelled."
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+  inbox_clarifying:
+    description: "Answering a clarification request for a stalled background job."
+    view: |
+      Clarification Request
+
+      A background job is waiting for your input:
+      Question: "Should the deploy target production or staging?"
+
+      Please answer: answer clarification "production" or answer clarification "staging"
+    relevant_world: [clarification_asked]
+    relevant_slots: []
+    on:
+      answer_clarification:
+        - target: inbox_clarification_answered
+          effects:
+            - set:
+                clarification_answer: "{{ slots.answer }}"
+                clarification_asked: false
+
+      cancel:
+        - target: inbox
+          effects:
+            - set: { clarification_asked: false }
+
+      go_back:
+        - target: inbox
+
+      go_main:
+        - target: main
+
+  inbox_clarification_answered:
+    description: "Clarification submitted — job will resume."
+    view: |
+      Clarification submitted: {{ world.clarification_answer }}
+
+      The background job has been notified and will resume.
+      Check the inbox for the result.
+    relevant_world: [clarification_answer]
+    relevant_slots: []
+    on:
+      go_inbox:
+        - target: inbox
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+  terminal_bg_result_view:
+    description: "Background job result — teleported from inbox."
+    view: |
+      Background Job Result (teleported from inbox)
+
+      Command: {{ world.proposal_cmd }}
+      Result: {{ world.job_bg_result }}
+
+      Job is complete. You can propose another command or go back.
+    relevant_world: [proposal_cmd, job_bg_result, proposal_status]
+    relevant_slots: []
+    on:
+      propose:
+        - target: terminal_reviewing
+          effects:
+            - set:
+                proposal_cmd: "{{ slots.cmd }}"
+                proposal_status: "reviewing"
+                job_bg_result: ""
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
