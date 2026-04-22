@@ -101,10 +101,13 @@ var allowedBuiltins = map[string]bool{
 // allowedRoots is the set of top-level identifier names that may appear in
 // expressions. Member access chains must start with one of these.
 var allowedRoots = map[string]bool{
-	"slots": true,
-	"world": true,
-	"event": true,
-	"run":   true,
+	"slots":    true,
+	"world":    true,
+	"event":    true,
+	"run":      true,
+	"proposal": true, // $proposal slot (§3)
+	"inbox":    true, // $inbox slot (§4)
+	"workspace": true, // $workspace slot (§6)
 	// Boolean literals, which appear as identifiers in some expr-lang versions.
 	"true":  true,
 	"false": true,

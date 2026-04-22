@@ -97,6 +97,10 @@ type Transition struct {
 	View string `yaml:"view,omitempty"`
 	// Emit lists events emitted to parallel regions after this transition.
 	Emit []string `yaml:"emit,omitempty"`
+	// PushHistory controls whether the outgoing state is pushed onto the history stack.
+	// Default true (push on every normal transition). Set false for utility transitions
+	// like entering the Oracle Room or Inbox (§5.1 stackless transitions).
+	PushHistory *bool `yaml:"push_history,omitempty"`
 }
 
 // Effect is one atomic world mutation or side-effect invocation.
