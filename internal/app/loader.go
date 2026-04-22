@@ -131,7 +131,12 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 	}
 
 	// ── 7. per-state referential-integrity checks ─────────────────────────────
-	validateStates(file, "", def.States, globalIntents, worldKeys, allStatePaths, &errs)
+	// Build the host allow-list set for effect validation.
+	allowedHosts := make(map[string]struct{}, len(def.Hosts))
+	for _, h := range def.Hosts {
+		allowedHosts[h] = struct{}{}
+	}
+	validateStates(file, "", def.States, globalIntents, worldKeys, allStatePaths, allowedHosts, &errs)
 
 	// ── 8. relevant_world keys exist in world schema ──────────────────────────
 	// (already done inside validateStates, which recurses into nested states)
@@ -167,6 +172,7 @@ func joinPath(prefix, name string) string {
 //   - Valid target state paths in transitions.
 //   - Valid world key references in relevant_world.
 //   - compound states: initial child must exist.
+//   - invoke: host.* effects reference only declared hosts.
 func validateStates(
 	file string,
 	prefix string,
@@ -174,6 +180,7 @@ func validateStates(
 	globalIntents map[string]struct{},
 	worldKeys map[string]struct{},
 	allPaths map[string]struct{},
+	allowedHosts map[string]struct{},
 	errs *[]error,
 ) {
 	addErr := func(msg string) {
@@ -202,7 +209,7 @@ func validateStates(
 			}
 		}
 
-		// Validate on: intent names and transition targets.
+		// Validate on: intent names, transition targets, and effect hosts.
 		intentNames := sortedKeys(s.On)
 		for _, intentName := range intentNames {
 			// Wildcard "*" is always allowed (§3.1).
@@ -216,6 +223,22 @@ func validateStates(
 			for _, tr := range s.On[intentName] {
 				if err := validateTransitionTarget(file, statePath, tr.Target, allPaths); err != nil {
 					*errs = append(*errs, err)
+				}
+				// Validate invoke: host.* effects against the allow-list.
+				for _, eff := range tr.Effects {
+					if eff.Invoke != "" && len(allowedHosts) > 0 {
+						if _, ok := allowedHosts[eff.Invoke]; !ok {
+							addErr(fmt.Sprintf("state %q intent %q: effect invoke %q is not declared in app hosts", statePath, intentName, eff.Invoke))
+						}
+					}
+				}
+			}
+		}
+		// Validate on_enter effects.
+		for _, eff := range s.OnEnter {
+			if eff.Invoke != "" && len(allowedHosts) > 0 {
+				if _, ok := allowedHosts[eff.Invoke]; !ok {
+					addErr(fmt.Sprintf("state %q: on_enter invoke %q is not declared in app hosts", statePath, eff.Invoke))
 				}
 			}
 		}
@@ -234,7 +257,7 @@ func validateStates(
 
 		// Recurse into child states.
 		if len(s.States) > 0 {
-			validateStates(file, statePath, s.States, globalIntents, worldKeys, allPaths, errs)
+			validateStates(file, statePath, s.States, globalIntents, worldKeys, allPaths, allowedHosts, errs)
 		}
 	}
 }

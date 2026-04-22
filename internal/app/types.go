@@ -23,6 +23,12 @@ type AppDef struct {
 	Root     any                `yaml:"root"` // string state name or inline compound/parallel root
 	States   map[string]*State  `yaml:"states,omitempty"`
 	OffPath  *OffPathDef        `yaml:"off_path,omitempty"`
+	// Hosts is the allow-list of host handler names this app may invoke (§2).
+	Hosts    []string           `yaml:"hosts,omitempty"`
+	// Proposals declares named proposal kinds (§3).
+	Proposals map[string]*ProposalKind `yaml:"proposals,omitempty"`
+	// Include lists glob patterns for additional YAML files to merge (§9).
+	Include  []string           `yaml:"include,omitempty"`
 }
 
 // AppMeta holds the app-level metadata block.
@@ -101,12 +107,65 @@ type Effect struct {
 	Increment map[string]int `yaml:"increment,omitempty"`
 	// Say appends a narrative message (expr interpolation supported).
 	Say string `yaml:"say,omitempty"`
-	// Invoke calls a host-namespace function (§3.2, §11).
+	// Invoke calls a host-namespace function (§2, §11).
 	Invoke string `yaml:"invoke,omitempty"`
 	// With holds arguments for an Invoke call.
 	With map[string]any `yaml:"with,omitempty"`
+	// Bind extracts keys from the host result into world variables: bind: {world_key: result_key}.
+	Bind map[string]string `yaml:"bind,omitempty"`
+	// OnError is a state transition target fired when a host invoke returns an error.
+	// The $host_error slot is populated with {code, message} for guard evaluation.
+	OnError string `yaml:"on_error,omitempty"`
 	// Emit sends a named event to parallel regions.
 	Emit string `yaml:"emit,omitempty"`
+}
+
+// ProposalKind declares a named proposal kind (§3).
+type ProposalKind struct {
+	// Schema declares the typed fields of the proposal draft.
+	Schema map[string]string `yaml:"schema,omitempty"`
+	// Draft configures the initial drafting step.
+	Draft *ProposalStep `yaml:"draft,omitempty"`
+	// Refine configures the refinement step.
+	Refine *ProposalStep `yaml:"refine,omitempty"`
+	// Execute declares the host invocation that runs the proposal.
+	Execute *ProposalExecute `yaml:"execute,omitempty"`
+	// Views holds optional view overrides per lifecycle phase.
+	Views map[string]string `yaml:"views,omitempty"`
+	// Policy declares acceptance and confirmation policies.
+	Policy *ProposalPolicy `yaml:"policy,omitempty"`
+}
+
+// ProposalStep configures a draft or refine step.
+type ProposalStep struct {
+	// Prompt is the path to the prompt template used for this step.
+	Prompt string `yaml:"prompt,omitempty"`
+}
+
+// ProposalExecute declares what happens when the proposal is executed.
+type ProposalExecute struct {
+	// Invoke is the host handler name to call.
+	Invoke string `yaml:"invoke,omitempty"`
+	// With are the templated args passed to the handler.
+	With map[string]any `yaml:"with,omitempty"`
+	// Repeatable controls whether rerun/modify_and_rerun are available after success.
+	Repeatable bool `yaml:"repeatable,omitempty"`
+	// OnSuccess declares the transition after successful execution.
+	// Valid values: "stay", "back", or a named state.
+	OnSuccess string `yaml:"on_success,omitempty"`
+	// Background, when true, runs the execute as a background job (§4).
+	Background bool `yaml:"background,omitempty"`
+	// OnComplete declares effects to run when a background job completes.
+	OnComplete []Effect `yaml:"on_complete,omitempty"`
+}
+
+// ProposalPolicy configures automatic acceptance and confirmation.
+type ProposalPolicy struct {
+	// AutoAcceptIf is an expr evaluated against {$proposal, $world, $slots}.
+	// When true on drafting→reviewing, skip straight to executing.
+	AutoAcceptIf string `yaml:"auto_accept_if,omitempty"`
+	// RequireConfirm, when true, always requires explicit user confirmation before execute.
+	RequireConfirm bool `yaml:"require_confirm,omitempty"`
 }
 
 // Intent is a named, typed action available in a state.

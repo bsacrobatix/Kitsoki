@@ -75,9 +75,16 @@ type ValidationResult struct {
 // HostInvocation describes a host.* side-effect call that the caller must
 // dispatch outside the pure machine (§11).
 type HostInvocation struct {
-	Namespace string         `json:"namespace"`
-	Args      map[string]any `json:"args,omitempty"`
-	EmitEvent string         `json:"emit_event,omitempty"`
+	Namespace string            `json:"namespace"`
+	Args      map[string]any    `json:"args,omitempty"`
+	// Bind maps world variable names to keys in the host result's Data map.
+	// e.g. bind: {workspace: "id"} copies result.Data["id"] into world["workspace"].
+	Bind      map[string]string `json:"bind,omitempty"`
+	// OnError is a state path to transition to when the host returns an error.
+	// When non-empty and the host fails, the machine should transition there
+	// rather than erroring out. The $host_error slot will be set.
+	OnError   string            `json:"on_error,omitempty"`
+	EmitEvent string            `json:"emit_event,omitempty"`
 }
 
 // TurnResult is returned by Machine.Turn after a successful transition.
@@ -716,9 +723,20 @@ func (m *machineImpl) applyEffectsTraced(ctx context.Context, effects []app.Effe
 			}))
 
 		case eff.Invoke != "":
+			// Resolve with: args (templated values).
+			resolvedArgs := make(map[string]any, len(eff.With))
+			for k, v := range eff.With {
+				resolved, err := resolveEffectValue(v, env, newWorld)
+				if err != nil {
+					return world.World{}, nil, saySB, nil, fmt.Errorf("effect invoke %q with %q: %w", eff.Invoke, k, err)
+				}
+				resolvedArgs[k] = resolved
+			}
 			hc := HostInvocation{
 				Namespace: eff.Invoke,
-				Args:      eff.With,
+				Args:      resolvedArgs,
+				Bind:      eff.Bind,
+				OnError:   eff.OnError,
 				EmitEvent: eff.Emit,
 			}
 			hostCalls = append(hostCalls, hc)
@@ -728,7 +746,7 @@ func (m *machineImpl) applyEffectsTraced(ctx context.Context, effects []app.Effe
 			)
 			effectEvents = append(effectEvents, newEvent(store.HostInvoked, map[string]any{
 				"namespace": eff.Invoke,
-				"args":      eff.With,
+				"args":      resolvedArgs,
 			}))
 		}
 	}
@@ -908,15 +926,26 @@ func (m *machineImpl) applyEffects(effects []app.Effect, w world.World, env expr
 			}))
 
 		case eff.Invoke != "":
+			// Resolve with: args (templated values).
+			resolvedArgs := make(map[string]any, len(eff.With))
+			for k, v := range eff.With {
+				resolved, err := resolveEffectValue(v, env, newWorld)
+				if err != nil {
+					return world.World{}, nil, saySB, nil, fmt.Errorf("effect invoke %q with %q: %w", eff.Invoke, k, err)
+				}
+				resolvedArgs[k] = resolved
+			}
 			hc := HostInvocation{
 				Namespace: eff.Invoke,
-				Args:      eff.With,
+				Args:      resolvedArgs,
+				Bind:      eff.Bind,
+				OnError:   eff.OnError,
 				EmitEvent: eff.Emit,
 			}
 			hostCalls = append(hostCalls, hc)
 			effectEvents = append(effectEvents, newEvent(store.HostInvoked, map[string]any{
 				"namespace": eff.Invoke,
-				"args":      eff.With,
+				"args":      resolvedArgs,
 			}))
 		}
 	}
