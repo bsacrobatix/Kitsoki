@@ -15,6 +15,7 @@ import (
 
 	"hally/internal/app"
 	"hally/internal/harness"
+	"hally/internal/host"
 	"hally/internal/intent"
 	"hally/internal/machine"
 	"hally/internal/store"
@@ -35,6 +36,7 @@ type Orchestrator struct {
 	machine machine.Machine
 	store   store.Store
 	harness harness.Harness
+	hosts   *host.Registry
 	logger  *slog.Logger
 
 	// pending tracks in-flight clarifications keyed by session ID.
@@ -67,6 +69,16 @@ func WithLogger(l *slog.Logger) Option {
 		if l != nil {
 			o.logger = l
 		}
+	}
+}
+
+// WithHostRegistry enables dispatch of machine HostCalls. When unset, host
+// invocations collected by the machine are ignored (the event log still records
+// HostInvoked but no side-effect fires). Enable this for live sessions;
+// deterministic flow tests typically leave it off.
+func WithHostRegistry(r *host.Registry) Option {
+	return func(o *Orchestrator) {
+		o.hosts = r
 	}
 }
 
@@ -236,7 +248,21 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		}
 	}
 
-	// Success path: persist the machine's events.
+	// Success path: dispatch any host calls collected by the machine, apply
+	// their bindings to world, and refresh the view so the user sees the
+	// updated state on the same turn.
+	hostEvents, hostWorld, hostView, hostErr := o.dispatchHostCalls(ctx, result.HostCalls, result.World, result.NewState)
+	if hostErr != nil {
+		tl.Debug(ctx, trace.EvHarnessError, slog.String("host_dispatch_error", hostErr.Error()))
+	}
+	if len(hostEvents) > 0 {
+		result.Events = append(result.Events, hostEvents...)
+		result.World = hostWorld
+		if hostView != "" {
+			result.View = hostView
+		}
+	}
+
 	successEvents := append(prefix, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
 		"outcome": "transitioned",
@@ -292,6 +318,77 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		AllowedIntents: newAllowedNames,
 		TurnNumber:     turnNum,
 	}, nil
+}
+
+// dispatchHostCalls invokes each HostInvocation, applies bindings to world,
+// and re-renders the view. Returns the new events, the updated world, the
+// refreshed view (empty if no changes), and an error only when re-rendering
+// fails. Individual handler failures are folded into world.last_error and
+// emitted as HostReturned events with error payloads — they do not stop
+// dispatch of the remaining calls.
+//
+// When o.hosts is nil (deterministic flow tests), returns no events and the
+// original world unchanged.
+func (o *Orchestrator) dispatchHostCalls(ctx context.Context, calls []machine.HostInvocation, w world.World, state app.StatePath) ([]store.Event, world.World, string, error) {
+	if o.hosts == nil || len(calls) == 0 {
+		return nil, w, "", nil
+	}
+
+	var events []store.Event
+	applied := false
+
+	for _, hc := range calls {
+		res, err := o.hosts.Invoke(ctx, hc.Namespace, hc.Args)
+		if err != nil {
+			// Infrastructure failure (e.g. handler not registered): record and move on.
+			w.Vars["last_error"] = err.Error()
+			events = append(events, newOrchestratorEvent(store.HostReturned, map[string]any{
+				"namespace": hc.Namespace,
+				"error":     err.Error(),
+			}, 0))
+			applied = true
+			continue
+		}
+		if res.Error != "" {
+			w.Vars["last_error"] = res.Error
+		}
+
+		// Emit one EffectApplied event per binding so replay reconstructs
+		// the final world deterministically from the event log.
+		for wkey, dkey := range hc.Bind {
+			if res.Data == nil {
+				continue
+			}
+			val, ok := res.Data[dkey]
+			if !ok {
+				continue
+			}
+			w.Vars[wkey] = val
+			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
+				"set": map[string]any{wkey: val},
+			}, 0))
+			applied = true
+		}
+
+		payload := map[string]any{"namespace": hc.Namespace}
+		if res.Error != "" {
+			payload["error"] = res.Error
+		}
+		if res.Data != nil {
+			payload["data"] = res.Data
+		}
+		events = append(events, newOrchestratorEvent(store.HostReturned, payload, 0))
+	}
+
+	if !applied {
+		return events, w, "", nil
+	}
+
+	view, err := o.machine.RenderState(state, w)
+	if err != nil {
+		return events, w, "", fmt.Errorf("orchestrator: re-render after host dispatch: %w", err)
+	}
+	return events, w, view, nil
 }
 
 // SubmitDirect submits an intent call directly to the machine, bypassing the
@@ -385,6 +482,18 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 		"input":  fmt.Sprintf("[direct] intent=%s", intentName),
 		"direct": true,
 	}, turnNum)
+
+	hostEvents, hostWorld, hostView, hostErr := o.dispatchHostCalls(ctx, result.HostCalls, result.World, result.NewState)
+	if hostErr != nil {
+		tl.Debug(ctx, trace.EvHarnessError, slog.String("host_dispatch_error", hostErr.Error()))
+	}
+	if len(hostEvents) > 0 {
+		result.Events = append(result.Events, hostEvents...)
+		result.World = hostWorld
+		if hostView != "" {
+			result.View = hostView
+		}
+	}
 
 	successEvents := append([]store.Event{startEvent}, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
@@ -525,7 +634,19 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 		}, nil
 	}
 
-	// Success: build and persist events.
+	// Success: dispatch host calls then persist events.
+	hostEvents, hostWorld, hostView, hostErr := o.dispatchHostCalls(ctx, result.HostCalls, result.World, result.NewState)
+	if hostErr != nil {
+		tl.Debug(ctx, trace.EvHarnessError, slog.String("host_dispatch_error", hostErr.Error()))
+	}
+	if len(hostEvents) > 0 {
+		result.Events = append(result.Events, hostEvents...)
+		result.World = hostWorld
+		if hostView != "" {
+			result.View = hostView
+		}
+	}
+
 	startEvent := newOrchestratorEvent(store.TurnStarted, map[string]any{
 		"turn":    int64(turnNum),
 		"input":   fmt.Sprintf("[clarify-continue] intent=%s", call.Intent),

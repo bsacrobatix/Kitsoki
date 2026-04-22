@@ -18,6 +18,7 @@ import (
 
 	"hally/internal/app"
 	"hally/internal/harness"
+	"hally/internal/host"
 	hallymcp "hally/internal/mcp"
 	"hally/internal/machine"
 	"hally/internal/orchestrator"
@@ -144,8 +145,18 @@ func runCmd() *cobra.Command {
 			// Wire logger into harness.
 			setHarnessLogger(h, logger)
 
+			// Build host registry (built-in handlers + allow-list check).
+			hostReg := host.NewRegistry()
+			host.RegisterBuiltins(hostReg)
+			if err := hostReg.ValidateAllowList(def.Hosts); err != nil {
+				return fmt.Errorf("validate hosts: %w", err)
+			}
+
 			// Build orchestrator.
-			orch := orchestrator.New(def, m, s, h, orchestrator.WithLogger(logger))
+			orch := orchestrator.New(def, m, s, h,
+				orchestrator.WithLogger(logger),
+				orchestrator.WithHostRegistry(hostReg),
+			)
 
 			// Create a new session.
 			ctx := context.Background()

@@ -1,0 +1,43 @@
+# Tiny app used by TestOrchestrator_HostDispatch. Enters `probe` via `ask`,
+# and the `probe` state's on_enter invokes host.probe which binds message
+# into world.greeting. The `probe` view renders world.greeting so the test
+# can observe the refreshed view.
+app:
+  id: hostbind
+  version: 0.1.0
+  title: "host-bind test app"
+
+hosts:
+  - host.probe
+
+world:
+  greeting: { type: string, default: "" }
+
+root: idle
+
+intents:
+  ask:
+    title: "Ask"
+    description: "Trigger the probe."
+    examples: ["ask", "probe"]
+    priority: 10
+
+states:
+  idle:
+    description: "Idle"
+    view: "Idle. Greeting: {{ world.greeting }}"
+    on:
+      ask:
+        - target: probe
+
+  probe:
+    description: "Probe state"
+    view: "Greeting: {{ world.greeting }}"
+    on_enter:
+      - invoke: host.probe
+        with: {}
+        bind:
+          greeting: "message"
+    on:
+      ask:
+        - target: probe

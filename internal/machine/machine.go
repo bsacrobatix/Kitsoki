@@ -105,6 +105,10 @@ type Machine interface {
 	Turn(ctx context.Context, cur app.StatePath, w world.World, call intent.IntentCall) (TurnResult, error)
 	AllowedIntents(cur app.StatePath, w world.World) []AllowedIntent
 	Validate(cur app.StatePath, w world.World, call intent.IntentCall) ValidationResult
+	// RenderState recomputes the view for the given state path and world snapshot.
+	// Used by the orchestrator to refresh the view after host-call bindings land
+	// so the user sees the updated world on the same turn.
+	RenderState(cur app.StatePath, w world.World) (string, error)
 	// TryGuards performs a dry-run of the guards for the given intent and
 	// prefilled slots. It returns the resolved target state path (if a guard
 	// matches) and the blocking hint (if no guard matches). It never mutates
@@ -991,6 +995,21 @@ func (m *machineImpl) applyEffects(effects []app.Effect, w world.World, env expr
 		}
 	}
 	return newWorld, hostCalls, saySB, effectEvents, nil
+}
+
+// RenderState renders the view for a state+world snapshot. Used by the
+// orchestrator to refresh the on-screen view after host-call bindings write
+// new values into world on the same turn.
+func (m *machineImpl) RenderState(cur app.StatePath, w world.World) (string, error) {
+	cs, ok := m.states[string(cur)]
+	if !ok || cs.s == nil || cs.s.View == "" {
+		return "", nil
+	}
+	env := expr.Env{
+		Slots: map[string]any{},
+		World: w.Vars,
+	}
+	return expr.Render(cs.s.View, env)
 }
 
 // resolveEffectValue evaluates an effect value. If it's a string template, run

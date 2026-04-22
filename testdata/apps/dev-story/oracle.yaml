@@ -8,70 +8,83 @@ generator: "hand-authored (demo tape)"
 min_confidence: 1.00
 
 entries:
-  # main → workspace manager
+  # ── Oracle detour (first turn — then back to main) ──────────────────────
+  - state: main
+    input: "consult the oracle"
+    intent: { name: go_oracle, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: oracle
+    input: "how does the auth token refresh work"
+    intent:
+      name: ask_question
+      slots: { question: "how does the auth token refresh work" }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: oracle_answering
+    input: "go back"
+    intent: { name: go_back, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── Main navigation flow ───────────────────────────────────────────────
   - state: main
     input: "open workspace manager"
     intent: { name: go_workspace_manager, slots: {} }
     confidence: 1.00
     majority_of: 1
 
-  # workspace_manager → workspace_loading
   - state: workspace_manager
     input: "enter my-api-project"
     intent: { name: enter_workspace, slots: { name: my-api-project } }
     confidence: 1.00
     majority_of: 1
 
-  # workspace_loading → workspace_room
   - state: workspace_loading
     input: "enter workspace"
     intent: { name: enter_workspace, slots: { name: my-api-project } }
     confidence: 1.00
     majority_of: 1
 
-  # workspace_room → terminal_idle
   - state: workspace_room
     input: "open terminal"
     intent: { name: go_terminal, slots: {} }
     confidence: 1.00
     majority_of: 1
 
-  # terminal_idle → terminal_reviewing (propose)
+  # ── Terminal proposal lifecycle ─────────────────────────────────────────
   - state: terminal_idle
     input: "run git status"
     intent: { name: propose, slots: { cmd: "git status" } }
     confidence: 1.00
     majority_of: 1
 
-  # terminal_reviewing → terminal_reviewing (refine)
   - state: terminal_reviewing
     input: "refine with --short"
     intent: { name: refine, slots: { feedback: "git status --short" } }
     confidence: 1.00
     majority_of: 1
 
-  # terminal_reviewing → terminal_executing (accept)
   - state: terminal_reviewing
     input: "accept"
     intent: { name: accept, slots: {} }
     confidence: 1.00
     majority_of: 1
 
-  # terminal_executing → terminal_result (accept)
   - state: terminal_executing
     input: "accept"
     intent: { name: accept, slots: {} }
     confidence: 1.00
     majority_of: 1
 
-  # terminal_result → inbox
   - state: terminal_result
     input: "check my inbox"
     intent: { name: go_inbox, slots: {} }
     confidence: 1.00
     majority_of: 1
 
-  # inbox → main
   - state: inbox
     input: "home"
     intent: { name: go_main, slots: {} }
