@@ -1,0 +1,174 @@
+# Workspace Manager Room — find or create workspaces.
+
+states:
+  workspace_manager:
+    description: "Workspace Manager Room — find or create project workspaces."
+    view: |
+      Workspace Manager.
+
+      Current workspace: {{ world.current_workspace }}
+
+      Intents: list workspaces, create workspace, enter workspace, go back.
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on:
+      list_workspaces:
+        - target: workspace_list
+          effects:
+            - set: { prev_state: "workspace_manager" }
+
+      create_workspace:
+        - target: workspace_creating
+          effects:
+            - set: { current_workspace: "{{ slots.name }}" }
+            - set: { prev_state: "workspace_manager" }
+
+      enter_workspace:
+        - target: workspace_loading
+          effects:
+            - set: { current_workspace: "{{ slots.name }}" }
+            - set: { prev_state: "workspace_manager" }
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+          effects:
+            - set: { prev_state: "main" }
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  workspace_list:
+    description: "Listing all available workspaces."
+    view: |
+      Available Workspaces:
+
+      [stub] 3 workspaces found:
+        1. my-api-project     (main branch, 2 repos, clean)
+        2. feature-auth-v2    (feat/auth-v2 branch, 1 repo, dirty)
+        3. hotfix-billing     (hotfix/billing branch, 1 repo, clean)
+
+      Enter a workspace name or go back.
+    relevant_world: []
+    relevant_slots: []
+    on:
+      enter_workspace:
+        - target: workspace_loading
+          effects:
+            - set: { current_workspace: "{{ slots.name }}" }
+
+      create_workspace:
+        - target: workspace_creating
+          effects:
+            - set: { current_workspace: "{{ slots.name }}" }
+
+      go_back:
+        - target: workspace_manager
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  workspace_creating:
+    description: "Creating a new workspace..."
+    view: |
+      Creating workspace: {{ world.current_workspace }}
+
+      [stub] Workspace created successfully!
+        Root: /workspaces/{{ world.current_workspace }}
+        Repos: 1 repo initialized
+        Branch: main
+
+      Entering workspace...
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo '{\"id\":\"ws-001\",\"root_path\":\"/workspaces/my-project\",\"repos\":[{\"path\":\"/workspaces/my-project\",\"branch\":\"main\",\"dirty\":false}]}'"
+        bind:
+          workspace_root: "stdout"
+        on_error: workspace_error
+    on:
+      go_back:
+        - target: workspace_manager
+          effects:
+            - set: { current_workspace: "" }
+
+      go_terminal:
+        - target: workspace_room
+          effects:
+            - set: { prev_state: "workspace_manager" }
+
+      go_main:
+        - target: main
+          effects:
+            - set: { current_workspace: "" }
+            - set: { prev_state: "main" }
+
+      enter_workspace:
+        - target: workspace_room
+          effects:
+            - set: { prev_state: "workspace_manager" }
+
+  workspace_loading:
+    description: "Loading workspace..."
+    view: |
+      Loading workspace: {{ world.current_workspace }}
+
+      [stub] Workspace loaded:
+        Root: /workspaces/{{ world.current_workspace }}
+        Repos: 1 repo
+        Branch: main (clean)
+
+      You are now in the workspace.
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.workspace_manager.get
+        with:
+          workspace_id: "{{ world.current_workspace }}"
+        bind:
+          workspace_root: "root_path"
+        on_error: workspace_error
+    on:
+      go_terminal:
+        - target: workspace_room
+          effects:
+            - set: { prev_state: "workspace_manager" }
+
+      go_main:
+        - target: main
+          effects:
+            - set: { prev_state: "main" }
+
+      go_back:
+        - target: workspace_manager
+
+      enter_workspace:
+        - target: workspace_room
+          effects:
+            - set: { prev_state: "workspace_manager" }
+
+  workspace_error:
+    description: "Workspace operation failed."
+    view: |
+      Workspace error: {{ world.last_error }}
+
+      Go back to try again.
+    relevant_world: [last_error]
+    relevant_slots: []
+    on:
+      go_back:
+        - target: workspace_manager
+          effects:
+            - set: { current_workspace: "" }
+
+      go_main:
+        - target: main

@@ -1,0 +1,159 @@
+# Workspace Room — hub for a specific project workspace.
+
+states:
+  workspace_room:
+    description: "Workspace Room — your project hub. Run commands, check PRs, navigate to sub-rooms."
+    view: |
+      Workspace: {{ world.current_workspace }}
+      Root: {{ world.workspace_root }}
+
+      Available actions:
+        - terminal            (run commands)
+        - check pr            (PR status)
+        - fix bug             (bug fix room)
+        - implement           (implementation room)
+        - debug               (debug room)
+        - test                (test room)
+        - docs                (docs room)
+        - refactor            (refactor room)
+        - plan                (planning room)
+        - deploy              (deploy room)
+        - logs                (observability room)
+        - sync                (pull latest)
+        - open vscode         (open editor)
+        - jira                (search Jira)
+    relevant_world: [current_workspace, workspace_root]
+    relevant_slots: []
+    on:
+      go_terminal:
+        - target: terminal_idle
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      check_pr:
+        - target: pr_room
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_bugfix:
+        - target: bugfix
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_implement:
+        - target: implementation
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_debug:
+        - target: debug_room
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_test:
+        - target: test_room
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_docs:
+        - target: docs_room
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_refactor:
+        - target: refactor_room
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_planning:
+        - target: planning_room
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_deploy:
+        - target: deploy_room
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_observability:
+        - target: observability_room
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      sync_workspace:
+        - target: workspace_syncing
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      open_vscode:
+        - target: workspace_room
+          effects:
+            - invoke: host.run
+              with:
+                cmd: "echo 'Opening VS Code in {{ world.workspace_root }}'"
+            - say: "Opening VS Code in {{ world.workspace_root }}..."
+
+      go_jira:
+        - target: jira_search
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+          effects:
+            - set: { prev_state: "main" }
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  workspace_syncing:
+    description: "Syncing workspace with remote..."
+    view: |
+      Syncing workspace: {{ world.current_workspace }}
+
+      [stub] Running: git pull --rebase && git submodule update --init --recursive
+        Already up to date.
+        Submodules updated.
+
+      Sync complete.
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'Sync complete: workspace up to date'"
+        on_error: workspace_sync_error
+    on:
+      go_back:
+        - target: workspace_room
+
+      go_terminal:
+        - target: terminal_idle
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  workspace_sync_error:
+    description: "Sync failed."
+    view: |
+      Sync failed: {{ world.last_error }}
+
+      Resolve conflicts manually and try again.
+    relevant_world: [last_error]
+    relevant_slots: []
+    on:
+      go_back:
+        - target: workspace_room
+
+      go_main:
+        - target: main

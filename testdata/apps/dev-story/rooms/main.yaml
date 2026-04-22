@@ -1,0 +1,66 @@
+# Main Room — landing/navigation hub.
+# This is the root state. Transitioning here clears history (reset point).
+
+states:
+  main:
+    description: "Main Room — your daily HQ. Navigate to any area of work from here."
+    view: |
+      Welcome to dev-story. What would you like to do today?
+
+      Available areas:
+        - Start a new task          (jira search)
+        - Continue existing task    (workspace manager)
+        - Consult the Oracle        (general Q&A with Claude)
+        - Review a teammate's PR    (code review)
+        - Check my inbox            (notifications, background jobs)
+        - Prep for standup          (daily summary)
+        - Triage a production issue (incident room)
+
+      Inbox: {{ world.inbox_unread }} unread.
+    relevant_world: [inbox_unread]
+    relevant_slots: []
+    on:
+      go_jira:
+        - target: jira_search
+          effects:
+            - set: { prev_state: "main" }
+
+      go_workspace_manager:
+        - target: workspace_manager
+          effects:
+            - set: { prev_state: "main" }
+
+      go_oracle:
+        - target: oracle
+          push_history: false
+          effects:
+            - set: { prev_state: "main" }
+
+      go_code_review:
+        - target: code_review
+          effects:
+            - set: { prev_state: "main" }
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+          effects:
+            - set: { prev_state: "main" }
+
+      go_standup:
+        - target: standup
+          effects:
+            - set: { prev_state: "main" }
+
+      go_incident:
+        - target: incident
+          effects:
+            - set: { prev_state: "main" }
+
+      go_main:
+        - target: main
+          effects:
+            - set: { prev_state: "main" }
+
+      go_back:
+        - target: main
