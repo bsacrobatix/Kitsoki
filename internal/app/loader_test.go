@@ -143,6 +143,50 @@ func TestNegative(t *testing.T) {
 	}
 }
 
+// TestLoad_Include verifies that the include: directive merges states from
+// separate files (roadmap step 2 / §9).
+func TestLoad_Include(t *testing.T) {
+	def, err := Load("testdata/include_test/main.yaml")
+	require.NoError(t, err, "include test app must load cleanly")
+	require.NotNil(t, def)
+
+	// Both states from the included files should be present.
+	require.Contains(t, def.States, "room_a", "room_a must be merged from rooms/room_a.yaml")
+	require.Contains(t, def.States, "room_b", "room_b must be merged from rooms/room_b.yaml")
+	require.Equal(t, "include-test", def.App.ID)
+}
+
+// TestLoad_IncludeConflict verifies that duplicate keys across included files
+// produce an error.
+func TestLoad_IncludeConflict(t *testing.T) {
+	// Write two temp files with the same state name and include both.
+	dir := t.TempDir()
+	mainYAML := `app:
+  id: conflict-test
+  version: 0.1.0
+include: [rooms/*.yaml]
+root: room_a
+`
+	roomA1 := `states:
+  room_a:
+    description: "First"
+    view: "First room A"
+`
+	roomA2 := `states:
+  room_a:
+    description: "Second"
+    view: "Second room A"
+`
+	require.NoError(t, os.WriteFile(dir+"/main.yaml", []byte(mainYAML), 0644))
+	require.NoError(t, os.MkdirAll(dir+"/rooms", 0755))
+	require.NoError(t, os.WriteFile(dir+"/rooms/a1.yaml", []byte(roomA1), 0644))
+	require.NoError(t, os.WriteFile(dir+"/rooms/a2.yaml", []byte(roomA2), 0644))
+
+	_, err := Load(dir + "/main.yaml")
+	require.Error(t, err, "conflicting state names must produce an error")
+	require.True(t, containsSubstring(err, "room_a"), "error must mention the duplicate key")
+}
+
 // containsSubstring checks whether the error string (including joined errors)
 // contains the expected substring.
 func containsSubstring(err error, sub string) bool {

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -43,16 +44,147 @@ func (v *ValidationError) Error() string {
 }
 
 // Load reads and validates an AppDef from the given file path.
+// If the app declares include: patterns, those files are merged first (§9).
 func Load(path string) (*AppDef, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("load %s: %w", path, err)
 	}
-	def, errs := loadAndValidate(b, path)
-	if len(errs) > 0 {
-		return nil, errors.Join(errs...)
+
+	// Parse just enough to find the include: list before full validation.
+	baseDir := filepath.Dir(path)
+	merged, mergeErrs := parseAndMerge(b, path, baseDir)
+	if len(mergeErrs) > 0 {
+		return nil, errors.Join(mergeErrs...)
 	}
-	return def, nil
+
+	// Now fully validate the merged definition.
+	_, validErrs := validateDef(merged, path)
+	if len(validErrs) > 0 {
+		return nil, errors.Join(validErrs...)
+	}
+	return merged, nil
+}
+
+// parseAndMerge parses the main YAML file, resolves include: patterns, and
+// merges all included files into a single AppDef.
+func parseAndMerge(b []byte, file, baseDir string) (*AppDef, []error) {
+	var def AppDef
+	if err := goyaml.UnmarshalWithOptions(b, &def, goyaml.Strict()); err != nil {
+		var yamlErr *goyaml.SyntaxError
+		ve := &ValidationError{File: file, Message: err.Error()}
+		if errors.As(err, &yamlErr) {
+			_ = yamlErr
+		}
+		return nil, []error{ve}
+	}
+
+	if len(def.Include) == 0 {
+		return &def, nil
+	}
+
+	// Resolve each glob pattern and merge included files.
+	var errs []error
+	for _, pattern := range def.Include {
+		if !filepath.IsAbs(pattern) {
+			pattern = filepath.Join(baseDir, pattern)
+		}
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf("include glob %q: %v", pattern, err)})
+			continue
+		}
+		for _, matchPath := range matches {
+			inclBytes, err := os.ReadFile(matchPath)
+			if err != nil {
+				errs = append(errs, &ValidationError{File: matchPath, Message: fmt.Sprintf("include read: %v", err)})
+				continue
+			}
+			var inclDef AppDef
+			if err := goyaml.UnmarshalWithOptions(inclBytes, &inclDef, goyaml.Strict()); err != nil {
+				errs = append(errs, &ValidationError{File: matchPath, Message: err.Error()})
+				continue
+			}
+			if mergeErr := mergeInto(&def, &inclDef, matchPath); mergeErr != nil {
+				errs = append(errs, mergeErr...)
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	return &def, nil
+}
+
+// mergeInto merges src into dst. States, proposals, hosts, intents, and world
+// keys from src are merged into dst. Collisions are errors (§9.1).
+func mergeInto(dst, src *AppDef, srcFile string) []error {
+	var errs []error
+	addErr := func(msg string) {
+		errs = append(errs, &ValidationError{File: srcFile, Message: msg})
+	}
+
+	// Merge states.
+	for k, v := range src.States {
+		if _, exists := dst.States[k]; exists {
+			addErr(fmt.Sprintf("include: state %q is already declared", k))
+			continue
+		}
+		if dst.States == nil {
+			dst.States = make(map[string]*State)
+		}
+		dst.States[k] = v
+	}
+
+	// Merge proposals.
+	for k, v := range src.Proposals {
+		if _, exists := dst.Proposals[k]; exists {
+			addErr(fmt.Sprintf("include: proposal %q is already declared", k))
+			continue
+		}
+		if dst.Proposals == nil {
+			dst.Proposals = make(map[string]*ProposalKind)
+		}
+		dst.Proposals[k] = v
+	}
+
+	// Merge hosts allow-list (union, no duplicates).
+	hostSet := make(map[string]struct{}, len(dst.Hosts))
+	for _, h := range dst.Hosts {
+		hostSet[h] = struct{}{}
+	}
+	for _, h := range src.Hosts {
+		if _, exists := hostSet[h]; !exists {
+			dst.Hosts = append(dst.Hosts, h)
+			hostSet[h] = struct{}{}
+		}
+	}
+
+	// Merge intents.
+	for k, v := range src.Intents {
+		if _, exists := dst.Intents[k]; exists {
+			addErr(fmt.Sprintf("include: intent %q is already declared", k))
+			continue
+		}
+		if dst.Intents == nil {
+			dst.Intents = make(map[string]Intent)
+		}
+		dst.Intents[k] = v
+	}
+
+	// Merge world schema.
+	for k, v := range src.World {
+		if _, exists := dst.World[k]; exists {
+			addErr(fmt.Sprintf("include: world variable %q is already declared", k))
+			continue
+		}
+		if dst.World == nil {
+			dst.World = make(map[string]VarDef)
+		}
+		dst.World[k] = v
+	}
+
+	return errs
 }
 
 // LoadBytes reads and validates an AppDef from a YAML byte slice.
@@ -64,7 +196,7 @@ func LoadBytes(b []byte) (*AppDef, error) {
 	return def, nil
 }
 
-// loadAndValidate is the shared implementation used by Load and LoadBytes.
+// loadAndValidate parses a YAML byte slice and validates the resulting AppDef.
 // It returns all validation errors accumulated, not just the first.
 func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 	var def AppDef
@@ -85,6 +217,11 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 		return nil, []error{ve}
 	}
 
+	return validateDef(&def, file)
+}
+
+// validateDef validates a pre-parsed (and possibly merged) AppDef.
+func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	var errs []error
 	addErr := func(msg string) {
 		errs = append(errs, &ValidationError{File: file, Message: msg})
@@ -141,7 +278,7 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 	// ── 8. relevant_world keys exist in world schema ──────────────────────────
 	// (already done inside validateStates, which recurses into nested states)
 
-	return &def, errs
+	return def, errs
 }
 
 // collectStatePaths walks the state tree and records every path in the form
