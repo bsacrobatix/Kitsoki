@@ -1,0 +1,91 @@
+# proposal_smoke — smoke test app for the Proposal pattern (roadmap step 4).
+# Exercises the proposal lifecycle via regular state machine transitions.
+# The proposal $proposal world variable is manipulated via set: effects.
+
+app:
+  id: proposal-smoke
+  version: 0.1.0
+  title: "Proposal Smoke Test"
+
+hosts:
+  - host.run
+
+world:
+  last_exit_code: { type: int, default: 0 }
+  last_stdout:    { type: string, default: "" }
+  stage:          { type: string, default: "idle" }
+
+root: terminal
+
+intents:
+  propose:
+    title: "Propose a command"
+    description: "Draft a new shell command."
+    examples: ["run ls", "propose echo hello"]
+    priority: 100
+    slots:
+      cmd:
+        type: string
+        required: true
+        description: "Shell command to draft."
+
+  accept:
+    title: "Accept proposal"
+    description: "Accept and execute the proposed command."
+    examples: ["accept", "run it", "yes"]
+    priority: 90
+
+  cancel:
+    title: "Cancel"
+    description: "Cancel the current proposal."
+    examples: ["cancel"]
+    priority: 50
+
+  retry:
+    title: "Retry"
+    description: "Retry the last failed command."
+    examples: ["retry"]
+    priority: 85
+
+states:
+  terminal:
+    description: "Terminal Room — propose and run commands."
+    view: |
+      Terminal Room. Stage: {{ world.stage }}
+      Last exit code: {{ world.last_exit_code }}
+    on:
+      propose:
+        - target: reviewing
+          effects:
+            - set:
+                stage: "reviewing"
+
+      cancel:
+        - target: terminal
+          effects:
+            - set:
+                stage: "idle"
+
+  reviewing:
+    description: "Review the proposed command before executing."
+    view: |
+      Reviewing proposal. Stage: {{ world.stage }}
+    on:
+      accept:
+        - target: terminal
+          effects:
+            - set:
+                stage: "done"
+                last_exit_code: 0
+
+      cancel:
+        - target: terminal
+          effects:
+            - set:
+                stage: "cancelled"
+
+      retry:
+        - target: reviewing
+          effects:
+            - set:
+                stage: "reviewing"

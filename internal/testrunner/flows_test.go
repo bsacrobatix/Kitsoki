@@ -97,3 +97,25 @@ func TestFlowsNegativePath(t *testing.T) {
 	}
 	require.True(t, r.Passed, "negative path should pass")
 }
+
+// TestFlowsProposalSmoke runs the proposal smoke app flow fixtures (roadmap step 4).
+func TestFlowsProposalSmoke(t *testing.T) {
+	const smokeAppPath = "../../testdata/apps/proposal_smoke/app.yaml"
+	const smokeGlob = "../../testdata/apps/proposal_smoke/flows/*.yaml"
+
+	ctx := context.Background()
+	report, err := testrunner.RunFlows(ctx, smokeAppPath, smokeGlob, testrunner.FlowOptions{})
+	require.NoError(t, err)
+
+	for _, r := range report.Results {
+		if !r.Passed {
+			for _, turn := range r.Turns {
+				for _, f := range turn.Failures {
+					t.Logf("flow=%s turn=%d failure: %s", filepath.Base(r.File), turn.TurnIndex+1, f)
+				}
+			}
+		}
+		require.True(t, r.Passed, "smoke flow %q should pass", filepath.Base(r.File))
+	}
+	require.Equal(t, 0, report.Failed, "all smoke flows must pass")
+}
