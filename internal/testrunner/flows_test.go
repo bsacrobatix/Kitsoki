@@ -119,3 +119,127 @@ func TestFlowsProposalSmoke(t *testing.T) {
 	}
 	require.Equal(t, 0, report.Failed, "all smoke flows must pass")
 }
+
+// TestFlowsDevStory runs all dev-story flow fixtures (the main app build).
+// Covers: navigation, terminal proposal lifecycle, background jobs, oracle, clarification.
+func TestFlowsDevStory(t *testing.T) {
+	const devStoryAppPath = "../../testdata/apps/dev-story/app.yaml"
+	const devStoryGlob = "../../testdata/apps/dev-story/flows/*.yaml"
+
+	ctx := context.Background()
+	report, err := testrunner.RunFlows(ctx, devStoryAppPath, devStoryGlob, testrunner.FlowOptions{
+		Verbose: true,
+	})
+	require.NoError(t, err)
+
+	for _, r := range report.Results {
+		if !r.Passed {
+			for _, turn := range r.Turns {
+				for _, f := range turn.Failures {
+					t.Logf("flow=%s turn=%d failure: %s", filepath.Base(r.File), turn.TurnIndex+1, f)
+				}
+			}
+		}
+		require.True(t, r.Passed, "dev-story flow %q should pass", filepath.Base(r.File))
+	}
+	require.Equal(t, 0, report.Failed, "all dev-story flows must pass")
+}
+
+// TestFlowsDevStoryFlow1 runs the workspace navigation flow (history stack exercise).
+func TestFlowsDevStoryFlow1(t *testing.T) {
+	ctx := context.Background()
+	report, err := testrunner.RunFlows(ctx,
+		"../../testdata/apps/dev-story/app.yaml",
+		"../../testdata/apps/dev-story/flows/flow1_workspace_nav.yaml",
+		testrunner.FlowOptions{})
+	require.NoError(t, err)
+	require.Len(t, report.Results, 1)
+	r := report.Results[0]
+	for _, turn := range r.Turns {
+		for _, f := range turn.Failures {
+			t.Logf("flow1 turn %d failure: %s", turn.TurnIndex+1, f)
+		}
+	}
+	require.True(t, r.Passed, "flow1 workspace navigation should pass")
+}
+
+// TestFlowsDevStoryFlow2 runs the terminal proposal flows (happy path, cancel, error).
+func TestFlowsDevStoryFlow2(t *testing.T) {
+	flows := []string{
+		"../../testdata/apps/dev-story/flows/flow2a_terminal_propose_accept.yaml",
+		"../../testdata/apps/dev-story/flows/flow2b_terminal_cancel.yaml",
+		"../../testdata/apps/dev-story/flows/flow2c_terminal_error.yaml",
+	}
+	for _, f := range flows {
+		f := f
+		t.Run(filepath.Base(f), func(t *testing.T) {
+			ctx := context.Background()
+			report, err := testrunner.RunFlows(ctx,
+				"../../testdata/apps/dev-story/app.yaml",
+				f, testrunner.FlowOptions{})
+			require.NoError(t, err)
+			require.Len(t, report.Results, 1)
+			r := report.Results[0]
+			for _, turn := range r.Turns {
+				for _, ff := range turn.Failures {
+					t.Logf("turn %d failure: %s", turn.TurnIndex+1, ff)
+				}
+			}
+			require.True(t, r.Passed, "terminal flow %q should pass", filepath.Base(f))
+		})
+	}
+}
+
+// TestFlowsDevStoryFlow3 runs the background job flow.
+func TestFlowsDevStoryFlow3(t *testing.T) {
+	ctx := context.Background()
+	report, err := testrunner.RunFlows(ctx,
+		"../../testdata/apps/dev-story/app.yaml",
+		"../../testdata/apps/dev-story/flows/flow3_background_job.yaml",
+		testrunner.FlowOptions{})
+	require.NoError(t, err)
+	require.Len(t, report.Results, 1)
+	r := report.Results[0]
+	for _, turn := range r.Turns {
+		for _, f := range turn.Failures {
+			t.Logf("flow3 turn %d failure: %s", turn.TurnIndex+1, f)
+		}
+	}
+	require.True(t, r.Passed, "flow3 background job should pass")
+}
+
+// TestFlowsDevStoryFlow4 runs the Oracle Room flow.
+func TestFlowsDevStoryFlow4(t *testing.T) {
+	ctx := context.Background()
+	report, err := testrunner.RunFlows(ctx,
+		"../../testdata/apps/dev-story/app.yaml",
+		"../../testdata/apps/dev-story/flows/flow4_oracle.yaml",
+		testrunner.FlowOptions{})
+	require.NoError(t, err)
+	require.Len(t, report.Results, 1)
+	r := report.Results[0]
+	for _, turn := range r.Turns {
+		for _, f := range turn.Failures {
+			t.Logf("flow4 turn %d failure: %s", turn.TurnIndex+1, f)
+		}
+	}
+	require.True(t, r.Passed, "flow4 oracle room should pass")
+}
+
+// TestFlowsDevStoryFlow5 runs the clarification flow.
+func TestFlowsDevStoryFlow5(t *testing.T) {
+	ctx := context.Background()
+	report, err := testrunner.RunFlows(ctx,
+		"../../testdata/apps/dev-story/app.yaml",
+		"../../testdata/apps/dev-story/flows/flow5_clarification.yaml",
+		testrunner.FlowOptions{})
+	require.NoError(t, err)
+	require.Len(t, report.Results, 1)
+	r := report.Results[0]
+	for _, turn := range r.Turns {
+		for _, f := range turn.Failures {
+			t.Logf("flow5 turn %d failure: %s", turn.TurnIndex+1, f)
+		}
+	}
+	require.True(t, r.Passed, "flow5 clarification should pass")
+}
