@@ -1,0 +1,158 @@
+# Standup Room — prepare daily standups and async status updates.
+
+states:
+  standup:
+    description: "Standup Room — summarize yesterday, plan today, list blockers."
+    view: |
+      Standup Room.
+
+      Current summary: {{ world.standup_summary }}
+
+      Options: summarize yesterday, plan today, list blockers, post to slack, go back.
+    relevant_world: [standup_summary]
+    relevant_slots: []
+    on:
+      summarize_yesterday:
+        - target: standup_summarizing
+
+      plan_today:
+        - target: standup_planning
+
+      post_to_slack:
+        - when: "world.standup_summary != ''"
+          target: standup_posting
+        - default: true
+          target: standup
+          guard_hint: "Generate a summary first."
+          effects:
+            - say: "Generate a summary first with 'summarize yesterday' or 'plan today'."
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  standup_summarizing:
+    description: "Aggregating yesterday's work..."
+    view: |
+      Yesterday's Summary:
+
+      [stub] Aggregated from commits, PRs, and Jira (last 24h):
+
+      Completed:
+        - Reviewed PR #38 (billing discounts) — left 2 comments
+        - Fixed auth token refresh bug (PROJ-102) — PR #42 open
+        - Joined incident call for prod database slow queries
+
+      In Progress:
+        - Implementing auth refresh token rotation (PROJ-101) — 60%
+        - PR #42 waiting for CI
+
+      Generated standup:
+        "Yesterday: Fixed auth token bug, reviewed billing PR. Today: Continue
+        PROJ-101, get PR #42 merged. Blockers: CI flaky on auth tests."
+    relevant_world: []
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'Standup: Fixed auth bug, reviewed billing PR. Continuing PROJ-101.'"
+        bind:
+          standup_summary: "stdout"
+        on_error: standup_error
+    on:
+      post_to_slack:
+        - target: standup_posting
+
+      plan_today:
+        - target: standup_planning
+
+      go_back:
+        - target: standup
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  standup_planning:
+    description: "Planning today's work..."
+    view: |
+      Today's Plan:
+
+      [stub] Active workspaces and Jira assignments:
+
+      In-progress workspaces:
+        - feature-auth-v2: 60% complete, PR #42 open
+        - hotfix-billing: ready to merge
+
+      Assigned Jira issues:
+        - PROJ-101: Implement auth refresh (due: tomorrow)
+        - PROJ-104: Write billing module tests (due: this sprint)
+
+      Today's focus:
+        1. Merge PR #42 (auth fix) — unblock after CI passes
+        2. Continue PROJ-101 — get to 80% by EOD
+        3. Start PROJ-104 test writing
+    relevant_world: []
+    relevant_slots: []
+    on:
+      post_to_slack:
+        - target: standup_posting
+
+      go_back:
+        - target: standup
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  standup_posting:
+    description: "Posting standup to Slack..."
+    view: |
+      Standup posted to #eng-standup!
+
+      [stub] Slack message sent:
+        "Yesterday: {{ world.standup_summary }}
+         Today: Continue auth work, merge PR #42.
+         Blockers: CI flaky."
+    relevant_world: [standup_summary]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'Slack message sent to #eng-standup'"
+        on_error: standup_error
+    on:
+      go_back:
+        - target: standup
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  standup_error:
+    description: "Standup operation failed."
+    view: |
+      Standup error: {{ world.last_error }}
+    relevant_world: [last_error]
+    relevant_slots: []
+    on:
+      go_back:
+        - target: standup
+
+      go_main:
+        - target: main

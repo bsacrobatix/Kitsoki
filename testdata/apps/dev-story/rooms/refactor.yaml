@@ -1,0 +1,165 @@
+# Refactor Room — structural changes without altering behavior.
+
+states:
+  refactor_room:
+    description: "Refactor Room — propose, apply, and verify structural code changes."
+    view: |
+      Refactor Room.
+      Workspace: {{ world.current_workspace }}
+
+      Options: propose refactor, apply refactor, verify behavior, go back.
+    relevant_world: [current_workspace, proposal_result]
+    relevant_slots: []
+    on:
+      propose_refactor:
+        - target: refactor_proposing
+
+      apply_refactor:
+        - target: refactor_applying
+
+      verify_behavior:
+        - target: refactor_verifying
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  refactor_proposing:
+    description: "Proposing a refactor plan..."
+    view: |
+      Refactor Proposal:
+      Intent: {{ slots.intent }}
+
+      [stub] Change plan:
+        Files affected: auth/token.go, auth/refresh.go, api/auth_handler.go
+        Changes:
+          1. Extract TokenValidator interface from Token struct
+          2. Move refresh logic to separate RefreshService type
+          3. Inject RefreshService via dependency injection in handlers
+          4. Update all callers to use the interface
+
+        Risk: Medium (touches 3 files, 12 call sites)
+        Test coverage: 78% → 85% expected after refactor
+
+        Atomic commits:
+          - feat: extract TokenValidator interface
+          - feat: extract RefreshService
+          - refactor: inject RefreshService via DI
+          - test: update tests for new structure
+
+      Apply this refactor?
+    relevant_world: []
+    relevant_slots: []
+    on:
+      apply_refactor:
+        - target: refactor_applying
+
+      cancel:
+        - target: refactor_room
+
+      go_back:
+        - target: refactor_room
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  refactor_applying:
+    description: "Applying the refactor..."
+    view: |
+      Applying refactor to {{ world.current_workspace }}:
+
+      [stub] Progress:
+        [1/4] Extracting TokenValidator interface... done
+        [2/4] Extracting RefreshService... done
+        [3/4] Updating callers to use DI... done
+        [4/4] Running tests to verify... PASS
+
+      Refactor complete. All 12 call sites updated.
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'Refactor applied: 3 files changed, 12 call sites updated'"
+        bind:
+          proposal_result: "stdout"
+        on_error: refactor_error
+    on:
+      verify_behavior:
+        - target: refactor_verifying
+
+      open_pr:
+        - target: pr_room
+          effects:
+            - set: { prev_state: "refactor_room" }
+
+      go_back:
+        - target: refactor_room
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  refactor_verifying:
+    description: "Verifying behavior is unchanged..."
+    view: |
+      Behavior Verification:
+
+      [stub] Running full test suite + behavior comparison:
+        go test ./... -count=1
+          ok  auth/token_test.go (0.15s)
+          ok  auth/refresh_test.go (0.18s)
+          ok  api/auth_handler_test.go (0.22s)
+          ok  api/billing_test.go (0.31s)
+
+        All 24 tests pass. No behavioral changes detected.
+
+      Behavior verified — safe to open PR.
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'Behavior verified: all 24 tests pass, no behavioral changes'"
+        on_error: refactor_error
+    on:
+      open_pr:
+        - target: pr_room
+          effects:
+            - set: { prev_state: "refactor_room" }
+
+      go_back:
+        - target: refactor_room
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  refactor_error:
+    description: "Refactor operation failed."
+    view: |
+      Refactor error: {{ world.last_error }}
+    relevant_world: [last_error]
+    relevant_slots: []
+    on:
+      go_back:
+        - target: refactor_room
+
+      go_main:
+        - target: main

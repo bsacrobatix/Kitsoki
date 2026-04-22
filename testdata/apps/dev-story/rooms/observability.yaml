@@ -1,0 +1,144 @@
+# Observability Room — logs, metrics, traces, dashboards.
+
+states:
+  observability_room:
+    description: "Observability Room — tail logs, check dashboards, query traces, see alerts."
+    view: |
+      Observability Room.
+      Workspace: {{ world.current_workspace }}
+
+      Options: tail logs, check dashboard, check alerts, go back.
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on:
+      tail_logs:
+        - target: obs_tailing_logs
+
+      check_dashboard:
+        - target: obs_dashboard
+
+      check_alerts:
+        - target: obs_alerts
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  obs_tailing_logs:
+    description: "Tailing logs..."
+    view: |
+      Tailing logs for: {{ slots.service }}
+
+      [stub] Log stream (last 10 lines):
+        2024-01-15T10:25:01Z INFO  {{ slots.service }}: request received path=/api/v1/auth method=POST
+        2024-01-15T10:25:01Z DEBUG {{ slots.service }}: token validation started user=u123
+        2024-01-15T10:25:02Z WARN  {{ slots.service }}: token near expiry user=u123 expires_in=4m30s
+        2024-01-15T10:25:02Z INFO  {{ slots.service }}: token refreshed user=u123
+        2024-01-15T10:25:02Z INFO  {{ slots.service }}: request completed status=200 latency=145ms
+
+      Use Ctrl+C equivalent to stop. This view shows last 10 lines (stub).
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'Log stream: 10 lines from auth-service pod'"
+        on_error: obs_error
+    on:
+      go_back:
+        - target: observability_room
+
+      go_main:
+        - target: main
+
+      check_alerts:
+        - target: obs_alerts
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  obs_dashboard:
+    description: "Opening metrics dashboard..."
+    view: |
+      Metrics Dashboard for {{ world.current_workspace }}:
+
+      [stub] Grafana dashboard: auth-service
+        Request rate:    450 req/s (normal)
+        Error rate:      0.2% (normal)
+        P99 latency:     245ms (elevated — threshold 200ms)
+        Token refresh/s: 12 (normal)
+        Active sessions: 1,234
+
+      Alert: P99 latency elevated. Check traces for slow requests.
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on:
+      check_alerts:
+        - target: obs_alerts
+
+      go_back:
+        - target: observability_room
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  obs_alerts:
+    description: "Checking firing alerts..."
+    view: |
+      Active Alerts for {{ world.current_workspace }}:
+
+      [stub] 1 firing alert:
+        WARN: AuthService P99 latency > 200ms
+          Started: 10 minutes ago
+          Value: 245ms
+          Runbook: https://runbooks.internal/auth/latency
+
+      No critical alerts. The latency alert is non-critical.
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo '1 alert: AuthService P99 latency 245ms (warn)'"
+        on_error: obs_error
+    on:
+      go_back:
+        - target: observability_room
+
+      go_main:
+        - target: main
+
+      go_incident:
+        - target: incident
+          effects:
+            - set:
+                incident_title: "AuthService P99 latency elevated"
+                prev_state: "observability_room"
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  obs_error:
+    description: "Observability operation failed."
+    view: |
+      Observability error: {{ world.last_error }}
+    relevant_world: [last_error]
+    relevant_slots: []
+    on:
+      go_back:
+        - target: observability_room
+
+      go_main:
+        - target: main

@@ -1,0 +1,151 @@
+# Deploy Room — ship changes to an environment.
+
+states:
+  deploy_room:
+    description: "Deploy Room — check what's deployed, trigger deploys, rollback."
+    view: |
+      Deploy Room.
+      Workspace: {{ world.current_workspace }}
+      Last deploy env: {{ world.deploy_env }}
+      Last deploy status: {{ world.deploy_status }}
+
+      Options: check deployed, trigger deploy, watch deploy, rollback, go back.
+    relevant_world: [current_workspace, deploy_env, deploy_status]
+    relevant_slots: []
+    on:
+      check_deployed:
+        - target: deploy_checking
+
+      trigger_deploy:
+        - target: deploy_triggering
+
+      rollback:
+        - target: deploy_rolling_back
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  deploy_checking:
+    description: "Checking deployed status..."
+    view: |
+      Deployment Status:
+
+      [stub] Comparing deployed vs. main:
+
+        Staging:  commit abc1234 (2 commits behind main)
+        Prod:     commit def5678 (5 commits behind main)
+        Dev:      commit main (up to date)
+
+      5 new commits since last prod deploy:
+        - feat: auth refresh token rotation (#42)
+        - fix: billing nil pointer (#43)
+        - chore: update deps (#44)
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'staging: 2 behind, prod: 5 behind, dev: up to date'"
+        bind:
+          deploy_status: "stdout"
+        on_error: deploy_error
+    on:
+      trigger_deploy:
+        - target: deploy_triggering
+
+      go_back:
+        - target: deploy_room
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  deploy_triggering:
+    description: "Triggering deploy..."
+    view: |
+      Deploying to {{ slots.environment }}...
+
+      [stub] Pipeline triggered:
+        Pipeline: deploy-auth-service-{{ slots.environment }}
+        Revision: abc1234
+        Status: RUNNING
+
+      Deploy is running. Check back or open inbox for completion notification.
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'Deploy pipeline triggered: running'"
+        bind:
+          deploy_status: "stdout"
+        on_error: deploy_error
+    on:
+      go_inbox:
+        - target: inbox
+          push_history: false
+          effects:
+            - set:
+                inbox_unread: 1
+                deploy_env: "{{ slots.environment }}"
+
+      go_back:
+        - target: deploy_room
+
+      go_main:
+        - target: main
+
+  deploy_rolling_back:
+    description: "Rolling back deployment..."
+    view: |
+      Rolling back to previous revision...
+
+      [stub] Rollback initiated:
+        From: abc1234
+        To:   def5678 (previous known-good)
+        Env:  {{ world.deploy_env }}
+        Status: ROLLING BACK
+
+      Rollback in progress. Estimated 2-3 minutes.
+    relevant_world: [deploy_env]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'Rollback initiated: reverting to previous revision'"
+        bind:
+          deploy_status: "stdout"
+        on_error: deploy_error
+    on:
+      go_back:
+        - target: deploy_room
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  deploy_error:
+    description: "Deploy operation failed."
+    view: |
+      Deploy error: {{ world.last_error }}
+    relevant_world: [last_error]
+    relevant_slots: []
+    on:
+      go_back:
+        - target: deploy_room
+
+      go_main:
+        - target: main

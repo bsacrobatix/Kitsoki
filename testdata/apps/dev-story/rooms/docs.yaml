@@ -1,0 +1,109 @@
+# Docs Room — write or update documentation.
+
+states:
+  docs_room:
+    description: "Docs Room — update in-repo docs, Confluence pages, generate from code."
+    view: |
+      Docs Room.
+      Workspace: {{ world.current_workspace }}
+
+      Options: update inline docs, update confluence, generate docs from code,
+               cross-link, go back.
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on:
+      update_inline_docs:
+        - target: docs_updating_inline
+
+      generate_docs:
+        - target: docs_generating
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  docs_updating_inline:
+    description: "Updating in-repo documentation..."
+    view: |
+      Updating docs in {{ world.current_workspace }}:
+
+      [stub] Files to update:
+        - README.md: Add auth token refresh section
+        - docs/api/auth.md: Document new refresh endpoint
+        - CHANGELOG.md: Add entry for v2.4.2
+
+      Suggested changes:
+        README.md line 45: Add "### Token Refresh\nTokens auto-refresh when within 5 minutes of expiry."
+        docs/api/auth.md: Add POST /auth/refresh endpoint documentation
+
+      Apply these changes?
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on:
+      accept:
+        - target: docs_room
+          effects:
+            - say: "[stub] Docs updated in repo."
+
+      cancel:
+        - target: docs_room
+
+      go_back:
+        - target: docs_room
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  docs_generating:
+    description: "Generating docs from source code..."
+    view: |
+      Generating docs for {{ world.current_workspace }}:
+
+      [stub] Analyzing source:
+        auth/token.go: 3 exported types, 5 exported functions
+        auth/refresh.go: 1 exported function
+
+      Generated draft:
+        # auth/token
+        Package auth/token implements JWT token management with auto-refresh.
+
+        ## Types
+        - Token: represents a JWT token with expiry tracking
+        - RefreshPolicy: controls when auto-refresh is triggered
+
+        ## Functions
+        - New(claims): creates a new token
+        - Validate(ctx): validates and optionally refreshes the token
+        - RefreshIfExpiring(ctx): refresh when within configured threshold
+
+      Write this to docs/api/auth-token.md?
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on:
+      accept:
+        - target: docs_room
+          effects:
+            - say: "[stub] Generated docs written to docs/api/auth-token.md"
+
+      cancel:
+        - target: docs_room
+
+      go_back:
+        - target: docs_room
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
