@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"hally/internal/host"
 )
 
@@ -243,6 +246,169 @@ func TestOracleAskWithMCP_NonZeroExit(t *testing.T) {
 	if code, _ := res.Data["exit_code"].(int); code == 0 {
 		t.Fatal("exit_code should be non-zero")
 	}
+}
+
+// TestOracleAskWithMCP_AutoAttachesValidatorForSchema verifies that setting
+// `schema:` without an explicit mcp_servers.validator entry causes the
+// handler to materialize a validator entry pointing at the running binary.
+// We assert by reading back the temp --mcp-config that the fake binary
+// echoes via the JSON envelope.
+func TestOracleAskWithMCP_AutoAttachesValidatorForSchema(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+	// Pretend hally lives at /usr/local/bin/hally so we can assert the
+	// validator entry's command field deterministically.
+	t.Setenv("HALLY_BIN", "/usr/local/bin/hally")
+
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	if err := os.WriteFile(promptPath, []byte("propose a fix"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	schemaPath := filepath.Join(dir, "schema.json")
+	if err := os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path":   promptPath,
+		"schema":        schemaPath,
+		"output_format": "json",
+	})
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
+
+	parsed, ok := res.Data["stdout_json"].(map[string]any)
+	require.True(t, ok, "stdout_json missing: %v", res.Data["stdout_json"])
+	body, _ := parsed["mcp_body"].(map[string]any)
+	servers, _ := body["mcpServers"].(map[string]any)
+	v, ok := servers["validator"].(map[string]any)
+	require.True(t, ok, "validator entry missing: %v", servers)
+	assert.Equal(t, "/usr/local/bin/hally", v["command"])
+	args, _ := v["args"].([]any)
+	require.GreaterOrEqual(t, len(args), 3)
+	assert.Equal(t, "mcp-validator", args[0])
+	assert.Equal(t, "--schema", args[1])
+	assert.Equal(t, schemaPath, args[2])
+}
+
+// TestOracleAskWithMCP_NoAutoAttachWhenMcpServersValidatorPresent verifies
+// that if the caller already provides an mcp_servers.validator entry, the
+// handler leaves it alone (no overwrite).
+func TestOracleAskWithMCP_NoAutoAttachWhenMcpServersValidatorPresent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+	t.Setenv("HALLY_BIN", "/usr/local/bin/hally")
+
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	require.NoError(t, os.WriteFile(promptPath, []byte("x"), 0o644))
+	schemaPath := filepath.Join(dir, "schema.json")
+	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644))
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path": promptPath,
+		"schema":      schemaPath,
+		"mcp_servers": map[string]any{
+			"validator": map[string]any{
+				"command": "/opt/custom-validator",
+				"args":    []any{"--mode", "strict"},
+			},
+		},
+		"output_format": "json",
+	})
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
+
+	parsed, ok := res.Data["stdout_json"].(map[string]any)
+	require.True(t, ok)
+	body, _ := parsed["mcp_body"].(map[string]any)
+	servers, _ := body["mcpServers"].(map[string]any)
+	v, _ := servers["validator"].(map[string]any)
+	require.Equal(t, "/opt/custom-validator", v["command"], "caller-provided validator must not be overwritten")
+}
+
+// TestOracleAskWithMCP_NoSchemaMeansNoValidator verifies that without a
+// schema arg, no validator entry appears (back-compat with existing callers).
+func TestOracleAskWithMCP_NoSchemaMeansNoValidator(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	require.NoError(t, os.WriteFile(promptPath, []byte("x"), 0o644))
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path":   promptPath,
+		"output_format": "json",
+	})
+	require.NoError(t, err)
+	parsed, _ := res.Data["stdout_json"].(map[string]any)
+	require.NotNil(t, parsed)
+	// mcp_config_path is empty when no servers were attached.
+	cfg, _ := parsed["mcp_config_path"].(string)
+	assert.Empty(t, cfg, "no schema arg means no --mcp-config should be passed")
+}
+
+// TestOracleAskWithMCP_SchemaResolvedAgainstAppDir verifies that a relative
+// schema path is resolved against HALLY_APP_DIR (mirroring resolvePromptPath).
+func TestOracleAskWithMCP_SchemaResolvedAgainstAppDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+	t.Setenv("HALLY_BIN", "/usr/local/bin/hally")
+
+	appDir := t.TempDir()
+	t.Setenv(host.AppDirEnv, appDir)
+
+	schemasDir := filepath.Join(appDir, "schemas")
+	require.NoError(t, os.MkdirAll(schemasDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(schemasDir, "p.json"), []byte(`{"type":"object"}`), 0o644))
+
+	promptPath := filepath.Join(appDir, "p.md")
+	require.NoError(t, os.WriteFile(promptPath, []byte("x"), 0o644))
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path":   promptPath,
+		"schema":        "schemas/p.json", // relative
+		"output_format": "json",
+	})
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
+	parsed, _ := res.Data["stdout_json"].(map[string]any)
+	body, _ := parsed["mcp_body"].(map[string]any)
+	servers, _ := body["mcpServers"].(map[string]any)
+	v, _ := servers["validator"].(map[string]any)
+	args, _ := v["args"].([]any)
+	require.GreaterOrEqual(t, len(args), 3)
+	assert.Equal(t, filepath.Join(appDir, "schemas/p.json"), args[2])
+}
+
+// TestOracleAskWithMCP_MissingSchemaFile errors cleanly.
+func TestOracleAskWithMCP_MissingSchemaFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	require.NoError(t, os.WriteFile(promptPath, []byte("x"), 0o644))
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path": promptPath,
+		"schema":      filepath.Join(dir, "missing.json"),
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Error)
+	assert.Contains(t, res.Error, "missing.json")
 }
 
 // TestOracleAskWithMCP_StdoutJSONParseError surfaces a parse-error sentinel

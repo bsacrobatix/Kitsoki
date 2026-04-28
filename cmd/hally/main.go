@@ -59,6 +59,7 @@ See also the full design document (design.md) in the repo.`,
 	root.AddCommand(inspectCmd())
 	root.AddCommand(turnCmd())
 	root.AddCommand(sessionCmd())
+	root.AddCommand(mcpValidatorCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

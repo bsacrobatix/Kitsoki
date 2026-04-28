@@ -19,6 +19,37 @@ import (
 	"hally/internal/expr"
 )
 
+// hallyBinaryEnv overrides the path to the hally binary used to spawn the
+// auto-attached validator. Set in tests; in production callers may also
+// set it if `hally` is not the running binary's name.
+const hallyBinaryEnv = "HALLY_BIN"
+
+// buildValidatorMCPServer constructs an mcp_servers entry that runs
+// `hally mcp-validator --schema <abs-path>`. The schema path is resolved
+// against HALLY_APP_DIR if relative, mirroring resolvePromptPath.
+func buildValidatorMCPServer(schemaPath string) (map[string]any, error) {
+	resolved := resolvePromptPath(schemaPath)
+	if _, err := os.Stat(resolved); err != nil {
+		return nil, fmt.Errorf("schema %q not found: %w", resolved, err)
+	}
+
+	bin := os.Getenv(hallyBinaryEnv)
+	if bin == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return nil, fmt.Errorf("locate hally binary: %w", err)
+		}
+		bin = exe
+	}
+	return map[string]any{
+		"command": bin,
+		"args": []any{
+			"mcp-validator",
+			"--schema", resolved,
+		},
+	}, nil
+}
+
 // OracleAskWithMCPHandler implements host.oracle.ask_with_mcp.
 //
 // Required args:
@@ -96,9 +127,30 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 		"--permission-mode", "bypassPermissions",
 	}
 
+	// Build the merged mcp_servers map: caller-provided entries plus an
+	// auto-attached "validator" entry when `schema:` is set and the caller
+	// didn't already define one. The validator is the running hally binary
+	// invoked as `hally mcp-validator --schema <abs-path>`, which exposes a
+	// `submit` tool whose input schema is the user-provided schema. The LLM
+	// must call submit() and round-trip its JSON through it before answering;
+	// validation errors come back inline so the LLM self-corrects.
+	mcpServers, _ := args["mcp_servers"].(map[string]any)
+	if mcpServers == nil {
+		mcpServers = map[string]any{}
+	}
+	if schemaArg, _ := args["schema"].(string); strings.TrimSpace(schemaArg) != "" {
+		if _, alreadyHasValidator := mcpServers["validator"]; !alreadyHasValidator {
+			validatorEntry, vErr := buildValidatorMCPServer(schemaArg)
+			if vErr != nil {
+				return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: %v", vErr)}, nil
+			}
+			mcpServers["validator"] = validatorEntry
+		}
+	}
+
 	// Materialize mcp_servers (if any) into a temp config file.
 	var mcpConfigPath string
-	if mcpServers, ok := args["mcp_servers"].(map[string]any); ok && len(mcpServers) > 0 {
+	if len(mcpServers) > 0 {
 		mcpConfig := map[string]any{"mcpServers": mcpServers}
 		mcpBytes, mErr := json.Marshal(mcpConfig)
 		if mErr != nil {
