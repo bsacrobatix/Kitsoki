@@ -58,6 +58,12 @@ func Load(path string) (*AppDef, error) {
 		return nil, errors.Join(mergeErrs...)
 	}
 
+	// Expand phase templates into concrete states before validation so the
+	// referential-integrity pass sees the synthesised states (proposal §5).
+	if expandErrs := expandPhases(merged, path); len(expandErrs) > 0 {
+		return nil, errors.Join(expandErrs...)
+	}
+
 	// Now fully validate the merged definition.
 	_, validErrs := validateDef(merged, path)
 	if len(validErrs) > 0 {

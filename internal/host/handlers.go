@@ -86,5 +86,7 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.workspace_manager.get", WorkspaceManagerGetHandler)
 	r.Register("host.run", RunHandler)
 	r.Register("host.oracle.ask", OracleAskHandler)
+	r.Register("host.oracle.ask_with_mcp", OracleAskWithMCPHandler)
 	r.Register("host.oracle.talk", OracleTalkHandler)
+	r.Register("host.transport.post", TransportPostHandler)
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"hally/internal/app"
 
@@ -43,6 +44,38 @@ type Store interface {
 	// Pass limit=0 for no limit.
 	ListSessions(ctx context.Context, appID string, limit int) ([]SessionSummary, error)
 
+	// BindExternalKey associates a (transport, thread) key with the given
+	// session. A session may carry multiple keys; the (transport, thread)
+	// pair is unique across all sessions. Returns ErrExternalKeyTaken if
+	// the pair is already bound to a different session.
+	BindExternalKey(ctx context.Context, session app.SessionID, transport, thread string) error
+
+	// LookupByKey returns the session bound to (transport, thread), or
+	// (ErrSessionNotFound) if none.
+	LookupByKey(ctx context.Context, transport, thread string) (app.SessionID, error)
+
+	// ListExternalKeys returns the (transport, thread) keys bound to a session.
+	ListExternalKeys(ctx context.Context, session app.SessionID) ([]ExternalKey, error)
+
+	// ListSessionsByTransport returns up to `limit` sessions that have at
+	// least one external key with the given transport, newest-key-first.
+	// Pass limit=0 for no limit.
+	ListSessionsByTransport(ctx context.Context, transport string, limit int) ([]SessionSummary, error)
+
+	// WithWriterLock acquires a session-scoped writer lock, runs fn, and
+	// releases the lock. Returns ErrSessionBusy if another live process
+	// holds the lock. Stale locks (owner pid no longer alive) are reaped.
+	WithWriterLock(ctx context.Context, session app.SessionID, fn func() error) error
+
 	// Close flushes WAL and closes the underlying *sql.DB.
 	Close() error
 }
+
+// ExternalKey is one (transport, thread) binding to a session.
+type ExternalKey struct {
+	Transport string
+	Thread    string
+	CreatedAt time.Time
+}
+
+func (k ExternalKey) String() string { return k.Transport + ":" + k.Thread }

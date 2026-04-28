@@ -48,6 +48,11 @@ type FlowTurn struct {
 	Intent *FlowIntent `yaml:"intent,omitempty"`
 	Input  string      `yaml:"input,omitempty"`
 
+	// WorldOverride mutates world before guard evaluation on this turn (§7.19).
+	// Lets fixtures probe arcs that would otherwise require a long preceding
+	// flow (e.g. the L2 cycle-budget feedback arcs).
+	WorldOverride map[string]any `yaml:"world_override,omitempty"`
+
 	// Assertions (§10.3.2).
 	ExpectState        string         `yaml:"expect_state,omitempty"`
 	ExpectNotState     string         `yaml:"expect_not_state,omitempty"`
@@ -296,6 +301,13 @@ func runOneFlow(ctx context.Context, def *app.AppDef, m machine.Machine, filePat
 			}
 		} else {
 			return nil, fmt.Errorf("turn %d: neither intent nor input is set", i+1)
+		}
+
+		// Apply world_override (§7.19) before guard evaluation. Mutations are
+		// applied in-place to the running world so the rest of the turn (guard
+		// eval, effects, view render) sees them.
+		for k, v := range turn.WorldOverride {
+			currentWorld.Vars[k] = v
 		}
 
 		// Snapshot pre-turn world for expect_world_unchanged.

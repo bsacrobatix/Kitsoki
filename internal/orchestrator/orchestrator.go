@@ -20,6 +20,7 @@ import (
 	"hally/internal/machine"
 	"hally/internal/store"
 	"hally/internal/trace"
+	"hally/internal/transport"
 	"hally/internal/world"
 )
 
@@ -32,12 +33,13 @@ type pendingClarify struct {
 
 // Orchestrator drives a single session from raw input to applied events.
 type Orchestrator struct {
-	def     *app.AppDef
-	machine machine.Machine
-	store   store.Store
-	harness harness.Harness
-	hosts   *host.Registry
-	logger  *slog.Logger
+	def        *app.AppDef
+	machine    machine.Machine
+	store      store.Store
+	harness    harness.Harness
+	hosts      *host.Registry
+	transports *transport.Registry
+	logger     *slog.Logger
 
 	// pending tracks in-flight clarifications keyed by session ID.
 	mu      sync.Mutex
@@ -79,6 +81,16 @@ func WithLogger(l *slog.Logger) Option {
 func WithHostRegistry(r *host.Registry) Option {
 	return func(o *Orchestrator) {
 		o.hosts = r
+	}
+}
+
+// WithTransportRegistry installs a transport.Registry that is injected into
+// the dispatch context so the host.transport.post bridge handler can find
+// it. When unset, `host.transport.post` invocations error with "no
+// transport registry installed" and route via on_error: as configured.
+func WithTransportRegistry(r *transport.Registry) Option {
+	return func(o *Orchestrator) {
+		o.transports = r
 	}
 }
 
@@ -333,6 +345,10 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 func (o *Orchestrator) dispatchHostCalls(ctx context.Context, calls []machine.HostInvocation, w world.World, state app.StatePath) ([]store.Event, world.World, string, error) {
 	if o.hosts == nil || len(calls) == 0 {
 		return nil, w, "", nil
+	}
+
+	if o.transports != nil {
+		ctx = transport.WithRegistry(ctx, o.transports)
 	}
 
 	var events []store.Event
@@ -686,6 +702,10 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 		return nil, nil, w, "", nil
 	}
 
+	if o.transports != nil {
+		ctx = transport.WithRegistry(ctx, o.transports)
+	}
+
 	summaries := make([]HostCallSummary, 0, len(calls))
 	var events []store.Event
 	applied := false
@@ -966,6 +986,20 @@ func (o *Orchestrator) InitialState() app.StatePath {
 // InitialWorld returns a world initialised from the app's schema defaults.
 func (o *Orchestrator) InitialWorld() world.World {
 	return machine.WorldFromSchema(o.def.World)
+}
+
+// LoadJourney reconstructs the current state and world from the store.
+// Exported for read-only callers (e.g. `hally session show`); the Turn-loop
+// path uses the unexported alias `loadJourney`.
+func (o *Orchestrator) LoadJourney(sid app.SessionID) (*store.JourneyState, error) {
+	return o.loadJourney(sid)
+}
+
+// RenderState renders the view template for (state, world) without touching
+// the store. Thin wrapper around machine.RenderState for symmetry with
+// LoadJourney.
+func (o *Orchestrator) RenderState(state app.StatePath, w world.World) (string, error) {
+	return o.machine.RenderState(state, w)
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

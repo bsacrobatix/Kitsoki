@@ -276,6 +276,10 @@ A turn uses either `intent:` (skips the oracle entirely — the authoritative
 way to test state logic) or `input:` (requires the oracle and exercises the
 mapping). Mix freely.
 
+A turn may also carry a `world_override:` map, applied to world before guard
+evaluation on that turn. Use it to probe arcs that would otherwise require a
+long preceding flow (e.g. cycle-budget feedback paths).
+
 Per-turn assertions: `expect_state`, `expect_world` (partial match),
 `expect_view_matches` (regex), plus a fixture-level `expect_no_errors`.
 

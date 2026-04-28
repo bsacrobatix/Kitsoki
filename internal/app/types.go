@@ -29,6 +29,42 @@ type AppDef struct {
 	Proposals map[string]*ProposalKind `yaml:"proposals,omitempty"`
 	// Include lists glob patterns for additional YAML files to merge (§9).
 	Include  []string           `yaml:"include,omitempty"`
+
+	// PhaseTemplates declares reusable phase shapes (proposal §5.2).
+	// Authors instantiate templates by listing phases under `phases:`.
+	PhaseTemplates map[string]*PhaseTemplate `yaml:"phase_templates,omitempty"`
+	// Phases declares the phase graph that instantiates a phase template
+	// (proposal §5.3). Expanded into States at load time.
+	Phases *PhasesBlock `yaml:"phases,omitempty"`
+	// CheckpointIntents is a per-room intent menu merged into every
+	// {id}_awaiting_reply state during phase-template expansion (proposal §6).
+	CheckpointIntents map[string]Intent `yaml:"checkpoint_intents,omitempty"`
+}
+
+// PhaseTemplate is a reusable phase shape. It declares a parameter schema and
+// a set of states that get instantiated once per phase. State-key keys may
+// contain `{paramname}` placeholders; state body strings may contain
+// `{{ tpl.paramname }}` and `{{ phase.next.<arc> }}` expressions which the
+// loader substitutes at expansion time.
+type PhaseTemplate struct {
+	Parameters map[string]PhaseTemplateParam `yaml:"parameters,omitempty"`
+	States     map[string]*State             `yaml:"states,omitempty"`
+}
+
+// PhaseTemplateParam declares one parameter on a phase template.
+type PhaseTemplateParam struct {
+	Type     string `yaml:"type"`
+	Required bool   `yaml:"required,omitempty"`
+	Default  any    `yaml:"default,omitempty"`
+}
+
+// PhasesBlock is the top-level `phases:` declaration that picks a template
+// and supplies a graph of phase instances. Graph is parsed as a raw map so
+// authors can put arbitrary template-parameter keys alongside the
+// structured `next:`, `cycle_budgets:`, and `checkpoint:` fields.
+type PhasesBlock struct {
+	Template string                    `yaml:"template"`
+	Graph    map[string]map[string]any `yaml:"graph,omitempty"`
 }
 
 // AppMeta holds the app-level metadata block.

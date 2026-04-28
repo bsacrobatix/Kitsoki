@@ -41,3 +41,29 @@ CREATE TABLE IF NOT EXISTS snapshots (
     rng_seed     INTEGER NOT NULL,
     PRIMARY KEY (session_id, turn)
 ) STRICT;
+
+-- External-key index: maps (transport, thread) to a session_id so loop.py
+-- and other orchestrators can address sessions by their inbound surface
+-- key (e.g. ("jira", "PLTFRM-12345")). One session may carry multiple keys
+-- (a Jira ticket plus the Bitbucket PR thread it spawns); the (transport,
+-- thread) pair is unique. Proposal §3.2.
+CREATE TABLE IF NOT EXISTS external_keys (
+    transport   TEXT    NOT NULL,
+    thread      TEXT    NOT NULL,
+    session_id  TEXT    NOT NULL,
+    created_at  INTEGER NOT NULL,
+    PRIMARY KEY (transport, thread)
+) STRICT;
+CREATE INDEX IF NOT EXISTS external_keys_session_idx ON external_keys(session_id);
+
+-- Session-level writer lock: row-keyed by session_id. Acquired by
+-- WithWriterLock around the load → run → post → commit critical section
+-- so two `hally session continue` invocations on the same key serialize
+-- (proposal §3.3). Stale locks (owner pid no longer alive) are reaped on
+-- the next acquire attempt.
+CREATE TABLE IF NOT EXISTS session_locks (
+    session_id   TEXT    NOT NULL PRIMARY KEY,
+    owner_pid    INTEGER NOT NULL,
+    owner_host   TEXT    NOT NULL,
+    acquired_at  INTEGER NOT NULL
+) STRICT;

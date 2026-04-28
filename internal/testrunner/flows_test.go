@@ -22,8 +22,8 @@ func TestFlowsCloak(t *testing.T) {
 	report, err := testrunner.RunFlows(ctx, cloakAppPath, cloakFlowsGlob, testrunner.FlowOptions{})
 	require.NoError(t, err)
 
-	// Must have exactly 3 flow results.
-	require.Len(t, report.Results, 3, "expected 3 flow results (winning, losing, negative)")
+	// Must have exactly 4 flow results.
+	require.Len(t, report.Results, 4, "expected 4 flow results (winning, losing, negative, world_override)")
 
 	// All must pass.
 	for _, r := range report.Results {
@@ -37,7 +37,7 @@ func TestFlowsCloak(t *testing.T) {
 		require.True(t, r.Passed, "flow %q should pass", filepath.Base(r.File))
 	}
 
-	require.Equal(t, 3, report.Passed)
+	require.Equal(t, 4, report.Passed)
 	require.Equal(t, 0, report.Failed)
 }
 
@@ -77,6 +77,27 @@ func TestFlowsLosingPath(t *testing.T) {
 		}
 	}
 	require.True(t, r.Passed, "losing path should pass")
+}
+
+// TestFlowsWorldOverride runs the world_override fixture (§7.19): forcing
+// wearing_cloak=false before the south transition routes the player into
+// bar.lit on the very first turn instead of bar.dark.
+func TestFlowsWorldOverride(t *testing.T) {
+	ctx := context.Background()
+	report, err := testrunner.RunFlows(ctx, cloakAppPath,
+		"../../testdata/apps/cloak/flows/world_override.yaml",
+		testrunner.FlowOptions{})
+	require.NoError(t, err)
+	require.Len(t, report.Results, 1)
+	r := report.Results[0]
+	if !r.Passed {
+		for _, turn := range r.Turns {
+			for _, f := range turn.Failures {
+				t.Logf("turn %d failure: %s", turn.TurnIndex+1, f)
+			}
+		}
+	}
+	require.True(t, r.Passed, "world_override fixture should pass")
 }
 
 // TestFlowsNegativePath runs the negative (rejected-intent) fixture.
