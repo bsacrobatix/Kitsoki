@@ -40,8 +40,14 @@ type editModel struct {
 
 func newEditModel() editModel { return editModel{phase: editPhaseInput} }
 
-// Open resets the model so a fresh proposal can begin.
+// Open resets the model so a fresh proposal can begin. If a previous
+// Proposal is still attached (user pressed Esc / 'c' / 'r' before
+// applying), its shadow directory is cleaned up first so we don't
+// leak temp dirs.
 func (e *editModel) Open() {
+	if e.proposal != nil {
+		_ = authoring.Discard(e.proposal)
+	}
 	e.phase = editPhaseInput
 	e.proposal = nil
 }
@@ -59,10 +65,12 @@ type editApplyDoneMsg struct {
 }
 
 // proposeCmd asynchronously calls authoring.Propose. Cancellation
-// must be handled by the caller via the supplied context.
-func proposeCmd(ctx context.Context, appPath, proposalText string) tea.Cmd {
+// must be handled by the caller via the supplied context. runCtx
+// carries the player's current state + rendered view so Claude can
+// pin the proposal to the right file.
+func proposeCmd(ctx context.Context, appPath, proposalText string, runCtx *authoring.Context) tea.Cmd {
 	return func() tea.Msg {
-		p, err := authoring.Propose(ctx, appPath, proposalText)
+		p, err := authoring.Propose(ctx, appPath, proposalText, runCtx)
 		return editProposalReadyMsg{proposal: p, err: err}
 	}
 }

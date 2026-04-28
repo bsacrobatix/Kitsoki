@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"hally/internal/app"
+	"hally/internal/authoring"
 	"hally/internal/orchestrator"
 	"hally/internal/viz"
 )
@@ -774,7 +775,7 @@ func (m RootModel) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.transcript.AppendError("(edit)", "proposal failed: "+msg.err.Error())
 			m.edit.phase = editPhaseInput
-			m.prompt.Placeholder = "describe a change to app.yaml…"
+			m.prompt.Placeholder = "describe a change to this story…"
 			return m, nil
 		}
 		m.edit.proposal = msg.proposal
@@ -813,6 +814,15 @@ func (m RootModel) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 			note += " (your current state no longer exists in the new app — restart to enter the new graph)"
 		}
 		m.transcript.AppendSystem("_" + note + "_")
+
+		// Re-render the current room with the new app definition so the
+		// user actually sees the change. Without this the transcript
+		// keeps the pre-reload view and the edit looks like a no-op.
+		if res.PrevStateExists {
+			if view, vErr := m.orch.Machine().RenderState(m.currentState, w); vErr == nil && view != "" {
+				m.transcript.AppendSystem(view)
+			}
+		}
 		m.edit.Open()
 		m.mode = ModeOnPath
 		m.prompt.Placeholder = "what now?"
@@ -871,7 +881,16 @@ func (m RootModel) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inFlightCancel = cancel
 			m.edit.phase = editPhaseThinking
 			m.transcript.AppendSystem("> " + text)
-			return m, tea.Batch(m.spinner.Tick, proposeCmd(ctx, m.appPath, text))
+
+			// Capture the runtime context Claude needs to pin the
+			// proposal to the right file: the state path the user is
+			// in plus the view that's literally on their screen.
+			runCtx := &authoring.Context{State: string(m.currentState)}
+			w := m.orch.CurrentWorld(m.sid)
+			if view, vErr := m.orch.Machine().RenderState(m.currentState, w); vErr == nil {
+				runCtx.View = view
+			}
+			return m, tea.Batch(m.spinner.Tick, proposeCmd(ctx, m.appPath, text, runCtx))
 		}
 		// All other keys feed the prompt textinput.
 		var cmd tea.Cmd
@@ -942,8 +961,8 @@ func (m RootModel) handleMenuSystemChoice(msg menuSystemChoiceMsg) (tea.Model, t
 		m.mode = ModeEdit
 		m.edit.Open()
 		m.prompt.SetValue("")
-		m.prompt.Placeholder = "describe a change to app.yaml…"
-		m.transcript.AppendSystem("**Edit mode** — describe a change in plain English. Esc to cancel.")
+		m.prompt.Placeholder = "describe a change to this story…"
+		m.transcript.AppendSystem("**Edit mode** — describe a change to any part of this story (rooms, prompts, scripts). Esc to cancel.")
 		return m, nil
 	}
 	return m, nil

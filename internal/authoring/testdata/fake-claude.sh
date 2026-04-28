@@ -1,28 +1,22 @@
 #!/usr/bin/env bash
-# fake-claude.sh — emulates `claude -p` for authoring package tests.
+# fake-claude.sh — emulates `claude -p` running with file-edit tools
+# enabled inside the shadow story directory. Tests place the binary
+# via $HALLY_ORACLE_CLAUDE_BIN.
 #
-# Reads the prompt from stdin and dispatches based on sentinel tokens
-# present in the user's proposal section:
+# Behaviour is dispatched by sentinel tokens in the user's PROPOSAL
+# section of the prompt (read from stdin). cwd is the shadow dir so
+# any file edits land where authoring.diffDirs will see them.
 #
-#   PROPOSAL contains "FAIL_EXEC"     -> exit 2, write to stderr (exec failure)
-#   PROPOSAL contains "REFUSE"        -> emit `ERROR: ...` (no yaml fence)
-#   PROPOSAL contains "RETURN_INVALID"-> emit a yaml fence with broken YAML
-#   PROPOSAL contains "MALFORMED"     -> emit prose only, no SUMMARY/yaml
-#   default                           -> echo back the original yaml (no-op edit)
-#                                       OR if proposal contains "ADD_LINE",
-#                                       append a comment so diff is non-empty.
+#   FAIL_EXEC      → exit 2, write to stderr (exec failure)
+#   REFUSE         → emit ERROR: line, no file edits, exit 0
+#   NO_CHANGES     → emit only SUMMARY:, no file edits
+#   ADD_LINE       → append a YAML comment to ./app.yaml
+#   ADD_FILE       → write a new file ./prompts/new_prompt.md
+#   BREAK_YAML     → corrupt ./app.yaml (test the validation gate)
+#   default        → no edits, just emit SUMMARY:
 set -euo pipefail
 while [ $# -gt 0 ]; do shift; done
 stdin="$(cat /dev/stdin)"
-
-# Extract the original yaml between the first ```yaml and the matching ```
-# in the prompt template's "current app.yaml" section. We use awk because
-# bash regex over multi-line input is painful.
-yaml="$(printf '%s' "$stdin" | awk '
-  /^```yaml/ && !seen { seen=1; next }
-  seen && /^```/ { exit }
-  seen { print }
-')"
 
 if printf '%s' "$stdin" | grep -q FAIL_EXEC; then
   printf 'simulated exec failure\n' >&2
@@ -31,21 +25,23 @@ fi
 
 if printf '%s' "$stdin" | grep -q REFUSE; then
   printf 'ERROR: proposal is ambiguous and does not name a specific room.\n'
-  exit 0
-fi
-
-if printf '%s' "$stdin" | grep -q MALFORMED; then
-  printf 'I would change the foyer message but I am not formatting this correctly.\n'
-  exit 0
-fi
-
-if printf '%s' "$stdin" | grep -q RETURN_INVALID; then
-  printf 'SUMMARY: invalid edit\n\n```yaml\nthis: is: not: valid yaml: at all:\n  - [missing\n```\n'
+  printf 'The right place to edit is likely prompts/example.md.\n'
   exit 0
 fi
 
 if printf '%s' "$stdin" | grep -q ADD_LINE; then
-  yaml="${yaml}"$'\n''# fake-claude appended this comment'
+  printf '\n# fake-claude appended this comment\n' >> ./app.yaml
 fi
 
-printf 'SUMMARY: applied test edit\n\n```yaml\n%s\n```\n' "$yaml"
+if printf '%s' "$stdin" | grep -q ADD_FILE; then
+  mkdir -p ./prompts
+  printf 'hello from fake-claude\n' > ./prompts/new_prompt.md
+fi
+
+if printf '%s' "$stdin" | grep -q BREAK_YAML; then
+  printf 'this: is: not: valid: yaml: at: all:\n  - [unbalanced\n' > ./app.yaml
+fi
+
+# NO_CHANGES sentinel falls through with no edits.
+
+printf 'SUMMARY: applied test edit\n'

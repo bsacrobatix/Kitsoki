@@ -31,7 +31,7 @@ Concretely:
 ### 1.2 What Hally is not
 
 - **Not a chat agent.** The LLM has no latitude to "decide" what the user wants outside the intent alphabet.
-- **Not a general workflow engine.** We are not competing with Temporal or Step Functions on durability or long-running timers. We are optimized for *interactive* sessions with a human in the loop.
+- **Not a general workflow engine.** We don't compete with Temporal or Step Functions on multi-worker durability, distributed activities, or scheduler timers. Hally hosts one conversation per session — but the surface that carries the conversation is plural: a local TUI, a Jira ticket comment thread, a Bitbucket PR comment thread, later a Slack thread. Long-pause sessions and per-event invocations are first-class. See §1.4.
 - **Not a wizard library.** Wizards are strictly linear; Hally models cyclic graphs, compound states, and free exploration.
 - **Not a natural language understanding framework in its own right.** NLU is outsourced to the LLM through a constrained tool surface.
 
@@ -94,6 +94,61 @@ LangGraph's conditional edges run after a node and select the next node determin
 
 *Avoid:*
 1. "Planner" agents that reason about what tool to call over multi-step plans. We want a one-shot extraction: free text → intent. If the user needs multi-step, the state graph models it, not the LLM.
+
+### 1.4 Conversation surfaces and the orchestrator boundary
+
+Hally is a *conversation engine*. Conversations may be driven from different surfaces — a local TUI, a Jira ticket comment thread, a Bitbucket pull-request comment thread, later a Slack thread — and the same room (the same state graph, intents, phases, and checkpoints) must work driven from any of them. The TUI is one such surface; it is not privileged. The canonical examples in §1.1 are TUI-flavored, but every claim about "the user types" generalises to "the user replies via the surface."
+
+#### Transports
+
+A *transport* is the output adapter that translates a hally `Post(key, body)` call into the surface's native form: a TUI panel render, a Jira `POST /comment`, a Bitbucket PR comment-create. Transports own native markup rendering (Jira wiki vs. markdown), authentication, and rate-limiting against the external surface.
+
+Inbound — turning an external reply into a hally intent — is *not* a transport responsibility in the v1 design (see "the orchestrator boundary" below). Transports may grow `Open(handler)` polling or webhook loops in a future revision; they do not have one yet.
+
+#### The orchestrator boundary (v1)
+
+Hally hosts the per-session conversation. It does not poll Jira, watch Bitbucket webhooks, or schedule its own work. The *orchestrator* — for the bug-fix and PR-refine rooms today, `tools/loopy/loop.py` in `cyber-repo` — owns:
+
+- ticket / PR selection and dispatch
+- polling external surfaces for new replies
+- mapping a reply to a hally intent (or passing the raw body to hally's intent router)
+- knowledge extraction, capability boundaries, metrics, dashboards, and other supervisor-level concerns that span sessions
+
+The contract between an orchestrator and hally is a small CLI surface keyed by external ID:
+
+```bash
+hally session create   --app stories/bugfix/app.yaml --key jira:PLTFRM-12345
+hally session continue --key jira:PLTFRM-12345 --intent <name> --slots <json>
+hally session continue --key jira:PLTFRM-12345 --raw "<reply body>"
+hally session show     --key jira:PLTFRM-12345
+hally session list     --transport jira
+hally tui              --key jira:PLTFRM-12345    # attended attach
+```
+
+Each invocation runs hally to a quiescent point — the next checkpoint or a terminal state — posts whatever output the room declares via the configured transport, then exits. State is event-sourced (§8) so no process needs to stay resident between events.
+
+This keeps hally focused — one binary, one session per process, no in-process scheduler — and lets `loop.py` keep its accumulated features (knowledge subsystem, capability boundaries, metrics, cross-run analysis, dashboards) without re-homing them in hally. A future "orchestrator-in-hally" mode (e.g. `hally serve` with its own polling loops) is not ruled out, but it is **not v1**, and we will not design for it until a concrete need surfaces.
+
+#### Sessions are persistent singletons
+
+A session is keyed by `(transport, thread)` — e.g. `jira:PLTFRM-12345`, `bitbucket:DBI/some-repo/pulls/123` — and persists indefinitely in the SQLite event store. A session may carry **multiple** external keys (a bug-fix session attached to both its Jira ticket and the Bitbucket PR it eventually opens); keys are bound as the session progresses.
+
+At most one process at a time may write to a given session. Concurrent invocations serialize on a row-level writer lock with a configurable retry deadline; the loser fails fast with `session busy`. This is what lets `hally tui --key X` and an orchestrator's `hally session continue --key X` co-exist safely against the same persistent session — first writer wins, second writer either waits or reports busy.
+
+#### Phases are the model unit; checkpoints are a transport concern
+
+Hally models conversations at *phase* granularity, not at coarse stage granularity. Each phase is a state with its own artifacts, prompts, guards, history, and intent menu. A phase may be marked as a *checkpoint* — when entered, hally posts the phase output via the configured transport and the session pauses awaiting a reply. Non-checkpoint phases auto-advance.
+
+Whether a phase is a checkpoint is a **transport concern**, not a model concern. The bug-fix pipeline today batches 14 fine-grained phases into 4 stage-group checkpoints because human reviewers don't want to be pinged 14 times per ticket; that batching is a property of the Jira surface, not of the bug-fix room. A more verbose surface (e.g. an attended TUI session) may checkpoint every phase against the same room.
+
+#### Reply parsing is room-defined and extensible
+
+Replies are not constrained to a fixed framework vocabulary (no hardcoded `continue` / `refine` / `quit`). Each checkpoint state declares its own intent menu — `continue`, `quit`, `refine`, `restart_from(stage)`, `jump_to(phase)`, `block_on(reason)`, or anything else the room needs. The orchestrator either:
+
+1. Pre-parses well-known keywords and passes `--intent <name> --slots <json>`, or
+2. Passes the raw reply body via `--raw "<body>"` and lets hally's existing intent-router (the same one that parses TUI free text) map the body to one of the menu's intents using each intent's `examples:` and slot schema.
+
+Synonyms and aliases (`approve`/`lgtm`/`proceed` for `continue`; `skip`/`abandon`/`stop` for `quit`) are declared as intent `examples:`, not hardcoded in the parser. This keeps reply behavior room-specific and lets reviewers' historical vocabulary continue to work without framework changes.
 
 ---
 
@@ -554,7 +609,9 @@ Slot payloads coming in from the MCP `transition` tool are first shape-checked a
 
 ### 4.1 Process model
 
-A single Go process, one statically-linked binary, no daemons, no separate server. Every component communicates in-process; the only external boundaries are the LLM harness subprocess and the MCP stdio/socket transport between the harness and our server.
+A single Go process, one statically-linked binary, no in-process scheduler, no resident server. Every component communicates in-process; the only external boundaries are the LLM harness subprocess and the MCP stdio/socket transport between the harness and our server.
+
+Hally is invoked **per session-event**. An attended TUI session is one continuous process for the duration of the user's seat at the keyboard; an orchestrator-driven session (Jira, Bitbucket — see §1.4) is invoked once per inbound reply via `hally session continue`, runs forward to the next checkpoint, posts via the configured transport, and exits. Durability across invocations is provided by the event-sourced SQLite store (§8). The diagram below depicts the attended (TUI) shape; in the orchestrator-driven shape the TUI box is absent and the orchestrator (e.g. `loop.py`) sits outside the diagram, invoking hally over the CLI.
 
 ```
 +-------------------------------------------------------------------+
@@ -1125,6 +1182,29 @@ The only always-on LLM feedback path is §7.3 sub-mode B, and it is gated behind
 - **Write path:** each turn is wrapped in a single `BEGIN IMMEDIATE ... COMMIT`; `events` append is one multi-VALUES insert. WAL mode enabled on open.
 
 Rationale for SQLite: single file, zero-op, well-understood, transactional, and the target audience is local CLI users. Remote persistence and multi-tenant storage are out of scope for the PoC.
+
+#### External session keys
+
+Per §1.4, sessions are addressable by an external key — a `(transport, thread)` pair such as `jira:PLTFRM-12345` or `bitbucket:DBI/some-repo/pulls/123`. The mapping lives in a separate table; one session may carry multiple keys (a bug-fix session attached to both its Jira ticket and the Bitbucket PR it opens):
+
+```sql
+CREATE TABLE external_keys (
+    transport   TEXT    NOT NULL,
+    thread      TEXT    NOT NULL,
+    session_id  TEXT    NOT NULL,
+    created_at  INTEGER NOT NULL,
+    PRIMARY KEY (transport, thread)
+) STRICT;
+CREATE INDEX external_keys_session_idx ON external_keys(session_id);
+```
+
+The first key is set on `hally session create --key X`; later keys are bound by an effect (e.g. `bind_external_key:` after a Bitbucket PR is opened by the room).
+
+#### Singleton writer-lock semantics
+
+At most one process at a time may write to a given session. Concurrent `hally session continue` (and TUI attach) invocations against the same key serialize on a row-level lock taken at session-load time, with a configurable retry deadline. The loser of the race fails fast with a `session busy` exit code so an orchestrator can choose to retry, queue, or skip.
+
+The lock is held for the duration of one event — load → run to next checkpoint → post → release — not for the lifetime of the session. A long-paused session sitting at `phase_8_awaiting_reply` holds no lock; the next `session continue` may come hours later.
 
 ---
 

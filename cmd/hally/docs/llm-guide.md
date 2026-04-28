@@ -364,14 +364,18 @@ reads. For reviewability and LLM-assisted editing:
   The human re-runs `hally render` to refresh the docs.
 - **In-TUI Edit mode.** While playing in `hally run`, press `Esc` and pick
   **Edit mode** to author a change without leaving the session. Type a
-  free-text proposal; the TUI shells out to `claude -p` (same prompt
-  surface as `apply-proposal`), shows a unified diff for review, and
-  on `[a]pply` writes the new YAML to `app.yaml` and hot-reloads the
-  orchestrator. If the user's current state still exists in the new
-  graph, it is preserved; otherwise a notice tells them to restart.
-  Requires the `claude` binary on `PATH`. The harness's cached system
-  prompt is rebuilt as part of the reload, so the LLM router sees the
-  new states and intents on the very next turn.
+  free-text proposal; the TUI snapshots the story directory, runs
+  `claude -p` (with full Read/Edit/Write tool access) inside the shadow
+  copy, walks the result vs. the original to build a unified diff, and
+  shows it for review. On `[a]pply` the changed files are copied back
+  into place and the orchestrator hot-reloads. The scope is the **whole
+  story directory** — Claude can edit `app.yaml`, included `rooms/*.yaml`
+  fragments, `prompts/*.md` templates, and anything under `scripts/`,
+  not just the manifest. If the user's current state still exists in
+  the new graph, it is preserved; otherwise a notice tells them to
+  restart. Requires the `claude` binary on `PATH`. The harness's cached
+  system prompt is rebuilt as part of the reload, so the LLM router
+  sees new states and intents on the very next turn.
 
 See `hally docs app-schema` for the complete YAML reference. The shortest
 possible mental model:
