@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -71,8 +70,19 @@ func buildValidatorMCPServer(schemaPath, outputPath string) (map[string]any, err
 //                              and exposes it as `stdout_json` for binding.
 //   - schema        (string): informational; passed through unchanged. The
 //                              MCP server is responsible for enforcement.
-//
-// All other keys in args are template variables ({{ args.X }}).
+//   - args          (map):    explicit prompt-template variables.  The
+//                              prompt is rendered with `expr.Env{Args:
+//                              <this map>}`, so the prompt references its
+//                              variables as `{{ args.X }}` (or any nested
+//                              path like `{{ args.context.issue_block }}`,
+//                              `{{ args.artifacts.phase_3.fix_description }}`).
+//                              When omitted, falls back to passing the full
+//                              call-args map as the template scope (legacy
+//                              behaviour) so existing rooms keep working —
+//                              new rooms should use the explicit `args:`
+//                              block to keep handler-control keys
+//                              (prompt/schema/etc.) out of the template
+//                              namespace.
 //
 // Returns Result.Data with:
 //   - stdout      (string): claude's text reply
@@ -101,18 +111,25 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 		return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: read prompt %q: %v", resolved, err)}, nil
 	}
 
-	rendered, err := expr.Render(string(raw), expr.Env{Args: args})
+	// Choose the template scope: prefer the explicit `args:` map, fall
+	// back to the entire call-args dict for backwards compatibility.
+	// Authors should migrate to the explicit form so handler-control
+	// keys (prompt/schema/output_format/mcp_servers/working_dir) don't
+	// leak into the prompt's `args.X` namespace and so nested objects
+	// (`args.context.X`, `args.artifacts.phase_3.Y`) are clean rather
+	// than a flat soup of one-deep keys.
+	templateArgs, _ := args["args"].(map[string]any)
+	if templateArgs == nil {
+		templateArgs = args
+	}
+	rendered, err := expr.Render(string(raw), expr.Env{Args: templateArgs})
 	if err != nil {
 		return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: render prompt %q: %v", resolved, err)}, nil
 	}
 
-	bin := os.Getenv(OracleBinEnv)
-	if bin == "" {
-		path, lookErr := exec.LookPath("claude")
-		if lookErr != nil {
-			return Result{Error: ErrOracleUnavailable.Error()}, nil
-		}
-		bin = path
+	bin, err := resolveOracleBin()
+	if err != nil {
+		return Result{Error: err.Error()}, nil
 	}
 
 	workingDir, _ := args["working_dir"].(string)
@@ -138,9 +155,15 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 	// `submit` tool whose input schema is the user-provided schema. The LLM
 	// must call submit() and round-trip its JSON through it before answering;
 	// validation errors come back inline so the LLM self-corrects.
-	mcpServers, _ := args["mcp_servers"].(map[string]any)
-	if mcpServers == nil {
-		mcpServers = map[string]any{}
+	//
+	// We shallow-copy the caller's map so the auto-attached validator entry
+	// does not leak back into args["mcp_servers"] (an effect map can be
+	// re-run after on_error: routing, and a stale validator entry would
+	// point at a deleted tempfile on the second pass).
+	callerServers, _ := args["mcp_servers"].(map[string]any)
+	mcpServers := make(map[string]any, len(callerServers)+1)
+	for k, v := range callerServers {
+		mcpServers[k] = v
 	}
 
 	// validatorOutputPath is set when we auto-attach the validator. It's
@@ -163,11 +186,7 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 			// claude exits — the validator will recreate it via atomic
 			// rename on its first successful submit.
 			_ = os.Remove(validatorOutputPath)
-			defer func() {
-				if validatorOutputPath != "" {
-					_ = os.Remove(validatorOutputPath)
-				}
-			}()
+			defer os.Remove(validatorOutputPath)
 
 			validatorEntry, vErr := buildValidatorMCPServer(schemaArg, validatorOutputPath)
 			if vErr != nil {
@@ -200,44 +219,29 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 		cliArgs = append(cliArgs, "--mcp-config", mcpConfigPath)
 	}
 
-	cmd := exec.CommandContext(ctx, bin, cliArgs...)
-	cmd.Stdin = strings.NewReader(rendered)
-	cmd.Dir = workingDir
-
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-	exitCode := 0
+	cr, runErr := runClaudeOneShot(ctx, bin, cliArgs, rendered, workingDir)
 	if runErr != nil {
-		if ctx.Err() != nil {
-			return Result{}, ctx.Err()
+		return Result{}, runErr
+	}
+	if cr.Infra != nil {
+		msg := fmt.Sprintf("host.oracle.ask_with_mcp: claude exec failed: %v", cr.Infra)
+		if s := strings.TrimSpace(cr.Stderr); s != "" {
+			msg = fmt.Sprintf("%s\nstderr: %s", msg, s)
 		}
-		if exitErr, ok := runErr.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			stderrText := strings.TrimSpace(stderr.String())
-			msg := fmt.Sprintf("host.oracle.ask_with_mcp: claude exec failed: %v", runErr)
-			if stderrText != "" {
-				msg = fmt.Sprintf("%s\nstderr: %s", msg, stderrText)
-			}
-			return Result{Error: msg}, nil
-		}
+		return Result{Error: msg}, nil
 	}
 
-	out := strings.TrimRight(stdout.String(), "\n")
 	res := Result{
 		Data: map[string]any{
-			"stdout":    out,
-			"exit_code": exitCode,
-			"ok":        exitCode == 0,
+			"stdout":    cr.Stdout,
+			"exit_code": cr.ExitCode,
+			"ok":        cr.ExitCode == 0,
 		},
 	}
 
-	if outputFormat == "json" && exitCode == 0 && out != "" {
+	if outputFormat == "json" && cr.ExitCode == 0 && cr.Stdout != "" {
 		var parsed any
-		if jErr := json.Unmarshal([]byte(out), &parsed); jErr == nil {
+		if jErr := json.Unmarshal([]byte(cr.Stdout), &parsed); jErr == nil {
 			res.Data["stdout_json"] = parsed
 		} else {
 			// Don't fail the handler — bind: { foo: stdout_json } will silently
@@ -262,9 +266,7 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 				// schema validation, so a parse error here is a real bug.
 				// Surface it through the handler error path so on_error:
 				// can route.
-				if res.Error == "" {
-					res.Error = fmt.Sprintf("host.oracle.ask_with_mcp: parse validator output: %v", jErr)
-				}
+				res.Error = fmt.Sprintf("host.oracle.ask_with_mcp: parse validator output: %v", jErr)
 			}
 		}
 		// Note: file-not-found is the normal "LLM never made a successful
@@ -272,15 +274,10 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 		// state machine handles its absence via guard / on_error.
 	}
 
-	if exitCode != 0 {
-		stderrText := strings.TrimSpace(stderr.String())
-		if stderrText != "" {
-			res.Error = stderrText
-		} else if out != "" {
-			res.Error = out
-		} else {
-			res.Error = fmt.Sprintf("claude exited with code %d", exitCode)
-		}
+	// Preserve any earlier res.Error (e.g. validator parse-error) — only
+	// fall back to the exit-code message when nothing more specific is set.
+	if cr.ExitCode != 0 && res.Error == "" {
+		res.Error = claudeExitErrorMessage(cr.ExitCode, cr.Stderr, cr.Stdout)
 	}
 	return res, nil
 }

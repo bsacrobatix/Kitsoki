@@ -42,6 +42,73 @@ func TestOracleAskWithMCP_RegisteredAsBuiltin(t *testing.T) {
 	}
 }
 
+// TestOracleAskWithMCP_ExplicitArgsScopesPromptVariables verifies that the
+// `args:` field, when present, is the *only* scope visible to the prompt's
+// `{{ args.X }}` references — handler-control keys (prompt_path,
+// schema, etc.) and other top-level entries do not leak into the
+// template namespace.  This is the principled form authors should use;
+// it also lets prompts use nested paths like `{{ args.context.X }}`.
+func TestOracleAskWithMCP_ExplicitArgsScopesPromptVariables(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	body := "ticket={{ args.ticket }} repo={{ args.context.repo }} prompt={{ args.prompt_path }}"
+	if err := os.WriteFile(promptPath, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path": promptPath,
+		// `args:` is the explicit template scope.
+		"args": map[string]any{
+			"ticket": "PLTFRM-12345",
+			"context": map[string]any{
+				"repo": "ABC/widget-service",
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Empty(t, res.Error, "unexpected Result.Error: %s", res.Error)
+	out, _ := res.Data["stdout"].(string)
+	assert.Contains(t, out, "ticket=PLTFRM-12345")
+	assert.Contains(t, out, "repo=ABC/widget-service")
+	// Crucially: `prompt_path` is a handler-control key.  In the legacy
+	// flat-args fallback it would render as the path; with explicit
+	// `args:` it must NOT leak — render to empty (or any non-path value).
+	assert.NotContains(t, out, "prompt="+promptPath,
+		"handler-control key prompt_path leaked into template scope")
+}
+
+// TestOracleAskWithMCP_LegacyFlatArgsFallback verifies the backwards-compat
+// path: when no explicit `args:` is supplied, the entire call args dict
+// is the template scope (the v0 behaviour).  Existing rooms that pass
+// flat `who: world` keep working.
+func TestOracleAskWithMCP_LegacyFlatArgsFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	if err := os.WriteFile(promptPath, []byte("hello {{ args.who }}"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path": promptPath,
+		"who":         "fallback",
+	})
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
+	out, _ := res.Data["stdout"].(string)
+	assert.Contains(t, out, "hello fallback")
+}
+
 // TestOracleAskWithMCP_NoServers behaves identically to host.oracle.ask when
 // mcp_servers is missing — no --mcp-config is passed, prompt is echoed back.
 func TestOracleAskWithMCP_NoServers(t *testing.T) {

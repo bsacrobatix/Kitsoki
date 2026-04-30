@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -64,13 +63,9 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		return Result{Error: fmt.Sprintf("host.oracle.ask: render prompt %q: %v", resolved, err)}, nil
 	}
 
-	bin := os.Getenv(OracleBinEnv)
-	if bin == "" {
-		path, lookErr := exec.LookPath("claude")
-		if lookErr != nil {
-			return Result{Error: ErrOracleUnavailable.Error()}, nil
-		}
-		bin = path
+	bin, err := resolveOracleBin()
+	if err != nil {
+		return Result{Error: err.Error()}, nil
 	}
 
 	workingDir, _ := args["working_dir"].(string)
@@ -84,50 +79,27 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		"--permission-mode", "bypassPermissions",
 	}
 
-	cmd := exec.CommandContext(ctx, bin, cliArgs...)
-	cmd.Stdin = strings.NewReader(rendered)
-	cmd.Dir = workingDir
-
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-	exitCode := 0
+	cr, runErr := runClaudeOneShot(ctx, bin, cliArgs, rendered, workingDir)
 	if runErr != nil {
-		if ctx.Err() != nil {
-			return Result{}, ctx.Err()
+		return Result{}, runErr
+	}
+	if cr.Infra != nil {
+		msg := fmt.Sprintf("host.oracle.ask: claude exec failed: %v", cr.Infra)
+		if s := strings.TrimSpace(cr.Stderr); s != "" {
+			msg = fmt.Sprintf("%s\nstderr: %s", msg, s)
 		}
-		if exitErr, ok := runErr.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			// Infrastructure failure (e.g. binary vanished mid-run).
-			stderrText := strings.TrimSpace(stderr.String())
-			msg := fmt.Sprintf("host.oracle.ask: claude exec failed: %v", runErr)
-			if stderrText != "" {
-				msg = fmt.Sprintf("%s\nstderr: %s", msg, stderrText)
-			}
-			return Result{Error: msg}, nil
-		}
+		return Result{Error: msg}, nil
 	}
 
-	out := strings.TrimRight(stdout.String(), "\n")
 	res := Result{
 		Data: map[string]any{
-			"stdout":    out,
-			"exit_code": exitCode,
-			"ok":        exitCode == 0,
+			"stdout":    cr.Stdout,
+			"exit_code": cr.ExitCode,
+			"ok":        cr.ExitCode == 0,
 		},
 	}
-	if exitCode != 0 {
-		stderrText := strings.TrimSpace(stderr.String())
-		if stderrText != "" {
-			res.Error = stderrText
-		} else if out != "" {
-			res.Error = out
-		} else {
-			res.Error = fmt.Sprintf("claude exited with code %d", exitCode)
-		}
+	if cr.ExitCode != 0 {
+		res.Error = claudeExitErrorMessage(cr.ExitCode, cr.Stderr, cr.Stdout)
 	}
 	return res, nil
 }
