@@ -232,6 +232,10 @@ type Slot struct {
 	FormatHint  string   `yaml:"format_hint,omitempty"`
 	Prompt      string   `yaml:"prompt,omitempty"`
 	Validator   string   `yaml:"validator,omitempty"` // expr guard expression
+	// Format names a custom semantic format (e.g. "jql"). Validated by
+	// the MCP validator's RegisterFormat hooks. Distinct from FormatHint,
+	// which is documentation-only.
+	Format string `yaml:"format,omitempty"`
 }
 
 // GuardExpr is a compiled guard expression (produced by internal/expr).
