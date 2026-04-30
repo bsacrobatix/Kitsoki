@@ -12,17 +12,23 @@ import (
 )
 
 // BuildTransitionSchema returns a JSON Schema (draft 2020-12) describing the
-// arguments to the transition tool. The top-level shape is fixed:
+// arguments to the transition tool. Top-level shape:
 //
-//	{intent: <enum>, slots: {...}, confidence: number}
+//	{intent: <enum>, slots: {<flat union of all slot defs>}, confidence}
 //
-// Per-intent slot constraints live under $defs/slots__<name> and are wired
-// into the top-level schema via `allOf` of `if/then` clauses keyed on
-// `intent`. Intents with no slots are omitted from `allOf` (their slots
-// default to the permissive `{"type":"object"}`).
+// Slots from every allowed intent are unioned into one `slots.properties`
+// map keyed by slot name. Per-intent `required` and `additionalProperties:
+// false` are intentionally dropped: Anthropic's tool input_schema rejects
+// `oneOf`, `allOf`, `anyOf` at the top level, which rules out the obvious
+// `if/then` discriminator pattern. The semantic checks that actually catch
+// drift (per-slot `format`, type, enum) survive the flattening.
 //
-// An empty allowedIntents list yields `intent.enum: []` and no per-intent
-// branches — still a structurally valid schema.
+// If two intents declare a slot with the same name, the first declaration
+// in `allowedIntents` order wins. The harness already runs in an
+// LLM-driven extraction loop where slot-shape collisions across intents
+// would be a router-level authoring smell, not a runtime correctness issue.
+//
+// An empty `allowedIntents` slice yields an empty enum but is otherwise valid.
 func BuildTransitionSchema(appDef *app.AppDef, allowedIntents []string) ([]byte, error) {
 	if appDef == nil {
 		return nil, fmt.Errorf("harness/schema: appDef must not be nil")
@@ -33,28 +39,18 @@ func BuildTransitionSchema(appDef *app.AppDef, allowedIntents []string) ([]byte,
 		enum = append(enum, name)
 	}
 
-	defs := map[string]any{}
-	allOf := []any{}
-
+	slotProps := map[string]any{}
 	for _, name := range allowedIntents {
 		intent, ok := appDef.Intents[name]
-		if !ok || len(intent.Slots) == 0 {
+		if !ok {
 			continue
 		}
-		defKey := "slots__" + name
-		defs[defKey] = buildSlotSchema(intent.Slots)
-		allOf = append(allOf, map[string]any{
-			"if": map[string]any{
-				"properties": map[string]any{
-					"intent": map[string]any{"const": name},
-				},
-			},
-			"then": map[string]any{
-				"properties": map[string]any{
-					"slots": map[string]any{"$ref": "#/$defs/" + defKey},
-				},
-			},
-		})
+		for slotName, slot := range intent.Slots {
+			if _, exists := slotProps[slotName]; exists {
+				continue
+			}
+			slotProps[slotName] = buildSlotProperty(slot)
+		}
 	}
 
 	schema := map[string]any{
@@ -67,7 +63,8 @@ func BuildTransitionSchema(appDef *app.AppDef, allowedIntents []string) ([]byte,
 				"enum": enum,
 			},
 			"slots": map[string]any{
-				"type": "object",
+				"type":       "object",
+				"properties": slotProps,
 			},
 			"confidence": map[string]any{
 				"type":    "number",
@@ -76,37 +73,8 @@ func BuildTransitionSchema(appDef *app.AppDef, allowedIntents []string) ([]byte,
 			},
 		},
 	}
-	if len(allOf) > 0 {
-		schema["allOf"] = allOf
-	}
-	if len(defs) > 0 {
-		schema["$defs"] = defs
-	}
 
 	return json.Marshal(schema)
-}
-
-// buildSlotSchema renders a per-intent slots object schema from the slot map.
-// additionalProperties is false so unknown slot keys are rejected; required
-// holds slot names with Slot.Required == true.
-func buildSlotSchema(slots map[string]app.Slot) map[string]any {
-	props := map[string]any{}
-	required := []any{}
-	for name, slot := range slots {
-		props[name] = buildSlotProperty(slot)
-		if slot.Required {
-			required = append(required, name)
-		}
-	}
-	out := map[string]any{
-		"type":                 "object",
-		"additionalProperties": false,
-		"properties":           props,
-	}
-	if len(required) > 0 {
-		out["required"] = required
-	}
-	return out
 }
 
 // buildSlotProperty renders one slot's JSON-Schema property.

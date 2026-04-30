@@ -34,11 +34,10 @@ func compileSchema(t *testing.T, raw []byte) {
 
 func TestBuildTransitionSchema(t *testing.T) {
 	type want struct {
-		intentEnum     []string // expected order in intent.enum
-		hasAllOf       bool
-		allOfLen       int     // when hasAllOf
-		slotDefs       []string // names that must appear under $defs (slots__<name>)
-		assertSlotProp func(t *testing.T, root map[string]any)
+		intentEnum     []string
+		expectSlots    []string // slot names that must appear under properties.slots.properties
+		absentSlots    []string // slot names that must NOT appear
+		assertSlotProp func(t *testing.T, slotProps map[string]any)
 	}
 
 	tests := []struct {
@@ -56,7 +55,6 @@ func TestBuildTransitionSchema(t *testing.T) {
 			allowedIntents: nil,
 			want: want{
 				intentEnum: []string{},
-				hasAllOf:   false,
 			},
 		},
 		{
@@ -70,7 +68,6 @@ func TestBuildTransitionSchema(t *testing.T) {
 			allowedIntents: []string{"look"},
 			want: want{
 				intentEnum: []string{"look"},
-				hasAllOf:   false,
 			},
 		},
 		{
@@ -92,21 +89,13 @@ func TestBuildTransitionSchema(t *testing.T) {
 			},
 			allowedIntents: []string{"search"},
 			want: want{
-				intentEnum: []string{"search"},
-				hasAllOf:   true,
-				allOfLen:   1,
-				slotDefs:   []string{"slots__search"},
-				assertSlotProp: func(t *testing.T, root map[string]any) {
-					defs := root["$defs"].(map[string]any)
-					def := defs["slots__search"].(map[string]any)
-					props := def["properties"].(map[string]any)
-					jqlProp := props["jql"].(map[string]any)
+				intentEnum:  []string{"search"},
+				expectSlots: []string{"jql"},
+				assertSlotProp: func(t *testing.T, slotProps map[string]any) {
+					jqlProp := slotProps["jql"].(map[string]any)
 					assert.Equal(t, "jql", jqlProp["format"])
 					assert.Equal(t, "string", jqlProp["type"])
 					assert.Equal(t, "JQL query", jqlProp["description"])
-					req := def["required"].([]any)
-					require.Len(t, req, 1)
-					assert.Equal(t, "jql", req[0])
 				},
 			},
 		},
@@ -129,16 +118,32 @@ func TestBuildTransitionSchema(t *testing.T) {
 			},
 			allowedIntents: []string{"look", "go", "hang_cloak"},
 			want: want{
-				intentEnum: []string{"look", "go", "hang_cloak"},
-				hasAllOf:   true,
-				allOfLen:   1, // only `go` has slots
-				slotDefs:   []string{"slots__go"},
-				assertSlotProp: func(t *testing.T, root map[string]any) {
-					defs := root["$defs"].(map[string]any)
-					_, hasGo := defs["slots__go"]
-					assert.True(t, hasGo, "slots__go should exist")
-					_, hasLook := defs["slots__look"]
-					assert.False(t, hasLook, "slots__look should not exist")
+				intentEnum:  []string{"look", "go", "hang_cloak"},
+				expectSlots: []string{"direction"},
+				assertSlotProp: func(t *testing.T, slotProps map[string]any) {
+					dir := slotProps["direction"].(map[string]any)
+					enum := dir["enum"].([]any)
+					assert.Len(t, enum, 2)
+				},
+			},
+		},
+		{
+			name: "duplicate slot names — first allowed-intent wins",
+			appDef: &app.AppDef{
+				App: app.AppMeta{ID: "x"},
+				Intents: map[string]app.Intent{
+					"a": {Slots: map[string]app.Slot{"key": {Type: "string", Description: "from a"}}},
+					"b": {Slots: map[string]app.Slot{"key": {Type: "integer", Description: "from b"}}},
+				},
+			},
+			allowedIntents: []string{"a", "b"},
+			want: want{
+				intentEnum:  []string{"a", "b"},
+				expectSlots: []string{"key"},
+				assertSlotProp: func(t *testing.T, slotProps map[string]any) {
+					k := slotProps["key"].(map[string]any)
+					assert.Equal(t, "string", k["type"])
+					assert.Equal(t, "from a", k["description"])
 				},
 			},
 		},
@@ -153,9 +158,15 @@ func TestBuildTransitionSchema(t *testing.T) {
 			var root map[string]any
 			require.NoError(t, json.Unmarshal(raw, &root))
 
-			// Top-level invariants.
 			assert.Equal(t, "object", root["type"])
 			assert.Equal(t, false, root["additionalProperties"])
+
+			// Top-level discriminators that Anthropic's tool input_schema
+			// rejects MUST NOT appear at the root.
+			for _, k := range []string{"oneOf", "allOf", "anyOf"} {
+				_, present := root[k]
+				assert.False(t, present, "top-level %q must not be emitted (Anthropic API rejects it)", k)
+			}
 
 			props := root["properties"].(map[string]any)
 			intentProp := props["intent"].(map[string]any)
@@ -167,24 +178,21 @@ func TestBuildTransitionSchema(t *testing.T) {
 				assert.Equal(t, name, enum[i])
 			}
 
-			if tc.want.hasAllOf {
-				allOf, ok := root["allOf"].([]any)
-				require.True(t, ok, "allOf should be present")
-				assert.Len(t, allOf, tc.want.allOfLen)
+			slotsProp := props["slots"].(map[string]any)
+			assert.Equal(t, "object", slotsProp["type"])
+			slotProps, _ := slotsProp["properties"].(map[string]any)
 
-				defs, ok := root["$defs"].(map[string]any)
-				require.True(t, ok)
-				for _, name := range tc.want.slotDefs {
-					_, present := defs[name]
-					assert.True(t, present, "$defs.%s should be present", name)
-				}
-			} else {
-				_, hasAllOf := root["allOf"]
-				assert.False(t, hasAllOf, "allOf should be absent")
+			for _, slotName := range tc.want.expectSlots {
+				_, present := slotProps[slotName]
+				assert.True(t, present, "slots.properties.%s should be present", slotName)
+			}
+			for _, slotName := range tc.want.absentSlots {
+				_, present := slotProps[slotName]
+				assert.False(t, present, "slots.properties.%s should be absent", slotName)
 			}
 
-			if tc.want.assertSlotProp != nil {
-				tc.want.assertSlotProp(t, root)
+			if tc.want.assertSlotProp != nil && slotProps != nil {
+				tc.want.assertSlotProp(t, slotProps)
 			}
 
 			compileSchema(t, raw)
