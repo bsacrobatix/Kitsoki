@@ -2,6 +2,15 @@
 // Shells out to the `claude -p` CLI to route a user utterance to an IntentCall.
 // This avoids requiring ANTHROPIC_API_KEY: it picks up the user's existing
 // Claude Code login instead.
+//
+// Slot extraction goes through MCP tool-calling: the harness spawns the
+// hally binary itself as a `mcp-validator` subprocess, attaches it via
+// `--mcp-config`, and tells the LLM to call `mcp__hally-validator__submit`
+// with the routed payload. The validator captures the schema-validated
+// JSON to a side-channel file so we never have to scrape stdout for fences
+// or beg the model to "respond with raw JSON". Semantic formats declared
+// on slots (e.g. `format: jql`) are enforced by the validator, the same
+// way `host.oracle.ask_with_mcp` does it.
 package harness
 
 import (
@@ -12,6 +21,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -30,28 +40,37 @@ var ErrClaudeCLIUnavailable = errors.New("harness/claude-cli: `claude` binary no
 // via WithClaudeModel or the --claude-model flag on `hally run`.
 const DefaultClaudeModel = "claude-haiku-4-5-20251001"
 
+// validatorServerName is the MCP server name advertised to claude. The
+// resulting tool name is `mcp__<server>__submit` — keep this in sync with
+// the prompt instruction below.
+const validatorServerName = "hally-validator"
+
+// validatorToolName is the full tool name the LLM must call. Built from
+// validatorServerName + the validator server's default `submit` tool.
+const validatorToolName = "mcp__" + validatorServerName + "__submit"
+
 // ClaudeCLIConfig holds optional knobs for ClaudeCLIHarness.
 type ClaudeCLIConfig struct {
 	// Model is passed as --model to claude. If empty, DefaultClaudeModel is used.
 	Model string
-	// MaxRetries is the number of parse-failure retries. Default 2 (3 total attempts).
-	MaxRetries int
 	// ClaudeBin overrides the path to the claude binary (used in tests).
 	// If empty, exec.LookPath("claude") is used.
 	ClaudeBin string
+	// HallyBin overrides the path to the hally binary used to spawn the
+	// validator MCP server. If empty, os.Executable() is used. Tests set
+	// this to a stub that mimics the validator's capture behavior.
+	HallyBin string
 }
 
 // ClaudeCLIHarness shells out to `claude -p` to route user text → IntentCall.
 // Prompt composition reuses buildStablePrefix and buildDynamicSuffix from prompt.go
 // so the prompt shape is identical to LiveHarness.
 //
-// Invocation: the complete prompt (stable prefix + dynamic suffix + JSON instruction
-// + user utterance) is piped to claude via stdin, which avoids argv size limits on
-// large apps. --output-format json causes claude to emit a JSON envelope whose
-// "result" field contains the assistant text. We parse the JSON object from "result".
-//
-// Retry on parse failure: up to cfg.MaxRetries additional attempts (default 2),
-// each prefixing the prompt with an explanation of what went wrong.
+// Invocation: the complete prompt is piped to claude via stdin (avoids argv
+// size limits). A per-turn JSON Schema is written to a tempdir alongside
+// an --mcp-config file that points claude at `hally mcp-validator`. The
+// validator captures the LLM's submit() payload to a file we read after
+// claude exits.
 type ClaudeCLIHarness struct {
 	appDef       *app.AppDef
 	cfg          ClaudeCLIConfig
@@ -68,9 +87,6 @@ type ClaudeCLIHarness struct {
 func NewClaudeCLI(appDef *app.AppDef, cfg ClaudeCLIConfig) (*ClaudeCLIHarness, error) {
 	if appDef == nil {
 		return nil, errors.New("harness/claude-cli: app definition must not be nil")
-	}
-	if cfg.MaxRetries == 0 {
-		cfg.MaxRetries = 2
 	}
 	if cfg.Model == "" {
 		cfg.Model = DefaultClaudeModel
@@ -121,6 +137,9 @@ func (h *ClaudeCLIHarness) WithLogger(l *slog.Logger) {
 }
 
 // claudeJSONEnvelope is the outer JSON object emitted by `claude -p --output-format json`.
+// We don't strictly need to parse the result text anymore (the side-channel
+// capture file carries the canonical payload), but the envelope is still
+// useful for surfacing exec errors.
 type claudeJSONEnvelope struct {
 	Type    string `json:"type"`
 	Subtype string `json:"subtype"`
@@ -128,75 +147,37 @@ type claudeJSONEnvelope struct {
 	IsError bool   `json:"is_error"`
 }
 
-// claudeResponseSchema is the JSON object we expect the LLM to return inside the envelope.
-type claudeResponseSchema struct {
-	Intent     string         `json:"intent"`
-	Slots      map[string]any `json:"slots"`
-	Confidence float64        `json:"confidence,omitempty"`
-}
+// submitInstruction is appended to every prompt. It tells the LLM the only
+// way to "respond" is to call the validator's submit tool with a payload
+// that matches the schema attached to that tool.
+const submitInstruction = `
 
-// jsonInstruction is appended to every prompt to tell the LLM the exact
-// output format. The prose below is deliberately emphatic and repeats the
-// "no fences" rule several times because Haiku 4.5 (the default intent
-// router) has been observed to wrap JSON in ` + "```" + `json fences even when told
-// not to — seeing fenced code blocks earlier in the prompt (the rendered
-// view is wrapped in fences by buildDynamicSuffix) primes the model to
-// mirror that style on output. Leaving the stripper as a safety net.
-const jsonInstruction = `
 ---
 
-## CRITICAL OUTPUT INSTRUCTION
+## Output Contract
 
-You are acting as a JSON API endpoint, not a conversational assistant.
-Your ENTIRE response must be a single raw JSON object. Nothing else.
+You must call the tool ` + "`" + validatorToolName + "`" + ` exactly once with an object of shape:
 
-The JSON must match this exact schema:
+  {"intent": "<one of the allowed intent names>",
+   "slots":  {"<slot>": <value>, ...},
+   "confidence": 0.0}
 
-{
-  "intent": "<one of the allowed intent names above>",
-  "slots": { "<slot_name>": "<value>", ... },
-  "confidence": 0.0
-}
+The tool's input schema (attached to the tool itself) constrains the allowed
+intent values, the slot shape per intent, and any semantic format checks
+(e.g. JQL). If the call is rejected, fix the payload and call submit again.
 
-The "slots" field is required (use {} if no slots). The "confidence" field is optional.
-
-### OUTPUT FORMAT RULES — READ CAREFULLY
-
-- Your response starts with the character ` + "`{`" + ` and ends with the character ` + "`}`" + `.
-- Do NOT wrap the output in ` + "`" + "```" + "`" + ` fences of any kind.
-- Do NOT prefix the output with ` + "`" + "```" + "json`" + ` or any language tag.
-- Do NOT add any prose, explanation, heading, or commentary before or after the JSON.
-- Do NOT mirror the fenced code blocks that appear in the context above —
-  those are the USER's view, not a template for your reply.
-
-### Examples
-
-CORRECT output (copy this style):
-{"intent":"go","slots":{"direction":"south"},"confidence":0.9}
-
-WRONG — do not do this:
-` + "```" + `json
-{"intent":"go","slots":{"direction":"south"}}
-` + "```" + `
-
-WRONG — do not do this either:
-Here is the JSON: {"intent":"go","slots":{"direction":"south"}}
-`
-
-// retryInstruction is prepended when a previous attempt produced invalid JSON.
-const retryInstruction = `Your last response was not valid JSON. Return ONLY a JSON object matching this schema:
-{"intent":"<name>","slots":{...},"confidence":0.0}
-No fences, no prose. The JSON object must be the entire response.
-
+Once submit returns OK, your turn is done — write at most a one-line
+acknowledgement; do not repeat the JSON.
 `
 
 // RunTurn pipes the user utterance and app context to `claude -p` and extracts
-// the resulting IntentCall as a mcp.CallToolParams.
-//
-// Retry policy: up to cfg.MaxRetries additional attempts on JSON parse failure.
+// the resulting IntentCall via the MCP validator's side-channel capture file.
 func (h *ClaudeCLIHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallToolParams, error) {
-	// Resolve binary path.
 	claudeBin, err := h.resolveBin()
+	if err != nil {
+		return mcp.CallToolParams{}, err
+	}
+	hallyBin, err := h.resolveHallyBin()
 	if err != nil {
 		return mcp.CallToolParams{}, err
 	}
@@ -207,90 +188,134 @@ func (h *ClaudeCLIHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallT
 		slog.String("state_path", string(in.StatePath)),
 	)
 
-	dynamic := buildDynamicSuffix(h.appDef, in)
-	basePrompt := h.stablePrefix + dynamic + jsonInstruction +
-		"\n## User Input\n\n" + in.UserText + "\n"
-
-	if l.Enabled(ctx, slog.LevelDebug) {
-		l.DebugContext(ctx, trace.EvHarnessRequest,
-			slog.Int("prompt_bytes", len(basePrompt)),
-			slog.String("prompt_head", trace.Truncate(basePrompt, trace.TruncateCap)),
-		)
+	// Per-turn schema, written to a tempdir alongside the --mcp-config
+	// document and the side-channel capture file.
+	schemaBytes, err := BuildTransitionSchema(h.appDef, in.AllowedIntents)
+	if err != nil {
+		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: build transition schema: %w", err)
 	}
 
-	var lastParseErr error
-	for attempt := 0; attempt <= h.cfg.MaxRetries; attempt++ {
-		prompt := basePrompt
-		if attempt > 0 {
-			prompt = retryInstruction + basePrompt
-			slog.Warn("harness/claude-cli: retrying after parse failure",
-				"attempt", attempt, "err", lastParseErr)
-			l.DebugContext(ctx, trace.EvHarnessRetry,
-				slog.Int("attempt", attempt),
-				slog.String("reason", lastParseErr.Error()),
-			)
-		}
+	tmpDir, err := os.MkdirTemp("", "hally-claude-cli-*")
+	if err != nil {
+		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: mkdir tmp: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
 
-		args := buildClaudeArgs(h.cfg)
+	schemaPath := filepath.Join(tmpDir, "schema.json")
+	if err := os.WriteFile(schemaPath, schemaBytes, 0o600); err != nil {
+		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: write schema: %w", err)
+	}
+
+	capturePath := filepath.Join(tmpDir, "capture.json")
+	// Don't pre-create capturePath; the validator writes via atomic
+	// rename, and absence-after-exit is the "LLM never called submit" signal.
+
+	configPath := filepath.Join(tmpDir, "config.json")
+	mcpConfig := map[string]any{
+		"mcpServers": map[string]any{
+			validatorServerName: map[string]any{
+				"command": hallyBin,
+				"args": []any{
+					"mcp-validator",
+					"--schema", schemaPath,
+					"--output", capturePath,
+				},
+			},
+		},
+	}
+	configBytes, err := json.Marshal(mcpConfig)
+	if err != nil {
+		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: marshal mcp-config: %w", err)
+	}
+	if err := os.WriteFile(configPath, configBytes, 0o600); err != nil {
+		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: write mcp-config: %w", err)
+	}
+
+	dynamic := buildDynamicSuffix(h.appDef, in)
+	prompt := h.stablePrefix + dynamic + submitInstruction +
+		"\n## User Input\n\n" + in.UserText + "\n"
+
+	args := buildClaudeArgs(h.cfg, configPath)
+	if l.Enabled(ctx, slog.LevelDebug) {
+		l.DebugContext(ctx, trace.EvHarnessRequest,
+			slog.Int("prompt_bytes", len(prompt)),
+			slog.String("prompt_head", trace.Truncate(prompt, trace.TruncateCap)),
+		)
 		l.DebugContext(ctx, trace.EvHarnessExec,
 			slog.String("bin", claudeBin),
 			slog.Any("args", args),
 		)
-
-		raw, err := h.invoke(ctx, claudeBin, prompt)
-		if err != nil {
-			l.DebugContext(ctx, trace.EvHarnessError, slog.String("error", err.Error()))
-			return mcp.CallToolParams{}, err
-		}
-
-		if l.Enabled(ctx, slog.LevelDebug) {
-			l.DebugContext(ctx, trace.EvHarnessResponseRaw,
-				slog.String("raw", trace.Truncate(string(raw), trace.TruncateCap)),
-			)
-		}
-
-		params, parseErr := parseClaudeEnvelope(raw)
-		if parseErr == nil {
-			intentName, slots, confidence := parseTransitionArgs(params)
-			l.DebugContext(ctx, trace.EvHarnessResponseParsed,
-				slog.String("intent", intentName),
-				slog.Any("slots", slots),
-				slog.Float64("confidence", confidence),
-			)
-			return params, nil
-		}
-		lastParseErr = parseErr
 	}
 
-	return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: all %d attempts failed, last parse error: %w",
-		h.cfg.MaxRetries+1, lastParseErr)
+	raw, runErr := h.invoke(ctx, claudeBin, args, prompt)
+	if runErr != nil {
+		l.DebugContext(ctx, trace.EvHarnessError, slog.String("error", runErr.Error()))
+		return mcp.CallToolParams{}, runErr
+	}
+	if l.Enabled(ctx, slog.LevelDebug) {
+		l.DebugContext(ctx, trace.EvHarnessResponseRaw,
+			slog.String("raw", trace.Truncate(string(raw), trace.TruncateCap)),
+		)
+	}
+
+	// Read the side-channel capture file. Empty/missing → the LLM never
+	// successfully called submit, which is a hard error here (no fallback).
+	captured, readErr := os.ReadFile(capturePath)
+	if readErr != nil || len(captured) == 0 {
+		// Surface the envelope's result text in the error to aid diagnosis.
+		var env claudeJSONEnvelope
+		_ = json.Unmarshal(raw, &env)
+		hint := truncate(env.Result, 200)
+		return mcp.CallToolParams{}, fmt.Errorf(
+			"harness/claude-cli: LLM did not call %s (no validated payload captured); claude said: %q",
+			validatorToolName, hint,
+		)
+	}
+
+	params, parseErr := parseValidatedPayload(captured)
+	if parseErr != nil {
+		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: parse validated payload: %w", parseErr)
+	}
+
+	intentName, slots, confidence := parseTransitionArgs(params)
+	l.DebugContext(ctx, trace.EvHarnessResponseParsed,
+		slog.String("intent", intentName),
+		slog.Any("slots", slots),
+		slog.Float64("confidence", confidence),
+	)
+	return params, nil
 }
 
-// buildClaudeArgs returns the CLI argument list (without prompt) for trace logging.
-// The model is always included: either cfg.Model or DefaultClaudeModel.
-func buildClaudeArgs(cfg ClaudeCLIConfig) []string {
+// buildClaudeArgs returns the CLI argument list for `claude -p`. configPath
+// is the --mcp-config file path. The model is always included.
+func buildClaudeArgs(cfg ClaudeCLIConfig, configPath string) []string {
 	model := cfg.Model
 	if model == "" {
 		model = DefaultClaudeModel
 	}
-	return []string{"-p", "--output-format", "json", "--no-session-persistence", "--model", model}
+	args := []string{
+		"-p",
+		"--output-format", "json",
+		"--no-session-persistence",
+		"--permission-mode", "bypassPermissions",
+		"--model", model,
+	}
+	if configPath != "" {
+		args = append(args, "--mcp-config", configPath)
+	}
+	return args
 }
 
-// invoke runs `claude -p --output-format json` with the prompt piped via stdin.
-// Returns the raw stdout bytes.
-func (h *ClaudeCLIHarness) invoke(ctx context.Context, claudeBin, prompt string) ([]byte, error) {
-	args := buildClaudeArgs(h.cfg)
-
+// invoke runs `claude -p ...` with the prompt piped via stdin. Returns raw stdout.
+func (h *ClaudeCLIHarness) invoke(ctx context.Context, claudeBin string, args []string, prompt string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, claudeBin, args...)
 	cmd.Stdin = strings.NewReader(prompt)
 
-	// Capture stdout and stderr separately.
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		// Check for context cancellation / timeout.
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -300,61 +325,24 @@ func (h *ClaudeCLIHarness) invoke(ctx context.Context, claudeBin, prompt string)
 		}
 		return nil, fmt.Errorf("harness/claude-cli: claude exited with error: %w", err)
 	}
-
 	return []byte(stdout.String()), nil
 }
 
-// parseClaudeEnvelope decodes the JSON envelope from `claude -p --output-format json`
-// and extracts the IntentCall from the "result" field.
-//
-// Tolerances:
-//   - Leading/trailing whitespace around the JSON object in "result" is stripped.
-//   - A single ```json ... ``` fence in "result" is stripped (with a warning log).
-//   - The "slots" field may be absent (treated as empty map).
-func parseClaudeEnvelope(raw []byte) (mcp.CallToolParams, error) {
-	// Decode the outer envelope.
-	var env claudeJSONEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: decode envelope: %w (raw=%q)", err, truncate(string(raw), 200))
+// parseValidatedPayload decodes the JSON written by the MCP validator on a
+// successful submit. The schema we generate guarantees the `intent` field;
+// `slots` may be omitted (treated as empty) and `confidence` is optional.
+func parseValidatedPayload(raw []byte) (mcp.CallToolParams, error) {
+	var schema struct {
+		Intent     string         `json:"intent"`
+		Slots      map[string]any `json:"slots"`
+		Confidence float64        `json:"confidence,omitempty"`
 	}
-
-	if env.Type != "result" {
-		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: unexpected envelope type %q (want \"result\")", env.Type)
-	}
-	if env.Subtype != "success" || env.IsError {
-		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: envelope indicates failure (subtype=%q is_error=%v result=%q)",
-			env.Subtype, env.IsError, truncate(env.Result, 200))
-	}
-	if env.Result == "" {
-		return mcp.CallToolParams{}, errors.New("harness/claude-cli: envelope result field is empty")
-	}
-
-	// Extract the JSON object from the result string.
-	resultText, fenced := stripFence(strings.TrimSpace(env.Result))
-	if fenced {
-		// Demoted from Warn to Debug: Haiku 4.5 routinely wraps JSON in
-		// ```json fences despite explicit anti-fence prompt instructions.
-		// The stripper is doing the right thing; the event is not an
-		// author error worth surfacing every turn.
-		slog.Debug("harness/claude-cli: result contained markdown fence; stripped")
-	}
-
-	// Find the JSON object boundaries.
-	jsonText, err := extractJSONObject(resultText)
-	if err != nil {
-		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: extract JSON from result: %w (result=%q)", err, truncate(resultText, 200))
-	}
-
-	// Decode the transition schema.
-	var schema claudeResponseSchema
-	if err := json.Unmarshal([]byte(jsonText), &schema); err != nil {
-		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: decode transition JSON: %w (json=%q)", err, truncate(jsonText, 200))
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return mcp.CallToolParams{}, fmt.Errorf("decode payload: %w (raw=%q)", err, truncate(string(raw), 200))
 	}
 	if schema.Intent == "" {
-		return mcp.CallToolParams{}, fmt.Errorf("harness/claude-cli: transition JSON missing \"intent\" field (json=%q)", truncate(jsonText, 200))
+		return mcp.CallToolParams{}, fmt.Errorf("validated payload missing \"intent\" field (raw=%q)", truncate(string(raw), 200))
 	}
-
-	// Build CallToolParams.
 	args := map[string]any{
 		"intent": schema.Intent,
 	}
@@ -366,68 +354,10 @@ func parseClaudeEnvelope(raw []byte) (mcp.CallToolParams, error) {
 	if schema.Confidence != 0 {
 		args["confidence"] = schema.Confidence
 	}
-
 	return mcp.CallToolParams{
 		Name:      "transition",
 		Arguments: args,
 	}, nil
-}
-
-// stripFence removes a single ```json ... ``` (or ```) markdown fence from s.
-// Returns the stripped string and true if a fence was present.
-func stripFence(s string) (string, bool) {
-	// Try ```json\n...\n``` first, then ```.
-	for _, prefix := range []string{"```json\n", "```\n", "```json", "```"} {
-		if strings.HasPrefix(s, prefix) {
-			inner := strings.TrimPrefix(s, prefix)
-			// Strip closing fence.
-			if idx := strings.LastIndex(inner, "```"); idx >= 0 {
-				inner = strings.TrimSpace(inner[:idx])
-			}
-			return inner, true
-		}
-	}
-	return s, false
-}
-
-// extractJSONObject finds the first complete JSON object in s, starting from
-// the first '{' and ending at the matching '}'. Returns an error if no object
-// is found or the braces are unbalanced.
-func extractJSONObject(s string) (string, error) {
-	start := strings.Index(s, "{")
-	if start < 0 {
-		return "", fmt.Errorf("no JSON object found in string")
-	}
-	depth := 0
-	inString := false
-	escaped := false
-	for i := start; i < len(s); i++ {
-		ch := s[i]
-		if escaped {
-			escaped = false
-			continue
-		}
-		if ch == '\\' && inString {
-			escaped = true
-			continue
-		}
-		if ch == '"' {
-			inString = !inString
-			continue
-		}
-		if inString {
-			continue
-		}
-		if ch == '{' {
-			depth++
-		} else if ch == '}' {
-			depth--
-			if depth == 0 {
-				return s[start : i+1], nil
-			}
-		}
-	}
-	return "", fmt.Errorf("unbalanced braces in JSON object")
 }
 
 // resolveBin returns the path to the claude binary, checking ClaudeBin override
@@ -444,6 +374,22 @@ func (h *ClaudeCLIHarness) resolveBin() (string, error) {
 		return "", ErrClaudeCLIUnavailable
 	}
 	return path, nil
+}
+
+// resolveHallyBin returns the path used to spawn the validator MCP server.
+// Tests override via ClaudeCLIConfig.HallyBin; production uses os.Executable().
+func (h *ClaudeCLIHarness) resolveHallyBin() (string, error) {
+	if h.cfg.HallyBin != "" {
+		if _, err := os.Stat(h.cfg.HallyBin); err != nil {
+			return "", fmt.Errorf("harness/claude-cli: HallyBin=%q: %w", h.cfg.HallyBin, err)
+		}
+		return h.cfg.HallyBin, nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("harness/claude-cli: locate hally binary: %w", err)
+	}
+	return exe, nil
 }
 
 // Close is a no-op for ClaudeCLIHarness (no persistent resources).

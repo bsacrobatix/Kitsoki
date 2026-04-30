@@ -22,12 +22,12 @@ func ParseTransitionArgsForTest(p mcp.CallToolParams) (intent string, slots map[
 	return parseTransitionArgs(p)
 }
 
-// ParseClaudeEnvelopeForTest exposes parseClaudeEnvelope for testing.
-func ParseClaudeEnvelopeForTest(raw []byte) (mcp.CallToolParams, error) {
-	return parseClaudeEnvelope(raw)
+// ParseValidatedPayloadForTest exposes parseValidatedPayload for testing.
+func ParseValidatedPayloadForTest(raw []byte) (mcp.CallToolParams, error) {
+	return parseValidatedPayload(raw)
 }
 
 // BuildClaudeArgsForTest exposes buildClaudeArgs for testing.
 func BuildClaudeArgsForTest(cfg ClaudeCLIConfig) []string {
-	return buildClaudeArgs(cfg)
+	return buildClaudeArgs(cfg, "")
 }
