@@ -19,8 +19,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,6 +84,11 @@ func NewValidatorServer(cfg ValidatorConfig) (*ValidatorServer, error) {
 	}
 
 	compiler := jsonschema.NewCompiler()
+	// Register custom semantic formats (e.g. JQL) and switch the compiler
+	// from annotation-only to assertion mode so format errors surface as
+	// kind.Format failures through BasicOutput like any other constraint.
+	compiler.RegisterFormat(&jsonschema.Format{Name: "jql", Validate: validateJQL})
+	compiler.AssertFormat()
 	if err := compiler.AddResource("validator-schema.json", probe); err != nil {
 		return nil, fmt.Errorf("mcp.NewValidatorServer: register schema: %w", err)
 	}
@@ -221,7 +226,7 @@ func errorResult(text string) *mcpsdk.CallToolResult {
 // a nil printer).
 func formatValidationError(err error) string {
 	var ve *jsonschema.ValidationError
-	if !asValidationError(err, &ve) {
+	if !errors.As(err, &ve) {
 		return "submit: schema validation failed: " + err.Error()
 	}
 	out := ve.BasicOutput()
@@ -267,24 +272,3 @@ func walkBasicOutput(unit *jsonschema.OutputUnit, out *[]string) {
 	}
 }
 
-// asValidationError unwraps err into a *jsonschema.ValidationError without
-// importing errors.As at the call site (keeps the call expression terse).
-func asValidationError(err error, target **jsonschema.ValidationError) bool {
-	for err != nil {
-		if ve, ok := err.(*jsonschema.ValidationError); ok {
-			*target = ve
-			return true
-		}
-		type unwrapper interface{ Unwrap() error }
-		if u, ok := err.(unwrapper); ok {
-			err = u.Unwrap()
-			continue
-		}
-		break
-	}
-	return false
-}
-
-// _ static assertion that io.Closer is not required of mcpsdk.StdioTransport
-// — silence a vet warning if the SDK ever changes the interface.
-var _ io.Closer = io.NopCloser(nil)

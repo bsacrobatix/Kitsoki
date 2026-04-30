@@ -3,8 +3,6 @@ package mcp_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"io/fs"
 	"os"
 	"strings"
 	"testing"
@@ -15,10 +13,6 @@ import (
 
 	hallymcp "hally/internal/mcp"
 )
-
-func osStat(p string) (os.FileInfo, error)    { return os.Stat(p) }
-func osReadFile(p string) ([]byte, error)     { return os.ReadFile(p) }
-func isNotExist(err error) bool               { return errors.Is(err, fs.ErrNotExist) }
 
 // fixProposalSchema is a wiggum-style schema for a phase 3 "fix proposal"
 // artifact. The required fields and enum constraints are typical of the
@@ -129,8 +123,8 @@ func TestValidator_WritesOutputOnSuccessfulSubmit(t *testing.T) {
 	defer cs.Close()
 
 	// File must NOT exist yet.
-	_, err = osStat(outPath)
-	require.True(t, isNotExist(err), "output file must not exist before submit")
+	_, err = os.Stat(outPath)
+	require.True(t, os.IsNotExist(err), "output file must not exist before submit")
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name: "submit",
@@ -144,7 +138,7 @@ func TestValidator_WritesOutputOnSuccessfulSubmit(t *testing.T) {
 	require.False(t, res.IsError)
 
 	// Read back and verify it's valid JSON matching what we sent.
-	raw, err := osReadFile(outPath)
+	raw, err := os.ReadFile(outPath)
 	require.NoError(t, err)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(raw, &got))
@@ -182,8 +176,8 @@ func TestValidator_DoesNotWriteOutputOnInvalidSubmit(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, res.IsError)
 
-	_, err = osStat(outPath)
-	require.True(t, isNotExist(err), "output file must not exist after a rejected submit")
+	_, err = os.Stat(outPath)
+	require.True(t, os.IsNotExist(err), "output file must not exist after a rejected submit")
 }
 
 // TestValidator_LastSuccessfulSubmitWins covers the case where the LLM
@@ -227,7 +221,7 @@ func TestValidator_LastSuccessfulSubmitWins(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, r2.IsError)
 
-	raw, err := osReadFile(outPath)
+	raw, err := os.ReadFile(outPath)
 	require.NoError(t, err)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(raw, &got))
@@ -303,6 +297,63 @@ func TestValidator_RejectsNonObjectSchema(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `must be "object"`)
+}
+
+// TestValidator_RejectsNonJQLFormat exercises the new "format": "jql" hook
+// end-to-end through the MCP submit path. The smoking-gun input from the
+// devstory router trace ("open presentation service bugs") must come back
+// as IsError with /query in the location and a "natural language" mention.
+func TestValidator_RejectsNonJQLFormat(t *testing.T) {
+	schema := []byte(`{
+	  "type": "object",
+	  "additionalProperties": false,
+	  "required": ["query"],
+	  "properties": {
+	    "query": { "type": "string", "format": "jql" }
+	  }
+	}`)
+
+	cs, done := connectValidator(t, schema)
+	defer done()
+
+	res, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "submit",
+		Arguments: map[string]any{
+			"query": "open presentation service bugs",
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "natural-language query must fail JQL format validation")
+	require.NotEmpty(t, res.Content)
+	textContent, ok := res.Content[0].(*mcpsdk.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "/query")
+	assert.Contains(t, strings.ToLower(textContent.Text), "natural language")
+}
+
+// TestValidator_AcceptsValidJQL is the happy-path twin: a real JQL string
+// passes validation and the side-channel captures it.
+func TestValidator_AcceptsValidJQL(t *testing.T) {
+	schema := []byte(`{
+	  "type": "object",
+	  "additionalProperties": false,
+	  "required": ["query"],
+	  "properties": {
+	    "query": { "type": "string", "format": "jql" }
+	  }
+	}`)
+
+	cs, done := connectValidator(t, schema)
+	defer done()
+
+	res, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "submit",
+		Arguments: map[string]any{
+			"query": "project = PLTFRM AND status = Open",
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "valid JQL must not be rejected")
 }
 
 func TestValidator_CustomToolName(t *testing.T) {
