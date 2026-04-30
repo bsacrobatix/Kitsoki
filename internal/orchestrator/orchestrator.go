@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"hally/internal/app"
+	"hally/internal/expr"
 	"hally/internal/harness"
 	"hally/internal/host"
 	"hally/internal/intent"
@@ -99,6 +101,27 @@ func (o *Orchestrator) NewSession(ctx context.Context) (app.SessionID, error) {
 	return o.store.CreateSession(ctx, o.def)
 }
 
+// TurnOption configures a Turn call.
+type TurnOption func(*turnConfig)
+
+type turnConfig struct {
+	// supplementSlots are merged into the intent call returned by the
+	// harness, before machine.Turn runs.  Slot keys already populated by
+	// the harness are NOT overwritten — this is for orchestrator-injected
+	// metadata (e.g. last_reply_author) that the LLM routing would not
+	// know about.
+	supplementSlots world.Slots
+}
+
+// WithSupplementSlots returns a TurnOption that injects per-turn slot
+// metadata alongside the harness's resolved intent.  Useful for
+// orchestrators that classify the human reply via the LLM (so they
+// can't pre-populate the intent's slots) but still need to attach
+// known metadata such as the comment author for the ACL guard.
+func WithSupplementSlots(slots world.Slots) TurnOption {
+	return func(c *turnConfig) { c.supplementSlots = slots }
+}
+
 // Turn processes one user utterance and returns a TurnOutcome.
 // Steps (§4.2):
 //  1. Load journey (state + world) from the store.
@@ -106,7 +129,11 @@ func (o *Orchestrator) NewSession(ctx context.Context) (app.SessionID, error) {
 //  3. Parse the intent call from the params.
 //  4. Call machine.Turn.
 //  5. React to the result: persist events and build the outcome.
-func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string) (*TurnOutcome, error) {
+func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string, opts ...TurnOption) (*TurnOutcome, error) {
+	var cfg turnConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	// 1. Reconstruct the journey from the event log.
 	journey, err := o.loadJourney(sid)
 	if err != nil {
@@ -172,6 +199,20 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	call, parseErr := parseIntentCall(params)
 	if parseErr != nil {
 		return nil, fmt.Errorf("orchestrator: parse intent call: %w", parseErr)
+	}
+
+	// 4b. Merge supplemental slots (orchestrator-provided metadata).
+	// Existing slot keys from the harness win — supplemental slots only
+	// fill gaps so the harness's classification is authoritative.
+	if len(cfg.supplementSlots) > 0 {
+		if call.Slots == nil {
+			call.Slots = world.Slots{}
+		}
+		for k, v := range cfg.supplementSlots {
+			if _, exists := call.Slots[k]; !exists {
+				call.Slots[k] = v
+			}
+		}
 	}
 
 	// 5. Run the machine.
@@ -355,7 +396,14 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, calls []machine.Ho
 	applied := false
 
 	for _, hc := range calls {
-		res, err := o.hosts.Invoke(ctx, hc.Namespace, hc.Args)
+		// Re-render RawWith against the current world so downstream
+		// effects in the same `on_enter:` block see prior binds.  Falls
+		// back to hc.Args if RawWith isn't set (older HostInvocation
+		// instances or test stubs).  See the corresponding machine-side
+		// note on HostInvocation.RawWith.
+		invokeArgs := rerenderHostArgs(hc, w)
+
+		res, err := o.hosts.Invoke(ctx, hc.Namespace, invokeArgs)
 		if err != nil {
 			// Infrastructure failure (e.g. handler not registered): record and move on.
 			w.Vars["last_error"] = err.Error()
@@ -372,11 +420,16 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, calls []machine.Ho
 
 		// Emit one EffectApplied event per binding so replay reconstructs
 		// the final world deterministically from the event log.
+		//
+		// `dkey` is a dot-separated path (e.g. `submitted.summary_markdown`)
+		// so apps can extract a specific field of a structured host result
+		// without an intermediate slot.  Top-level keys remain the common
+		// case; nested paths are opt-in via the dot syntax.
 		for wkey, dkey := range hc.Bind {
 			if res.Data == nil {
 				continue
 			}
-			val, ok := res.Data[dkey]
+			val, ok := lookupBindPath(res.Data, dkey)
 			if !ok {
 				continue
 			}
@@ -406,6 +459,121 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, calls []machine.Ho
 		return events, w, "", fmt.Errorf("orchestrator: re-render after host dispatch: %w", err)
 	}
 	return events, w, view, nil
+}
+
+// rerenderHostArgs re-renders the templates in hc.RawWith against the current
+// world snapshot so a host call that runs after an earlier bind in the same
+// `on_enter:` block sees the post-bind values.
+//
+// Falls back to the up-front-resolved hc.Args when:
+//   - RawWith is empty (no templates to re-render)
+//   - hc.Env is not the expected expr.Env type (older code paths or stubs)
+//   - rendering a value fails (the up-front resolution was the best we had)
+//
+// This keeps the behaviour compatible with code that doesn't supply RawWith
+// while letting the bugfix room's 2-step `on_enter:` pattern compose
+// cleanly.  See `internal/machine/machine.go` HostInvocation for the
+// machine-side contract.
+func rerenderHostArgs(hc machine.HostInvocation, w world.World) map[string]any {
+	if len(hc.RawWith) == 0 {
+		return hc.Args
+	}
+	env, ok := hc.Env.(expr.Env)
+	if !ok {
+		return hc.Args
+	}
+	// Snapshot the env with the *current* world.
+	env.World = w.Vars
+	out := make(map[string]any, len(hc.RawWith))
+	for k, raw := range hc.RawWith {
+		resolved, err := resolveTemplateValue(raw, env)
+		if err != nil {
+			// Fall back to the up-front-resolved value for this key.
+			if existing, exists := hc.Args[k]; exists {
+				out[k] = existing
+				continue
+			}
+			out[k] = raw
+			continue
+		}
+		out[k] = resolved
+	}
+	return out
+}
+
+// resolveTemplateValue mirrors machine.resolveEffectValue but lives here
+// so the orchestrator's late re-render doesn't need to import machine
+// internals.  Recurses into maps and slices and renders any string that
+// looks like an expr-lang template.
+func resolveTemplateValue(v any, env expr.Env) (any, error) {
+	switch val := v.(type) {
+	case string:
+		if !containsTemplate(val) {
+			return val, nil
+		}
+		// expr.RenderValue preserves type when the entire string is a
+		// single `{{ ... }}` (e.g. a nested object); falls back to text
+		// rendering for inline interpolation.
+		return expr.RenderValue(val, env)
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for k, vv := range val {
+			r, err := resolveTemplateValue(vv, env)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = r
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(val))
+		for i, vv := range val {
+			r, err := resolveTemplateValue(vv, env)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = r
+		}
+		return out, nil
+	default:
+		return v, nil
+	}
+}
+
+func containsTemplate(s string) bool {
+	return strings.Contains(s, "{{")
+}
+
+// lookupBindPath resolves a dot-separated key path (e.g.
+// `submitted.summary_markdown`) inside a host result's `Data` map.
+// Returns the leaf value and true on success, or (nil, false) if any
+// segment is missing or hits a non-traversable value.  Single-segment
+// keys (the common case) are equivalent to a top-level lookup.
+//
+// The path elements are exact map keys; no array indexing or wildcard
+// support — apps that need richer extraction can declare an
+// intermediate slot and chain.  Whitespace is not stripped, so app
+// authors should keep paths tight.
+func lookupBindPath(data map[string]any, path string) (any, bool) {
+	if data == nil || path == "" {
+		return nil, false
+	}
+	if !strings.Contains(path, ".") {
+		v, ok := data[path]
+		return v, ok
+	}
+	var cur any = data
+	for _, seg := range strings.Split(path, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		cur, ok = m[seg]
+		if !ok {
+			return nil, false
+		}
+	}
+	return cur, true
 }
 
 // SubmitDirect submits an intent call directly to the machine, bypassing the
@@ -711,8 +879,11 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	applied := false
 
 	for _, hc := range calls {
-		summary := HostCallSummary{Namespace: hc.Namespace, Args: hc.Args}
-		res, err := o.hosts.Invoke(ctx, hc.Namespace, hc.Args)
+		// Re-render templates against the current world so chained
+		// `on_enter:` host calls compose — see rerenderHostArgs above.
+		invokeArgs := rerenderHostArgs(hc, w)
+		summary := HostCallSummary{Namespace: hc.Namespace, Args: invokeArgs}
+		res, err := o.hosts.Invoke(ctx, hc.Namespace, invokeArgs)
 		if err != nil {
 			summary.Error = err.Error()
 			summaries = append(summaries, summary)
@@ -737,7 +908,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			if res.Data == nil {
 				continue
 			}
-			val, ok := res.Data[dkey]
+			val, ok := lookupBindPath(res.Data, dkey)
 			if !ok {
 				continue
 			}
