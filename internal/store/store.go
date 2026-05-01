@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"hally/internal/app"
@@ -74,6 +75,12 @@ type Store interface {
 	// releases the lock. Returns ErrSessionBusy if another live process
 	// holds the lock. Stale locks (owner pid no longer alive) are reaped.
 	WithWriterLock(ctx context.Context, session app.SessionID, fn func() error) error
+
+	// DB returns the underlying *sql.DB so that auxiliary packages
+	// (e.g. jobs.NewJobStore) can share the same connection without
+	// opening a second file handle.  The caller must not close the
+	// returned *sql.DB directly; use Store.Close instead.
+	DB() *sql.DB
 
 	// Close flushes WAL and closes the underlying *sql.DB.
 	Close() error

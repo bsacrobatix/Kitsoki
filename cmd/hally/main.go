@@ -20,6 +20,7 @@ import (
 	"hally/internal/app"
 	"hally/internal/harness"
 	"hally/internal/host"
+	"hally/internal/jobs"
 	hallymcp "hally/internal/mcp"
 	"hally/internal/machine"
 	"hally/internal/orchestrator"
@@ -141,6 +142,18 @@ See 'hally docs llm-guide' for the full operator guide.`,
 				return fmt.Errorf("open store: %w", err)
 			}
 			defer func() { _ = s.Close() }()
+
+			// Build the job store and scheduler.  The job store shares the
+			// same *sql.DB as the session store so we stay at one SQLite file.
+			jobStore, err := jobs.NewJobStore(s.DB())
+			if err != nil {
+				return fmt.Errorf("open job store: %w", err)
+			}
+			jobScheduler := jobs.NewScheduler(jobStore)
+			// TODO(slice-1): orchestrator.WithScheduler(jobScheduler) — pass
+			// the scheduler into the orchestrator once the option is wired.
+			_ = jobScheduler // suppress unused-variable error until Slice 1
+			_ = jobStore     // exposed via context injection once Slice 1 lands
 
 			// Build trace logger.
 			var level slog.Level

@@ -113,6 +113,11 @@ func openDSN(dsn string) (*sqliteStore, error) {
 	return &sqliteStore{db: db, path: dsn}, nil
 }
 
+// DB returns the underlying *sql.DB, allowing auxiliary packages such as
+// jobs.NewJobStore to share the same connection without opening a second
+// file handle.  The returned *sql.DB must not be closed by the caller.
+func (s *sqliteStore) DB() *sql.DB { return s.db }
+
 // Close flushes WAL and closes the underlying *sql.DB.
 func (s *sqliteStore) Close() error {
 	// Checkpoint WAL before closing to reduce WAL file size.
