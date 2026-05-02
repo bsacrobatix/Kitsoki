@@ -168,6 +168,93 @@ chain, which runs in a later synthetic turn once the job terminates.
 Conventional order within a single effect: `set` → `increment` → `say` →
 `invoke` → `emit`.
 
+## Clarifications mid-flight
+
+A background handler can pause mid-execution to ask the user a question.
+The machinery is transparent to the room YAML author once the clarifying
+sub-state is wired.
+
+### Handler side (Go)
+
+```go
+// Inside a host.Handler running as a background job:
+rawJSON, err := host.RequestClarification(ctx, jobs.ClarificationSchema{
+    Prompt: "Which branch should I use?",
+    Fields: map[string]string{"branch": "string"},
+})
+// rawJSON is the JSON-encoded answer submitted by the user, e.g. `"main"`.
+```
+
+`host.RequestClarification` is a blocking call that:
+1. Writes the schema to the DB and flips the job row to `awaiting_input`.
+2. Signals the scheduler to fan out a `JobAwaitingInput` event.
+3. Polls every 200 ms until the answer is stored, then returns the raw JSON.
+
+### Orchestrator side (automatic)
+
+When the orchestrator's session listener receives `JobAwaitingInput` it calls
+`handleJobAwaitingInput`, which fetches the schema and posts an
+`action_required` notification.  The notification's `TeleportJobID` and
+`TeleportState` carry the job ID and origin state so the TUI can surface a
+banner and teleport the user back.
+
+### YAML side (app author)
+
+Add a `*_clarifying` sub-state to the originating room with an
+`answer_clarification` intent:
+
+```yaml
+hosts:
+  - host.jobs.answer_clarification   # built-in; no extra registration needed
+
+intents:
+  answer_clarification:
+    title: "Answer clarification"
+    slots:
+      job_id: { type: string, required: true }
+      answer: { type: string, required: true }
+
+states:
+  lobby_running:
+    view: "Running…"
+    on_enter:
+      - invoke: host.my_long_task
+        background: true
+        bind: { last_job_id: job_id }
+        on_complete:
+          - say: "Done!"
+          - go: lobby_done
+
+  lobby_clarifying:
+    view: |
+      Job {{ world.last_job_id }} needs your input.
+      {{ world.clarification_prompt }}
+    on:
+      answer_clarification:
+        - target: lobby_running
+          effects:
+            - invoke: host.jobs.answer_clarification
+              with:
+                job_id: "{{ slots.job_id }}"
+                answer: "{{ slots.answer }}"
+```
+
+### Round-trip summary
+
+1. Handler calls `host.RequestClarification(ctx, schema)` and blocks.
+2. User sees an `action_required` banner in the inbox.
+3. Selecting it teleports to `lobby_clarifying` (the `TeleportState`).
+4. User submits `answer_clarification` with `{job_id, answer}`.
+5. `host.jobs.answer_clarification` calls `AnswerClarification(jobID, value)`.
+6. The handler's poll loop returns the answer; the job resumes.
+7. On completion, `on_complete` effects fire normally.
+
+**Important:** the `*_clarifying` state must be reachable from the origin
+state or be a distinct state with the `answer_clarification` intent.  The
+TeleportState in the notification is set to the job's `OriginState` — the
+state where the job was submitted — so make sure that state (or a teleport
+alias) handles `answer_clarification`.
+
 ## `Intent`
 
 ```yaml

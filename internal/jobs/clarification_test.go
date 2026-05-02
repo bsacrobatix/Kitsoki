@@ -78,3 +78,33 @@ func TestClarification_AnswerWrongStatus(t *testing.T) {
 		t.Fatal("expected error when answering a job not awaiting_input")
 	}
 }
+
+// TestRequestClarification_RejectsDoneJob verifies P1-2: calling
+// RequestClarification on a job that is already done (or failed) must return
+// an error.  Before the fix, only awaiting_input was rejected; any other
+// non-running status (done, failed, cancelled) was silently accepted.
+func TestRequestClarification_RejectsDoneJob(t *testing.T) {
+	db := openTestDB(t)
+	js, err := jobs.NewJobStore(db)
+	if err != nil {
+		t.Fatalf("NewJobStore: %v", err)
+	}
+
+	for _, status := range []jobs.JobStatus{jobs.JobDone, jobs.JobFailed, jobs.JobCancelled, jobs.JobAwaitingInput} {
+		t.Run(string(status), func(t *testing.T) {
+			j := makeTestJob("job-clar-reject-"+string(status), status)
+			if err := js.UpsertJob(context.Background(), j); err != nil {
+				t.Fatalf("UpsertJob: %v", err)
+			}
+
+			schema := jobs.ClarificationSchema{
+				Fields: map[string]string{"q": "string"},
+				Prompt: "test",
+			}
+			err := js.RequestClarification(context.Background(), j.ID, schema)
+			if err == nil {
+				t.Fatalf("expected error when requesting clarification on %s job", status)
+			}
+		})
+	}
+}

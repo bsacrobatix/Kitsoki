@@ -62,9 +62,12 @@ func (o *Orchestrator) dispatchBackground(
 				return host.Result{Error: "no host registry: cannot run " + namespace + " as background job"}, nil
 			}
 			// Strip internal keys before passing to the handler.
+			// The scheduler injects __job_id into args for debugging; it also
+			// injects host.JobContext into jobCtx directly (when js != nil) so
+			// handlers can call host.RequestClarification without further wiring.
 			cleanArgs := make(map[string]any, len(args))
 			for k, v := range args {
-				if k == "__on_complete" {
+				if k == "__on_complete" || k == "__job_id" {
 					continue
 				}
 				cleanArgs[k] = v

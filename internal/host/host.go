@@ -26,6 +26,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Handler is the callable unit for a host invocation.
@@ -122,4 +123,124 @@ func SecretsFromContext(ctx context.Context) map[string]string {
 		return v
 	}
 	return nil
+}
+
+// ─── Job context ─────────────────────────────────────────────────────────────
+
+// ClarificationRequester is the subset of *jobs.JobStore that a background
+// handler can call mid-flight to pause execution and ask the user a question.
+//
+// Defining it here in the host package avoids an import cycle: jobs already
+// imports host (for host.Handler), so host cannot import jobs directly.
+// *jobs.JobStore satisfies this interface via structural typing — no explicit
+// implementation required on the jobs side.
+//
+// The method names with the "Any" suffix accept schema/answer as any so that
+// the interface can be declared without importing the jobs package types.
+type ClarificationRequester interface {
+	// RequestClarificationAny transitions the job to awaiting_input and stores
+	// the given schema (a jobs.ClarificationSchema value, passed as any to
+	// avoid an import cycle) so the inbox can render a form. Returns an error
+	// when the job is already awaiting_input (clarification collision).
+	RequestClarificationAny(ctx context.Context, id string, schema any) error
+	// AnswerClarificationRaw returns the raw JSON-encoded clarification answer
+	// once the user has submitted it, or ("", nil) when not yet available.
+	// The caller is responsible for polling until a non-empty value is returned.
+	AnswerClarificationRaw(ctx context.Context, id string) (string, error)
+}
+
+// jobsKey is the unexported context key for the injected JobContext.
+type jobsKey struct{}
+
+// JobContext is the active-job handle injected into a Handler's context when
+// it is running as a background job. Synchronous (foreground) calls do not
+// see a JobContext — check Store != nil before calling any method.
+type JobContext struct {
+	// Store provides mid-flight clarification support.
+	// nil when the handler is running in a foreground (non-background) call.
+	Store ClarificationRequester
+	// JobID is the unique identifier for the running job.
+	JobID string
+	// awaiting signals the scheduler that the job has entered awaiting_input.
+	// Called automatically by the host.RequestClarification helper.
+	awaiting func(id string) error
+}
+
+// NewJobContext constructs a JobContext with the given store, job ID, and
+// awaiting signaller.  The awaiting func is called by host.RequestClarification
+// after the DB row has been flipped so the scheduler can fan out a
+// JobAwaitingInput event.  Pass nil when no scheduler signal is needed.
+func NewJobContext(store ClarificationRequester, jobID string, awaiting func(id string) error) JobContext {
+	return JobContext{
+		Store:    store,
+		JobID:    jobID,
+		awaiting: awaiting,
+	}
+}
+
+// WithJobContext injects a JobContext into ctx so that a background handler
+// can access its job identity and clarification facilities.
+func WithJobContext(ctx context.Context, jc JobContext) context.Context {
+	return context.WithValue(ctx, jobsKey{}, jc)
+}
+
+// JobContextFromContext retrieves the JobContext from ctx.
+// Returns the zero value (Store == nil) when no JobContext was injected,
+// which is the case for every synchronous (foreground) handler call.
+func JobContextFromContext(ctx context.Context) JobContext {
+	if v, ok := ctx.Value(jobsKey{}).(JobContext); ok {
+		return v
+	}
+	return JobContext{}
+}
+
+// RequestClarification is the high-level helper that handler authors call to
+// pause the job and ask the user a question. It:
+//  1. Calls jc.Store.RequestClarification to write the schema to the DB and
+//     flip the job row to awaiting_input.
+//  2. Signals the scheduler via jc.awaiting so it can fan out a
+//     JobAwaitingInput event to all subscribers (including the orchestrator's
+//     session listener which will post the action_required notification).
+//  3. Polls jc.Store.AnswerClarificationRaw every 200 ms until the user
+//     submits an answer, then returns the raw JSON string.
+//
+// The schema argument should be a jobs.ClarificationSchema value; it is passed
+// as any to avoid an import cycle.
+//
+// Returns an error when:
+//   - the context is cancelled (ctx.Err() wrapped),
+//   - Store == nil (not a background job — use in foreground handler),
+//   - RequestClarification fails (e.g. collision).
+func RequestClarification(ctx context.Context, schema any) (string, error) {
+	jc := JobContextFromContext(ctx)
+	if jc.Store == nil {
+		return "", fmt.Errorf("host.RequestClarification: not running as a background job (no JobContext in ctx)")
+	}
+	if err := jc.Store.RequestClarificationAny(ctx, jc.JobID, schema); err != nil {
+		return "", fmt.Errorf("host.RequestClarification: %w", err)
+	}
+	// Notify the scheduler that we are now awaiting input.
+	if jc.awaiting != nil {
+		if err := jc.awaiting(jc.JobID); err != nil {
+			// Non-fatal: the job is already in awaiting_input in the DB; the
+			// scheduler just won't fan out the event. Log and continue.
+			_ = err
+		}
+	}
+	// Poll for the answer.
+	const pollInterval = 200 * time.Millisecond
+	for {
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("host.RequestClarification: context cancelled while waiting for answer: %w", ctx.Err())
+		case <-time.After(pollInterval):
+		}
+		raw, err := jc.Store.AnswerClarificationRaw(ctx, jc.JobID)
+		if err != nil {
+			return "", fmt.Errorf("host.RequestClarification: poll answer: %w", err)
+		}
+		if raw != "" {
+			return raw, nil
+		}
+	}
 }

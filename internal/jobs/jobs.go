@@ -123,6 +123,14 @@ type Scheduler interface {
 	// the unsubscribe function to release resources.  Events are dropped
 	// (not buffered to infinity) when the channel is full.
 	SubscribeSession(sessionID app.SessionID) (<-chan JobEvent, func())
+	// Awaiting transitions an in-memory job to JobAwaitingInput and fans out
+	// a JobEvent{Status: JobAwaitingInput} on all per-job and per-session
+	// subscribers.  It is called by the handler (via host.RequestClarification)
+	// immediately after the DB row has been flipped to awaiting_input.
+	// The handler's goroutine remains alive — it will be blocking on a poll
+	// loop in host.RequestClarification waiting for the answer.
+	// Returns ErrJobNotFound when id is unknown.
+	Awaiting(id JobID) error
 	// Get returns a snapshot of the job identified by id.  Returns (Job{}, false)
 	// when id is unknown.  The returned Job is a copy and is safe to read; callers
 	// must not mutate it.
@@ -224,7 +232,28 @@ func (s *inMemoryScheduler) Submit(ctx context.Context, spec JobSpec) (JobID, er
 	go func() {
 		defer close(rj.done)
 
-		result, err := spec.Handler(jobCtx, spec.Payload)
+		// Inject a host.JobContext when write-through is enabled, so handlers
+		// can call host.RequestClarification without any extra wiring.
+		// This is the canonical injection point: the scheduler knows the job ID
+		// and the store at this moment, so it builds the context here.
+		handlerCtx := jobCtx
+		if s.js != nil {
+			jc := host.NewJobContext(s.js, id, func(jid string) error {
+				return s.Awaiting(jid)
+			})
+			handlerCtx = host.WithJobContext(handlerCtx, jc)
+		}
+
+		// Inject __job_id into args as a convenience for orchestrator-side
+		// handler wrappers that need to build the JobContext from args rather
+		// than from context (e.g. when a custom scheduler is used).
+		argsWithID := make(map[string]any, len(spec.Payload)+1)
+		for k, v := range spec.Payload {
+			argsWithID[k] = v
+		}
+		argsWithID["__job_id"] = id
+
+		result, err := spec.Handler(handlerCtx, argsWithID)
 		now := time.Now()
 
 		s.mu.Lock()
@@ -375,6 +404,32 @@ func (s *inMemoryScheduler) Heartbeat(id JobID, progress any) error {
 			slog.Warn("jobs: write-through UpsertJob on Heartbeat failed", "id", id, "err", err)
 		}
 	}
+	return nil
+}
+
+// Awaiting flips the in-memory job status to JobAwaitingInput and fans out a
+// JobEvent{Status: JobAwaitingInput} on the per-job and per-session subscriber
+// channels.  The handler goroutine is expected to remain alive and block on
+// host.RequestClarification's poll loop until an answer is stored.
+//
+// This is a signal-only operation: the DB row must already have been flipped to
+// awaiting_input (by jobs.JobStore.RequestClarification) before calling this.
+func (s *inMemoryScheduler) Awaiting(id JobID) error {
+	s.mu.Lock()
+	rj, ok := s.jobs[id]
+	if !ok {
+		s.mu.Unlock()
+		return ErrJobNotFound
+	}
+	rj.job.Status = JobAwaitingInput
+	rj.job.UpdatedAt = time.Now()
+	sessionID := rj.job.SessionID
+	ev := JobEvent{JobID: id, Status: JobAwaitingInput}
+	s.fanoutLocked(rj, ev)
+	s.mu.Unlock()
+
+	// Fan out to session subscribers (the orchestrator's listener goroutine).
+	s.fanoutSession(sessionID, ev)
 	return nil
 }
 

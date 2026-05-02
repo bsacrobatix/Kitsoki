@@ -232,4 +232,5 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.oracle.ask_with_mcp", OracleAskWithMCPHandler)
 	r.Register("host.oracle.talk", OracleTalkHandler)
 	r.Register("host.transport.post", TransportPostHandler)
+	r.Register("host.jobs.answer_clarification", AnswerClarificationHandler)
 }

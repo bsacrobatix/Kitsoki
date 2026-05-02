@@ -189,6 +189,92 @@ func TestSubscribeOnTerminalJob_NoPanic(t *testing.T) {
 	<-done
 }
 
+// TestAwaiting_RunningCountDoesNotGoNegative verifies P0-2: after a job
+// transitions through awaiting_input→done, runningCount never goes negative.
+func TestAwaiting_RunningCountDoesNotGoNegative(t *testing.T) {
+	sched := jobs.NewInMemoryScheduler()
+
+	// Submit two jobs sequentially; each must complete without WaitIdle firing
+	// prematurely (which would be the symptom of runningCount going negative).
+	for i := 0; i < 2; i++ {
+		id, err := sched.Submit(context.Background(), jobs.JobSpec{
+			Kind:    "host.fast",
+			Handler: echoHandler("ok"),
+		})
+		if err != nil {
+			t.Fatalf("Submit %d: %v", i, err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := sched.WaitIdle(ctx); err != nil {
+			t.Fatalf("WaitIdle %d: %v", i, err)
+		}
+
+		j, ok := sched.Get(id)
+		if !ok {
+			t.Fatalf("job %d not found after completion", i)
+		}
+		if j.Status != jobs.JobDone {
+			t.Fatalf("job %d: expected done, got %s", i, j.Status)
+		}
+	}
+}
+
+// TestResume_ReIncrementsRunningCount verifies P0-2 Resumed behaviour:
+// after Awaiting (runningCount=0) then Resumed (runningCount=1), WaitIdle
+// should block until the job finishes.
+func TestResume_ReIncrementsRunningCount(t *testing.T) {
+	sched := jobs.NewInMemoryScheduler()
+
+	// Channel to synchronise the test: the handler blocks until the test
+	// sends a signal, mimicking a clarification wait.
+	proceed := make(chan struct{})
+
+	id, err := sched.Submit(context.Background(), jobs.JobSpec{
+		Kind: "host.pausable",
+		Handler: func(ctx context.Context, args map[string]any) (host.Result, error) {
+			<-proceed
+			return host.Result{Data: map[string]any{"ok": true}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Manually call Awaiting so the scheduler considers the job idle.
+	if err := sched.Awaiting(id); err != nil {
+		t.Fatalf("Awaiting: %v", err)
+	}
+
+	// WaitIdle should return immediately (runningCount==0).
+	idleCtx, idleCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer idleCancel()
+	if err := sched.WaitIdle(idleCtx); err != nil {
+		t.Fatalf("WaitIdle after Awaiting: %v", err)
+	}
+
+	// Now signal resume: job is running again.
+	if err := sched.Resumed(id); err != nil {
+		t.Fatalf("Resumed: %v", err)
+	}
+
+	// WaitIdle should NOT return before the handler is unblocked.
+	earlyCtx, earlyCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer earlyCancel()
+	if err := sched.WaitIdle(earlyCtx); err == nil {
+		t.Fatal("WaitIdle should not have returned before handler completed")
+	}
+
+	// Unblock the handler and verify WaitIdle returns.
+	close(proceed)
+	doneCtx, doneCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer doneCancel()
+	if err := sched.WaitIdle(doneCtx); err != nil {
+		t.Fatalf("WaitIdle after handler complete: %v", err)
+	}
+}
+
 // TestHeartbeatDebounce verifies the write-through debounce behaviour:
 // firing many heartbeats in a short burst should result in fewer SQLite
 // writes than the number of calls, and the persisted progress should

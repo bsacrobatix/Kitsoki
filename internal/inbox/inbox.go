@@ -8,6 +8,34 @@
 // Teleport pushes the inbox predecessor onto the room history stack (§5.1),
 // so pressing `back` from the teleport destination returns the user to wherever
 // they were before visiting the inbox.
+//
+// # Clarification round-trip
+//
+// When a background handler calls host.RequestClarification, the following
+// sequence executes:
+//
+//  1. The handler calls host.RequestClarification(ctx, schema).
+//  2. host.RequestClarification calls jc.Store.RequestClarificationAny (which
+//     writes the schema to the DB and flips the job row to awaiting_input),
+//     then calls jc.awaiting(jobID) to signal the scheduler.
+//  3. The scheduler's Awaiting method fans out a JobEvent{Status: JobAwaitingInput}
+//     on per-job and per-session channels.
+//  4. The orchestrator's session listener receives the event and calls
+//     handleJobAwaitingInput, which loads the clarification schema and posts
+//     an action_required notification via jobs.JobStore.PostClarificationNotification.
+//  5. The notification's TeleportTarget carries TeleportJobID and TeleportState
+//     (the job's OriginState). The TUI surfaces it as a banner.
+//  6. The user selects the notification; the TUI calls Orchestrator.Teleport to
+//     the TeleportState (a "*_clarifying" state in the originating room).
+//  7. The user submits the answer_clarification intent with slots
+//     {job_id, answer}. The machine fires the intent, which invokes
+//     host.jobs.answer_clarification via an effect.
+//  8. host.jobs.answer_clarification calls ClarificationAnswerer.AnswerClarification,
+//     which writes the answer to the DB and flips the job back to running.
+//  9. host.RequestClarification's poll loop detects the non-NULL answer and
+//     returns it to the handler, which resumes normally.
+// 10. The handler returns a result; the scheduler posts a JobDone event and
+//     the orchestrator fires the on_complete chain.
 package inbox
 
 import (

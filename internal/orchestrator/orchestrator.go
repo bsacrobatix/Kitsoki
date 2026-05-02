@@ -560,6 +560,9 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	if o.transports != nil {
 		ctx = transport.WithRegistry(ctx, o.transports)
 	}
+	if o.jobStore != nil {
+		ctx = host.WithClarificationAnswerer(ctx, o.jobStore)
+	}
 
 	var events []store.Event
 	applied := false
