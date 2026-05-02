@@ -145,6 +145,13 @@ func (j *JiraTransport) Close() error {
 // buildJiraBody composes the comment text. Title is folded into a bold
 // heading line (Jira wiki: `*text*`). The bot marker is prepended so
 // orchestrators can filter their own posts on inbound polling.
+//
+// The body is run through sanitizeForJira so Markdown emitted by LLMs
+// (the bugfix room's `summary_markdown` is plain Markdown) renders as
+// styled Jira wiki rather than literal `**bold**` / `# heading` text.
+// The title is intentionally NOT sanitised — it's already wrapped in
+// `*…*` for Jira bold above and is short, plain text supplied by the
+// orchestrator.
 func buildJiraBody(msg Message, botMarker string) string {
 	var b strings.Builder
 	b.WriteString(botMarker)
@@ -154,6 +161,6 @@ func buildJiraBody(msg Message, botMarker string) string {
 		b.WriteString(msg.Title)
 		b.WriteString("*\n\n")
 	}
-	b.WriteString(msg.Body)
+	b.WriteString(sanitizeForJira(msg.Body))
 	return b.String()
 }
