@@ -1,6 +1,10 @@
 // Package tui implements the full-screen Bubble Tea interface (§9a).
 // It composes sub-models for the location header, transcript pane,
-// menu list, graph overlay, prompt input, and slot-fill modals.
+// menu list, inbox panel (§2.2), graph overlay, prompt input, and slot-fill modals.
+//
+// The inbox panel displays background-job notifications below the Actions menu in
+// the right column. It polls a *jobs.JobStore every 2 s (200 ms when a job is
+// running) and supports i1–i9 key selection and teleport via the orchestrator.
 package tui
 
 import (
@@ -19,6 +23,8 @@ import (
 
 	"hally/internal/app"
 	"hally/internal/authoring"
+	"hally/internal/inbox"
+	"hally/internal/jobs"
 	"hally/internal/orchestrator"
 	"hally/internal/viz"
 )
@@ -93,12 +99,22 @@ type RootModel struct {
 	location   locationModel
 	transcript transcriptModel
 	menu       menuModel
+	inbox      inboxModel
 	offPath    offPathModel
 	clarify        clarifyModel
 	disambiguation disambiguationModel
 	menuSystem     menuSystemModel
 	edit           editModel
 	prompt         textinput.Model
+
+	// jobStore is the SQLite-backed notification store.  When nil (headless
+	// tests, serve mode) the inbox ticker is a no-op and the panel stays
+	// hidden so no database is required.
+	jobStore *jobs.JobStore
+
+	// lastNotifications is the most-recent polling snapshot, used to build
+	// the status-line badge without re-querying the database on every View().
+	lastNotifications []jobs.Notification
 
 	// lastCtrlC is the time the most recent Ctrl+C was pressed, used to
 	// detect a double-tap quit. Zero means no recent press (or the window
@@ -136,11 +152,20 @@ type RootModel struct {
 // NewRootModel creates the root TUI model. appPath is the path to the
 // app.yaml backing this session — required for the Esc-menu "Edit mode"
 // reload flow. Pass "" to disable edit mode (e.g., from tests).
+// The inbox panel is disabled (no polling) when no jobStore is provided.
 func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, initialView string) RootModel {
+	return NewRootModelWithJobs(orch, sid, appPath, initialView, nil)
+}
+
+// NewRootModelWithJobs creates the root TUI model with a *jobs.JobStore wired
+// in for the inbox panel.  When jobStore is nil the inbox panel stays hidden
+// and the polling ticker is a no-op, so headless tests do not need a database.
+func NewRootModelWithJobs(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, initialView string, jobStore *jobs.JobStore) RootModel {
 	const defaultWidth = 120
 	const defaultHeight = 40
 	const menuWidth = 30
 	const transcriptHeight = 30
+	const inboxHeight = 12
 
 	ti := textinput.New()
 	ti.Placeholder = "what now?"
@@ -159,8 +184,9 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		width:          defaultWidth,
 		height:         defaultHeight,
 		location:       newLocationModel(),
-		transcript:     newTranscriptModel(defaultWidth-menuWidth-6, transcriptHeight),
-		menu:           newMenuModel(menuWidth, transcriptHeight),
+		transcript:     newTranscriptModel(defaultWidth-menuWidth-6, transcriptHeight-inboxHeight),
+		menu:           newMenuModel(menuWidth, transcriptHeight-inboxHeight),
+		inbox:          newInboxModel(menuWidth, inboxHeight),
 		offPath:        newOffPathModel(""),
 		clarify:        newClarifyModel(),
 		disambiguation: newDisambiguationModel(),
@@ -169,6 +195,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		prompt:         ti,
 		spinner:        sp,
 		mouseOn:        true,
+		jobStore:       jobStore,
 	}
 
 	// Set initial state.
@@ -193,7 +220,36 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 
 // Init implements tea.Model.
 func (m RootModel) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.spinner.Tick)
+	cmds := []tea.Cmd{textinput.Blink, m.spinner.Tick}
+	if m.jobStore != nil {
+		cmds = append(cmds, m.scheduleInboxPoll(2*time.Second))
+	}
+	return tea.Batch(cmds...)
+}
+
+// inboxPollMsg is the internal tick message fired by the inbox poller.
+type inboxPollMsg struct{}
+
+// scheduleInboxPoll returns a tea.Cmd that fires inboxPollMsg after delay.
+func (m RootModel) scheduleInboxPoll(delay time.Duration) tea.Cmd {
+	return tea.Tick(delay, func(t time.Time) tea.Msg {
+		return inboxPollMsg{}
+	})
+}
+
+// pollInbox reads notifications from the job store and returns an inboxRefreshed
+// message.  Runs inline (called from the Update goroutine via tea.Cmd).
+func (m RootModel) pollInbox() tea.Msg {
+	if m.jobStore == nil {
+		return nil
+	}
+	ctx := context.Background()
+	ns, err := m.jobStore.ListNotifications(ctx, m.sid, 20)
+	if err != nil {
+		slog.Warn("tui: inbox poll error", "err", err)
+		return nil
+	}
+	return inboxRefreshed{notifications: ns}
 }
 
 // Update implements tea.Model.
@@ -256,6 +312,31 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case inboxPollMsg:
+		// Fire the actual DB read as a new Cmd, then schedule the next tick.
+		if m.jobStore == nil {
+			return m, nil
+		}
+		return m, func() tea.Msg { return m.pollInbox() }
+
+	case inboxRefreshed:
+		m.lastNotifications = msg.notifications
+		m.inbox, _ = m.inbox.Update(msg)
+		// Schedule next poll — faster when jobs are running.
+		if m.jobStore != nil {
+			delay := 2 * time.Second
+			ctx := context.Background()
+			running, _ := m.jobStore.ListJobsByStatus(ctx, m.sid, jobs.JobRunning)
+			if len(running) > 0 {
+				delay = 200 * time.Millisecond
+			}
+			return m, m.scheduleInboxPoll(delay)
+		}
+		return m, nil
+
+	case inboxItemSelected:
+		return m.handleInboxItemSelected(msg)
+
 	default:
 		// Pass to sub-models.
 		var cmd tea.Cmd
@@ -263,6 +344,35 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.transcript, cmd = m.transcript.Update(msg)
 		m.menu, _ = m.menu.Update(msg)
 		return m, cmd
+	}
+}
+
+// handleInboxItemSelected teleports to the notification's target state and
+// marks the notification read.
+func (m RootModel) handleInboxItemSelected(msg inboxItemSelected) (tea.Model, tea.Cmd) {
+	n := msg.notification
+	target := inbox.FromNotification(n)
+	if target.State == "" {
+		// Notification has no teleport target — just mark it read and move on.
+		if m.jobStore != nil {
+			ctx := context.Background()
+			_ = m.jobStore.MarkNotificationRead(ctx, n.ID)
+		}
+		return m, nil
+	}
+
+	orch := m.orch
+	sid := m.sid
+	js := m.jobStore
+
+	return m, func() tea.Msg {
+		ctx := context.Background()
+		// Mark notification read (best-effort; ignore error).
+		if js != nil {
+			_ = js.MarkNotificationRead(ctx, n.ID)
+		}
+		out, err := orch.Teleport(ctx, sid, target)
+		return turnOutcomeMsg{outcome: out, input: "(teleport)", err: err}
 	}
 }
 
@@ -353,6 +463,39 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// All other keys are silently ignored while in-flight.
 		return m, nil
+	}
+
+	// i1–i9: inbox selection keys (only when prompt is empty).
+	if s := msg.String(); len(s) == 2 && s[0] == 'i' && s[1] >= '1' && s[1] <= '9' {
+		if strings.TrimSpace(m.prompt.Value()) == "" {
+			var cmd tea.Cmd
+			m.inbox, cmd = m.inbox.Update(msg)
+			return m, cmd
+		}
+	}
+
+	// action_required banner: enter/esc while banner is visible and prompt is empty.
+	if banner := m.inbox.ActionRequiredBanner(); banner != "" && strings.TrimSpace(m.prompt.Value()) == "" {
+		switch msg.Type {
+		case tea.KeyEnter:
+			// Teleport to the action_required notification.
+			if n := m.inbox.ActionRequiredNotification(); n != nil {
+				return m.handleInboxItemSelected(inboxItemSelected{notification: *n})
+			}
+		case tea.KeyEsc:
+			// Snooze: mark it read in-memory by removing from model (dismiss from
+			// display).  We call MarkNotificationRead for persistence — it's the
+			// closest semantic fit for "later" (the notification won't reappear
+			// until a new one is posted; there is no dedicated snooze-with-timer
+			// path in the store today).
+			if n := m.inbox.ActionRequiredNotification(); n != nil && m.jobStore != nil {
+				ctx := context.Background()
+				_ = m.jobStore.MarkNotificationRead(ctx, n.ID)
+				// Trigger a re-poll so the inbox snapshot updates immediately.
+				return m, func() tea.Msg { return m.pollInbox() }
+			}
+			return m, nil
+		}
 	}
 
 	switch msg.String() {
@@ -535,6 +678,10 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "/mouse":
 		return m.handleMouseCommand(parts[1:])
+
+	case "/inbox":
+		m.inbox.ToggleExpanded()
+		return m, nil
 
 	default:
 		m.transcript.AppendSystem(fmt.Sprintf("(unknown command: %s)", parts[0]))
@@ -1035,6 +1182,7 @@ func (m RootModel) resize() RootModel {
 	const minMenuWidth = 28
 	const locationHeight = 2
 	const promptHeight = 3
+	const minInboxHeight = 8
 
 	menuWidth := minMenuWidth
 
@@ -1048,9 +1196,18 @@ func (m RootModel) resize() RootModel {
 	if transcriptWidth < 40 {
 		transcriptWidth = 40
 	}
-	transcriptHeight := m.height - locationHeight - promptHeight - 4
-	if transcriptHeight < 5 {
-		transcriptHeight = 5
+	totalRightHeight := m.height - locationHeight - promptHeight - 4
+	if totalRightHeight < 5 {
+		totalRightHeight = 5
+	}
+
+	// Split the right column vertically: menu on top, inbox below.
+	// Inbox gets minInboxHeight; menu gets the remainder.
+	inboxHeight := minInboxHeight
+	menuHeight := totalRightHeight - inboxHeight
+	if menuHeight < 5 {
+		menuHeight = 5
+		inboxHeight = max(0, totalRightHeight-menuHeight)
 	}
 
 	// Inner content area = panel width minus border (1 each side) and
@@ -1061,10 +1218,15 @@ func (m RootModel) resize() RootModel {
 	// correct wrap width. The root intercepts tea.WindowSizeMsg before it
 	// reaches the transcript, so this is the only place the transcript
 	// learns its real size.
-	m.transcript.SetSize(transcriptWidth, transcriptHeight, innerWidth, transcriptHeight-2)
+	// Transcript height = entire right-column height (it fills the same
+	// vertical space; it is placed opposite the stacked menu+inbox).
+	m.transcript.SetSize(transcriptWidth, totalRightHeight, innerWidth, totalRightHeight-2)
 
 	m.menu.width = menuWidth
-	m.menu.height = transcriptHeight
+	m.menu.height = menuHeight
+
+	m.inbox.width = menuWidth
+	m.inbox.height = inboxHeight
 
 	m.location, _ = m.location.Update(tea.WindowSizeMsg{Width: m.width, Height: 1})
 
@@ -1080,10 +1242,18 @@ func (m RootModel) View() string {
 	// Location bar (full width).
 	locationBar := m.location.View()
 
-	// Main body: transcript (left) + menu (right).
+	// Main body: transcript (left) + [menu + inbox] (right, stacked vertically).
 	transcriptView := m.transcript.View()
 	menuView := m.menu.View()
-	body := lipgloss.JoinHorizontal(lipgloss.Top, transcriptView, menuView)
+	inboxView := m.inbox.View()
+	rightCol := lipgloss.JoinVertical(lipgloss.Left, menuView, inboxView)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, transcriptView, rightCol)
+
+	// Action-required banner above the prompt (when applicable).
+	var bannerLine string
+	if banner := m.inbox.ActionRequiredBanner(); banner != "" {
+		bannerLine = banner
+	}
 
 	// Prompt line.
 	// Spinner placement: right of the prompt prefix on the input line.
@@ -1129,21 +1299,51 @@ func (m RootModel) View() string {
 	// through prior turns. Bindings are picked to work on MacBook keyboards
 	// without PgUp/PgDn/Home/End physical keys. When mouse capture is off,
 	// drop "mouse wheel" from the hint and advertise the /mouse command.
+	// Prepend inbox badge when there are unread notifications.
 	var scrollHint string
 	if m.mouseOn {
 		scrollHint = "scroll: mouse wheel · Shift+↑/↓ · Ctrl+U/Ctrl+D (half) · Ctrl+B/Ctrl+F (page) · /mouse off to select text"
 	} else {
 		scrollHint = "scroll: Shift+↑/↓ · Ctrl+U/Ctrl+D (half) · Ctrl+B/Ctrl+F (page) · /mouse on to re-enable wheel"
 	}
+	if badge := m.inboxBadge(); badge != "" {
+		scrollHint = badge + "  ·  " + scrollHint
+	}
 	hints := lipgloss.NewStyle().Foreground(colorMuted).Render(scrollHint)
 
-	// Stack vertically.
-	return lipgloss.JoinVertical(lipgloss.Left,
-		locationBar,
-		body,
-		promptLine,
-		hints,
-	)
+	// Stack vertically, inserting banner when present.
+	parts := []string{locationBar, body}
+	if bannerLine != "" {
+		parts = append(parts, bannerLine)
+	}
+	parts = append(parts, promptLine, hints)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// inboxBadge builds the status-line badge text from the latest notification
+// snapshot.  Returns "" when there are no unread notifications.
+func (m RootModel) inboxBadge() string {
+	if len(m.lastNotifications) == 0 {
+		return ""
+	}
+	unread := 0
+	actionRequired := 0
+	for _, n := range m.lastNotifications {
+		if n.ReadAt == nil {
+			unread++
+			if n.Severity == jobs.SeverityActionRequired {
+				actionRequired++
+			}
+		}
+	}
+	if unread == 0 {
+		return ""
+	}
+	badge := fmt.Sprintf("inbox: %d unread", unread)
+	if actionRequired > 0 {
+		badge += fmt.Sprintf(" · %d action_required", actionRequired)
+	}
+	return badge
 }
 
 // isScrollKey reports whether a key event is a transcript-scroll key.

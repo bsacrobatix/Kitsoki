@@ -4,9 +4,11 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"hally/internal/jobs"
 	"hally/internal/orchestrator"
 )
 
@@ -209,4 +211,59 @@ func (w *TestDisambiguationModelWrapper) IsActive() bool {
 // View returns the rendered view.
 func (w *TestDisambiguationModelWrapper) View() string {
 	return w.m.View()
+}
+
+// ── Inbox test helpers ────────────────────────────────────────────────────────
+
+// inboxModelWrapper wraps inboxModel to satisfy tea.Model (whose Update returns
+// (tea.Model, tea.Cmd) rather than the concrete type).
+type inboxModelWrapper struct{ m inboxModel }
+
+func (w inboxModelWrapper) Init() tea.Cmd { return w.m.Init() }
+func (w inboxModelWrapper) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	updated, cmd := w.m.Update(msg)
+	return inboxModelWrapper{m: updated}, cmd
+}
+func (w inboxModelWrapper) View() string { return w.m.View() }
+
+// NewInboxModelForTest creates an inboxModel pre-populated with notifications
+// and returns it as a tea.Model interface.  Width and height set the panel
+// dimensions (matching what resize() would compute in production).
+func NewInboxModelForTest(width, height int, ns []jobs.Notification) tea.Model {
+	m := newInboxModel(width, height)
+	if len(ns) > 0 {
+		m, _ = m.Update(inboxRefreshed{notifications: ns})
+	}
+	return inboxModelWrapper{m: m}
+}
+
+// InboxRefreshedMsg constructs an inboxRefreshed message for injection into
+// Update().  Used by tests that simulate polling results without a real ticker.
+func InboxRefreshedMsg(ns []jobs.Notification) tea.Msg {
+	return inboxRefreshed{notifications: ns}
+}
+
+// ExtractInboxItemSelected type-asserts a tea.Msg to inboxItemSelected and
+// returns the embedded Notification.  Returns (zero, false) on mismatch.
+func ExtractInboxItemSelected(msg tea.Msg) (jobs.Notification, bool) {
+	sel, ok := msg.(inboxItemSelected)
+	if !ok {
+		return jobs.Notification{}, false
+	}
+	return sel.notification, true
+}
+
+// InboxActionRequiredBannerForTest constructs an inboxModel with the given
+// notifications and returns its ActionRequiredBanner() string.
+func InboxActionRequiredBannerForTest(width, height int, ns []jobs.Notification) string {
+	m := newInboxModel(width, height)
+	if len(ns) > 0 {
+		m, _ = m.Update(inboxRefreshed{notifications: ns})
+	}
+	return m.ActionRequiredBanner()
+}
+
+// HumanizeDurationForTest exposes the package-private humanizeDuration helper.
+func HumanizeDurationForTest(d time.Duration) string {
+	return humanizeDuration(d)
 }

@@ -1,0 +1,242 @@
+package tui_test
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/stretchr/testify/require"
+
+	"hally/internal/app"
+	"hally/internal/jobs"
+	tuipkg "hally/internal/tui"
+
+	_ "modernc.org/sqlite"
+)
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+// openInboxTestDB opens an in-memory SQLite database and applies the jobs schema.
+func openInboxTestDB(t *testing.T) (*sql.DB, *jobs.JobStore) {
+	t.Helper()
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	js, err := jobs.NewJobStore(db)
+	require.NoError(t, err)
+	return db, js
+}
+
+// buildInboxModel creates a standalone inboxModel (via exported test hook)
+// fed with a slice of notifications, at a fixed width/height.
+func buildInboxModel(t *testing.T, ns []jobs.Notification) tea.Model {
+	t.Helper()
+	m := tuipkg.NewInboxModelForTest(28, 14, ns)
+	return m
+}
+
+// ─── TestInboxView_Hidden ─────────────────────────────────────────────────────
+
+// TestInboxView_Hidden asserts that an inbox with zero notifications renders
+// the "Inbox: empty" single-line collapsed form.
+func TestInboxView_Hidden(t *testing.T) {
+	m := buildInboxModel(t, nil)
+	view := m.View()
+	require.Contains(t, view, "Inbox: empty",
+		"zero notifications should render 'Inbox: empty'")
+}
+
+// ─── TestInboxView_Compact ────────────────────────────────────────────────────
+
+// TestInboxView_Compact asserts that three notifications of mixed severity are
+// all rendered with the correct severity glyph and title.
+func TestInboxView_Compact(t *testing.T) {
+	sid := app.SessionID("test-session")
+	ns := []jobs.Notification{
+		{
+			ID:        "n1",
+			SessionID: sid,
+			CreatedAt: time.Now().Add(-5 * time.Minute),
+			Severity:  jobs.SeveritySuccess,
+			Title:     "build_plan done",
+		},
+		{
+			ID:        "n2",
+			SessionID: sid,
+			CreatedAt: time.Now().Add(-2 * time.Minute),
+			Severity:  jobs.SeverityError,
+			Title:     "deploy failed",
+		},
+		{
+			ID:        "n3",
+			SessionID: sid,
+			CreatedAt: time.Now().Add(-1 * time.Minute),
+			Severity:  jobs.SeverityActionRequired,
+			Title:     "confirm deploy",
+		},
+	}
+	m := buildInboxModel(t, ns)
+	view := m.View()
+
+	// All three titles should appear.
+	require.Contains(t, view, "build_plan done", "success notification title")
+	require.Contains(t, view, "deploy failed", "error notification title")
+	require.Contains(t, view, "confirm deploy", "action_required notification title")
+
+	// Severity glyphs.
+	require.Contains(t, view, "✓", "success glyph")
+	require.Contains(t, view, "✗", "error glyph")
+	require.Contains(t, view, "⋯", "action_required glyph")
+}
+
+// ─── TestInboxView_BadgeSummary ───────────────────────────────────────────────
+
+// TestInboxView_BadgeSummary asserts that the title row shows the correct
+// unread / total counts.
+func TestInboxView_BadgeSummary(t *testing.T) {
+	now := time.Now()
+	readAt := now.Add(-1 * time.Second)
+
+	sid := app.SessionID("test-session")
+	ns := []jobs.Notification{
+		{ID: "n1", SessionID: sid, CreatedAt: now, Severity: jobs.SeverityInfo, Title: "a"},
+		{ID: "n2", SessionID: sid, CreatedAt: now, Severity: jobs.SeverityInfo, Title: "b"},
+		{ID: "n3", SessionID: sid, CreatedAt: now, Severity: jobs.SeveritySuccess, Title: "c", ReadAt: &readAt},
+		{ID: "n4", SessionID: sid, CreatedAt: now, Severity: jobs.SeverityWarn, Title: "d", ReadAt: &readAt},
+		{ID: "n5", SessionID: sid, CreatedAt: now, Severity: jobs.SeverityError, Title: "e", ReadAt: &readAt},
+	}
+
+	m := buildInboxModel(t, ns)
+	view := m.View()
+
+	// 2 unread of 5 total → "2 / 5"
+	require.Contains(t, view, "2 / 5",
+		"badge should show '2 / 5' for 2 unread of 5 total; view:\n%s", view)
+}
+
+// ─── TestInboxKey_Selection ───────────────────────────────────────────────────
+
+// TestInboxKey_Selection asserts that pressing i2 selects the second item and
+// emits an inboxItemSelected message.
+func TestInboxKey_Selection(t *testing.T) {
+	sid := app.SessionID("test-session")
+	ns := []jobs.Notification{
+		{ID: "n1", SessionID: sid, CreatedAt: time.Now(), Severity: jobs.SeverityInfo, Title: "first"},
+		{ID: "n2", SessionID: sid, CreatedAt: time.Now(), Severity: jobs.SeverityWarn, Title: "second"},
+		{ID: "n3", SessionID: sid, CreatedAt: time.Now(), Severity: jobs.SeverityError, Title: "third"},
+	}
+
+	m := buildInboxModel(t, ns)
+
+	// Send i2 keypress.
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i2")})
+	require.NotNil(t, cmd, "i2 should return a non-nil Cmd")
+
+	// Execute the command — it should produce an inboxItemSelected.
+	msg := cmd()
+	selected, ok := tuipkg.ExtractInboxItemSelected(msg)
+	require.True(t, ok, "cmd should produce inboxItemSelected; got %T", msg)
+	require.Equal(t, "n2", selected.ID, "selected notification should be the second one")
+	require.Equal(t, "second", selected.Title)
+
+	_ = m
+}
+
+// ─── TestInboxKey_ActionRequiredBanner ───────────────────────────────────────
+
+// TestInboxKey_ActionRequiredBanner asserts that when at least one unread
+// action_required notification exists, View() includes the banner text.
+func TestInboxKey_ActionRequiredBanner(t *testing.T) {
+	sid := app.SessionID("test-session")
+	ns := []jobs.Notification{
+		{
+			ID:            "n1",
+			SessionID:     sid,
+			CreatedAt:     time.Now(),
+			Severity:      jobs.SeverityActionRequired,
+			Title:         "deploy needs confirmation",
+			TeleportState: "deploy_confirm",
+		},
+	}
+
+	// We need to test the banner via the RootModel since the banner is
+	// composed there from m.inbox.ActionRequiredBanner(). Instead, test the
+	// inbox sub-model's ActionRequiredBanner() via the exported helper.
+	banner := tuipkg.InboxActionRequiredBannerForTest(28, 14, ns)
+	require.Contains(t, banner, "[enter] open",
+		"banner should contain [enter] open")
+	require.Contains(t, banner, "[esc] later",
+		"banner should contain [esc] later")
+	require.Contains(t, banner, "deploy needs confirmation",
+		"banner should contain the notification title")
+}
+
+// ─── TestInboxPoll_LiveStore ──────────────────────────────────────────────────
+
+// TestInboxPoll_LiveStore exercises the inboxRefreshed message path end-to-end
+// using a real in-memory JobStore: insert a notification, feed an
+// inboxRefreshed message to an inboxModel, and assert the notification appears
+// in View().
+func TestInboxPoll_LiveStore(t *testing.T) {
+	_, js := openInboxTestDB(t)
+	ctx := context.Background()
+	sid := app.SessionID("live-test")
+
+	err := js.InsertNotification(ctx, &jobs.Notification{
+		SessionID:  sid,
+		CreatedAt:  time.Now(),
+		Severity:   jobs.SeveritySuccess,
+		Title:      "live job done",
+		OriginKind: "job",
+		OriginRef:  "job:abc",
+	})
+	require.NoError(t, err)
+
+	ns, err := js.ListNotifications(ctx, sid, 20)
+	require.NoError(t, err)
+	require.Len(t, ns, 1)
+
+	m := buildInboxModel(t, nil) // start empty
+	m, _ = m.Update(tuipkg.InboxRefreshedMsg(ns))
+
+	view := m.View()
+	require.Contains(t, view, "live job done", "notification title should appear after inboxRefreshed")
+}
+
+// ─── TestHumanizeDuration ─────────────────────────────────────────────────────
+
+// TestHumanizeDuration validates the relative-time helper across several buckets.
+func TestHumanizeDuration(t *testing.T) {
+	type tc struct {
+		d    time.Duration
+		want string
+	}
+	cases := []tc{
+		{30 * time.Second, "just now"},
+		{90 * time.Second, "1 m ago"},
+		{65 * time.Minute, "1 h ago"},
+		{25 * time.Hour, "1 d ago"},
+	}
+	for _, c := range cases {
+		got := tuipkg.HumanizeDurationForTest(c.d)
+		require.Equal(t, c.want, got, "humanizeDuration(%v)", c.d)
+	}
+}
+
+// ─── TestInboxBadge_NoUnread ──────────────────────────────────────────────────
+
+// TestInboxBadge_NoUnread asserts that the badge string is empty when there are
+// no unread notifications.
+func TestInboxBadge_NoUnread(t *testing.T) {
+	orch, sid := setupCloak(t)
+	m := buildModel(t, orch, sid)
+
+	// No notifications — badge should be absent from hints row.
+	view := m.View()
+	require.NotContains(t, view, "inbox:", "no badge when there are no notifications")
+
+	_ = sid
+}
