@@ -306,6 +306,107 @@ TeleportState in the notification is set to the job's `OriginState` — the
 state where the job was submitted — so make sure that state (or a teleport
 alias) handles `answer_clarification`.
 
+### Flow tests with background jobs
+
+Flow fixtures can test the full background-job lifecycle deterministically
+using `host_handlers:`, `advance_clock:`, and `expect_inbox:`.
+
+#### How it works
+
+When a fixture declares `host_handlers:` (or any turn uses `advance_clock:` or
+`expect_inbox:`), the flow runner automatically switches to the
+**orchestrator-backed path**:
+
+- An in-memory SQLite store and fake clock are created.
+- The scheduler and session listener are wired together.
+- Each `host_handlers:` entry becomes a stub closure (no real I/O).
+- `advance_clock: "2s"` moves the fake clock forward and then drains the
+  scheduler + listener, so `on_complete` effects are applied before assertions
+  run.
+
+The legacy path (no `host_handlers`, no `advance_clock`) is unchanged.
+
+#### Fixture fields
+
+```yaml
+# Declare stub handlers. Keys are the handler name declared in `hosts:`.
+host_handlers:
+  host.run:
+    data: { stdout: "hello", exit: 0 }   # host.Result.Data returned on success
+    delay: "1s"                           # optional: block for this virtual duration
+    error: "something_went_wrong"         # optional: domain-level error (Result.Error)
+    infra_error: "connection refused"     # optional: infrastructure error (Go error)
+```
+
+On a turn:
+
+```yaml
+turns:
+  - intent: { name: start }
+    advance_clock: "2s"        # move fake time forward; waits for scheduler+listener
+    expect_state: running
+    expect_world:              # assertions run AFTER advance_clock drains
+      result: "hello"
+    expect_inbox:
+      unread: 2                # total unread count
+      needs_attention: 0       # action_required severity count
+      severities: ["info", "success"]  # sorted severity list for all unread items
+```
+
+#### `host_handlers` fields
+
+| Field         | Purpose                                                                       |
+|---------------|-------------------------------------------------------------------------------|
+| `data`        | Map returned in `host.Result.Data` on a successful invocation.               |
+| `error`       | Non-empty → `host.Result.Error` set (domain error; job terminates as failed). |
+| `infra_error` | Non-empty → `(Result{}, error)` returned (infrastructure failure).           |
+| `delay`       | Duration string (e.g. `"1s"`) — the stub blocks for this virtual time.        |
+
+`delay` and `infra_error`/`error` are independent: you can combine delay with
+an error to simulate a slow then failing handler.
+
+#### `advance_clock` + notification counts
+
+The stub's `delay:` field simulates a long-running handler. To make it
+complete in the test, set `advance_clock:` to a duration ≥ the handler delay
+on the same turn (or a subsequent turn). After advancing the clock:
+
+- The scheduler drains (all job goroutines reach terminal state).
+- The session listener drains (`on_complete` effects are applied).
+- The inbox receives a notification with severity `info` (job submitted) and
+  `success`/`error`/`warn` (job terminal state). Both are counted in
+  `expect_inbox.unread`.
+
+#### Minimal example
+
+```yaml
+test_kind: flow
+app: ../app.yaml
+initial_state: lobby
+initial_world:
+  result: ""
+  last_job_id: ""
+
+host_handlers:
+  host.run:
+    data: { stdout: "hello" }
+    delay: "1s"
+
+turns:
+  - intent: { name: start }
+    advance_clock: "2s"
+    expect_world:
+      result: "hello"
+    expect_inbox:
+      unread: 2
+      severities: ["info", "success"]
+
+expect_no_errors: true
+```
+
+A full working example lives at
+`testdata/apps/background_jobs/flows/happy_path.yaml`.
+
 ## `Intent`
 
 ```yaml

@@ -283,6 +283,71 @@ long preceding flow (e.g. cycle-budget feedback paths).
 Per-turn assertions: `expect_state`, `expect_world` (partial match),
 `expect_view_matches` (regex), plus a fixture-level `expect_no_errors`.
 
+#### Background-job fixtures (orchestrator path)
+
+When any of `host_handlers:`, `advance_clock:`, or `expect_inbox:` appear in a
+fixture the test runner automatically switches to the orchestrator path, which
+wires up a fake clock, an in-memory job store, and stub host handlers instead of
+real infrastructure.
+
+```yaml
+test_kind: flow
+app: ../app.yaml
+initial_state: lobby
+initial_world:
+  result: ""
+  last_job_id: ""
+
+# Declare one stub per handler name used by the app.
+host_handlers:
+  host.run:
+    data:           # returned as host.Result.Data on success
+      stdout: "hello"
+      exit: 0
+    delay: "1s"     # virtual time to hold before completing
+
+turns:
+  - intent:
+      name: enter
+      slots: {}
+    advance_clock: "2s"   # advance virtual time after RunIntent completes
+    expect_state: running
+    expect_world:
+      result: "hello"
+    expect_inbox:
+      unread: 2
+      severities: ["info", "success"]
+
+expect_no_errors: true
+```
+
+**`host_handlers`** — map from handler name to stub behaviour:
+
+| field | type | meaning |
+|---|---|---|
+| `data` | object | `host.Result.Data` returned on success |
+| `delay` | duration | virtual time the stub holds before resolving |
+| `error` | string | domain error string (non-fatal to job store) |
+| `infra_error` | string | infrastructure error (job terminates as failed) |
+
+**`advance_clock`** (per-turn) — duration string (`"2s"`, `"500ms"`) to advance
+the fake clock after the intent fires. The runner drains the scheduler and the
+orchestrator's session listener before evaluating assertions, so
+`expect_world`/`expect_inbox` see the fully-resolved post-job state.
+
+**`expect_inbox`** (per-turn) — asserts on the session notification inbox after
+the turn (and any clock advance) completes:
+
+| field | type | meaning |
+|---|---|---|
+| `unread` | int | exact unread notification count |
+| `needs_attention` | int | exact needs-attention count |
+| `severities` | []string | ordered list of severities for all unread notifications |
+
+Note: a background job produces **two** notifications — an `info` notification
+when the job is submitted and a `success` or `error` notification when it
+terminates.
+
 Run: `hally test flows <app.yaml>`. Exit codes: `0` pass, `1` fail, `2` setup
 error.
 
