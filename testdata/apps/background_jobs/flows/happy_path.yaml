@@ -42,6 +42,11 @@ turns:
     expect_state: running
     expect_world:
       result: "hello"
+    # TODO(P3-7): assert the on_complete say: text ("Job complete. Output: hello")
+    # appears in the session output.  The flow fixture expect_view_matches field
+    # checks the intent-turn's view (running-state render), but on_complete say:
+    # is emitted by the background listener path and does not flow into that view.
+    # A dedicated expect_say or expect_events assertion is needed to lock this in.
     expect_inbox:
       unread: 2
       severities: ["info", "success"]

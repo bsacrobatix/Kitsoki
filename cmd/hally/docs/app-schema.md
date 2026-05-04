@@ -151,6 +151,8 @@ Conventional order within a single effect: `set` → `increment` → `say` →
 
 ## Background jobs
 
+> Detailed reference: [docs/background-jobs/](../../../docs/background-jobs/README.md)
+
 Background jobs let a state machine fire a long-running shell command or LLM
 call without blocking the current turn. The job runs in a goroutine; when it
 finishes a synthetic turn fires `on_complete:` effects in the originating

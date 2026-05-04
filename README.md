@@ -11,6 +11,9 @@ effect is declared by the author in YAML.
 
 Full design: [`design.md`](design.md).
 
+Background jobs (long-running handlers, inbox notifications, clarification
+mid-flight): [`docs/background-jobs/`](docs/background-jobs/README.md).
+
 ## Status
 
 **PoC — Stage 7 of 7 complete.** All core features are implemented:

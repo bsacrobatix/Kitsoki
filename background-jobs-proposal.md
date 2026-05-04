@@ -1,5 +1,7 @@
 # Proposal — Wire the existing Background-Jobs subsystem into orchestrator + TUI
 
+> **Implemented.** See [docs/background-jobs/](docs/background-jobs/README.md) for the canonical guide.
+
 **Status:** Draft. Authored from the cyber-repo `devstory` story consumer
 side, where a long-running `build_plan` action (LLM-driven, 30-90s)
 blocks the entire room while it runs.
