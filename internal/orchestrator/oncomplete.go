@@ -128,8 +128,15 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		// Dispatch any foreground host calls collected by the on_complete chain.
 		// background: true is forbidden inside on_complete: by the loader, so all
 		// calls here are synchronous.
+		//
+		// on_error: redirects from on_complete host calls are accepted and the
+		// session lands on the named error state — TransitionApplied events
+		// emitted by dispatchHostCalls already carry the redirect, so the
+		// replayer restores the correct state on restart.  The redirect path
+		// itself is not propagated further here since on_complete runs outside
+		// a turn boundary (no turn-end book-keeping to update).
 		if len(hostCalls) > 0 {
-			hostEvts, hostWorld, _, hostErr := o.dispatchHostCalls(ctx, sid, hostCalls, w, j.OriginState)
+			hostEvts, hostWorld, _, _, hostErr := o.dispatchHostCalls(ctx, sid, hostCalls, w, j.OriginState)
 			if hostErr != nil {
 				o.logger.Warn("handleJobTerminal: dispatchHostCalls",
 					slog.String("job_id", ev.JobID),

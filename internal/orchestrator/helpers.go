@@ -152,7 +152,7 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 	}
 
 	// Success path: dispatch host calls, persist events.
-	hostEvents, hostWorld, hostView, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
+	hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
 		tl.Debug(ctx, trace.EvHarnessError, slog.String("host_dispatch_error", hostErr.Error()))
 	}
@@ -162,6 +162,9 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 		if hostView != "" {
 			result.View = hostView
 		}
+	}
+	if hostRedirect != "" {
+		result.NewState = hostRedirect
 	}
 
 	successEvents := append([]store.Event{startEvent}, result.Events...)

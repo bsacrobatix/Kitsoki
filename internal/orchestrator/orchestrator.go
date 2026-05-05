@@ -449,7 +449,7 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	// Success path: dispatch any host calls collected by the machine, apply
 	// their bindings to world, and refresh the view so the user sees the
 	// updated state on the same turn.
-	hostEvents, hostWorld, hostView, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
+	hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
 		tl.Debug(ctx, trace.EvHarnessError, slog.String("host_dispatch_error", hostErr.Error()))
 	}
@@ -459,6 +459,14 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		if hostView != "" {
 			result.View = hostView
 		}
+	}
+	// Honour an on_error: redirect from the host dispatch.  The redirect
+	// state's on_enter has already run via dispatchHostCalls, and a
+	// TransitionApplied event was appended for replay; here we update
+	// result.NewState so subsequent allowed-intent / terminal-state /
+	// turn-end logic targets the redirected state, not the original.
+	if hostRedirect != "" {
+		result.NewState = hostRedirect
 	}
 
 	successEvents := append(prefix, result.Events...)
@@ -523,16 +531,24 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 
 // dispatchHostCalls invokes each HostInvocation, applies bindings to world,
 // and re-renders the view. Returns the new events, the updated world, the
-// refreshed view (empty if no changes), and an error only when re-rendering
-// fails. Individual handler failures are folded into world.last_error and
-// emitted as HostReturned events with error payloads — they do not stop
-// dispatch of the remaining calls.
+// refreshed view (empty if no changes), an override state path (non-empty
+// when an `on_error:` arc fires and the caller must redirect to the error
+// state), and an error only when re-rendering fails.
+//
+// Individual handler failures without `on_error:` are folded into
+// world.last_error and emitted as HostReturned events with error payloads —
+// they do not stop dispatch of the remaining calls.  When an
+// `on_error:` arc IS declared on the failing host call, dispatch of the
+// remaining calls in the same on_enter block is aborted and the named error
+// state is entered: its on_enter chain runs (including any host calls it
+// emits), a TransitionApplied event is appended so replay restores the
+// redirected state, and the view is rendered from the error state.
 //
 // When o.hosts is nil (deterministic flow tests), returns no events and the
 // original world unchanged.
-func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID, calls []machine.HostInvocation, w world.World, state app.StatePath) ([]store.Event, world.World, string, error) {
+func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID, calls []machine.HostInvocation, w world.World, state app.StatePath) ([]store.Event, world.World, string, app.StatePath, error) {
 	if o.hosts == nil || len(calls) == 0 {
-		return nil, w, "", nil
+		return nil, w, "", "", nil
 	}
 
 	if o.transports != nil {
@@ -544,6 +560,7 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 
 	var events []store.Event
 	applied := false
+	var redirect app.StatePath
 
 	for _, hc := range calls {
 		// Background invocations go to the scheduler; foreground go to the host registry.
@@ -579,6 +596,14 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 				"error":     err.Error(),
 			}, 0))
 			applied = true
+			// Honour on_error even on infrastructure failure: the
+			// app-author's intent is "if this host call doesn't succeed,
+			// route here", and "never registered" is a stronger failure
+			// than a non-zero exit.  Stop processing further calls.
+			if hc.OnError != "" {
+				redirect = app.StatePath(hc.OnError)
+				break
+			}
 			continue
 		}
 		if res.Error != "" {
@@ -615,17 +640,128 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			payload["data"] = res.Data
 		}
 		events = append(events, newOrchestratorEvent(store.HostReturned, payload, 0))
+
+		// If the call failed and the author declared an `on_error:` arc,
+		// abort dispatch of the remaining calls in this on_enter block
+		// and route to the error state.  This is what makes pass/fail
+		// host scripts (the bugfix room's verifier, deploy, etc.)
+		// actually block the pipeline instead of silently advancing.
+		if res.Error != "" && hc.OnError != "" {
+			redirect = app.StatePath(hc.OnError)
+			break
+		}
+	}
+
+	if redirect != "" {
+		// Run the error state's on_enter chain and recursively dispatch
+		// any host calls it emits.  Append a TransitionApplied event so
+		// replay correctly lands the journey in the error state after a
+		// process restart.
+		errEvents, errWorld, errView, redirErr := o.enterRedirectState(ctx, sid, state, redirect, w)
+		if redirErr != nil {
+			return events, w, "", "", redirErr
+		}
+		events = append(events, errEvents...)
+		w = errWorld
+		applied = true
+		if errView == "" {
+			// Fallback: render the error state's view against the
+			// post-on_enter world so callers always have a refreshed
+			// view to show the user.
+			v, rErr := o.machine.RenderState(redirect, w)
+			if rErr != nil {
+				return events, w, "", "", fmt.Errorf("orchestrator: render redirect state %q: %w", redirect, rErr)
+			}
+			errView = v
+		}
+		return events, w, errView, redirect, nil
 	}
 
 	if !applied {
-		return events, w, "", nil
+		return events, w, "", "", nil
 	}
 
 	view, err := o.machine.RenderState(state, w)
 	if err != nil {
-		return events, w, "", fmt.Errorf("orchestrator: re-render after host dispatch: %w", err)
+		return events, w, "", "", fmt.Errorf("orchestrator: re-render after host dispatch: %w", err)
 	}
-	return events, w, view, nil
+	return events, w, view, "", nil
+}
+
+// enterRedirectState runs the on_enter chain for the named error state and
+// recursively dispatches any host calls it emits.  Used by dispatchHostCalls
+// to land the session in the on_error: target after a host failure.
+//
+// Emits a TransitionApplied event (from prior → target) so the replayer
+// updates the journey state, plus StateExited/StateEntered events to mirror
+// the regular machine.Turn transition shape.  Returns the accumulated
+// events, the post-on_enter world, the rendered view (empty if rendering
+// is left to the caller), and a non-nil error only on infrastructure failure.
+func (o *Orchestrator) enterRedirectState(ctx context.Context, sid app.SessionID, prior, target app.StatePath, w world.World) ([]store.Event, world.World, string, error) {
+	// Validate target exists; if not, surface as an infrastructure error.
+	tgtState := lookupStateByPath(o.def, target)
+	if tgtState == nil {
+		return nil, w, "", fmt.Errorf("orchestrator: on_error target state %q not found", target)
+	}
+
+	var events []store.Event
+
+	// TransitionApplied is the event the replayer uses to update
+	// js.State, so it must be emitted for the redirect to survive a
+	// process restart.
+	events = append(events, newOrchestratorEvent(store.TransitionApplied, map[string]any{
+		"from":   string(prior),
+		"to":     string(target),
+		"intent": "on_error",
+	}, 0))
+
+	// Mirror the StateExited/StateEntered shape that machine.Turn emits
+	// for a regular transition.  Single-level paths only — compound
+	// state hierarchies are handled as a flat exit/enter pair, which
+	// matches the on_error: arc's flat-target contract.
+	events = append(events, newOrchestratorEvent(store.StateExited, map[string]any{
+		"state": string(prior),
+	}, 0))
+	events = append(events, newOrchestratorEvent(store.StateEntered, map[string]any{
+		"state": string(target),
+	}, 0))
+
+	// Run the error state's on_enter via the machine.  This collects
+	// any nested host calls so we can recurse below.
+	if len(tgtState.OnEnter) > 0 {
+		newWorld, hostCalls, _, effEvents, runErr := o.machine.RunEffects(ctx, target, w, tgtState.OnEnter)
+		if runErr != nil {
+			return events, w, "", fmt.Errorf("orchestrator: run on_enter for redirect %q: %w", target, runErr)
+		}
+		w = newWorld
+		events = append(events, effEvents...)
+
+		// Recursively dispatch.  A nested on_error redirect supersedes
+		// this one — the caller will see the deepest target.
+		if len(hostCalls) > 0 {
+			nestedEvents, nestedWorld, nestedView, nestedRedirect, nestedErr := o.dispatchHostCalls(ctx, sid, hostCalls, w, target)
+			if nestedErr != nil {
+				return events, w, "", nestedErr
+			}
+			events = append(events, nestedEvents...)
+			w = nestedWorld
+			if nestedRedirect != "" {
+				// A deeper on_error fired; emit one more
+				// TransitionApplied so replay lands at the
+				// deepest target, but otherwise let the
+				// nested events already capture the chain.
+				events = append(events, newOrchestratorEvent(store.TransitionApplied, map[string]any{
+					"from":   string(target),
+					"to":     string(nestedRedirect),
+					"intent": "on_error",
+				}, 0))
+				return events, w, nestedView, nil
+			}
+			return events, w, nestedView, nil
+		}
+	}
+
+	return events, w, "", nil
 }
 
 // rerenderHostArgs re-renders the templates in hc.RawWith against the current
@@ -835,7 +971,7 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 		"direct": true,
 	}, turnNum)
 
-	hostEvents, hostWorld, hostView, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
+	hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
 		tl.Debug(ctx, trace.EvHarnessError, slog.String("host_dispatch_error", hostErr.Error()))
 	}
@@ -845,6 +981,9 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 		if hostView != "" {
 			result.View = hostView
 		}
+	}
+	if hostRedirect != "" {
+		result.NewState = hostRedirect
 	}
 
 	successEvents := append([]store.Event{startEvent}, result.Events...)
@@ -1000,7 +1139,7 @@ func (o *Orchestrator) OneShot(ctx context.Context, in OneShotInput) (*OneShotRe
 	// `hally turn` can show effect-by-effect diffs.
 	out.Effects = effectsFromEvents(result.Events)
 
-	hostSummaries, hostEvents, hostWorld, hostView, hostErr := o.dispatchHostCallsDetailed(ctx, result.HostCalls, result.World, result.NewState)
+	hostSummaries, hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCallsDetailed(ctx, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
 		return nil, fmt.Errorf("orchestrator: OneShot: %w", hostErr)
 	}
@@ -1012,6 +1151,10 @@ func (o *Orchestrator) OneShot(ctx context.Context, in OneShotInput) (*OneShotRe
 		if hostView != "" {
 			result.View = hostView
 		}
+	}
+	if hostRedirect != "" {
+		result.NewState = hostRedirect
+		out.NextState = hostRedirect
 	}
 
 	out.HostCalls = hostSummaries
@@ -1035,9 +1178,16 @@ func (o *Orchestrator) OneShot(ctx context.Context, in OneShotInput) (*OneShotRe
 // but additionally returns one HostCallSummary per invocation so callers
 // (currently OneShot) can surface args/data/error to the user. The events
 // returned here are identical to what dispatchHostCalls would have produced.
-func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []machine.HostInvocation, w world.World, state app.StatePath) ([]HostCallSummary, []store.Event, world.World, string, error) {
+//
+// Honours `on_error:` arcs the same way dispatchHostCalls does — when a
+// host call with `on_error:` declared returns Result.Error != "", dispatch
+// of the remaining calls in the batch is aborted and the named error
+// state is entered (its on_enter chain runs and any nested host calls are
+// dispatched).  The returned `redirect` is non-empty in that case so the
+// caller can override `result.NewState`.
+func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []machine.HostInvocation, w world.World, state app.StatePath) ([]HostCallSummary, []store.Event, world.World, string, app.StatePath, error) {
 	if o.hosts == nil || len(calls) == 0 {
-		return nil, nil, w, "", nil
+		return nil, nil, w, "", "", nil
 	}
 
 	if o.transports != nil {
@@ -1047,6 +1197,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	summaries := make([]HostCallSummary, 0, len(calls))
 	var events []store.Event
 	applied := false
+	var redirect app.StatePath
 
 	for _, hc := range calls {
 		// Re-render templates against the current world so chained
@@ -1063,6 +1214,10 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 				"error":     err.Error(),
 			}, 0))
 			applied = true
+			if hc.OnError != "" {
+				redirect = app.StatePath(hc.OnError)
+				break
+			}
 			continue
 		}
 		if res.Error != "" {
@@ -1097,16 +1252,39 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			payload["data"] = res.Data
 		}
 		events = append(events, newOrchestratorEvent(store.HostReturned, payload, 0))
+
+		if res.Error != "" && hc.OnError != "" {
+			redirect = app.StatePath(hc.OnError)
+			break
+		}
+	}
+
+	if redirect != "" {
+		errEvents, errWorld, errView, redirErr := o.enterRedirectState(ctx, "", state, redirect, w)
+		if redirErr != nil {
+			return summaries, events, w, "", "", redirErr
+		}
+		events = append(events, errEvents...)
+		w = errWorld
+		applied = true
+		if errView == "" {
+			v, rErr := o.machine.RenderState(redirect, w)
+			if rErr != nil {
+				return summaries, events, w, "", "", fmt.Errorf("render redirect state %q: %w", redirect, rErr)
+			}
+			errView = v
+		}
+		return summaries, events, w, errView, redirect, nil
 	}
 
 	if !applied {
-		return summaries, events, w, "", nil
+		return summaries, events, w, "", "", nil
 	}
 	view, err := o.machine.RenderState(state, w)
 	if err != nil {
-		return summaries, events, w, "", fmt.Errorf("re-render after host dispatch: %w", err)
+		return summaries, events, w, "", "", fmt.Errorf("re-render after host dispatch: %w", err)
 	}
-	return summaries, events, w, view, nil
+	return summaries, events, w, view, "", nil
 }
 
 // effectsFromEvents flattens EffectApplied events into EffectSummary form.
@@ -1224,7 +1402,7 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 	}
 
 	// Success: dispatch host calls then persist events.
-	hostEvents, hostWorld, hostView, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
+	hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
 		tl.Debug(ctx, trace.EvHarnessError, slog.String("host_dispatch_error", hostErr.Error()))
 	}
@@ -1234,6 +1412,9 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 		if hostView != "" {
 			result.View = hostView
 		}
+	}
+	if hostRedirect != "" {
+		result.NewState = hostRedirect
 	}
 
 	startEvent := newOrchestratorEvent(store.TurnStarted, map[string]any{

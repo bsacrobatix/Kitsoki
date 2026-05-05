@@ -79,6 +79,46 @@ func TestOrchestrator_HostDispatchDisabledWhenNoRegistry(t *testing.T) {
 		"host binding should be skipped when no registry is wired")
 }
 
+// TestOrchestrator_HostDispatchOnError_RoutesToErrorState verifies that
+// when an on_enter `invoke:` step has an `on_error:` arc, a non-empty
+// Result.Error from the host handler routes the session to the named
+// error state — instead of leaving it stuck in the success target.
+//
+// Regression for the bugfix room's phase_6_5 verifier hang: the verifier
+// returned exit 1 but hally still advanced to the success state because
+// the orchestrator captured `last_error` in world without consulting
+// hc.OnError to actually transition.
+func TestOrchestrator_HostDispatchOnError_RoutesToErrorState(t *testing.T) {
+	def, err := app.Load("testdata/hosterror/app.yaml")
+	require.NoError(t, err)
+
+	m, err := machine.New(def)
+	require.NoError(t, err)
+
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	reg := host.NewRegistry()
+	reg.Register("host.fail", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		return host.Result{Error: "deliberate failure"}, nil
+	})
+
+	orch := orchestrator.New(def, m, s, noopHarness{}, orchestrator.WithHostRegistry(reg))
+
+	ctx := context.Background()
+	sid, err := orch.NewSession(ctx)
+	require.NoError(t, err)
+
+	out, err := orch.SubmitDirect(ctx, sid, "ask", map[string]any{})
+	require.NoError(t, err)
+	require.Equal(t, orchestrator.ModeTransitioned, out.Mode)
+	require.Equal(t, app.StatePath("probe_error"), out.NewState,
+		"on_error must route to the named error state on host failure; got %q", out.NewState)
+	require.True(t, strings.Contains(out.View, "error_branch"),
+		"expected error-state on_enter to fire, got view: %q", out.View)
+}
+
 // noopHarness is a zero-behavior Harness for SubmitDirect tests. RunTurn is
 // never invoked by SubmitDirect, so a stub is sufficient.
 type noopHarness struct{}
