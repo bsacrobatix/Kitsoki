@@ -196,8 +196,86 @@ func NewValidatorServer(cfg ValidatorConfig) (*ValidatorServer, error) {
 	return srv, nil
 }
 
+// Outcome reports the validator's session-level disposition. The
+// orchestrator (host.oracle.ask_with_mcp, sub-task B) reads this after
+// the MCP session ends to decide whether to (a) accept the captured
+// payload, (b) re-engage the same `claude --continue` conversation with
+// a "you forgot to call submit_result" nudge, or (c) fire on_error.
+type Outcome int
+
+const (
+	// OutcomeUnknown is the zero value — no submit calls observed yet.
+	// In practice this means the LLM never even attempted submit; the
+	// orchestrator should treat it as OutcomeAbandoned at the session
+	// boundary.
+	OutcomeUnknown Outcome = iota
+	// OutcomeSuccess means at least one submit passed schema (and
+	// post-cmd, when configured). The captured payload is in the side-
+	// channel file.
+	OutcomeSuccess
+	// OutcomeRetriesExhausted means the LLM burned through `MaxRetries`
+	// submit attempts without ever producing an accepted payload. The
+	// orchestrator should fire on_error: no further re-engagement helps.
+	OutcomeRetriesExhausted
+	// OutcomeAbandoned means the LLM session ended (stdin EOF) with no
+	// successful submit and the retry budget not yet spent. The
+	// orchestrator may re-engage via `claude --continue` with a nudge
+	// prompt before falling back to on_error.
+	OutcomeAbandoned
+)
+
+// String renders the outcome for logging.
+func (o Outcome) String() string {
+	switch o {
+	case OutcomeSuccess:
+		return "success"
+	case OutcomeRetriesExhausted:
+		return "retries_exhausted"
+	case OutcomeAbandoned:
+		return "abandoned"
+	default:
+		return "unknown"
+	}
+}
+
+// Outcome computes the validator's session-level disposition based on
+// the current attempts/successfulSubmits counters. It is safe to call
+// any time, including before Run(ctx) returns — the result reflects
+// whatever the LLM has done so far.
+//
+// Precedence:
+//   - successfulSubmits >= 1                                  → Success
+//   - attempts >= maxRetries (no successful submit)           → RetriesExhausted
+//   - otherwise (attempts < maxRetries, no successful submit) → Abandoned
+//
+// Note that Abandoned only makes operational sense once the session has
+// ended; while a session is live a low attempt count just means the LLM
+// hasn't tried hard enough yet. The caller is responsible for picking
+// the right moment to read this — typically right after Run() returns.
+func (v *ValidatorServer) Outcome() Outcome {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.successfulSubmits >= 1 {
+		return OutcomeSuccess
+	}
+	if v.maxRetries > 0 && v.attempts >= v.maxRetries {
+		return OutcomeRetriesExhausted
+	}
+	return OutcomeAbandoned
+}
+
+// Stats returns a snapshot of the validator's session-level counters.
+// Useful for tests and for diagnostic logging from the orchestrator.
+func (v *ValidatorServer) Stats() (attempts, successfulSubmits int, lastError string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.attempts, v.successfulSubmits, v.lastError
+}
+
 // Run starts the validator on stdio and blocks until the peer disconnects
-// or ctx is cancelled.
+// or ctx is cancelled. Outcome() can be inspected after Run() returns to
+// learn whether the LLM produced a captured payload, exhausted retries,
+// or abandoned the session.
 func (v *ValidatorServer) Run(ctx context.Context) error {
 	return v.mcpSrv.Run(ctx, &mcpsdk.StdioTransport{})
 }

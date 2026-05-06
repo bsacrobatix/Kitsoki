@@ -114,7 +114,23 @@ The schema must be a JSON Schema object whose top-level "type" is
 			defer cancel()
 
 			fmt.Fprintf(os.Stderr, "hally: mcp-validator stdio server (schema=%s)\n", abs)
-			return srv.Run(ctx)
+			runErr := srv.Run(ctx)
+			// Surface the outcome to stderr so an external orchestrator
+			// (one that's not using the in-process API) can observe what
+			// happened. The exit code is also non-zero on retries-exhausted
+			// so wrappers can branch on it without parsing logs.
+			outcome := srv.Outcome()
+			attempts, successful, lastErr := srv.Stats()
+			fmt.Fprintf(os.Stderr,
+				"hally: mcp-validator outcome=%s attempts=%d successful_submits=%d last_error=%q\n",
+				outcome, attempts, successful, lastErr)
+			if runErr != nil {
+				return runErr
+			}
+			if outcome == hallymcp.OutcomeRetriesExhausted {
+				return fmt.Errorf("mcp-validator: max retries exhausted (%d attempts, no successful submit)", attempts)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&schemaPath, "schema", "", "path to a JSON Schema (required)")
