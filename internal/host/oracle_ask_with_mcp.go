@@ -301,6 +301,12 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 	if vparseErr != "" {
 		return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: %s", vparseErr)}, nil
 	}
+	// validatorBlockPresent governs whether we run the abandonment-recovery
+	// retry loop (claude --resume nudges) or the single-shot legacy path.
+	// We key on the explicit presence of the YAML sub-block rather than on
+	// any individual field so authors who write `validator: {}` opt into
+	// the retry semantics with sensible defaults.
+	_, validatorBlockPresent := args["validator"]
 
 	// validatorOutputPath is set when we auto-attach the validator. It's
 	// the path the validator subprocess writes the schema-validated payload
@@ -308,7 +314,14 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 	// and bind the result as Result.Data["submitted"], so authors can
 	// `bind: foo: submitted` and get the canonical, validated JSON instead
 	// of relying on the LLM's final stdout text.
+	//
+	// validatorStateFilePath is set when the retry loop is active so the
+	// validator's session counters (attempts/successful_submits/last_error)
+	// survive each iteration's subprocess restart. We read this same file
+	// between iterations to inspect the Outcome and decide whether to
+	// re-engage with a nudge.
 	var validatorOutputPath string
+	var validatorStateFilePath string
 	if schemaArg, _ := args["schema"].(string); strings.TrimSpace(schemaArg) != "" {
 		if _, alreadyHasValidator := mcpServers["validator"]; !alreadyHasValidator {
 			outFile, ofErr := os.CreateTemp("", "hally-validated-*.json")
@@ -323,6 +336,23 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 			// rename on its first successful submit.
 			_ = os.Remove(validatorOutputPath)
 			defer os.Remove(validatorOutputPath)
+
+			// In retry-loop mode, allocate a state-file path and pass it
+			// to the validator subprocess so counters persist across
+			// `claude --resume` restarts. Outside retry-loop mode we
+			// don't bother — the legacy single-shot path doesn't need
+			// cross-process state.
+			if validatorBlockPresent {
+				stFile, sfErr := os.CreateTemp("", "hally-validator-state-*.json")
+				if sfErr != nil {
+					return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: create validator state tempfile: %v", sfErr)}, nil
+				}
+				validatorStateFilePath = stFile.Name()
+				_ = stFile.Close()
+				_ = os.Remove(validatorStateFilePath)
+				defer os.Remove(validatorStateFilePath)
+				vopts.StateFilePath = validatorStateFilePath
+			}
 
 			validatorEntry, vErr := buildValidatorMCPServer(schemaArg, validatorOutputPath, vopts)
 			if vErr != nil {
@@ -353,6 +383,28 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 		mcpConfigPath = f.Name()
 		defer os.Remove(mcpConfigPath)
 		cliArgs = append(cliArgs, "--mcp-config", mcpConfigPath)
+	}
+
+	// Pick the execution path:
+	//   - validator: block present  → abandonment-recovery retry loop
+	//                                  with `claude --resume <sid>` nudges
+	//   - otherwise                  → single-shot legacy path (unchanged)
+	if validatorBlockPresent {
+		effectiveMaxRetries := vopts.MaxRetries
+		if effectiveMaxRetries <= 0 {
+			effectiveMaxRetries = validatorDefaultMaxRetries
+		}
+		return runWithValidatorRetryLoop(ctx, runValidatorLoopParams{
+			Bin:                 bin,
+			BaseCLIArgs:         cliArgs,
+			Rendered:            rendered,
+			WorkingDir:          workingDir,
+			OutputFormat:        outputFormat,
+			ValidatorOutputPath: validatorOutputPath,
+			ValidatorStatePath:  validatorStateFilePath,
+			MaxOuterIterations:  maxOuterIterations,
+			ValidatorMaxRetries: effectiveMaxRetries,
+		}), nil
 	}
 
 	cr, runErr := runClaudeOneShot(ctx, bin, cliArgs, rendered, workingDir)
@@ -417,3 +469,258 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 	}
 	return res, nil
 }
+
+// maxOuterIterations is the default cap on the outer claude-restart loop
+// when a validator: block is present. The inner per-submit retries are
+// capped separately by the validator's MaxRetries field. Combined cap is
+// outer * inner = 3 * 5 = 15 submits in the worst case.
+const maxOuterIterations = 3
+
+// abandonmentNudgePrompt is the prompt sent on each `claude --resume`
+// re-engagement after the LLM exited without a successful submit. It is
+// rendered with the validator's `last_error` (if any) so the LLM sees the
+// most recent rejection reason and corrects accordingly. Hard-coded for
+// now; can be lifted into a YAML field on a future iteration if authors
+// need per-room customisation.
+const abandonmentNudgeTemplate = `Your previous turn ended without successfully calling submit.{{LAST_ERROR_BLOCK}}
+
+You MUST call the validator's submit tool with a valid payload to continue.
+Read the task again, identify what is needed, and call submit. Do not exit
+the conversation without submitting.`
+
+// runValidatorLoopParams bundles everything the retry loop needs. Pulling
+// it into a struct keeps OracleAskWithMCPHandler's signature clean even as
+// the loop grows new knobs (custom nudge, per-iteration logging, etc.).
+type runValidatorLoopParams struct {
+	Bin                 string
+	BaseCLIArgs         []string // contains -p, --output-format, --permission-mode, --mcp-config <path>
+	Rendered            string   // initial user prompt
+	WorkingDir          string
+	OutputFormat        string
+	ValidatorOutputPath string
+	ValidatorStatePath  string
+	MaxOuterIterations  int
+	// ValidatorMaxRetries mirrors validatorOptions.MaxRetries (or the
+	// validator's default of 5 when unset). The host-side outcome
+	// computation must agree with the in-validator one or we'd
+	// misclassify "exhausted" as "abandoned" and waste an extra
+	// re-engagement.
+	ValidatorMaxRetries int
+}
+
+// runWithValidatorRetryLoop runs `claude -p` once per outer iteration,
+// re-engaging via `claude --resume <session-id>` whenever the LLM exits
+// without a successful submit. Between iterations it reads the validator
+// state file to inspect Outcome and last_error.
+//
+// Outer-loop semantics:
+//
+//   iteration 0  : claude -p   --session-id <sid>
+//   iteration N>0: claude      --resume     <sid>  (only when Outcome == Abandoned)
+//
+// Termination conditions (checked after each iteration):
+//
+//   Outcome == Success            → return success, bind submitted payload
+//   Outcome == RetriesExhausted   → return error (last_error), on_error: fires
+//   Outcome == Abandoned, n+1==N  → return error ("session abandoned"), on_error: fires
+//   Outcome == Abandoned, n+1<N   → continue with --resume + nudge prompt
+//
+// The validator's in-memory counters reset between subprocess invocations,
+// but the state-file path makes them persist so the validator can return
+// the "MAX RETRIES EXHAUSTED" sentinel even if exhaustion straddles
+// re-engagements (rare but possible — the LLM can submit many times within
+// a single iteration, so iteration 1's submits accrue against iteration
+// 0's attempts counter).
+func runWithValidatorRetryLoop(ctx context.Context, p runValidatorLoopParams) Result {
+	maxOuter := p.MaxOuterIterations
+	if maxOuter <= 0 {
+		maxOuter = maxOuterIterations
+	}
+
+	sessionID := newUUID()
+
+	var lastIterStdout string
+	var lastIterExit int
+	var lastIterStderr string
+	var lastInfraErr error
+	for iter := 0; iter < maxOuter; iter++ {
+		// Build the per-iteration argv. iter==0 starts a fresh session;
+		// iter>0 resumes the same session so claude has the full prior
+		// context (prompt, tool calls, validator rejections) when the
+		// nudge arrives.
+		var iterArgs []string
+		var iterPrompt string
+		if iter == 0 {
+			iterArgs = append([]string{}, p.BaseCLIArgs...)
+			iterArgs = append(iterArgs, "--session-id", sessionID)
+			iterPrompt = p.Rendered
+		} else {
+			iterArgs = append([]string{}, p.BaseCLIArgs...)
+			iterArgs = append(iterArgs, "--resume", sessionID)
+			// Inspect the validator's recorded last_error so the nudge
+			// can echo the most recent rejection reason.
+			_, _, lastErr := readValidatorState(p.ValidatorStatePath)
+			iterPrompt = renderNudge(lastErr)
+		}
+
+		cr, runErr := runClaudeOneShot(ctx, p.Bin, iterArgs, iterPrompt, p.WorkingDir)
+		if runErr != nil {
+			lastInfraErr = runErr
+			break
+		}
+		if cr.Infra != nil {
+			lastInfraErr = cr.Infra
+			lastIterStderr = cr.Stderr
+			break
+		}
+		lastIterStdout = cr.Stdout
+		lastIterExit = cr.ExitCode
+		lastIterStderr = cr.Stderr
+
+		// Inspect the validator's outcome. If it has a successful submit
+		// we're done. If it ran out of retries we're done (failure). If
+		// the LLM abandoned without submitting, loop and re-engage —
+		// unless we've used the outer budget.
+		attempts, success, lastErr := readValidatorState(p.ValidatorStatePath)
+		switch outcomeFromState(attempts, success, p.ValidatorMaxRetries) {
+		case mcpOutcomeSuccess:
+			return assembleResult(p, lastIterStdout, lastIterExit, lastIterStderr, "")
+		case mcpOutcomeRetriesExhausted:
+			msg := lastErr
+			if strings.TrimSpace(msg) == "" {
+				msg = fmt.Sprintf("validator: max retries exhausted after %d attempts", attempts)
+			}
+			return assembleResult(p, lastIterStdout, lastIterExit, lastIterStderr, msg)
+		case mcpOutcomeAbandoned:
+			// Try again unless we've spent the outer budget.
+			continue
+		}
+	}
+
+	// Outer budget spent (or infrastructure failure). Surface whatever we
+	// know: prefer the validator's last_error, fall back to "abandoned",
+	// fall back to infra error.
+	if lastInfraErr != nil {
+		msg := fmt.Sprintf("host.oracle.ask_with_mcp: claude exec failed: %v", lastInfraErr)
+		if s := strings.TrimSpace(lastIterStderr); s != "" {
+			msg = fmt.Sprintf("%s\nstderr: %s", msg, s)
+		}
+		return Result{Error: msg}
+	}
+	attempts, _, lastErr := readValidatorState(p.ValidatorStatePath)
+	msg := lastErr
+	if strings.TrimSpace(msg) == "" {
+		msg = fmt.Sprintf("validator: session abandoned without successful submit after %d outer iteration(s), %d attempt(s)", maxOuter, attempts)
+	}
+	return assembleResult(p, lastIterStdout, lastIterExit, lastIterStderr, msg)
+}
+
+// assembleResult builds the standard handler return value from a final
+// claude run. Mirrors the legacy single-shot path so authors see the
+// same Data shape (stdout / exit_code / ok / submitted / stdout_json)
+// regardless of which path executed.
+//
+// errMsg is the orchestrator-visible error: empty = success, non-empty
+// goes to res.Error which the orchestrator copies into world.last_error
+// and (when on_error: is declared on the host call) routes the journey.
+func assembleResult(p runValidatorLoopParams, stdout string, exitCode int, stderr, errMsg string) Result {
+	res := Result{
+		Data: map[string]any{
+			"stdout":    stdout,
+			"exit_code": exitCode,
+			"ok":        exitCode == 0,
+		},
+	}
+	if p.OutputFormat == "json" && exitCode == 0 && stdout != "" {
+		var parsed any
+		if jErr := json.Unmarshal([]byte(stdout), &parsed); jErr == nil {
+			res.Data["stdout_json"] = parsed
+		} else {
+			res.Data["stdout_json_parse_error"] = jErr.Error()
+		}
+	}
+	if p.ValidatorOutputPath != "" {
+		if vBytes, vErr := os.ReadFile(p.ValidatorOutputPath); vErr == nil && len(vBytes) > 0 {
+			var parsed any
+			if jErr := json.Unmarshal(vBytes, &parsed); jErr == nil {
+				res.Data["submitted"] = parsed
+			} else {
+				// The validator only writes schema-passed payloads; a
+				// parse error here is a real bug.
+				if errMsg == "" {
+					errMsg = fmt.Sprintf("host.oracle.ask_with_mcp: parse validator output: %v", jErr)
+				}
+			}
+		}
+	}
+	if errMsg != "" {
+		res.Error = errMsg
+	} else if exitCode != 0 {
+		res.Error = claudeExitErrorMessage(exitCode, stderr, stdout)
+	}
+	return res
+}
+
+// renderNudge interpolates the LLM-facing nudge prompt with the most
+// recent rejection reason (if any). Hard-coded template for now; if/when
+// a room needs a different tone the call site can plumb a string field
+// through validatorOptions.
+func renderNudge(lastError string) string {
+	block := ""
+	if strings.TrimSpace(lastError) != "" {
+		block = "\n\nThe last submission attempt was rejected:\n" + lastError
+	}
+	return strings.Replace(abandonmentNudgeTemplate, "{{LAST_ERROR_BLOCK}}", block, 1)
+}
+
+// readValidatorState reads the validator's persisted counters. Returns
+// zeroes when the file is missing (the LLM never called submit) or
+// malformed (treated as "we don't know — assume abandoned"). Errors are
+// silently swallowed because the validator may legitimately not have
+// written anything yet on the very first iteration.
+func readValidatorState(path string) (attempts, successfulSubmits int, lastError string) {
+	if path == "" {
+		return 0, 0, ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return 0, 0, ""
+	}
+	var st struct {
+		Attempts          int    `json:"attempts"`
+		SuccessfulSubmits int    `json:"successful_submits"`
+		LastError         string `json:"last_error"`
+	}
+	if jErr := json.Unmarshal(data, &st); jErr != nil {
+		return 0, 0, ""
+	}
+	return st.Attempts, st.SuccessfulSubmits, st.LastError
+}
+
+// outcomeFromState mirrors mcp.ValidatorServer.Outcome() at the host
+// level — we reimplement here so the host package doesn't have to import
+// the mcp package. The two implementations must stay in sync; the
+// single-source-of-truth lives in mcp/validator.go.
+type mcpOutcome int
+
+const (
+	mcpOutcomeUnknown mcpOutcome = iota
+	mcpOutcomeSuccess
+	mcpOutcomeRetriesExhausted
+	mcpOutcomeAbandoned
+)
+
+func outcomeFromState(attempts, success, maxRetries int) mcpOutcome {
+	if success >= 1 {
+		return mcpOutcomeSuccess
+	}
+	if maxRetries > 0 && attempts >= maxRetries {
+		return mcpOutcomeRetriesExhausted
+	}
+	return mcpOutcomeAbandoned
+}
+
+// validatorDefaultMaxRetries mirrors mcp.ValidatorConfig.MaxRetries's
+// fallback. The host-side outcome computation must agree with the
+// in-validator one or we'd misclassify exhaustion vs abandonment.
+const validatorDefaultMaxRetries = 5

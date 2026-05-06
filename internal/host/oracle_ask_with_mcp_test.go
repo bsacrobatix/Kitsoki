@@ -564,7 +564,11 @@ func TestOracleAskWithMCP_ValidatorBlockParsed(t *testing.T) {
 
 	dir := t.TempDir()
 	promptPath := filepath.Join(dir, "p.md")
-	require.NoError(t, os.WriteFile(promptPath, []byte("propose a fix"), 0o644))
+	// SIMULATE_SUBMIT makes the fake claude write a "successful submit"
+	// state file so the host's retry loop exits after one iteration.
+	require.NoError(t, os.WriteFile(promptPath, []byte(
+		`propose a fix SIMULATE_SUBMIT={"summary":"x","confidence":"high","files_changed":["a.go"]}`,
+	), 0o644))
 	schemaPath := filepath.Join(dir, "schema.json")
 	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644))
 
@@ -707,7 +711,9 @@ func TestOracleAskWithMCP_ValidatorBlockArgsTemplated(t *testing.T) {
 
 	dir := t.TempDir()
 	promptPath := filepath.Join(dir, "p.md")
-	require.NoError(t, os.WriteFile(promptPath, []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(promptPath, []byte(
+		`x SIMULATE_SUBMIT={"summary":"x","confidence":"high","files_changed":["a.go"]}`,
+	), 0o644))
 	schemaPath := filepath.Join(dir, "schema.json")
 	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644))
 
@@ -748,6 +754,233 @@ func indexOfString(haystack []string, needle string) int {
 		}
 	}
 	return -1
+}
+
+// TestOracleAskWithMCP_OutcomeSuccess_FirstIteration — the LLM submits
+// successfully on iteration 0; the retry loop exits immediately and
+// binds the captured payload.
+func TestOracleAskWithMCP_OutcomeSuccess_FirstIteration(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+	t.Setenv("HALLY_BIN", "/usr/local/bin/hally")
+
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	require.NoError(t, os.WriteFile(promptPath, []byte(
+		`do the thing SIMULATE_SUBMIT={"summary":"first try worked","done":true}`,
+	), 0o644))
+	schemaPath := filepath.Join(dir, "schema.json")
+	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644))
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path": promptPath,
+		"schema":      schemaPath,
+		"validator": map[string]any{
+			"post_cmd":    "true",
+			"max_retries": 5,
+		},
+	})
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
+	submitted, ok := res.Data["submitted"].(map[string]any)
+	require.True(t, ok, "submitted payload missing")
+	assert.Equal(t, "first try worked", submitted["summary"])
+}
+
+// TestOracleAskWithMCP_OutcomeAbandoned_SecondIteration_Success — iter 0
+// claude exits without submit (Outcome == Abandoned); the host re-engages
+// with `claude --resume` and a nudge prompt; iter 1 submits successfully.
+// We assert (a) the loop succeeds, (b) iter 1's prompt contains the
+// nudge text, (c) iter 1's argv contains --resume.
+func TestOracleAskWithMCP_OutcomeAbandoned_SecondIteration_Success(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+	t.Setenv("HALLY_BIN", "/usr/local/bin/hally")
+
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "record.txt")
+	t.Setenv("HALLY_FAKE_RECORD", recordPath)
+	t.Setenv("HALLY_FAKE_REJECT_THEN_OK", "1")
+	promptPath := filepath.Join(dir, "p.md")
+	prompt := "do the thing"
+	require.NoError(t, os.WriteFile(promptPath, []byte(prompt), 0o644))
+	schemaPath := filepath.Join(dir, "schema.json")
+	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644))
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path": promptPath,
+		"schema":      schemaPath,
+		"validator": map[string]any{
+			"post_cmd": "true",
+		},
+	})
+	require.NoError(t, err)
+	require.Empty(t, res.Error, "loop should succeed on iter 1")
+	submitted, ok := res.Data["submitted"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, submitted["resumed"], "resumed payload bound")
+
+	// Inspect the record file: iter 0 has the original prompt, iter 1
+	// has the nudge + --resume flag in argv.
+	record, err := os.ReadFile(recordPath)
+	require.NoError(t, err)
+	text := string(record)
+	iters := strings.Count(text, "----iteration----")
+	assert.Equal(t, 2, iters, "expected exactly two iterations, got: %s", text)
+	// Iter 1 argv contains --resume.
+	assert.Contains(t, text, "--resume")
+	// Iter 1 prompt is the nudge.
+	assert.Contains(t, text, "Your previous turn ended without successfully calling submit")
+	// Iter 1 nudge echoes last_error from iter 0.
+	assert.Contains(t, text, "first attempt rejected")
+}
+
+// TestOracleAskWithMCP_AbandonmentExhausted — three iterations all
+// abandoned (no SIMULATE_SUBMIT, no SIMULATE_REJECT_THEN_OK); after the
+// outer budget is spent the handler reports an error containing the
+// abandonment phrase. on_error: would route in production.
+func TestOracleAskWithMCP_AbandonmentExhausted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+	t.Setenv("HALLY_BIN", "/usr/local/bin/hally")
+
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "record.txt")
+	t.Setenv("HALLY_FAKE_RECORD", recordPath)
+	promptPath := filepath.Join(dir, "p.md")
+	require.NoError(t, os.WriteFile(promptPath, []byte("do the thing"), 0o644))
+	schemaPath := filepath.Join(dir, "schema.json")
+	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644))
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path": promptPath,
+		"schema":      schemaPath,
+		"validator": map[string]any{
+			"post_cmd": "true",
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Error, "all iterations abandoned must surface an error")
+	assert.Contains(t, res.Error, "abandoned",
+		"error must mention abandonment so operators can distinguish from RetriesExhausted")
+
+	// Should have run exactly three iterations (the default outer cap).
+	record, err := os.ReadFile(recordPath)
+	require.NoError(t, err)
+	iters := strings.Count(string(record), "----iteration----")
+	assert.Equal(t, 3, iters, "expected three outer iterations")
+}
+
+// TestOracleAskWithMCP_VerifierRejection_LeadsToRetriesExhausted — the
+// fake claude writes a state file claiming the validator hit MaxRetries
+// (5 attempts, 0 successes). The host must surface RetriesExhausted on
+// the very first iteration: no point re-engaging when the validator has
+// run out of retry budget.
+func TestOracleAskWithMCP_VerifierRejection_LeadsToRetriesExhausted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+	t.Setenv("HALLY_BIN", "/usr/local/bin/hally")
+
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "record.txt")
+	t.Setenv("HALLY_FAKE_RECORD", recordPath)
+	promptPath := filepath.Join(dir, "p.md")
+	require.NoError(t, os.WriteFile(promptPath, []byte("propose SIMULATE_EXHAUST"), 0o644))
+	schemaPath := filepath.Join(dir, "schema.json")
+	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644))
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path": promptPath,
+		"schema":      schemaPath,
+		"validator": map[string]any{
+			"post_cmd":    "true",
+			"max_retries": 5,
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Error)
+	// last_error from the state file must propagate so operators know why.
+	assert.Contains(t, res.Error, "verifier rejected: file foo.go did not change")
+
+	// Only one outer iteration — no point re-engaging when retries are
+	// already exhausted.
+	record, err := os.ReadFile(recordPath)
+	require.NoError(t, err)
+	iters := strings.Count(string(record), "----iteration----")
+	assert.Equal(t, 1, iters, "RetriesExhausted must short-circuit the outer loop")
+}
+
+// TestOracleAskWithMCP_NudgeIncludesLastError_AndOmitsItWhenAbsent — the
+// nudge prompt rendered for iter 1 must include the validator's
+// last_error when set, and use a generic fallback when not.
+//
+// We split the assertion across two scenarios:
+//   - SIMULATE_REJECT_THEN_OK sets last_error="first attempt rejected"
+//     (already exercised above; we re-assert for clarity here).
+//   - A vanilla abandonment with no last_error must produce a nudge
+//     that does NOT contain "rejected".
+func TestOracleAskWithMCP_NudgeIncludesLastError_AndOmitsItWhenAbsent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+	t.Setenv("HALLY_BIN", "/usr/local/bin/hally")
+
+	t.Run("with_last_error", func(t *testing.T) {
+		dir := t.TempDir()
+		recordPath := filepath.Join(dir, "record.txt")
+		t.Setenv("HALLY_FAKE_RECORD", recordPath)
+		t.Setenv("HALLY_FAKE_REJECT_THEN_OK", "1")
+		promptPath := filepath.Join(dir, "p.md")
+		require.NoError(t, os.WriteFile(promptPath, []byte("do"), 0o644))
+		schemaPath := filepath.Join(dir, "schema.json")
+		require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644))
+
+		_, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+			"prompt_path": promptPath,
+			"schema":      schemaPath,
+			"validator":   map[string]any{"post_cmd": "true"},
+		})
+		require.NoError(t, err)
+		record, _ := os.ReadFile(recordPath)
+		assert.Contains(t, string(record), "first attempt rejected",
+			"nudge must echo last_error verbatim")
+	})
+
+	t.Run("without_last_error", func(t *testing.T) {
+		dir := t.TempDir()
+		recordPath := filepath.Join(dir, "record.txt")
+		t.Setenv("HALLY_FAKE_RECORD", recordPath)
+		promptPath := filepath.Join(dir, "p.md")
+		// Plain abandonment: no SIMULATE_* sentinels means the fake
+		// writes nothing to the state file, so last_error stays empty.
+		require.NoError(t, os.WriteFile(promptPath, []byte("do"), 0o644))
+		schemaPath := filepath.Join(dir, "schema.json")
+		require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644))
+
+		_, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+			"prompt_path": promptPath,
+			"schema":      schemaPath,
+			"validator":   map[string]any{"post_cmd": "true"},
+		})
+		require.NoError(t, err)
+		record, _ := os.ReadFile(recordPath)
+		text := string(record)
+		// Nudge present (we ran multiple iterations).
+		assert.Contains(t, text, "Your previous turn ended without successfully calling submit")
+		// But no "rejected" prefix block since last_error is empty.
+		// (The fake script never wrote a state file for this case.)
+		assert.NotContains(t, text, "The last submission attempt was rejected:",
+			"nudge must use generic language when last_error is empty")
+	})
 }
 
 // TestOracleAskWithMCP_StdoutJSONParseError surfaces a parse-error sentinel

@@ -8,7 +8,11 @@
 #
 # Sentinel "FAIL" in stdin → exit 2 with stderr, same convention as
 # fake-oneshot.sh.
-set -euo pipefail
+set -uo pipefail
+
+# Capture the original argv before the case-shift loop consumes it; the
+# retry-loop tests need to see --resume / --session-id.
+orig_argv=("$@")
 
 mcp_config=""
 output_format="text"
@@ -48,19 +52,132 @@ fi
 sentinel="$(printf '%s' "$stdin" | grep -o 'SIMULATE_SUBMIT=.*' || true)"
 if [ -n "$sentinel" ] && [ -n "$mcp_body" ]; then
   payload="${sentinel#SIMULATE_SUBMIT=}"
-  output_path="$(python3 -c '
+  paths_json="$(python3 -c '
 import json, sys
 cfg = json.loads(sys.argv[1])
 v = cfg.get("mcpServers", {}).get("validator", {})
 args = v.get("args", [])
+out = {"output": "", "state": ""}
 for i, a in enumerate(args):
     if a == "--output" and i + 1 < len(args):
-        print(args[i + 1])
-        break
+        out["output"] = args[i + 1]
+    if a == "--state-file" and i + 1 < len(args):
+        out["state"] = args[i + 1]
+print(json.dumps(out))
 ' "$mcp_body")"
+  output_path="$(printf '%s' "$paths_json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["output"])')"
+  state_path="$(printf '%s' "$paths_json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["state"])')"
   if [ -n "$output_path" ]; then
     printf '%s' "$payload" > "$output_path"
   fi
+  # When the host runs the retry loop it reads the validator state file
+  # to compute Outcome. Synthesize a successful-submit state so the loop
+  # exits after one iteration with Result.submitted bound to the payload.
+  if [ -n "$state_path" ]; then
+    printf '{"attempts":1,"successful_submits":1,"last_error":""}' > "$state_path"
+  fi
+fi
+
+# "SIMULATE_ABANDON" — exit cleanly without writing anything to the
+# validator's output or state file. From the host's point of view this
+# looks like the LLM ended without calling submit at all (Outcome ==
+# Abandoned). The retry loop should re-engage on subsequent iterations.
+# No-op here; we just drop through.
+
+# "SIMULATE_REJECT_THEN_OK" — the first iteration writes a non-success
+# state file ("rejected"); a second iteration with the resume marker
+# writes a successful state. The fake recognises the resume marker by
+# scanning argv for the sentinel "--resume" (set by the host's retry
+# loop on iter > 0).
+resume_marker=""
+if [ ${#orig_argv[@]} -gt 0 ] && printf '%s\n' "${orig_argv[@]}" | grep -q -- '--resume'; then
+  resume_marker="resume"
+fi
+# The reject-then-ok scenario is sticky across iterations because the
+# nudge prompt (iter 1+) won't carry the SIMULATE_REJECT_THEN_OK
+# sentinel — only iter 0's user-authored prompt does. Tests opt in
+# via env var HALLY_FAKE_REJECT_THEN_OK=1 (set with t.Setenv) so the
+# behaviour persists across the host's claude restarts.
+reject_then_ok="${HALLY_FAKE_REJECT_THEN_OK:-}"
+if [ -z "$reject_then_ok" ] && printf '%s' "$stdin" | grep -q SIMULATE_REJECT_THEN_OK; then
+  reject_then_ok="1"
+fi
+if [ "$reject_then_ok" = "1" ]; then
+  state_path="$(printf '%s' "$mcp_body" | python3 -c '
+import json, sys
+try:
+  cfg = json.loads(sys.stdin.read())
+except Exception:
+  print("")
+  sys.exit(0)
+v = cfg.get("mcpServers", {}).get("validator", {})
+for i, a in enumerate(v.get("args", [])):
+  if a == "--state-file" and i + 1 < len(v["args"]):
+    print(v["args"][i + 1]); break
+')"
+  if [ -n "$state_path" ]; then
+    if [ -z "$resume_marker" ]; then
+      # First iteration: pretend abandoned (no successful submit, low
+      # attempt count) so the host retry loop nudges.
+      printf '{"attempts":1,"successful_submits":0,"last_error":"first attempt rejected"}' > "$state_path"
+    else
+      # Second iteration (after --resume nudge): pretend success.
+      printf '{"attempts":2,"successful_submits":1,"last_error":""}' > "$state_path"
+      output_path="$(printf '%s' "$mcp_body" | python3 -c '
+import json, sys
+try:
+  cfg = json.loads(sys.stdin.read())
+except Exception:
+  print("")
+  sys.exit(0)
+v = cfg.get("mcpServers", {}).get("validator", {})
+for i, a in enumerate(v.get("args", [])):
+  if a == "--output" and i + 1 < len(v["args"]):
+    print(v["args"][i + 1]); break
+')"
+      if [ -n "$output_path" ]; then
+        printf '{"summary":"resume worked","resumed":true}' > "$output_path"
+      fi
+    fi
+  fi
+fi
+
+# "SIMULATE_EXHAUST" — write a state file showing the validator
+# rejected MaxRetries times so the host loop classifies the outcome as
+# RetriesExhausted (regardless of how many outer iterations remain).
+if printf '%s' "$stdin" | grep -q SIMULATE_EXHAUST; then
+  state_path="$(printf '%s' "$mcp_body" | python3 -c '
+import json, sys
+try:
+  cfg = json.loads(sys.stdin.read())
+except Exception:
+  print("")
+  sys.exit(0)
+v = cfg.get("mcpServers", {}).get("validator", {})
+for i, a in enumerate(v.get("args", [])):
+  if a == "--state-file" and i + 1 < len(v["args"]):
+    print(v["args"][i + 1]); break
+')"
+  if [ -n "$state_path" ]; then
+    printf '{"attempts":5,"successful_submits":0,"last_error":"verifier rejected: file foo.go did not change"}' > "$state_path"
+  fi
+fi
+
+# HALLY_FAKE_RECORD=<path> — append the stdin prompt and argv to
+# <path>, one entry per invocation. Used by retry-loop tests to assert
+# the nudge-prompt content on iteration 1 (we can't carry a sentinel
+# in the prompt because iter 1's prompt is the host-rendered nudge,
+# not the original prompt). Set via t.Setenv.
+record_path="${HALLY_FAKE_RECORD:-}"
+if [ -n "$record_path" ]; then
+  {
+    printf '%s\n' '----iteration----'
+    printf '%s\n' "$stdin"
+    printf '%s\n' '----argv----'
+    if [ ${#orig_argv[@]} -gt 0 ]; then
+      printf '%s\n' "${orig_argv[@]}"
+    fi
+  } >> "$record_path"
 fi
 
 if [ "$output_format" = "json" ]; then
