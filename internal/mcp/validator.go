@@ -71,6 +71,11 @@ type ValidatorServer struct {
 	postCmdCwd  string
 	maxRetries  int
 
+	// stateFilePath, when non-empty, makes counters (attempts /
+	// successfulSubmits / lastError) survive process restarts. See
+	// ValidatorConfig.StateFilePath for rationale. Empty = volatile.
+	stateFilePath string
+
 	// Session state — protected by mu. Each `submit` call mutates these;
 	// Outcome() reads them. The validator instance is shared across calls
 	// within a single Run(ctx), so this state is the source of truth for
@@ -80,6 +85,15 @@ type ValidatorServer struct {
 	attempts          int    // total submit calls (any outcome)
 	successfulSubmits int    // submits that passed schema + post-cmd
 	lastError         string // most recent rejection reason (for diagnostics)
+}
+
+// validatorState is the on-disk shape of the persisted counters when
+// ValidatorConfig.StateFilePath is set. JSON-encoded, atomically rewritten
+// after every mutation under the validator's lock.
+type validatorState struct {
+	Attempts          int    `json:"attempts"`
+	SuccessfulSubmits int    `json:"successful_submits"`
+	LastError         string `json:"last_error"`
 }
 
 // PostCmdArg is a single key/value pair forwarded to the --post-cmd
@@ -119,6 +133,17 @@ type ValidatorConfig struct {
 	// (5). On exhaustion the validator returns a final-error response and
 	// Run() reports OutcomeRetriesExhausted.
 	MaxRetries int
+
+	// StateFilePath, when non-empty, makes session counters
+	// (attempts/successfulSubmits/lastError) survive a process restart.
+	// At startup the validator reads JSON state from this file (if it
+	// exists) to seed its counters; after every submit it rewrites the
+	// file atomically. host.oracle.ask_with_mcp uses this to keep one
+	// logical "validator session" across multiple `claude --resume`
+	// re-engagements (each re-engagement spawns a fresh hally
+	// mcp-validator subprocess but they all share the same state file).
+	// Empty = volatile in-memory counters only (the default).
+	StateFilePath string
 }
 
 // NewValidatorServer constructs a ValidatorServer from a raw JSON Schema.
@@ -171,15 +196,31 @@ func NewValidatorServer(cfg ValidatorConfig) (*ValidatorServer, error) {
 	}
 
 	srv := &ValidatorServer{
-		schemaRaw:   append(json.RawMessage(nil), cfg.SchemaJSON...),
-		compiled:    compiled,
-		toolName:    toolName,
-		description: desc,
-		outputPath:  cfg.OutputPath,
-		postCmd:     strings.TrimSpace(cfg.PostCmd),
-		postCmdArgs: append([]PostCmdArg(nil), cfg.PostCmdArgs...),
-		postCmdCwd:  cfg.PostCmdCwd,
-		maxRetries:  maxRetries,
+		schemaRaw:     append(json.RawMessage(nil), cfg.SchemaJSON...),
+		compiled:      compiled,
+		toolName:      toolName,
+		description:   desc,
+		outputPath:    cfg.OutputPath,
+		postCmd:       strings.TrimSpace(cfg.PostCmd),
+		postCmdArgs:   append([]PostCmdArg(nil), cfg.PostCmdArgs...),
+		postCmdCwd:    cfg.PostCmdCwd,
+		maxRetries:    maxRetries,
+		stateFilePath: cfg.StateFilePath,
+	}
+
+	// Seed counters from the state file (if present and well-formed).
+	// A missing file is the normal "first iteration" case; a malformed
+	// file is treated as "no prior state" rather than fatal so an
+	// operator can hand-edit / wipe the file without crashing the run.
+	if srv.stateFilePath != "" {
+		if data, rerr := os.ReadFile(srv.stateFilePath); rerr == nil && len(data) > 0 {
+			var st validatorState
+			if jerr := json.Unmarshal(data, &st); jerr == nil {
+				srv.attempts = st.Attempts
+				srv.successfulSubmits = st.SuccessfulSubmits
+				srv.lastError = st.LastError
+			}
+		}
 	}
 
 	srv.mcpSrv = mcpsdk.NewServer(&mcpsdk.Implementation{
@@ -372,6 +413,7 @@ func (v *ValidatorServer) recordSuccess() {
 	v.mu.Lock()
 	v.successfulSubmits++
 	v.lastError = ""
+	v.persistStateLocked()
 	v.mu.Unlock()
 }
 
@@ -380,7 +422,29 @@ func (v *ValidatorServer) recordSuccess() {
 func (v *ValidatorServer) recordFailure(reason string) {
 	v.mu.Lock()
 	v.lastError = reason
+	v.persistStateLocked()
 	v.mu.Unlock()
+}
+
+// persistStateLocked rewrites the on-disk state file atomically. Caller
+// must hold v.mu. No-op when stateFilePath is empty. Failures are
+// silently ignored: a state-file write error must not block the LLM's
+// response — the worst-case is that a subsequent restart loses one
+// iteration of state, which is recoverable.
+func (v *ValidatorServer) persistStateLocked() {
+	if v.stateFilePath == "" {
+		return
+	}
+	st := validatorState{
+		Attempts:          v.attempts,
+		SuccessfulSubmits: v.successfulSubmits,
+		LastError:         v.lastError,
+	}
+	data, err := json.Marshal(st)
+	if err != nil {
+		return
+	}
+	_ = writeOutputAtomically(v.stateFilePath, data)
 }
 
 // maxRetriesExhaustedMessage is the LLM-facing sentinel returned once the

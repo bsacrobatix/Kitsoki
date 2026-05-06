@@ -36,14 +36,15 @@ import (
 
 func mcpValidatorCmd() *cobra.Command {
 	var (
-		schemaPath   string
-		outputPath   string
-		toolName     string
-		description  string
-		postCmd      string
-		postCmdArgs  []string
-		postCmdCwd   string
-		maxRetries   int
+		schemaPath    string
+		outputPath    string
+		toolName      string
+		description   string
+		postCmd       string
+		postCmdArgs   []string
+		postCmdCwd    string
+		maxRetries    int
+		stateFilePath string
 	)
 	cmd := &cobra.Command{
 		Use:   "mcp-validator",
@@ -105,6 +106,7 @@ The schema must be a JSON Schema object whose top-level "type" is
 				PostCmdArgs:     parsedArgs,
 				PostCmdCwd:      postCmdCwd,
 				MaxRetries:      maxRetries,
+				StateFilePath:   stateFilePath,
 			})
 			if err != nil {
 				return fmt.Errorf("build validator: %w", err)
@@ -150,5 +152,10 @@ The schema must be a JSON Schema object whose top-level "type" is
 	cmd.Flags().IntVar(&maxRetries, "max-retries", 5,
 		"max submit attempts (schema-fail + post-cmd-fail combined). On exhaustion the next call "+
 			"returns a final-error response and Run() reports OutcomeRetriesExhausted.")
+	cmd.Flags().StringVar(&stateFilePath, "state-file", "",
+		"persist session counters (attempts/successful_submits/last_error) to this JSON file. "+
+			"At startup the file is read to seed counters; after every submit it is rewritten "+
+			"atomically. Used by host.oracle.ask_with_mcp to keep one logical validator session "+
+			"across multiple `claude --resume` re-engagements. Empty = volatile in-memory only.")
 	return cmd
 }
