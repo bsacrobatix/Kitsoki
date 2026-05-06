@@ -22,13 +22,26 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
+
+// postCmdStderrCap caps captured stderr at this many bytes (tail-preserved)
+// before being returned to the LLM. Verifiers can produce verbose output;
+// 2 KiB is enough to convey one or two distinct failures while keeping the
+// prompt cheap.
+const postCmdStderrCap = 2000
+
+// ansiEscapeRE strips CSI sequences (most ANSI colours) from captured
+// stderr. Verifiers like pytest/rich often emit colour codes that would
+// otherwise leak into the LLM's context as noise.
+var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 // ValidatorServer is the MCP-protocol surface of the schema validator.
 type ValidatorServer struct {
@@ -237,6 +250,23 @@ func (v *ValidatorServer) handleSubmit(ctx context.Context, req *mcpsdk.CallTool
 		return errorResult(msg), nil
 	}
 
+	// Run the optional post-cmd verifier. Non-zero exit = LLM-visible
+	// rejection (with capped stderr); the side-channel write is skipped
+	// so a semantically-bad payload never lands in the canonical output.
+	if v.postCmd != "" {
+		if rejection, err := v.runPostCmd(ctx, raw); err != nil {
+			// Infrastructure failure (couldn't spawn, couldn't write
+			// tempfile, etc.) — surface as a retry-eligible rejection
+			// so the LLM at least sees what went wrong.
+			msg := fmt.Sprintf("submit: post-cmd infrastructure error: %v", err)
+			v.recordFailure(msg)
+			return errorResult(msg), nil
+		} else if rejection != "" {
+			v.recordFailure(rejection)
+			return errorResult(rejection), nil
+		}
+	}
+
 	// Capture to the side-channel file. We use the raw arguments rather
 	// than re-marshalling the parsed instance so byte-level fidelity is
 	// preserved (numeric precision, key order from the LLM, etc.).
@@ -287,6 +317,92 @@ func maxRetriesExhaustedMessage(lastErr string) string {
 		msg += "\n\nLast rejection reason:\n" + lastErr
 	}
 	return msg
+}
+
+// runPostCmd writes the submitted JSON to a tempfile and runs the
+// configured post-cmd verifier. Returns:
+//
+//   - ("", nil)            — verifier exited 0, payload semantically accepted
+//   - (rejectMsg, nil)     — verifier exited non-zero, capped stderr returned
+//                            for the LLM to react to
+//   - ("", err)            — infrastructure failure (couldn't write tempfile,
+//                            couldn't spawn, etc.) — caller surfaces as such
+//
+// The post-cmd is split into argv0 + argv-rest by shell-style word
+// splitting (spaces only — no quoting). Power users who need quoted args
+// can pass them via --post-cmd-arg key=value, which always renders as
+// `--key value` (two argv slots).
+func (v *ValidatorServer) runPostCmd(ctx context.Context, submittedJSON []byte) (string, error) {
+	// Write the submitted JSON to a tempfile that the verifier will read.
+	tmp, err := os.CreateTemp("", "hally-validator-submitted-*.json")
+	if err != nil {
+		return "", fmt.Errorf("create tempfile: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(submittedJSON); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("write tempfile: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close tempfile: %w", err)
+	}
+
+	// Build argv. We split postCmd on whitespace (no shell metachars) so
+	// `python3 -m bugfix verify-impl` works without spawning sh. Quoted
+	// values must come through --post-cmd-arg.
+	parts := strings.Fields(v.postCmd)
+	if len(parts) == 0 {
+		return "", fmt.Errorf("post-cmd is empty after whitespace split")
+	}
+	argv := append([]string(nil), parts[1:]...)
+	for _, kv := range v.postCmdArgs {
+		argv = append(argv, "--"+kv.Key, kv.Value)
+	}
+	argv = append(argv, "--submitted-json", tmpPath)
+
+	cmd := exec.CommandContext(ctx, parts[0], argv...)
+	if v.postCmdCwd != "" {
+		cmd.Dir = v.postCmdCwd
+	}
+	// Capture stderr only — stdout is reserved for verifier-internal
+	// chatter that we don't want to surface to the LLM.
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	cmd.Stdout = nil // discard
+
+	runErr := cmd.Run()
+	if runErr == nil {
+		return "", nil
+	}
+
+	// Non-zero exit. Cap and ANSI-strip stderr for the LLM.
+	capped := capStderr(stderr.String(), postCmdStderrCap)
+	rejection := "submit: post-cmd verifier rejected the payload. " +
+		"Fix the issues and call submit again.\n\n" +
+		"verifier stderr (last " + fmt.Sprintf("%d", postCmdStderrCap) + " bytes; ANSI stripped):\n" +
+		capped
+	// If the error is *not* an ExitError (e.g. binary missing) treat as
+	// infrastructure rather than a verifier rejection so the operator
+	// can fix the wiring.
+	if _, ok := runErr.(*exec.ExitError); !ok {
+		return "", fmt.Errorf("spawn post-cmd %q: %w (stderr: %s)", parts[0], runErr, capped)
+	}
+	return rejection, nil
+}
+
+// capStderr returns the tail of s capped at maxBytes after stripping ANSI
+// escape sequences. The tail is preferred because verifier diagnostics
+// usually surface errors after a banner of progress noise.
+func capStderr(s string, maxBytes int) string {
+	clean := ansiEscapeRE.ReplaceAllString(s, "")
+	if len(clean) <= maxBytes {
+		return clean
+	}
+	// Preserve the tail; prepend an ellipsis marker so the LLM knows the
+	// head was truncated.
+	tail := clean[len(clean)-maxBytes:]
+	return "…[truncated]…\n" + tail
 }
 
 // writeOutputAtomically writes data to path via a temp file + rename, so
