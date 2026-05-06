@@ -18,6 +18,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"hally/internal/app"
+	"hally/internal/chathost"
+	"hally/internal/chats"
 	"hally/internal/harness"
 	"hally/internal/host"
 	"hally/internal/jobs"
@@ -61,9 +63,16 @@ See also the full design document (design.md) in the repo.`,
 	root.AddCommand(inspectCmd())
 	root.AddCommand(turnCmd())
 	root.AddCommand(sessionCmd())
+	root.AddCommand(chatCmd())
 	root.AddCommand(mcpValidatorCmd())
 
 	if err := root.Execute(); err != nil {
+		// Sentinel error: translate to EX_TEMPFAIL=75 (chat-busy / session-busy)
+		// so wrappers like loop.py can back off and retry.  The user-facing
+		// reason was already written to stderr by the subcommand.
+		if IsTempFail(err) {
+			os.Exit(EX_TEMPFAIL)
+		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -153,6 +162,14 @@ See 'hally docs llm-guide' for the full operator guide.`,
 			// Slice-1: scheduler and job store are now wired into the orchestrator
 			// via WithScheduler / WithJobStore options below.
 
+			// Build the chat store.  Shares the same *sql.DB so we keep one SQLite
+			// file for all persistence.
+			rawChatStore, err := chats.NewStore(s.DB())
+			if err != nil {
+				return fmt.Errorf("open chat store: %w", err)
+			}
+			chatStoreAdapter := chathost.NewAdapter(rawChatStore)
+
 			// Build trace logger.
 			var level slog.Level
 			switch traceLevel {
@@ -218,6 +235,7 @@ See 'hally docs llm-guide' for the full operator guide.`,
 				orchestrator.WithHostRegistry(hostReg),
 				orchestrator.WithScheduler(jobScheduler),
 				orchestrator.WithJobStore(jobStore),
+				orchestrator.WithChatStore(chatStoreAdapter),
 			)
 
 			// Create a new session.

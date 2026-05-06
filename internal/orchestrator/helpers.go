@@ -69,6 +69,11 @@ func (o *Orchestrator) SetLogger(l *slog.Logger) {
 // If you are writing user-facing conversation handling, use Turn instead so the
 // LLM harness participates in routing.
 func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any) (*TurnOutcome, error) {
+	// Serialise against handleJobTerminal — see Turn for rationale.
+	sessMu := o.sessionLock(sid)
+	sessMu.Lock()
+	defer sessMu.Unlock()
+
 	journey, err := o.loadJourney(sid)
 	if err != nil {
 		return nil, fmt.Errorf("orchestrator: RunIntent: load journey: %w", err)

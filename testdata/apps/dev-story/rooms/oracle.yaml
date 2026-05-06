@@ -1,46 +1,132 @@
-# Oracle Room — interactive Claude Code session that persists across turns.
+# Oracle Room — persistent chat-thread conversations with Claude Code.
 #
-# Each ask_question / explore_area / brainstorm invokes `host.oracle.talk`
-# (backed by the `claude -p --session-id <uuid>` CLI). The session_id is
-# stored in world so subsequent turns resume the same Claude session — tools,
-# context, and memory all carry over. Exiting the room (go_back / go_main)
-# keeps the session_id; re-entering continues where the user left off.
+# State layout:
+#   oracle              — chat list view; on_enter loads the list via host.chat.list
+#   oracle_active       — transcript view for an existing open chat
+#   oracle_asking_new   — creates a fresh chat THEN calls host.oracle.talk (ask_question from list)
+#   oracle_asking       — calls host.oracle.talk in an already-open chat
+#   oracle_error        — error fallback
+#
+# Auto-persistence: every ask_question from the list view creates a new chat
+# (host.chat.create), fires host.oracle.talk, then host.chat.suggest_title
+# generates a polished title. Each chat persists across restarts.
+#
+# Effect.When is NOT supported — conditional create vs no-create is achieved
+# via the two-state split (oracle_asking_new / oracle_asking).
 
 states:
   oracle:
     mode: conversational
-    description: "Oracle Room — an interactive Claude Code session. Ask anything; the session persists."
+    description: "Oracle Room — chat list. Start a new thread or open an existing one."
     view: |
-      Oracle Room — interactive Claude session.
+      ======================================================================
+       Oracle                                   persistent Claude chats
+      ======================================================================
 
-      Session: {{ world.oracle_session_id }}{{ if world.oracle_session_id == "" }}(new){{ end }}
-      Turns so far: {{ world.oracle_turns }}
+      {{ if world.oracle_chat_count == 0 }}
+       No chats yet.
 
-      Ask a question, explore an area of the codebase, or brainstorm an approach.
-      Your session persists — leaving and returning resumes the same Claude context.
+       Type a question to start your first conversation:
+         "how does the ZTA proxy work"
+         "explain the beasy flow"
+         "walk me through bug-fix.py"
+      {{ else }}
+       Chats: {{ world.oracle_chat_count }}
 
-        ask question "..."
-        explore area "..."
-        brainstorm "..."
+      {{ world.oracle_chats_view }}
 
-      Use "back" to return to the previous room (session is preserved).
-    relevant_world: [oracle_session_id, oracle_turns]
+       Actions:
+         ask "..."                  — start a new chat with this question
+         open <number/id>           — resume an existing chat
+         rename <number/id> "title" — rename a chat
+         remove <number/id>         — archive a chat (hides from list)
+      {{ end }}
+
+       back                         — return to previous room
+    relevant_world: [oracle_chats_view, oracle_chat_count]
     relevant_slots: []
+    on_enter:
+      - invoke: host.chat.list
+        with:
+          app:  "dev-story"
+          room: "oracle"
+        bind:
+          oracle_chats_view: "rendered"
+          oracle_chat_count: "count"
+        on_error: oracle_error
+
     on:
       ask_question:
-        - target: oracle_answering
+        # Ask from list → create a fresh chat then ask. Routes to oracle_asking_new
+        # which creates the chat in on_enter before firing host.oracle.talk.
+        - target: oracle_asking_new
           effects:
-            - set: { oracle_question: "{{ slots.question }}" }
+            - set:
+                oracle_chat_id:    ""
+                oracle_question:   "{{ slots.question }}"
+                oracle_chat_title: ""
+                oracle_answer:     ""
 
-      explore_area:
-        - target: oracle_answering
+      new_chat:
+        # Explicit new chat (no question yet) → open a blank chat.
+        - target: oracle_active_new
           effects:
-            - set: { oracle_question: "Walk me through: {{ slots.area }}" }
+            - set:
+                oracle_chat_id:    ""
+                oracle_question:   ""
+                oracle_chat_title: "{{ slots.title }}"
+                oracle_answer:     ""
 
-      brainstorm:
-        - target: oracle_answering
+      open_chat:
+        # User typed "open 1" or "open 01KQZ3" — resolve the ref to a full ULID
+        # via host.chat.resolve_ref before transitioning. The handler accepts
+        # list positions, ULID prefixes, or full ULIDs.
+        - target: oracle_active
           effects:
-            - set: { oracle_question: "Let's brainstorm: {{ slots.topic }}" }
+            - invoke: host.chat.resolve_ref
+              with:
+                app:  "dev-story"
+                room: "oracle"
+                ref:  "{{ slots.chat_id }}"
+              bind:
+                oracle_chat_id: "chat_id"
+              on_error: oracle_error
+            - set:
+                oracle_question:   ""
+                oracle_answer:     ""
+
+      rename_chat:
+        - target: oracle
+          effects:
+            - invoke: host.chat.resolve_ref
+              with:
+                app:  "dev-story"
+                room: "oracle"
+                ref:  "{{ slots.chat_id }}"
+              bind:
+                oracle_chat_id: "chat_id"
+              on_error: oracle_error
+            - invoke: host.chat.rename
+              with:
+                chat_id: "{{ world.oracle_chat_id }}"
+                title:   "{{ slots.title }}"
+              on_error: oracle_error
+
+      archive_chat:
+        - target: oracle
+          effects:
+            - invoke: host.chat.resolve_ref
+              with:
+                app:  "dev-story"
+                room: "oracle"
+                ref:  "{{ slots.chat_id }}"
+              bind:
+                oracle_chat_id: "chat_id"
+              on_error: oracle_error
+            - invoke: host.chat.archive
+              with:
+                chat_id: "{{ world.oracle_chat_id }}"
+              on_error: oracle_error
 
       go_back:
         - target: "{{ world.prev_state }}"
@@ -52,53 +138,275 @@ states:
         - target: inbox
           push_history: false
 
-  oracle_answering:
+  oracle_active_new:
     mode: conversational
-    description: "Oracle is working on your question..."
+    description: "Creating a new Oracle chat..."
     view: |
+      Oracle — {{ world.oracle_chat_title }}
+      Chat ID: {{ world.oracle_chat_id }}
+
+      (empty chat — ask a question to begin)
+
+      Ask a question, or use "back" to return to the chat list.
+    relevant_world: [oracle_chat_id, oracle_chat_title]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.chat.create
+        with:
+          app:   "dev-story"
+          room:  "oracle"
+          title: "{{ world.oracle_chat_title }}"
+        bind:
+          oracle_chat_id:    "chat_id"
+          oracle_chat_title: "title"
+        on_error: oracle_error
+
+    on:
+      ask_question:
+        - target: oracle_asking
+          effects:
+            - set:
+                oracle_question: "{{ slots.question }}"
+                oracle_answer:   ""
+
+      ask_question_bg:
+        - target: oracle_asking_bg
+          effects:
+            - set:
+                oracle_question: "{{ slots.question }}"
+                oracle_answer:   ""
+
+      rename_chat:
+        - target: oracle_active_new
+          effects:
+            - invoke: host.chat.rename
+              with:
+                chat_id: "{{ world.oracle_chat_id }}"
+                title:   "{{ slots.title }}"
+              on_error: oracle_error
+
+      go_back:
+        - target: oracle
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  oracle_active:
+    mode: conversational
+    description: "Active Oracle chat — view transcript and ask questions."
+    view: |
+      Oracle — {{ world.oracle_chat_title }}
+      Chat ID: {{ world.oracle_chat_id }}
+
+      {{ world.oracle_transcript_view }}
+
+      Ask a question, or use "back" to return to the chat list.
+    relevant_world: [oracle_chat_id, oracle_chat_title, oracle_transcript_view, oracle_answer]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.chat.transcript
+        with:
+          chat_id: "{{ world.oracle_chat_id }}"
+        bind:
+          oracle_transcript_view: "rendered"
+          oracle_chat_title:      "title"
+        on_error: oracle_error
+
+    on:
+      ask_question:
+        - target: oracle_asking
+          effects:
+            - set:
+                oracle_question: "{{ slots.question }}"
+                oracle_answer:   ""
+
+      explore_area:
+        - target: oracle_asking
+          effects:
+            - set:
+                oracle_question: "Walk me through: {{ slots.area }}"
+                oracle_answer:   ""
+
+      brainstorm:
+        - target: oracle_asking
+          effects:
+            - set:
+                oracle_question: "Let's brainstorm: {{ slots.topic }}"
+                oracle_answer:   ""
+
+      rename_chat:
+        - target: oracle_active
+          effects:
+            - invoke: host.chat.rename
+              with:
+                chat_id: "{{ world.oracle_chat_id }}"
+                title:   "{{ slots.title }}"
+              on_error: oracle_error
+
+      go_back:
+        - target: oracle
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  oracle_asking_new:
+    mode: conversational
+    description: "Starting a new Oracle chat and asking your question..."
+    view: |
+      Oracle — {{ world.oracle_chat_title }}
+
       Q: {{ world.oracle_question }}
 
       A: {{ world.oracle_answer }}{{ if world.oracle_answer == "" }}
       [Claude is thinking...]{{ end }}
 
-      Ask another question, or use "back" to return (session is preserved).
-      Session: {{ world.oracle_session_id }}
-    relevant_world: [oracle_question, oracle_answer, oracle_session_id, oracle_turns]
+      Ask another question, or use "back" to return to the chat list.
+    relevant_world: [oracle_chat_id, oracle_chat_title, oracle_question, oracle_answer]
+    relevant_slots: []
+    on_enter:
+      # Step 1: Create a fresh chat. Title defaults to the question (handler truncates to 80 chars).
+      - invoke: host.chat.create
+        with:
+          app:   "dev-story"
+          room:  "oracle"
+          title: "{{ world.oracle_question }}"
+        bind:
+          oracle_chat_id:    "chat_id"
+          oracle_chat_title: "title"
+        on_error: oracle_error
+
+      # Step 2: Ask the question in the new chat.
+      - invoke: host.oracle.talk
+        with:
+          question: "{{ world.oracle_question }}"
+          chat_id:  "{{ world.oracle_chat_id }}"
+        bind:
+          oracle_answer: "answer"
+        on_error: oracle_error
+
+      # Step 3: Generate a polished title from the transcript (benign if it fails).
+      - invoke: host.chat.suggest_title
+        with:
+          chat_id: "{{ world.oracle_chat_id }}"
+          force: false
+        bind:
+          oracle_chat_title: "title"
+        on_error: oracle_error
+
+    on:
+      ask_question:
+        - target: oracle_asking
+          effects:
+            - set:
+                oracle_question: "{{ slots.question }}"
+                oracle_answer:   ""
+
+      explore_area:
+        - target: oracle_asking
+          effects:
+            - set:
+                oracle_question: "Walk me through: {{ slots.area }}"
+                oracle_answer:   ""
+
+      brainstorm:
+        - target: oracle_asking
+          effects:
+            - set:
+                oracle_question: "Let's brainstorm: {{ slots.topic }}"
+                oracle_answer:   ""
+
+      rename_chat:
+        - target: oracle_asking_new
+          effects:
+            - invoke: host.chat.rename
+              with:
+                chat_id: "{{ world.oracle_chat_id }}"
+                title:   "{{ slots.title }}"
+              on_error: oracle_error
+
+      go_back:
+        - target: oracle
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  oracle_asking:
+    mode: conversational
+    description: "Oracle is working on your question..."
+    view: |
+      Oracle — {{ world.oracle_chat_title }}
+
+      Q: {{ world.oracle_question }}
+
+      A: {{ world.oracle_answer }}{{ if world.oracle_answer == "" }}
+      [Claude is thinking...]{{ end }}
+
+      Ask another question, or use "back" to return to the chat list.
+    relevant_world: [oracle_chat_id, oracle_chat_title, oracle_question, oracle_answer]
     relevant_slots: []
     on_enter:
       - invoke: host.oracle.talk
         with:
           question: "{{ world.oracle_question }}"
-          session_id: "{{ world.oracle_session_id }}"
+          chat_id:  "{{ world.oracle_chat_id }}"
         bind:
           oracle_answer: "answer"
-          oracle_session_id: "session_id"
         on_error: oracle_error
-      - set: { oracle_turns: "{{ world.oracle_turns + 1 }}" }
+
+      # Suggest a title after the first answer; skip if already user-set.
+      - invoke: host.chat.suggest_title
+        with:
+          chat_id: "{{ world.oracle_chat_id }}"
+          force: false
+        bind:
+          oracle_chat_title: "title"
+        on_error: oracle_error
+
     on:
       ask_question:
-        - target: oracle_answering
+        - target: oracle_asking
           effects:
             - set:
                 oracle_question: "{{ slots.question }}"
-                oracle_answer: ""
+                oracle_answer:   ""
 
       explore_area:
-        - target: oracle_answering
+        - target: oracle_asking
           effects:
             - set:
                 oracle_question: "Walk me through: {{ slots.area }}"
-                oracle_answer: ""
+                oracle_answer:   ""
 
       brainstorm:
-        - target: oracle_answering
+        - target: oracle_asking
           effects:
             - set:
                 oracle_question: "Let's brainstorm: {{ slots.topic }}"
-                oracle_answer: ""
+                oracle_answer:   ""
+
+      rename_chat:
+        - target: oracle_asking
+          effects:
+            - invoke: host.chat.rename
+              with:
+                chat_id: "{{ world.oracle_chat_id }}"
+                title:   "{{ slots.title }}"
+              on_error: oracle_error
 
       go_back:
-        - target: "{{ world.prev_state }}"
+        - target: oracle
 
       go_main:
         - target: main
@@ -112,24 +420,63 @@ states:
     view: |
       Oracle error: {{ world.last_error }}
 
-      Try asking again, or use "back" to leave the room.
-      Session: {{ world.oracle_session_id }} (preserved for retry)
-    relevant_world: [last_error, oracle_session_id]
+      Try again, or use "back" to return.
+      Chat: {{ world.oracle_chat_id }}
+    relevant_world: [last_error, oracle_chat_id]
     relevant_slots: []
     on:
       ask_question:
-        - target: oracle_answering
+        - target: oracle_asking
           effects:
             - set:
                 oracle_question: "{{ slots.question }}"
-                oracle_answer: ""
-                last_error: ""
+                oracle_answer:   ""
+                last_error:      ""
 
       retry:
-        - target: oracle_answering
+        - target: oracle_active
 
       go_back:
         - target: "{{ world.prev_state }}"
 
       go_main:
         - target: main
+
+  # ─── Background-oracle state (used by flow8 / orchestrator background tests) ─
+
+  oracle_asking_bg:
+    mode: conversational
+    description: "Background Oracle — question dispatched as a background job."
+    view: |
+      Oracle — {{ world.oracle_chat_title }}
+
+      Q: {{ world.oracle_question }}
+
+      A: {{ world.oracle_answer }}{{ if world.oracle_answer == "" }}
+      [Waiting for Claude reply in background… check Inbox for notification.]{{ end }}
+
+      Use "back" to return to the chat list.
+    relevant_world: [oracle_chat_id, oracle_chat_title, oracle_question, oracle_answer, last_job_id]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.oracle.talk
+        with:
+          question: "{{ world.oracle_question }}"
+          chat_id:  "{{ world.oracle_chat_id }}"
+        background: true
+        bind:
+          last_job_id: "job_id"
+        on_complete:
+          - set:
+              oracle_answer: "{{ world.last_job_result.answer }}"
+
+    on:
+      go_back:
+        - target: oracle
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false

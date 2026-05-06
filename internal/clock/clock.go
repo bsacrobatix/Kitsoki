@@ -20,6 +20,7 @@
 package clock
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -222,6 +223,51 @@ func (f *Fake) BlockUntil(n int) {
 		f.cond.Wait()
 	}
 	f.mu.Unlock()
+}
+
+// WaitCount returns the current number of registered waiters (goroutines
+// blocked on After/Sleep, or holding a live Timer/Ticker).  This is a
+// non-blocking snapshot intended for drain-loop coordination — see e.g. the
+// testrunner's advanceAndWait, which must wait for handler goroutines to be
+// parked on the clock before advancing time.
+func (f *Fake) WaitCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.waitCount
+}
+
+// BlockUntilContext is the context-aware form of BlockUntil: it blocks until at
+// least n goroutines are registered as waiters on this clock OR ctx is
+// cancelled.  Returns ctx.Err() in the latter case, nil otherwise.
+//
+// Unlike BlockUntil, BlockUntilContext does not park indefinitely if the
+// expected number of waiters is never reached (e.g. a handler that returned
+// before calling into the clock); callers can use a short outer context to
+// re-evaluate the wait count.
+func (f *Fake) BlockUntilContext(ctx context.Context, n int) error {
+	// A goroutine watches ctx.Done and broadcasts on the cond so the wait loop
+	// below can re-check ctx.Err and exit.
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		select {
+		case <-ctx.Done():
+			f.mu.Lock()
+			f.cond.Broadcast()
+			f.mu.Unlock()
+		case <-stop:
+		}
+	}()
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for f.waitCount < n {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		f.cond.Wait()
+	}
+	return nil
 }
 
 // fireExpired fires all waiters whose deadline ≤ f.now.  Must be called with

@@ -1023,3 +1023,164 @@ func TestOracleAskWithMCP_StdoutJSONParseError(t *testing.T) {
 		t.Fatalf("test premise broken: stdout %q is valid JSON", out)
 	}
 }
+
+// ── host.oracle.ask_with_mcp chat-aware path ──────────────────────────────────
+
+// TestOracleAskWithMCP_ChatAware_FirstCall verifies that on the first call
+// with a chat_id and a ChatStore in context:
+//   - the rendered prompt is appended as a user message
+//   - a new claude_session_id is generated and stored on the chat
+//   - the assistant message is appended after the run
+//   - the result carries chat_id and transcript_seq
+func TestOracleAskWithMCP_ChatAware_FirstCall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	// Prompt with a recognisable rendered value so we can assert the user
+	// message content.
+	if err := os.WriteFile(promptPath, []byte("propose a fix for {{ args.issue }}"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	cs := newFakeChatStore()
+	cs.addChat(host.ChatRecord{ID: "chat-mcp-1", Title: "Phase 3 Chat", Status: "active"})
+	ctx := host.WithChatStore(context.Background(), cs)
+
+	res, err := host.OracleAskWithMCPHandler(ctx, map[string]any{
+		"prompt_path": promptPath,
+		"chat_id":     "chat-mcp-1",
+		"args": map[string]any{
+			"issue": "PROJ-42",
+		},
+	})
+	require.NoError(t, err)
+	require.Empty(t, res.Error, "unexpected Result.Error: %s", res.Error)
+
+	// chat_id echoed back in result
+	assert.Equal(t, "chat-mcp-1", res.Data["chat_id"])
+
+	// claude_session_id generated (non-empty)
+	claudeSID, _ := res.Data["claude_session_id"].(string)
+	assert.NotEmpty(t, claudeSID, "expected claude_session_id to be generated")
+
+	// transcript_seq present
+	_, hasSeq := res.Data["transcript_seq"]
+	assert.True(t, hasSeq, "expected transcript_seq in result")
+
+	// Two messages in transcript: user + assistant
+	msgs := cs.messages["chat-mcp-1"]
+	require.Len(t, msgs, 2, "expected 2 messages (user + assistant)")
+	assert.Equal(t, "user", msgs[0].Role)
+	// The user message content is the rendered prompt.
+	assert.Contains(t, msgs[0].Content, "PROJ-42", "user message should contain rendered prompt")
+	assert.Equal(t, "assistant", msgs[1].Role)
+
+	// claude_session_id stored on the chat row
+	stored, err := cs.Get(context.Background(), "chat-mcp-1")
+	require.NoError(t, err)
+	assert.Equal(t, claudeSID, stored.ClaudeSessionID, "claude_session_id should be persisted on chat")
+}
+
+// TestOracleAskWithMCP_ChatAware_ReusesSessionID verifies that on a second call
+// against the same chat the existing claude_session_id is reused.
+func TestOracleAskWithMCP_ChatAware_ReusesSessionID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+
+	const existingClaudeID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	if err := os.WriteFile(promptPath, []byte("second turn prompt"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	cs := newFakeChatStore()
+	cs.addChat(host.ChatRecord{
+		ID:              "chat-mcp-2",
+		Title:           "Phase 3 Chat",
+		Status:          "active",
+		ClaudeSessionID: existingClaudeID,
+	})
+	ctx := host.WithChatStore(context.Background(), cs)
+
+	res, err := host.OracleAskWithMCPHandler(ctx, map[string]any{
+		"prompt_path": promptPath,
+		"chat_id":     "chat-mcp-2",
+	})
+	require.NoError(t, err)
+	require.Empty(t, res.Error, "unexpected Result.Error: %s", res.Error)
+
+	returnedSID, _ := res.Data["claude_session_id"].(string)
+	assert.Equal(t, existingClaudeID, returnedSID, "existing claude_session_id should be reused")
+
+	// ClaudeSessionID on the chat row should remain unchanged.
+	stored, err := cs.Get(context.Background(), "chat-mcp-2")
+	require.NoError(t, err)
+	assert.Equal(t, existingClaudeID, stored.ClaudeSessionID)
+}
+
+// TestOracleAskWithMCP_ChatAware_NoChatStore verifies that providing a chat_id
+// but no store in context produces a domain-level error.
+func TestOracleAskWithMCP_ChatAware_NoChatStore(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	if err := os.WriteFile(promptPath, []byte("hi"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	res, err := host.OracleAskWithMCPHandler(context.Background(), map[string]any{
+		"prompt_path": promptPath,
+		"chat_id":     "chat-mcp-3",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, res.Error, "no chat store wired",
+		"expected 'no chat store wired' error, got: %q", res.Error)
+}
+
+// TestRunOracleAskWithMCPWithChat_AssistantAppendFails_SurfacesError verifies
+// C2: when the claude one-shot succeeds but persisting the assistant
+// message fails, the handler surfaces a Result.Error so on_error: routing
+// fires; the answer text remains in Result.Data["stdout"] for diagnostics.
+func TestRunOracleAskWithMCPWithChat_AssistantAppendFails_SurfacesError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotMCPBin(t))
+
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	if err := os.WriteFile(promptPath, []byte("hi {{ args.who }}"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	cs := newFakeChatStore()
+	cs.addChat(host.ChatRecord{ID: "chat-mcp-c2", Title: "C2 mcp chat", Status: "active"})
+	cs.failAppendOnRole = "assistant"
+	ctx := host.WithChatStore(context.Background(), cs)
+
+	res, err := host.OracleAskWithMCPHandler(ctx, map[string]any{
+		"prompt_path": promptPath,
+		"chat_id":     "chat-mcp-c2",
+		"args":        map[string]any{"who": "world"},
+	})
+	require.NoError(t, err)
+	require.Contains(t, res.Error, "persist assistant message",
+		"expected persist-assistant error in Result.Error, got: %q", res.Error)
+
+	// The user did get the answer; surface stdout in Data for diagnostics.
+	stdout, _ := res.Data["stdout"].(string)
+	assert.NotEmpty(t, stdout, "expected Result.Data[\"stdout\"] to be present even when persistence failed")
+	assert.Equal(t, "chat-mcp-c2", res.Data["chat_id"])
+
+	// Only the user message should be in the transcript — assistant append failed.
+	msgs := cs.messages["chat-mcp-c2"]
+	require.Len(t, msgs, 1, "expected exactly one user message in transcript")
+	assert.Equal(t, "user", msgs[0].Role)
+}

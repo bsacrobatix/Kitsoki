@@ -119,6 +119,83 @@ func TestOrchestrator_HostDispatchOnError_RoutesToErrorState(t *testing.T) {
 		"expected error-state on_enter to fire, got view: %q", out.View)
 }
 
+// TestOrchestrator_WithChatStore_InjectsStoreIntoContext verifies that when
+// a ChatStore is wired via orchestrator.WithChatStore, it is injected into
+// the handler context so ChatStoreFromContext returns it inside the handler.
+func TestOrchestrator_WithChatStore_InjectsStoreIntoContext(t *testing.T) {
+	def, err := app.Load("testdata/hostbind/app.yaml")
+	require.NoError(t, err)
+
+	m, err := machine.New(def)
+	require.NoError(t, err)
+
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	// Minimal ChatStore that records whether it was called.
+	var storeSeen bool
+	cs := &chatStoreProbe{onGet: func() { storeSeen = true }}
+
+	reg := host.NewRegistry()
+	reg.Register("host.probe", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		got := host.ChatStoreFromContext(ctx)
+		if got == cs {
+			storeSeen = true
+		}
+		return host.Result{Data: map[string]any{"message": "ok"}}, nil
+	})
+
+	orch := orchestrator.New(def, m, s, noopHarness{},
+		orchestrator.WithHostRegistry(reg),
+		orchestrator.WithChatStore(cs),
+	)
+
+	ctx := context.Background()
+	sid, err := orch.NewSession(ctx)
+	require.NoError(t, err)
+
+	_, err = orch.SubmitDirect(ctx, sid, "ask", map[string]any{})
+	require.NoError(t, err)
+	require.True(t, storeSeen, "expected ChatStore to be present in handler context")
+}
+
+// chatStoreProbe is a minimal ChatStore that calls a callback on any method
+// to confirm it was injected into context.
+type chatStoreProbe struct {
+	onGet func()
+}
+
+func (p *chatStoreProbe) Get(_ context.Context, _ string) (*host.ChatRecord, error) {
+	p.onGet()
+	return nil, nil
+}
+func (p *chatStoreProbe) Resolve(_ context.Context, _, _, _, _ string) (*host.ChatRecord, bool, error) {
+	return nil, false, nil
+}
+func (p *chatStoreProbe) Create(_ context.Context, _, _, _, _ string) (*host.ChatRecord, error) {
+	return nil, nil
+}
+func (p *chatStoreProbe) List(_ context.Context, _, _, _ string) ([]host.ChatRecord, error) {
+	return nil, nil
+}
+func (p *chatStoreProbe) Fork(_ context.Context, _, _ string) (*host.ChatRecord, error) {
+	return nil, nil
+}
+func (p *chatStoreProbe) Archive(_ context.Context, _ string) error              { return nil }
+func (p *chatStoreProbe) Rename(_ context.Context, _, _ string) error            { return nil }
+func (p *chatStoreProbe) SetClaudeSessionID(_ context.Context, _, _ string) error { return nil }
+func (p *chatStoreProbe) AppendMessage(_ context.Context, _, _, _ string, _ map[string]any) (host.ChatMessage, error) {
+	return host.ChatMessage{}, nil
+}
+func (p *chatStoreProbe) Transcript(_ context.Context, _ string, _ int) ([]host.ChatMessage, error) {
+	return nil, nil
+}
+func (p *chatStoreProbe) LatestSeq(_ context.Context, _ string) (int, error) { return -1, nil }
+func (p *chatStoreProbe) WithLock(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}
+
 // noopHarness is a zero-behavior Harness for SubmitDirect tests. RunTurn is
 // never invoked by SubmitDirect, so a stub is sufficient.
 type noopHarness struct{}

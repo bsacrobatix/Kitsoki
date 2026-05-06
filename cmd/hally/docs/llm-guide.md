@@ -538,11 +538,41 @@ Built-ins (`internal/host/`):
   prompt. Returns `{stdout, exit_code, ok}`. See "LLM-backed effects"
   below for the common patterns.
 - **`host.oracle.talk`** — conversational Claude session via `claude -p
-  --session-id`. Args `question` (required), `session_id` (optional;
-  round-tripped so the caller can persist it in world and resume the
-  session), `working_dir`. Returns `{answer, session_id}`. Use this when
-  the user is having a multi-turn conversation; use `host.oracle.ask`
-  when you want a one-shot response derived from a named prompt file.
+  --session-id`. Args:
+    - `question` (string, required)
+    - `chat_id` (string, optional) — when set AND a `ChatStore` is wired,
+      operates in **chat-aware mode**: appends the user message + assistant
+      reply to the persistent transcript and reuses the chat row's
+      `claude_session_id` across turns. Acquires the per-chat singleton
+      lock for the duration of the turn. Returns
+      `{answer, session_id, chat_id, claude_session_id, transcript_seq}`.
+    - `session_id` (string, optional, legacy non-chat path) — round-tripped
+      so the caller can persist it in world and resume the session.
+      Ignored when `chat_id` is set.
+    - `working_dir` (string, optional)
+  Use this when the user is having a multi-turn conversation; use
+  `host.oracle.ask` when you want a one-shot response derived from a named
+  prompt file.
+- **`host.oracle.ask_with_mcp`** — one-shot Claude call with optional MCP
+  servers (typed-JSON validators, etc.). Same shape as `host.oracle.ask`
+  plus an `mcp_servers:` map. Accepts an optional `chat_id:` arg with the
+  same chat-aware semantics as `host.oracle.talk` (transcript persistence
+  + Claude session reuse + singleton lock).
+- **`host.chat.resolve`** — get-or-create a chat for `(app, room,
+  scope_key)`. Args `app`, `room`, `scope_key` (optional), `title`
+  (optional). Returns `{chat_id, title, status, is_new}`. Idempotent —
+  cheap to call from `on_enter:` so a room always knows its chat.
+- **`host.chat.list`** — list chats matching `(app, room, scope_key)`.
+  Returns `{rendered, chats, count}` where `rendered` is a Markdown
+  preformatted block suitable for inlining into a `view:`.
+- **`host.chat.transcript`** — fetch a chat's transcript. Args `chat_id`,
+  `since_seq` (optional), `max_turns` (optional, default 20). Returns
+  `{rendered, messages, latest_seq, title}`.
+- **`host.chat.fork`** — fork a chat: copy messages, set `parent_chat_id`,
+  clear `claude_session_id` so the next turn starts a fresh Claude
+  session. Args `chat_id`, `title` (optional).
+- **`host.chat.archive`** — soft-delete a chat (status="archived"); the
+  archived chat is hidden from `list` unless `--all-status` is passed.
 - **`host.workspace_manager.get`** — shell out to a `workspace-manager` CLI
   and parse JSON. Args `workspace_id`. Returns the parsed object.
 

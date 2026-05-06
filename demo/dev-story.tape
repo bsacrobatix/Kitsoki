@@ -26,17 +26,18 @@ Type "./hally run testdata/apps/dev-story/app.yaml --harness replay --oracle tes
 Enter
 Sleep 4s
 
-# Turn 1: open the Oracle Room first — fresh Claude session.
+# Turn 1: open the Oracle Room — chat list view loads (empty list initially).
 Type "consult the oracle"
 Enter
 Sleep 3500ms
 
-# Turn 2: ask Claude a question — session is created here.
+# Turn 2: ask Claude a question — auto-creates a chat, runs one turn,
+#         appends both Q+A to the persistent transcript.
 Type "how does the auth token refresh work"
 Enter
 Sleep 5500ms
 
-# Turn 3: leave the Oracle — session_id persists in world for next time.
+# Turn 3: leave the Oracle — chat persists in SQLite for next time.
 Type "go back"
 Enter
 Sleep 3s

@@ -321,3 +321,198 @@ func TestOracleAsk_RegisteredAsBuiltin(t *testing.T) {
 		t.Fatal("host.oracle.ask was not registered by RegisterBuiltins")
 	}
 }
+
+// ── host.oracle.talk chat-aware path ──────────────────────────────────────────
+
+// TestOracleTalk_ChatAwarePath_FirstTurn verifies that on the first turn with a
+// chat_id and a ChatStore in context:
+//   - user message is appended to the transcript
+//   - a new claude_session_id is generated and stored on the chat
+//   - assistant message is appended to the transcript
+//   - result contains chat_id, claude_session_id, transcript_seq
+func TestOracleTalk_ChatAwarePath_FirstTurn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oracle.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOracleBin(t))
+
+	cs := newFakeChatStore()
+	cs.addChat(host.ChatRecord{ID: "chat-1", Title: "My Chat", Status: "active"})
+	ctx := host.WithChatStore(context.Background(), cs)
+
+	res, err := host.OracleTalkHandler(ctx, map[string]any{
+		"question": "What is X?",
+		"chat_id":  "chat-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %s", res.Error)
+	}
+
+	// chat_id echoed back
+	if res.Data["chat_id"] != "chat-1" {
+		t.Fatalf("expected chat_id=chat-1 in result, got %v", res.Data["chat_id"])
+	}
+
+	// claude_session_id generated (non-empty UUID)
+	claudeSID, _ := res.Data["claude_session_id"].(string)
+	if claudeSID == "" {
+		t.Fatal("expected claude_session_id to be generated")
+	}
+
+	// transcript_seq present
+	seq, _ := res.Data["transcript_seq"].(int)
+	if seq < 0 {
+		t.Fatalf("expected transcript_seq >= 0, got %d", seq)
+	}
+
+	// Two messages in transcript: user + assistant
+	msgs := cs.messages["chat-1"]
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages in transcript, got %d", len(msgs))
+	}
+	if msgs[0].Role != "user" {
+		t.Fatalf("expected first message role=user, got %q", msgs[0].Role)
+	}
+	if msgs[1].Role != "assistant" {
+		t.Fatalf("expected second message role=assistant, got %q", msgs[1].Role)
+	}
+
+	// claude session ID stored on chat
+	stored, _ := cs.Get(context.Background(), "chat-1")
+	if stored.ClaudeSessionID == "" {
+		t.Fatal("expected ClaudeSessionID to be stored on chat after first turn")
+	}
+	if stored.ClaudeSessionID != claudeSID {
+		t.Fatalf("stored ClaudeSessionID %q != result claude_session_id %q", stored.ClaudeSessionID, claudeSID)
+	}
+}
+
+// TestOracleTalk_ChatAwarePath_ReusesSessionID verifies that on the second turn
+// the existing claude_session_id is reused, not replaced.
+func TestOracleTalk_ChatAwarePath_ReusesSessionID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oracle.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOracleBin(t))
+
+	const existingClaudeID = "11111111-2222-4333-8444-555555555555"
+	cs := newFakeChatStore()
+	cs.addChat(host.ChatRecord{
+		ID:              "chat-1",
+		Title:           "My Chat",
+		Status:          "active",
+		ClaudeSessionID: existingClaudeID,
+	})
+	ctx := host.WithChatStore(context.Background(), cs)
+
+	res, err := host.OracleTalkHandler(ctx, map[string]any{
+		"question": "Second question",
+		"chat_id":  "chat-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %s", res.Error)
+	}
+
+	returnedSID, _ := res.Data["claude_session_id"].(string)
+	if returnedSID != existingClaudeID {
+		t.Fatalf("expected existing claude_session_id %q to be reused, got %q", existingClaudeID, returnedSID)
+	}
+
+	// The answer from the fake binary should echo the session_id
+	answer, _ := res.Data["answer"].(string)
+	if !strings.Contains(answer, existingClaudeID) {
+		t.Fatalf("fake binary did not receive existing session_id in answer: %q", answer)
+	}
+}
+
+// TestOracleTalk_ChatAwarePath_NoChatStore verifies that providing a chat_id
+// but no store in context produces a domain-level error.
+func TestOracleTalk_ChatAwarePath_NoChatStore(t *testing.T) {
+	res, err := host.OracleTalkHandler(context.Background(), map[string]any{
+		"question": "anything",
+		"chat_id":  "chat-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(res.Error, "no chat store wired") {
+		t.Fatalf("expected 'no chat store wired' error, got: %q", res.Error)
+	}
+}
+
+// TestRunOracleTalkWithChat_AssistantAppendFails_SurfacesError verifies C2:
+// when claude succeeded but persisting the assistant message fails, the
+// handler returns Result.Error so on_error: routing fires.  The answer is
+// still exposed under Result.Data["answer"] so the user sees the reply.
+func TestRunOracleTalkWithChat_AssistantAppendFails_SurfacesError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oracle.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOracleBin(t))
+
+	cs := newFakeChatStore()
+	cs.addChat(host.ChatRecord{ID: "chat-c2", Title: "C2 chat", Status: "active"})
+	cs.failAppendOnRole = "assistant" // user append succeeds; assistant fails
+	ctx := host.WithChatStore(context.Background(), cs)
+
+	res, err := host.OracleTalkHandler(ctx, map[string]any{
+		"question": "ping",
+		"chat_id":  "chat-c2",
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(res.Error, "persist assistant message") {
+		t.Fatalf("expected persist-assistant error in Result.Error, got: %q", res.Error)
+	}
+	// The user did get the answer — keep it in Data for diagnostics.
+	answer, _ := res.Data["answer"].(string)
+	if answer == "" {
+		t.Fatal("expected Result.Data[\"answer\"] to be present even when persistence failed")
+	}
+	// The user message must have been appended (only the assistant append fails).
+	msgs := cs.messages["chat-c2"]
+	if len(msgs) != 1 || msgs[0].Role != "user" {
+		t.Fatalf("expected exactly one user message in transcript, got %+v", msgs)
+	}
+}
+
+// TestRunOracleTalkWithChat_SetSessionFails_NoTranscriptPollution verifies
+// I10: when SetClaudeSessionID fails, no user message has been appended yet.
+// Pre-fix order was append-user → set-session, so a session-write failure
+// stranded a user message in the chat with no Claude session to resume.
+func TestRunOracleTalkWithChat_SetSessionFails_NoTranscriptPollution(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oracle.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOracleBin(t))
+
+	cs := newFakeChatStore()
+	// Chat starts with empty ClaudeSessionID so the handler will try to
+	// allocate one and call SetClaudeSessionID.
+	cs.addChat(host.ChatRecord{ID: "chat-i10", Title: "I10 chat", Status: "active"})
+	cs.failSetSession = true
+	ctx := host.WithChatStore(context.Background(), cs)
+
+	res, err := host.OracleTalkHandler(ctx, map[string]any{
+		"question": "ping",
+		"chat_id":  "chat-i10",
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(res.Error, "set claude session id") {
+		t.Fatalf("expected set-session error in Result.Error, got: %q", res.Error)
+	}
+	// No transcript pollution: the user message must NOT have been appended.
+	msgs := cs.messages["chat-i10"]
+	if len(msgs) != 0 {
+		t.Fatalf("expected empty transcript on SetClaudeSessionID failure, got %+v", msgs)
+	}
+}

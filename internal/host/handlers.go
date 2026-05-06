@@ -233,4 +233,13 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.oracle.talk", OracleTalkHandler)
 	r.Register("host.transport.post", TransportPostHandler)
 	r.Register("host.jobs.answer_clarification", AnswerClarificationHandler)
+	r.Register("host.chat.resolve", ChatResolveHandler)
+	r.Register("host.chat.list", ChatListHandler)
+	r.Register("host.chat.transcript", ChatTranscriptHandler)
+	r.Register("host.chat.fork", ChatForkHandler)
+	r.Register("host.chat.archive", ChatArchiveHandler)
+	r.Register("host.chat.create", ChatCreateHandler)
+	r.Register("host.chat.rename", ChatRenameHandler)
+	r.Register("host.chat.suggest_title", ChatSuggestTitleHandler)
+	r.Register("host.chat.resolve_ref", ChatResolveRefHandler)
 }

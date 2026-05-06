@@ -1,6 +1,7 @@
 package clock_test
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -396,5 +397,143 @@ func TestFakeClock_StopThenAdvance_WaitCountNotNegative(t *testing.T) {
 		// OK — waitCount was not corrupted.
 	case <-time.After(time.Second):
 		t.Fatal("goroutine did not exit — waitCount appears corrupted (may be negative)")
+	}
+}
+
+// ─── Fake clock: WaitCount snapshot ──────────────────────────────────────────
+
+// TestFakeClock_WaitCount asserts that WaitCount tracks the number of live
+// waiters across After registrations, expirations, and Stop calls.
+func TestFakeClock_WaitCount(t *testing.T) {
+	f := clock.NewFake(time.Unix(0, 0))
+
+	if got := f.WaitCount(); got != 0 {
+		t.Fatalf("initial WaitCount: got %d want 0", got)
+	}
+
+	// Two After waiters → WaitCount==2.
+	chA := f.After(50 * time.Millisecond)
+	chB := f.After(150 * time.Millisecond)
+	if got := f.WaitCount(); got != 2 {
+		t.Fatalf("after 2 After: got %d want 2", got)
+	}
+
+	// Advance past A only — WaitCount drops to 1.
+	f.Advance(50 * time.Millisecond)
+	<-chA
+	if got := f.WaitCount(); got != 1 {
+		t.Fatalf("after A fires: got %d want 1", got)
+	}
+
+	// Advance past B — WaitCount drops to 0.
+	f.Advance(150 * time.Millisecond)
+	<-chB
+	if got := f.WaitCount(); got != 0 {
+		t.Fatalf("after B fires: got %d want 0", got)
+	}
+
+	// Now create a Timer and Stop it: WaitCount goes 0→1→0.
+	tm := f.NewTimer(100 * time.Millisecond)
+	if got := f.WaitCount(); got != 1 {
+		t.Fatalf("after NewTimer: got %d want 1", got)
+	}
+	if !tm.Stop() {
+		t.Fatal("Stop should return true for an active timer")
+	}
+	if got := f.WaitCount(); got != 0 {
+		t.Fatalf("after Stop: got %d want 0", got)
+	}
+}
+
+// ─── Fake clock: BlockUntilContext ───────────────────────────────────────────
+
+// TestFakeClock_BlockUntilContext_AlreadySatisfied asserts that
+// BlockUntilContext returns nil immediately when waitCount already meets n.
+func TestFakeClock_BlockUntilContext_AlreadySatisfied(t *testing.T) {
+	f := clock.NewFake(time.Unix(0, 0))
+	_ = f.After(50 * time.Millisecond)
+	_ = f.After(50 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := f.BlockUntilContext(ctx, 1); err != nil {
+		t.Fatalf("BlockUntilContext when already satisfied: %v", err)
+	}
+}
+
+// TestFakeClock_BlockUntilContext_BlocksAndReleases verifies the call blocks
+// until enough waiters register, then returns nil.
+func TestFakeClock_BlockUntilContext_BlocksAndReleases(t *testing.T) {
+	f := clock.NewFake(time.Unix(0, 0))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- f.BlockUntilContext(ctx, 1)
+	}()
+
+	// Goroutine should still be blocked — no waiters yet.
+	select {
+	case err := <-done:
+		t.Fatalf("BlockUntilContext returned early: err=%v", err)
+	case <-time.After(20 * time.Millisecond):
+		// Still blocked — OK.
+	}
+
+	// Register a waiter; BlockUntilContext should unblock.
+	_ = f.After(time.Second)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("BlockUntilContext: unexpected err=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("BlockUntilContext did not unblock after waiter registered")
+	}
+}
+
+// TestFakeClock_BlockUntilContext_CtxCancelled verifies that a cancelled
+// context causes BlockUntilContext to return ctx.Err() (and not park forever).
+func TestFakeClock_BlockUntilContext_CtxCancelled(t *testing.T) {
+	f := clock.NewFake(time.Unix(0, 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled before the call.
+
+	err := f.BlockUntilContext(ctx, 5)
+	if err == nil {
+		t.Fatal("expected ctx.Err(), got nil")
+	}
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+// TestFakeClock_BlockUntilContext_NSatisfied verifies BlockUntilContext
+// satisfies the exact count threshold, and that asking for more than registered
+// blocks until the deadline.
+func TestFakeClock_BlockUntilContext_NSatisfied(t *testing.T) {
+	f := clock.NewFake(time.Unix(0, 0))
+
+	for i := 0; i < 3; i++ {
+		_ = f.After(time.Second)
+	}
+
+	// Asking for 3 returns immediately.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := f.BlockUntilContext(ctx, 3); err != nil {
+		t.Fatalf("BlockUntilContext(ctx, 3): %v", err)
+	}
+
+	// Asking for 4 with no further waiters must block until the deadline.
+	short, shortCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer shortCancel()
+	err := f.BlockUntilContext(short, 4)
+	if err == nil {
+		t.Fatal("expected timeout error when n exceeds registered waiters")
 	}
 }

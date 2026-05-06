@@ -5,11 +5,20 @@
 // This is host.oracle.ask plus an mcp_servers: arg that is materialized into a
 // temporary --mcp-config file and passed to `claude -p`. The bug-fix room
 // uses this for every LLM-driven phase (proposal §5.2, §7.1).
+//
+// Field naming note (N11): the canonical text-output field on this handler
+// is `stdout` (consistent with the rest of host.run / host.oracle.* surface).
+// In the chat-aware path we additionally expose the same string under the
+// alias `answer` so YAML can use a single `answer` key whether the upstream
+// handler is host.oracle.talk (which only has `answer`) or
+// host.oracle.ask_with_mcp. We do NOT rename `stdout` — established callers
+// (validator path, non-chat path, on_complete notification) still bind it.
 package host
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -210,12 +219,22 @@ func buildValidatorMCPServer(schemaPath, outputPath string, opts validatorOption
 //                              block to keep handler-control keys
 //                              (prompt/schema/etc.) out of the template
 //                              namespace.
+//   - chat_id       (string, optional): when set AND a ChatStore is in context,
+//                              persists the conversation to the chat transcript
+//                              and reuses the claude session ID stored on the
+//                              chat row across turns (same as host.oracle.talk).
 //
 // Returns Result.Data with:
 //   - stdout      (string): claude's text reply
 //   - stdout_json (any):    parsed JSON when output_format=="json" and parse succeeds
 //   - exit_code   (int):    claude's exit code
 //   - ok          (bool):   exit_code == 0
+//   - chat_id            (string, chat-aware path only)
+//   - claude_session_id  (string, chat-aware path only)
+//   - transcript_seq     (int, chat-aware path only)
+//   - answer             (string, chat-aware path only): alias for stdout, so
+//                                                        YAML can `bind: answer: answer`
+//                                                        consistently with host.oracle.talk.
 //
 // On all expected errors (binary missing, prompt unreadable, MCP config
 // marshal failure, non-zero exit) the handler returns Result{Error: ...}
@@ -254,6 +273,119 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 		return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: render prompt %q: %v", resolved, err)}, nil
 	}
 
+	// Chat-aware path: chat_id provided AND ChatStore available.
+	chatID, _ := args["chat_id"].(string)
+	if chatID != "" {
+		cs := ChatStoreFromContext(ctx)
+		if cs == nil {
+			return Result{Error: "host.oracle.ask_with_mcp: chat_id provided but no chat store wired"}, nil
+		}
+		return runOracleAskWithMCPWithChat(ctx, cs, chatID, rendered, resolved, args)
+	}
+
+	return oracleAskWithMCPCore(ctx, rendered, resolved, args, nil, "")
+}
+
+// runOracleAskWithMCPWithChat executes the chat-aware path: acquires the
+// per-chat lock, persists the claude session ID, appends the user message,
+// runs the claude invocation, then appends the assistant message.
+//
+// Step ordering: SetClaudeSessionID runs BEFORE the user-append so a write
+// failure on the session ID can't strand an unanswered user message in a
+// chat that has no claude session to resume (see I10 in the agent-rooms
+// review). Likewise, an assistant-append failure surfaces via Result.Error
+// so on_error: routing observes it.
+func runOracleAskWithMCPWithChat(ctx context.Context, cs ChatStore, chatID, rendered, resolvedPrompt string, args map[string]any) (Result, error) {
+	var out Result
+	lockErr := cs.WithLock(ctx, chatID, func(ctx context.Context) error {
+		chat, err := cs.Get(ctx, chatID)
+		if err != nil {
+			out = Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: get chat %s: %v", chatID, err)}
+			return nil
+		}
+
+		// Determine or assign the claude session ID FIRST (before mutating
+		// the transcript). If this write fails we bail before appending
+		// anything.
+		claudeSID := chat.ClaudeSessionID
+		if claudeSID == "" {
+			claudeSID = newUUID()
+			if err := cs.SetClaudeSessionID(ctx, chatID, claudeSID); err != nil {
+				out = Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: set claude session id: %v", err)}
+				return nil
+			}
+		}
+
+		// Append the rendered prompt as the user message.
+		if _, err := cs.AppendMessage(ctx, chatID, "user", rendered, nil); err != nil {
+			out = Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: append user message: %v", err)}
+			return nil
+		}
+
+		inner, runErr := oracleAskWithMCPCore(ctx, rendered, resolvedPrompt, args, nil, claudeSID)
+		if runErr != nil {
+			return runErr
+		}
+
+		// On success, append the assistant message.  Surface persistence
+		// failures via Result.Error so on_error: routing fires (the user
+		// has the answer in inner.Data["stdout"], but the orchestrator/TUI
+		// is informed the transcript wasn't extended).
+		if inner.Error == "" {
+			stdout, _ := inner.Data["stdout"].(string)
+			exitCode, _ := inner.Data["exit_code"].(int)
+			_, hasSubmitted := inner.Data["submitted"]
+			_, appendErr := cs.AppendMessage(ctx, chatID, "assistant", stdout, map[string]any{
+				"exit_code":           exitCode,
+				"validator_submitted": hasSubmitted,
+			})
+			if appendErr != nil {
+				if inner.Data == nil {
+					inner.Data = make(map[string]any)
+				}
+				inner.Data["chat_id"] = chatID
+				inner.Data["claude_session_id"] = claudeSID
+				inner.Error = fmt.Sprintf("host.oracle.ask_with_mcp: persist assistant message: %v", appendErr)
+				out = inner
+				return nil
+			}
+		}
+
+		seq, _ := cs.LatestSeq(ctx, chatID)
+
+		// Enrich the result with chat metadata.
+		if inner.Data == nil {
+			inner.Data = make(map[string]any)
+		}
+		inner.Data["chat_id"] = chatID
+		inner.Data["claude_session_id"] = claudeSID
+		inner.Data["transcript_seq"] = seq
+		// N11: expose `answer` as an alias for `stdout` in the chat-aware
+		// path so YAML can write `bind: answer: answer` regardless of which
+		// chat-aware handler produced the result. `stdout` remains the
+		// canonical name for the non-chat path; we only add this in the
+		// chat-aware branch where a transcript-anchored "answer" is more
+		// meaningful than a raw stdout dump.
+		if stdout, ok := inner.Data["stdout"].(string); ok {
+			inner.Data["answer"] = stdout
+		}
+
+		out = inner
+		return nil
+	})
+	if errors.Is(lockErr, ErrChatBusy) {
+		return Result{Error: lockErr.Error()}, nil
+	}
+	if lockErr != nil {
+		return Result{}, lockErr
+	}
+	return out, nil
+}
+
+// oracleAskWithMCPCore executes the claude one-shot invocation. When
+// claudeSessionID is non-empty, --session-id is added to the CLI args so the
+// call participates in a Claude-side conversation.
+func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, args map[string]any, _ any, claudeSessionID string) (Result, error) {
 	bin, err := resolveOracleBin()
 	if err != nil {
 		return Result{Error: err.Error()}, nil
@@ -261,7 +393,7 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 
 	workingDir, _ := args["working_dir"].(string)
 	if workingDir == "" {
-		workingDir = filepath.Dir(resolved)
+		workingDir = filepath.Dir(resolvedPrompt)
 	}
 
 	outputFormat := "text"
@@ -273,6 +405,12 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 		"-p",
 		"--output-format", outputFormat,
 		"--permission-mode", "bypassPermissions",
+	}
+
+	// When participating in a chat, inject the session ID so Claude can
+	// resume the conversation from its own memory.
+	if claudeSessionID != "" {
+		cliArgs = append(cliArgs, "--session-id", claudeSessionID)
 	}
 
 	// Build the merged mcp_servers map: caller-provided entries plus an

@@ -35,6 +35,7 @@ func rootForTest() *cobra.Command {
 	root.AddCommand(versionCmd())
 	root.AddCommand(sessionCmd())
 	root.AddCommand(turnCmd())
+	root.AddCommand(chatCmd())
 	return root
 }
 

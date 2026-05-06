@@ -205,9 +205,29 @@ Full source: [`testdata/apps/background_jobs/app.yaml`](../../testdata/apps/back
 The corresponding flow test is at
 [`testdata/apps/background_jobs/flows/happy_path.yaml`](../../testdata/apps/background_jobs/flows/happy_path.yaml).
 
+## Chat-aware background turns
+
+When a `host.oracle.talk` or `host.oracle.ask_with_mcp` invocation carries a
+`chat_id:` arg and the orchestrator has been wired with a chat store
+(`orchestrator.WithChatStore(...)`), the handler runs in chat-aware mode:
+the user message and assistant reply are persisted to a transcript, the
+Claude session ID is reused across turns, and a per-chat singleton lock
+serialises concurrent drivers (TUI vs orchestrator vs `hally chat
+continue`). The `last_job_result` payload carries `chat_id`,
+`claude_session_id`, `transcript_seq`, and `answer` (or `stdout`).
+
+A complete recipe — including how to obtain a `chat_id` via
+`host.chat.resolve` on `on_enter:` — is in
+[`recipes.md` §Chat-aware background turn](recipes.md#chat-aware-background-turn).
+
+The completionNotification path is chat-aware: a successful chat turn
+produces "Reply ready — <60-char preview>" with the answer body,
+distinguishing it from generic "Job done: <kind>" notifications.
+
 ## See also
 
 - [`README.md`](README.md) — entry point and glossary.
+- [`recipes.md`](recipes.md) — runnable patterns including the chat-aware turn.
 - [`testing.md`](testing.md) — how to test background jobs in flow fixtures.
 - [`runtime.md`](runtime.md) — how the orchestrator processes these fields at runtime.
 - [`cmd/hally/docs/app-schema.md` §Background jobs](../../cmd/hally/docs/app-schema.md#background-jobs) — field reference table.

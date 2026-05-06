@@ -13,6 +13,15 @@ hosts:
   - host.workspace_manager.get
   - host.oracle.ask
   - host.oracle.talk
+  - host.chat.resolve
+  - host.chat.list
+  - host.chat.transcript
+  - host.chat.fork
+  - host.chat.archive
+  - host.chat.create
+  - host.chat.rename
+  - host.chat.suggest_title
+  - host.chat.resolve_ref
 
 # World schema: typed variables used across all rooms.
 world:
@@ -35,10 +44,15 @@ world:
   job_bg_result:       { type: string, default: "" }
   clarification_asked:  { type: bool,   default: false }
   clarification_answer: { type: string, default: "" }
-  oracle_session_id:    { type: string, default: "" }
   oracle_question:      { type: string, default: "" }
   oracle_answer:        { type: string, default: "" }
   oracle_turns:         { type: int,    default: 0 }
+  oracle_chat_id:       { type: string, default: "" }
+  oracle_chats_view:    { type: string, default: "" }
+  oracle_transcript_view: { type: string, default: "" }
+  oracle_chat_title:    { type: string, default: "" }
+  oracle_chat_count:    { type: int,    default: 0 }
+  last_job_id:          { type: string, default: "" }
 
 # Root state is the Main Room.
 root: main
@@ -322,7 +336,73 @@ intents:
     examples: ["cancel job", "stop background job", "kill job"]
     priority: 75
 
+  # Oracle chat-specific
+  new_chat:
+    title: "Start New Chat"
+    description: "Start a new persistent chat thread in the Oracle room."
+    examples: ["new chat", "new", "start new chat", "new chat about X"]
+    priority: 95
+    slots:
+      title:
+        type: string
+        required: false
+        description: "Title for the new chat."
+
+  open_chat:
+    title: "Open Chat"
+    description: "Open an existing chat by ID or list number."
+    examples: ["open 1", "open chat abc", "select 1"]
+    priority: 90
+    slots:
+      chat_id:
+        type: string
+        required: true
+        description: "Chat ID or list number to open."
+
+  rename_chat:
+    title: "Rename Chat"
+    description: "Rename an existing Oracle chat."
+    examples:
+      - "rename 1 \"the auth bug\""
+      - "rename chat abc \"refactor plan\""
+      - "title 1 ZTA proxy walkthrough"
+    priority: 88
+    slots:
+      chat_id:
+        type: string
+        required: true
+        description: "Chat ID or list number to rename."
+      title:
+        type: string
+        required: true
+        description: "New title for the chat."
+
+  archive_chat:
+    title: "Archive Chat"
+    description: "Hide an Oracle chat from the list."
+    examples:
+      - "remove 1"
+      - "archive 1"
+      - "delete chat abc"
+    priority: 87
+    slots:
+      chat_id:
+        type: string
+        required: true
+        description: "Chat ID or list number to archive."
+
   # Oracle-specific
+  ask_question_bg:
+    title: "Ask a Question (Background)"
+    description: "Ask Claude a question dispatched as a background job."
+    examples: ["ask background", "background question", "bg ask"]
+    priority: 99
+    slots:
+      question:
+        type: string
+        required: true
+        description: "Your question for the Oracle (dispatched asynchronously)."
+
   ask_question:
     title: "Ask a Question"
     description: "Ask Claude a general question."

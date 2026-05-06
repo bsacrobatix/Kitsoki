@@ -24,6 +24,8 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"hally/internal/app"
+	"hally/internal/chathost"
+	"hally/internal/chats"
 	"hally/internal/harness"
 	"hally/internal/host"
 	"hally/internal/machine"
@@ -128,8 +130,18 @@ Examples:
 				return fmt.Errorf("validate hosts: %w", err)
 			}
 
+			// Wire the chats store on the same in-memory DB so app YAMLs
+			// that invoke host.chat.* can be exercised via `hally turn`.
+			// The DB is discarded on return — every turn starts empty.
+			chatStore, err := chats.NewStore(s.DB())
+			if err != nil {
+				return fmt.Errorf("init chats store: %w", err)
+			}
+			chatAdapter := chathost.NewAdapter(chatStore)
+
 			orch := orchestrator.New(def, m, s, h,
 				orchestrator.WithHostRegistry(hostReg),
+				orchestrator.WithChatStore(chatAdapter),
 			)
 
 			result, err := orch.OneShot(cmd.Context(), orchestrator.OneShotInput{

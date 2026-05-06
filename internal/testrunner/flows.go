@@ -1136,6 +1136,67 @@ func injectWorldOverride(ctx context.Context, rig *orchRig, overrides map[string
 	return rig.st.AppendEvents(rig.sid, events)
 }
 
+// waitForJobsParked blocks until every currently-running job goroutine has
+// either registered a clock waiter (the canonical handler shape: the first
+// thing a host stub does is clock.Sleep(delay)) or has terminated on its own
+// without touching the clock (e.g. infra_error stubs with no delay).  It is
+// the race-free pre-condition for a safe rig.clk.Advance(d) call.
+//
+// Implementation: race two waits — clock.BlockUntilContext(rc) returns when
+// every running job is parked; scheduler.WaitIdle returns when every running
+// job has terminated.  Whichever fires first is sufficient: in both cases
+// Advance is safe (it either fires the parked waiters or is a no-op).  If the
+// running count snapshot drops mid-wait (a non-clock job finishes while a
+// clock job has yet to park), the WaitIdle goroutine eventually catches up;
+// loop on the running count until either both barriers agree or ctx fires.
+func waitForJobsParked(ctx context.Context, rig *orchRig) error {
+	for {
+		rc := rig.sched.RunningCount()
+		if rc == 0 {
+			return nil
+		}
+		// Already parked? Skip the goroutine setup.
+		if rig.clk.WaitCount() >= rc {
+			return nil
+		}
+
+		// Race the two barriers.  parkCtx is cancelled when either fires (or
+		// when ctx fires) so the loser's goroutine returns promptly.
+		parkCtx, cancel := context.WithCancel(ctx)
+		parked := make(chan struct{})
+		idle := make(chan struct{})
+
+		go func() {
+			_ = rig.clk.BlockUntilContext(parkCtx, rc)
+			close(parked)
+		}()
+		go func() {
+			_ = rig.sched.WaitIdle(parkCtx)
+			close(idle)
+		}()
+
+		select {
+		case <-parked:
+		case <-idle:
+		case <-ctx.Done():
+			cancel()
+			<-parked
+			<-idle
+			return ctx.Err()
+		}
+		cancel()
+		<-parked
+		<-idle
+
+		// Re-check: if a job terminated without ever parking, runningCount may
+		// have dropped while we waited.  Loop and re-evaluate.
+		if rig.sched.RunningCount() == 0 || rig.clk.WaitCount() >= rig.sched.RunningCount() {
+			return nil
+		}
+		// Otherwise, loop with the new (lower) running-count snapshot.
+	}
+}
+
 // advanceAndWait advances the fake clock by d, then drains the scheduler and
 // session listener with the given context deadline.
 //
@@ -1145,21 +1206,32 @@ func injectWorldOverride(ctx context.Context, rig *orchRig, overrides map[string
 //  1. Subscribe to the session's job-event channel before advancing, so we
 //     never miss events that arrive between the Advance call and our first
 //     channel read.
-//  2. Advance the fake clock.  This unblocks any timers whose deadline ≤
+//  2. Park barrier: wait until every still-running job goroutine has registered
+//     itself as a clock waiter (or has terminated on its own).  Without this
+//     barrier there is a race where Submit's goroutine has incremented
+//     runningCount but has not yet called clock.Sleep — Advance fires no
+//     waiter, time moves forward, the goroutine then registers a waiter whose
+//     deadline is in the past relative to wall-clock-of-test but in the future
+//     relative to (already-bumped) fake time, and WaitIdle hangs until ctx
+//     deadline.  See clock.Fake.BlockUntilContext for the canonical fix.
+//  3. Advance the fake clock.  This unblocks any timers whose deadline ≤
 //     now+d, including RequestClarification's poll timer for a resumed job.
-//  3. Wait for the scheduler to be idle (WaitIdle): all job goroutines are
+//  4. Wait for the scheduler to be idle (WaitIdle): all job goroutines are
 //     either terminal or awaiting_input.
-//  4. Wait for the orchestrator listener to process all queued terminal events
+//  5. Wait for the orchestrator listener to process all queued terminal events
 //     (WaitListenerIdle).  on_complete effects run inside this call.
-//  5. Drain any remaining session-channel events (on_complete may have
+//  6. Drain any remaining session-channel events (on_complete may have
 //     dispatched new jobs whose terminal events arrive here).  For each
-//     event, repeat steps 3–4 so cascading on_complete chains fully settle.
-//  6. After WaitIdle + WaitListenerIdle both return with the channel empty,
+//     event, repeat steps 4–5 so cascading on_complete chains fully settle.
+//  7. After WaitIdle + WaitListenerIdle both return with the channel empty,
 //     the system is quiescent; return nil.
 //
 // The outer context (typically 5 s) is the hard deadline; ctx.Err() is
 // returned if it fires before the drain completes.
 func advanceAndWait(ctx context.Context, rig *orchRig, d time.Duration) error {
+	if err := waitForJobsParked(ctx, rig); err != nil {
+		return fmt.Errorf("park barrier: %w", err)
+	}
 	rig.clk.Advance(d)
 
 	// Drain loop: WaitIdle + WaitListenerIdle each cover one barrier; together

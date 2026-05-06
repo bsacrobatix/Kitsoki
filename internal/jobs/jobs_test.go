@@ -417,6 +417,155 @@ func TestWaitIdle_NoGoroutineLeak(t *testing.T) {
 	}
 }
 
+// TestScheduler_RunningCount_Increments asserts that RunningCount tracks
+// the number of in-flight jobs: 1 while a blocking handler is running, then
+// 0 after it completes.
+func TestScheduler_RunningCount_Increments(t *testing.T) {
+	sched := jobs.NewInMemoryScheduler()
+
+	proceed := make(chan struct{})
+	id, err := sched.Submit(context.Background(), jobs.JobSpec{
+		Kind: "host.blocking",
+		Handler: func(ctx context.Context, args map[string]any) (host.Result, error) {
+			<-proceed
+			return host.Result{Data: map[string]any{"ok": true}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Poll briefly: the goroutine increments runningCount AFTER the goroutine
+	// is launched in Submit, but before it can be observed without a tiny
+	// scheduling delay.  Spin for up to 1s.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if sched.RunningCount() == 1 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := sched.RunningCount(); got != 1 {
+		t.Fatalf("RunningCount while job blocked: got %d want 1", got)
+	}
+
+	close(proceed)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := sched.WaitIdle(ctx); err != nil {
+		t.Fatalf("WaitIdle: %v", err)
+	}
+	if got := sched.RunningCount(); got != 0 {
+		t.Fatalf("RunningCount after terminal: got %d want 0", got)
+	}
+	if _, ok := sched.Get(id); !ok {
+		t.Fatalf("job not found after completion")
+	}
+}
+
+// TestScheduler_RunningCount_AwaitingNotCounted asserts that a job in
+// JobAwaitingInput counts as idle (RunningCount==0).
+func TestScheduler_RunningCount_AwaitingNotCounted(t *testing.T) {
+	sched := jobs.NewInMemoryScheduler()
+
+	proceed := make(chan struct{})
+	id, err := sched.Submit(context.Background(), jobs.JobSpec{
+		Kind: "host.pausable",
+		Handler: func(ctx context.Context, args map[string]any) (host.Result, error) {
+			<-proceed
+			return host.Result{Data: map[string]any{"ok": true}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Wait for the goroutine to be running.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if sched.RunningCount() == 1 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	if err := sched.Awaiting(id); err != nil {
+		t.Fatalf("Awaiting: %v", err)
+	}
+	if got := sched.RunningCount(); got != 0 {
+		t.Fatalf("RunningCount after Awaiting: got %d want 0 (awaiting counts as idle)", got)
+	}
+
+	close(proceed)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := sched.WaitIdle(ctx); err != nil {
+		t.Fatalf("WaitIdle: %v", err)
+	}
+}
+
+// TestScheduler_RunningCount_MultipleJobs asserts that RunningCount tracks
+// the number of in-flight handlers across a fleet of blocking jobs.
+func TestScheduler_RunningCount_MultipleJobs(t *testing.T) {
+	sched := jobs.NewInMemoryScheduler()
+
+	const n = 3
+	gates := make([]chan struct{}, n)
+	for i := range gates {
+		gates[i] = make(chan struct{})
+	}
+	for i := 0; i < n; i++ {
+		gate := gates[i]
+		_, err := sched.Submit(context.Background(), jobs.JobSpec{
+			Kind: "host.blocking",
+			Handler: func(ctx context.Context, args map[string]any) (host.Result, error) {
+				<-gate
+				return host.Result{Data: map[string]any{"ok": true}}, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("Submit %d: %v", i, err)
+		}
+	}
+
+	// Wait for all 3 to be running.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if sched.RunningCount() == n {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := sched.RunningCount(); got != n {
+		t.Fatalf("RunningCount with %d jobs: got %d", n, got)
+	}
+
+	// Release jobs one at a time and observe the counter ticking down.
+	for i := 0; i < n; i++ {
+		close(gates[i])
+
+		// Wait until that job has decremented runningCount.
+		expected := n - 1 - i
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			if sched.RunningCount() == expected {
+				break
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+		if got := sched.RunningCount(); got != expected {
+			t.Fatalf("RunningCount after releasing job %d: got %d want %d", i, got, expected)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := sched.WaitIdle(ctx); err != nil {
+		t.Fatalf("WaitIdle: %v", err)
+	}
+}
+
 // TestHeartbeatDebounce verifies the write-through debounce behaviour:
 // firing many heartbeats in a short burst should result in fewer SQLite
 // writes than the number of calls, and the persisted progress should

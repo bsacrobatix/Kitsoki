@@ -23,6 +23,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"hally/internal/app"
+	"hally/internal/chathost"
+	"hally/internal/chats"
 	"hally/internal/host"
 	"hally/internal/machine"
 	"hally/internal/orchestrator"
@@ -261,10 +263,20 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 			}
 			defer func() { _ = transportReg.Close() }()
 
-			orch := orchestrator.New(def, m, s, h,
+			rawChatStore, chatStoreErr := chats.NewStore(s.DB())
+			var chatStoreOpt orchestrator.Option
+			if chatStoreErr == nil {
+				chatStoreOpt = orchestrator.WithChatStore(chathost.NewAdapter(rawChatStore))
+			}
+
+			orchOpts := []orchestrator.Option{
 				orchestrator.WithHostRegistry(hostReg),
 				orchestrator.WithTransportRegistry(transportReg),
-			)
+			}
+			if chatStoreOpt != nil {
+				orchOpts = append(orchOpts, chatStoreOpt)
+			}
+			orch := orchestrator.New(def, m, s, h, orchOpts...)
 
 			var outcome *orchestrator.TurnOutcome
 			lockErr := s.WithWriterLock(ctx, sid, func() error {
@@ -289,7 +301,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 			})
 			if errors.Is(lockErr, store.ErrSessionBusy) {
 				fmt.Fprintf(cmd.ErrOrStderr(), "session busy: another process holds the writer lock for %s\n", sid)
-				os.Exit(EX_TEMPFAIL)
+				return errTempFail
 			}
 			if lockErr != nil {
 				return lockErr

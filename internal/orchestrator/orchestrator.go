@@ -66,6 +66,10 @@ type Orchestrator struct {
 	// on_complete processing and to post notifications.
 	jobStore *jobs.JobStore
 
+	// chatStore is the SQLite-backed chat store used by chat-aware oracle handlers
+	// and the host.chat.* built-ins. Optional; nil disables chat persistence.
+	chatStore host.ChatStore
+
 	// pending tracks in-flight clarifications keyed by session ID.
 	mu              sync.Mutex
 	pending         map[app.SessionID]*pendingClarify
@@ -74,6 +78,21 @@ type Orchestrator struct {
 	cancelListeners map[app.SessionID]context.CancelFunc
 	// listenerStates tracks per-session listener idle state for WaitListenerIdle.
 	listenerStates map[app.SessionID]*listenerState
+	// sessionLocks serialises read-modify-write of (journey → events) for one
+	// session.  The foreground turn path (Turn/SubmitDirect/ContinueTurn) and
+	// the background-job-terminal path (handleJobTerminal) both compute
+	// turn = journey.Turn + 1 from the live event log and then call
+	// store.AppendEvents under that turn number.  Without this lock, a
+	// background job whose handler runs to completion before the foreground
+	// Turn finishes appending its events races: the listener goroutine reads
+	// journey.Turn = N-1 (Turn hasn't committed yet) and tries to write
+	// turn = N, colliding with the foreground writer's UNIQUE
+	// (session_id, turn, seq) PK.  Held across the entire load → mutate →
+	// AppendEvents critical section in every writer path so no two writers
+	// can compute the same turn number for the same session.  Per-session,
+	// not global — concurrent turns for *different* sessions remain
+	// unserialised.
+	sessionLocks map[app.SessionID]*sync.Mutex
 }
 
 // New creates an Orchestrator.
@@ -87,6 +106,7 @@ func New(def *app.AppDef, m machine.Machine, s store.Store, h harness.Harness, o
 		pending:         make(map[app.SessionID]*pendingClarify),
 		cancelListeners: make(map[app.SessionID]context.CancelFunc),
 		listenerStates:  make(map[app.SessionID]*listenerState),
+		sessionLocks:    make(map[app.SessionID]*sync.Mutex),
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -142,6 +162,16 @@ func WithScheduler(s jobs.Scheduler) Option {
 func WithJobStore(js *jobs.JobStore) Option {
 	return func(o *Orchestrator) {
 		o.jobStore = js
+	}
+}
+
+// WithChatStore wires a host.ChatStore so that chat-aware oracle calls and the
+// host.chat.* built-in handlers have access to the persistent chat transcript.
+// When nil (the default), chat persistence is silently disabled and handlers
+// that require a store return Result{Error: "…no chat store wired"}.
+func WithChatStore(cs host.ChatStore) Option {
+	return func(o *Orchestrator) {
+		o.chatStore = cs
 	}
 }
 
@@ -246,6 +276,24 @@ func (o *Orchestrator) stopSessionListener(sid app.SessionID) {
 	}
 }
 
+// sessionLock returns the per-session mutex, lazily creating it on first use.
+// See the comment on Orchestrator.sessionLocks for why this lock exists.
+//
+// Callers MUST hold the returned mutex from before loadJourney through to
+// AppendEvents in any path that writes new events; otherwise the read-then-
+// write of (journey.Turn → AppendEvents at turn N) is racy across the
+// foreground Turn path and the background handleJobTerminal path.
+func (o *Orchestrator) sessionLock(sid app.SessionID) *sync.Mutex {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	mu, ok := o.sessionLocks[sid]
+	if !ok {
+		mu = &sync.Mutex{}
+		o.sessionLocks[sid] = mu
+	}
+	return mu
+}
+
 // TurnOption configures a Turn call.
 type TurnOption func(*turnConfig)
 
@@ -279,6 +327,15 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	// Serialise foreground turn against any concurrent handleJobTerminal for
+	// this session: both compute turnNum = journey.Turn + 1 from the event
+	// log, so without this lock they can both pick the same N and collide on
+	// the events PK.  Per-session — turns for other sessions still run in
+	// parallel.
+	sessMu := o.sessionLock(sid)
+	sessMu.Lock()
+	defer sessMu.Unlock()
+
 	// 1. Reconstruct the journey from the event log.
 	journey, err := o.loadJourney(sid)
 	if err != nil {
@@ -556,6 +613,9 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	}
 	if o.jobStore != nil {
 		ctx = host.WithClarificationAnswerer(ctx, o.jobStore)
+	}
+	if o.chatStore != nil {
+		ctx = host.WithChatStore(ctx, o.chatStore)
 	}
 
 	var events []store.Event
@@ -884,6 +944,11 @@ func lookupBindPath(data map[string]any, path string) (any, bool) {
 // required slots are already known (e.g. enum-expanded rows like "go south").
 // It mirrors the success path of Turn but skips harness.RunTurn.
 func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any) (*TurnOutcome, error) {
+	// Serialise against handleJobTerminal — see Turn for rationale.
+	sessMu := o.sessionLock(sid)
+	sessMu.Lock()
+	defer sessMu.Unlock()
+
 	journey, err := o.loadJourney(sid)
 	if err != nil {
 		return nil, fmt.Errorf("orchestrator: SubmitDirect: load journey: %w", err)
@@ -1193,6 +1258,9 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	if o.transports != nil {
 		ctx = transport.WithRegistry(ctx, o.transports)
 	}
+	if o.chatStore != nil {
+		ctx = host.WithChatStore(ctx, o.chatStore)
+	}
 
 	summaries := make([]HostCallSummary, 0, len(calls))
 	var events []store.Event
@@ -1316,6 +1384,11 @@ func allowedNamesFromMachine(m machine.Machine, state app.StatePath, w world.Wor
 // ContinueTurn retries the pending intent with supplemental slot values
 // collected from the clarification UI (§4.2 step 4 continuation).
 func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supplementSlots map[string]any) (*TurnOutcome, error) {
+	// Serialise against handleJobTerminal — see Turn for rationale.
+	sessMu := o.sessionLock(sid)
+	sessMu.Lock()
+	defer sessMu.Unlock()
+
 	o.mu.Lock()
 	pend, ok := o.pending[sid]
 	o.mu.Unlock()

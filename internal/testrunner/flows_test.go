@@ -247,6 +247,28 @@ func TestFlowsDevStoryFlow4(t *testing.T) {
 	require.True(t, r.Passed, "flow4 oracle room should pass")
 }
 
+// TestFlowsDevStoryFlow8 runs the Oracle background-chat-turn flow.
+// This proves that Effect.Background + chat-aware host.oracle.talk +
+// on_complete bridge all compose correctly: the job is submitted, the clock is
+// advanced past the stub delay, on_complete sets oracle_answer, and the inbox
+// shows a chat-friendly "Reply ready" success notification.
+func TestFlowsDevStoryFlow8(t *testing.T) {
+	ctx := context.Background()
+	report, err := testrunner.RunFlows(ctx,
+		"../../testdata/apps/dev-story/app.yaml",
+		"../../testdata/apps/dev-story/flows/flow8_oracle_background.yaml",
+		testrunner.FlowOptions{Verbose: true})
+	require.NoError(t, err)
+	require.Len(t, report.Results, 1)
+	r := report.Results[0]
+	for _, turn := range r.Turns {
+		for _, f := range turn.Failures {
+			t.Logf("flow8 turn %d failure: %s", turn.TurnIndex+1, f)
+		}
+	}
+	require.True(t, r.Passed, "flow8 oracle background should pass")
+}
+
 // TestFlowsDevStoryFlow5 runs the clarification flow.
 func TestFlowsDevStoryFlow5(t *testing.T) {
 	ctx := context.Background()

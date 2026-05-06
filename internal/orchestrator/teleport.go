@@ -22,6 +22,11 @@ func (o *Orchestrator) Teleport(ctx context.Context, sid app.SessionID, target i
 		return nil, fmt.Errorf("orchestrator.Teleport: target.State is empty")
 	}
 
+	// Serialise against handleJobTerminal — see Turn for rationale.
+	sessMu := o.sessionLock(sid)
+	sessMu.Lock()
+	defer sessMu.Unlock()
+
 	journey, err := o.loadJourney(sid)
 	if err != nil {
 		return nil, fmt.Errorf("orchestrator.Teleport: load journey: %w", err)

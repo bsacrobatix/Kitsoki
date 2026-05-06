@@ -164,6 +164,11 @@ type Scheduler interface {
 	// JobAwaitingInput counts as idle.  This is a non-blocking snapshot used by
 	// drain loops to detect cascading dispatches without race-prone polling.
 	IsIdle() bool
+	// RunningCount returns the current number of jobs that are neither terminal
+	// nor awaiting input.  This is a non-blocking snapshot intended for tests
+	// that need to know how many handler goroutines should be parked on the
+	// clock before advancing time (see testrunner.advanceAndWait).
+	RunningCount() int
 	// WaitIdle blocks until every job tracked by the scheduler has reached a
 	// terminal or awaiting-input state (JobDone, JobFailed, JobCancelled, or
 	// JobAwaitingInput).  JobAwaitingInput counts as idle because the scheduler
@@ -641,6 +646,14 @@ func (s *inMemoryScheduler) IsIdle() bool {
 	s.idleMu.Lock()
 	defer s.idleMu.Unlock()
 	return s.runningCount == 0
+}
+
+// RunningCount returns the current number of jobs that are neither terminal
+// nor awaiting input.  Non-blocking snapshot.
+func (s *inMemoryScheduler) RunningCount() int {
+	s.idleMu.Lock()
+	defer s.idleMu.Unlock()
+	return s.runningCount
 }
 
 // Get returns a snapshot of the job (safe to read, not modify).

@@ -14,6 +14,11 @@ Full design: [`design.md`](design.md).
 Background jobs (long-running handlers, inbox notifications, clarification
 mid-flight): [`docs/background-jobs/`](docs/background-jobs/README.md).
 
+Persistent chats (multi-thread agent rooms with transcripts, forks, and a
+singleton lock so the TUI and orchestrators don't race): the `host.chat.*`
+built-ins, the chat-aware `host.oracle.{talk,ask_with_mcp}` paths, and the
+`hally chat list|new|continue|show|fork|archive|unlock` CLI surface.
+
 ## Status
 
 **PoC — Stage 7 of 7 complete.** All core features are implemented:

@@ -187,6 +187,57 @@ states:
 
 ---
 
+---
+
+## Chat-aware background turn
+
+**Pattern:** A chat-aware Oracle invocation, dispatched as a background job
+so the orchestrator (or `loop.py`) doesn't block waiting for Claude. The
+chat lock serialises concurrent drivers; on completion the inbox shows a
+chat-friendly notification ("Reply ready — <preview>") that teleports back
+to the originating room with `world.last_job_result.answer` bound.
+
+### YAML
+
+```yaml
+hosts:
+  - host.chat.resolve
+  - host.oracle.ask_with_mcp
+
+states:
+  phase_3_executing:
+    on_enter:
+      - invoke: host.chat.resolve
+        with: { app: "bugfix", room: "phase_3", scope_key: "{{ world.ticket_key }}" }
+        bind: { active_chat_id: "chat_id" }
+      - invoke: host.oracle.ask_with_mcp
+        with:
+          chat_id: "{{ world.active_chat_id }}"
+          prompt: prompts/03-fix-proposal.txt
+          schema: schemas/03-fix-proposal.json
+        background: true
+        on_complete:
+          - set: { phase_artifact: "{{ world.last_job_result.submitted }}" }
+```
+
+### What you get
+
+- A persistent transcript per (room, scope_key) — re-running phase 3 for
+  the same ticket appends to the existing chat.
+- A singleton lock so a TUI attached to the same chat won't race with the
+  orchestrator.
+- An inbox notification with a 60-char preview of Claude's answer when
+  the turn completes; clicking it teleports to `phase_3_executing` with
+  `world.last_job_result` populated.
+
+### Notes
+
+- `host.oracle.talk` works the same way; use it for free-form Q&A rooms.
+- `host.chat.resolve` is idempotent — calling it on every `on_enter` is
+  cheap and correct.
+
+---
+
 ## See also
 
 - [`README.md`](README.md) — entry point and glossary.
