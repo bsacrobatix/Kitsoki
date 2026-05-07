@@ -5,7 +5,7 @@
 - when user presses enter, immediately add their input into the chat window and show thinking there, block input until resolved (can keep some spinner in the input area too)
 - check that we're really doing the mcp validation method - i think we're maybe not based on some bugs
 - use specific claude agents for each room/intent where oracle/claude is invoked
-- extensible stories - reusable dev story w/ company and project-specific aspects
+- extensible stories - reusable dev story w/ company and project-specific aspects (rooms, intents, etc... as reusable building blocks - extended and composed)
 - live discovery of story aspects as the user navigates to different projects, projects can define their own story aspects
 - visually distinguish between user commands that were interpreted deterministically vs those that use the LLM, when the LLM is used show the actual filled intent that was selected w/ confidence level
 - cache of natural language to intents to avoid calling claude again
@@ -16,6 +16,7 @@
 - self mode: ask questions or improve hally itself.
 - better testing for proposal mode - should work like conversation (w/ peristent convo)
 - remote job mode: monitor and control sessions on VMs
+- pass request id to downstream CLI and API calls so that the session/trace can be correlated, so for instance mcp validator can log directly against the right session (is this racy?)
 
 ## Tech debt
 
