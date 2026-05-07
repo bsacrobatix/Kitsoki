@@ -20,7 +20,7 @@ see [`../design.md`](../design.md).
 4. **[`developer-guide.md`](developer-guide.md)** — for contributors:
    build, test, debug, add an intent / host / transport / subcommand.
 5. **[`testing.md`](testing.md)** — Mode 1 (intent pass-rate) and
-   Mode 2 (deterministic flow) tests; oracles; demo recording.
+   Mode 2 (deterministic flow) tests; recordings; demo capture.
 6. **[`hosts.md`](hosts.md)** — every built-in `host.*` handler with
    its input/output contract.
 7. **[`transports.md`](transports.md)** — TUI, Jira, Bitbucket;

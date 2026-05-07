@@ -105,7 +105,7 @@ Almost always purely a YAML edit — no code change.
 
 If you want the new intent to be reachable via natural language and not
 just structured `intent:` blocks, also add a Mode 1 fixture under
-`<app>/intents/` and (for replay) an oracle entry.
+`<app>/intents/` and (for replay) a recording entry.
 
 ### 5.2 Adding a new built-in host handler
 

@@ -29,8 +29,9 @@ Consequences you must internalise:
 - **Transitions are pure.** Guards (`when:`) are expr-lang expressions over
   `world` and `slots`; effects are a small declarative vocabulary (`set`,
   `increment`, `say`, `invoke`, `emit`).
-- **Everything is replayable.** Given the same app + same oracle (or same
-  event log), hally produces byte-identical views. This is the whole point.
+- **Everything is replayable.** Given the same app + same recording (or
+  same event log), hally produces byte-identical views. This is the whole
+  point.
 
 ## 2. Commands at a glance
 
@@ -68,7 +69,7 @@ hally auto-selects using this exact precedence:
 |-------------|------------------------------|----------------|---------|----------------------------------------------|
 | `claude`    | `claude` CLI on PATH         | No (LLM)       | Free*   | Default when you have Claude Code            |
 | `live`      | `ANTHROPIC_API_KEY`          | No (LLM)       | Paid    | CI without `claude` CLI; explicit model pin  |
-| `replay`    | `--oracle oracle.yaml`       | **Yes**        | Zero    | Flow tests, demos, offline reproduction      |
+| `replay`    | recording via `--oracle`     | **Yes**        | Zero    | Flow tests, demos, offline reproduction      |
 | `recording` | `--oracle` *or* API key      | Wraps above    | Varies  | Capture an LLM session to JSONL for replay   |
 
 *Cost via your Claude Code plan.
@@ -79,7 +80,7 @@ graphs or intentionally ambiguous user prompts.
 
 `--record <path>` (with `--harness recording`) writes one JSONL object per turn
 (`{state, input, intent, slots, ts, model, tokens_in, tokens_out}`). Convert to
-an oracle later to replay deterministically.
+a recording later to replay deterministically.
 
 ## 4. Typical workflows
 
@@ -115,7 +116,7 @@ means stderr. Replay the JSONL later with `hally trace /tmp/myapp.jsonl`.
 hally test flows <app.yaml>
 ```
 
-Runs every `*.yaml` under `<app-dir>/flows/` against a replay oracle. Zero
+Runs every `*.yaml` under `<app-dir>/flows/` against a recording. Zero
 LLM calls, fast, exits non-zero on regression. See §7 for fixture shape.
 
 ### 4.5 Expose to an external MCP client
@@ -144,7 +145,7 @@ dot -Tpng <appid>-viz.dot -o graph.png
 |-------------------------|----------------------------------------------------------|
 | `--harness <type>`      | See §3. `claude \| live \| replay \| recording`.           |
 | `--claude-model <id>`   | Model for the `claude` harness (default: Haiku).         |
-| `--oracle <path>`       | Required for `--harness replay`.                         |
+| `--oracle <path>`       | Recording file. Required for `--harness replay`.         |
 | `--record <path>`       | JSONL output for `--harness recording`.                  |
 | `--db <path>`           | SQLite session DB (default `$XDG_DATA_HOME/hally/`).     |
 | `--trace <path>`        | JSONL trace. `-` = stderr.                               |
@@ -235,7 +236,7 @@ Use cases:
 # direct intent (no LLM)
 hally turn app.yaml --state cloakroom --intent hang_cloak
 
-# routed input via replay oracle
+# routed input via replay (against a recording)
 hally turn app.yaml --state foyer \
     --input "go west" --harness replay --oracle oracle.yaml
 
@@ -265,16 +266,16 @@ turns:
   - intent: { name: go, slots: { direction: south } }
     expect_state: bar
     expect_world: { wearing_cloak: true }
-  - input: "hang up the cloak"            # resolved via oracle
+  - input: "hang up the cloak"            # resolved via the recording
     expect_state: cloakroom
     expect_world: { wearing_cloak: false }
 
 expect_no_errors: true
 ```
 
-A turn uses either `intent:` (skips the oracle entirely — the authoritative
-way to test state logic) or `input:` (requires the oracle and exercises the
-mapping). Mix freely.
+A turn uses either `intent:` (skips the recording entirely — the
+authoritative way to test state logic) or `input:` (requires a recording
+and exercises the mapping). Mix freely.
 
 A turn may also carry a `world_override:` map, applied to world before guard
 evaluation on that turn. Use it to probe arcs that would otherwise require a
@@ -377,17 +378,18 @@ fixtures:
 Each `input` is run `runs` times; the fixture passes if ≥ `min_pass_rate` of
 runs match the expected intent/slots (or one of the expected error codes).
 
-Run: `hally test intents <app.yaml> --harness static` (seeded from oracle,
-deterministic) or `--harness live` (real LLM, costs money). Default is
+Run: `hally test intents <app.yaml> --harness static` (seeded from a
+recording, deterministic) or `--harness live` (real LLM, costs money). Default is
 `static` unless `ANTHROPIC_API_KEY` is set.
 
-## 8. Oracle files
+## 8. Recordings
 
-An oracle is a lookup table `(state, input) → {intent, slots}` used by the
-replay harness and the static intent harness.
+A **recording** is a lookup table `(state, input) → {intent, slots}` used by
+the `replay` harness and the `static` intent harness. The CLI flag and the
+YAML field still spell this `oracle` (a code rename is pending).
 
 ```yaml
-kind: oracle
+kind: oracle           # field name unchanged for now
 app_id: cloak-of-darkness
 app_version: 0.1.0
 generated_at: 2026-04-22T10:00:00Z
@@ -404,12 +406,12 @@ entries:
 Lookup is exact first, then case-insensitive. If nothing matches, `replay`
 returns an unknown-intent error to the machine.
 
-To bootstrap an oracle from real LLM traffic:
+To bootstrap a recording from real LLM traffic:
 
 ```sh
 hally run myapp.yaml --harness recording --record /tmp/rec.jsonl
 # play through desired inputs…
-# (stage-7 conversion JSONL → oracle.yaml is the intended workflow)
+# (JSONL → recording YAML conversion is the intended workflow)
 ```
 
 Or emit from an intent-test run:
@@ -512,7 +514,7 @@ From the intent validation pipeline — these appear in trace output and in
 
 When you are debugging an intent-routing failure, the first question is
 *which* error code came back: `UNKNOWN_INTENT` = the LLM made up a name (check
-fixtures, oracles, system prompt); `INTENT_NOT_ALLOWED_IN_STATE` = your state
+fixtures, recordings, system prompt); `INTENT_NOT_ALLOWED_IN_STATE` = your state
 is missing an `on:` binding.
 
 ## 11. Built-in host handlers
@@ -653,8 +655,8 @@ Notes:
   `harness.response`, read the parsed tool call. If the LLM is not even being
   given the right intents, check `state_path` in `harness.request` and the
   state's `on:` map.
-- **"replay harness says intent not found"** — your oracle does not have an
-  entry for that `(state, input)` pair. Add one, or use `--harness claude/live`
+- **"replay harness says intent not found"** — your recording does not have
+  an entry for that `(state, input)` pair. Add one, or use `--harness claude/live`
   for that run.
 - **"host invoke refused"** — add the host name to the app's top-level
   `hosts:` list.
@@ -672,7 +674,7 @@ Notes:
 ```
 <app-dir>/
   app.yaml                 # the app definition (required)
-  oracle.yaml              # optional; used by --harness replay + `test intents --harness static`
+  oracle.yaml              # recording: used by --harness replay + `test intents --harness static`
   flows/*.yaml             # Mode 2 flow fixtures
   intents/*.yaml           # Mode 1 intent fixtures
 ```

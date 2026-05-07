@@ -47,7 +47,7 @@ Requires Go 1.25+. Single static binary; no CGO, no system libraries.
 |---|---|---|
 | `claude` CLI on `PATH` | `claude` | Shells out to `claude -p` using your existing Claude Code login. **Default.** |
 | `ANTHROPIC_API_KEY` set | `live` | Direct Anthropic SDK calls. |
-| Neither | `replay` | Deterministic; needs an `--oracle` YAML. |
+| Neither | `replay` | Deterministic; needs a recording (passed via `--oracle`). |
 
 Force one:
 

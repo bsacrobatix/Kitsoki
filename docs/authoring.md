@@ -16,7 +16,7 @@ If you only read one source other than the schema, read that.
 ```
 testdata/apps/cloak/
 ├── app.yaml             single source of truth (or top of an include tree)
-├── oracle.yaml          (state, input) → (intent, slots) for replay/static harnesses
+├── oracle.yaml          recording: (state, input) → (intent, slots) for replay/static harnesses
 ├── flows/
 │   ├── winning.yaml     Mode 2 deterministic flow tests
 │   └── losing.yaml

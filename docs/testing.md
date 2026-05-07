@@ -32,16 +32,16 @@ turns:
     expect_state: bar
     expect_world: { wearing_cloak: true }
 
-  - input: "hang up the cloak"            # routed via oracle (replay)
+  - input: "hang up the cloak"            # routed via recording (replay)
     expect_state: cloakroom
     expect_world: { wearing_cloak: false }
 
 expect_no_errors: true
 ```
 
-A turn uses **either** `intent:` (skips the oracle entirely — the
-authoritative way to test state logic) or `input:` (requires an
-oracle file and exercises the routing). Mix freely.
+A turn uses **either** `intent:` (skips the recording entirely — the
+authoritative way to test state logic) or `input:` (requires a
+recording file and exercises the routing). Mix freely.
 
 ### Per-turn assertions
 
@@ -71,14 +71,15 @@ hally test flows testdata/apps/cloak/app.yaml --json /tmp/results.json
 
 Exit codes: `0` pass, `1` fail, `2` setup error.
 
-### Oracle for `input:` turns
+### Recording for `input:` turns
 
-When a fixture uses `input:`, the runner needs an oracle YAML —
-either passed explicitly with `--oracle path` or auto-discovered at
-`<app-dir>/oracle.yaml`. Oracle shape:
+When a fixture uses `input:`, the runner needs a **recording** —
+a YAML mapping `(state, input) → (intent, slots)`. Pass one
+explicitly with `--oracle path` or let the runner auto-discover
+`<app-dir>/oracle.yaml`. Recording shape:
 
 ```yaml
-kind: oracle
+kind: oracle           # CLI flag and YAML field still spell this "oracle"
 app_id: cloak-of-darkness
 app_version: 0.1.0
 generated_at: 2026-04-22T10:00:00Z
@@ -187,8 +188,8 @@ code).
 
 | Harness | Cost | Determinism | When |
 |---|---|---|---|
-| `static` | Zero | Yes | Default; reads the oracle as a deterministic lookup. |
-| `live` | Paid | No | Real Anthropic SDK calls. Use to seed the oracle. |
+| `static` | Zero | Yes | Default; reads a recording as a deterministic lookup. |
+| `live` | Paid | No | Real Anthropic SDK calls. Use to seed a recording. |
 | `claude` | Free* | No | Shells out to the `claude` CLI. |
 
 `*` *Free via your Claude Code login.*
@@ -199,7 +200,7 @@ code).
 hally test intents testdata/apps/cloak/app.yaml --harness static
 hally test intents testdata/apps/cloak/app.yaml --harness live --runs 10
 
-# Compile a live run into a replay oracle for use by Mode 2 / static
+# Compile a live run into a recording for use by Mode 2 / static
 hally test intents testdata/apps/cloak/app.yaml \
     --harness live --emit-oracle testdata/apps/cloak/oracle.yaml
 
@@ -212,20 +213,28 @@ Default harness is `static` unless `ANTHROPIC_API_KEY` is set.
 
 ---
 
-## 4. Recording and oracles
+## 4. Recordings
 
-When you want to capture real LLM traffic for later replay:
+A **recording** is the source of truth for a deterministic replay —
+a YAML lookup of `(state, input) → (intent, slots)` plus optional
+metadata (confidence, majority count). The `replay` and `static`
+harnesses read recordings; the `recording` harness produces JSONL
+that can be compiled into one.
 
 ```sh
-# Record a session to JSONL
+# Capture a real LLM session as JSONL while you play the app
 hally run myapp.yaml --harness recording --record /tmp/rec.jsonl
 
-# Convert to oracle (currently via hally test intents --emit-oracle)
+# Compile a live intent-test run directly into a YAML recording
 hally test intents myapp.yaml --harness live --emit-oracle oracle.yaml
 ```
 
-The record format is one JSONL object per turn:
+The JSONL recording is one object per turn:
 `{state, input, intent, slots, ts, model, tokens_in, tokens_out}`.
+
+> **Note:** the CLI flag is still spelled `--oracle` and the YAML
+> still has `kind: oracle`. The terminology in this document is
+> "recording"; a future code change is expected to follow.
 
 ---
 

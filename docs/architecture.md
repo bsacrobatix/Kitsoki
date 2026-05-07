@@ -1,19 +1,403 @@
 # Architecture
 
-Hally is a deterministic conversation engine. A user (or an external
-orchestrator) drives a finite-state machine with free text; an LLM is used
-only to translate that text into one of a finite alphabet of intents. The
-machine itself is pure — no side effects live inside it. Side effects flow
-through a registry of named **host** handlers, and outbound user-facing
-messages flow through a registry of named **transports**.
+This document describes hally as a **system** — what it is, what it
+believes, and how the pieces of the model fit together. It is meant
+for someone trying to understand hally, not for someone working in
+the code; the implementation map at the end points to where each idea
+lives.
 
-This document is the map. For the philosophy and the long-form design,
-see [`design.md`](../design.md). For runnable examples, see
-[`testdata/apps/`](../testdata/apps).
+For the long-form design rationale, see [`design.md`](../design.md).
+For runnable apps, see [`testdata/apps/`](../testdata/apps). For the
+state-machine vocabulary in detail, see
+[`state-machine.md`](state-machine.md).
 
 ---
 
-## 1. Layered view
+## 1. The shape of the system
+
+Hally sits between two surfaces of common pain.
+
+**Traditional CLIs** demand exact syntax. `kubectl patch deployment foo
+-p '{"spec":{"replicas":3}}' --type=merge` is unforgiving — one missing
+flag, one mistyped JSON path, and you get nothing back except a
+recovery hint. The compensating virtue is that the CLI does exactly
+what you asked, every time.
+
+**Chat agents** accept anything. You can say "scale the frontend to
+three replicas, please" and a sufficiently smart agent figures it out.
+The compensating cost is that it might also figure out something
+*adjacent* — restart pods, edit your manifest, page the on-call —
+because no surface boundary tells it not to.
+
+Hally is neither. Hally is a conversation **engine** that splits the
+difference: free text in, but a declared, finite alphabet of
+**intents** decides what can happen next.
+
+```mermaid
+flowchart LR
+    User["User<br/>(or external thread)"]
+    LLM["LLM<br/>(translator)"]
+    App["Application<br/>(state graph)"]
+    World["World<br/>(persistent state)"]
+
+    User -- "free text" --> LLM
+    LLM -- "named intent + typed slots" --> App
+    App -- "transition" --> World
+    World -- "rendered view" --> User
+```
+
+The arrow that matters most is the second one. The LLM never edits the
+world directly; it only proposes an intent. If the intent isn't valid
+in the current room, or its arguments don't fit the slot schema, the
+machine refuses and the LLM gets a structured error to retry against.
+The user's free text was a question, not a command — the application
+decides what counts as a meaningful answer.
+
+Three things follow:
+
+- **The LLM cannot invent actions.** Every action is declared by the
+  application's author. If a user says "delete everything", the LLM
+  can only translate that into one of the verbs the current room
+  exposes. If no such verb exists, the user gets told "no".
+- **The state machine is pure.** Given the same world and the same
+  intent, hally always picks the same transition. Replay is mechanical.
+- **The author is in charge.** What can happen, in what room, with
+  what guards, with what effects — all of it is in YAML, all of it is
+  reviewable, none of it is a surprise.
+
+---
+
+## 2. The domain model
+
+Six concepts cover almost everything hally does.
+
+| Concept | What it is |
+|---|---|
+| **Conversation** | One ongoing exchange between a user and an application, threaded over a *surface*. |
+| **Application** | A directed cyclic graph of *rooms* with a vocabulary of intents and a typed *world*. Author-declared in YAML. |
+| **Room** | A node in the graph. Has its own intent vocabulary (which actions are valid here), an optional view template (what the user sees), and an optional set of side effects fired on entry. |
+| **Intent** | A named action a user can take. May carry typed arguments (slots). The atom of free-text translation. |
+| **World** | The application's persistent memory — a typed key/value bag. Rooms read it through guards and view templates; transitions write it through effects. |
+| **Transition** | An edge between rooms. Takes an intent, may evaluate a guard, applies an ordered list of effects, lands in a target room. |
+
+A few more concepts come up at the periphery:
+
+| Concept | What it is |
+|---|---|
+| **Slot** | A typed parameter on an intent — `direction: north`, `branch: main`. Validated before any guard runs. |
+| **Effect** | A small declarative mutation: `set` a world value, `increment` a counter, `say` a line of narration, `invoke` a host, `emit` an event to parallel regions. |
+| **Host** | A named handler the application can invoke as an effect — `host.run` for a shell command, `host.oracle.ask` for a one-shot Claude call, `host.transport.post` to deliver a message to an external thread. The application's allow-list of hosts is part of the YAML. |
+| **Phase** | A repeated room. Phase templates compress pipelines like "execute, post, await reply, retry on failure" into one declaration plus per-phase parameters. |
+| **Off-path** | A global escape hatch: the user can ask a free-form question (often "help") that suspends the current room, runs a sub-conversation, and rehydrates the original room on exit. |
+
+These compose into the application's graph:
+
+```mermaid
+flowchart LR
+    subgraph App["Application — author-declared YAML"]
+        direction LR
+        R1((Room A))
+        R2((Room B))
+        R3((Room C))
+        R4((Room D<br/>terminal))
+        R1 -- intent X --> R2
+        R1 -- intent Y --> R3
+        R2 -- intent Z<br/>guard: world.k > 0 --> R3
+        R2 -- default --> R1
+        R3 -- intent W --> R4
+        R3 -- intent W<br/>retry --> R1
+    end
+```
+
+Cycles are not just allowed — they are the *typical shape*. A "main
+menu" room loops back to itself between sub-conversations; a proposal
+lifecycle bounces between draft and review until accepted; a phase
+pipeline retries on failure until a budget runs out.
+
+---
+
+## 3. The journey of one turn
+
+A **turn** is one round-trip: the user said something (or an external
+thread did), and the application responds. From the user's
+perspective, this looks like typing and seeing a reply. The model
+underneath is:
+
+```mermaid
+flowchart TD
+    A["User free text"]
+    B{"Already a<br/>structured intent?"}
+    C["Translation<br/>LLM picks an intent + slots<br/>from this room's vocabulary"]
+    D["Validation<br/>Does this intent exist here?<br/>Are the slots well-typed?"]
+    E["Decision<br/>Pick the first transition whose<br/>guard is satisfied"]
+    F["Effects<br/>set, increment, say, invoke host,<br/>emit event"]
+    G["Persistence<br/>Append events to the journey log"]
+    H["Render<br/>New view appears on every<br/>subscribed surface"]
+    I["Retry<br/>Tell the LLM what was wrong,<br/>let it try again"]
+    J["Human escape<br/>If retries exhaust, ask the user<br/>directly with a clarify dialog"]
+
+    A --> B
+    B -- yes --> D
+    B -- no --> C
+    C --> D
+    D -- ok --> E
+    D -- malformed<br/>or unknown --> I
+    I -- next attempt --> C
+    I -- budget<br/>exhausted --> J
+    E --> F --> G --> H
+```
+
+What the user sees is the path `A → … → H`. What the system *does*
+includes the retry off-ramp and the human escape; both happen quietly
+unless the LLM keeps producing invalid output. The human escape is
+the deliberate fall-through: "I asked the LLM, it tried, it failed,
+now it's your turn — pick from this menu."
+
+The system goes out of its way to keep the user out of that branch.
+It also goes out of its way to never let the LLM **cause** something
+the author didn't declare.
+
+---
+
+## 4. The LLM's role (and its boundaries)
+
+The LLM does exactly one thing: **translate free text into a named
+intent with typed slots, picked from the current room's vocabulary.**
+It never:
+
+- decides what to do — the state machine does that;
+- writes the world — only effects do that;
+- invents new actions — the room declares them all;
+- holds context across turns of its own accord — the application's
+  world is the context.
+
+There are four ways the translation can run, with different
+trade-offs:
+
+| Mode | Determinism | Cost | When |
+|---|---|---|---|
+| `claude` | No (real LLM) | Free with Claude Code login | Default for local play. |
+| `live` | No (real LLM) | Paid (Anthropic API) | CI without Claude Code, or to pin a specific model. |
+| `replay` | Yes | Zero | Flow tests, demos, byte-reproducible reruns. Reads a hand-written or captured **recording** that maps `(state, input)` to `(intent, slots)`. |
+| `recording` | Wraps another | Wraps another | Capture an LLM session to a recording file for later replay. |
+
+The fact that one of these modes is fully deterministic is what makes
+hally testable. The same flow YAML that drives the `replay` harness
+in CI also drives the `record` command that produces a reproducible
+demo GIF. There is no "recording drift" because there is no second
+implementation to drift from.
+
+---
+
+## 5. Conversations across surfaces
+
+A conversation has to live somewhere — a TUI window, a Jira ticket
+comment thread, a Bitbucket PR, a Slack thread. Hally calls each of
+these a **surface** (or, viewed from inside, a **transport**), and
+the same application works across all of them.
+
+```mermaid
+flowchart LR
+    subgraph Surfaces
+        TUI["TUI window<br/>(local)"]
+        Jira["Jira ticket comments"]
+        BB["Bitbucket PR comments"]
+        MCP["MCP client<br/>(Claude Desktop, etc.)"]
+    end
+
+    subgraph Hally
+        S["one session<br/>per (transport, thread)"]
+        APP["application<br/>state graph"]
+    end
+
+    TUI <-- "transcript" --> S
+    Jira <-- "comments" --> S
+    BB <-- "comments" --> S
+    MCP <-- "transition tool" --> S
+    S --> APP
+```
+
+The user-visible consequence: **the same conversation can move
+between surfaces without losing state.** A bug-fix room driven from a
+Jira ticket can be inspected from the local TUI on the developer's
+laptop; the same session ID resolves both ways. An external
+orchestrator (today `loop.py`) drives the session by feeding inbound
+comments to hally one at a time; output flows to whichever transports
+the application has wired up.
+
+This is what makes hally usable as the **conversation engine behind a
+ticket-thread bot**. The state machine is identical; only the surface
+moves.
+
+---
+
+## 6. Long-running work and notifications
+
+Many useful things take longer than a turn — a build, a deploy, a
+deep LLM analysis. If the conversation blocked while they ran, the
+user would either wait or give up.
+
+Hally handles this with **background jobs**. An effect marked
+`background: true` spawns a goroutine; the user gets back to the
+conversation immediately. When the job finishes, three things happen:
+
+1. The originating room's `on_complete:` effects fire as a synthetic
+   turn (so all the usual `set`/`say`/`invoke` work the same way).
+2. The world is updated with the job's result.
+3. An **inbox notification** appears on the user's surface.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Room
+    participant Job
+    participant Inbox
+
+    User->>Room: take some action
+    Room->>Job: spawn background work
+    Room-->>User: "job started" + room continues
+    Note over User,Room: user keeps doing other things
+    Job-->>Room: result available
+    Room->>Room: apply on_complete effects
+    Room->>Inbox: notification ready
+    Inbox-->>User: badge in inbox panel
+```
+
+Some background work needs to **pause and ask** mid-flight — "should
+I commit to `main` or `develop`?" The handler calls a clarification
+helper, which surfaces an `action_required` notification. The user
+answers; the handler resumes. The user never sees the goroutine, the
+poll loop, or the database row that mediated the pause.
+
+The pattern is intentional: the human and the system trade attention.
+The user can keep working while a long task runs; the system can ask
+for help when it needs to without crashing the conversation.
+
+---
+
+## 7. Persistence, replay, and auditability
+
+Every turn produces an ordered list of **events**: the harness was
+called, the validation passed, this transition fired, that effect
+applied, the new room rendered. The events are written to a single
+per-session log. The world snapshot is a *cache* derived from the
+log — replaying the log on a fresh database produces the same world.
+
+The user-facing consequences:
+
+- **Sessions survive.** Close the TUI, reopen it the next day; the
+  conversation picks up where it left off. The session lives in
+  `$XDG_DATA_HOME/hally/sessions.db`.
+- **The transcript is real.** What the user saw on screen is
+  reconstructable from the event log, byte-for-byte.
+- **Bugs are diagnosable.** When something goes wrong, an operator
+  can read the log, see exactly which intent fired, which guard
+  matched, which host returned what — without re-running the LLM.
+- **Demos are testable.** The same flow YAML drives both the
+  reproducible recording and the deterministic CI test.
+
+This is what "deterministic" actually buys. The LLM is allowed to be
+non-deterministic; everything *downstream* of the LLM is recorded
+exactly enough that the next person who needs to understand what
+happened doesn't have to be online.
+
+---
+
+## 8. Trust and authoring
+
+A hally application is one YAML file (or a tree of them via
+`include:`). That YAML declares:
+
+- the **rooms** and their connections,
+- the **intent vocabulary**, both globally and per-room,
+- the **world schema** with typed defaults,
+- the **host allow-list** — which side effects this app may invoke,
+- the **off-path trigger** — when free-form chat is acceptable,
+- and any **phase templates** for repeated pipelines.
+
+The YAML is the only source of truth. There are no hidden defaults
+that the runtime might inject; loader-side validation is strict
+(unknown fields are errors). When a host is invoked that wasn't in
+the allow-list, the app fails to load.
+
+The author can therefore reason about the application by reading a
+single tree of YAML files. Reviewers can do the same. When a
+collaborator (LLM or human) proposes a change, it's a diff against
+that tree, reviewable like any code change.
+
+Authors who want to evolve an app **while playing it** can use the
+TUI's edit mode: a free-text proposal kicks off a Claude session
+inside a shadow copy of the app directory; the resulting diff is
+shown for review; on accept, the app reloads in place. The entire
+cycle is in-process — no checkout, no restart.
+
+---
+
+## 9. Determinism boundary (where surprise is allowed)
+
+Hally is deliberate about where non-determinism can live.
+
+| Layer | Deterministic? | Notes |
+|---|---|---|
+| Application state machine | Yes, always | Same world + same intent → same transition. No clocks, no random, no I/O inside the machine. |
+| Expression evaluator (guards, templates) | Yes | Pure expressions over `world` and `slots`; no user functions. |
+| YAML loader | Yes | Strict; unknown fields fail load. |
+| Effects (`set`, `increment`, `say`, `emit`) | Yes | Pure mutations over the world snapshot. |
+| Effects that invoke a host | No, in general | Hosts touch the network/filesystem; their results are recorded so replays are reproducible. |
+| LLM translation | Configurable | `claude`/`live` are non-deterministic; `replay` is fully deterministic against a recording. |
+| Time | Injected | Production uses real time; tests inject a virtual clock. |
+| IDs | Injected | Production uses ULIDs derived from real time; tests inject a deterministic generator. |
+
+The architecture confines non-determinism to two places: the LLM
+call, and host invocations. Both record their inputs and outputs to
+the event log. Everything downstream is replayable from those
+recordings — which is what makes the test pyramid possible:
+
+- **Mode 2 flow tests** drive the machine through a recording.
+  Zero LLM cost, deterministic, run on every PR.
+- **Mode 1 intent tests** measure how reliably real LLMs translate a
+  given input. Run on demand.
+
+---
+
+## 10. Putting it together
+
+A useful summary frame: hally is what you get when you take three
+things — a state-graph application engine, a structured-output LLM
+adapter, and a multi-surface conversation runtime — and decide that
+the *application author*, not the LLM, is in charge.
+
+Concretely:
+
+- **Authors** describe a finite, reviewable graph of rooms and intents.
+- **Users** drive the application with free text, on whichever surface
+  they're already in.
+- **The LLM** translates that free text into an intent the author
+  declared, retrying when its output doesn't fit.
+- **The orchestrator** runs the resulting transitions deterministically,
+  records every event, and posts the new view to every subscribed
+  surface.
+- **External orchestrators** (a Jira poller, a webhook receiver) feed
+  inbound events through the same primitives, so the same application
+  works whether driven by a TUI or a ticket comment.
+
+The result is a system in which the LLM contributes its strengths
+(natural-language understanding) and is denied its weaknesses
+(deciding what to do, writing state without permission). The
+application author retains agency; the user gets a forgiving surface;
+the operator gets a replayable log.
+
+---
+
+## 11. Implementation map
+
+The conceptual model above is realised by a small set of Go packages
+under `internal/`. This section is for someone working on hally
+itself; if you're an application author or a user, you can stop
+here and head to [`authoring.md`](authoring.md) or
+[`developer-guide.md`](developer-guide.md).
+
+### 11.1 Layered view
 
 ```mermaid
 flowchart TD
@@ -46,227 +430,114 @@ flowchart TD
     TRANSPORTS --> PERSIST
 ```
 
-Five interfaces hold the architecture together. They are deliberately the
-only seams that vary across deployments:
+### 11.2 Five interfaces
 
 | Interface | Defined in | Implementations |
 |---|---|---|
 | `Machine` | `internal/machine` | `machine.machine` (only one — the pure core) |
 | `Harness` | `internal/harness` | `claude_cli`, `live`, `replay`, `recording` |
 | `Store` | `internal/store` | `sqlite` (production); in-memory test stub |
-| `Transport` | `internal/transport` | `tui`, `jira`, `bitbucket` |
+| `Transport` | `internal/transport` | `tui`, `jira` |
 | `host.Handler` | `internal/host` | one per built-in (`host.run`, `host.oracle.*`, `host.chat.*`, …) |
 
----
+### 11.3 Package map
 
-## 2. Anatomy of one turn
-
-A turn begins with an inbound event — a user keystroke, an MCP `transition`
-call, or a `hally session continue` invocation — and ends when the
-orchestrator commits the resulting events to the store and renders the
-next view.
-
-```mermaid
-flowchart TD
-    A["1. Ingest<br/>acquire per-session writer lock<br/>load journey via Store.LoadJourney"]
-    B["2. Translate (skipped if intent already supplied)<br/>Harness.Turn(input, state, allowedIntents) → IntentCall<br/>retries on ValidationError"]
-    C["3. Decide (pure)<br/>Machine.Turn(state, world, intentCall) →<br/>{ nextState, effects, events }<br/>no I/O · deterministic"]
-    D["4. Apply effects (impure, ordered)<br/>set · increment · say · invoke · emit<br/>invoke routes through host.Handler<br/>background:true spawns a job"]
-    E["5. Persist<br/>Store.AppendEvents writes the canonical event log:<br/>TurnStarted → LLMCalled → TransitionApplied →<br/>EffectApplied … → StateExited → StateEntered → TurnEnded"]
-    F["6. Render<br/>render the new state's view<br/>post to every subscribed Transport<br/>release the lock"]
-
-    A --> B --> C --> D --> E --> F
-```
-
-Every step that matters is also a trace event — see
-[observability](#7-observability) below.
-
----
-
-## 3. Package map
-
-Rough size, by responsibility. Read top-to-bottom; downstream packages
-depend on upstream ones, never the reverse.
-
-### Pure core (no I/O)
+Pure core, no I/O:
 
 | Package | Purpose |
 |---|---|
-| `internal/app` | YAML loader, types, schema validation. The single source of truth for `app.yaml`. |
-| `internal/intent` | `IntentCall`, `ValidationError`, error-code enum (used by harness, machine, MCP). |
-| `internal/world` | Typed world snapshot — immutable map passed to guards, templates, and effects. |
-| `internal/expr` | Wrapped `expr-lang/expr` evaluator with an AST whitelist. Templates use `{{ … }}`; guards use bare expressions. |
-| `internal/machine` | The state machine. `Machine.Turn` is pure: state + world + intent → next state + effects + events. Used by the orchestrator, the MCP server, and the replay path. |
+| `internal/app` | YAML loader, types, schema validation. Source of truth for `app.yaml`. |
+| `internal/intent` | `IntentCall`, `ValidationError`, error-code enum. |
+| `internal/world` | Typed world snapshot — immutable map passed to guards, templates, effects. |
+| `internal/expr` | `expr-lang/expr` evaluator with an AST whitelist. |
+| `internal/machine` | The pure state machine. `Machine.Turn` is `(state, world, intent) → (next state, effects, events)`. |
 | `internal/proposal` | Draft → review → execute lifecycle helpers. |
 | `internal/history` | Bounded room-history stack used by `back` intents. |
-| `internal/workspace` | Typed workspace context (repos, issue, PR list) loaded by `host.workspace_manager.get`. |
+| `internal/workspace` | Typed workspace context loaded by `host.workspace_manager.get`. |
 
-### Coordination
-
-| Package | Purpose |
-|---|---|
-| `internal/orchestrator` | The only writer to `Store`. Drives the turn loop, dispatches effects, manages background-job listeners, hot-reloads on `app.yaml` change, handles teleport / off-path / clarification flows. |
-| `internal/host` | Registry of named side-effect handlers. Built-ins under the same package: `host.run`, `host.oracle.{ask,talk,ask_with_mcp}`, `host.transport.post`, `host.chat.*`, `host.jobs.answer_clarification`, `host.workspace_manager.get`. |
-| `internal/harness` | LLM abstraction. Implementations: `claude_cli` (default — shells out to Claude Code), `live` (Anthropic SDK), `replay` (oracle YAML), `recording` (wraps any harness, captures to JSONL). |
-| `internal/transport` | Output-only adapters. `Transport.Post(ctx, key, msg)` delivers a message to a TUI transcript, a Jira ticket, or a Bitbucket PR thread. |
-| `internal/clock` | Injectable time source. Tests use `clock.Fake` to advance virtual time; production uses `clock.Real`. |
-| `internal/jobs` | Background job scheduler + persistence + clarification flow. Every long-running host handler can run as a job. |
-| `internal/inbox` | In-app notifications surfaced to the TUI; teleport metadata for clarifications. |
-| `internal/chathost` | Adapter that bridges `internal/chats.Store` into the `host.ChatStore` interface (avoids an import cycle). |
-
-### Persistence
+Coordination:
 
 | Package | Purpose |
 |---|---|
-| `internal/store` | SQLite-backed event log + session metadata + external-key index. The append-only `events` table is the canonical record of every turn. |
-| `internal/chats` | Persistent multi-turn chat threads (the back-end behind `host.chat.*` and the chat-aware mode of `host.oracle.{talk,ask_with_mcp}`). One `claude --resume` session per chat row. |
-| `internal/ulid` | 26-char monotonically-increasing IDs used for sessions, jobs, chats, messages. |
+| `internal/orchestrator` | The only writer to `Store`. Drives the turn loop, dispatches effects, manages background-job listeners, hot-reloads on `app.yaml` change. |
+| `internal/host` | Registry of named side-effect handlers + built-ins. |
+| `internal/harness` | LLM abstraction. |
+| `internal/transport` | Output-only adapters. |
+| `internal/clock` | Injectable time source (real / fake). |
+| `internal/jobs` | Background-job scheduler + persistence + clarification flow. |
+| `internal/inbox` | In-app notifications and teleport metadata. |
+| `internal/chathost` | Adapter bridging `internal/chats.Store` into the host's `ChatStore` interface. |
 
-### Surfaces
-
-| Package | Purpose |
-|---|---|
-| `internal/tui` | Bubble Tea TUI — transcript pane, action menu, clarify dialog, inbox panel, hot-reload edit mode. |
-| `internal/mcp` | MCP server (`hally serve`). Exposes a single `transition` tool over stdio; per-intent JSON Schema is generated from the app definition. |
-| `internal/viz` | Graphviz DOT and Mermaid `stateDiagram-v2` emitters. |
-| `internal/trace` | Structured slog-based event tracing. JSONL plus a colour pretty-printer. |
-
-### Authoring & testing
+Persistence:
 
 | Package | Purpose |
 |---|---|
-| `internal/authoring` | Edit-mode flow: shadow-copy the app dir, run `claude -p` with full Read/Edit/Write access, diff and apply changes. |
-| `internal/testrunner` | Mode 1 (intent pass-rate) and Mode 2 (deterministic flow) test runners. Includes the static / replay harnesses. |
-| `pkg/hallytest` | Public testing helpers for app authors (still a thin wrapper over `internal/testrunner`). |
+| `internal/store` | SQLite-backed event log + session metadata + external-key index. |
+| `internal/chats` | Persistent multi-turn chat threads. |
+| `internal/ulid` | 26-char monotonically-increasing IDs for sessions, jobs, chats, messages. |
 
-### CLI
+Surfaces:
 
 | Package | Purpose |
 |---|---|
-| `cmd/hally` | Cobra root + every subcommand (`run`, `serve`, `viz`, `trace`, `replay`, `test`, `record`, `session`, `chat`, `inspect`, `turn`, `render`, `mcp-validator`, `docs`, `version`). |
+| `internal/tui` | Bubble Tea TUI. |
+| `internal/mcp` | MCP server (`hally serve`). |
+| `internal/viz` | Graphviz DOT and Mermaid emitters. |
+| `internal/trace` | Structured slog-based event tracing. |
+
+Authoring & testing:
+
+| Package | Purpose |
+|---|---|
+| `internal/authoring` | Edit-mode flow — shadow-copy app, run `claude -p`, diff, apply. |
+| `internal/testrunner` | Mode 1 (intent pass-rate) and Mode 2 (deterministic flow) test runners. |
+| `pkg/hallytest` | Public testing helpers for app authors. |
+
+CLI:
+
+| Package | Purpose |
+|---|---|
+| `cmd/hally` | Cobra root + every subcommand. |
 | `cmd/devstory_loader` | One-off utility to seed a sample `dev-story` session. |
 
----
+### 11.4 Persistence schema
 
-## 4. Determinism boundary
-
-Determinism is a hard contract for the **machine** and a soft contract for
-the **orchestrator**.
-
-- **Pure (always deterministic).** `internal/machine`, `internal/expr`,
-  `internal/world`, `internal/app`, `internal/proposal`. Same inputs →
-  identical outputs, byte-for-byte. The `replay` harness exists to make
-  the LLM step deterministic too: an oracle YAML maps `(state, input)` →
-  `(intent, slots)` and the harness looks up rather than calls.
-
-- **Effectful but reproducible.** `internal/orchestrator`,
-  `internal/store`, `internal/jobs`. Time and randomness are injected
-  (`clock.Clock`, `ulid.New`); test code substitutes deterministic
-  versions. The event log is the source of truth — replaying it on a
-  fresh store produces the same world snapshot.
-
-- **Not deterministic.** The `live` and `claude_cli` harnesses; real
-  network calls inside host handlers (`host.run`, `host.oracle.*`,
-  `host.transport.post`, `host.workspace_manager.get`).
-
-The orchestrator quarantines non-determinism into the harness call and
-the host invocations. Everything downstream of those — guard evaluation,
-effect application, view rendering — is replayable from the recorded
-result of those calls.
-
----
-
-## 5. Persistence model
-
-Three stores share one SQLite file (default
+Three concerns share one SQLite file (default
 `$XDG_DATA_HOME/hally/sessions.db`):
 
 ```
-sessions    one row per session         (id, app_id, state_path, world_json,
-                                         status, transport, thread, …)
-events      append-only event log       (session_id, seq, ts, kind, payload_json)
-jobs        background-job lifecycle    (id, session_id, status, payload_json,
-                                         result_json, clarification_json, …)
-chats       persistent chat threads     (id, app_id, room, scope_key, status,
-                                         claude_session_id, lock_owner, …)
-messages    chat transcript rows        (chat_id, seq, role, content, ts)
-external_keys (transport, thread) → session_id  for singleton lookup
+sessions       one row per session         (id, app_id, state_path, world_json, …)
+events         append-only event log       (session_id, seq, ts, kind, payload_json)
+jobs           background-job lifecycle    (id, session_id, status, payload_json, …)
+chats          persistent chat threads     (id, app_id, room, scope_key, status, …)
+messages       chat transcript rows        (chat_id, seq, role, content, ts)
+external_keys  (transport, thread) → session_id
 ```
 
-Key invariants:
+The orchestrator is the only writer to `events` and `sessions`; chats
+and jobs each have their own per-row lock. The full event-kind enum
+is defined in [`internal/store/event.go`](../internal/store/event.go).
 
-- The orchestrator is the **only** writer to `events` and `sessions`.
-- Each session has a writer lock — `cmd/hally session continue` returns
-  EX_TEMPFAIL (75) if the lock is held, so external orchestrators can
-  back off.
-- Chats have their own per-row lock so a TUI session and an external
-  driver can both hold the session lock without racing on a chat.
-- Replaying `events` through `Store.LoadJourney` rebuilds the world
-  snapshot byte-for-byte. The world column on `sessions` is a cache.
-
-The full event-kind enum is defined in
-[`internal/store/event.go`](../internal/store/event.go); a representative
-slice: `TurnStarted`, `LLMCalled`, `LLMToolCall`, `ValidationFailed`,
-`TransitionApplied`, `EffectApplied`, `HostInvoked`, `HostReturned`,
-`StateExited`, `StateEntered`, `JobSubmitted`, `JobCompleted`,
-`GuardRejected`, `OffPathEntered`, `OffPathExited`, `TurnEnded`.
-
----
-
-## 6. Conversation surfaces
-
-A "conversation" is a session driven from one or more **surfaces**.
-
-- **TUI** is `cmd/hally run` — Bubble Tea, single-process, the local
-  developer's view. The TUI transport is the local mirror of the
-  transcript.
-- **MCP** is `cmd/hally serve` — Claude Desktop and Claude Code reach
-  into hally via the `transition` tool to drive a session.
-- **External orchestrators** (`loop.py`, future webhook receivers) drive
-  sessions over the CLI via `hally session continue`. Each external
-  invocation is one inbound event; the orchestrator runs one turn and
-  exits.
-
-`Transport.Post` is the dual: any room can output to **all** subscribed
-transports for a session — Jira ticket comments, Bitbucket PR comments,
-the local TUI. Output transports are output-only in v1; inbound is the
-external driver's responsibility.
-
-The session table's `(transport, thread)` index makes singleton lookup
-cheap: `jira:PLTFRM-12345` resolves to exactly one session, and the
-writer lock guarantees serial execution against it. This is what makes
-hally usable as the conversation engine behind a comment-thread bot.
-
-For details, see [`docs/transports.md`](transports.md).
-
----
-
-## 7. Observability
-
-Three lenses, all shipping with the binary:
+### 11.5 Observability
 
 - **Trace** — `--trace file.jsonl --trace-pretty -` writes one JSON
   object per event (`turn.*`, `harness.*`, `machine.*`, `store.*`,
-  `expr.*`, `host.*`, `jobs.*`). `hally trace` pretty-prints it after
-  the fact.
-- **Inspect** — `hally inspect --session-id <id>` prints a read-only JSON
-  snapshot of a stored session: current state, world, allowed intents,
-  last view, last N turns. Safe to run alongside an active session.
-- **Visualise** — `hally viz` emits Graphviz DOT (default) or Mermaid
-  (`--mermaid`); the Mermaid output supports per-room split.
+  `host.*`, `jobs.*`).
+- **Inspect** — `hally inspect --session-id <id>` prints a read-only
+  JSON snapshot of a stored session.
+- **Visualise** — `hally viz` emits Graphviz DOT or Mermaid.
 
-The trace is the canonical post-mortem surface. Every interesting event
-in §5 is logged with the same `session_id` and `turn` keys, so grepping
-by either reconstructs the full picture.
+The `turn.done` events carry `view_rendered`, so a `--trace` JSONL
+file is a complete after-the-fact transcript.
 
 ---
 
-## 8. Where to go from here
+## 12. Where to go next
 
 - **Authoring an app** → [`authoring.md`](authoring.md) and
   `hally docs app-schema`.
+- **State machine vocabulary** → [`state-machine.md`](state-machine.md).
 - **Building or contributing** → [`developer-guide.md`](developer-guide.md).
-- **Understanding the state machine** → [`state-machine.md`](state-machine.md).
 - **Testing** → [`testing.md`](testing.md).
 - **Background jobs** → [`background-jobs/`](background-jobs/README.md).
 - **Hosts and transports** → [`hosts.md`](hosts.md), [`transports.md`](transports.md).
