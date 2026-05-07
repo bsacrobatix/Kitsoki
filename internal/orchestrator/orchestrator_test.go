@@ -30,7 +30,7 @@ func loadCloakOrchestrator(t *testing.T) (*orchestrator.Orchestrator, *app.AppDe
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
-	h, err := harness.NewReplay("../../testdata/apps/cloak/oracle.yaml")
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
 	require.NoError(t, err)
 
 	orch := orchestrator.New(def, m, s, h)

@@ -41,7 +41,7 @@ func turnCmd() *cobra.Command {
 		intentName  string
 		inputText   string
 		harnessType string
-		oraclePath  string
+		recordingPath  string
 	)
 
 	cmd := &cobra.Command{
@@ -64,7 +64,7 @@ Examples:
   hally turn app.yaml --state foyer --intent go_west
   hally turn app.yaml --state foyer --intent open --slots '{"door":"red"}'
   hally turn app.yaml --state cloakroom --world @w.json --input "hang the cloak"
-  hally turn app.yaml --state foyer --intent take --harness replay --oracle oracle.yaml`,
+  hally turn app.yaml --state foyer --intent take --harness replay --recording recording.yaml`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appPath := args[0]
@@ -118,7 +118,7 @@ Examples:
 			}
 			defer func() { _ = s.Close() }()
 
-			h, err := buildTurnHarness(harnessType, oraclePath, def, intentName != "")
+			h, err := buildTurnHarness(harnessType, recordingPath, def, intentName != "")
 			if err != nil {
 				return err
 			}
@@ -167,7 +167,7 @@ Examples:
 	cmd.Flags().StringVar(&intentName, "intent", "", "intent name to invoke directly (no LLM)")
 	cmd.Flags().StringVar(&inputText, "input", "", "free-text input routed through the harness")
 	cmd.Flags().StringVar(&harnessType, "harness", "", "harness type for --input: claude|live|replay (default auto)")
-	cmd.Flags().StringVar(&oraclePath, "oracle", "", "oracle YAML for --harness replay")
+	cmd.Flags().StringVar(&recordingPath, "recording", "", "recording YAML for --harness replay")
 
 	return cmd
 }
@@ -211,9 +211,9 @@ func decodeJSONFlag(raw, fieldName string) (map[string]any, error) {
 // buildTurnHarness chooses a harness for `hally turn`. When --intent is set
 // the harness is never invoked, so we hand back a no-op replay-ish harness
 // that errors loudly if anything tries to call it.
-func buildTurnHarness(harnessType, oraclePath string, def *app.AppDef, directIntent bool) (harness.Harness, error) {
+func buildTurnHarness(harnessType, recordingPath string, def *app.AppDef, directIntent bool) (harness.Harness, error) {
 	if directIntent {
-		// Cheap stub: a replay harness with no oracle path will error if
+		// Cheap stub: a replay harness with no recording path will error if
 		// invoked, which is exactly what we want — the direct path must
 		// not call it.
 		return &noRunHarness{}, nil
@@ -223,10 +223,10 @@ func buildTurnHarness(harnessType, oraclePath string, def *app.AppDef, directInt
 	}
 	switch harnessType {
 	case "replay":
-		if oraclePath == "" {
-			return nil, fmt.Errorf("--oracle is required when --harness replay is set")
+		if recordingPath == "" {
+			return nil, fmt.Errorf("--recording is required when --harness replay is set")
 		}
-		return harness.NewReplay(oraclePath)
+		return harness.NewReplay(recordingPath)
 	case "claude":
 		return harness.NewClaudeCLI(def, harness.ClaudeCLIConfig{})
 	case "live":

@@ -1,6 +1,6 @@
-# Replay oracle for the dev-story demo tape.
+# Replay recording for the dev-story demo tape.
 # Hand-authored — deterministic mapping from free-text to structured intent.
-kind: oracle
+kind: recording
 app_id: dev-story
 app_version: 0.1.0
 generated_at: "2026-04-22T00:00:00Z"

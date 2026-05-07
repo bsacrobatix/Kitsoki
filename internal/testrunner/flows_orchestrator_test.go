@@ -101,7 +101,7 @@ expect_no_errors: true
 	require.NoError(t, os.WriteFile(fixturePath, []byte(fixture), 0644))
 
 	report, err := testrunner.RunFlows(t.Context(), absAppPath, fixturePath, testrunner.FlowOptions{
-		AllowMissingOracle: true,
+		AllowMissingRecording: true,
 	})
 	require.NoError(t, err, "RunFlows should not return a fatal error on host infra error")
 	require.NotEmpty(t, report.Results)

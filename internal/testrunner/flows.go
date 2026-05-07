@@ -37,7 +37,7 @@ import (
 type FlowFixture struct {
 	TestKind     string            `yaml:"test_kind"`
 	App          string            `yaml:"app"`
-	Oracle       string            `yaml:"oracle,omitempty"`
+	Recording    string            `yaml:"recording,omitempty"`
 	InitialState string            `yaml:"initial_state"`
 	InitialWorld map[string]any    `yaml:"initial_world,omitempty"`
 	Turns        []FlowTurn        `yaml:"turns"`
@@ -177,7 +177,7 @@ type FlowResult struct {
 	File    string
 	Passed  bool
 	Turns   []TurnResult
-	Skipped bool // when oracle miss and allow-missing is set
+	Skipped bool // when recording miss and allow-missing is set
 }
 
 // FlowReport is the aggregate result of running multiple flows.
@@ -191,10 +191,10 @@ type FlowReport struct {
 
 // FlowOptions configure the flow runner.
 type FlowOptions struct {
-	// OracleOverride overrides the oracle path declared in each fixture file.
-	OracleOverride string
-	// AllowMissingOracle downgrades oracle-miss failures to skips.
-	AllowMissingOracle bool
+	// RecordingOverride overrides the recording path declared in each fixture file.
+	RecordingOverride string
+	// AllowMissingRecording downgrades recording-miss failures to skips.
+	AllowMissingRecording bool
 	// FailFast stops at first failure.
 	FailFast bool
 	// Verbose enables per-turn verbose output.
@@ -454,25 +454,25 @@ func runOneFlow(ctx context.Context, def *app.AppDef, m machine.Machine, filePat
 func runOneFlowLegacy(ctx context.Context, def *app.AppDef, m machine.Machine, filePath string, fixture *FlowFixture, opts FlowOptions) (*FlowResult, error) {
 	result := &FlowResult{File: filePath}
 
-	// Load oracle if needed.
+	// Load recording if needed.
 	var replayHarness *harness.ReplayHarness
-	oraclePath := fixture.Oracle
-	if opts.OracleOverride != "" {
-		oraclePath = opts.OracleOverride
+	recordingPath := fixture.Recording
+	if opts.RecordingOverride != "" {
+		recordingPath = opts.RecordingOverride
 	}
 
-	// Resolve oracle path relative to fixture file.
-	if oraclePath != "" {
-		if !filepath.IsAbs(oraclePath) {
-			oraclePath = filepath.Join(filepath.Dir(filePath), oraclePath)
+	// Resolve recording path relative to fixture file.
+	if recordingPath != "" {
+		if !filepath.IsAbs(recordingPath) {
+			recordingPath = filepath.Join(filepath.Dir(filePath), recordingPath)
 		}
-		rh, err := harness.NewReplay(oraclePath)
+		rh, err := harness.NewReplay(recordingPath)
 		if err != nil {
-			if opts.AllowMissingOracle {
+			if opts.AllowMissingRecording {
 				result.Skipped = true
 				return result, nil
 			}
-			return nil, fmt.Errorf("load oracle %q: %w", oraclePath, err)
+			return nil, fmt.Errorf("load recording %q: %w", recordingPath, err)
 		}
 		replayHarness = rh
 	}
@@ -493,30 +493,30 @@ func runOneFlowLegacy(ctx context.Context, def *app.AppDef, m machine.Machine, f
 		var call intent.IntentCall
 
 		if turn.Intent != nil {
-			// Structured intent — bypass oracle.
+			// Structured intent — bypass recording.
 			call = intent.IntentCall{
 				Intent: turn.Intent.Name,
 				Slots:  world.Slots(turn.Intent.Slots),
 			}
 		} else if turn.Input != "" {
-			// Oracle lookup.
+			// Recording lookup.
 			if replayHarness == nil {
-				return nil, fmt.Errorf("turn %d: input %q requires an oracle but none was loaded", i+1, turn.Input)
+				return nil, fmt.Errorf("turn %d: input %q requires a recording but none was loaded", i+1, turn.Input)
 			}
 			params, err := replayHarness.RunTurn(ctx, harness.TurnInput{
 				StatePath: currentState,
 				UserText:  turn.Input,
 			})
 			if err != nil {
-				if opts.AllowMissingOracle {
+				if opts.AllowMissingRecording {
 					result.Skipped = true
 					return result, nil
 				}
-				return nil, fmt.Errorf("turn %d: oracle miss for input %q in state %q: %w", i+1, turn.Input, currentState, err)
+				return nil, fmt.Errorf("turn %d: recording miss for input %q in state %q: %w", i+1, turn.Input, currentState, err)
 			}
 			call, err = paramsToIntentCall(params)
 			if err != nil {
-				return nil, fmt.Errorf("turn %d: parse oracle result: %w", i+1, err)
+				return nil, fmt.Errorf("turn %d: parse recording result: %w", i+1, err)
 			}
 		} else {
 			return nil, fmt.Errorf("turn %d: neither intent nor input is set", i+1)
@@ -842,12 +842,12 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 
 			outcome, turnErr = rig.orch.RunIntent(ctx, rig.sid, call.Intent, map[string]any(call.Slots))
 		} else if turn.Input != "" {
-			// input: turns in the orchestrator path require an oracle to resolve the
+			// input: turns in the orchestrator path require a recording to resolve the
 			// intent. For now we return an error — the orchestrator path is only used
 			// for intent: turns (host_handlers, advance_clock). If someone wants
-			// oracle-resolved turns with orchestrator features they should add a static
+			// recording-resolved turns with orchestrator features they should add a static
 			// harness; that's a future enhancement.
-			return nil, fmt.Errorf("turn %d: input: %q in orchestrator-path fixture; use intent: instead (oracle routing not yet supported on orchestrator path)", i+1, turn.Input)
+			return nil, fmt.Errorf("turn %d: input: %q in orchestrator-path fixture; use intent: instead (recording routing not yet supported on orchestrator path)", i+1, turn.Input)
 		} else {
 			return nil, fmt.Errorf("turn %d: neither intent nor input is set", i+1)
 		}

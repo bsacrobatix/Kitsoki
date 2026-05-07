@@ -70,7 +70,7 @@ SQLite or a fake clock.
 # Force the deterministic replay path (no LLM at all)
 ./hally run testdata/apps/cloak/app.yaml \
     --harness replay \
-    --oracle testdata/apps/cloak/oracle.yaml
+    --recording testdata/apps/cloak/recording.yaml
 
 # Verbose tracing, both JSONL and human-readable, to disk
 ./hally run testdata/apps/cloak/app.yaml \
@@ -214,7 +214,7 @@ for "what would happen if I did X in state Y with world Z?":
 ```sh
 hally turn app.yaml --state cloakroom --intent hang_cloak
 hally turn app.yaml --state foyer \
-    --input "head south" --harness replay --oracle oracle.yaml
+    --input "head south" --harness replay --recording recording.yaml
 hally turn app.yaml --state cloakroom --intent look \
     --world '{"wearing_cloak": false}'
 ```

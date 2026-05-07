@@ -37,7 +37,7 @@ func TestRecordEndToEnd(t *testing.T) {
 		theme:       th,
 		frameDelay:  25,   // 250ms
 		settleDelay: 15,   // 150ms
-		oraclePath:  "",   // winning.yaml uses structured intents only
+		recordingPath:  "",   // winning.yaml uses structured intents only
 	}
 
 	if err := runRecord(cfg); err != nil {

@@ -43,8 +43,8 @@ const (
 	EvHarnessRetry         = "harness.retry"
 	EvHarnessError         = "harness.error"
 	EvHarnessExec          = "harness.exec"
-	EvHarnessOracleHit     = "harness.oracle_hit"
-	EvHarnessOracleMiss    = "harness.oracle_miss"
+	EvHarnessRecordingHit  = "harness.recording_hit"
+	EvHarnessRecordingMiss = "harness.recording_miss"
 
 	// Machine guard / effect / transition.
 	EvMachineGuardEval          = "machine.guard.eval"

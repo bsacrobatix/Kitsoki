@@ -1,6 +1,6 @@
 // Package harness defines the Harness interface and its type dependencies.
 // Three implementations are planned (§12.1): Live (anthropic-sdk-go or claude -p
-// subprocess), Replay (YAML oracle for Mode 2 tests), and Recording (wraps Live).
+// subprocess), Replay (YAML recording for Mode 2 tests), and Recording (wraps Live).
 package harness
 
 import (

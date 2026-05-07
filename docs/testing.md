@@ -75,11 +75,11 @@ Exit codes: `0` pass, `1` fail, `2` setup error.
 
 When a fixture uses `input:`, the runner needs a **recording** —
 a YAML mapping `(state, input) → (intent, slots)`. Pass one
-explicitly with `--oracle path` or let the runner auto-discover
-`<app-dir>/oracle.yaml`. Recording shape:
+explicitly with `--recording <path>` or let the runner auto-discover
+`<app-dir>/recording.yaml`. Recording shape:
 
 ```yaml
-kind: oracle           # CLI flag and YAML field still spell this "oracle"
+kind: recording
 app_id: cloak-of-darkness
 app_version: 0.1.0
 generated_at: 2026-04-22T10:00:00Z
@@ -202,7 +202,7 @@ hally test intents testdata/apps/cloak/app.yaml --harness live --runs 10
 
 # Compile a live run into a recording for use by Mode 2 / static
 hally test intents testdata/apps/cloak/app.yaml \
-    --harness live --emit-oracle testdata/apps/cloak/oracle.yaml
+    --harness live --emit-recording testdata/apps/cloak/recording.yaml
 
 # Compare against a baseline pass-rate file
 hally test intents testdata/apps/cloak/app.yaml \
@@ -226,15 +226,11 @@ that can be compiled into one.
 hally run myapp.yaml --harness recording --record /tmp/rec.jsonl
 
 # Compile a live intent-test run directly into a YAML recording
-hally test intents myapp.yaml --harness live --emit-oracle oracle.yaml
+hally test intents myapp.yaml --harness live --emit-recording recording.yaml
 ```
 
 The JSONL recording is one object per turn:
 `{state, input, intent, slots, ts, model, tokens_in, tokens_out}`.
-
-> **Note:** the CLI flag is still spelled `--oracle` and the YAML
-> still has `kind: oracle`. The terminology in this document is
-> "recording"; a future code change is expected to follow.
 
 ---
 

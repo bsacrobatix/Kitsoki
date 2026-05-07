@@ -1,5 +1,5 @@
 // Package harness — ReplayHarness implementation (§10.5, §12.1).
-// Reads an oracle YAML and returns deterministic CallToolParams without any LLM.
+// Reads a recording YAML and returns deterministic CallToolParams without any LLM.
 package harness
 
 import (
@@ -15,105 +15,105 @@ import (
 	"hally/internal/trace"
 )
 
-// oracleFile is the parsed oracle YAML structure (§10.4).
-type oracleFile struct {
-	Kind          string         `yaml:"kind"`
-	AppID         string         `yaml:"app_id"`
-	AppVersion    string         `yaml:"app_version"`
-	GeneratedAt   string         `yaml:"generated_at"`
-	Generator     string         `yaml:"generator"`
-	MinConfidence float64        `yaml:"min_confidence"`
-	Entries       []oracleEntry  `yaml:"entries"`
+// recordingFile is the parsed recording YAML structure (§10.4).
+type recordingFile struct {
+	Kind          string            `yaml:"kind"`
+	AppID         string            `yaml:"app_id"`
+	AppVersion    string            `yaml:"app_version"`
+	GeneratedAt   string            `yaml:"generated_at"`
+	Generator     string            `yaml:"generator"`
+	MinConfidence float64           `yaml:"min_confidence"`
+	Entries       []recordingEntry  `yaml:"entries"`
 }
 
-// oracleEntry is one (state, input, intent, slots) record in the oracle.
-type oracleEntry struct {
-	State   string      `yaml:"state"`
-	Input   string      `yaml:"input"`
-	Intent  oracleIntent `yaml:"intent"`
-	Confidence float64 `yaml:"confidence"`
-	MajorityOf int    `yaml:"majority_of"`
+// recordingEntry is one (state, input, intent, slots) record in the recording.
+type recordingEntry struct {
+	State      string          `yaml:"state"`
+	Input      string          `yaml:"input"`
+	Intent     recordingIntent `yaml:"intent"`
+	Confidence float64         `yaml:"confidence"`
+	MajorityOf int             `yaml:"majority_of"`
 }
 
-// oracleIntent holds the intent name and slot map within an oracle entry.
-type oracleIntent struct {
+// recordingIntent holds the intent name and slot map within a recording entry.
+type recordingIntent struct {
 	Name  string         `yaml:"name"`
 	Slots map[string]any `yaml:"slots"`
 }
 
-// oracleKey is the lookup key for the oracle map.
-type oracleKey struct {
+// recordingKey is the lookup key for the recording map.
+type recordingKey struct {
 	State string
 	Input string // normalized (lowercased, trimmed)
 }
 
-// ErrOracleMiss is returned when no matching oracle entry is found.
-type ErrOracleMiss struct {
+// ErrRecordingMiss is returned when no matching recording entry is found.
+type ErrRecordingMiss struct {
 	State string
 	Input string
 }
 
-func (e *ErrOracleMiss) Error() string {
-	return fmt.Sprintf("harness/replay: oracle miss for state=%q input=%q", e.State, e.Input)
+func (e *ErrRecordingMiss) Error() string {
+	return fmt.Sprintf("harness/replay: recording miss for state=%q input=%q", e.State, e.Input)
 }
 
-// ReplayHarness looks up (state, input) pairs in an oracle YAML and returns
+// ReplayHarness looks up (state, input) pairs in a recording YAML and returns
 // the recorded intent call without making any LLM calls.
 //
 // Lookup precedence (documented here, tested in harness_test.go):
 //  1. Exact match on (state, input) — original casing, untrimmed.
 //  2. Case-insensitive match on (state, input) — both sides lowercased, trimmed.
 //
-// The first match wins. If no match is found, ErrOracleMiss is returned.
+// The first match wins. If no match is found, ErrRecordingMiss is returned.
 type ReplayHarness struct {
 	// exact maps (state, input) → entry using the original casing.
-	exact map[oracleKey]*oracleEntry
+	exact map[recordingKey]*recordingEntry
 	// normalized maps (state, normalized-input) → entry for case-insensitive lookup.
-	normalized map[oracleKey]*oracleEntry
+	normalized map[recordingKey]*recordingEntry
 	// logger is used for structured trace events.
 	logger *slog.Logger
 }
 
-// NewReplay loads an oracle YAML from oraclePath and constructs a ReplayHarness.
+// NewReplay loads a recording YAML from recordingPath and constructs a ReplayHarness.
 // Returns an error if the file is missing, malformed, or contains duplicate entries.
-func NewReplay(oraclePath string) (*ReplayHarness, error) {
-	data, err := os.ReadFile(oraclePath)
+func NewReplay(recordingPath string) (*ReplayHarness, error) {
+	data, err := os.ReadFile(recordingPath)
 	if err != nil {
-		return nil, fmt.Errorf("harness/replay: read oracle %q: %w", oraclePath, err)
+		return nil, fmt.Errorf("harness/replay: read recording %q: %w", recordingPath, err)
 	}
 
-	var of oracleFile
-	if err := yaml.Unmarshal(data, &of); err != nil {
-		return nil, fmt.Errorf("harness/replay: parse oracle %q: %w", oraclePath, err)
+	var rf recordingFile
+	if err := yaml.Unmarshal(data, &rf); err != nil {
+		return nil, fmt.Errorf("harness/replay: parse recording %q: %w", recordingPath, err)
 	}
 
-	if of.Kind != "oracle" {
-		return nil, fmt.Errorf("harness/replay: oracle %q has unexpected kind %q (want \"oracle\")", oraclePath, of.Kind)
+	if rf.Kind != "recording" {
+		return nil, fmt.Errorf("harness/replay: recording %q has unexpected kind %q (want \"recording\")", recordingPath, rf.Kind)
 	}
-	if len(of.Entries) == 0 {
-		return nil, fmt.Errorf("harness/replay: oracle %q has no entries", oraclePath)
+	if len(rf.Entries) == 0 {
+		return nil, fmt.Errorf("harness/replay: recording %q has no entries", recordingPath)
 	}
 
 	h := &ReplayHarness{
-		exact:      make(map[oracleKey]*oracleEntry, len(of.Entries)),
-		normalized: make(map[oracleKey]*oracleEntry, len(of.Entries)),
+		exact:      make(map[recordingKey]*recordingEntry, len(rf.Entries)),
+		normalized: make(map[recordingKey]*recordingEntry, len(rf.Entries)),
 		logger:     slog.Default(),
 	}
 
-	for i := range of.Entries {
-		e := &of.Entries[i]
+	for i := range rf.Entries {
+		e := &rf.Entries[i]
 		if e.State == "" {
-			return nil, fmt.Errorf("harness/replay: oracle entry %d has empty state", i)
+			return nil, fmt.Errorf("harness/replay: recording entry %d has empty state", i)
 		}
 		if e.Input == "" {
-			return nil, fmt.Errorf("harness/replay: oracle entry %d has empty input", i)
+			return nil, fmt.Errorf("harness/replay: recording entry %d has empty input", i)
 		}
 		if e.Intent.Name == "" {
-			return nil, fmt.Errorf("harness/replay: oracle entry %d has empty intent name", i)
+			return nil, fmt.Errorf("harness/replay: recording entry %d has empty intent name", i)
 		}
 
-		exactKey := oracleKey{State: e.State, Input: e.Input}
-		normKey := oracleKey{State: e.State, Input: normalizeInput(e.Input)}
+		exactKey := recordingKey{State: e.State, Input: e.Input}
+		normKey := recordingKey{State: e.State, Input: normalizeInput(e.Input)}
 
 		// First entry wins (preserves YAML source order).
 		if _, dup := h.exact[exactKey]; !dup {
@@ -127,7 +127,7 @@ func NewReplay(oraclePath string) (*ReplayHarness, error) {
 	return h, nil
 }
 
-// RunTurn looks up the (state, input) pair in the oracle and returns a
+// RunTurn looks up the (state, input) pair in the recording and returns a
 // mcp.CallToolParams for the matched intent.
 func (h *ReplayHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallToolParams, error) {
 	state := string(in.StatePath)
@@ -144,9 +144,9 @@ func (h *ReplayHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallTool
 	)
 
 	// 1. Exact match.
-	exactKey := oracleKey{State: state, Input: in.UserText}
+	exactKey := recordingKey{State: state, Input: in.UserText}
 	if e, ok := h.exact[exactKey]; ok {
-		l.DebugContext(ctx, trace.EvHarnessOracleHit,
+		l.DebugContext(ctx, trace.EvHarnessRecordingHit,
 			slog.String("input", in.UserText),
 			slog.String("intent", e.Intent.Name),
 			slog.Any("slots", e.Intent.Slots),
@@ -155,9 +155,9 @@ func (h *ReplayHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallTool
 	}
 
 	// 2. Case-insensitive + trimmed match.
-	normKey := oracleKey{State: state, Input: normalizeInput(in.UserText)}
+	normKey := recordingKey{State: state, Input: normalizeInput(in.UserText)}
 	if e, ok := h.normalized[normKey]; ok {
-		l.DebugContext(ctx, trace.EvHarnessOracleHit,
+		l.DebugContext(ctx, trace.EvHarnessRecordingHit,
 			slog.String("input", in.UserText),
 			slog.String("intent", e.Intent.Name),
 			slog.Any("slots", e.Intent.Slots),
@@ -165,11 +165,11 @@ func (h *ReplayHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallTool
 		return entryToParams(e), nil
 	}
 
-	l.DebugContext(ctx, trace.EvHarnessOracleMiss,
+	l.DebugContext(ctx, trace.EvHarnessRecordingMiss,
 		slog.String("input", in.UserText),
 		slog.String("state", state),
 	)
-	return mcp.CallToolParams{}, &ErrOracleMiss{State: state, Input: in.UserText}
+	return mcp.CallToolParams{}, &ErrRecordingMiss{State: state, Input: in.UserText}
 }
 
 // WithLogger sets the logger for trace emission.
@@ -187,8 +187,8 @@ func normalizeInput(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// entryToParams converts an oracle entry to a mcp.CallToolParams.
-func entryToParams(e *oracleEntry) mcp.CallToolParams {
+// entryToParams converts a recording entry to a mcp.CallToolParams.
+func entryToParams(e *recordingEntry) mcp.CallToolParams {
 	args := map[string]any{
 		"intent": e.Intent.Name,
 	}

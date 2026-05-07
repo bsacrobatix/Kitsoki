@@ -92,7 +92,7 @@ func runCmd() *cobra.Command {
 	var (
 		harnessType    string
 		claudeModel    string
-		oraclePath     string
+		recordingPath     string
 		recordPath     string
 		dbPath         string
 		tracePath      string
@@ -111,12 +111,12 @@ state machine applies the transition; the view is re-rendered.
 Harness auto-selection (when --harness is omitted):
   1. 'claude' binary on PATH       → claude harness (no API key needed)
   2. ANTHROPIC_API_KEY set         → live harness (direct SDK)
-  3. otherwise                     → replay (requires --oracle)
+  3. otherwise                     → replay (requires --recording)
 
 Examples:
   hally run testdata/apps/cloak/app.yaml
   hally run myapp.yaml --harness claude --claude-model opus
-  hally run myapp.yaml --harness replay --oracle oracle.yaml
+  hally run myapp.yaml --harness replay --recording recording.yaml
   hally run myapp.yaml --harness recording --record /tmp/rec.jsonl
   hally run myapp.yaml --trace /tmp/t.jsonl --trace-pretty -
 
@@ -214,7 +214,7 @@ See 'hally docs llm-guide' for the full operator guide.`,
 			}
 
 			// Build harness.
-			h, err := buildHarness(harnessType, claudeModel, oraclePath, recordPath, def)
+			h, err := buildHarness(harnessType, claudeModel, recordingPath, recordPath, def)
 			if err != nil {
 				return fmt.Errorf("build harness: %w", err)
 			}
@@ -271,8 +271,8 @@ See 'hally docs llm-guide' for the full operator guide.`,
 		"harness type: claude|live|replay|recording (default: claude if `claude` binary on PATH, else live if ANTHROPIC_API_KEY set, else replay)")
 	cmd.Flags().StringVar(&claudeModel, "claude-model", "",
 		fmt.Sprintf("model passed to claude -p --model (default: %s); use 'opus' for higher quality at higher cost", harness.DefaultClaudeModel))
-	cmd.Flags().StringVar(&oraclePath, "oracle", "",
-		"path to oracle YAML file (required for --harness replay)")
+	cmd.Flags().StringVar(&recordingPath, "recording", "",
+		"path to recording YAML file (required for --harness replay)")
 	cmd.Flags().StringVar(&recordPath, "record", "",
 		"path to output JSONL recording (for --harness recording)")
 	cmd.Flags().StringVar(&dbPath, "db", "",
@@ -302,7 +302,7 @@ func setHarnessLogger(h harness.Harness, l *slog.Logger) {
 // Precedence:
 //  1. `claude` binary on PATH → use ClaudeCLIHarness (no API key needed).
 //  2. ANTHROPIC_API_KEY set   → use LiveHarness (direct SDK).
-//  3. Otherwise               → use "replay" (requires --oracle) or error.
+//  3. Otherwise               → use "replay" (requires --recording) or error.
 func autoSelectHarness() string {
 	if _, err := exec.LookPath("claude"); err == nil {
 		return "claude"
@@ -310,14 +310,14 @@ func autoSelectHarness() string {
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
 		return "live"
 	}
-	// Fall back to replay; the caller will error if --oracle is not set.
+	// Fall back to replay; the caller will error if --recording is not set.
 	return "replay"
 }
 
 // buildHarness constructs the appropriate harness based on the harness type flag.
 // If harnessType is empty, autoSelectHarness() is called to pick one.
 // claudeModel is the model name for the ClaudeCLIHarness; pass "" to use the default.
-func buildHarness(harnessType, claudeModel, oraclePath, recordPath string, def *app.AppDef) (harness.Harness, error) {
+func buildHarness(harnessType, claudeModel, recordingPath, recordPath string, def *app.AppDef) (harness.Harness, error) {
 	if harnessType == "" {
 		harnessType = autoSelectHarness()
 	}
@@ -327,10 +327,10 @@ func buildHarness(harnessType, claudeModel, oraclePath, recordPath string, def *
 		return harness.NewClaudeCLI(def, harness.ClaudeCLIConfig{Model: claudeModel})
 
 	case "replay":
-		if oraclePath == "" {
-			return nil, fmt.Errorf("--oracle is required when --harness replay is set")
+		if recordingPath == "" {
+			return nil, fmt.Errorf("--recording is required when --harness replay is set")
 		}
-		return harness.NewReplay(oraclePath)
+		return harness.NewReplay(recordingPath)
 
 	case "live":
 		apiKey := os.Getenv("ANTHROPIC_API_KEY")
@@ -341,9 +341,9 @@ func buildHarness(harnessType, claudeModel, oraclePath, recordPath string, def *
 		return harness.NewLive(&client, "", def)
 
 	case "recording":
-		if oraclePath != "" {
+		if recordingPath != "" {
 			// Wrap replay with recording.
-			replay, err := harness.NewReplay(oraclePath)
+			replay, err := harness.NewReplay(recordingPath)
 			if err != nil {
 				return nil, fmt.Errorf("replay harness for recording: %w", err)
 			}
@@ -355,7 +355,7 @@ func buildHarness(harnessType, claudeModel, oraclePath, recordPath string, def *
 		// Wrap live with recording.
 		apiKey := os.Getenv("ANTHROPIC_API_KEY")
 		if apiKey == "" {
-			return nil, fmt.Errorf("ANTHROPIC_API_KEY required for recording mode without oracle")
+			return nil, fmt.Errorf("ANTHROPIC_API_KEY required for recording mode without a recording")
 		}
 		client := anthropic.NewClient()
 		live, err := harness.NewLive(&client, "", def)
@@ -516,7 +516,7 @@ func testCmd() *cobra.Command {
 Fixture layout (defaults):
   <app-dir>/flows/*.yaml      — flow fixtures (run under 'test flows')
   <app-dir>/intents/*.yaml    — intent fixtures (run under 'test intents')
-  <app-dir>/oracle.yaml       — oracle YAML (seeds replay/static harness)
+  <app-dir>/recording.yaml       — recording YAML (seeds replay/static harness)
 
 See 'hally docs llm-guide' §7 for fixture shape.`,
 	}

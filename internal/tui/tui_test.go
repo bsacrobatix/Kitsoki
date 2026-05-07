@@ -43,7 +43,7 @@ func setupCloak(t *testing.T) (*orchestrator.Orchestrator, app.SessionID) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
-	h, err := harness.NewReplay("../../testdata/apps/cloak/oracle.yaml")
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
 	require.NoError(t, err)
 
 	orch := orchestrator.New(def, mach, s, h)
@@ -330,7 +330,7 @@ func TestEditModeFullFlow(t *testing.T) {
 	s, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
-	h, err := harness.NewReplay("../../testdata/apps/cloak/oracle.yaml")
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
 	require.NoError(t, err)
 	orch := orchestrator.New(def, mach, s, h)
 	sid, err := orch.NewSession(context.Background())
@@ -401,7 +401,7 @@ func TestEditModeCancelFromInput(t *testing.T) {
 	s, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
-	h, err := harness.NewReplay("../../testdata/apps/cloak/oracle.yaml")
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
 	require.NoError(t, err)
 	orch := orchestrator.New(def, mach, s, h)
 	sid, err := orch.NewSession(context.Background())

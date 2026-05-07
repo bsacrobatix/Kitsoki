@@ -97,7 +97,7 @@ func TestOrchestratorTraceEvents(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	// Use replay harness so no LLM is needed.
-	h, err := harness.NewReplay("../../testdata/apps/cloak/oracle.yaml")
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
 	require.NoError(t, err)
 	h.WithLogger(logger)
 
@@ -122,8 +122,8 @@ func TestOrchestratorTraceEvents(t *testing.T) {
 	assert.True(t, handler.hasMsg(trace.EvTurnPersisted), "expected turn.persisted")
 	assert.True(t, handler.hasMsg(trace.EvTurnDone), "expected turn.done")
 
-	// Harness event: oracle hit.
-	assert.True(t, handler.hasMsg(trace.EvHarnessOracleHit), "expected harness.oracle_hit")
+	// Harness event: recording hit.
+	assert.True(t, handler.hasMsg(trace.EvHarnessRecordingHit), "expected harness.recording_hit")
 
 	// Machine events.
 	assert.True(t, handler.hasMsg(trace.EvMachineTransition), "expected machine.transition")
@@ -160,7 +160,7 @@ func TestOrchestratorTraceEffects(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
-	h, err := harness.NewReplay("../../testdata/apps/cloak/oracle.yaml")
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
 	require.NoError(t, err)
 	h.WithLogger(logger)
 
@@ -198,7 +198,7 @@ func TestOrchestratorTraceWinningPath(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
-	h, err := harness.NewReplay("../../testdata/apps/cloak/oracle.yaml")
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
 	require.NoError(t, err)
 	h.WithLogger(logger)
 
@@ -215,9 +215,9 @@ func TestOrchestratorTraceWinningPath(t *testing.T) {
 	}
 
 	// Acceptance criteria:
-	// - At least one harness.oracle_hit per turn.
-	oracleHits := countMsg(handler.allRecords(), trace.EvHarnessOracleHit)
-	assert.GreaterOrEqual(t, oracleHits, 5, "expected at least one oracle_hit per turn")
+	// - At least one harness.recording_hit per turn.
+	recordingHits := countMsg(handler.allRecords(), trace.EvHarnessRecordingHit)
+	assert.GreaterOrEqual(t, recordingHits, 5, "expected at least one recording_hit per turn")
 
 	// - At least one machine.guard.winner event per transition.
 	guardWinners := countMsg(handler.allRecords(), trace.EvMachineGuardWinner)
@@ -272,7 +272,7 @@ func TestTurnDoneCarriesRenderedView(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
-	h, err := harness.NewReplay("../../testdata/apps/cloak/oracle.yaml")
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
 	require.NoError(t, err)
 	h.WithLogger(logger)
 

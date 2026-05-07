@@ -12,14 +12,14 @@ import (
 )
 
 const (
-	cloakOraclePath   = "../../testdata/apps/cloak/oracle.yaml"
+	cloakOraclePath   = "../../testdata/apps/cloak/recording.yaml"
 	cloakIntentsGlob  = "../../testdata/apps/cloak/intents/*.yaml"
 )
 
 // TestIntentsStaticHarness runs the Cloak intent fixtures with a StaticHarness
 // seeded from the oracle. Every input that has an oracle entry should pass.
 func TestIntentsStaticHarness(t *testing.T) {
-	sh, err := testrunner.NewStaticHarnessFromOracle(cloakOraclePath)
+	sh, err := testrunner.NewStaticHarnessFromRecording(cloakOraclePath)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -40,7 +40,7 @@ func TestIntentsStaticHarness(t *testing.T) {
 // TestIntentsNoiseInjection verifies that the statistical reporting flags
 // fixtures below min_pass_rate when noise is injected.
 func TestIntentsNoiseInjection(t *testing.T) {
-	sh, err := testrunner.NewStaticHarnessFromOracle(cloakOraclePath)
+	sh, err := testrunner.NewStaticHarnessFromRecording(cloakOraclePath)
 	require.NoError(t, err)
 
 	// Inject 20% noise: every 5th call returns "look" instead of the canonical intent.
@@ -66,12 +66,12 @@ func TestIntentsNoiseInjection(t *testing.T) {
 	_ = hasFailure
 }
 
-// TestIntentsEmitOracle verifies that --emit-oracle writes a valid YAML oracle.
-func TestIntentsEmitOracle(t *testing.T) {
-	sh, err := testrunner.NewStaticHarnessFromOracle(cloakOraclePath)
+// TestIntentsEmitRecording verifies that --emit-oracle writes a valid YAML oracle.
+func TestIntentsEmitRecording(t *testing.T) {
+	sh, err := testrunner.NewStaticHarnessFromRecording(cloakOraclePath)
 	require.NoError(t, err)
 
-	tmpFile := filepath.Join(t.TempDir(), "emitted-oracle.yaml")
+	tmpFile := filepath.Join(t.TempDir(), "emitted-recording.yaml")
 
 	ctx := context.Background()
 	report, err := testrunner.RunIntents(ctx, cloakAppPath, testrunner.IntentOptions{
@@ -79,22 +79,22 @@ func TestIntentsEmitOracle(t *testing.T) {
 		Runs:              1,
 		HarnessType:       "static",
 		StaticHarnessImpl: sh,
-		EmitOracle:        tmpFile,
+		EmitRecording:        tmpFile,
 	})
 	require.NoError(t, err)
-	require.True(t, report.OracleEmitted, "oracle should have been emitted")
+	require.True(t, report.RecordingEmitted, "oracle should have been emitted")
 
 	// The emitted file must exist and be parseable as an oracle.
 	data, err := os.ReadFile(tmpFile)
 	require.NoError(t, err)
 	require.NotEmpty(t, data)
 
-	// Verify it's valid YAML with kind: oracle.
-	require.Contains(t, string(data), "kind: oracle")
+	// Verify it's valid YAML with kind: recording.
+	require.Contains(t, string(data), "kind: recording")
 	require.Contains(t, string(data), "app_id: cloak-of-darkness")
 
 	// Load it as a static harness to confirm it's valid.
-	sh2, err := testrunner.NewStaticHarnessFromOracle(tmpFile)
+	sh2, err := testrunner.NewStaticHarnessFromRecording(tmpFile)
 	require.NoError(t, err)
 	require.NotNil(t, sh2)
 }
@@ -102,10 +102,10 @@ func TestIntentsEmitOracle(t *testing.T) {
 // TestIntentsRoundtrip verifies that emitting an oracle and running against it
 // produces the same results (idempotent roundtrip per the spec).
 func TestIntentsRoundtrip(t *testing.T) {
-	sh, err := testrunner.NewStaticHarnessFromOracle(cloakOraclePath)
+	sh, err := testrunner.NewStaticHarnessFromRecording(cloakOraclePath)
 	require.NoError(t, err)
 
-	tmpFile := filepath.Join(t.TempDir(), "roundtrip-oracle.yaml")
+	tmpFile := filepath.Join(t.TempDir(), "roundtrip-recording.yaml")
 
 	ctx := context.Background()
 
@@ -115,13 +115,13 @@ func TestIntentsRoundtrip(t *testing.T) {
 		Runs:              1,
 		HarnessType:       "static",
 		StaticHarnessImpl: sh,
-		EmitOracle:        tmpFile,
+		EmitRecording:        tmpFile,
 	})
 	require.NoError(t, err)
-	require.True(t, report1.OracleEmitted)
+	require.True(t, report1.RecordingEmitted)
 
 	// Second run: load emitted oracle.
-	sh2, err := testrunner.NewStaticHarnessFromOracle(tmpFile)
+	sh2, err := testrunner.NewStaticHarnessFromRecording(tmpFile)
 	require.NoError(t, err)
 
 	report2, err := testrunner.RunIntents(ctx, cloakAppPath, testrunner.IntentOptions{

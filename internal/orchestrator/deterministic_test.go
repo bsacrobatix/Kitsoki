@@ -29,7 +29,7 @@ func loadCloakForDeterministic(t *testing.T) (*orchestrator.Orchestrator, app.Se
 	t.Cleanup(func() { _ = s.Close() })
 
 	// Use a replay harness; TryDeterministic bypasses it anyway.
-	h, err := harness.NewReplay("../../testdata/apps/cloak/oracle.yaml")
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
 	require.NoError(t, err)
 
 	orch := orchestrator.New(def, m, s, h)

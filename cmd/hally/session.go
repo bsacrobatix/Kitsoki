@@ -188,7 +188,7 @@ func sessionContinueCmd() *cobra.Command {
 		rawText     string
 		harnessType string
 		claudeModel string
-		oraclePath  string
+		recordingPath  string
 	)
 	cmd := &cobra.Command{
 		Use:   "continue",
@@ -244,7 +244,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 				return fmt.Errorf("build machine: %w", err)
 			}
 
-			h, err := buildTurnHarness(harnessType, oraclePath, def, intentName != "")
+			h, err := buildTurnHarness(harnessType, recordingPath, def, intentName != "")
 			if err != nil {
 				return err
 			}
@@ -319,7 +319,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 	cmd.Flags().StringVar(&rawText, "raw", "", "raw inbound reply body, routed through the harness")
 	cmd.Flags().StringVar(&harnessType, "harness", "", "harness for --raw: claude|live|replay (default auto)")
 	cmd.Flags().StringVar(&claudeModel, "claude-model", "", "model passed to claude -p --model")
-	cmd.Flags().StringVar(&oraclePath, "oracle", "", "oracle YAML for --harness replay")
+	cmd.Flags().StringVar(&recordingPath, "recording", "", "recording YAML for --harness replay")
 	_ = cmd.MarkFlagRequired("app")
 	return cmd
 }

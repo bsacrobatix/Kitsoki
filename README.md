@@ -47,7 +47,7 @@ Requires Go 1.25+. Single static binary; no CGO, no system libraries.
 |---|---|---|
 | `claude` CLI on `PATH` | `claude` | Shells out to `claude -p` using your existing Claude Code login. **Default.** |
 | `ANTHROPIC_API_KEY` set | `live` | Direct Anthropic SDK calls. |
-| Neither | `replay` | Deterministic; needs a recording (passed via `--oracle`). |
+| Neither | `replay` | Deterministic; needs a recording (passed via `--recording`). |
 
 Force one:
 
@@ -55,7 +55,7 @@ Force one:
 ./hally run testdata/apps/cloak/app.yaml --harness claude
 ./hally run testdata/apps/cloak/app.yaml --harness live
 ./hally run testdata/apps/cloak/app.yaml \
-    --harness replay --oracle testdata/apps/cloak/oracle.yaml
+    --harness replay --recording testdata/apps/cloak/recording.yaml
 ```
 
 ### 3. Play

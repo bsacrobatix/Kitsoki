@@ -2,7 +2,7 @@
 # message and get the "You have lost" ending.
 test_kind: flow
 app: cloak-of-darkness
-oracle: ../oracle.yaml
+recording: ../recording.yaml
 initial_state: foyer
 initial_world:
   wearing_cloak: true

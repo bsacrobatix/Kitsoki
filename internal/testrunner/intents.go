@@ -20,30 +20,30 @@ import (
 	"hally/internal/world"
 )
 
-// ─── Oracle YAML types (local copies matching harness.oracleFile) ─────────────
+// ─── Recording YAML types (local copies matching harness.recordingFile) ─────────────
 
-// oracleFile is the top-level oracle YAML document (§10.4).
-type oracleFile struct {
+// recordingFile is the top-level recording YAML document (§10.4).
+type recordingFile struct {
 	Kind          string         `yaml:"kind"`
 	AppID         string         `yaml:"app_id"`
 	AppVersion    string         `yaml:"app_version"`
 	GeneratedAt   string         `yaml:"generated_at"`
 	Generator     string         `yaml:"generator"`
 	MinConfidence float64        `yaml:"min_confidence"`
-	Entries       []oracleEntry  `yaml:"entries"`
+	Entries       []recordingEntry  `yaml:"entries"`
 }
 
-// oracleEntry is one row in the oracle YAML.
-type oracleEntry struct {
+// recordingEntry is one row in the recording YAML.
+type recordingEntry struct {
 	State      string       `yaml:"state"`
 	Input      string       `yaml:"input"`
-	Intent     oracleIntent `yaml:"intent"`
+	Intent     recordingIntent `yaml:"intent"`
 	Confidence float64      `yaml:"confidence"`
 	MajorityOf int          `yaml:"majority_of"`
 }
 
-// oracleIntent holds the intent name and slot map in an oracle entry.
-type oracleIntent struct {
+// recordingIntent holds the intent name and slot map in a recording entry.
+type recordingIntent struct {
 	Name  string         `yaml:"name"`
 	Slots map[string]any `yaml:"slots,omitempty"`
 }
@@ -118,7 +118,7 @@ type IntentReport struct {
 	TotalPassed  int
 	TotalFailed  int
 	Regressions  []string
-	OracleEmitted bool
+	RecordingEmitted bool
 }
 
 // ─── Intent runner options ────────────────────────────────────────────────────
@@ -135,8 +135,8 @@ type IntentOptions struct {
 	MaxCostUSD float64
 	// OnlyState filters to matching state.
 	OnlyState string
-	// EmitOracle writes the oracle YAML to this path.
-	EmitOracle string
+	// EmitRecording writes the recording YAML to this path.
+	EmitRecording string
 	// BaselinePath is the baseline JSON for regression tracking.
 	BaselinePath string
 	// UpdateBaseline writes a new baseline after running.
@@ -149,10 +149,10 @@ type IntentOptions struct {
 	HarnessType string
 	// StaticHarnessImpl is used when HarnessType == "static".
 	StaticHarnessImpl harness.Harness
-	// SkipOnOracleMiss skips inputs that are not in the oracle rather than
+	// SkipOnRecordingMiss skips inputs that are not in the recording rather than
 	// counting them as failures. Useful when running with the static harness
-	// against an oracle that doesn't cover all fixture inputs.
-	SkipOnOracleMiss bool
+	// against a recording that doesn't cover all fixture inputs.
+	SkipOnRecordingMiss bool
 }
 
 // ─── Baseline format (§10.2.4) ───────────────────────────────────────────────
@@ -244,7 +244,7 @@ func RunIntents(ctx context.Context, appPath string, opts IntentOptions) (*Inten
 
 	// Run all fixtures.
 	report := &IntentReport{}
-	oracleEntries := []oracleEntry{}
+	recordingEntries := []recordingEntry{}
 
 	// Load baseline.
 	var baseline *Baseline
@@ -277,7 +277,7 @@ func RunIntents(ctx context.Context, appPath string, opts IntentOptions) (*Inten
 			for run := 0; run < runs; run++ {
 				passed, err := runOneIntent(ctx, h, m, g.def, g.state, input, g.fixture)
 				if err != nil {
-					if opts.SkipOnOracleMiss && isOracleMissError(err) {
+					if opts.SkipOnRecordingMiss && isRecordingMissError(err) {
 						skipped = true
 						break
 					}
@@ -300,12 +300,12 @@ func RunIntents(ctx context.Context, appPath string, opts IntentOptions) (*Inten
 			fr.TotalRuns += runs
 			fr.TotalPassed += ir.Passed
 
-			// Collect majority-vote oracle entry.
+			// Collect majority-vote recording entry.
 			if ir.Passed > runs/2 && g.fixture.Intent != nil {
-				oracleEntries = append(oracleEntries, oracleEntry{
+				recordingEntries = append(recordingEntries, recordingEntry{
 					State: g.state,
 					Input: input,
-					Intent: oracleIntent{
+					Intent: recordingIntent{
 						Name:  g.fixture.Intent.Name,
 						Slots: g.fixture.Intent.Slots,
 					},
@@ -318,7 +318,7 @@ func RunIntents(ctx context.Context, appPath string, opts IntentOptions) (*Inten
 		if fr.TotalRuns > 0 {
 			fr.PassRate = float64(fr.TotalPassed) / float64(fr.TotalRuns)
 		} else {
-			// All inputs were skipped (oracle miss). Treat the fixture as
+			// All inputs were skipped (recording miss). Treat the fixture as
 			// fully skipped — count as pass so CI doesn't block unnecessarily.
 			fr.PassRate = 1.0
 		}
@@ -345,22 +345,22 @@ func RunIntents(ctx context.Context, appPath string, opts IntentOptions) (*Inten
 		}
 	}
 
-	// Emit oracle if requested.
-	if opts.EmitOracle != "" && len(oracleEntries) > 0 {
-		of := oracleFile{
-			Kind:          "oracle",
+	// Emit recording if requested.
+	if opts.EmitRecording != "" && len(recordingEntries) > 0 {
+		of := recordingFile{
+			Kind:          "recording",
 			AppID:         def.App.ID,
 			AppVersion:    def.App.Version,
 			GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
 			Generator:     "hally test intents",
 			MinConfidence: 0.80,
-			Entries:       oracleEntries,
+			Entries:       recordingEntries,
 		}
 		b, _ := yaml.Marshal(of)
-		if err := os.WriteFile(opts.EmitOracle, b, 0644); err != nil {
-			return nil, fmt.Errorf("write oracle: %w", err)
+		if err := os.WriteFile(opts.EmitRecording, b, 0644); err != nil {
+			return nil, fmt.Errorf("write recording: %w", err)
 		}
-		report.OracleEmitted = true
+		report.RecordingEmitted = true
 	}
 
 	// Update baseline if requested.
@@ -506,15 +506,15 @@ func loadBaseline(path string) (*Baseline, error) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// isOracleMissError returns true if the error is from a static/replay harness
-// oracle miss (no entry for this (state, input) pair).
-func isOracleMissError(err error) bool {
+// isRecordingMissError returns true if the error is from a static/replay harness
+// recording miss (no entry for this (state, input) pair).
+func isRecordingMissError(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "no entry for state=") ||
-		strings.Contains(msg, "oracle miss for state=")
+		strings.Contains(msg, "recording miss for state=")
 }
 
 func effectiveRuns(fix IntentFixture, deflt IntentDefaults, globalOverride int) int {

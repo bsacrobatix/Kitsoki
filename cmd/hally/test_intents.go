@@ -14,7 +14,7 @@ import (
 // testIntentsCmd implements `hally test intents`.
 //
 // Default harness:
-//   - "static" when ANTHROPIC_API_KEY is not set (uses oracle as the
+//   - "static" when ANTHROPIC_API_KEY is not set (uses a recording as the
 //     canned-response table; no LLM calls).
 //   - "live" when ANTHROPIC_API_KEY is set (calls the real LLM; costs money).
 //
@@ -28,13 +28,13 @@ func testIntentsCmd() *cobra.Command {
 		dryRun              bool
 		maxCost             float64
 		onlyState           string
-		emitOracle          string
+		emitRecording          string
 		baselinePath        string
 		updateBaseline      bool
 		regressionThreshold float64
 		jsonOut             string
 		harnessType         string
-		oraclePath          string // for static harness seeding
+		recordingPath          string // for static harness seeding
 	)
 
 	cmd := &cobra.Command{
@@ -43,7 +43,7 @@ func testIntentsCmd() *cobra.Command {
 		Long: `Run pass-rate tests that measure how reliably the harness maps user
 phrasings to the correct intents in each state.
 
-By default this uses a StaticHarness seeded from the oracle file so no
+By default this uses a StaticHarness seeded from the recording file so no
 LLM calls are made and the run is deterministic. To use the live LLM
 harness, set ANTHROPIC_API_KEY and --harness live.
 
@@ -53,7 +53,7 @@ Default harness:
 Override with --harness <live|static>.
 
 Default intents glob: <app-dir>/intents/*.yaml
-Default oracle (for --harness static): <app-dir>/oracle.yaml
+Default recording (for --harness static): <app-dir>/recording.yaml
 
 Exit codes:
   0  all fixtures at or above their pass-rate threshold, no regressions
@@ -77,9 +77,9 @@ Exit codes:
 				}
 			}
 
-			// Resolve oracle path for static harness.
-			if harnessType == "static" && oraclePath == "" {
-				oraclePath = filepath.Join(filepath.Dir(appPath), "oracle.yaml")
+			// Resolve recording path for static harness.
+			if harnessType == "static" && recordingPath == "" {
+				recordingPath = filepath.Join(filepath.Dir(appPath), "recording.yaml")
 			}
 
 			// Build harness.
@@ -87,7 +87,7 @@ Exit codes:
 			switch harnessType {
 			case "static":
 				var err error
-				sh, err = testrunner.NewStaticHarnessFromOracle(oraclePath)
+				sh, err = testrunner.NewStaticHarnessFromRecording(recordingPath)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "hally test intents: %v\n", err)
 					os.Exit(2)
@@ -106,17 +106,17 @@ Exit codes:
 				DryRun:              dryRun,
 				MaxCostUSD:          maxCost,
 				OnlyState:           onlyState,
-				EmitOracle:          emitOracle,
+				EmitRecording:          emitRecording,
 				BaselinePath:        baselinePath,
 				UpdateBaseline:      updateBaseline,
 				RegressionThreshold: regressionThreshold,
 				JSONOut:             jsonOut,
 				HarnessType:         harnessType,
 				StaticHarnessImpl:   sh,
-				// Oracle-miss inputs are skipped (not failed) when using the static harness.
-				// This is correct behaviour: the oracle only covers canonical phrasings, not
+				// Recording-miss inputs are skipped (not failed) when using the static harness.
+				// This is correct behaviour: the recording only covers canonical phrasings, not
 				// every colloquial phrasing in the Mode 1 fixtures (which require a live LLM).
-				SkipOnOracleMiss: harnessType == "static",
+				SkipOnRecordingMiss: harnessType == "static",
 			}
 
 			ctx := context.Background()
@@ -145,8 +145,8 @@ Exit codes:
 		"refuse to run if estimated cost exceeds this (USD; 0 = no limit)")
 	cmd.Flags().StringVar(&onlyState, "only", "",
 		"filter to only this state (exact match)")
-	cmd.Flags().StringVar(&emitOracle, "emit-oracle", "",
-		"write majority-vote oracle to this YAML file after a passing run")
+	cmd.Flags().StringVar(&emitRecording, "emit-recording", "",
+		"write majority-vote recording to this YAML file after a passing run")
 	cmd.Flags().StringVar(&baselinePath, "baseline", "",
 		"path to baseline JSON for regression tracking")
 	cmd.Flags().BoolVar(&updateBaseline, "update-baseline", false,
@@ -157,8 +157,8 @@ Exit codes:
 		"write JSON report to this file")
 	cmd.Flags().StringVar(&harnessType, "harness", "",
 		"harness type: live|static (default: static if no ANTHROPIC_API_KEY, else live)")
-	cmd.Flags().StringVar(&oraclePath, "oracle", "",
-		"oracle YAML to seed the static harness (default: <app-dir>/oracle.yaml)")
+	cmd.Flags().StringVar(&recordingPath, "recording", "",
+		"recording YAML to seed the static harness (default: <app-dir>/recording.yaml)")
 
 	return cmd
 }

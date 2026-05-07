@@ -1,6 +1,6 @@
 // Package harness — RecordingHarness implementation (§10.5, §12.1).
 // Wraps an inner Harness (typically LiveHarness) and appends each call as a
-// JSONL record to an output file. Stage 7 will convert the JSONL → oracle YAML.
+// JSONL record to an output file. The JSONL is later compiled into a recording YAML.
 package harness
 
 import (
@@ -15,7 +15,7 @@ import (
 )
 
 // recordedTurn is one JSONL record written by RecordingHarness.
-// JSON tags are the canonical shape; Stage 7's oracle emitter reads them.
+// JSON tags are the canonical shape; the recording emitter reads them.
 type recordedTurn struct {
 	// State is the state path at the time of the call.
 	State string `json:"state"`

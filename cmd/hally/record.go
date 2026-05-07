@@ -10,7 +10,7 @@
 // This replaces the VHS-based pipeline that required:
 //
 //   - A hand-authored .tape file (inputs + timing hardcoded)
-//   - A matching oracle.yaml that duplicated the tape's inputs
+//   - A matching recording.yaml that duplicated the tape's inputs
 //   - VHS + headless ttyd + ffmpeg installed and working
 //   - Font rendering that varied by machine / container image
 //
@@ -93,7 +93,7 @@ func recordCmd() *cobra.Command {
 		themeName  string
 		frameMS    int
 		settleMS   int
-		oraclePath string
+		recordingPath string
 	)
 
 	cmd := &cobra.Command{
@@ -113,13 +113,13 @@ templates are stripped before rendering.
 
 Exit codes:
   0  success
-  1  flow error (validation, oracle miss, etc.)
+  1  flow error (validation, recording miss, etc.)
   2  I/O error (bad paths, write failure)
 
 Examples:
   hally record testdata/apps/cloak/app.yaml --flow testdata/apps/cloak/flows/winning.yaml
   hally record app.yaml --flow flows/ -o demo.gif --theme dracula
-  hally record app.yaml --flow flows/main.yaml --oracle oracle.yaml --frame-ms 3000`,
+  hally record app.yaml --flow flows/main.yaml --recording recording.yaml --frame-ms 3000`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appPath := args[0]
@@ -151,7 +151,7 @@ Examples:
 				theme:       th,
 				frameDelay:  centiseconds(frameMS),
 				settleDelay: centiseconds(settleMS),
-				oraclePath:  oraclePath,
+				recordingPath:  recordingPath,
 			}
 
 			if err := runRecord(cfg); err != nil {
@@ -175,7 +175,7 @@ Examples:
 	cmd.Flags().StringVar(&themeName, "theme", "molokai", "colour theme: molokai|dracula|light")
 	cmd.Flags().IntVar(&frameMS, "frame-ms", 2500, "how long each frame shows (milliseconds)")
 	cmd.Flags().IntVar(&settleMS, "settle-ms", 1500, "brief pause after each frame (milliseconds)")
-	cmd.Flags().StringVar(&oraclePath, "oracle", "", "oracle YAML for input: turns in the flow")
+	cmd.Flags().StringVar(&recordingPath, "recording", "", "recording YAML for input: turns in the flow")
 
 	return cmd
 }
@@ -244,7 +244,7 @@ type recordConfig struct {
 	theme       recordTheme
 	frameDelay  int // centiseconds (GIF delay units)
 	settleDelay int // centiseconds
-	oraclePath  string
+	recordingPath  string
 }
 
 // runRecord executes the full pipeline: load app → replay flows →
@@ -265,7 +265,7 @@ func runRecord(cfg recordConfig) error {
 	// 3. Replay each flow file and collect text frames.
 	var frames []string
 	for _, flowFile := range cfg.flowFiles {
-		ff, err := replayFlowToFrames(def, m, flowFile, cfg.oraclePath)
+		ff, err := replayFlowToFrames(def, m, flowFile, cfg.recordingPath)
 		if err != nil {
 			return fmt.Errorf("replay flow %q: %w", flowFile, err)
 		}
@@ -303,7 +303,7 @@ func runRecord(cfg recordConfig) error {
 // Only the fields we need for recording are decoded.
 type recordFlowFixture struct {
 	TestKind     string            `yaml:"test_kind"`
-	Oracle       string            `yaml:"oracle,omitempty"`
+	Recording    string            `yaml:"recording,omitempty"`
 	InitialState string            `yaml:"initial_state"`
 	InitialWorld map[string]any    `yaml:"initial_world,omitempty"`
 	Turns        []recordFlowTurn  `yaml:"turns"`
@@ -321,7 +321,7 @@ type recordFlowIntent struct {
 
 // replayFlowToFrames loads a flow YAML file, parses all documents, and replays
 // each flow fixture through the machine, collecting one text frame per turn.
-func replayFlowToFrames(def *app.AppDef, m machine.Machine, flowFile, oraclePath string) ([]string, error) {
+func replayFlowToFrames(def *app.AppDef, m machine.Machine, flowFile, recordingPath string) ([]string, error) {
 	data, err := os.ReadFile(flowFile)
 	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", flowFile, err)
@@ -343,7 +343,7 @@ func replayFlowToFrames(def *app.AppDef, m machine.Machine, flowFile, oraclePath
 			continue
 		}
 
-		frames, err := replayOneRecordFixture(def, m, &fixture, flowFile, oraclePath)
+		frames, err := replayOneRecordFixture(def, m, &fixture, flowFile, recordingPath)
 		if err != nil {
 			return nil, err
 		}
@@ -353,20 +353,20 @@ func replayFlowToFrames(def *app.AppDef, m machine.Machine, flowFile, oraclePath
 }
 
 // replayOneRecordFixture replays a single fixture and returns text frames.
-func replayOneRecordFixture(def *app.AppDef, m machine.Machine, fixture *recordFlowFixture, flowFile, oraclePath string) ([]string, error) {
-	// Load oracle if needed.
+func replayOneRecordFixture(def *app.AppDef, m machine.Machine, fixture *recordFlowFixture, flowFile, recordingPath string) ([]string, error) {
+	// Load recording if needed.
 	var replayH *harness.ReplayHarness
-	effectiveOracle := oraclePath
-	if effectiveOracle == "" {
-		effectiveOracle = fixture.Oracle
+	effectiveRecording := recordingPath
+	if effectiveRecording == "" {
+		effectiveRecording = fixture.Recording
 	}
-	if effectiveOracle != "" {
-		if !filepath.IsAbs(effectiveOracle) {
-			effectiveOracle = filepath.Join(filepath.Dir(flowFile), effectiveOracle)
+	if effectiveRecording != "" {
+		if !filepath.IsAbs(effectiveRecording) {
+			effectiveRecording = filepath.Join(filepath.Dir(flowFile), effectiveRecording)
 		}
-		rh, err := harness.NewReplay(effectiveOracle)
+		rh, err := harness.NewReplay(effectiveRecording)
 		if err != nil {
-			return nil, fmt.Errorf("load oracle %q: %w", effectiveOracle, err)
+			return nil, fmt.Errorf("load recording %q: %w", effectiveRecording, err)
 		}
 		replayH = rh
 	}
@@ -398,18 +398,18 @@ func replayOneRecordFixture(def *app.AppDef, m machine.Machine, fixture *recordF
 
 		case turn.Input != "":
 			if replayH == nil {
-				return nil, fmt.Errorf("turn %d: input %q requires oracle but none loaded", i+1, turn.Input)
+				return nil, fmt.Errorf("turn %d: input %q requires a recording but none loaded", i+1, turn.Input)
 			}
 			params, err := replayH.RunTurn(ctx, harness.TurnInput{
 				StatePath: currentState,
 				UserText:  turn.Input,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("turn %d: oracle miss for %q in state %q: %w", i+1, turn.Input, currentState, err)
+				return nil, fmt.Errorf("turn %d: recording miss for %q in state %q: %w", i+1, turn.Input, currentState, err)
 			}
 			c, err := recordParamsToIntentCall(params)
 			if err != nil {
-				return nil, fmt.Errorf("turn %d: parse oracle: %w", i+1, err)
+				return nil, fmt.Errorf("turn %d: parse recording: %w", i+1, err)
 			}
 			call = c
 

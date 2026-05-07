@@ -2,7 +2,7 @@
 # foyer → cloakroom (hang cloak) → foyer → bar.lit → read_message → ended (won)
 test_kind: flow
 app: cloak-of-darkness
-oracle: ../oracle.yaml
+recording: ../recording.yaml
 initial_state: foyer
 initial_world:
   wearing_cloak: true
@@ -28,7 +28,7 @@ turns:
       - kind: EffectApplied
         effect: { set: { wearing_cloak: false } }
 
-  # Turn 3: use oracle-backed free text to go back east.
+  # Turn 3: use recording-backed free text to go back east.
   - input: "head east"
     expect_state: foyer
 

@@ -63,14 +63,14 @@ hally auto-selects using this exact precedence:
    login — no `ANTHROPIC_API_KEY` needed).
 2. **`ANTHROPIC_API_KEY` set** → `live` harness (direct Anthropic SDK with
    prompt caching, retry on 429/5xx).
-3. Otherwise → `replay` — which will fail unless you also pass `--oracle`.
+3. Otherwise → `replay` — which will fail unless you also pass `--recording`.
 
 | Harness     | Needs                        | Deterministic? | Cost    | When to use                                  |
 |-------------|------------------------------|----------------|---------|----------------------------------------------|
 | `claude`    | `claude` CLI on PATH         | No (LLM)       | Free*   | Default when you have Claude Code            |
 | `live`      | `ANTHROPIC_API_KEY`          | No (LLM)       | Paid    | CI without `claude` CLI; explicit model pin  |
-| `replay`    | recording via `--oracle`     | **Yes**        | Zero    | Flow tests, demos, offline reproduction      |
-| `recording` | `--oracle` *or* API key      | Wraps above    | Varies  | Capture an LLM session to JSONL for replay   |
+| `replay`    | recording via `--recording`     | **Yes**        | Zero    | Flow tests, demos, offline reproduction      |
+| `recording` | `--recording` *or* API key      | Wraps above    | Varies  | Capture an LLM session to JSONL for replay   |
 
 *Cost via your Claude Code plan.
 
@@ -98,7 +98,7 @@ That's it — auto-selects the harness, opens the TUI, persists the session to
 ```sh
 hally run testdata/apps/cloak/app.yaml \
     --harness replay \
-    --oracle testdata/apps/cloak/oracle.yaml
+    --recording testdata/apps/cloak/recording.yaml
 ```
 
 ### 4.3 Iterate on an app with full tracing
@@ -145,7 +145,7 @@ dot -Tpng <appid>-viz.dot -o graph.png
 |-------------------------|----------------------------------------------------------|
 | `--harness <type>`      | See §3. `claude \| live \| replay \| recording`.           |
 | `--claude-model <id>`   | Model for the `claude` harness (default: Haiku).         |
-| `--oracle <path>`       | Recording file. Required for `--harness replay`.         |
+| `--recording <path>`       | Recording file. Required for `--harness replay`.         |
 | `--record <path>`       | JSONL output for `--harness recording`.                  |
 | `--db <path>`           | SQLite session DB (default `$XDG_DATA_HOME/hally/`).     |
 | `--trace <path>`        | JSONL trace. `-` = stderr.                               |
@@ -212,7 +212,7 @@ session id and read what hally thinks is going on.
 ```sh
 hally turn <app.yaml> --state <S> [--world @file.json] [--slots @file.json] \
            (--intent <name> | --input "<text>")
-           [--harness replay --oracle <path>]
+           [--harness replay --recording <path>]
 ```
 
 Runs exactly one turn against an app definition without persisting anything
@@ -238,7 +238,7 @@ hally turn app.yaml --state cloakroom --intent hang_cloak
 
 # routed input via replay (against a recording)
 hally turn app.yaml --state foyer \
-    --input "go west" --harness replay --oracle oracle.yaml
+    --input "go west" --harness replay --recording recording.yaml
 
 # world override
 hally turn app.yaml --state cloakroom --intent look \
@@ -385,11 +385,10 @@ recording, deterministic) or `--harness live` (real LLM, costs money). Default i
 ## 8. Recordings
 
 A **recording** is a lookup table `(state, input) → {intent, slots}` used by
-the `replay` harness and the `static` intent harness. The CLI flag and the
-YAML field still spell this `oracle` (a code rename is pending).
+the `replay` harness and the `static` intent harness.
 
 ```yaml
-kind: oracle           # field name unchanged for now
+kind: recording
 app_id: cloak-of-darkness
 app_version: 0.1.0
 generated_at: 2026-04-22T10:00:00Z
@@ -417,7 +416,7 @@ hally run myapp.yaml --harness recording --record /tmp/rec.jsonl
 Or emit from an intent-test run:
 
 ```sh
-hally test intents myapp.yaml --harness live --emit-oracle oracle.yaml
+hally test intents myapp.yaml --harness live --emit-recording recording.yaml
 ```
 
 ## 9. Authoring apps — survival guide
@@ -674,13 +673,13 @@ Notes:
 ```
 <app-dir>/
   app.yaml                 # the app definition (required)
-  oracle.yaml              # recording: used by --harness replay + `test intents --harness static`
+  recording.yaml           # used by --harness replay + `test intents --harness static`
   flows/*.yaml             # Mode 2 flow fixtures
   intents/*.yaml           # Mode 1 intent fixtures
 ```
 
 Default globs in test commands assume this layout. Override with `--flows` /
-`--intents` / `--oracle`.
+`--intents` / `--recording`.
 
 ## 14. Environment variables
 

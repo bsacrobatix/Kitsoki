@@ -39,12 +39,12 @@ func extractIntent(t *testing.T, p mcp.CallToolParams) (intent string, slots map
 
 // ─── ReplayHarness tests ─────────────────────────────────────────────────────
 
-const cloakOraclePath = "../../testdata/apps/cloak/oracle.yaml"
+const cloakRecordingPath = "../../testdata/apps/cloak/recording.yaml"
 
 // TestReplayHarness_AllEntries asserts that every (state, input) pair in the
-// Cloak oracle resolves to the expected intent without an oracle miss.
+// Cloak recording resolves to the expected intent without a recording miss.
 func TestReplayHarness_AllEntries(t *testing.T) {
-	h, err := harness.NewReplay(cloakOraclePath)
+	h, err := harness.NewReplay(cloakRecordingPath)
 	require.NoError(t, err)
 
 	type wantEntry struct {
@@ -90,7 +90,7 @@ func TestReplayHarness_AllEntries(t *testing.T) {
 			assert.Equal(t, "transition", params.Name)
 			intent, slots := extractIntent(t, params)
 			assert.Equal(t, tc.intent, intent)
-			// Compare slot values (oracle stores them as interface{}, not string).
+			// Compare slot values (recording stores them as interface{}, not string).
 			for k, want := range tc.slots {
 				got, ok := slots[k]
 				if !ok {
@@ -110,7 +110,7 @@ func TestReplayHarness_AllEntries(t *testing.T) {
 // TestReplayHarness_CaseInsensitive asserts that the case-insensitive fallback
 // path works: "GO SOUTH" should resolve the same as "go south".
 func TestReplayHarness_CaseInsensitive(t *testing.T) {
-	h, err := harness.NewReplay(cloakOraclePath)
+	h, err := harness.NewReplay(cloakRecordingPath)
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -122,7 +122,7 @@ func TestReplayHarness_CaseInsensitive(t *testing.T) {
 
 // TestReplayHarness_Trim asserts that leading/trailing whitespace is handled.
 func TestReplayHarness_Trim(t *testing.T) {
-	h, err := harness.NewReplay(cloakOraclePath)
+	h, err := harness.NewReplay(cloakRecordingPath)
 	require.NoError(t, err)
 	ctx := context.Background()
 
@@ -132,34 +132,34 @@ func TestReplayHarness_Trim(t *testing.T) {
 	assert.Equal(t, "look", intent)
 }
 
-// TestReplayHarness_OracleMiss asserts that a miss returns ErrOracleMiss.
-func TestReplayHarness_OracleMiss(t *testing.T) {
-	h, err := harness.NewReplay(cloakOraclePath)
+// TestReplayHarness_RecordingMiss asserts that a miss returns ErrRecordingMiss.
+func TestReplayHarness_RecordingMiss(t *testing.T) {
+	h, err := harness.NewReplay(cloakRecordingPath)
 	require.NoError(t, err)
 	ctx := context.Background()
 
 	_, err = h.RunTurn(ctx, makeTurnInput("foyer", "hack the mainframe"))
 	require.Error(t, err)
 
-	var miss *harness.ErrOracleMiss
+	var miss *harness.ErrRecordingMiss
 	require.ErrorAs(t, err, &miss)
 	assert.Equal(t, "foyer", miss.State)
 	assert.Equal(t, "hack the mainframe", miss.Input)
 }
 
-// TestReplayHarness_MalformedOracle asserts that a missing-kind oracle file fails fast.
-func TestReplayHarness_MalformedOracle(t *testing.T) {
+// TestReplayHarness_MalformedRecording asserts that a missing-kind recording file fails fast.
+func TestReplayHarness_MalformedRecording(t *testing.T) {
 	tmp := t.TempDir()
 	bad := filepath.Join(tmp, "bad.yaml")
-	require.NoError(t, os.WriteFile(bad, []byte("kind: not-oracle\nentries: []\n"), 0o644))
+	require.NoError(t, os.WriteFile(bad, []byte("kind: not-recording\nentries: []\n"), 0o644))
 	_, err := harness.NewReplay(bad)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected kind")
 }
 
-// TestReplayHarness_NonexistentFile checks that a missing oracle file gives a clear error.
+// TestReplayHarness_NonexistentFile checks that a missing recording file gives a clear error.
 func TestReplayHarness_NonexistentFile(t *testing.T) {
-	_, err := harness.NewReplay("/no/such/oracle.yaml")
+	_, err := harness.NewReplay("/no/such/recording.yaml")
 	require.Error(t, err)
 }
 

@@ -48,7 +48,7 @@ func TestTurn_DirectIntent(t *testing.T) {
 // exercise harness.RunTurn → parseIntentCall → machine.Turn end-to-end.
 func TestTurn_RoutedInput(t *testing.T) {
 	def := loadCloak(t)
-	h, err := harness.NewReplay(filepath.Join("..", "..", "testdata", "apps", "cloak", "oracle.yaml"))
+	h, err := harness.NewReplay(filepath.Join("..", "..", "testdata", "apps", "cloak", "recording.yaml"))
 	require.NoError(t, err)
 	orch := buildOneShotOrch(t, def, h)
 

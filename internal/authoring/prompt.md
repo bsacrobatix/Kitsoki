@@ -10,7 +10,7 @@ running engine treats as a single app. The pieces:
                               are filled by the engine at call time.
   scripts/                    Scripts invoked via host.run (Python,
                               shell, anything executable).
-  oracle.yaml                 Replay fixture for deterministic tests.
+  recording.yaml              Replay fixture for deterministic tests.
 
 You are running with cwd at the story root: `{{SHADOW_DIR}}`.
 Use Read, Glob, and Grep to explore. Use Edit and Write to make

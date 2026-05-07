@@ -1,7 +1,7 @@
-# Replay oracle for Cloak of Darkness — Mode 2 flow fixtures.
-# Hand-authored bootstrap oracle (§10.4); replace with a Mode-1-generated
-# oracle once the LLM harness is wired up (Stage 5).
-kind: oracle
+# Replay recording for Cloak of Darkness — Mode 2 flow fixtures.
+# Hand-authored bootstrap recording (§10.4); replace with a Mode-1-generated
+# recording once the LLM harness is wired up (Stage 5).
+kind: recording
 app_id: cloak-of-darkness
 app_version: 0.1.0
 generated_at: "2026-04-20T00:00:00Z"

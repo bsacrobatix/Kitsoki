@@ -36,7 +36,7 @@ func TestInspect_PopulatedSession(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
-	h, err := harness.NewReplay(filepath.Join("..", "..", "testdata", "apps", "cloak", "oracle.yaml"))
+	h, err := harness.NewReplay(filepath.Join("..", "..", "testdata", "apps", "cloak", "recording.yaml"))
 	require.NoError(t, err)
 
 	hostReg := host.NewRegistry()

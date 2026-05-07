@@ -16,7 +16,7 @@ import (
 type flowFixture struct {
 	TestKind     string      `yaml:"test_kind"`
 	App          string      `yaml:"app"`
-	Oracle       string      `yaml:"oracle,omitempty"`
+	Recording    string      `yaml:"recording,omitempty"`
 	InitialState string      `yaml:"initial_state"`
 	InitialWorld map[string]any `yaml:"initial_world,omitempty"`
 	Turns        []flowTurn  `yaml:"turns"`
@@ -75,18 +75,18 @@ type expectFailure struct {
 	AnyOf []string `yaml:"any_of"`
 }
 
-// oracleFile is the minimal shape of a Mode 2 oracle file (§10.4).
-type oracleFile struct {
-	Kind        string        `yaml:"kind"`
-	AppID       string        `yaml:"app_id"`
-	AppVersion  string        `yaml:"app_version"`
-	GeneratedAt string        `yaml:"generated_at"`
-	Generator   string        `yaml:"generator,omitempty"`
-	Entries     []oracleEntry `yaml:"entries"`
+// recordingFile is the minimal shape of a Mode 2 recording file (§10.4).
+type recordingFile struct {
+	Kind        string           `yaml:"kind"`
+	AppID       string           `yaml:"app_id"`
+	AppVersion  string           `yaml:"app_version"`
+	GeneratedAt string           `yaml:"generated_at"`
+	Generator   string           `yaml:"generator,omitempty"`
+	Entries     []recordingEntry `yaml:"entries"`
 }
 
-// oracleEntry is one (state, input) → (intent, slots) mapping.
-type oracleEntry struct {
+// recordingEntry is one (state, input) → (intent, slots) mapping.
+type recordingEntry struct {
 	State      string         `yaml:"state"`
 	Input      string         `yaml:"input"`
 	Intent     *intentRef     `yaml:"intent"`
@@ -156,15 +156,15 @@ func TestIntentFixtures_Parse(t *testing.T) {
 	}
 }
 
-// TestOracle_Parses verifies oracle.yaml can be struct-parsed.
-func TestOracle_Parses(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join(cloakBase, "oracle.yaml"))
+// TestRecording_Parses verifies recording.yaml can be struct-parsed.
+func TestRecording_Parses(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(cloakBase, "recording.yaml"))
 	require.NoError(t, err)
 
-	var of oracleFile
-	require.NoError(t, goyaml.Unmarshal(b, &of), "oracle.yaml must parse")
-	require.Equal(t, "oracle", of.Kind)
-	require.Equal(t, "cloak-of-darkness", of.AppID)
-	require.NotEmpty(t, of.GeneratedAt)
-	require.NotEmpty(t, of.Entries, "oracle must have at least one entry")
+	var rf recordingFile
+	require.NoError(t, goyaml.Unmarshal(b, &rf), "recording.yaml must parse")
+	require.Equal(t, "recording", rf.Kind)
+	require.Equal(t, "cloak-of-darkness", rf.AppID)
+	require.NotEmpty(t, rf.GeneratedAt)
+	require.NotEmpty(t, rf.Entries, "recording must have at least one entry")
 }

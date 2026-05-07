@@ -37,48 +37,48 @@ type StaticHarness struct {
 	NoiseFunc func(count int, canonical mcp.CallToolParams) mcp.CallToolParams
 }
 
-// staticOracleIntent is the intent block inside a static oracle entry.
-type staticOracleIntent struct {
+// staticRecordingIntent is the intent block inside a static recording entry.
+type staticRecordingIntent struct {
 	Name  string         `yaml:"name"`
 	Slots map[string]any `yaml:"slots"`
 }
 
-// staticOracleEntry is one row in the static oracle YAML.
-type staticOracleEntry struct {
+// staticRecordingEntry is one row in the static recording YAML.
+type staticRecordingEntry struct {
 	State      string             `yaml:"state"`
 	Input      string             `yaml:"input"`
-	Intent     staticOracleIntent `yaml:"intent"`
+	Intent     staticRecordingIntent `yaml:"intent"`
 	Confidence float64            `yaml:"confidence"`
 	MajorityOf int                `yaml:"majority_of"`
 }
 
-// staticOracleFile is the top-level structure of the oracle YAML.
-type staticOracleFile struct {
+// staticRecordingFile is the top-level structure of the recording YAML.
+type staticRecordingFile struct {
 	Kind    string              `yaml:"kind"`
-	Entries []staticOracleEntry `yaml:"entries"`
+	Entries []staticRecordingEntry `yaml:"entries"`
 }
 
-// NewStaticHarnessFromOracle parses an oracle YAML and builds a StaticHarness.
-// The oracle format is identical to the replay-harness oracle (§10.4).
-func NewStaticHarnessFromOracle(oraclePath string) (*StaticHarness, error) {
-	data, err := os.ReadFile(oraclePath)
+// NewStaticHarnessFromRecording parses a recording YAML and builds a StaticHarness.
+// The recording format is identical to the replay harness's (§10.4).
+func NewStaticHarnessFromRecording(recordingPath string) (*StaticHarness, error) {
+	data, err := os.ReadFile(recordingPath)
 	if err != nil {
-		return nil, fmt.Errorf("static harness: read oracle %q: %w", oraclePath, err)
+		return nil, fmt.Errorf("static harness: read recording %q: %w", recordingPath, err)
 	}
 
-	var of staticOracleFile
-	if err := yaml.Unmarshal(data, &of); err != nil {
-		return nil, fmt.Errorf("static harness: parse oracle %q: %w", oraclePath, err)
+	var rf staticRecordingFile
+	if err := yaml.Unmarshal(data, &rf); err != nil {
+		return nil, fmt.Errorf("static harness: parse recording %q: %w", recordingPath, err)
 	}
 
-	if of.Kind != "oracle" {
-		return nil, fmt.Errorf("static harness: oracle %q has kind %q (want \"oracle\")", oraclePath, of.Kind)
+	if rf.Kind != "recording" {
+		return nil, fmt.Errorf("static harness: recording %q has kind %q (want \"recording\")", recordingPath, rf.Kind)
 	}
 
-	entries := make(map[staticKey]mcp.CallToolParams, len(of.Entries))
-	for i, e := range of.Entries {
+	entries := make(map[staticKey]mcp.CallToolParams, len(rf.Entries))
+	for i, e := range rf.Entries {
 		if e.State == "" || e.Input == "" || e.Intent.Name == "" {
-			return nil, fmt.Errorf("static harness: oracle entry %d is incomplete (state=%q input=%q intent=%q)", i, e.State, e.Input, e.Intent.Name)
+			return nil, fmt.Errorf("static harness: recording entry %d is incomplete (state=%q input=%q intent=%q)", i, e.State, e.Input, e.Intent.Name)
 		}
 		key := staticKey{
 			State: e.State,

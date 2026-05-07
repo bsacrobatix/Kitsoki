@@ -22,7 +22,7 @@ Set TypingSpeed 110ms
 Env HALLY_ORACLE_CLAUDE_BIN "demo/fake-oracle-claude.sh"
 
 # Launch dev-story with the replay harness.
-Type "./hally run testdata/apps/dev-story/app.yaml --harness replay --oracle testdata/apps/dev-story/oracle.yaml"
+Type "./hally run testdata/apps/dev-story/app.yaml --harness replay --recording testdata/apps/dev-story/recording.yaml"
 Enter
 Sleep 4s
 

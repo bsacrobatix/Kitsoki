@@ -22,10 +22,10 @@ func testFlowsCmd() *cobra.Command {
 	var (
 		flowsGlob   string
 		jsonOut     string
-		oraclePath  string
+		recordingPath  string
 		failFast    bool
 		verbose     bool
-		allowMissOracle bool
+		allowMissRecording bool
 	)
 
 	cmd := &cobra.Command{
@@ -35,7 +35,7 @@ func testFlowsCmd() *cobra.Command {
 
 Each flow fixture is a YAML file with test_kind: flow. It declares an
 initial state, a sequence of turns (each supplying either a structured
-intent or a free-text input resolved via the oracle), and assertions
+intent or a free-text input resolved via the recording), and assertions
 checked after each turn.
 
 Default flow glob: <app-dir>/flows/*.yaml
@@ -55,8 +55,8 @@ Exit codes:
 			}
 
 			opts := testrunner.FlowOptions{
-				OracleOverride:     oraclePath,
-				AllowMissingOracle: allowMissOracle,
+				RecordingOverride:     recordingPath,
+				AllowMissingRecording: allowMissRecording,
 				FailFast:           failFast,
 				Verbose:            verbose,
 				JSONOut:            jsonOut,
@@ -82,14 +82,14 @@ Exit codes:
 		"glob for flow fixture files (default: <app-dir>/flows/*.yaml)")
 	cmd.Flags().StringVar(&jsonOut, "json", "",
 		"write JSON report to this file")
-	cmd.Flags().StringVar(&oraclePath, "oracle", "",
-		"override the oracle path declared in fixture files")
+	cmd.Flags().StringVar(&recordingPath, "recording", "",
+		"override the recording path declared in fixture files")
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false,
 		"stop at first flow failure")
 	cmd.Flags().BoolVar(&verbose, "v", false,
 		"verbose per-turn output")
-	cmd.Flags().BoolVar(&allowMissOracle, "allow-missing-oracle", false,
-		"treat oracle misses as skips rather than failures")
+	cmd.Flags().BoolVar(&allowMissRecording, "allow-missing-recording", false,
+		"treat recording misses as skips rather than failures")
 
 	return cmd
 }
