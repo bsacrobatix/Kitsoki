@@ -95,6 +95,19 @@ entries:
 Lookup is exact first, then case-insensitive. Missing entries cause
 the turn to fail with `UNKNOWN_INTENT`.
 
+### Asserting on chained `on_enter:` host calls
+
+When step N+1 of an `on_enter:` block references a slot bound by step
+N, the orchestrator re-renders step N+1's args against the post-bind
+world at dispatch time (see
+[`architecture.md` §11.5](architecture.md#115-chained-host-call-rerender-contract)).
+Two events fire for each call: `HostInvoked` carries the *pre-bind*
+args (snapshotted at machine time), and `HostDispatched` carries the
+*post-rerender* args (what the handler actually receives) plus a
+`rerender_fell_back` flag. When a test cares what step N+1's handler
+saw, assert against `HostDispatched` — `HostInvoked` will still show
+the un-substituted template.
+
 ---
 
 ## 2. Background-job fixtures

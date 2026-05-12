@@ -1,10 +1,9 @@
 # Transports & Sessions
 
 A **transport** is an output adapter onto an external surface. The TUI
-transcript is one transport; Jira ticket comments are another (and a
-Bitbucket transport is on the roadmap). The same room — state graph,
-intents, phases, checkpoints — works no matter which transport
-carries the conversation.
+transcript is one transport; Jira ticket comments and Bitbucket PR
+comments are two more. The same room — state graph, intents, phases,
+checkpoints — works no matter which transport carries the conversation.
 
 A **session** is one running instance of a state machine for one app.
 Sessions are persistent and are addressed two ways:
@@ -49,7 +48,7 @@ Source: [`internal/transport/transport.go`](../internal/transport/transport.go).
 |---|---|---|
 | `tui` | `internal/transport/tui_transport.go` | Local mirror of the transcript pane. Used by `kitsoki run`. |
 | `jira` | `internal/transport/jira_transport.go` | Posts via the Jira REST API. Uses `internal/transport/jira_markdown.go` to convert Markdown → Jira wiki markup. De-dups by `PhaseID` so re-running a phase doesn't double-post. |
-| `bitbucket` | *not yet implemented* | Targeted by the bug-fix-room proposal; a session can already be keyed by `bitbucket:<thread>` for migration. |
+| `bitbucket` | `internal/transport/bitbucket_transport.go` | Posts a comment to a Bitbucket Server PR thread via the REST API. Bearer-token auth; defaults to the Acronis ZTA proxy. See §2.1. |
 
 Each implementation reads its config (URL, auth, default account) from
 environment variables; see the source file's package comment for the
@@ -57,6 +56,61 @@ exact list.
 
 To add another transport, see
 [`developer-guide.md` §5.3](developer-guide.md#53-adding-a-new-transport).
+
+### 2.1 Bitbucket transport
+
+Posts a single comment to a Bitbucket Server pull-request thread. The
+shape mirrors the Jira transport so `host.transport.post` dispatches
+into either driver without special-casing — only the routing args
+differ.
+
+**Authentication.** Bearer personal-access token. The session builder
+resolves it in this order:
+
+1. `$BITBUCKET_TOKEN` (test overrides, CI).
+2. `~/.config/acronis/bitbucket-token` (the standard Acronis location
+   shared with `tools/loopy`).
+
+If neither source yields a token the transport is silently omitted from
+the registry — the session continues without `bitbucket` available.
+
+**Endpoint.** `POST <base>/rest/api/1.0/projects/<pr_project>/repos/<pr_slug>/pull-requests/<pr_id>/comments`
+with body `{"text": "<body>"}`. `<base>` defaults to the Acronis ZTA
+proxy mount at `https://localhost:3128/bitbucket` (override via
+`$BITBUCKET_BASE_URL`). The default HTTP client skips TLS verification
+because the proxy presents a self-signed cert; supply
+`BitbucketConfig.HTTPClient` to opt back in.
+
+**Routing args.** Unlike Jira (where `SessionKey.Thread` is the issue
+key and that's all the API needs), Bitbucket needs three coordinates
+to identify a PR. They flow in via the `host.transport.post` call:
+
+```yaml
+- invoke: host.transport.post
+  with:
+    transport:  "bitbucket"
+    thread:     "{{ world.jira_key }}"   # correlation only; not in URL
+    pr_project: "DBI"
+    pr_slug:    "loopy"
+    pr_id:      "302"
+    title:      "Phase A complete"
+    body:       "Result: {{ world.result }}"
+```
+
+`pr_project`, `pr_slug`, `pr_id` are non-reserved args and reach the
+transport via `Message.Extra` (see `internal/host/transport_post.go::collectExtras`).
+`SessionKey.Thread` is kept for orchestrator-side correlation
+(typically the Jira ticket key) and plays no role in the REST URL.
+
+**Body format.** `[kitsoki] *<title>*\n\n<body>` — the bot-marker
+prefix is prepended so polling drivers (today `loop.py`) can filter
+out kitsoki's own posts. The same convention as the Jira transport
+(see §6); Bitbucket renders comments as Markdown so `*<title>*`
+becomes emphasis.
+
+**Registration.** Automatic when a token is discoverable. See
+`cmd/kitsoki/session.go::buildTransportRegistry` and
+`loadBitbucketToken`.
 
 ---
 

@@ -217,9 +217,9 @@ flowchart LR
     S --> APP
 ```
 
-Today the TUI and Jira transports ship; Bitbucket is sketched against
-the same `Transport` interface but not yet implemented. See
-[`transports.md`](transports.md) for the per-transport status.
+Today the TUI, Jira, and Bitbucket transports ship against the same
+`Transport` interface. See [`transports.md`](transports.md) for the
+per-transport status.
 
 The user-visible consequence: **the same conversation can move
 between surfaces without losing state.** A bug-fix room driven from a
@@ -441,7 +441,7 @@ flowchart TD
 | `Machine` | `internal/machine` | `machine.machine` (only one — the pure core) |
 | `Harness` | `internal/harness` | `claude_cli`, `live`, `replay`, `recording` |
 | `Store` | `internal/store` | `sqlite` (production); in-memory test stub |
-| `Transport` | `internal/transport` | `tui`, `jira` |
+| `Transport` | `internal/transport` | `tui`, `jira`, `bitbucket` |
 | `host.Handler` | `internal/host` | one per built-in (`host.run`, `host.oracle.*`, `host.chat.*`, …) |
 
 ### 11.3 Package map
@@ -520,7 +520,40 @@ The orchestrator is the only writer to `events` and `sessions`; chats
 and jobs each have their own per-row lock. The full event-kind enum
 is defined in [`internal/store/event.go`](../internal/store/event.go).
 
-### 11.5 Observability
+### 11.5 Chained host-call rerender contract
+
+When `on_enter:` declares multiple `invoke:` steps and step N+1
+references a slot bound by step N inside a nested template (e.g.
+`{{ world.X }}` inside `args:` of the second call), the orchestrator
+re-renders step N+1's `with:` block against the post-bind world at
+dispatch time. The machine snapshots the unresolved templates as
+`HostInvocation.RawWith` at machine time; the orchestrator re-walks
+them just before invoking each handler.
+
+**Per-leaf fallback.** If a nested template raises during re-render
+(e.g. a type mismatch on a structured artifact slot, or an
+expression error against the current world), only *that leaf* falls
+back to its corresponding pre-render value from the up-front-resolved
+`hc.Args`. Sibling leaves still render against the fresh world.
+Implemented in
+[`internal/orchestrator/orchestrator.go::rerenderHostArgs`](../internal/orchestrator/orchestrator.go)
+and the recursive walk in `resolveTemplateValueLeafFallback`.
+
+**`HostDispatched` event.** Emitted immediately before each handler
+invocation. Its payload includes the post-rerender args and a
+`rerender_fell_back` boolean that flags whether any leaf was
+substituted. This makes the trace honest about what the handler
+actually received, distinct from the pre-bind args snapshotted by
+`HostInvoked` at machine time. Useful for tracing chained-bind issues
+("did step 2 see step 1's output?") without re-running the LLM.
+
+**Backward compatibility.** `HostInvoked` is still emitted with the
+pre-bind args; existing replay cassettes and traces are unchanged.
+`HostDispatched` is additive — store replay treats it as a no-op.
+Enum entries live in
+[`internal/store/event.go`](../internal/store/event.go).
+
+### 11.6 Observability
 
 - **Trace** — `--trace file.jsonl --trace-pretty -` writes one JSON
   object per event (`turn.*`, `harness.*`, `machine.*`, `store.*`,

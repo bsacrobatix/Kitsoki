@@ -273,6 +273,40 @@ effects:
 The transport handles markup conversion (Markdown → Jira wiki for
 Jira, etc.). See [`transports.md`](transports.md) for the registry.
 
+### 5.7 Template interpolation: how complex values render
+
+`{{ ... }}` expressions inside YAML strings are evaluated by the
+`expr-lang` engine against `world` and `slots`. How the result is
+spliced back into the surrounding string depends on its type:
+
+| Value type | Rendering |
+|---|---|
+| string, int, float, bool | Go's `fmt %v` (the usual default). |
+| `map[string]any`, `[]any` | `encoding/json.Marshal` — sorted keys for maps, compact form. |
+| nil | empty string. |
+| anything else | `%v` (fallback). |
+
+The map/slice case matters when you pass a structured world slot
+into a host call argument or a prompt:
+
+```yaml
+- invoke: host.run
+  with:
+    cmd: "consume.py"
+    args: ["--input", "pr_status={{ world.pr_status }}"]
+```
+
+If `world.pr_status` is `{state: "FAILED", build: "..."}`, the
+rendered arg is `pr_status={"build":"...","state":"FAILED"}` —
+parseable JSON, sorted keys, ready for the downstream CLI. Without
+the JSON rule it would render as Go's `map[build:... state:FAILED]`
+repr, which no standard parser can read.
+
+On marshal failure (cyclic graph, unsupported type) the renderer
+falls back to `%v` so a corrupt slot doesn't crash the template.
+Implemented in
+[`internal/expr/expr.go::anyToString`](../internal/expr/expr.go).
+
 ---
 
 ## 6. Scaling up: includes, phases, proposals
