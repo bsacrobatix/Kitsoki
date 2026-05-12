@@ -167,6 +167,123 @@ func TestPhases_OnEnterOverride(t *testing.T) {
 		"override on_error must have `{{ tpl.id }}` substituted")
 }
 
+// TestPhases_HandWrittenOverride verifies that a top-level hand-written
+// state whose name collides with a template-expanded state name silently
+// wins: the expander skips the templated assignment for that one name,
+// keeps the hand-written body in def.States, and continues expanding the
+// rest of the phase's states unchanged.
+//
+// This is the substrate for phases that want to keep the template's
+// `_executing` / `_error` states but route a checkpoint intent through a
+// hand-written `_awaiting_reply` to a literal target the template can't
+// model (e.g. stories/bugfix/app.yaml's phase_13).
+func TestPhases_HandWrittenOverride(t *testing.T) {
+	def, err := app.Load(filepath.Join("testdata", "phases", "hand-written-override.yaml"))
+	require.NoError(t, err, "load must succeed; the collision must NOT error")
+
+	// phase_a_awaiting_reply must be the hand-written version — recognisable
+	// by its description and by carrying the `custom` arc that the template
+	// body does not declare.
+	aAwait := def.States["phase_a_awaiting_reply"]
+	require.NotNil(t, aAwait)
+	assert.Equal(t, "Hand-written awaiting reply for Phase A", aAwait.Description,
+		"hand-written body must win over the template body")
+	require.Contains(t, aAwait.On, "custom",
+		"hand-written `custom` arc must be present (template doesn't declare it)")
+	assert.Equal(t, "terminated", aAwait.On["custom"][0].Target,
+		"hand-written arc must route to the literal `terminated` target")
+	// Conversely the template's `continue` arc must NOT have been merged in.
+	_, hasContinue := aAwait.On["continue"]
+	assert.False(t, hasContinue, "template's `continue` arc must NOT bleed into the hand-written state")
+
+	// The phase's other template-generated states must still be present and
+	// unmodified — only the one colliding name is skipped.
+	aExec := def.States["phase_a_executing"]
+	require.NotNil(t, aExec, "phase_a_executing must still be templated")
+	assert.Equal(t, "Executing Phase A", aExec.Description)
+	aErr := def.States["phase_a_error"]
+	require.NotNil(t, aErr, "phase_a_error must still be templated")
+	assert.Equal(t, "Error in Phase A", aErr.Description)
+
+	// A sibling phase with no override must template all three states
+	// normally — the override must not be sticky across phases.
+	bAwait := def.States["phase_b_awaiting_reply"]
+	require.NotNil(t, bAwait)
+	assert.Equal(t, "Templated awaiting reply for Phase B", bAwait.Description,
+		"phase_b has no override; it must get the templated body")
+}
+
+// TestPhases_HandWritten_ExecutingOverride_AppliesCycleBudgets verifies
+// that the expander applies `cycle_budgets:` synthesis to a phase's
+// hand-written `_executing` state.  The override wins for the state's
+// body (description, on_enter, explicit arcs in `on:`) but the cycle-
+// budget retry arcs are grafted in regardless — they protect the state
+// machine from runaway loops independently of whatever the hand-written
+// body looks like.
+//
+// Why this matters: the audit (.context/test-audit.md §"Surface 4")
+// pinned the prior silent-drop behaviour.  Silently dropping budgets
+// when a phase author hand-writes `_executing` would let a runaway loop
+// escape the guard the author thought they had.  `applyCycleBudgets`
+// merges into existing arcs idempotently — arcs the hand-written state
+// declares explicitly stay (decorated with the guard); arcs only the
+// budget declares get fresh retry/error transitions.
+//
+// A sibling phase (phase_b) with cycle_budgets but no override is
+// used as a positive control — it must still get the synthesis, which
+// proves the merge path didn't break the standard one.
+func TestPhases_HandWritten_ExecutingOverride_AppliesCycleBudgets(t *testing.T) {
+	def, err := app.Load(filepath.Join(
+		"testdata", "phases", "hand-written-executing-with-cycle-budgets.yaml",
+	))
+	require.NoError(t, err)
+
+	// ── phase_a: hand-written `_executing` wins for the body, AND
+	// cycle-budget synthesis is grafted on top.
+	aExec := def.States["phase_a_executing"]
+	require.NotNil(t, aExec)
+	require.Equal(t, "Hand-written executing for Phase A", aExec.Description,
+		"hand-written body must win over the template body")
+	require.Contains(t, aExec.On, "custom",
+		"hand-written `custom` arc must be preserved verbatim")
+
+	// `on_failure` is declared by cycle_budgets but NOT by the hand-
+	// written body — applyCycleBudgets must synthesise it via the
+	// missing-arc → fall-through-error path.
+	aOnFailure := aExec.On["on_failure"]
+	require.NotEmpty(t, aOnFailure,
+		"hand-written _executing must receive the synthesised on_failure arc")
+	aFirst := aOnFailure[0]
+	assert.Contains(t, aFirst.When, "world.cycle__phase_a__on_failure",
+		"synthesised guard must reference the world counter")
+	assert.Contains(t, aFirst.When, " < 2")
+	require.NotEmpty(t, aFirst.Effects)
+	assert.Equal(t, 1, aFirst.Effects[0].Increment["cycle__phase_a__on_failure"])
+	aLast := aOnFailure[len(aOnFailure)-1]
+	assert.True(t, aLast.Default,
+		"trailing transition must be the synthesised fall-through")
+	assert.Equal(t, "phase_a_error", aLast.Target)
+
+	// ── phase_b: NO override.  Positive control — proves the merge
+	// path didn't break standard template-only expansion.
+	bExec := def.States["phase_b_executing"]
+	require.NotNil(t, bExec)
+	assert.Equal(t, "Templated executing for Phase B", bExec.Description,
+		"phase_b has no override; it must get the templated body")
+
+	bOnFailure := bExec.On["on_failure"]
+	require.NotEmpty(t, bOnFailure,
+		"phase_b.on_failure must be synthesised by applyCycleBudgets")
+	bFirst := bOnFailure[0]
+	assert.Contains(t, bFirst.When, "world.cycle__phase_b__on_failure")
+	assert.Contains(t, bFirst.When, " < 2")
+	require.NotEmpty(t, bFirst.Effects)
+	assert.Equal(t, 1, bFirst.Effects[0].Increment["cycle__phase_b__on_failure"])
+	bLast := bOnFailure[len(bOnFailure)-1]
+	assert.True(t, bLast.Default)
+	assert.Equal(t, "phase_b_error", bLast.Target)
+}
+
 // TestPhases_CycleBudgetSynthesisMissingArcCreatesErrorRoute verifies that
 // declaring cycle_budgets for an arc not present in the template synthesizes
 // a fall-through-to-error transition (rather than silently dropping the

@@ -171,11 +171,33 @@ func expandOnePhase(def *AppDef, file string, tpl *PhaseTemplate, phaseID string
 			})
 			continue
 		}
-		if _, exists := def.States[expandedName]; exists {
-			errs = append(errs, &ValidationError{
-				File:    file,
-				Message: fmt.Sprintf("phases.graph[%q]: expanded state %q already exists in def.States", phaseID, expandedName),
-			})
+		if existing, exists := def.States[expandedName]; exists {
+			// Hand-written state overrides templated expansion. The state
+			// already declared in the top-level `states:` block wins for
+			// its body (on_enter, on, view, …). Override is implicit —
+			// just declare the state in `states:`. No new YAML keyword.
+			//
+			// Cycle budgets are an exception. When the phase declares
+			// `cycle_budgets:` and the override is `_executing`, the
+			// synthesized retry arcs MUST still apply: they protect the
+			// state machine from runaway loops independently of whatever
+			// the hand-written body looks like, and `applyCycleBudgets`
+			// merges into existing arcs idempotently (existing template
+			// arcs get guard-decorated; arcs the hand-written state
+			// doesn't declare get fresh retry/error transitions).
+			// Silently dropping them was a real gap — see
+			// `TestPhases_HandWritten_ExecutingOverride_AppliesCycleBudgets`.
+			//
+			// Other overrides (`_awaiting_reply`, `_error`) don't carry
+			// per-phase retry arcs, so they stay a pure skip.
+			if strings.HasSuffix(expandedName, "_executing") && len(cycles) > 0 {
+				if cerr := applyCycleBudgets(existing, phaseID, cycles, next); cerr != nil {
+					errs = append(errs, &ValidationError{
+						File:    file,
+						Message: fmt.Sprintf("phases.graph[%q]: %v", phaseID, cerr),
+					})
+				}
+			}
 			continue
 		}
 
