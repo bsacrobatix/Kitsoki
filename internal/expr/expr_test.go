@@ -285,3 +285,52 @@ func TestRender_UnclosedBlock(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unclosed")
 }
+
+// TestRender_MapInterpolatesAsJSON pins anyToString's map/slice → JSON behavior.
+// Before this change, Go's fmt %v rendered maps as `map[k:v]` which downstream
+// CLI parsers (e.g. `bugfix context --input <slot>={{ world.X }}`) couldn't
+// decode.  Maps and slices must render as valid JSON so the interpolation
+// produces machine-readable output by default.
+func TestRender_MapInterpolatesAsJSON(t *testing.T) {
+	out, err := expr.Render("{{ world.status }}", expr.Env{
+		Slots: map[string]any{},
+		World: map[string]any{
+			"status": map[string]any{
+				"build": "FAILED",
+				"pr":    "302",
+			},
+		},
+	})
+	require.NoError(t, err)
+	// JSON map ordering is alphabetical by key for encoding/json.
+	require.Equal(t, `{"build":"FAILED","pr":"302"}`, out)
+}
+
+func TestRender_SliceInterpolatesAsJSON(t *testing.T) {
+	out, err := expr.Render("{{ world.evidence }}", expr.Env{
+		Slots: map[string]any{},
+		World: map[string]any{
+			"evidence": []any{"jenkins:url#1", "jenkins:url#2"},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, `["jenkins:url#1","jenkins:url#2"]`, out)
+}
+
+// Scalars must NOT be JSON-encoded — they keep their fmt %v behavior so
+// existing templates that interpolate strings/numbers don't gain quotes.
+func TestRender_ScalarsKeepFmtVBehavior(t *testing.T) {
+	out, err := expr.Render(
+		"{{ world.name }} / {{ world.count }} / {{ world.ok }}",
+		expr.Env{
+			Slots: map[string]any{},
+			World: map[string]any{
+				"name":  "PLTFRM-89912",
+				"count": 42,
+				"ok":    true,
+			},
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "PLTFRM-89912 / 42 / true", out)
+}

@@ -34,6 +34,7 @@
 package expr
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -541,9 +542,24 @@ func isTruthy(v any) bool {
 }
 
 // anyToString converts a value to its string representation for interpolation.
+//
+// Strings, numbers, and bools render via fmt's %v (the expected default).
+// Maps and slices render as JSON — Go's `fmt.Sprintf("%v", map[k]v{})` produces
+// `map[k:v]` which is unparseable by anything downstream that expects standard
+// data interchange (e.g. a Python CLI consuming `--input <slot>={{ world.X }}`).
+// JSON-encoding makes templates that pass structured world slots into host.run
+// args, prompts, or Jira/Bitbucket comments produce machine-readable output by
+// default.  On marshal failure (cyclic graph, unsupported type), fall back to
+// %v so a corrupt slot doesn't crash template rendering.
 func anyToString(v any) string {
 	if v == nil {
 		return ""
+	}
+	switch v.(type) {
+	case map[string]any, []any, map[any]any, []map[string]any:
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
 	}
 	return fmt.Sprintf("%v", v)
 }
