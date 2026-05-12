@@ -18,6 +18,9 @@ coverage.html
 *.swp
 *.swo
 
+# Claude Code local state
+.claude/
+
 # Session data (local only)
 ~/.kitsoki/
 
