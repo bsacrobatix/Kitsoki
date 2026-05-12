@@ -102,10 +102,12 @@ func (r *renderer) stateDiagram() {
 	for _, p := range paths {
 		r.ln(fmt.Sprintf("  %s[\"%s\"]", mermaidID(p), p))
 	}
-	// Declare edges.
+	// Declare edges. Iterate intents in stable order so the rendered Markdown
+	// is deterministic across runs (the rendered doc is committed as a work
+	// product).
 	walkStates(r.def.States, "", func(path string, st *app.State) {
-		for intent, trs := range st.On {
-			for _, tr := range trs {
+		for _, intent := range stableKeys(st.On) {
+			for _, tr := range st.On[intent] {
 				target := resolveMermaidTarget(path, tr.Target)
 				if target == "" {
 					continue

@@ -20,20 +20,20 @@ flowchart LR
   cloakroom["cloakroom"]
   ended["ended"]
   foyer["foyer"]
+  bar__dark -->|*| bar__dark
   bar__dark -->|go [slots.direction == 'north']| foyer
   bar__dark -->|go (default)| bar__dark
-  bar__dark -->|*| bar__dark
   bar__lit -->|go [slots.direction == 'north']| foyer
   bar__lit -->|go (default)| bar__lit
-  bar__lit -->|read_message| ended
   bar__lit -->|look| bar__lit
+  bar__lit -->|read_message| ended
   cloakroom -->|go [slots.direction == 'east']| foyer
   cloakroom -->|go (default)| cloakroom
   cloakroom -->|hang_cloak [world.wearing_cloak == true]| cloakroom
   cloakroom -->|hang_cloak (default)| cloakroom
+  cloakroom -->|look| cloakroom
   cloakroom -->|wear_cloak [world.wearing_cloak == false]| cloakroom
   cloakroom -->|wear_cloak (default)| cloakroom
-  cloakroom -->|look| cloakroom
   foyer -->|go [slots.direction == 'south']| bar
   foyer -->|go [slots.direction == 'west']| cloakroom
   foyer -->|go [slots.direction == 'north']| foyer

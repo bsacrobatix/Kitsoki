@@ -107,7 +107,6 @@ kitsoki/
 │                          record, session, chat, inspect, turn, render,
 │                          mcp-validator, docs, version
 ├── internal/              platform packages — see docs/architecture.md
-├── pkg/kitsokitest/       public testing helpers for app authors
 ├── docs/                  narrative documentation
 ├── testdata/apps/         example apps: cloak, dev-story,
 │                          background_jobs, proposal_smoke

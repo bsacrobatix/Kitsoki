@@ -182,8 +182,8 @@ func (p *chatStoreProbe) List(_ context.Context, _, _, _ string) ([]host.ChatRec
 func (p *chatStoreProbe) Fork(_ context.Context, _, _ string) (*host.ChatRecord, error) {
 	return nil, nil
 }
-func (p *chatStoreProbe) Archive(_ context.Context, _ string) error              { return nil }
-func (p *chatStoreProbe) Rename(_ context.Context, _, _ string) error            { return nil }
+func (p *chatStoreProbe) Archive(_ context.Context, _ string) error               { return nil }
+func (p *chatStoreProbe) Rename(_ context.Context, _, _ string) error             { return nil }
 func (p *chatStoreProbe) SetClaudeSessionID(_ context.Context, _, _ string) error { return nil }
 func (p *chatStoreProbe) AppendMessage(_ context.Context, _, _, _ string, _ map[string]any) (host.ChatMessage, error) {
 	return host.ChatMessage{}, nil

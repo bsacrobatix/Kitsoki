@@ -57,4 +57,3 @@ func printSessionEvents(s store.Store, sessionID string, w io.Writer) error {
 	fmt.Fprintf(w, "\nTotal events: %d\n", len(history))
 	return nil
 }
-

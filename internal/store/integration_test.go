@@ -27,11 +27,11 @@ import (
 // testdata/apps/cloak/flows/winning.yaml. Turn 3 uses a hard-coded go east
 // (same as cloak_test.go does for the oracle-backed turn).
 var winningPath = []intent.IntentCall{
-	{Intent: "go", Slots: world.Slots{"direction": "west"}},   // foyer → cloakroom
-	{Intent: "hang_cloak", Slots: world.Slots{}},              // cloakroom, sets wearing_cloak=false
-	{Intent: "go", Slots: world.Slots{"direction": "east"}},   // cloakroom → foyer
-	{Intent: "go", Slots: world.Slots{"direction": "south"}},  // foyer → bar.lit (no cloak)
-	{Intent: "read_message", Slots: world.Slots{}},            // bar.lit → ended
+	{Intent: "go", Slots: world.Slots{"direction": "west"}},  // foyer → cloakroom
+	{Intent: "hang_cloak", Slots: world.Slots{}},             // cloakroom, sets wearing_cloak=false
+	{Intent: "go", Slots: world.Slots{"direction": "east"}},  // cloakroom → foyer
+	{Intent: "go", Slots: world.Slots{"direction": "south"}}, // foyer → bar.lit (no cloak)
+	{Intent: "read_message", Slots: world.Slots{}},           // bar.lit → ended
 }
 
 // loadCloakForIntegration loads the Cloak app from the testdata fixtures.

@@ -54,7 +54,7 @@ func TestDOTExporterBytes(t *testing.T) {
 func TestDOTMinimalApp(t *testing.T) {
 	// Minimal app with two states and one transition.
 	def := &app.AppDef{
-		App: app.AppMeta{ID: "test", Title: "Test App"},
+		App:  app.AppMeta{ID: "test", Title: "Test App"},
 		Root: "start",
 		States: map[string]*app.State{
 			"start": {

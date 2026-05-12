@@ -137,4 +137,3 @@ func TestInboxClockInjection_SyntheticPollMsg(t *testing.T) {
 	// it's non-nil, meaning the machinery is wired.
 	require.NotNil(t, cmd, "handling inboxPollMsg should schedule a follow-up Cmd")
 }
-

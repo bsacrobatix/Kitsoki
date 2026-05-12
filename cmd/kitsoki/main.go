@@ -23,8 +23,8 @@ import (
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
-	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/machine"
+	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
 	"kitsoki/internal/tui"
@@ -33,7 +33,10 @@ import (
 
 const version = "0.0.1-scaffold"
 
-func main() {
+// newRootCmd builds the top-level cobra command tree. Extracted from main()
+// so tests can construct an isolated root and call Execute() against captured
+// I/O without running the real os.Args/os.Exit dance.
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "kitsoki",
 		Short: "Kitsoki — deterministic LLM orchestrator",
@@ -66,7 +69,11 @@ See also the full design document (design.md) in the repo.`,
 	root.AddCommand(chatCmd())
 	root.AddCommand(mcpValidatorCmd())
 
-	if err := root.Execute(); err != nil {
+	return root
+}
+
+func main() {
+	if err := newRootCmd().Execute(); err != nil {
 		// Sentinel error: translate to EX_TEMPFAIL=75 (chat-busy / session-busy)
 		// so wrappers like loop.py can back off and retry.  The user-facing
 		// reason was already written to stderr by the subcommand.
@@ -90,15 +97,15 @@ func versionCmd() *cobra.Command {
 
 func runCmd() *cobra.Command {
 	var (
-		harnessType    string
-		claudeModel    string
-		recordingPath     string
-		recordPath     string
-		dbPath         string
-		tracePath      string
-		tracePretty    string
-		traceLevel     string
-		traceRedact    bool
+		harnessType   string
+		claudeModel   string
+		recordingPath string
+		recordPath    string
+		dbPath        string
+		tracePath     string
+		tracePretty   string
+		traceLevel    string
+		traceRedact   bool
 	)
 
 	cmd := &cobra.Command{
@@ -121,7 +128,7 @@ Examples:
   kitsoki run myapp.yaml --trace /tmp/t.jsonl --trace-pretty -
 
 See 'kitsoki docs llm-guide' for the full operator guide.`,
-		Args:  cobra.ExactArgs(1),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appPath := args[0]
 

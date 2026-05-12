@@ -2,7 +2,7 @@
 
 > **Implemented.** See [docs/background-jobs/](docs/background-jobs/README.md) for the canonical guide.
 
-**Status:** Draft. Authored from the cyber-repo `devstory` story consumer
+**Status:** Draft. Authored from the consumer-repo `devstory` story consumer
 side, where a long-running `build_plan` action (LLM-driven, 30-90s)
 blocks the entire room while it runs.
 
@@ -297,7 +297,7 @@ Each step is independently shippable and useful.
 
 ## 9. Why now
 
-The cyber-repo `devstory` story has at least three actions that should
+The consumer-repo `devstory` story has at least three actions that should
 be background jobs but block synchronously today:
 
 - `build_plan` — claude takes 30-90s investigating Jira/Bitbucket/git.
@@ -324,6 +324,6 @@ block.  No further consumer changes required.
 - Cross-session jobs (jobs stay session-scoped per design §4.2).
 - Replacing `host.run` — synchronous path remains the default.
 - Real-time streaming of job stdout to the inbox panel.  That's the
-  separate "streaming host results" gap (§7.1 in the cyber-repo
+  separate "streaming host results" gap (§7.1 in the consumer-repo
   KITSOKI-GAPS).  This proposal makes "submit and notify on done" work;
   streaming is a follow-up.

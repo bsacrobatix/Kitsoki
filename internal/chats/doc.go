@@ -27,7 +27,7 @@
 //   - app_id            the app the room belongs to
 //   - room              the state path that owns the chat
 //   - scope_key         a free-form disambiguator ("PROJ-123") so a single
-//                       room can hold per-ticket / per-workspace threads
+//     room can hold per-ticket / per-workspace threads
 //   - title             human-readable label
 //   - status            active|paused|completed|archived
 //   - claude_session_id the Claude-side session ID for `claude -p --session-id`

@@ -116,6 +116,29 @@ func (js *JobStore) UpsertJob(ctx context.Context, j *Job) error {
 	return err
 }
 
+// SweepStaleJobs marks any row whose status is "running" or "awaiting_input"
+// as failed with error=ErrProcessDied. Intended to be called once at scheduler
+// construction: when a fresh process starts, no in-memory goroutine can own
+// those rows, so by definition they are orphans from a prior crashed or
+// killed process. Returns the number of rows affected.
+func (js *JobStore) SweepStaleJobs(ctx context.Context) (int64, error) {
+	now := time.Now().UnixMilli()
+	res, err := js.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = ?, error = ?, finished_at = ?, updated_at = ?
+		WHERE status IN (?, ?)`,
+		string(JobFailed), ErrProcessDied, now, now,
+		string(JobRunning), string(JobAwaitingInput))
+	if err != nil {
+		return 0, fmt.Errorf("jobs.SweepStaleJobs: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("jobs.SweepStaleJobs: rows affected: %w", err)
+	}
+	return n, nil
+}
+
 // UpdateJobStatus updates the status, error, result, and timestamps of a job.
 func (js *JobStore) UpdateJobStatus(ctx context.Context, id JobID, status JobStatus, errMsg string, result any, finishedAt *time.Time) error {
 	var resultJSON []byte
@@ -176,15 +199,15 @@ func scanJobs(rows *sql.Rows) ([]Job, error) {
 	var out []Job
 	for rows.Next() {
 		var (
-			j               Job
-			status          string
+			j                Job
+			status           string
 			originProposalID sql.NullString
-			payloadJSON     string
-			errStr          sql.NullString
-			createdAtMs     int64
-			updatedAtMs     int64
-			startedAtMs     sql.NullInt64
-			finishedAtMs    sql.NullInt64
+			payloadJSON      string
+			errStr           sql.NullString
+			createdAtMs      int64
+			updatedAtMs      int64
+			startedAtMs      sql.NullInt64
+			finishedAtMs     sql.NullInt64
 		)
 		if err := rows.Scan(
 			&j.ID, &j.Kind, &status, (*string)(&j.OriginState), &originProposalID,

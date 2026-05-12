@@ -143,8 +143,8 @@ func TestClaudeCLIHarness_ExecPlumbing(t *testing.T) {
 	// actually spawn it, so we reuse the fake-claude binary to satisfy
 	// the existence check.
 	h, err := harness.NewClaudeCLI(appDef, harness.ClaudeCLIConfig{
-		ClaudeBin: fakeBin,
-		KitsokiBin:  fakeBin,
+		ClaudeBin:  fakeBin,
+		KitsokiBin: fakeBin,
 	})
 	require.NoError(t, err)
 
@@ -186,8 +186,8 @@ func TestClaudeCLIHarness_NoSubmitError(t *testing.T) {
 		Intents: map[string]app.Intent{"look": {}},
 	}
 	h, err := harness.NewClaudeCLI(appDef, harness.ClaudeCLIConfig{
-		ClaudeBin: fakeBin,
-		KitsokiBin:  fakeBin,
+		ClaudeBin:  fakeBin,
+		KitsokiBin: fakeBin,
 	})
 	require.NoError(t, err)
 

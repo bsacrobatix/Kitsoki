@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"kitsoki/internal/host"
-	"kitsoki/internal/world"
 	"kitsoki/internal/workspace"
+	"kitsoki/internal/world"
 )
 
 func fakeWorkspaceHandler(ws *workspace.Workspace) host.Handler {

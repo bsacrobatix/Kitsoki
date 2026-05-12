@@ -9,9 +9,10 @@
 //
 // # Supervisor scan
 //
-// TODO(supervisor-scan): On startup, stale rows with status="running" should
-// be marked failed with error=ErrProcessDied so clients see a clean terminal
-// state after a process restart.  This is not yet implemented.
+// On construction, NewScheduler(js, ...) invokes JobStore.SweepStaleJobs to
+// mark any rows left in status="running" or "awaiting_input" from a prior
+// process as failed with error=ErrProcessDied. This guarantees clients see a
+// clean terminal state after a process restart.
 //
 //	sched := jobs.NewScheduler(jobStore) // or NewInMemoryScheduler() for tests
 //	id, err := sched.Submit(ctx, jobs.JobSpec{...})

@@ -10,11 +10,8 @@ the embedded `kitsoki docs app-schema`.
 
 ```
 kitsoki/
-├── cmd/
-│   ├── kitsoki/             single CLI entrypoint, one Go file per subcommand
-│   └── devstory_loader/   one-off helper used during dev-story bring-up
+├── cmd/kitsoki/           single CLI entrypoint, one Go file per subcommand
 ├── internal/              all platform packages (see architecture.md §3)
-├── pkg/kitsokitest/         public helpers for app authors writing tests
 ├── docs/                  this directory — narrative documentation
 ├── testdata/apps/         runnable example apps (cloak, dev-story, …)
 ├── demo/                  VHS tapes and recorded GIFs
@@ -23,10 +20,10 @@ kitsoki/
 └── README.md              top-level entry point
 ```
 
-Anything imported under `internal/` is private to the binary by Go's
-visibility rules; that's deliberate. The only public Go surface is
-`pkg/kitsokitest`. Stable user surfaces are the `kitsoki` CLI, the `app.yaml`
-schema, the MCP `transition` tool, and the JSONL trace format.
+Everything under `internal/` is private to the binary by Go's
+visibility rules; that's deliberate. Stable user surfaces are the
+`kitsoki` CLI, the `app.yaml` schema, the MCP `transition` tool,
+and the JSONL trace format.
 
 ---
 

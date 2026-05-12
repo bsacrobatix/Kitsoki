@@ -35,13 +35,13 @@ import (
 
 func turnCmd() *cobra.Command {
 	var (
-		state       string
-		worldFlag   string
-		slotsFlag   string
-		intentName  string
-		inputText   string
-		harnessType string
-		recordingPath  string
+		state         string
+		worldFlag     string
+		slotsFlag     string
+		intentName    string
+		inputText     string
+		harnessType   string
+		recordingPath string
 	)
 
 	cmd := &cobra.Command{

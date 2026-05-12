@@ -116,13 +116,13 @@ func TestSanitizeForJira_FencedCode(t *testing.T) {
 // Emojis (4-byte UTF-8) get replaced with `(emoji)` to dodge Jira MySQL
 // utf8 (not utf8mb4) rejection.
 func TestSanitizeForJira_StripsEmojis(t *testing.T) {
-	in := "all good ✨"  // U+2728 is 3-byte, must be preserved
+	in := "all good ✨" // U+2728 is 3-byte, must be preserved
 	got := sanitizeForJira(in)
 	if got != in {
 		t.Fatalf("3-byte rune got mutated:\n got: %q\nwant: %q", got, in)
 	}
 
-	in = "all good \U0001F600 done"  // U+1F600 is 4-byte
+	in = "all good \U0001F600 done" // U+1F600 is 4-byte
 	got = sanitizeForJira(in)
 	want := "all good (emoji) done"
 	if got != want {
@@ -244,7 +244,7 @@ func TestDepthForIndent(t *testing.T) {
 		{0, 1},
 		{2, 2},
 		{4, 2},
-		{6, 4},  // 6/2 + 1 = 4 (matches Python ref)
+		{6, 4}, // 6/2 + 1 = 4 (matches Python ref)
 		{8, 3},
 	}
 	for _, c := range cases {

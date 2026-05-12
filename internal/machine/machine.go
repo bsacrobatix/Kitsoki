@@ -75,8 +75,8 @@ type ValidationResult struct {
 // HostInvocation describes a host.* side-effect call that the caller must
 // dispatch outside the pure machine (§11).
 type HostInvocation struct {
-	Namespace string            `json:"namespace"`
-	Args      map[string]any    `json:"args,omitempty"`
+	Namespace string         `json:"namespace"`
+	Args      map[string]any `json:"args,omitempty"`
 	// RawWith carries the *unresolved* `with:` templates from the YAML so the
 	// orchestrator can re-render them at dispatch time, after any earlier host
 	// call's `bind:` has updated the world.  This makes 2-step `on_enter:`
@@ -86,36 +86,36 @@ type HostInvocation struct {
 	// machine had when it queued the host calls.  Args is still populated with
 	// the best-effort up-front resolution so callers that don't re-render get
 	// reasonable behaviour.
-	RawWith   map[string]any    `json:"raw_with,omitempty"`
+	RawWith map[string]any `json:"raw_with,omitempty"`
 	// Env is the expression-evaluation environment to use for re-rendering
 	// RawWith.  Captured from the machine's effect-walk so the orchestrator
 	// has access to the same slots/event/run scope (the World is overridden
 	// at re-render time with the latest world).
-	Env       any               `json:"-"`
+	Env any `json:"-"`
 	// Bind maps world variable names to keys in the host result's Data map.
 	// e.g. bind: {workspace: "id"} copies result.Data["id"] into world["workspace"].
-	Bind      map[string]string `json:"bind,omitempty"`
+	Bind map[string]string `json:"bind,omitempty"`
 	// OnError is a state path to transition to when the host returns an error.
 	// When non-empty and the host fails, the machine should transition there
 	// rather than erroring out. The $host_error slot will be set.
-	OnError   string            `json:"on_error,omitempty"`
-	EmitEvent string            `json:"emit_event,omitempty"`
+	OnError   string `json:"on_error,omitempty"`
+	EmitEvent string `json:"emit_event,omitempty"`
 	// Background, when true, signals that the orchestrator should submit
 	// this invocation to the scheduler instead of dispatching synchronously.
-	Background bool             `json:"background,omitempty"`
+	Background bool `json:"background,omitempty"`
 	// OnComplete is the saved effect chain to run when the job terminates.
 	// The orchestrator persists these alongside the job spec; the machine
 	// does not consume them.
-	OnComplete []app.Effect     `json:"on_complete,omitempty"`
+	OnComplete []app.Effect `json:"on_complete,omitempty"`
 }
 
 // TurnResult is returned by Machine.Turn after a successful transition.
 type TurnResult struct {
-	NewState  app.StatePath `json:"new_state"`
-	World     world.World   `json:"world"`
-	View      string        `json:"view"`
-	Menu      []string      `json:"menu"`
-	Events    []store.Event `json:"events,omitempty"`
+	NewState  app.StatePath    `json:"new_state"`
+	World     world.World      `json:"world"`
+	View      string           `json:"view"`
+	Menu      []string         `json:"menu"`
+	Events    []store.Event    `json:"events,omitempty"`
 	HostCalls []HostInvocation `json:"host_calls,omitempty"`
 	// ValidationError is set when the intent was rejected (no transition fired).
 	// In that case NewState equals the input state and World is unchanged.
@@ -188,9 +188,9 @@ type compiledState struct {
 
 // machineImpl is the concrete Machine implementation.
 type machineImpl struct {
-	appDef  *app.AppDef
-	states  map[string]*compiledState // dot-separated path -> compiled state
-	logger  *slog.Logger
+	appDef *app.AppDef
+	states map[string]*compiledState // dot-separated path -> compiled state
+	logger *slog.Logger
 }
 
 // MachineOption is a functional option for Machine construction.
@@ -519,9 +519,9 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 			ValidationError: ve,
 			Events: []store.Event{
 				newEvent(store.ValidationFailed, map[string]any{
-					"code":      string(intent.ErrGuardFailed),
-					"intent":    call.Intent,
-					"state":     string(cur),
+					"code":       string(intent.ErrGuardFailed),
+					"intent":     call.Intent,
+					"state":      string(cur),
 					"guard_hint": hint,
 				}),
 			},

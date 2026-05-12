@@ -582,7 +582,7 @@ func TestOracleAskWithMCP_ValidatorBlockParsed(t *testing.T) {
 				"worktree": "/tmp/work",
 			},
 			"post_cmd_cwd": "/tmp/loopy",
-			"max_retries": 7,
+			"max_retries":  7,
 		},
 		"output_format": "json",
 	})

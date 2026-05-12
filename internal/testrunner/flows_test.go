@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	cloakAppPath = "../../testdata/apps/cloak/app.yaml"
+	cloakAppPath   = "../../testdata/apps/cloak/app.yaml"
 	cloakFlowsGlob = "../../testdata/apps/cloak/flows/*.yaml"
 )
 

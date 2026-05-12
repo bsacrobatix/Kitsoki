@@ -45,9 +45,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/goccy/go-yaml"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spf13/cobra"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
@@ -86,13 +86,13 @@ var recordThemes = map[string]recordTheme{
 
 func recordCmd() *cobra.Command {
 	var (
-		flowPath   string
-		outPath    string
-		widthPx    int
-		heightPx   int
-		themeName  string
-		frameMS    int
-		settleMS   int
+		flowPath      string
+		outPath       string
+		widthPx       int
+		heightPx      int
+		themeName     string
+		frameMS       int
+		settleMS      int
 		recordingPath string
 	)
 
@@ -143,15 +143,15 @@ Examples:
 			}
 
 			cfg := recordConfig{
-				appPath:     appPath,
-				flowFiles:   flowFiles,
-				outPath:     outPath,
-				width:       widthPx,
-				height:      heightPx,
-				theme:       th,
-				frameDelay:  centiseconds(frameMS),
-				settleDelay: centiseconds(settleMS),
-				recordingPath:  recordingPath,
+				appPath:       appPath,
+				flowFiles:     flowFiles,
+				outPath:       outPath,
+				width:         widthPx,
+				height:        heightPx,
+				theme:         th,
+				frameDelay:    centiseconds(frameMS),
+				settleDelay:   centiseconds(settleMS),
+				recordingPath: recordingPath,
 			}
 
 			if err := runRecord(cfg); err != nil {
@@ -236,15 +236,15 @@ func resolveFlowPaths(flowPath string) ([]string, error) {
 // ─── record pipeline ─────────────────────────────────────────────────────────
 
 type recordConfig struct {
-	appPath     string
-	flowFiles   []string
-	outPath     string
-	width       int
-	height      int
-	theme       recordTheme
-	frameDelay  int // centiseconds (GIF delay units)
-	settleDelay int // centiseconds
-	recordingPath  string
+	appPath       string
+	flowFiles     []string
+	outPath       string
+	width         int
+	height        int
+	theme         recordTheme
+	frameDelay    int // centiseconds (GIF delay units)
+	settleDelay   int // centiseconds
+	recordingPath string
 }
 
 // runRecord executes the full pipeline: load app → replay flows →
@@ -302,11 +302,11 @@ func runRecord(cfg recordConfig) error {
 // an import cycle (testrunner imports machine; cmd imports testrunner already).
 // Only the fields we need for recording are decoded.
 type recordFlowFixture struct {
-	TestKind     string            `yaml:"test_kind"`
-	Recording    string            `yaml:"recording,omitempty"`
-	InitialState string            `yaml:"initial_state"`
-	InitialWorld map[string]any    `yaml:"initial_world,omitempty"`
-	Turns        []recordFlowTurn  `yaml:"turns"`
+	TestKind     string           `yaml:"test_kind"`
+	Recording    string           `yaml:"recording,omitempty"`
+	InitialState string           `yaml:"initial_state"`
+	InitialWorld map[string]any   `yaml:"initial_world,omitempty"`
+	Turns        []recordFlowTurn `yaml:"turns"`
 }
 
 type recordFlowTurn struct {

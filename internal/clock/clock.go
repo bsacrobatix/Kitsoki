@@ -78,24 +78,24 @@ func Real() Clock { return realClock{} }
 
 func (realClock) Now() time.Time                         { return time.Now() }
 func (realClock) Since(t time.Time) time.Duration        { return time.Since(t) }
-func (realClock) After(d time.Duration) <-chan time.Time  { return time.After(d) }
-func (realClock) Sleep(d time.Duration)                   { time.Sleep(d) }
-func (realClock) NewTimer(d time.Duration) Timer          { return &realTimer{t: time.NewTimer(d)} }
-func (realClock) NewTicker(d time.Duration) Ticker        { return &realTicker{t: time.NewTicker(d)} }
+func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+func (realClock) Sleep(d time.Duration)                  { time.Sleep(d) }
+func (realClock) NewTimer(d time.Duration) Timer         { return &realTimer{t: time.NewTimer(d)} }
+func (realClock) NewTicker(d time.Duration) Ticker       { return &realTicker{t: time.NewTicker(d)} }
 
 // realTimer wraps *time.Timer.
 type realTimer struct{ t *time.Timer }
 
-func (r *realTimer) C() <-chan time.Time       { return r.t.C }
-func (r *realTimer) Stop() bool                { return r.t.Stop() }
+func (r *realTimer) C() <-chan time.Time        { return r.t.C }
+func (r *realTimer) Stop() bool                 { return r.t.Stop() }
 func (r *realTimer) Reset(d time.Duration) bool { return r.t.Reset(d) }
 
 // realTicker wraps *time.Ticker.
 type realTicker struct{ t *time.Ticker }
 
-func (r *realTicker) C() <-chan time.Time      { return r.t.C }
-func (r *realTicker) Stop()                    { r.t.Stop() }
-func (r *realTicker) Reset(d time.Duration)    { r.t.Reset(d) }
+func (r *realTicker) C() <-chan time.Time   { return r.t.C }
+func (r *realTicker) Stop()                 { r.t.Stop() }
+func (r *realTicker) Reset(d time.Duration) { r.t.Reset(d) }
 
 // ─── fake clock ──────────────────────────────────────────────────────────────
 
@@ -114,9 +114,9 @@ type waiter struct {
 //
 // All methods are safe for concurrent use.
 type Fake struct {
-	mu       sync.Mutex
-	now      time.Time
-	waiters  []*waiter
+	mu      sync.Mutex
+	now     time.Time
+	waiters []*waiter
 	// waitCount is the number of goroutines currently blocked waiting on
 	// After/Sleep/NewTimer channels.  Tickers count once when registered.
 	waitCount int
@@ -323,8 +323,8 @@ func (f *Fake) fireExpired() {
 // ─── fakeTimer ───────────────────────────────────────────────────────────────
 
 type fakeTimer struct {
-	f  *Fake
-	w  *waiter
+	f *Fake
+	w *waiter
 }
 
 func (t *fakeTimer) C() <-chan time.Time { return t.w.ch }

@@ -9,7 +9,7 @@
 // Used by `host.oracle.ask_with_mcp` (auto-attached when the effect declares
 // a `schema:` arg) and exposed standalone via `kitsoki mcp-validator`.
 //
-// Compared to cyber-repo's `tools/loopy/wiggum-mcp.py`:
+// Design notes vs. an external phase-keyed validator MCP:
 //   - No artifact directory side-effect: claude's stdout carries the
 //     validated payload back to kitsoki via `output_format: json` →
 //     `bind: stdout_json`.
@@ -466,9 +466,9 @@ func maxRetriesExhaustedMessage(lastErr string) string {
 //
 //   - ("", nil)            — verifier exited 0, payload semantically accepted
 //   - (rejectMsg, nil)     — verifier exited non-zero, capped stderr returned
-//                            for the LLM to react to
+//     for the LLM to react to
 //   - ("", err)            — infrastructure failure (couldn't write tempfile,
-//                            couldn't spawn, etc.) — caller surfaces as such
+//     couldn't spawn, etc.) — caller surfaces as such
 //
 // The post-cmd is split into argv0 + argv-rest by shell-style word
 // splitting (spaces only — no quoting). Power users who need quoted args
@@ -634,4 +634,3 @@ func walkBasicOutput(unit *jsonschema.OutputUnit, out *[]string) {
 		walkBasicOutput(&unit.Errors[i], out)
 	}
 }
-

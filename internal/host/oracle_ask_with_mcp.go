@@ -219,31 +219,31 @@ func buildValidatorMCPServer(schemaPath, outputPath string, opts validatorOption
 // Optional args:
 //   - working_dir   (string): cwd for the claude subprocess.
 //   - mcp_servers   (map):    server-name → { command: str, args: [str],
-//                              env: {k:v} }. Materialized into a temp
-//                              --mcp-config JSON file for the duration of
-//                              the call. Empty/missing → no --mcp-config.
+//     env: {k:v} }. Materialized into a temp
+//     --mcp-config JSON file for the duration of
+//     the call. Empty/missing → no --mcp-config.
 //   - output_format (string): "text" (default) or "json". When "json", the
-//                              handler additionally parses stdout as JSON
-//                              and exposes it as `stdout_json` for binding.
+//     handler additionally parses stdout as JSON
+//     and exposes it as `stdout_json` for binding.
 //   - schema        (string): informational; passed through unchanged. The
-//                              MCP server is responsible for enforcement.
+//     MCP server is responsible for enforcement.
 //   - args          (map):    explicit prompt-template variables.  The
-//                              prompt is rendered with `expr.Env{Args:
-//                              <this map>}`, so the prompt references its
-//                              variables as `{{ args.X }}` (or any nested
-//                              path like `{{ args.context.issue_block }}`,
-//                              `{{ args.artifacts.phase_3.fix_description }}`).
-//                              When omitted, falls back to passing the full
-//                              call-args map as the template scope (legacy
-//                              behaviour) so existing rooms keep working —
-//                              new rooms should use the explicit `args:`
-//                              block to keep handler-control keys
-//                              (prompt/schema/etc.) out of the template
-//                              namespace.
+//     prompt is rendered with `expr.Env{Args:
+//     <this map>}`, so the prompt references its
+//     variables as `{{ args.X }}` (or any nested
+//     path like `{{ args.context.issue_block }}`,
+//     `{{ args.artifacts.phase_3.fix_description }}`).
+//     When omitted, falls back to passing the full
+//     call-args map as the template scope (legacy
+//     behaviour) so existing rooms keep working —
+//     new rooms should use the explicit `args:`
+//     block to keep handler-control keys
+//     (prompt/schema/etc.) out of the template
+//     namespace.
 //   - chat_id       (string, optional): when set AND a ChatStore is in context,
-//                              persists the conversation to the chat transcript
-//                              and reuses the claude session ID stored on the
-//                              chat row across turns (same as host.oracle.talk).
+//     persists the conversation to the chat transcript
+//     and reuses the claude session ID stored on the
+//     chat row across turns (same as host.oracle.talk).
 //
 // Returns Result.Data with:
 //   - stdout      (string): claude's text reply
@@ -254,8 +254,8 @@ func buildValidatorMCPServer(schemaPath, outputPath string, opts validatorOption
 //   - claude_session_id  (string, chat-aware path only)
 //   - transcript_seq     (int, chat-aware path only)
 //   - answer             (string, chat-aware path only): alias for stdout, so
-//                                                        YAML can `bind: answer: answer`
-//                                                        consistently with host.oracle.talk.
+//     YAML can `bind: answer: answer`
+//     consistently with host.oracle.talk.
 //
 // On all expected errors (binary missing, prompt unreadable, MCP config
 // marshal failure, non-zero exit) the handler returns Result{Error: ...}
@@ -674,15 +674,15 @@ type runValidatorLoopParams struct {
 //
 // Outer-loop semantics:
 //
-//   iteration 0  : claude -p   --session-id <sid>
-//   iteration N>0: claude      --resume     <sid>  (only when Outcome == Abandoned)
+//	iteration 0  : claude -p   --session-id <sid>
+//	iteration N>0: claude      --resume     <sid>  (only when Outcome == Abandoned)
 //
 // Termination conditions (checked after each iteration):
 //
-//   Outcome == Success            → return success, bind submitted payload
-//   Outcome == RetriesExhausted   → return error (last_error), on_error: fires
-//   Outcome == Abandoned, n+1==N  → return error ("session abandoned"), on_error: fires
-//   Outcome == Abandoned, n+1<N   → continue with --resume + nudge prompt
+//	Outcome == Success            → return success, bind submitted payload
+//	Outcome == RetriesExhausted   → return error (last_error), on_error: fires
+//	Outcome == Abandoned, n+1==N  → return error ("session abandoned"), on_error: fires
+//	Outcome == Abandoned, n+1<N   → continue with --resume + nudge prompt
 //
 // The validator's in-memory counters reset between subprocess invocations,
 // but the state-file path makes them persist so the validator can return

@@ -18,7 +18,7 @@ The two surfaces below remain in design. The TUI's automatic
 spinner (the alternative noted in §2 of this file) is already
 implemented; `loading_view` per-state YAML is not.
 
-**Context.** The cyber-repo `devstory` story is built by an AI
+**Context.** The motivating `devstory` story is built by an AI
 agent and driven by a human. Every bug that only the human sees
 is one the AI wrote blind. The shipped trace + turn + inspect
 surfaces narrowed that gap; these two would close it further.

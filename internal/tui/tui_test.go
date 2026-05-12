@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/spinner"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	tea "github.com/charmbracelet/bubbletea"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/app"
@@ -154,11 +154,11 @@ func TestTUIWinningPath(t *testing.T) {
 
 	// Run the winning path turns in sequence.
 	turns := []string{
-		"go west",           // foyer → cloakroom
-		"hang the cloak",    // cloakroom → hang cloak
-		"go east",           // cloakroom → foyer
-		"go south",          // foyer → bar.lit (cloak is hung)
-		"read the message",  // bar.lit → ended (won)
+		"go west",          // foyer → cloakroom
+		"hang the cloak",   // cloakroom → hang cloak
+		"go east",          // cloakroom → foyer
+		"go south",         // foyer → bar.lit (cloak is hung)
+		"read the message", // bar.lit → ended (won)
 	}
 
 	for _, turn := range turns {

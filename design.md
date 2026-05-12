@@ -10,7 +10,7 @@ This document defines the conceptual model, the YAML authoring format, the runti
 
 ### Target platform
 
-Kitsoki is implemented in **Go 1.23+** and ships as a **single statically-linked binary** with no CGO, no external runtime, and no managed service dependency. The CLI/TUI is built on [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) v2. The rationale for this stack — distribution, compile-time interface enforcement, the maturity of the Charm TUI ecosystem, and the stable MCP Go SDK v1 — is documented in `stack-comparison.md`; this document encodes the decision and uses Go-specific library names throughout. Where earlier drafts said "Go or Python" or "TBD," we now commit to Go.
+Kitsoki is implemented in **Go 1.25+** and ships as a **single statically-linked binary** with no CGO, no external runtime, and no managed service dependency. The CLI/TUI is built on [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) v2. The rationale for this stack — distribution, compile-time interface enforcement, the maturity of the Charm TUI ecosystem, and the stable MCP Go SDK v1 — is documented in [`docs/archive/stack-comparison.md`](docs/archive/stack-comparison.md); this document encodes the decision and uses Go-specific library names throughout. Where earlier drafts said "Go or Python" or "TBD," we now commit to Go.
 
 ---
 
@@ -107,7 +107,7 @@ Inbound — turning an external reply into a kitsoki intent — is *not* a trans
 
 #### The orchestrator boundary (v1)
 
-Kitsoki hosts the per-session conversation. It does not poll Jira, watch Bitbucket webhooks, or schedule its own work. The *orchestrator* — for the bug-fix and PR-refine rooms today, `tools/loopy/loop.py` in `cyber-repo` — owns:
+Kitsoki hosts the per-session conversation. It does not poll Jira, watch Bitbucket webhooks, or schedule its own work. The *orchestrator* — an external driver, e.g. a `loop.py`-style script in a consumer repo — owns:
 
 - ticket / PR selection and dispatch
 - polling external surfaces for new replies
@@ -646,7 +646,7 @@ Component-to-library mapping:
 
 - **TUI**: [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) v2 (Elm-architecture event loop, Cursed Renderer), [charmbracelet/bubbles](https://github.com/charmbracelet/bubbles) (viewport, list, textinput, spinner, table), [charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss) v2 (layout + styling), [charmbracelet/huh](https://github.com/charmbracelet/huh) v2 (slot-filling modal forms), [charmbracelet/glamour](https://github.com/charmbracelet/glamour) (markdown rendering inside the transcript pane).
 - **Orchestrator**: custom, ~500 lines. Single-threaded per session; owns the turn lifecycle, hands tool calls to the MCP server, applies results to the Machine, appends events to the Store, and publishes `tea.Msg` values back to the TUI goroutine.
-- **State Machine**: custom, built on top of the compiled YAML model. We deliberately reject off-the-shelf FSM libraries — [looplab/fsm](https://github.com/looplab/fsm) is flat-only, and [qmuntal/stateless](https://github.com/qmuntal/stateless) does hierarchical states but not the XState-flavored compound + parallel + first-guard-wins semantics we need (see stack-comparison §A and the "Risks" in that doc). Writing the ~600 lines of reducer ourselves is cheaper than bending a library to fit.
+- **State Machine**: custom, built on top of the compiled YAML model. We deliberately reject off-the-shelf FSM libraries — [looplab/fsm](https://github.com/looplab/fsm) is flat-only, and [qmuntal/stateless](https://github.com/qmuntal/stateless) does hierarchical states but not the XState-flavored compound + parallel + first-guard-wins semantics we need (see [`docs/archive/stack-comparison.md`](docs/archive/stack-comparison.md) §A and the "Risks" in that doc). Writing the ~600 lines of reducer ourselves is cheaper than bending a library to fit.
 - **MCP Server**: the official [modelcontextprotocol/go-sdk](https://github.com/modelcontextprotocol/go-sdk) v1 (stable semver as of late 2025). We explicitly do not use `mark3labs/mcp-go` — the official SDK is now the canonical path and ships Anthropic/Google-maintained tool-handler idioms.
 - **LLM Harness**: pluggable via a `Harness` interface (§12). Default implementation spawns `claude -p` or `opencode` as a subprocess over stdio. An in-process fallback uses [anthropic-sdk-go](https://github.com/anthropics/anthropic-sdk-go) directly (Claude Opus 4.7, prompt caching, tool use).
 - **Journey Store**: [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) — pure-Go SQLite, no cgo, which is what keeps the single static binary promise alive on every `GOOS`.
@@ -1987,7 +1987,7 @@ The original idea doc had 12 open items. They map into the design as follows:
 
 ## 14. Tradeoffs and Open Questions
 
-The implementation language is **closed** (Go 1.23+; see stack-comparison.md). The following decisions remain genuinely open. For each: what would tip it.
+The implementation language is **closed** (Go 1.25+; see [`docs/archive/stack-comparison.md`](docs/archive/stack-comparison.md)). The following decisions remain genuinely open. For each: what would tip it.
 
 1. **One `transition` tool vs. per-intent tools.** *Current decision:* one generic tool (§5). *Tip condition:* if benchmarks show that LLMs' per-turn accuracy is materially better with typed per-intent tools even with the prompt-cache cost, switch — but measure first. A hybrid (one tool per state, regenerated only on state change) is plausible.
 

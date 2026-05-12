@@ -432,9 +432,9 @@ func TestOrchestratorContinueTurnNoPending(t *testing.T) {
 func TestOrchestratorInitialView(t *testing.T) {
 	orch, _ := loadCloakOrchestrator(t)
 	w := world.World{Vars: map[string]any{
-		"wearing_cloak":    true,
-		"disturbance":      int64(0),
-		"message_rumpled":  false,
+		"wearing_cloak":   true,
+		"disturbance":     int64(0),
+		"message_rumpled": false,
 	}}
 
 	view, err := orch.InitialView(w)

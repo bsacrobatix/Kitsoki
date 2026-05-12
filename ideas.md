@@ -21,24 +21,7 @@
 ## Tech debt
 
 ### View rendering: unify structured + prose content
-➜  devstory git:(devstory) ✗ kitsoki run stories/devstory/app.yaml --trace /tmp/devstory-trace.jsonl --trace-pretty /tmp/devstory-trace.log
-Error: validate hosts: host: unregistered hosts declared in app manifest: [host.oracle.talk]
-Usage:
-  kitsoki run <app.yaml> [flags]
 
-Flags:
-      --claude-model string   model passed to claude -p --model (default: claude-haiku-4-5-20251001); use 'opus' for higher quality at higher cost
-      --db string             path to SQLite session database (default: $XDG_DATA_HOME/kitsoki/sessions.db)
-      --harness claude        harness type: claude|live|replay|recording (default: claude if claude binary on PATH, else live if ANTHROPIC_API_KEY set, else replay)
-  -h, --help                  help for run
-      --oracle string         path to oracle YAML file (required for --harness replay)
-      --record string         path to output JSONL recording (for --harness recording)
-      --trace string          write JSONL trace events to this file; '-' writes to stderr
-      --trace-level string    minimum trace level: debug|info|warn|error (default: debug when --trace is set) (default "debug")
-      --trace-pretty string   write human-readable trace to this file in parallel; '-' writes to stderr
-      --trace-redact          redact sensitive values (API keys, etc.) in trace output (default true)
-
-error: validate hosts: host: unregistered hosts declared in app manifest: [host.oracle.talk]
 **Problem.** The TUI runs every state's `view:` through Glamour with
 `glamour.WithPreservedNewLines()`. That's necessary for structured views
 (e.g. the Terminal Room's `propose "…"` examples, menu-like bullet lists)

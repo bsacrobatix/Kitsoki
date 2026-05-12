@@ -34,7 +34,7 @@
 //     which writes the answer to the DB and flips the job back to running.
 //  9. host.RequestClarification's poll loop detects the non-NULL answer and
 //     returns it to the handler, which resumes normally.
-// 10. The handler returns a result; the scheduler posts a JobDone event and
+//  10. The handler returns a result; the scheduler posts a JobDone event and
 //     the orchestrator fires the on_complete chain.
 package inbox
 

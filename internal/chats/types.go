@@ -33,7 +33,7 @@ type Chat struct {
 type Message struct {
 	ChatID    string
 	Seq       int
-	Role      string         // user|assistant|system|tool
+	Role      string // user|assistant|system|tool
 	Content   string
 	Metadata  map[string]any
 	CreatedAt time.Time

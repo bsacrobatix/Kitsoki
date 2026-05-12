@@ -34,7 +34,7 @@ func NewChatBusyError(cause error) error { return &chatBusyHostError{cause: caus
 type ChatRecord struct {
 	ID, AppID, Room, ScopeKey, Title, Status string
 	ClaudeSessionID, ParentChatID, SessionID string
-	CreatedAt, UpdatedAt, LastActiveAt        time.Time
+	CreatedAt, UpdatedAt, LastActiveAt       time.Time
 }
 
 // ChatMessage mirrors chats.Message at the host-package boundary.

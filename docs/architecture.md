@@ -192,16 +192,16 @@ implementation to drift from.
 ## 5. Conversations across surfaces
 
 A conversation has to live somewhere — a TUI window, a Jira ticket
-comment thread, a Bitbucket PR, a Slack thread. Kitsoki calls each of
-these a **surface** (or, viewed from inside, a **transport**), and
-the same application works across all of them.
+comment thread, or (on the roadmap) a Bitbucket PR or a Slack thread.
+Kitsoki calls each of these a **surface** (or, viewed from inside, a
+**transport**), and the same application works across all of them.
 
 ```mermaid
 flowchart LR
     subgraph Surfaces
         TUI["TUI window<br/>(local)"]
         Jira["Jira ticket comments"]
-        BB["Bitbucket PR comments"]
+        BB["Bitbucket PR comments<br/>(planned)"]
         MCP["MCP client<br/>(Claude Desktop, etc.)"]
     end
 
@@ -212,10 +212,14 @@ flowchart LR
 
     TUI <-- "transcript" --> S
     Jira <-- "comments" --> S
-    BB <-- "comments" --> S
+    BB <-. "comments" .-> S
     MCP <-- "transition tool" --> S
     S --> APP
 ```
+
+Today the TUI and Jira transports ship; Bitbucket is sketched against
+the same `Transport` interface but not yet implemented. See
+[`transports.md`](transports.md) for the per-transport status.
 
 The user-visible consequence: **the same conversation can move
 between surfaces without losing state.** A bug-fix room driven from a
@@ -491,14 +495,12 @@ Authoring & testing:
 |---|---|
 | `internal/authoring` | Edit-mode flow — shadow-copy app, run `claude -p`, diff, apply. |
 | `internal/testrunner` | Mode 1 (intent pass-rate) and Mode 2 (deterministic flow) test runners. |
-| `pkg/kitsokitest` | Public testing helpers for app authors. |
 
 CLI:
 
 | Package | Purpose |
 |---|---|
 | `cmd/kitsoki` | Cobra root + every subcommand. |
-| `cmd/devstory_loader` | One-off utility to seed a sample `dev-story` session. |
 
 ### 11.4 Persistence schema
 

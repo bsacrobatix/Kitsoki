@@ -44,15 +44,13 @@ type JobID = string
 type JobStatus string
 
 const (
-	JobRunning           JobStatus = "running"
-	JobAwaitingInput     JobStatus = "awaiting_input"
-	JobDone              JobStatus = "done"
-	JobFailed            JobStatus = "failed"
-	JobCancelled         JobStatus = "cancelled"
-	// ErrProcessDied is the error string written to stale running rows when the
-	// supervisor scan runs on startup.
-	// TODO(supervisor-scan): implement a startup scan that marks stale running
-	// rows as failed with this error value.  Currently no code writes this value.
+	JobRunning       JobStatus = "running"
+	JobAwaitingInput JobStatus = "awaiting_input"
+	JobDone          JobStatus = "done"
+	JobFailed        JobStatus = "failed"
+	JobCancelled     JobStatus = "cancelled"
+	// ErrProcessDied is the error string written to orphaned running /
+	// awaiting_input rows by JobStore.SweepStaleJobs on scheduler startup.
 	ErrProcessDied string = "process_died_mid_job"
 )
 
@@ -192,6 +190,15 @@ var ErrJobNotFound = fmt.Errorf("jobs: job not found")
 // both satisfy the flush condition within the same lock acquisition.
 const heartbeatFlushInterval = 500 * time.Millisecond
 
+// terminalWriteTimeout caps the time spent writing a job's terminal-state row
+// to SQLite. Long enough for normal contention; short enough that a stuck
+// store does not block scheduler shutdown.
+const terminalWriteTimeout = 5 * time.Second
+
+// heartbeatWriteTimeout caps a debounced Heartbeat flush. Best-effort:
+// failures log and the next heartbeat retries.
+const heartbeatWriteTimeout = 2 * time.Second
+
 // Option is a functional option for constructing an inMemoryScheduler.
 type Option func(*inMemoryScheduler)
 
@@ -281,9 +288,25 @@ func NewInMemoryScheduler(opts ...Option) Scheduler {
 // Heartbeat debounces flushes to ≤ 2/s; terminal transitions are committed
 // immediately).  When js is nil the scheduler runs entirely in-memory —
 // identical behaviour to NewInMemoryScheduler(opts...).
+//
+// As a side effect of construction with js != nil, any DB rows left in
+// status running or awaiting_input from a prior process are swept to failed
+// (with error=ErrProcessDied), so clients see a clean terminal state after a
+// crash. Failures of the sweep itself are logged but do not block startup.
+//
 // Optional Option values (e.g. WithClock) may be supplied.
 func NewScheduler(js *JobStore, opts ...Option) Scheduler {
-	return newScheduler(js, opts...)
+	s := newScheduler(js, opts...)
+	if js != nil {
+		sweepCtx, cancel := context.WithTimeout(context.Background(), terminalWriteTimeout)
+		if n, err := js.SweepStaleJobs(sweepCtx); err != nil {
+			slog.Warn("jobs: supervisor sweep failed", "err", err)
+		} else if n > 0 {
+			slog.Info("jobs: supervisor sweep marked orphaned rows as failed", "count", n)
+		}
+		cancel()
+	}
+	return s
 }
 
 func newScheduler(js *JobStore, opts ...Option) *inMemoryScheduler {
@@ -408,11 +431,18 @@ func (s *inMemoryScheduler) Submit(ctx context.Context, spec JobSpec) (JobID, er
 		termFinishedAt := rj.job.FinishedAt
 		s.mu.Unlock()
 
-		// Persist terminal status if write-through is enabled.
+		// Persist terminal status if write-through is enabled. We derive from
+		// jobCtx via WithoutCancel so trace/observability values propagate but
+		// the terminal write is not aborted if jobCtx itself was just cancelled
+		// (which is the common case here — the handler returned because of
+		// Cancel and we still want the row marked accordingly). A short
+		// timeout bounds the worst-case shutdown latency.
 		if s.js != nil {
-			if dbErr := s.js.UpdateJobStatus(context.Background(), id, termStatus, termErr, termResult, termFinishedAt); dbErr != nil {
+			writeCtx, cancelWrite := context.WithTimeout(context.WithoutCancel(jobCtx), terminalWriteTimeout)
+			if dbErr := s.js.UpdateJobStatus(writeCtx, id, termStatus, termErr, termResult, termFinishedAt); dbErr != nil {
 				slog.Warn("jobs: write-through UpdateJobStatus failed", "id", id, "err", dbErr)
 			}
+			cancelWrite()
 		}
 
 		s.fanout(rj, ev)
@@ -528,9 +558,15 @@ func (s *inMemoryScheduler) Heartbeat(id JobID, progress any) error {
 	s.mu.Unlock()
 
 	if shouldFlush {
-		if err := s.js.UpsertJob(context.Background(), &jobSnapshot); err != nil {
+		// Heartbeat has no caller context (it's invoked from inside the
+		// handler), so we use a short-bounded background context. The flush is
+		// debounced (≤ once per heartbeatFlushInterval) and best-effort —
+		// failure logs and the next heartbeat re-attempts.
+		writeCtx, cancelWrite := context.WithTimeout(context.Background(), heartbeatWriteTimeout)
+		if err := s.js.UpsertJob(writeCtx, &jobSnapshot); err != nil {
 			slog.Warn("jobs: write-through UpsertJob on Heartbeat failed", "id", id, "err", err)
 		}
+		cancelWrite()
 	}
 	return nil
 }

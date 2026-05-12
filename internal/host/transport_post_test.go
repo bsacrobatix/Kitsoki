@@ -79,8 +79,8 @@ func TestTransportPost_RequiredArgs(t *testing.T) {
 	ctx := transport.WithRegistry(context.Background(), reg)
 
 	cases := []map[string]any{
-		{"thread": "S-1", "body": "x"},                // missing transport
-		{"transport": "tui", "body": "x"},             // missing thread
+		{"thread": "S-1", "body": "x"},    // missing transport
+		{"transport": "tui", "body": "x"}, // missing thread
 	}
 	for _, args := range cases {
 		res, err := host.TransportPostHandler(ctx, args)

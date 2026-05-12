@@ -47,10 +47,10 @@ type TransitionArgs struct {
 // TransitionOK is the success response of the transition tool.
 // JSON tags are load-bearing: read by the LLM harness.
 type TransitionOK struct {
-	OK    bool     `json:"ok"`    // always true on this branch
-	State string   `json:"state"` // new current state path
-	View  string   `json:"view"`  // rendered narrative
-	Menu  []string `json:"menu"`  // currently-allowed intent names
+	OK    bool     `json:"ok"`              // always true on this branch
+	State string   `json:"state"`           // new current state path
+	View  string   `json:"view"`            // rendered narrative
+	Menu  []string `json:"menu"`            // currently-allowed intent names
 	World any      `json:"world,omitempty"` // updated world snapshot (optional, for debugging)
 }
 

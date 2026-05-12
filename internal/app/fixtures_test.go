@@ -14,21 +14,21 @@ import (
 
 // flowFixture is the minimal shape of a Mode 2 flow test file (§10.3).
 type flowFixture struct {
-	TestKind     string      `yaml:"test_kind"`
-	App          string      `yaml:"app"`
-	Recording    string      `yaml:"recording,omitempty"`
-	InitialState string      `yaml:"initial_state"`
+	TestKind     string         `yaml:"test_kind"`
+	App          string         `yaml:"app"`
+	Recording    string         `yaml:"recording,omitempty"`
+	InitialState string         `yaml:"initial_state"`
 	InitialWorld map[string]any `yaml:"initial_world,omitempty"`
-	Turns        []flowTurn  `yaml:"turns"`
+	Turns        []flowTurn     `yaml:"turns"`
 }
 
 // flowTurn is one turn in a flow fixture.
 type flowTurn struct {
-	Intent      *intentRef         `yaml:"intent,omitempty"`
-	Input       string             `yaml:"input,omitempty"`
-	ExpectState string             `yaml:"expect_state,omitempty"`
-	ExpectWorld map[string]any     `yaml:"expect_world,omitempty"`
-	ExpectError *expectError       `yaml:"expect_error,omitempty"`
+	Intent      *intentRef     `yaml:"intent,omitempty"`
+	Input       string         `yaml:"input,omitempty"`
+	ExpectState string         `yaml:"expect_state,omitempty"`
+	ExpectWorld map[string]any `yaml:"expect_world,omitempty"`
+	ExpectError *expectError   `yaml:"expect_error,omitempty"`
 }
 
 // intentRef is the structured intent + slots form.
@@ -45,11 +45,11 @@ type expectError struct {
 
 // intentFixture is the minimal shape of a Mode 1 intent test file (§10.2).
 type intentFixture struct {
-	TestKind string           `yaml:"test_kind"`
-	App      string           `yaml:"app"`
-	State    string           `yaml:"state"`
-	Defaults intentDefaults   `yaml:"defaults,omitempty"`
-	Fixtures []intentCase     `yaml:"fixtures"`
+	TestKind string         `yaml:"test_kind"`
+	App      string         `yaml:"app"`
+	State    string         `yaml:"state"`
+	Defaults intentDefaults `yaml:"defaults,omitempty"`
+	Fixtures []intentCase   `yaml:"fixtures"`
 }
 
 // intentDefaults holds per-file default configuration.
@@ -61,13 +61,13 @@ type intentDefaults struct {
 
 // intentCase is one fixture within a Mode 1 file.
 type intentCase struct {
-	ID            string          `yaml:"id"`
-	Intent        *intentRef      `yaml:"intent,omitempty"`
-	Inputs        []string        `yaml:"inputs,omitempty"`
-	MinPassRate   float64         `yaml:"min_pass_rate,omitempty"`
-	Runs          int             `yaml:"runs,omitempty"`
-	ExpectFailure *expectFailure  `yaml:"expect_failure,omitempty"`
-	ExpectFallthrough bool        `yaml:"expect_fallthrough,omitempty"`
+	ID                string         `yaml:"id"`
+	Intent            *intentRef     `yaml:"intent,omitempty"`
+	Inputs            []string       `yaml:"inputs,omitempty"`
+	MinPassRate       float64        `yaml:"min_pass_rate,omitempty"`
+	Runs              int            `yaml:"runs,omitempty"`
+	ExpectFailure     *expectFailure `yaml:"expect_failure,omitempty"`
+	ExpectFallthrough bool           `yaml:"expect_fallthrough,omitempty"`
 }
 
 // expectFailure is the failure-assertion block in an adversarial fixture.
@@ -87,11 +87,11 @@ type recordingFile struct {
 
 // recordingEntry is one (state, input) → (intent, slots) mapping.
 type recordingEntry struct {
-	State      string         `yaml:"state"`
-	Input      string         `yaml:"input"`
-	Intent     *intentRef     `yaml:"intent"`
-	Confidence float64        `yaml:"confidence,omitempty"`
-	MajorityOf int            `yaml:"majority_of,omitempty"`
+	State      string     `yaml:"state"`
+	Input      string     `yaml:"input"`
+	Intent     *intentRef `yaml:"intent"`
+	Confidence float64    `yaml:"confidence,omitempty"`
+	MajorityOf int        `yaml:"majority_of,omitempty"`
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

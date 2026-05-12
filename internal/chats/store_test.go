@@ -451,12 +451,12 @@ func TestStore_RestartPersistence(t *testing.T) {
 // TestStore_SchemaMigration_OnExistingDB verifies that the chats schema is
 // applied idempotently to an existing DB that already has the session and jobs
 // schemas in place.  Sequence:
-//   1. Open a fresh in-memory store (applies sessions schema).
-//   2. Apply jobs schema via jobs.NewJobStore.
-//   3. Confirm chat tables do NOT yet exist.
-//   4. Apply chats schema via chats.NewStore — chat tables now exist.
-//   5. Insert a chat and read it back.
-//   6. Re-call chats.NewStore on the same *sql.DB — must be idempotent.
+//  1. Open a fresh in-memory store (applies sessions schema).
+//  2. Apply jobs schema via jobs.NewJobStore.
+//  3. Confirm chat tables do NOT yet exist.
+//  4. Apply chats schema via chats.NewStore — chat tables now exist.
+//  5. Insert a chat and read it back.
+//  6. Re-call chats.NewStore on the same *sql.DB — must be idempotent.
 func TestStore_SchemaMigration_OnExistingDB(t *testing.T) {
 	s, err := store.OpenMemory()
 	if err != nil {

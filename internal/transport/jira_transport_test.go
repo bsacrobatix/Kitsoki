@@ -35,10 +35,10 @@ func TestJiraTransport_NewRequiresFields(t *testing.T) {
 
 func TestJiraTransport_PostEncodesAndAuths(t *testing.T) {
 	var (
-		gotPath  string
-		gotAuth  string
-		gotCT    string
-		gotBody  map[string]any
+		gotPath string
+		gotAuth string
+		gotCT   string
+		gotBody map[string]any
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path

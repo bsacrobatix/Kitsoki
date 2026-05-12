@@ -187,7 +187,7 @@ func TestSession_BindKey(t *testing.T) {
 // TestSession_ParseExternalKey covers the "transport:thread" parser edges.
 func TestSession_ParseExternalKey(t *testing.T) {
 	good := map[string][2]string{
-		"jira:PLTFRM-12345":     {"jira", "PLTFRM-12345"},
+		"jira:PLTFRM-12345":      {"jira", "PLTFRM-12345"},
 		"bitbucket:repo/pulls/4": {"bitbucket", "repo/pulls/4"},
 	}
 	for in, want := range good {

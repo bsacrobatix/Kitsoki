@@ -20,11 +20,11 @@ import (
 // Use --flows to override.
 func testFlowsCmd() *cobra.Command {
 	var (
-		flowsGlob   string
-		jsonOut     string
-		recordingPath  string
-		failFast    bool
-		verbose     bool
+		flowsGlob          string
+		jsonOut            string
+		recordingPath      string
+		failFast           bool
+		verbose            bool
 		allowMissRecording bool
 	)
 
@@ -57,9 +57,9 @@ Exit codes:
 			opts := testrunner.FlowOptions{
 				RecordingOverride:     recordingPath,
 				AllowMissingRecording: allowMissRecording,
-				FailFast:           failFast,
-				Verbose:            verbose,
-				JSONOut:            jsonOut,
+				FailFast:              failFast,
+				Verbose:               verbose,
+				JSONOut:               jsonOut,
 			}
 
 			ctx := context.Background()

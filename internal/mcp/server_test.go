@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/app"
-	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/machine"
+	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/store"
 )
 

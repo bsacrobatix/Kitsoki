@@ -32,8 +32,8 @@ type clarifyModel struct {
 	intentName string
 
 	// Sub-mode A: huh form for the current enum/bool slot.
-	huhForm    *huh.Form
-	huhValue   string // bound to huhForm's Select
+	huhForm  *huh.Form
+	huhValue string // bound to huhForm's Select
 
 	// Sub-mode B: textinput for free-form strings.
 	input textinput.Model

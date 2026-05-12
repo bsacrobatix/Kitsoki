@@ -527,11 +527,11 @@ func ChatSuggestTitleHandler(ctx context.Context, args map[string]any) (Result, 
 //   - scope_key    (string, optional)
 //   - ref          (string, required): user input
 //   - max_chats    (int, optional): cap on how many chats to consider in the
-//                  shallow LLM pass (default 30)
+//     shallow LLM pass (default 30)
 //   - max_deep     (int, optional): cap on how many chats to consider in the
-//                  deep LLM pass (default 5)
+//     deep LLM pass (default 5)
 //   - llm_model    (string, optional): override model; default
-//                  "claude-haiku-4-5-20251001"
+//     "claude-haiku-4-5-20251001"
 //   - skip_llm     (bool, optional): if true, only steps 1-3 run
 //
 // Returns Result.Data with:

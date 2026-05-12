@@ -42,12 +42,12 @@ func styleFor(s string, color lipgloss.Color) string {
 }
 
 var (
-	colorTurn    = lipgloss.Color("12")  // bright blue
-	colorHarness = lipgloss.Color("10")  // bright green
-	colorMachine = lipgloss.Color("11")  // bright yellow
-	colorStore   = lipgloss.Color("14")  // bright cyan
-	colorErr     = lipgloss.Color("9")   // bright red
-	colorDim     = lipgloss.Color("8")   // dark gray
+	colorTurn    = lipgloss.Color("12") // bright blue
+	colorHarness = lipgloss.Color("10") // bright green
+	colorMachine = lipgloss.Color("11") // bright yellow
+	colorStore   = lipgloss.Color("14") // bright cyan
+	colorErr     = lipgloss.Color("9")  // bright red
+	colorDim     = lipgloss.Color("8")  // dark gray
 )
 
 // prettyLine formats one trace record for human-readable output.

@@ -179,16 +179,16 @@ func sessionCreateCmd() *cobra.Command {
 
 func sessionContinueCmd() *cobra.Command {
 	var (
-		appPath     string
-		dbPath      string
-		key         string
-		idFlag      string
-		intentName  string
-		slotsFlag   string
-		rawText     string
-		harnessType string
-		claudeModel string
-		recordingPath  string
+		appPath       string
+		dbPath        string
+		key           string
+		idFlag        string
+		intentName    string
+		slotsFlag     string
+		rawText       string
+		harnessType   string
+		claudeModel   string
+		recordingPath string
 	)
 	cmd := &cobra.Command{
 		Use:   "continue",
@@ -586,9 +586,9 @@ func externalKeysView(keys []store.ExternalKey) []map[string]any {
 //
 // Setting JIRA_INSECURE_SKIP_VERIFY=1 disables TLS verification on the
 // Jira HTTP client.  This is needed for internal/self-hosted instances
-// behind a proxy with a self-signed certificate (e.g. Acronis's ZTA
-// proxy at 127.0.0.1:3128 with `zta-proxy-ca.crt` not on the system
-// trust store).  Off by default — only opt in deliberately.
+// behind an enterprise zero-trust proxy with a self-signed certificate
+// whose CA is not on the system trust store.  Off by default — only
+// opt in deliberately.
 func buildTransportRegistry() (*transport.Registry, error) {
 	reg := transport.NewRegistry()
 	reg.Register(transport.NewTUITransport())

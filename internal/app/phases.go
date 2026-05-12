@@ -18,10 +18,10 @@
 //   - cycle_budgets: { <arc>: N } synthesizes for each arc:
 //
 //     1. An Effect.Increment on the arc transition's effects, against
-//        a counter `cycle__<phase_id>__<arc>` in world.
+//     a counter `cycle__<phase_id>__<arc>` in world.
 //     2. A `when:` guard `world.cycle__<phase_id>__<arc> < N` on the arc.
 //     3. A trailing fall-through transition with `default: true` and
-//        target `<phase_id>_error`, carrying the guard hint.
+//     target `<phase_id>_error`, carrying the guard hint.
 //
 // `host.transport.post` invocations inside the template are not interpreted
 // here — the loader only substitutes; the orchestrator dispatches.

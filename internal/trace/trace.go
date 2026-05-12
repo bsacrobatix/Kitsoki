@@ -37,14 +37,14 @@ const (
 	EvTurnDone      = "turn.done"
 
 	// Harness.
-	EvHarnessRequest       = "harness.request"
-	EvHarnessResponseRaw   = "harness.response.raw"
+	EvHarnessRequest        = "harness.request"
+	EvHarnessResponseRaw    = "harness.response.raw"
 	EvHarnessResponseParsed = "harness.response.parsed"
-	EvHarnessRetry         = "harness.retry"
-	EvHarnessError         = "harness.error"
-	EvHarnessExec          = "harness.exec"
-	EvHarnessRecordingHit  = "harness.recording_hit"
-	EvHarnessRecordingMiss = "harness.recording_miss"
+	EvHarnessRetry          = "harness.retry"
+	EvHarnessError          = "harness.error"
+	EvHarnessExec           = "harness.exec"
+	EvHarnessRecordingHit   = "harness.recording_hit"
+	EvHarnessRecordingMiss  = "harness.recording_miss"
 
 	// Machine guard / effect / transition.
 	EvMachineGuardEval          = "machine.guard.eval"

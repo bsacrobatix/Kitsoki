@@ -1,6 +1,6 @@
 # Proposal — Host bug-fix and PR-refine as kitsoki rooms driven by Jira and Bitbucket
 
-**Status:** Draft v2.  Authored from the cyber-repo `devstory` story
+**Status:** Draft v2.  Authored from the consumer-repo `devstory` story
 consumer side.  Supersedes v1, which was written against an older
 snapshot of `tools/loopy/bug-fix.py` (14 raw phases, no stage groups)
 and assumed kitsoki would absorb the orchestrator role wholesale.
@@ -301,7 +301,7 @@ transports:
   bitbucket:
     base_url:    "https://127.0.0.1:3128/bitbucket"
     auth:        bearer
-    token_file:  "~/.config/acronis/bitbucket-token"
+    token_file:  "~/.config/myorg/bitbucket-token"
     bot_marker:  "[kitsoki]"
 ```
 
@@ -730,10 +730,10 @@ states:
 
 Total kitsoki-side: **~6-8 weeks** for A-H.
 
-In parallel (cyber-repo):
+In parallel (consumer-repo):
 
 - **bug-fix.py decomposition.**  Per-phase scripts replace the
-  10,573-line mega-script.  Lives in cyber-repo.  Multi-month, not
+  10,573-line mega-script.  Lives in consumer-repo.  Multi-month, not
   blocking kitsoki work — phase G can land against the existing
   monolithic `bug-fix.py --from-phase N --to-phase M` interface.
 
@@ -743,11 +743,11 @@ In parallel (cyber-repo):
 
 After phases A-G:
 
-1.  cyber-repo extracts `prompts/phase_*.txt` (one per LLM-driven
+1.  consumer-repo extracts `prompts/phase_*.txt` (one per LLM-driven
     phase) into `stories/bugfix/prompts/`.
-2.  cyber-repo extracts `wiggum-schemas/*.json` into
+2.  consumer-repo extracts `wiggum-schemas/*.json` into
     `stories/bugfix/schemas/`.
-3.  cyber-repo writes `stories/bugfix/app.yaml` — one phase template,
+3.  consumer-repo writes `stories/bugfix/app.yaml` — one phase template,
     one phases.graph, one transports block, one `checkpoint_intents`
     block.  ~250 lines of YAML.
 4.  `loop.py` shrinks: ticket selection, polling, comment dispatch,
@@ -756,7 +756,7 @@ After phases A-G:
     "<comment body>"`.  Per-stage `bug-fix.py --from-phase N --to-phase
     M` invocations move into kitsoki's phase-runner.
 5.  `bug-fix.py` is decomposed into per-phase scripts invoked by the
-    room's `host.oracle.ask_with_mcp` effect (parallel cyber-repo
+    room's `host.oracle.ask_with_mcp` effect (parallel consumer-repo
     work).
 6.  Phase H wraps `stories/bugfix/app.yaml` into `stories/devstory/`
     via sub-room composition.  Existing `devstory/rooms/bugfix.yaml`
@@ -785,7 +785,7 @@ through PR-refine on Bitbucket.
   existing primitives we extend, not replace.
 - `dev-story-design.md` — the original devstory design that this
   proposal grew out of.
-- cyber-repo `stories/devstory/KITSOKI-GAPS.md` — the per-room gap log.
+- consumer-repo `stories/devstory/KITSOKI-GAPS.md` — the per-room gap log.
   Items resolved or partially-resolved by this proposal:
   §7.1 (streaming, deferred), §7.10 (host.run_json; via MCP-aware
   oracle), §7.11 (plugin / external-host extension; **partially

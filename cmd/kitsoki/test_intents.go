@@ -28,13 +28,13 @@ func testIntentsCmd() *cobra.Command {
 		dryRun              bool
 		maxCost             float64
 		onlyState           string
-		emitRecording          string
+		emitRecording       string
 		baselinePath        string
 		updateBaseline      bool
 		regressionThreshold float64
 		jsonOut             string
 		harnessType         string
-		recordingPath          string // for static harness seeding
+		recordingPath       string // for static harness seeding
 	)
 
 	cmd := &cobra.Command{
@@ -106,7 +106,7 @@ Exit codes:
 				DryRun:              dryRun,
 				MaxCostUSD:          maxCost,
 				OnlyState:           onlyState,
-				EmitRecording:          emitRecording,
+				EmitRecording:       emitRecording,
 				BaselinePath:        baselinePath,
 				UpdateBaseline:      updateBaseline,
 				RegressionThreshold: regressionThreshold,

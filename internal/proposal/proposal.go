@@ -47,10 +47,10 @@ const (
 
 // HistoryEntry is one version snapshot in the proposal's draft history.
 type HistoryEntry struct {
-	Version    int    `json:"version"`
+	Version    int            `json:"version"`
 	Draft      map[string]any `json:"draft"`
-	Feedback   string `json:"feedback,omitempty"` // user feedback that produced the NEXT version
-	ProducedAt string `json:"produced_at"`        // RFC3339
+	Feedback   string         `json:"feedback,omitempty"` // user feedback that produced the NEXT version
+	ProducedAt string         `json:"produced_at"`        // RFC3339
 }
 
 // Result holds the outcome of a proposal execution.

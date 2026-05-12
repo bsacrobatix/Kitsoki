@@ -27,24 +27,24 @@ import (
 
 // flowFixture is a minimal parse of the flow YAML files.
 type flowFixture struct {
-	TestKind     string            `yaml:"test_kind"`
-	App          string            `yaml:"app"`
-	InitialState string            `yaml:"initial_state"`
-	InitialWorld map[string]any    `yaml:"initial_world"`
-	Turns        []flowTurn        `yaml:"turns"`
-	ExpectTerm   bool              `yaml:"expect_terminal"`
-	ExpectNoErr  bool              `yaml:"expect_no_errors"`
+	TestKind     string         `yaml:"test_kind"`
+	App          string         `yaml:"app"`
+	InitialState string         `yaml:"initial_state"`
+	InitialWorld map[string]any `yaml:"initial_world"`
+	Turns        []flowTurn     `yaml:"turns"`
+	ExpectTerm   bool           `yaml:"expect_terminal"`
+	ExpectNoErr  bool           `yaml:"expect_no_errors"`
 }
 
 type flowTurn struct {
-	Intent      *flowIntent        `yaml:"intent"`
-	ExpectState string             `yaml:"expect_state"`
-	ExpectNotState string          `yaml:"expect_not_state"`
-	ExpectWorld map[string]any     `yaml:"expect_world"`
-	ExpectError *flowExpectError   `yaml:"expect_error"`
-	ExpectWUnchanged bool          `yaml:"expect_world_unchanged"`
-	ExpectViewMatch  string        `yaml:"expect_view_matches"`
-	ExpectEvents []flowExpectEvent `yaml:"expect_events"`
+	Intent           *flowIntent       `yaml:"intent"`
+	ExpectState      string            `yaml:"expect_state"`
+	ExpectNotState   string            `yaml:"expect_not_state"`
+	ExpectWorld      map[string]any    `yaml:"expect_world"`
+	ExpectError      *flowExpectError  `yaml:"expect_error"`
+	ExpectWUnchanged bool              `yaml:"expect_world_unchanged"`
+	ExpectViewMatch  string            `yaml:"expect_view_matches"`
+	ExpectEvents     []flowExpectEvent `yaml:"expect_events"`
 }
 
 type flowIntent struct {

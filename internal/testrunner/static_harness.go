@@ -45,16 +45,16 @@ type staticRecordingIntent struct {
 
 // staticRecordingEntry is one row in the static recording YAML.
 type staticRecordingEntry struct {
-	State      string             `yaml:"state"`
-	Input      string             `yaml:"input"`
+	State      string                `yaml:"state"`
+	Input      string                `yaml:"input"`
 	Intent     staticRecordingIntent `yaml:"intent"`
-	Confidence float64            `yaml:"confidence"`
-	MajorityOf int                `yaml:"majority_of"`
+	Confidence float64               `yaml:"confidence"`
+	MajorityOf int                   `yaml:"majority_of"`
 }
 
 // staticRecordingFile is the top-level structure of the recording YAML.
 type staticRecordingFile struct {
-	Kind    string              `yaml:"kind"`
+	Kind    string                 `yaml:"kind"`
 	Entries []staticRecordingEntry `yaml:"entries"`
 }
 

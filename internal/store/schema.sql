@@ -1,11 +1,12 @@
--- schema.sql — Hally event-sourced session store DDL (§8).
+-- schema.sql — Kitsoki event-sourced session store DDL (§8).
 -- Embedded via //go:embed in sqlite.go; executed idempotently on Open().
--- One SQLite file per session: ~/.hally/sessions/<session-id>.db
+-- All sessions share one SQLite file: $XDG_DATA_HOME/kitsoki/sessions.db
+-- (default ~/.local/share/kitsoki/sessions.db). Every table keys on session_id.
 
 -- WAL mode + tuning pragmas are applied by the Go Open() constructor, not here,
 -- because SQLite PRAGMAs cannot appear inside the embedded DDL run via Exec.
 
--- Session metadata (one row per session file).
+-- Session metadata (one row per session).
 CREATE TABLE IF NOT EXISTS sessions (
     id           TEXT    NOT NULL,
     app_id       TEXT    NOT NULL,
@@ -58,7 +59,7 @@ CREATE INDEX IF NOT EXISTS external_keys_session_idx ON external_keys(session_id
 
 -- Session-level writer lock: row-keyed by session_id. Acquired by
 -- WithWriterLock around the load → run → post → commit critical section
--- so two `hally session continue` invocations on the same key serialize
+-- so two `kitsoki session continue` invocations on the same key serialize
 -- (proposal §3.3). Stale locks (owner pid no longer alive) are reaped on
 -- the next acquire attempt.
 CREATE TABLE IF NOT EXISTS session_locks (

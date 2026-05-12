@@ -24,22 +24,22 @@ import (
 
 // recordingFile is the top-level recording YAML document (§10.4).
 type recordingFile struct {
-	Kind          string         `yaml:"kind"`
-	AppID         string         `yaml:"app_id"`
-	AppVersion    string         `yaml:"app_version"`
-	GeneratedAt   string         `yaml:"generated_at"`
-	Generator     string         `yaml:"generator"`
-	MinConfidence float64        `yaml:"min_confidence"`
-	Entries       []recordingEntry  `yaml:"entries"`
+	Kind          string           `yaml:"kind"`
+	AppID         string           `yaml:"app_id"`
+	AppVersion    string           `yaml:"app_version"`
+	GeneratedAt   string           `yaml:"generated_at"`
+	Generator     string           `yaml:"generator"`
+	MinConfidence float64          `yaml:"min_confidence"`
+	Entries       []recordingEntry `yaml:"entries"`
 }
 
 // recordingEntry is one row in the recording YAML.
 type recordingEntry struct {
-	State      string       `yaml:"state"`
-	Input      string       `yaml:"input"`
+	State      string          `yaml:"state"`
+	Input      string          `yaml:"input"`
 	Intent     recordingIntent `yaml:"intent"`
-	Confidence float64      `yaml:"confidence"`
-	MajorityOf int          `yaml:"majority_of"`
+	Confidence float64         `yaml:"confidence"`
+	MajorityOf int             `yaml:"majority_of"`
 }
 
 // recordingIntent holds the intent name and slot map in a recording entry.
@@ -52,11 +52,11 @@ type recordingIntent struct {
 
 // IntentFixtureFile is the top-level document in an intent fixture file.
 type IntentFixtureFile struct {
-	TestKind string           `yaml:"test_kind"`
-	App      string           `yaml:"app"`
-	State    string           `yaml:"state"`
-	Defaults IntentDefaults   `yaml:"defaults"`
-	Fixtures []IntentFixture  `yaml:"fixtures"`
+	TestKind string          `yaml:"test_kind"`
+	App      string          `yaml:"app"`
+	State    string          `yaml:"state"`
+	Defaults IntentDefaults  `yaml:"defaults"`
+	Fixtures []IntentFixture `yaml:"fixtures"`
 }
 
 // IntentDefaults holds per-file defaults for runs, pass rate, and temperature.
@@ -68,14 +68,14 @@ type IntentDefaults struct {
 
 // IntentFixture is one fixture group inside an intent file.
 type IntentFixture struct {
-	ID            string         `yaml:"id"`
-	Intent        *IntentExpect  `yaml:"intent,omitempty"`
-	Slots         map[string]any `yaml:"slots,omitempty"`
-	Inputs        []string       `yaml:"inputs"`
-	Runs          int            `yaml:"runs,omitempty"` // per-fixture override
-	MinPassRate   float64        `yaml:"min_pass_rate,omitempty"`
-	ExpectFailure *ExpectFailure `yaml:"expect_failure,omitempty"`
-	ExpectFallthrough bool       `yaml:"expect_fallthrough,omitempty"`
+	ID                string         `yaml:"id"`
+	Intent            *IntentExpect  `yaml:"intent,omitempty"`
+	Slots             map[string]any `yaml:"slots,omitempty"`
+	Inputs            []string       `yaml:"inputs"`
+	Runs              int            `yaml:"runs,omitempty"` // per-fixture override
+	MinPassRate       float64        `yaml:"min_pass_rate,omitempty"`
+	ExpectFailure     *ExpectFailure `yaml:"expect_failure,omitempty"`
+	ExpectFallthrough bool           `yaml:"expect_fallthrough,omitempty"`
 }
 
 // IntentExpect holds the expected intent name and slots.
@@ -114,10 +114,10 @@ type FixtureResult struct {
 
 // IntentReport is the aggregate result of running all intent fixtures.
 type IntentReport struct {
-	Fixtures     []FixtureResult
-	TotalPassed  int
-	TotalFailed  int
-	Regressions  []string
+	Fixtures         []FixtureResult
+	TotalPassed      int
+	TotalFailed      int
+	Regressions      []string
 	RecordingEmitted bool
 }
 
@@ -287,7 +287,7 @@ func RunIntents(ctx context.Context, appPath string, opts IntentOptions) (*Inten
 				}
 			}
 			if skipped {
-				ir.Runs = 0 // indicate skipped
+				ir.Runs = 0       // indicate skipped
 				ir.PassRate = 1.0 // treat as pass for rate computation
 				ir.BelowMin = false
 				fr.Inputs = append(fr.Inputs, ir)
@@ -539,7 +539,6 @@ func effectiveMinPassRate(fix IntentFixture, deflt IntentDefaults) float64 {
 	}
 	return 0.90
 }
-
 
 // ─── Reporter ─────────────────────────────────────────────────────────────────
 

@@ -1267,7 +1267,7 @@ the frame and bindings allow.
 | **F. Chat container rooms + TUI handoff** *(critical-path)* | Manifest schema extension for `chat_container:`; loader/validator changes; kitsoki TUI's state-entry handler suspends bubbletea, invokes the PTY frame helper, and resumes with the detach result bound into `on_detach:` / `on_chat_end:` arcs. Nested-tmux behaviour (§17.9) finalized here. **The user-facing payoff lands in this phase.** | ~1 week |
 | **G. Inbox notification producer** | Tail claude session JSONL (or whatever §0 A2 validates), detect idle, write inbox entries. Selecting a notification opens the chat container room (if the entering app exposes one) or invokes `kitsoki chat attach`. | ~3-4 days |
 | **H. Indirect transport integration + permission UX** | Jira/Bitbucket pollers route via `kitsoki chat queue add` / `host.chat.drive` instead of running the existing harness directly. `kitsoki chat allow-bypass` and the per-chat permission level. End-to-end: ticket comment → drive → headless turn → reply posted. | ~1 week |
-| **I. Docs + polish** | `docs/chats-pty.md` (or extend `docs/hosts.md` and the chats package doc); CLI help; recovery scenarios; the `chat_container:` authoring guide; cyber-repo example wiring. | ~3-4 days |
+| **I. Docs + polish** | `docs/chats-pty.md` (or extend `docs/hosts.md` and the chats package doc); CLI help; recovery scenarios; the `chat_container:` authoring guide; consumer-repo example wiring. | ~3-4 days |
 
 Phase 0 is a hard gate. Phases A-C are unblocked by 0; phases
 D-E build the frame and bindings; **phase F is where the

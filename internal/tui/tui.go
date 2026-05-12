@@ -89,19 +89,19 @@ type continueTurnOutcomeMsg struct {
 // It uses pointer receivers so the same *RootModel can be type-asserted after
 // being returned from Update as a tea.Model interface.
 type RootModel struct {
-	orch      *orchestrator.Orchestrator
-	sid       app.SessionID
-	appPath   string // path to app.yaml, needed for edit mode reloads ("" disables edit)
-	mode      Mode
-	width     int
-	height    int
-	quitting  bool
+	orch     *orchestrator.Orchestrator
+	sid      app.SessionID
+	appPath  string // path to app.yaml, needed for edit mode reloads ("" disables edit)
+	mode     Mode
+	width    int
+	height   int
+	quitting bool
 
-	location   locationModel
-	transcript transcriptModel
-	menu       menuModel
-	inbox      inboxModel
-	offPath    offPathModel
+	location       locationModel
+	transcript     transcriptModel
+	menu           menuModel
+	inbox          inboxModel
+	offPath        offPathModel
 	clarify        clarifyModel
 	disambiguation disambiguationModel
 	menuSystem     menuSystemModel
@@ -218,7 +218,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		edit:           newEditModel(),
 		prompt:         ti,
 		spinner:        sp,
-		mouseOn: true,
+		mouseOn:        true,
 	}
 
 	// Set initial state.
@@ -855,7 +855,6 @@ func (m RootModel) runTurn(input string) tea.Cmd {
 	}
 }
 
-
 func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 	// Clear in-flight state (safe to call even if already cleared).
 	if m.inFlightCancel != nil {
@@ -948,14 +947,14 @@ func (m RootModel) handleContinueTurnOutcome(msg continueTurnOutcomeMsg) (tea.Mo
 // updateEdit owns the keyboard while the LLM-driven edit overlay is
 // active. Phase transitions:
 //
-//   editPhaseInput     → Enter starts authoring.Propose (→ editPhaseThinking)
-//                        Esc cancels back to ModeOnPath
-//   editPhaseThinking  → Ctrl+C cancels the in-flight Propose
-//                        editProposalReadyMsg arrives → editPhaseReview
-//   editPhaseReview    → 'a' applies + reloads (→ editPhaseApplying)
-//                        'r' refines (→ editPhaseInput, keep last proposal text)
-//                        'c' or Esc cancels back to ModeOnPath
-//   editPhaseApplying  → editApplyDoneMsg arrives → reload + return to ModeOnPath
+//	editPhaseInput     → Enter starts authoring.Propose (→ editPhaseThinking)
+//	                     Esc cancels back to ModeOnPath
+//	editPhaseThinking  → Ctrl+C cancels the in-flight Propose
+//	                     editProposalReadyMsg arrives → editPhaseReview
+//	editPhaseReview    → 'a' applies + reloads (→ editPhaseApplying)
+//	                     'r' refines (→ editPhaseInput, keep last proposal text)
+//	                     'c' or Esc cancels back to ModeOnPath
+//	editPhaseApplying  → editApplyDoneMsg arrives → reload + return to ModeOnPath
 func (m RootModel) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case editProposalReadyMsg:

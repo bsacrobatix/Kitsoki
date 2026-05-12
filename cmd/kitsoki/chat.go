@@ -528,4 +528,3 @@ func renderMarkdown(cmd *cobra.Command, c *chats.Chat, msgs []chats.Message) err
 	}
 	return nil
 }
-

@@ -66,16 +66,16 @@ func WorkspaceManagerGetHandler(ctx context.Context, args map[string]any) (Resul
 //   - exit_code (int):    exit code
 //   - ok (bool):          true if exit code == 0
 //   - stdout_json (any):  parsed JSON when stdout's last non-empty line is
-//                         a single JSON document and parse succeeds.  Lets
-//                         CLI subcommands that emit a structured envelope
-//                         on their last stdout line (e.g.
-//                         tools/loopy/bugfix's `python3 -m bugfix <cmd>`)
-//                         be bound directly into a world slot via
-//                         `bind: <slot>: stdout_json`.  Mirrors the same
-//                         field exposed by host.oracle.ask_with_mcp.
+//     a single JSON document and parse succeeds.  Lets
+//     CLI subcommands that emit a structured envelope
+//     on their last stdout line (e.g.
+//     tools/loopy/bugfix's `python3 -m bugfix <cmd>`)
+//     be bound directly into a world slot via
+//     `bind: <slot>: stdout_json`.  Mirrors the same
+//     field exposed by host.oracle.ask_with_mcp.
 //   - stdout_json_parse_error (string): present (and stdout_json absent)
-//                         when the last line looked like JSON but couldn't
-//                         be parsed; useful for diagnosing envelope drift.
+//     when the last line looked like JSON but couldn't
+//     be parsed; useful for diagnosing envelope drift.
 //
 // When fail_on_error=true and exit_code != 0, Result.Error is also set
 // (Data is preserved so the error state can render stdout/exit_code).

@@ -255,17 +255,7 @@ GIF bytes. No external dependencies (no VHS, no ttyd, no ffmpeg).
 
 ---
 
-## 6. Public testing helpers (`pkg/kitsokitest`)
-
-For Go-level tests that drive a kitsoki machine directly,
-`pkg/kitsokitest` exposes a thin wrapper over `internal/testrunner`.
-It's still small — most of the value today is in declarative YAML
-fixtures — but it's the right entry point if you're embedding kitsoki
-into another binary.
-
----
-
-## 7. CI recipe
+## 6. CI recipe
 
 ```sh
 go vet ./...                                    # fast static check

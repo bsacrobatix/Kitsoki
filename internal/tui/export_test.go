@@ -181,10 +181,10 @@ func GetPromptValue(m RootModel) string { return m.prompt.Value() }
 // EditPhaseInput / Thinking / Review / Applying re-export the unexported
 // editPhase constants for use by tui_test code.
 const (
-	EditPhaseInput     = int(editPhaseInput)
-	EditPhaseThinking  = int(editPhaseThinking)
-	EditPhaseReview    = int(editPhaseReview)
-	EditPhaseApplying  = int(editPhaseApplying)
+	EditPhaseInput    = int(editPhaseInput)
+	EditPhaseThinking = int(editPhaseThinking)
+	EditPhaseReview   = int(editPhaseReview)
+	EditPhaseApplying = int(editPhaseApplying)
 )
 
 // EditPhase returns the current edit-overlay phase as an int (cast to

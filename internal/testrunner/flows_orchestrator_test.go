@@ -19,13 +19,13 @@ import (
 
 // TestRunFlows_OrchestratorPath_BackgroundJob verifies the full background-job
 // happy path via the real background_jobs testdata fixture:
-//   1. host_handlers: auto-upgrades the fixture to the orchestrator path.
-//   2. Turn 1 fires 'enter', machine transitions lobby→running, on_enter
-//      dispatches the job and binds last_job_id synchronously.
-//   3. advance_clock: "2s" moves virtual time past the 1s handler delay; the
-//      orchestrator listener applies on_complete (sets result="hello") and
-//      posts a success notification.
-//   4. expect_world: {result: "hello"} and expect_inbox: {unread:1} pass.
+//  1. host_handlers: auto-upgrades the fixture to the orchestrator path.
+//  2. Turn 1 fires 'enter', machine transitions lobby→running, on_enter
+//     dispatches the job and binds last_job_id synchronously.
+//  3. advance_clock: "2s" moves virtual time past the 1s handler delay; the
+//     orchestrator listener applies on_complete (sets result="hello") and
+//     posts a success notification.
+//  4. expect_world: {result: "hello"} and expect_inbox: {unread:1} pass.
 func TestRunFlows_OrchestratorPath_BackgroundJob(t *testing.T) {
 	const appPath = "../../testdata/apps/background_jobs/app.yaml"
 	const glob = "../../testdata/apps/background_jobs/flows/happy_path.yaml"
@@ -55,10 +55,10 @@ func TestRunFlows_OrchestratorPath_BackgroundJob(t *testing.T) {
 // infrastructure error (infra_error: "timeout") causes the background job to
 // terminate as failed and the flow runner handles this gracefully. The test
 // confirms:
-//   1. The machine turn succeeds (state = running, last_job_id non-empty).
-//   2. advance_clock moves time forward; the job terminates as failed.
-//   3. The flow runner does not crash (RunFlows returns no error).
-//   4. The info notification (job submitted) is in the inbox.
+//  1. The machine turn succeeds (state = running, last_job_id non-empty).
+//  2. advance_clock moves time forward; the job terminates as failed.
+//  3. The flow runner does not crash (RunFlows returns no error).
+//  4. The info notification (job submitted) is in the inbox.
 //
 // Note: the background_jobs app.yaml on_complete attempts to access
 // world.last_job_result.stdout, which is nil on failure. This causes

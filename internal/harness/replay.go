@@ -17,13 +17,13 @@ import (
 
 // recordingFile is the parsed recording YAML structure (§10.4).
 type recordingFile struct {
-	Kind          string            `yaml:"kind"`
-	AppID         string            `yaml:"app_id"`
-	AppVersion    string            `yaml:"app_version"`
-	GeneratedAt   string            `yaml:"generated_at"`
-	Generator     string            `yaml:"generator"`
-	MinConfidence float64           `yaml:"min_confidence"`
-	Entries       []recordingEntry  `yaml:"entries"`
+	Kind          string           `yaml:"kind"`
+	AppID         string           `yaml:"app_id"`
+	AppVersion    string           `yaml:"app_version"`
+	GeneratedAt   string           `yaml:"generated_at"`
+	Generator     string           `yaml:"generator"`
+	MinConfidence float64          `yaml:"min_confidence"`
+	Entries       []recordingEntry `yaml:"entries"`
 }
 
 // recordingEntry is one (state, input, intent, slots) record in the recording.

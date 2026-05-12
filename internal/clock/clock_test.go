@@ -194,7 +194,7 @@ func TestFakeClock_NewTicker_MultipleFiresPerAdvance(t *testing.T) {
 
 	// Must have at least one tick available.
 	fired := 0
-	drain:
+drain:
 	for {
 		select {
 		case <-ticker.C():

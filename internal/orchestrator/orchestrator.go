@@ -34,22 +34,6 @@ type pendingClarify struct {
 	slots      map[string]any // already-collected slots
 }
 
-// listenerState tracks per-session listener bookkeeping.
-//
-// Idle detection lives on the scheduler side via WaitSessionDrained — see
-// jobs.sessionSub for why a sender-side counter is required to close the
-// receive→process race window.  This struct retains only the cancel func
-// (now tracked via the orchestrator's cancelListeners map) and is currently
-// vestigial; it remains in place so the per-session bookkeeping has a
-// natural extension point.
-type listenerState struct {
-	// reserved for future per-session bookkeeping.
-}
-
-func newListenerState() *listenerState {
-	return &listenerState{}
-}
-
 // Orchestrator drives a single session from raw input to applied events.
 type Orchestrator struct {
 	def        *app.AppDef
@@ -71,13 +55,11 @@ type Orchestrator struct {
 	chatStore host.ChatStore
 
 	// pending tracks in-flight clarifications keyed by session ID.
-	mu              sync.Mutex
-	pending         map[app.SessionID]*pendingClarify
+	mu      sync.Mutex
+	pending map[app.SessionID]*pendingClarify
 	// cancelListeners holds the cancel funcs for per-session listener goroutines.
 	// Goroutines are torn down when the session is closed.
 	cancelListeners map[app.SessionID]context.CancelFunc
-	// listenerStates tracks per-session listener idle state for WaitListenerIdle.
-	listenerStates map[app.SessionID]*listenerState
 	// sessionLocks serialises read-modify-write of (journey → events) for one
 	// session.  The foreground turn path (Turn/SubmitDirect/ContinueTurn) and
 	// the background-job-terminal path (handleJobTerminal) both compute
@@ -105,7 +87,6 @@ func New(def *app.AppDef, m machine.Machine, s store.Store, h harness.Harness, o
 		logger:          slog.Default(),
 		pending:         make(map[app.SessionID]*pendingClarify),
 		cancelListeners: make(map[app.SessionID]context.CancelFunc),
-		listenerStates:  make(map[app.SessionID]*listenerState),
 		sessionLocks:    make(map[app.SessionID]*sync.Mutex),
 	}
 	for _, opt := range opts {
@@ -194,10 +175,8 @@ func (o *Orchestrator) NewSession(ctx context.Context) (app.SessionID, error) {
 // when the cancel func stored in cancelListeners is called.
 func (o *Orchestrator) startSessionListener(sid app.SessionID) {
 	listenerCtx, cancel := context.WithCancel(context.Background())
-	ls := newListenerState()
 	o.mu.Lock()
 	o.cancelListeners[sid] = cancel
-	o.listenerStates[sid] = ls
 	o.mu.Unlock()
 
 	ch, ack, unsub := o.scheduler.SubscribeSession(sid)
@@ -263,13 +242,16 @@ func (o *Orchestrator) WaitListenerIdle(ctx context.Context, sid app.SessionID) 
 	return o.scheduler.WaitSessionDrained(ctx, sid)
 }
 
-// stopSessionListener cancels the listener goroutine for sid (if any).
+// stopSessionListener cancels the listener goroutine for sid (if any) and
+// reclaims the per-session lock map entry so long-running orchestrators do
+// not accumulate stale entries.
 func (o *Orchestrator) stopSessionListener(sid app.SessionID) {
 	o.mu.Lock()
 	cancel, ok := o.cancelListeners[sid]
 	if ok {
 		delete(o.cancelListeners, sid)
 	}
+	delete(o.sessionLocks, sid)
 	o.mu.Unlock()
 	if ok {
 		cancel()

@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	cloakOraclePath   = "../../testdata/apps/cloak/recording.yaml"
-	cloakIntentsGlob  = "../../testdata/apps/cloak/intents/*.yaml"
+	cloakOraclePath  = "../../testdata/apps/cloak/recording.yaml"
+	cloakIntentsGlob = "../../testdata/apps/cloak/intents/*.yaml"
 )
 
 // TestIntentsStaticHarness runs the Cloak intent fixtures with a StaticHarness
@@ -79,7 +79,7 @@ func TestIntentsEmitRecording(t *testing.T) {
 		Runs:              1,
 		HarnessType:       "static",
 		StaticHarnessImpl: sh,
-		EmitRecording:        tmpFile,
+		EmitRecording:     tmpFile,
 	})
 	require.NoError(t, err)
 	require.True(t, report.RecordingEmitted, "oracle should have been emitted")
@@ -115,7 +115,7 @@ func TestIntentsRoundtrip(t *testing.T) {
 		Runs:              1,
 		HarnessType:       "static",
 		StaticHarnessImpl: sh,
-		EmitRecording:        tmpFile,
+		EmitRecording:     tmpFile,
 	})
 	require.NoError(t, err)
 	require.True(t, report1.RecordingEmitted)

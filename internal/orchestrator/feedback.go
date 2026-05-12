@@ -305,11 +305,11 @@ func expandIntent(name string, intentDef app.Intent, state app.StatePath, m mach
 			// Unresolved guards are treated as primary: the guard references a slot
 			// that isn't prefilled yet. We'll re-evaluate at submission time.
 			entry = MenuEntry{
-				Intent:         name,
-				PrefilledSlots: prefill,
-				MissingSlots:   missing,
-				Display:        display,
-				Primary:        true,
+				Intent:          name,
+				PrefilledSlots:  prefill,
+				MissingSlots:    missing,
+				Display:         display,
+				Primary:         true,
 				DestinationHint: result.DestinationHint,
 			}
 		case result.Primary:

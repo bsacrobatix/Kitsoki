@@ -12,9 +12,9 @@ import (
 
 // locationModel renders the §7.1 location indicator (breadcrumb + state description).
 type locationModel struct {
-	loc    orchestrator.Location
+	loc     orchestrator.Location
 	offPath bool
-	width  int
+	width   int
 }
 
 func newLocationModel() locationModel {

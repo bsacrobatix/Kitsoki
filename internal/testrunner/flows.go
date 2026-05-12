@@ -35,12 +35,12 @@ import (
 
 // FlowFixture is the top-level flow fixture document.
 type FlowFixture struct {
-	TestKind     string            `yaml:"test_kind"`
-	App          string            `yaml:"app"`
-	Recording    string            `yaml:"recording,omitempty"`
-	InitialState string            `yaml:"initial_state"`
-	InitialWorld map[string]any    `yaml:"initial_world,omitempty"`
-	Turns        []FlowTurn        `yaml:"turns"`
+	TestKind     string         `yaml:"test_kind"`
+	App          string         `yaml:"app"`
+	Recording    string         `yaml:"recording,omitempty"`
+	InitialState string         `yaml:"initial_state"`
+	InitialWorld map[string]any `yaml:"initial_world,omitempty"`
+	Turns        []FlowTurn     `yaml:"turns"`
 
 	// HostHandlers declares stub host.* handlers used by this flow.
 	// Keys are the handler name (e.g. "host.run", "host.workspace_manager.get").
@@ -270,8 +270,8 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 			// 2. Mid-flight clarification: pause until the user answers.
 			if stub.RequestClarification != "" {
 				_, cErr := host.RequestClarification(hctx, jobs.ClarificationSchema{
-					Prompt:  stub.RequestClarification,
-					Fields:  map[string]string{"answer": "string"},
+					Prompt: stub.RequestClarification,
+					Fields: map[string]string{"answer": "string"},
 				})
 				if cErr != nil {
 					return host.Result{Error: cErr.Error()}, nil
@@ -812,9 +812,9 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 
 	for i, turn := range fixture.Turns {
 		var (
-			outcome   *orchestrator.TurnOutcome
-			turnErr   error
-			call      intent.IntentCall
+			outcome *orchestrator.TurnOutcome
+			turnErr error
+			call    intent.IntentCall
 		)
 
 		if turn.Intent != nil {

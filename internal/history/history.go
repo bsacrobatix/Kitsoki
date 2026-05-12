@@ -43,7 +43,7 @@ type Entry struct {
 // Stack is the in-memory representation of the room history.
 // It wraps a bounded slice of entries with push/pop/peek operations.
 type Stack struct {
-	entries []Entry
+	entries  []Entry
 	mainRoom app.StatePath
 }
 

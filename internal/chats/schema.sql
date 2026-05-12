@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS chats (
     status              TEXT    NOT NULL,               -- active|paused|completed|archived
     claude_session_id   TEXT,                           -- for `claude -p --session-id`
     parent_chat_id      TEXT,                           -- non-null on forks
-    session_id          TEXT,                           -- last hally session that drove this chat (audit only)
+    session_id          TEXT,                           -- last kitsoki session that drove this chat (audit only)
     created_at          INTEGER NOT NULL,
     updated_at          INTEGER NOT NULL,
     last_active_at      INTEGER NOT NULL

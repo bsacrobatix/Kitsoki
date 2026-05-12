@@ -2,10 +2,10 @@
 //
 // Flow:
 //
-//   editPhaseInput     → user types a free-text proposal in the prompt
-//   editPhaseThinking  → Claude is rewriting app.yaml (spinner)
-//   editPhaseReview    → diff is shown; keys: a=apply, r=refine, c=cancel
-//   editPhaseApplying  → file is being written + orchestrator reloaded
+//	editPhaseInput     → user types a free-text proposal in the prompt
+//	editPhaseThinking  → Claude is rewriting app.yaml (spinner)
+//	editPhaseReview    → diff is shown; keys: a=apply, r=refine, c=cancel
+//	editPhaseApplying  → file is being written + orchestrator reloaded
 //
 // The edit model is a tiny state holder. The root model owns the
 // prompt textinput, the spinner, and the transcript, so this file is

@@ -6,7 +6,7 @@ composition gap from
 Supersedes that sketch.
 
 **Goal.** Make stories a real unit of reuse. A consumer app (e.g.
-cyber-repo's `cyber-devstory`) should be able to import an upstream
+consumer-repo's `consumer-devstory`) should be able to import an upstream
 story (e.g. kitsoki-shipped `devstory`, which itself imports `bugfix`),
 add or replace rooms, and project world state across the layers
 through an explicit interface. Today's `include:` is a glob-merge in
@@ -50,7 +50,7 @@ repos and let consumers extend it."
 
 ```mermaid
 flowchart TD
-    subgraph cyber["cyber-repo / cyber-devstory (app)"]
+    subgraph cyber["consumer-repo / consumer-devstory (app)"]
         cybmain["main"]
         cybexit["bugfix_done"]
     end
@@ -77,12 +77,12 @@ phase templates, rooms, prompts, scripts). One app, one private world.
 alias. The imported app retains its own world; the importer projects
 values across the boundary explicitly.
 
-**Layer.** The chain `cyber-devstory → devstory → bugfix` is three
+**Layer.** The chain `consumer-devstory → devstory → bugfix` is three
 layers. Each layer is just an app importing other apps; there is no
 distinct "library" type.
 
 **Prefix path.** Every state in an imported app is addressable as
-`<alias>/<state-path>`. Prefixes compose: from cyber-devstory,
+`<alias>/<state-path>`. Prefixes compose: from consumer-devstory,
 bugfix's `idle` state has the absolute path `dev/bf/idle`. The
 existing slash-vs-dot target resolution in
 `internal/app/loader.go:444-487` already accepts slash-segmented
@@ -163,11 +163,11 @@ Three forms, resolved in order:
 
 1. **Path** (`./stories/bugfix`, `../shared/bugfix`). Relative to the
    importer's `app.yaml` directory. Resolves to a directory holding
-   another `app.yaml`. Simplest case; covers cyber-repo importing
+   another `app.yaml`. Simplest case; covers consumer-repo importing
    kitsoki-shipped stories via a checked-in path or a git submodule.
 2. **Repo-scoped reference** (`@kitsoki/devstory`). Resolves against a
    well-known directory inside the kitsoki module
-   (`stories/<name>/app.yaml`). cyber-repo references shipped stories
+   (`stories/<name>/app.yaml`). consumer-repo references shipped stories
    this way without knowing the on-disk layout. Cleanly addresses the
    "I want to bring devstory and bugfix into this repo and consume
    them from another repo" goal.
@@ -180,7 +180,7 @@ submodule the upstream repo. Add a registry later if there's demand.
 `@kitsoki/<name>` resolution rule: the loader walks up from the
 importer's path looking for a `go.mod` (or a `.kitsoki-root` marker)
 and resolves `@kitsoki/<name>` to `<root>/stories/<name>/app.yaml`.
-This lets cyber-repo embed kitsoki via Go modules and address
+This lets consumer-repo embed kitsoki via Go modules and address
 shipped stories without knowing the vendor path.
 
 ---
@@ -345,7 +345,7 @@ Each app declares its own `hosts:` allow-list. On import:
   `include:` behavior for the same-repo case.
 - **`hosts: declared`.** Parent must list every child host in its own
   `hosts:` block. The loader cross-checks and fails loudly if any are
-  missing. Use this in audited consumers (the cyber-repo case where
+  missing. Use this in audited consumers (the consumer-repo case where
   the security team wants the consumer manifest to be the
   authoritative host list).
 
@@ -358,8 +358,8 @@ just compose configuration.
 
 ## 10. Override (extension without forking)
 
-The cyber-repo motivating case: `cyber-devstory` imports kitsoki's
-`devstory` and wants to swap out the deploy room (because cyber-repo's
+The consumer-repo motivating case: `consumer-devstory` imports kitsoki's
+`devstory` and wants to swap out the deploy room (because consumer-repo's
 deploys go through a different pipeline) and override a prompt. The
 import declares:
 
@@ -405,8 +405,8 @@ imports:
 **Validation.** Every `overrides.states.<name>` must match an existing
 child state. Same for intents and prompts. Typo → load fails.
 
-**Compounding overrides across layers.** If cyber-devstory overrides
-`dev/deploy`, and a hypothetical fourth-layer app imports cyber-devstory,
+**Compounding overrides across layers.** If consumer-devstory overrides
+`dev/deploy`, and a hypothetical fourth-layer app imports consumer-devstory,
 the fourth layer sees the *already-overridden* `dev/deploy`. Overrides
 are flattened bottom-up at load time.
 
@@ -416,7 +416,7 @@ are flattened bottom-up at load time.
 
 ```mermaid
 flowchart LR
-    cd["cyber-devstory<br/>(consumer)"]
+    cd["consumer-devstory<br/>(consumer)"]
     ds["devstory"]
     bf["bugfix"]
     cd -->|imports as `dev`| ds
@@ -444,7 +444,7 @@ Move canonical stories out of `testdata/` and into a new top-level
 `stories/` directory:
 
 ```
-hally/
+kitsoki/
   stories/
     devstory/
       app.yaml
@@ -538,11 +538,11 @@ states:
   bugfix_failed: { ... }
 ```
 
-### Layer 3: cyber-devstory (lives in cyber-repo)
+### Layer 3: consumer-devstory (lives in consumer-repo)
 
 ```yaml
-# cyber-repo/cyber-devstory/app.yaml
-app: { id: cyber-devstory, version: 0.1.0 }
+# consumer-repo/consumer-devstory/app.yaml
+app: { id: consumer-devstory, version: 0.1.0 }
 hosts: [host.run, host.oracle.ask, host.cyber.deploy, host.workspace_manager.get]
 world:
   active_jira:    { type: string, default: "" }
@@ -571,12 +571,12 @@ states:
 root: dev
 ```
 
-**World projection trace at runtime** (cyber-devstory invokes
+**World projection trace at runtime** (consumer-devstory invokes
 devstory, which invokes bugfix):
 
 | Layer | World read by state |
 |---|---|
-| cyber-devstory | `world.active_jira = "PLTFRM-42"` |
+| consumer-devstory | `world.active_jira = "PLTFRM-42"` |
 | devstory | `world.current_ticket = "PLTFRM-42"` (via cyber's `world_in`) |
 | bugfix | `world.ticket_id = "PLTFRM-42"` (via devstory's `world_in`) |
 
@@ -585,7 +585,7 @@ On exit:
 | Layer | Set on parent |
 |---|---|
 | bugfix → devstory `completed` | `last_pr_url = "<from bf.pr_url>"` |
-| devstory → cyber-devstory `done` | nothing (no `set:`) |
+| devstory → consumer-devstory `done` | nothing (no `set:`) |
 
 ---
 
@@ -658,7 +658,7 @@ exactly as it does today.
 2. **Versioning.** v1 stores `version:` for traceability but doesn't
    enforce. Adding actual semver resolution requires a manifest
    registry or a vendor convention. Probably worth deferring to a
-   v2 once we know whether anyone outside cyber-repo consumes
+   v2 once we know whether anyone outside consumer-repo consumes
    shipped stories.
 
 3. **Cross-layer host sandboxing.** Today's host registry is global;
@@ -677,7 +677,7 @@ exactly as it does today.
    Should the trace surface the import alias as a separate field for
    filtering, or is the prefixed path enough? Leaning toward the
    prefixed path being authoritative and adding a per-event
-   `import_chain: [cyber-devstory, dev, bf]` for filtering.
+   `import_chain: [consumer-devstory, dev, bf]` for filtering.
 
 6. **`testdata/apps/dev-story/` migration.** Move the canonical
    manifest under `stories/devstory/` and reduce the testdata copy
@@ -703,10 +703,10 @@ exactly as it does today.
 | **D. Intent scoping + re-export** | Per-app intent tables; `intents.export` / `intents.import`. Validator updates. Migration of `testdata/apps/dev-story/` to live under `stories/`. | ~1 week |
 | **E. Overrides** | State / intent / prompt replacement at import time. Validator checks every override targets a real child element. | ~3-4 days |
 | **F. Hot reload + tooling** | Watch all reachable manifests; teach `kitsoki render` and `kitsoki viz` to emit subgraphs per import; trace event `import_chain`. | ~3-4 days |
-| **G. Ship `stories/devstory` and `stories/bugfix`** | Move existing testdata into the canonical layout, write the README contracts, exercise them via cyber-repo. | ~3-4 days, blocking on F |
+| **G. Ship `stories/devstory` and `stories/bugfix`** | Move existing testdata into the canonical layout, write the README contracts, exercise them via consumer-repo. | ~3-4 days, blocking on F |
 
 Total: ~5 weeks for the full path. Phase G is the "deliverable for
-cyber-repo" milestone — everything before it is engine work.
+consumer-repo" milestone — everything before it is engine work.
 
 ---
 
@@ -740,18 +740,18 @@ cyber-repo" milestone — everything before it is engine work.
 ## 19. Decision points the user should weigh in on
 
 1. **`hosts: inherit` vs. `declared` default.** Inherit is friendlier;
-   declared is auditable. Proposal picks inherit; cyber-repo might
+   declared is auditable. Proposal picks inherit; consumer-repo might
    want declared by policy.
 2. **`@exit:` syntax.** Alternative: a YAML-level `exit: name` field
    on terminal states instead of overloading `target:`. Slightly more
    typing, slightly less magic syntax.
 3. **`@kitsoki/<name>` resolution.** Tying it to Go module root is
-   convenient for cyber-repo (which imports kitsoki as a Go module)
+   convenient for consumer-repo (which imports kitsoki as a Go module)
    but couples the loader to module layout. Alternative: require an
    explicit `paths:` config in the consumer's manifest.
 4. **Override granularity.** Whole-state replacement is loud and
    simple. Deep-merge would be more powerful but harder to reason
-   about. Proposal picks whole-state; cyber-repo's real overrides
+   about. Proposal picks whole-state; consumer-repo's real overrides
    may show whether that's sufficient.
 5. **Whether to keep `include:` long-term.** Imports subsumes include
    conceptually (single-app split = no-prefix import). Cutting

@@ -39,7 +39,7 @@ func TestIsValid(t *testing.T) {
 		want bool
 	}{
 		{"01ARZ3NDEKTSV4RRFFQ69G5FAV", true},
-		{"01ARZ3NDEKTSV4RRFFQ69G5FA", false},  // too short
+		{"01ARZ3NDEKTSV4RRFFQ69G5FA", false},   // too short
 		{"01ARZ3NDEKTSV4RRFFQ69G5FAVI", false}, // too long
 		{"", false},
 	}

@@ -29,15 +29,15 @@ func TestRecordEndToEnd(t *testing.T) {
 
 	th := recordThemes["molokai"]
 	cfg := recordConfig{
-		appPath:     appYAML,
-		flowFiles:   []string{flowYAML},
-		outPath:     outGIF,
-		width:       320,  // small for speed
-		height:      240,
-		theme:       th,
-		frameDelay:  25,   // 250ms
-		settleDelay: 15,   // 150ms
-		recordingPath:  "",   // winning.yaml uses structured intents only
+		appPath:       appYAML,
+		flowFiles:     []string{flowYAML},
+		outPath:       outGIF,
+		width:         320, // small for speed
+		height:        240,
+		theme:         th,
+		frameDelay:    25, // 250ms
+		settleDelay:   15, // 150ms
+		recordingPath: "", // winning.yaml uses structured intents only
 	}
 
 	if err := runRecord(cfg); err != nil {

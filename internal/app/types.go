@@ -17,18 +17,18 @@ type TurnNumber int64
 
 // AppDef is the top-level deserialized application definition.
 type AppDef struct {
-	App      AppMeta            `yaml:"app"`
-	World    map[string]VarDef  `yaml:"world,omitempty"`
-	Intents  map[string]Intent  `yaml:"intents,omitempty"`
-	Root     any                `yaml:"root"` // string state name or inline compound/parallel root
-	States   map[string]*State  `yaml:"states,omitempty"`
-	OffPath  *OffPathDef        `yaml:"off_path,omitempty"`
+	App     AppMeta           `yaml:"app"`
+	World   map[string]VarDef `yaml:"world,omitempty"`
+	Intents map[string]Intent `yaml:"intents,omitempty"`
+	Root    any               `yaml:"root"` // string state name or inline compound/parallel root
+	States  map[string]*State `yaml:"states,omitempty"`
+	OffPath *OffPathDef       `yaml:"off_path,omitempty"`
 	// Hosts is the allow-list of host handler names this app may invoke (§2).
-	Hosts    []string           `yaml:"hosts,omitempty"`
+	Hosts []string `yaml:"hosts,omitempty"`
 	// Proposals declares named proposal kinds (§3).
 	Proposals map[string]*ProposalKind `yaml:"proposals,omitempty"`
 	// Include lists glob patterns for additional YAML files to merge (§9).
-	Include  []string           `yaml:"include,omitempty"`
+	Include []string `yaml:"include,omitempty"`
 
 	// PhaseTemplates declares reusable phase shapes (proposal §5.2).
 	// Authors instantiate templates by listing phases under `phases:`.
@@ -234,7 +234,7 @@ type Slot struct {
 	Type        string   `yaml:"type"`
 	Required    bool     `yaml:"required,omitempty"`
 	Default     any      `yaml:"default,omitempty"`
-	Values      []string `yaml:"values,omitempty"`   // enum values
+	Values      []string `yaml:"values,omitempty"` // enum values
 	Description string   `yaml:"description,omitempty"`
 	Examples    []string `yaml:"examples,omitempty"`
 	FormatHint  string   `yaml:"format_hint,omitempty"`
