@@ -41,12 +41,3 @@ see [`../design.md`](../design.md).
 
 - [`proposals/`](proposals/) — proposal documents, some of which have
   been (partly) implemented; kept for design context.
-- [`archive/`](archive/) — earlier brainstorms and decision documents
-  preserved for history (`idea.md`, `DECISIONS.md`,
-  `stack-comparison.md`, `dev-story.md`,
-  `dev-story-design.md`).
-
-The proposals are still useful as context — for example,
-[`proposals/bugfix-room-proposal.md`](proposals/bugfix-room-proposal.md)
-is the design for the multi-transport conversation engine that the
-current code is converging on. The archive is reference-only.

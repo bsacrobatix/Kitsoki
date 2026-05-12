@@ -21,9 +21,8 @@ yet implemented**.
   whose ideas have shipped is stale planning material — it does
   not belong here.
 - **Fully-resolved planning history.** When everything in a
-  proposal has shipped or been superseded, the file moves to
-  [`docs/archive/`](../archive/) so the history stays
-  discoverable without cluttering the in-flight queue.
+  proposal has shipped or been superseded, the file is deleted —
+  the shipped docs and git history are authoritative.
 
 ## Every proposal carries a status line
 
@@ -46,7 +45,8 @@ and where to find the shipped pieces. Examples:
    implemented sections into normal `docs/`, trims the proposal,
    and updates the status line.
 3. When everything in the proposal has shipped (or been fully
-   superseded), the file moves to `docs/archive/`.
+   superseded), the file is deleted. Git history preserves the
+   planning record.
 
 The goal: `docs/proposals/` stays a **small, current queue** of
 what's being worked toward — not a graveyard of what was once
@@ -65,16 +65,3 @@ thought.
   chats PTY mode, input queue, and multi-transport drive,
   extending `internal/chats/`. Validation spike required before
   phase A.
-
-## Archive
-
-Fully shipped or superseded proposals live in
-[`docs/archive/`](../archive/). Notable entries:
-
-- `background-jobs-proposal.md` — fully shipped; see
-  [`docs/background-jobs/`](../background-jobs/) for the
-  canonical guide.
-- `bugfix-room-proposal.md` — §3-§7 shipped (see
-  `docs/transports.md`, `docs/state-machine.md` §9-§10,
-  `docs/hosts.md`, `internal/store/external_keys.go`); §8
-  (sub-room composition) superseded by `story-imports-proposal.md`.
