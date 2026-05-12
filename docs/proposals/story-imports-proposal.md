@@ -50,9 +50,9 @@ repos and let consumers extend it."
 
 ```mermaid
 flowchart TD
-    subgraph cyber["consumer-repo / consumer-devstory (app)"]
-        cybmain["main"]
-        cybexit["bugfix_done"]
+    subgraph csr["consumer-repo / consumer-devstory (app)"]
+        csrmain["main"]
+        csrexit["bugfix_done"]
     end
     subgraph dev["@kitsoki/devstory (imported as `dev`)"]
         devmain["dev/main"]
@@ -63,11 +63,11 @@ flowchart TD
         bffix["dev/bf/applying"]
         bfverify["dev/bf/verifying"]
     end
-    cybmain -->|enter `dev`| devmain
+    csrmain -->|enter `dev`| devmain
     devmain -->|enter `bf`| bfidle
     bfidle --> bffix --> bfverify
     bfverify -->|exit: completed| devbugfix_done
-    devbugfix_done -->|exit: success| cybexit
+    devbugfix_done -->|exit: success| csrexit
 ```
 
 **App.** A loadable kitsoki manifest (`app.yaml` plus its `include:`,
@@ -135,7 +135,7 @@ imports:
             - invoke: host.run
               with: { cmd: "{{ company.fix_command }}" }
       prompts:
-        shell_repair.md: ./prompts/cyber_shell_repair.md
+        shell_repair.md: ./prompts/custom_shell_repair.md
 ```
 
 Field reference:
@@ -217,7 +217,7 @@ on its `bf:` import. The boundary doesn't leak through layers.
 
 ```mermaid
 flowchart LR
-    pworld["parent.world<br/>current_ticket = JIRA-42"]
+    pworld["parent.world<br/>current_ticket = TKT-42"]
     cworld["child.world<br/>ticket_id = ?"]
     gcworld["grandchild.world<br/>ticket = ?"]
     pworld -->|world_in.ticket_id:<br/>'{{ world.current_ticket }}'| cworld
@@ -370,20 +370,20 @@ imports:
     overrides:
       states:
         deploy:                              # replaces dev/deploy entirely
-          view: "Cyber deploy room: {{ world.deploy_env }}"
+          view: "Custom deploy room: {{ world.deploy_env }}"
           on:
             trigger_deploy:
               - target: dev/deploy_running
                 effects:
-                  - invoke: host.cyber.deploy
+                  - invoke: host.consumer.deploy
                     with: { env: "{{ slots.environment }}" }
       intents:
         trigger_deploy:                      # narrows the intent definition
           slots:
             environment:
-              values: [dev, staging, prod, gov-cloud]
+              values: [dev, staging, prod, isolated]
       prompts:
-        shell_repair.md: ./prompts/cyber_shell_repair.md
+        shell_repair.md: ./prompts/custom_shell_repair.md
 ```
 
 **Semantics.**
@@ -412,7 +412,150 @@ are flattened bottom-up at load time.
 
 ---
 
-## 11. Recursive imports & cycle detection
+## 11. Host interfaces (capability binding)
+
+The "public default, private override" axis. Stories like `devstory`
+ship with a public-friendly toolchain — public PR and ticket services,
+plain `host.run` for shell — but real consumers run against private
+environments with bespoke auth and internal code-host / ticket
+backends. Forking the story or replacing whole states (§10) is too
+heavy when the only thing changing is *which concrete handler
+fulfills a known operation*.
+
+A **host interface** is a named capability the story depends on,
+declared in the manifest with a shape (operations + I/O schemas) and
+a default binding. States invoke the interface
+(`iface.pr_engine.open_pr`) rather than a concrete host. Importers
+rebind the interface to whichever handler their environment requires.
+Public stories keep working out-of-the-box; private wiring stays in
+the private repo.
+
+### 11.1 Declaring an interface
+
+```yaml
+# stories/devstory/app.yaml
+host_interfaces:
+  pr_engine:
+    description: "Open and close pull requests against the source repo."
+    operations:
+      open_pr:
+        input:  { branch: string, title: string, body: string }
+        output: { pr_url: string }
+      close_pr:
+        input:  { pr_url: string }
+    default: host.github.pr           # binding used when nobody overrides
+  ticket_engine:
+    operations:
+      get_ticket:
+        input:  { ticket_id: string }
+        output: { title: string, body: string, assignee: string }
+      add_comment:
+        input:  { ticket_id: string, body: string }
+    default: host.github.issues
+```
+
+States inside the story invoke operations through the interface:
+
+```yaml
+states:
+  applying:
+    on:
+      open_pr:
+        - target: "@exit:completed"
+          effects:
+            - invoke: iface.pr_engine.open_pr
+              with:
+                branch: "{{ world.branch_name }}"
+                title:  "Fix {{ world.ticket_id }}"
+                body:   "{{ slots.body }}"
+              bind: { pr_url: result.pr_url }
+            - set: { pr_url: "{{ slots.pr_url }}" }
+```
+
+`iface.<name>.<op>` is a new invocation target. At load time it's
+rewritten to whichever concrete handler is bound (default or
+overridden); at runtime the dispatch is identical to today's
+`host.<x>.<y>` path. Stories without any `host_interfaces:` behave
+exactly as today.
+
+### 11.2 Overriding an interface from the importer
+
+```yaml
+# consumer-repo/consumer-devstory/app.yaml
+imports:
+  dev:
+    source: "@kitsoki/devstory"
+    host_bindings:
+      pr_engine:     host.consumer.pr
+      ticket_engine: host.consumer.tickets
+```
+
+A binding override replaces the child's default for that interface.
+The interface contract (`operations:` shape) stays the child's; the
+importer is only naming a different handler that satisfies it.
+Bindings compose: a fourth layer importing consumer-devstory sees
+`pr_engine` already bound to the consumer's handler unless it
+rebinds again.
+
+### 11.3 Contract validation
+
+At load time the loader checks, for every interface:
+
+- The default handler — and any override binding — is registered.
+- The handler's declared input/output schema is structurally
+  compatible with the interface's. Every input the interface
+  promises must be accepted; every output it consumes must be
+  produced. Extra fields on the handler are fine.
+
+Mismatches fail the load with a message naming both the interface
+and the offending handler. This is what makes rebinding safe across
+environments: the runtime never silently calls a handler with a
+different shape than the story expects.
+
+### 11.4 Public default, private override
+
+The motivating split:
+
+- **`stories/devstory`** binds `pr_engine` and `ticket_engine` to
+  github-flavored defaults. Someone cloning kitsoki and pointing the
+  app at their personal repos gets a working flow with zero config.
+- **`consumer-repo/consumer-devstory`** rebinds both interfaces to
+  the consumer's own handlers, which target whatever private code
+  host and ticket system the consumer runs. The kitsoki manifest
+  never has to know those hosts exist; the private wiring lives
+  entirely in the consumer repo.
+
+The same shape generalizes to anything where the story's operation
+is universal but the carrier is environment-specific: deploy,
+notification, secrets retrieval, model gateway, log shipping.
+
+### 11.5 Relationship to §9 and §10
+
+- §9 `hosts:` lists are still the allow-list. An override binding
+  contributes its handler to the effective host list under the same
+  `inherit` / `declared` rules; a `declared` parent must list every
+  rebound handler explicitly.
+- §10 state/intent/prompt overrides remain the right tool when the
+  *flow* changes. Host interface bindings are the right tool when
+  only the *carrier* changes. A consumer that needs both uses both
+  on the same import.
+
+### 11.6 What this does not do
+
+- Interfaces are optional. Stories without `host_interfaces:` invoke
+  handlers directly, as today.
+- No runtime sandboxing. The handler is still globally callable by
+  name from any state — interfaces are a loader-time indirection,
+  not a capability boundary. Real sandboxing is the same follow-up
+  noted in §9 and §16.3.
+- No registry of "well-known interfaces." Every story declares the
+  shape it depends on. Stories that align on the same surface (e.g.
+  both `devstory` and `bugfix` wanting a `pr_engine`) do so by
+  convention; v1 has no shared interface library. See §20.6.
+
+---
+
+## 12. Recursive imports & cycle detection
 
 ```mermaid
 flowchart LR
@@ -438,7 +581,7 @@ need to de-dup.
 
 ---
 
-## 12. File layout
+## 13. File layout
 
 Move canonical stories out of `testdata/` and into a new top-level
 `stories/` directory:
@@ -471,7 +614,7 @@ because the manifest schema doesn't carry prose.
 
 ---
 
-## 13. Worked example — three layers
+## 14. Worked example — three layers
 
 The full picture, kept tight.
 
@@ -543,31 +686,34 @@ states:
 ```yaml
 # consumer-repo/consumer-devstory/app.yaml
 app: { id: consumer-devstory, version: 0.1.0 }
-hosts: [host.run, host.oracle.ask, host.cyber.deploy, host.workspace_manager.get]
+hosts: [host.run, host.oracle.ask, host.consumer.deploy, host.workspace_manager.get]
 world:
-  active_jira:    { type: string, default: "" }
-  compliance_env: { type: enum, values: [dev, staging, prod, gov-cloud] }
+  active_ticket: { type: string, default: "" }
+  deploy_env:    { type: enum, values: [dev, staging, prod, isolated] }
 imports:
   dev:
     source: "@kitsoki/devstory"   # resolved against kitsoki Go module
     entry: main
     world_in:
-      current_ticket: "{{ world.active_jira }}"
+      current_ticket: "{{ world.active_ticket }}"
     exits:
-      done: { to: cyber_complete }
+      done: { to: consumer_complete }
     hosts: declared
+    host_bindings:                    # rebind the public defaults onto private hosts
+      pr_engine:     host.consumer.pr
+      ticket_engine: host.consumer.tickets
     overrides:
       states:
         deploy:
-          view: "Cyber deploy: {{ world.compliance_env }}"
+          view: "Custom deploy: {{ world.deploy_env }}"
           on:
             trigger_deploy:
               - target: dev/deploy_running
                 effects:
-                  - invoke: host.cyber.deploy
+                  - invoke: host.consumer.deploy
                     with: { env: "{{ slots.environment }}" }
 states:
-  cyber_complete: { terminal: true }
+  consumer_complete: { terminal: true }
 root: dev
 ```
 
@@ -576,8 +722,8 @@ devstory, which invokes bugfix):
 
 | Layer | World read by state |
 |---|---|
-| consumer-devstory | `world.active_jira = "PLTFRM-42"` |
-| devstory | `world.current_ticket = "PLTFRM-42"` (via cyber's `world_in`) |
+| consumer-devstory | `world.active_ticket = "PLTFRM-42"` |
+| devstory | `world.current_ticket = "PLTFRM-42"` (via consumer's `world_in`) |
 | bugfix | `world.ticket_id = "PLTFRM-42"` (via devstory's `world_in`) |
 
 On exit:
@@ -589,7 +735,7 @@ On exit:
 
 ---
 
-## 14. Loader changes (concrete)
+## 15. Loader changes (concrete)
 
 The relevant existing code:
 
@@ -629,7 +775,7 @@ New work, in order:
    effects on the exit transitions, evaluated in the child's scope
    with results written to parent world keys (the runtime's existing
    effect dispatch handles this once we tag effects with a scope
-   marker — see §15 open question).
+   marker — see §16 open question).
 8. **Intent re-export** — `intents.export` on the import folds the
    named parent intents into the child's local intent table under
    their child-side names. `intents.import` does the reverse.
@@ -644,7 +790,7 @@ exactly as it does today.
 
 ---
 
-## 15. Open questions
+## 16. Open questions
 
 1. **Expression scope tag on effects.** `world_out` effects need to
    evaluate in the child's scope but write to the parent's world.
@@ -693,24 +839,25 @@ exactly as it does today.
 
 ---
 
-## 16. Phased delivery
+## 17. Phased delivery
 
 | Phase | Scope | Effort |
 |---|---|---|
 | **A. Manifest schema + source resolver** | `AppDef.Imports`, `ImportDef`, path / `@kitsoki/<name>` resolution, recursive loader skeleton with cycle detection, no projection yet. Validator rejects everything until later phases. | ~3-4 days |
 | **B. Namespace flattening + `@exit:` rewriting** | Fold child states under alias prefixes; rewrite `@exit:` targets; reject cross-boundary parent-to-child-internal targets. Get a child app loading inside a parent with no world projection. | ~3-4 days |
-| **C. World projection** | `world_in` synthesized as child `OnEnter` effects evaluated in parent scope; `world_out` synthesized on exit transitions evaluated in child scope. Includes the scope-tag question from §15.1. | ~1 week |
+| **C. World projection** | `world_in` synthesized as child `OnEnter` effects evaluated in parent scope; `world_out` synthesized on exit transitions evaluated in child scope. Includes the scope-tag question from §16.1. | ~1 week |
 | **D. Intent scoping + re-export** | Per-app intent tables; `intents.export` / `intents.import`. Validator updates. Migration of `testdata/apps/dev-story/` to live under `stories/`. | ~1 week |
 | **E. Overrides** | State / intent / prompt replacement at import time. Validator checks every override targets a real child element. | ~3-4 days |
-| **F. Hot reload + tooling** | Watch all reachable manifests; teach `kitsoki render` and `kitsoki viz` to emit subgraphs per import; trace event `import_chain`. | ~3-4 days |
-| **G. Ship `stories/devstory` and `stories/bugfix`** | Move existing testdata into the canonical layout, write the README contracts, exercise them via consumer-repo. | ~3-4 days, blocking on F |
+| **F. Host interfaces** | `host_interfaces:` schema in the child, `host_bindings:` on the import, `iface.<name>.<op>` invocation target rewrite at load, structural schema compatibility check between interface and bound handler. | ~3-4 days |
+| **G. Hot reload + tooling** | Watch all reachable manifests; teach `kitsoki render` and `kitsoki viz` to emit subgraphs per import; trace event `import_chain`. | ~3-4 days |
+| **H. Ship `stories/devstory` and `stories/bugfix`** | Move existing testdata into the canonical layout, write the README contracts, exercise them via consumer-repo. | ~3-4 days, blocking on G |
 
-Total: ~5 weeks for the full path. Phase G is the "deliverable for
+Total: ~5-6 weeks for the full path. Phase H is the "deliverable for
 consumer-repo" milestone — everything before it is engine work.
 
 ---
 
-## 17. What this does not do
+## 18. What this does not do
 
 - **Does not introduce daemon mode or registries.** Imports are
   resolved at load time from the local filesystem.
@@ -725,7 +872,7 @@ consumer-repo" milestone — everything before it is engine work.
 
 ---
 
-## 18. Relationship to other proposals
+## 19. Relationship to other proposals
 
 - Supersedes `bugfix-room-proposal.md` §8 (sub-room composition).
   That section's sketch lives on as the design seed for §3 here.
@@ -737,7 +884,7 @@ consumer-repo" milestone — everything before it is engine work.
 
 ---
 
-## 19. Decision points the user should weigh in on
+## 20. Decision points the user should weigh in on
 
 1. **`hosts: inherit` vs. `declared` default.** Inherit is friendlier;
    declared is auditable. Proposal picks inherit; consumer-repo might
@@ -757,3 +904,11 @@ consumer-repo" milestone — everything before it is engine work.
    conceptually (single-app split = no-prefix import). Cutting
    include would simplify the loader. Proposal keeps both; opinions
    welcome.
+6. **Shared interface library vs. per-story declaration.** v1 has
+   every story declare its own `host_interfaces:`, on the theory that
+   two stories converging on the same surface (`pr_engine` here,
+   `pr_engine` there) can do so by convention and the loader's
+   structural check catches mismatches. A `stories/interfaces/`
+   library both could import is more reusable but adds a sixth file
+   type to the manifest model and another resolver path. Lean: defer
+   until at least two shipped stories want the same interface.
