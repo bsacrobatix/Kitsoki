@@ -627,7 +627,20 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		// back to hc.Args if RawWith isn't set (older HostInvocation
 		// instances or test stubs).  See the corresponding machine-side
 		// note on HostInvocation.RawWith.
-		invokeArgs := rerenderHostArgs(hc, w)
+		invokeArgs, fellBack := rerenderHostArgs(hc, w)
+
+		// HostDispatched records the *actual* args the handler is about
+		// to receive (post-rerender), so the event trace is honest even
+		// when rerenderHostArgs had to fall back for one or more leaves.
+		// Unlike HostInvoked (which snapshots pre-bind args at machine
+		// time), this fires immediately before the handler is invoked.
+		// Replay treats it as a no-op (see store/replay.go).
+		events = append(events, newOrchestratorEvent(store.HostDispatched, map[string]any{
+			"namespace":     hc.Namespace,
+			"args":          invokeArgs,
+			"rerender_fell_back": fellBack,
+			"background":    hc.Background,
+		}, 0))
 
 		res, err := o.hosts.Invoke(ctx, hc.Namespace, invokeArgs)
 		if err != nil {
@@ -813,43 +826,142 @@ func (o *Orchestrator) enterRedirectState(ctx context.Context, sid app.SessionID
 // Falls back to the up-front-resolved hc.Args when:
 //   - RawWith is empty (no templates to re-render)
 //   - hc.Env is not the expected expr.Env type (older code paths or stubs)
-//   - rendering a value fails (the up-front resolution was the best we had)
+//
+// On a *leaf* template-render error the leaf is replaced with the
+// corresponding pre-resolved leaf from hc.Args (per-leaf fallback), so a
+// single bad nested template no longer poisons the entire `with:` block —
+// the rest of the leaves still see the post-bind world.  Returns the
+// rerendered args plus a fellBack flag that is true iff any leaf fell back
+// (used by HostDispatched to make the diagnostic story honest).
 //
 // This keeps the behaviour compatible with code that doesn't supply RawWith
 // while letting the bugfix room's 2-step `on_enter:` pattern compose
 // cleanly.  See `internal/machine/machine.go` HostInvocation for the
 // machine-side contract.
-func rerenderHostArgs(hc machine.HostInvocation, w world.World) map[string]any {
+func rerenderHostArgs(hc machine.HostInvocation, w world.World) (map[string]any, bool) {
 	if len(hc.RawWith) == 0 {
-		return hc.Args
+		return hc.Args, false
 	}
 	env, ok := hc.Env.(expr.Env)
 	if !ok {
-		return hc.Args
+		return hc.Args, false
 	}
 	// Snapshot the env with the *current* world.
 	env.World = w.Vars
 	out := make(map[string]any, len(hc.RawWith))
+	fellBack := false
 	for k, raw := range hc.RawWith {
-		resolved, err := resolveTemplateValue(raw, env)
+		// Look up the up-front-resolved leaf-equivalent for this top-level
+		// key so per-leaf failures inside a nested map/slice can fall back
+		// to the corresponding pre-bind leaf.
+		existing, hasExisting := hc.Args[k]
+		resolved, leafFell, err := resolveTemplateValueLeafFallback(raw, existing, hasExisting, env)
 		if err != nil {
-			// Fall back to the up-front-resolved value for this key.
-			if existing, exists := hc.Args[k]; exists {
+			// Unrecoverable shape mismatch between raw and existing at
+			// the top level; preserve the legacy behaviour of falling
+			// back to the up-front-resolved value for this key.
+			if hasExisting {
 				out[k] = existing
-				continue
+			} else {
+				out[k] = raw
 			}
-			out[k] = raw
+			fellBack = true
 			continue
+		}
+		if leafFell {
+			fellBack = true
 		}
 		out[k] = resolved
 	}
-	return out
+	return out, fellBack
+}
+
+// resolveTemplateValueLeafFallback recurses into maps/slices and renders any
+// string that looks like an expr-lang template.  On a leaf-template render
+// error it falls back to the corresponding leaf from `existing` (the
+// up-front-resolved value for this position), if one exists and has a
+// matching shape.  The returned bool is true iff any leaf in the subtree
+// fell back to its pre-bind value.
+//
+// The shape-matching rule is:
+//   - string leaf → fall back to `existing` (any type)
+//   - map leaf    → recurse, matching keys against `existing` if it is a map
+//   - slice leaf  → recurse, matching indices against `existing` if it is a
+//     slice of the same length
+//
+// If shapes diverge mid-walk (e.g. raw says map, existing says string), the
+// failing subtree falls back wholesale to `existing` and fellBack is set.
+func resolveTemplateValueLeafFallback(v any, existing any, hasExisting bool, env expr.Env) (any, bool, error) {
+	switch val := v.(type) {
+	case string:
+		if !containsTemplate(val) {
+			return val, false, nil
+		}
+		r, err := expr.RenderValue(val, env)
+		if err != nil {
+			if hasExisting {
+				return existing, true, nil
+			}
+			// No pre-bind leaf available; keep raw so the handler sees
+			// the un-rendered template rather than nil.
+			return val, true, nil
+		}
+		return r, false, nil
+	case map[string]any:
+		exMap, _ := existing.(map[string]any)
+		out := make(map[string]any, len(val))
+		fell := false
+		for k, vv := range val {
+			var (
+				exVal any
+				exOK  bool
+			)
+			if exMap != nil {
+				exVal, exOK = exMap[k]
+			}
+			r, f, err := resolveTemplateValueLeafFallback(vv, exVal, exOK, env)
+			if err != nil {
+				return nil, fell, err
+			}
+			if f {
+				fell = true
+			}
+			out[k] = r
+		}
+		return out, fell, nil
+	case []any:
+		exSlice, _ := existing.([]any)
+		out := make([]any, len(val))
+		fell := false
+		for i, vv := range val {
+			var (
+				exVal any
+				exOK  bool
+			)
+			if exSlice != nil && i < len(exSlice) {
+				exVal, exOK = exSlice[i], true
+			}
+			r, f, err := resolveTemplateValueLeafFallback(vv, exVal, exOK, env)
+			if err != nil {
+				return nil, fell, err
+			}
+			if f {
+				fell = true
+			}
+			out[i] = r
+		}
+		return out, fell, nil
+	default:
+		return v, false, nil
+	}
 }
 
 // resolveTemplateValue mirrors machine.resolveEffectValue but lives here
 // so the orchestrator's late re-render doesn't need to import machine
 // internals.  Recurses into maps and slices and renders any string that
-// looks like an expr-lang template.
+// looks like an expr-lang template.  Kept for callers that don't have a
+// pre-bind fallback value; rerenderHostArgs uses the leaf-fallback variant
+// above instead.
 func resolveTemplateValue(v any, env expr.Env) (any, error) {
 	switch val := v.(type) {
 	case string:
@@ -1252,8 +1364,14 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	for _, hc := range calls {
 		// Re-render templates against the current world so chained
 		// `on_enter:` host calls compose — see rerenderHostArgs above.
-		invokeArgs := rerenderHostArgs(hc, w)
+		invokeArgs, fellBack := rerenderHostArgs(hc, w)
 		summary := HostCallSummary{Namespace: hc.Namespace, Args: invokeArgs}
+		events = append(events, newOrchestratorEvent(store.HostDispatched, map[string]any{
+			"namespace":          hc.Namespace,
+			"args":               invokeArgs,
+			"rerender_fell_back": fellBack,
+			"background":         hc.Background,
+		}, 0))
 		res, err := o.hosts.Invoke(ctx, hc.Namespace, invokeArgs)
 		if err != nil {
 			summary.Error = err.Error()

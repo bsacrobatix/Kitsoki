@@ -100,7 +100,7 @@ func BuildJourney(def *app.AppDef, initialState app.StatePath, initialWorld worl
 		case LLMCalled, LLMToolCall:
 			// LLM-layer events; no state/world change.
 
-		case HostInvoked, HostReturned:
+		case HostInvoked, HostDispatched, HostReturned:
 			// Host side-effects are already materialized as EffectApplied events.
 			// Nothing to re-apply here.
 

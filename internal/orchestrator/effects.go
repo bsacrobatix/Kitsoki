@@ -30,7 +30,10 @@ func (o *Orchestrator) dispatchBackground(
 	w world.World,
 ) ([]store.Event, world.World, error) {
 	// Re-render args against the current world (same as the synchronous path).
-	invokeArgs := rerenderHostArgs(hc, w)
+	// fellBack is intentionally ignored here — the background job path doesn't
+	// emit HostDispatched (the job scheduler logs its own dispatch events) and
+	// the per-leaf fallback semantics already preserve usable args.
+	invokeArgs, _ := rerenderHostArgs(hc, w)
 
 	// Copy into a mutable map (rerenderHostArgs may return hc.Args directly).
 	payload := make(map[string]any, len(invokeArgs))

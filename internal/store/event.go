@@ -28,7 +28,17 @@ const (
 	// EffectApplied is appended once per effect executed in a transition.
 	EffectApplied EventKind = "EffectApplied"
 	// HostInvoked is appended when a host.* side effect is dispatched (§11).
+	// Snapshots the up-front-resolved args at machine time (pre-bind for any
+	// later step in the same on_enter block).  See HostDispatched for the
+	// post-rerender, dispatch-time args the handler actually receives.
 	HostInvoked EventKind = "HostInvoked"
+	// HostDispatched is appended immediately before the orchestrator
+	// invokes a host.* handler.  Its payload records the *rerendered* args
+	// (what the handler actually receives) plus `rerender_fell_back: bool`
+	// which is true when any leaf had to fall back to its pre-bind value
+	// because its template failed to render against the current world.
+	// Additive to HostInvoked; replayed as a no-op.
+	HostDispatched EventKind = "HostDispatched"
 	// HostReturned is appended when the host.* invocation completes.
 	HostReturned EventKind = "HostReturned"
 	// OffPathEntered is appended when the user activates the off-path mode (§7.7).
