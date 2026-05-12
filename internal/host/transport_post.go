@@ -27,6 +27,11 @@ import (
 //   - phase_id   (string): originating phase ID (for orchestrator-side dedup).
 //   - bot_marker (string): prefix for inbound-polling filters; default "[kitsoki]".
 //
+// Any additional string-valued args (e.g. "pr_project", "pr_slug", "pr_id"
+// for the Bitbucket transport) are forwarded verbatim via Message.Extra so
+// transport-specific routing data can travel through the generic bridge
+// without the bridge knowing each transport's protocol.
+//
 // Returns Result.Data with:
 //   - message_id (string): transport-assigned message identifier.
 //
@@ -51,6 +56,7 @@ func TransportPostHandler(ctx context.Context, args map[string]any) (Result, err
 		Title:     stringArg(args, "title"),
 		Body:      bodyArg(args, "body"),
 		BotMarker: stringArg(args, "bot_marker"),
+		Extra:     collectExtras(args),
 	}
 
 	id, err := reg.Post(ctx, transport.SessionKey{
@@ -66,6 +72,45 @@ func TransportPostHandler(ctx context.Context, args map[string]any) (Result, err
 func stringArg(args map[string]any, key string) string {
 	v, _ := args[key].(string)
 	return v
+}
+
+// reservedTransportPostArgs is the set of args consumed directly by
+// TransportPostHandler — anything else is treated as a transport-specific
+// extension and forwarded via Message.Extra.
+var reservedTransportPostArgs = map[string]struct{}{
+	"transport":  {},
+	"thread":     {},
+	"phase_id":   {},
+	"title":      {},
+	"body":       {},
+	"bot_marker": {},
+}
+
+// collectExtras returns a map of every string-valued arg that isn't part of
+// the reserved set.  Non-string values are stringified via fmt.Sprint so
+// YAML numeric scalars (e.g. an int `pr_id: 302`) survive the round-trip.
+// Returns nil when there are no extras so callers can compare with the
+// zero-valued map cheaply.
+func collectExtras(args map[string]any) map[string]string {
+	var out map[string]string
+	for k, v := range args {
+		if _, reserved := reservedTransportPostArgs[k]; reserved {
+			continue
+		}
+		if v == nil {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]string, 4)
+		}
+		switch x := v.(type) {
+		case string:
+			out[k] = x
+		default:
+			out[k] = fmt.Sprint(x)
+		}
+	}
+	return out
 }
 
 // bodyArg coerces the body argument into a string suitable for posting to a

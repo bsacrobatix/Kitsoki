@@ -582,13 +582,20 @@ func externalKeysView(keys []store.ExternalKey) []map[string]any {
 // buildTransportRegistry constructs the transport.Registry used during a
 // `kitsoki session continue` invocation. Always includes a TUITransport
 // (in-process buffer); adds a JiraTransport when the JIRA_URL,
-// JIRA_USERNAME, and JIRA_API_TOKEN env vars are all set.
+// JIRA_USERNAME, and JIRA_API_TOKEN env vars are all set; adds a
+// BitbucketTransport when a Bitbucket Bearer token is discoverable
+// (either via $BITBUCKET_TOKEN or the standard Acronis location
+// ``~/.config/acronis/bitbucket-token``).
 //
 // Setting JIRA_INSECURE_SKIP_VERIFY=1 disables TLS verification on the
 // Jira HTTP client.  This is needed for internal/self-hosted instances
 // behind an enterprise zero-trust proxy with a self-signed certificate
 // whose CA is not on the system trust store.  Off by default — only
 // opt in deliberately.
+//
+// The Bitbucket client always skips TLS verification because it defaults
+// to the Acronis ZTA proxy mount (https://localhost:3128/bitbucket) which
+// presents a self-signed cert; same convention as tools/loopy.
 func buildTransportRegistry() (*transport.Registry, error) {
 	reg := transport.NewRegistry()
 	reg.Register(transport.NewTUITransport())
@@ -616,7 +623,42 @@ func buildTransportRegistry() (*transport.Registry, error) {
 		}
 		reg.Register(jt)
 	}
+
+	if bbToken := loadBitbucketToken(); bbToken != "" {
+		cfg := transport.BitbucketConfig{Token: bbToken}
+		if base := os.Getenv("BITBUCKET_BASE_URL"); base != "" {
+			cfg.BaseURL = base
+		}
+		bt, err := transport.NewBitbucketTransport(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("build bitbucket transport: %w", err)
+		}
+		reg.Register(bt)
+	}
 	return reg, nil
+}
+
+// loadBitbucketToken resolves the Bitbucket bearer token.  Preference:
+//  1. $BITBUCKET_TOKEN (test overrides + CI),
+//  2. ``~/.config/acronis/bitbucket-token`` (the standard Acronis location
+//     read by tools/loopy/bugfix/lib/creds.bitbucket_token).
+//
+// Returns the empty string when neither source is available so
+// buildTransportRegistry can simply skip registering the transport rather
+// than failing the whole session.
+func loadBitbucketToken() string {
+	if env := strings.TrimSpace(os.Getenv("BITBUCKET_TOKEN")); env != "" {
+		return env
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".config", "acronis", "bitbucket-token"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // turnOutcomeView projects a TurnOutcome into a stable JSON shape suitable

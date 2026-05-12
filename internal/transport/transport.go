@@ -51,6 +51,13 @@ type Message struct {
 	// Timestamp is the wall-clock time at which the message was created.
 	// Zero-valued is fine; the transport may set it on Post if needed.
 	Timestamp time.Time
+	// Extra carries transport-specific routing arguments that don't fit the
+	// generic SessionKey/Body model.  Example: the Bitbucket transport
+	// requires (pr_project, pr_slug, pr_id) coordinates which it reads from
+	// here (because key.Thread is the Jira ticket, not the PR coords).
+	// Always string-valued so YAML scalars round-trip cleanly; transports
+	// coerce as needed.
+	Extra map[string]string
 }
 
 // Attachment is an inline asset referenced from a Message.
