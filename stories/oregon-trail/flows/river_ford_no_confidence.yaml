@@ -1,0 +1,100 @@
+# river_ford_no_confidence — regression for the slot-default fill.
+#
+# History: the propose_crossing intent declares `confidence` as
+# `required: false, default: 50`. The deterministic LLM router emits
+# `slots: { method: ford }` when the player types "ford" (matching the
+# example list); no confidence is bound. Before the slot-default fix
+# the effect chain in the depth substate's propose_crossing arm crashed
+# on `crossing_confidence: "{{ int(slots.confidence) }}"` because expr-lang
+# saw `slots.confidence` absent → undefined identifier → orchestrator
+# error → user-visible red message immediately after typing "ford".
+#
+# Now validateSlots fills Slot.Default into the bag before effects run,
+# so the same call lands `crossing_confidence: 50` and the transition
+# completes cleanly. This fixture pins that behaviour.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: river_crossing.shallow
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    banker
+  month:         june
+  money:         1600
+  oxen:          6
+  food_lbs:      1500
+  bullets:       50
+  clothing_sets: 3
+  spare_wheels:  2
+  spare_axles:   2
+  spare_tongues: 2
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    100
+  narration:     false
+  miles_traveled: 102
+  current_landmark: "Kansas River Crossing"
+  river_depth_ft:   2
+  river_width_ft:   620
+  crossing_method:  none
+  crossing_confidence: 0
+
+# The river_crossing.executing.on_enter fires a background host.run
+# and the transition into the next leg fires host.transport.post on
+# the awaiting_reply on_enter; stub both as cheap no-ops.
+host_handlers:
+  host.run:
+    data: { stdout: "crossed", exit_code: 0, ok: true }
+    delay: "50ms"
+  host.transport.post:
+    data: { ok: true }
+    delay: "0s"
+
+turns:
+
+  # Turn 1: propose_crossing with ONLY method=ford. confidence is
+  # absent; the engine fills the declared default (50). Without the
+  # fix this turn crashes on `int(slots.confidence)`.
+  - intent:
+      name: propose_crossing
+      slots: { method: ford }
+    expect_state: river_crossing.reviewing
+    expect_world:
+      crossing_method:    "ford"
+      crossing_confidence: 50
+
+  # Turn 2: accept_crossing — kick off the background crossing job.
+  # advance_clock: "100ms" drains past the stub's 50ms delay, so the
+  # host.run job lands terminal before turn-3 fires `continue`.
+  #
+  # expect_jobs locks down commit 2d96c3a: river_crossing.yaml's
+  # executing.on_enter dispatches host.run with `cmd: <string>`. If a
+  # future edit changes that to `cmd: [list]` form the type assertion
+  # in handlers.go silently fails and the job lands status=failed —
+  # on_complete still runs, so the state machine continues and the
+  # state assertion in turn 3 still passes. expect_jobs is the only
+  # signal that catches this regression.
+  - intent: { name: accept_crossing, slots: {} }
+    expect_state: river_crossing.executing
+    advance_clock: "100ms"
+    expect_jobs:
+      - namespace: host.run
+        status:    done
+
+  # Turn 3: drain the background job, read outcome, continue.
+  # Deterministic outcome formula in executing.on_complete:
+  #   (river_depth_ft * oxen + miles_traveled) % 100 = (2*6+102)%100 = 14
+  # 14 < 60 → river_outcome = "crossed" → continue lands in leg_b_executing.
+  # The continue arm clears river_outcome / crossing_* after using them
+  # in its guards, so the post-turn assertion sees the cleared state.
+  #
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_b_executing.traveling
+    expect_world:
+      river_outcome:       ""
+      crossing_method:     "none"
+      crossing_confidence: 0
+      miles_traveled:      0      # leg_b starts fresh.
+
+expect_no_errors: true

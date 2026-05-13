@@ -1,0 +1,40 @@
+# buy_proposal_auto_accept — phase D auto-accept smoke. The buy_supplies
+# proposal's policy.auto_accept_if: $proposal.total_cost < 5 should
+# bypass the reviewing substate for cheap baskets and land straight in
+# general_store.done.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: general_store.idle
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    banker
+  month:         april
+  money:         1600
+  oxen:          0
+  food_lbs:      0
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    100
+  narration:     false
+  local_price_pct: 100
+
+turns:
+
+  # Turn 1: propose a $1 basket. Auto-accept (total_cost < 5) goes
+  # straight to general_store.done, debiting $1 and crediting 1 lb food.
+  - intent:
+      name: propose_purchase
+      slots:
+        items:      "a single hardtack biscuit"
+        total_cost: 1
+        food:       1
+    expect_state: general_store.done
+    expect_world:
+      money: 1599
+      food_lbs: 1
+      proposal_items: "a single hardtack biscuit"
+      proposal_total_cost: 1
+
+expect_no_errors: true

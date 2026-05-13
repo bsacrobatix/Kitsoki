@@ -33,12 +33,20 @@ var ErrOracleUnavailable = errors.New("host.oracle.talk: `claude` binary not fou
 // OracleTalkHandler implements host.oracle.talk.
 //
 // Args:
-//   - question    (string, required): the user's prompt for Claude
-//   - session_id  (string, optional): UUID for session persistence; if empty, a new one is generated
-//   - working_dir (string, optional): cwd passed to claude (scopes tool access)
-//   - chat_id     (string, optional): when set AND a ChatStore is in context,
+//   - question      (string, required): the user's prompt for Claude
+//   - session_id    (string, optional): UUID for session persistence; if empty, a new one is generated
+//   - working_dir   (string, optional): cwd passed to claude (scopes tool access)
+//   - chat_id       (string, optional): when set AND a ChatStore is in context,
 //     persists the conversation to the chat transcript and reuses the claude
 //     session ID stored on the chat row across turns.
+//   - system_prompt (string, optional): app-tunable persona / system-prompt
+//     instruction. Threaded to `claude --append-system-prompt` so the engine
+//     stays generic and apps can style their off-path oracle voice.
+//   - agent         (string, optional): name of an entry in AppDef.Agents
+//     (injected via WithAgents) whose SystemPrompt is applied to this call
+//     and whose Model, when non-empty, is forwarded as `claude --model`.
+//     When the caller also supplies a literal `system_prompt:` arg the
+//     inline value wins (so apps can override one named agent per call).
 //
 // Returns Result.Data with:
 //   - answer             (string): Claude's text reply
@@ -76,6 +84,13 @@ func OracleTalkHandler(ctx context.Context, args map[string]any) (Result, error)
 	}
 
 	workingDir, _ := args["working_dir"].(string)
+	// Resolve `agent: <name>` against the context-injected agents map (if
+	// any) and merge with any inline `system_prompt:` arg — inline wins so
+	// authors can override a named agent per call. agent.Model, when set,
+	// appends --model so a per-agent model override travels through the
+	// same primitive.
+	agent, _ := resolveAgent(ctx, args)
+	systemPrompt := effectiveSystemPrompt(args, agent)
 
 	bin := os.Getenv(OracleBinEnv)
 	if bin == "" {
@@ -96,6 +111,12 @@ func OracleTalkHandler(ctx context.Context, args map[string]any) (Result, error)
 		"--session-id", sessionID,
 		"--output-format", "text",
 		"--permission-mode", "bypassPermissions",
+	}
+	if strings.TrimSpace(systemPrompt) != "" {
+		cliArgs = append(cliArgs, "--append-system-prompt", systemPrompt)
+	}
+	if strings.TrimSpace(agent.Model) != "" {
+		cliArgs = append(cliArgs, "--model", agent.Model)
 	}
 
 	cmd := exec.CommandContext(ctx, bin, cliArgs...)
@@ -138,10 +159,15 @@ func OracleTalkHandler(ctx context.Context, args map[string]any) (Result, error)
 // messages to the transcript and stores the claude session ID on the chat row.
 func runOracleTalkWithChat(ctx context.Context, cs ChatStore, chatID, question string, args map[string]any) (Result, error) {
 	workingDir, _ := args["working_dir"].(string)
+	// Resolve agent (system_prompt + model) the same way as the legacy
+	// path so chat-aware calls also pick up the agent's persona.
+	agent, _ := resolveAgent(ctx, args)
+	systemPrompt := effectiveSystemPrompt(args, agent)
+	model := agent.Model
 
 	var out Result
 	lockErr := cs.WithLock(ctx, chatID, func(ctx context.Context) error {
-		inner, runErr := doOracleChatTurn(ctx, cs, chatID, question, workingDir)
+		inner, runErr := doOracleChatTurn(ctx, cs, chatID, question, workingDir, systemPrompt, model)
 		out = inner
 		return runErr
 	})
@@ -160,16 +186,22 @@ func runOracleTalkWithChat(ctx context.Context, cs ChatStore, chatID, question s
 // BEFORE we append the user message, otherwise a SetClaudeSessionID failure
 // leaves an orphan user message in the transcript with no claude session to
 // resume. See I10 in the agent-rooms review.
-func doOracleChatTurn(ctx context.Context, cs ChatStore, chatID, question, workingDir string) (Result, error) {
+func doOracleChatTurn(ctx context.Context, cs ChatStore, chatID, question, workingDir, systemPrompt, model string) (Result, error) {
 	chat, err := cs.Get(ctx, chatID)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("host.oracle.talk: get chat %s: %v", chatID, err)}, nil
 	}
 
 	// Determine/assign claude session ID FIRST. If the SetClaudeSessionID
-	// write fails we bail before mutating the transcript.
+	// write fails we bail before mutating the transcript. `firstTurn` drives
+	// the flag choice below: first turn passes --session-id (assign), every
+	// subsequent turn on the same chat passes --resume (continue). Without
+	// this split, claude rejects the second call with "Session ID X is
+	// already in use" because --session-id is start-a-new-session-with-this-
+	// exact-id and the id was claimed on turn 1.
 	claudeSID := chat.ClaudeSessionID
-	if claudeSID == "" {
+	firstTurn := claudeSID == ""
+	if firstTurn {
 		claudeSID = newUUID()
 		if err := cs.SetClaudeSessionID(ctx, chatID, claudeSID); err != nil {
 			return Result{Error: fmt.Sprintf("host.oracle.talk: set claude session id: %v", err)}, nil
@@ -196,9 +228,19 @@ func doOracleChatTurn(ctx context.Context, cs ChatStore, chatID, question, worki
 
 	cliArgs := []string{
 		"-p",
-		"--session-id", claudeSID,
 		"--output-format", "text",
 		"--permission-mode", "bypassPermissions",
+	}
+	if firstTurn {
+		cliArgs = append(cliArgs, "--session-id", claudeSID)
+	} else {
+		cliArgs = append(cliArgs, "--resume", claudeSID)
+	}
+	if strings.TrimSpace(systemPrompt) != "" {
+		cliArgs = append(cliArgs, "--append-system-prompt", systemPrompt)
+	}
+	if strings.TrimSpace(model) != "" {
+		cliArgs = append(cliArgs, "--model", model)
 	}
 
 	cr, runErr := runClaudeOneShot(ctx, bin, cliArgs, question, workingDir)

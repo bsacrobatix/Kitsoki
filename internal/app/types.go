@@ -33,6 +33,13 @@ type AppDef struct {
 	// PhaseTemplates declares reusable phase shapes (proposal §5.2).
 	// Authors instantiate templates by listing phases under `phases:`.
 	PhaseTemplates map[string]*PhaseTemplate `yaml:"phase_templates,omitempty"`
+
+	// Agents declares named Claude agents — first-class personas / system
+	// prompts (and optionally model overrides) reusable across any
+	// host.oracle.{ask,talk,ask_with_mcp} call via the `agent: <name>` arg
+	// in the effect's `with:` block. Generalises OffPathDef.Persona into a
+	// per-call primitive so different rooms / intents can speak in
+	// different voices through the same engine path.
 	// Phases declares the phase graph that instantiates a phase template
 	// (proposal §5.3). Expanded into States at load time.
 	Phases *PhasesBlock `yaml:"phases,omitempty"`
@@ -42,6 +49,9 @@ type AppDef struct {
 	// MetaModes declares named off-path concerns (meta-mode proposal §2).
 	MetaModes map[string]*MetaModeDef `yaml:"meta_modes,omitempty"`
 	// Agents declares named per-context agents (meta-mode proposal §2.1).
+	// Generalises OffPathDef.Persona / OffPathDef.Agent into a top-level
+	// primitive any host.oracle.* call site can reference by name. Bound
+	// at startup via agents.BuildRegistry(def.AgentSpecs()) + host.SetAgentRegistry.
 	Agents map[string]*AgentDecl `yaml:"agents,omitempty"`
 }
 
@@ -148,6 +158,15 @@ type Transition struct {
 
 // Effect is one atomic world mutation or side-effect invocation.
 type Effect struct {
+	// When is an optional guard expression (expr-lang). When non-empty
+	// and the expression evaluates false against the current world, the
+	// effect is skipped silently (no set/invoke/say/etc. runs). Empty =
+	// always-on. Used to branch on_enter / transition effects on world
+	// flags (e.g. `when: world.narration` vs `when: not world.narration`
+	// per proposal §6.2.1 / §9.6). Eval errors are non-fatal: a bad
+	// expression aborts the surrounding effects chain with an error so
+	// authors get a loud failure rather than a silently-skipped effect.
+	When string `yaml:"when,omitempty"`
 	// Set maps world-variable names to new values (expr or literal).
 	Set map[string]any `yaml:"set,omitempty"`
 	// Increment maps world-variable names to integer delta values.
@@ -267,13 +286,19 @@ type OffPathDef struct {
 	Trigger string `yaml:"trigger"`
 	Banner  string `yaml:"banner,omitempty"`
 	Return  string `yaml:"return,omitempty"`
-	// Agent is the named agent (registered in AppDef.Agents or builtin)
-	// used when the off-path runtime invokes the LLM. The slot loads and
-	// validates today; the off-path LLM dispatch path itself is still
-	// stubbed (orchestrator.ModeOffPath is "not yet implemented", see
-	// internal/orchestrator/outcome.go). Whoever wires that runtime
-	// later will pass this as the per-call agent: arg on
-	// host.oracle.ask_with_mcp (WS-A7).
+	// Persona is an optional inline system-prompt-style instruction
+	// prepended to every off-path oracle call. Lets apps style the
+	// off-path "oracle" voice without declaring a top-level agent
+	// (e.g., a frontier wise-man for Oregon Trail). Empty falls back
+	// to the engine default. When both Persona and Agent are set,
+	// Persona wins — apps can override a named agent inline for
+	// off-path only.
+	Persona string `yaml:"persona,omitempty"`
+	// Agent, when non-empty, names an entry in AppDef.Agents whose
+	// SystemPrompt is applied to every off-path oracle call. Resolved
+	// at runtime via the process-wide agent registry installed at
+	// startup by host.SetAgentRegistry. Mutually composable with
+	// Persona (above) — Persona wins when both are set.
 	Agent string `yaml:"agent,omitempty"`
 }
 

@@ -78,6 +78,34 @@ func TestPrettyPrintWarnRecords(t *testing.T) {
 	assert.Contains(t, out, "something exploded")
 }
 
+// TestPrettyPrintNewFamilies covers the topic chips added when off-path,
+// timeout, teleport, background-job, slot-fill, and inbox lifecycle events
+// were promoted to the structured Ev* taxonomy. A missing chip mapping
+// would silently render these messages as plain dim DEBUG lines.
+func TestPrettyPrintNewFamilies(t *testing.T) {
+	input := `{"time":"2026-05-12T10:00:00Z","level":"DEBUG","msg":"offpath.enter","session_id":"s1","from_state":"foyer"}
+{"time":"2026-05-12T10:00:01Z","level":"DEBUG","msg":"timeout.armed","session_id":"s1","state":"waiting","after":"10d"}
+{"time":"2026-05-12T10:00:02Z","level":"DEBUG","msg":"teleport.start","session_id":"s1","to":"clarifying"}
+{"time":"2026-05-12T10:00:03Z","level":"DEBUG","msg":"job.submitted","session_id":"s1","job_id":"j1"}
+{"time":"2026-05-12T10:00:04Z","level":"DEBUG","msg":"slotfill.requested","intent":"go","missing_count":1}
+{"time":"2026-05-12T10:00:05Z","level":"DEBUG","msg":"disambig.presented","candidate_count":3}
+{"time":"2026-05-12T10:00:06Z","level":"DEBUG","msg":"inbox.notification.posted","origin":"job_terminal"}
+`
+	var buf bytes.Buffer
+	err := prettyPrint(strings.NewReader(input), &buf)
+	require.NoError(t, err)
+	out := buf.String()
+
+	for _, want := range []string{"OFFPATH", "TIMEOUT", "TELEPORT", "JOB", "SLOTFILL", "DISAMBIG", "INBOX"} {
+		assert.Contains(t, out, want, "expected chip %s for the new event family", want)
+	}
+	// Sanity: the stripped tails should appear too (chips are followed by the
+	// post-prefix portion of the msg).
+	assert.Contains(t, out, "enter")
+	assert.Contains(t, out, "armed")
+	assert.Contains(t, out, "notification.posted")
+}
+
 // TestPrettyPrintEmptyInput produces no output (no error) for empty input.
 func TestPrettyPrintEmptyInput(t *testing.T) {
 	r := strings.NewReader("")

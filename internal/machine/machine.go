@@ -1,12 +1,12 @@
 // Package machine implements the pure deterministic state machine core (§4, §12.1).
 // No I/O; consumers are the MCP server, the replay harness, and tests.
 //
-// # Parallel states
+// # Parallel states (proposal §9.4)
 //
-// Parallel-region support is OUT OF SCOPE for this PoC (§14 open question).
-// Machine construction rejects any app whose root or any state declares
-// type: "parallel" with a clear error. Authors must restructure to compound
-// states for the PoC.
+// `type: parallel` is supported with minimum-viable semantics. See
+// parallel.go for the full design notes — state-path encoding, first-region-
+// wins intent dispatch, and depth-capped emit propagation across sibling
+// regions.
 //
 // # Event ordering within a turn
 //
@@ -142,6 +142,11 @@ type Machine interface {
 	// Callers should treat unresolved as primary (passes by default): the guard
 	// will be checked at submission time when all slots are present.
 	TryGuards(cur app.StatePath, w world.World, intentName string, prefillSlots map[string]any) GuardDryRunResult
+	// Menu returns the computed §7.2 menu (primary + blocked entries) for
+	// the given state and world. View-render call sites populate env.Menu
+	// with the template-friendly view of this so authors can render the
+	// "what can I do right now" surface inline.
+	Menu(state app.StatePath, w world.World) MenuView
 	// RunEffects walks effects and returns the new world, any host calls
 	// collected, the accumulated say-text, the effect events, and an error.
 	// State path is used purely for the env snapshot (slots, etc.).
@@ -160,13 +165,20 @@ type GuardDryRunResult struct {
 	// a referenced slot was missing from the prefill map. Treat as primary.
 	Unresolved bool
 	// MatchedDefault is true when Primary is true because a default: branch fired
-	// (i.e. no when: branch matched). Menu-building code uses this to omit the
-	// row entirely: the default arm is a runtime catch-all, not a real transition
-	// the author intended to surface.
+	// (i.e. no when: branch matched). Menu-building code uses this to decide
+	// whether to surface, omit, or demote the entry.
 	MatchedDefault bool
+	// WhenArmFailed is true when at least one when: arm was evaluated and
+	// returned false during the walk. Combined with MatchedDefault this means
+	// "the player can type the intent but only the catch-all fires" — menu
+	// code surfaces such entries as blocked so the player sees why their
+	// "real" arc isn't available yet (with BlockedReason carrying the hint).
+	WhenArmFailed bool
 	// DestinationHint is the resolved target state path when Primary is true.
 	DestinationHint string
-	// BlockedReason is the guard_hint from the first failing transition when Blocked is true.
+	// BlockedReason is the guard_hint from the first failing when: arm. Set
+	// whenever WhenArmFailed is true — whether or not a default eventually
+	// matched.
 	BlockedReason string
 }
 
@@ -208,7 +220,7 @@ func WithMachineLogger(l *slog.Logger) MachineOption {
 // New creates a new Machine from a validated AppDef.
 // It pre-compiles all guards, view templates, and guard hints.
 // Returns an error (via errors.Join) listing every compilation failure.
-// Returns an error if the app declares any parallel regions.
+// Returns an error if any parallel state is malformed (proposal §9.4).
 func New(def *app.AppDef, opts ...MachineOption) (Machine, error) {
 	m := &machineImpl{
 		appDef: def,
@@ -221,8 +233,9 @@ func New(def *app.AppDef, opts ...MachineOption) (Machine, error) {
 
 	var errs []error
 
-	// Check for parallel regions (out of scope for PoC).
-	if err := rejectParallelStates("", def.States); err != nil {
+	// Validate parallel-state shape (≥2 regions, no parent initial:,
+	// no nested parallel).
+	if err := validateParallelStates("", def.States); err != nil {
 		return nil, err
 	}
 
@@ -233,24 +246,6 @@ func New(def *app.AppDef, opts ...MachineOption) (Machine, error) {
 		return nil, errors.Join(errs...)
 	}
 	return m, nil
-}
-
-// rejectParallelStates walks the state tree and returns an error if any state
-// declares type: "parallel". Parallel support is deferred to a future stage.
-func rejectParallelStates(prefix string, states map[string]*app.State) error {
-	for name, s := range states {
-		if s == nil {
-			continue
-		}
-		path := joinStatePath(prefix, name)
-		if s.Type == "parallel" {
-			return fmt.Errorf("machine: state %q declares type: parallel, which is not supported in this PoC (§14)", path)
-		}
-		if err := rejectParallelStates(path, s.States); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // compileStatesInto pre-compiles every state's guards and views into the dst map.
@@ -341,7 +336,16 @@ func (m *machineImpl) Validate(cur app.StatePath, w world.World, call intent.Int
 }
 
 // hasWildcard returns true if the state or any ancestor has a "*" wildcard handler.
+// Parallel-encoded paths return true if ANY region (or its ancestor chain) has one.
 func (m *machineImpl) hasWildcard(cur app.StatePath) bool {
+	if par := parseParallel(string(cur)); par.IsParallel {
+		for _, leaf := range par.RegionLeaves {
+			if m.hasWildcard(app.StatePath(leaf)) {
+				return true
+			}
+		}
+		return false
+	}
 	path := string(cur)
 	for {
 		cs, ok := m.states[path]
@@ -362,25 +366,37 @@ func (m *machineImpl) hasWildcard(cur app.StatePath) bool {
 // allowedIntentNames returns the names of intents that are handled in the
 // given state (including inherited handlers from compound-state ancestors,
 // but for PoC we only look at the leaf state and its direct parent chain).
+//
+// Parallel-encoded paths (proposal §9.4) return the union of allowed intents
+// across every region leaf, so the orchestrator's menu and Validate code
+// see the full surface without needing to know about parallel encoding.
 func (m *machineImpl) allowedIntentNames(cur app.StatePath) []string {
 	seen := make(map[string]struct{})
-	// Walk the path from leaf to root, collecting on: keys.
-	path := string(cur)
-	for {
-		cs, ok := m.states[path]
-		if ok {
-			for name := range cs.on {
-				if name != "*" { // wildcard is not a public intent name
-					seen[name] = struct{}{}
-				}
+	if par := parseParallel(string(cur)); par.IsParallel {
+		for _, leaf := range par.RegionLeaves {
+			for _, n := range m.allowedIntentNames(app.StatePath(leaf)) {
+				seen[n] = struct{}{}
 			}
 		}
-		// Move up one level.
-		idx := strings.LastIndexByte(path, '.')
-		if idx < 0 {
-			break
+	} else {
+		// Walk the path from leaf to root, collecting on: keys.
+		path := string(cur)
+		for {
+			cs, ok := m.states[path]
+			if ok {
+				for name := range cs.on {
+					if name != "*" { // wildcard is not a public intent name
+						seen[name] = struct{}{}
+					}
+				}
+			}
+			// Move up one level.
+			idx := strings.LastIndexByte(path, '.')
+			if idx < 0 {
+				break
+			}
+			path = path[:idx]
 		}
-		path = path[:idx]
 	}
 	names := make([]string, 0, len(seen))
 	for n := range seen {
@@ -401,7 +417,20 @@ func isAllowed(name string, allowed []string) bool {
 }
 
 // lookupIntent looks up an intent definition by name scoped to the given state.
+// Parallel-encoded paths probe each region leaf in turn; the first match wins
+// (regions are alphabetical so the result is deterministic).
 func (m *machineImpl) lookupIntent(cur app.StatePath, name string) (app.Intent, bool) {
+	if par := parseParallel(string(cur)); par.IsParallel {
+		for _, leaf := range par.RegionLeaves {
+			if i, ok := m.lookupIntent(app.StatePath(leaf), name); ok {
+				return i, true
+			}
+		}
+		if i, ok := m.appDef.Intents[name]; ok {
+			return i, true
+		}
+		return app.Intent{}, false
+	}
 	// Check state-local intents first, then global library.
 	path := string(cur)
 	for {
@@ -431,6 +460,15 @@ func validateSlots(intentDef app.Intent, slots world.Slots) *intent.ValidationEr
 		if slotDef.Required && (!present || val == nil || val == "") {
 			missing = append(missing, slotName)
 			continue
+		}
+		// Fill in the declared default for an absent optional slot so
+		// downstream effects (set/say templates) can read slots.<name>
+		// without needing per-effect `?? <default>` guards. The Slot.Default
+		// field was previously documentation-only; this makes it real.
+		if !present && slotDef.Default != nil {
+			slots[slotName] = slotDef.Default
+			val = slotDef.Default
+			present = true
 		}
 		if !present {
 			continue
@@ -469,6 +507,12 @@ func validateSlots(intentDef app.Intent, slots world.Slots) *intent.ValidationEr
 // Turn applies one accepted intent call and returns the result.
 // All state mutations are on a cloned world — the caller's world is not mutated.
 func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World, call intent.IntentCall) (TurnResult, error) {
+	// 0. Parallel-encoded path? Dispatch to the parallel-state turn handler
+	//    (proposal §9.4).
+	if par := parseParallel(string(cur)); par.IsParallel {
+		return m.turnParallel(ctx, par, w, call)
+	}
+
 	// 1. Validate first.
 	vr := m.Validate(cur, w, call)
 	if !vr.OK {
@@ -540,8 +584,10 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 	}
 	targetPath := resolveTarget(winningPath, rawTarget)
 
-	// 5. For compound states, resolve the initial child.
-	resolvedTarget, err := m.resolveInitial(targetPath, env)
+	// 5. For compound states, resolve the initial child. resolveInitialAware
+	//    additionally expands a parallel target into its encoded composite
+	//    leaf-set (proposal §9.4).
+	resolvedTarget, err := m.resolveInitialAware(targetPath, env)
 	if err != nil {
 		return TurnResult{}, fmt.Errorf("resolve initial for %q: %w", targetPath, err)
 	}
@@ -562,7 +608,7 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 	// 6b. Apply on_enter effects of the target state (and any entered ancestors).
 	// on_enter fires whenever a state is newly entered (not on self-transitions).
 	if resolvedTarget != string(cur) {
-		entered := stateEnterPaths(string(cur), resolvedTarget)
+		entered := stateEnterPathsAware(string(cur), resolvedTarget)
 		for _, enteredPath := range entered {
 			cs, ok := m.states[enteredPath]
 			if !ok || cs.s == nil || len(cs.s.OnEnter) == 0 {
@@ -591,8 +637,14 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 		}
 	}
 
-	// 7. Render view.
-	renderedView, err := m.renderView(winningTr.tr, resolvedTarget, newWorld, env, saySB.String())
+	// 7. Render view. When the target is parallel-encoded, compose region
+	//    leaf views; otherwise normal single-state render.
+	var renderedView string
+	if par := parseParallel(resolvedTarget); par.IsParallel {
+		renderedView, err = m.renderViewParallel(winningTr.tr, par.Root, sortedRegionNames(m.states[par.Root].s.States), resolvedTarget, newWorld, env, saySB.String(), false, resolvedTarget)
+	} else {
+		renderedView, err = m.renderView(winningTr.tr, resolvedTarget, newWorld, env, saySB.String())
+	}
 	if err != nil {
 		return TurnResult{}, err
 	}
@@ -605,24 +657,44 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 		"from":   string(cur),
 		"to":     resolvedTarget,
 		"intent": call.Intent,
+		// Persist the slot bag so replay-derived back-reference summaries
+		// (orchestrator.extractRecentTurns) can re-surface the exact values
+		// the user supplied — necessary for "yes — like I said before"
+		// style anaphora on slotted intents like propose_purchase.
+		"slots": map[string]any(call.Slots),
 	}))
 
 	events = append(events, effectEvents...)
 
 	// Emit StateExited for each level of the old path that is not shared.
-	exited := stateExitPaths(string(cur), resolvedTarget)
+	exited := stateExitPathsAware(string(cur), resolvedTarget)
 	for _, p := range exited {
 		events = append(events, newEvent(store.StateExited, map[string]any{"state": p}))
 	}
 
 	// Emit StateEntered for each new level of the new path.
-	entered := stateEnterPaths(string(cur), resolvedTarget)
+	entered := stateEnterPathsAware(string(cur), resolvedTarget)
 	for _, p := range entered {
 		events = append(events, newEvent(store.StateEntered, map[string]any{"state": p}))
 	}
 
-	// 9. Build menu for new state.
-	newMenu := m.allowedIntentNames(app.StatePath(resolvedTarget))
+	// 9. Build menu for new state.  For parallel targets, union region menus.
+	var newMenu []string
+	if par := parseParallel(resolvedTarget); par.IsParallel {
+		seen := make(map[string]struct{})
+		for _, leaf := range par.RegionLeaves {
+			for _, n := range m.allowedIntentNames(app.StatePath(leaf)) {
+				seen[n] = struct{}{}
+			}
+		}
+		newMenu = make([]string, 0, len(seen))
+		for n := range seen {
+			newMenu = append(newMenu, n)
+		}
+		sort.Strings(newMenu)
+	} else {
+		newMenu = m.allowedIntentNames(app.StatePath(resolvedTarget))
+	}
 
 	return TurnResult{
 		NewState:  app.StatePath(resolvedTarget),
@@ -741,6 +813,32 @@ func (m *machineImpl) applyEffectsTraced(ctx context.Context, effects []app.Effe
 	var effectEvents []store.Event
 
 	for _, eff := range effects {
+		// Optional per-effect guard (§6.2.1, §9.6). An effect whose
+		// `when:` expression evaluates false is silently skipped so
+		// authors can branch on_enter chains on world flags (e.g.
+		// `when: world.narration` vs `when: not world.narration`)
+		// without restructuring states into compound shapes. The
+		// guard sees the post-prior-effect world via env, so an
+		// earlier `set:` in the same chain can steer a later
+		// branch — symmetric with the host-call rerender semantics.
+		if strings.TrimSpace(eff.When) != "" {
+			env.World = newWorld.Vars
+			prog, cerr := expr.CompileBool(eff.When)
+			if cerr != nil {
+				return world.World{}, nil, saySB, nil, fmt.Errorf("effect when %q: compile: %w", eff.When, cerr)
+			}
+			ok, eerr := expr.EvalBool(prog, env)
+			if eerr != nil {
+				return world.World{}, nil, saySB, nil, fmt.Errorf("effect when %q: eval: %w", eff.When, eerr)
+			}
+			if !ok {
+				m.logger.DebugContext(ctx, trace.EvMachineEffectApplied,
+					slog.String("type", "skip"),
+					slog.String("when", eff.When),
+				)
+				continue
+			}
+		}
 		switch {
 		case len(eff.Set) > 0:
 			for k, v := range eff.Set {
@@ -1057,13 +1155,41 @@ func (m *machineImpl) applyEffects(effects []app.Effect, w world.World, env expr
 // orchestrator to refresh the on-screen view after host-call bindings write
 // new values into world on the same turn.
 func (m *machineImpl) RenderState(cur app.StatePath, w world.World) (string, error) {
-	cs, ok := m.states[string(cur)]
-	if !ok || cs.s == nil || cs.s.View == "" {
-		return "", nil
-	}
 	env := expr.Env{
 		Slots: map[string]any{},
 		World: w.Vars,
+		Menu:  MenuToTemplateMap(m.Menu(cur, w)),
+	}
+	expr.PopulateMenuHelpers(&env)
+	if par := parseParallel(string(cur)); par.IsParallel {
+		// Parallel composition: parent view (if any) + each leaf view.
+		var sb strings.Builder
+		if parCS, ok := m.states[par.Root]; ok && parCS.s != nil && parCS.s.View != "" {
+			v, err := expr.Render(parCS.s.View, env)
+			if err != nil {
+				return "", fmt.Errorf("render parallel parent view %q: %w", par.Root, err)
+			}
+			sb.WriteString(v)
+		}
+		for _, leaf := range par.RegionLeaves {
+			cs, ok := m.states[leaf]
+			if !ok || cs.s == nil || cs.s.View == "" {
+				continue
+			}
+			v, err := expr.Render(cs.s.View, env)
+			if err != nil {
+				return "", fmt.Errorf("render region leaf view %q: %w", leaf, err)
+			}
+			if sb.Len() > 0 {
+				sb.WriteString("\n\n")
+			}
+			sb.WriteString(v)
+		}
+		return sb.String(), nil
+	}
+	cs, ok := m.states[string(cur)]
+	if !ok || cs.s == nil || cs.s.View == "" {
+		return "", nil
 	}
 	return expr.Render(cs.s.View, env)
 }
@@ -1128,13 +1254,20 @@ func resolveEffectValue(v any, env expr.Env, w world.World) (any, error) {
 //   - Otherwise, target state view.
 //   - If say text exists, prepend it.
 func (m *machineImpl) renderView(tr app.Transition, targetPath string, w world.World, env expr.Env, sayText string) (string, error) {
-	// Build a new env with the updated world for rendering.
+	// Build a new env with the updated world for rendering. Populate
+	// env.Menu (and the helper-fn closures) so view templates can render
+	// the "what can I do right now" surface inline — primary/blocked
+	// intents with reasons. The menu is computed against the resolved
+	// target path and the post-effect world so the on-screen menu reflects
+	// the state the user is about to see.
 	renderEnv := expr.Env{
 		Slots: env.Slots,
 		World: w.Vars,
 		Event: env.Event,
 		Run:   env.Run,
+		Menu:  MenuToTemplateMap(m.Menu(app.StatePath(targetPath), w)),
 	}
+	expr.PopulateMenuHelpers(&renderEnv)
 
 	var viewText string
 
@@ -1209,13 +1342,29 @@ func (m *machineImpl) TryGuards(cur app.StatePath, w world.World, intentName str
 // transition the author intends to surface in the menu.
 func tryEvaluateArms(arms []compiledTransition, env expr.Env, statePath string) GuardDryRunResult {
 	hint := ""
+	whenFailed := false
 	for i := range arms {
 		arm := &arms[i]
 		if arm.tr.Default {
 			// Default arm always fires, but mark MatchedDefault so menu-builders
-			// can distinguish this from a real when: match.
+			// can distinguish this from a real when: match. Carry a hint so
+			// menu code can surface "you can type this but it won't do what
+			// you want" as a blocked entry. Prefer the default arm's own
+			// guard_hint (the canonical place authors document the unmet
+			// precondition); fall back to any hint captured from a failing
+			// when arm earlier in the list.
 			target := resolveTarget(statePath, arm.tr.Target)
-			return GuardDryRunResult{Primary: true, MatchedDefault: true, DestinationHint: target}
+			reason := arm.tr.GuardHint
+			if reason == "" {
+				reason = hint
+			}
+			return GuardDryRunResult{
+				Primary:         true,
+				MatchedDefault:  true,
+				WhenArmFailed:   whenFailed,
+				DestinationHint: target,
+				BlockedReason:   reason,
+			}
 		}
 		if arm.guard == nil {
 			// No guard = always true (not a default: branch).
@@ -1232,12 +1381,13 @@ func tryEvaluateArms(arms []compiledTransition, env expr.Env, statePath string) 
 			return GuardDryRunResult{Primary: true, DestinationHint: target}
 		}
 		// Guard failed; capture the hint from the first failing guard.
+		whenFailed = true
 		if hint == "" && arm.tr.GuardHint != "" {
 			hint = arm.tr.GuardHint
 		}
 	}
 	// All guards failed, no default.
-	return GuardDryRunResult{Blocked: true, BlockedReason: hint}
+	return GuardDryRunResult{Blocked: true, BlockedReason: hint, WhenArmFailed: true}
 }
 
 // ─── Machine.AllowedIntents ──────────────────────────────────────────────────
@@ -1313,6 +1463,40 @@ func stateEnterPaths(oldPath, newPath string) []string {
 	return out
 }
 
+// stateExitPathsAware extends stateExitPaths to gracefully handle parallel-
+// encoded paths. For exits, we use the structural-parent of either side
+// (`StripParallel`) — entering or leaving a parallel state at the parent
+// level is what matters for outer ancestors; region-internal exits are
+// emitted separately by the parallel turn handler.
+func stateExitPathsAware(oldPath, newPath string) []string {
+	return stateExitPaths(stripParallel(oldPath), stripParallel(newPath))
+}
+
+// stateEnterPathsAware extends stateEnterPaths to expand a parallel-encoded
+// target into per-region leaf chains. For an entry transition into a
+// parallel state, we emit: outer compound ancestors (if any), the parallel
+// parent itself, then each region's leaf chain (shared parent already
+// included). This drives on_enter to fire on every region as it "enters".
+func stateEnterPathsAware(oldPath, newPath string) []string {
+	if !strings.Contains(newPath, parallelSigil) {
+		return stateEnterPaths(stripParallel(oldPath), newPath)
+	}
+	par := parseParallel(newPath)
+	oldStripped := stripParallel(oldPath)
+	// 1. ancestor entries up to and including the parallel parent.
+	out := stateEnterPaths(oldStripped, par.Root)
+	// 2. each region leaf chain — entries below the parallel parent.
+	for _, leaf := range par.RegionLeaves {
+		if leaf == par.Root || leaf == "" {
+			continue
+		}
+		for _, p := range stateEnterPaths(par.Root, leaf) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func commonPrefixLen(a, b []string) int {
 	n := len(a)
 	if len(b) < n {
@@ -1353,7 +1537,17 @@ func toInt64(v any) int64 {
 		return int64(x)
 	case int64:
 		return x
+	case int32:
+		return int64(x)
+	case uint:
+		return int64(x)
+	case uint32:
+		return int64(x)
+	case uint64:
+		return int64(x)
 	case float64:
+		return int64(x)
+	case float32:
 		return int64(x)
 	}
 	return 0

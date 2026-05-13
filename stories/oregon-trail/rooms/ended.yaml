@@ -1,0 +1,73 @@
+# ended_won / ended_lost — terminal endings for the trail.
+#
+# PHASE B scope: minimal terminals so the graph closes cleanly. Phase J
+# may layer a scoreboard view; not in scope here.
+
+states:
+
+  ended_won:
+    terminal: true
+    description: "The wagon party has reached the Willamette Valley."
+    relevant_world: [day, party_alive, food_lbs, oxen, money, profession]
+    # Phase G: terminal arrival post — the trail diary's last entry.
+    # phase_id is scoped to the run so re-running won't double-post.
+    on_enter:
+      - invoke: host.transport.post
+        with:
+          transport: tui
+          thread:    "{{ run.id }}"
+          phase_id:  "ended_won_{{ run.id }}"
+          title:     "Arrived in Willamette"
+          body: |
+            Day {{ world.day }}, {{ world.year }}. We made it.
+
+            **{{ world.party_alive }}** survivors rolled into the Willamette Valley
+            after a long road from Independence.
+
+            - Food remaining: {{ world.food_lbs }} lbs
+            - Oxen: {{ world.oxen }}
+            - Cash: ${{ world.money }}
+            - Profession: {{ world.profession }}
+
+            The journey is over.
+    view: |
+      You have reached the Willamette Valley!
+
+      Day:      {{ world.day }}
+      Party:    {{ world.party_alive }} survivors
+      Food:     {{ world.food_lbs }} lbs remaining
+      Oxen:     {{ world.oxen }}
+      Cash:     ${{ world.money }}
+      Profession: {{ world.profession }}
+
+      The journey is over.
+
+  ended_lost:
+    terminal: true
+    description: "The journey ends short of Oregon."
+    relevant_world: [day, party_alive, current_landmark, miles_traveled]
+    # Phase G: obituary post for the trail diary. Notes the last
+    # known location + day. last_event / illness_kind may be empty
+    # depending on what killed the party; the body is still readable.
+    on_enter:
+      - invoke: host.transport.post
+        with:
+          transport: tui
+          thread:    "{{ run.id }}"
+          phase_id:  "ended_lost_{{ run.id }}"
+          title:     "Obituary"
+          body: |
+            Day {{ world.day }}, {{ world.year }}. The trail claims another wagon party.
+
+            **Last known location:** {{ world.current_landmark }} ({{ world.miles_traveled }} mi into the leg).
+            **Survivors at the end:** {{ world.party_alive }}.
+
+            May the trail remember them.
+    view: |
+      The journey ends short of the Willamette Valley.
+
+      Last known location: {{ world.current_landmark }} ({{ world.miles_traveled }} mi into the leg).
+      Day:                 {{ world.day }}
+      Party:               {{ world.party_alive }} alive
+
+      The trail claims another wagon party.

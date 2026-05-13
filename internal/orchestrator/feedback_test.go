@@ -482,3 +482,93 @@ func TestComputeMenuNoDefaultNoMatchOmitted(t *testing.T) {
 	// so it's visible rather than silently missing.
 	require.Contains(t, blocked, "go south", "go south should be blocked (no when: branch covers it, no default:)")
 }
+
+// TestComputeMenuSlotlessIntentBlockedByGuard verifies the generic
+// "show disabled intents" surface: a slotless intent whose when: arm
+// fails AND whose default arm is a hint-only catch-all should appear
+// in Menu.Blocked with the failing when's guard_hint, not silently
+// stay in Menu.Primary.
+//
+// Mirrors the OT intro's start_journey pattern: required preconditions
+// not met → menu shows it as ✗ start_journey — <hint> rather than
+// looking like a clickable green entry that does nothing useful.
+func TestComputeMenuSlotlessIntentBlockedByGuard(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "slotless-test", Version: "1"},
+		Root: "lobby",
+		World: app.WorldSchema{
+			"ready": {Type: "bool", Default: false},
+		},
+		Intents: map[string]app.Intent{
+			"depart": {Title: "Depart", Description: "Leave the lobby."},
+			"look":   {Title: "Look"},
+		},
+		States: map[string]*app.State{
+			"lobby": {
+				View: "Lobby.",
+				On: map[string][]app.Transition{
+					"depart": {
+						{Target: "outside", When: "world.ready == true"},
+						{Target: "lobby", Default: true, GuardHint: "Get ready first."},
+					},
+					"look": {{Target: "lobby"}},
+				},
+			},
+			"outside": {View: "Outside."},
+		},
+	}
+	m, err := machine.New(def)
+	require.NoError(t, err)
+
+	// World where the when arm fails (ready=false).
+	w := machine.WorldFromSchema(def.World)
+	menu := buildMenu(t, def, m, "lobby", w)
+	primary, blocked := menuDisplays(menu)
+
+	require.Contains(t, primary, "look", "look has no guard so always primary")
+	require.NotContains(t, primary, "depart", "depart's when arm fails — must not be primary")
+	require.Contains(t, blocked, "depart", "depart should appear blocked")
+
+	// The guard_hint from the failing when arm carries through.
+	var departBlocked *orchestrator.MenuEntry
+	for i := range menu.Blocked {
+		if menu.Blocked[i].Intent == "depart" {
+			departBlocked = &menu.Blocked[i]
+			break
+		}
+	}
+	require.NotNil(t, departBlocked)
+	require.Equal(t, "Get ready first.", departBlocked.Reason)
+
+	// Same menu in a world where the guard passes → depart is primary.
+	wReady := w.With("ready", true)
+	menuReady := buildMenu(t, def, m, "lobby", wReady)
+	primaryReady, blockedReady := menuDisplays(menuReady)
+	require.Contains(t, primaryReady, "depart", "with ready=true depart is primary")
+	require.NotContains(t, blockedReady, "depart")
+}
+
+// TestComputeMenu_WrapsMachineMenu pins the post-refactor contract: the
+// orchestrator.ComputeMenu wrapper must return precisely what machine.Menu
+// returns (same primary + blocked entries in the same order). Used as a
+// guardrail so future churn in feedback.go doesn't silently diverge from
+// the in-machine canonical implementation.
+func TestComputeMenu_WrapsMachineMenu(t *testing.T) {
+	def, m := loadCloakDef(t)
+	w := machine.WorldFromSchema(app.WorldSchema(def.World))
+
+	wrapper := orchestrator.ComputeMenu(def, m, "foyer", w)
+	canonical := m.Menu("foyer", w)
+
+	require.Equal(t, len(canonical.Primary), len(wrapper.Primary))
+	require.Equal(t, len(canonical.Blocked), len(wrapper.Blocked))
+	for i := range canonical.Primary {
+		require.Equal(t, canonical.Primary[i].Display, wrapper.Primary[i].Display)
+		require.Equal(t, canonical.Primary[i].Intent, wrapper.Primary[i].Intent)
+		require.Equal(t, canonical.Primary[i].Primary, wrapper.Primary[i].Primary)
+	}
+	for i := range canonical.Blocked {
+		require.Equal(t, canonical.Blocked[i].Display, wrapper.Blocked[i].Display)
+		require.Equal(t, canonical.Blocked[i].Reason, wrapper.Blocked[i].Reason)
+	}
+}

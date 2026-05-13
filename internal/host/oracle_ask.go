@@ -31,8 +31,14 @@ import (
 //     via KITSOKI_APP_DIR) or the process working directory as a fallback.
 //
 // Optional args:
-//   - working_dir (string): cwd passed to the claude subprocess (scopes
+//   - working_dir   (string): cwd passed to the claude subprocess (scopes
 //     tool access). Defaults to the directory containing the prompt file.
+//   - system_prompt (string): persona / system-prompt instruction. Threaded
+//     to `claude --append-system-prompt`. When also passing `agent:`, the
+//     inline value wins (override).
+//   - agent         (string): name of an entry in AppDef.Agents (injected
+//     via WithAgents); applies the agent's SystemPrompt as the system prompt
+//     and forwards its Model (when set) as `claude --model`.
 //
 // All other keys in args are treated as template variables and are
 // available to the prompt template as {{ args.X }}.
@@ -77,6 +83,16 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		"-p",
 		"--output-format", "text",
 		"--permission-mode", "bypassPermissions",
+	}
+	// Per-call agent + inline system_prompt — applied via the same shared
+	// helper as host.oracle.talk so apps see one consistent shape across
+	// every oracle handler.
+	agent, _ := resolveAgent(ctx, args)
+	if sp := effectiveSystemPrompt(args, agent); strings.TrimSpace(sp) != "" {
+		cliArgs = append(cliArgs, "--append-system-prompt", sp)
+	}
+	if strings.TrimSpace(agent.Model) != "" {
+		cliArgs = append(cliArgs, "--model", agent.Model)
 	}
 
 	cr, runErr := runClaudeOneShot(ctx, bin, cliArgs, rendered, workingDir)

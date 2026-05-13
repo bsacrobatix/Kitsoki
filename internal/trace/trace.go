@@ -15,6 +15,15 @@
 //	machine.transition, machine.validation.rejected
 //	expr.compile_error, expr.eval_error
 //	store.events.appended
+//	offpath.enter, offpath.exit, offpath.ask.start, offpath.ask.done,
+//	offpath.ask.error, offpath.chat.resolved
+//	timeout.armed, timeout.cancelled, timeout.fired, timeout.error, timeout.rearmed
+//	teleport.start, teleport.done
+//	job.submitted, job.terminal, job.awaiting_input,
+//	job.clarification_answered, job.on_complete.run, job.error
+//	slotfill.requested, slotfill.continued
+//	disambig.presented, disambig.chosen
+//	inbox.notification.posted, inbox.item.opened, inbox.item.dismissed
 package trace
 
 import (
@@ -63,6 +72,52 @@ const (
 	// Deterministic routing.
 	EvTurnDeterministicHit  = "turn.deterministic_hit"
 	EvTurnDeterministicMiss = "turn.deterministic_miss"
+
+	// Off-path side-channel (§7.7).  The off-path runtime is intentionally
+	// orthogonal to the state machine — no Turn() fires, no transition events
+	// land on the journey.  These trace constants are the only structured
+	// breadcrumb of that activity in --trace-pretty output.
+	EvOffPathEnter        = "offpath.enter"
+	EvOffPathExit         = "offpath.exit"
+	EvOffPathAskStart     = "offpath.ask.start"
+	EvOffPathAskDone      = "offpath.ask.done"
+	EvOffPathAskError     = "offpath.ask.error"
+	EvOffPathChatResolved = "offpath.chat.resolved"
+
+	// Timeout dispatcher (§9.5).  arm / cancel / fire / rearm cover every
+	// dispatcher-side state change; error covers persistence and dispatch
+	// failures.
+	EvTimeoutArmed     = "timeout.armed"
+	EvTimeoutCancelled = "timeout.cancelled"
+	EvTimeoutFired     = "timeout.fired"
+	EvTimeoutError     = "timeout.error"
+	EvTimeoutRearmed   = "timeout.rearmed"
+
+	// Teleport (used by inbox, off-path return, oracle return, etc.).
+	// The synthetic turn it appends is already covered by turn.* but
+	// teleport.* records the user-visible "I jumped sideways" intent.
+	EvTeleportStart = "teleport.start"
+	EvTeleportDone  = "teleport.done"
+
+	// Background-job lifecycle (orchestrator-side view; the scheduler has its
+	// own job-table events but the user-visible mode transitions go here).
+	EvJobSubmitted             = "job.submitted"
+	EvJobTerminal              = "job.terminal" // done/failed/cancelled
+	EvJobAwaitingInput         = "job.awaiting_input"
+	EvJobClarificationAnswered = "job.clarification_answered"
+	EvJobOnCompleteRun         = "job.on_complete.run"
+	EvJobError                 = "job.error"
+
+	// Slot-fill / disambiguation (orchestrator + TUI cooperate).
+	EvSlotFillRequested = "slotfill.requested"
+	EvSlotFillContinued = "slotfill.continued"
+	EvDisambigPresented = "disambig.presented"
+	EvDisambigChosen    = "disambig.chosen"
+
+	// Inbox.
+	EvInboxNotificationPosted = "inbox.notification.posted"
+	EvInboxItemOpened         = "inbox.item.opened"
+	EvInboxItemDismissed      = "inbox.item.dismissed"
 )
 
 // ─── Logger context key ───────────────────────────────────────────────────────

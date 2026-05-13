@@ -187,6 +187,46 @@ view: |
 Variables: `world.*`, `slots.*`, plus a few orchestrator-injected
 context keys (`run.session_id`, `run.turn`).
 
+Block constructs: `{{ if }}…{{ else }}…{{ end }}` and
+`{{ range list-expr }}…{{ end }}`. Inside a `range` body the current
+element is bound to `.` — write `.display`, `.reason`, etc., to read
+fields off the iteration value.
+
+`menu.*` and the menu-helper functions surface the computed §7.2
+menu (primary + blocked intents with reasons) inside view bodies,
+so authors can render the "what can I do right now" surface inline
+with prose — not only in the right-side actions pane.
+
+```yaml
+view: |
+  Choose:
+  {{ range menu.primary }}- {{ .display }}
+  {{ end }}{{ range menu.blocked }}- ✗ {{ .display }} — {{ .reason }}
+  {{ end }}
+```
+
+Or, for a single intent, the helper functions are usually clearer:
+
+* `available(name)` → bool — `name` is in `menu.primary`.
+* `blocked(name)` → bool — `name` is in `menu.blocked`.
+* `blocked_reason(name)` → string — the failing arm's `guard_hint`,
+  or `""` when not blocked.
+* `intent_status(name)` → `"available"` / `"blocked"` / `"unknown"`
+  (`"unknown"` covers global intents that aren't bound to the
+  current state).
+
+```yaml
+view: |
+  {{ if available("start_journey") }}- start the journey
+  {{ else }}- ✗ start_journey — {{ blocked_reason("start_journey") }}
+  {{ end }}
+```
+
+`menu.primary[i]` and `menu.blocked[i]` are plain map entries with
+keys `intent`, `display`, `reason`, `destination_hint`, and
+`primary` — JSON-serializable, so the same shape is what the TUI's
+right-side panel and the in-view templates read.
+
 The result is rendered by the surface — the TUI runs it through
 Glamour; transports send it as Markdown or convert to wiki markup.
 

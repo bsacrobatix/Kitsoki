@@ -164,6 +164,28 @@ A background job produces **two** notifications — `info` when
 submitted and `success`/`error`/`warn` when terminal — so a single
 job → `unread: 2`.
 
+`expect_jobs` pins the terminal status of jobs that landed during the
+turn. Catches a regression class `expect_inbox` cannot see: a handler
+that fails silently (e.g. `cmd:` passed as a list, type-assertion in
+`handlers.go` returns `Result{Error: ...}`) lands `status=failed`, yet
+`on_complete:` still runs and the game continues — only the per-job
+terminal status is wrong.
+
+```yaml
+turns:
+  - intent: { name: continue }
+    advance_clock: "300ms"
+    expect_jobs:
+      - namespace: host.run        # job.Kind to match
+        status:    done            # done | failed | cancelled | awaiting_input
+```
+
+Matching is order-sensitive against jobs that newly reached a terminal
+status this turn (creation-time ASC). Surplus newly-terminal jobs not
+asserted pass silently, so fixtures don't have to enumerate every
+side-effect dispatch. A job that transitions from `awaiting_input` →
+`done` after a clarification answer counts as newly terminal this turn.
+
 The full lifecycle (clarification, retry, error paths) is documented
 in [`background-jobs/testing.md`](background-jobs/testing.md).
 

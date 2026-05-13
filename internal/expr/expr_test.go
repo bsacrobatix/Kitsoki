@@ -334,3 +334,182 @@ func TestRender_ScalarsKeepFmtVBehavior(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "PLTFRM-89912 / 42 / true", out)
 }
+
+// ─── Menu env + helper builtins (in-view menu rendering) ─────────────────────
+
+// sampleMenuEnv returns an Env with a small representative menu populated
+// (two primary entries + one blocked entry with a reason), with the helper
+// functions bound. Used by the helper-builtin tests below.
+func sampleMenuEnv() expr.Env {
+	env := expr.Env{
+		Slots: map[string]any{},
+		World: map[string]any{},
+		Menu: map[string]any{
+			"primary": []any{
+				map[string]any{
+					"intent":           "name_party",
+					"display":          "name_party <names:string>",
+					"reason":           "",
+					"destination_hint": "intro",
+					"primary":          true,
+				},
+				map[string]any{
+					"intent":           "look",
+					"display":          "look",
+					"reason":           "",
+					"destination_hint": "intro",
+					"primary":          true,
+				},
+			},
+			"blocked": []any{
+				map[string]any{
+					"intent":           "start_journey",
+					"display":          "start_journey",
+					"reason":           "Name the party, pick a profession, and pick a month before you can leave.",
+					"destination_hint": "",
+					"primary":          false,
+				},
+			},
+		},
+	}
+	expr.PopulateMenuHelpers(&env)
+	return env
+}
+
+func TestRender_MenuPrimaryRange(t *testing.T) {
+	// Iterate menu.primary with the range construct; each iteration binds
+	// `.display` (rewritten internally to `item.display`).
+	tmpl := "{{ range menu.primary }}- {{ .display }}\n{{ end }}"
+	out, err := expr.Render(tmpl, sampleMenuEnv())
+	require.NoError(t, err)
+	require.Equal(t, "- name_party <names:string>\n- look\n", out)
+}
+
+func TestRender_MenuBlockedRange(t *testing.T) {
+	tmpl := "{{ range menu.blocked }}✗ {{ .intent }} — {{ .reason }}{{ end }}"
+	out, err := expr.Render(tmpl, sampleMenuEnv())
+	require.NoError(t, err)
+	require.Equal(t, "✗ start_journey — Name the party, pick a profession, and pick a month before you can leave.", out)
+}
+
+func TestRender_AvailableHelper(t *testing.T) {
+	env := sampleMenuEnv()
+
+	out, err := expr.Render(`{{ if available("name_party") }}yes{{ else }}no{{ end }}`, env)
+	require.NoError(t, err)
+	require.Equal(t, "yes", out)
+
+	out, err = expr.Render(`{{ if available("start_journey") }}yes{{ else }}no{{ end }}`, env)
+	require.NoError(t, err)
+	require.Equal(t, "no", out)
+
+	// Unknown intent: not in primary → available returns false.
+	out, err = expr.Render(`{{ if available("missing_intent") }}yes{{ else }}no{{ end }}`, env)
+	require.NoError(t, err)
+	require.Equal(t, "no", out)
+}
+
+func TestRender_BlockedHelper(t *testing.T) {
+	env := sampleMenuEnv()
+
+	out, err := expr.Render(`{{ if blocked("start_journey") }}blocked{{ else }}ok{{ end }}`, env)
+	require.NoError(t, err)
+	require.Equal(t, "blocked", out)
+
+	out, err = expr.Render(`{{ if blocked("name_party") }}blocked{{ else }}ok{{ end }}`, env)
+	require.NoError(t, err)
+	require.Equal(t, "ok", out)
+}
+
+func TestRender_BlockedReasonHelper(t *testing.T) {
+	out, err := expr.Render(`{{ blocked_reason("start_journey") }}`, sampleMenuEnv())
+	require.NoError(t, err)
+	require.Equal(t, "Name the party, pick a profession, and pick a month before you can leave.", out)
+
+	// Not blocked → empty string.
+	out, err = expr.Render(`{{ blocked_reason("name_party") }}`, sampleMenuEnv())
+	require.NoError(t, err)
+	require.Equal(t, "", out)
+}
+
+func TestRender_IntentStatusHelper(t *testing.T) {
+	env := sampleMenuEnv()
+
+	out, err := expr.Render(`{{ intent_status("look") }}`, env)
+	require.NoError(t, err)
+	require.Equal(t, "available", out)
+
+	out, err = expr.Render(`{{ intent_status("start_journey") }}`, env)
+	require.NoError(t, err)
+	require.Equal(t, "blocked", out)
+
+	out, err = expr.Render(`{{ intent_status("nope") }}`, env)
+	require.NoError(t, err)
+	require.Equal(t, "unknown", out)
+}
+
+func TestRender_OTIntroPattern(t *testing.T) {
+	// Mirrors the OT intro.yaml usage: when start_journey is blocked, show
+	// the reason inline; when available, show the bare intent name.
+	tmpl := `{{ if available("start_journey") }}- start the journey{{ else }}- ✗ start_journey — {{ blocked_reason("start_journey") }}{{ end }}`
+
+	out, err := expr.Render(tmpl, sampleMenuEnv())
+	require.NoError(t, err)
+	require.Equal(t, "- ✗ start_journey — Name the party, pick a profession, and pick a month before you can leave.", out)
+
+	// Now flip: move start_journey into primary.
+	env := expr.Env{
+		Slots: map[string]any{},
+		World: map[string]any{},
+		Menu: map[string]any{
+			"primary": []any{
+				map[string]any{
+					"intent":  "start_journey",
+					"display": "start_journey",
+					"primary": true,
+				},
+			},
+			"blocked": []any{},
+		},
+	}
+	expr.PopulateMenuHelpers(&env)
+	out, err = expr.Render(tmpl, env)
+	require.NoError(t, err)
+	require.Equal(t, "- start the journey", out)
+}
+
+// TestRender_EmptyMenu pins behaviour when env.Menu is nil — helpers must
+// answer "unknown / not available" without panicking, and {{ range }} over
+// nil yields the empty string.
+func TestRender_EmptyMenu(t *testing.T) {
+	env := expr.Env{Slots: map[string]any{}, World: map[string]any{}}
+	expr.PopulateMenuHelpers(&env) // bind helpers against nil menu
+
+	out, err := expr.Render(`{{ available("x") }} / {{ blocked("x") }} / {{ intent_status("x") }}`, env)
+	require.NoError(t, err)
+	require.Equal(t, "false / false / unknown", out)
+
+	out, err = expr.Render(`{{ range menu.primary }}{{ .display }}{{ end }}`, env)
+	require.NoError(t, err)
+	require.Equal(t, "", out)
+}
+
+// TestRender_RangeNoIdentifierLeak verifies the dot-rewriter only touches
+// leading-dot tokens — `a.foo` stays as `a.foo` inside a range body.
+func TestRender_RangeNoIdentifierLeak(t *testing.T) {
+	env := expr.Env{
+		Slots: map[string]any{},
+		World: map[string]any{"banner": "HELLO"},
+		Menu: map[string]any{
+			"primary": []any{
+				map[string]any{"intent": "a", "display": "x"},
+				map[string]any{"intent": "b", "display": "y"},
+			},
+		},
+	}
+	expr.PopulateMenuHelpers(&env)
+	tmpl := "{{ range menu.primary }}{{ world.banner }}={{ .display }};{{ end }}"
+	out, err := expr.Render(tmpl, env)
+	require.NoError(t, err)
+	require.Equal(t, "HELLO=x;HELLO=y;", out)
+}

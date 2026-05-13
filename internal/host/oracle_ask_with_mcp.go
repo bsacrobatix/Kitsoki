@@ -244,6 +244,11 @@ func buildValidatorMCPServer(schemaPath, outputPath string, opts validatorOption
 //     persists the conversation to the chat transcript
 //     and reuses the claude session ID stored on the
 //     chat row across turns (same as host.oracle.talk).
+//   - system_prompt (string, optional): inline persona/system-prompt
+//     instruction; threaded to `claude --append-system-prompt`. Wins over
+//     any agent: value when both are set.
+//   - agent         (string, optional): name of an entry in AppDef.Agents
+//     (injected via WithAgents); supplies SystemPrompt + Model for this call.
 //
 // Returns Result.Data with:
 //   - stdout      (string): claude's text reply
@@ -579,6 +584,19 @@ func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, 
 		} else {
 			cliArgs = append(cliArgs, "--resume", claudeSessionID)
 		}
+	}
+
+	// Per-call agent + inline system_prompt — same shape as the other two
+	// oracle handlers (host.oracle.{ask,talk}). The retry-loop path runs
+	// claude --resume on subsequent iterations, but resume carries the
+	// original session's system prompt forward implicitly, so we only
+	// need to append the flag on iteration 0 (handled by BaseCLIArgs).
+	agent, _ := resolveAgent(ctx, args)
+	if sp := effectiveSystemPrompt(args, agent); strings.TrimSpace(sp) != "" {
+		cliArgs = append(cliArgs, "--append-system-prompt", sp)
+	}
+	if strings.TrimSpace(agent.Model) != "" {
+		cliArgs = append(cliArgs, "--model", agent.Model)
 	}
 
 	// Build the merged mcp_servers map: caller-provided entries plus an

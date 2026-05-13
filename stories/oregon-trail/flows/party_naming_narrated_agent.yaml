@@ -1,0 +1,75 @@
+# party_naming_narrated_agent — exercises the narrated branch of
+# generate_names (world.narration: true) and asserts that the
+# host.oracle.ask invocation threads the named `party_namer` agent
+# through to the handler via the new top-level agents primitive.
+#
+# Sister fixture to party_naming.yaml, which covers the deterministic
+# branch. Together they cover both arms of the generate_names guard.
+#
+# The host.oracle.ask stub returns a canned CSV the way a real claude
+# call would; the state machine then splits it into the five per-seat
+# party_member_* keys. The agent: arg on the with: block is asserted
+# via expect_events → HostDispatched.args.agent so a future refactor
+# that drops the agent: wiring fails this fixture loudly.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: intro
+initial_world:
+  narration:     true
+  # Seed party_names with a five-slot CSV so the post-host `set:` chain
+  # in generate_names's narrated arm — which split()s world.party_names
+  # to populate party_member_1..5 — succeeds. The host.oracle.ask bind
+  # overwrites party_names with the stub's CSV AFTER the transition's
+  # effects run (orchestrator dispatches host calls post-applyEffects),
+  # so party_member_* keep their seed values for this fixture. The
+  # primary assertion is on HostDispatched.args.agent, which is what
+  # this fixture exists to prove.
+  party_names:   "Adam,Beth,Carol,Daniel,Edith"
+  party_size:    5
+
+host_handlers:
+  # Canned CSV — five names, comma-separated, no spaces. Mirrors what
+  # the party_namer agent is instructed to produce. The handler is
+  # stubbed; we don't actually exercise the prompt-template render
+  # here, just confirm that the engine threads the `agent:` arg down.
+  host.oracle.ask:
+    data:
+      stdout:    "Luke,Leia,Han,Chewie,Yoda"
+      exit_code: 0
+      ok:        true
+
+turns:
+
+  # Single turn: generate_names { theme } → the narrated arm fires
+  # because world.narration is true. host.oracle.ask is invoked with
+  # the party_namer agent; the post-bind party_names is the stub's
+  # CSV. The party_member_* keys were set from the seeded party_names
+  # before the bind landed — that's a pre-existing ordering of the
+  # narrated arm, not exercised here.
+  - intent:
+      name: generate_names
+      slots:
+        theme: "Star Wars"
+    expect_state: intro
+    expect_world:
+      # Bind landed: party_names overwritten with the stub's stdout.
+      party_names: "Luke,Leia,Han,Chewie,Yoda"
+    # HostDispatched carries the *post-rerender* args, so this asserts
+    # the engine resolved the templated `{{ slots.theme }}` AND kept
+    # the literal `agent: party_namer` on the way down to the handler.
+    # This is the primary load-bearing assertion of the fixture: it
+    # would fail if a future refactor dropped the agent: arg from
+    # intro.yaml's host.oracle.ask invocation, or if the engine stopped
+    # forwarding `agent:` into HostDispatched.args.
+    expect_events:
+      - kind: HostDispatched
+        effect:
+          namespace: host.oracle.ask
+          args:
+            prompt_path: "prompts/name_party.md"
+            agent:       party_namer
+            args:
+              theme: "Star Wars"
+
+expect_no_errors: true

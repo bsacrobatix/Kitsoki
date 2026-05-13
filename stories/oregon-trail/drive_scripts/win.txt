@@ -1,0 +1,188 @@
+# win.txt — human-typed input script for a deterministic winning
+# playthrough of stories/oregon-trail. One line per turn; each line is
+# the free-text input that, when routed through `kitsoki drive`, lands
+# the same intents as flows/winning_deterministic.yaml.
+#
+# `kitsoki drive` is unshipped (see ai-collaboration-proposal.md). This
+# file is the placeholder so reviewers can read the player-facing shape
+# of a winning run today. When drive ships, it will read this file as
+# stdin (or `--script win.txt`) and step the orchestrator one input at
+# a time, routing each line through the intent harness like a TTY user.
+#
+# Lines beginning with `#` are comments and skipped by drive.
+# Blank lines are also skipped.
+
+# ── Intro ────────────────────────────────────────────────────────────
+name the party You, Adam, Beth, Carol, Daniel
+play as a banker
+depart in april
+start the journey
+
+# ── General store ────────────────────────────────────────────────────
+# Outfit the wagon. A banker starts with $1600.
+buy 6 oxen for 240
+buy 600 lbs of food for 60
+buy 200 bullets for 20
+buy 3 sets of clothing for 30
+buy 1 spare wheel for 10
+buy 1 spare axle for 10
+buy 1 spare tongue for 10
+leave the store
+
+# ── Trail: Independence → Kansas River Crossing (leg_a, 102 mi) ──────
+# Each `continue` is a game-day on the trail. Several days of steady
+# pace cover the 102 miles. In drive mode each line fires the
+# continue intent; the orchestrator's event roll determines whether a
+# substate fires that turn.
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+
+# Arrived at the Kansas River. The arrival_hint nudges the player.
+approach the river
+ford the river
+continue
+
+# ── Trail: Kansas River → Fort Kearney (leg_b, 202 mi, fort) ─────────
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+
+# At Fort Kearney — optional resupply, then press on.
+enter the fort
+leave the fort
+continue
+
+# ── Trail: Fort Kearney → Chimney Rock (leg_c, 250 mi) ───────────────
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+
+# At Chimney Rock — visual landmark, no choice. Move on.
+continue
+
+# ── Trail: Chimney Rock → Fort Laramie (leg_d, 86 mi, fort) ──────────
+continue
+continue
+continue
+continue
+continue
+continue
+enter the fort
+leave the fort
+continue
+
+# ── Trail: Fort Laramie → South Pass (leg_e, 292 mi, mountain) ───────
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+
+# At South Pass — Continental Divide. Press on.
+continue
+
+# ── Trail: South Pass → Snake River (leg_f, 250 mi) ──────────────────
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+
+# At Snake River — wider, deeper than Kansas. Ferry recommended.
+approach the river
+take the ferry
+continue
+
+# ── Trail: Snake River → Willamette Valley (leg_g, 318 mi, mountain) ─
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+
+# ── Won! ─────────────────────────────────────────────────────────────
+# At leg_g_awaiting_reply the final `continue` lands ended_won.
+continue

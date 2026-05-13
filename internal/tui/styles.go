@@ -71,18 +71,29 @@ var (
 			Foreground(colorWarning).
 			Italic(true)
 
-	// menuItemStyle renders a menu item.
+	// clarificationStyle renders a soft "I didn't catch that" prompt. It is
+	// deliberately muted (gray, not warning-amber) — the user didn't fail,
+	// the router did, and the next line is the recovery menu.
+	clarificationStyle = lipgloss.NewStyle().
+				Foreground(colorMuted).
+				Italic(true)
+
+	// menuItemStyle renders an available (guard-passing) menu item. Soft
+	// green tint signals "you can do this right now" without shouting.
 	menuItemStyle = lipgloss.NewStyle().
-			Foreground(colorText)
+			Foreground(colorAccent)
 
 	// menuItemSelectedStyle renders the selected/highlighted menu item.
 	menuItemSelectedStyle = lipgloss.NewStyle().
 				Foreground(colorSelected).
 				Bold(true)
 
-	// menuItemBlockedStyle renders a blocked menu item.
+	// menuItemBlockedStyle renders a menu item whose guards currently fail.
+	// Red signals "the intent is declared in this state but its preconditions
+	// aren't met yet" — paired with the captured guard_hint inline so the
+	// player knows what to do first.
 	menuItemBlockedStyle = lipgloss.NewStyle().
-				Foreground(colorMuted).
+				Foreground(colorError).
 				Italic(true)
 
 	// offPathBannerStyle renders the off-path banner.
@@ -90,6 +101,12 @@ var (
 				Foreground(colorWarning).
 				Bold(true).
 				Italic(true)
+
+	// transcriptOffPathAnswerStyle renders an oracle answer surfaced in
+	// off-path mode. Soft amber to match the off-path framing without
+	// shouting; not italic because the body is normal prose.
+	transcriptOffPathAnswerStyle = lipgloss.NewStyle().
+					Foreground(colorOffPath)
 
 	// turnHeaderStyle renders the user-turn header in the transcript.
 	turnHeaderStyle = lipgloss.NewStyle().

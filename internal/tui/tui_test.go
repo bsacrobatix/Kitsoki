@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/chathost"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/orchestrator"
@@ -194,6 +196,132 @@ func TestTUIWinningPath(t *testing.T) {
 	}
 }
 
+// setupCloakWithOracle builds a cloak orchestrator wired with a real chat
+// store and the host-package's fake-oracle.sh as the claude stand-in.
+// Returns the underlying store handle so tests can sniff the event log.
+func setupCloakWithOracle(t *testing.T) (*orchestrator.Orchestrator, app.SessionID, store.Store) {
+	t.Helper()
+
+	// Point the oracle handler at the fake-oracle.sh shipped with the
+	// host package's testdata. Path is repo-root-relative.
+	t.Setenv("KITSOKI_ORACLE_CLAUDE_BIN", "../host/testdata/fake-oracle.sh")
+
+	def, err := app.Load("../../testdata/apps/cloak/app.yaml")
+	require.NoError(t, err)
+
+	mach, err := machine.New(def)
+	require.NoError(t, err)
+
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
+	require.NoError(t, err)
+
+	rawChatStore, err := chats.NewStore(s.DB())
+	require.NoError(t, err)
+
+	orch := orchestrator.New(def, mach, s, h,
+		orchestrator.WithChatStore(chathost.NewAdapter(rawChatStore)),
+	)
+
+	ctx := context.Background()
+	sid, err := orch.NewSession(ctx)
+	require.NoError(t, err)
+
+	return orch, sid, s
+}
+
+// TestTUIOffPathInputRoutesToOracle exercises the off-path runtime end-to-end:
+// /freeform flips ModeOffPath, the next text submission goes to the oracle
+// via AskOffPath, the orchestrator's foreground Turn() machinery is NOT
+// invoked, and only the off-path event kinds land in the session log.
+func TestTUIOffPathInputRoutesToOracle(t *testing.T) {
+	orch, sid, s := setupCloakWithOracle(t)
+	m := buildModel(t, orch, sid)
+
+	// /freeform → ModeOffPath.
+	m = runTurnBlocking(t, m, "/freeform")
+	require.Equal(t, tuipkg.ModeOffPath, extractMode(t, m))
+
+	// Type and submit a free-form question. This should NOT route through
+	// MatchDeterministic + harness — it should fire AskOffPath instead.
+	m = runTurnBlocking(t, m, "what is the meaning of life?")
+
+	// After the async reply lands, we should be back in ModeOffPath
+	// (not ModeOnPath — the banner stays).
+	require.Equal(t, tuipkg.ModeOffPath, extractMode(t, m))
+
+	// The transcript should contain the fake oracle's echo of our question.
+	transcriptText := extractTranscript(t, m)
+	require.Contains(t, transcriptText, "what is the meaning of life?",
+		"transcript should include the user's off-path question header")
+	require.Contains(t, transcriptText, "ANSWER for q=[what is the meaning of life?]",
+		"transcript should include the fake oracle's echoed answer")
+
+	// Sniff the raw event log: only off-path event kinds should be
+	// present from the off-path question; in particular, no
+	// TransitionApplied was emitted by the off-path submission.
+	hist, err := s.LoadHistory(sid)
+	require.NoError(t, err)
+	var sawOffPathQuestion, sawOffPathAnswer bool
+	for _, ev := range hist {
+		switch ev.Kind {
+		case store.OffPathQuestion:
+			sawOffPathQuestion = true
+		case store.OffPathAnswer:
+			sawOffPathAnswer = true
+		case store.TransitionApplied:
+			// Cloak's session start emits a TransitionApplied for the
+			// initial state-enter; that's fine. But anything else here
+			// means off-path leaked into the foreground turn path.
+			// We allow only the initial-entry transition by checking
+			// it was emitted at turn ≤ 0 (the initial root entry).
+			require.LessOrEqual(t, int64(ev.Turn), int64(0),
+				"unexpected TransitionApplied at turn %d after off-path input", ev.Turn)
+		}
+	}
+	require.True(t, sawOffPathQuestion,
+		"expected an OffPathQuestion event in the session log")
+	require.True(t, sawOffPathAnswer,
+		"expected an OffPathAnswer event in the session log")
+}
+
+// TestTUIOffPathDeniedWhileAwaitingLLM verifies the /freeform safety gate:
+// while the model is in ModeAwaitingLLM (an on-path turn is in flight),
+// /freeform is refused with a transient transcript message rather than
+// silently switching modes mid-turn and orphaning the goroutine.
+//
+// We bypass submitLine() (which type-streams characters; type input is
+// blocked in ModeAwaitingLLM) and pre-fill the prompt directly, then press
+// Enter. The slash-command branch in routeKey() fires before the awaiting
+// gate, so /freeform is reached even while in-flight — it's our enterOffPath
+// helper's job to deny the switch.
+func TestTUIOffPathDeniedWhileAwaitingLLM(t *testing.T) {
+	orch, sid := setupCloak(t)
+	m := buildModel(t, orch, sid)
+
+	// Manually put the model into ModeAwaitingLLM (no real goroutine).
+	rm, ok := tuipkg.ExtractRootModel(m)
+	require.True(t, ok)
+	rm = tuipkg.SimulateSlowHarnessTurnStart(rm)
+	require.True(t, tuipkg.IsInFlight(rm))
+
+	// Pre-fill the prompt with "/freeform" then press Enter so the slash
+	// branch in routeKey runs.
+	tuipkg.SetPromptValue(&rm, "/freeform")
+	updated, _ := rm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	rm2, ok := tuipkg.ExtractRootModel(updated)
+	require.True(t, ok)
+	require.Equal(t, tuipkg.ModeAwaitingLLM, tuipkg.GetMode(rm2),
+		"/freeform must NOT switch modes while ModeAwaitingLLM is active")
+
+	transcriptText := tuipkg.GetTranscriptContent(rm2)
+	require.Contains(t, transcriptText, "can't enter off-path while a turn is in flight",
+		"expected the gate message to appear in the transcript")
+}
+
 // ─── Slash command tests ──────────────────────────────────────────────────────
 
 func TestTUISlashFreeformAndOnpath(t *testing.T) {
@@ -205,10 +333,14 @@ func TestTUISlashFreeformAndOnpath(t *testing.T) {
 	view := m.View()
 	require.Contains(t, view, "off the path",
 		"off-path banner should appear after /freeform")
+	require.Equal(t, tuipkg.ModeOffPath, extractMode(t, m),
+		"expected ModeOffPath after /freeform")
 
 	// /onpath → back to on-path.
 	m = runTurnBlocking(t, m, "/onpath")
 	view = m.View()
+	require.Equal(t, tuipkg.ModeOnPath, extractMode(t, m),
+		"expected ModeOnPath after /onpath")
 	// The banner should be gone from the current rendering.
 	_ = view // mode changed; transcript may still show the banner text but border should revert
 }
@@ -408,8 +540,10 @@ states:
 	m = runTurnBlocking(t, m, "do something invalid")
 
 	content := extractTranscript(t, m)
-	require.Contains(t, content, "blocked",
-		"transcript should contain 'blocked' for a rejected turn")
+	require.Contains(t, content, "didn't catch",
+		"transcript should render a clarification (not [blocked]) for an INTENT_NOT_ALLOWED rejection")
+	require.NotContains(t, content, "[blocked]",
+		"the literal [blocked] prefix has been replaced with a softer rendering")
 }
 
 // ─── Clarify mode ─────────────────────────────────────────────────────────────

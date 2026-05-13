@@ -258,18 +258,24 @@ func (h *ClaudeCLIHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallT
 		)
 	}
 
-	// Read the side-channel capture file. Empty/missing → the LLM never
-	// successfully called submit, which is a hard error here (no fallback).
+	// Read the side-channel capture file. Empty/missing → the LLM answered
+	// without calling submit. Return a ClarifyResponse so the orchestrator
+	// surfaces the LLM's free-form text to the user as a soft clarification
+	// rather than a red technical error. The trace still gets the technical
+	// form via the wrapped Underlying error.
 	captured, readErr := os.ReadFile(capturePath)
 	if readErr != nil || len(captured) == 0 {
-		// Surface the envelope's result text in the error to aid diagnosis.
 		var env claudeJSONEnvelope
 		_ = json.Unmarshal(raw, &env)
-		hint := truncate(env.Result, 200)
-		return mcp.CallToolParams{}, fmt.Errorf(
+		message := strings.TrimSpace(env.Result)
+		underlying := fmt.Errorf(
 			"harness/claude-cli: LLM did not call %s (no validated payload captured); claude said: %q",
-			validatorToolName, hint,
+			validatorToolName, truncate(message, 200),
 		)
+		return mcp.CallToolParams{}, &ClarifyResponse{
+			Message:    message,
+			Underlying: underlying,
+		}
 	}
 
 	params, parseErr := parseValidatedPayload(captured)

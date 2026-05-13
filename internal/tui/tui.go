@@ -28,6 +28,7 @@ import (
 	"kitsoki/internal/clock"
 	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
+	"kitsoki/internal/intent"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
@@ -302,7 +303,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		transcript:     newTranscriptModel(defaultWidth-menuWidth-6, transcriptHeight-inboxHeight),
 		menu:           newMenuModel(menuWidth, transcriptHeight-inboxHeight),
 		inbox:          newInboxModel(menuWidth, inboxHeight),
-		offPath:        newOffPathModel(""),
+		offPath:        newOffPathModel(offPathBannerFromApp(orch.AppDef())),
 		clarify:        newClarifyModel(),
 		disambiguation: newDisambiguationModel(),
 		menuSystem:     newMenuSystemModel(metaMenuLabel(orch.AppDef())),
@@ -471,6 +472,9 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = ModeOnPath
 		m.inFlightCancel = nil
 		return m.handleTurnOutcome(msg)
+
+	case offPathReplyMsg:
+		return m.handleOffPathReply(msg)
 
 	case continueTurnOutcomeMsg:
 		return m.handleContinueTurnOutcome(msg)
@@ -731,6 +735,13 @@ func (m RootModel) submitInput() (tea.Model, tea.Cmd) {
 		return m.handleSlashCommand(input)
 	}
 
+	// Off-path mode: free-form chat that does NOT touch world or state.
+	// Routes directly to host.oracle.talk via Orchestrator.AskOffPath
+	// rather than through MatchDeterministic → harness → machine.
+	if m.mode == ModeOffPath {
+		return m.submitOffPath(input)
+	}
+
 	m.lastInput = input
 
 	// Cheap, side-effect-free match against the current menu. This avoids the
@@ -822,28 +833,21 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Resolve the app-declared off_path triggers, falling back to the
+	// engine defaults when the app declares no off_path block.
+	enterCmd, exitCmd := offPathTriggers(m.orch.AppDef())
+
+	if parts[0] == enterCmd {
+		return m.enterOffPath()
+	}
+	if parts[0] == exitCmd {
+		return m.exitOffPath()
+	}
+
 	switch parts[0] {
 	case "/quit", "/q":
 		m.quitting = true
 		return m, tea.Quit
-
-	case "/freeform":
-		m.mode = ModeOffPath
-		m.offPath, _ = m.offPath.Update(enterOffPathMsg{})
-		m.location, _ = m.location.Update(offPathToggled{on: true})
-		m.transcript, _ = m.transcript.Update(offPathToggled{on: true})
-		m.prompt.Placeholder = "freeform chat — /onpath to resume"
-		m.transcript.AppendSystem(m.offPath.Banner())
-		return m, nil
-
-	case "/onpath":
-		m.mode = ModeOnPath
-		m.offPath, _ = m.offPath.Update(exitOffPathMsg{})
-		m.location, _ = m.location.Update(offPathToggled{on: false})
-		m.transcript, _ = m.transcript.Update(offPathToggled{on: false})
-		m.prompt.Placeholder = "what now?"
-		m.transcript.AppendSystem("(returned to on-path mode)")
-		return m, nil
 
 	case "/menu":
 		// Toggle menu visibility — for Stage 6 just echo.
@@ -1072,19 +1076,100 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		var errMsg string
-		if out.GuardHint != "" {
-			errMsg = out.GuardHint
-		} else if out.ErrorMessage != "" {
-			errMsg = out.ErrorMessage
-		} else {
-			errMsg = string(out.ErrorCode)
-		}
-		m.transcript.AppendTurn(msg.input, "")
-		m.transcript.AppendGuardHint(errMsg)
+		m.renderRejection(msg.input, out)
 	}
 
 	return m, nil
+}
+
+// renderRejection writes a friendly clarification or guard message into
+// the transcript for a ModeRejected outcome. It branches on out.ErrorCode:
+//
+//   - UNKNOWN_INTENT / INTENT_NOT_ALLOWED_IN_STATE / INVALID_SLOT_VALUE:
+//     the user said something the router could not map to an allowed
+//     intent. Show "I didn't catch that. Try one of:" followed by the
+//     current intent menu (one title + first example per entry). If the
+//     author authored a guard_hint we still show it on a trailing line.
+//
+//   - GUARD_FAILED: an arm matched but a real guard refused. The author's
+//     guard_hint (or the intent description, via Reason fallback in the
+//     orchestrator path) is the canonical user-facing message; we render
+//     it via AppendGuardHint which adds a soft "→ " prefix.
+//
+//   - any other code: fall back to AppendError with the message or code,
+//     still prefixed with "→ ".
+func (m *RootModel) renderRejection(userInput string, out *orchestrator.TurnOutcome) {
+	switch out.ErrorCode {
+	case intent.ErrUnknownIntent, intent.ErrIntentNotAllowed, intent.ErrInvalidSlotValue:
+		menuText := m.intentMenuText()
+		var msg strings.Builder
+		msg.WriteString("I didn't catch that.")
+		if menuText != "" {
+			msg.WriteString(" Try one of:\n")
+			msg.WriteString(menuText)
+		}
+		m.transcript.AppendClarification(userInput, msg.String())
+		if out.GuardHint != "" {
+			m.transcript.AppendGuardHint(out.GuardHint)
+		}
+
+	case "LLM_CLARIFICATION":
+		// The LLM answered but didn't call the expected tool — its
+		// free-form text was preserved as ErrorMessage. Render it as a
+		// clarification (soft style) so the player sees the model
+		// asking a follow-up question rather than a red technical error.
+		m.transcript.AppendClarification(userInput, out.ErrorMessage)
+
+	case intent.ErrGuardFailed:
+		hint := out.GuardHint
+		if hint == "" {
+			hint = out.ErrorMessage
+		}
+		if hint == "" {
+			hint = string(out.ErrorCode)
+		}
+		m.transcript.AppendTurn(userInput, "")
+		m.transcript.AppendGuardHint(hint)
+
+	default:
+		errMsg := out.GuardHint
+		if errMsg == "" {
+			errMsg = out.ErrorMessage
+		}
+		if errMsg == "" {
+			errMsg = string(out.ErrorCode)
+		}
+		m.transcript.AppendError(userInput, errMsg)
+	}
+}
+
+// intentMenuText returns a compact "Try one of:" suggestion list built
+// from the current menu state (Primary entries only). Each line is the
+// MenuEntry display (e.g. "go south") indented two spaces; we cap at
+// a small N so a state with a long allowed-intent list does not flood
+// the transcript on every misroute.
+func (m *RootModel) intentMenuText() string {
+	const maxSuggestions = 6
+	w := m.orch.CurrentWorld(m.sid)
+	menu := orchestrator.ComputeMenu(m.orch.AppDef(), m.orch.Machine(), m.currentState, w)
+	if len(menu.Primary) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	n := len(menu.Primary)
+	if n > maxSuggestions {
+		n = maxSuggestions
+	}
+	for i := 0; i < n; i++ {
+		entry := menu.Primary[i]
+		sb.WriteString("  • ")
+		sb.WriteString(entry.Display)
+		sb.WriteString("\n")
+	}
+	if len(menu.Primary) > maxSuggestions {
+		sb.WriteString(fmt.Sprintf("  …and %d more\n", len(menu.Primary)-maxSuggestions))
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func (m RootModel) handleContinueTurnOutcome(msg continueTurnOutcomeMsg) (tea.Model, tea.Cmd) {

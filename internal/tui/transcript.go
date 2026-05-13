@@ -307,6 +307,29 @@ func startsWithListMarker(s string) bool {
 	return false
 }
 
+// AppendOffPathAnswer appends an oracle reply styled with the soft off-path
+// amber tint. The reply runs through the same Markdown pipeline as
+// AppendTurn so formatting (lists, code blocks) renders cleanly. Pass
+// userInput="" when the caller already appended the question header in a
+// prior AppendTurn (the typical TUI submitOffPath sequence).
+func (m *transcriptModel) AppendOffPathAnswer(userInput, answer string) {
+	rendered := m.renderMarkdown(answer)
+	if rendered == "" {
+		rendered = answer
+	}
+	body := transcriptOffPathAnswerStyle.Render(rendered)
+	entry := transcriptEntry{
+		body:   body,
+		source: answer,
+	}
+	if userInput != "" {
+		entry.header = "> " + userInput
+	}
+	m.entries = append(m.entries, entry)
+	m.vp.SetContent(m.render())
+	m.vp.GotoBottom()
+}
+
 // AppendMetaList appends the /meta list output as one transcript
 // entry: a blue title banner, a header row (column names), one
 // blue-styled padded row per chat, then a closing rule. Column widths
@@ -417,22 +440,50 @@ func (m *transcriptModel) ScrollToLine(n int) {
 	m.vp.SetYOffset(n)
 }
 
-// AppendError appends an error/rejection message.
+// AppendError appends an error/rejection message. The leading arrow
+// matches AppendGuardHint and AppendClarification so a user reading the
+// scrollback sees a consistent prefix for engine-side feedback.
 func (m *transcriptModel) AppendError(userInput, msg string) {
 	header := "> " + userInput
-	body := errorStyle.Render("[blocked] " + msg)
+	body := errorStyle.Render("→ " + msg)
 	m.entries = append(m.entries, transcriptEntry{header: header, body: body})
 	m.vp.SetContent(m.render())
 	m.vp.GotoBottom()
 }
 
-// AppendGuardHint appends a guard-failure hint.
+// AppendGuardHint appends a guard-failure hint. The leading arrow softens
+// the older "[blocked]" prefix: a guard refusal is information, not an
+// alarm — the user picked a valid intent and the world said "not now",
+// which is exactly the kind of friction the author wrote the hint for.
 func (m *transcriptModel) AppendGuardHint(hint string) {
 	if hint == "" {
 		return
 	}
-	body := guardHintStyle.Render("[blocked] " + hint)
+	body := guardHintStyle.Render("→ " + hint)
 	m.entries = append(m.entries, transcriptEntry{body: body})
+	m.vp.SetContent(m.render())
+	m.vp.GotoBottom()
+}
+
+// AppendClarification renders a friendly rejection: the user's input did
+// not parse to any allowed intent (UNKNOWN_INTENT,
+// INTENT_NOT_ALLOWED_IN_STATE, INVALID_SLOT_VALUE, …). The user header is
+// included so the transcript carries the same "> input" anchor as a real
+// turn; the body is styled with the muted clarificationStyle and a list
+// of suggestions follows on subsequent lines.
+//
+// Both userInput and message may be empty: an empty header is omitted,
+// and an empty message no-ops.
+func (m *transcriptModel) AppendClarification(userInput, message string) {
+	if message == "" {
+		return
+	}
+	var header string
+	if userInput != "" {
+		header = "> " + userInput
+	}
+	body := clarificationStyle.Render(message)
+	m.entries = append(m.entries, transcriptEntry{header: header, body: body})
 	m.vp.SetContent(m.render())
 	m.vp.GotoBottom()
 }

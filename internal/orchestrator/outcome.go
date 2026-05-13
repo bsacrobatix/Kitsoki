@@ -20,7 +20,12 @@ const (
 	ModeRejected
 	// ModeCompleted means the new state is terminal.
 	ModeCompleted
-	// ModeOffPath is not yet implemented (Stage 7).
+	// ModeOffPath indicates a free-form off-path chat turn (§7.7, §11).
+	// Off-path turns do NOT mutate world or state; they route through
+	// Orchestrator.AskOffPath, which fires host.oracle.talk against a
+	// per-session chat thread keyed by (app_id, room="off_path",
+	// scope_key=session_id). No TransitionApplied event is emitted; only
+	// OffPathEntered/Exited and OffPathQuestion/Answer are appended.
 	ModeOffPath
 	// ModeCancelled means the turn was cancelled (context cancelled by user).
 	ModeCancelled

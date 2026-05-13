@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"kitsoki/internal/app"
@@ -26,59 +25,25 @@ type Location struct {
 
 // SlotRef describes a single required slot that has not been pre-filled.
 // It is used in MenuEntry.MissingSlots to drive the clarification flow.
-type SlotRef struct {
-	// Name is the slot name.
-	Name string
-	// Type is the slot type ("string", "enum", "bool", "int", "float").
-	Type string
-	// Values lists the enum values (non-empty only for type=="enum").
-	Values []string
-	// Description is the author-provided slot description.
-	Description string
-	// Prompt is the author-provided prompt string.
-	Prompt string
-}
-
-// MenuEntry is one concrete row in the §7.2 menu. Unlike the old MenuItem
-// which represented a bare intent name, each MenuEntry represents a fully
-// qualified (intent + prefilled-slots) action that can either be submitted
-// directly (MissingSlots empty) or launched into the clarification flow.
 //
-// Design rationale:
-//   - Enum slots are expanded: "go north", "go south", ... become separate rows.
-//   - Free-form required slots remain as placeholders in Display; the row still
-//     appears but requires clarification before dispatch.
-//   - Optional slots are NOT shown as placeholders: they are discoverable via
-//     the clarification flow. This keeps the menu compact for the common case
-//     where the author has declared a few required params and many optional ones.
-type MenuEntry struct {
-	// Intent is the intent name.
-	Intent string
-	// PrefilledSlots are the slots that have been pre-resolved for this row
-	// (e.g. {"direction": "south"} for a "go south" row).
-	PrefilledSlots map[string]any
-	// MissingSlots are required slots that are not yet known. If non-empty,
-	// selecting this row enters the clarification flow.
-	MissingSlots []SlotRef
-	// Display is the human-readable label for this row (e.g. "go south",
-	// "ask <person:string> about <topic:string>").
-	Display string
-	// Reason is the guard_hint or description shown when Primary is false.
-	Reason string
-	// Primary is true when the guard dry-run passed (or was unresolved).
-	Primary bool
-	// DestinationHint is the resolved target state path (e.g. "bar") when
-	// Primary is true and a guard matched.
-	DestinationHint string
-}
+// Aliased to machine.MenuSlotRef so the menu type lives in the package that
+// owns its computation (avoiding an import cycle when view-render needs to
+// populate env.Menu) while existing orchestrator consumers (TUI) continue
+// to import the orchestrator type unchanged.
+type SlotRef = machine.MenuSlotRef
 
-// Menu is the computed "where can I go" surface for §7.2.
-type Menu struct {
-	// Primary is the sorted list of available actions (guards pass or unresolved).
-	Primary []MenuEntry
-	// Blocked is the list of actions whose guards currently fail.
-	Blocked []MenuEntry
-}
+// MenuEntry is one concrete row in the §7.2 menu. Each entry represents a
+// fully qualified (intent + prefilled-slots) action that can either be
+// submitted directly (MissingSlots empty) or launched into the clarification
+// flow.
+//
+// Aliased to machine.MenuEntry — see SlotRef above for the cycle-avoidance
+// rationale.
+type MenuEntry = machine.MenuEntry
+
+// Menu is the computed "where can I go" surface for §7.2. Alias to
+// machine.MenuView (the canonical definition lives in machine).
+type Menu = machine.MenuView
 
 // MenuItem is kept for backward-compatibility with the TUI's menuItemsChanged message.
 // New code should use MenuEntry directly.
@@ -132,260 +97,14 @@ func ComputeLocation(def *app.AppDef, state app.StatePath, w world.World, turn a
 }
 
 // ComputeMenu derives the §7.2 menu from allowed intents in the current state.
-// It expands enum slots into concrete rows and dry-runs guards per enum value
-// to classify each row as primary or blocked.
 //
-// Expansion rules (§spec):
-//  1. No required slots → one row, no guard dry-run needed (always primary).
-//  2. Exactly one required slot, with enum → one row per enum value; guard dry-run
-//     with synthetic slots map to determine primary vs blocked.
-//  3. Multiple required slots, first enum slot in declaration order → one row per
-//     enum value with other required slots shown as <name:type> placeholders.
-//     Guards are dry-run with {enumSlot: value} only; guards referencing other
-//     (unprefilled) slots will be "unresolved" — treated as primary. This is
-//     intentional: the guard is re-evaluated at submission time.
-//  4. Required slots but no enums → one row with all required slots as placeholders;
-//     always primary (we have no values to dry-run).
-//  5. Optional slots are NOT shown in placeholder lines (keeps the menu compact).
-func ComputeMenu(def *app.AppDef, m machine.Machine, state app.StatePath, w world.World) Menu {
-	allowed := m.AllowedIntents(state, w)
-
-	menu := Menu{}
-	for _, ai := range allowed {
-		if ai.Hidden {
-			continue
-		}
-
-		intentDef, hasIntentDef := lookupIntentByPath(def, state, ai.Name)
-		if !hasIntentDef {
-			// Intent has no definition; treat as a no-slot intent.
-			menu.Primary = append(menu.Primary, MenuEntry{
-				Intent:  ai.Name,
-				Display: ai.Name,
-				Primary: true,
-			})
-			continue
-		}
-
-		entries := expandIntent(ai.Name, intentDef, state, m, w)
-		for _, e := range entries {
-			if e.Primary {
-				menu.Primary = append(menu.Primary, e)
-			} else {
-				menu.Blocked = append(menu.Blocked, e)
-			}
-		}
-	}
-
-	// Sort primary by priority desc then display asc.
-	// We use the underlying AllowedIntent priority (already sorted by machine) but
-	// since we've broken intents into multiple rows we need stable ordering.
-	sort.SliceStable(menu.Primary, func(i, j int) bool {
-		pi := intentPriority(def, state, menu.Primary[i].Intent, allowed)
-		pj := intentPriority(def, state, menu.Primary[j].Intent, allowed)
-		if pi != pj {
-			return pi > pj
-		}
-		return menu.Primary[i].Display < menu.Primary[j].Display
-	})
-	sort.SliceStable(menu.Blocked, func(i, j int) bool {
-		return menu.Blocked[i].Display < menu.Blocked[j].Display
-	})
-
-	return menu
-}
-
-// intentPriority looks up the priority for an intent from the allowed list.
-func intentPriority(def *app.AppDef, state app.StatePath, name string, allowed []machine.AllowedIntent) int {
-	for _, ai := range allowed {
-		if ai.Name == name {
-			return ai.Priority
-		}
-	}
-	return 0
-}
-
-// expandIntent expands one intent into one or more MenuEntry rows based on
-// its slot schema and the guard dry-run results.
-func expandIntent(name string, intentDef app.Intent, state app.StatePath, m machine.Machine, w world.World) []MenuEntry {
-	// Collect required slots in deterministic order (sorted by name for stability
-	// across map iteration; YAML map order is not guaranteed at runtime).
-	var required []menuSlotEntry
-	for sname, sdef := range intentDef.Slots {
-		if sdef.Required {
-			required = append(required, menuSlotEntry{sname, sdef})
-		}
-	}
-	sort.Slice(required, func(i, j int) bool { return required[i].name < required[j].name })
-
-	// Case 1: no required slots → one row, no expansion needed.
-	if len(required) == 0 {
-		return []MenuEntry{{
-			Intent:  name,
-			Display: name,
-			Primary: true,
-		}}
-	}
-
-	// Find the first enum slot in declaration order.
-	enumIdx := -1
-	for i, se := range required {
-		if len(se.def.Values) > 0 {
-			enumIdx = i
-			break
-		}
-	}
-
-	// Case 4: required slots but no enum → single placeholder row.
-	if enumIdx < 0 {
-		display := formatPlaceholderRow(name, required)
-		// No guard dry-run possible without values; always primary.
-		var missing []SlotRef
-		for _, se := range required {
-			missing = append(missing, SlotRef{
-				Name:        se.name,
-				Type:        se.def.Type,
-				Values:      se.def.Values,
-				Description: se.def.Description,
-				Prompt:      se.def.Prompt,
-			})
-		}
-		return []MenuEntry{{
-			Intent:       name,
-			Display:      display,
-			MissingSlots: missing,
-			Primary:      true,
-		}}
-	}
-
-	enumSlot := required[enumIdx]
-
-	// Cases 2 & 3: expand on the enum slot dimension.
-	var entries []MenuEntry
-	for _, val := range enumSlot.def.Values {
-		// Build the prefilled slots map for this enum value.
-		prefill := map[string]any{enumSlot.name: val}
-
-		// Build display string.
-		display := formatEnumRow(name, required, enumIdx, val)
-
-		// Collect remaining (non-enum) required slots as MissingSlots.
-		var missing []SlotRef
-		for i, se := range required {
-			if i == enumIdx {
-				continue
-			}
-			missing = append(missing, SlotRef{
-				Name:        se.name,
-				Type:        se.def.Type,
-				Values:      se.def.Values,
-				Description: se.def.Description,
-				Prompt:      se.def.Prompt,
-			})
-		}
-
-		// Dry-run guards. For Case 3 (other required slots unprefilled), guards
-		// that reference those slots will be "unresolved" → primary by default.
-		result := m.TryGuards(state, w, name, prefill)
-
-		// If the only arm that would fire is a default: catch-all branch, omit
-		// this enum value from the menu entirely. The default: arm is a runtime
-		// safety net for free-form input (e.g. "You can't go that way."); it is
-		// not a real transition the author intends to surface. The user can still
-		// type the direction directly and the runtime will handle it gracefully.
-		// (If there are NO when: branches at all — not even a default — the result
-		// is Blocked, which surfaces as a blocked row, not an omission.)
-		if result.MatchedDefault {
-			continue
-		}
-
-		var entry MenuEntry
-		switch {
-		case result.Unresolved:
-			// Unresolved guards are treated as primary: the guard references a slot
-			// that isn't prefilled yet. We'll re-evaluate at submission time.
-			entry = MenuEntry{
-				Intent:          name,
-				PrefilledSlots:  prefill,
-				MissingSlots:    missing,
-				Display:         display,
-				Primary:         true,
-				DestinationHint: result.DestinationHint,
-			}
-		case result.Primary:
-			entry = MenuEntry{
-				Intent:          name,
-				PrefilledSlots:  prefill,
-				MissingSlots:    missing,
-				Display:         display,
-				Primary:         true,
-				DestinationHint: result.DestinationHint,
-			}
-		default: // Blocked
-			reason := result.BlockedReason
-			if reason == "" {
-				reason = intentDef.Description
-			}
-			entry = MenuEntry{
-				Intent:         name,
-				PrefilledSlots: prefill,
-				MissingSlots:   missing,
-				Display:        display,
-				Primary:        false,
-				Reason:         reason,
-			}
-		}
-		entries = append(entries, entry)
-	}
-	return entries
-}
-
-// menuSlotEntry is used only within this file to hold a required slot name+def pair.
-type menuSlotEntry struct {
-	name string
-	def  app.Slot
-}
-
-// formatPlaceholderRow builds a display string for a no-enum intent:
-//
-//	ask <person:string> about <topic:string>
-func formatPlaceholderRow(intentName string, required []menuSlotEntry) string {
-	var sb strings.Builder
-	sb.WriteString(intentName)
-	for _, se := range required {
-		sb.WriteString(" <")
-		sb.WriteString(se.name)
-		sb.WriteString(":")
-		sb.WriteString(se.def.Type)
-		sb.WriteString(">")
-	}
-	return sb.String()
-}
-
-// formatEnumRow builds a display string for one row of an enum expansion.
-// The enum slot at enumIdx is replaced by its concrete value; other required
-// slots appear as <name:type> placeholders.
-//
-// Examples:
-//
-//	go south              (single required enum slot, value=south)
-//	give <item:string> to butler  (enum slot recipient=butler, free slot item)
-func formatEnumRow(intentName string, required []menuSlotEntry, enumIdx int, enumVal string) string {
-	var sb strings.Builder
-	sb.WriteString(intentName)
-	for i, se := range required {
-		sb.WriteString(" ")
-		if i == enumIdx {
-			sb.WriteString(enumVal)
-		} else {
-			sb.WriteString("<")
-			sb.WriteString(se.name)
-			sb.WriteString(":")
-			sb.WriteString(se.def.Type)
-			sb.WriteString(">")
-		}
-	}
-	return sb.String()
+// As of the in-view-menu-rendering refactor this is a thin wrapper over
+// machine.Machine.Menu — the actual expansion logic lives in
+// internal/machine so view-render call sites can compute the menu without
+// an import cycle. The wrapper exists so existing orchestrator/TUI
+// consumers continue to type-check unchanged.
+func ComputeMenu(_ *app.AppDef, m machine.Machine, state app.StatePath, w world.World) Menu {
+	return m.Menu(state, w)
 }
 
 // ComputeClarification builds the §7.3 slot-fill context for a MISSING_SLOTS outcome.
@@ -450,8 +169,18 @@ func FormatLocation(loc Location) string {
 }
 
 // lookupStateByPath walks the nested state map using a dot-separated path.
+//
+// Parallel-encoded paths (proposal §9.4) are stripped to their structural
+// parent — the parallel parent state — so callers that want terminal/mode
+// checks or timeout config see a sensible result. Region-internal state
+// lookup requires the orchestrator to pick a specific region leaf and call
+// this with that leaf path directly.
 func lookupStateByPath(def *app.AppDef, path app.StatePath) *app.State {
-	parts := strings.Split(string(path), ".")
+	p := string(path)
+	if idx := strings.Index(p, "#"); idx >= 0 {
+		p = p[:idx]
+	}
+	parts := strings.Split(p, ".")
 	states := def.States
 	var s *app.State
 	for _, part := range parts {
@@ -467,9 +196,16 @@ func lookupStateByPath(def *app.AppDef, path app.StatePath) *app.State {
 
 // lookupIntentByPath finds an intent definition for the given state path,
 // checking local intents first, then the global library.
+//
+// Parallel-encoded paths (proposal §9.4) are stripped to the parallel
+// parent for state-local intent lookup; per-region scoped intents need
+// the orchestrator to pass the region leaf path directly.
 func lookupIntentByPath(def *app.AppDef, state app.StatePath, intentName string) (app.Intent, bool) {
 	// Check state-local intents along the path.
 	path := string(state)
+	if idx := strings.Index(path, "#"); idx >= 0 {
+		path = path[:idx]
+	}
 	states := def.States
 	var s *app.State
 	for _, part := range strings.Split(path, ".") {

@@ -1,0 +1,162 @@
+# buy_then_breakdown — regression pin for the wheels/clothing inventory
+# bug fixed in the same commit. Before the fix, accept_purchase only
+# credited oxen + food_lbs from the basket's total_cost; the wheels,
+# axles, tongues, clothing, and bullets implied by the items string
+# were silently dropped. Players who "bought 4 spare wheels" then saw
+# spare_wheels = 0 when a breakdown hit, and the same for clothing on
+# the disease.treat path.
+#
+# The fix added optional per-item slots to propose_purchase (oxen,
+# food, bullets, clothing, wheels, axles, tongues) and mirrored them
+# into proposal_* world fields so accept_purchase can credit each
+# inventory key directly. This fixture exercises the full sequence:
+# propose → accept → leave_store → forced breakdown on a wheel →
+# repair → assert spare_wheels decremented; same shape for clothing
+# via event_disease.treat which consumes 1 set.
+#
+# Determinism notes:
+#   - propose_purchase uses total_cost=400 (≥ 5) so it goes through
+#     reviewing → done rather than auto-accept. That exercises the
+#     same code path the user hits when buying realistic baskets.
+#   - The breakdown event is forced by setting
+#     miles_traveled=75, rng_counter=0 before continue. The roll is
+#     (miles + counter) % 100 = 75, which sits in [75, 85) — the
+#     event_breakdown bucket. event_breakdown.on_enter then sets
+#     breakdown_part from rng_last % 3; 75 % 3 = 0 → 'wheel'.
+#   - The disease event is forced the same way: rng_counter=60,
+#     miles_traveled=0 → roll = 60 → [60, 75) → event_disease.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: general_store.idle
+initial_world:
+  party_names:    "John,Sarah,Tom,Mary,Anne"
+  profession:     banker
+  month:          april
+  year:           1848
+  money:          1600
+  oxen:           0
+  food_lbs:       0
+  bullets:        0
+  clothing_sets:  0
+  spare_wheels:   0
+  spare_axles:    0
+  spare_tongues:  0
+  pace:           steady
+  rations:        filling
+  party_alive:    5
+  health_avg:     100
+  narration:      false
+  miles_traveled: 0
+  rng_counter:    0
+  rng_last:       0
+  current_landmark: "Independence"
+  local_price_pct: 100
+
+turns:
+
+  # ── Turn 1: propose a structured basket. Goes to reviewing because
+  # total_cost (400) >= 5. The proposal_* world fields capture the
+  # per-item counts so accept_purchase can credit them directly.
+  - intent:
+      name: propose_purchase
+      slots:
+        items:      "2 oxen, 200 lbs food, 4 spare wheels, 10 sets of clothing"
+        total_cost: 400
+        oxen:       2
+        food:       200
+        wheels:     4
+        clothing:   10
+    expect_state: general_store.reviewing
+    expect_world:
+      proposal_items: "2 oxen, 200 lbs food, 4 spare wheels, 10 sets of clothing"
+      proposal_total_cost: 400
+      proposal_oxen:     2
+      proposal_food:     200
+      proposal_wheels:   4
+      proposal_clothing: 10
+      # Nothing landed in inventory yet — still in reviewing.
+      money: 1600
+      oxen: 0
+      food_lbs: 0
+      spare_wheels: 0
+      clothing_sets: 0
+
+  # ── Turn 2: accept. The structured-basket path runs because the
+  # sum of proposal_* item counts is > 0 — each inventory key gets
+  # credited from its proposal_* field rather than the coarse
+  # cost-split fallback.
+  - intent: { name: accept_purchase }
+    expect_state: general_store.done
+    expect_world:
+      money:         1200       # 1600 - 400
+      oxen:          2
+      food_lbs:      200
+      spare_wheels:  4
+      clothing_sets: 10
+      # Other items remain at 0.
+      spare_axles:   0
+      spare_tongues: 0
+      bullets:       0
+
+  # ── Turn 3: leave the store. Guard requires oxen >= 2 && food_lbs
+  # >= 200 — we have exactly that. Drops into leg_a_executing.traveling
+  # and clears all proposal_* draft fields.
+  - intent: { name: leave_store, slots: {} }
+    expect_state: leg_a_executing.traveling
+    expect_world:
+      spare_wheels:  4
+      clothing_sets: 10
+      proposal_items: ""
+      proposal_wheels: 0
+      proposal_clothing: 0
+
+  # ── Turn 4: force a wheel breakdown. world_override pins
+  # miles_traveled=75, rng_counter=0 so (75 + 0) % 100 = 75 → [75, 85)
+  # event_breakdown bucket. event_breakdown.on_enter rolls 75 % 3 = 0
+  # → breakdown_part = 'wheel'.
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 75
+      rng_counter:    0
+    expect_state: leg_a_executing.event_breakdown
+    expect_world:
+      event_kind:     "breakdown"
+      breakdown_part: "wheel"
+      spare_wheels:   4
+
+  # ── Turn 5: repair using the spare wheel. spare_wheels decrements
+  # from 4 → 3, the bug we're pinning.
+  - intent: { name: repair, slots: {} }
+    expect_state: leg_a_executing.traveling
+    expect_world:
+      spare_wheels:   3
+      breakdown_part: ""
+      event_kind:     ""
+
+  # ── Turn 6: force a disease event. rng_counter=60, miles_traveled=0
+  # → (0 + 60) % 100 = 60 → [60, 75) event_disease bucket. The
+  # on_enter then picks 60 % 5 = 0 → 'dysentery'.
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 0
+      rng_counter:    60
+    expect_state: leg_a_executing.event_disease
+    expect_world:
+      event_kind:    "disease"
+      illness_kind:  "dysentery"
+      clothing_sets: 10
+
+  # ── Turn 7: treat the disease. Consumes 1 clothing set + 50 lbs
+  # food, restores 20 health. clothing_sets 10 → 9 — the same family
+  # of bug as wheels: the buy-side wasn't crediting clothing before
+  # the fix, so disease.treat would see 0 sets even after the player
+  # had "bought" 10.
+  - intent: { name: treat, slots: {} }
+    expect_state: leg_a_executing.traveling
+    expect_world:
+      clothing_sets: 9
+      illness_kind:  ""
+      event_kind:    ""
+
+expect_no_errors: true

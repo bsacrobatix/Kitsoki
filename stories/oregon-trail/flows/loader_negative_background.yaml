@@ -1,0 +1,38 @@
+# loader_negative_background — DISABLED until the test runner gains expect_load_error support.
+#
+# Per proposal §13's testing strategy, this fixture is meant to assert
+# that the loader rejects an app where `background: true` is declared
+# inside an `on_complete:` effect (background only valid on the outer
+# invoke, never on completion handlers — see proposal §6.3).
+#
+# Same runner-support gap as loader_negative.yaml: the FlowFixture type
+# has no `expect_load_error` field, and load errors are fatal-to-run
+# rather than fixture-level failures. See loader_negative.yaml for the
+# follow-up options.
+#
+# The minimum offending YAML this would shrink-wrap:
+#
+#   states:
+#     lobby:
+#       on:
+#         enter:
+#           - target: running
+#             effects:
+#               - invoke: host.run
+#                 background: true
+#                 with: { cmd: ["sleep", "1"] }
+#                 on_complete:
+#                   - invoke: host.run
+#                     background: true       # ← INVALID
+#                     with: { cmd: ["true"] }
+#
+# Until expect_load_error lands the fixture is parked with a non-`flow`
+# test_kind so the runner's filter at flows.go:425 skips it silently.
+
+test_kind: flow_disabled_pending_runner_support
+app: ../app.yaml
+initial_state: intro
+
+turns: []
+
+expect_no_errors: true

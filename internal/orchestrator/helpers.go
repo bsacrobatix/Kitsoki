@@ -2,16 +2,163 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/harness"
 	"kitsoki/internal/intent"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/store"
 	"kitsoki/internal/trace"
 	"kitsoki/internal/world"
 )
+
+// RecentTurnsLimit caps how many prior turn summaries are passed to the
+// harness via TurnInput.RecentTurns. Kept small to bound prompt size; the
+// LLM's working memory for back-reference resolution is unlikely to need
+// more than a handful of recent turns. A future iteration may expose this
+// as a per-app knob in app.yaml.
+const RecentTurnsLimit = 5
+
+// extractRecentTurns scans an event history (oldest → newest) and returns
+// up to RecentTurnsLimit harness.TurnSummary records, one per completed
+// prior turn. The slice is ordered oldest → newest; the caller may pass it
+// directly into TurnInput.RecentTurns.
+//
+// "Completed turn" means a TurnEnded event was appended, which covers both
+// success (outcome=transitioned) and rejection (outcome=rejected). Turns
+// that ended in clarify mode are intentionally excluded — they did not
+// finish from the user's perspective and their pending state belongs in a
+// different surface (the slot-fill flow). Synthetic turns (background-job
+// completions, timeouts) are excluded as well: they did not originate from
+// a user utterance and have no UserText to anchor a back-reference to.
+//
+// The function tolerates partial event sequences: a turn missing a
+// TransitionApplied (rejected before machine.Turn fired) still produces a
+// summary with Intent="" and Rejected=true. A turn missing TurnStarted is
+// skipped — without UserText the summary has no anchor.
+func extractRecentTurns(history store.History) []harness.TurnSummary {
+	if len(history) == 0 {
+		return nil
+	}
+
+	// Group events by turn number. Map preserves no order but we sort the
+	// turn keys before walking, so the result is deterministic.
+	type turnAcc struct {
+		userText  string
+		intent    string
+		slots     map[string]any
+		toState   string
+		fromState string
+		rejected  bool
+		ended     bool
+		synthetic bool // true when no user utterance drove this turn
+	}
+	turns := make(map[app.TurnNumber]*turnAcc)
+
+	for _, ev := range history {
+		acc, ok := turns[ev.Turn]
+		if !ok {
+			acc = &turnAcc{}
+			turns[ev.Turn] = acc
+		}
+		switch ev.Kind {
+		case store.TurnStarted:
+			var p struct {
+				Input  string `json:"input"`
+				Direct bool   `json:"direct"`
+			}
+			if err := json.Unmarshal(ev.Payload, &p); err == nil {
+				acc.userText = p.Input
+				// RunIntent paths prefix input with "[intent] ..." and set
+				// direct: true. Treat those as synthetic so they do not
+				// pollute back-reference context.
+				if p.Direct {
+					acc.synthetic = true
+				}
+			}
+		case store.TransitionApplied:
+			var p struct {
+				Intent string         `json:"intent"`
+				Slots  map[string]any `json:"slots"`
+				From   string         `json:"from"`
+				To     string         `json:"to"`
+			}
+			if err := json.Unmarshal(ev.Payload, &p); err == nil {
+				if acc.intent == "" {
+					acc.intent = p.Intent
+				}
+				if len(p.Slots) > 0 && acc.slots == nil {
+					acc.slots = p.Slots
+				}
+				acc.fromState = p.From
+				acc.toState = p.To
+			}
+		case store.TurnEnded:
+			acc.ended = true
+			var p struct {
+				Outcome string `json:"outcome"`
+			}
+			if err := json.Unmarshal(ev.Payload, &p); err == nil {
+				if p.Outcome == "rejected" {
+					acc.rejected = true
+				}
+			}
+		}
+	}
+
+	// Walk turns in ascending order and collect completed summaries.
+	maxTurn := app.TurnNumber(0)
+	for t := range turns {
+		if t > maxTurn {
+			maxTurn = t
+		}
+	}
+
+	var summaries []harness.TurnSummary
+	for t := app.TurnNumber(1); t <= maxTurn; t++ {
+		acc, ok := turns[t]
+		if !ok || !acc.ended || acc.synthetic {
+			continue
+		}
+		if acc.userText == "" {
+			continue
+		}
+		state := acc.toState
+		if state == "" {
+			state = acc.fromState
+		}
+		summaries = append(summaries, harness.TurnSummary{
+			Turn:     t,
+			UserText: acc.userText,
+			Intent:   acc.intent,
+			Slots:    acc.slots,
+			State:    app.StatePath(state),
+			Rejected: acc.rejected,
+		})
+	}
+
+	if len(summaries) > RecentTurnsLimit {
+		summaries = summaries[len(summaries)-RecentTurnsLimit:]
+	}
+	return summaries
+}
+
+// supplementKeys returns the sorted list of keys in m, used purely for trace
+// attribute emission so a slog handler does not have to serialise the
+// (possibly large) values.
+func supplementKeys(m map[string]any) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
 
 // AppDef returns the app definition for this orchestrator.
 func (o *Orchestrator) AppDef() *app.AppDef {
@@ -120,6 +267,12 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 			}
 			o.mu.Unlock()
 			clarification := ComputeClarification(o.def, journey.State, call.Intent, ve.MissingSlots)
+			tl.Debug(ctx, trace.EvSlotFillRequested,
+				slog.String("intent", call.Intent),
+				slog.Int("missing_count", len(ve.MissingSlots)),
+				slog.Any("missing", ve.MissingSlots),
+				slog.String("origin", "run_intent"),
+			)
 			return &TurnOutcome{
 				Mode:           ModeClarify,
 				NewState:       journey.State,
@@ -195,6 +348,10 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 	o.mu.Lock()
 	delete(o.pending, sid)
 	o.mu.Unlock()
+
+	// (Re-)arm any Timeout: declared on the new state, cancelling any
+	// pre-existing timeout on the state we just exited.
+	o.armTimeoutForState(sid, journey.State, result.NewState)
 
 	newAllowed := allowedNamesFromMachine(o.machine, result.NewState, result.World)
 

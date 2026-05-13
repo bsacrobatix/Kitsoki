@@ -131,6 +131,20 @@ Examples:
 See 'kitsoki docs llm-guide' for the full operator guide.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Restore terminal modes on any exit path so a panic before
+			// tea.Program.Run installs its own recovery — or a prior crash
+			// that already left the terminal in alt-screen / mouse-reporting
+			// mode — doesn't leave the user staring at escape sequences.
+			// Tea cleans up on normal Run() return; this defer covers the
+			// gaps before/after Run and on panic.
+			defer restoreTerminal()
+			defer func() {
+				if r := recover(); r != nil {
+					restoreTerminal()
+					panic(r) // re-raise so the runtime still prints the trace
+				}
+			}()
+
 			appPath := args[0]
 
 			// Load app definition.
@@ -647,4 +661,23 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 	}
 	cmd.Flags().StringVar(&dbPath, "db", "", "path to the SQLite session database (default: in-memory)")
 	return cmd
+}
+
+// restoreTerminal emits the escape sequences that disable mouse reporting and
+// leave the alternate screen, in case a prior crash (or one in this run before
+// tea.NewProgram's own recovery kicked in) left the terminal in those modes.
+// Idempotent: safe to call from multiple defer paths.
+//
+//   - CSI ?1000 l — disable X10 mouse reporting
+//   - CSI ?1002 l — disable cell-motion mouse reporting (matches tea.WithMouseCellMotion)
+//   - CSI ?1003 l — disable any-motion mouse reporting
+//   - CSI ?1006 l — disable SGR mouse mode
+//   - CSI ?1049 l — leave alternate screen buffer
+//
+// Written to stderr so it doesn't interleave with structured stdout output
+// (e.g. JSON traces piped to a file). A bare terminal will render the
+// sequence; a pipe (no terminal) will silently absorb it.
+func restoreTerminal() {
+	const seq = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1049l"
+	_, _ = fmt.Fprint(os.Stderr, seq)
 }

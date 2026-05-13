@@ -111,6 +111,22 @@ type FlowTurn struct {
 	// run. Requires the orchestrator path.
 	ExpectInbox *FlowInboxExpectation `yaml:"expect_inbox,omitempty"`
 
+	// ExpectJobs asserts on jobs that newly reached a terminal status during
+	// this turn (post advance_clock if set). Matching is order-sensitive: the
+	// i-th ExpectJob entry matches the i-th newly-terminal job (in
+	// creation-time order) whose namespace matches. Surplus newly-terminal
+	// jobs not asserted are silently allowed, so fixtures don't need to
+	// enumerate every side-effect job. Requires the orchestrator path.
+	//
+	// Catches a bug class that expect_inbox can't see: when host.run is
+	// invoked with cmd: in list-form, the string type assertion in the
+	// handler fails and the job lands with status=failed, yet on_complete
+	// still runs and the game continues — the misleading inbox entries
+	// ("submitted" + a failure ledger) are the only signal. expect_jobs:
+	// pins per-job terminal status so the next regression of this shape
+	// fails the suite.
+	ExpectJobs []ExpectJob `yaml:"expect_jobs,omitempty"`
+
 	// Assertions (§10.3.2).
 	ExpectState          string         `yaml:"expect_state,omitempty"`
 	ExpectNotState       string         `yaml:"expect_not_state,omitempty"`
@@ -136,6 +152,35 @@ type FlowInboxExpectation struct {
 	// Severities asserts that the sorted list of severity strings for all
 	// unread notifications matches exactly (e.g. ["info", "success"]).
 	Severities []string `yaml:"severities,omitempty"`
+}
+
+// ExpectJob is one entry in a per-turn expect_jobs assertion. It pins the
+// terminal status of a job that landed during the turn, identified by its
+// host handler namespace (the job's Kind).
+//
+// Matching contract:
+//   - After advance_clock drains, the runner enumerates jobs whose ID was
+//     unknown OR not-yet-terminal at the start of the turn, but is now in a
+//     terminal state (done | failed | cancelled | awaiting_input).
+//     awaiting_input is intentionally included so a clarification pause can
+//     be asserted explicitly.
+//   - The newly-terminal jobs are listed in creation-time order (jobs.created_at).
+//   - Each ExpectJob[i] consumes the next unmatched newly-terminal job whose
+//     Kind == Namespace. If the status doesn't match, the fixture fails with
+//     a clear diff.
+//   - Surplus newly-terminal jobs that don't match any remaining ExpectJob
+//     entry are tolerated silently — fixtures can assert on a single
+//     interesting job without enumerating every side-effect dispatch.
+//   - If expect_jobs has N entries but fewer than N newly-terminal jobs were
+//     found, the fixture fails with "expected N jobs to terminate, got M".
+type ExpectJob struct {
+	// Namespace is the handler name to match against the job's Kind
+	// (e.g. "host.run", "host.transport.post"). Required.
+	Namespace string `yaml:"namespace"`
+	// Status is the expected terminal status. One of:
+	//   done | failed | cancelled | awaiting_input
+	// Required.
+	Status string `yaml:"status"`
 }
 
 // FlowIntent is the structured intent in a fixture turn.
@@ -259,7 +304,7 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 		reg.Register(name, func(hctx context.Context, args map[string]any) (host.Result, error) {
 			// 1. Simulated delay using the fake clock injected by the scheduler.
 			if stub.Delay != "" {
-				d, parseErr := time.ParseDuration(stub.Delay)
+				d, parseErr := app.ParseDuration(stub.Delay)
 				if parseErr != nil {
 					return host.Result{}, fmt.Errorf("stub %q: parse delay: %w", name, parseErr)
 				}
@@ -294,6 +339,9 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 		orchestrator.WithHostRegistry(reg),
 		orchestrator.WithScheduler(sched),
 		orchestrator.WithJobStore(js),
+		// Inject the same fake clock the scheduler uses so Timeout: firings
+		// (gap §9.5) run on virtual time alongside background-job delays.
+		orchestrator.WithClock(clk),
 	)
 
 	sid, err := orch.NewSession(ctx)
@@ -332,7 +380,7 @@ func shouldUseOrchestrator(fixture *FlowFixture) bool {
 		return true
 	}
 	for _, t := range fixture.Turns {
-		if t.AdvanceClock != "" || t.ExpectInbox != nil {
+		if t.AdvanceClock != "" || t.ExpectInbox != nil || len(t.ExpectJobs) > 0 {
 			return true
 		}
 	}
@@ -817,6 +865,23 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 			call    intent.IntentCall
 		)
 
+		// Pre-turn job snapshot for expect_jobs diffing. We capture the set
+		// of every job ID currently in the store along with its status; a
+		// "newly-terminal" job after the turn is one whose ID was either
+		// not present, or was present in a non-terminal status, but now
+		// holds a terminal status. Cheap relative to the DB calls already
+		// happening per turn.
+		preTurnJobStatus := map[jobs.JobID]jobs.JobStatus{}
+		if len(turn.ExpectJobs) > 0 {
+			snapshot, snapErr := rig.jobStore.ListBySession(ctx, rig.sid)
+			if snapErr != nil {
+				return nil, fmt.Errorf("turn %d: pre-turn job snapshot: %w", i+1, snapErr)
+			}
+			for _, j := range snapshot {
+				preTurnJobStatus[j.ID] = j.Status
+			}
+		}
+
 		if turn.Intent != nil {
 			// Load the current world before building the intent call so that
 			// slot values containing {{ world.* }} templates can be expanded.
@@ -848,8 +913,23 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 			// recording-resolved turns with orchestrator features they should add a static
 			// harness; that's a future enhancement.
 			return nil, fmt.Errorf("turn %d: input: %q in orchestrator-path fixture; use intent: instead (recording routing not yet supported on orchestrator path)", i+1, turn.Input)
+		} else if turn.AdvanceClock != "" {
+			// Clock-only turn: no user input, just advance virtual time.  Used
+			// by Timeout: fixtures (gap §9.5) that need to fire a synthetic
+			// transition without first issuing a user intent.  Synthesise an
+			// empty TurnOutcome reflecting the current state so the assertion
+			// logic below can run.
+			preJ, preJErr := rig.orch.LoadJourney(rig.sid)
+			if preJErr != nil {
+				return nil, fmt.Errorf("turn %d: load journey for clock-only turn: %w", i+1, preJErr)
+			}
+			outcome = &orchestrator.TurnOutcome{
+				Mode:       orchestrator.ModeTransitioned,
+				NewState:   preJ.State,
+				TurnNumber: preJ.Turn,
+			}
 		} else {
-			return nil, fmt.Errorf("turn %d: neither intent nor input is set", i+1)
+			return nil, fmt.Errorf("turn %d: turn requires one of intent:, input:, or advance_clock:", i+1)
 		}
 
 		if turnErr != nil {
@@ -860,7 +940,9 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 
 		// AdvanceClock: move the fake clock forward, then wait for scheduler + listener.
 		if turn.AdvanceClock != "" {
-			d, parseErr := time.ParseDuration(turn.AdvanceClock)
+			// app.ParseDuration accepts Go-std durations plus Nd (days), so
+			// Timeout: fixtures can write "11d" for the canonical OT case.
+			d, parseErr := app.ParseDuration(turn.AdvanceClock)
 			if parseErr != nil {
 				return nil, fmt.Errorf("turn %d: advance_clock %q: %w", i+1, turn.AdvanceClock, parseErr)
 			}
@@ -1015,6 +1097,14 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 			}
 		}
 
+		// expect_jobs: diff against the pre-turn snapshot and match each
+		// expected entry against a newly-terminal job by namespace.
+		if len(turn.ExpectJobs) > 0 {
+			if errs := assertJobs(ctx, rig.jobStore, rig.sid, preTurnJobStatus, turn.ExpectJobs); len(errs) > 0 {
+				tr.Failures = append(tr.Failures, errs...)
+			}
+		}
+
 		tr.Passed = len(tr.Failures) == 0
 		result.Turns = append(result.Turns, tr)
 
@@ -1116,7 +1206,18 @@ func seedInitialState(ctx context.Context, rig *orchRig, def *app.AppDef, fixtur
 		})
 	}
 
-	return rig.st.AppendEvents(rig.sid, events)
+	if err := rig.st.AppendEvents(rig.sid, events); err != nil {
+		return err
+	}
+
+	// Arm any Timeout: declared on the seeded initial state.  Without this,
+	// fixtures whose initial_state has a Timeout would not see it fire on
+	// advance_clock, because seed events bypass the orchestrator's normal
+	// transition path that calls armTimeoutForState.
+	if fixture.InitialState != "" {
+		rig.orch.ArmTimeoutForInitialState(rig.sid, app.StatePath(fixture.InitialState))
+	}
+	return nil
 }
 
 // injectWorldOverride writes a set of EffectApplied events for each
@@ -1247,6 +1348,12 @@ func advanceAndWait(ctx context.Context, rig *orchRig, d time.Duration) error {
 		if err := rig.orch.WaitListenerIdle(ctx, rig.sid); err != nil {
 			return fmt.Errorf("listener WaitListenerIdle: %w", err)
 		}
+		// Drain any due Timeout: firings (gap §9.5).  The timeout dispatcher
+		// runs its synthetic turns on independent goroutines, so neither
+		// scheduler.WaitIdle nor orch.WaitListenerIdle covers them.
+		if err := rig.orch.WaitTimeoutsDrained(ctx, rig.sid); err != nil {
+			return fmt.Errorf("timeout dispatcher WaitTimeoutsDrained: %w", err)
+		}
 		// If on_complete didn't dispatch any new background work during the
 		// listener's processing, runningCount is still zero and we are done.
 		// Otherwise loop: the next WaitIdle blocks until the cascading job
@@ -1302,6 +1409,136 @@ func assertInbox(ctx context.Context, js *jobs.JobStore, sid app.SessionID, exp 
 		wantJSON, _ := json.Marshal(want)
 		if string(gotJSON) != string(wantJSON) {
 			failures = append(failures, fmt.Sprintf("expect_inbox.severities: got %v, want %v", got, exp.Severities))
+		}
+	}
+
+	return failures
+}
+
+// terminalJobStatuses is the set of job statuses considered terminal by
+// expect_jobs. JobAwaitingInput is included so a fixture can explicitly
+// assert that a job paused for clarification (without continuing past it).
+var terminalJobStatuses = map[jobs.JobStatus]bool{
+	jobs.JobDone:          true,
+	jobs.JobFailed:        true,
+	jobs.JobCancelled:     true,
+	jobs.JobAwaitingInput: true,
+}
+
+// finalJobStatuses is the subset of terminal statuses that represent a job's
+// permanently final state. Used in the pre-turn snapshot diff: a job
+// transitioning from awaiting_input → done is "newly terminal" this turn, so
+// awaiting_input must NOT count as "already terminal" for diffing purposes
+// (otherwise the resume-and-complete turn would see zero newly-terminal jobs).
+var finalJobStatuses = map[jobs.JobStatus]bool{
+	jobs.JobDone:      true,
+	jobs.JobFailed:    true,
+	jobs.JobCancelled: true,
+}
+
+// validExpectJobStatuses is the set of strings accepted in expect_jobs.status,
+// matched against jobs.JobStatus values. Kept in sync with terminalJobStatuses.
+var validExpectJobStatuses = map[string]bool{
+	string(jobs.JobDone):          true,
+	string(jobs.JobFailed):        true,
+	string(jobs.JobCancelled):     true,
+	string(jobs.JobAwaitingInput): true,
+}
+
+// assertJobs implements the expect_jobs assertion. It re-reads the job store,
+// computes the set of jobs that newly reached a terminal status during this
+// turn (relative to preTurnStatus), and matches each expected entry to the
+// next unmatched newly-terminal job whose Kind == Namespace in creation-time
+// order. See the ExpectJob doc-comment for the full matching contract.
+func assertJobs(ctx context.Context, js *jobs.JobStore, sid app.SessionID, preTurnStatus map[jobs.JobID]jobs.JobStatus, expected []ExpectJob) []string {
+	if len(expected) == 0 || js == nil {
+		return nil
+	}
+
+	// Validate expected status strings up front so a typo in the fixture
+	// produces an obvious error rather than a silent no-match.
+	var failures []string
+	for i, exp := range expected {
+		if exp.Namespace == "" {
+			failures = append(failures, fmt.Sprintf("expect_jobs[%d]: namespace is required", i))
+		}
+		if !validExpectJobStatuses[exp.Status] {
+			failures = append(failures, fmt.Sprintf("expect_jobs[%d]: status %q is not one of done|failed|cancelled|awaiting_input", i, exp.Status))
+		}
+	}
+	if len(failures) > 0 {
+		return failures
+	}
+
+	all, err := js.ListBySession(ctx, sid)
+	if err != nil {
+		return []string{fmt.Sprintf("expect_jobs: ListBySession: %v", err)}
+	}
+
+	// Newly-terminal: a job whose current status is in terminalJobStatuses
+	// (done | failed | cancelled | awaiting_input) AND whose pre-turn status
+	// was either absent (new job dispatched this turn) or not yet in
+	// finalJobStatuses (running, or awaiting_input that has now landed
+	// permanently). The asymmetry lets the assertion fire on
+	// awaiting_input → done resumes — see finalJobStatuses doc.
+	// Preserve creation-time order (ListBySession returns ASC).
+	type termJob struct {
+		j      jobs.Job
+		taken  bool
+		status jobs.JobStatus
+	}
+	var newlyTerminal []*termJob
+	for _, j := range all {
+		if !terminalJobStatuses[j.Status] {
+			continue
+		}
+		prev, hadPrev := preTurnStatus[j.ID]
+		// Skip jobs that were already in a permanently-final status — only
+		// transitions into a (new) terminal status this turn count.
+		if hadPrev && finalJobStatuses[prev] {
+			continue
+		}
+		// Skip jobs that were already awaiting_input and remain awaiting_input
+		// — no transition occurred this turn.
+		if hadPrev && prev == jobs.JobAwaitingInput && j.Status == jobs.JobAwaitingInput {
+			continue
+		}
+		jj := j
+		newlyTerminal = append(newlyTerminal, &termJob{j: jj, status: jj.Status})
+	}
+
+	if len(newlyTerminal) < len(expected) {
+		return []string{fmt.Sprintf("expect_jobs: expected %d jobs to terminate this turn, got %d", len(expected), len(newlyTerminal))}
+	}
+
+	for i, exp := range expected {
+		// Find the next unmatched newly-terminal job with matching namespace.
+		var match *termJob
+		for _, tj := range newlyTerminal {
+			if tj.taken {
+				continue
+			}
+			if tj.j.Kind == exp.Namespace {
+				match = tj
+				break
+			}
+		}
+		if match == nil {
+			// Build a diagnostic of what is available.
+			available := make([]string, 0, len(newlyTerminal))
+			for _, tj := range newlyTerminal {
+				if tj.taken {
+					continue
+				}
+				available = append(available, fmt.Sprintf("%s/%s", tj.j.Kind, tj.status))
+			}
+			failures = append(failures, fmt.Sprintf("expect_jobs[%d]: no newly-terminal job found with namespace=%q (remaining: %v)", i, exp.Namespace, available))
+			continue
+		}
+		match.taken = true
+		if string(match.status) != exp.Status {
+			failures = append(failures, fmt.Sprintf("expect_jobs[%d]: namespace=%q got status=%q, want %q (job_id=%s, error=%q)",
+				i, exp.Namespace, match.status, exp.Status, match.j.ID, match.j.Error))
 		}
 	}
 

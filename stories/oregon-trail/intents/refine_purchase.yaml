@@ -1,0 +1,93 @@
+# refine_purchase — in-place tweaks to a draft basket at the counter.
+#
+# State: general_store.reviewing — the proposal lifecycle's "draft in
+# hand" substate. The room's on:refine_purchase arm self-stays in
+# reviewing and merges any per-item slot into the working draft
+# (replacement semantics: the slot value REPLACES the current value,
+# it is NOT additive). The fixture pins three things:
+#
+#   1. Casual "actually give me N <item>" routes to refine_purchase
+#      with that item's slot set.
+#   2. Typo / colloquial item names ("draaft animalz" → oxen) still
+#      route correctly — confirms the LLM's slot enrichment is robust.
+#   3. Bare "refine" (no per-item) is a valid no-op refinement; the
+#      view re-renders the current draft so the player can re-read.
+#
+# NOTE on the "less food" / "add 50 more bullets" cases: these are
+# ambiguous in REPLACEMENT semantics (without knowing the current
+# total) so we route them to refine_purchase with bullets/food slots
+# at the LLM's best-guess concrete value. The trace showed
+# "add 50 more bullets" → bullets:50 (treats as new total when there
+# were 0; merged-in when there were >0); we lock the trace's value.
+#
+# NOTE on min_confidence: the runner's fixture schema does NOT support
+# a per-fixture min_confidence threshold today (only the recording
+# top-level min_confidence is read by the static harness, which uses
+# it as a load-time filter). Pass-rate is the only fixture-level
+# regression gate. See internal/testrunner/intents.go ~L60-90.
+test_kind: intents
+app: oregon-trail
+state: general_store.reviewing
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  - id: actually-12-oxen
+    intent:
+      name: refine_purchase
+      slots: { oxen: 12 }
+    inputs:
+      - "actually give me 12 oxen"
+
+  - id: typo-draft-animals
+    intent:
+      name: refine_purchase
+      slots: { oxen: 12 }
+    inputs:
+      - "actually give me 12 draaft animalz"
+
+  - id: oxen-not-six
+    intent:
+      name: refine_purchase
+      slots: { oxen: 7 }
+    inputs:
+      - "I want 7 oxen not 6"
+
+  - id: add-bullets
+    intent:
+      name: refine_purchase
+      slots: { bullets: 50 }
+    inputs:
+      - "add 50 more bullets"
+
+  - id: actually-food
+    intent:
+      name: refine_purchase
+      slots: { food: 250 }
+    inputs:
+      - "actually 250 lbs of food"
+
+  - id: refine-bare
+    intent:
+      name: refine_purchase
+      slots: {}
+    inputs:
+      - "refine"
+
+  # "less food" — vague refinement; the LLM routes to refine_purchase
+  # with feedback only (no concrete food slot). The machine accepts
+  # this because every refine_purchase slot is optional (the room's
+  # merge logic preserves the existing total when no override is
+  # given) — so this is NOT an expect_failure, it's a positive assert
+  # that the intent fires WITH ONLY feedback (no food slot, so the
+  # current draft is preserved unchanged).
+  - id: less-food-vague
+    intent:
+      name: refine_purchase
+      slots:
+        feedback: "less food"
+    inputs:
+      - "less food"

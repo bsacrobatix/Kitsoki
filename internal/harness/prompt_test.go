@@ -77,6 +77,63 @@ func TestBuildDynamicSuffix_RendersWorldTemplates(t *testing.T) {
 	}
 }
 
+// TestBuildDynamicSuffix_RendersRecentTurns asserts the RecentTurns slice
+// shows up in the system prompt as a "Recent conversation" block — the
+// surface the LLM should consult to resolve back-references like "what I
+// just said". Both success and rejection rows are exercised.
+func TestBuildDynamicSuffix_RendersRecentTurns(t *testing.T) {
+	def := &app.AppDef{
+		App: app.AppMeta{ID: "x"},
+		States: map[string]*app.State{
+			"main": {Description: "Main", View: "ok"},
+		},
+	}
+
+	in := harness.TurnInput{
+		StatePath: "main",
+		World:     world.World{Vars: map[string]any{}},
+		RecentTurns: []harness.TurnSummary{
+			{Turn: 3, UserText: "go south", Intent: "go", State: "bar.dark"},
+			{Turn: 4, UserText: "drink", Intent: "drink", State: "bar.dark", Rejected: true},
+		},
+	}
+
+	out := harness.BuildDynamicSuffixForTest(def, in)
+
+	if !strings.Contains(out, "Recent conversation") {
+		t.Fatalf("expected 'Recent conversation' header in prompt, got:\n%s", out)
+	}
+	if !strings.Contains(out, "turn 3") || !strings.Contains(out, "go south") {
+		t.Errorf("expected turn 3 user text in prompt, got:\n%s", out)
+	}
+	if !strings.Contains(out, "REJECTED") {
+		t.Errorf("expected rejection marker in prompt, got:\n%s", out)
+	}
+	if !strings.Contains(out, "bar.dark") {
+		t.Errorf("expected post-turn state in prompt, got:\n%s", out)
+	}
+}
+
+// TestBuildDynamicSuffix_EmptyRecentTurnsOmitsBlock asserts the recent-
+// conversation block is omitted entirely on turn 1 (RecentTurns empty)
+// — we should not waste tokens on an empty heading.
+func TestBuildDynamicSuffix_EmptyRecentTurnsOmitsBlock(t *testing.T) {
+	def := &app.AppDef{
+		App: app.AppMeta{ID: "x"},
+		States: map[string]*app.State{
+			"main": {Description: "Main", View: "ok"},
+		},
+	}
+	in := harness.TurnInput{
+		StatePath: "main",
+		World:     world.World{Vars: map[string]any{}},
+	}
+	out := harness.BuildDynamicSuffixForTest(def, in)
+	if strings.Contains(out, "Recent conversation") {
+		t.Errorf("expected no 'Recent conversation' block when RecentTurns is empty, got:\n%s", out)
+	}
+}
+
 // TestBuildDynamicSuffix_UnknownStateIsSafe asserts the function does not
 // panic or error when the state path is unknown — it just omits the
 // description/view section.

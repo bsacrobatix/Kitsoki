@@ -1,0 +1,41 @@
+# timeout — minimal demo app exercising the Timeout: runtime (gap §9.5).
+#
+# Used by the flow-runner test in internal/testrunner to verify that
+# advance_clock: drives the timeout dispatcher alongside the background-job
+# scheduler.  The Oregon Trail port will adopt the same pattern after
+# Phase F merges (see proposal §9.5 "Fallback" note).
+
+app:
+  id: timeout-demo
+  version: 0.1.0
+  title: "Timeout: runtime demo"
+
+world:
+  visits: { type: int, default: 0 }
+
+intents:
+  continue:
+    title: "Continue"
+    description: "Manual departure."
+    examples: ["go", "continue"]
+
+root: waiting
+
+states:
+  waiting:
+    description: "Waiting for reply."
+    view: "Waiting..."
+    timeout:
+      after: "10d"
+      target: traveled
+    on_enter:
+      - increment:
+          visits: 1
+    on:
+      continue:
+        - target: traveled
+
+  traveled:
+    terminal: true
+    description: "Traveled onward."
+    view: "Traveled. visits={{ world.visits }}"

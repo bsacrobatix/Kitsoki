@@ -1,0 +1,22 @@
+app:
+  id: test-bad-timeout-duration
+  version: 0.1.0
+
+world: {}
+
+intents:
+  go:
+    title: "Go"
+
+root: waiting
+
+states:
+  waiting:
+    view: "Waiting."
+    timeout:
+      # 'forever' is not a parseable duration.
+      after: "forever"
+      target: waiting
+    on:
+      go:
+        - target: waiting

@@ -1,0 +1,63 @@
+# inbox — atomic state listing pending background-job notifications.
+#
+# PHASE E scope. Stackless entry: callers transition here with
+# push_history: false so the player's history stack still points at the
+# originating room. The `open_job` and `answer_clarification` intents
+# teleport (also push_history: false) back to that originating state,
+# whose path is captured in world.last_job_originating_state at the time
+# the background job was launched.
+#
+# In the TUI proper, the engine surfaces inbox notifications directly
+# (internal/jobs/store.go + internal/inbox/) and the user clicks a
+# notification to teleport via the TeleportState attached to the
+# notification row. This YAML state is the kitsoki-app-visible facade so
+# flow fixtures can drive the same lifecycle via intents.
+
+states:
+
+  inbox:
+    description: "Inbox — pending background-job notifications."
+    relevant_world: [inbox_unread, last_job_id, last_hunt_target, last_hunt_lbs, last_hunt_outcome, last_job_originating_state]
+    view: |
+      Inbox ({{ world.inbox_unread }} unread).
+
+      Last job: {{ world.last_job_id }}
+      {{ if world.last_hunt_outcome }}Hunt result: {{ world.last_hunt_lbs }} lbs of {{ world.last_hunt_target }} ({{ world.last_hunt_outcome }}).{{ end }}
+
+      Actions:
+        - answer_clarification job_id=... answer=...   (resolve a paused job)
+        - open_job job_id=...                          (teleport back to the originating room)
+        - look
+    on:
+      # answer_clarification — resolve a paused background job. The
+      # host.jobs.answer_clarification handler writes the answer into the
+      # JobStore; the handler's poll loop picks it up and resumes. We
+      # teleport back to the originating room stacklessly so the player
+      # is now watching the job continue from where it was launched.
+      answer_clarification:
+        - target: "{{ world.last_job_originating_state }}"
+          push_history: false
+          effects:
+            - invoke: host.jobs.answer_clarification
+              with:
+                job_id: "{{ slots.job_id }}"
+                answer: "{{ slots.answer }}"
+            - set:
+                inbox_unread: 0
+            - say: "Answered clarification for job {{ slots.job_id }}."
+
+      # open_job — straight teleport back to the originating room. The
+      # job_id slot is required for the TUI surface; flow fixtures pass
+      # `{{ world.last_job_id }}` to satisfy it. The originating state
+      # path lives in world.last_job_originating_state — set when the
+      # background job was launched.
+      open_job:
+        - target: "{{ world.last_job_originating_state }}"
+          push_history: false
+          effects:
+            - set:
+                inbox_unread: 0
+            - say: "Returning to {{ world.last_job_originating_state }}."
+
+      look:
+        - target: .

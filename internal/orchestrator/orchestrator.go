@@ -5,7 +5,9 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/clock"
 	"kitsoki/internal/expr"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
@@ -54,6 +57,15 @@ type Orchestrator struct {
 	// and the host.chat.* built-ins. Optional; nil disables chat persistence.
 	chatStore host.ChatStore
 
+	// clk is the injectable time source used by the timeout dispatcher.
+	// Defaults to clock.Real() when no WithClock option is supplied.
+	clk clock.Clock
+
+	// timeouts owns per-session pending Timeout entries.  Lazily constructed
+	// in New so orchestrators without a clock/store still get a working
+	// in-memory dispatcher.
+	timeouts *timeoutDispatcher
+
 	// pending tracks in-flight clarifications keyed by session ID.
 	mu      sync.Mutex
 	pending map[app.SessionID]*pendingClarify
@@ -88,9 +100,30 @@ func New(def *app.AppDef, m machine.Machine, s store.Store, h harness.Harness, o
 		pending:         make(map[app.SessionID]*pendingClarify),
 		cancelListeners: make(map[app.SessionID]context.CancelFunc),
 		sessionLocks:    make(map[app.SessionID]*sync.Mutex),
+		clk:             clock.Real(),
 	}
 	for _, opt := range opts {
 		opt(o)
+	}
+	// Construct the timeout dispatcher.  Persistence is enabled iff the
+	// orchestrator has a store with a *sql.DB attached (the production case);
+	// pure-memory test rigs default to in-memory tracking.
+	var db *sql.DB
+	if s != nil {
+		db = s.DB()
+	}
+	td, tdErr := newTimeoutDispatcher(o.clk, db, o.logger)
+	if tdErr != nil {
+		// A schema failure is recoverable: log and proceed with no Timeout
+		// support.  Apps that don't use Timeout: still work.
+		o.logger.Warn(trace.EvTimeoutError,
+			slog.String("phase", "dispatcher_init"),
+			slog.String("err", tdErr.Error()),
+		)
+	} else {
+		o.timeouts = td
+		td.setOrchestrator(o)
+		o.rearmPersistedTimeouts()
 	}
 	return o
 }
@@ -156,6 +189,17 @@ func WithChatStore(cs host.ChatStore) Option {
 	}
 }
 
+// WithClock injects a clock.Clock used by the timeout dispatcher.  Defaults
+// to clock.Real() when not supplied.  Pass a *clock.Fake in tests to drive
+// Timeout: firings deterministically alongside background-job stubs.
+func WithClock(c clock.Clock) Option {
+	return func(o *Orchestrator) {
+		if c != nil {
+			o.clk = c
+		}
+	}
+}
+
 // NewSession opens a session in the store and returns its ID.
 // If a background-job scheduler is configured, it also spawns a per-session
 // listener goroutine that forwards terminal JobEvents to handleJobTerminal.
@@ -200,17 +244,19 @@ func (o *Orchestrator) startSessionListener(sid app.SessionID) {
 					switch ev.Status {
 					case jobs.JobDone, jobs.JobFailed, jobs.JobCancelled:
 						if err := o.handleJobTerminal(listenerCtx, sid, ev); err != nil {
-							o.logger.Error("orchestrator: handleJobTerminal",
-								slog.String("session", string(sid)),
+							o.logger.ErrorContext(listenerCtx, trace.EvJobError,
+								slog.String("session_id", string(sid)),
 								slog.String("job_id", ev.JobID),
+								slog.String("phase", "handle_terminal"),
 								slog.String("err", err.Error()),
 							)
 						}
 					case jobs.JobAwaitingInput:
 						if err := o.handleJobAwaitingInput(listenerCtx, sid, ev); err != nil {
-							o.logger.Error("orchestrator: handleJobAwaitingInput",
-								slog.String("session", string(sid)),
+							o.logger.ErrorContext(listenerCtx, trace.EvJobError,
+								slog.String("session_id", string(sid)),
 								slog.String("job_id", ev.JobID),
+								slog.String("phase", "handle_awaiting_input"),
 								slog.String("err", err.Error()),
 							)
 						}
@@ -255,6 +301,11 @@ func (o *Orchestrator) stopSessionListener(sid app.SessionID) {
 	o.mu.Unlock()
 	if ok {
 		cancel()
+	}
+	// Drop any pending Timeout entries: a terminal session should not
+	// have a stale timer hanging around firing into a dead session.
+	if o.timeouts != nil {
+		o.timeouts.cancelAll(sid)
 	}
 }
 
@@ -340,6 +391,23 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		slog.String("mode", "normal"),
 	)
 
+	// Build RecentTurns from the event history. The store call here is a
+	// second pass over the same rows loadJourney already read, but the slice
+	// isn't carried on JourneyState today and snapshotting through the
+	// journey type would be a bigger refactor. Bounded to RecentTurnsLimit
+	// so prompt size stays predictable.
+	//
+	// On error: log and pass nil. RecentTurns is purely advisory — a missing
+	// history must not abort the turn.
+	history, histErr := o.store.LoadHistory(sid)
+	if histErr != nil {
+		tl.Debug(ctx, trace.EvTurnStart,
+			slog.String("recent_turns_load_error", histErr.Error()),
+		)
+		history = nil
+	}
+	recent := extractRecentTurns(history)
+
 	in := harness.TurnInput{
 		SessionID:      app.SessionID(sid),
 		TurnNumber:     turnNum,
@@ -347,6 +415,7 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		StatePath:      journey.State,
 		World:          journey.World,
 		AllowedIntents: allowedNames,
+		RecentTurns:    recent,
 	}
 
 	// Append TurnStarted event.
@@ -360,6 +429,28 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	params, err := o.harness.RunTurn(ctx, in)
 	harnessDur := time.Since(harnessStart)
 	if err != nil {
+		// LLM answered but didn't call the expected tool — surface its
+		// free-form text as a soft clarification rather than bubbling a
+		// red technical error. The TUI's renderRejection picks the
+		// LLM_CLARIFICATION code up and renders via AppendClarification.
+		var clarify *harness.ClarifyResponse
+		if errors.As(err, &clarify) {
+			tl.Debug(ctx, trace.EvTurnRouted,
+				slog.Duration("dur", harnessDur),
+				slog.String("outcome", "clarify"),
+				slog.String("error", err.Error()),
+			)
+			msg := strings.TrimSpace(clarify.Message)
+			if msg == "" {
+				msg = "The router didn't understand. Try rephrasing or pick an action from the menu."
+			}
+			return &TurnOutcome{
+				Mode:         ModeRejected,
+				NewState:     journey.State,
+				ErrorCode:    intent.ErrorCode("LLM_CLARIFICATION"),
+				ErrorMessage: msg,
+			}, nil
+		}
 		tl.Debug(ctx, trace.EvTurnRouted,
 			slog.Duration("dur", harnessDur),
 			slog.String("outcome", "error"),
@@ -440,6 +531,12 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 
 			missingSlots := ve.MissingSlots
 			clarification := ComputeClarification(o.def, journey.State, call.Intent, missingSlots)
+			tl.Debug(ctx, trace.EvSlotFillRequested,
+				slog.String("intent", call.Intent),
+				slog.Int("missing_count", len(missingSlots)),
+				slog.Any("missing", missingSlots),
+				slog.String("origin", "turn"),
+			)
 			return &TurnOutcome{
 				Mode:           ModeClarify,
 				NewState:       journey.State,
@@ -534,6 +631,10 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	delete(o.pending, sid)
 	o.mu.Unlock()
 
+	// (Re-)arm any Timeout: declared on the new state, cancelling any
+	// pre-existing timeout on the state we just exited.
+	o.armTimeoutForState(sid, journey.State, result.NewState)
+
 	// Compute updated allowed intents in the new state.
 	newAllowed := o.machine.AllowedIntents(result.NewState, result.World)
 	newAllowedNames := make([]string, len(newAllowed))
@@ -599,6 +700,10 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	if o.chatStore != nil {
 		ctx = host.WithChatStore(ctx, o.chatStore)
 	}
+	// Inject the agents map so host.oracle.* invocations can resolve
+	// `with: { agent: <name> }` references to a host.Agent value. Built
+	// once per dispatch (cheap — translation is tag-equivalent).
+	ctx = host.WithAgents(ctx, agentsForContext(o.def))
 
 	var events []store.Event
 	applied := false
@@ -609,8 +714,10 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		if hc.Background && o.scheduler != nil {
 			bgEvents, bgWorld, bgErr := o.dispatchBackground(ctx, sid, state, hc, w)
 			if bgErr != nil {
-				o.logger.Error("orchestrator: dispatchBackground failed",
+				o.logger.ErrorContext(ctx, trace.EvJobError,
+					slog.String("session_id", string(sid)),
 					slog.String("namespace", hc.Namespace),
+					slog.String("phase", "dispatch_background"),
 					slog.String("err", bgErr.Error()),
 				)
 				w.Vars["last_error"] = bgErr.Error()
@@ -1081,6 +1188,12 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 
 			missingSlots := ve.MissingSlots
 			clarification := ComputeClarification(o.def, journey.State, call.Intent, missingSlots)
+			tl.Debug(ctx, trace.EvSlotFillRequested,
+				slog.String("intent", call.Intent),
+				slog.Int("missing_count", len(missingSlots)),
+				slog.Any("missing", missingSlots),
+				slog.String("origin", "submit_direct"),
+			)
 			return &TurnOutcome{
 				Mode:          ModeClarify,
 				NewState:      journey.State,
@@ -1167,6 +1280,9 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 	o.mu.Lock()
 	delete(o.pending, sid)
 	o.mu.Unlock()
+
+	// (Re-)arm any Timeout: declared on the new state.
+	o.armTimeoutForState(sid, journey.State, result.NewState)
 
 	newAllowed := o.machine.AllowedIntents(result.NewState, result.World)
 	newAllowedNames := make([]string, len(newAllowed))
@@ -1355,6 +1471,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	if o.chatStore != nil {
 		ctx = host.WithChatStore(ctx, o.chatStore)
 	}
+	ctx = host.WithAgents(ctx, agentsForContext(o.def))
 
 	summaries := make([]HostCallSummary, 0, len(calls))
 	var events []store.Event
@@ -1523,6 +1640,11 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 		slog.String("intent", call.Intent),
 		slog.String("mode", "clarify-continue"),
 	)
+	tl.Debug(ctx, trace.EvSlotFillContinued,
+		slog.String("intent", call.Intent),
+		slog.Int("supplement_count", len(supplementSlots)),
+		slog.Any("supplement_keys", supplementKeys(supplementSlots)),
+	)
 
 	result, machineErr := o.machine.Turn(ctx, journey.State, journey.World, call)
 	if machineErr != nil {
@@ -1546,6 +1668,12 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 			o.mu.Unlock()
 
 			clarification := ComputeClarification(o.def, journey.State, call.Intent, ve.MissingSlots)
+			tl.Debug(ctx, trace.EvSlotFillRequested,
+				slog.String("intent", call.Intent),
+				slog.Int("missing_count", len(ve.MissingSlots)),
+				slog.Any("missing", ve.MissingSlots),
+				slog.String("origin", "continue_turn"),
+			)
 			return &TurnOutcome{
 				Mode:          ModeClarify,
 				NewState:      journey.State,
@@ -1651,13 +1779,18 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 }
 
 // InitialView returns the view for the initial state (to display at session start).
+//
+// Routes through machine.RenderState so the same env-population path the turn
+// loop uses runs here too — in particular env.Menu and the available() /
+// blocked() / blocked_reason() helper closures land populated. Bypassing the
+// machine (as the prior render.go shortcut did) left the helpers nil and any
+// template calling `available("...")` panicked with a nil-pointer dereference
+// on the first frame.
 func (o *Orchestrator) InitialView(w world.World) (string, error) {
 	initialState := app.StatePath("")
 	if s, ok := o.def.Root.(string); ok {
 		initialState = app.StatePath(s)
 	}
-	// Render the view for the initial state.
-	// We do a dummy "look" turn if look is available, otherwise we read the view directly.
 	s := lookupStateByPath(o.def, initialState)
 	if s == nil {
 		return "", nil
@@ -1665,9 +1798,7 @@ func (o *Orchestrator) InitialView(w world.World) (string, error) {
 	if s.View == "" {
 		return s.Description, nil
 	}
-	// Use the machine to render the view by doing a self-transition via "look" if available.
-	// For now, read the view template directly via the expr package.
-	return renderStateView(o.def, initialState, w)
+	return o.machine.RenderState(initialState, w)
 }
 
 // InitialState returns the initial state path for the app.
@@ -1826,4 +1957,23 @@ func newOrchestratorEvent(kind store.EventKind, payload map[string]any, turn app
 		Turn:    turn,
 		Payload: b,
 	}
+}
+
+// agentsForContext translates the app-side AgentDef map into the host-side
+// Agent map used by the context shim. Returns nil when the app declares no
+// agents so handlers see a clean "no agents wired" signal rather than an
+// empty allocated map. Description is dropped — it's documentation-only and
+// the host package doesn't need it for runtime resolution.
+func agentsForContext(def *app.AppDef) map[string]host.Agent {
+	if def == nil || len(def.Agents) == 0 {
+		return nil
+	}
+	out := make(map[string]host.Agent, len(def.Agents))
+	for name, a := range def.Agents {
+		out[name] = host.Agent{
+			SystemPrompt: a.SystemPrompt,
+			Model:        a.Model,
+		}
+	}
+	return out
 }

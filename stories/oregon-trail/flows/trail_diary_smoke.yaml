@@ -1,0 +1,96 @@
+# Phase G — trail diary smoke. Exercises host.transport.post emission
+# at three of the four surfaces Phase G wires:
+#
+#   - landmark arrival            ({id}_awaiting_reply.on_enter)
+#   - event resolution (disease)  (event_disease.wait_out, default arm)
+#   - terminal obituary           (ended_lost.on_enter, via `quit`)
+#
+# # Why not also exercise river/win here
+#
+# The win + river post paths require longer sequences and full game
+# state; they're indirectly covered by extending winning_deterministic
+# (next iteration if Phase G's coverage matrix grows). The smoke
+# fixture below pins down the three surfaces that diverge most from
+# the existing Phase B-F behaviour.
+#
+# # Assertion strategy
+#
+# Confirmed against internal/testrunner/flows.go: there is no
+# expect_outbound: / expect_transport: field — the assertion path is
+# `expect_events: [{ kind: HostInvoked, effect: { namespace: ... } }]`.
+# machine.go emits the HostInvoked event when the effect is processed
+# (before dispatch). Phase G's transports run in deterministic mode
+# (Lean per proposal §15.8), so no host_handlers are needed; the
+# absence of a transport registry causes host.transport.post to return
+# Result{Error: "no transport registry installed"} but that is a
+# domain error, not a hard runner failure — the turn completes.
+
+test_kind: flow
+app: ../app.yaml
+
+# Start mid-trail at leg_a.traveling so a single forced disease event
+# resolution rolls into leg_a.traveling → leg_a_awaiting_reply with
+# minimal preamble.
+initial_state: leg_a_executing.event_disease
+initial_world:
+  party_names:    "John,Sarah,Tom,Mary,Anne"
+  profession:     farmer
+  month:          april
+  year:           1848
+  money:          400
+  oxen:           4
+  food_lbs:       400
+  clothing_sets:  3
+  pace:           steady
+  rations:        filling
+  party_alive:    5
+  health_avg:     90
+  narration:      false
+  miles_traveled: 50
+  event_kind:     "disease"
+  illness_kind:   "dysentery"
+  illness_severity: 3
+  illness_treatment: "rest"
+  rng_counter:    0
+  rng_last:       0
+  current_event_attempts: 0
+  current_landmark: "Independence"
+
+turns:
+
+  # ── Turn 1: wait_out the dysentery. health_avg=90 so the >=30 arm
+  # wins → traveling, no death. Emits a HostInvoked event for the
+  # disease-passed transport post.
+  - intent: { name: wait_out, slots: {} }
+    expect_state: leg_a_executing.traveling
+    expect_world:
+      event_kind: ""
+      illness_kind: ""
+    expect_events:
+      - kind: HostInvoked
+        effect: { namespace: "host.transport.post" }
+
+  # ── Turn 2: continue to arrival. miles_override pushes past the
+  # 102 mi threshold; the arrival arm fires which routes to
+  # leg_a_awaiting_reply, whose on_enter posts the trail-diary
+  # landmark entry.
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 102
+    expect_state: leg_a_awaiting_reply
+    expect_world:
+      current_landmark: "Independence"  # set by leg_a_executing.on_enter
+    expect_events:
+      - kind: HostInvoked
+        effect: { namespace: "host.transport.post" }
+
+  # ── Turn 3: quit the journey. Routes to ended_lost, whose on_enter
+  # posts the obituary.
+  - intent: { name: quit, slots: {} }
+    expect_state: ended_lost
+    expect_events:
+      - kind: HostInvoked
+        effect: { namespace: "host.transport.post" }
+
+expect_terminal: true
+expect_no_errors: true

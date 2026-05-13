@@ -1,0 +1,332 @@
+# trail_guide — persistent chat room with the wagon master.
+#
+# PHASE F scope. mode: conversational compound state backed by
+# host.chat.* + host.oracle.talk. Pattern lifted directly from
+# testdata/apps/dev-story/rooms/oracle.yaml; OT-specific differences:
+#
+#   - One room, three leaf substates: list / active (existing chat)
+#     / active_new (fresh chat). active_new is one-shot: its on_enter
+#     does create+talk, and ask_question from active_new routes to
+#     active so subsequent turns reuse the same chat.
+#
+#   - Scope key is `world.profession`, so a banker's wagon-master
+#     chats are separate from a farmer's. The proposal calls this out
+#     in §2.6.
+#
+#   - Stackless entry from any `_awaiting_reply` via `consult_guide`
+#     (wired in phases.yaml). The caller sets
+#     world.last_job_originating_state before transitioning so `back`
+#     can teleport home. The same world key is reused for inbox
+#     teleport-back (Phase E) — the name is misleading but the key is
+#     generic enough.
+#
+#   - Auto-titling fires on every `host.oracle.talk` via
+#     host.chat.suggest_title with force=false; the handler itself
+#     no-ops for non-placeholder titles, so once a polished title
+#     lands the call becomes idempotent. wagon_chat_turns is the
+#     player-visible counter used in the view but the actual auto-
+#     rename condition is delegated to host.chat.suggest_title (see
+#     internal/host/chat_handlers.go isPlaceholderTitle).
+#
+#   - host.chat.suggest_title is fired unconditionally after every
+#     answer rather than gated on `wagon_chat_turns == 3` because:
+#       (a) the handler itself is the right place to decide when a
+#           title is "polished enough" — the YAML doesn't have to
+#           replicate that logic;
+#       (b) gating with Effect.When on a fragile `==` would make the
+#           transcript order-of-asks dependent on the exact counter
+#           value, which is brittle across resumed sessions.
+#
+# Effect.When is supported (gap §9.6) but isn't needed for the chat
+# state machinery itself — the two-state split (active vs active_new)
+# encodes the conditional cleanly.
+
+states:
+
+  trail_guide:
+    type: compound
+    initial: trail_guide_list
+    description: "Wagon master — persistent chats keyed by profession."
+    relevant_world: [wagon_chats_view, wagon_chat_count, wagon_chat_id, wagon_chat_title, wagon_answer, wagon_chat_turns, profession]
+
+    states:
+
+      # ── trail_guide_list — chat-management home ─────────────────
+      # on_enter refreshes the list view via host.chat.list. From here
+      # the player can ask_question (→ active_new, creates a fresh
+      # chat), open_chat (→ active, resolves chat_id), or do chat-
+      # management (rename / archive / fork).
+      trail_guide_list:
+        mode: conversational
+        description: "Wagon-master chats — list, open, rename, archive, fork, or start fresh."
+        view: |
+          ======================================================================
+           Wagon master                                profession: {{ world.profession }}
+          ======================================================================
+
+           Chats: {{ world.wagon_chat_count }}
+
+          {{ world.wagon_chats_view }}
+
+           Actions:
+             ask "..."                  — start a fresh wagon-master conversation
+             open <number/id>           — resume an existing chat
+             rename <number/id> "title" — rename a chat
+             archive <number/id>        — hide a chat from the list
+             fork <number/id> "title"   — fork a chat into a what-if branch
+
+             back                       — return to the trail
+        relevant_world: [wagon_chats_view, wagon_chat_count, profession]
+        on_enter:
+          - invoke: host.chat.list
+            with:
+              app:       "oregon-trail"
+              room:      "trail_guide"
+              scope_key: "{{ world.profession }}"
+            bind:
+              wagon_chats_view: "rendered"
+              wagon_chat_count: "count"
+
+        on:
+          # ask_question always starts a fresh chat (active_new
+          # creates it). The question is stashed in world for the
+          # active_new.on_enter chain to consume. wagon_chat_turns is
+          # incremented here (not in on_enter) because self-
+          # transitions from trail_guide_active skip on_enter — see
+          # machine.go's `resolvedTarget != string(cur)` guard — and
+          # we want the counter to climb on every ask, including the
+          # within-active self-transitions.
+          ask_question:
+            - target: trail_guide.trail_guide_active_new
+              effects:
+                - set:
+                    wagon_chat_id:    ""
+                    wagon_question:   "{{ slots.question }}"
+                    wagon_answer:     ""
+                    wagon_chat_turns: 1
+
+          open_chat:
+            - target: trail_guide.trail_guide_active
+              effects:
+                - invoke: host.chat.resolve_ref
+                  with:
+                    app:       "oregon-trail"
+                    room:      "trail_guide"
+                    scope_key: "{{ world.profession }}"
+                    ref:       "{{ slots.chat_id }}"
+                  bind:
+                    wagon_chat_id:    "chat_id"
+                    wagon_chat_title: "title"
+                - set:
+                    wagon_question:   ""
+                    wagon_answer:     ""
+                    wagon_chat_turns: 0
+
+          rename_chat:
+            - target: trail_guide.trail_guide_list
+              effects:
+                - invoke: host.chat.resolve_ref
+                  with:
+                    app:       "oregon-trail"
+                    room:      "trail_guide"
+                    scope_key: "{{ world.profession }}"
+                    ref:       "{{ slots.chat_id }}"
+                  bind:
+                    wagon_chat_id: "chat_id"
+                - invoke: host.chat.rename
+                  with:
+                    chat_id: "{{ world.wagon_chat_id }}"
+                    title:   "{{ slots.title }}"
+
+          archive_chat:
+            - target: trail_guide.trail_guide_list
+              effects:
+                - invoke: host.chat.resolve_ref
+                  with:
+                    app:       "oregon-trail"
+                    room:      "trail_guide"
+                    scope_key: "{{ world.profession }}"
+                    ref:       "{{ slots.chat_id }}"
+                  bind:
+                    wagon_chat_id: "chat_id"
+                - invoke: host.chat.archive
+                  with:
+                    chat_id: "{{ world.wagon_chat_id }}"
+
+          fork_chat:
+            - target: trail_guide.trail_guide_active
+              effects:
+                - invoke: host.chat.resolve_ref
+                  with:
+                    app:       "oregon-trail"
+                    room:      "trail_guide"
+                    scope_key: "{{ world.profession }}"
+                    ref:       "{{ slots.chat_id }}"
+                  bind:
+                    wagon_chat_id: "chat_id"
+                - invoke: host.chat.fork
+                  with:
+                    chat_id: "{{ world.wagon_chat_id }}"
+                    title:   "{{ slots.title }}"
+                  bind:
+                    wagon_chat_id:    "chat_id"
+                    wagon_chat_title: "title"
+                - set:
+                    wagon_question:   ""
+                    wagon_answer:     ""
+                    wagon_chat_turns: 0
+
+          # Stackless return to whatever launched consult_guide.
+          # phases.yaml's `consult_guide:` arm sets
+          # last_job_originating_state to the leg's _awaiting_reply.
+          back:
+            - target: "{{ world.last_job_originating_state }}"
+              push_history: false
+
+          look:
+            - target: .
+
+      # ── trail_guide_active — existing chat, ask in a loop ───────
+      # on_enter fires host.oracle.talk against the already-known
+      # wagon_chat_id. ask_question re-enters this same state (the
+      # self-transition causes on_enter to run again with the new
+      # question), so the player can keep asking until they `back`.
+      trail_guide_active:
+        mode: conversational
+        description: "Wagon master — active chat. Ask another question or go back."
+        view: |
+          Wagon master — {{ world.wagon_chat_title }}
+          Chat: {{ world.wagon_chat_id }}    turns: {{ world.wagon_chat_turns }}
+
+          Q: {{ world.wagon_question }}
+
+          A: {{ world.wagon_answer }}
+
+          Ask another question, or "back" for the chat list.
+        relevant_world: [wagon_chat_id, wagon_chat_title, wagon_question, wagon_answer, wagon_chat_turns]
+        on_enter:
+          - invoke: host.oracle.talk
+            with:
+              chat_id:  "{{ world.wagon_chat_id }}"
+              question: "{{ world.wagon_question }}"
+              # Named agent — wagon_master persona, declared in app.yaml's
+              # agents: block. Threaded through to claude as
+              # --append-system-prompt so the chat answers come back in
+              # the period-accurate wagon-master voice.
+              agent:    wagon_master
+            bind:
+              wagon_answer:     "answer"
+              wagon_chat_id:    "chat_id"
+              wagon_session_id: "claude_session_id"
+          # Auto-titling: the handler is a no-op when force=false and
+          # the existing title looks user-set, so it's safe to call on
+          # every turn. The proposal hints "after 3 turns" but the
+          # actual policy lives in the handler (placeholder-title
+          # detection in internal/host/chat_handlers.go).
+          - invoke: host.chat.suggest_title
+            with:
+              chat_id: "{{ world.wagon_chat_id }}"
+              force:   false
+            bind:
+              wagon_chat_title: "title"
+
+        on:
+          ask_question:
+            # Self-transition. on_enter does NOT re-fire on self-
+            # transitions (machine.go), so the turn counter is
+            # incremented in this transition's effects (not in
+            # on_enter) and the host.oracle.talk call is duplicated
+            # here so the new question actually triggers a fresh
+            # response. wagon_answer is cleared up front so a brief
+            # failure doesn't leave a stale answer paired with the
+            # new question.
+            - target: trail_guide.trail_guide_active
+              effects:
+                - set:
+                    wagon_question: "{{ slots.question }}"
+                    wagon_answer:   ""
+                - increment: { wagon_chat_turns: 1 }
+                - invoke: host.oracle.talk
+                  with:
+                    chat_id:  "{{ world.wagon_chat_id }}"
+                    question: "{{ slots.question }}"
+                    agent:    wagon_master
+                  bind:
+                    wagon_answer:     "answer"
+                    wagon_chat_id:    "chat_id"
+                    wagon_session_id: "claude_session_id"
+                - invoke: host.chat.suggest_title
+                  with:
+                    chat_id: "{{ world.wagon_chat_id }}"
+                    force:   false
+                  bind:
+                    wagon_chat_title: "title"
+
+          back:
+            - target: trail_guide.trail_guide_list
+
+          look:
+            - target: .
+
+      # ── trail_guide_active_new — fresh chat, one-shot ───────────
+      # Identical to trail_guide_active except on_enter first creates
+      # the chat. Subsequent ask_question goes to trail_guide_active
+      # so the create only fires once per chat.
+      trail_guide_active_new:
+        mode: conversational
+        description: "Wagon master — starting a fresh chat."
+        view: |
+          Wagon master — {{ world.wagon_chat_title }}
+          Chat: {{ world.wagon_chat_id }}    turns: {{ world.wagon_chat_turns }}
+
+          Q: {{ world.wagon_question }}
+
+          A: {{ world.wagon_answer }}
+
+          Ask another question, or "back" for the chat list.
+        relevant_world: [wagon_chat_id, wagon_chat_title, wagon_question, wagon_answer, wagon_chat_turns]
+        on_enter:
+          - invoke: host.chat.create
+            with:
+              app:       "oregon-trail"
+              room:      "trail_guide"
+              scope_key: "{{ world.profession }}"
+              title:     "Question about the trail"
+            bind:
+              wagon_chat_id:    "chat_id"
+              wagon_chat_title: "title"
+          - invoke: host.oracle.talk
+            with:
+              chat_id:  "{{ world.wagon_chat_id }}"
+              question: "{{ world.wagon_question }}"
+              agent:    wagon_master
+            bind:
+              wagon_answer:     "answer"
+              wagon_chat_id:    "chat_id"
+              wagon_session_id: "claude_session_id"
+          - invoke: host.chat.suggest_title
+            with:
+              chat_id: "{{ world.wagon_chat_id }}"
+              force:   false
+            bind:
+              wagon_chat_title: "title"
+
+        on:
+          ask_question:
+            # Route to the existing-chat state so create doesn't
+            # refire. wagon_chat_turns is incremented here (the
+            # destination's on_enter would, but parity with the
+            # active.ask_question self-transition is cleaner: every
+            # ask_question arm owns its own increment).
+            - target: trail_guide.trail_guide_active
+              effects:
+                - set:
+                    wagon_question: "{{ slots.question }}"
+                    wagon_answer:   ""
+                - increment: { wagon_chat_turns: 1 }
+
+          back:
+            - target: trail_guide.trail_guide_list
+
+          look:
+            - target: .

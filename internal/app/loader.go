@@ -140,8 +140,9 @@ func parseAndMerge(b []byte, file, baseDir string) (*AppDef, []error) {
 	return &def, nil
 }
 
-// mergeInto merges src into dst. States, proposals, hosts, intents, and world
-// keys from src are merged into dst. Collisions are errors (§9.1).
+// mergeInto merges src into dst. States, proposals, hosts, intents, world keys,
+// phase_templates, phases, and checkpoint_intents from src are merged into dst.
+// Collisions are errors (§9.1).
 func mergeInto(dst, src *AppDef, srcFile string) []error {
 	var errs []error
 	addErr := func(msg string) {
@@ -158,6 +159,39 @@ func mergeInto(dst, src *AppDef, srcFile string) []error {
 			dst.States = make(map[string]*State)
 		}
 		dst.States[k] = v
+	}
+
+	// Merge phase_templates.
+	for k, v := range src.PhaseTemplates {
+		if _, exists := dst.PhaseTemplates[k]; exists {
+			addErr(fmt.Sprintf("include: phase_template %q is already declared", k))
+			continue
+		}
+		if dst.PhaseTemplates == nil {
+			dst.PhaseTemplates = make(map[string]*PhaseTemplate)
+		}
+		dst.PhaseTemplates[k] = v
+	}
+
+	// Merge phases (singleton — at most one source may declare it).
+	if src.Phases != nil {
+		if dst.Phases != nil {
+			addErr("include: phases: block already declared")
+		} else {
+			dst.Phases = src.Phases
+		}
+	}
+
+	// Merge checkpoint_intents.
+	for k, v := range src.CheckpointIntents {
+		if _, exists := dst.CheckpointIntents[k]; exists {
+			addErr(fmt.Sprintf("include: checkpoint_intent %q is already declared", k))
+			continue
+		}
+		if dst.CheckpointIntents == nil {
+			dst.CheckpointIntents = make(map[string]Intent)
+		}
+		dst.CheckpointIntents[k] = v
 	}
 
 	// Merge proposals.
@@ -420,7 +454,17 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	for _, h := range def.Hosts {
 		allowedHosts[h] = struct{}{}
 	}
-	validateStates(file, "", def.States, globalIntents, worldKeys, allStatePaths, allowedHosts, &errs)
+	// Build the declared-agents set so effect-level `agent: <name>` refs in
+	// host.oracle.* with: blocks can be statically resolved.
+	declaredAgents := make(map[string]struct{}, len(def.Agents))
+	for name := range def.Agents {
+		declaredAgents[name] = struct{}{}
+	}
+	validateStates(file, "", def.States, globalIntents, worldKeys, allStatePaths, allowedHosts, declaredAgents, &errs)
+
+	// ── 7b. (removed) off-path agent reference: superseded by §9b
+	// validateAgentReferences which also recognises builtin agent names
+	// like `story-author`.
 
 	// ── 8. relevant_world keys exist in world schema ──────────────────────────
 	// (already done inside validateStates, which recurses into nested states)
@@ -456,7 +500,8 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 					addErr(fmt.Sprintf("%s: invoke %q is not declared in app hosts", childLoc, child.Invoke))
 				}
 			}
-			validateBackgroundEffect(file, childLoc, child, allowedHosts, &errs)
+			validateAgentRef(file, childLoc, child, declaredAgents, &errs)
+			validateBackgroundEffect(file, childLoc, child, allowedHosts, declaredAgents, &errs)
 		}
 	}
 
@@ -492,6 +537,7 @@ func joinPath(prefix, name string) string {
 //   - Valid world key references in relevant_world.
 //   - compound states: initial child must exist.
 //   - invoke: host.* effects reference only declared hosts.
+//   - `with.agent:` on host.oracle.* effects resolves to a declared agent.
 func validateStates(
 	file string,
 	prefix string,
@@ -500,6 +546,7 @@ func validateStates(
 	worldKeys map[string]struct{},
 	allPaths map[string]struct{},
 	allowedHosts map[string]struct{},
+	declaredAgents map[string]struct{},
 	errs *[]error,
 ) {
 	addErr := func(msg string) {
@@ -550,7 +597,8 @@ func validateStates(
 							addErr(fmt.Sprintf("state %q intent %q: effect invoke %q is not declared in app hosts", statePath, intentName, eff.Invoke))
 						}
 					}
-					validateBackgroundEffect(file, fmt.Sprintf("state %q intent %q effects[%d]", statePath, intentName, i), eff, allowedHosts, errs)
+					validateAgentRef(file, fmt.Sprintf("state %q intent %q effects[%d]", statePath, intentName, i), eff, declaredAgents, errs)
+					validateBackgroundEffect(file, fmt.Sprintf("state %q intent %q effects[%d]", statePath, intentName, i), eff, allowedHosts, declaredAgents, errs)
 				}
 			}
 		}
@@ -561,7 +609,24 @@ func validateStates(
 					addErr(fmt.Sprintf("state %q: on_enter invoke %q is not declared in app hosts", statePath, eff.Invoke))
 				}
 			}
-			validateBackgroundEffect(file, fmt.Sprintf("state %q on_enter[%d]", statePath, i), eff, allowedHosts, errs)
+			validateAgentRef(file, fmt.Sprintf("state %q on_enter[%d]", statePath, i), eff, declaredAgents, errs)
+			validateBackgroundEffect(file, fmt.Sprintf("state %q on_enter[%d]", statePath, i), eff, allowedHosts, declaredAgents, errs)
+		}
+
+		// Validate Timeout: parse the duration and resolve the target.
+		if s.Timeout != nil {
+			if s.Timeout.After == "" {
+				addErr(fmt.Sprintf("state %q: timeout: missing 'after' field", statePath))
+			} else if !strings.Contains(s.Timeout.After, "{{") {
+				if _, err := ParseDuration(s.Timeout.After); err != nil {
+					addErr(fmt.Sprintf("state %q: timeout.after %q: %v", statePath, s.Timeout.After, err))
+				}
+			}
+			if s.Timeout.Target == "" {
+				addErr(fmt.Sprintf("state %q: timeout: missing 'target' field", statePath))
+			} else if err := validateTransitionTarget(file, statePath, s.Timeout.Target, allPaths); err != nil {
+				*errs = append(*errs, err)
+			}
 		}
 
 		// Validate compound state's initial child.
@@ -576,9 +641,21 @@ func validateStates(
 			}
 		}
 
+		// Validate parallel state shape (proposal §9.4): each parallel state
+		// must declare ≥2 child regions and must not declare an `initial:`
+		// field on the parent (each region picks its own initial).
+		if s.Type == "parallel" {
+			if len(s.States) < 2 {
+				addErr(fmt.Sprintf("state %q: parallel state must declare at least 2 child regions (got %d)", statePath, len(s.States)))
+			}
+			if s.Initial != "" {
+				addErr(fmt.Sprintf("state %q: parallel state must not declare initial: — each region picks its own initial", statePath))
+			}
+		}
+
 		// Recurse into child states.
 		if len(s.States) > 0 {
-			validateStates(file, statePath, s.States, globalIntents, worldKeys, allPaths, allowedHosts, errs)
+			validateStates(file, statePath, s.States, globalIntents, worldKeys, allPaths, allowedHosts, declaredAgents, errs)
 		}
 	}
 }
@@ -639,7 +716,8 @@ func resolveTarget(statePath, target string) string {
 //   - background: true requires invoke: to be non-empty.
 //   - effects inside on_complete: must NOT have background: true (recursively).
 //   - invoke: inside on_complete: must reference only declared hosts (allowedHosts).
-func validateBackgroundEffect(file, location string, eff Effect, allowedHosts map[string]struct{}, errs *[]error) {
+//   - `with.agent:` inside on_complete: must resolve to a declared agent.
+func validateBackgroundEffect(file, location string, eff Effect, allowedHosts, declaredAgents map[string]struct{}, errs *[]error) {
 	addErr := func(msg string) {
 		*errs = append(*errs, &ValidationError{File: file, Message: msg})
 	}
@@ -657,8 +735,49 @@ func validateBackgroundEffect(file, location string, eff Effect, allowedHosts ma
 				addErr(fmt.Sprintf("%s: invoke %q is not declared in app hosts", loc, child.Invoke))
 			}
 		}
+		// Validate any `agent: <name>` on the child effect's with: block.
+		validateAgentRef(file, loc, child, declaredAgents, errs)
 		// Recursively reject nested on_complete with background.
-		validateBackgroundEffect(file, loc, child, allowedHosts, errs)
+		validateBackgroundEffect(file, loc, child, allowedHosts, declaredAgents, errs)
+	}
+}
+
+// validateAgentRef checks that, when a host.oracle.* effect declares
+// `with: { agent: <name> }`, the name resolves to an entry in
+// AppDef.Agents. Effects that omit `agent:` (or whose Invoke is not a
+// host.oracle.* handler) are silently ignored — agent: is host-handler-
+// specific metadata, not a global field. Templated values (containing
+// "{{") are skipped because they cannot be resolved statically.
+func validateAgentRef(file, location string, eff Effect, declaredAgents map[string]struct{}, errs *[]error) {
+	if eff.With == nil {
+		return
+	}
+	raw, ok := eff.With["agent"]
+	if !ok {
+		return
+	}
+	name, ok := raw.(string)
+	if !ok || name == "" {
+		return
+	}
+	if strings.Contains(name, "{{") {
+		// Template — evaluated at runtime; cannot validate statically.
+		return
+	}
+	// Only host.oracle.* handlers consume agent:; flag misuse on others as
+	// a useful authoring error rather than a silent typo.
+	if eff.Invoke != "" && !strings.HasPrefix(eff.Invoke, "host.oracle.") {
+		*errs = append(*errs, &ValidationError{
+			File:    file,
+			Message: fmt.Sprintf("%s: with.agent is only meaningful on host.oracle.* invocations (got invoke %q)", location, eff.Invoke),
+		})
+		return
+	}
+	if _, found := declaredAgents[name]; !found {
+		*errs = append(*errs, &ValidationError{
+			File:    file,
+			Message: fmt.Sprintf("%s: with.agent %q is not declared in agents", location, name),
+		})
 	}
 }
 

@@ -114,6 +114,57 @@ func TestOracleTalk_PreservesSessionID(t *testing.T) {
 	}
 }
 
+// TestOracleTalk_SystemPromptThreaded verifies that when the caller passes a
+// system_prompt arg, the handler forwards it to the claude binary via
+// --append-system-prompt. fake-oracle.sh echoes it back as system=[...] when
+// present, letting us assert the threading without inspecting argv directly.
+func TestOracleTalk_SystemPromptThreaded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oracle.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOracleBin(t))
+
+	const persona = "you speak like a frontier scout"
+	res, err := host.OracleTalkHandler(context.Background(), map[string]any{
+		"question":      "where to camp?",
+		"system_prompt": persona,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %s", res.Error)
+	}
+	ans, _ := res.Data["answer"].(string)
+	if !strings.Contains(ans, "system=["+persona+"]") {
+		t.Fatalf("system_prompt was not forwarded to --append-system-prompt; answer=%q", ans)
+	}
+}
+
+// TestOracleTalk_SystemPromptOmitted verifies the legacy path: with no
+// system_prompt arg, the binary's argv must NOT carry --append-system-prompt.
+// Apps without a persona block keep their pre-existing behaviour.
+func TestOracleTalk_SystemPromptOmitted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oracle.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOracleBin(t))
+
+	res, err := host.OracleTalkHandler(context.Background(), map[string]any{
+		"question": "anything",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %s", res.Error)
+	}
+	ans, _ := res.Data["answer"].(string)
+	if strings.Contains(ans, "system=[") {
+		t.Fatalf("no system_prompt was set but --append-system-prompt leaked: answer=%q", ans)
+	}
+}
+
 // TestOracleTalk_MissingQuestion asserts that an empty question returns an
 // application-level error (Result.Error), not a Go error.
 func TestOracleTalk_MissingQuestion(t *testing.T) {
@@ -480,6 +531,143 @@ func TestRunOracleTalkWithChat_AssistantAppendFails_SurfacesError(t *testing.T) 
 	msgs := cs.messages["chat-c2"]
 	if len(msgs) != 1 || msgs[0].Role != "user" {
 		t.Fatalf("expected exactly one user message in transcript, got %+v", msgs)
+	}
+}
+
+// ── Named-agent (`agent:` arg) threading ─────────────────────────────────────
+
+// TestOracleTalk_AgentArg_AppliesSystemPrompt verifies that when the caller
+// passes `agent: <name>` AND a host.Agent map is in ctx via WithAgents, the
+// handler resolves the name, applies the agent's SystemPrompt as
+// --append-system-prompt, and forwards Model as --model. This is the
+// engine-side round-trip for the new top-level `agents:` block on AppDef.
+func TestOracleTalk_AgentArg_AppliesSystemPrompt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oracle.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOracleBin(t))
+
+	const systemPrompt = "you are the wagon master, period-accurate"
+	ctx := host.WithAgents(context.Background(), map[string]host.Agent{
+		"wagon_master": {SystemPrompt: systemPrompt, Model: "claude-opus-4-7"},
+	})
+
+	res, err := host.OracleTalkHandler(ctx, map[string]any{
+		"question": "should we ford or caulk?",
+		"agent":    "wagon_master",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %s", res.Error)
+	}
+	ans, _ := res.Data["answer"].(string)
+	if !strings.Contains(ans, "system=["+systemPrompt+"]") {
+		t.Fatalf("agent's system_prompt did not reach the binary; answer=%q", ans)
+	}
+	if !strings.Contains(ans, "model=[claude-opus-4-7]") {
+		t.Fatalf("agent's model did not reach the binary; answer=%q", ans)
+	}
+}
+
+// TestOracleTalk_AgentArg_InlineSystemPromptWins asserts the override rule:
+// when both `system_prompt:` and `agent:` are present, the inline value wins
+// (lets authors override one named agent per call). The agent's Model still
+// applies — only the prompt is overridden, model and prompt are independent.
+func TestOracleTalk_AgentArg_InlineSystemPromptWins(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oracle.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOracleBin(t))
+
+	const inline = "INLINE OVERRIDE wins"
+	const agentPrompt = "agent persona LOSES"
+	ctx := host.WithAgents(context.Background(), map[string]host.Agent{
+		"wagon_master": {SystemPrompt: agentPrompt},
+	})
+
+	res, err := host.OracleTalkHandler(ctx, map[string]any{
+		"question":      "anything",
+		"agent":         "wagon_master",
+		"system_prompt": inline,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %s", res.Error)
+	}
+	ans, _ := res.Data["answer"].(string)
+	if !strings.Contains(ans, "system=["+inline+"]") {
+		t.Fatalf("inline system_prompt did not win over agent's SystemPrompt; answer=%q", ans)
+	}
+	if strings.Contains(ans, agentPrompt) {
+		t.Fatalf("agent's SystemPrompt leaked through despite inline override; answer=%q", ans)
+	}
+}
+
+// TestOracleTalk_AgentArg_UnknownAgent_NoSystemPrompt asserts the runtime
+// safety net: when ctx has no agents map (or the named agent isn't in it),
+// the handler silently falls back to a clean call with no system_prompt.
+// (Mismatches are normally caught at load time by validateAgentRef; this
+// path only runs in handlers invoked from non-app code, e.g. tests.)
+func TestOracleTalk_AgentArg_UnknownAgent_NoSystemPrompt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oracle.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOracleBin(t))
+
+	res, err := host.OracleTalkHandler(context.Background(), map[string]any{
+		"question": "anything",
+		"agent":    "does_not_exist",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %s", res.Error)
+	}
+	ans, _ := res.Data["answer"].(string)
+	if strings.Contains(ans, "system=[") {
+		t.Fatalf("unresolved agent: leaked a system_prompt; answer=%q", ans)
+	}
+}
+
+// TestOracleAsk_AgentArg_AppliesSystemPrompt verifies the same agent: round-
+// trip on the one-shot host.oracle.ask handler. The prompt-file path is a
+// different code path (oracle_ask.go) so this test guards against the
+// agent: support drifting between the two handlers.
+func TestOracleAsk_AgentArg_AppliesSystemPrompt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot.sh requires bash")
+	}
+	t.Setenv(host.OracleBinEnv, fakeOneShotBin(t))
+
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	if err := os.WriteFile(promptPath, []byte("hi"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	const systemPrompt = "you are the party namer, comma-separated names only"
+	ctx := host.WithAgents(context.Background(), map[string]host.Agent{
+		"party_namer": {SystemPrompt: systemPrompt},
+	})
+
+	res, err := host.OracleAskHandler(ctx, map[string]any{
+		"prompt_path": promptPath,
+		"agent":       "party_namer",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %s", res.Error)
+	}
+	out, _ := res.Data["stdout"].(string)
+	if !strings.Contains(out, "system=["+systemPrompt+"]") {
+		t.Fatalf("agent: did not thread system_prompt through host.oracle.ask; stdout=%q", out)
 	}
 }
 

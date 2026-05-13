@@ -65,12 +65,21 @@ func addStatesToGraph(
 		fullPath := joinPath(prefix, name)
 
 		if len(s.States) > 0 {
-			// Compound state: cluster subgraph.
+			// Compound state: cluster subgraph.  Parallel parents (§9.4) get
+			// a different visual cue so the sibling-region structure reads.
 			clusterID := "cluster_" + strings.ReplaceAll(fullPath, ".", "_")
 			sg := parent.Subgraph(clusterID, dotlib.ClusterOption{})
-			sg.Attr("label", fullPath)
-			sg.Attr("style", "dashed")
-			sg.Attr("color", "grey50")
+			label := fullPath
+			if s.Type == "parallel" {
+				label = fullPath + " (parallel)"
+				sg.Attr("style", "filled,rounded")
+				sg.Attr("fillcolor", "lightblue:white")
+				sg.Attr("color", "steelblue")
+			} else {
+				sg.Attr("style", "dashed")
+				sg.Attr("color", "grey50")
+			}
+			sg.Attr("label", label)
 			sg.Attr("fontname", "Helvetica")
 
 			// Recurse into children.

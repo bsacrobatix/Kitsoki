@@ -6,14 +6,17 @@
 // The view and guard_hint fields in the YAML use expr-lang template syntax
 // with {{ }} delimiters — NOT Go text/template. Constructs supported:
 //
-//	{{ expr }}           — interpolate an expr-lang expression (any type, toString'd)
-//	{{ if expr }}        — conditional block start (expr must be truthy)
-//	{{ else }}           — else branch
-//	{{ end }}            — close if/else block
+//	{{ expr }}                  — interpolate an expr-lang expression
+//	{{ if expr }}…{{ end }}     — conditional block
+//	{{ else }}                  — else branch (within an if-block)
+//	{{ range expr }}…{{ end }}  — iterate over a list (each item bound to `.`)
 //
 // The ternary operator (e.g. {{ world.wearing_cloak ? 'dark' : 'lit' }}) is
-// handled by expr-lang natively. Block constructs (if/else/end) are handled
-// by our custom Render function.
+// handled by expr-lang natively. Block constructs (if/else/range/end) are
+// handled by our custom Render function. Inside a range body, the special
+// identifier `.` refers to the current iteration element; field access
+// (`.display`, `.reason`, …) is rewritten to map/struct lookups against
+// that element.
 //
 // Design rationale: We chose a small custom parser over Go text/template because:
 //  1. The YAML already uses expr-lang expression syntax (ternary, ==, member access)
@@ -50,12 +53,102 @@ import (
 //   - Event   map[string]any  — the triggering event (if any)
 //   - Run     RunCtx          — run-level metadata (id, turn, timestamps)
 //   - Args    map[string]any  — handler-local arguments (host invocations, prompt files)
+//   - Menu    map[string]any  — computed menu (primary + blocked intents)
+//     for the current state, populated by view-render call sites so authors
+//     can render the "what can I do right now" surface inline in view: prose.
+//     Shape: {"primary": [{intent, display, reason, destination_hint, primary}],
+//     "blocked": [...]}.
+//
+// View-render call sites should call PopulateMenuHelpers after assembling
+// Slots/World/Menu so the helper functions (available, blocked,
+// blocked_reason, intent_status) are bound to a closure over Menu. The
+// helpers are exposed as function-typed fields on Env so expr-lang resolves
+// bare names like `available(...)` to method-style calls on the env value.
 type Env struct {
 	Slots map[string]any `expr:"slots"`
 	World map[string]any `expr:"world"`
 	Event map[string]any `expr:"event"`
 	Run   RunCtx         `expr:"run"`
 	Args  map[string]any `expr:"args"`
+	Menu  map[string]any `expr:"menu"`
+
+	// Helper functions for view templates. Bound at view-render time by
+	// PopulateMenuHelpers. When Menu is unset (effect evaluation, guard
+	// evaluation), these remain nil — they're not callable from non-view
+	// contexts, which is fine because authors only reference them from
+	// view: prose.
+	Available     func(name string) bool   `expr:"available"`
+	Blocked       func(name string) bool   `expr:"blocked"`
+	BlockedReason func(name string) string `expr:"blocked_reason"`
+	IntentStatus  func(name string) string `expr:"intent_status"`
+
+	// Item is the current element inside a {{ range expr }} block. The
+	// template engine sets this on a per-iteration copy of the env; field
+	// access inside the body uses `.display`, which the engine rewrites
+	// to `item.display`. Unused outside range bodies (nil → expr-lang
+	// resolves accesses against nil per AllowUndefinedVariables).
+	Item any `expr:"item"`
+}
+
+// PopulateMenuHelpers binds the helper functions (available, blocked,
+// blocked_reason, intent_status) to the env's current Menu. View-render
+// callers invoke this after assembling Menu so the template helpers can
+// answer "is this intent currently primary/blocked?" without each call
+// re-walking the menu shape.
+func PopulateMenuHelpers(env *Env) {
+	primarySet, blockedReasons := indexMenuForHelpers(env.Menu)
+	env.Available = func(name string) bool {
+		_, ok := primarySet[name]
+		return ok
+	}
+	env.Blocked = func(name string) bool {
+		_, ok := blockedReasons[name]
+		return ok
+	}
+	env.BlockedReason = func(name string) string {
+		return blockedReasons[name]
+	}
+	env.IntentStatus = func(name string) string {
+		if _, ok := primarySet[name]; ok {
+			return "available"
+		}
+		if _, ok := blockedReasons[name]; ok {
+			return "blocked"
+		}
+		return "unknown"
+	}
+}
+
+// indexMenuForHelpers walks the env.Menu shape (map[string]any with primary
+// and blocked lists of map entries) and returns two lookup tables: the set
+// of intent names in primary, and intent → reason for blocked entries.
+func indexMenuForHelpers(menu map[string]any) (map[string]struct{}, map[string]string) {
+	primary := make(map[string]struct{})
+	blocked := make(map[string]string)
+	if menu == nil {
+		return primary, blocked
+	}
+	if p, ok := menu["primary"].([]any); ok {
+		for _, e := range p {
+			if m, ok := e.(map[string]any); ok {
+				if n, ok := m["intent"].(string); ok && n != "" {
+					primary[n] = struct{}{}
+				}
+			}
+		}
+	}
+	if b, ok := menu["blocked"].([]any); ok {
+		for _, e := range b {
+			if m, ok := e.(map[string]any); ok {
+				name, _ := m["intent"].(string)
+				reason, _ := m["reason"].(string)
+				if name != "" {
+					blocked[name] = reason
+				}
+			}
+		}
+	}
+	return primary, blocked
 }
 
 // RunCtx holds the run-level metadata visible in expressions.
@@ -109,6 +202,8 @@ var allowedRoots = map[string]bool{
 	"event":     true,
 	"run":       true,
 	"args":      true, // handler-local args (host invocations, prompt files)
+	"menu":      true, // computed menu (primary/blocked intents) for view templates
+	"item":      true, // current element inside a {{ range expr }} block
 	"proposal":  true, // $proposal slot (§3)
 	"inbox":     true, // $inbox slot (§4)
 	"workspace": true, // $workspace slot (§6)
@@ -116,6 +211,19 @@ var allowedRoots = map[string]bool{
 	"true":  true,
 	"false": true,
 	"nil":   true,
+}
+
+// allowedFunctions is the set of user-defined function names that may appear
+// in templates. These are surfaced via function-typed fields on Env (see
+// PopulateMenuHelpers) so a call like `available("name")` resolves at
+// evaluation time to the closure bound on the env. The whitelist visitor
+// admits these CallNodes (other user-defined function calls remain
+// rejected).
+var allowedFunctions = map[string]bool{
+	"available":      true, // available(name) → bool: name is in menu.primary
+	"blocked":        true, // blocked(name)   → bool: name is in menu.blocked
+	"blocked_reason": true, // blocked_reason(name) → string: reason or ""
+	"intent_status":  true, // intent_status(name) → "available"|"blocked"|"unknown"
 }
 
 // whitelistVisitor accumulates violations found during the AST walk.
@@ -127,8 +235,17 @@ type whitelistVisitor struct {
 func (v *whitelistVisitor) Visit(node *ast.Node) {
 	switch n := (*node).(type) {
 	case *ast.CallNode:
-		// Raw user-defined function calls — forbidden.
-		// Builtins are represented as *ast.BuiltinNode, not *ast.CallNode.
+		// User-defined function calls — only those explicitly listed in
+		// allowedFunctions pass the whitelist. The view-template helpers
+		// (available, blocked, blocked_reason, intent_status) are surfaced
+		// as function-typed fields on Env; expr-lang resolves bare names
+		// like `available("foo")` to method-style calls on the env value,
+		// which appear here as CallNodes with an IdentifierNode callee.
+		// Stdlib builtins (len, trim, …) appear as *ast.BuiltinNode and
+		// are checked separately.
+		if id, ok := n.Callee.(*ast.IdentifierNode); ok && allowedFunctions[id.Value] {
+			break
+		}
 		v.violations = append(v.violations,
 			fmt.Sprintf("forbidden user-defined function call %q (only built-in functions are allowed)", n.Callee))
 
@@ -267,14 +384,15 @@ const (
 	nodeText nodeKind = iota
 	nodeExpr
 	nodeIf
+	nodeRange
 )
 
 type tmplNode struct {
 	kind     nodeKind
 	text     string      // nodeText: literal text
 	exprSrc  string      // nodeExpr: expression source to interpolate
-	cond     string      // nodeIf: guard expression
-	thenBody []*tmplNode // nodeIf: then branch
+	cond     string      // nodeIf: guard expression / nodeRange: list expression
+	thenBody []*tmplNode // nodeIf: then branch / nodeRange: loop body
 	elseBody []*tmplNode // nodeIf: else branch
 }
 
@@ -391,6 +509,29 @@ func parseNodes(tokens []token, i int, inBlock bool) ([]*tmplNode, int, error) {
 				elseBody: elseBody,
 			})
 
+		case "range":
+			listExpr := strings.TrimSpace(rest)
+			i++ // consume 'range' token
+			body, j, err := parseNodes(tokens, i, true)
+			if err != nil {
+				return nil, 0, err
+			}
+			i = j
+			// Expect 'end' (no else for range).
+			if i >= len(tokens) || !tokens[i].isBlock {
+				return nil, 0, fmt.Errorf("template: missing 'end' for range block")
+			}
+			kw, _ := splitKeyword(tokens[i].val)
+			if kw != "end" {
+				return nil, 0, fmt.Errorf("template: expected 'end' for range, got %q", tokens[i].val)
+			}
+			i++ // consume 'end'
+			nodes = append(nodes, &tmplNode{
+				kind:     nodeRange,
+				cond:     listExpr,
+				thenBody: body,
+			})
+
 		default:
 			// Plain expression interpolation.
 			nodes = append(nodes, &tmplNode{kind: nodeExpr, exprSrc: t.val})
@@ -446,9 +587,161 @@ func execNodes(nodes []*tmplNode, env Env, out *strings.Builder) error {
 					return err
 				}
 			}
+
+		case nodeRange:
+			v, err := evalExprCached(n.cond, env)
+			if err != nil {
+				return fmt.Errorf("template range-expr %q: %w", n.cond, err)
+			}
+			items, err := coerceToList(v)
+			if err != nil {
+				return fmt.Errorf("template range %q: %w", n.cond, err)
+			}
+			for _, item := range items {
+				// Per-iteration env: copy and bind Item. The body's bare-dot
+				// references (`.display`, `.foo`) are rewritten to
+				// `item.display` at exec time by the dot-rewriter (see
+				// rewriteDotsForRange).
+				iterEnv := env
+				iterEnv.Item = item
+				if err := execRangeBody(n.thenBody, iterEnv, out); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
+}
+
+// execRangeBody renders the body of a {{ range }} block, rewriting dot-
+// prefixed identifiers (`.display`) inside each nested expression to bind
+// against the `item` env field. Nested if/range nodes recurse through the
+// same rewriter so multi-level templates work.
+func execRangeBody(nodes []*tmplNode, env Env, out *strings.Builder) error {
+	for _, n := range nodes {
+		switch n.kind {
+		case nodeText:
+			out.WriteString(n.text)
+		case nodeExpr:
+			rewritten := rewriteDotsForRange(n.exprSrc)
+			v, err := evalExprCached(rewritten, env)
+			if err != nil {
+				return fmt.Errorf("template expr %q (in range): %w", n.exprSrc, err)
+			}
+			out.WriteString(anyToString(v))
+		case nodeIf:
+			rewritten := rewriteDotsForRange(n.cond)
+			truthy, err := evalBoolCached(rewritten, env)
+			if err != nil {
+				return fmt.Errorf("template if-cond %q (in range): %w", n.cond, err)
+			}
+			if truthy {
+				if err := execRangeBody(n.thenBody, env, out); err != nil {
+					return err
+				}
+			} else {
+				if err := execRangeBody(n.elseBody, env, out); err != nil {
+					return err
+				}
+			}
+		case nodeRange:
+			// Nested range: evaluate (with outer dot-rewrite for the list
+			// expression) and recurse with the new item binding. We do not
+			// support `.` referring to the outer item from within a nested
+			// body — keep it simple (it's not required by current view
+			// templates).
+			rewritten := rewriteDotsForRange(n.cond)
+			v, err := evalExprCached(rewritten, env)
+			if err != nil {
+				return fmt.Errorf("template range-expr %q (nested): %w", n.cond, err)
+			}
+			items, err := coerceToList(v)
+			if err != nil {
+				return fmt.Errorf("template range %q (nested): %w", n.cond, err)
+			}
+			for _, item := range items {
+				iterEnv := env
+				iterEnv.Item = item
+				if err := execRangeBody(n.thenBody, iterEnv, out); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// rewriteDotsForRange rewrites dot-prefixed identifiers inside an expression
+// so they reference the env's Item binding. Specifically:
+//
+//	.foo       → item.foo
+//	.foo.bar   → item.foo.bar
+//	a.foo      → a.foo            (unchanged — only leading-dot tokens rewrite)
+//
+// Implementation: walk the expression looking for occurrences of `.<letter>`
+// preceded by a token boundary (start of string, whitespace, or operator
+// character). Replace the leading `.` with `item.`.
+func rewriteDotsForRange(src string) string {
+	if !strings.Contains(src, ".") {
+		return src
+	}
+	var sb strings.Builder
+	sb.Grow(len(src) + 8)
+	prevBoundary := true
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		// Detect leading-dot: `.` preceded by a token boundary and followed
+		// by an identifier-start (letter or underscore).
+		if c == '.' && prevBoundary && i+1 < len(src) && isIdentStart(src[i+1]) {
+			sb.WriteString("item.")
+			prevBoundary = false
+			continue
+		}
+		sb.WriteByte(c)
+		// Update boundary tracking: identifier and digit chars are NOT
+		// boundaries (so `a.foo` stays as `a.foo`); everything else is.
+		prevBoundary = !isIdentCont(c)
+	}
+	return sb.String()
+}
+
+func isIdentStart(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func isIdentCont(c byte) bool {
+	return isIdentStart(c) || (c >= '0' && c <= '9')
+}
+
+// coerceToList converts a value into a slice for iteration. Supports:
+//
+//   - []any              (the canonical menu shape)
+//   - []map[string]any   (defensive — JSON unmarshalling may produce this)
+//   - []string           (occasionally useful for `{{ range world.tags }}`)
+//
+// Other types return an empty slice with no error (range over nil/empty
+// is a no-op, matching Go text/template behaviour).
+func coerceToList(v any) ([]any, error) {
+	switch x := v.(type) {
+	case nil:
+		return nil, nil
+	case []any:
+		return x, nil
+	case []map[string]any:
+		out := make([]any, len(x))
+		for i, m := range x {
+			out[i] = m
+		}
+		return out, nil
+	case []string:
+		out := make([]any, len(x))
+		for i, s := range x {
+			out[i] = s
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("range expression yields %T, expected list", v)
+	}
 }
 
 // RenderValue evaluates a template string that contains exactly one {{ expr }}

@@ -1,0 +1,22 @@
+# landmark_timeout — exercises the Timeout: runtime (gap §9.5).
+#
+# Session is seeded into `waiting` (which declares timeout: { after: 10d,
+# target: traveled }).  Turn 1 is a clock-only turn: advance_clock pushes
+# virtual time past the 10-day deadline, the dispatcher fires a synthetic
+# transition, and assertions land on the terminal `traveled` state.
+#
+# This is the engine-level analogue of OT's planned flows/landmark_timeout
+# fixture (proposal §9.5).  The OT-side counterpart lands after Phase F
+# merges; this fixture proves the engine wiring on a minimal app.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: waiting
+
+use_orchestrator: true
+
+turns:
+  - advance_clock: "11d"
+    expect_state: traveled
+
+expect_terminal: true

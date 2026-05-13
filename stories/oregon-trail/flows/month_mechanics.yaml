@@ -1,0 +1,159 @@
+# month_mechanics — pins the §8 month-driven trail mechanics.
+#
+# Three arcs covered in one fixture (all deterministic, zero LLM):
+#
+#   1. Snow-blocked South Pass: leg_e_awaiting_reply.continue in
+#      october routes to snow_blocked instead of leg_f.
+#   2. wait_for_spring loop: each tick advances the calendar one
+#      month and drains 120 lbs of food + 5 health, until the month
+#      sits at march — that tick exits to leg_e_awaiting_reply with
+#      month=april (the pass is open).
+#   3. Daylight modifier on traveling.continue: april (×95%) gives a
+#      steady-pace step of 13 mi/tick; december (×70%) gives 9. Both
+#      assertions are made on miles_traveled deltas with rng_counter
+#      kept low so the event-roll arms stay quiet.
+#
+# Initial setup pins us at leg_e_awaiting_reply (South Pass arrival)
+# in october with enough food to wait out the winter. host.transport.post
+# is stubbed because the awaiting-reply on_enter posts a trail-diary
+# entry.
+
+test_kind: flow
+app: ../app.yaml
+# Force the legacy machine path. The orchestrator path has a known
+# Turn-0 collision bug when world_override is used after seed events
+# share Turn=0; this fixture uses world_override on later turns for
+# the daylight scenario, so the legacy path is the safe one. No
+# advance_clock / expect_inbox / host_handlers are required here.
+use_orchestrator: false
+initial_state: leg_e_awaiting_reply
+initial_world:
+  party_names:      "John,Sarah,Tom,Mary,Anne"
+  profession:       banker
+  month:            october
+  year:             1848
+  day:              5
+  money:            500
+  oxen:             4
+  food_lbs:         900
+  pace:             steady
+  rations:          filling
+  party_alive:      5
+  health_avg:       100
+  narration:        false
+  miles_traveled:   0
+  rng_counter:      0
+  current_landmark: "South Pass"
+
+turns:
+
+  # ── Scenario A — snow-blocked routing ──────────────────────────────
+  # Turn 1: continue from leg_e_awaiting_reply (South Pass, october)
+  # MUST route to snow_blocked, not leg_f_executing.
+  - intent: { name: continue, slots: {} }
+    expect_state: snow_blocked
+    expect_world:
+      month: october
+      current_landmark: "South Pass"
+
+  # ── Scenario B — wait_for_spring loop ──────────────────────────────
+  # Each tick: month advances one slot, day resets to 1, food -120,
+  # health -5. Year ticks on dec→jan.
+  #
+  # Turn 2: october → november.
+  - intent: { name: wait_for_spring, slots: {} }
+    expect_state: snow_blocked
+    expect_world:
+      month: november
+      day: 1
+      food_lbs: 780
+      health_avg: 95
+      year: 1848
+
+  # Turn 3: november → december.
+  - intent: { name: wait_for_spring, slots: {} }
+    expect_state: snow_blocked
+    expect_world:
+      month: december
+      food_lbs: 660
+      health_avg: 90
+      year: 1848
+
+  # Turn 4: december → january. Year ticks 1848 → 1849.
+  - intent: { name: wait_for_spring, slots: {} }
+    expect_state: snow_blocked
+    expect_world:
+      month: january
+      food_lbs: 540
+      health_avg: 85
+      year: 1849
+
+  # Turn 5: january → february.
+  - intent: { name: wait_for_spring, slots: {} }
+    expect_state: snow_blocked
+    expect_world:
+      month: february
+      food_lbs: 420
+      health_avg: 80
+      year: 1849
+
+  # Turn 6: february → march.
+  - intent: { name: wait_for_spring, slots: {} }
+    expect_state: snow_blocked
+    expect_world:
+      month: march
+      food_lbs: 300
+      health_avg: 75
+      year: 1849
+
+  # Turn 7: march tick → spring-exit arm fires (since world.month is
+  # march at the time the guard evaluates). Pops back to
+  # leg_e_awaiting_reply with month=april and one more 120 lbs drained.
+  - intent: { name: wait_for_spring, slots: {} }
+    expect_state: leg_e_awaiting_reply
+    expect_world:
+      month: april
+      day: 1
+      food_lbs: 180
+      health_avg: 70
+
+  # ── Scenario C — daylight modifier on the trail ────────────────────
+  # Now the pass is open. Continue from leg_e_awaiting_reply lands in
+  # leg_f_executing.traveling (snow_blocked guard no longer fires).
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_f_executing.traveling
+    expect_world:
+      current_landmark: "South Pass"
+      miles_traveled: 0
+      month: april
+
+  # Turn 9: continue in april at steady pace.
+  #   step = int(14 * 95 / 100) = 13.
+  #   miles_traveled 0 → 13.
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_f_executing.traveling
+    expect_world:
+      miles_traveled: 13
+      month: april
+
+  # Turn 10: bump the calendar to december via world_override and
+  # continue. Step = int(14 * 70 / 100) = 9. miles 13 → 22.
+  - intent: { name: continue, slots: {} }
+    world_override:
+      month: december
+    expect_state: leg_f_executing.traveling
+    expect_world:
+      miles_traveled: 22
+      month: december
+
+  # Turn 11: switch back to june (peak summer) and continue.
+  # Step = int(14 * 100 / 100) = 14. miles 22 → 36.
+  - intent: { name: continue, slots: {} }
+    world_override:
+      month: june
+    expect_state: leg_f_executing.traveling
+    expect_world:
+      miles_traveled: 36
+      month: june
+
+expect_no_errors: true

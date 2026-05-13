@@ -1,0 +1,94 @@
+# illness_status_visible — regression pin for the "illness state never
+# communicated past the substate" bug. Before the fix:
+#   * world.illness_member did not exist; the player had no signal who
+#     was sick.
+#   * illness_kind / illness_severity were set on event_disease.on_enter
+#     but only surfaced inside that substate's own view. Once the player
+#     resolved the event, downstream states had no idea whether the
+#     patient was still convalescing.
+#   * The clearing pattern on success/death was incomplete:
+#     illness_severity and illness_treatment lived on as stale data
+#     because only illness_kind got blanked.
+#
+# What this fixture pins
+# ----------------------
+# 1. Turn 1 — disease fires. After on_enter the world has the full
+#    triple populated: illness_kind (= dysentery via rng_last % 5),
+#    illness_severity (= 1), illness_member (= "You" via
+#    split(party_names, ',')[rng_last % party_alive] = [0] → "You").
+# 2. Turn 2 — treat succeeds. ALL illness_* fields blank out
+#    simultaneously: kind, severity, treatment, member. This is the
+#    surface the TUI location indicator reads via the trail-leg's
+#    relevant_world list.
+#
+# Determinism notes
+# -----------------
+# Same RNG trick as illness_twice / buy_then_breakdown: pin
+# miles_traveled=0, rng_counter=60 to land in the [60,75) disease
+# bucket on the first continue.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: leg_a_executing.traveling
+initial_world:
+  party_names:    "You,Adam,Beth,Carol,Daniel"
+  profession:     banker
+  month:          april
+  year:           1848
+  money:          1200
+  oxen:           2
+  food_lbs:       500
+  bullets:        0
+  clothing_sets:  3
+  spare_wheels:   0
+  spare_axles:    0
+  spare_tongues:  0
+  pace:           steady
+  rations:        filling
+  party_alive:    5
+  health_avg:     90
+  narration:      false
+  miles_traveled: 0
+  rng_counter:    0
+  rng_last:       0
+  current_landmark: "Independence"
+  local_price_pct: 100
+  current_event_attempts: 0
+  illness_kind:      ""
+  illness_severity:  0
+  illness_treatment: ""
+  illness_member:    ""
+  day: 1
+
+turns:
+
+  # ── Turn 1: continue → event_disease. on_enter populates the full
+  # illness triple so the TUI / downstream views can render persistent
+  # status.
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 0
+      rng_counter:    60
+    expect_state: leg_a_executing.event_disease
+    expect_world:
+      illness_kind:     "dysentery"     # rng_last % 5 == 0
+      illness_severity: 1               # rng_last % 5 + 1
+      # split(party_names, ',')[rng_last % party_alive] = [0] → "You"
+      illness_member:   "You"
+      # illness_treatment defaults to "rest" in deterministic mode so
+      # the narrated/deterministic shapes stay one shape downstream.
+      illness_treatment: "rest"
+      event_kind:        "disease"
+
+  # ── Turn 2: treat succeeds. Every illness_* field clears
+  # simultaneously so the location indicator stops carrying a stale
+  # patient across the rest of the trail.
+  - intent: { name: treat, slots: {} }
+    expect_state: leg_a_executing.traveling
+    expect_world:
+      illness_kind:      ""
+      illness_severity:  0
+      illness_treatment: ""
+      illness_member:    ""
+
+expect_no_errors: true

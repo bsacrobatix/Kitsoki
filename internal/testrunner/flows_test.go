@@ -2,7 +2,9 @@ package testrunner_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -267,6 +269,170 @@ func TestFlowsDevStoryFlow8(t *testing.T) {
 		}
 	}
 	require.True(t, r.Passed, "flow8 oracle background should pass")
+}
+
+// ─── expect_jobs assertion tests ─────────────────────────────────────────────
+//
+// The expect_jobs assertion locks down the bug class where a background
+// host.run job silently lands status=failed (e.g. because a `cmd:` field is
+// passed as a list rather than a string) yet on_complete still applies its
+// effects and the game continues. expect_inbox catches the notification
+// count but not per-job terminal status; expect_jobs closes that gap.
+
+// jobsTestApp is a minimal stand-alone app with one room that dispatches a
+// background host.run job. Reused by the positive and negative expect_jobs
+// tests below.
+const jobsTestApp = `
+app:
+  id: expect-jobs-test
+  version: 0.1.0
+  title: "expect_jobs test app"
+
+hosts:
+  - host.run
+
+world:
+  result: { type: string, default: "" }
+  last_job_id: { type: string, default: "" }
+
+intents:
+  enter:
+    title: "Start"
+    description: "Kick off the background job."
+    examples: ["start", "run", "go"]
+
+root: lobby
+
+states:
+  lobby:
+    description: "Lobby."
+    view: "Lobby."
+    on:
+      enter:
+        - target: running
+
+  running:
+    description: "Running."
+    view: "Running: {{ world.result }}"
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo hello"
+        background: true
+        bind:
+          last_job_id: job_id
+        on_complete:
+          - set:
+              result: "{{ world.last_job_result.stdout }}"
+`
+
+// TestRunFlows_ExpectJobs_Positive verifies that a turn with
+// expect_jobs: [{namespace: host.run, status: done}] passes when the stub
+// resolves cleanly. The pre-turn snapshot is empty; after advance_clock the
+// host.run job lands status=done and the assertion matches.
+func TestRunFlows_ExpectJobs_Positive(t *testing.T) {
+	dir := t.TempDir()
+	appPath := filepath.Join(dir, "app.yaml")
+	require.NoError(t, os.WriteFile(appPath, []byte(jobsTestApp), 0644))
+
+	fixture := `
+test_kind: flow
+app: ./app.yaml
+initial_state: lobby
+initial_world:
+  result: ""
+  last_job_id: ""
+
+host_handlers:
+  host.run:
+    data:
+      stdout: "hello"
+      exit: 0
+    delay: "10ms"
+
+turns:
+  - intent: { name: enter, slots: {} }
+    advance_clock: "100ms"
+    expect_state: running
+    expect_jobs:
+      - namespace: host.run
+        status:    done
+
+expect_no_errors: true
+`
+	fixturePath := filepath.Join(dir, "positive.yaml")
+	require.NoError(t, os.WriteFile(fixturePath, []byte(fixture), 0644))
+
+	report, err := testrunner.RunFlows(context.Background(), appPath, fixturePath, testrunner.FlowOptions{})
+	require.NoError(t, err)
+	require.Len(t, report.Results, 1)
+	r := report.Results[0]
+	for _, tr := range r.Turns {
+		for _, f := range tr.Failures {
+			t.Logf("turn %d failure: %s", tr.TurnIndex+1, f)
+		}
+	}
+	require.True(t, r.Passed, "expect_jobs positive flow should pass")
+	require.Equal(t, 0, report.Failed)
+}
+
+// TestRunFlows_ExpectJobs_Negative verifies that a mismatched expect_jobs
+// entry — declaring status: failed while the stub actually returns done —
+// fails the fixture with a clear diff. This is the assertion that would
+// have caught commit 2d96c3a's regression.
+func TestRunFlows_ExpectJobs_Negative(t *testing.T) {
+	dir := t.TempDir()
+	appPath := filepath.Join(dir, "app.yaml")
+	require.NoError(t, os.WriteFile(appPath, []byte(jobsTestApp), 0644))
+
+	fixture := `
+test_kind: flow
+app: ./app.yaml
+initial_state: lobby
+initial_world:
+  result: ""
+  last_job_id: ""
+
+host_handlers:
+  host.run:
+    data:
+      stdout: "hello"
+      exit: 0
+    delay: "10ms"
+
+turns:
+  - intent: { name: enter, slots: {} }
+    advance_clock: "100ms"
+    expect_state: running
+    expect_jobs:
+      - namespace: host.run
+        status:    failed
+`
+	fixturePath := filepath.Join(dir, "negative.yaml")
+	require.NoError(t, os.WriteFile(fixturePath, []byte(fixture), 0644))
+
+	report, err := testrunner.RunFlows(context.Background(), appPath, fixturePath, testrunner.FlowOptions{})
+	require.NoError(t, err)
+	require.Len(t, report.Results, 1)
+	r := report.Results[0]
+	require.False(t, r.Passed, "expect_jobs negative flow should fail")
+	require.Equal(t, 1, report.Failed)
+
+	// The failure message must mention the namespace, the actual status
+	// (done) and the wanted status (failed) so a developer can see the
+	// mismatch at a glance.
+	var sawDiff bool
+	for _, tr := range r.Turns {
+		for _, f := range tr.Failures {
+			if strings.Contains(f, "expect_jobs") &&
+				strings.Contains(f, "host.run") &&
+				strings.Contains(f, `got status="done"`) &&
+				strings.Contains(f, `want "failed"`) {
+				sawDiff = true
+			}
+		}
+	}
+	require.True(t, sawDiff, "expect_jobs failure should include namespace + got/want status diff")
 }
 
 // TestFlowsDevStoryFlow5 runs the clarification flow.

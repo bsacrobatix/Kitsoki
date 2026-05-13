@@ -33,6 +33,48 @@ type TurnInput struct {
 	AllowedIntents []string `json:"allowed_intents"`
 	// SystemPrompt is the rendered system prompt (including app context and §7 surfaces).
 	SystemPrompt string `json:"system_prompt,omitempty"`
+	// RecentTurns is an ordered tail (oldest → newest) of the most recent N
+	// completed turns in this session, included so the LLM can resolve
+	// back-references like "what I just said" or "that thing I tried before".
+	// Empty on turn 1. Populated by the orchestrator from the session event
+	// log; harnesses are expected to render this into the system prompt as
+	// a compact "Recent conversation" block.
+	RecentTurns []TurnSummary `json:"recent_turns,omitempty"`
+}
+
+// TurnSummary is a compact view of one prior turn for harness context. It
+// captures just enough to give the LLM back-reference grounding without
+// inflating the prompt: the user utterance (for anaphora resolution), the
+// routed intent (so "what I just did" is decidable), the state the user
+// landed in after the turn (the structural anchor), and whether the turn
+// was rejected (so "the thing I tried that failed" is unambiguous).
+//
+// View text is intentionally omitted: it is often the largest piece of a
+// turn record and is rarely needed for back-reference resolution. If we
+// later want full-fidelity replays we can either add a View field with a
+// truncation cap or have the harness fetch on demand.
+type TurnSummary struct {
+	// Turn is the monotonic turn number this summary represents.
+	Turn app.TurnNumber `json:"turn"`
+	// UserText is the raw user utterance from this prior turn.
+	UserText string `json:"user_text"`
+	// Intent is the intent name the harness routed the prior turn to.
+	// Empty when the turn was rejected before routing (e.g. UNKNOWN_INTENT).
+	Intent string `json:"intent,omitempty"`
+	// Slots is the slot bag the harness passed for this prior turn. Carried
+	// so back-references like "yes — like I said before" or "same as last
+	// time" can reach not just the verb but the *values* the user previously
+	// supplied. Without this, the LLM sees "the prior intent was
+	// propose_purchase" but cannot re-submit `items` + `total_cost` because
+	// they're not in scope — Claude then asks the user to repeat themselves
+	// and the harness errors out on a missing submit call.
+	Slots map[string]any `json:"slots,omitempty"`
+	// State is the active state path AFTER the prior turn completed (the
+	// post-transition state on success, or the unchanged state on rejection).
+	State app.StatePath `json:"state,omitempty"`
+	// Rejected is true when the prior turn ended in ModeRejected. Lets the
+	// LLM tell "what I asked for" from "what I succeeded in doing".
+	Rejected bool `json:"rejected,omitempty"`
 }
 
 // Harness is the pluggable LLM runner (§12.1).
@@ -45,4 +87,45 @@ type Harness interface {
 
 	// Close releases any subprocess or network resources held by the harness.
 	Close() error
+}
+
+// ClarifyResponse is the error type returned by a harness when the LLM
+// answered but did not call the tool the harness was waiting for — most
+// commonly the MCP validator's `submit`. The LLM's free-form response is
+// preserved on Message so the orchestrator can surface it to the user as
+// a soft clarification ("the router needs more from you") rather than a
+// red technical error ("LLM did not call mcp__kitsoki-validator__submit").
+//
+// Match with errors.As. The orchestrator looks for this specifically and
+// translates the turn to ModeRejected with ErrorCode "LLM_CLARIFICATION"
+// and ErrorMessage = Message.
+type ClarifyResponse struct {
+	// Message is the LLM's free-form text. Empty when the LLM exited
+	// silently — in that case the orchestrator falls back to a generic
+	// "the router didn't understand" hint.
+	Message string
+	// Underlying is the original technical error (preserved for the
+	// trace); the user-facing surface uses Message.
+	Underlying error
+}
+
+// Error implements the error interface. The string is the technical form
+// (suitable for the trace log); the user-facing surface should read
+// Message instead.
+func (c *ClarifyResponse) Error() string {
+	if c == nil {
+		return "harness: nil ClarifyResponse"
+	}
+	if c.Underlying != nil {
+		return c.Underlying.Error()
+	}
+	return "harness: LLM responded without calling the expected tool: " + c.Message
+}
+
+// Unwrap lets errors.Is / errors.As reach the underlying error.
+func (c *ClarifyResponse) Unwrap() error {
+	if c == nil {
+		return nil
+	}
+	return c.Underlying
 }

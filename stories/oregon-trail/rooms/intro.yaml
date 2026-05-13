@@ -1,0 +1,227 @@
+# intro — Atomic state. Player names the party, picks a profession,
+# picks a departure month, then starts the journey. start_journey is
+# guarded on all three having been set.
+#
+# Phase A: prompts the player through three setup choices, then hands
+# off to general_store. No host invocations.
+
+states:
+  intro:
+    description: "Independence, Missouri — preparing to leave for Oregon."
+    relevant_world: [party_names, party_size, party_member_1, party_member_2, party_member_3, party_member_4, party_member_5, profession, month]
+    relevant_slots: []
+    view: |
+      It is {{ world.year }}. You are in Independence, Missouri,
+      preparing to lead a wagon party of five to the Willamette Valley in Oregon.
+
+      The trail runs about 1,500 miles to Oregon City. At a steady pace
+      most parties make the crossing in 120 to 150 days. You can push
+      harder — strenuous or grueling — but the oxen tire, folks fall
+      ill, and the wagon breaks down more often.
+
+      Before you outfit at Matt's General Store, size up what you'll need:
+
+        - Oxen ($40/yoke). At least 2 to leave town; 6–8 is comfortable.
+          Lose enough to disease or accident and a heavy wagon won't roll.
+        - Food ($0.20/lb). Each soul eats about 2 lbs/day at filling
+          rations (meager halves that, bare-bones quarters it). Five
+          people for 150 days at filling = ~1,500 lbs minimum; 2,000 lbs
+          is a comfortable cushion.
+        - Bullets ($2.00/box of 20). For hunting — figure ~100 lbs of
+          meat per successful hunt. 50 bullets is thin, 100 comfortable,
+          200 if you mean to live off the land.
+        - Clothing sets ($10/set). Burned through treating illness.
+          2 sets is bare-minimum; 5 or more keeps the party warm.
+        - Spare wheels / axles / tongues ($10 each). Eaten by breakdown
+          events. 1 of each is the floor; 2–3 of each is safer.
+
+      Starting cash depends on your profession:
+
+        - Banker — $1,600 (easy; lowest score multiplier)
+        - Carpenter — $800 (medium)
+        - Farmer — $400 (hard; highest score multiplier)
+
+      Departure month is a load-bearing decision. It feeds five things
+      at once over the run:
+
+        - Daylight / pace — winter days are short; oxen cover fewer
+          miles per tick. Summer pace = 100%; mar/oct = 85%; nov = 80%;
+          dec–feb = 70%.
+        - Forage — grass is rich in may/jun, fair in apr/jul, sparse
+          by mar/aug, drying in sep/oct, gone in winter.
+        - River flooding — april crossings run 160% of base depth
+          (snowmelt); july 80%; august 70%. A swollen river forces
+          ferry/caulk over ford.
+        - Snow-blocked passes — arriving at South Pass in oct–mar
+          routes you to a snow_blocked camp until spring.
+        - Severe-weather kind — when a weather event fires, the kind
+          is biased by month: snow in winter, heavy_rain in spring,
+          hail/fog in summer, heavy_rain/fog in fall.
+
+      Common shapes:
+
+        - March / April — early start, but snowmelt rivers + snow can
+          still close South Pass if you're slow.
+        - May / June — the sweet spot; rich grass, fair rivers, long
+          daylight.
+        - July — late; pace good, but you may meet snow at South Pass.
+        - August+ — likely to overwinter at the pass.
+
+      Mid-trail you can consult the wagon master (or drop into /freeform)
+      for free-form advice. Plan your purchase here so you're not trapped
+      out on the prairie with empty barrels.
+
+      Party of {{ world.party_size }}:
+        1. {{ if world.party_member_1 != "" }}{{ world.party_member_1 }} (leader){{ else }}(unnamed){{ end }}
+        2. {{ if world.party_member_2 != "" }}{{ world.party_member_2 }}{{ else }}(unnamed){{ end }}
+        3. {{ if world.party_member_3 != "" }}{{ world.party_member_3 }}{{ else }}(unnamed){{ end }}
+        4. {{ if world.party_member_4 != "" }}{{ world.party_member_4 }}{{ else }}(unnamed){{ end }}
+        5. {{ if world.party_member_5 != "" }}{{ world.party_member_5 }}{{ else }}(unnamed){{ end }}
+      Profession: {{ if world.profession != nil }}{{ world.profession }}{{ else }}(not yet chosen){{ end }}
+      Departure:  {{ if world.month != nil }}{{ world.month }}{{ else }}(not yet chosen){{ end }}
+
+      Choose:
+        - name the party (or: name member N, or: generate names <theme>)
+        - pick a profession (banker / carpenter / farmer)
+        - pick a departure month (march / april / may / june / july)
+        {{ if available("start_journey") }}- start the journey{{ else }}- ✗ start_journey — {{ blocked_reason("start_journey") }}{{ end }}
+    on:
+      name_party:
+        # Quick "set them all" entry point: write the canonical CSV
+        # into party_names AND mirror each comma-separated element into
+        # party_member_1..5 so the intro roster + per-seat name_member
+        # intent address the same data. trim() drops the spaces the
+        # player likely typed around the commas; the deterministic
+        # fixtures use no spaces and round-trip identically.
+        - target: intro
+          effects:
+            - set:
+                party_names:    "{{ slots.names }}"
+                party_member_1: '{{ trim(split(slots.names, ",")[0]) }}'
+                party_member_2: '{{ trim(split(slots.names, ",")[1]) }}'
+                party_member_3: '{{ trim(split(slots.names, ",")[2]) }}'
+                party_member_4: '{{ trim(split(slots.names, ",")[3]) }}'
+                party_member_5: '{{ trim(split(slots.names, ",")[4]) }}'
+            - say: "Party named: {{ slots.names }}."
+
+      name_member:
+        # Per-seat naming. slots.index is 1-indexed (1 = leader). A
+        # nested ternary selects which party_member_N key to write —
+        # Effect.Set targets must be static keys, so we route through
+        # an expr-lang `key:` map by writing all five keys and using
+        # the ternary to pass through the existing value for every
+        # other seat. (set: is a merge, so untouched keys stay put.)
+        - when: "slots.index == 1"
+          target: intro
+          effects:
+            - set: { party_member_1: "{{ slots.name }}" }
+            - say: "Member 1 (leader) named {{ slots.name }}."
+        - when: "slots.index == 2"
+          target: intro
+          effects:
+            - set: { party_member_2: "{{ slots.name }}" }
+            - say: "Member 2 named {{ slots.name }}."
+        - when: "slots.index == 3"
+          target: intro
+          effects:
+            - set: { party_member_3: "{{ slots.name }}" }
+            - say: "Member 3 named {{ slots.name }}."
+        - when: "slots.index == 4"
+          target: intro
+          effects:
+            - set: { party_member_4: "{{ slots.name }}" }
+            - say: "Member 4 named {{ slots.name }}."
+        - when: "slots.index == 5"
+          target: intro
+          effects:
+            - set: { party_member_5: "{{ slots.name }}" }
+            - say: "Member 5 named {{ slots.name }}."
+        - default: true
+          target: intro
+          guard_hint: "Index must be 1..{{ world.party_size }}."
+          effects:
+            - say: "Index {{ slots.index }} is out of range — pick 1..{{ world.party_size }}."
+
+      generate_names:
+        # Theme-based auto-fill.  Branches on world.narration so CI /
+        # deterministic flows don't depend on a live Claude call:
+        #
+        # - narrated (true)  → host.oracle.ask with prompts/name_party.md
+        #                       returns a CSV on stdout; we bind it
+        #                       into party_names and then split into
+        #                       the five per-seat keys, same shape as
+        #                       name_party.
+        # - deterministic   → a small hardcoded theme→CSV table
+        #   (false)            covers Western / Star Wars / Norse /
+        #                       Lord of the Rings; everything else
+        #                       falls back to the default seeded crew.
+        - when: "world.narration"
+          target: intro
+          effects:
+            - invoke: host.oracle.ask
+              with:
+                prompt_path: "prompts/name_party.md"
+                # Named agent — party_namer persona keeps the output
+                # tight (comma-separated names, no prose) which the
+                # split() chain below expects.
+                agent:       party_namer
+                args:
+                  theme: "{{ slots.theme }}"
+              bind:
+                party_names: stdout
+            - set:
+                party_member_1: '{{ trim(split(world.party_names, ",")[0]) }}'
+                party_member_2: '{{ trim(split(world.party_names, ",")[1]) }}'
+                party_member_3: '{{ trim(split(world.party_names, ",")[2]) }}'
+                party_member_4: '{{ trim(split(world.party_names, ",")[3]) }}'
+                party_member_5: '{{ trim(split(world.party_names, ",")[4]) }}'
+            - say: "Named the wagon party from theme: {{ slots.theme }}."
+        - default: true
+          target: intro
+          effects:
+            # Deterministic theme→CSV table. lower(slots.theme) so
+            # "Western" / "western" / "WESTERN" all hit the same arm,
+            # and hasPrefix on a handful of recognizable cues catches
+            # phrasings like "Norse mythology", "Lord of the Rings
+            # names", "give us star wars".
+            - set:
+                party_names: '{{ hasPrefix(lower(slots.theme), "west") ? "Hank,Jesse,Mary,Ezra,Sarah" : (hasPrefix(lower(slots.theme), "star wars") ? "Luke,Leia,Han,Chewie,Yoda" : (hasPrefix(lower(slots.theme), "norse") ? "Erik,Helga,Thor,Sigrid,Bjorn" : (hasPrefix(lower(slots.theme), "lord of the rings") ? "Frodo,Sam,Merry,Pippin,Bilbo" : "Adam,Beth,Carol,Daniel,Edith"))) }}'
+            - set:
+                party_member_1: '{{ trim(split(world.party_names, ",")[0]) }}'
+                party_member_2: '{{ trim(split(world.party_names, ",")[1]) }}'
+                party_member_3: '{{ trim(split(world.party_names, ",")[2]) }}'
+                party_member_4: '{{ trim(split(world.party_names, ",")[3]) }}'
+                party_member_5: '{{ trim(split(world.party_names, ",")[4]) }}'
+            - say: "Named the wagon party from theme: {{ slots.theme }} → {{ world.party_names }}."
+
+      pick_profession:
+        - target: intro
+          effects:
+            # Banker = $1600, carpenter = $800, farmer = $400 (per the
+            # 1985 MECC scaling). Stored unconditionally; later cash
+            # transactions decrement from here.
+            - set:
+                profession: "{{ slots.profession }}"
+                money: "{{ slots.profession == 'banker' ? 1600 : (slots.profession == 'carpenter' ? 800 : 400) }}"
+            - say: "Profession set to {{ slots.profession }}; starting cash ${{ world.money }}."
+
+      pick_month:
+        - target: intro
+          effects:
+            - set:
+                month: "{{ slots.month }}"
+            - say: "Departure month set to {{ slots.month }}."
+
+      start_journey:
+        - when: "world.party_names != '' && world.profession != nil && world.month != nil"
+          target: general_store
+          effects:
+            - say: "Wagon's hitched. Off to the general store."
+        - default: true
+          target: intro
+          guard_hint: "Name the party, pick a profession, and pick a month before you can leave."
+          effects:
+            - say: "Not ready yet — name the party, pick a profession, and pick a departure month first."
+
+      look:
+        - target: intro

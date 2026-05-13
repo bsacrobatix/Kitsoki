@@ -13,6 +13,7 @@ import (
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/store"
+	"kitsoki/internal/trace"
 )
 
 // handleJobTerminal is called by the per-session listener goroutine when a job
@@ -30,6 +31,12 @@ import (
 // $inbox.{unread,...} to the fresh counts. The next Turn call rebuilds world
 // from the event log, so the badge reflects the new notification immediately.
 func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID, ev jobs.JobEvent) error {
+	o.logger.DebugContext(ctx, trace.EvJobTerminal,
+		slog.String("session_id", string(sid)),
+		slog.String("job_id", ev.JobID),
+		slog.String("status", string(ev.Status)),
+	)
+
 	// Serialise read-modify-write against the foreground Turn path: both
 	// compute turnNum = journey.Turn + 1 from the live event log, so without
 	// this lock the listener goroutine can read journey.Turn before the
@@ -118,6 +125,11 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 
 	// Apply on_complete effects (may be empty if the app didn't declare any).
 	if len(onComplete) > 0 {
+		o.logger.DebugContext(ctx, trace.EvJobOnCompleteRun,
+			slog.String("session_id", string(sid)),
+			slog.String("job_id", ev.JobID),
+			slog.Int("effect_count", len(onComplete)),
+		)
 		newWorld, hostCalls, sayText, effectEvents, runErr := o.machine.RunEffects(ctx, j.OriginState, w, onComplete)
 		if runErr != nil {
 			return fmt.Errorf("handleJobTerminal: RunEffects: %w", runErr)
@@ -133,8 +145,10 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		// captured as an EffectApplied{say: ...} event inside effectEvents.
 		// Log it so operators can see it in structured output as well.
 		if sayText != "" {
-			o.logger.Info("handleJobTerminal: on_complete say",
+			o.logger.InfoContext(ctx, trace.EvJobOnCompleteRun,
+				slog.String("session_id", string(sid)),
 				slog.String("job_id", ev.JobID),
+				slog.String("phase", "say"),
 				slog.String("text", sayText),
 			)
 		}
@@ -152,8 +166,10 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		if len(hostCalls) > 0 {
 			hostEvts, hostWorld, _, _, hostErr := o.dispatchHostCalls(ctx, sid, hostCalls, w, j.OriginState)
 			if hostErr != nil {
-				o.logger.Warn("handleJobTerminal: dispatchHostCalls",
+				o.logger.WarnContext(ctx, trace.EvJobError,
+					slog.String("session_id", string(sid)),
 					slog.String("job_id", ev.JobID),
+					slog.String("phase", "on_complete_dispatch"),
 					slog.String("err", hostErr.Error()),
 				)
 			} else {
@@ -182,7 +198,10 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 	if o.jobStore != nil {
 		refreshedWorld, refreshErr := inbox.RefreshSummary(ctx, o.jobStore, sid, w)
 		if refreshErr != nil {
-			o.logger.Warn("handleJobTerminal: RefreshSummary",
+			o.logger.WarnContext(ctx, trace.EvJobError,
+				slog.String("session_id", string(sid)),
+				slog.String("job_id", ev.JobID),
+				slog.String("phase", "refresh_inbox_summary"),
 				slog.String("err", refreshErr.Error()),
 			)
 		} else {
@@ -215,18 +234,29 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		severity, title, body := completionNotification(ev, j)
 		notifyErr := inbox.PostJobNotification(ctx, o.jobStore, sid, j, title, body, severity)
 		if notifyErr != nil {
-			o.logger.Warn("handleJobTerminal: PostJobNotification",
+			o.logger.WarnContext(ctx, trace.EvJobError,
+				slog.String("session_id", string(sid)),
 				slog.String("job_id", ev.JobID),
+				slog.String("phase", "post_completion_notification"),
 				slog.String("err", notifyErr.Error()),
+			)
+		} else {
+			o.logger.DebugContext(ctx, trace.EvInboxNotificationPosted,
+				slog.String("session_id", string(sid)),
+				slog.String("job_id", ev.JobID),
+				slog.String("severity", string(severity)),
+				slog.String("title", title),
+				slog.String("origin", "job_terminal"),
 			)
 		}
 	}
 
-	o.logger.Info("orchestrator: background job completed",
-		slog.String("session", string(sid)),
+	o.logger.InfoContext(ctx, trace.EvJobTerminal,
+		slog.String("session_id", string(sid)),
 		slog.String("job_id", ev.JobID),
 		slog.String("status", string(ev.Status)),
 		slog.Int("on_complete_count", len(onComplete)),
+		slog.String("phase", "committed"),
 	)
 	return nil
 }
@@ -239,6 +269,10 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 // notification teleports the user back to where the job was launched, which
 // should have a state whose intents: includes answer_clarification.
 func (o *Orchestrator) handleJobAwaitingInput(ctx context.Context, sid app.SessionID, ev jobs.JobEvent) error {
+	o.logger.DebugContext(ctx, trace.EvJobAwaitingInput,
+		slog.String("session_id", string(sid)),
+		slog.String("job_id", ev.JobID),
+	)
 	if o.jobStore == nil {
 		// No persistent store: cannot post a notification or fetch the schema.
 		return nil
@@ -269,8 +303,10 @@ func (o *Orchestrator) handleJobAwaitingInput(ctx context.Context, sid app.Sessi
 	}
 	if schema == nil {
 		// Schema not yet persisted (race); log and skip.
-		o.logger.Warn("orchestrator: handleJobAwaitingInput: no clarification schema found",
+		o.logger.WarnContext(ctx, trace.EvJobError,
+			slog.String("session_id", string(sid)),
 			slog.String("job_id", ev.JobID),
+			slog.String("phase", "awaiting_input_no_schema"),
 		)
 		return nil
 	}
@@ -279,12 +315,19 @@ func (o *Orchestrator) handleJobAwaitingInput(ctx context.Context, sid app.Sessi
 	if err := o.jobStore.PostClarificationNotification(ctx, sid, j, *schema); err != nil {
 		return fmt.Errorf("handleJobAwaitingInput: post notification: %w", err)
 	}
+	o.logger.DebugContext(ctx, trace.EvInboxNotificationPosted,
+		slog.String("session_id", string(sid)),
+		slog.String("job_id", ev.JobID),
+		slog.String("severity", string(jobs.SeverityActionRequired)),
+		slog.String("origin", "job_awaiting_input"),
+	)
 
-	o.logger.Info("orchestrator: job awaiting clarification",
-		slog.String("session", string(sid)),
+	o.logger.InfoContext(ctx, trace.EvJobAwaitingInput,
+		slog.String("session_id", string(sid)),
 		slog.String("job_id", ev.JobID),
 		slog.String("kind", j.Kind),
 		slog.String("prompt", schema.Prompt),
+		slog.String("phase", "notified"),
 	)
 	return nil
 }

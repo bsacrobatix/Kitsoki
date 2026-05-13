@@ -465,6 +465,11 @@ func TestEffectInvokeWithTemplatedListArgs(t *testing.T) {
 
 // ─── parallel state rejection ─────────────────────────────────────────────────
 
+// TestParallelStatesRejected — historical guard against the PoC restriction.
+// After §9.4 lifts the bare-rejection, this test was reframed: an empty
+// `type: parallel` state (no children) still fails, but on shape grounds
+// (regions count) rather than a blanket "parallel not supported" error.
+// The expanded parallel-state tests live in parallel_test.go.
 func TestParallelStatesRejected(t *testing.T) {
 	def := &app.AppDef{
 		App:   app.AppMeta{ID: "test"},
@@ -477,7 +482,7 @@ func TestParallelStatesRejected(t *testing.T) {
 
 	_, err := machine.New(def)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "parallel")
+	require.Contains(t, err.Error(), "at least 2 child regions")
 }
 
 // ─── TryGuards MatchedDefault ────────────────────────────────────────────────
@@ -597,4 +602,155 @@ func TestRunEffects(t *testing.T) {
 		}
 	}
 	require.True(t, foundEffApplied, "EffectApplied event should be emitted for set effects")
+}
+
+// ─── Machine.Menu ────────────────────────────────────────────────────────────
+
+// TestMenu_EnumExpansionPrimaryVsBlocked exercises the §7.2 menu computation
+// inside the machine package (where it now lives). An intent with a required
+// enum slot is expanded into per-value rows; rows whose guard dry-run fails
+// surface in Blocked with the failing arm's guard_hint.
+func TestMenu_EnumExpansionPrimaryVsBlocked(t *testing.T) {
+	def := &app.AppDef{
+		App:   app.AppMeta{ID: "test"},
+		Root:  "room",
+		World: map[string]app.VarDef{"unlocked_north": {Type: "bool"}},
+		Intents: map[string]app.Intent{
+			"go": {Slots: map[string]app.Slot{
+				"direction": {Type: "enum", Values: []string{"north", "south"}, Required: true},
+			}},
+		},
+		States: map[string]*app.State{
+			"room": {
+				On: map[string][]app.Transition{
+					"go": {
+						{
+							When:      "slots.direction == 'north' && world.unlocked_north",
+							Target:    "north_room",
+							GuardHint: "The north door is locked.",
+						},
+						{
+							When:   "slots.direction == 'south'",
+							Target: "south_room",
+						},
+					},
+				},
+			},
+			"north_room": {},
+			"south_room": {},
+		},
+	}
+	m := mustNew(t, def)
+	w := world.New()
+	w.Vars["unlocked_north"] = false
+
+	menu := m.Menu("room", w)
+
+	// "go south" passes its when arm → primary.
+	foundSouth := false
+	for _, e := range menu.Primary {
+		if e.Display == "go south" {
+			foundSouth = true
+			require.Equal(t, "south_room", e.DestinationHint)
+		}
+	}
+	require.True(t, foundSouth, "go south should be in primary")
+
+	// "go north" fails its when arm (unlocked_north=false) → blocked with hint.
+	foundNorth := false
+	for _, e := range menu.Blocked {
+		if e.Display == "go north" {
+			foundNorth = true
+			require.Equal(t, "The north door is locked.", e.Reason)
+		}
+	}
+	require.True(t, foundNorth, "go north should be in blocked")
+}
+
+// TestMenu_SlotlessIntentBlockedByGuard mirrors the OT intro / start_journey
+// shape: an intent declared in the state with no required slots but with a
+// when: arm that fails (and a default: catch-all) surfaces as a blocked row
+// carrying the failing arm's guard_hint.
+func TestMenu_SlotlessIntentBlockedByGuard(t *testing.T) {
+	def := &app.AppDef{
+		App:   app.AppMeta{ID: "test"},
+		Root:  "lobby",
+		World: map[string]app.VarDef{"ready": {Type: "bool"}},
+		Intents: map[string]app.Intent{
+			"depart": {Description: "Depart the lobby."},
+		},
+		States: map[string]*app.State{
+			"lobby": {
+				On: map[string][]app.Transition{
+					"depart": {
+						{When: "world.ready", Target: "outside"},
+						{Default: true, Target: "lobby", GuardHint: "Not ready to depart yet."},
+					},
+				},
+			},
+			"outside": {},
+		},
+	}
+	m := mustNew(t, def)
+
+	wNotReady := world.New()
+	wNotReady.Vars["ready"] = false
+	menu := m.Menu("lobby", wNotReady)
+
+	var blocked *machine.MenuEntry
+	for i := range menu.Blocked {
+		if menu.Blocked[i].Intent == "depart" {
+			blocked = &menu.Blocked[i]
+		}
+	}
+	require.NotNil(t, blocked, "depart should be blocked when ready=false")
+	require.Equal(t, "Not ready to depart yet.", blocked.Reason)
+
+	// Flip ready=true and depart should now be primary.
+	wReady := world.New()
+	wReady.Vars["ready"] = true
+	menu = m.Menu("lobby", wReady)
+	foundPrimary := false
+	for _, e := range menu.Primary {
+		if e.Intent == "depart" {
+			foundPrimary = true
+		}
+	}
+	require.True(t, foundPrimary, "depart should be primary when ready=true")
+}
+
+// TestMenu_TemplateMapShape verifies the contract between machine.Menu and
+// the view-template env: MenuToTemplateMap produces a map[string]any with
+// "primary" and "blocked" lists whose elements are plain map[string]any
+// carrying intent/display/reason/destination_hint/primary keys.
+func TestMenu_TemplateMapShape(t *testing.T) {
+	def := &app.AppDef{
+		App:   app.AppMeta{ID: "test"},
+		Root:  "s",
+		World: map[string]app.VarDef{},
+		Intents: map[string]app.Intent{
+			"look": {Description: "Look."},
+		},
+		States: map[string]*app.State{
+			"s": {
+				On: map[string][]app.Transition{
+					"look": {{Target: "s"}},
+				},
+			},
+		},
+	}
+	m := mustNew(t, def)
+	tm := machine.MenuToTemplateMap(m.Menu("s", world.New()))
+
+	primary, ok := tm["primary"].([]any)
+	require.True(t, ok, "primary key must be []any")
+	require.NotEmpty(t, primary, "look should produce a primary entry")
+	entry, ok := primary[0].(map[string]any)
+	require.True(t, ok, "primary entries must be map[string]any")
+	require.Equal(t, "look", entry["intent"])
+	require.Equal(t, "look", entry["display"])
+	require.Equal(t, true, entry["primary"])
+
+	_, ok = tm["blocked"].([]any)
+	require.True(t, ok, "blocked key must be []any even when empty")
 }

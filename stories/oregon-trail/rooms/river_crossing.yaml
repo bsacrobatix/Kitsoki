@@ -1,0 +1,364 @@
+# river_crossing — phase D refactor. Hosts the river_strategy proposal
+# (declared in proposals.yaml) as a compound state with depth-based
+# initial substate selection plus a shared review/execute/done arc.
+#
+# # Substate layout
+#
+#   shallow / mid / deep — depth-bucketed entry substates. The compound
+#                          `initial:` template selects based on
+#                          world.river_depth_ft (set by the preceding
+#                          leg's approach_river transition).
+#   reviewing            — a draft (method, confidence) exists; await
+#                          accept_crossing / refine_crossing / cancel.
+#   executing            — background host.run is in flight (simulated
+#                          2-second sleep per §6.1). on_complete reads
+#                          world.last_job_result.stdout, then deciphers
+#                          the outcome from depth × oxen × miles.
+#   done                 — outcome is known; player issues `continue`
+#                          to apply the outcome (transition forward or
+#                          back) or `look` to inspect.
+#
+# # Background execute
+#
+# executing.on_enter dispatches host.run with background: true. The
+# on_complete chain ONLY runs effects (no transition — the orchestrator
+# applies on_complete as a synthetic background_completion turn but
+# does NOT change state, per oncomplete.go). The outcome is therefore
+# committed into world.river_outcome by on_complete; the actual state
+# advance happens when the player issues `continue` from the executing
+# view (which will see river_outcome != "" and branch accordingly).
+#
+# # Outcome resolution
+#
+# Deterministic mode: outcome ~= (depth_ft * oxen + miles_traveled) % 100.
+#   - < 60        → "crossed"        (success; advance to next leg)
+#   - [60, 85)    → "swept_supplies" (lose 100 lbs food, retry leg)
+#   - >= 85       → "drowned"        (party_alive -= 1, retry leg)
+#
+# `approach_river` from each `_awaiting_reply` sets river_depth_ft /
+# river_width_ft from the landmark name (see helper map below).
+# Kansas River: 2-4 ft typical. Snake River: 6-8 ft typical.
+
+states:
+  river_crossing:
+    type: compound
+    # depth < 3 → shallow; [3, 6) → mid; >= 6 → deep.
+    initial: "{{ if world.river_depth_ft < 3 }}shallow{{ else }}{{ if world.river_depth_ft < 6 }}mid{{ else }}deep{{ end }}{{ end }}"
+    description: "At the river ({{ world.current_landmark }})."
+    relevant_world: [current_landmark, river_depth_ft, river_width_ft, money, food_lbs, oxen, party_alive, miles_traveled, crossing_method, crossing_confidence, river_outcome, last_job_id]
+    states:
+
+      # ── shallow: depth < 3 ft. propose_crossing → reviewing. ─────────
+      shallow:
+        description: "Low water at {{ world.current_landmark }} — {{ world.river_depth_ft }} ft deep."
+        view: |
+          The {{ world.current_landmark }} runs low. {{ world.river_depth_ft }} ft of water,
+          {{ world.river_width_ft }} ft from bank to bank. The bed reads flat and the
+          current is easy — at this water you could drive across without wetting the wagon
+          much above the axle.
+
+          The wagon master spits in the grass and lays out the choices:
+
+            - ford    — drive the team straight through. Free; safe in low water.
+            - caulk   — seal and float the wagon. Free, but slow work for no gain here.
+            - ferry   — pay the ferryman his dollars. Safe; unnecessary at this depth.
+            - wait    — make camp until the water drops further. Costs days and food.
+
+          Tell him: propose_crossing method=ford confidence=80
+          Or:       cancel_crossing  to step back from the bank.
+        on:
+          propose_crossing:
+            - target: ../reviewing
+              effects:
+                - set:
+                    crossing_method: "{{ slots.method }}"
+                    crossing_confidence: "{{ int(slots.confidence) }}"
+                - say: "The wagon master walks the bank, looks at the team, looks at the water. 'We'll {{ slots.method }} her — confidence about {{ slots.confidence }} in ten.'"
+          cancel_crossing:
+            # Cancel walks back to the preceding _awaiting_reply via current_landmark.
+            - when: "world.current_landmark == 'Kansas River Crossing'"
+              target: leg_a_awaiting_reply
+              effects:
+                - say: "The team backs off the cutbank. The river runs on without us; we'll come back to it."
+            - when: "world.current_landmark == 'Snake River Crossing'"
+              target: leg_f_awaiting_reply
+              effects:
+                - say: "The team backs off the cutbank. The river runs on without us; we'll come back to it."
+            - default: true
+              target: ended_lost
+              guard_hint: "Unknown river — ending the run."
+          look:
+            - target: .
+
+      # ── mid: 3-5 ft. Same lifecycle, different opening view. ─────────
+      mid:
+        description: "Fair water at {{ world.current_landmark }} — {{ world.river_depth_ft }} ft."
+        view: |
+          The {{ world.current_landmark }} runs fair to high. {{ world.river_depth_ft }} ft
+          of water, {{ world.river_width_ft }} ft across. The current pulls harder than it
+          looks from the bank — a fording party would feel the oxen leave the bottom in the
+          middle, and a wagon bed would take water before it cleared the far side.
+
+          The wagon master shakes his head at the ford and considers the team:
+
+            - ford    — drive across regardless. Free, but oxen may lose footing.
+            - caulk   — seal the wagon-bed with pitch and tallow and float her over.
+                        Slow, but the standard play in water like this.
+            - ferry   — pay the ferryman. Slow as well, but no losses.
+            - wait    — make camp on the cutbank and wait the water down. Days and food.
+
+          Tell him: propose_crossing method=caulk confidence=70
+          Or:       cancel_crossing  to step off the bank.
+        on:
+          propose_crossing:
+            - target: ../reviewing
+              effects:
+                - set:
+                    crossing_method: "{{ slots.method }}"
+                    crossing_confidence: "{{ int(slots.confidence) }}"
+                - say: "The wagon master walks the bank, looks at the team, looks at the water. 'We'll {{ slots.method }} her — confidence about {{ slots.confidence }} in ten.'"
+          cancel_crossing:
+            - when: "world.current_landmark == 'Kansas River Crossing'"
+              target: leg_a_awaiting_reply
+            - when: "world.current_landmark == 'Snake River Crossing'"
+              target: leg_f_awaiting_reply
+            - default: true
+              target: ended_lost
+              guard_hint: "Unknown river — ending the run."
+          look:
+            - target: .
+
+      # ── deep: 6+ ft. The dangerous branch. ───────────────────────────
+      deep:
+        description: "High water at {{ world.current_landmark }} — {{ world.river_depth_ft }} ft."
+        view: |
+          The {{ world.current_landmark }} is running high and brown. {{ world.river_depth_ft }} ft
+          of water — well over the oxen's heads — and {{ world.river_width_ft }} ft of swelter
+          from bank to bank. Cottonwood limbs come tumbling past in the current. A man on
+          horseback would think twice; a wagon and an ox-team has no business out there.
+
+          The wagon master pulls his hat low and reckons it grim:
+
+            - ford    — drive into water above the oxen. Sure to founder. Death of the team
+                        and likely the wagon-bed besides.
+            - caulk   — seal her up and float. Possible, but the current is heavy enough
+                        to swamp a caulked wagon before she reaches the far bank.
+            - ferry   — pay the ferryman. The only sure way over. Worth every coin.
+            - wait    — set camp on the high ground. The water falls in time. Costs days,
+                        and food, but saves the team and the load.
+
+          Tell him: propose_crossing method=ferry confidence=90
+          Or:       cancel_crossing  to step back from the bank.
+        on:
+          propose_crossing:
+            - target: ../reviewing
+              effects:
+                - set:
+                    crossing_method: "{{ slots.method }}"
+                    crossing_confidence: "{{ int(slots.confidence) }}"
+                - say: "The wagon master walks the bank, looks at the team, looks at the water. 'We'll {{ slots.method }} her — confidence about {{ slots.confidence }} in ten.'"
+          cancel_crossing:
+            - when: "world.current_landmark == 'Kansas River Crossing'"
+              target: leg_a_awaiting_reply
+            - when: "world.current_landmark == 'Snake River Crossing'"
+              target: leg_f_awaiting_reply
+            - default: true
+              target: ended_lost
+              guard_hint: "Unknown river — ending the run."
+          look:
+            - target: .
+
+      # ── reviewing: draft in hand. accept_crossing / refine / cancel. ─
+      # require_confirm: true overrides auto_accept_if — we always come
+      # through reviewing.
+      reviewing:
+        description: "The wagon master spells out the plan."
+        view: |
+          The wagon master sets a boot on the wagon-tongue, looks at the river, says it
+          back so we all hear it:
+
+          "{{ world.crossing_method }} the {{ world.current_landmark }} — {{ world.river_depth_ft }} ft
+           of water, {{ world.river_width_ft }} ft across. Confidence about {{ world.crossing_confidence }}
+           in ten. Speak up now if I've called it wrong."
+
+          accept_crossing — give him the nod and put the team in the water.
+          refine_crossing — change the method or sharpen the call.
+          cancel_crossing — walk away from the bank for now.
+          look           — look the river over again.
+        relevant_world: [crossing_method, crossing_confidence, current_landmark, river_depth_ft]
+        on:
+          accept_crossing:
+            - target: ../executing
+              effects:
+                - set:
+                    river_outcome: ""
+                - say: "The wagon master nods to the team. The lead ox steps into the water; the wheels follow."
+          refine_crossing:
+            # Drop back into the depth-appropriate substate to redraft.
+            - when: "world.river_depth_ft < 3"
+              target: ../shallow
+              effects:
+                - set: { crossing_method: none, crossing_confidence: 0 }
+            - when: "world.river_depth_ft < 6"
+              target: ../mid
+              effects:
+                - set: { crossing_method: none, crossing_confidence: 0 }
+            - default: true
+              target: ../deep
+              effects:
+                - set: { crossing_method: none, crossing_confidence: 0 }
+          cancel_crossing:
+            - when: "world.current_landmark == 'Kansas River Crossing'"
+              target: leg_a_awaiting_reply
+              effects:
+                - set: { crossing_method: none, crossing_confidence: 0 }
+            - when: "world.current_landmark == 'Snake River Crossing'"
+              target: leg_f_awaiting_reply
+              effects:
+                - set: { crossing_method: none, crossing_confidence: 0 }
+            - default: true
+              target: ended_lost
+              guard_hint: "Unknown river — ending the run."
+          look:
+            - target: .
+
+      # ── executing: background job in flight. ─────────────────────────
+      executing:
+        description: "The wagon is in the water at {{ world.current_landmark }}."
+        view: |
+          The wagon is in the water — {{ world.crossing_method }} across the
+          {{ world.current_landmark }}. From the bank we watch the wheels turn slow,
+          the oxen swim where it gets deep, the wagon-bed ride high or take water.
+
+          {{ if world.river_outcome == "" }}No word yet from the far side.{{ else }}Word from the far side: {{ world.river_outcome }}.{{ end }}
+
+          continue — once we have the outcome, press on.
+          look     — watch the crossing from the bank.
+        relevant_world: [crossing_method, river_outcome, last_job_id, river_depth_ft, oxen, miles_traveled]
+        on_enter:
+          # Background host.run — proposals.yaml river_strategy.execute.
+          # 0.2s sleep simulates the time it takes to float across.
+          # on_complete computes river_outcome from the deterministic
+          # depth × oxen × miles formula. We don't read stdout for the
+          # outcome (the spec wants stdout-based outcome, but for
+          # deterministic flow tests the world-derived formula is more
+          # stable than a literal "crossed" string).
+          - invoke: host.run
+            with:
+              # cmd: must be a string for bash-shell mode (host.run wraps
+              # it as `bash -c <cmd>`); a list-form here fails the type
+              # assertion in handlers.go RunHandler and the job lands
+              # terminal-status=failed even though on_complete still runs.
+              cmd: "sleep 0.2; echo crossed"
+            background: true
+            bind: { last_job_id: job_id }
+            on_complete:
+              - set:
+                  # Deterministic outcome: (depth × oxen + miles) % 100.
+                  # Wrap in int() because world int values can deserialise
+                  # as float64 from the JSON event log (especially for
+                  # initial_world-seeded fields), and expr-lang's `%`
+                  # operator rejects float64 operands.
+                  river_outcome: "{{ int(world.river_depth_ft * world.oxen + world.miles_traveled) % 100 < 60 ? 'crossed' : (int(world.river_depth_ft * world.oxen + world.miles_traveled) % 100 < 85 ? 'swept_supplies' : 'drowned') }}"
+              - say: "Word from the far bank: {{ world.river_outcome }}."
+              # Phase G: post the river-crossing outcome to the trail diary.
+              # phase_id is unique per (landmark, outcome, day) so re-tries
+              # of the same crossing land as distinct posts.
+              - invoke: host.transport.post
+                with:
+                  transport: tui
+                  thread:    "{{ run.id }}"
+                  phase_id:  "river_crossing_{{ world.current_landmark }}_{{ world.river_outcome }}_{{ world.day }}"
+                  title:     "Crossing the {{ world.current_landmark }}"
+                  body: |
+                    Day {{ world.day }} — attempted the {{ world.current_landmark }} via {{ world.crossing_method }}
+                    ({{ world.river_depth_ft }} ft deep, {{ world.river_width_ft }} ft wide).
+
+                    Outcome: **{{ world.river_outcome }}**.
+                    {{ if world.river_outcome == 'crossed' }}Across safely. Onward.{{ end }}{{ if world.river_outcome == 'swept_supplies' }}The current swept off 100 lbs of supplies. We will try again.{{ end }}{{ if world.river_outcome == 'drowned' }}A wagon member drowned. The trail remembers them.{{ end }}
+        on:
+          continue:
+            # ── crossed: advance to the next leg's executing.
+            - when: "world.river_outcome == 'crossed' && world.current_landmark == 'Kansas River Crossing'"
+              target: leg_b_executing
+              effects:
+                - set:
+                    current_landmark: "Kansas River Crossing"
+                    miles_traveled: 0
+                    river_outcome: ""
+                    crossing_method: none
+                    crossing_confidence: 0
+                - say: "Across! The team finds its footing on the far bank and we hitch the load tight again — Fort Kearney lies ahead."
+            - when: "world.river_outcome == 'crossed' && world.current_landmark == 'Snake River Crossing'"
+              target: leg_g_executing
+              effects:
+                - set:
+                    current_landmark: "Snake River Crossing"
+                    miles_traveled: 0
+                    river_outcome: ""
+                    crossing_method: none
+                    crossing_confidence: 0
+                - say: "Across! The Snake is behind us, the team is dripping but whole, and the road bends west toward the Willamette."
+            # ── swept_supplies: lose 100 lbs food, drop back to depth
+            #    substate to try again.
+            - when: "world.river_outcome == 'swept_supplies' && world.river_depth_ft < 3"
+              target: ../shallow
+              effects:
+                - set:
+                    food_lbs: "{{ world.food_lbs - 100 }}"
+                    river_outcome: ""
+                    crossing_method: none
+                    crossing_confidence: 0
+                - say: "The current took the load off the wagon-bed — 100 lbs of stores gone downriver. The wagon is dragged back to dry ground; we'll have to try again."
+            - when: "world.river_outcome == 'swept_supplies' && world.river_depth_ft < 6"
+              target: ../mid
+              effects:
+                - set:
+                    food_lbs: "{{ world.food_lbs - 100 }}"
+                    river_outcome: ""
+                    crossing_method: none
+                    crossing_confidence: 0
+                - say: "The current took the load off the wagon-bed — 100 lbs of stores gone downriver. The wagon is dragged back to dry ground; we'll have to try again."
+            - when: "world.river_outcome == 'swept_supplies'"
+              target: ../deep
+              effects:
+                - set:
+                    food_lbs: "{{ world.food_lbs - 100 }}"
+                    river_outcome: ""
+                    crossing_method: none
+                    crossing_confidence: 0
+                - say: "The current took the load off the wagon-bed — 100 lbs of stores gone downriver. The wagon is dragged back to dry ground; we'll have to try again."
+            # ── drowned: party_alive -= 1, retry the same depth substate.
+            - when: "world.river_outcome == 'drowned' && world.river_depth_ft < 3"
+              target: ../shallow
+              effects:
+                - set:
+                    party_alive: "{{ world.party_alive - 1 }}"
+                    river_outcome: ""
+                    crossing_method: none
+                    crossing_confidence: 0
+                - say: "One of the party was taken in the crossing — pulled under in the current and lost before the team could come about. The wagon is dragged back to the bank in silence."
+            - when: "world.river_outcome == 'drowned' && world.river_depth_ft < 6"
+              target: ../mid
+              effects:
+                - set:
+                    party_alive: "{{ world.party_alive - 1 }}"
+                    river_outcome: ""
+                    crossing_method: none
+                    crossing_confidence: 0
+                - say: "One of the party was taken in the crossing — pulled under in the current and lost before the team could come about. The wagon is dragged back to the bank in silence."
+            - when: "world.river_outcome == 'drowned'"
+              target: ../deep
+              effects:
+                - set:
+                    party_alive: "{{ world.party_alive - 1 }}"
+                    river_outcome: ""
+                    crossing_method: none
+                    crossing_confidence: 0
+                - say: "One of the party was taken in the crossing — pulled under in the current and lost before the team could come about. The wagon is dragged back to the bank in silence."
+            # ── outcome not yet posted (job still running).
+            - default: true
+              target: .
+              guard_hint: "The wagon's still mid-stream. Wait for word from the bank."
+          look:
+            - target: .

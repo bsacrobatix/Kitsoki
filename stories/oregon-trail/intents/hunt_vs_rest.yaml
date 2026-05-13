@@ -1,0 +1,55 @@
+# hunt_vs_rest — period idioms that should route to `rest`, not `hunt`.
+#
+# At a landmark checkpoint, "let's hold up here" or "make camp for a
+# bit" are period-flavored ways of saying rest, and the LLM is
+# plausibly going to grab `hunt` because that's the other major
+# off-road verb at the same state. This fixture pins the difference.
+#
+# Threshold-tightening note: kept at 0.8 because the runner today
+# does NOT honour a per-fixture min_confidence field — the future
+# runner change (IntentDefaults.MinConfidence) is what would let us
+# pair a stricter pass-rate with a confidence floor. See
+# internal/testrunner/intents.go.
+test_kind: intents
+app: oregon-trail
+state: leg_b_awaiting_reply       # Fort Kearney checkpoint
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  - id: rest-period-idioms
+    intent: { name: rest, slots: {} }
+    inputs:
+      - "let's hold up here"
+      - "make camp for a bit"
+      - "we need to rest"
+      - "camp here a few days"
+      - "rest the team"
+
+  - id: hunt-canonical
+    intent: { name: hunt, slots: {} }
+    inputs:
+      - "go hunting"
+      - "shoot some game"
+      - "hunt for meat"
+      - "I'll hunt"
+
+  - id: continue-period
+    intent: { name: continue, slots: {} }
+    inputs:
+      - "press on"
+      - "onward"
+      - "keep going"
+      - "let's move"
+
+  # Adversarial — fully ambiguous: "stop here" could be rest OR a generic
+  # "stay put" intent that doesn't exist. The LLM should clarify.
+  - id: stop-ambiguous
+    expect_failure:
+      any_of: [clarify, UNKNOWN_INTENT]
+    inputs:
+      - "stop here"
+      - "wait"

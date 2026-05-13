@@ -50,12 +50,18 @@ func styleFor(s string, color lipgloss.Color) string {
 }
 
 var (
-	colorTurn    = lipgloss.Color("12") // bright blue
-	colorHarness = lipgloss.Color("10") // bright green
-	colorMachine = lipgloss.Color("11") // bright yellow
-	colorStore   = lipgloss.Color("14") // bright cyan
-	colorErr     = lipgloss.Color("9")  // bright red
-	colorDim     = lipgloss.Color("8")  // dark gray
+	colorTurn    = lipgloss.Color("12")  // bright blue
+	colorHarness = lipgloss.Color("10")  // bright green
+	colorMachine = lipgloss.Color("11")  // bright yellow
+	colorStore   = lipgloss.Color("14")  // bright cyan
+	colorErr     = lipgloss.Color("9")   // bright red
+	colorDim     = lipgloss.Color("8")   // dark gray
+	colorOffPath = lipgloss.Color("214") // amber — matches off-path UX framing
+	colorTimeout = lipgloss.Color("51")  // bright cyan-blue — quietly distinct from STORE
+	colorTele    = lipgloss.Color("135") // violet — "you jumped sideways"
+	colorJob     = lipgloss.Color("33")  // mid blue — background job lifecycle
+	colorSlot    = lipgloss.Color("220") // soft yellow — paired with MACHINE-yellow visually
+	colorInbox   = lipgloss.Color("245") // mid gray — notifications are low-key
 )
 
 // prettyLine formats one trace record for human-readable output.
@@ -122,6 +128,46 @@ func prettyLine(rec traceRecord, extra map[string]any) string {
 	case strings.HasPrefix(msg, "expr."):
 		sb.WriteString("  " + styleFor("EXPR", colorErr) +
 			" " + strings.TrimPrefix(msg, "expr.") +
+			" " + formatKV(extra, "", ""))
+
+	case strings.HasPrefix(msg, "offpath."):
+		sb.WriteString("  " + styleFor("OFFPATH", colorOffPath) +
+			" " + strings.TrimPrefix(msg, "offpath.") +
+			" " + formatKV(extra, "", ""))
+
+	case strings.HasPrefix(msg, "timeout."):
+		sb.WriteString("  " + styleFor("TIMEOUT", colorTimeout) +
+			" " + strings.TrimPrefix(msg, "timeout.") +
+			" " + formatKV(extra, "", ""))
+
+	case strings.HasPrefix(msg, "teleport."):
+		sb.WriteString("  " + styleFor("TELEPORT", colorTele) +
+			" " + strings.TrimPrefix(msg, "teleport.") +
+			" " + formatKV(extra, "", ""))
+
+	case strings.HasPrefix(msg, "job."):
+		sb.WriteString("  " + styleFor("JOB", colorJob) +
+			" " + strings.TrimPrefix(msg, "job.") +
+			" " + formatKV(extra, "", ""))
+
+	case strings.HasPrefix(msg, "slotfill."), strings.HasPrefix(msg, "disambig."):
+		// Group slot-fill and disambiguation under SLOTFILL — both are the
+		// "I need more info before I can route" family.
+		label := "SLOTFILL"
+		trimmed := msg
+		if strings.HasPrefix(msg, "slotfill.") {
+			trimmed = strings.TrimPrefix(msg, "slotfill.")
+		} else {
+			label = "DISAMBIG"
+			trimmed = strings.TrimPrefix(msg, "disambig.")
+		}
+		sb.WriteString("  " + styleFor(label, colorSlot) +
+			" " + trimmed +
+			" " + formatKV(extra, "", ""))
+
+	case strings.HasPrefix(msg, "inbox."):
+		sb.WriteString("  " + styleFor("INBOX", colorInbox) +
+			" " + strings.TrimPrefix(msg, "inbox.") +
 			" " + formatKV(extra, "", ""))
 
 	default:

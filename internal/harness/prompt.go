@@ -4,6 +4,7 @@
 package harness
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -115,6 +116,10 @@ func buildDynamicSuffix(appDef *app.AppDef, in TurnInput) string {
 		sb.WriteString("\n")
 	}
 
+	if len(in.RecentTurns) > 0 {
+		sb.WriteString(buildRecentConversationBlock(in.RecentTurns))
+	}
+
 	if len(in.World.Vars) > 0 {
 		sb.WriteString("**World context:**\n")
 		for k, v := range in.World.Vars {
@@ -128,6 +133,61 @@ func buildDynamicSuffix(appDef *app.AppDef, in TurnInput) string {
 		sb.WriteString("\n")
 	}
 
+	return sb.String()
+}
+
+// buildRecentConversationBlock renders the per-turn RecentTurns slice as a
+// compact "Recent conversation" block for the system prompt. The block is
+// ordered oldest → newest so the LLM reads it like a chat log; each row
+// captures (user utterance, routed intent, post-turn state, rejected
+// flag) — just enough to resolve "what I said before" or "the thing I
+// tried that failed" without inflating the prompt.
+//
+// The convention is human prose annotated with a structured trailer:
+//
+//	**Recent conversation (oldest → newest):**
+//	- turn 3 — user said "go south"; routed to `go(direction=south)`;
+//	  ended in `bar.dark`
+//	- turn 4 — user said "drink"; routed to `drink`; REJECTED
+//	  (intent_not_allowed_in_state); state unchanged at `bar.dark`
+//
+// The trailer's exact phrasing is documented in TurnSummary; the leading
+// "**Recent conversation**" heading is what the LLM is told to look for
+// when resolving back-references.
+func buildRecentConversationBlock(turns []TurnSummary) string {
+	if len(turns) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("**Recent conversation (oldest → newest, for back-reference resolution like \"what I just said\"):**\n")
+	for _, t := range turns {
+		sb.WriteString(fmt.Sprintf("- turn %d — user said %q", int64(t.Turn), t.UserText))
+		if t.Rejected {
+			sb.WriteString("; REJECTED")
+			if t.Intent != "" {
+				sb.WriteString(fmt.Sprintf(" (router proposed `%s`)", t.Intent))
+			}
+		} else if t.Intent != "" {
+			sb.WriteString(fmt.Sprintf("; routed to `%s`", t.Intent))
+		}
+		if len(t.Slots) > 0 {
+			// Render the slots as a compact JSON object so the LLM can
+			// re-extract them verbatim for back-reference inputs like
+			// "same as before" or "yes — like I said".
+			if b, err := json.Marshal(t.Slots); err == nil {
+				sb.WriteString(fmt.Sprintf(" with slots %s", string(b)))
+			}
+		}
+		if t.State != "" {
+			if t.Rejected {
+				sb.WriteString(fmt.Sprintf("; state unchanged at `%s`", t.State))
+			} else {
+				sb.WriteString(fmt.Sprintf("; ended in `%s`", t.State))
+			}
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
 	return sb.String()
 }
 

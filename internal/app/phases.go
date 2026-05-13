@@ -364,6 +364,7 @@ func substTransition(tr Transition, params map[string]any, next map[string]strin
 
 func substEffect(eff Effect, params map[string]any, next map[string]string) Effect {
 	out := Effect{
+		When:    substString(eff.When, params, next),
 		Invoke:  substString(eff.Invoke, params, next),
 		Say:     substString(eff.Say, params, next),
 		Emit:    substString(eff.Emit, params, next),
@@ -451,9 +452,15 @@ func substString(s string, params map[string]any, next map[string]string) string
 
 // rewritePhaseTarget converts a phase ID into its concrete entry-state name.
 // "phase_0" → "phase_0_executing"; "terminated" / "ended" pass through.
+// Names beginning with `ended_` (e.g. `ended_won`, `ended_lost`) also pass
+// through unchanged so authors can declare multiple terminal endings without
+// the expander pretending they're phases.
 func rewritePhaseTarget(t string) string {
 	switch t {
 	case "", "terminated", "ended", "completed", "abandoned", "failed":
+		return t
+	}
+	if strings.HasPrefix(t, "ended_") {
 		return t
 	}
 	return t + "_executing"

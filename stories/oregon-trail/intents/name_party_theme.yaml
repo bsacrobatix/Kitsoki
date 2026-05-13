@@ -1,0 +1,72 @@
+# name_party_theme — themed party-naming patterns.
+#
+# State: intro. The live trace showed that "name the party after the
+# jackson 5" routes to `name_party { names: "Jackie, Tito, Jermaine,
+# Marlon, Michael" }` — the LLM INVENTS five names inline rather than
+# routing to `generate_names`. That convention is fragile (a router
+# regression could flip it to generate_names) so we pin the canonical
+# answer here per theme.
+#
+# Counterpoint: explicit "generate names from X" / "use X names" verb
+# forms must route to `generate_names { theme: X }`, NOT name_party
+# with invented names. The "verb gate" is what disambiguates the two
+# code paths and we lock both sides.
+#
+# CAVEAT — partial-slot match: the runner DOES support partial slot
+# match (only slots listed in the fixture's intent.slots are checked,
+# via deepEqualValues in internal/testrunner/intents.go runOneIntent).
+# But the static harness keys (state, exact-input) so the canonical
+# `names` string from the recording IS what the harness returns. We
+# spell out the trace-observed answer string in both the fixture and
+# the recording — a future LLM regression that picks a DIFFERENT 5
+# Jackson-5 names would still pass at the per-slot-equality layer
+# only if the recording were regenerated. Today the recording entry
+# IS the canonical answer.
+#
+# NOTE: per-fixture min_confidence not yet supported by the runner.
+test_kind: intents
+app: oregon-trail
+state: intro
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  # Theme → name_party (LLM invents names inline).
+  - id: jackson-5
+    intent:
+      name: name_party
+      slots: { names: "Jackie, Tito, Jermaine, Marlon, Michael" }
+    inputs:
+      - "name the party after the jackson 5"
+
+  - id: famous-comedians
+    intent:
+      name: name_party
+      slots: { names: "Richard, George, Joan, Robin, Eddie" }
+    inputs:
+      - "name the party after famous comedians"
+
+  - id: beatles
+    intent:
+      name: name_party
+      slots: { names: "John, Paul, George, Ringo, Pete" }
+    inputs:
+      - "name the party after the beatles"
+
+  # Explicit theme verb → generate_names (NOT name_party).
+  - id: generate-western
+    intent:
+      name: generate_names
+      slots: { theme: "western" }
+    inputs:
+      - "generate names from a western theme"
+
+  - id: use-star-wars
+    intent:
+      name: generate_names
+      slots: { theme: "Star Wars" }
+    inputs:
+      - "use star wars names"

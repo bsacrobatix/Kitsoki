@@ -53,6 +53,13 @@ func BuildJourney(def *app.AppDef, initialState app.StatePath, initialWorld worl
 	}
 
 	for _, ev := range history {
+		// js.Turn tracks the highest turn number used in the session,
+		// including off-path side-channel events. The off-path appender
+		// allocates fresh turn numbers via max(existing)+1 so its events
+		// don't collide with foreground events at append time; if we then
+		// excluded them from js.Turn, the next foreground Turn() would
+		// reuse a turn number an off-path event already claimed and hit
+		// a UNIQUE (session_id, turn, seq) PK collision on insert.
 		if ev.Turn > js.Turn {
 			js.Turn = ev.Turn
 		}
@@ -77,7 +84,15 @@ func BuildJourney(def *app.AppDef, initialState app.StatePath, initialWorld worl
 				return nil, fmt.Errorf("replay: EffectApplied turn=%d seq=%d: %w", ev.Turn, ev.Seq, err)
 			}
 			for k, v := range p.Set {
-				js.World.Vars[k] = v
+				// JSON unmarshal of integers into `any` produces float64.
+				// When the app schema declares `type: int` (or `bool`)
+				// for this var, coerce so downstream expr-lang guards
+				// like `world.x % 100` work against the same Go types
+				// the machine would have written at run-time (int64).
+				// Without this, fixtures whose initial_world feeds an
+				// int key through the JSON event log would see a
+				// `float64 % int` runtime error when a guard fires.
+				js.World.Vars[k] = coerceWorldVar(def, k, v)
 			}
 			for k, delta := range p.Increment {
 				js.World.Vars[k] = toInt64Replay(js.World.Vars[k]) + int64(delta)
@@ -104,8 +119,13 @@ func BuildJourney(def *app.AppDef, initialState app.StatePath, initialWorld worl
 			// Host side-effects are already materialized as EffectApplied events.
 			// Nothing to re-apply here.
 
-		case OffPathEntered, OffPathExited:
-			// Off-path turns do not mutate world (§2.1). Skip.
+		case OffPathEntered, OffPathExited, OffPathQuestion, OffPathAnswer:
+			// Off-path turns do not mutate world or state (§7.7, §11).
+			// All four kinds are annotation-only for the replay path.
+
+		case TimeoutFired:
+			// Annotation-only event.  The accompanying TransitionApplied
+			// already updates state; nothing to do here.
 
 		default:
 			// Forward-compatible: silently ignore unknown event kinds.
@@ -113,6 +133,18 @@ func BuildJourney(def *app.AppDef, initialState app.StatePath, initialWorld worl
 	}
 
 	return js, nil
+}
+
+// isOffPathEvent reports whether kind is one of the four off-path event
+// kinds that fire on the orchestrator's side-channel rather than as part
+// of a foreground turn. These events must NOT advance js.Turn during
+// replay — see the BuildJourney comment.
+func isOffPathEvent(kind EventKind) bool {
+	switch kind {
+	case OffPathEntered, OffPathExited, OffPathQuestion, OffPathAnswer:
+		return true
+	}
+	return false
 }
 
 // effectPayload is the JSON structure for an EffectApplied event payload.
@@ -142,4 +174,40 @@ func toInt64Replay(v any) int64 {
 		return int64(x)
 	}
 	return 0
+}
+
+// coerceWorldVar applies app-schema-aware type coercion to a value
+// unmarshalled from a replayed EffectApplied event. JSON encoding/
+// decoding through `any` always produces float64 for numeric values
+// and the standard string/bool types for the others; for `type: int`
+// world vars we round-trip through int64 so downstream expr-lang
+// operations (e.g. `world.x % 100`) see an integral Go type.
+//
+// Vars not declared in the app schema (e.g. test-only keys) pass
+// through unchanged — this keeps the function safe to call for every
+// EffectApplied set entry without breaking off-schema usage.
+func coerceWorldVar(def *app.AppDef, key string, v any) any {
+	if def == nil {
+		return v
+	}
+	vd, ok := def.World[key]
+	if !ok {
+		return v
+	}
+	switch vd.Type {
+	case "int":
+		switch x := v.(type) {
+		case float64:
+			return int64(x)
+		case float32:
+			return int64(x)
+		case int:
+			return int64(x)
+		case int32:
+			return int64(x)
+		case int64:
+			return x
+		}
+	}
+	return v
 }

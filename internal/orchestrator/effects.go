@@ -12,6 +12,7 @@ import (
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/store"
+	"kitsoki/internal/trace"
 	"kitsoki/internal/world"
 )
 
@@ -84,6 +85,14 @@ func (o *Orchestrator) dispatchBackground(
 		return nil, w, fmt.Errorf("dispatchBackground: scheduler.Submit: %w", err)
 	}
 
+	o.logger.DebugContext(ctx, trace.EvJobSubmitted,
+		slog.String("session_id", string(sid)),
+		slog.String("namespace", hc.Namespace),
+		slog.String("job_id", jobID),
+		slog.String("origin_state", string(state)),
+		slog.Int("on_complete_count", len(hc.OnComplete)),
+	)
+
 	// Bind the job ID into world.
 	// Walk hc.Bind: if any entry maps dkey=="job_id", use that world key.
 	// Otherwise default to "last_job_id".
@@ -132,9 +141,19 @@ func (o *Orchestrator) dispatchBackground(
 			OriginRef:     "job:" + jobID,
 		})
 		if notifyErr != nil {
-			o.logger.Warn("dispatchBackground: post notification",
+			o.logger.WarnContext(ctx, trace.EvJobError,
+				slog.String("session_id", string(sid)),
 				slog.String("job_id", jobID),
+				slog.String("phase", "post_submit_notification"),
 				slog.String("err", notifyErr.Error()),
+			)
+		} else {
+			o.logger.DebugContext(ctx, trace.EvInboxNotificationPosted,
+				slog.String("session_id", string(sid)),
+				slog.String("job_id", jobID),
+				slog.String("severity", string(jobs.SeverityInfo)),
+				slog.String("origin", "job_submitted"),
+				slog.String("title", "Job submitted: "+hc.Namespace),
 			)
 		}
 	}

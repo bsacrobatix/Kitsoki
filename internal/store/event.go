@@ -45,6 +45,13 @@ const (
 	OffPathEntered EventKind = "OffPathEntered"
 	// OffPathExited is appended when the user returns from off-path mode.
 	OffPathExited EventKind = "OffPathExited"
+	// OffPathQuestion is appended when the user asks a free-form question
+	// in off-path mode. Replay treats it as a no-op: off-path turns do not
+	// mutate world or state.
+	OffPathQuestion EventKind = "OffPathQuestion"
+	// OffPathAnswer is appended when the oracle returns a reply to an
+	// off-path question. Replay treats it as a no-op.
+	OffPathAnswer EventKind = "OffPathAnswer"
 	// TurnEnded is appended at the end of every user turn.
 	TurnEnded EventKind = "TurnEnded"
 	// StateExited is appended when the machine leaves a state (compound or leaf).
@@ -61,6 +68,12 @@ const (
 	// JobCompleted is appended in the synthetic background-completion turn
 	// when a background job reaches a terminal state (done/failed/cancelled).
 	JobCompleted EventKind = "JobCompleted"
+	// TimeoutFired is appended in the synthetic timeout turn when a state's
+	// declared Timeout: elapses on the orchestrator's clock.  Replay treats
+	// the accompanying TransitionApplied as authoritative for state update;
+	// TimeoutFired is annotation-only so traces can distinguish a timeout
+	// from a user-driven transition.
+	TimeoutFired EventKind = "TimeoutFired"
 )
 
 // Event is one row in the append-only event log (§8 DDL).

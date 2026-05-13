@@ -80,8 +80,39 @@ func emitStates(b *strings.Builder, states map[string]*app.State, prefix, indent
 		label := fullPath
 
 		if len(s.States) > 0 {
+			// Parallel states (§9.4) are rendered with the special
+			// `<<fork>>` shape so the sibling-region structure is visible
+			// in the Mermaid output. Each region renders as a nested
+			// compound block; emitStates recurses into them.
 			fmt.Fprintf(b, "%sstate %q as %s {\n", indent, label, id)
 			fmt.Fprintf(b, "%s  direction LR\n", indent)
+			if s.Type == "parallel" {
+				// Mermaid's parallel-region separator is `--`.
+				regionNames := sortedKeys(s.States)
+				for ri, rn := range regionNames {
+					if ri > 0 {
+						fmt.Fprintf(b, "%s  --\n", indent)
+					}
+					child := s.States[rn]
+					childPath := joinDot(fullPath, rn)
+					if child != nil && len(child.States) > 0 {
+						childID := mermaidStateID(childPath)
+						fmt.Fprintf(b, "%s  state %q as %s {\n", indent, childPath, childID)
+						fmt.Fprintf(b, "%s    direction LR\n", indent)
+						if init := child.Initial; init != "" && !strings.Contains(init, "{{") {
+							leafPath := joinDot(childPath, init)
+							fmt.Fprintf(b, "%s    [*] --> %s\n", indent, mermaidStateID(leafPath))
+						}
+						emitStates(b, child.States, childPath, indent+"    ")
+						fmt.Fprintf(b, "%s  }\n", indent)
+					} else if child != nil {
+						childID := mermaidStateID(childPath)
+						fmt.Fprintf(b, "%s  state %q as %s\n", indent, childPath, childID)
+					}
+				}
+				fmt.Fprintf(b, "%s}\n", indent)
+				continue
+			}
 			// Initial-child arrow inside the compound block. `initial:`
 			// may be a template expression; only emit when literal.
 			if init := s.Initial; init != "" && !strings.Contains(init, "{{") {

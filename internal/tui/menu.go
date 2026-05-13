@@ -116,17 +116,15 @@ func (m menuModel) View() string {
 		sb.WriteString("\n")
 	}
 
-	// Blocked items (collapsed summary + expanded list).
+	// Blocked items — declared in this state but guard currently fails.
+	// Rendered inline (not collapsed) so the player sees both the action
+	// they wanted and why it's not available yet.
 	if len(m.blocked) > 0 {
-		sb.WriteString("\n")
-		sb.WriteString(menuItemBlockedStyle.Render(fmt.Sprintf("+%d blocked", len(m.blocked))))
 		sb.WriteString("\n")
 		for _, item := range m.blocked {
 			line := "  ✗ " + item.Display
 			if item.Reason != "" {
-				line += lipgloss.NewStyle().Foreground(colorMuted).Render(
-					" — " + item.Reason,
-				)
+				line += " — " + item.Reason
 			}
 			sb.WriteString(menuItemBlockedStyle.Render(line))
 			sb.WriteString("\n")

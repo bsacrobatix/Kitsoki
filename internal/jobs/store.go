@@ -195,6 +195,24 @@ func (js *JobStore) ListJobsByStatus(ctx context.Context, sessionID app.SessionI
 	return scanJobs(rows)
 }
 
+// ListBySession returns every job row for a session ordered by created_at ASC.
+// Used by the flow testrunner's expect_jobs assertion to diff pre-turn vs
+// post-turn snapshots and detect which jobs newly reached a terminal status.
+// Order is creation-time so callers can index by "the N-th job to be dispatched
+// this turn" reliably.
+func (js *JobStore) ListBySession(ctx context.Context, sessionID app.SessionID) ([]Job, error) {
+	rows, err := js.db.QueryContext(ctx, `
+		SELECT id, kind, status, origin_state, origin_proposal_id,
+		       payload, error, retry_count, created_at, updated_at, started_at, finished_at
+		FROM jobs WHERE session_id=? ORDER BY created_at ASC`,
+		string(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanJobs(rows)
+}
+
 func scanJobs(rows *sql.Rows) ([]Job, error) {
 	var out []Job
 	for rows.Next() {

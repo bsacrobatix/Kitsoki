@@ -119,6 +119,35 @@ expect_no_errors: true
 	require.Equal(t, 0, report.Failed, "error-path flow should pass")
 }
 
+// ─── TestRunFlows_OrchestratorPath_Timeout ───────────────────────────────────
+
+// TestRunFlows_OrchestratorPath_Timeout verifies the Timeout: runtime
+// (gap §9.5).  The fixture seeds the session into a state whose `timeout:`
+// declares a 10-day deadline, then uses `advance_clock: "11d"` to fire the
+// synthetic transition.  Post-advance assertions land on the terminal
+// destination state.
+func TestRunFlows_OrchestratorPath_Timeout(t *testing.T) {
+	const appPath = "../../testdata/apps/timeout/app.yaml"
+	const glob = "../../testdata/apps/timeout/flows/landmark_timeout.yaml"
+
+	report, err := testrunner.RunFlows(t.Context(), appPath, glob, testrunner.FlowOptions{})
+	require.NoError(t, err, "RunFlows should not return a fatal error")
+	require.NotEmpty(t, report.Results, "should have at least one result")
+
+	for _, r := range report.Results {
+		if r.Skipped {
+			continue
+		}
+		for _, tr := range r.Turns {
+			if !tr.Passed {
+				t.Errorf("flow %s turn %d failed: %v", filepath.Base(r.File), tr.TurnIndex+1, tr.Failures)
+			}
+		}
+	}
+	require.Equal(t, 0, report.Failed, "timeout fixture should pass")
+	require.Greater(t, report.Passed, 0)
+}
+
 // ─── TestRunFlows_LegacyPath_StillWorks ──────────────────────────────────────
 
 // TestRunFlows_LegacyPath_StillWorks confirms that existing fixtures without

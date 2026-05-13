@@ -1,0 +1,1306 @@
+# Oregon Trail — trail-leg phase template + 7 phase instances.
+#
+# PHASE C SCOPE: deterministic event rolls + 5 event substates + manual
+# event-level cycle budgets on treat/repair retries. Phase-level
+# on_failure arcs (and their cycle_budgets) are deferred to Phase D
+# (rivers/drowning).
+#
+# § Event roll (§6.2.1 of the proposal):
+#   The event roll happens INSIDE the `traveling.continue` arms, not in
+#   the parent `*_executing.on_enter:` — because `resolveInitial` runs
+#   BEFORE on_enter (machine.go §467+), so an on_enter-set event_kind
+#   doesn't steer the initial-substate selection. Putting the roll on
+#   `traveling.continue` guarded arms keeps the rng deterministic
+#   (function of miles_traveled + rng_counter) AND keeps the routing
+#   to event substates declarative.
+#
+#   Each `traveling.continue` arm:
+#     - Arrival   (miles + step >= distance) → {id}_awaiting_reply
+#     - Starvation (food - ration_cost <= 0) → ended_lost
+#     - Disease    (rng in [60,75))          → ../event_disease
+#     - Breakdown  (rng in [75,85))          → ../event_breakdown
+#     - Weather    (rng in [85,92))          → ../event_weather
+#     - Encounter  (rng in [92,97))          → ../event_encounter
+#     - SupplyLoss (rng in [97,100))         → ../event_supply_loss
+#     - Default                              → . (back into traveling)
+#   where `rng = (miles_traveled + rng_counter) % 100`.
+#
+#   Every continue arm advances time/food and increments rng_counter,
+#   so successive ticks yield distinct rolls.
+#
+# § Cycle budgets (manual pattern):
+#   Each event_* substate's `on_enter:` zeroes `current_event_attempts`
+#   plus its kind-specific roll (illness_kind, breakdown_part, …).
+#   Resolution intents that we want budget-limited (treat, repair)
+#   increment the counter and guard against `< 2`. When the budget is
+#   exhausted, a `default:` arm fires the failure consequence (death,
+#   forced abandonment) and returns to traveling.
+#
+# Mileage and food depletion: `Effect.Increment` is map[string]int
+# (literal only — internal/app/types.go), so pace-modulated math goes
+# through `set:` with templated expressions. The expr-lang template
+# parser supports plain `{{ if … }} … {{ else }} … {{ end }}` blocks
+# (no `else if`), so chained conditionals use nested ifs in `set:`
+# value templates.
+#
+# § Month-driven mechanics (§7-§8 of the proposal):
+#   Every `traveling.continue` arm folds three things into its set:
+#   block alongside the existing mileage/food/day bumps:
+#
+#   1. Daylight modifier — the daily step (14/18/22 by pace) is
+#      multiplied by a percent keyed on world.month (jun-aug = 100%,
+#      may/sep = 95%, apr/oct = 85%, mar/nov = 80%, dec-feb = 70%),
+#      then int()-rounded back to whole miles.
+#
+#   2. Calendar rollover — when world.day + 1 > 30, day wraps to 1 and
+#      world.month advances to the next enum value (mar→apr→…→feb→mar).
+#      world.year ticks up on the dec → jan boundary.
+#
+#   The arrival guard also pulls the daylight-modulated step so a
+#   slow-paced december tick doesn't false-trigger arrival.
+#
+#   Two more month consumers live outside traveling.continue:
+#
+#   3. River depth — _awaiting_reply.approach_river multiplies the
+#      hardcoded landmark depth by a snowmelt curve (april peak ×1.6,
+#      late summer ×0.7-0.8). Phase J: river_crossing.yaml's initial:
+#      ternary on river_depth_ft still keys off the post-multiplied
+#      value, so the multiplier flows in without rewriting that room.
+#
+#   4. Snow-blocked South Pass — _awaiting_reply.continue routes to
+#      the new snow_blocked room (rooms/snow_blocked.yaml) when
+#      tpl.to_landmark == 'South Pass' AND world.month is in the
+#      oct-feb winter band. (The player has just arrived at South Pass
+#      and the descent into the Snake basin is closed.) The player can
+#      wait out the winter (advances month/drains food until april) or
+#      give up and turn back east.
+#
+# Substitution: `{id}_executing` resolves at expansion time;
+# `{{ tpl.X }}` and `{{ phase.next.continue }}` substitute inside string
+# fields. See internal/app/phases.go.
+
+phase_templates:
+  trail_leg:
+    parameters:
+      from_landmark: { type: string, required: true }
+      to_landmark:   { type: string, required: true }
+      distance_mi:   { type: int,    required: true }
+      terrain:       { type: string, default: prairie }
+      ends_at_river: { type: bool,   default: false }
+      ends_at_fort:  { type: bool,   default: false }
+      # arrival_hint is a substitution-time string; defaults to empty.
+      # The phase template's `{{ if tpl.X }}` pattern isn't supported by
+      # phases.go (templateRE matches `{{ tpl.X }}` only — see §6.2 of
+      # the proposal vs the real expander), so per-leg hint text is
+      # passed as a string instead of computed from ends_at_fort/
+      # ends_at_river at render time.
+      arrival_hint:  { type: string, default: "" }
+      # river_base_depth_ft / river_width_ft per leg, used by approach_river
+      # to set world.river_depth_ft / world.river_width_ft. Same expander
+      # gap as arrival_hint: ternaries on tpl.to_landmark inside a single
+      # {{ }} block aren't substituted at expansion time, so per-leg river
+      # geometry has to be a phase parameter (which the regex DOES handle
+      # via direct `{{ tpl.river_base_depth_ft }}` interpolations).
+      # Defaults to 0/0 for non-river legs; ignored unless ends_at_river.
+      river_base_depth_ft: { type: int, default: 0 }
+      river_width_ft:      { type: int, default: 0 }
+    states:
+
+      # ── {id}_executing — compound, traveling is the always-entry. ──
+      # The event roll happens on `traveling.continue` arms, not here.
+      "{id}_executing":
+        type: compound
+        initial: traveling
+        description: "On the trail from {{ tpl.from_landmark }} to {{ tpl.to_landmark }} ({{ tpl.terrain }})."
+        relevant_world: [day, month, miles_traveled, food_lbs, oxen, party_alive, health_avg, pace, rations, current_landmark, event_kind, illness_kind, illness_severity, illness_member, breakdown_part, weather_kind, encounter_kind, rng_last, rng_counter]
+        on_enter:
+          - set:
+              current_landmark: "{{ tpl.from_landmark }}"
+        states:
+          traveling:
+            description: "Travelling — {{ tpl.from_landmark }} → {{ tpl.to_landmark }}."
+            # The `Forage:` line keys off world.month to make the
+            # seasonal pace modifier visible to the player: rich grass
+            # in may/jun, drying out by aug, gone by nov. This is a
+            # view-only label — the actual pace math lives in the
+            # daylight-modifier expression on continue (which already
+            # bakes in both daylight and forage as a single curve, see
+            # the §8 note in app.yaml).
+            view: |
+              {{ world.month }} {{ world.day }}, {{ world.year }}. Heading for {{ tpl.to_landmark }} ({{ tpl.terrain }}).
+
+              Miles travelled this leg: {{ world.miles_traveled }} / {{ tpl.distance_mi }}.
+              Food: {{ world.food_lbs }} lbs. Oxen: {{ world.oxen }}. Party: {{ world.party_alive }} alive.
+              Pace: {{ world.pace }}. Rations: {{ world.rations }}.
+              Forage: {{ world.month == 'may' || world.month == 'june' ? 'rich' : (world.month == 'april' || world.month == 'july' ? 'fair' : (world.month == 'march' || world.month == 'august' ? 'sparse' : (world.month == 'september' || world.month == 'october' ? 'drying' : 'none — winter'))) }}.
+
+              Actions: continue, set_pace <pace>, set_rations <rations>, look, quit.
+            on:
+              continue:
+                # ── Arrival: miles + step would reach the next landmark.
+                # The step is the pace-base (14/18/22) scaled by a
+                # month-of-year daylight modifier and int()-rounded back
+                # to whole miles. jun-aug = 100%, may/sep = 95%,
+                # apr/oct = 85%, mar/nov = 80%, dec-feb = 70%. The same
+                # expression appears in the set: miles_traveled below
+                # and in every event arm — keep them in sync.
+                - when: "world.miles_traveled + int((world.pace == 'grueling' ? 22 : (world.pace == 'strenuous' ? 18 : 14)) * (world.month == 'december' || world.month == 'january' || world.month == 'february' ? 70 : (world.month == 'november' ? 80 : (world.month == 'march' || world.month == 'october' ? 85 : (world.month == 'april' || world.month == 'september' ? 95 : 100)))) / 100) >= {{ tpl.distance_mi }}"
+                  target: "{{ tpl.id }}_awaiting_reply"
+                  effects:
+                    - set:
+                        miles_traveled: "{{ world.miles_traveled + int((world.pace == 'grueling' ? 22 : (world.pace == 'strenuous' ? 18 : 14)) * (world.month == 'december' || world.month == 'january' || world.month == 'february' ? 70 : (world.month == 'november' ? 80 : (world.month == 'march' || world.month == 'october' ? 85 : (world.month == 'april' || world.month == 'september' ? 95 : 100)))) / 100) }}"
+                        food_lbs: "{{ world.food_lbs - (world.rations == 'bare_bones' ? 6 : (world.rations == 'meager' ? 8 : 10)) }}"
+                        # Calendar rollover: when day + 1 > 30, wrap to 1
+                        # and roll the month enum forward (mar→apr→…→feb→
+                        # mar). Year ticks on dec → jan only. All three
+                        # fields key off world.day / world.month so they
+                        # decide independently from the same pre-update
+                        # snapshot — order-of-evaluation within this set:
+                        # block is non-deterministic (phases.yaml header),
+                        # so co-reading the source-of-truth keys keeps the
+                        # rollover atomic.
+                        day: "{{ world.day + 1 > 30 ? 1 : world.day + 1 }}"
+                        year: "{{ world.day + 1 > 30 && world.month == 'december' ? world.year + 1 : world.year }}"
+                    # month MUST be the final write of the calendar
+                    # rollover — year's expression above reads
+                    # world.month, and map-iteration in a single set:
+                    # block is order-non-deterministic, so writing
+                    # month in the same block would let year see the
+                    # post-update month on some runs and tick the year
+                    # incorrectly.
+                    - set:
+                        month: "{{ world.day + 1 > 30 ? (world.month == 'march' ? 'april' : (world.month == 'april' ? 'may' : (world.month == 'may' ? 'june' : (world.month == 'june' ? 'july' : (world.month == 'july' ? 'august' : (world.month == 'august' ? 'september' : (world.month == 'september' ? 'october' : (world.month == 'october' ? 'november' : (world.month == 'november' ? 'december' : (world.month == 'december' ? 'january' : (world.month == 'january' ? 'february' : (world.month == 'february' ? 'march' : world.month)))))))))))) : world.month }}"
+                    - say: "Arrived at {{ tpl.to_landmark }}."
+                # ── Starvation: food would drop to/under zero this step.
+                - when: "world.food_lbs - (world.rations == 'bare_bones' ? 6 : (world.rations == 'meager' ? 8 : 10)) <= 0"
+                  target: ended_lost
+                  effects:
+                    - set:
+                        food_lbs: 0
+                        day: "{{ world.day + 1 > 30 ? 1 : world.day + 1 }}"
+                        year: "{{ world.day + 1 > 30 && world.month == 'december' ? world.year + 1 : world.year }}"
+                    # month MUST be the final write of the calendar
+                    # rollover — year's expression above reads
+                    # world.month, and map-iteration in a single set:
+                    # block is order-non-deterministic, so writing
+                    # month in the same block would let year see the
+                    # post-update month on some runs and tick the year
+                    # incorrectly.
+                    - set:
+                        month: "{{ world.day + 1 > 30 ? (world.month == 'march' ? 'april' : (world.month == 'april' ? 'may' : (world.month == 'may' ? 'june' : (world.month == 'june' ? 'july' : (world.month == 'july' ? 'august' : (world.month == 'august' ? 'september' : (world.month == 'september' ? 'october' : (world.month == 'october' ? 'november' : (world.month == 'november' ? 'december' : (world.month == 'december' ? 'january' : (world.month == 'january' ? 'february' : (world.month == 'february' ? 'march' : world.month)))))))))))) : world.month }}"
+                    - say: "The party has run out of food between {{ tpl.from_landmark }} and {{ tpl.to_landmark }}. They starve on the trail."
+                # ── Event rolls. The roll is (miles + rng_counter) % 100.
+                #    Each arm sets event_kind for the view, then transitions
+                #    to the matching event substate. Mileage/food/day still
+                #    advance so successive rolls aren't identical.
+                - when: "int(world.miles_traveled + world.rng_counter) % 100 >= 60 && int(world.miles_traveled + world.rng_counter) % 100 < 75"
+                  target: ../event_disease
+                  effects:
+                    # Compute rng_last from the PRE-update miles/rng counters.
+                    # Map-iteration in a single set: block is order-non-
+                    # deterministic (Phase C flake), so the rng_last read
+                    # must land before miles_traveled is bumped. int()
+                    # forces integer math so the orchestrator path (where
+                    # JSON-decoded int values arrive as float64) doesn't
+                    # error out on `%` with a float operand — same fix
+                    # as river_crossing.executing.on_complete.
+                    - set:
+                        rng_last: "{{ int(world.miles_traveled + world.rng_counter) % 100 }}"
+                    - set:
+                        event_kind: "disease"
+                        miles_traveled: "{{ world.miles_traveled + int((world.pace == 'grueling' ? 22 : (world.pace == 'strenuous' ? 18 : 14)) * (world.month == 'december' || world.month == 'january' || world.month == 'february' ? 70 : (world.month == 'november' ? 80 : (world.month == 'march' || world.month == 'october' ? 85 : (world.month == 'april' || world.month == 'september' ? 95 : 100)))) / 100) }}"
+                        food_lbs: "{{ world.food_lbs - (world.rations == 'bare_bones' ? 6 : (world.rations == 'meager' ? 8 : 10)) }}"
+                        day: "{{ world.day + 1 > 30 ? 1 : world.day + 1 }}"
+                        year: "{{ world.day + 1 > 30 && world.month == 'december' ? world.year + 1 : world.year }}"
+                    # month MUST be the final write of the calendar
+                    # rollover — year's expression above reads
+                    # world.month, and map-iteration in a single set:
+                    # block is order-non-deterministic, so writing
+                    # month in the same block would let year see the
+                    # post-update month on some runs and tick the year
+                    # incorrectly.
+                    - set:
+                        month: "{{ world.day + 1 > 30 ? (world.month == 'march' ? 'april' : (world.month == 'april' ? 'may' : (world.month == 'may' ? 'june' : (world.month == 'june' ? 'july' : (world.month == 'july' ? 'august' : (world.month == 'august' ? 'september' : (world.month == 'september' ? 'october' : (world.month == 'october' ? 'november' : (world.month == 'november' ? 'december' : (world.month == 'december' ? 'january' : (world.month == 'january' ? 'february' : (world.month == 'february' ? 'march' : world.month)))))))))))) : world.month }}"
+                    - increment: { rng_counter: 1 }
+                - when: "int(world.miles_traveled + world.rng_counter) % 100 >= 75 && int(world.miles_traveled + world.rng_counter) % 100 < 85"
+                  target: ../event_breakdown
+                  effects:
+                    - set:
+                        rng_last: "{{ int(world.miles_traveled + world.rng_counter) % 100 }}"
+                    - set:
+                        event_kind: "breakdown"
+                        miles_traveled: "{{ world.miles_traveled + int((world.pace == 'grueling' ? 22 : (world.pace == 'strenuous' ? 18 : 14)) * (world.month == 'december' || world.month == 'january' || world.month == 'february' ? 70 : (world.month == 'november' ? 80 : (world.month == 'march' || world.month == 'october' ? 85 : (world.month == 'april' || world.month == 'september' ? 95 : 100)))) / 100) }}"
+                        food_lbs: "{{ world.food_lbs - (world.rations == 'bare_bones' ? 6 : (world.rations == 'meager' ? 8 : 10)) }}"
+                        day: "{{ world.day + 1 > 30 ? 1 : world.day + 1 }}"
+                        year: "{{ world.day + 1 > 30 && world.month == 'december' ? world.year + 1 : world.year }}"
+                    # month MUST be the final write of the calendar
+                    # rollover — year's expression above reads
+                    # world.month, and map-iteration in a single set:
+                    # block is order-non-deterministic, so writing
+                    # month in the same block would let year see the
+                    # post-update month on some runs and tick the year
+                    # incorrectly.
+                    - set:
+                        month: "{{ world.day + 1 > 30 ? (world.month == 'march' ? 'april' : (world.month == 'april' ? 'may' : (world.month == 'may' ? 'june' : (world.month == 'june' ? 'july' : (world.month == 'july' ? 'august' : (world.month == 'august' ? 'september' : (world.month == 'september' ? 'october' : (world.month == 'october' ? 'november' : (world.month == 'november' ? 'december' : (world.month == 'december' ? 'january' : (world.month == 'january' ? 'february' : (world.month == 'february' ? 'march' : world.month)))))))))))) : world.month }}"
+                    - increment: { rng_counter: 1 }
+                - when: "int(world.miles_traveled + world.rng_counter) % 100 >= 85 && int(world.miles_traveled + world.rng_counter) % 100 < 92"
+                  target: ../event_weather
+                  effects:
+                    - set:
+                        rng_last: "{{ int(world.miles_traveled + world.rng_counter) % 100 }}"
+                    - set:
+                        event_kind: "weather"
+                        miles_traveled: "{{ world.miles_traveled + int((world.pace == 'grueling' ? 22 : (world.pace == 'strenuous' ? 18 : 14)) * (world.month == 'december' || world.month == 'january' || world.month == 'february' ? 70 : (world.month == 'november' ? 80 : (world.month == 'march' || world.month == 'october' ? 85 : (world.month == 'april' || world.month == 'september' ? 95 : 100)))) / 100) }}"
+                        food_lbs: "{{ world.food_lbs - (world.rations == 'bare_bones' ? 6 : (world.rations == 'meager' ? 8 : 10)) }}"
+                        day: "{{ world.day + 1 > 30 ? 1 : world.day + 1 }}"
+                        year: "{{ world.day + 1 > 30 && world.month == 'december' ? world.year + 1 : world.year }}"
+                    # month MUST be the final write of the calendar
+                    # rollover — year's expression above reads
+                    # world.month, and map-iteration in a single set:
+                    # block is order-non-deterministic, so writing
+                    # month in the same block would let year see the
+                    # post-update month on some runs and tick the year
+                    # incorrectly.
+                    - set:
+                        month: "{{ world.day + 1 > 30 ? (world.month == 'march' ? 'april' : (world.month == 'april' ? 'may' : (world.month == 'may' ? 'june' : (world.month == 'june' ? 'july' : (world.month == 'july' ? 'august' : (world.month == 'august' ? 'september' : (world.month == 'september' ? 'october' : (world.month == 'october' ? 'november' : (world.month == 'november' ? 'december' : (world.month == 'december' ? 'january' : (world.month == 'january' ? 'february' : (world.month == 'february' ? 'march' : world.month)))))))))))) : world.month }}"
+                    - increment: { rng_counter: 1 }
+                - when: "int(world.miles_traveled + world.rng_counter) % 100 >= 92 && int(world.miles_traveled + world.rng_counter) % 100 < 97"
+                  target: ../event_encounter
+                  effects:
+                    - set:
+                        rng_last: "{{ int(world.miles_traveled + world.rng_counter) % 100 }}"
+                    - set:
+                        event_kind: "encounter"
+                        miles_traveled: "{{ world.miles_traveled + int((world.pace == 'grueling' ? 22 : (world.pace == 'strenuous' ? 18 : 14)) * (world.month == 'december' || world.month == 'january' || world.month == 'february' ? 70 : (world.month == 'november' ? 80 : (world.month == 'march' || world.month == 'october' ? 85 : (world.month == 'april' || world.month == 'september' ? 95 : 100)))) / 100) }}"
+                        food_lbs: "{{ world.food_lbs - (world.rations == 'bare_bones' ? 6 : (world.rations == 'meager' ? 8 : 10)) }}"
+                        day: "{{ world.day + 1 > 30 ? 1 : world.day + 1 }}"
+                        year: "{{ world.day + 1 > 30 && world.month == 'december' ? world.year + 1 : world.year }}"
+                    # month MUST be the final write of the calendar
+                    # rollover — year's expression above reads
+                    # world.month, and map-iteration in a single set:
+                    # block is order-non-deterministic, so writing
+                    # month in the same block would let year see the
+                    # post-update month on some runs and tick the year
+                    # incorrectly.
+                    - set:
+                        month: "{{ world.day + 1 > 30 ? (world.month == 'march' ? 'april' : (world.month == 'april' ? 'may' : (world.month == 'may' ? 'june' : (world.month == 'june' ? 'july' : (world.month == 'july' ? 'august' : (world.month == 'august' ? 'september' : (world.month == 'september' ? 'october' : (world.month == 'october' ? 'november' : (world.month == 'november' ? 'december' : (world.month == 'december' ? 'january' : (world.month == 'january' ? 'february' : (world.month == 'february' ? 'march' : world.month)))))))))))) : world.month }}"
+                    - increment: { rng_counter: 1 }
+                - when: "int(world.miles_traveled + world.rng_counter) % 100 >= 97"
+                  target: ../event_supply_loss
+                  effects:
+                    - set:
+                        rng_last: "{{ int(world.miles_traveled + world.rng_counter) % 100 }}"
+                    - set:
+                        event_kind: "supply_loss"
+                        miles_traveled: "{{ world.miles_traveled + int((world.pace == 'grueling' ? 22 : (world.pace == 'strenuous' ? 18 : 14)) * (world.month == 'december' || world.month == 'january' || world.month == 'february' ? 70 : (world.month == 'november' ? 80 : (world.month == 'march' || world.month == 'october' ? 85 : (world.month == 'april' || world.month == 'september' ? 95 : 100)))) / 100) }}"
+                        food_lbs: "{{ world.food_lbs - (world.rations == 'bare_bones' ? 6 : (world.rations == 'meager' ? 8 : 10)) }}"
+                        day: "{{ world.day + 1 > 30 ? 1 : world.day + 1 }}"
+                        year: "{{ world.day + 1 > 30 && world.month == 'december' ? world.year + 1 : world.year }}"
+                    # month MUST be the final write of the calendar
+                    # rollover — year's expression above reads
+                    # world.month, and map-iteration in a single set:
+                    # block is order-non-deterministic, so writing
+                    # month in the same block would let year see the
+                    # post-update month on some runs and tick the year
+                    # incorrectly.
+                    - set:
+                        month: "{{ world.day + 1 > 30 ? (world.month == 'march' ? 'april' : (world.month == 'april' ? 'may' : (world.month == 'may' ? 'june' : (world.month == 'june' ? 'july' : (world.month == 'july' ? 'august' : (world.month == 'august' ? 'september' : (world.month == 'september' ? 'october' : (world.month == 'october' ? 'november' : (world.month == 'november' ? 'december' : (world.month == 'december' ? 'january' : (world.month == 'january' ? 'february' : (world.month == 'february' ? 'march' : world.month)))))))))))) : world.month }}"
+                    - increment: { rng_counter: 1 }
+                # ── Quiet day: no event, just advance time.
+                - default: true
+                  target: .
+                  effects:
+                    - set:
+                        rng_last: "{{ int(world.miles_traveled + world.rng_counter) % 100 }}"
+                    - set:
+                        event_kind: ""
+                        miles_traveled: "{{ world.miles_traveled + int((world.pace == 'grueling' ? 22 : (world.pace == 'strenuous' ? 18 : 14)) * (world.month == 'december' || world.month == 'january' || world.month == 'february' ? 70 : (world.month == 'november' ? 80 : (world.month == 'march' || world.month == 'october' ? 85 : (world.month == 'april' || world.month == 'september' ? 95 : 100)))) / 100) }}"
+                        food_lbs: "{{ world.food_lbs - (world.rations == 'bare_bones' ? 6 : (world.rations == 'meager' ? 8 : 10)) }}"
+                        day: "{{ world.day + 1 > 30 ? 1 : world.day + 1 }}"
+                        year: "{{ world.day + 1 > 30 && world.month == 'december' ? world.year + 1 : world.year }}"
+                    # month MUST be the final write of the calendar
+                    # rollover — year's expression above reads
+                    # world.month, and map-iteration in a single set:
+                    # block is order-non-deterministic, so writing
+                    # month in the same block would let year see the
+                    # post-update month on some runs and tick the year
+                    # incorrectly.
+                    - set:
+                        month: "{{ world.day + 1 > 30 ? (world.month == 'march' ? 'april' : (world.month == 'april' ? 'may' : (world.month == 'may' ? 'june' : (world.month == 'june' ? 'july' : (world.month == 'july' ? 'august' : (world.month == 'august' ? 'september' : (world.month == 'september' ? 'october' : (world.month == 'october' ? 'november' : (world.month == 'november' ? 'december' : (world.month == 'december' ? 'january' : (world.month == 'january' ? 'february' : (world.month == 'february' ? 'march' : world.month)))))))))))) : world.month }}"
+                    - increment: { rng_counter: 1 }
+
+              set_pace:
+                - target: .
+                  effects:
+                    - set: { pace: "{{ slots.pace }}" }
+                    - say: "Pace set to {{ slots.pace }}."
+
+              set_rations:
+                - target: .
+                  effects:
+                    - set: { rations: "{{ slots.rations }}" }
+                    - say: "Rations set to {{ slots.rations }}."
+
+              look:
+                - target: .
+
+              quit:
+                - target: ended_lost
+                  effects:
+                    - say: "The party abandons the journey between {{ tpl.from_landmark }} and {{ tpl.to_landmark }}."
+
+          # ── event_disease ───────────────────────────────────────────
+          # on_enter picks illness_kind by a deterministic sub-roll
+          # (rng_last % 5) and zeroes current_event_attempts. In
+          # narrated mode (world.narration == true) the diagnosis comes
+          # from host.oracle.ask_with_mcp with the typed-JSON validator
+          # bound to stories/oregon-trail/mcp/illness.json — Claude
+          # returns { illness, severity, treatment } via the MCP submit
+          # tool (proposal §9.6). The narrated arm also writes
+          # illness_severity + illness_treatment; deterministic mode
+          # fills those in with defaults so downstream views never see
+          # an empty narrated-only field.
+          # treat: -1 clothing_set, -50 food → health_avg +20 → traveling.
+          # wait_out: +1 day; if health_avg < 30, party_alive -= 1.
+          # move_on: -15 health, return to traveling.
+          # Cycle budget on treat: 2 retries; default arm sets the
+          # patient as dead and returns to traveling.
+          event_disease:
+            description: "Illness has struck the party ({{ world.illness_kind }})."
+            relevant_world: [illness_kind, illness_severity, illness_treatment, illness_member, health_avg, party_alive, food_lbs, clothing_sets, day, current_event_attempts]
+            on_enter:
+              # Shared baseline: zero the attempts counter and bleed
+              # health. Runs in both modes. The counter reset matters
+              # for the SECOND illness later in the trail — the first
+              # event may have wait_out'd or default-died leaving the
+              # counter clean, but a treat-attempted-and-succeeded path
+              # also clears, and a self-transition no-supplies path
+              # leaves it incremented. Re-zeroing on every fresh entry
+              # is defensive and cheap.
+              - set:
+                  current_event_attempts: 0
+                  health_avg: "{{ world.health_avg - 10 }}"
+                  # Pick the sick party member deterministically.
+                  # split(party_names, ",")[rng_last % party_alive]
+                  # indexes into the comma-separated names. rng_last
+                  # was set by the disease arm of traveling.continue.
+                  illness_member: "{{ split(world.party_names, ',')[world.rng_last % world.party_alive] }}"
+              # Deterministic arm — preserves the rng_last % 5 illness
+              # selection plus default severity/treatment.
+              - when: "not world.narration"
+                set:
+                  illness_kind: "{{ if world.rng_last % 5 == 0 }}dysentery{{ else }}{{ if world.rng_last % 5 == 1 }}cholera{{ else }}{{ if world.rng_last % 5 == 2 }}typhoid{{ else }}{{ if world.rng_last % 5 == 3 }}measles{{ else }}exhaustion{{ end }}{{ end }}{{ end }}{{ end }}"
+                  illness_severity: "{{ world.rng_last % 5 + 1 }}"
+                  illness_treatment: "rest"
+              # Narrated arm — Claude returns typed JSON via the MCP
+              # `submit` tool. host.oracle.ask_with_mcp auto-attaches
+              # the schema validator (see internal/host/oracle_ask_with_mcp.go);
+              # the validated payload is exposed as Result.Data.submitted
+              # which `bind:` walks via dotted paths.
+              - when: "world.narration"
+                invoke: host.oracle.ask_with_mcp
+                with:
+                  prompt: "prompts/event_disease.md"
+                  schema: "mcp/illness.json"
+                  agent: frontier_doctor
+                  args:
+                    rng_last:        "{{ world.rng_last }}"
+                    health_avg:      "{{ world.health_avg }}"
+                    party_alive:     "{{ world.party_alive }}"
+                    food_lbs:        "{{ world.food_lbs }}"
+                    clothing_sets:   "{{ world.clothing_sets }}"
+                    current_landmark: "{{ world.current_landmark }}"
+                bind:
+                  illness_kind:      submitted.illness
+                  illness_severity:  submitted.severity
+                  illness_treatment: submitted.treatment
+                # On an LLM/validator failure fall back to the leg's
+                # error state — the player sees the "stranded" view and
+                # can retry or quit. (Phase H may swap this for a
+                # deterministic fallback that re-fires the rng_last % 5
+                # heuristic so a failed Claude call still produces a
+                # playable diagnosis.)
+                on_error: "{{ tpl.id }}_error"
+            view: |
+              {{ if world.illness_member != "" }}{{ world.illness_member }} has fallen ill.{{ else }}Someone in the party has fallen ill.{{ end }}
+              Illness: {{ world.illness_kind }} (severity {{ world.illness_severity }}).
+              Health: {{ world.health_avg }}.   Party: {{ world.party_alive }} alive.
+              Supplies: {{ world.clothing_sets }} clothing sets, {{ world.food_lbs }} lbs food.
+
+              Actions: treat, wait_out, move_on, look, quit.
+            on:
+              treat:
+                - when: "world.clothing_sets >= 1 && world.food_lbs >= 50 && world.current_event_attempts < 2"
+                  target: ../traveling
+                  effects:
+                    # Phase G: post BEFORE the clearing set so world.illness_kind
+                    # is still populated when the body renders.
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_disease_treated_{{ world.day }}"
+                        title:     "Disease treated"
+                        body:      "Day {{ world.day }} — the {{ world.illness_kind }} has passed. Rested up, one clothing set used and 50 lbs of food spent on broth and care. Spirits steady, on the move."
+                    - set:
+                        clothing_sets: "{{ world.clothing_sets - 1 }}"
+                        food_lbs: "{{ world.food_lbs - 50 }}"
+                        health_avg: "{{ world.health_avg + 20 }}"
+                        event_kind: ""
+                        illness_kind: ""
+                        illness_severity: 0
+                        illness_treatment: ""
+                        illness_member: ""
+                        current_event_attempts: 0
+                    - say: "The party rests and treats the illness."
+                - when: "(world.clothing_sets < 1 || world.food_lbs < 50) && world.current_event_attempts < 2"
+                  target: .
+                  effects:
+                    - increment: { current_event_attempts: 1 }
+                    - say: "Not enough supplies to treat the {{ world.illness_kind }} (need 1 clothing set + 50 lbs food). Try again or wait_out."
+                - default: true
+                  target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_disease_lost_{{ world.day }}"
+                        title:     "Lost to illness"
+                        body:      "Day {{ world.day }} — after repeated attempts, the {{ world.illness_kind }} took one of the party. May the trail remember them."
+                    - set:
+                        party_alive: "{{ world.party_alive - 1 }}"
+                        event_kind: ""
+                        illness_kind: ""
+                        illness_severity: 0
+                        illness_treatment: ""
+                        illness_member: ""
+                        current_event_attempts: 0
+                    - say: "After repeated futile attempts, a party member has died of illness."
+              wait_out:
+                - when: "world.health_avg < 30"
+                  target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_disease_wait_lost_{{ world.day }}"
+                        title:     "Lost to illness"
+                        body:      "Day {{ world.day }} — the patient was too weak. {{ world.illness_kind }} claimed one of the party while we waited."
+                    - set:
+                        party_alive: "{{ world.party_alive - 1 }}"
+                        day: "{{ world.day + 1 }}"
+                        event_kind: ""
+                        illness_kind: ""
+                        illness_severity: 0
+                        illness_treatment: ""
+                        illness_member: ""
+                        current_event_attempts: 0
+                    - say: "The patient was too weak. A party member dies of illness."
+                - default: true
+                  target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_disease_wait_ok_{{ world.day }}"
+                        title:     "Illness passed"
+                        body:      "Day {{ world.day }} — one day of rest and the {{ world.illness_kind }} let go. We move on tomorrow."
+                    - set:
+                        day: "{{ world.day + 1 }}"
+                        event_kind: ""
+                        illness_kind: ""
+                        illness_severity: 0
+                        illness_treatment: ""
+                        illness_member: ""
+                        current_event_attempts: 0
+                    - say: "The party rests a day. The illness passes."
+              move_on:
+                - target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_disease_moved_on_{{ world.day }}"
+                        title:     "Pressing on through illness"
+                        body:      "Day {{ world.day }} — pushed on through the {{ world.illness_kind }} rather than stop. Health is worse for it, but the wagon rolls."
+                    - set:
+                        health_avg: "{{ world.health_avg - 15 }}"
+                        event_kind: ""
+                        illness_kind: ""
+                        illness_severity: 0
+                        illness_treatment: ""
+                        illness_member: ""
+                        current_event_attempts: 0
+                    - say: "The party presses on. Health worsens."
+              look:
+                - target: .
+              quit:
+                - target: ended_lost
+                  effects:
+                    - say: "The party gives up on the trail, broken by {{ world.illness_kind }}."
+
+          # ── event_breakdown ─────────────────────────────────────────
+          # on_enter picks wheel / axle / tongue from rng_last % 3.
+          # repair (with spare): consumes the relevant spare → traveling.
+          # repair (no spare): +1 attempt, guard hint to wait_out;
+          # after 2 attempts the wagon is abandoned (party_alive -= 1).
+          # wait_out: +5 days, returns to traveling.
+          # Phase H: in narrated mode, host.oracle.ask renders 2-4
+          # sentences of period-flavored prose into world.last_event_prose
+          # using the rolled breakdown_part. The view: template prefers
+          # the prose when set and falls back to the canned line otherwise.
+          event_breakdown:
+            description: "Wagon breakdown — {{ world.breakdown_part }}."
+            relevant_world: [breakdown_part, spare_wheels, spare_axles, spare_tongues, day, current_event_attempts, last_event_prose]
+            on_enter:
+              # Shared baseline: zero attempts + pick the part. The
+              # set: block must run before the narrated invoke so the
+              # prompt's {{ args.part }} sees the rolled part.
+              - set:
+                  current_event_attempts: 0
+                  breakdown_part: "{{ if world.rng_last % 3 == 0 }}wheel{{ else }}{{ if world.rng_last % 3 == 1 }}axle{{ else }}tongue{{ end }}{{ end }}"
+                  # Phase G post-then-clear pattern: zero the prose at
+                  # the top of on_enter so a deterministic-mode entry
+                  # never sees a stale prose line from the prior event.
+                  last_event_prose: ""
+              # Narrated arm — Claude renders 2-4 sentences of prose
+              # keyed on the rolled part + spares remaining. The bound
+              # `stdout` value lands in world.last_event_prose and the
+              # view template reads it.
+              - when: "world.narration"
+                invoke: host.oracle.ask
+                with:
+                  prompt_path: "prompts/event_breakdown.md"
+                  agent: trail_narrator
+                  args:
+                    part:              "{{ if world.rng_last % 3 == 0 }}wheel{{ else }}{{ if world.rng_last % 3 == 1 }}axle{{ else }}tongue{{ end }}{{ end }}"
+                    spares_remaining:  "{{ world.rng_last % 3 == 0 ? world.spare_wheels : (world.rng_last % 3 == 1 ? world.spare_axles : world.spare_tongues) }}"
+                    current_landmark:  "{{ world.current_landmark }}"
+                    day:               "{{ world.day }}"
+                bind:
+                  last_event_prose: stdout
+            view: |
+              {{ if world.last_event_prose != "" }}{{ world.last_event_prose }}
+
+              {{ end }}The wagon's {{ world.breakdown_part }} has broken.
+              Spare wheels: {{ world.spare_wheels }}, axles: {{ world.spare_axles }}, tongues: {{ world.spare_tongues }}.
+
+              Actions: repair (needs a matching spare), wait_out (5 days), look, quit.
+            on:
+              repair:
+                - when: "world.breakdown_part == 'wheel' && world.spare_wheels >= 1"
+                  target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_breakdown_wheel_repaired_{{ world.day }}"
+                        title:     "Wheel repaired"
+                        body:      "Day {{ world.day }} — fitted the spare wheel and got the wagon rolling again. One less in reserve."
+                    - set:
+                        spare_wheels: "{{ world.spare_wheels - 1 }}"
+                        event_kind: ""
+                        breakdown_part: ""
+                        current_event_attempts: 0
+                    - say: "Spare wheel installed. Back on the trail."
+                - when: "world.breakdown_part == 'axle' && world.spare_axles >= 1"
+                  target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_breakdown_axle_repaired_{{ world.day }}"
+                        title:     "Axle repaired"
+                        body:      "Day {{ world.day }} — swapped in the spare axle. Took the morning, but the wagon's true again."
+                    - set:
+                        spare_axles: "{{ world.spare_axles - 1 }}"
+                        event_kind: ""
+                        breakdown_part: ""
+                        current_event_attempts: 0
+                    - say: "Spare axle installed. Back on the trail."
+                - when: "world.breakdown_part == 'tongue' && world.spare_tongues >= 1"
+                  target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_breakdown_tongue_repaired_{{ world.day }}"
+                        title:     "Tongue repaired"
+                        body:      "Day {{ world.day }} — pinned in the spare tongue and we hitched the oxen back up."
+                    - set:
+                        spare_tongues: "{{ world.spare_tongues - 1 }}"
+                        event_kind: ""
+                        breakdown_part: ""
+                        current_event_attempts: 0
+                    - say: "Spare tongue installed. Back on the trail."
+                - when: "world.current_event_attempts < 2"
+                  target: .
+                  effects:
+                    - increment: { current_event_attempts: 1 }
+                    - say: "No spare {{ world.breakdown_part }} on hand. Try repair again, wait_out, or look."
+                  guard_hint: "Need a spare {{ world.breakdown_part }} to repair."
+                - default: true
+                  target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_breakdown_failed_{{ world.day }}"
+                        title:     "Wagon limping on"
+                        body:      "Day {{ world.day }} — couldn't repair the {{ world.breakdown_part }}. Lashed it together and pressed on at a cost: a member of the party was left behind."
+                    - set:
+                        party_alive: "{{ world.party_alive - 1 }}"
+                        health_avg: "{{ world.health_avg - 20 }}"
+                        event_kind: ""
+                        breakdown_part: ""
+                        current_event_attempts: 0
+                    - say: "Repeated repair attempts failed; the wagon is patched poorly and the party limps on. A member is left behind."
+              wait_out:
+                - target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_breakdown_waited_{{ world.day }}"
+                        title:     "Improvised repair"
+                        body:      "Day {{ world.day }} — made camp and improvised a {{ world.breakdown_part }} repair over five days. Slow going, but back on the trail."
+                    - set:
+                        day: "{{ world.day + 5 }}"
+                        event_kind: ""
+                        breakdown_part: ""
+                        current_event_attempts: 0
+                    - say: "The party makes camp and improvises a repair over five days."
+              look:
+                - target: .
+              quit:
+                - target: ended_lost
+                  effects:
+                    - say: "The party abandons the broken wagon."
+
+          # ── event_weather ───────────────────────────────────────────
+          # on_enter picks weather_kind biased by world.month:
+          #   winter  (nov-feb): always snow
+          #   spring  (mar-may): heavy_rain — snowmelt storms, no snow
+          #   summer  (jun-aug): hail or fog (rng_last % 2)
+          #   fall    (sep-oct): heavy_rain or fog (rng_last % 2)
+          # This is the bullet from §8 ("departure month affects
+          # weather") landing on the severe-weather event arm: a
+          # december ambush rolls snow; an april ambush rolls a
+          # snowmelt downpour; a july ambush rolls hail or fog. The
+          # ranges intentionally overlap (heavy_rain shows up in both
+          # spring and fall) so the variety stays human; the contract
+          # is only that the *season* is coherent.
+          #
+          # wait_out: lose 1-3 days (deterministic from rng_last);
+          # food spoils 20 lbs if heavy_rain.
+          # push_on: continue, health_avg -= 10.
+          # Phase H: in narrated mode, host.oracle.ask renders 2-4
+          # sentences of period prose keyed on weather_kind + month +
+          # terrain. The view: template prefers the prose when set.
+          event_weather:
+            description: "Severe weather: {{ world.weather_kind }}."
+            relevant_world: [weather_kind, day, food_lbs, health_avg, last_event_prose]
+            on_enter:
+              - set:
+                  current_event_attempts: 0
+                  weather_kind: "{{ world.month == 'november' || world.month == 'december' || world.month == 'january' || world.month == 'february' ? 'snow' : (world.month == 'march' || world.month == 'april' || world.month == 'may' ? 'heavy_rain' : (world.month == 'june' || world.month == 'july' || world.month == 'august' ? (world.rng_last % 2 == 0 ? 'hail' : 'fog') : (world.rng_last % 2 == 0 ? 'heavy_rain' : 'fog'))) }}"
+                  last_event_prose: ""
+              - when: "world.narration"
+                invoke: host.oracle.ask
+                with:
+                  prompt_path: "prompts/event_weather.md"
+                  agent: trail_narrator
+                  args:
+                    kind:              "{{ world.month == 'november' || world.month == 'december' || world.month == 'january' || world.month == 'february' ? 'snow' : (world.month == 'march' || world.month == 'april' || world.month == 'may' ? 'heavy_rain' : (world.month == 'june' || world.month == 'july' || world.month == 'august' ? (world.rng_last % 2 == 0 ? 'hail' : 'fog') : (world.rng_last % 2 == 0 ? 'heavy_rain' : 'fog'))) }}"
+                    month:             "{{ world.month }}"
+                    terrain:           "{{ tpl.terrain }}"
+                    current_landmark:  "{{ world.current_landmark }}"
+                    day:               "{{ world.day }}"
+                bind:
+                  last_event_prose: stdout
+            view: |
+              {{ if world.last_event_prose != "" }}{{ world.last_event_prose }}
+
+              {{ end }}Severe weather: {{ world.weather_kind }}.
+              Health: {{ world.health_avg }}.   Food: {{ world.food_lbs }} lbs.   Day {{ world.day }}.
+
+              Actions: wait_out, push_on, look, quit.
+            on:
+              wait_out:
+                - target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_weather_waited_{{ world.day }}"
+                        title:     "Weather passed"
+                        body:      "Day {{ world.day }} — sheltered until the {{ world.weather_kind }} let up. {{ world.weather_kind == 'heavy_rain' ? '20 lbs of food spoiled in the wet.' : 'No supplies lost — only days.' }}"
+                    - set:
+                        day: "{{ world.day + (world.rng_last % 3) + 1 }}"
+                        food_lbs: "{{ world.weather_kind == 'heavy_rain' ? world.food_lbs - 20 : world.food_lbs }}"
+                        event_kind: ""
+                        weather_kind: ""
+                        current_event_attempts: 0
+                    - say: "The party shelters until the weather passes."
+              push_on:
+                - target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_weather_pushed_on_{{ world.day }}"
+                        title:     "Pushed on through the weather"
+                        body:      "Day {{ world.day }} — pushed on through the {{ world.weather_kind }}. Cold and wet; health worsened by 10."
+                    - set:
+                        health_avg: "{{ world.health_avg - 10 }}"
+                        event_kind: ""
+                        weather_kind: ""
+                        current_event_attempts: 0
+                    - say: "The party pushes on through the weather."
+              look:
+                - target: .
+              quit:
+                - target: ended_lost
+                  effects:
+                    - say: "The party gives up in the {{ world.weather_kind }}."
+
+          # ── event_encounter ─────────────────────────────────────────
+          # on_enter picks trader / hunter / band from rng_last % 3.
+          # accept_trade: swap 50 food ↔ 1 clothing_set.
+          # decline_trade: no-op, return to traveling.
+          # move_on: same as decline.
+          # Phase H: in narrated mode, host.oracle.ask renders 2-4
+          # sentences of period prose keyed on the encounter kind.
+          event_encounter:
+            description: "Encounter on the trail: {{ world.encounter_kind }}."
+            relevant_world: [encounter_kind, food_lbs, clothing_sets, last_event_prose]
+            on_enter:
+              - set:
+                  current_event_attempts: 0
+                  encounter_kind: "{{ if world.rng_last % 3 == 0 }}trader{{ else }}{{ if world.rng_last % 3 == 1 }}hunter{{ else }}band{{ end }}{{ end }}"
+                  last_event_prose: ""
+              - when: "world.narration"
+                invoke: host.oracle.ask
+                with:
+                  prompt_path: "prompts/event_encounter.md"
+                  agent: trail_narrator
+                  args:
+                    kind:              "{{ if world.rng_last % 3 == 0 }}trader{{ else }}{{ if world.rng_last % 3 == 1 }}hunter{{ else }}band{{ end }}{{ end }}"
+                    current_landmark:  "{{ world.current_landmark }}"
+                    day:               "{{ world.day }}"
+                    food_lbs:          "{{ world.food_lbs }}"
+                    clothing_sets:     "{{ world.clothing_sets }}"
+                bind:
+                  last_event_prose: stdout
+            view: |
+              {{ if world.last_event_prose != "" }}{{ world.last_event_prose }}
+
+              {{ end }}You meet a {{ world.encounter_kind }} on the trail.
+              They offer 1 clothing set in exchange for 50 lbs of food.
+              You have {{ world.food_lbs }} lbs food, {{ world.clothing_sets }} clothing sets.
+
+              Actions: accept_trade, decline_trade, move_on, look, quit.
+            on:
+              accept_trade:
+                - when: "world.food_lbs >= 50"
+                  target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_encounter_traded_{{ world.day }}"
+                        title:     "Trade with a {{ world.encounter_kind }}"
+                        body:      "Day {{ world.day }} — traded 50 lbs of food to a {{ world.encounter_kind }} for one clothing set. A fair deal on the trail."
+                    - set:
+                        food_lbs: "{{ world.food_lbs - 50 }}"
+                        clothing_sets: "{{ world.clothing_sets + 1 }}"
+                        event_kind: ""
+                        encounter_kind: ""
+                        current_event_attempts: 0
+                    - say: "Trade complete: -50 lbs food, +1 clothing set."
+                - default: true
+                  target: .
+                  guard_hint: "Not enough food to trade."
+              decline_trade:
+                - target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_encounter_declined_{{ world.day }}"
+                        title:     "Declined a trade"
+                        body:      "Day {{ world.day }} — passed on a trade with a {{ world.encounter_kind }}. The wagon kept rolling."
+                    - set:
+                        event_kind: ""
+                        encounter_kind: ""
+                        current_event_attempts: 0
+                    - say: "The party declines the trade and presses on."
+              move_on:
+                - target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_encounter_moved_on_{{ world.day }}"
+                        title:     "Moved on from a {{ world.encounter_kind }}"
+                        body:      "Day {{ world.day }} — moved on past the {{ world.encounter_kind }}. No words exchanged."
+                    - set:
+                        event_kind: ""
+                        encounter_kind: ""
+                        current_event_attempts: 0
+                    - say: "The party moves on past the encounter."
+              look:
+                - target: .
+              quit:
+                - target: ended_lost
+                  effects:
+                    - say: "The party gives up at the encounter."
+
+          # ── event_supply_loss ───────────────────────────────────────
+          # Deterministically loses food OR an ox: even rng_last drops
+          # 10-40 lbs of food, odd rng_last kills 1 ox. Single move_on
+          # intent — no choice to be made.
+          # Phase H: in narrated mode, host.oracle.ask renders 2-4
+          # sentences of period prose keyed on what was lost.
+          event_supply_loss:
+            description: "Supplies lost on the trail."
+            relevant_world: [food_lbs, oxen, rng_last, last_event_prose]
+            on_enter:
+              - set:
+                  current_event_attempts: 0
+                  last_event: "{{ if world.rng_last % 2 == 0 }}food_loss{{ else }}ox_loss{{ end }}"
+                  last_event_prose: ""
+              - set:
+                  food_lbs: "{{ world.rng_last % 2 == 0 ? world.food_lbs - (10 + 10 * (world.rng_last % 4)) : world.food_lbs }}"
+                  oxen: "{{ world.rng_last % 2 == 0 ? world.oxen : world.oxen - 1 }}"
+              - when: "world.narration"
+                invoke: host.oracle.ask
+                with:
+                  prompt_path: "prompts/event_supply_loss.md"
+                  agent: trail_narrator
+                  args:
+                    what:              "{{ world.rng_last % 2 == 0 ? 'food spoiled' : 'ox lame' }}"
+                    current_landmark:  "{{ world.current_landmark }}"
+                    day:               "{{ world.day }}"
+                    food_lbs:          "{{ world.food_lbs }}"
+                    oxen:              "{{ world.oxen }}"
+                bind:
+                  last_event_prose: stdout
+            view: |
+              {{ if world.last_event_prose != "" }}{{ world.last_event_prose }}
+
+              {{ end }}Supplies have been lost on the trail.
+              Food: {{ world.food_lbs }} lbs.  Oxen: {{ world.oxen }}.
+
+              Action: move_on.
+            on:
+              move_on:
+                - target: ../traveling
+                  effects:
+                    - invoke: host.transport.post
+                      with:
+                        transport: tui
+                        thread:    "{{ run.id }}"
+                        phase_id:  "{{ tpl.id }}_event_supply_loss_recovered_{{ world.day }}"
+                        title:     "Supplies lost"
+                        body:      "Day {{ world.day }} — {{ world.last_event == 'food_loss' ? 'food spoiled' : 'an ox went lame' }} on the trail. Recovered what we could and pressed on. Food: {{ world.food_lbs }} lbs, oxen: {{ world.oxen }}."
+                    - set:
+                        event_kind: ""
+                        last_event: ""
+                        current_event_attempts: 0
+                    - say: "The party recovers what it can and presses on."
+              look:
+                - target: .
+              quit:
+                - target: ended_lost
+                  effects:
+                    - say: "The party gives up after losing supplies."
+
+      # ── {id}_awaiting_reply — checkpoint at the landmark ───────────
+      # checkpoint_intents (top-level on AppDef) merges the *intent
+      # declarations* (description/slots/examples) into this state's
+      # Intents map; the `on:` arms below provide the backing
+      # transitions. continue/quit/rest/hunt/consult_guide/restart_from
+      # all live here, plus the template-specific enter_fort and
+      # approach_river guarded by tpl.ends_at_fort / tpl.ends_at_river.
+      "{id}_awaiting_reply":
+        description: "Arrived at {{ tpl.to_landmark }} ({{ tpl.terrain }})."
+        relevant_world: [day, miles_traveled, food_lbs, oxen, party_alive, health_avg, illness_kind, illness_severity, illness_member, last_landmark_prose]
+        # Phase I — gap §9.5: idle at a landmark for 10 game-days and the
+        # wagon master presses on automatically. The expander substitutes
+        # {{ phase.next.continue }} per leg, so leg_a's timeout target is
+        # leg_b, leg_b's is leg_c, etc. (and leg_g's is ended_won).
+        # Exercised by flows/landmark_timeout.yaml via advance_clock: "11d".
+        timeout:
+          after:  "10d"
+          target: "{{ phase.next.continue }}"
+        # ── Phase G: trail-diary post on landmark arrival. Posts to the
+        # `tui` transport every time we step into this leg's checkpoint.
+        # phase_id is unique per leg so de-dup on the Jira side (which
+        # the spec calls out in §2.7) keeps a single arrival entry per
+        # leg, even if we re-enter the state (e.g. from a failed river
+        # crossing). The body is intentionally period-flavoured Markdown
+        # — that's the entire point of the trail-diary surface.
+        # ── Phase H: in narrated mode, host.oracle.ask drops 2-4
+        # sentences of atmospheric prose into world.last_landmark_prose.
+        # The view: template prefers the prose over the canned hint
+        # when set. Both effects run unconditionally aside from the
+        # `when:` guard on the narrated invoke — transport.post fires
+        # in either mode.
+        on_enter:
+          # Phase G post-then-clear: zero the prose first so a
+          # deterministic-mode arrival never reads a stale string left
+          # behind by a prior narrated leg.
+          - set:
+              last_landmark_prose: ""
+          - invoke: host.transport.post
+            with:
+              transport: tui
+              thread:    "{{ run.id }}"
+              phase_id:  "{{ tpl.id }}_arrival"
+              title:     "Day {{ world.day }}: {{ tpl.to_landmark }}"
+              body: |
+                Day {{ world.day }}, {{ world.month }} {{ world.year }}. We rolled into **{{ tpl.to_landmark }}** ({{ tpl.terrain }}) at last.
+
+                - Food: {{ world.food_lbs }} lbs
+                - Oxen: {{ world.oxen }}
+                - Party: {{ world.party_alive }} alive
+                - Health: {{ world.health_avg }}
+          - when: "world.narration"
+            invoke: host.oracle.ask
+            with:
+              prompt_path: "prompts/landmark_arrival.md"
+              agent: trail_narrator
+              args:
+                landmark:        "{{ tpl.to_landmark }}"
+                miles_traveled:  "{{ world.miles_traveled }}"
+                day:             "{{ world.day }}"
+                month:           "{{ world.month }}"
+                year:            "{{ world.year }}"
+                party_alive:     "{{ world.party_alive }}"
+                food_lbs:        "{{ world.food_lbs }}"
+            bind:
+              last_landmark_prose: stdout
+        view: |
+          Arrived at {{ tpl.to_landmark }} ({{ tpl.terrain }}).
+
+          Day:    {{ world.day }}
+          Food:   {{ world.food_lbs }} lbs
+          Oxen:   {{ world.oxen }}
+          Party:  {{ world.party_alive }} alive
+          Health: {{ world.health_avg }}
+
+          {{ if world.last_landmark_prose != "" }}{{ world.last_landmark_prose }}{{ else }}{{ tpl.arrival_hint }}{{ end }}
+
+          When you're ready, "continue" presses on toward the next landmark.
+        on:
+          continue:
+            # ── Snow-blocked South Pass guard (§8 month mechanics).
+            # When the player tries to leave South Pass in oct-feb the
+            # descent into the Snake basin is choked with snow; route
+            # to the snow_blocked room instead of the next leg. The
+            # tpl.to_landmark literal substitutes per-leg, so non-South-
+            # Pass legs see a never-true compare and fall through to
+            # the default arm.
+            - when: "'{{ tpl.to_landmark }}' == 'South Pass' && (world.month == 'october' || world.month == 'november' || world.month == 'december' || world.month == 'january' || world.month == 'february')"
+              target: snow_blocked
+              effects:
+                - set:
+                    current_landmark: "{{ tpl.to_landmark }}"
+                - say: "South Pass is snowed in. The wagons cannot get through."
+            - default: true
+              target: "{{ phase.next.continue }}"
+              effects:
+                - set:
+                    current_landmark: "{{ tpl.to_landmark }}"
+                    miles_traveled: 0
+                    event_kind: ""
+                    illness_kind: ""
+                    breakdown_part: ""
+                    weather_kind: ""
+                    encounter_kind: ""
+                    current_event_attempts: 0
+          quit:
+            - target: ended_lost
+              effects:
+                - say: "The party abandons the journey at {{ tpl.to_landmark }}."
+          enter_fort:
+            - when: "{{ tpl.ends_at_fort }}"
+              target: fort
+              effects:
+                - set: { current_landmark: "{{ tpl.to_landmark }}" }
+            - default: true
+              target: .
+              guard_hint: "No fort at this landmark."
+          approach_river:
+            - when: "{{ tpl.ends_at_river }}"
+              target: river_crossing
+              effects:
+                - set:
+                    current_landmark: "{{ tpl.to_landmark }}"
+                    # Per-leg river geometry comes from phase parameters
+                    # (river_base_depth_ft, river_width_ft) — the expander
+                    # substitutes `{{ tpl.X }}` directly but NOT ternaries
+                    # on tpl.* inside a single `{{ }}` block, so we can't
+                    # branch on `tpl.to_landmark == 'Kansas River Crossing'`
+                    # here. Depth is then modulated by a snowmelt curve
+                    # keyed on world.month (§8): peak april ×1.60,
+                    # may ×1.30, jun ×1.00, jul ×0.80, aug ×0.70,
+                    # sep ×0.80, mar ×1.40, oct+ ×1.00.
+                    # Kansas (base 2) april = 3 ft (mid in the
+                    # river_crossing initial: heuristic); Snake (base 7)
+                    # april = 11 ft (deep). river_width_ft is not modulated.
+                    river_depth_ft: "{{ int({{ tpl.river_base_depth_ft }} * (world.month == 'april' ? 160 : (world.month == 'march' ? 140 : (world.month == 'may' ? 130 : (world.month == 'june' ? 100 : (world.month == 'july' ? 80 : (world.month == 'august' ? 70 : (world.month == 'september' ? 80 : 100))))))) / 100) }}"
+                    river_width_ft: "{{ int({{ tpl.river_width_ft }}) }}"
+            - default: true
+              target: .
+              guard_hint: "No river at this landmark."
+
+          # ── Phase E checkpoint actions: hunt + rest ─────────────────
+          # Both transition to the global hunt / rest_room compound
+          # states. push_history is left at the default (true) so the
+          # rooms' own `continue` arms (which look up
+          # world.current_landmark) bring the player back to this same
+          # _awaiting_reply. The landmark is preserved in current_landmark
+          # by the preceding leg's continue arm; no additional setter
+          # needed here.
+          hunt:
+            - target: hunt
+          rest:
+            - target: rest_room
+
+          # ── Phase F checkpoint action: consult_guide ────────────────
+          # Stackless teleport into trail_guide (compound, initial:
+          # trail_guide_list). The originating _awaiting_reply path is
+          # recorded in world.last_job_originating_state so the room's
+          # `back` arm knows where to return. Reusing the same world
+          # key as Phase E's inbox-teleport-back is intentional: the
+          # name is a misnomer (it's a generic teleport-source
+          # pointer, not strictly "job"-related), but introducing a
+          # second key would just be a rename. The current value is
+          # always overwritten before a stackless teleport, so the
+          # two consumers (inbox, trail_guide) never collide.
+          consult_guide:
+            - target: trail_guide
+              push_history: false
+              effects:
+                - set:
+                    last_job_originating_state: "{{ tpl.id }}_awaiting_reply"
+
+          # restart_from — phase J wiring of the checkpoint_intents
+          # declaration. checkpoint_intents (top-level on AppDef) only
+          # gets *intents* merged into _awaiting_reply.Intents by the
+          # expander; a backing `on:` transition arm is required for the
+          # validator to accept the intent (Machine.Validate walks
+          # state.On). Mapping the `stage` enum to the named leg's
+          # `_executing` state so the player re-traverses the leg from
+          # its starting landmark — re-experiencing events, mileage,
+          # and food costs. Supplies and health are preserved so the
+          # teleport feels like "back up and try this stretch again",
+          # not "reset the game". The reset block matches the
+          # give_up_leg effects so the leg fires its on_enter cleanly.
+          restart_from:
+            - when: "slots.stage == 'independence' || slots.stage == 'kansas'"
+              target: leg_a_executing
+              effects:
+                - set:
+                    miles_traveled: 0
+                    event_kind: ""
+                    illness_kind: ""
+                    breakdown_part: ""
+                    weather_kind: ""
+                    encounter_kind: ""
+                    current_event_attempts: 0
+                - say: "The party doubles back to Independence to retry the run toward Kansas River."
+            - when: "slots.stage == 'kearney'"
+              target: leg_b_executing
+              effects:
+                - set:
+                    miles_traveled: 0
+                    event_kind: ""
+                    illness_kind: ""
+                    breakdown_part: ""
+                    weather_kind: ""
+                    encounter_kind: ""
+                    current_event_attempts: 0
+                - say: "The party doubles back to Kansas River to retry the stretch toward Fort Kearney."
+            - when: "slots.stage == 'chimney'"
+              target: leg_c_executing
+              effects:
+                - set:
+                    miles_traveled: 0
+                    event_kind: ""
+                    illness_kind: ""
+                    breakdown_part: ""
+                    weather_kind: ""
+                    encounter_kind: ""
+                    current_event_attempts: 0
+                - say: "The party doubles back to Fort Kearney to retry the stretch toward Chimney Rock."
+            - when: "slots.stage == 'laramie'"
+              target: leg_d_executing
+              effects:
+                - set:
+                    miles_traveled: 0
+                    event_kind: ""
+                    illness_kind: ""
+                    breakdown_part: ""
+                    weather_kind: ""
+                    encounter_kind: ""
+                    current_event_attempts: 0
+                - say: "The party doubles back to Chimney Rock to retry the stretch toward Fort Laramie."
+            - when: "slots.stage == 'south_pass'"
+              target: leg_e_executing
+              effects:
+                - set:
+                    miles_traveled: 0
+                    event_kind: ""
+                    illness_kind: ""
+                    breakdown_part: ""
+                    weather_kind: ""
+                    encounter_kind: ""
+                    current_event_attempts: 0
+                - say: "The party doubles back to Fort Laramie to retry the stretch toward South Pass."
+            - when: "slots.stage == 'snake'"
+              target: leg_f_executing
+              effects:
+                - set:
+                    miles_traveled: 0
+                    event_kind: ""
+                    illness_kind: ""
+                    breakdown_part: ""
+                    weather_kind: ""
+                    encounter_kind: ""
+                    current_event_attempts: 0
+                - say: "The party doubles back to South Pass to retry the stretch toward Snake River."
+            - default: true
+              target: .
+              guard_hint: "Unknown restart stage."
+
+          # give_up_leg — phase-level on_failure trigger. Increments
+          # the cycle__<phase>__on_failure counter; once it crosses
+          # cycle_budgets.on_failure the {id}_error fall-through fires
+          # via the synthesized arc on _executing. Here we manually
+          # manage the same counter from the _awaiting_reply state so
+          # the player has a user-visible verb.
+          give_up_leg:
+            - when: "world.cycle__{{ tpl.id }}__on_failure < 2"
+              target: "{{ phase.next.on_failure }}"
+              effects:
+                - increment: { "cycle__{{ tpl.id }}__on_failure": 1 }
+                - set:
+                    miles_traveled: 0
+                    event_kind: ""
+                    illness_kind: ""
+                    breakdown_part: ""
+                    weather_kind: ""
+                    encounter_kind: ""
+                    current_event_attempts: 0
+                - say: "The party turns back toward {{ tpl.from_landmark }}."
+            - default: true
+              target: "{{ tpl.id }}_error"
+              effects:
+                - say: "The party has given up too many times — stranded."
+
+      # ── {id}_error — declared for completeness; reached only by ────
+      # Phase D's `on_failure:` arc. Phase C leaves it unreached.
+      "{id}_error":
+        description: "Stranded between {{ tpl.from_landmark }} and {{ tpl.to_landmark }}."
+        relevant_world: [day, party_alive, current_landmark]
+        view: |
+          Stranded between {{ tpl.from_landmark }} and {{ tpl.to_landmark }}.
+
+          The party has failed this leg too many times.
+
+          Actions: retry (returns to {{ tpl.from_landmark }}), quit.
+        on:
+          retry:
+            - target: "{{ tpl.id }}_executing"
+              effects:
+                - set:
+                    event_kind: ""
+                    current_event_attempts: 0
+          quit:
+            - target: ended_lost
+              effects:
+                - say: "The party gives up between {{ tpl.from_landmark }} and {{ tpl.to_landmark }}."
+
+phases:
+  template: trail_leg
+  graph:
+    # cycle_budgets: { on_failure: 2 } is applied per-phase below.
+    # The synthesizer in internal/app/phases.go emits a `on_failure:`
+    # arc on each `_executing` state that fires next.on_failure for the
+    # first 2 attempts, then drops to `{id}_error`. The give_up_leg
+    # intent on `_awaiting_reply` manages the same counter manually.
+    leg_a:
+      from_landmark: "Independence"
+      to_landmark:   "Kansas River Crossing"
+      distance_mi:   102
+      ends_at_river: true
+      river_base_depth_ft: 2
+      river_width_ft:      620
+      arrival_hint:  "A river bars the way — approach to assess the crossing."
+      # leg_a is the first leg; on_failure loops back to itself (the
+      # party retreats and re-attempts the leg from Independence).
+      next: { continue: leg_b, on_failure: leg_a }
+      cycle_budgets: { on_failure: 2 }
+    leg_b:
+      from_landmark: "Kansas River Crossing"
+      to_landmark:   "Fort Kearney"
+      distance_mi:   202
+      ends_at_fort:  true
+      arrival_hint:  "A fort lies ahead — enter to resupply."
+      next: { continue: leg_c, on_failure: leg_a }
+      cycle_budgets: { on_failure: 2 }
+    leg_c:
+      from_landmark: "Fort Kearney"
+      to_landmark:   "Chimney Rock"
+      distance_mi:   250
+      next: { continue: leg_d, on_failure: leg_b }
+      cycle_budgets: { on_failure: 2 }
+    leg_d:
+      from_landmark: "Chimney Rock"
+      to_landmark:   "Fort Laramie"
+      distance_mi:   86
+      ends_at_fort:  true
+      arrival_hint:  "Fort Laramie ahead — enter to resupply at marked-up prices."
+      next: { continue: leg_e, on_failure: leg_c }
+      cycle_budgets: { on_failure: 2 }
+    leg_e:
+      from_landmark: "Fort Laramie"
+      to_landmark:   "South Pass"
+      distance_mi:   292
+      terrain:       "mountain"
+      next: { continue: leg_f, on_failure: leg_d }
+      cycle_budgets: { on_failure: 2 }
+    leg_f:
+      from_landmark: "South Pass"
+      to_landmark:   "Snake River Crossing"
+      distance_mi:   250
+      ends_at_river: true
+      river_base_depth_ft: 7
+      river_width_ft:      1000
+      arrival_hint:  "The Snake River blocks the way — approach to assess the crossing."
+      next: { continue: leg_g, on_failure: leg_e }
+      cycle_budgets: { on_failure: 2 }
+    leg_g:
+      from_landmark: "Snake River Crossing"
+      to_landmark:   "Willamette Valley"
+      distance_mi:   318
+      terrain:       "mountain"
+      next: { continue: ended_won, on_failure: leg_f }
+      cycle_budgets: { on_failure: 2 }

@@ -3,10 +3,12 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/store"
+	"kitsoki/internal/trace"
 )
 
 // Teleport jumps the session to the given target state with the slot bag
@@ -21,6 +23,14 @@ func (o *Orchestrator) Teleport(ctx context.Context, sid app.SessionID, target i
 	if target.State == "" {
 		return nil, fmt.Errorf("orchestrator.Teleport: target.State is empty")
 	}
+
+	o.logger.DebugContext(ctx, trace.EvTeleportStart,
+		slog.String("session_id", string(sid)),
+		slog.String("to", string(target.State)),
+		slog.String("job_id", target.JobID),
+		slog.String("proposal_id", target.ProposalID),
+		slog.Int("slot_count", len(target.Slots)),
+	)
 
 	// Serialise against handleJobTerminal — see Turn for rationale.
 	sessMu := o.sessionLock(sid)
@@ -107,6 +117,16 @@ func (o *Orchestrator) Teleport(ctx context.Context, sid app.SessionID, target i
 	if appendErr := o.store.AppendEvents(sid, events); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator.Teleport: append events: %w", appendErr)
 	}
+
+	o.logger.DebugContext(ctx, trace.EvTeleportDone,
+		slog.String("session_id", string(sid)),
+		slog.String("from", string(priorState)),
+		slog.String("to", string(target.State)),
+		slog.Int64("turn", int64(turnNum)),
+	)
+
+	// (Re-)arm any Timeout: declared on the destination state.
+	o.armTimeoutForState(sid, priorState, target.State)
 
 	// Compute new allowed intents in the destination state.
 	newAllowed := o.machine.AllowedIntents(target.State, w)

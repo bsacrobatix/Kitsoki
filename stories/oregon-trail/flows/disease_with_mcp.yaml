@@ -1,0 +1,90 @@
+# disease_with_mcp — proposal §9.6, engine gap closure.
+#
+# Drives the narrated branch of `event_disease.on_enter`:
+# host.oracle.ask_with_mcp returns a typed-JSON illness diagnosis via
+# the MCP `submit` tool (schema in stories/oregon-trail/mcp/illness.json).
+# The fixture stubs the handler with a canned `submitted:` payload —
+# Claude is never actually launched — so the test runs offline and
+# deterministically while still exercising the full
+# host-invoke → bind → world chain.
+#
+# What this fixture proves
+# ------------------------
+# 1. host.oracle.ask_with_mcp is allow-listed (app.yaml hosts:).
+# 2. The narrated arm of event_disease.on_enter fires when
+#    world.narration == true (and the deterministic arm does NOT —
+#    no rng_last % 5 selection happens).
+# 3. `bind:` extracts nested paths from the host result:
+#       illness_kind      ← submitted.illness
+#       illness_severity  ← submitted.severity
+#       illness_treatment ← submitted.treatment
+# 4. The world keys land in the post-on_enter world snapshot so the
+#    view + downstream intents see the narrated diagnosis.
+#
+# RNG setup mirrors plague_at_chimney: miles_traveled=0,
+# rng_counter=62, so the traveling.continue roll lands in the disease
+# arm and we enter leg_d_executing.event_disease.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: leg_d_executing.traveling
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    banker
+  month:         june
+  money:         200
+  oxen:          4
+  food_lbs:      500
+  clothing_sets: 2
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    80
+  # ── Narrated mode: routes event_disease.on_enter through
+  # host.oracle.ask_with_mcp instead of the deterministic
+  # rng_last % 5 illness selector.
+  narration:     true
+  miles_traveled: 0
+  rng_counter:   62
+  event_kind:    ""
+  current_landmark: "Chimney Rock"
+  current_event_attempts: 0
+
+host_handlers:
+  # Stub the typed-JSON oracle call. The handler returns a Result.Data
+  # map that mirrors what the real handler exposes when the validator
+  # captures a successful submit: a `submitted` sub-map with the
+  # schema-validated illness diagnosis. The orchestrator's bind step
+  # walks `submitted.<key>` for each bind entry and writes the value
+  # into world.
+  host.oracle.ask_with_mcp:
+    data:
+      stdout: "diagnosed: cholera (severity 3, treatment fluids)"
+      exit_code: 0
+      ok: true
+      submitted:
+        illness:   cholera
+        severity:  3
+        treatment: fluids
+
+turns:
+
+  # Turn 1: continue. Roll = (0 + 62) % 100 = 62 → disease arm.
+  # event_disease.on_enter runs:
+  #   1. Shared baseline:       current_event_attempts=0, health_avg -= 10
+  #   2. when: not narration    SKIPPED (narration is true)
+  #   3. when: world.narration  invokes host.oracle.ask_with_mcp;
+  #                              bind populates the three world keys
+  #                              from the stubbed `submitted` payload.
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_d_executing.event_disease
+    expect_world:
+      event_kind:        "disease"
+      rng_last:          62
+      health_avg:        70           # shared baseline: -10
+      rng_counter:       63           # incremented by the disease arm
+      illness_kind:      "cholera"    # ← submitted.illness
+      illness_severity:  3            # ← submitted.severity
+      illness_treatment: "fluids"     # ← submitted.treatment
+
+expect_no_errors: true

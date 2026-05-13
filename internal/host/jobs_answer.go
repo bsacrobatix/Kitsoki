@@ -4,6 +4,9 @@ package host
 import (
 	"context"
 	"fmt"
+	"log/slog"
+
+	"kitsoki/internal/trace"
 )
 
 // ClarificationAnswerer is the subset of *jobs.JobStore required by the
@@ -66,6 +69,10 @@ func AnswerClarificationHandler(ctx context.Context, args map[string]any) (Resul
 	if err := ca.AnswerClarification(ctx, jobID, answer); err != nil {
 		return Result{Error: fmt.Sprintf("host.jobs.answer_clarification: %v", err)}, nil
 	}
+
+	trace.FromContext(ctx).DebugContext(ctx, trace.EvJobClarificationAnswered,
+		slog.String("job_id", jobID),
+	)
 
 	return Result{Data: map[string]any{"job_id": jobID, "answered": true}}, nil
 }
