@@ -478,6 +478,19 @@ func (m *transcriptModel) AppendGuardHint(hint string) {
 //
 // Both userInput and message may be empty: an empty header is omitted,
 // and an empty message no-ops.
+// AppendDisambig appends a single-line disambiguation breadcrumb. Style
+// matches AppendGuardHint — a soft arrow plus muted body — because both
+// describe path-disambiguation friction rather than failure.
+func (m *transcriptModel) AppendDisambig(body string) {
+	if body == "" {
+		return
+	}
+	rendered := clarificationStyle.Render("→ " + body)
+	m.entries = append(m.entries, transcriptEntry{body: rendered})
+	m.vp.SetContent(m.render())
+	m.vp.GotoBottom()
+}
+
 func (m *transcriptModel) AppendClarification(userInput, message string) {
 	if message == "" {
 		return
@@ -583,9 +596,82 @@ func (m *transcriptModel) ReconstructFromEntries(entries []journal.Entry) {
 			}
 			m.AppendOffPathAnswer(body.Input, body.Answer)
 
-		case journal.KindDisambigPresented, journal.KindDisambigChosen:
-			// No dedicated transcript constructor today — skip.
-			slog.Debug("transcript: no constructor for kind", "kind", e.Kind)
+		case journal.KindChatsAppend:
+			// Body shape: {"ops": [{"op":"add", "path":"/messages/-", "value":{...}}]}
+			// We only extract the appended message; non-append patch ops
+			// (e.g. metadata replaces on /meta/*) are skipped — they're not
+			// user-visible chat-row content.
+			var body struct {
+				Ops []struct {
+					Op    string          `json:"op"`
+					Path  string          `json:"path"`
+					Value json.RawMessage `json:"value"`
+				} `json:"ops"`
+			}
+			if err := json.Unmarshal(e.Body, &body); err != nil {
+				slog.Debug("transcript: failed to decode chats.append body",
+					"turn", e.Turn, "seq", e.Seq, "err", err)
+				continue
+			}
+			for _, op := range body.Ops {
+				if op.Op != "add" || op.Path != "/messages/-" {
+					continue
+				}
+				var msg struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+					Text    string `json:"text"`
+				}
+				if err := json.Unmarshal(op.Value, &msg); err != nil {
+					continue
+				}
+				text := msg.Content
+				if text == "" {
+					text = msg.Text
+				}
+				if text == "" {
+					continue
+				}
+				switch msg.Role {
+				case "user":
+					m.AppendTurn(text, "")
+				case "assistant", "model":
+					m.AppendOffPathAnswer("", text)
+				default:
+					m.AppendSystem(text)
+				}
+			}
+
+		case journal.KindDisambigPresented:
+			var body struct {
+				Candidates []string `json:"candidates"`
+			}
+			if err := json.Unmarshal(e.Body, &body); err != nil {
+				slog.Debug("transcript: failed to decode disambig.presented body",
+					"turn", e.Turn, "seq", e.Seq, "err", err)
+				continue
+			}
+			if len(body.Candidates) > 0 {
+				m.AppendDisambig("disambiguating: " + strings.Join(body.Candidates, ", "))
+			}
+
+		case journal.KindDisambigChosen:
+			var body struct {
+				Intent         string `json:"intent"`
+				CandidateLabel string `json:"candidate_label"`
+			}
+			if err := json.Unmarshal(e.Body, &body); err != nil {
+				slog.Debug("transcript: failed to decode disambig.chosen body",
+					"turn", e.Turn, "seq", e.Seq, "err", err)
+				continue
+			}
+			label := body.CandidateLabel
+			if label == "" {
+				label = body.Intent
+			}
+			if label != "" {
+				m.AppendDisambig("chose: " + label)
+			}
 
 		default:
 			slog.Debug("transcript: no constructor for kind", "kind", e.Kind)

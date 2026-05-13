@@ -59,6 +59,10 @@ type Store interface {
 	// Pass limit=0 for no limit.
 	ListSessions(ctx context.Context, appID string, limit int) ([]SessionSummary, error)
 
+	// GetSession returns a single session by id. Returns ErrSessionNotFound
+	// if no session exists with the given id.
+	GetSession(ctx context.Context, session app.SessionID) (SessionSummary, error)
+
 	// BindExternalKey associates a (transport, thread) key with the given
 	// session. A session may carry multiple keys; the (transport, thread)
 	// pair is unique across all sessions. Returns ErrExternalKeyTaken if

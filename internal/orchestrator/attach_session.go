@@ -7,11 +7,14 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/store"
 )
@@ -42,6 +45,19 @@ type ResumeBundle struct {
 	// The TUI's first frame uses this verbatim; no view template is re-evaluated.
 	// Empty string if no view.rendered entry exists (e.g. empty session).
 	InitialView string
+
+	// AwaitingJobs lists background jobs that were in awaiting_input status
+	// when the session was last active (proposal §6.3).  The TUI surfaces a
+	// clarification UI for each on first frame.  Empty when no jobs await input
+	// or when no JobStore is wired into the orchestrator.
+	AwaitingJobs []AwaitingJob
+}
+
+// AwaitingJob describes one background job paused waiting for user input.
+type AwaitingJob struct {
+	JobID  jobs.JobID
+	Kind   string // the host handler kind that produced the job
+	Schema any    // ClarificationSchema as stored — TUI knows how to render
 }
 
 // PendingClarify is the exported version of the in-memory pendingClarify
@@ -164,8 +180,47 @@ func (o *Orchestrator) AttachSession(sid app.SessionID) (*ResumeBundle, error) {
 		}
 	}
 
+	// ── 3a. Chat-doc patch entries (chats.append) ────────────────────────────
+	// Patch entries live outside ReplayTyped's stream because they target the
+	// chats/<id> document.  We pick them up here so the transcript can render
+	// the conversation rows the user saw inline with view.rendered.  Sorted
+	// into the transcript list by timestamp (chats entries carry Turn=0 today
+	// because chats.Store methods don't thread the kitsoki turn — see the Z
+	// wave report).  Time-based ordering gives the right user-visible sequence.
+	for _, doc := range o.journalReader.ListLiveDocs(sid) {
+		if !isChatsDoc(doc) {
+			continue
+		}
+		for e := range o.journalReader.ReplayFrom(sid, doc, 0) {
+			if e.Kind == journal.KindChatsAppend {
+				transcriptEntries = append(transcriptEntries, e)
+			}
+		}
+	}
+	sortByTs(transcriptEntries)
+
 	bundle.TranscriptEntries = transcriptEntries
 	bundle.InitialView = latestViewText
+
+	// ── 4. Background jobs in awaiting_input state (proposal §6.3) ───────────
+	// The jobs table is its own source of truth; status survives restart
+	// natively.  AttachSession surfaces awaiting-input jobs so the TUI can
+	// open their clarification UI immediately.
+	if o.jobStore != nil {
+		awaiting, err := o.jobStore.ListJobsByStatus(context.Background(), sid, jobs.JobAwaitingInput)
+		if err != nil {
+			slog.Debug("orchestrator.AttachSession: ListJobsByStatus failed",
+				"session_id", string(sid), "err", err)
+		} else {
+			for _, j := range awaiting {
+				bundle.AwaitingJobs = append(bundle.AwaitingJobs, AwaitingJob{
+					JobID:  j.ID,
+					Kind:   j.Kind,
+					Schema: j.ClarificationSchema,
+				})
+			}
+		}
+	}
 
 	return bundle, nil
 }
@@ -182,4 +237,19 @@ type clarifyRequestedBody struct {
 type viewRenderedBody struct {
 	ViewText  string `json:"view_text"`
 	StatePath string `json:"state_path"`
+}
+
+// isChatsDoc returns true for DocIDs that name a chats/<id> document.
+func isChatsDoc(doc journal.DocID) bool {
+	return len(doc) > 6 && doc[:6] == "chats/"
+}
+
+// sortByTs sorts a slice of entries by Ts ascending, stable. Used when
+// interleaving turn-anchored entries (view.rendered etc.) with chats.append
+// entries that today carry Turn=0 because the chats package doesn't thread the
+// kitsoki turn into its store methods.
+func sortByTs(entries []journal.Entry) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].Ts.Before(entries[j].Ts)
+	})
 }

@@ -435,20 +435,19 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				// Use the explicit-ID path for the check: --key and picker paths
 				// already fail fast above if the session is not found.
 				if continueID != "" {
-					summaries, listErr := s.ListSessions(ctx, def.App.ID, 0)
-					if listErr != nil {
-						return fmt.Errorf("list sessions: %w", listErr)
-					}
-					found := false
-					for _, sum := range summaries {
-						if sum.ID == sid {
-							found = true
-							break
-						}
-					}
-					if !found {
+					sum, getErr := s.GetSession(ctx, sid)
+					if errors.Is(getErr, store.ErrSessionNotFound) {
 						fmt.Fprintf(cmd.ErrOrStderr(), "error: no session with id %s\n", sid)
 						return fmt.Errorf("no session with id %s", sid)
+					}
+					if getErr != nil {
+						return fmt.Errorf("lookup session %s: %w", sid, getErr)
+					}
+					if sum.AppID != def.App.ID {
+						fmt.Fprintf(cmd.ErrOrStderr(),
+							"error: session %s belongs to app %q, not %q\n",
+							sid, sum.AppID, def.App.ID)
+						return fmt.Errorf("session app-id mismatch")
 					}
 				}
 

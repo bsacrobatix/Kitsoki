@@ -467,6 +467,34 @@ func (s *sqliteStore) setStatus(ctx context.Context, session app.SessionID, stat
 
 // ListSessions returns up to limit sessions for the given app ID, ordered by
 // started_at descending. Pass limit=0 for no limit.
+func (s *sqliteStore) GetSession(ctx context.Context, session app.SessionID) (SessionSummary, error) {
+	const q = `SELECT id, app_id, app_version, started_at, last_turn, status
+	           FROM sessions WHERE id = ?`
+	var (
+		id        string
+		aid       string
+		aver      string
+		startedAt int64
+		lastTurn  int64
+		status    string
+	)
+	err := s.db.QueryRowContext(ctx, q, string(session)).Scan(&id, &aid, &aver, &startedAt, &lastTurn, &status)
+	if err == sql.ErrNoRows {
+		return SessionSummary{}, ErrSessionNotFound
+	}
+	if err != nil {
+		return SessionSummary{}, fmt.Errorf("store.GetSession: %w", err)
+	}
+	return SessionSummary{
+		ID:         app.SessionID(id),
+		AppID:      aid,
+		AppVersion: aver,
+		StartedAt:  time.UnixMicro(startedAt),
+		LastTurn:   app.TurnNumber(lastTurn),
+		Status:     status,
+	}, nil
+}
+
 func (s *sqliteStore) ListSessions(ctx context.Context, appID string, limit int) ([]SessionSummary, error) {
 	q := `SELECT id, app_id, app_version, started_at, last_turn, status
 	      FROM sessions
