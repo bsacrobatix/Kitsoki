@@ -520,6 +520,22 @@ Output JSON: {session_id, deleted_tables: {events: N, snapshots: N, ...}}`,
 			if err := execDelete("chat_locks", chatLockDel, sidStr); err != nil {
 				return err
 			}
+			// chat_pty_sessions + chat_input_queue (added by
+			// claude-code-sessions). Soft-skip via "no such table" so
+			// forget keeps working on databases predating that feature.
+			chatPTYDel := `DELETE FROM chat_pty_sessions WHERE chat_id IN
+			               (SELECT id FROM chats WHERE session_id = ?)`
+			if err := execDelete("chat_pty_sessions", chatPTYDel, sidStr); err != nil {
+				return err
+			}
+			// chat_input_queue carries origin_session_id directly — the kitsoki
+			// session that enqueued the drive — so we can delete by it, not by
+			// chat membership. (A single drive's lifetime is owned by the
+			// session that spawned it.)
+			chatQueueDel := `DELETE FROM chat_input_queue WHERE origin_session_id = ?`
+			if err := execDelete("chat_input_queue", chatQueueDel, sidStr); err != nil {
+				return err
+			}
 			if err := execDelete("chats", `DELETE FROM chats WHERE session_id = ?`, sidStr); err != nil {
 				return err
 			}
