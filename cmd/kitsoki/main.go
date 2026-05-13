@@ -313,6 +313,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				orchestrator.WithScheduler(jobScheduler),
 				orchestrator.WithJobStore(jobStore),
 				orchestrator.WithChatStore(chatStoreAdapter),
+				orchestrator.WithChatsConcrete(rawChatStore),
 				orchestrator.WithJournalWriter(jw),
 				orchestrator.WithJournalReader(jr),
 			)

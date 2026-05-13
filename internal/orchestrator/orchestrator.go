@@ -17,6 +17,7 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
 	"kitsoki/internal/expr"
 	"kitsoki/internal/harness"
@@ -57,6 +58,13 @@ type Orchestrator struct {
 	// chatStore is the SQLite-backed chat store used by chat-aware oracle handlers
 	// and the host.chat.* built-ins. Optional; nil disables chat persistence.
 	chatStore host.ChatStore
+
+	// chatsConcrete is the concrete *chats.Store, set when callers want the
+	// continue-mode resume path to surface pending drives and backgrounded PTY
+	// chats. Distinct from chatStore (the host-interface flavour) because the
+	// resume reads need methods (ListDrivesBySession, ListPTYForHost) that
+	// aren't on host.ChatStore. Optional; nil disables the surfacing.
+	chatsConcrete *chats.Store
 
 	// journalWriter is the durable journal writer (continue-mode §4.9 Rule 1).
 	// When nil, callers fall through to the legacy AppendEvents path.
@@ -208,6 +216,17 @@ func WithJobStore(js *jobs.JobStore) Option {
 func WithChatStore(cs host.ChatStore) Option {
 	return func(o *Orchestrator) {
 		o.chatStore = cs
+	}
+}
+
+// WithChatsConcrete wires a concrete *chats.Store for continue-mode resume
+// reads (drives + backgrounded PTY chats). Optional; when nil, AttachSession
+// returns a bundle without PendingDrives or BackgroundedChats populated.
+// Distinct from WithChatStore — the host-interface flavour serves host
+// handlers, this serves the resume read path.
+func WithChatsConcrete(cs *chats.Store) Option {
+	return func(o *Orchestrator) {
+		o.chatsConcrete = cs
 	}
 }
 

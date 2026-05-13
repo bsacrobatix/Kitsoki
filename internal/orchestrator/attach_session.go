@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/store"
@@ -51,6 +53,22 @@ type ResumeBundle struct {
 	// clarification UI for each on first frame.  Empty when no jobs await input
 	// or when no JobStore is wired into the orchestrator.
 	AwaitingJobs []AwaitingJob
+
+	// PendingDrives lists chat-input-queue rows in pending or dispatching
+	// status whose origin_session_id is this session.  These survive a
+	// kitsoki restart in SQLite; resume surfaces them so the TUI can
+	// re-dispatch, dismiss, or surface a pending-work indicator.  Empty
+	// when no drives are pending or no concrete chats.Store is wired.
+	PendingDrives []PendingDrive
+
+	// BackgroundedChats lists chat_pty_sessions rows in pty_background
+	// status whose chat is owned by this session.  Means: a chat had a
+	// tmux PTY running claude when the session was last active, and the
+	// PTY is still alive (or its row still exists — chat_pty_sessions
+	// only gets cleaned up by an explicit detach / GC).  Resume can
+	// offer to reattach.  Empty when no backgrounded chats or no
+	// concrete chats.Store is wired.
+	BackgroundedChats []BackgroundedChat
 }
 
 // AwaitingJob describes one background job paused waiting for user input.
@@ -58,6 +76,28 @@ type AwaitingJob struct {
 	JobID  jobs.JobID
 	Kind   string // the host handler kind that produced the job
 	Schema any    // ClarificationSchema as stored — TUI knows how to render
+}
+
+// PendingDrive describes one chat-input-queue row that survived restart in
+// pending or dispatching status — work the user (or an upstream orchestrator)
+// had enqueued against a chat that the resumed TUI should know about.
+type PendingDrive struct {
+	DriveID    string
+	ChatID     string
+	Transport  chats.DriveTransport
+	Status     chats.DriveStatus // pending | dispatching
+	Payload    string
+	ReceivedAt time.Time
+}
+
+// BackgroundedChat describes one chat whose tmux PTY was running claude in
+// pty_background mode when the session was last active. Resume can offer to
+// reattach (`kitsoki chat attach <chat_id>`).
+type BackgroundedChat struct {
+	ChatID      string
+	TmuxSession string
+	TmuxHost    string
+	LastIdleAt  *time.Time // nil if the PTY never reported idle
 }
 
 // PendingClarify is the exported version of the in-memory pendingClarify
@@ -217,6 +257,59 @@ func (o *Orchestrator) AttachSession(sid app.SessionID) (*ResumeBundle, error) {
 					JobID:  j.ID,
 					Kind:   j.Kind,
 					Schema: j.ClarificationSchema,
+				})
+			}
+		}
+	}
+
+	// ── 5. Pending chat drives + backgrounded PTY chats ───────────────────────
+	// claude-code-sessions adds chat_input_queue (drives) and chat_pty_sessions
+	// (tmux-hosted claude). Both survive restart in SQLite. Resume surfaces them
+	// so the TUI can re-dispatch / dismiss / reattach.
+	if o.chatsConcrete != nil {
+		ctx := context.Background()
+
+		// Drives: pending or dispatching, owned by this session.
+		drives, err := o.chatsConcrete.ListDrivesBySession(ctx, string(sid),
+			[]chats.DriveStatus{chats.DriveStatusPending, chats.DriveStatusDispatching})
+		if err != nil {
+			slog.Debug("orchestrator.AttachSession: ListDrivesBySession failed",
+				"session_id", string(sid), "err", err)
+		} else {
+			for _, d := range drives {
+				bundle.PendingDrives = append(bundle.PendingDrives, PendingDrive{
+					DriveID:    d.DriveID,
+					ChatID:     d.ChatID,
+					Transport:  d.Transport,
+					Status:     d.Status,
+					Payload:    d.Payload,
+					ReceivedAt: d.ReceivedAt,
+				})
+			}
+		}
+
+		// Backgrounded PTY chats: pty_background mode, this host only
+		// (ListPTYForHost is already host-scoped). Cross-host PTYs can't
+		// be reattached from here so they're filtered out at the source.
+		ptyRows, err := o.chatsConcrete.ListPTYForHost(ctx)
+		if err != nil {
+			slog.Debug("orchestrator.AttachSession: ListPTYForHost failed",
+				"session_id", string(sid), "err", err)
+		} else {
+			for _, p := range ptyRows {
+				if p.Mode != chats.PtyModeBackground {
+					continue
+				}
+				// Filter to chats owned by this session.
+				ch, err := o.chatsConcrete.Get(ctx, p.ChatID)
+				if err != nil || ch == nil || ch.SessionID != string(sid) {
+					continue
+				}
+				bundle.BackgroundedChats = append(bundle.BackgroundedChats, BackgroundedChat{
+					ChatID:      p.ChatID,
+					TmuxSession: p.TmuxSession,
+					TmuxHost:    p.TmuxHost,
+					LastIdleAt:  p.LastIdleAt,
 				})
 			}
 		}

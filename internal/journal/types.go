@@ -137,6 +137,26 @@ const KindDisambigPresented = "disambig.presented"
 // KindDisambigChosen records the user's selection from a disambiguation menu.
 const KindDisambigChosen = "disambig.chosen"
 
+// KindChatDriveSubmitted records a chat-input-queue Enqueue (a drive
+// submitted against a chat). Body: {drive_id, chat_id, transport, actor,
+// payload_snippet}. Resume reads these to render historical drives in the
+// transcript and to surface in-flight ones (when paired with the live
+// chat_input_queue row).
+const KindChatDriveSubmitted = "chat.drive.submitted"
+
+// KindChatDriveCompleted records a chat drive reaching terminal "done"
+// (the dispatch produced an assistant message). Body: {drive_id, chat_id,
+// result_seq}.
+const KindChatDriveCompleted = "chat.drive.completed"
+
+// KindChatDriveFailed records a chat drive reaching terminal "failed"
+// (dispatch errored). Body: {drive_id, chat_id, error_message}.
+const KindChatDriveFailed = "chat.drive.failed"
+
+// KindChatDriveDismissed records a chat drive that was operator-suppressed
+// without dispatch. Body: {drive_id, chat_id, reason}.
+const KindChatDriveDismissed = "chat.drive.dismissed"
+
 // ---- Predicate helpers ------------------------------------------------------
 
 // patchKinds is the set of patch-entry kind values.

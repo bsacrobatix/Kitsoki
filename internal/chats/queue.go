@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"kitsoki/internal/app"
+	"kitsoki/internal/journal"
 	"kitsoki/internal/ulid"
 )
 
@@ -138,6 +140,27 @@ func (s *Store) Enqueue(ctx context.Context, opts EnqueueOptions) (*Drive, error
 	)
 	if err != nil {
 		return nil, fmt.Errorf("chats.Enqueue: insert: %w", err)
+	}
+	// Journal: chat.drive.submitted. Post-commit; OK to be a separate write —
+	// the queue row is already durable. payload_snippet is the first 256
+	// chars (full payload would balloon the journal for large turns).
+	if s.journalWriter != nil {
+		snippet := opts.Payload
+		if len(snippet) > 256 {
+			snippet = snippet[:256] + "…"
+		}
+		appendJournalEntry(s.journalWriter, journal.Entry{
+			Ts:      s.clock.Now(),
+			Session: app.SessionID(opts.OriginSessionID),
+			Kind:    journal.KindChatDriveSubmitted,
+			Body: mustJSON(map[string]any{
+				"drive_id":        driveID,
+				"chat_id":         opts.ChatID,
+				"transport":       string(opts.Transport),
+				"actor":           opts.Actor,
+				"payload_snippet": snippet,
+			}),
+		})
 	}
 	return s.GetDrive(ctx, driveID)
 }
@@ -292,6 +315,7 @@ func (s *Store) markDriveTerminal(
 	}
 	n, _ := res.RowsAffected()
 	if n == 1 {
+		s.emitDriveTerminalJournal(ctx, driveID, toStatus, resultSeq, errorMessage)
 		return nil
 	}
 
@@ -309,6 +333,46 @@ func (s *Store) markDriveTerminal(
 	}
 	return fmt.Errorf("%w: drive %s is %s, expected %s",
 		ErrDriveStateMismatch, driveID, gotStatus, fromStatus)
+}
+
+// emitDriveTerminalJournal writes a chat.drive.{completed,failed,dismissed}
+// journal entry after a successful markDriveTerminal UPDATE. Post-commit;
+// silently no-ops when no journal writer is wired. We fetch the row to learn
+// origin_session_id and chat_id without changing the markDriveTerminal
+// signature.
+func (s *Store) emitDriveTerminalJournal(ctx context.Context, driveID string, toStatus DriveStatus, resultSeq *int, errorMessage string) {
+	if s.journalWriter == nil {
+		return
+	}
+	d, err := s.GetDrive(ctx, driveID)
+	if err != nil || d == nil {
+		return
+	}
+	var kind string
+	body := map[string]any{
+		"drive_id": driveID,
+		"chat_id":  d.ChatID,
+	}
+	switch toStatus {
+	case DriveStatusDone:
+		kind = journal.KindChatDriveCompleted
+		if resultSeq != nil {
+			body["result_seq"] = *resultSeq
+		}
+	case DriveStatusFailed:
+		kind = journal.KindChatDriveFailed
+		body["error_message"] = errorMessage
+	case DriveStatusDismissed:
+		kind = journal.KindChatDriveDismissed
+	default:
+		return
+	}
+	appendJournalEntry(s.journalWriter, journal.Entry{
+		Ts:      s.clock.Now(),
+		Session: app.SessionID(d.OriginSessionID),
+		Kind:    kind,
+		Body:    mustJSON(body),
+	})
 }
 
 // GetDrive returns a drive by id, or ErrDriveNotFound.
@@ -375,6 +439,49 @@ func (s *Store) ListDrives(ctx context.Context, chatID string, filter ListDrives
 		d, err := scanDriveRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("chats.ListDrives: scan: %w", err)
+		}
+		out = append(out, *d)
+	}
+	return out, rows.Err()
+}
+
+// ListDrivesBySession returns every drive whose origin_session_id matches
+// the given kitsoki session, optionally narrowed by status. Used by the
+// continue-mode AttachSession path to surface pending/in-flight drives the
+// resumed TUI should be aware of.
+//
+// Ordered by received_at ASC, drive_id ASC. An empty statuses slice returns
+// drives in every status (audit view).
+func (s *Store) ListDrivesBySession(ctx context.Context, sessionID string, statuses []DriveStatus) ([]Drive, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("chats.ListDrivesBySession: empty session ID")
+	}
+	q := `SELECT drive_id, chat_id, transport, thread, actor, correlation_id,
+	             payload, status, received_at,
+	             dispatched_at, completed_at, result_seq, error_message,
+	             on_complete_json, origin_session_id, origin_state
+	      FROM chat_input_queue
+	      WHERE origin_session_id = ?`
+	args := []any{sessionID}
+	if len(statuses) > 0 {
+		q += ` AND status IN (` + placeholders(len(statuses)) + `)`
+		for _, st := range statuses {
+			args = append(args, string(st))
+		}
+	}
+	q += ` ORDER BY received_at ASC, drive_id ASC`
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("chats.ListDrivesBySession: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Drive
+	for rows.Next() {
+		d, err := scanDriveRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("chats.ListDrivesBySession: scan: %w", err)
 		}
 		out = append(out, *d)
 	}

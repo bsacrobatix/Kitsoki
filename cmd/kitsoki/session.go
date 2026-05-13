@@ -864,6 +864,9 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 			if chatStoreOpt != nil {
 				orchOpts = append(orchOpts, chatStoreOpt)
 			}
+			if chatStoreErr == nil {
+				orchOpts = append(orchOpts, orchestrator.WithChatsConcrete(rawChatStore))
+			}
 			if journalWriterOpt != nil {
 				orchOpts = append(orchOpts, journalWriterOpt)
 			}

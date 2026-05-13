@@ -112,11 +112,49 @@ func AppendJournalTx(tx *sql.Tx, sid app.SessionID, entries []Entry) error {
 			}
 			e.DocVersion = ver
 		}
+		// Out-of-turn writes (chat appends, drive lifecycle, inbox events
+		// emitted post-commit from non-orchestrator paths) carry Turn=0,
+		// Seq=0 by convention. The (session_id, turn, seq) PK collides
+		// across multiple such entries — and the SQLite-Writer's swallow-
+		// errors path would silently drop all but the first. Auto-assign
+		// Seq from MAX+1 for the (session, turn=0) row group so multiple
+		// out-of-turn entries coexist.
+		//
+		// Orchestrator-driven writes set Seq explicitly (matching the
+		// paired events row) and use Turn>=1, so this branch leaves them
+		// untouched.
+		if e.Turn == 0 && e.Seq == 0 {
+			nextSeq, err := nextSeqTx(tx, sid, e.Turn)
+			if err != nil {
+				return fmt.Errorf("journal.AppendJournalTx: next seq for out-of-turn entry: %w", err)
+			}
+			e.Seq = nextSeq
+		}
 		if err := insertEntryTx(tx, e); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// nextSeqTx returns MAX(seq)+1 for (sid, turn) within tx. If no rows exist
+// for that (session, turn) pair it returns 0 (so the entry becomes seq=0,
+// the first row in its turn). Used to safely assign seqs for out-of-turn
+// entries (chat appends, drive lifecycle, etc.) without colliding with
+// other post-commit writes.
+func nextSeqTx(tx *sql.Tx, sid app.SessionID, turn app.TurnNumber) (int, error) {
+	var maxSeq sql.NullInt64
+	err := tx.QueryRow(
+		`SELECT MAX(seq) FROM journal WHERE session_id = ? AND turn = ?`,
+		string(sid), int64(turn),
+	).Scan(&maxSeq)
+	if err != nil {
+		return 0, fmt.Errorf("nextSeqTx: %w", err)
+	}
+	if maxSeq.Valid {
+		return int(maxSeq.Int64 + 1), nil
+	}
+	return 0, nil
 }
 
 // nextVersionTx returns MAX(doc_version)+1 for (sid, doc) within tx.
