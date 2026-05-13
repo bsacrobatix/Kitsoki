@@ -18,9 +18,7 @@ This document is the user-facing reference. For the conceptual model
 of states, intents, and the FSM proper, see
 [`state-machine.md`](state-machine.md); meta mode is the richer
 surface that supersedes the bare off-path escape hatch described in
-§11 of that doc. For the design discussion of what is still in flight
-(self / bug modes, background-agent runtime), see
-[`proposals/meta-mode-proposal.md`](proposals/meta-mode-proposal.md).
+§11 of that doc.
 
 ---
 
@@ -176,8 +174,47 @@ agents:
     tools: [host.authoring.propose, host.authoring.apply]
 ```
 
-Future phases will ship more builtins (`kitsoki-engineer`,
-`bug-reporter`); the override mechanism is the same.
+### 3.1 Other builtins
+
+Three more agents ship pre-registered alongside `story-author`:
+
+- **`default-oracle`** — vanilla helpful-assistant prompt with no
+  tools and no privileged surface. Acts as the unspecified-caller
+  fallback (off-path runtime once it ships LLM dispatch; future
+  free-form chat). Apps override under the same name to give
+  unspecified callers a different default.
+- **`kitsoki-engineer`** — edits Go code in the kitsoki repo, runs
+  the test suite, and (with user direction) opens PRs. Tool surface:
+  claude's filesystem + shell built-ins (`Read`, `Write`, `Edit`,
+  `Bash`, `Glob`, `Grep`). DefaultCwd is `${KITSOKI_REPO}`; the
+  agent is reached through the builtin `self` meta mode and is
+  silently omitted when that env var isn't set.
+- **`bug-reporter`** — gathers reproduction context and files a
+  bug report by invoking `kitsoki bug create` (see
+  `cmd/kitsoki/bug.go`). Tool surface:
+  `Bash(kitsoki bug create*)` — a single-command pattern that
+  forbids the agent from running anything else. Reached through
+  the builtin `bug` meta mode.
+
+### 3.2 Builtin meta_modes
+
+The loader injects two meta_modes that every app gets without
+declaring them in YAML (mirrors the agent-builtin pattern, see
+`internal/app/builtin_meta_modes.go`):
+
+- **`self`** — `/meta self`, agent `kitsoki-engineer`, cwd
+  `${KITSOKI_REPO}`. Chat row keys against the synthetic app_id
+  `kitsoki-self` so the conversation persists across every app:
+  a `self` session started while playing cloak is the same row
+  the user reopens while playing dev-story. `self` is omitted from
+  the injection set when `KITSOKI_REPO` is unset.
+- **`bug`** — `/meta bug`, agent `bug-reporter`, per-app keying.
+  Each app accumulates its own pile under `<app-dir>/bugs/`.
+
+An app suppresses or replaces either builtin by declaring its own
+`meta_modes.<self|bug>` with the same key. Trigger collisions
+between a builtin and a user-declared mode surface through normal
+validation (the injection step runs before `validateMetaModes`).
 
 ---
 
@@ -245,12 +282,13 @@ involvement.
 | `/meta list`             | on-path or meta      | Inline-lists every meta chat for this app. Columns: `ID` (first 8 chars), `MODE`, `SCOPE` (state path), `UPDATED` (`YYYY-MM-DD HH:MM` local), `PREVIEW` (first 50 chars of the first user turn). Archived rows are excluded. |
 | `/meta new`              | meta only            | Archives the active chat row (status → `archived`) and opens a fresh one in the same `(mode, scope)`. The transcript is reset; the banner is re-emitted. Outside meta this prints a usage hint. |
 | `/meta resume <prefix>`  | on-path or meta      | Resolves an ID prefix (minimum 3 chars) against the app's meta chats and enters that chat. An ambiguous prefix prints every matching ID; no chat is entered. |
-| `/onpath`                | meta only            | Exits the overlay. Default exit intent — overridable per mode via `return.intent`. The TUI prints the session-summary line (`✓ meta session: N turns, M edit(s) ...`) and re-renders the saved state. |
+| `/meta done`             | meta only            | Archives the active chat (status → `archived`) AND exits meta mode. Use when you're finished with the conversation and don't want it cluttering `/meta list` or the foyer panel. Differs from `/onpath` (which exits without archiving) and from `/meta new` (which archives + opens a fresh row). The confirmation includes the chat ID so you can recover via `/meta resume <prefix>` if you change your mind. |
+| `/onpath`                | meta only            | Exits the overlay without archiving — the chat persists for resume. Default exit intent; overridable per mode via `return.intent`. The TUI prints the session-summary line (`✓ meta session: N turns, M edit(s) ...`) and re-renders the saved state. |
 
 Mode dispatch uses exact match on the first slash arg, so a meta
-mode literally named `list`, `new`, or `resume` would be unreachable
-via `/meta <name>` (the subcommand wins). The loader rejects those
-reserved names so the collision is structural rather than runtime.
+mode literally named `list`, `new`, `resume`, or `done` would be
+unreachable via `/meta <name>` (the subcommand wins). Pick mode
+names outside that reserved set.
 
 When a meta-mode session is active the side panel renders the
 "Meta mode" cheatsheet — the on-path actions menu is irrelevant
@@ -454,34 +492,34 @@ eyes to these before designing a new app around them.
   type with an `agent:` field; that type has not landed. Background
   jobs today are declared via `effects:` (`background: true`) on
   transitions and do not select an agent. The slot will land when
-  background jobs become a first-class declarative type.
-- **Tool gating is metadata-only.** The agent's declared `tools:`
-  list (and the meta-mode override) is plumbed through to the
-  oracle adapter as a hint (`__meta_tool_allowlist`), but the
-  spawned claude subprocess has access to its full configured tool
-  surface. A misconfigured agent that the author thinks is locked
-  to `host.authoring.*` could still invoke `Bash` or `Write`. Don't
-  treat the allowlist as a security boundary — treat it as
-  documentation for the agent's prompt and a future enforcement
-  seam.
-- **Tool gating enforcement is not yet wired.** Once a per-call MCP
-  server with a registered subset of tools is in place (or
-  controller-side rejection of disallowed tool-token usage), the
-  `tools:` list will be load-bearing. Until then it documents
-  intent.
-- **`self` and `bug` meta modes are not yet built.** Those are
-  Phase C work — see
-  [`proposals/meta-mode-proposal.md`](proposals/meta-mode-proposal.md)
-  §1 for the design sketch. Today `story` is the only shipped
-  builtin mode, but app authors can declare new modes against any
-  agent in their `agents:` block without engine changes.
+  background jobs become a first-class declarative type (separate
+  proposal, not part of meta mode).
 - **One active meta mode at a time.** Nested overlays are not
   supported. Entering meta from inside meta is undefined; the TUI
   treats `/meta <name>` while already in meta as a usage hint.
-- **TUI session list is CLI-only.** There is no foyer panel that
-  enumerates every meta session across the app; use
-  `kitsoki chat list --room meta:story` (or any other `meta:*`
-  room) until the Phase D session list lands.
+- **Tool-gating is not enforced.** Every claude subprocess runs with
+  `--permission-mode bypassPermissions`. An agent's declared `tools:`
+  list is informational — it documents the intended toolset for
+  prompt authors and code reviewers, but claude is free to call
+  anything its built-in surface exposes. Treat the list as a
+  contract between the prompt and the reviewer, not as a runtime
+  guardrail. A future iteration may switch to `dontAsk` +
+  `--allowed-tools` + `--disallowed-tools` when an agent's blast
+  radius actually demands enforcement (e.g. `self` mode pushing
+  commits).
 
-The proposal file linked above tracks the resolution of each of these
-items; everything in this document is shipped and load-bearing.
+What ships with kitsoki today (formerly under "Limitations"):
+
+- **`self` and `bug` meta modes are builtin** (see §3.4). `self`
+  uses the `kitsoki-engineer` agent rooted at `${KITSOKI_REPO}` and
+  keys its chat against a synthetic `app_id` so the conversation
+  is the same row across every running app; `bug` uses the
+  `bug-reporter` agent which files reports via
+  `kitsoki bug create` under the running app's `bugs/` directory.
+  Apps override either by declaring a `meta_modes.{self,bug}` with
+  the same key.
+- **The foyer "meta sessions" panel** is available from the
+  Esc-menu's "Meta sessions" entry. It lists every active meta
+  chat the controller can see — including cross-app `self` chats
+  merged in by `Controller.ListChats` — and resumes the picked
+  row without typing `/meta resume <id>`.

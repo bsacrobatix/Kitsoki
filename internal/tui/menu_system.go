@@ -13,47 +13,80 @@ type menuSystemAction int
 const (
 	menuActionNone menuSystemAction = iota
 	menuActionExit
-	menuActionReportBug
-	// menuActionMetaStory opens the first declared meta mode (default
-	// = /meta with no name). Present when the AppDef declares any
-	// meta_modes; otherwise the row is omitted entirely.
-	menuActionMetaStory
+	// menuActionMetaMode opens a specific meta mode. The entry's
+	// modeName carries which one; the handler dispatches into
+	// startMetaMode(modeName).
+	menuActionMetaMode
+	// menuActionMetaSessions opens the foyer "meta sessions" panel
+	// (proposal §2.1) — an overlay that lists every active meta chat
+	// (this app's plus cross-app `self` chats) and lets the user
+	// resume one without typing `/meta resume <id>`.
+	menuActionMetaSessions
 )
 
-// menuSystemChoiceMsg is emitted when the user selects a row.
+// menuSystemChoiceMsg is emitted when the user selects a row. modeName
+// is non-empty only for menuActionMetaMode rows.
 type menuSystemChoiceMsg struct {
-	action menuSystemAction
+	action   menuSystemAction
+	modeName string
 }
 
 // menuSystemEntry describes one row in the overlay.
 type menuSystemEntry struct {
-	action menuSystemAction
-	label  string
-	hint   string
+	action   menuSystemAction
+	label    string
+	hint     string
+	modeName string // mode name for menuActionMetaMode entries; "" otherwise
 }
 
 // menuSystemModel is the Esc-activated overlay that exposes session-level
-// actions (exit, report bug, and any declared meta mode). It follows
-// the same Open/Close + Update/View shape as disambiguationModel.
+// actions (exit, report bug, and one row per declared meta mode). It
+// follows the same Open/Close + Update/View shape as disambiguationModel.
 type menuSystemModel struct {
 	active   bool
 	entries  []menuSystemEntry
 	selected int
 }
 
-// newMenuSystemModel builds the overlay's static entry list. metaLabel
-// is the human-readable label for the meta-mode row; pass "" to omit
-// the row (when the AppDef declares no meta_modes).
-func newMenuSystemModel(metaLabel string) menuSystemModel {
+// metaMenuEntry is a (mode name, display label) pair passed to
+// newMenuSystemModel so the overlay can list every declared meta
+// mode. Order is the caller's responsibility — pass sorted names for
+// deterministic output. Empty slice → no meta rows.
+type metaMenuEntry struct {
+	Name  string
+	Label string
+}
+
+// newMenuSystemModel builds the overlay's entry list. metaEntries
+// produces one row per declared meta mode; pass an empty slice when
+// the AppDef declares (or has injected) no meta_modes.
+func newMenuSystemModel(metaEntries []metaMenuEntry) menuSystemModel {
 	entries := []menuSystemEntry{
 		{action: menuActionExit, label: "Exit", hint: "quit this session"},
-		{action: menuActionReportBug, label: "Report bug", hint: "coming soon"},
 	}
-	if metaLabel != "" {
+	for _, me := range metaEntries {
+		if me.Name == "" {
+			continue
+		}
+		label := me.Label
+		if label == "" {
+			label = "meta: " + me.Name
+		}
 		entries = append(entries, menuSystemEntry{
-			action: menuActionMetaStory,
-			label:  metaLabel,
-			hint:   "/meta — sidebar conversation",
+			action:   menuActionMetaMode,
+			label:    label,
+			hint:     "/meta " + me.Name,
+			modeName: me.Name,
+		})
+	}
+	if len(metaEntries) > 0 {
+		// Only surface the "Meta sessions" panel when there's at least
+		// one mode the user could have a session under. Apps with no
+		// meta modes get an Esc menu that's just Exit.
+		entries = append(entries, menuSystemEntry{
+			action: menuActionMetaSessions,
+			label:  "Meta sessions",
+			hint:   "browse + resume active meta chats",
 		})
 	}
 	return menuSystemModel{entries: entries}
@@ -104,18 +137,22 @@ func (m menuSystemModel) Update(msg tea.Msg) (menuSystemModel, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		chosen := m.entries[m.selected].action
+		chosen := m.entries[m.selected]
 		m.active = false
-		return m, func() tea.Msg { return menuSystemChoiceMsg{action: chosen} }
+		return m, func() tea.Msg {
+			return menuSystemChoiceMsg{action: chosen.action, modeName: chosen.modeName}
+		}
 	}
 
 	// Numeric hotkeys 1..N.
 	for i := 1; i <= len(m.entries) && i <= 9; i++ {
 		if keyMsg.String() == fmt.Sprintf("%d", i) {
-			chosen := m.entries[i-1].action
+			chosen := m.entries[i-1]
 			m.active = false
 			m.selected = i - 1
-			return m, func() tea.Msg { return menuSystemChoiceMsg{action: chosen} }
+			return m, func() tea.Msg {
+				return menuSystemChoiceMsg{action: chosen.action, modeName: chosen.modeName}
+			}
 		}
 	}
 

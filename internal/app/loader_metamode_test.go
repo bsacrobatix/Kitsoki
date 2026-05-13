@@ -8,12 +8,13 @@ import (
 )
 
 // TestMetaMode_Minimal loads an app with a single meta_modes entry and asserts
-// that defaults resolve correctly via the helper methods.
+// that defaults resolve correctly via the helper methods. The builtin `bug`
+// mode is also injected post-merge, so the assertion targets the story entry
+// specifically rather than the map length.
 func TestMetaMode_Minimal(t *testing.T) {
 	def, err := Load("testdata/metamode_minimal.yaml")
 	require.NoError(t, err)
 	require.NotNil(t, def.MetaModes)
-	require.Len(t, def.MetaModes, 1)
 
 	story, ok := def.MetaModes["story"]
 	require.True(t, ok, "story meta mode must be present")
@@ -30,12 +31,18 @@ func TestMetaMode_Minimal(t *testing.T) {
 }
 
 // TestMetaMode_EmptyBlock verifies that an explicit `meta_modes: {}` parses
-// into a non-nil (but empty) map, matching the user-facing contract.
+// into a non-nil map and that builtin injection still runs (the app gets
+// the builtin `bug` mode without declaring anything). Apps that want to
+// suppress a builtin override it under the same name.
 func TestMetaMode_EmptyBlock(t *testing.T) {
 	def, err := Load("testdata/metamode_empty.yaml")
 	require.NoError(t, err)
 	require.NotNil(t, def.MetaModes, "explicit empty meta_modes: must yield a non-nil map")
-	require.Len(t, def.MetaModes, 0)
+
+	bug, ok := def.MetaModes["bug"]
+	require.True(t, ok, "builtin `bug` mode must be injected for apps without their own declaration")
+	require.Equal(t, "bug", bug.Trigger)
+	require.Equal(t, "bug-reporter", bug.Agent)
 }
 
 // TestMetaMode_DuplicateTrigger asserts that two meta modes claiming the same

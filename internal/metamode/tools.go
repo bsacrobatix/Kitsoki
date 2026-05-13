@@ -19,6 +19,11 @@ import "strings"
 // loader accepts in either form, per the WS-A4 brief) into the
 // OracleCaller's tool allowlist. Keeps the loader free of host-package
 // knowledge and the YAML surface forgiving.
+//
+// The list this produces is informational today — every claude
+// subprocess runs with --permission-mode bypassPermissions, so the
+// allowlist documents intent for prompts and human reviewers rather
+// than acting as a runtime gate. See docs/meta-mode.md §10.
 func NormaliseToolName(name string) string {
 	if name == "" {
 		return name

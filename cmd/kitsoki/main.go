@@ -74,6 +74,7 @@ See also the full design document (design.md) in the repo.`,
 	root.AddCommand(sessionCmd())
 	root.AddCommand(chatCmd())
 	root.AddCommand(mcpValidatorCmd())
+	root.AddCommand(bugCmd())
 
 	return root
 }

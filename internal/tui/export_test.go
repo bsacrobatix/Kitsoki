@@ -170,6 +170,28 @@ func MenuSystemActive(m RootModel) bool { return m.menuSystem.IsActive() }
 // MenuSystemView returns the rendered overlay (empty when inactive).
 func MenuSystemView(m RootModel) string { return m.menuSystem.View() }
 
+// ── Sessions panel test helpers ───────────────────────────────────────────────
+
+// SessionsPanelActive reports whether the foyer "meta sessions" overlay is
+// currently visible. Used by the end-to-end flow test to observe the
+// async ListChats → handleSessionsPanelLoaded transition without
+// reaching into private fields.
+func SessionsPanelActive(m RootModel) bool { return m.sessionsPanel.IsActive() }
+
+// SessionsPanelView returns the rendered overlay (empty when inactive).
+func SessionsPanelView(m RootModel) string { return m.sessionsPanel.View() }
+
+// MetaSessionChatID returns the chat ID of the currently-active meta
+// session, or "" when no /meta overlay is open. Used by the
+// sessions-panel flow test to assert resume targeted the right row
+// without depending on the fake store's internal bookkeeping.
+func MetaSessionChatID(m RootModel) string {
+	if m.metaMode.session == nil || m.metaMode.session.Chat == nil {
+		return ""
+	}
+	return m.metaMode.session.Chat.ID()
+}
+
 // SetPromptValue sets the prompt input value for tests that need to start
 // with pre-filled text (e.g. Ctrl+C clears the prompt).
 func SetPromptValue(m *RootModel, v string) { m.prompt.SetValue(v) }

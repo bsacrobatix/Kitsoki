@@ -140,13 +140,13 @@ func (c *Controller) Enter(ctx context.Context, snap Snapshot, modeName string) 
 	}
 
 	room := metaRoom(modeName)
-	scopeKey := string(snap.State)
+	scopeKey := metaScopeKey(modeName, string(snap.State))
 	title := mode.Label
 	if title == "" {
 		title = modeName
 	}
 
-	chat, err := c.Chats.ResolveMeta(ctx, c.AppDef.App.ID, room, scopeKey, title)
+	chat, err := c.Chats.ResolveMeta(ctx, metaAppID(modeName, c.AppDef.App.ID), room, scopeKey, title)
 	if err != nil {
 		return nil, fmt.Errorf("metamode.Enter: resolve chat: %w", err)
 	}
@@ -181,6 +181,13 @@ const firstUserMessageMaxLen = 100
 // by UpdatedAt desc. Archived rows are excluded by the underlying
 // ChatStore.ListMeta. Non-meta rooms are filtered defensively even
 // though ListMeta should already exclude them.
+//
+// Cross-app `self` chats (keyed under SelfAppID) are merged into the
+// result when the caller asks for any app other than SelfAppID
+// itself — so `/meta list` inside a running app surfaces ongoing
+// kitsoki-engineering conversations alongside the app's own chats.
+// Callers that explicitly want only one bucket pass SelfAppID
+// directly to see just the cross-app chats.
 func (c *Controller) ListChats(ctx context.Context, appID string) ([]ChatListing, error) {
 	if c == nil {
 		return nil, fmt.Errorf("metamode.ListChats: nil controller")
@@ -191,6 +198,16 @@ func (c *Controller) ListChats(ctx context.Context, appID string) ([]ChatListing
 	handles, err := c.Chats.ListMeta(ctx, appID)
 	if err != nil {
 		return nil, fmt.Errorf("metamode.ListChats: %w", err)
+	}
+	// Pull cross-app `self` chats alongside the app's own — but only
+	// when the caller isn't already asking for SelfAppID (avoid the
+	// double-list).
+	if appID != SelfAppID {
+		selfHandles, err := c.Chats.ListMeta(ctx, SelfAppID)
+		if err != nil {
+			return nil, fmt.Errorf("metamode.ListChats: self: %w", err)
+		}
+		handles = append(handles, selfHandles...)
 	}
 	out := make([]ChatListing, 0, len(handles))
 	for _, h := range handles {
@@ -264,7 +281,11 @@ func (c *Controller) EnterByChatID(ctx context.Context, snap Snapshot, modeName,
 	if !strings.HasPrefix(room, "meta:") {
 		return nil, fmt.Errorf("metamode.EnterByChatID: chat %q is not a meta chat (room=%q)", chatID, room)
 	}
-	if chat.AppID() != c.AppDef.App.ID {
+	// `self` chats key against the synthetic SelfAppID across all apps
+	// (proposal §1 cross-app keying). Allow them to resume from any
+	// running app; reject only when the chat's app_id matches neither
+	// the running app nor SelfAppID.
+	if chat.AppID() != c.AppDef.App.ID && chat.AppID() != SelfAppID {
 		return nil, fmt.Errorf("metamode.EnterByChatID: chat %q belongs to app %q, not %q",
 			chatID, chat.AppID(), c.AppDef.App.ID)
 	}
@@ -765,6 +786,39 @@ func (c *Controller) Exit(ctx context.Context, s *Session) error {
 	return nil
 }
 
+// Done archives the active session's chat and returns its ID. Unlike
+// Exit (which only archives when the mode is non-persistent) and
+// NewChat (which archives and opens a fresh row), Done is the
+// user-signalled "I'm finished with this chat — don't keep it around"
+// path. The chat goes to archived state so it no longer shows up in
+// the default /meta list / sessions-panel listing; it can still be
+// resumed by full ID via /meta resume for forensic reads.
+//
+// Persist:false modes call ArchiveMeta from Exit too, so Done is
+// mostly useful for the default persist:true case. Calling Done
+// twice in a row is safe — the second call hits the same archived
+// row and returns the same ID without erroring (ArchiveMeta is
+// idempotent at the SQLite layer).
+//
+// Returns the archived chat ID for the caller's confirmation
+// message.
+func (c *Controller) Done(ctx context.Context, s *Session) (string, error) {
+	if c == nil {
+		return "", fmt.Errorf("metamode.Done: nil controller")
+	}
+	if s == nil || s.Chat == nil {
+		return "", fmt.Errorf("metamode.Done: no active session")
+	}
+	if c.Chats == nil {
+		return "", fmt.Errorf("metamode.Done: nil chat store")
+	}
+	id := s.Chat.ID()
+	if err := c.Chats.ArchiveMeta(ctx, id); err != nil {
+		return "", fmt.Errorf("metamode.Done: archive %s: %w", id, err)
+	}
+	return id, nil
+}
+
 // now is the clock accessor with a sane default.
 func (c *Controller) now() time.Time {
 	if c.Clock != nil {
@@ -807,6 +861,37 @@ func (c *Controller) newLedger(sid app.SessionID) *ProposalLedger {
 		l.WithLedgerJournalWriter(c.JournalWriter, sid)
 	}
 	return l
+}
+
+// SelfAppID is the synthetic app_id under which `self` meta chats are
+// stored. It is intentionally not a valid app YAML id (no app could
+// declare `app.id: kitsoki-self` and collide), so chats keyed against
+// it survive across every running app — a `self` conversation started
+// while playing cloak is the same row the user reopens while playing
+// dev-story. Cross-app keying is the proposal §1 design (option a).
+const SelfAppID = "kitsoki-self"
+
+// metaAppID returns the app_id used to resolve a meta chat row for the
+// given mode. For `self` it ignores the running app and returns
+// SelfAppID so the conversation is cross-app; every other mode keys
+// under the running app's id.
+func metaAppID(modeName, runningAppID string) string {
+	if modeName == "self" {
+		return SelfAppID
+	}
+	return runningAppID
+}
+
+// metaScopeKey returns the scope_key used to resolve a meta chat for
+// the given mode. The `self` mode is cross-app, so the user's current
+// state in their running app is irrelevant — one conversation per
+// user, period. Every other mode keys against the current state path
+// so a chat opened in `bar.dark` is distinct from one opened in `foyer`.
+func metaScopeKey(modeName, statePath string) string {
+	if modeName == "self" {
+		return ""
+	}
+	return statePath
 }
 
 // ─── ledger adapter (avoids an import cycle metamode→host→metamode) ─────────

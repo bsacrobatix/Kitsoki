@@ -369,7 +369,8 @@ func TestTUIQuit(t *testing.T) {
 
 // TestTUIMenuEscOpens verifies that pressing Esc from ModeOnPath opens the
 // menu overlay and enters ModeMenu. Cloak declares a meta_modes.story
-// block, so the meta-mode row appears alongside Exit and Report bug.
+// block, so the meta-mode row appears alongside Exit and the builtin
+// `bug` mode row.
 func TestTUIMenuEscOpens(t *testing.T) {
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
@@ -382,8 +383,11 @@ func TestTUIMenuEscOpens(t *testing.T) {
 	require.True(t, tuipkg.MenuSystemActive(rm))
 	view := tuipkg.MenuSystemView(rm)
 	require.Contains(t, view, "Exit")
-	require.Contains(t, view, "Report bug")
 	require.Contains(t, view, "improve the story")
+	require.Contains(t, view, "File a bug",
+		"builtin bug meta mode must surface — it replaced the legacy 'Report bug' stub")
+	require.NotContains(t, view, "Report bug",
+		"the 'coming soon' stub is gone; /meta bug is the real flow now")
 	require.NotContains(t, view, "Edit mode",
 		"edit mode entry should be gone (replaced by /meta:story)")
 }
@@ -417,22 +421,6 @@ func TestTUIMenuExitQuits(t *testing.T) {
 	rm, ok := tuipkg.ExtractRootModel(m)
 	require.True(t, ok)
 	require.True(t, rm.Quitting(), "picking Exit should set quitting")
-}
-
-// TestTUIMenuReportBugStub verifies that the Report bug row posts a stub
-// system message instead of crashing or advancing any state.
-func TestTUIMenuReportBugStub(t *testing.T) {
-	orch, sid := setupCloak(t)
-	m := buildModel(t, orch, sid)
-
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	var cmd tea.Cmd
-	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
-	m = processCommands(m, cmd, 5)
-
-	require.Equal(t, tuipkg.ModeOnPath, extractMode(t, m))
-	transcript := extractTranscript(t, m)
-	require.Contains(t, transcript, "bug report: coming soon")
 }
 
 // ─── Ctrl+C tiered behaviour ─────────────────────────────────────────────────

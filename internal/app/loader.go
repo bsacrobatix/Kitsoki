@@ -67,6 +67,12 @@ func Load(path string) (*AppDef, error) {
 		return nil, errors.Join(expandErrs...)
 	}
 
+	// Inject builtin meta_modes (`self`, `bug`) that the app didn't
+	// declare itself. Done before validation so trigger collisions and
+	// missing-env-var diagnostics fire the same way as for app-declared
+	// modes.
+	injectBuiltinMetaModes(merged)
+
 	// Now fully validate the merged definition.
 	_, validErrs := validateDef(merged, path)
 	if len(validErrs) > 0 {
@@ -397,6 +403,10 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 		}
 		return nil, []error{ve}
 	}
+
+	// LoadBytes skips parseAndMerge, so inject builtin meta_modes here
+	// before validation. Same rationale as the Load() path.
+	injectBuiltinMetaModes(&def)
 
 	return validateDef(&def, file)
 }

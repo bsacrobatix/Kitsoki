@@ -388,10 +388,11 @@ func TestMetaMode_MenuEntry(t *testing.T) {
 	require.Contains(t, view, "improve the story",
 		"meta-mode label should appear in the Esc menu")
 
-	// Hotkey: meta-story sits at row 3 (Exit=1, Report bug=2, meta=3,
-	// Edit=4).
+	// Hotkey: meta-story sits at row 2 (Exit=1, meta-story=2, Meta sessions=3).
+	// The legacy "Report bug" stub at row 2 was removed once `/meta bug`
+	// became the real bug-filing flow.
 	var cmd tea.Cmd
-	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = processCommands(m, cmd, 10)
 
 	require.Equal(t, tuipkg.ModeMeta, extractMode(t, m),
@@ -502,6 +503,56 @@ func TestMetaMode_NewArchivesAndContinues(t *testing.T) {
 		"the transcript should announce the new chat")
 	require.NotContains(t, transcript, "older question",
 		"the previous chat's content must not bleed into the new pane")
+}
+
+// TestMetaMode_DoneArchivesAndExits enters meta, types /meta done,
+// and asserts the chat was archived AND the overlay closed
+// (mode flips back to ModeOnPath). The transcript carries a
+// confirmation with the 8-char id prefix so the user can recover
+// via /meta resume if they regret it.
+func TestMetaMode_DoneArchivesAndExits(t *testing.T) {
+	m, store, _ := buildMetaModeModel(t, singleStoryMode(), "")
+
+	// Enter meta first so there's an active session.
+	m = runTurnBlocking(t, m, "/meta")
+	require.Equal(t, tuipkg.ModeMeta, extractMode(t, m))
+	require.NotNil(t, store.chat, "initial enter should have resolved a chat")
+	oldID := store.chat.ID()
+
+	// Drive /meta done.
+	m, _ = typeString(m, "/meta done")
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = processCommands(m, cmd, 10)
+
+	require.Equal(t, tuipkg.ModeOnPath, extractMode(t, m),
+		"/meta done must drop us back to ModeOnPath, unlike /meta new which stays in ModeMeta")
+	require.Len(t, store.archivedIDs, 1,
+		"the active chat should have been archived exactly once")
+	require.Equal(t, oldID, store.archivedIDs[0])
+
+	transcript := extractTranscript(t, m)
+	require.Contains(t, transcript, "meta done: archived chat",
+		"confirmation must surface in the transcript")
+	// The fake store's auto-minted IDs ("chat-1") are shorter than 8 chars;
+	// the handler truncates only when len > 8, so we just check the full id
+	// appears.
+	require.Contains(t, transcript, oldID,
+		"confirmation must include the chat id for recovery via /meta resume")
+}
+
+// TestMetaMode_DoneOutsideMetaIsHint asserts that typing /meta done
+// from ModeOnPath (no active session) prints a hint rather than
+// archiving anything random.
+func TestMetaMode_DoneOutsideMetaIsHint(t *testing.T) {
+	m, store, _ := buildMetaModeModel(t, singleStoryMode(), "")
+
+	m, _ = typeString(m, "/meta done")
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = processCommands(m, cmd, 5)
+
+	require.Equal(t, tuipkg.ModeOnPath, extractMode(t, m))
+	require.Empty(t, store.archivedIDs, "no archive should fire when no session is active")
+	require.Contains(t, extractTranscript(t, m), "only valid inside meta mode")
 }
 
 // TestMetaMode_ResumeByPrefix from ModeOnPath: seed a chat, type

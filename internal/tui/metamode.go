@@ -108,7 +108,8 @@ func (m metaModel) MenuView(width, height int) string {
 
 	header := lipgloss.NewStyle().Bold(true).Foreground(colorInfo).Render(title)
 	rows := []struct{ cmd, desc string }{
-		{"/onpath", "return to the story"},
+		{"/onpath", "return to the story (keep chat)"},
+		{"/meta done", "archive this chat + exit"},
 		{"/meta list", "list chats"},
 		{"/meta new", "fresh chat"},
 		{"/meta resume <id>", "jump to a chat by id"},
@@ -183,6 +184,15 @@ type metaNewDoneMsg struct {
 	err     error
 }
 
+// metaDoneDoneMsg is emitted by metaDoneCmd when Controller.Done
+// returns. On success the TUI archives the chat, exits meta mode,
+// and prints a confirmation with the (truncated) chat ID so the
+// user can resume by id-prefix if they later regret the close.
+type metaDoneDoneMsg struct {
+	archivedID string
+	err        error
+}
+
 // metaEnterCmd asynchronously calls Controller.Enter for modeName.
 // Falls into metaEnterDoneMsg on completion.
 func metaEnterCmd(ctx context.Context, ctrl *metamode.Controller, snap metamode.Snapshot, modeName string) tea.Cmd {
@@ -230,6 +240,20 @@ func metaNewCmd(ctx context.Context, ctrl *metamode.Controller, sess *metamode.S
 		}
 		s, err := ctrl.NewChat(ctx, sess)
 		return metaNewDoneMsg{session: s, err: err}
+	}
+}
+
+// metaDoneCmd asynchronously archives the active chat without opening
+// a replacement, then emits metaDoneDoneMsg. The TUI's handler is
+// responsible for exiting meta mode and printing the confirmation —
+// keeping mode flips off the io goroutine.
+func metaDoneCmd(ctx context.Context, ctrl *metamode.Controller, sess *metamode.Session) tea.Cmd {
+	return func() tea.Msg {
+		if ctrl == nil {
+			return metaDoneDoneMsg{err: fmt.Errorf("meta mode unavailable: controller not wired")}
+		}
+		id, err := ctrl.Done(ctx, sess)
+		return metaDoneDoneMsg{archivedID: id, err: err}
 	}
 }
 

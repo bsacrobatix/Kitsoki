@@ -33,7 +33,10 @@ type Registry interface {
 // ship with kitsoki today.
 func NewBuiltins() Registry {
 	r := &registry{agents: make(map[string]Agent)}
+	r.Register(defaultOracle())
 	r.Register(storyAuthor())
+	r.Register(kitsokiEngineer())
+	r.Register(bugReporter())
 	return r
 }
 
@@ -42,7 +45,7 @@ func NewBuiltins() Registry {
 // a full registry. Order matches NewBuiltins() registration; callers that
 // need a stable lexicographic order should sort the returned slice.
 func BuiltinNames() []string {
-	return []string{"story-author"}
+	return []string{"default-oracle", "story-author", "kitsoki-engineer", "bug-reporter"}
 }
 
 type registry struct {

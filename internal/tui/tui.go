@@ -61,6 +61,11 @@ const (
 	// declared meta mode). See docs/proposals/meta-mode-proposal.md §3.
 	// Replaces the former ModeEdit / edit-mode overlay (Phase B).
 	ModeMeta
+	// ModeMetaSessions is active while the "Meta sessions" foyer
+	// overlay (proposal §2.1) is on screen. Arrow keys navigate the
+	// listed chats; Enter resumes one; Esc closes the overlay and
+	// returns to ModeOnPath.
+	ModeMetaSessions
 )
 
 // ctrlCQuitWindow is how long after a Ctrl+C the next Ctrl+C will quit
@@ -117,6 +122,7 @@ type RootModel struct {
 	disambiguation disambiguationModel
 	menuSystem     menuSystemModel
 	metaMode       metaModel
+	sessionsPanel  sessionsPanelModel
 	prompt         textinput.Model
 
 	// chatStore is the persistent chat row backend; used by the
@@ -368,8 +374,9 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		offPath:        newOffPathModel(offPathBannerFromApp(orch.AppDef())),
 		clarify:        newClarifyModel(),
 		disambiguation: newDisambiguationModel(),
-		menuSystem:     newMenuSystemModel(metaMenuLabel(orch.AppDef())),
+		menuSystem:     newMenuSystemModel(metaMenuEntries(orch.AppDef())),
 		metaMode:       newMetaModel(),
+		sessionsPanel:  newSessionsPanelModel(),
 		prompt:         ti,
 		spinner:        sp,
 		mouseOn:        true,
@@ -416,22 +423,27 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	return m
 }
 
-// metaMenuLabel picks the Esc-menu label for the meta entry. Returns
-// the first declared mode's Label (or "meta: <name>" when no Label),
-// or "" if no meta modes are declared (entry is omitted).
-func metaMenuLabel(def *app.AppDef) string {
+// metaMenuEntries enumerates every declared meta mode (sorted by name)
+// so the Esc-menu overlay can list one row per mode. Empty slice when
+// the AppDef declares (or has injected) no meta_modes.
+func metaMenuEntries(def *app.AppDef) []metaMenuEntry {
 	if def == nil || len(def.MetaModes) == 0 {
-		return ""
+		return nil
 	}
 	names := sortedMetaModeNames(def)
-	first := firstMetaModeName(names)
-	if first == "" {
-		return ""
+	out := make([]metaMenuEntry, 0, len(names))
+	for _, name := range names {
+		mode := def.MetaModes[name]
+		if mode == nil {
+			continue
+		}
+		label := mode.Label
+		if label == "" {
+			label = "meta: " + name
+		}
+		out = append(out, metaMenuEntry{Name: name, Label: label})
 	}
-	if mode := def.MetaModes[first]; mode != nil && mode.Label != "" {
-		return mode.Label
-	}
-	return "meta: " + first
+	return out
 }
 
 // sortedMetaModeNames returns def.MetaModes keys in lexicographic
@@ -515,6 +527,11 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.mode == ModeMeta {
 		return m.updateMeta(msg)
 	}
+	// If the meta-sessions panel overlay is active, it owns the
+	// keyboard until the user picks a row or hits Esc.
+	if m.mode == ModeMetaSessions {
+		return m.updateSessionsPanel(msg)
+	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -562,6 +579,15 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case metaNewDoneMsg:
 		return m.handleMetaNewDone(msg)
+
+	case metaDoneDoneMsg:
+		return m.handleMetaDoneDone(msg)
+
+	case sessionsPanelLoadedMsg:
+		return m.handleSessionsPanelLoaded(msg)
+
+	case sessionsPanelChoiceMsg:
+		return m.handleSessionsPanelChoice(msg)
 
 	case spinner.TickMsg:
 		// Only animate when awaiting LLM.
@@ -1264,12 +1290,13 @@ func (m RootModel) handleContinueTurnOutcome(msg continueTurnOutcomeMsg) (tea.Mo
 //	/meta list           — inline-list this app's meta chats
 //	/meta new            — archive the active chat + open a fresh one
 //	/meta resume <id...> — resume a past meta chat by id prefix (≥3)
+//	/meta done           — archive the active chat + exit meta mode
 //
-// The list / new / resume subcommands close the discovery gap
-// surfaced during manual smoke; they're Phase A.5 additions.
-// Subcommand identity is by exact match on the first arg, so a meta
-// mode literally named "list" would be unreachable via this surface —
-// the loader rejects reserved names so that collision is structural.
+// The list / new / resume / done subcommands close the discovery gap
+// surfaced during manual smoke. Subcommand identity is by exact
+// match on the first arg, so a meta mode literally named "list" or
+// "done" would be unreachable via this surface — pick mode names
+// outside the reserved set.
 func (m RootModel) handleMetaSlash(args []string) (tea.Model, tea.Cmd) {
 	if len(args) == 0 {
 		return m.startMetaMode("")
@@ -1281,6 +1308,8 @@ func (m RootModel) handleMetaSlash(args []string) (tea.Model, tea.Cmd) {
 		return m.handleMetaNew()
 	case "resume":
 		return m.handleMetaResume(args[1:])
+	case "done":
+		return m.handleMetaDone()
 	}
 	// Anything else is treated as a mode name (legacy behaviour).
 	return m.startMetaMode(args[0])
@@ -1313,6 +1342,46 @@ func (m RootModel) handleMetaNew() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, metaNewCmd(context.Background(), m.metaController, m.metaMode.session)
+}
+
+// handleMetaDone archives the active chat and exits meta mode. Only
+// valid while in ModeMeta — outside, there's no active chat to close.
+// Differs from /onpath (which exits without archiving — the chat
+// persists for resume) and from /meta new (which archives + opens a
+// fresh row in the same scope).
+func (m RootModel) handleMetaDone() (tea.Model, tea.Cmd) {
+	if m.mode != ModeMeta {
+		m.transcript.AppendSystem("(meta done: only valid inside meta mode — use /meta to enter first)")
+		return m, nil
+	}
+	if m.metaController == nil || m.metaMode.session == nil {
+		m.transcript.AppendSystem("(meta done: unavailable — no active session)")
+		return m, nil
+	}
+	return m, metaDoneCmd(context.Background(), m.metaController, m.metaMode.session)
+}
+
+// handleMetaDoneDone reacts to the async archive completing. On
+// success the overlay closes, mode returns to ModeOnPath, and the
+// transcript carries an "archived" confirmation that surfaces the
+// 8-char id prefix so the user can recover via /meta resume if they
+// regret it.
+func (m RootModel) handleMetaDoneDone(msg metaDoneDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.transcript.AppendError("(meta done)", fmt.Sprintf("error: %v", msg.err))
+		return m, nil
+	}
+	id := msg.archivedID
+	short := id
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	m.metaMode.Exit()
+	m.mode = ModeOnPath
+	m.transcript.AppendSystem(fmt.Sprintf(
+		"(meta done: archived chat %s — resume with /meta resume %s if you change your mind)",
+		short, short))
+	return m, nil
 }
 
 // handleMetaResume resolves an id prefix to a chat ID then enters
@@ -1393,6 +1462,93 @@ func (m RootModel) handleMetaListDone(msg metaListDoneMsg) (tea.Model, tea.Cmd) 
 // metaListingCells / formatMetaListing.
 func metaListColumns() []string {
 	return []string{"ID", "MODE", "SCOPE", "UPDATED", "PREVIEW"}
+}
+
+// openSessionsPanel kicks off the foyer "meta sessions" overlay
+// (proposal §2.1). The controller call is async (it touches the
+// chats DB), so we leave the model in ModeOnPath until the
+// sessionsPanelLoadedMsg comes back. If meta plumbing is missing
+// we surface a hint via the transcript instead of opening an empty
+// panel — the user gets the same diagnostic the inline `/meta list`
+// would have produced.
+func (m RootModel) openSessionsPanel() (tea.Model, tea.Cmd) {
+	if m.metaController == nil {
+		m.transcript.AppendSystem("(meta sessions: unavailable — no chat store or meta_modes wired to this session)")
+		return m, nil
+	}
+	appID := ""
+	if def := m.orch.AppDef(); def != nil {
+		appID = def.App.ID
+	}
+	if appID == "" {
+		m.transcript.AppendSystem("(meta sessions: unavailable — no app loaded)")
+		return m, nil
+	}
+	return m, sessionsPanelLoadCmd(context.Background(), m.metaController, appID)
+}
+
+// sessionsPanelLoadCmd asynchronously fetches the listing for the
+// foyer panel. Errors are surfaced via the err field of the loaded
+// msg; the handler renders them as a transcript-system line so the
+// user knows why the panel didn't open.
+func sessionsPanelLoadCmd(ctx context.Context, ctrl *metamode.Controller, appID string) tea.Cmd {
+	return func() tea.Msg {
+		listings, err := ctrl.ListChats(ctx, appID)
+		return sessionsPanelLoadedMsg{listings: listings, err: err}
+	}
+}
+
+// handleSessionsPanelLoaded is invoked when the async ListChats call
+// completes. On error the panel stays closed and the user sees the
+// error in the transcript. On success we Open() the panel with the
+// loaded rows and switch the mode so the overlay owns the keyboard.
+func (m RootModel) handleSessionsPanelLoaded(msg sessionsPanelLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.transcript.AppendSystem(fmt.Sprintf("(meta sessions: %v)", msg.err))
+		return m, nil
+	}
+	m.sessionsPanel.Open(msg.listings)
+	m.mode = ModeMetaSessions
+	return m, nil
+}
+
+// handleSessionsPanelChoice resumes the chat the user picked from the
+// foyer panel. Identical code path to `/meta resume <id>` past the
+// snapshot construction.
+func (m RootModel) handleSessionsPanelChoice(msg sessionsPanelChoiceMsg) (tea.Model, tea.Cmd) {
+	m.mode = ModeOnPath
+	if m.metaController == nil {
+		m.transcript.AppendSystem("(meta sessions: unavailable — no chat store or meta_modes wired to this session)")
+		return m, nil
+	}
+	if msg.chatID == "" || msg.modeName == "" {
+		m.transcript.AppendSystem("(meta sessions: panel returned an empty selection)")
+		return m, nil
+	}
+	snap := metamode.Snapshot{
+		SessionID: m.sid,
+		State:     m.currentState,
+		World:     m.orch.CurrentWorld(m.sid),
+		EnteredAt: time.Now(),
+	}
+	return m, metaResumeCmd(context.Background(), m.metaController, snap, msg.modeName, msg.chatID)
+}
+
+// updateSessionsPanel routes keyboard input to the foyer overlay and
+// — when the user closes it without picking — returns the mode to
+// ModeOnPath so the prompt is ready to receive input again.
+func (m RootModel) updateSessionsPanel(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case sessionsPanelChoiceMsg:
+		return m.handleSessionsPanelChoice(msg)
+	}
+	var cmd tea.Cmd
+	m.sessionsPanel, cmd = m.sessionsPanel.Update(msg)
+	if !m.sessionsPanel.IsActive() && m.mode == ModeMetaSessions {
+		m.sessionsPanel.Close()
+		m.mode = ModeOnPath
+	}
+	return m, cmd
 }
 
 // dedupSorted returns the unique values from in, sorted lexicographically.
@@ -1668,6 +1824,9 @@ func (m RootModel) updateMeta(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMetaListDone(msg)
 	case metaNewDoneMsg:
 		return m.handleMetaNewDone(msg)
+
+	case metaDoneDoneMsg:
+		return m.handleMetaDoneDone(msg)
 	case spinner.TickMsg:
 		if m.metaMode.inFlight {
 			var cmd tea.Cmd
@@ -1727,14 +1886,15 @@ func (m RootModel) updateMeta(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// The discovery subcommands /meta list, /meta new, /meta resume
-	// <id> are allowed inside meta mode — they pivot between meta
-	// chats without forcing /onpath first. Anything else with a "/"
-	// prefix is still discouraged.
+	// <id>, and /meta done are allowed inside meta mode — they
+	// pivot between meta chats (or close the current one) without
+	// forcing /onpath first. Anything else with a "/" prefix is
+	// still discouraged.
 	if strings.HasPrefix(text, "/") {
 		parts := strings.Fields(text)
 		if len(parts) > 0 && parts[0] == "/meta" && len(parts) > 1 {
 			switch parts[1] {
-			case "list", "new", "resume":
+			case "list", "new", "resume", "done":
 				return m.handleMetaSlash(parts[1:])
 			}
 		}
@@ -1885,13 +2045,14 @@ func (m RootModel) handleMenuSystemChoice(msg menuSystemChoiceMsg) (tea.Model, t
 	case menuActionExit:
 		m.quitting = true
 		return m, tea.Quit
-	case menuActionReportBug:
-		m.transcript.AppendSystem("(bug report: coming soon — this will bundle session state and a freeform note)")
-		return m, nil
-	case menuActionMetaStory:
-		// Same code path as the /meta slash command (bare form
-		// resolves to the first declared mode).
-		return m.startMetaMode("")
+	case menuActionMetaMode:
+		// Same code path as `/meta <name>`. The Esc menu enumerates
+		// every declared mode, so msg.modeName is always set; the
+		// bare-form fallback (first declared mode) is reserved for the
+		// `/meta` slash command.
+		return m.startMetaMode(msg.modeName)
+	case menuActionMetaSessions:
+		return m.openSessionsPanel()
 	}
 	return m, nil
 }
@@ -2055,6 +2216,8 @@ func (m RootModel) View() string {
 		promptLine = m.disambiguation.View()
 	} else if m.mode == ModeMenu {
 		promptLine = m.menuSystem.View()
+	} else if m.mode == ModeMetaSessions {
+		promptLine = m.sessionsPanel.View()
 	} else if m.mode == ModeAwaitingLLM {
 		spinnerStr := m.spinner.View()
 		caption := "thinking via claude… (Ctrl+C to cancel)"

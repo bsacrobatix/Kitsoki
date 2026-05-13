@@ -65,9 +65,3 @@ thought.
   chats PTY mode, input queue, and multi-transport drive,
   extending `internal/chats/`. Validation spike required before
   phase A.
-- [`meta-mode-proposal.md`](meta-mode-proposal.md) — Phase A
-  (per-context agents + meta mode) and Phase B (edit-mode removal)
-  shipped on `feat/meta-mode`; shipped sections moved to
-  [`../meta-mode.md`](../meta-mode.md). This proposal now tracks
-  Phase C (self/bug modes) and Phase D (session list, bg-agent
-  runtime) only.
