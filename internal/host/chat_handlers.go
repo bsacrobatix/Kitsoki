@@ -14,6 +14,8 @@ package host
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -221,6 +223,256 @@ func ChatTranscriptHandler(ctx context.Context, args map[string]any) (Result, er
 		"latest_seq": latestSeq,
 		"title":      chat.Title,
 	}}, nil
+}
+
+// ChatDriveHandler implements host.chat.drive: enqueue a turn request
+// against a chat and (optionally) await its completion.
+//
+// Args:
+//   - chat_id          (string, optional*): chat ULID to drive.
+//   - chat_ref         (string, optional*): user-supplied reference (position,
+//     prefix, free text). Resolved via host.chat.resolve_ref. When set, the
+//     accompanying app/room/scope_key args are required so resolve_ref has
+//     the lookup context. * exactly one of chat_id / chat_ref must be set.
+//   - app, room, scope_key (string, optional): scope for chat_ref resolution;
+//     ignored when chat_id is supplied.
+//   - payload          (string, required): user-message text to send to claude.
+//   - transport        (string, optional): originating surface id. Default "state_machine".
+//   - thread           (string, optional): correlation thread (e.g. "PROJ-123#42").
+//   - actor            (string, optional): originating actor id.
+//   - correlation_id   (string, optional): caller-side correlation token.
+//   - await            (bool, optional): when true, block until the turn
+//     completes (or fails); when false (default), return after Enqueue.
+//   - timeout_seconds  (int, optional): lock-contention budget for await:true
+//     (default 300; ignored for await:false). The dispatcher polls the chat
+//     lock until acquired or the timeout elapses.
+//   - working_dir      (string, optional): cwd for the claude subprocess in
+//     the await:true path.
+//
+// Args reserved for orchestrator-driven invocation (callers normally do not
+// set these directly; the dispatcher in internal/orchestrator pre-injects
+// them when a state-machine effect declares on_complete):
+//   - __on_complete       (string|[]any): JSON-encoded or in-memory
+//     []app.Effect chain to fire when the drive completes. Persisted on the
+//     drive row; the firing path is Phase G work (see follow-up note below).
+//   - __origin_session_id (string): the kitsoki session the drive belongs to.
+//   - __origin_state      (string): the state path that spawned the drive.
+//
+// Returns (always — both await:false and await:true):
+//   - drive_id    (string): allocated ULID of the queued row.
+//   - chat_id     (string): the resolved chat ULID.
+//   - enqueued_at (int64):  UnixMicro timestamp from the row's received_at.
+//
+// Additionally for await:true:
+//   - status      (string): "done" or "failed".
+//   - result_seq  (int):    chat_messages.seq of the assistant reply (done only).
+//   - result_text (string): assistant reply text (done only).
+//   - error       (string): error message (failed only).
+//
+// Errors (Result.Error, distinguished by prefix):
+//   - "host.chat.drive: chat_not_found …" — chat_id / chat_ref didn't resolve.
+//   - "host.chat.drive: chat_busy …"      — await:true and lock contended past timeout.
+//   - "host.chat.drive: drive_failed …"   — await:true and the turn errored.
+//
+// Follow-up (Phase G):
+//
+//   The on_complete chain is persisted on the drive row (on_complete_json),
+//   but is NOT yet fired automatically when the drive completes. Two
+//   integration points are still missing:
+//
+//     1. The orchestrator's dispatchHostCalls must, for host.chat.drive
+//        invocations with an on_complete: block, pre-inject the args
+//        listed above (__on_complete + __origin_session_id + __origin_state)
+//        before invoking the handler — mirroring how dispatchBackground
+//        does this for background jobs.
+//
+//     2. A consumer (the inbox/notification producer in Phase G, or a future
+//        kitsoki serve daemon, or the CLI dispatch path when running under a
+//        session) must, on observing a drive transition to a terminal status
+//        with a non-empty on_complete_json, deserialize the chain and run
+//        machine.RunEffects(origin_state, world+{last_drive_result}, chain)
+//        analogous to orchestrator.handleJobTerminal.
+//
+//   Until both are wired, drives initiated with on_complete: in their effect
+//   spec will run to completion but the chain will not fire — callers should
+//   either use await:true (synchronous result) or poll via kitsoki chat
+//   queue list. This is a deliberate Phase B+ scope cut.
+func ChatDriveHandler(ctx context.Context, args map[string]any) (Result, error) {
+	cs := ChatStoreFromContext(ctx)
+	if cs == nil {
+		return Result{Error: "host.chat.drive: no chat store wired"}, nil
+	}
+
+	chatID, _ := args["chat_id"].(string)
+	chatRef, _ := args["chat_ref"].(string)
+	chatID = strings.TrimSpace(chatID)
+	chatRef = strings.TrimSpace(chatRef)
+	if chatID == "" && chatRef == "" {
+		return Result{Error: "host.chat.drive: chat_id or chat_ref is required"}, nil
+	}
+	if chatID != "" && chatRef != "" {
+		return Result{Error: "host.chat.drive: chat_id and chat_ref are mutually exclusive"}, nil
+	}
+
+	payload, _ := args["payload"].(string)
+	if strings.TrimSpace(payload) == "" {
+		return Result{Error: "host.chat.drive: payload argument is required"}, nil
+	}
+
+	// chat_ref → resolve via the existing resolver, then carry the result
+	// forward in the same shape chat_id would have produced.
+	if chatRef != "" {
+		appID, _ := args["app"].(string)
+		room, _ := args["room"].(string)
+		if strings.TrimSpace(appID) == "" || strings.TrimSpace(room) == "" {
+			return Result{Error: "host.chat.drive: app and room are required when chat_ref is set"}, nil
+		}
+		resolveArgs := map[string]any{
+			"app":  appID,
+			"room": room,
+			"ref":  chatRef,
+		}
+		if scopeKey, _ := args["scope_key"].(string); scopeKey != "" {
+			resolveArgs["scope_key"] = scopeKey
+		}
+		// Propagate the model/max overrides so a caller embedding drive in a
+		// non-default room can keep them consistent across the two hosts.
+		for _, k := range []string{"max_chats", "max_deep", "llm_model", "skip_llm"} {
+			if v, ok := args[k]; ok {
+				resolveArgs[k] = v
+			}
+		}
+		resolved, err := ChatResolveRefHandler(ctx, resolveArgs)
+		if err != nil {
+			return Result{}, fmt.Errorf("host.chat.drive: resolve chat_ref: %w", err)
+		}
+		if resolved.Error != "" {
+			return Result{Error: fmt.Sprintf("host.chat.drive: chat_not_found: %s", resolved.Error)}, nil
+		}
+		chatID, _ = resolved.Data["chat_id"].(string)
+		if chatID == "" {
+			return Result{Error: "host.chat.drive: chat_ref resolved to empty chat_id"}, nil
+		}
+	}
+
+	// Confirm the chat exists before allocating a queue row — otherwise an
+	// Enqueue with a bogus chat_id would silently create an orphan drive
+	// that no Dequeue would ever pick up.
+	if _, err := cs.Get(ctx, chatID); err != nil {
+		return Result{Error: fmt.Sprintf("host.chat.drive: chat_not_found: %v", err)}, nil
+	}
+
+	transport, _ := args["transport"].(string)
+	if transport == "" {
+		transport = "state_machine"
+	}
+	thread, _ := args["thread"].(string)
+	actor, _ := args["actor"].(string)
+	correlationID, _ := args["correlation_id"].(string)
+	workingDir, _ := args["working_dir"].(string)
+	awaitDrive, _ := args["await"].(bool)
+
+	// On-complete capture (orchestrator-injected). The chain may arrive as
+	// either a JSON string (the format dispatchBackground uses for jobs) or
+	// a directly-marshalled []any (the orchestrator may also pass the parsed
+	// slice without re-serializing). Either way we end up with a JSON string
+	// on the drive row.
+	onCompleteJSON, _ := extractOnCompleteJSON(args)
+	originSessionID, _ := args["__origin_session_id"].(string)
+	originState, _ := args["__origin_state"].(string)
+
+	drive, err := cs.Enqueue(ctx, EnqueueDriveOptions{
+		ChatID:          chatID,
+		Transport:       transport,
+		Thread:          thread,
+		Actor:           actor,
+		CorrelationID:   correlationID,
+		Payload:         payload,
+		OnCompleteJSON:  onCompleteJSON,
+		OriginSessionID: originSessionID,
+		OriginState:     originState,
+	})
+	if err != nil {
+		return Result{Error: fmt.Sprintf("host.chat.drive: enqueue: %v", err)}, nil
+	}
+
+	data := map[string]any{
+		"drive_id":    drive.DriveID,
+		"chat_id":     drive.ChatID,
+		"enqueued_at": drive.ReceivedAt.UnixMicro(),
+	}
+
+	if !awaitDrive {
+		return Result{Data: data}, nil
+	}
+
+	// await:true — run the drive synchronously through the dispatcher,
+	// respecting timeout_seconds for lock-contention retry.
+	timeoutSeconds := optInt(args, "timeout_seconds", 300)
+	disp, dispErr := DispatchDriveWithTimeout(ctx, cs, drive.DriveID, workingDir, time.Duration(timeoutSeconds)*time.Second)
+	if errors.Is(dispErr, ErrChatBusy) {
+		data["status"] = "failed"
+		data["error"] = dispErr.Error()
+		return Result{
+			Error: fmt.Sprintf("host.chat.drive: chat_busy: %v", dispErr),
+			Data:  data,
+		}, nil
+	}
+	if dispErr != nil {
+		// Infra failure during dispatch. Surface as Result.Error so on_error:
+		// routing fires; the drive row has already been marked failed inside
+		// DispatchDrive (or, for nil-store-ish misuse, no row mutation
+		// happened).
+		data["status"] = "failed"
+		data["error"] = dispErr.Error()
+		return Result{
+			Error: fmt.Sprintf("host.chat.drive: drive_failed: %v", dispErr),
+			Data:  data,
+		}, nil
+	}
+
+	data["status"] = disp.Status
+	if disp.Status == "done" {
+		data["result_seq"] = disp.ResultSeq
+		data["result_text"] = disp.Answer
+		return Result{Data: data}, nil
+	}
+	// Domain-level failure — drive row says failed; surface to caller.
+	data["error"] = disp.ErrorMessage
+	return Result{
+		Error: fmt.Sprintf("host.chat.drive: drive_failed: %s", disp.ErrorMessage),
+		Data:  data,
+	}, nil
+}
+
+// extractOnCompleteJSON normalizes the __on_complete arg into a JSON
+// string. The orchestrator's background-jobs path serializes
+// []app.Effect to JSON for transport across the job payload; for chat
+// drives we accept the same string form, but also tolerate a raw
+// []any (in case a future caller passes the parsed slice directly).
+// Returns ("", false) when the key is absent or empty.
+func extractOnCompleteJSON(args map[string]any) (string, bool) {
+	raw, ok := args["__on_complete"]
+	if !ok || raw == nil {
+		return "", false
+	}
+	switch v := raw.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return "", false
+		}
+		return v, true
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return "", false
+		}
+		s := string(b)
+		if s == "null" || s == "[]" {
+			return "", false
+		}
+		return s, true
+	}
 }
 
 // ChatForkHandler implements host.chat.fork.

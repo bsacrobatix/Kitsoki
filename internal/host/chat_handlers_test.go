@@ -52,6 +52,17 @@ type fakeChatStore struct {
 	// multiple Resolve(...) calls that create new chats produce distinct
 	// IDs. Without this, the second call would collide on "new-chat-id".
 	resolveSeq int
+
+	// drives + driveOrder back the chat_input_queue mock. driveOrder is
+	// the FIFO insertion order Dequeue walks; drives is the by-id map
+	// for status transitions and GetDrive.
+	drives     map[string]*host.ChatDrive
+	driveOrder []string
+	driveSeq   int
+	// withLockErr, when non-nil, makes WithLock return this error
+	// without running fn. Used to simulate lock contention in
+	// dispatcher tests.
+	withLockErr error
 }
 
 func newFakeChatStore() *fakeChatStore {
@@ -232,7 +243,162 @@ func (f *fakeChatStore) LatestSeq(_ context.Context, chatID string) (int, error)
 }
 
 func (f *fakeChatStore) WithLock(_ context.Context, chatID string, fn func(context.Context) error) error {
+	if f.withLockErr != nil {
+		return f.withLockErr
+	}
 	return fn(context.Background())
+}
+
+// ─── chat input queue (fake) ──────────────────────────────────────────────────
+
+func (f *fakeChatStore) ensureDrivesInit() {
+	if f.drives == nil {
+		f.drives = make(map[string]*host.ChatDrive)
+	}
+}
+
+func (f *fakeChatStore) Enqueue(_ context.Context, opts host.EnqueueDriveOptions) (*host.ChatDrive, error) {
+	f.ensureDrivesInit()
+	f.driveSeq++
+	id := fmt.Sprintf("DRIVE%04d", f.driveSeq)
+	now := time.Now()
+	d := host.ChatDrive{
+		DriveID:         id,
+		ChatID:          opts.ChatID,
+		Transport:       opts.Transport,
+		Thread:          opts.Thread,
+		Actor:           opts.Actor,
+		CorrelationID:   opts.CorrelationID,
+		Payload:         opts.Payload,
+		Status:          "pending",
+		ReceivedAt:      now,
+		OnCompleteJSON:  opts.OnCompleteJSON,
+		OriginSessionID: opts.OriginSessionID,
+		OriginState:     opts.OriginState,
+	}
+	f.drives[id] = &d
+	f.driveOrder = append(f.driveOrder, id)
+	cp := d
+	return &cp, nil
+}
+
+func (f *fakeChatStore) Dequeue(_ context.Context, chatID string) (*host.ChatDrive, error) {
+	f.ensureDrivesInit()
+	for _, id := range f.driveOrder {
+		d, ok := f.drives[id]
+		if !ok || d.ChatID != chatID || d.Status != "pending" {
+			continue
+		}
+		now := time.Now()
+		d.Status = "dispatching"
+		d.DispatchedAt = &now
+		cp := *d
+		return &cp, nil
+	}
+	return nil, host.ErrNoPendingDrive
+}
+
+func (f *fakeChatStore) ClaimDrive(_ context.Context, driveID string) (*host.ChatDrive, error) {
+	f.ensureDrivesInit()
+	d, ok := f.drives[driveID]
+	if !ok {
+		return nil, host.ErrDriveNotFound
+	}
+	if d.Status != "pending" {
+		return nil, fmt.Errorf("%w: drive %s is %s, want pending",
+			host.ErrDriveStateMismatch, driveID, d.Status)
+	}
+	now := time.Now()
+	d.Status = "dispatching"
+	d.DispatchedAt = &now
+	cp := *d
+	return &cp, nil
+}
+
+func (f *fakeChatStore) MarkDriveDone(_ context.Context, driveID string, resultSeq int) error {
+	d, err := f.findDrive(driveID, "dispatching")
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	d.Status = "done"
+	d.CompletedAt = &now
+	seqCopy := resultSeq
+	d.ResultSeq = &seqCopy
+	return nil
+}
+
+func (f *fakeChatStore) MarkDriveFailed(_ context.Context, driveID, errorMessage string) error {
+	d, err := f.findDrive(driveID, "dispatching")
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	d.Status = "failed"
+	d.CompletedAt = &now
+	d.ErrorMessage = errorMessage
+	return nil
+}
+
+func (f *fakeChatStore) MarkDriveDismissed(_ context.Context, driveID string) error {
+	d, err := f.findDrive(driveID, "pending")
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	d.Status = "dismissed"
+	d.CompletedAt = &now
+	return nil
+}
+
+func (f *fakeChatStore) GetDrive(_ context.Context, driveID string) (*host.ChatDrive, error) {
+	f.ensureDrivesInit()
+	d, ok := f.drives[driveID]
+	if !ok {
+		return nil, host.ErrDriveNotFound
+	}
+	cp := *d
+	return &cp, nil
+}
+
+func (f *fakeChatStore) ListDrives(_ context.Context, chatID string, filter host.ListDrivesFilter) ([]host.ChatDrive, error) {
+	f.ensureDrivesInit()
+	wanted := func(status string) bool {
+		if len(filter.Statuses) == 0 {
+			return true
+		}
+		for _, s := range filter.Statuses {
+			if s == status {
+				return true
+			}
+		}
+		return false
+	}
+	var out []host.ChatDrive
+	for _, id := range f.driveOrder {
+		d, ok := f.drives[id]
+		if !ok || d.ChatID != chatID || !wanted(d.Status) {
+			continue
+		}
+		out = append(out, *d)
+		if filter.Limit > 0 && len(out) >= filter.Limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeChatStore) findDrive(driveID, requiredStatus string) (*host.ChatDrive, error) {
+	f.ensureDrivesInit()
+	d, ok := f.drives[driveID]
+	if !ok {
+		return nil, host.ErrDriveNotFound
+	}
+	if d.Status != requiredStatus {
+		return nil, fmt.Errorf("%w: drive %s is %s, want %s",
+			host.ErrDriveStateMismatch, driveID, d.Status, requiredStatus)
+	}
+	return d, nil
 }
 
 // ─── ChatResolveHandler tests ─────────────────────────────────────────────────

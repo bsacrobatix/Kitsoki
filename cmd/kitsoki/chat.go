@@ -54,6 +54,10 @@ Subcommands:
   kitsoki chat fork      [--db <path>] <chat-id> [--title "..."]
   kitsoki chat archive   [--db <path>] <chat-id>
   kitsoki chat unlock    [--db <path>] <chat-id> --force
+  kitsoki chat queue     [add|list|dispatch|dismiss] (see 'kitsoki chat queue --help')
+  kitsoki chat attach    [--db <path>] <chat-id> [--workspace <path>] [--permission-mode <mode>]
+  kitsoki chat detach    [--db <path>] <chat-id> --mode background|headless|stop
+  kitsoki chat gc        [--db <path>]
 
 Exit codes:
   0   success
@@ -67,6 +71,10 @@ Exit codes:
 	cmd.AddCommand(chatForkCmd())
 	cmd.AddCommand(chatArchiveCmd())
 	cmd.AddCommand(chatUnlockCmd())
+	cmd.AddCommand(chatQueueCmd())
+	cmd.AddCommand(chatAttachCmd())
+	cmd.AddCommand(chatDetachCmd())
+	cmd.AddCommand(chatGCCmd())
 	return cmd
 }
 

@@ -149,6 +149,117 @@ func TestAdapter_Resolve(t *testing.T) {
 	}
 }
 
+// TestAdapter_QueueRoundTrip exercises the chat input queue passthrough.
+// Sentinel translation is checked separately so a regression in
+// translateDriveErr shows up as a focused failure.
+func TestAdapter_QueueRoundTrip(t *testing.T) {
+	db := openMemDB(t)
+	s, err := chats.NewStore(db)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	a := chathost.NewAdapter(s)
+	ctx := context.Background()
+	c, _ := a.Create(ctx, "app", "room", "", "queued")
+
+	// Enqueue → status is pending; queue fields populated.
+	d, err := a.Enqueue(ctx, host.EnqueueDriveOptions{
+		ChatID:        c.ID,
+		Transport:     "jira",
+		Thread:        "PROJ-1#42",
+		Actor:         "alice",
+		CorrelationID: "corr-7",
+		Payload:       "do the thing",
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if d.DriveID == "" {
+		t.Fatal("DriveID should be allocated")
+	}
+	if d.Status != "pending" {
+		t.Errorf("status=%q, want pending", d.Status)
+	}
+	if d.Transport != "jira" || d.Actor != "alice" {
+		t.Errorf("transport/actor not propagated: %+v", d)
+	}
+
+	// ListDrives sees it as pending.
+	list, err := a.ListDrives(ctx, c.ID, host.ListDrivesFilter{
+		Statuses: []string{"pending"},
+	})
+	if err != nil {
+		t.Fatalf("ListDrives: %v", err)
+	}
+	if len(list) != 1 || list[0].DriveID != d.DriveID {
+		t.Errorf("ListDrives mismatch: %+v", list)
+	}
+
+	// Dequeue claims it.
+	claimed, err := a.Dequeue(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("Dequeue: %v", err)
+	}
+	if claimed.DriveID != d.DriveID {
+		t.Errorf("Dequeue returned a different drive")
+	}
+	if claimed.Status != "dispatching" {
+		t.Errorf("status=%q, want dispatching", claimed.Status)
+	}
+
+	// MarkDriveDone → terminal state with result_seq.
+	if err := a.MarkDriveDone(ctx, d.DriveID, 5); err != nil {
+		t.Fatalf("MarkDriveDone: %v", err)
+	}
+	got, err := a.GetDrive(ctx, d.DriveID)
+	if err != nil {
+		t.Fatalf("GetDrive: %v", err)
+	}
+	if got.Status != "done" {
+		t.Errorf("status=%q, want done", got.Status)
+	}
+	if got.ResultSeq == nil || *got.ResultSeq != 5 {
+		t.Errorf("result_seq=%v, want 5", got.ResultSeq)
+	}
+}
+
+// TestAdapter_QueueSentinelTranslation verifies that chats.* error
+// sentinels surface as host.* sentinels through the adapter.
+func TestAdapter_QueueSentinelTranslation(t *testing.T) {
+	db := openMemDB(t)
+	s, err := chats.NewStore(db)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	a := chathost.NewAdapter(s)
+	ctx := context.Background()
+	c, _ := a.Create(ctx, "app", "room", "", "x")
+
+	// Empty queue → ErrNoPendingDrive.
+	if _, err := a.Dequeue(ctx, c.ID); !errors.Is(err, host.ErrNoPendingDrive) {
+		t.Errorf("Dequeue empty: expected host.ErrNoPendingDrive, got %v", err)
+	}
+
+	// Unknown drive id → ErrDriveNotFound.
+	if _, err := a.GetDrive(ctx, "NOPE"); !errors.Is(err, host.ErrDriveNotFound) {
+		t.Errorf("GetDrive nope: expected host.ErrDriveNotFound, got %v", err)
+	}
+	if err := a.MarkDriveDone(ctx, "NOPE", 0); !errors.Is(err, host.ErrDriveNotFound) {
+		t.Errorf("MarkDriveDone nope: expected host.ErrDriveNotFound, got %v", err)
+	}
+
+	// Wrong-state transition → ErrDriveStateMismatch.
+	d, err := a.Enqueue(ctx, host.EnqueueDriveOptions{
+		ChatID: c.ID, Transport: "tui", Payload: "x",
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := a.MarkDriveDone(ctx, d.DriveID, 0); !errors.Is(err, host.ErrDriveStateMismatch) {
+		t.Errorf("MarkDriveDone on pending: expected host.ErrDriveStateMismatch, got %v", err)
+	}
+}
+
 func TestAdapter_WithLock_TranslatesErrChatBusy(t *testing.T) {
 	db := openMemDB(t)
 	s, err := chats.NewStore(db)

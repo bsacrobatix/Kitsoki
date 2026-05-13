@@ -42,6 +42,10 @@ type fakeChatStore struct {
 	// nextNewID supplies a synthetic id for NewChat-driven creates.
 	// When empty, ResolveMeta increments a counter ("chat-2", "chat-3"…).
 	nextNewIDCounter int
+	// withLockErr is the error WithLock returns instead of running fn.
+	// Tests that simulate a busy chat lock set this to a wrapped
+	// ErrChatBusy and assert the controller surfaces it cleanly.
+	withLockErr error
 }
 
 func (s *fakeChatStore) ResolveMeta(_ context.Context, appID, room, scopeKey, title string) (ChatHandle, error) {
@@ -151,6 +155,20 @@ func (s *fakeChatStore) seedChat(c *fakeChat) {
 	s.rows = append(s.rows, c)
 }
 
+// WithLock — fake lock that calls fn immediately. When
+// withLockErr is set the fn never runs and the error is returned,
+// simulating a busy chat / locked-by-other-driver scenario for
+// Controller.Send tests.
+func (s *fakeChatStore) WithLock(ctx context.Context, _ string, fn func(context.Context) error) error {
+	s.mu.Lock()
+	err := s.withLockErr
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return fn(ctx)
+}
+
 // fakeChat records every append + session-id update.
 type fakeChat struct {
 	mu              sync.Mutex
@@ -221,11 +239,13 @@ type fakeOracle struct {
 	gotInput AskInput
 	out      AskOutput
 	err      error
+	calls    int
 }
 
 func (o *fakeOracle) Ask(_ context.Context, in AskInput) (AskOutput, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	o.calls++
 	o.gotInput = in
 	if o.err != nil {
 		return AskOutput{}, o.err
@@ -496,6 +516,61 @@ func TestController_Send_OracleError(t *testing.T) {
 	// user was appended before the oracle ran; assistant must not have been.
 	if len(fc.appends) != 1 {
 		t.Errorf("appends = %d, want 1 (only user)", len(fc.appends))
+	}
+}
+
+// TestController_Send_ChatBusySurfaces verifies that when the chat
+// lock is held by another driver, Send returns metamode.ErrChatBusy
+// without calling the oracle and without writing to the transcript.
+// This is the contract the TUI's metaSendCmd hook relies on to
+// render the busy-chat warning.
+func TestController_Send_ChatBusySurfaces(t *testing.T) {
+	c, store, oracle := newTestController(t)
+	store.withLockErr = fmt.Errorf("%w: simulated", ErrChatBusy)
+
+	s, err := c.Enter(context.Background(), makeSnapshot("main"), "story")
+	if err != nil {
+		t.Fatalf("Enter: %v", err)
+	}
+
+	res, err := c.Send(context.Background(), s, "hello", TurnContext{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrChatBusy) {
+		t.Errorf("expected ErrChatBusy, got %v", err)
+	}
+	if !errors.Is(res.Err, ErrChatBusy) {
+		t.Errorf("res.Err should also wrap ErrChatBusy: %v", res.Err)
+	}
+	// Oracle was never called.
+	if oracle.calls != 0 {
+		t.Errorf("oracle was invoked %d times despite busy lock", oracle.calls)
+	}
+	// Transcript was not mutated.
+	fc := s.Chat.(*fakeChat)
+	if len(fc.appends) != 0 {
+		t.Errorf("transcript should be untouched on busy lock; got %d appends", len(fc.appends))
+	}
+}
+
+// TestController_Send_PopulatesChatID covers the SendResult.ChatID
+// surface used by the TUI to render the kitsoki-chat-attach hint.
+func TestController_Send_PopulatesChatID(t *testing.T) {
+	c, _, _ := newTestController(t)
+	s, err := c.Enter(context.Background(), makeSnapshot("main"), "story")
+	if err != nil {
+		t.Fatalf("Enter: %v", err)
+	}
+	res, err := c.Send(context.Background(), s, "hi", TurnContext{})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if res.ChatID == "" {
+		t.Error("SendResult.ChatID should be populated on success")
+	}
+	if res.ChatID != s.Chat.ID() {
+		t.Errorf("ChatID = %q, want %q", res.ChatID, s.Chat.ID())
 	}
 }
 

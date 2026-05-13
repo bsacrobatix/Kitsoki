@@ -477,7 +477,7 @@ Persistence:
 | Package | Purpose |
 |---|---|
 | `internal/store` | SQLite-backed event log + session metadata + external-key index. |
-| `internal/chats` | Persistent multi-turn chat threads. |
+| `internal/chats` | Persistent multi-turn chat threads, the `chat_pty_sessions` PTY-lifecycle rows, and the `chat_input_queue` FIFO of pending drives. |
 | `internal/ulid` | 26-char monotonically-increasing IDs for sessions, jobs, chats, messages. |
 
 Surfaces:
@@ -488,6 +488,8 @@ Surfaces:
 | `internal/mcp` | MCP server (`kitsoki serve`). |
 | `internal/viz` | Graphviz DOT and Mermaid emitters. |
 | `internal/trace` | Structured slog-based event tracing. |
+| `internal/tmux` | tmux-CLI wrapper rooted at a kitsoki-owned socket (`$XDG_STATE_HOME/kitsoki/tmux.sock`). Used by the PTY-attach lifecycle to spawn / list / kill / attach / push status-bar updates. |
+| `internal/chatattach` | The chat-attach lifecycle: acquire chat lock → ensure tmux session running `claude --resume <id>` → record `pty_attached` → run a caller-supplied `runTmux` callback (the CLI passes `tmux.AttachStreaming`; the TUI passes a bubbletea `tea.ExecCommand` wrapper) → flip to `pty_background` on detach. Ships `kitsoki-tmux.conf` (status bar config) via `go:embed`. Shared by `kitsoki chat attach` and TUI `/attach`. |
 
 Authoring & testing:
 
@@ -508,12 +510,15 @@ Three concerns share one SQLite file (default
 `$XDG_DATA_HOME/kitsoki/sessions.db`):
 
 ```
-sessions       one row per session         (id, app_id, state_path, world_json, …)
-events         append-only event log       (session_id, seq, ts, kind, payload_json)
-jobs           background-job lifecycle    (id, session_id, status, payload_json, …)
-chats          persistent chat threads     (id, app_id, room, scope_key, status, …)
-messages       chat transcript rows        (chat_id, seq, role, content, ts)
-external_keys  (transport, thread) → session_id
+sessions             one row per session       (id, app_id, state_path, world_json, …)
+events               append-only event log     (session_id, seq, ts, kind, payload_json)
+jobs                 background-job lifecycle  (id, session_id, status, payload_json, …)
+chats                persistent chat threads   (id, app_id, room, scope_key, status, claude_session_id, …)
+chat_messages        chat transcript rows      (chat_id, seq, role, content, ts)
+chat_locks           per-chat singleton lock   (chat_id, owner_pid, owner_host, heartbeat_at)
+chat_pty_sessions    tmux-hosted claudes       (chat_id, tmux_session, tmux_host, mode, last_idle_at, …)
+chat_input_queue     pending drives FIFO       (drive_id, chat_id, transport, payload, status, on_complete_json, …)
+external_keys        (transport, thread) → session_id
 ```
 
 The orchestrator is the only writer to `events` and `sessions`; chats

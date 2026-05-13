@@ -140,6 +140,21 @@ func (a *chatStoreAdapter) ArchiveMeta(ctx context.Context, chatID string) error
 	return nil
 }
 
+// WithLock acquires the per-chat singleton lock through the underlying
+// chats.Store, translating chats.ErrChatBusy into metamode.ErrChatBusy
+// so the controller (and TUI) can use errors.Is(err,
+// metamode.ErrChatBusy) without importing internal/chats.
+func (a *chatStoreAdapter) WithLock(ctx context.Context, chatID string, fn func(context.Context) error) error {
+	if a == nil || a.s == nil {
+		return fmt.Errorf("metamode.WithLock: nil store")
+	}
+	err := a.s.WithLock(ctx, chatID, fn)
+	if err != nil && errors.Is(err, chats.ErrChatBusy) {
+		return fmt.Errorf("%w: %v", ErrChatBusy, err)
+	}
+	return err
+}
+
 // chatHandle binds a chat row to the operations the controller calls
 // on it. Persistence goes through *chats.Store so the SQLite row stays
 // authoritative; the in-memory row.ClaudeSessionID is updated to match.

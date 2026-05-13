@@ -168,6 +168,13 @@ func (s *fakeMetaChatStore) seedChat(c *fakeMetaChat) {
 	s.rows = append(s.rows, c)
 }
 
+// WithLock — pass-through fake that runs fn under no synchronization,
+// matching the controller-level fake in internal/metamode. TUI tests
+// don't exercise lock contention; the controller's own tests do.
+func (s *fakeMetaChatStore) WithLock(ctx context.Context, _ string, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
 // fakeMetaOracle scripts a reply (and optionally an error) for Ask.
 type fakeMetaOracle struct {
 	mu       sync.Mutex

@@ -339,7 +339,27 @@ func (m *transcriptModel) AppendOffPathAnswer(userInput, answer string) {
 // blue-styled padded row per chat, then a closing rule. Column widths
 // are computed across rows AND the header so things line up. Bypasses
 // the Markdown pipeline so lipgloss ANSI survives.
+//
+// Thin wrapper around AppendStyledTable so /sessions list (and any
+// future list-style slash command) get the same look — see the
+// generalized helper below for the styling source of truth.
 func (m *transcriptModel) AppendMetaList(headers []string, rows [][]string) {
+	m.AppendStyledTable("meta chats", headers, rows, "(no meta chats yet)")
+}
+
+// AppendStyledTable appends a rectangular table styled like
+// /meta list — blue title banner, blue-bold column headers, blue
+// rows — as one transcript entry. The Markdown pipeline is bypassed
+// so lipgloss ANSI survives.
+//
+// Column widths are computed across both rows and the header so the
+// columns line up. emptyMsg is rendered (in the row style) when rows
+// is empty, otherwise one styled line per row.
+//
+// Used by /meta list and /sessions list; either caller can pass a
+// different title to keep the section header semantically accurate
+// while sharing the look.
+func (m *transcriptModel) AppendStyledTable(title string, headers []string, rows [][]string, emptyMsg string) {
 	// Per-column width = max(header, all rows in that column).
 	widths := make([]int, len(headers))
 	for i, h := range headers {
@@ -384,12 +404,11 @@ func (m *transcriptModel) AppendMetaList(headers []string, rows [][]string) {
 	}
 
 	var sb strings.Builder
-	title := "meta chats"
-	leftBar := (totalWidth - len(title) - 2) / 2
+	leftBar := (totalWidth - runeLen(title) - 2) / 2
 	if leftBar < 2 {
 		leftBar = 2
 	}
-	rightBar := totalWidth - len(title) - 2 - leftBar
+	rightBar := totalWidth - runeLen(title) - 2 - leftBar
 	if rightBar < 2 {
 		rightBar = 2
 	}
@@ -398,7 +417,10 @@ func (m *transcriptModel) AppendMetaList(headers []string, rows [][]string) {
 	sb.WriteString(metaListHeaderStyle.Render(render(headers)))
 	sb.WriteString("\n")
 	if len(rows) == 0 {
-		sb.WriteString(metaListItemStyle.Render("(no meta chats yet)"))
+		if emptyMsg == "" {
+			emptyMsg = "(no rows)"
+		}
+		sb.WriteString(metaListItemStyle.Render(emptyMsg))
 		sb.WriteString("\n")
 	} else {
 		for _, r := range rows {

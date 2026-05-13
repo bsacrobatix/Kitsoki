@@ -35,6 +35,7 @@ For the effect-level shape (`invoke:`, `with:`, `bind:`, `on_error:`,
 | [`host.chat.rename`](#hostchatrename) | Update a chat's title. |
 | [`host.chat.suggest_title`](#hostchatsuggest_title) | Ask Claude to propose a title from the transcript. |
 | [`host.chat.resolve_ref`](#hostchatresolve_ref) | Resolve a chat reference (id, alias, or "current") to a chat row. |
+| [`host.chat.drive`](#hostchatdrive) | Enqueue a turn against a chat; optionally `await` completion. |
 
 Every handler must be present in the app's top-level `hosts:`
 allow-list to be invokable.
@@ -283,6 +284,90 @@ Returns: `{ title }`.
 
 Resolve a free-form reference (chat ID, partial ID, alias, or
 `"current"`) to a concrete `chat_id`. Used by the TUI's chat picker.
+
+### host.chat.drive
+
+Enqueue a turn against a chat and optionally run it synchronously.
+The async path mirrors the `background_jobs` pattern: the handler
+returns immediately with a `drive_id` and the turn runs out of band
+(via `kitsoki chat queue dispatch <drive-id>` or a future periodic
+drainer). The sync path acquires the chat singleton lock, runs
+`claude -p --resume <id>` headlessly, and returns the result text +
+the new `chat_messages.seq`.
+
+The handler lives at
+[`internal/host/chat_handlers.go:ChatDriveHandler`](../internal/host/chat_handlers.go);
+the dispatcher (claim → claude → mark-terminal) lives in
+[`internal/host/chat_dispatch.go`](../internal/host/chat_dispatch.go).
+Full design rationale in
+[`docs/proposals/claude-code-sessions-proposal.md`](proposals/claude-code-sessions-proposal.md)
+§9.2.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `chat_id` | string | one of | Target chat ULID. |
+| `chat_ref` | string | one of | User-supplied reference (position, prefix, free-text). Resolved through `host.chat.resolve_ref`; requires `app`+`room` in the same args. Mutually exclusive with `chat_id`. |
+| `app`, `room`, `scope_key` | strings | with `chat_ref` | Resolution scope. Ignored when `chat_id` is supplied. |
+| `payload` | string | yes | User-message text for the turn. |
+| `transport` | string | no | Originating surface tag (`tui`, `jira`, `bitbucket`, `mcp`, `job`, `state_machine`, `cli`). Default `state_machine`. |
+| `thread` | string | no | Correlation thread (e.g. `PROJ-123#42`). |
+| `actor` | string | no | Originating actor id. |
+| `correlation_id` | string | no | Caller-side correlation token. |
+| `await` | bool | no | `true` → block until the turn lands (or fails). `false` (default) → return immediately after Enqueue. |
+| `timeout_seconds` | int | no | `await:true` only. Lock-contention budget; the dispatcher polls on a 1s cadence (matching the lock-heartbeat tick) until acquired or the budget elapses. Default 300. |
+| `working_dir` | string | no | cwd for the claude subprocess in the `await:true` path. |
+
+**Returns (always, both async and sync):**
+
+| Key | Type | Notes |
+|---|---|---|
+| `drive_id` | string | Allocated ULID of the queued row. |
+| `chat_id` | string | The resolved chat ULID. |
+| `enqueued_at` | int64 | `chat_input_queue.received_at` (`UnixMicro`). |
+
+**Additionally for `await:true`:**
+
+| Key | Type | Notes |
+|---|---|---|
+| `status` | string | `"done"` or `"failed"`. |
+| `result_seq` | int | `chat_messages.seq` of the assistant reply (when `done`). |
+| `result_text` | string | Assistant reply text (when `done`). |
+| `error` | string | Error message (when `failed`). |
+
+**Errors** (Result.Error, prefix-distinguished for `on_error:` routing):
+
+- `host.chat.drive: chat_not_found …` — `chat_id` / `chat_ref` didn't resolve.
+- `host.chat.drive: chat_busy …` — `await:true` and the lock stayed contended past `timeout_seconds`.
+- `host.chat.drive: drive_failed …` — `await:true` and the turn errored (non-zero claude exit, persistence failure, etc.).
+
+**`on_complete` chain.** The proposal §9.2 specifies that
+`await:false` drives optionally carry an `on_complete:` effect set
+declared in the calling state, fired as a synthetic turn when the
+drive completes. The drive row already persists the serialized
+chain plus `origin_session_id` / `origin_state` so the followup
+just needs to wire the orchestrator-side consumer (subscribe to
+drive-terminal events; bind `world.last_drive_result`; run
+`machine.RunEffects(origin_state, world, chain)`). Until that
+lands, `await:false` callers should poll
+`kitsoki chat queue list <chat-id>` or use `await:true` for
+synchronous results.
+
+**Example (sync, with `chat_ref`):**
+
+```yaml
+effects:
+  - invoke: host.chat.drive
+    with:
+      chat_ref: "{{ world.bugfix_chat_ref }}"
+      app: bugfix
+      room: live_coding
+      scope_key: "{{ world.ticket_id }}"
+      payload: "Please summarize phase 7."
+      await: true
+      timeout_seconds: 60
+    bind:
+      summary: result_text
+```
 
 ---
 

@@ -62,6 +62,8 @@ thought.
   AppDef. Supersedes the sub-room composition sketch that lived
   in the bugfix-room proposal.
 - [`claude-code-sessions-proposal.md`](claude-code-sessions-proposal.md) —
-  chats PTY mode, input queue, and multi-transport drive,
-  extending `internal/chats/`. Validation spike required before
-  phase A.
+  chats PTY mode, input queue, and multi-transport drive.
+  Phases 0/A/B/C shipped (see `docs/meta-mode.md` §5 and
+  `docs/hosts.md` for the user-facing surface); D/E/F/G partial
+  or deferred; H not started. The status table at the top of the
+  proposal is the source of truth for what's wired today.

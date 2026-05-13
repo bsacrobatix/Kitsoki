@@ -1,10 +1,85 @@
 # Proposal — Chats: PTY mode, input queue, and multi-transport drive
 
-**Status:** Draft v3. Refactored against
-[`internal/chats/`](../../internal/chats/) after review found that
-v2's "subagent" framing duplicated the existing `chats` /
-`chat_locks` / `claude_session_id` subsystem. This draft *extends*
-chats rather than introducing a parallel concept.
+**Status:** Phases 0/A/B/C shipped; D/E/F/G partial or deferred; H
+not started. The §0 spike notes
+([`notes/claude-code-sessions-spike.md`](notes/claude-code-sessions-spike.md))
+validated every assumption against claude 2.1.140. The shipped
+surface — `kitsoki chat queue …`, `kitsoki chat attach/detach/gc`,
+`/attach` and `/sessions` inside the TUI, `host.chat.drive` —
+extends `internal/chats/` exactly as this draft describes. User-
+facing docs for the shipped pieces live in
+[`docs/meta-mode.md`](../meta-mode.md) (§5 covers `/attach` and
+`/sessions`) and [`docs/hosts.md`](../hosts.md) (covers
+`host.chat.drive`). See the **"Shipped surface"** table below for
+the per-section status; the **"Future work"** section near the
+bottom (§§13–17) is now the actionable agenda.
+
+---
+
+## Shipped surface
+
+What each proposal section maps to in code, and what's left to do.
+
+| Section | Status | Where it lives |
+|---|---|---|
+| §0 validation spike | **shipped** | [`notes/claude-code-sessions-spike.md`](notes/claude-code-sessions-spike.md) |
+| §2 concepts | **shipped** | `internal/chats/pty.go`, `internal/chats/queue.go` |
+| §3 chat-mode FSM (idle ↔ headless ↔ pty_attached ↔ pty_background) | **shipped** | `internal/chats/pty.go` types |
+| §4.1 headless envelope | **shipped** unchanged | `internal/host/oracle.go` |
+| §4.2 PTY envelope | **shipped** | `internal/chatattach/attach.go` |
+| §5 mode-switching via `claude --resume` | **shipped** with the §0/A3 split — first attach uses `--session-id`, subsequent uses `--resume` | `internal/chatattach/attach.go:buildClaudeCommand` |
+| §6.1 reuse `chat_locks` | **shipped** unchanged | `internal/chats/lock.go` (pre-existing) |
+| §6.2 `chat_pty_sessions` table | **shipped** | `internal/chats/schema.sql` v2; `internal/chats/pty.go` |
+| §6.3 `chat_input_queue` table | **shipped** + `on_complete_json` / `origin_session_id` / `origin_state` columns (storage only; firing is Phase G) | `internal/chats/schema.sql` v3; `internal/chats/queue.go` |
+| §6.4 schema migration | **shipped** | `internal/chats/store.go:NewStore` + `migrateChatInputQueueColumns` |
+| §6.5 inner-tmux conf | **partial** — `kitsoki-tmux.conf` ships with the status bar (left = chat label, right = inbox watcher pushes count). The proposal's `prefix+d/D/k/q` keybindings are NOT installed — Phase E | `internal/chatattach/kitsoki-tmux.conf` |
+| §6.6 CLI verbs | **shipped**: `kitsoki chat attach`, `detach`, `queue {add,list,dispatch,dismiss}`, `gc` | `cmd/kitsoki/chat_attach.go`, `cmd/kitsoki/chat_queue.go`, `cmd/kitsoki/chat_gc.go` |
+| §7 queue arbitration | **partial** — single-chat lock arbitration shipped (drives queue when lock is busy). The `defer` / `auto-after-idle` / `always-inject` policies and a periodic drainer are not built | `internal/host/chat_dispatch.go` |
+| §8 kitsoki chrome around tmux | **deferred** — Phase D. v1 hands the terminal directly to tmux (`tmux attach`); the vt-emulated frame is not built. Tmux's own status bar carries the kitsoki identity + inbox count, covering the "always-visible escape hatch" goal at lower fidelity | — |
+| §9.1 inbox idle notifications | **partial** — the watcher in `/attach` pushes the existing inbox count into the tmux status bar. The JSONL-tailing "this chat just went idle" notification producer is not built — Phase G | `internal/tui/meta_attach.go:runStatusBarWatcher` |
+| §9.2 `host.chat.drive` | **shipped** with `chat_id`/`chat_ref`, `await:true|false`, `timeout_seconds` lock-retry. `on_complete` is **persisted** on the drive row but **not fired** — orchestrator integration is Phase G+ follow-up (documented in the handler's docstring) | `internal/host/chat_handlers.go:ChatDriveHandler`, `internal/host/chat_dispatch.go` |
+| §9.3 chat container rooms | **deferred** — Phase F. `/attach` inside `/meta` is the slash-command equivalent: the TUI hands the terminal to `claude --resume` via `tea.Exec` and resumes on detach. The manifest `chat_container:` state hasn't shipped | `internal/tui/meta_attach.go` (the `/attach` path) |
+| §9.4 changed vs new artifacts | **accurate** — every "Unchanged" stayed unchanged; every "New" line landed | — |
+| §10 persistence and recovery | **shipped** | `internal/chats/pty.go:GCDeadTmux`, `internal/chatattach/attach.go` stale-row + cross-host handling |
+| §11.1 general security | **shipped** | Same posture as today |
+| §11.2 per-chat permission level | **deferred** — Phase H. Every `/attach` runs `--permission-mode default` (interactive prompts); every headless drive runs `bypassPermissions` (today's `host.oracle.ask_with_mcp` posture). The `interactive-only` / `bypass-when-headless` / `bypass-always` policy and `kitsoki chat allow-bypass` verb are not built | — |
+| §12 open questions | mostly addressed by shipping; remaining ones flagged inline | — |
+| §13 what this does NOT do | **honoured** — still no daemon, still local-only | — |
+| §15 future work | the deferred phases above are the actionable items; §15.1–15.9 entries that haven't landed are still future work | — |
+| §16 phased delivery | per the rows above | — |
+
+**Outstanding work, prioritised:**
+
+1. **Phase G — `on_complete` firing.** Drive rows already carry the
+   serialized effect chain plus `origin_session_id` / `origin_state`.
+   The remaining work is the orchestrator-side consumer: subscribe
+   to drive-terminal events (mirroring `oncomplete.go:handleJobTerminal`),
+   pre-bind `world.last_drive_result`, and run
+   `machine.RunEffects(origin_state, world, chain)`. The capture-side
+   wiring (orchestrator pre-injecting `__on_complete` into the
+   `host.chat.drive` args from a state's `on_complete:`) is the second
+   half. ~1 week.
+2. **Phase H — indirect transport routing + `allow-bypass`.** Jira /
+   Bitbucket pollers route via `kitsoki chat queue add` /
+   `host.chat.drive`; per-chat permission level encoded as a chat-row
+   setting; `kitsoki chat allow-bypass <chat-id> [--always]`. ~1 week.
+3. **Phase F — chat container rooms.** Manifest `chat_container:`
+   state declaration; orchestrator handles entry/exit and binds
+   `pty.transcript_seq` into the follow-on state. The TUI plumbing
+   already exists via `metaAttachExec`; this is mostly loader +
+   orchestrator work. ~1 week.
+4. **Phase E — inner-tmux key bindings.** `kitsoki-tmux.conf` gains
+   the `prefix+d` (background) / `prefix+D` (headless drain) /
+   `prefix+k` (stop) / `prefix+q` (queue popup) bindings. Each runs
+   a `kitsoki chat detach --mode …` shell-out. ~3-4 days.
+5. **Phase D — kitsoki-rendered chrome.** Vt-emulator embed,
+   framed `(cols, rows-2)` middle region, kitsoki status + instruction
+   rows. Real engineering work (~2 weeks per the original estimate);
+   delivers the visual identity the tmux-only v1 only approximates.
+
+---
+
+## Original draft (preserved for design context)
 
 **Goal.** Add two capabilities to the existing chats subsystem:
 

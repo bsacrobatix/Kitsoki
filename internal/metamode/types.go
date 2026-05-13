@@ -145,7 +145,13 @@ type SendResult struct {
 	// included YAML fragments, prompts, scripts, anything the
 	// directory walk picked up. Empty when nothing changed.
 	ChangedFiles []string
-	Err          error
+	// ChatID is the meta-chat row's full ULID. Surfaced on every
+	// successful turn so the TUI can render a "kitsoki chat attach
+	// <id>" hint — meta-mode chats are regular chat rows under the
+	// hood, so the user can hand off to an interactive
+	// claude --resume session against the same conversation history.
+	ChatID string
+	Err    error
 }
 
 // ChatHandle is the tiny subset of the chat row the controller needs.

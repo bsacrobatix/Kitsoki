@@ -197,6 +197,24 @@ func (p *chatStoreProbe) LatestSeq(_ context.Context, _ string) (int, error) { r
 func (p *chatStoreProbe) WithLock(_ context.Context, _ string, fn func(context.Context) error) error {
 	return fn(context.Background())
 }
+func (p *chatStoreProbe) Enqueue(_ context.Context, _ host.EnqueueDriveOptions) (*host.ChatDrive, error) {
+	return nil, nil
+}
+func (p *chatStoreProbe) Dequeue(_ context.Context, _ string) (*host.ChatDrive, error) {
+	return nil, host.ErrNoPendingDrive
+}
+func (p *chatStoreProbe) ClaimDrive(_ context.Context, _ string) (*host.ChatDrive, error) {
+	return nil, host.ErrDriveNotFound
+}
+func (p *chatStoreProbe) MarkDriveDone(_ context.Context, _ string, _ int) error    { return nil }
+func (p *chatStoreProbe) MarkDriveFailed(_ context.Context, _, _ string) error      { return nil }
+func (p *chatStoreProbe) MarkDriveDismissed(_ context.Context, _ string) error      { return nil }
+func (p *chatStoreProbe) GetDrive(_ context.Context, _ string) (*host.ChatDrive, error) {
+	return nil, host.ErrDriveNotFound
+}
+func (p *chatStoreProbe) ListDrives(_ context.Context, _ string, _ host.ListDrivesFilter) ([]host.ChatDrive, error) {
+	return nil, nil
+}
 
 // noopHarness is a zero-behavior Harness for SubmitDirect tests. RunTurn is
 // never invoked by SubmitDirect, so a stub is sufficient.

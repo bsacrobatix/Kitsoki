@@ -88,6 +88,12 @@ func (s *wireChatStore) ListMeta(_ context.Context, _ string) ([]metamode.ChatHa
 
 func (s *wireChatStore) ArchiveMeta(_ context.Context, _ string) error { return nil }
 
+func (s *wireChatStore) WithLock(ctx context.Context, _ string, fn func(context.Context) error) error {
+	// real-oracle wire test doesn't simulate lock contention; just
+	// pass through to fn so the original behaviour is preserved.
+	return fn(ctx)
+}
+
 type wireAppend struct {
 	Role string
 	Text string

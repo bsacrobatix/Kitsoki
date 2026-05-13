@@ -284,6 +284,9 @@ involvement.
 | `/meta resume <prefix>`  | on-path or meta      | Resolves an ID prefix (minimum 3 chars) against the app's meta chats and enters that chat. An ambiguous prefix prints every matching ID; no chat is entered. |
 | `/meta done`             | meta only            | Archives the active chat (status → `archived`) AND exits meta mode. Use when you're finished with the conversation and don't want it cluttering `/meta list` or the foyer panel. Differs from `/onpath` (which exits without archiving) and from `/meta new` (which archives + opens a fresh row). The confirmation includes the chat ID so you can recover via `/meta resume <prefix>` if you change your mind. |
 | `/onpath`                | meta only            | Exits the overlay without archiving — the chat persists for resume. Default exit intent; overridable per mode via `return.intent`. The TUI prints the session-summary line (`✓ meta session: N turns, M edit(s) ...`) and re-renders the saved state. |
+| `/attach`                | meta only            | Suspends the TUI and hands the terminal to a live `claude --resume <claude-session-id>` session inside tmux, against the active meta chat. The chat row's `claude_session_id` is minted on first attach (with `--session-id`); subsequent attaches use `--resume`. Detach with the tmux prefix + `d` (default Ctrl-B then d) to return to kitsoki — the tmux session keeps running with claude inside, so the conversation persists across the TUI's lifetime. While attached, the tmux status bar shows `kitsoki ❘ <chat>` on the left and an inbox-count badge on the right (severity-coloured for action-required vs info). See [`claude-code-sessions-proposal.md`](proposals/claude-code-sessions-proposal.md) §4.2 / §9.3 for the design context. |
+| `/sessions list`         | on-path or meta      | Prints a styled, numbered table of every active claude session on this host (every `chat_pty_sessions` row, attached or background). Columns: `#`, `CHAT`, `MODE` (`attached` or `background`), `IDLE` (`HH:MM:SS` plus `"(Nm ago)"` when stale >5 min), `SCOPE`. The numbering is cached on the TUI so `/sessions attach <N>` can resolve it without typing chat IDs. |
+| `/sessions attach <N>`   | on-path or meta      | Suspends the TUI and attaches to session `<N>` from the most recent `/sessions list` output. Same handoff lifecycle as `/attach` but lets you hop between background claude conversations across chats (including cross-app `self` chats) without leaving the TUI. Detach with the tmux prefix + `d`. |
 
 Mode dispatch uses exact match on the first slash arg, so a meta
 mode literally named `list`, `new`, `resume`, or `done` would be
@@ -460,12 +463,15 @@ contract.
 |------------------------------------------|------|
 | YAML schema (`agents:`, `meta_modes:`)   | `internal/app/types.go`, `internal/app/loader.go` |
 | Agents registry + `story-author` builtin | `internal/agents/` |
-| Meta-mode controller (Enter / Send / Exit, ledger, tree-diff reload) | `internal/metamode/controller.go` |
-| TUI overlay, slash-command dispatch, `/meta list` rendering | `internal/tui/metamode.go`, `internal/tui/tui.go` |
+| Meta-mode controller (Enter / Send / Exit, ledger, tree-diff reload, WithLock integration so meta turns serialize against drive dispatch / `chat continue` / `/attach`) | `internal/metamode/controller.go` |
+| TUI overlay, slash-command dispatch, `/meta list` rendering, `/attach` + `/sessions list|attach` | `internal/tui/metamode.go`, `internal/tui/tui.go`, `internal/tui/meta_attach.go`, `internal/tui/sessions.go` |
 | Per-call `agent:` arg on `host.oracle.ask_with_mcp` | `internal/host/oracle_ask_with_mcp.go` |
 | Authoring-tool dispatcher (legacy structured tokens) | `internal/host/authoring_tools.go` |
 | Trace ring buffer + per-turn dump        | `internal/trace/ringbuffer.go` |
-| Process-wide wiring (registry install, trace file, chat store) | `cmd/kitsoki/main.go` |
+| Process-wide wiring (registry install, trace file, chat store, tmux client, inbox watcher) | `cmd/kitsoki/main.go` |
+| Chat-attach lifecycle (chat lock → ensure tmux session → `pty_attached` → heartbeat → runTmux callback → `pty_background`) | `internal/chatattach/attach.go`, `internal/chatattach/kitsoki-tmux.conf` |
+| tmux wrapper (kitsoki-owned socket, `HasSession`/`NewSession`/`AttachStreaming`/`SetStatusRight`/...) | `internal/tmux/` |
+| Inbox status-bar watcher (pushes severity-coloured notification counts into the attached session's tmux `status-right` every 2s while `/attach` is live) | `internal/tui/meta_attach.go:runStatusBarWatcher` |
 
 In-tree apps with a working `meta_modes.story`:
 [`testdata/apps/cloak/app.yaml`](../testdata/apps/cloak/app.yaml),
@@ -523,3 +529,28 @@ What ships with kitsoki today (formerly under "Limitations"):
   chat the controller can see — including cross-app `self` chats
   merged in by `Controller.ListChats` — and resumes the picked
   row without typing `/meta resume <id>`.
+- **`/attach` hands the terminal to claude.** While `/meta`
+  drives turns through kitsoki's Go-side oracle adapter (with
+  file-change detection and orchestrator reload), `/attach`
+  flips the same chat row into a tmux-hosted `claude --resume`
+  pane so the user gets claude's native UI. Detach with
+  `Ctrl-B then d`; claude keeps running in the background.
+  `/sessions list` and `/sessions attach <N>` let you hop
+  between any active claude sessions — meta or otherwise — by
+  position rather than chat ID. The kitsoki-shipped tmux config
+  (`internal/chatattach/kitsoki-tmux.conf`) gives the attached
+  pane a `kitsoki ❘ <chat>` status bar with severity-coloured
+  inbox counts on the right; a watcher goroutine refreshes that
+  count via `tmux set-option status-right` every 2 s while
+  attached. The full kitsoki-rendered chrome (vt-emulator embed,
+  proposal §8) is **not** built — tmux's own status bar carries
+  the kitsoki identity in v1, with the chat-attach lifecycle in
+  `internal/chatattach/`.
+- **`host.chat.drive` is registered as a builtin host.** A
+  state-machine effect can enqueue (or sync-run) a turn against
+  any chat, with `chat_ref` resolution and a `timeout_seconds`
+  lock-retry budget for the `await:true` path. The drive row
+  carries an `on_complete` chain when the orchestrator sets one,
+  but the orchestrator's firing-side consumer is not wired yet
+  — see `docs/proposals/claude-code-sessions-proposal.md` §9.2
+  for the followup.

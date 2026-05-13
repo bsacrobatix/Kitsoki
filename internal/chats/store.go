@@ -28,7 +28,22 @@ var chatsSchemaDDL string
 // existing DB; bumping this constant alongside the DDL makes that case fail
 // loudly at NewStore time. Any bump must be paired with an explicit
 // migration step before reaching the version assertion.
-const expectedSchemaVersion = 1
+const expectedSchemaVersion = 3
+
+// migratableFromVersions lists the prior user_version values from which the
+// migration steps in NewStore can bring a DB up to expectedSchemaVersion.
+// Each entry has a corresponding code path that handles the *additive*
+// changes (new tables, new columns); fresh DBs (gotVersion == 0) take the
+// same path because every step is idempotent (CREATE … IF NOT EXISTS for
+// tables, "ALTER TABLE … ADD COLUMN" guarded by a column-presence probe).
+//
+// When a future bump adds a destructive change (column drop, type change,
+// renamed table), the migration step must serialize a copy-then-rename
+// pattern instead of relying on IF NOT EXISTS.
+var migratableFromVersions = map[int]bool{
+	1: true, // v1 → v2: adds chat_pty_sessions and chat_input_queue.
+	2: true, // v2 → v3: adds on_complete_json / origin_session_id / origin_state on chat_input_queue.
+}
 
 // ErrChatNotFound is returned when a requested chat does not exist.
 var ErrChatNotFound = errors.New("chats: chat not found")
@@ -85,12 +100,27 @@ func NewStore(db *sql.DB, opts ...Option) (*Store, error) {
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&gotVersion); err != nil {
 		return nil, fmt.Errorf("chats.NewStore: read schema version: %w", err)
 	}
-	if gotVersion != 0 && gotVersion != expectedSchemaVersion {
+	// A fresh DB reports 0 and is always migratable. A DB stamped at the
+	// current version is a no-op re-application. Any other value must be in
+	// migratableFromVersions, or we're being asked to open a DB written by
+	// an incompatible kitsoki build.
+	if gotVersion != 0 && gotVersion != expectedSchemaVersion && !migratableFromVersions[gotVersion] {
 		return nil, fmt.Errorf(
 			"chats.NewStore: unexpected schema version %d (want %d) — DB written by a different kitsoki build; refusing to open",
 			gotVersion, expectedSchemaVersion,
 		)
 	}
+
+	// Pre-DDL migrations. The embedded schema.sql adds new tables and
+	// columns via IF NOT EXISTS, but SQLite's ALTER TABLE … ADD COLUMN
+	// has no IF NOT EXISTS form, so a v2 → v3 upgrade needs an explicit
+	// column-presence probe before each ALTER. The probe is cheap (a
+	// PRAGMA table_info read of a small table) and pre-DDL so a partial
+	// migration on a previous run is recoverable.
+	if err := migrateChatInputQueueColumns(db); err != nil {
+		return nil, fmt.Errorf("chats.NewStore: alter chat_input_queue: %w", err)
+	}
+
 	if _, err := db.Exec(chatsSchemaDDL); err != nil {
 		return nil, fmt.Errorf("chats.NewStore: schema migration: %w", err)
 	}
@@ -106,6 +136,65 @@ func NewStore(db *sql.DB, opts ...Option) (*Store, error) {
 		)
 	}
 	return s, nil
+}
+
+// migrateChatInputQueueColumns adds the v3 columns (on_complete_json,
+// origin_session_id, origin_state) to chat_input_queue when they are
+// missing. The function is a no-op when:
+//   - the table doesn't exist yet (fresh DB; the embedded DDL will
+//     create it with all columns), or
+//   - the columns are already present (already-migrated DB, or v3 from
+//     scratch).
+//
+// Idempotent so a partially-applied migration on a prior run can be
+// resumed without manual intervention.
+func migrateChatInputQueueColumns(db *sql.DB) error {
+	// PRAGMA table_info returns one row per column. Empty result means
+	// the table doesn't exist — defer to the IF NOT EXISTS DDL below.
+	rows, err := db.Query(`PRAGMA table_info(chat_input_queue)`)
+	if err != nil {
+		return fmt.Errorf("read table_info: %w", err)
+	}
+	cols := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notNull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan table_info: %w", err)
+		}
+		cols[name] = true
+	}
+	rows.Close()
+	if len(cols) == 0 {
+		// Table doesn't exist yet — fresh DB; let the embedded DDL run.
+		return nil
+	}
+
+	type addCol struct {
+		name string
+		ddl  string
+	}
+	want := []addCol{
+		{"on_complete_json", `ALTER TABLE chat_input_queue ADD COLUMN on_complete_json TEXT NOT NULL DEFAULT ''`},
+		{"origin_session_id", `ALTER TABLE chat_input_queue ADD COLUMN origin_session_id TEXT NOT NULL DEFAULT ''`},
+		{"origin_state", `ALTER TABLE chat_input_queue ADD COLUMN origin_state TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, c := range want {
+		if cols[c.name] {
+			continue
+		}
+		if _, err := db.Exec(c.ddl); err != nil {
+			return fmt.Errorf("add column %s: %w", c.name, err)
+		}
+	}
+	return nil
 }
 
 // Create inserts a new chat row and returns it.

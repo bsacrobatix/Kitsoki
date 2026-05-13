@@ -204,6 +204,13 @@ type RootModel struct {
 	// traceFilePath is the session-scoped temp file path the TUI
 	// rewrites with the ring snapshot. Empty disables the dump.
 	traceFilePath string
+
+	// sessionList caches the most recent /sessions list output so
+	// /sessions attach <N> can resolve a 1-indexed position back to a
+	// chat_pty_sessions row without the user typing chat IDs.
+	// Replaced wholesale on every /sessions list; nil between
+	// invocations.
+	sessionList []chats.PtySession
 }
 
 // RootModelOption is a functional option for RootModel construction.
@@ -980,6 +987,9 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "/meta":
 		return m.handleMetaSlash(parts[1:])
 
+	case "/sessions":
+		return m.handleSessionsSlash(parts[1:])
+
 	default:
 		m.transcript.AppendSystem(fmt.Sprintf("(unknown command: %s)", parts[0]))
 		return m, nil
@@ -1738,12 +1748,31 @@ func (m RootModel) handleMetaSendDone(msg metaSendDoneMsg) (tea.Model, tea.Cmd) 
 	m.metaMode.inFlight = false
 
 	if msg.err != nil {
+		if errors.Is(msg.err, metamode.ErrChatBusy) {
+			// Another driver (a queued drive dispatch, a parallel
+			// `kitsoki chat continue`, or an in-progress
+			// `kitsoki chat attach`) is holding the per-chat lock.
+			// Surface a TUI-friendly note rather than the raw
+			// "metamode: chat busy" wrapper.
+			m.transcript.AppendError("(meta)",
+				"this chat is currently held by another driver — wait for it to release, or run `kitsoki chat unlock --force <chat-id>` if you know it's stuck")
+			return m, nil
+		}
 		m.transcript.AppendError("(meta)", fmt.Sprintf("error: %v", msg.err))
 		return m, nil
 	}
 	m.metaMode.turns++
 	if msg.result.Assistant != "" {
 		m.transcript.AppendSystem(msg.result.Assistant)
+	}
+	// Surface the /attach affordance once per overlay so the user
+	// knows the in-TUI hand-off: type /attach to drop into a real
+	// `claude --resume` session for this chat, detach with Ctrl-B
+	// then d, and come back here with the conversation intact.
+	if m.metaMode.turns == 1 && msg.result.ChatID != "" {
+		m.transcript.AppendSystem(
+			"tip: /attach drops you into the full claude UI for this chat; Ctrl-B then d leaves claude running in the background",
+		)
 	}
 	if msg.result.ReloadRequested && m.appPath != "" {
 		m.metaMode.edits++
@@ -1824,9 +1853,10 @@ func (m RootModel) updateMeta(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMetaListDone(msg)
 	case metaNewDoneMsg:
 		return m.handleMetaNewDone(msg)
-
 	case metaDoneDoneMsg:
 		return m.handleMetaDoneDone(msg)
+	case metaAttachDoneMsg:
+		return m.handleMetaAttachDone(msg)
 	case spinner.TickMsg:
 		if m.metaMode.inFlight {
 			var cmd tea.Cmd
@@ -1888,8 +1918,12 @@ func (m RootModel) updateMeta(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// The discovery subcommands /meta list, /meta new, /meta resume
 	// <id>, and /meta done are allowed inside meta mode — they
 	// pivot between meta chats (or close the current one) without
-	// forcing /onpath first. Anything else with a "/" prefix is
-	// still discouraged.
+	// forcing /onpath first. /attach hands the terminal to a
+	// tmux-hosted `claude --resume` session against the active
+	// meta chat (proposal §4.2 / §9.3); /sessions list and
+	// /sessions attach <N> work too so the user can hop to any
+	// background claude conversation without leaving /meta.
+	// Anything else with a "/" prefix is still discouraged.
 	if strings.HasPrefix(text, "/") {
 		parts := strings.Fields(text)
 		if len(parts) > 0 && parts[0] == "/meta" && len(parts) > 1 {
@@ -1898,7 +1932,13 @@ func (m RootModel) updateMeta(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.handleMetaSlash(parts[1:])
 			}
 		}
-		m.transcript.AppendSystem(fmt.Sprintf("(slash commands are paused in meta mode — use %s to return first)", exitCmd))
+		if len(parts) > 0 && parts[0] == "/sessions" {
+			return m.handleSessionsSlash(parts[1:])
+		}
+		if text == "/attach" {
+			return m.handleMetaAttach()
+		}
+		m.transcript.AppendSystem(fmt.Sprintf("(slash commands are paused in meta mode — use %s to return first; or /attach / /sessions to jump into claude)", exitCmd))
 		return m, nil
 	}
 

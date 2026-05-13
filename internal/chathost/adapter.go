@@ -118,6 +118,122 @@ func (a *adapter) WithLock(ctx context.Context, chatID string, fn func(context.C
 	return err
 }
 
+// ─── chat input queue ─────────────────────────────────────────────────────────
+
+func (a *adapter) Enqueue(ctx context.Context, opts host.EnqueueDriveOptions) (*host.ChatDrive, error) {
+	d, err := a.s.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          opts.ChatID,
+		Transport:       chats.DriveTransport(opts.Transport),
+		Thread:          opts.Thread,
+		Actor:           opts.Actor,
+		CorrelationID:   opts.CorrelationID,
+		Payload:         opts.Payload,
+		OnCompleteJSON:  opts.OnCompleteJSON,
+		OriginSessionID: opts.OriginSessionID,
+		OriginState:     opts.OriginState,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toDrive(d), nil
+}
+
+func (a *adapter) Dequeue(ctx context.Context, chatID string) (*host.ChatDrive, error) {
+	d, err := a.s.Dequeue(ctx, chatID)
+	if err != nil {
+		return nil, translateDriveErr(err)
+	}
+	return toDrive(d), nil
+}
+
+func (a *adapter) ClaimDrive(ctx context.Context, driveID string) (*host.ChatDrive, error) {
+	d, err := a.s.ClaimDrive(ctx, driveID)
+	if err != nil {
+		return nil, translateDriveErr(err)
+	}
+	return toDrive(d), nil
+}
+
+func (a *adapter) MarkDriveDone(ctx context.Context, driveID string, resultSeq int) error {
+	return translateDriveErr(a.s.MarkDriveDone(ctx, driveID, resultSeq))
+}
+
+func (a *adapter) MarkDriveFailed(ctx context.Context, driveID, errorMessage string) error {
+	return translateDriveErr(a.s.MarkDriveFailed(ctx, driveID, errorMessage))
+}
+
+func (a *adapter) MarkDriveDismissed(ctx context.Context, driveID string) error {
+	return translateDriveErr(a.s.MarkDriveDismissed(ctx, driveID))
+}
+
+func (a *adapter) GetDrive(ctx context.Context, driveID string) (*host.ChatDrive, error) {
+	d, err := a.s.GetDrive(ctx, driveID)
+	if err != nil {
+		return nil, translateDriveErr(err)
+	}
+	return toDrive(d), nil
+}
+
+func (a *adapter) ListDrives(ctx context.Context, chatID string, filter host.ListDrivesFilter) ([]host.ChatDrive, error) {
+	statuses := make([]chats.DriveStatus, len(filter.Statuses))
+	for i, s := range filter.Statuses {
+		statuses[i] = chats.DriveStatus(s)
+	}
+	ds, err := a.s.ListDrives(ctx, chatID, chats.ListDrivesFilter{
+		Statuses: statuses,
+		Limit:    filter.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]host.ChatDrive, len(ds))
+	for i := range ds {
+		out[i] = *toDrive(&ds[i])
+	}
+	return out, nil
+}
+
+// translateDriveErr maps chats package sentinel errors to their
+// host-package equivalents so callers in host (and below) can use
+// errors.Is against host.ErrNoPendingDrive / host.ErrDriveNotFound /
+// host.ErrDriveStateMismatch without importing chats.
+func translateDriveErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, chats.ErrNoPendingDrive):
+		return host.ErrNoPendingDrive
+	case errors.Is(err, chats.ErrDriveNotFound):
+		return host.ErrDriveNotFound
+	case errors.Is(err, chats.ErrDriveStateMismatch):
+		// Preserve the original error's message (it carries the actual
+		// vs. expected status) so logs stay useful; just thread the
+		// host sentinel into the chain.
+		return errJoin(host.ErrDriveStateMismatch, err)
+	default:
+		return err
+	}
+}
+
+// errJoin wraps a sentinel + an inner error so errors.Is matches the
+// sentinel and Error() reports the inner message. We can't use the
+// stdlib %w idiom directly because the inner error already wraps its
+// own sentinel.
+func errJoin(sentinel, inner error) error {
+	return &joinedErr{sentinel: sentinel, inner: inner}
+}
+
+type joinedErr struct {
+	sentinel error
+	inner    error
+}
+
+func (e *joinedErr) Error() string { return e.inner.Error() }
+func (e *joinedErr) Is(target error) bool {
+	return errors.Is(e.sentinel, target) || errors.Is(e.inner, target)
+}
+func (e *joinedErr) Unwrap() error { return e.inner }
+
 // ─── conversion helpers ───────────────────────────────────────────────────────
 
 func toRecord(c *chats.Chat) *host.ChatRecord {
@@ -145,5 +261,29 @@ func toMessage(m chats.Message) host.ChatMessage {
 		Content:   m.Content,
 		Metadata:  m.Metadata,
 		CreatedAt: m.CreatedAt,
+	}
+}
+
+func toDrive(d *chats.Drive) *host.ChatDrive {
+	if d == nil {
+		return nil
+	}
+	return &host.ChatDrive{
+		DriveID:         d.DriveID,
+		ChatID:          d.ChatID,
+		Transport:       string(d.Transport),
+		Thread:          d.Thread,
+		Actor:           d.Actor,
+		CorrelationID:   d.CorrelationID,
+		Payload:         d.Payload,
+		Status:          string(d.Status),
+		ReceivedAt:      d.ReceivedAt,
+		DispatchedAt:    d.DispatchedAt,
+		CompletedAt:     d.CompletedAt,
+		ResultSeq:       d.ResultSeq,
+		ErrorMessage:    d.ErrorMessage,
+		OnCompleteJSON:  d.OnCompleteJSON,
+		OriginSessionID: d.OriginSessionID,
+		OriginState:     d.OriginState,
 	}
 }

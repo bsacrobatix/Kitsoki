@@ -5,6 +5,11 @@ import (
 	"testing"
 )
 
+// ExpectedSchemaVersion exposes the package-private expectedSchemaVersion
+// constant so external _test packages can assert against it without
+// hard-coding a literal that drifts on every schema bump.
+const ExpectedSchemaVersion = expectedSchemaVersion
+
 // TestDB is a test helper that exposes the underlying *sql.DB of a Store.
 // Only available in test builds.
 type TestDB struct {

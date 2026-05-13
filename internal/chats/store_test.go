@@ -785,13 +785,13 @@ func TestStore_SchemaVersion_RejectsUnknown(t *testing.T) {
 }
 
 // TestStore_SchemaVersion_PreservedOnReopen checks the happy path: open,
-// close, reopen — the version stays at expectedSchemaVersion and NewStore
-// succeeds without complaint.
+// close, reopen — the version stays at chats.ExpectedSchemaVersion and
+// NewStore succeeds without complaint.
 func TestStore_SchemaVersion_PreservedOnReopen(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "schema-roundtrip.db")
 
-	// First open: applies schema, sets user_version=1.
+	// First open: applies schema, stamps user_version.
 	{
 		s, err := store.Open(dbPath)
 		if err != nil {
@@ -805,7 +805,7 @@ func TestStore_SchemaVersion_PreservedOnReopen(t *testing.T) {
 		}
 	}
 
-	// Reopen: NewStore must succeed and user_version still equals 1.
+	// Reopen: NewStore must succeed and user_version is preserved.
 	s, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("store.Open (reopen): %v", err)
@@ -820,8 +820,110 @@ func TestStore_SchemaVersion_PreservedOnReopen(t *testing.T) {
 	if err := s.DB().QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
 		t.Fatalf("PRAGMA scan: %v", err)
 	}
-	if v != 1 {
-		t.Errorf("expected user_version=1, got %d", v)
+	if v != chats.ExpectedSchemaVersion {
+		t.Errorf("expected user_version=%d, got %d", chats.ExpectedSchemaVersion, v)
+	}
+}
+
+// TestStore_SchemaVersion_MigratesV1ToCurrent simulates opening a DB written
+// by a pre-v2 build: pre-stamp user_version=1, create only the v1 tables
+// (chats, chat_messages, chat_locks), and verify NewStore upgrades the DB
+// to ExpectedSchemaVersion by adding chat_pty_sessions and
+// chat_input_queue without losing the prior rows.
+func TestStore_SchemaVersion_MigratesV1ToCurrent(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "schema-v1.db")
+
+	// Pre-stamp the DB as v1 with only the v1 tables present, so the
+	// migration path actually has work to do (the v1 DDL is a subset
+	// of the current embedded DDL).
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	v1DDL := `
+		CREATE TABLE chats (
+		    id TEXT NOT NULL PRIMARY KEY,
+		    app_id TEXT NOT NULL,
+		    room TEXT NOT NULL,
+		    scope_key TEXT NOT NULL DEFAULT '',
+		    title TEXT NOT NULL,
+		    status TEXT NOT NULL,
+		    claude_session_id TEXT,
+		    parent_chat_id TEXT,
+		    session_id TEXT,
+		    created_at INTEGER NOT NULL,
+		    updated_at INTEGER NOT NULL,
+		    last_active_at INTEGER NOT NULL
+		) STRICT;
+		CREATE TABLE chat_messages (
+		    chat_id TEXT NOT NULL,
+		    seq INTEGER NOT NULL,
+		    role TEXT NOT NULL CHECK (role IN ('user','assistant','system','tool')),
+		    content TEXT NOT NULL,
+		    metadata TEXT,
+		    created_at INTEGER NOT NULL,
+		    PRIMARY KEY (chat_id, seq)
+		) STRICT;
+		CREATE TABLE chat_locks (
+		    chat_id TEXT NOT NULL PRIMARY KEY,
+		    owner_pid INTEGER NOT NULL,
+		    owner_host TEXT NOT NULL,
+		    acquired_at INTEGER NOT NULL,
+		    heartbeat_at INTEGER NOT NULL
+		) STRICT;
+		INSERT INTO chats (id, app_id, room, scope_key, title, status,
+		    claude_session_id, parent_chat_id, session_id,
+		    created_at, updated_at, last_active_at)
+		VALUES ('LEGACY01', 'app1', 'oracle', '', 'pre-migration', 'active',
+		    '', NULL, NULL, 1, 1, 1);
+		PRAGMA user_version = 1;`
+	if _, err := db.Exec(v1DDL); err != nil {
+		t.Fatalf("seed v1 DB: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Now open via the real path. NewStore must upgrade in place.
+	s, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	cs, err := chats.NewStore(s.DB())
+	if err != nil {
+		t.Fatalf("NewStore on v1 DB: %v", err)
+	}
+
+	// Version stamped forward.
+	var v int
+	if err := s.DB().QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		t.Fatalf("PRAGMA scan: %v", err)
+	}
+	if v != chats.ExpectedSchemaVersion {
+		t.Errorf("expected user_version=%d after migration, got %d", chats.ExpectedSchemaVersion, v)
+	}
+
+	// Pre-existing row survived.
+	got, err := cs.Get(context.Background(), "LEGACY01")
+	if err != nil {
+		t.Fatalf("Get legacy chat: %v", err)
+	}
+	if got.Title != "pre-migration" {
+		t.Errorf("legacy row lost: title=%q", got.Title)
+	}
+
+	// New tables exist.
+	for _, table := range []string{"chat_pty_sessions", "chat_input_queue"} {
+		var name string
+		err := s.DB().QueryRow(
+			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table,
+		).Scan(&name)
+		if err != nil {
+			t.Errorf("expected table %s to exist post-migration: %v", table, err)
+		}
 	}
 }
 

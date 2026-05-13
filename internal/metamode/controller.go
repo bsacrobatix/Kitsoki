@@ -3,6 +3,7 @@ package metamode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -51,8 +52,10 @@ type Controller struct {
 
 // ChatStore is the controller-facing chat store seam. ResolveMeta
 // covers Enter; GetMeta / ListMeta / ArchiveMeta cover the Phase A.5
-// discovery surface (/meta list, /meta resume, /meta new). All four
-// methods are meta-mode-specific so the names encode intent.
+// discovery surface (/meta list, /meta resume, /meta new). WithLock
+// is the singleton-lock primitive shared with the rest of the chats
+// subsystem — see Controller.Send for why meta-mode turns now
+// acquire it.
 type ChatStore interface {
 	// ResolveMeta returns the chat row for (appID, room, scopeKey),
 	// creating it with the given title if it doesn't exist. Room
@@ -70,7 +73,21 @@ type ChatStore interface {
 	// /meta new uses this before opening a fresh row in the same
 	// scope.
 	ArchiveMeta(ctx context.Context, chatID string) error
+	// WithLock acquires the per-chat singleton lock, runs fn, and
+	// releases. Same primitive used by chats.Store.WithLock and the
+	// drive dispatcher — meta-mode joins the same arbitration regime
+	// so a meta turn can't race a `kitsoki chat continue`, a queued
+	// drive dispatch, or a `kitsoki chat attach` session against the
+	// same chat row. On lock contention, fn is not called and the
+	// returned error wraps ErrChatBusy.
+	WithLock(ctx context.Context, chatID string, fn func(context.Context) error) error
 }
+
+// ErrChatBusy is returned (wrapped) by Controller.Send when the chat
+// lock is held by another driver. Callers (the TUI metaSendCmd path)
+// should use errors.Is to detect it and render a busy-chat message
+// rather than the generic "oracle ask: …" wrapper.
+var ErrChatBusy = errors.New("metamode: chat busy")
 
 // OracleCaller is the controller-facing LLM seam. The Ask method
 // represents one turn against an agent: system prompt + user message
@@ -471,9 +488,48 @@ func (c *Controller) Send(ctx context.Context, s *Session, userText string, turn
 		"user_chars", len(userText),
 	)
 
+	chatID := s.Chat.ID()
+
+	// Acquire the per-chat singleton lock. Held across the user
+	// append, oracle dispatch, and assistant append — every other
+	// driver (kitsoki chat continue, the drive dispatcher,
+	// kitsoki chat attach) acquires the same lock, so meta turns
+	// can't interleave with them against the same row. On contention
+	// we surface ErrChatBusy so the TUI renders a friendly message
+	// rather than a generic oracle-error wrapper.
+	var (
+		result   SendResult
+		innerErr error
+	)
+	lockErr := c.Chats.WithLock(ctx, chatID, func(lockedCtx context.Context) error {
+		result, innerErr = c.sendLocked(lockedCtx, s, userText, turn, chatID, mode)
+		return innerErr
+	})
+	if lockErr != nil {
+		if errors.Is(lockErr, ErrChatBusy) {
+			return SendResult{Err: lockErr}, lockErr
+		}
+		// innerErr is also returned by sendLocked; prefer the
+		// already-wrapped form when WithLock surfaced it. WithLock
+		// returns whatever fn returned, so when innerErr != nil it
+		// equals lockErr here.
+		if innerErr != nil {
+			return result, innerErr
+		}
+		return SendResult{Err: lockErr}, lockErr
+	}
+	return result, nil
+}
+
+// sendLocked is the original Send body, factored out so the chat-lock
+// callback in Send can hold it cleanly. ctx here is the locked
+// context — short-lived helpers (heartbeats) that ride on the lock
+// would attach to it, but meta-mode does not need a heartbeat goroutine
+// since oracle.Ask is a one-shot call.
+func (c *Controller) sendLocked(ctx context.Context, s *Session, userText string, turn TurnContext, chatID, mode string) (SendResult, error) {
 	if err := s.Chat.AppendMessage("user", userText); err != nil {
 		slog.ErrorContext(ctx, "metamode.send.append_user_failed",
-			"chat_id", s.Chat.ID(), "err", err.Error())
+			"chat_id", chatID, "err", err.Error())
 		return SendResult{Err: err}, fmt.Errorf("metamode.Send: append user: %w", err)
 	}
 
@@ -498,7 +554,6 @@ func (c *Controller) Send(ctx context.Context, s *Session, userText string, turn
 	// The dispatcher is dormant when the agent uses direct file
 	// edits (the current story-author protocol); the registration is
 	// kept defensive for legacy chats that resume with old prompts.
-	chatID := s.Chat.ID()
 	host.RegisterAuthoringLedger(chatID, ledgerAdapter{l: s.Ledger})
 	defer host.UnregisterAuthoringLedger(chatID)
 
@@ -518,7 +573,7 @@ func (c *Controller) Send(ctx context.Context, s *Session, userText string, turn
 	preStat = statAppFile(turn.AppFile)
 
 	slog.DebugContext(ctx, "metamode.oracle.ask",
-		"chat_id", s.Chat.ID(),
+		"chat_id", chatID,
 		"cwd", in.Cwd,
 		"tools", in.ToolAllowlist,
 		"claude_session_id", in.ClaudeSessionID,
@@ -526,14 +581,14 @@ func (c *Controller) Send(ctx context.Context, s *Session, userText string, turn
 	out, err := c.Oracle.Ask(ctx, in)
 	if err != nil {
 		slog.ErrorContext(ctx, "metamode.oracle.error",
-			"chat_id", s.Chat.ID(),
+			"chat_id", chatID,
 			"mode", mode,
 			"err", err.Error(),
 		)
 		return SendResult{Err: err}, fmt.Errorf("metamode.Send: oracle ask: %w", err)
 	}
 	slog.DebugContext(ctx, "metamode.oracle.reply",
-		"chat_id", s.Chat.ID(),
+		"chat_id", chatID,
 		"reply_chars", len(out.Reply),
 		"new_claude_session_id", out.NewClaudeSessionID,
 	)
@@ -552,7 +607,7 @@ func (c *Controller) Send(ctx context.Context, s *Session, userText string, turn
 
 	if err := s.Chat.AppendMessage("assistant", out.Reply); err != nil {
 		slog.ErrorContext(ctx, "metamode.send.append_assistant_failed",
-			"chat_id", s.Chat.ID(), "err", err.Error())
+			"chat_id", chatID, "err", err.Error())
 		return SendResult{Err: err}, fmt.Errorf("metamode.Send: append assistant: %w", err)
 	}
 
@@ -568,13 +623,14 @@ func (c *Controller) Send(ctx context.Context, s *Session, userText string, turn
 	_ = preStat // kept for symmetry with the legacy single-file diagnostic
 	reload := s.Ledger.ConsumeReload() || len(changedFiles) > 0
 	slog.InfoContext(ctx, "metamode.send.done",
-		"chat_id", s.Chat.ID(),
+		"chat_id", chatID,
 		"reload_requested", reload,
 		"changed_files", changedFiles,
 	)
 
 	return SendResult{
 		Assistant:       out.Reply,
+		ChatID:          chatID,
 		ReloadRequested: reload,
 		ChangedFiles:    changedFiles,
 		Err:             nil,
@@ -825,6 +881,18 @@ func (c *Controller) now() time.Time {
 		return c.Clock()
 	}
 	return time.Now()
+}
+
+// SessionWorkspace returns the cwd the controller would pass to a
+// new turn for sess against appFile. Exposed so the TUI's /attach
+// path can spawn `claude --resume` in the same directory the typed
+// /meta flow uses, keeping file-edit behaviour consistent across the
+// two modes.
+func SessionWorkspace(sess *Session, appFile string) string {
+	if sess == nil || sess.Mode == nil {
+		return ""
+	}
+	return resolveCwd(sess.Mode, sess.Agent, appFile)
 }
 
 // resolveCwd picks the cwd for an Ask. Precedence: mode override >
