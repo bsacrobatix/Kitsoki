@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/clock"
+	"kitsoki/internal/journal"
 	"kitsoki/internal/ulid"
 
 	_ "modernc.org/sqlite"
@@ -34,8 +36,9 @@ var ErrChatNotFound = errors.New("chats: chat not found")
 // Store provides SQLite-backed persistence for chats and their transcripts.
 // It operates on an existing *sql.DB (opened by the parent store package).
 type Store struct {
-	db    *sql.DB
-	clock clock.Clock
+	db            *sql.DB
+	clock         clock.Clock
+	journalWriter journal.Writer
 }
 
 // Option is a functional option for constructing a Store.
@@ -48,6 +51,18 @@ func WithClock(c clock.Clock) Option {
 		if c != nil {
 			s.clock = c
 		}
+	}
+}
+
+// WithJournalWriter injects a journal.Writer into the Store. When non-nil,
+// chat mutations emit typed journal entries alongside the SQLite writes
+// (continue-mode §4.9 dual-write). When nil (the default), no journal
+// entries are written — this preserves backward compatibility for callers
+// that do not participate in the journal (e.g. flow tests, chathost adapter
+// in non-continue-mode builds).
+func WithJournalWriter(jw journal.Writer) Option {
+	return func(s *Store) {
+		s.journalWriter = jw
 	}
 }
 
@@ -275,6 +290,20 @@ func (s *Store) SetClaudeSessionID(ctx context.Context, chatID, claudeSessionID 
 	if n == 0 {
 		return ErrChatNotFound
 	}
+	// Site 22: emit chats.append for the claude_session_id update.
+	if s.journalWriter != nil {
+		sid := chatSessionID(ctx, s.db, chatID)
+		body := mustJSON([]map[string]any{
+			{"op": "replace", "path": "/meta/claude_session_id", "value": claudeSessionID},
+		})
+		appendJournalEntry(s.journalWriter, journal.Entry{
+			Ts:      s.clock.Now(),
+			Session: sid,
+			Kind:    journal.KindChatsAppend,
+			Doc:     journal.DocID("chats/" + chatID),
+			Body:    body,
+		})
+	}
 	return nil
 }
 
@@ -298,6 +327,20 @@ func (s *Store) Rename(ctx context.Context, chatID, title string) error {
 	if n == 0 {
 		return ErrChatNotFound
 	}
+	// Site 21: emit chats.append for the title rename.
+	if s.journalWriter != nil {
+		sid := chatSessionID(ctx, s.db, chatID)
+		body := mustJSON([]map[string]any{
+			{"op": "replace", "path": "/meta/title", "value": title},
+		})
+		appendJournalEntry(s.journalWriter, journal.Entry{
+			Ts:      s.clock.Now(),
+			Session: sid,
+			Kind:    journal.KindChatsAppend,
+			Doc:     journal.DocID("chats/" + chatID),
+			Body:    body,
+		})
+	}
 	return nil
 }
 
@@ -313,6 +356,20 @@ func (s *Store) Archive(ctx context.Context, chatID string) error {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return ErrChatNotFound
+	}
+	// Site 20: emit chats.append for the archive status change.
+	if s.journalWriter != nil {
+		sid := chatSessionID(ctx, s.db, chatID)
+		body := mustJSON([]map[string]any{
+			{"op": "replace", "path": "/meta/status", "value": string(ChatArchived)},
+		})
+		appendJournalEntry(s.journalWriter, journal.Entry{
+			Ts:      s.clock.Now(),
+			Session: sid,
+			Kind:    journal.KindChatsAppend,
+			Doc:     journal.DocID("chats/" + chatID),
+			Body:    body,
+		})
 	}
 	return nil
 }
@@ -372,14 +429,39 @@ func (s *Store) AppendMessage(ctx context.Context, chatID, role, content string,
 	if metaJSON != nil {
 		_ = json.Unmarshal(metaJSON, &m)
 	}
-	return Message{
+	msg := Message{
 		ChatID:    chatID,
 		Seq:       seq,
 		Role:      role,
 		Content:   content,
 		Metadata:  m,
 		CreatedAt: time.UnixMicro(now),
-	}, nil
+	}
+	// Site 19: emit chats.append for the new message (post-commit write;
+	// acceptable per spike R4 — chat appends serialise behind the chat lock).
+	if s.journalWriter != nil {
+		sid := chatSessionID(ctx, s.db, chatID)
+		msgValue := map[string]any{
+			"seq":        seq,
+			"role":       role,
+			"content":    content,
+			"created_at": time.UnixMicro(now).Format(time.RFC3339Nano),
+		}
+		if m != nil {
+			msgValue["metadata"] = m
+		}
+		body := mustJSON([]map[string]any{
+			{"op": "add", "path": "/messages/-", "value": msgValue},
+		})
+		appendJournalEntry(s.journalWriter, journal.Entry{
+			Ts:      s.clock.Now(),
+			Session: sid,
+			Kind:    journal.KindChatsAppend,
+			Doc:     journal.DocID("chats/" + chatID),
+			Body:    body,
+		})
+	}
+	return msg, nil
 }
 
 // Transcript returns messages for a chat ordered by seq ASC, optionally
@@ -495,7 +577,53 @@ func (s *Store) Fork(ctx context.Context, parentChatID, newTitle string) (*Chat,
 		return nil, fmt.Errorf("chats.Fork: commit: %w", err)
 	}
 
-	return s.Get(ctx, newID)
+	result, err := s.Get(ctx, newID)
+	if err != nil {
+		return nil, err
+	}
+	// Site 23: emit journal entries for the fork.
+	// One entry on the new chat (full snapshot), one on the source chat (forked_to marker).
+	if s.journalWriter != nil {
+		// Fetch copied messages for the new chat snapshot.
+		newMsgs, _ := s.Transcript(ctx, newID, 0)
+		msgsVal := make([]map[string]any, 0, len(newMsgs))
+		for _, nm := range newMsgs {
+			mv := map[string]any{
+				"seq":        nm.Seq,
+				"role":       nm.Role,
+				"content":    nm.Content,
+				"created_at": nm.CreatedAt.Format(time.RFC3339Nano),
+			}
+			if nm.Metadata != nil {
+				mv["metadata"] = nm.Metadata
+			}
+			msgsVal = append(msgsVal, mv)
+		}
+		newChatBody := mustJSON([]map[string]any{
+			{"op": "add", "path": "/messages", "value": msgsVal},
+		})
+		// Use parent's session_id for both entries (fork shares the session).
+		parentSID := chatSessionID(ctx, s.db, parentChatID)
+		appendJournalEntry(s.journalWriter, journal.Entry{
+			Ts:      s.clock.Now(),
+			Session: parentSID,
+			Kind:    journal.KindChatsAppend,
+			Doc:     journal.DocID("chats/" + newID),
+			Body:    newChatBody,
+		})
+		// Source chat gets a forked_to marker.
+		forkMarkerBody := mustJSON([]map[string]any{
+			{"op": "replace", "path": "/meta/forked_to", "value": newID},
+		})
+		appendJournalEntry(s.journalWriter, journal.Entry{
+			Ts:      s.clock.Now(),
+			Session: parentSID,
+			Kind:    journal.KindChatsAppend,
+			Doc:     journal.DocID("chats/" + parentChatID),
+			Body:    forkMarkerBody,
+		})
+	}
+	return result, nil
 }
 
 // ─── scan helpers ─────────────────────────────────────────────────────────────
@@ -547,4 +675,36 @@ func nullableBytes(b []byte) any {
 		return nil
 	}
 	return string(b)
+}
+
+// ─── journal helpers ───────────────────────────────────────────────────────────
+
+// chatSessionID fetches the kitsoki session_id stored on the chat row.
+// Returns an empty string if the row has no session_id (pre-continue builds).
+// This is a best-effort lookup — a miss never blocks the main operation.
+func chatSessionID(ctx context.Context, db *sql.DB, chatID string) app.SessionID {
+	var sid string
+	_ = db.QueryRowContext(ctx, `SELECT COALESCE(session_id,'') FROM chats WHERE id = ?`, chatID).Scan(&sid)
+	return app.SessionID(sid)
+}
+
+// mustJSON marshals v to JSON, returning an empty object on error so a bad
+// value never silently drops a journal entry. Only used for journal bodies
+// where a marshalling failure is vanishingly unlikely.
+func mustJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return b
+}
+
+// appendJournalEntry calls jw.Append when jw is non-nil; silently no-ops
+// otherwise. Errors are swallowed — journal writes must not block or fail
+// the main operation.
+func appendJournalEntry(jw journal.Writer, e journal.Entry) {
+	if jw == nil {
+		return
+	}
+	_ = jw.Append(e)
 }

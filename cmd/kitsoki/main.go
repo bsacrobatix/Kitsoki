@@ -3,7 +3,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,7 +13,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,6 +28,7 @@ import (
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/orchestrator"
@@ -98,15 +103,19 @@ func versionCmd() *cobra.Command {
 
 func runCmd() *cobra.Command {
 	var (
-		harnessType   string
-		claudeModel   string
-		recordingPath string
-		recordPath    string
-		dbPath        string
-		tracePath     string
-		tracePretty   string
-		traceLevel    string
-		traceRedact   bool
+		harnessType      string
+		claudeModel      string
+		recordingPath    string
+		recordPath       string
+		dbPath           string
+		tracePath        string
+		tracePretty      string
+		traceLevel       string
+		traceRedact      bool
+		continueFlag     bool
+		continueID       string
+		continueKey      string
+		noImplicitResume bool
 	)
 
 	cmd := &cobra.Command{
@@ -174,9 +183,24 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			}
 			defer func() { _ = s.Close() }()
 
+			// Build the journal writer (continue-mode §4.9 Rule 1).
+			// Shares the same *sql.DB so dual-write transactions are possible.
+			// Built before job/chat stores so it can be passed to them.
+			jw, err := journal.NewSQLiteWriter(s.DB())
+			if err != nil {
+				return fmt.Errorf("open journal writer: %w", err)
+			}
+
+			// Build the journal reader (symmetric to the writer; used by the
+			// AttachSession resume path §4.5).  Shares the same *sql.DB.
+			jr, err := journal.NewSQLiteReader(s.DB())
+			if err != nil {
+				return fmt.Errorf("open journal reader: %w", err)
+			}
+
 			// Build the job store and scheduler.  The job store shares the
 			// same *sql.DB as the session store so we stay at one SQLite file.
-			jobStore, err := jobs.NewJobStore(s.DB())
+			jobStore, err := jobs.NewJobStore(s.DB(), jobs.WithJobJournalWriter(jw))
 			if err != nil {
 				return fmt.Errorf("open job store: %w", err)
 			}
@@ -186,7 +210,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 
 			// Build the chat store.  Shares the same *sql.DB so we keep one SQLite
 			// file for all persistence.
-			rawChatStore, err := chats.NewStore(s.DB())
+			rawChatStore, err := chats.NewStore(s.DB(), chats.WithJournalWriter(jw))
 			if err != nil {
 				return fmt.Errorf("open chat store: %w", err)
 			}
@@ -288,18 +312,235 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				orchestrator.WithScheduler(jobScheduler),
 				orchestrator.WithJobStore(jobStore),
 				orchestrator.WithChatStore(chatStoreAdapter),
+				orchestrator.WithJournalWriter(jw),
+				orchestrator.WithJournalReader(jr),
 			)
 
-			// Create a new session.
 			ctx := context.Background()
-			sid, err := orch.NewSession(ctx)
+
+			// ── Flag validation ────────────────────────────────────────────
+			if continueID != "" && !continueFlag {
+				return fmt.Errorf("--id requires --continue")
+			}
+			if continueKey != "" && !continueFlag {
+				return fmt.Errorf("--key requires --continue")
+			}
+			if continueID != "" && continueKey != "" {
+				return fmt.Errorf("--id and --key are mutually exclusive")
+			}
+
+			// ── Determine session ID (resume or fresh) ─────────────────────
+			var (
+				sid         app.SessionID
+				resumeMode  bool
+				tuiOptions  []tui.RootModelOption
+			)
+
+			if continueFlag {
+				// Explicit --continue path.
+				switch {
+				case continueID != "":
+					sid = app.SessionID(continueID)
+				case continueKey != "":
+					t, thread, kErr := parseExternalKey(continueKey)
+					if kErr != nil {
+						return kErr
+					}
+					sid, err = s.LookupByKey(ctx, t, thread)
+					if errors.Is(err, store.ErrSessionNotFound) {
+						return fmt.Errorf("no session bound to %s", continueKey)
+					}
+					if err != nil {
+						return fmt.Errorf("lookup key %s: %w", continueKey, err)
+					}
+				default:
+					// No selector — present numbered list picker.
+					summaries, lErr := s.ListSessions(ctx, def.App.ID, 0)
+					if lErr != nil {
+						return fmt.Errorf("list sessions: %w", lErr)
+					}
+					keys := make([][]store.ExternalKey, len(summaries))
+					for i, sum := range summaries {
+						keys[i], _ = s.ListExternalKeys(ctx, sum.ID)
+					}
+					sid, err = pickSession(summaries, keys, cmd.ErrOrStderr(), cmd.InOrStdin())
+					if errors.Is(err, errPickerAborted) {
+						return errTempFail
+					}
+					if err != nil {
+						return err
+					}
+				}
+				resumeMode = true
+			} else if !noImplicitResume {
+				// Implicit-resume path: exactly one active session → prompt.
+				summaries, lErr := s.ListSessions(ctx, def.App.ID, 0)
+				if lErr != nil {
+					return fmt.Errorf("list sessions: %w", lErr)
+				}
+				activeSessions := summaries[:0]
+				for _, sum := range summaries {
+					if sum.Status == "active" {
+						activeSessions = append(activeSessions, sum)
+					}
+				}
+				if len(activeSessions) == 1 {
+					sum := activeSessions[0]
+					age := time.Since(sum.StartedAt).Truncate(time.Second)
+					// Build a short state label via LoadJourney to show the user.
+					// Best-effort; ignore errors (fall through to fresh session if
+					// the journey can't be loaded).
+					stateLabel := "unknown"
+					if jPreview, jErr := orch.LoadJourney(sum.ID); jErr == nil {
+						stateLabel = string(jPreview.State)
+					}
+					fmt.Fprintf(cmd.ErrOrStderr(),
+						"You have an active session for %s from %s ago, turn %d (in %s).\n"+
+							"[Enter] to continue · [n] start fresh · [q] quit\n",
+						def.App.ID,
+						humanizeAge(age),
+						sum.LastTurn,
+						stateLabel,
+					)
+					scanner := bufio.NewScanner(cmd.InOrStdin())
+					scanner.Scan()
+					choice := strings.TrimSpace(scanner.Text())
+					switch strings.ToLower(choice) {
+					case "q":
+						return errTempFail
+					case "n", "no":
+						// Fall through: fresh session.
+					default:
+						// Empty line (Enter) or any other input → resume.
+						sid = sum.ID
+						resumeMode = true
+					}
+				}
+			}
+
+			// ── Acquire writer lock for resume ─────────────────────────────
+			// For a resumed session we wrap p.Run() inside WithWriterLock so
+			// the lock is held for the entire TUI lifetime (§5.3).
+			// For fresh sessions we create the session normally (no lock needed
+			// at this stage; individual turns take their own locks internally).
+			var (
+				initialView string
+			)
+
+			if resumeMode {
+				// Hard-error for typo'd --id: verify the session exists before
+				// attempting rehydration.  LoadHistory returns an empty slice
+				// (not an error) for unknown sessions, so we probe by listing.
+				// Use the explicit-ID path for the check: --key and picker paths
+				// already fail fast above if the session is not found.
+				if continueID != "" {
+					summaries, listErr := s.ListSessions(ctx, def.App.ID, 0)
+					if listErr != nil {
+						return fmt.Errorf("list sessions: %w", listErr)
+					}
+					found := false
+					for _, sum := range summaries {
+						if sum.ID == sid {
+							found = true
+							break
+						}
+					}
+					if !found {
+						fmt.Fprintf(cmd.ErrOrStderr(), "error: no session with id %s\n", sid)
+						return fmt.Errorf("no session with id %s", sid)
+					}
+				}
+
+				// Rehydrate the session via AttachSession (journal read path §4.5).
+				bundle, attachErr := orch.AttachSession(sid)
+				if attachErr != nil {
+					return fmt.Errorf("attach session %s: %w", sid, attachErr)
+				}
+
+				// Use the journal's last view.rendered as the initial TUI frame.
+				// Fall back to RenderState only when no journal entry exists yet
+				// (e.g. session created before journal writes were enabled).
+				if bundle.InitialView != "" {
+					initialView = bundle.InitialView
+				} else {
+					initialView, err = orch.RenderState(bundle.Journey.State, bundle.Journey.World)
+					if err != nil {
+						return fmt.Errorf("render resumed state: %w", err)
+					}
+				}
+
+				// Print pre-resume status header (§5.5).
+				clarifyNote := ""
+				if bundle.PendingClarify != nil {
+					clarifyNote = " (1 pending clarify rehydrated)"
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"Resuming %s (%s, turn %d, state %s): transcript: %d rows reconstructed%s\n",
+					sid, def.App.ID, bundle.Journey.Turn, bundle.Journey.State,
+					len(bundle.TranscriptEntries), clarifyNote,
+				)
+
+				tuiOptions = append(tuiOptions,
+					tui.WithResumedJourney(bundle.Journey.State, bundle.Journey.World, bundle.Journey.Turn),
+					// Pass an empty initial view to NewRootModel because we seed
+					// the transcript from journal entries below; passing the view
+					// here too would duplicate the last turn.
+					tui.WithResumedTranscript(bundle.TranscriptEntries),
+				)
+
+				// Build the TUI model now so we can pass it to tea.NewProgram
+				// before acquiring the lock.  Pass the initialView as the
+				// NewRootModel arg only when there are no transcript entries to
+				// replay (e.g. first-turn resume), so the TUI shows something.
+				effectiveInitialView := ""
+				if len(bundle.TranscriptEntries) == 0 {
+					effectiveInitialView = initialView
+				}
+				tuiOptions = append([]tui.RootModelOption{
+					tui.WithJobStore(jobStore),
+					tui.WithChatStore(rawChatStore),
+					tui.WithTraceRingBuffer(traceRing),
+					tui.WithJournalWriter(jw),
+				}, tuiOptions...)
+				if metaTraceExternal {
+					tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(metaTraceFilePath))
+				} else {
+					tuiOptions = append(tuiOptions, tui.WithTraceFilePath(metaTraceFilePath))
+				}
+				rootModel := tui.NewRootModel(orch, sid, appPath, effectiveInitialView, tuiOptions...)
+				p := tea.NewProgram(rootModel,
+					tea.WithAltScreen(),
+					tea.WithMouseCellMotion(),
+				)
+				detach := tui.AttachOrchestratorObserver(orch, p, sid)
+				defer detach()
+
+				lockErr := s.WithWriterLock(ctx, sid, func() error {
+					_, runErr := p.Run()
+					return runErr
+				})
+				if errors.Is(lockErr, store.ErrSessionBusy) {
+					fmt.Fprintf(cmd.ErrOrStderr(),
+						"session busy: another process holds the writer lock for %s\n"+
+							"Either close that attached session or run:\n"+
+							"    kitsoki session detach --id %s\n"+
+							"to break a stale lock.\n",
+						sid, sid,
+					)
+					return errTempFail
+				}
+				return lockErr
+			}
+
+			// ── Fresh session path ─────────────────────────────────────────
+			sid, err = orch.NewSession(ctx)
 			if err != nil {
 				return fmt.Errorf("create session: %w", err)
 			}
 
 			// Get initial view.
 			w := orch.InitialWorld()
-			initialView, err := orch.InitialView(w)
+			initialView, err = orch.InitialView(w)
 			if err != nil {
 				return fmt.Errorf("initial view: %w", err)
 			}
@@ -309,10 +550,11 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			// transcript viewport. Copying text then requires Option
 			// (macOS) or Shift (Linux) held during selection to bypass
 			// mouse capture.
-			tuiOptions := []tui.RootModelOption{
+			tuiOptions = []tui.RootModelOption{
 				tui.WithJobStore(jobStore),
 				tui.WithChatStore(rawChatStore),
 				tui.WithTraceRingBuffer(traceRing),
+				tui.WithJournalWriter(jw),
 			}
 			if metaTraceExternal {
 				tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(metaTraceFilePath))
@@ -324,6 +566,13 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				tea.WithAltScreen(),
 				tea.WithMouseCellMotion(),
 			)
+			// Bridge orchestrator background-turn notifications into
+			// the Bubble Tea message loop so the main transcript
+			// re-renders when a background job's on_complete fires —
+			// without this, the inbox badge ticks but the transcript
+			// stays frozen until the next keystroke.
+			detach := tui.AttachOrchestratorObserver(orch, p, sid)
+			defer detach()
 			_, err = p.Run()
 			return err
 		},
@@ -347,6 +596,15 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 		"minimum trace level: debug|info|warn|error (default: debug when --trace is set)")
 	cmd.Flags().BoolVar(&traceRedact, "trace-redact", true,
 		"redact sensitive values (API keys, etc.) in trace output")
+
+	cmd.Flags().BoolVar(&continueFlag, "continue", false,
+		"resume an existing session instead of starting a fresh one")
+	cmd.Flags().StringVar(&continueID, "id", "",
+		"resume a specific session by ID (requires --continue)")
+	cmd.Flags().StringVar(&continueKey, "key", "",
+		"resume a specific session by external key transport:thread (requires --continue)")
+	cmd.Flags().BoolVar(&noImplicitResume, "no-implicit-resume", false,
+		"always start a fresh session even if exactly one active session exists for this app")
 
 	return cmd
 }

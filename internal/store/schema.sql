@@ -68,3 +68,23 @@ CREATE TABLE IF NOT EXISTS session_locks (
     owner_host   TEXT    NOT NULL,
     acquired_at  INTEGER NOT NULL
 ) STRICT;
+
+-- Durable session journal (continue-mode proposal §4.2).
+-- One row per journal entry. Patch entries carry a (doc, doc_version) pair;
+-- typed-only entries leave doc and doc_version NULL. Checkpoints are stored
+-- here too, using the "<doc>.checkpoint" kind value.
+-- The (session_id, doc, doc_version) index enables efficient per-document
+-- replay starting from the latest checkpoint.
+CREATE TABLE IF NOT EXISTS journal (
+    session_id   TEXT    NOT NULL,
+    turn         INTEGER NOT NULL,
+    seq          INTEGER NOT NULL,
+    ts           INTEGER NOT NULL,   -- unix microseconds
+    kind         TEXT    NOT NULL,
+    doc          TEXT,               -- nullable for typed-only entries
+    doc_version  INTEGER,            -- nullable for typed-only entries
+    body_json    TEXT    NOT NULL,
+    PRIMARY KEY (session_id, turn, seq)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS journal_doc_idx ON journal (session_id, doc, doc_version);

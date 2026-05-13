@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -10,6 +12,8 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+
+	"kitsoki/internal/journal"
 )
 
 // cachedAutoStyle holds the result of a one-time terminal background probe.
@@ -523,6 +527,73 @@ func (m transcriptModel) View() string {
 	}
 
 	return style.Width(w).Height(h).Render(m.vp.View())
+}
+
+// ReconstructFromEntries replays a slice of journal entries (ordered by turn,
+// seq) into the transcript model, rehydrating it from durable journal data.
+//
+// This is the read side of the continue-mode transcript rehydration path
+// (proposal §4.6).  Each recognised entry kind maps to the corresponding live
+// constructor; unrecognised kinds are skipped with a debug log line — the
+// method never panics on unknown kinds.
+//
+// Supported kinds:
+//   - view.rendered    → AppendSystem with the journalled view text
+//   - offpath.question → AppendTurn with the question as user input
+//   - offpath.answer   → AppendOffPathAnswer with the answer text
+//   - disambig.presented / disambig.chosen → skipped (no transcript constructor today)
+//   - all others       → skipped
+func (m *transcriptModel) ReconstructFromEntries(entries []journal.Entry) {
+	for _, e := range entries {
+		switch e.Kind {
+		case journal.KindViewRendered:
+			var body struct {
+				ViewText string `json:"view_text"`
+			}
+			if err := json.Unmarshal(e.Body, &body); err != nil {
+				slog.Debug("transcript: failed to decode view.rendered body",
+					"turn", e.Turn, "seq", e.Seq, "err", err)
+				continue
+			}
+			if body.ViewText != "" {
+				m.AppendSystem(body.ViewText)
+			}
+
+		case journal.KindOffPathQuestion:
+			var body struct {
+				Question string `json:"question"`
+			}
+			if err := json.Unmarshal(e.Body, &body); err != nil {
+				slog.Debug("transcript: failed to decode offpath.question body",
+					"turn", e.Turn, "seq", e.Seq, "err", err)
+				continue
+			}
+			// Render as a turn with the question as user input and no view body.
+			m.AppendTurn(body.Question, "")
+
+		case journal.KindOffPathAnswer:
+			var body struct {
+				Answer string `json:"answer"`
+				Input  string `json:"input"`
+			}
+			if err := json.Unmarshal(e.Body, &body); err != nil {
+				slog.Debug("transcript: failed to decode offpath.answer body",
+					"turn", e.Turn, "seq", e.Seq, "err", err)
+				continue
+			}
+			m.AppendOffPathAnswer(body.Input, body.Answer)
+
+		case journal.KindDisambigPresented, journal.KindDisambigChosen:
+			// No dedicated transcript constructor today — skip.
+			slog.Debug("transcript: no constructor for kind", "kind", e.Kind)
+
+		default:
+			slog.Debug("transcript: no constructor for kind", "kind", e.Kind)
+		}
+	}
+	if len(entries) > 0 {
+		m.vp.GotoBottom()
+	}
 }
 
 // AllContent returns all transcript text concatenated (for golden-file tests).

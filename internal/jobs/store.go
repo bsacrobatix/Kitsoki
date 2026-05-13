@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/journal"
 	"kitsoki/internal/ulid"
 
 	_ "modernc.org/sqlite"
@@ -52,15 +53,33 @@ type Notification struct {
 // JobStore provides SQLite-backed persistence for jobs and notifications.
 // It operates on an existing *sql.DB (opened by the parent store package).
 type JobStore struct {
-	db *sql.DB
+	db            *sql.DB
+	journalWriter journal.Writer
+}
+
+// JobStoreOption is a functional option for constructing a JobStore.
+type JobStoreOption func(*JobStore)
+
+// WithJobJournalWriter injects a journal.Writer into the JobStore. When non-nil,
+// job and notification mutations emit typed journal entries alongside the SQLite
+// writes (continue-mode §4.9 dual-write). When nil (the default), no journal
+// entries are written — this preserves backward compatibility.
+func WithJobJournalWriter(jw journal.Writer) JobStoreOption {
+	return func(js *JobStore) {
+		js.journalWriter = jw
+	}
 }
 
 // NewJobStore creates a JobStore and applies the jobs/notifications schema migration.
-func NewJobStore(db *sql.DB) (*JobStore, error) {
+func NewJobStore(db *sql.DB, opts ...JobStoreOption) (*JobStore, error) {
 	if _, err := db.Exec(jobsSchemaDDL); err != nil {
 		return nil, fmt.Errorf("jobs.NewJobStore: schema migration: %w", err)
 	}
-	return &JobStore{db: db}, nil
+	js := &JobStore{db: db}
+	for _, o := range opts {
+		o(js)
+	}
+	return js, nil
 }
 
 // UpsertJob inserts or replaces a job row.
@@ -113,7 +132,31 @@ func (js *JobStore) UpsertJob(ctx context.Context, j *Job) error {
 		startedAtMs,
 		finishedAtMs,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// Site 24: emit jobs.update for the upserted job row.
+	if js.journalWriter != nil {
+		body := mustJobJSON(map[string]any{
+			"ops": []map[string]any{
+				{"op": "add", "path": "", "value": map[string]any{
+					"id":                  j.ID,
+					"kind":                j.Kind,
+					"status":              string(j.Status),
+					"origin_state":        string(j.OriginState),
+					"origin_proposal_id":  j.OriginProposalID,
+				}},
+			},
+		})
+		_ = js.journalWriter.Append(journal.Entry{
+			Ts:      time.Now(),
+			Session: j.SessionID,
+			Kind:    journal.KindJobsUpdate,
+			Doc:     journal.DocID("jobs/" + j.ID),
+			Body:    body,
+		})
+	}
+	return nil
 }
 
 // SweepStaleJobs marks any row whose status is "running" or "awaiting_input"
@@ -158,7 +201,36 @@ func (js *JobStore) UpdateJobStatus(ctx context.Context, id JobID, status JobSta
 	_, err := js.db.ExecContext(ctx, `
 		UPDATE jobs SET status=?, error=?, result=?, finished_at=?, updated_at=? WHERE id=?`,
 		string(status), errMsg, nullableBytes(resultJSON), finishedAtMs, now, id)
-	return err
+	if err != nil {
+		return err
+	}
+	// Site 25: emit jobs.update for the status transition.
+	// Checkpoint policy (§4.4 "checkpoint on every status transition") is the
+	// responsibility of a higher-level driver; we emit only the patch entry here.
+	if js.journalWriter != nil {
+		// Fetch the job's session_id so the journal entry can be attributed.
+		sid := jobSessionID(ctx, js.db, id)
+		ops := []map[string]any{
+			{"op": "replace", "path": "/status", "value": string(status)},
+		}
+		if errMsg != "" {
+			ops = append(ops, map[string]any{"op": "replace", "path": "/error", "value": errMsg})
+		}
+		if resultJSON != nil {
+			var resultVal any
+			_ = json.Unmarshal(resultJSON, &resultVal)
+			ops = append(ops, map[string]any{"op": "replace", "path": "/result", "value": resultVal})
+		}
+		body := mustJobJSON(map[string]any{"ops": ops})
+		_ = js.journalWriter.Append(journal.Entry{
+			Ts:      time.Now(),
+			Session: sid,
+			Kind:    journal.KindJobsUpdate,
+			Doc:     journal.DocID("jobs/" + id),
+			Body:    body,
+		})
+	}
+	return nil
 }
 
 // GetJob returns the job with the given ID, or ErrJobNotFound if it does not exist.
@@ -254,6 +326,13 @@ func scanJobs(rows *sql.Rows) ([]Job, error) {
 }
 
 // InsertNotification inserts a new notification row.
+// Site 26 (continue-mode): no journal entry is emitted here. Notifications are
+// part of the world via the "$inbox" world var; the orchestrator's EffectApplied
+// handler writes the world.patch entry (via the Y agent / oncomplete.go path)
+// that captures the refreshed $inbox snapshot. A standalone inbox.item.created
+// entry from this site would be redundant and risk ordering issues with the
+// world.patch that follows. The notifications table persists independently and
+// is the canonical source of truth for the notification row itself.
 func (js *JobStore) InsertNotification(ctx context.Context, n *Notification) error {
 	if n.ID == "" {
 		n.ID = ulid.New()
@@ -369,4 +448,23 @@ func nullableBytes(b []byte) any {
 		return nil
 	}
 	return string(b)
+}
+
+// jobSessionID fetches the kitsoki session_id for a job row.
+// Returns an empty SessionID if the row is not found (best-effort).
+func jobSessionID(ctx context.Context, db *sql.DB, id JobID) app.SessionID {
+	var sid string
+	_ = db.QueryRowContext(ctx, `SELECT COALESCE(session_id,'') FROM jobs WHERE id = ?`, id).Scan(&sid)
+	return app.SessionID(sid)
+}
+
+// mustJobJSON marshals v to JSON, returning an empty object on error.
+// Only used for journal entry bodies where marshalling failure is
+// vanishingly unlikely.
+func mustJobJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return b
 }

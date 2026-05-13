@@ -21,6 +21,9 @@ coverage.html
 # Claude Code local state
 .claude/
 
+# Git worktrees (local checkouts of feature branches)
+.worktrees/
+
 # Session data (local only)
 ~/.kitsoki/
 

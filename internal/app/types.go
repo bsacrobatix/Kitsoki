@@ -192,6 +192,19 @@ type Effect struct {
 	// the originating state's context. Cannot itself contain background: true
 	// (validated at load time).
 	OnComplete []Effect `yaml:"on_complete,omitempty"`
+	// Target, when non-empty, is the state path the session transitions to
+	// after this effect's mutations land. Only meaningful inside an
+	// `on_complete:` chain — the orchestrator scans the chain for the
+	// first effect with Target set and dispatches a synthetic transition
+	// (TransitionApplied + StateExited + StateEntered + target on_enter)
+	// once all preceding effects have applied without error. Mixing Target
+	// with Set / Increment / Say / Invoke on the same effect is rejected
+	// at load time (transition and mutation should live on separate
+	// effects). Target is also rejected outside on_complete: blocks (use
+	// a normal transition's target: instead). The standard Effect.When
+	// guard still applies — a false guard skips the entire effect,
+	// Target included.
+	Target string `yaml:"target,omitempty"`
 }
 
 // ProposalKind declares a named proposal kind (§3).

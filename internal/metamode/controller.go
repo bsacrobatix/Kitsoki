@@ -16,6 +16,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/authoring"
 	"kitsoki/internal/host"
+	"kitsoki/internal/journal"
 )
 
 // osStat is a package-local indirection so tests can swap the fs
@@ -41,6 +42,11 @@ type Controller struct {
 	// Clock is the time source for Snapshot.EnteredAt (and any future
 	// timestamps). Defaults to time.Now when zero.
 	Clock func() time.Time
+	// JournalWriter, when non-nil, is threaded into each ProposalLedger
+	// created by Enter/New/Resume so ledger lifecycle events (staged /
+	// discarded / applied) emit typed journal entries (continue-mode §4.7 v3).
+	// Nil disables ledger journal writes (back-compat default).
+	JournalWriter journal.Writer
 }
 
 // ChatStore is the controller-facing chat store seam. ResolveMeta
@@ -150,7 +156,7 @@ func (c *Controller) Enter(ctx context.Context, snap Snapshot, modeName string) 
 		Agent:    agent,
 		Chat:     chat,
 		Snapshot: snap,
-		Ledger:   NewProposalLedger(),
+		Ledger:   c.newLedger(snap.SessionID),
 	}, nil
 }
 
@@ -275,7 +281,7 @@ func (c *Controller) EnterByChatID(ctx context.Context, snap Snapshot, modeName,
 		Agent:    agent,
 		Chat:     chat,
 		Snapshot: snap,
-		Ledger:   NewProposalLedger(),
+		Ledger:   c.newLedger(snap.SessionID),
 	}, nil
 }
 
@@ -330,7 +336,7 @@ func (c *Controller) NewChat(ctx context.Context, s *Session) (*Session, error) 
 		Agent:    s.Agent,
 		Chat:     fresh,
 		Snapshot: s.Snapshot,
-		Ledger:   NewProposalLedger(),
+		Ledger:   c.newLedger(s.Snapshot.SessionID),
 	}, nil
 }
 
@@ -790,6 +796,18 @@ func resolveCwd(m *app.MetaModeDef, a agents.Agent, appFile string) string {
 // §3.1 step 3 and the existing `kitsoki chat list --scope-prefix meta:`
 // listing path.
 func metaRoom(modeName string) string { return "meta:" + modeName }
+
+// newLedger creates a ProposalLedger and, when c.JournalWriter is non-nil,
+// wires the writer and session ID into the ledger for continue-mode
+// journal writes (§4.7 v3). This centralises the wiring so Enter,
+// EnterByChatID, and NewChat all get the same treatment.
+func (c *Controller) newLedger(sid app.SessionID) *ProposalLedger {
+	l := NewProposalLedger()
+	if c.JournalWriter != nil {
+		l.WithLedgerJournalWriter(c.JournalWriter, sid)
+	}
+	return l
+}
 
 // ─── ledger adapter (avoids an import cycle metamode→host→metamode) ─────────
 //

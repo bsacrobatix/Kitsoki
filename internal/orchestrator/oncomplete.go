@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/expr"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/store"
 	"kitsoki/internal/trace"
+	"kitsoki/internal/world"
 )
 
 // handleJobTerminal is called by the per-session listener goroutine when a job
@@ -37,6 +40,16 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		slog.String("status", string(ev.Status)),
 	)
 
+	// outcomeForObservers is built inside the locked critical section and
+	// dispatched to SessionObservers AFTER we release the per-session
+	// lock — see notifyBackgroundTurn at the bottom of this function.
+	// We must not hold the lock across the observer call because the
+	// canonical TUI observer eventually does a tea.Program.Send back
+	// into the TUI goroutine, which may itself re-enter the orchestrator
+	// to (e.g.) recompute the menu via LoadJourney; holding sessMu would
+	// deadlock that path.
+	var outcomeForObservers *TurnOutcome
+
 	// Serialise read-modify-write against the foreground Turn path: both
 	// compute turnNum = journey.Turn + 1 from the live event log, so without
 	// this lock the listener goroutine can read journey.Turn before the
@@ -47,7 +60,14 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 	// Orchestrator.sessionLocks for details.
 	sessMu := o.sessionLock(sid)
 	sessMu.Lock()
-	defer sessMu.Unlock()
+	lockHeld := true
+	unlock := func() {
+		if lockHeld {
+			sessMu.Unlock()
+			lockHeld = false
+		}
+	}
+	defer unlock()
 
 	// Load the journey so we know current state and world.
 	journey, err := o.loadJourney(sid)
@@ -123,6 +143,19 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		"job_id": ev.JobID,
 	}, turnNum))
 
+	// currentState tracks the live state path as we walk on_complete and any
+	// on_error redirects.  It starts at the job's origin state; an on_error
+	// redirect during host-call dispatch updates it; a Target: effect (handled
+	// below) also updates it.  This is what the synthetic TurnOutcome reports
+	// as NewState to observers.
+	currentState := j.OriginState
+	// onErrorRedirected, when true, signals that a host-call inside the
+	// on_complete chain hit its on_error path and the session has already
+	// landed on the error state.  In that case the Target effect's transition
+	// is suppressed — on_error wins over Target (per the design note: on_error
+	// is itself a terminal state-change).
+	onErrorRedirected := false
+
 	// Apply on_complete effects (may be empty if the app didn't declare any).
 	if len(onComplete) > 0 {
 		o.logger.DebugContext(ctx, trace.EvJobOnCompleteRun,
@@ -132,6 +165,9 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		)
 		newWorld, hostCalls, sayText, effectEvents, runErr := o.machine.RunEffects(ctx, j.OriginState, w, onComplete)
 		if runErr != nil {
+			// An on_complete effect failed (e.g. set: with a bad expr).
+			// Preserve the fail-fast invariant: skip the synthetic Target
+			// transition entirely — no advance on partial application.
 			return fmt.Errorf("handleJobTerminal: RunEffects: %w", runErr)
 		}
 		// Stamp turn number on all effect events.
@@ -160,11 +196,10 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		// on_error: redirects from on_complete host calls are accepted and the
 		// session lands on the named error state — TransitionApplied events
 		// emitted by dispatchHostCalls already carry the redirect, so the
-		// replayer restores the correct state on restart.  The redirect path
-		// itself is not propagated further here since on_complete runs outside
-		// a turn boundary (no turn-end book-keeping to update).
+		// replayer restores the correct state on restart.  We track the
+		// redirect so the Target dispatch below can defer to it.
 		if len(hostCalls) > 0 {
-			hostEvts, hostWorld, _, _, hostErr := o.dispatchHostCalls(ctx, sid, hostCalls, w, j.OriginState)
+			hostEvts, hostWorld, _, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, hostCalls, w, j.OriginState)
 			if hostErr != nil {
 				o.logger.WarnContext(ctx, trace.EvJobError,
 					slog.String("session_id", string(sid)),
@@ -178,6 +213,41 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 				}
 				turnEvents = append(turnEvents, hostEvts...)
 				w = hostWorld
+				if hostRedirect != "" {
+					currentState = hostRedirect
+					onErrorRedirected = true
+				}
+			}
+		}
+
+		// Target dispatch: scan the on_complete chain for the FIRST effect
+		// whose target: field is non-empty (and whose when: guard, if any,
+		// passes against the post-effects world).  Emit a synthetic
+		// transition so the session advances out of the *_executing state
+		// without requiring an operator keystroke.
+		//
+		// on_error short-circuits Target — if a host call already redirected
+		// to an error state, we leave the session there.
+		if !onErrorRedirected {
+			targetEvents, targetState, targetErr := o.resolveAndApplyOnCompleteTarget(ctx, sid, onComplete, w, currentState, turnNum)
+			if targetErr != nil {
+				// Validation should have caught a missing target at load time;
+				// surface a warning rather than crashing the synthetic turn so
+				// the session can still recover via a subsequent keystroke.
+				o.logger.WarnContext(ctx, trace.EvJobError,
+					slog.String("session_id", string(sid)),
+					slog.String("job_id", ev.JobID),
+					slog.String("phase", "on_complete_target"),
+					slog.String("err", targetErr.Error()),
+				)
+			} else if len(targetEvents) > 0 {
+				// targetEvents already carry the synthetic transition,
+				// state-exit/enter, and on_enter effect events.  Apply.
+				for i := range targetEvents {
+					targetEvents[i].Turn = turnNum
+				}
+				turnEvents = append(turnEvents, targetEvents...)
+				currentState = targetState
 			}
 		}
 	}
@@ -225,9 +295,20 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		turnEvents[i].Turn = turnNum
 	}
 
-	if appendErr := o.store.AppendEvents(sid, turnEvents); appendErr != nil {
+	// Site 9: dual-write journal entries for the background-completion turn.
+	// Pre-world is `journey.World` (captured before on_complete ran); post-world is `w`.
+	jcNow := time.Now()
+	jcJEntries := journalEntriesForEvents(sid, turnNum, jcNow, turnEvents,
+		journey.World, w, "", currentState)
+	if appendErr := o.store.AppendEventsAndJournal(sid, turnEvents, jcJEntries); appendErr != nil {
 		return fmt.Errorf("handleJobTerminal: append events: %w", appendErr)
 	}
+
+	// AppendEvents committed.  Release the per-session lock now so the
+	// observer callback below (which the TUI uses to re-render its
+	// transcript) can safely re-enter the orchestrator without
+	// deadlocking against the foreground Turn path.
+	unlock()
 
 	// Post a completion notification.
 	if o.jobStore != nil {
@@ -251,6 +332,47 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		}
 	}
 
+	// Build a synthetic TurnOutcome for observers.  We reload the
+	// journey from the event log rather than reusing the in-memory `w`
+	// because dispatchHostCalls inside on_complete may have fired an
+	// on_error arc that redirected the state; the replay-driven journey
+	// is the canonical source of post-commit state.
+	//
+	// All work below happens AFTER unlock — observers may re-enter the
+	// orchestrator.
+	if postJourney, jerr := o.loadJourney(sid); jerr == nil {
+		newAllowed := o.machine.AllowedIntents(postJourney.State, postJourney.World)
+		allowedNames := make([]string, len(newAllowed))
+		for i, ai := range newAllowed {
+			allowedNames[i] = ai.Name
+		}
+		view, rerr := o.machine.RenderState(postJourney.State, postJourney.World)
+		if rerr != nil {
+			// Non-fatal: still surface the outcome with whatever view we have.
+			o.logger.Warn("handleJobTerminal: RenderState",
+				slog.String("err", rerr.Error()),
+			)
+		}
+		mode := ModeTransitioned
+		if st := lookupStateByPath(o.def, postJourney.State); st != nil && st.Terminal {
+			mode = ModeCompleted
+		}
+		outcomeForObservers = &TurnOutcome{
+			Mode:           mode,
+			View:           view,
+			NewState:       postJourney.State,
+			AllowedIntents: allowedNames,
+			TurnNumber:     turnNum,
+		}
+	} else {
+		// Reload failed — log and skip observer notification rather than
+		// guessing at a possibly-inconsistent outcome.  The event log is
+		// still complete; the TUI will catch up on its next poll/keystroke.
+		o.logger.Warn("handleJobTerminal: post-commit loadJourney",
+			slog.String("err", jerr.Error()),
+		)
+	}
+
 	o.logger.InfoContext(ctx, trace.EvJobTerminal,
 		slog.String("session_id", string(sid)),
 		slog.String("job_id", ev.JobID),
@@ -258,7 +380,196 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		slog.Int("on_complete_count", len(onComplete)),
 		slog.String("phase", "committed"),
 	)
+
+	// Fan out to observers (TUI re-render, audit log, etc.).  Done last
+	// so any panic inside an observer cannot prevent the notification or
+	// the structured-log line above from happening.
+	if outcomeForObservers != nil {
+		o.notifyBackgroundTurn(sid, outcomeForObservers)
+	}
 	return nil
+}
+
+// resolveAndApplyOnCompleteTarget scans the on_complete effect list for the
+// first effect whose Target: field is non-empty (and whose When: guard, if any,
+// passes against the post-effects world). When found it:
+//
+//   - resolves Target relative to the origin state,
+//   - asserts the resolved path exists in the state graph,
+//   - runs the target's on_enter effects (if any),
+//   - emits TransitionApplied + StateExited + StateEntered + on_enter events.
+//
+// Returns the synthetic events (caller stamps turn number) and the new state.
+// If no Target effect fires, returns (nil, currentState, nil). Subsequent
+// Target effects past the first are warn-logged and ignored — multi-Target
+// per on_complete chain is undefined; first-wins.
+//
+// originState is the state the job was launched from (j.OriginState) and is
+// used both as the "from" of the transition and as the base for resolving
+// relative target refs. currentState is the live state path used as the
+// "from" of the transition events; usually equal to originState but may
+// differ if a prior on_error redirect moved the session before we reached
+// this dispatch.
+func (o *Orchestrator) resolveAndApplyOnCompleteTarget(
+	ctx context.Context,
+	sid app.SessionID,
+	onComplete []app.Effect,
+	w world.World,
+	originState app.StatePath,
+	turnNum app.TurnNumber,
+) ([]store.Event, app.StatePath, error) {
+	var (
+		firstIdx    = -1
+		firstTarget string
+		extras      []int // indices of subsequent Target effects (warn-log only)
+	)
+	env := expr.Env{
+		Slots: map[string]any{},
+		World: w.Vars,
+		Event: map[string]any{},
+	}
+	for i, eff := range onComplete {
+		if eff.Target == "" {
+			continue
+		}
+		// Honour the per-effect When: guard.  A false guard skips the
+		// whole effect, Target included.  Errors during guard evaluation
+		// are surfaced — authors get a loud failure rather than a silently-
+		// skipped transition.
+		if strings.TrimSpace(eff.When) != "" {
+			prog, cerr := expr.CompileBool(eff.When)
+			if cerr != nil {
+				return nil, originState, fmt.Errorf("on_complete[%d].when %q: compile: %w", i, eff.When, cerr)
+			}
+			ok, eerr := expr.EvalBool(prog, env)
+			if eerr != nil {
+				return nil, originState, fmt.Errorf("on_complete[%d].when %q: eval: %w", i, eff.When, eerr)
+			}
+			if !ok {
+				continue
+			}
+		}
+		if firstIdx == -1 {
+			firstIdx = i
+			firstTarget = eff.Target
+			continue
+		}
+		extras = append(extras, i)
+	}
+	if firstIdx == -1 {
+		return nil, originState, nil // no Target effect fired
+	}
+	for _, idx := range extras {
+		o.logger.WarnContext(ctx, trace.EvJobOnCompleteRun,
+			slog.String("session_id", string(sid)),
+			slog.String("phase", "extra_target_ignored"),
+			slog.Int("on_complete_index", idx),
+			slog.String("target", onComplete[idx].Target),
+			slog.String("first_target", firstTarget),
+		)
+	}
+
+	// Resolve relative target refs ("../foo") against the origin state path.
+	resolved := resolveOnCompleteTarget(string(originState), firstTarget)
+	// Template-bearing targets (containing "{{") would have been left for
+	// runtime evaluation by the loader.  Render against the post-effects
+	// env so authors can pick a target dynamically.
+	if strings.Contains(resolved, "{{") {
+		rendered, rerr := expr.RenderValue(resolved, env)
+		if rerr != nil {
+			return nil, originState, fmt.Errorf("on_complete[%d].target render: %w", firstIdx, rerr)
+		}
+		if s, ok := rendered.(string); ok {
+			resolved = resolveOnCompleteTarget(string(originState), strings.TrimSpace(s))
+		} else {
+			return nil, originState, fmt.Errorf("on_complete[%d].target template did not render to string (got %T)", firstIdx, rendered)
+		}
+	}
+	tgtState := lookupStateByPath(o.def, app.StatePath(resolved))
+	if tgtState == nil {
+		return nil, originState, fmt.Errorf("on_complete[%d].target %q (resolved %q) does not exist", firstIdx, firstTarget, resolved)
+	}
+
+	o.logger.DebugContext(ctx, trace.EvJobOnCompleteRun,
+		slog.String("session_id", string(sid)),
+		slog.String("phase", "target_dispatch"),
+		slog.String("from", string(originState)),
+		slog.String("to", resolved),
+	)
+
+	// Build the transition event sequence.  Mirrors machine.Turn's contract
+	// (§8 in machine.go): TransitionApplied → StateExited → StateEntered →
+	// (on_enter EffectApplied*).
+	target := app.StatePath(resolved)
+	var events []store.Event
+	events = append(events, newOrchestratorEvent(store.TransitionApplied, map[string]any{
+		"from":   string(originState),
+		"to":     resolved,
+		"intent": "__on_complete_target__",
+	}, turnNum))
+	// Single-level exit/enter is sufficient for the leaf-targeted case the
+	// validator allows.  Multi-level / compound entry would require the
+	// stateExit/EnterPathsAware machinery from the machine package; we don't
+	// pull it in here because on_complete: target: is intended for the
+	// "advance out of the *_executing state to its sibling" pattern, where
+	// both states share a parent and the exit/enter is one hop.
+	events = append(events, newOrchestratorEvent(store.StateExited, map[string]any{
+		"state": string(originState),
+	}, turnNum))
+	events = append(events, newOrchestratorEvent(store.StateEntered, map[string]any{
+		"state": resolved,
+	}, turnNum))
+
+	// Run target.on_enter via the machine so any set/say/invoke effects fire
+	// the same way a foreground transition would.  Host calls collected here
+	// are dispatched synchronously — on_enter on the target of an
+	// on_complete: dispatch must not itself spawn another background job
+	// (background: true inside on_enter at the new state is fine when the
+	// state was entered by a regular turn, but it would cascade arbitrarily
+	// here; left as a known gap — see test coverage).
+	if len(tgtState.OnEnter) > 0 {
+		_, hostCalls, _, enterEvents, runErr := o.machine.RunEffects(ctx, target, w, tgtState.OnEnter)
+		if runErr != nil {
+			return nil, originState, fmt.Errorf("on_complete target on_enter: %w", runErr)
+		}
+		events = append(events, enterEvents...)
+		if len(hostCalls) > 0 {
+			hostEvts, _, _, _, hostErr := o.dispatchHostCalls(ctx, sid, hostCalls, w, target)
+			if hostErr != nil {
+				o.logger.WarnContext(ctx, trace.EvJobError,
+					slog.String("session_id", string(sid)),
+					slog.String("phase", "on_complete_target_on_enter_dispatch"),
+					slog.String("err", hostErr.Error()),
+				)
+			} else {
+				events = append(events, hostEvts...)
+			}
+		}
+	}
+
+	return events, target, nil
+}
+
+// resolveOnCompleteTarget mirrors app.resolveTarget so the orchestrator can
+// resolve on_complete target: refs without exporting the loader internal.
+// Accepts both slash- and dot-separated absolute refs and "../" relative
+// references.
+func resolveOnCompleteTarget(statePath, target string) string {
+	if !strings.HasPrefix(target, "..") {
+		return strings.ReplaceAll(target, "/", ".")
+	}
+	parts := strings.Split(statePath, ".")
+	segs := strings.Split(target, "/")
+	for _, seg := range segs {
+		if seg == ".." {
+			if len(parts) > 0 {
+				parts = parts[:len(parts)-1]
+			}
+		} else if seg != "." && seg != "" {
+			parts = append(parts, seg)
+		}
+	}
+	return strings.Join(parts, ".")
 }
 
 // handleJobAwaitingInput is called by the per-session listener goroutine when

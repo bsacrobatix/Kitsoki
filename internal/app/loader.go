@@ -501,7 +501,11 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 				}
 			}
 			validateAgentRef(file, childLoc, child, declaredAgents, &errs)
-			validateBackgroundEffect(file, childLoc, child, allowedHosts, declaredAgents, &errs)
+			// child is already an on_complete entry — use the on_complete-aware
+			// entry point so Target rules apply to it directly. Proposal-execute
+			// effects have no owning state; pass "" so a relative target: would
+			// resolve to the top-level namespace.
+			validateOnCompleteEffect(file, childLoc, "", child, allowedHosts, declaredAgents, allStatePaths, &errs)
 		}
 	}
 
@@ -598,7 +602,7 @@ func validateStates(
 						}
 					}
 					validateAgentRef(file, fmt.Sprintf("state %q intent %q effects[%d]", statePath, intentName, i), eff, declaredAgents, errs)
-					validateBackgroundEffect(file, fmt.Sprintf("state %q intent %q effects[%d]", statePath, intentName, i), eff, allowedHosts, declaredAgents, errs)
+					validateBackgroundEffect(file, fmt.Sprintf("state %q intent %q effects[%d]", statePath, intentName, i), statePath, eff, allowedHosts, declaredAgents, allPaths, errs)
 				}
 			}
 		}
@@ -610,7 +614,7 @@ func validateStates(
 				}
 			}
 			validateAgentRef(file, fmt.Sprintf("state %q on_enter[%d]", statePath, i), eff, declaredAgents, errs)
-			validateBackgroundEffect(file, fmt.Sprintf("state %q on_enter[%d]", statePath, i), eff, allowedHosts, declaredAgents, errs)
+			validateBackgroundEffect(file, fmt.Sprintf("state %q on_enter[%d]", statePath, i), statePath, eff, allowedHosts, declaredAgents, allPaths, errs)
 		}
 
 		// Validate Timeout: parse the duration and resolve the target.
@@ -717,12 +721,78 @@ func resolveTarget(statePath, target string) string {
 //   - effects inside on_complete: must NOT have background: true (recursively).
 //   - invoke: inside on_complete: must reference only declared hosts (allowedHosts).
 //   - `with.agent:` inside on_complete: must resolve to a declared agent.
-func validateBackgroundEffect(file, location string, eff Effect, allowedHosts, declaredAgents map[string]struct{}, errs *[]error) {
+//   - target: outside on_complete: is rejected (use a normal transition).
+//   - inside on_complete:, target: must not be combined with set / increment /
+//     say / invoke / bind on the same effect (mixing mutation with a
+//     synthetic transition is semantically muddled — declare them on
+//     separate effects in the same chain).
+//
+// The eff argument is always the "outer" effect; on_complete entries are
+// validated via the loop over eff.OnComplete with insideOnComplete=true on
+// the recursive descent. originStatePath is the dotted-path of the state
+// that owns the effect chain (used to resolve relative target: refs); it
+// may be empty for proposal-execute effects (no owning state).
+func validateBackgroundEffect(file, location, originStatePath string, eff Effect, allowedHosts, declaredAgents, allStatePaths map[string]struct{}, errs *[]error) {
+	validateBackgroundEffectAware(file, location, originStatePath, eff, false /* outer effect, not inside on_complete */, allowedHosts, declaredAgents, allStatePaths, errs)
+}
+
+// validateOnCompleteEffect is the entry point used at proposal-execute call
+// sites where the iterated effect is already an on_complete entry (the
+// caller has unrolled the first level of the on_complete: list before
+// invoking). Target rules apply directly to eff in addition to its
+// descendants.
+func validateOnCompleteEffect(file, location, originStatePath string, eff Effect, allowedHosts, declaredAgents, allStatePaths map[string]struct{}, errs *[]error) {
+	validateBackgroundEffectAware(file, location, originStatePath, eff, true /* eff is already inside on_complete */, allowedHosts, declaredAgents, allStatePaths, errs)
+}
+
+// validateBackgroundEffectAware is the on_complete-aware implementation.
+// insideOnComplete is true when eff itself is an entry inside a parent's
+// on_complete: list — Target is only legal in that case.
+func validateBackgroundEffectAware(file, location, originStatePath string, eff Effect, insideOnComplete bool, allowedHosts, declaredAgents, allStatePaths map[string]struct{}, errs *[]error) {
 	addErr := func(msg string) {
 		*errs = append(*errs, &ValidationError{File: file, Message: msg})
 	}
 	if eff.Background && eff.Invoke == "" {
 		addErr(fmt.Sprintf("%s: background: true requires invoke: to be set", location))
+	}
+	// target: is only meaningful inside on_complete: blocks. The async
+	// terminal context is the only place where a synthetic transition
+	// makes sense — normal effects should use a regular transition's
+	// target: instead.
+	if eff.Target != "" && !insideOnComplete {
+		addErr(fmt.Sprintf("%s: target: is only allowed inside on_complete: effects (it fires a synthetic transition once the background job terminates); use a normal transition's target: for in-turn transitions", location))
+	}
+	// target: combined with a mutation on the same effect is muddled —
+	// split into two effects so the chain reads top-to-bottom as
+	// "mutate, then transition".
+	if eff.Target != "" && insideOnComplete {
+		var conflicts []string
+		if len(eff.Set) > 0 {
+			conflicts = append(conflicts, "set")
+		}
+		if len(eff.Increment) > 0 {
+			conflicts = append(conflicts, "increment")
+		}
+		if eff.Say != "" {
+			conflicts = append(conflicts, "say")
+		}
+		if eff.Invoke != "" {
+			conflicts = append(conflicts, "invoke")
+		}
+		if len(eff.Bind) > 0 {
+			conflicts = append(conflicts, "bind")
+		}
+		if len(conflicts) > 0 {
+			addErr(fmt.Sprintf("%s: target: cannot be combined with %s on the same effect (split into separate effects in the on_complete: chain — mutation first, transition last)", location, strings.Join(conflicts, "/")))
+		}
+		// Resolve and verify the target state exists. Template targets
+		// (containing "{{") are evaluated at runtime; skip statically.
+		if eff.Target != "" && !strings.Contains(eff.Target, "{{") {
+			resolved := resolveTarget(originStatePath, eff.Target)
+			if _, ok := allStatePaths[resolved]; !ok {
+				addErr(fmt.Sprintf("%s: target %q (resolved: %q) does not exist", location, eff.Target, resolved))
+			}
+		}
 	}
 	for i, child := range eff.OnComplete {
 		loc := fmt.Sprintf("%s on_complete[%d]", location, i)
@@ -737,8 +807,8 @@ func validateBackgroundEffect(file, location string, eff Effect, allowedHosts, d
 		}
 		// Validate any `agent: <name>` on the child effect's with: block.
 		validateAgentRef(file, loc, child, declaredAgents, errs)
-		// Recursively reject nested on_complete with background.
-		validateBackgroundEffect(file, loc, child, allowedHosts, declaredAgents, errs)
+		// Recursively reject nested on_complete with background and validate target rules.
+		validateBackgroundEffectAware(file, loc, originStatePath, child, true /* this child IS inside on_complete */, allowedHosts, declaredAgents, allStatePaths, errs)
 	}
 }
 

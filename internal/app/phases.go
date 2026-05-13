@@ -369,6 +369,16 @@ func substEffect(eff Effect, params map[string]any, next map[string]string) Effe
 		Say:     substString(eff.Say, params, next),
 		Emit:    substString(eff.Emit, params, next),
 		OnError: substString(eff.OnError, params, next),
+		// Background is a plain bool; no template substitution.
+		// Without copying it through, a per-phase on_enter: override
+		// declaring `background: true` would silently dispatch
+		// synchronously and HostInvoked would fire with Background=false.
+		Background: eff.Background,
+		// Target is a state name; treat it like Invoke — it may carry
+		// `{{ tpl.X }}` / `{{ phase.next.X }}` references (e.g.
+		// `target: "{{ phase.next.continue }}"` inside on_complete).
+		// substString returns "" for "", so an unset Target stays "".
+		Target: substString(eff.Target, params, next),
 	}
 	if len(eff.Set) > 0 {
 		out.Set = make(map[string]any, len(eff.Set))
@@ -392,6 +402,16 @@ func substEffect(eff Effect, params map[string]any, next map[string]string) Effe
 		out.Bind = make(map[string]string, len(eff.Bind))
 		for k, v := range eff.Bind {
 			out.Bind[substString(k, params, next)] = substString(v, params, next)
+		}
+	}
+	// OnComplete is a list of follow-up effects fired when a background
+	// job terminates. Recurse so each child gets full substitution —
+	// including its own Target / nested OnComplete / With / etc. Order
+	// is preserved by appending in iteration order.
+	if len(eff.OnComplete) > 0 {
+		out.OnComplete = make([]Effect, 0, len(eff.OnComplete))
+		for _, child := range eff.OnComplete {
+			out.OnComplete = append(out.OnComplete, substEffect(child, params, next))
 		}
 	}
 	return out

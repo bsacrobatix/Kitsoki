@@ -23,6 +23,7 @@ import (
 	"kitsoki/internal/host"
 	"kitsoki/internal/intent"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/store"
 	"kitsoki/internal/trace"
@@ -57,6 +58,18 @@ type Orchestrator struct {
 	// and the host.chat.* built-ins. Optional; nil disables chat persistence.
 	chatStore host.ChatStore
 
+	// journalWriter is the durable journal writer (continue-mode §4.9 Rule 1).
+	// When nil, callers fall through to the legacy AppendEvents path.
+	// Set via WithJournalWriter; individual turn-write call sites are migrated
+	// by the next agent.
+	journalWriter journal.Writer
+
+	// journalReader is the read-side counterpart to journalWriter, used by the
+	// AttachSession resume path (continue-mode §4.5).  When nil, AttachSession
+	// falls back to LoadJourney-only (no transcript / no clarify rehydration).
+	// Set via WithJournalReader.
+	journalReader journal.Reader
+
 	// clk is the injectable time source used by the timeout dispatcher.
 	// Defaults to clock.Real() when no WithClock option is supplied.
 	clk clock.Clock
@@ -87,6 +100,15 @@ type Orchestrator struct {
 	// not global — concurrent turns for *different* sessions remain
 	// unserialised.
 	sessionLocks map[app.SessionID]*sync.Mutex
+
+	// obsMu guards observers.  observers receive OnBackgroundTurn
+	// callbacks after handleJobTerminal commits the synthetic turn —
+	// see observer.go.  Held only for the slice copy in
+	// notifyBackgroundTurn, never across the observer callback itself,
+	// so an observer that re-enters Register/UnregisterObserver cannot
+	// deadlock.
+	obsMu     sync.Mutex
+	observers []SessionObserver
 }
 
 // New creates an Orchestrator.
@@ -186,6 +208,16 @@ func WithJobStore(js *jobs.JobStore) Option {
 func WithChatStore(cs host.ChatStore) Option {
 	return func(o *Orchestrator) {
 		o.chatStore = cs
+	}
+}
+
+// WithJournalWriter wires a journal.Writer for durable session journalling
+// (continue-mode §4.9 Rule 1). When nil (the default), turn writes fall through
+// to the legacy AppendEvents path. Individual call sites are migrated by the
+// next wave agent; this option only stores the writer for later use.
+func WithJournalWriter(w journal.Writer) Option {
+	return func(o *Orchestrator) {
+		o.journalWriter = w
 	}
 }
 
@@ -517,10 +549,11 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		case intent.ErrMissingSlots:
 			// Do NOT persist events for clarify-required outcomes (§4.2 step 4).
 			// Store the pending intent in memory.
+			slotsSoFar := slotsToMap(call.Slots)
 			o.mu.Lock()
 			o.pending[sid] = &pendingClarify{
 				intentName: call.Intent,
-				slots:      slotsToMap(call.Slots),
+				slots:      slotsSoFar,
 			}
 			o.mu.Unlock()
 
@@ -537,11 +570,23 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 				slog.Any("missing", missingSlots),
 				slog.String("origin", "turn"),
 			)
+			// Site 8 (Turn path): emit clarify.requested via standalone journal
+			// write — no events row to pair with on this path.
+			slotsNeededNames := make([]string, len(missingSlots))
+			copy(slotsNeededNames, missingSlots)
+			o.appendJournal(journalEntry(sid, turnNum, 0, time.Now(),
+				journal.KindClarifyRequested, "",
+				map[string]any{
+					"origin":       "foreground",
+					"intent":       call.Intent,
+					"slots_so_far": slotsSoFar,
+					"slots_needed": slotsNeededNames,
+				}))
 			return &TurnOutcome{
 				Mode:           ModeClarify,
 				NewState:       journey.State,
 				PendingIntent:  call.Intent,
-				PendingSlots:   slotsToMap(call.Slots),
+				PendingSlots:   slotsSoFar,
 				SlotsNeeded:    clarification.Slots,
 				AllowedIntents: allowedNames,
 				TurnNumber:     turnNum,
@@ -556,7 +601,10 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 			}, turnNum)
 			failureEvents = append(failureEvents, endEvent)
 
-			if appendErr := o.store.AppendEvents(sid, failureEvents); appendErr != nil {
+			// Site 1: dual-write journal entries for the rejection turn.
+			jEntries := journalEntriesForEvents(sid, turnNum, time.Now(), failureEvents,
+				journey.World, journey.World, "", journey.State)
+			if appendErr := o.store.AppendEventsAndJournal(sid, failureEvents, jEntries); appendErr != nil {
 				return nil, fmt.Errorf("orchestrator: append failure events: %w", appendErr)
 			}
 
@@ -617,7 +665,10 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		successEvents[i].Turn = turnNum
 	}
 
-	if appendErr := o.store.AppendEvents(sid, successEvents); appendErr != nil {
+	// Site 2: dual-write journal entries for the success turn.
+	jEntries := journalEntriesForEvents(sid, turnNum, time.Now(), successEvents,
+		journey.World, result.World, result.View, result.NewState)
+	if appendErr := o.store.AppendEventsAndJournal(sid, successEvents, jEntries); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator: append events: %w", appendErr)
 	}
 
@@ -1179,10 +1230,11 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 	if result.ValidationError != nil {
 		ve := result.ValidationError
 		if ve.Code == intent.ErrMissingSlots {
+			sdSlotsSoFar := slotsToMap(call.Slots)
 			o.mu.Lock()
 			o.pending[sid] = &pendingClarify{
 				intentName: call.Intent,
-				slots:      slotsToMap(call.Slots),
+				slots:      sdSlotsSoFar,
 			}
 			o.mu.Unlock()
 
@@ -1194,11 +1246,22 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 				slog.Any("missing", missingSlots),
 				slog.String("origin", "submit_direct"),
 			)
+			// Site 8 (SubmitDirect path): emit clarify.requested via standalone journal write.
+			sdMissingNames := make([]string, len(missingSlots))
+			copy(sdMissingNames, missingSlots)
+			o.appendJournal(journalEntry(sid, turnNum, 0, time.Now(),
+				journal.KindClarifyRequested, "",
+				map[string]any{
+					"origin":       "foreground",
+					"intent":       call.Intent,
+					"slots_so_far": sdSlotsSoFar,
+					"slots_needed": sdMissingNames,
+				}))
 			return &TurnOutcome{
 				Mode:          ModeClarify,
 				NewState:      journey.State,
 				PendingIntent: call.Intent,
-				PendingSlots:  slotsToMap(call.Slots),
+				PendingSlots:  sdSlotsSoFar,
 				SlotsNeeded:   clarification.Slots,
 				TurnNumber:    turnNum,
 			}, nil
@@ -1217,7 +1280,10 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 		for i := range failureEvents {
 			failureEvents[i].Turn = turnNum
 		}
-		if appendErr := o.store.AppendEvents(sid, failureEvents); appendErr != nil {
+		// Site 5: dual-write journal entries for the SubmitDirect rejection turn.
+		sdFailJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), failureEvents,
+			journey.World, journey.World, "", journey.State)
+		if appendErr := o.store.AppendEventsAndJournal(sid, failureEvents, sdFailJEntries); appendErr != nil {
 			return nil, fmt.Errorf("orchestrator: SubmitDirect: append failure events: %w", appendErr)
 		}
 		allowedNames := make([]string, 0)
@@ -1268,7 +1334,10 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 		successEvents[i].Turn = turnNum
 	}
 
-	if appendErr := o.store.AppendEvents(sid, successEvents); appendErr != nil {
+	// Site 6: dual-write journal entries for the SubmitDirect success turn.
+	sdSuccJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), successEvents,
+		journey.World, result.World, result.View, result.NewState)
+	if appendErr := o.store.AppendEventsAndJournal(sid, successEvents, sdSuccJEntries); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator: SubmitDirect: append events: %w", appendErr)
 	}
 
@@ -1735,7 +1804,25 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 		successEvents[i].Turn = turnNum
 	}
 
-	if appendErr := o.store.AppendEvents(sid, successEvents); appendErr != nil {
+	// Site 7: dual-write journal entries for the ContinueTurn success turn.
+	// Prepend a clarify.answered entry before the standard set.
+	ctNow := time.Now()
+	ctJEntries := journalEntriesForEvents(sid, turnNum, ctNow, successEvents,
+		journey.World, result.World, result.View, result.NewState)
+	// Prepend clarify.answered (seq 0; other entries shift up by bumping seq on the fly via the slice).
+	clarifyAnsweredEntry := journalEntry(sid, turnNum, 0, ctNow,
+		journal.KindClarifyAnswered, "",
+		map[string]any{
+			"intent":      call.Intent,
+			"slots_final": map[string]any(merged),
+		})
+	// Shift existing seq values to make room for the prepended entry.
+	for i := range ctJEntries {
+		ctJEntries[i].Seq++
+	}
+	ctJEntries = append([]journal.Entry{clarifyAnsweredEntry}, ctJEntries...)
+
+	if appendErr := o.store.AppendEventsAndJournal(sid, successEvents, ctJEntries); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator: append continue events: %w", appendErr)
 	}
 

@@ -298,3 +298,55 @@ func TestPhases_CycleBudgetSynthesisMissingArcCreatesErrorRoute(t *testing.T) {
 	arc := exec.On["on_failure"]
 	require.NotEmpty(t, arc)
 }
+
+// TestPhases_OnEnterOverride_BackgroundOnCompleteTarget verifies that a
+// per-phase on_enter: override carrying `background: true`, an
+// `on_complete:` chain, and a `target:` inside that chain has ALL three
+// fields preserved through substEffect. Without the substEffect copy-
+// completeness fix these fields are silently stripped:
+//
+//   - Background drops → the override fires synchronously and the runtime
+//     emits HostInvoked{Background: false} instead of dispatching a job.
+//   - OnComplete drops → the post-job continuation never runs.
+//   - Target drops → the synthetic transition out of the background turn
+//     never fires, and the session is stuck in `_executing`.
+//
+// Template substitution must still apply: the `target:` references
+// `{{ tpl.id }}_awaiting_reply` which expands to `phase_script_awaiting_reply`.
+func TestPhases_OnEnterOverride_BackgroundOnCompleteTarget(t *testing.T) {
+	def, err := app.Load(filepath.Join("testdata", "phases", "on-enter-override-background.yaml"))
+	require.NoError(t, err)
+
+	scr := def.States["phase_script_executing"]
+	require.NotNil(t, scr)
+	require.Len(t, scr.OnEnter, 1, "override must REPLACE the template's on_enter with exactly one effect")
+
+	eff := scr.OnEnter[0]
+	assert.Equal(t, "host.run", eff.Invoke,
+		"override invoke must survive substEffect")
+	assert.True(t, eff.Background,
+		"Background: true MUST be copied through substEffect — otherwise the override dispatches synchronously")
+
+	// OnComplete: ordered list — set/bind first, target last.
+	require.Len(t, eff.OnComplete, 2,
+		"on_complete: must be copied through substEffect, with list order preserved")
+
+	mutate := eff.OnComplete[0]
+	assert.Equal(t, "result.status", mutate.Set["scr_status"],
+		"on_complete[0].set must be carried through")
+	assert.Equal(t, "stdout", mutate.Bind["scr_artifact"],
+		"on_complete[0].bind must be carried through")
+	assert.Empty(t, mutate.Target, "on_complete[0] has no target")
+
+	transition := eff.OnComplete[1]
+	assert.Equal(t, "phase_script_awaiting_reply", transition.Target,
+		"on_complete[1].target must be substituted: `{{ tpl.id }}_awaiting_reply` -> `phase_script_awaiting_reply`")
+	// Mutation/transition split must be preserved verbatim.
+	assert.Empty(t, transition.Set)
+	assert.Empty(t, transition.Bind)
+	assert.Empty(t, transition.Invoke)
+
+	// The outer effect's own Target must remain empty — Target only lives
+	// on on_complete entries. substEffect must not invent one.
+	assert.Empty(t, eff.Target, "outer effect must not have Target populated")
+}

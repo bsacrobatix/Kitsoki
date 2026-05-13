@@ -3,12 +3,15 @@ package metamode
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/authoring"
+	"kitsoki/internal/journal"
 )
 
 // ProposalState tracks the lifecycle of a pending authoring proposal
@@ -55,6 +58,13 @@ type ProposalLedger struct {
 	reloadPending bool
 	// now is injected for deterministic CreatedAt in tests.
 	now func() time.Time
+	// journalWriter, when non-nil, receives typed journal entries for
+	// proposal lifecycle transitions (continue-mode §4.7 v3).
+	// Nil disables journal writes (back-compat default).
+	journalWriter journal.Writer
+	// sessionID is the kitsoki session this ledger belongs to.
+	// Used to attribute journal entries. Empty string is acceptable.
+	sessionID app.SessionID
 }
 
 // NewProposalLedger returns an empty ledger using time.Now for
@@ -64,6 +74,16 @@ func NewProposalLedger() *ProposalLedger {
 		items: make(map[string]*PendingProposal),
 		now:   time.Now,
 	}
+}
+
+// WithLedgerJournalWriter injects a journal.Writer and session ID into the
+// ProposalLedger. When the writer is non-nil, proposal lifecycle transitions
+// (staged / discarded / applied) emit typed journal entries for continue-mode
+// durability (§4.7 v3). When nil (the default), journal writes are skipped.
+func (l *ProposalLedger) WithLedgerJournalWriter(jw journal.Writer, sid app.SessionID) *ProposalLedger {
+	l.journalWriter = jw
+	l.sessionID = sid
+	return l
 }
 
 // newProposalLedgerWithClock is the testing constructor.
@@ -87,11 +107,27 @@ func (l *ProposalLedger) Add(p *authoring.Proposal) string {
 	for _, exists := l.items[id]; exists; _, exists = l.items[id] {
 		id = newProposalID()
 	}
+	createdAt := l.now()
 	l.items[id] = &PendingProposal{
 		ID:        id,
 		State:     ProposalDraft,
 		Proposal:  p,
-		CreatedAt: l.now(),
+		CreatedAt: createdAt,
+	}
+	// Site 28: emit metamode.proposal.staged for the new draft (standalone write;
+	// no events row today — this is a §4.9 Rule 1 exception for in-memory-only mutations).
+	if l.journalWriter != nil {
+		body := ledgerMustJSON(map[string]any{
+			"proposal_id": id,
+			"state":       string(ProposalDraft),
+			"created_at":  createdAt.Format(time.RFC3339Nano),
+		})
+		_ = l.journalWriter.Append(journal.Entry{
+			Ts:      createdAt,
+			Session: l.sessionID,
+			Kind:    journal.KindMetamodeProposalStaged,
+			Body:    body,
+		})
 	}
 	return id
 }
@@ -135,6 +171,20 @@ func (l *ProposalLedger) Discard(id string) error {
 		return fmt.Errorf("metamode: discard proposal %q: %w", id, err)
 	}
 	pp.State = ProposalDiscarded
+	// Site 29: emit metamode.proposal.discarded (standalone write; no events row).
+	if l.journalWriter != nil {
+		discardedAt := l.now()
+		body := ledgerMustJSON(map[string]any{
+			"proposal_id":  id,
+			"discarded_at": discardedAt.Format(time.RFC3339Nano),
+		})
+		_ = l.journalWriter.Append(journal.Entry{
+			Ts:      discardedAt,
+			Session: l.sessionID,
+			Kind:    journal.KindMetamodeProposalDiscarded,
+			Body:    body,
+		})
+	}
 	return nil
 }
 
@@ -153,6 +203,20 @@ func (l *ProposalLedger) RecordApplied(proposalID string) {
 		pp.State = ProposalApplied
 	}
 	l.reloadPending = true
+	// Site 30: emit metamode.proposal.applied (standalone write; no events row).
+	if l.journalWriter != nil {
+		appliedAt := l.now()
+		body := ledgerMustJSON(map[string]any{
+			"proposal_id": proposalID,
+			"applied_at":  appliedAt.Format(time.RFC3339Nano),
+		})
+		_ = l.journalWriter.Append(journal.Entry{
+			Ts:      appliedAt,
+			Session: l.sessionID,
+			Kind:    journal.KindMetamodeProposalApplied,
+			Body:    body,
+		})
+	}
 }
 
 // ReloadPending reports whether an apply has been recorded since the
@@ -204,4 +268,15 @@ func newProposalID() string {
 		return fmt.Sprintf("ts%016x", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b[:])
+}
+
+// ledgerMustJSON marshals v to JSON for journal entry bodies, returning an
+// empty object if marshalling fails (vanishingly unlikely for the simple
+// map literals used here).
+func ledgerMustJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return b
 }

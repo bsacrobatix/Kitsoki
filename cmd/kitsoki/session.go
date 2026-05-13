@@ -9,8 +9,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -26,6 +29,7 @@ import (
 	"kitsoki/internal/chathost"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/host"
+	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
@@ -67,6 +71,10 @@ Exit codes:
 	cmd.AddCommand(sessionListCmd())
 	cmd.AddCommand(sessionBindKeyCmd())
 	cmd.AddCommand(sessionDeleteCmd())
+	cmd.AddCommand(sessionCheckpointCmd())
+	cmd.AddCommand(sessionJournalCmd())
+	cmd.AddCommand(sessionForgetCmd())
+	cmd.AddCommand(sessionDetachCmd())
 	return cmd
 }
 
@@ -115,6 +123,558 @@ or the equivalent terminal-state path so the audit trail is preserved.`,
 	cmd.Flags().StringVar(&key, "key", "", "external key transport:thread")
 	cmd.Flags().StringVar(&idFlag, "id", "", "session ID")
 	return cmd
+}
+
+// ─── session checkpoint ───────────────────────────────────────────────────────
+
+// sessionCheckpointCmd forces a checkpoint on the journal for one session.
+// For each live document (world, state) it writes a "<doc>.checkpoint" row
+// into the journal table carrying the full current document value.
+// With --doc only that single document is checkpointed.
+//
+// Phase-A note: chats/<id> and jobs/<id> checkpoint entries are not yet emitted
+// because the SQLite-backed journal Writer lands in a parallel wave; the
+// checkpoint rows for world/state are written directly via raw SQL so this
+// command is already functional once the journal table exists.
+func sessionCheckpointCmd() *cobra.Command {
+	var (
+		appPath string
+		dbPath  string
+		idFlag  string
+		keyFlag string
+		docFlag string
+	)
+	cmd := &cobra.Command{
+		Use:   "checkpoint",
+		Short: "Force a journal checkpoint for a session (continue-mode §7.2)",
+		Long: `Write a full-document checkpoint entry to the journal table for the
+named session. Useful for seeding test fixtures and bounding replay cost.
+
+One checkpoint row per document (world, state) is inserted with kind
+"world.checkpoint" / "state.checkpoint" and body {"full": <current value>}.
+With --doc only that one document is checkpointed.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if (idFlag == "") == (keyFlag == "") {
+				return fmt.Errorf("exactly one of --id or --key must be set")
+			}
+
+			def, err := app.Load(appPath)
+			if err != nil {
+				return fmt.Errorf("load app %q: %w", appPath, err)
+			}
+			publishAppDir(appPath)
+
+			s, err := openSessionStore(dbPath)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = s.Close() }()
+
+			ctx := cmd.Context()
+			sid, err := resolveSessionID(ctx, s, keyFlag, idFlag)
+			if err != nil {
+				return err
+			}
+
+			m, err := machine.New(def)
+			if err != nil {
+				return fmt.Errorf("build machine: %w", err)
+			}
+			orch := orchestrator.New(def, m, s, &noRunHarness{})
+
+			var outcome []map[string]any
+			lockErr := s.WithWriterLock(ctx, sid, func() error {
+				journey, jErr := orch.LoadJourney(sid)
+				if jErr != nil {
+					return fmt.Errorf("load journey: %w", jErr)
+				}
+
+				db := s.DB()
+
+				// Determine which docs to checkpoint.
+				type docSpec struct {
+					doc      string
+					kind     string
+					bodyJSON []byte
+				}
+				var docs []docSpec
+
+				maybeAdd := func(doc, kind string, value any) error {
+					if docFlag != "" && docFlag != doc {
+						return nil
+					}
+					b, mErr := json.Marshal(map[string]any{"full": value})
+					if mErr != nil {
+						return fmt.Errorf("marshal %s checkpoint body: %w", doc, mErr)
+					}
+					docs = append(docs, docSpec{doc: doc, kind: kind, bodyJSON: b})
+					return nil
+				}
+
+				if err := maybeAdd("world", "world.checkpoint", journey.World.Vars); err != nil {
+					return err
+				}
+				if err := maybeAdd("state", "state.checkpoint", string(journey.State)); err != nil {
+					return err
+				}
+
+				if len(docs) == 0 {
+					return fmt.Errorf("unknown --doc value %q; expected world or state", docFlag)
+				}
+
+				tsNow := time.Now().UnixMicro()
+				turnN := int64(journey.Turn)
+
+				for i, d := range docs {
+					// Determine next doc_version for this (session, doc) pair.
+					var maxVer sql.NullInt64
+					_ = db.QueryRowContext(ctx,
+						`SELECT MAX(doc_version) FROM journal WHERE session_id = ? AND doc = ?`,
+						string(sid), d.doc,
+					).Scan(&maxVer)
+					nextVer := int64(1)
+					if maxVer.Valid {
+						nextVer = maxVer.Int64 + 1
+					}
+
+					// Find next seq for this (session, turn) pair.
+					var maxSeq sql.NullInt64
+					_ = db.QueryRowContext(ctx,
+						`SELECT MAX(seq) FROM journal WHERE session_id = ? AND turn = ?`,
+						string(sid), turnN,
+					).Scan(&maxSeq)
+					seq := int64(0)
+					if maxSeq.Valid {
+						seq = maxSeq.Int64 + 1
+					} else {
+						seq = int64(i)
+					}
+
+					_, execErr := db.ExecContext(ctx,
+						`INSERT INTO journal (session_id, turn, seq, ts, kind, doc, doc_version, body_json)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+						string(sid), turnN, seq, tsNow, d.kind, d.doc, nextVer, string(d.bodyJSON),
+					)
+					if execErr != nil {
+						return fmt.Errorf("insert checkpoint for %s: %w", d.doc, execErr)
+					}
+					outcome = append(outcome, map[string]any{
+						"doc":         d.doc,
+						"doc_version": nextVer,
+					})
+				}
+				return nil
+			})
+			if errors.Is(lockErr, store.ErrSessionBusy) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "session busy: another process holds the writer lock for %s\n", sid)
+				return errTempFail
+			}
+			if lockErr != nil {
+				return lockErr
+			}
+
+			return writeJSON(cmd.OutOrStdout(), map[string]any{
+				"session_id":  string(sid),
+				"checkpoints": outcome,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&appPath, "app", "", "path to app.yaml (required)")
+	cmd.Flags().StringVar(&dbPath, "db", "", "session SQLite database (default: $XDG_DATA_HOME/kitsoki/sessions.db)")
+	cmd.Flags().StringVar(&idFlag, "id", "", "session ID")
+	cmd.Flags().StringVar(&keyFlag, "key", "", "external key transport:thread")
+	cmd.Flags().StringVar(&docFlag, "doc", "", "checkpoint only this document (world|state); default: all")
+	_ = cmd.MarkFlagRequired("app")
+	return cmd
+}
+
+// ─── session journal ──────────────────────────────────────────────────────────
+
+// sessionJournalCmd dumps journal entries for one session as JSONL to stdout.
+// Each output line is a JSON object matching the journal.Entry shape (§2.2).
+// Flags --from and --doc narrow the result set.
+func sessionJournalCmd() *cobra.Command {
+	var (
+		dbPath      string
+		idFlag      string
+		keyFlag     string
+		fromVersion int64
+		docFlag     string
+	)
+	cmd := &cobra.Command{
+		Use:   "journal",
+		Short: "Dump journal entries for a session as JSONL (continue-mode §7.2)",
+		Long: `Stream journal entries for the named session to stdout, one JSON object
+per line. Suitable for piping into jq or diffing against fixtures.
+
+--from <version>  emit only entries with doc_version > <version> (exclusive)
+--doc <doc>       emit only entries for the named document`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if (idFlag == "") == (keyFlag == "") {
+				return fmt.Errorf("exactly one of --id or --key must be set")
+			}
+
+			s, err := openSessionStore(dbPath)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = s.Close() }()
+
+			ctx := cmd.Context()
+			sid, err := resolveSessionID(ctx, s, keyFlag, idFlag)
+			if err != nil {
+				return err
+			}
+
+			q := `SELECT session_id, turn, seq, ts, kind,
+			             COALESCE(doc, ''), COALESCE(doc_version, 0), body_json
+			      FROM journal
+			      WHERE session_id = ?`
+			queryArgs := []any{string(sid)}
+
+			if docFlag != "" {
+				q += " AND doc = ?"
+				queryArgs = append(queryArgs, docFlag)
+			}
+			if fromVersion > 0 {
+				q += " AND doc_version > ?"
+				queryArgs = append(queryArgs, fromVersion)
+			}
+			q += " ORDER BY turn ASC, seq ASC"
+
+			rows, err := s.DB().QueryContext(ctx, q, queryArgs...)
+			if err != nil {
+				return fmt.Errorf("query journal: %w", err)
+			}
+			defer rows.Close()
+
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			for rows.Next() {
+				var (
+					sessionID  string
+					turn       int64
+					seq        int
+					tsUS       int64
+					kind       string
+					doc        string
+					docVersion int64
+					bodyJSON   string
+				)
+				if err := rows.Scan(&sessionID, &turn, &seq, &tsUS, &kind, &doc, &docVersion, &bodyJSON); err != nil {
+					return fmt.Errorf("scan journal row: %w", err)
+				}
+				entry := map[string]any{
+					"session_id": sessionID,
+					"turn":       turn,
+					"seq":        seq,
+					"ts":         time.UnixMicro(tsUS).UTC().Format(time.RFC3339Nano),
+					"ev":         kind,
+					"body":       json.RawMessage(bodyJSON),
+				}
+				if doc != "" {
+					entry["doc"] = doc
+				}
+				if docVersion != 0 {
+					entry["doc_version"] = docVersion
+				}
+				if err := enc.Encode(entry); err != nil {
+					return fmt.Errorf("encode journal entry: %w", err)
+				}
+			}
+			return rows.Err()
+		},
+	}
+	cmd.Flags().StringVar(&dbPath, "db", "", "session SQLite database (default: $XDG_DATA_HOME/kitsoki/sessions.db)")
+	cmd.Flags().StringVar(&idFlag, "id", "", "session ID")
+	cmd.Flags().StringVar(&keyFlag, "key", "", "external key transport:thread")
+	cmd.Flags().Int64Var(&fromVersion, "from", 0, "emit entries with doc_version > this value (exclusive lower bound)")
+	cmd.Flags().StringVar(&docFlag, "doc", "", "filter to entries for this document (e.g. world, state)")
+	return cmd
+}
+
+// ─── session forget ───────────────────────────────────────────────────────────
+
+// sessionForgetCmd deletes a session and ALL related data: the narrow
+// DeleteSession tables plus journal, timeouts, chats/chat_messages/chat_locks
+// (for chats whose session_id = this session), jobs/notifications (by
+// session_id), inside a single atomic transaction.
+//
+// Requires --yes or interactive confirmation on stdin.
+func sessionForgetCmd() *cobra.Command {
+	var (
+		dbPath  string
+		idFlag  string
+		keyFlag string
+		yes     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "forget",
+		Short: "Wide-delete a session and all related data (continue-mode §6.9)",
+		Long: `Permanently delete a session and every row that references it:
+  events, snapshots, external_keys, session_locks, sessions
+  journal (if the table exists)
+  timeouts (rows for this session)
+  chats + chat_messages + chat_locks (chats whose session_id = this session)
+  jobs + notifications (rows for this session)
+
+All deletes run inside a single transaction.  Requires --yes or interactive
+confirmation to prevent accidental data loss.
+
+Output JSON: {session_id, deleted_tables: {events: N, snapshots: N, ...}}`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if (idFlag == "") == (keyFlag == "") {
+				return fmt.Errorf("exactly one of --id or --key must be set")
+			}
+
+			s, err := openSessionStore(dbPath)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = s.Close() }()
+
+			ctx := cmd.Context()
+			sid, err := resolveSessionID(ctx, s, keyFlag, idFlag)
+			if err != nil {
+				return err
+			}
+
+			// Require confirmation unless --yes was passed.
+			if !yes {
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"Permanently delete session %s and all related data? [y/N]: ", sid)
+				scanner := bufio.NewScanner(cmd.InOrStdin())
+				scanner.Scan()
+				answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+				if answer != "y" && answer != "yes" {
+					fmt.Fprintln(cmd.ErrOrStderr(), "Aborted.")
+					return nil
+				}
+			}
+
+			db := s.DB()
+			counts := map[string]int64{}
+
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("begin transaction: %w", err)
+			}
+			defer func() { _ = tx.Rollback() }()
+
+			// Helper: exec a DELETE and record the affected count. If the table
+			// doesn't exist (SQLITE_ERROR / "no such table"), skip silently.
+			execDelete := func(table, query string, args ...any) error {
+				res, execErr := tx.ExecContext(ctx, query, args...)
+				if execErr != nil {
+					if strings.Contains(execErr.Error(), "no such table") {
+						return nil
+					}
+					return fmt.Errorf("delete %s: %w", table, execErr)
+				}
+				n, _ := res.RowsAffected()
+				counts[table] += n
+				return nil
+			}
+
+			sidStr := string(sid)
+
+			// Core session tables (existing DeleteSession scope).
+			if err := execDelete("events", `DELETE FROM events WHERE session_id = ?`, sidStr); err != nil {
+				return err
+			}
+			if err := execDelete("snapshots", `DELETE FROM snapshots WHERE session_id = ?`, sidStr); err != nil {
+				return err
+			}
+			if err := execDelete("external_keys", `DELETE FROM external_keys WHERE session_id = ?`, sidStr); err != nil {
+				return err
+			}
+			if err := execDelete("session_locks", `DELETE FROM session_locks WHERE session_id = ?`, sidStr); err != nil {
+				return err
+			}
+
+			// Journal (may not exist yet if the parallel DDL hasn't landed).
+			if err := execDelete("journal", `DELETE FROM journal WHERE session_id = ?`, sidStr); err != nil {
+				return err
+			}
+
+			// Timeouts (owned by the orchestrator's own table, session_id FK).
+			if err := execDelete("timeouts", `DELETE FROM timeouts WHERE session_id = ?`, sidStr); err != nil {
+				return err
+			}
+
+			// Chats: chats.session_id is an "audit only" nullable column that
+			// records the last kitsoki session that drove a chat. This is the
+			// closest FK we have for §6.9 "any chat whose app_id+session_id
+			// references this session". We delete chat_messages and chat_locks
+			// for matching chat IDs first, then the chat rows themselves.
+			//
+			// NOTE: the chats schema stores session_id as TEXT (nullable); there
+			// is no hard FK constraint. We treat a non-null session_id match as
+			// the ownership signal per the proposal's intent.
+			chatMsgDel := `DELETE FROM chat_messages WHERE chat_id IN
+			               (SELECT id FROM chats WHERE session_id = ?)`
+			if err := execDelete("chat_messages", chatMsgDel, sidStr); err != nil {
+				return err
+			}
+			chatLockDel := `DELETE FROM chat_locks WHERE chat_id IN
+			                (SELECT id FROM chats WHERE session_id = ?)`
+			if err := execDelete("chat_locks", chatLockDel, sidStr); err != nil {
+				return err
+			}
+			if err := execDelete("chats", `DELETE FROM chats WHERE session_id = ?`, sidStr); err != nil {
+				return err
+			}
+
+			// Jobs and notifications.
+			if err := execDelete("notifications", `DELETE FROM notifications WHERE session_id = ?`, sidStr); err != nil {
+				return err
+			}
+			if err := execDelete("jobs", `DELETE FROM jobs WHERE session_id = ?`, sidStr); err != nil {
+				return err
+			}
+
+			// Sessions row last (so a partial failure leaves the session resolvable).
+			res, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, sidStr)
+			if err != nil {
+				return fmt.Errorf("delete sessions row: %w", err)
+			}
+			n, _ := res.RowsAffected()
+			if n == 0 {
+				return store.ErrSessionNotFound
+			}
+			counts["sessions"] = n
+
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("commit forget transaction: %w", err)
+			}
+
+			return writeJSON(cmd.OutOrStdout(), map[string]any{
+				"session_id":     sidStr,
+				"deleted_tables": counts,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&dbPath, "db", "", "session SQLite database (default: $XDG_DATA_HOME/kitsoki/sessions.db)")
+	cmd.Flags().StringVar(&idFlag, "id", "", "session ID")
+	cmd.Flags().StringVar(&keyFlag, "key", "", "external key transport:thread")
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip interactive confirmation")
+	return cmd
+}
+
+// ─── session detach ───────────────────────────────────────────────────────────
+
+// sessionDetachCmd breaks a stale writer lock on a session.
+// It reads the session_locks row and refuses to delete it if the owner PID is
+// alive on the current host. If the owning process is dead (or from a
+// different host), it removes the lock row.
+func sessionDetachCmd() *cobra.Command {
+	var (
+		dbPath  string
+		idFlag  string
+		keyFlag string
+	)
+	cmd := &cobra.Command{
+		Use:   "detach",
+		Short: "Break a stale writer lock on a session (continue-mode §7.2)",
+		Long: `Read the session_locks row for the named session and remove it if the
+owning process is dead (or the lock was acquired on a different host).
+
+If the lock owner is alive on this host, the command refuses with an error.
+If no lock row exists, exits 0 with {"detached":false}.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if (idFlag == "") == (keyFlag == "") {
+				return fmt.Errorf("exactly one of --id or --key must be set")
+			}
+
+			s, err := openSessionStore(dbPath)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = s.Close() }()
+
+			ctx := cmd.Context()
+			sid, err := resolveSessionID(ctx, s, keyFlag, idFlag)
+			if err != nil {
+				return err
+			}
+
+			db := s.DB()
+
+			var (
+				ownerPID    int
+				ownerHost   string
+				acquiredAtUS int64
+			)
+			err = db.QueryRowContext(ctx,
+				`SELECT owner_pid, owner_host, acquired_at FROM session_locks WHERE session_id = ?`,
+				string(sid),
+			).Scan(&ownerPID, &ownerHost, &acquiredAtUS)
+			if errors.Is(err, sql.ErrNoRows) {
+				fmt.Fprintln(cmd.ErrOrStderr(), "no lock held")
+				return writeJSON(cmd.OutOrStdout(), map[string]any{
+					"session_id": string(sid),
+					"detached":   false,
+				})
+			}
+			if err != nil {
+				return fmt.Errorf("read session lock: %w", err)
+			}
+
+			priorOwner := map[string]any{
+				"pid":         ownerPID,
+				"host":        ownerHost,
+				"acquired_at": time.UnixMicro(acquiredAtUS).UTC().Format(time.RFC3339),
+			}
+
+			// Determine this host.
+			thisHost, _ := os.Hostname()
+
+			if ownerHost == thisHost {
+				// Same host: probe process liveness via signal 0.
+				if pidAlive(ownerPID) {
+					return fmt.Errorf(
+						"session %s is locked by a live process (pid=%d host=%s acquired_at=%s); "+
+							"use 'kill %d' to stop it first",
+						sid, ownerPID, ownerHost,
+						time.UnixMicro(acquiredAtUS).UTC().Format(time.RFC3339),
+						ownerPID,
+					)
+				}
+			}
+			// Either cross-host (cannot probe) or dead PID — delete the lock.
+			if _, delErr := db.ExecContext(ctx,
+				`DELETE FROM session_locks WHERE session_id = ?`, string(sid),
+			); delErr != nil {
+				return fmt.Errorf("delete session lock: %w", delErr)
+			}
+
+			return writeJSON(cmd.OutOrStdout(), map[string]any{
+				"session_id":  string(sid),
+				"detached":    true,
+				"prior_owner": priorOwner,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&dbPath, "db", "", "session SQLite database (default: $XDG_DATA_HOME/kitsoki/sessions.db)")
+	cmd.Flags().StringVar(&idFlag, "id", "", "session ID")
+	cmd.Flags().StringVar(&keyFlag, "key", "", "external key transport:thread")
+	return cmd
+}
+
+// pidAlive uses signal 0 to check whether a process with the given PID is
+// alive on this host. Mirrors the logic in internal/store/external_keys.go.
+func pidAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, syscall.EPERM) {
+		// EPERM means the process exists but we lack permission to signal it.
+		return true
+	}
+	return false
 }
 
 // ─── session create ───────────────────────────────────────────────────────────
@@ -269,12 +829,30 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 				chatStoreOpt = orchestrator.WithChatStore(chathost.NewAdapter(rawChatStore))
 			}
 
+			// Build the journal writer (continue-mode §4.9 Rule 1).
+			// Shares the same *sql.DB so dual-write transactions are possible.
+			var journalWriterOpt orchestrator.Option
+			var journalReaderOpt orchestrator.Option
+			if jw, jwErr := journal.NewSQLiteWriter(s.DB()); jwErr == nil {
+				journalWriterOpt = orchestrator.WithJournalWriter(jw)
+			}
+			// Build the journal reader (symmetric to the writer; §4.5 resume path).
+			if jr, jrErr := journal.NewSQLiteReader(s.DB()); jrErr == nil {
+				journalReaderOpt = orchestrator.WithJournalReader(jr)
+			}
+
 			orchOpts := []orchestrator.Option{
 				orchestrator.WithHostRegistry(hostReg),
 				orchestrator.WithTransportRegistry(transportReg),
 			}
 			if chatStoreOpt != nil {
 				orchOpts = append(orchOpts, chatStoreOpt)
+			}
+			if journalWriterOpt != nil {
+				orchOpts = append(orchOpts, journalWriterOpt)
+			}
+			if journalReaderOpt != nil {
+				orchOpts = append(orchOpts, journalReaderOpt)
 			}
 			orch := orchestrator.New(def, m, s, h, orchOpts...)
 

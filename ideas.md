@@ -17,6 +17,33 @@
 - better testing for proposal mode - should work like conversation (w/ peristent convo)
 - remote job mode: monitor and control sessions on VMs
 - pass request id to downstream CLI and API calls so that the session/trace can be correlated, so for instance mcp validator can log directly against the right session (is this racy?)
+- open a VS Code over Remote Tunnel or to local folder for a given project/PR/etc...
+- conversation/session info/context mcp for LLM to use for clarification
+- provide context/guidance/prompt to off_path based on current room + provide history/context/etc...
+- multi-intent - when actions/intents are non-navigational they can be stacked within a single input - on Oregon Trail it's like name the party, define the profession and start month in a single statement
+- single LLM chat across rooms, manage the scope to determine which rooms are contained within the chat, provides better context and richer history without hacks like the history mcp
+- meta mode works like off path so it's a full convo not just a one-shot, can use all normal conventions like proposal
+- meta mode chats are persistent and listed like oracle sessions
+- meta mode as a generic concept, off-path, self-fix/improvement/extend.  each different meta mode has different agent and prompts
+- add world display to TUI - apps can specify what state is shown in the panel, make it like the actions panel
+- actions panel is too narrow
+- --continue to resume existing session
+- voice/speaker transport
+- can't use numbers as start of chat text
+- live vs local mode for transports - sometimes we just want to work locally and don't need jira/bitbucket comments
+- json-rpc, mcp, rest support w/ auth
+- intent synonyms and caching
+- remove world from top status bar it crowds everything
+- add reload so that external app changes can be picked up without quit/restart (remove last error and retry failed operation (?)) - keep the world as-is so state is preserved
+- recording captures git commits and LLM interactions so it's possible to do a deterministic replay, graceful call to LLM if it's a new/changed call that needs a real response to be recorded
+- pure in-memory apps that are mutable in-flight, fully dynamic apps, export to yaml
+- generate precursor recording/state so we can continue right at the point where a new feature is to be demoed or a bug is reproduced
+- trace includes atomic state updates in some json-diff format so that there can be checkpoints + event stream for balance between size and speed of replay (reprocessing events) - event sourcing model for consistency
+- vs code integration like claude, see what the user has open and propose changes using VS code diff
+- voice/setting theming and localization - different languages and oregon trail could be in space
+- ticket/pr/etc... providers that support bitbucket jira github or file mode for testing/dev match our existing bugfix artifact write pattern
+- these providers are behind mcp for use in sessions, pluggable backends with the same interface so a single prompt works across different implementations
+- input history via up/down arrow
 
 ## Tech debt
 

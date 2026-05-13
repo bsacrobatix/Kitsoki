@@ -40,6 +40,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/clock"
+	"kitsoki/internal/journal"
 	"kitsoki/internal/store"
 	"kitsoki/internal/trace"
 )
@@ -417,6 +418,17 @@ func (d *timeoutDispatcher) persist(sid app.SessionID, sp, target app.StatePath,
 			slog.String("phase", "persist"),
 			slog.String("err", err.Error()),
 		)
+		return
+	}
+	// Site 15: emit timeout.armed as a post-commit standalone journal write.
+	if d.orch != nil {
+		d.orch.appendJournal(journalEntry(sid, 0, 0, time.Now(),
+			journal.KindTimeoutArmed, "",
+			map[string]any{
+				"state_path":  string(sp),
+				"target":      string(target),
+				"fires_at_ms": firesAt.UnixMilli(),
+			}))
 	}
 }
 
@@ -435,6 +447,16 @@ func (d *timeoutDispatcher) unpersist(sid app.SessionID, sp app.StatePath) {
 			slog.String("phase", "unpersist"),
 			slog.String("err", err.Error()),
 		)
+		return
+	}
+	// Site 16: emit timeout.cancelled as a post-commit standalone journal write.
+	if d.orch != nil {
+		d.orch.appendJournal(journalEntry(sid, 0, 0, time.Now(),
+			journal.KindTimeoutCancelled, "",
+			map[string]any{
+				"state_path": string(sp),
+				"reason":     "cancelled",
+			}))
 	}
 }
 
@@ -668,7 +690,10 @@ func (o *Orchestrator) fireTimeout(ctx context.Context, sid app.SessionID, fromS
 	for i := range events {
 		events[i].Turn = turnNum
 	}
-	if err := o.store.AppendEvents(sid, events); err != nil {
+	// Site 14: dual-write journal entries for the timeout-fired synthetic turn.
+	ftJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), events,
+		journey.World, w, "", target)
+	if err := o.store.AppendEventsAndJournal(sid, events, ftJEntries); err != nil {
 		return fmt.Errorf("fireTimeout: append events: %w", err)
 	}
 

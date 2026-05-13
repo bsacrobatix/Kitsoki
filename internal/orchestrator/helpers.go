@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/intent"
+	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/store"
 	"kitsoki/internal/trace"
@@ -260,10 +262,11 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 	if result.ValidationError != nil {
 		ve := result.ValidationError
 		if ve.Code == intent.ErrMissingSlots {
+			riSlotsSoFar := slotsToMap(call.Slots)
 			o.mu.Lock()
 			o.pending[sid] = &pendingClarify{
 				intentName: call.Intent,
-				slots:      slotsToMap(call.Slots),
+				slots:      riSlotsSoFar,
 			}
 			o.mu.Unlock()
 			clarification := ComputeClarification(o.def, journey.State, call.Intent, ve.MissingSlots)
@@ -273,11 +276,22 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 				slog.Any("missing", ve.MissingSlots),
 				slog.String("origin", "run_intent"),
 			)
+			// Site 8 (RunIntent path): emit clarify.requested via standalone journal write.
+			riMissingNames := make([]string, len(ve.MissingSlots))
+			copy(riMissingNames, ve.MissingSlots)
+			o.appendJournal(journalEntry(sid, turnNum, 0, time.Now(),
+				journal.KindClarifyRequested, "",
+				map[string]any{
+					"origin":       "foreground",
+					"intent":       call.Intent,
+					"slots_so_far": riSlotsSoFar,
+					"slots_needed": riMissingNames,
+				}))
 			return &TurnOutcome{
 				Mode:           ModeClarify,
 				NewState:       journey.State,
 				PendingIntent:  call.Intent,
-				PendingSlots:   slotsToMap(call.Slots),
+				PendingSlots:   riSlotsSoFar,
 				SlotsNeeded:    clarification.Slots,
 				AllowedIntents: allowedNames,
 				TurnNumber:     turnNum,
@@ -293,7 +307,10 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 		for i := range failureEvents {
 			failureEvents[i].Turn = turnNum
 		}
-		if appendErr := o.store.AppendEvents(sid, failureEvents); appendErr != nil {
+		// Site 3: dual-write journal entries for the RunIntent rejection turn.
+		riFailJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), failureEvents,
+			journey.World, journey.World, "", journey.State)
+		if appendErr := o.store.AppendEventsAndJournal(sid, failureEvents, riFailJEntries); appendErr != nil {
 			return nil, fmt.Errorf("orchestrator: RunIntent: append failure events: %w", appendErr)
 		}
 		newAllowed := allowedNamesFromMachine(o.machine, journey.State, journey.World)
@@ -335,7 +352,10 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 		successEvents[i].Turn = turnNum
 	}
 
-	if appendErr := o.store.AppendEvents(sid, successEvents); appendErr != nil {
+	// Site 4: dual-write journal entries for the RunIntent success turn.
+	riSuccJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), successEvents,
+		journey.World, result.World, result.View, result.NewState)
+	if appendErr := o.store.AppendEventsAndJournal(sid, successEvents, riSuccJEntries); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator: RunIntent: append events: %w", appendErr)
 	}
 

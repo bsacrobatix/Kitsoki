@@ -10,6 +10,7 @@ package tui
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -30,10 +31,12 @@ import (
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/intent"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/journal"
 	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/trace"
 	"kitsoki/internal/viz"
+	"kitsoki/internal/world"
 )
 
 // Mode describes which interaction mode the TUI is currently in (§7.3, §7.7).
@@ -173,6 +176,12 @@ type RootModel struct {
 	// because the program is launched with tea.WithMouseCellMotion.
 	mouseOn bool
 
+	// journalWriter, when non-nil, receives typed journal entries for
+	// inbox read/dismiss (sites 27) and disambiguation (site 31)
+	// lifecycle events (continue-mode §4.9 dual-write).
+	// Nil disables journal writes (back-compat default for tests).
+	journalWriter journal.Writer
+
 	// traceRing is the always-on in-memory ring buffer built by
 	// BuildTraceLogger.  buildMetaTurnContext snapshots it to
 	// traceFilePath on every meta-mode Send so the agent can Read
@@ -269,6 +278,59 @@ func WithExternalTraceFile(path string) RootModelOption {
 	}
 }
 
+// WithJournalWriter injects a journal.Writer into the RootModel. When non-nil,
+// inbox read/dismiss events (site 27) and disambiguation choice events (site 31)
+// emit typed journal entries for continue-mode durability (§4.9 dual-write).
+// When nil (the default), no journal entries are written — this preserves
+// backward compatibility for tests and headless callers.
+func WithJournalWriter(jw journal.Writer) RootModelOption {
+	return func(m *RootModel) { m.journalWriter = jw }
+}
+
+// WithResumedJourney overrides the initial state, world, and menu/location
+// to match a previously-loaded journey (--continue resume path). Without
+// this option, NewRootModel starts from the app's declared initial state.
+//
+// The option overwrites the currentState, menu, and location that
+// NewRootModel set from orch.InitialState() / orch.InitialWorld() so the
+// TUI opens in the same state the session was in when the user last quit.
+// The initialView passed to NewRootModel should already be the view
+// rendered from the journey (via orch.RenderState) by the caller.
+//
+// NOTE: A full Bubble Tea overlay picker (§5.4) is a follow-up; this option
+// is phase-A plumbing only.
+func WithResumedJourney(state app.StatePath, w world.World, turn app.TurnNumber) RootModelOption {
+	return func(m *RootModel) {
+		m.currentState = state
+		computedMenu := orchestrator.ComputeMenu(m.orch.AppDef(), m.orch.Machine(), state, w)
+		m.menu, _ = m.menu.Update(menuItemsChanged{items: computedMenu.Primary, blocked: computedMenu.Blocked})
+		loc := orchestrator.ComputeLocation(m.orch.AppDef(), state, w, turn)
+		m.location, _ = m.location.Update(locationUpdated{loc: loc})
+	}
+}
+
+// WithResumedTranscript seeds the transcript pane from journal entries
+// collected by AttachSession (continue-mode §4.6 transcript rehydration).
+//
+// The entries slice must be ordered by (turn, seq) — the order AttachSession
+// returns them in.  Each entry is mapped to the matching live transcript
+// constructor (view.rendered → AppendSystem, offpath.question → AppendTurn,
+// offpath.answer → AppendOffPathAnswer, etc.).  Unrecognised entry kinds are
+// silently skipped.
+//
+// This option is applied after NewRootModel runs its own initialView append so
+// the reconstructed history appears before any "fresh session" boilerplate.
+// Callers that pass both an initialView and WithResumedTranscript should pass
+// an empty initialView string to avoid duplicating the last view.rendered row.
+func WithResumedTranscript(entries []journal.Entry) RootModelOption {
+	return func(m *RootModel) {
+		if len(entries) == 0 {
+			return
+		}
+		m.transcript.ReconstructFromEntries(entries)
+	}
+}
+
 // NewRootModel creates the root TUI model.  appPath is the path to the
 // app.yaml backing this session — required for the Esc-menu "Edit mode"
 // reload flow.  Pass "" to disable edit mode (e.g., from tests).
@@ -342,10 +404,11 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	if m.metaController == nil && m.chatStore != nil && len(orch.AppDef().MetaModes) > 0 {
 		if reg := host.AgentRegistry(); reg != nil {
 			m.metaController = &metamode.Controller{
-				Chats:  metamode.NewChatStoreAdapter(m.chatStore),
-				Agents: reg,
-				AppDef: orch.AppDef(),
-				Oracle: metamode.NewOracleCallerAdapter(),
+				Chats:         metamode.NewChatStoreAdapter(m.chatStore),
+				Agents:        reg,
+				AppDef:        orch.AppDef(),
+				Oracle:        metamode.NewOracleCallerAdapter(),
+				JournalWriter: m.journalWriter, // site 28-30: wire ledger journal writes
 			}
 		}
 	}
@@ -555,12 +618,16 @@ func (m RootModel) handleInboxItemSelected(msg inboxItemSelected) (tea.Model, te
 			ctx := context.Background()
 			_ = m.jobStore.MarkNotificationRead(ctx, n.ID)
 		}
+		// Site 27 (a): inbox item opened (no teleport target).
+		m.emitInboxOpened(n.ID, n.Title)
 		return m, nil
 	}
 
 	orch := m.orch
 	sid := m.sid
 	js := m.jobStore
+	jw := m.journalWriter
+	tuiSID := m.sid
 
 	return m, func() tea.Msg {
 		ctx := context.Background()
@@ -568,6 +635,8 @@ func (m RootModel) handleInboxItemSelected(msg inboxItemSelected) (tea.Model, te
 		if js != nil {
 			_ = js.MarkNotificationRead(ctx, n.ID)
 		}
+		// Site 27 (b): inbox item opened (before teleport fires).
+		tuiEmitInboxOpened(jw, tuiSID, n.ID, n.Title)
 		out, err := orch.Teleport(ctx, sid, target)
 		return turnOutcomeMsg{outcome: out, input: "(teleport)", err: err}
 	}
@@ -688,6 +757,8 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if n := m.inbox.ActionRequiredNotification(); n != nil && m.jobStore != nil {
 				ctx := context.Background()
 				_ = m.jobStore.MarkNotificationRead(ctx, n.ID)
+				// Site 27 (c): inbox item dismissed (Esc / snooze semantics).
+				m.emitInboxDismissed(n.ID, n.Title)
 				// Trigger a re-poll so the inbox snapshot updates immediately.
 				return m, func() tea.Msg { return m.pollInbox() }
 			}
@@ -1073,6 +1144,8 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 			m.disambiguation.Open(out.Candidates)
 			m.transcript.AppendTurn(msg.input, "")
 			m.transcript.AppendSystem(m.disambiguation.View())
+			// Site 31: emit disambig.presented when the overlay is shown.
+			m.emitDisambigPresented(out.Candidates)
 			return m, nil
 		}
 
@@ -1846,6 +1919,8 @@ func (m RootModel) handleDisambiguationChoice(msg disambiguationChoiceMsg) (tea.
 	m.disambiguation.Close()
 	chosen := msg.chosen
 	m.transcript.AppendSystem(fmt.Sprintf("(chose: %s)", chosen.Intent))
+	// Site 31: emit disambig.chosen when the user picks an option.
+	m.emitDisambigChosen(chosen)
 	// Re-run the turn with the chosen intent directly.
 	// We synthesise the input as the intent name so the harness is bypassed
 	// and the machine receives the choice directly.
@@ -2076,4 +2151,92 @@ func isScrollKey(msg tea.KeyMsg) bool {
 		return true
 	}
 	return false
+}
+
+// ─── journal helpers ───────────────────────────────────────────────────────────
+
+// tuiMustJSON marshals v to JSON, returning an empty object on error.
+func tuiMustJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return b
+}
+
+// tuiEmitInboxOpened emits an inbox.item.opened journal entry via jw (standalone).
+// This package-level variant is used from closures that capture jw/sid by value.
+func tuiEmitInboxOpened(jw journal.Writer, sid app.SessionID, notificationID, title string) {
+	if jw == nil {
+		return
+	}
+	_ = jw.Append(journal.Entry{
+		Ts:      time.Now(),
+		Session: sid,
+		Kind:    journal.KindInboxItemOpened,
+		Body: tuiMustJSON(map[string]any{
+			"notification_id":    notificationID,
+			"notification_title": title,
+			"opened_at":          time.Now().Format(time.RFC3339Nano),
+		}),
+	})
+}
+
+// emitInboxOpened is the method receiver variant for use where m is available.
+func (m RootModel) emitInboxOpened(notificationID, title string) {
+	tuiEmitInboxOpened(m.journalWriter, m.sid, notificationID, title)
+}
+
+// emitInboxDismissed emits an inbox.item.dismissed journal entry (standalone write).
+func (m RootModel) emitInboxDismissed(notificationID, title string) {
+	if m.journalWriter == nil {
+		return
+	}
+	_ = m.journalWriter.Append(journal.Entry{
+		Ts:      time.Now(),
+		Session: m.sid,
+		Kind:    journal.KindInboxItemDismissed,
+		Body: tuiMustJSON(map[string]any{
+			"notification_id":    notificationID,
+			"notification_title": title,
+			"dismissed_at":       time.Now().Format(time.RFC3339Nano),
+		}),
+	})
+}
+
+// emitDisambigPresented emits a disambig.presented journal entry when the
+// disambiguation overlay is shown to the user (site 31 — presented half).
+func (m RootModel) emitDisambigPresented(candidates []intent.Candidate) {
+	if m.journalWriter == nil {
+		return
+	}
+	labels := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		labels = append(labels, c.Intent)
+	}
+	_ = m.journalWriter.Append(journal.Entry{
+		Ts:      time.Now(),
+		Session: m.sid,
+		Kind:    journal.KindDisambigPresented,
+		Body: tuiMustJSON(map[string]any{
+			"candidates": labels,
+		}),
+	})
+}
+
+// emitDisambigChosen emits a disambig.chosen journal entry when the user
+// picks a disambiguation candidate (site 31 — chosen half).
+func (m RootModel) emitDisambigChosen(chosen intent.Candidate) {
+	if m.journalWriter == nil {
+		return
+	}
+	_ = m.journalWriter.Append(journal.Entry{
+		Ts:      time.Now(),
+		Session: m.sid,
+		Kind:    journal.KindDisambigChosen,
+		Body: tuiMustJSON(map[string]any{
+			"intent":          chosen.Intent,
+			"candidate_label": chosen.Title,
+		}),
+	})
 }

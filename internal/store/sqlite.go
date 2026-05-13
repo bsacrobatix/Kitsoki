@@ -33,6 +33,7 @@ import (
 
 	"github.com/google/uuid"
 	"kitsoki/internal/app"
+	"kitsoki/internal/journal"
 
 	_ "modernc.org/sqlite" // register "sqlite" driver
 )
@@ -188,7 +189,20 @@ func (s *sqliteStore) appendEventsCtx(ctx context.Context, session app.SessionID
 		return ErrSessionClosed
 	}
 
-	// Determine the turn number from the first event.
+	if err := appendEventsTx(ctx, tx, session, events); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store.AppendEvents: commit: %w", err)
+	}
+	return nil
+}
+
+// appendEventsTx inserts events rows and updates last_turn within an existing
+// transaction. Seq values are overwritten with monotonic indices starting at 0.
+// All events must share the same Turn value; the turn is taken from events[0].Turn.
+func appendEventsTx(ctx context.Context, tx *sql.Tx, session app.SessionID, events []Event) error {
 	turn := events[0].Turn
 	now := time.Now().UnixMicro()
 
@@ -214,7 +228,7 @@ func (s *sqliteStore) appendEventsCtx(ctx context.Context, session app.SessionID
 			string(events[i].Kind),
 			string(payload),
 		); err != nil {
-			return fmt.Errorf("store.AppendEvents: insert event %d: %w", i, err)
+			return fmt.Errorf("store.appendEventsTx: insert event %d: %w", i, err)
 		}
 	}
 
@@ -223,11 +237,55 @@ func (s *sqliteStore) appendEventsCtx(ctx context.Context, session app.SessionID
 		`UPDATE sessions SET last_turn = ? WHERE id = ?`,
 		int64(turn), string(session),
 	); err != nil {
-		return fmt.Errorf("store.AppendEvents: update last_turn: %w", err)
+		return fmt.Errorf("store.appendEventsTx: update last_turn: %w", err)
+	}
+	return nil
+}
+
+// AppendEventsAndJournal atomically appends events and journal entries in a
+// single transaction. Either both writes succeed or both are rolled back
+// (§4.9 Rule 1). The events constraint (ErrSessionClosed / ErrSessionNotFound)
+// is checked before either insert proceeds.
+func (s *sqliteStore) AppendEventsAndJournal(session app.SessionID, events []Event, journalEntries []journal.Entry) error {
+	ctx := context.Background()
+	if len(events) == 0 && len(journalEntries) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("store.AppendEventsAndJournal: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Check session exists and is active.
+	var status string
+	err = tx.QueryRowContext(ctx,
+		`SELECT status FROM sessions WHERE id = ?`, string(session)).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrSessionNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("store.AppendEventsAndJournal: check session: %w", err)
+	}
+	if status != "active" {
+		return ErrSessionClosed
+	}
+
+	if len(events) > 0 {
+		if err := appendEventsTx(ctx, tx, session, events); err != nil {
+			return err
+		}
+	}
+
+	if len(journalEntries) > 0 {
+		if err := journal.AppendJournalTx(tx, session, journalEntries); err != nil {
+			return fmt.Errorf("store.AppendEventsAndJournal: journal: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store.AppendEvents: commit: %w", err)
+		return fmt.Errorf("store.AppendEventsAndJournal: commit: %w", err)
 	}
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/journal"
 
 	// Blank import to ensure modernc.org/sqlite stays in go.mod after tidy.
 	_ "modernc.org/sqlite"
@@ -24,6 +25,11 @@ type Store interface {
 	// seq is overwritten: events within a turn receive monotonic seq starting at 0.
 	// Returns ErrSessionClosed if the session has been completed or abandoned.
 	AppendEvents(session app.SessionID, events []Event) error
+
+	// AppendEventsAndJournal atomically appends events and journal entries in a
+	// single transaction (§4.9 Rule 1). Either both writes succeed or both roll back.
+	// Returns ErrSessionClosed if the session has been completed or abandoned.
+	AppendEventsAndJournal(session app.SessionID, events []Event, journalEntries []journal.Entry) error
 
 	// LoadHistory returns the ordered events since the latest snapshot for a session.
 	LoadHistory(session app.SessionID) (History, error)

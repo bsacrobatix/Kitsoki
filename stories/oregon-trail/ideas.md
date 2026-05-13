@@ -1,0 +1,10 @@
+- improve the party naming, how many people is it and provide names for each person, allow to generate based on a theme
+- multiple people in party but only 1 profession
+- show disabled intents - start journey is only possible after certain conditions - make it red and available intents green.  can this be generic?
+- enabled/disabled intents in the view text (not the actions pane - can be in the view itself just template logic)
+- actions in intro room shown as pick_month april, pick_month may, etc... but it should be 1 item pick_month {april,may,...}
+- /freeform -> cowboy themed oracle... wise man or something like that, lexicon of Zane Gray Louis L'Amour
+- more guidance information for the user in setup about ranges of food consumption, etc... so they can make better decisions about purchases
+- treat is only available on the first instance of illness, while the illness persists after continuing treat is not an option anymore
+- i bought spare wheels, one broke, but I show 0 available
+- illness status isn't well communicated, not clear if it continues, is healed or was just forgotten

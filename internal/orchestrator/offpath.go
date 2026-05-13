@@ -17,11 +17,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/host"
 	"kitsoki/internal/store"
 	"kitsoki/internal/trace"
+	"kitsoki/internal/world"
 )
 
 // offPathRoom is the canonical room key used when resolving the per-session
@@ -233,5 +235,10 @@ func (o *Orchestrator) appendOffPathEvents(sid app.SessionID, events []store.Eve
 	for i := range events {
 		events[i].Turn = offTurn
 	}
-	return o.store.AppendEvents(sid, events)
+	// Sites 10–13: dual-write journal entries for off-path events.
+	// Off-path events never mutate world or state; use empty worlds for the diff.
+	emptyWorld := world.World{Vars: map[string]any{}}
+	opJEntries := journalEntriesForEvents(sid, offTurn, time.Now(), events,
+		emptyWorld, emptyWorld, "", "")
+	return o.store.AppendEventsAndJournal(sid, events, opJEntries)
 }

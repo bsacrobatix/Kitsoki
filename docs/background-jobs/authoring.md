@@ -97,6 +97,62 @@ The `bind:` for `job_id` is applied synchronously in the same turn. However,
 `last_job_result` is only available in the `on_complete:` chain (a later
 synthetic turn). Use `on_complete:` to act on the result.
 
+## `target:` inside `on_complete:` — auto-advance after a job
+
+By default an `on_complete:` chain only applies its mutations and posts an
+inbox notification; the session stays in the state where the background job
+was launched (typically a `*_executing` placeholder).  To auto-advance once
+the job terminates, set `target:` on an effect in the chain:
+
+```yaml
+on_enter:
+  - invoke: host.run
+    with: { cmd: "long-task.sh" }
+    background: true
+    bind: { last_job_id: job_id }
+    on_complete:
+      - set: { last_run_ok: "{{ world.last_job_status == 'done' }}" }   # mutate
+      - say: "phase complete"                                          # narrate
+      - target: phase_done                                             # advance
+```
+
+**Semantics.**
+
+- The orchestrator scans the chain top-to-bottom for the FIRST effect with
+  `target:` set whose `when:` guard (if any) passes against the post-effects
+  world.  That one wins — subsequent `target:` effects are warn-logged and
+  ignored.
+- The transition is synthetic: it emits
+  `TransitionApplied → StateExited → StateEntered` and runs the target
+  state's `on_enter:` effects, exactly like a foreground transition.
+- The TUI observer (`OnBackgroundTurn`) fires with
+  `outcome.NewState=<target>` once everything is committed, so the
+  transcript auto-refreshes without the operator typing anything.
+- The PR-refinement / bug-fix-style "executing → done" pattern is the main
+  use case — see `stories/bugfix/app.yaml` in the cyber-repo.
+
+**Restrictions** (rejected at load time):
+
+- `target:` outside `on_complete:` is a hard error.  Use a normal
+  transition's `target:` for in-turn transitions; `target:` on an
+  `on_complete:` effect fires only at the END of a background job.
+- `target:` combined with `set:` / `increment:` / `say:` / `invoke:` /
+  `bind:` on the SAME effect is rejected.  Declare the mutation and the
+  transition as separate effects (so the chain reads "mutate, then
+  transition").  This avoids ambiguity about whether the new state's
+  `on_enter:` runs before or after the mutation lands.
+
+**Fail-fast.** If an EARLIER effect in the chain errors (bad template,
+unresolved expression, etc.) the entire synthetic turn aborts and
+`target:` is suppressed.  The session stays where it was — the
+invariant is "no advance on partial application".  Authors get a loud
+error log and can re-run.
+
+**`on_error` precedence.** If a host call inside the on_complete chain
+hits its `on_error:` redirect, the session lands on the error state and
+the `target:` dispatch is suppressed.  `on_error` is itself a
+state-change; `target:` defers to it.
+
 ## Forbidden patterns (loader rejects)
 
 The loader (`internal/app/loader.go`) reports these as load errors:
@@ -120,6 +176,26 @@ The loader (`internal/app/loader.go`) reports these as load errors:
 3. **Nested `on_complete:` inside `on_complete:`** — the validator recurses into
    child effects and rejects any `background: true` it finds, so deeply nested
    chains are also caught.
+
+4. **`target:` outside `on_complete:`**
+
+   ```yaml
+   # BAD — target: on a regular on_enter effect is meaningless
+   on_enter:
+     - target: somewhere
+   ```
+
+5. **`target:` mixed with mutations on the same effect**
+
+   ```yaml
+   # BAD — split into two effects: one mutate, one transition
+   on_complete:
+     - set: { x: 1 }
+       target: done
+   ```
+
+6. **`target:` pointing at a non-existent state** — the path is resolved
+   against the declared state graph at load time.
 
 ## Clarifications: the `*_clarifying` sub-state pattern
 
