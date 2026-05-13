@@ -10,6 +10,7 @@ const (
 	colorWarning  = lipgloss.Color("#F59E0B") // amber
 	colorError    = lipgloss.Color("#EF4444") // red
 	colorMuted    = lipgloss.Color("#6B7280") // gray
+	colorInfo     = lipgloss.Color("#3B82F6") // blue
 	colorOnPath   = lipgloss.Color("#10B981") // green
 	colorOffPath  = lipgloss.Color("#F59E0B") // amber
 	colorBorder   = lipgloss.Color("#4B5563") // dark gray
@@ -94,4 +95,21 @@ var (
 	turnHeaderStyle = lipgloss.NewStyle().
 			Foreground(colorPrimary).
 			Bold(true)
+
+	// metaListHeaderStyle renders the /meta list separator banner.
+	metaListHeaderStyle = lipgloss.NewStyle().
+				Foreground(colorInfo).
+				Bold(true)
+
+	// metaListItemStyle renders each row of /meta list output.
+	metaListItemStyle = lipgloss.NewStyle().
+				Foreground(colorInfo)
+
+	// slashOutputStyle renders the "(...)"-style transcript lines that
+	// slash commands emit as feedback. Always bold blue so meta-info
+	// notes — /meta reload signals, /onpath exit summary, /trace ping
+	// messages — are unambiguously distinct from narrative content.
+	slashOutputStyle = lipgloss.NewStyle().
+				Foreground(colorInfo).
+				Bold(true)
 )

@@ -14,6 +14,13 @@ set -uo pipefail
 # retry-loop tests need to see --resume / --session-id.
 orig_argv=("$@")
 
+# When KITSOKI_FAKE_ARGV_DUMP is set, append the argv (space-joined +
+# newline) to that path. Tests use this to assert which session flag
+# (--session-id vs --resume) the host passed on a given call.
+if [ -n "${KITSOKI_FAKE_ARGV_DUMP:-}" ]; then
+  printf '%s\n' "${orig_argv[*]}" >> "$KITSOKI_FAKE_ARGV_DUMP"
+fi
+
 mcp_config=""
 output_format="text"
 while [ $# -gt 0 ]; do

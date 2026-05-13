@@ -1,0 +1,18 @@
+app:
+  id: metamode-dup
+  version: 0.1.0
+
+root: foyer
+
+states:
+  foyer:
+    description: "Foyer"
+    view: "You are in the foyer."
+
+meta_modes:
+  story:
+    trigger: meta
+    agent: story-author
+  rival:
+    trigger: meta
+    agent: kitsoki-engineer

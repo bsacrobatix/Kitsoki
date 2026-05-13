@@ -10,6 +10,19 @@ app:
 hosts:
   - host.run
 
+# Sidebar authoring conversation: /meta opens a chat with story-author
+# about this smoke app's YAML. Smallest viable declaration.
+meta_modes:
+  story:
+    trigger: meta
+    label: "improve the story"
+    banner: "*** meta:story — discussing proposal-smoke ***"
+    agent: story-author
+    persist: true
+    return:
+      intent: onpath
+      message: "back on the path."
+
 world:
   last_exit_code: { type: int, default: 0 }
   last_stdout:    { type: string, default: "" }

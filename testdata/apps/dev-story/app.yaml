@@ -23,6 +23,21 @@ hosts:
   - host.chat.suggest_title
   - host.chat.resolve_ref
 
+# Named, persistent sidebar conversations against declared agents.
+# /meta opens "improve the story" — a multi-turn authoring conversation
+# with the story-author agent, scoped to (app, mode, state). Edit mode
+# (the one-shot diff overlay) was retired in favour of this flow.
+meta_modes:
+  story:
+    trigger: meta
+    label: "improve the story"
+    banner: "*** meta:story — discussing dev-story ***"
+    agent: story-author
+    persist: true
+    return:
+      intent: onpath
+      message: "back on the path."
+
 # World schema: typed variables used across all rooms.
 world:
   prev_state:          { type: string, default: "main" }

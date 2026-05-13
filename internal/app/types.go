@@ -39,6 +39,10 @@ type AppDef struct {
 	// CheckpointIntents is a per-room intent menu merged into every
 	// {id}_awaiting_reply state during phase-template expansion (proposal §6).
 	CheckpointIntents map[string]Intent `yaml:"checkpoint_intents,omitempty"`
+	// MetaModes declares named off-path concerns (meta-mode proposal §2).
+	MetaModes map[string]*MetaModeDef `yaml:"meta_modes,omitempty"`
+	// Agents declares named per-context agents (meta-mode proposal §2.1).
+	Agents map[string]*AgentDecl `yaml:"agents,omitempty"`
 }
 
 // PhaseTemplate is a reusable phase shape. It declares a parameter schema and
@@ -263,10 +267,66 @@ type OffPathDef struct {
 	Trigger string `yaml:"trigger"`
 	Banner  string `yaml:"banner,omitempty"`
 	Return  string `yaml:"return,omitempty"`
+	// Agent is the named agent (registered in AppDef.Agents or builtin)
+	// used when the off-path runtime invokes the LLM. The slot loads and
+	// validates today; the off-path LLM dispatch path itself is still
+	// stubbed (orchestrator.ModeOffPath is "not yet implemented", see
+	// internal/orchestrator/outcome.go). Whoever wires that runtime
+	// later will pass this as the per-call agent: arg on
+	// host.oracle.ask_with_mcp (WS-A7).
+	Agent string `yaml:"agent,omitempty"`
 }
 
 // TimeoutDef configures an automatic state transition after a duration.
 type TimeoutDef struct {
 	After  string `yaml:"after"`
 	Target string `yaml:"target"`
+}
+
+// AgentDecl is one entry in the top-level agents: map (meta-mode proposal
+// §2.1). Exactly one of SystemPrompt or SystemPromptPath must be set; the
+// loader resolves SystemPromptPath against the app YAML directory and
+// rewrites SystemPrompt with the file contents (clearing SystemPromptPath).
+type AgentDecl struct {
+	// Exactly one of these is required.
+	SystemPrompt     string `yaml:"system_prompt,omitempty"`
+	SystemPromptPath string `yaml:"system_prompt_path,omitempty"`
+
+	Model string   `yaml:"model,omitempty"`
+	Tools []string `yaml:"tools,omitempty"`
+	Cwd   string   `yaml:"cwd,omitempty"`
+}
+
+// MetaModeDef declares one meta mode (meta-mode proposal §2).
+type MetaModeDef struct {
+	Trigger string         `yaml:"trigger"`
+	Label   string         `yaml:"label,omitempty"`
+	Banner  string         `yaml:"banner,omitempty"`
+	Agent   string         `yaml:"agent"`
+	Persist *bool          `yaml:"persist,omitempty"`
+	Cwd     string         `yaml:"cwd,omitempty"`
+	Tools   []string       `yaml:"tools,omitempty"`
+	Return  *MetaReturnDef `yaml:"return,omitempty"`
+}
+
+// MetaReturnDef configures the exit message and intent for a meta mode.
+type MetaReturnDef struct {
+	Message string `yaml:"message,omitempty"`
+	Intent  string `yaml:"intent,omitempty"`
+}
+
+// PersistOrDefault returns true unless the author explicitly set persist: false.
+func (m *MetaModeDef) PersistOrDefault() bool {
+	if m == nil || m.Persist == nil {
+		return true
+	}
+	return *m.Persist
+}
+
+// ExitIntentOrDefault returns the configured return.intent or "onpath" if unset.
+func (m *MetaModeDef) ExitIntentOrDefault() string {
+	if m == nil || m.Return == nil || m.Return.Intent == "" {
+		return "onpath"
+	}
+	return m.Return.Intent
 }

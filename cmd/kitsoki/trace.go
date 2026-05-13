@@ -15,7 +15,15 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+
+	"kitsoki/internal/trace"
 )
+
+// ringBufferCap is the always-on in-memory ring buffer size used by
+// BuildTraceLogger. 5000 events keeps the memory footprint bounded
+// (a few MB on a long session) while still capturing the recent past
+// the meta-mode agent reads via its trace file.
+const ringBufferCap = 5000
 
 // ─── Pretty-printer ───────────────────────────────────────────────────────────
 
@@ -283,9 +291,15 @@ type TraceConfig struct {
 }
 
 // BuildTraceLogger constructs a *slog.Logger for the given TraceConfig.
-// Returns slog.Default() (no-op at ERROR level) when no trace is configured.
+//
+// The returned *trace.RingBuffer is ALWAYS non-nil: even when no
+// --trace flag is set, the engine captures recent activity into an
+// in-memory ring (ringBufferCap events, debug level) so the meta-mode
+// TUI can dump it to a temp file for the story-author agent to Read.
+// File sinks (JSONL, pretty) remain opt-in via TraceConfig.
+//
 // The caller must call the returned cleanup function when done.
-func BuildTraceLogger(cfg TraceConfig) (l *slog.Logger, cleanup func(), err error) {
+func BuildTraceLogger(cfg TraceConfig) (l *slog.Logger, ring *trace.RingBuffer, cleanup func(), err error) {
 	var closers []func()
 	// Cleanup runs closers in reverse of registration so bufio flushers
 	// (appended after their underlying file closers) run before the files
@@ -297,11 +311,11 @@ func BuildTraceLogger(cfg TraceConfig) (l *slog.Logger, cleanup func(), err erro
 		}
 	}
 
-	if cfg.JSONLPath == "" && cfg.PrettyPath == "" {
-		return slog.Default(), cleanup, nil
-	}
-
-	var handlers []slog.Handler
+	// Always-on ring buffer. The ring is itself a slog.Handler so it
+	// joins the multiHandler set alongside any file sinks. Debug
+	// level so it captures everything the file sinks could capture.
+	ring = trace.NewRingBuffer(ringBufferCap)
+	handlers := []slog.Handler{ring}
 
 	// JSONL sink. We write directly to the underlying file (no bufio wrapper)
 	// so each event lands on disk as soon as slog calls Write — supporting
@@ -310,7 +324,7 @@ func BuildTraceLogger(cfg TraceConfig) (l *slog.Logger, cleanup func(), err erro
 	if cfg.JSONLPath != "" {
 		w, closer, err := openSink(cfg.JSONLPath)
 		if err != nil {
-			return nil, cleanup, fmt.Errorf("trace: open JSONL sink %q: %w", cfg.JSONLPath, err)
+			return nil, nil, cleanup, fmt.Errorf("trace: open JSONL sink %q: %w", cfg.JSONLPath, err)
 		}
 		closers = append(closers, closer)
 		jsonHandler := slog.NewJSONHandler(w, &slog.HandlerOptions{
@@ -325,21 +339,17 @@ func BuildTraceLogger(cfg TraceConfig) (l *slog.Logger, cleanup func(), err erro
 	if cfg.PrettyPath != "" {
 		w, closer, err := openSink(cfg.PrettyPath)
 		if err != nil {
-			return nil, cleanup, fmt.Errorf("trace: open pretty sink %q: %w", cfg.PrettyPath, err)
+			return nil, nil, cleanup, fmt.Errorf("trace: open pretty sink %q: %w", cfg.PrettyPath, err)
 		}
 		closers = append(closers, closer)
 		handlers = append(handlers, &prettyHandler{w: w, level: cfg.Level, redact: cfg.Redact})
 	}
 
-	if len(handlers) == 0 {
-		return slog.Default(), cleanup, nil
-	}
-
 	if len(handlers) == 1 {
-		return slog.New(handlers[0]), cleanup, nil
+		return slog.New(handlers[0]), ring, cleanup, nil
 	}
 
-	return slog.New(&multiHandler{handlers: handlers}), cleanup, nil
+	return slog.New(&multiHandler{handlers: handlers}), ring, cleanup, nil
 }
 
 // openSink opens a write sink. "-" → os.Stderr; anything else → file.

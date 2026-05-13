@@ -242,4 +242,5 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.chat.rename", ChatRenameHandler)
 	r.Register("host.chat.suggest_title", ChatSuggestTitleHandler)
 	r.Register("host.chat.resolve_ref", ChatResolveRefHandler)
+	RegisterAuthoringBuiltins(r)
 }

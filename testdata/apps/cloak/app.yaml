@@ -231,3 +231,18 @@ off_path:
   trigger: "/freeform"
   banner: "*** off the path -- responses do not affect your story ***"
   return: "/onpath"
+
+# Named, persistent sidebar conversations against declared agents.
+# /meta opens "improve the story" — a multi-turn authoring conversation
+# with the story-author agent. Coexists with off_path: off-path is the
+# free-form oracle sidebar; meta is the authoring conversation.
+meta_modes:
+  story:
+    trigger: meta
+    label: "improve the story"
+    banner: "*** meta:story — discussing cloak-of-darkness ***"
+    agent: story-author
+    persist: true
+    return:
+      intent: onpath
+      message: "back on the path."

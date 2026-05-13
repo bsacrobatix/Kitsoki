@@ -141,6 +141,30 @@ func TestStore_Resolve_GetOrCreate(t *testing.T) {
 	}
 }
 
+func TestStore_Resolve_SkipsArchived(t *testing.T) {
+	cs, _ := openTestStore(t)
+	ctx := context.Background()
+
+	c1, _, err := cs.Resolve(ctx, "app1", "meta:story", "main.foyer", "First")
+	if err != nil {
+		t.Fatalf("Resolve initial: %v", err)
+	}
+	if err := cs.Archive(ctx, c1.ID); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+
+	c2, created, err := cs.Resolve(ctx, "app1", "meta:story", "main.foyer", "Second")
+	if err != nil {
+		t.Fatalf("Resolve after archive: %v", err)
+	}
+	if !created {
+		t.Fatal("expected created=true after archiving prior chat")
+	}
+	if c2.ID == c1.ID {
+		t.Fatalf("expected fresh chat after archive; got same ID %s", c1.ID)
+	}
+}
+
 func TestStore_Resolve_ForkDoesNotBlock(t *testing.T) {
 	cs, _ := openTestStore(t)
 	ctx := context.Background()

@@ -30,8 +30,15 @@ import (
 	"github.com/pmezard/go-difflib/difflib"
 
 	"kitsoki/internal/app"
-	"kitsoki/internal/host"
 )
+
+// ClaudeBinEnv is the env var that overrides the path to the `claude`
+// binary used by Propose. Duplicated locally (with the same value as
+// host.OracleBinEnv) so this package does not import internal/host —
+// host needs to import internal/authoring for its meta-mode
+// host.authoring.* tool handlers (WS-A4), which would otherwise form
+// a cycle.
+const ClaudeBinEnv = "KITSOKI_ORACLE_CLAUDE_BIN"
 
 //go:embed prompt.md
 var promptTemplate string
@@ -232,7 +239,7 @@ func Discard(p *Proposal) error {
 }
 
 func resolveClaudeBin() (string, error) {
-	if env := os.Getenv(host.OracleBinEnv); env != "" {
+	if env := os.Getenv(ClaudeBinEnv); env != "" {
 		return env, nil
 	}
 	path, err := exec.LookPath("claude")

@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
 	"kitsoki/internal/chathost"
 	"kitsoki/internal/chats"
@@ -198,7 +199,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				Level:      level,
 				Redact:     traceRedact,
 			}
-			logger, traceCleanup, err := BuildTraceLogger(traceCfg)
+			logger, traceRing, traceCleanup, err := BuildTraceLogger(traceCfg)
 			if err != nil {
 				return fmt.Errorf("build trace logger: %w", err)
 			}
@@ -207,12 +208,32 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			// Redirect the package-level slog sink through the trace logger
 			// so slog.Warn / slog.Error from deep in the harness stack
 			// (e.g. retry-after-parse-failure in claude_cli.go) reach the
-			// --trace file rather than stderr, which the alt-screen TUI
-			// swallows. This is a no-op when tracing is disabled because
-			// BuildTraceLogger returns slog.Default() in that case.
+			// --trace file (and the always-on ring buffer) rather than
+			// stderr, which the alt-screen TUI swallows.
 			prevDefault := slog.Default()
 			slog.SetDefault(logger)
 			defer slog.SetDefault(prevDefault)
+
+			// Meta-mode trace file: where the story-author agent reads
+			// session history. If --trace points at a real on-disk
+			// JSONL path, reuse that — slog is already streaming events
+			// there, no need for a parallel dump. Otherwise create a
+			// per-session temp file the TUI rewrites from the in-memory
+			// ring buffer on every Send.
+			var (
+				metaTraceFilePath string
+				metaTraceExternal bool
+			)
+			if tracePath != "" && tracePath != "-" {
+				metaTraceFilePath = tracePath
+				metaTraceExternal = true
+			} else if tf, terr := os.CreateTemp("", "kitsoki-meta-trace-*.jsonl"); terr == nil {
+				metaTraceFilePath = tf.Name()
+				_ = tf.Close()
+				defer func() { _ = os.Remove(metaTraceFilePath) }()
+			} else {
+				slog.Warn("trace: could not create meta-mode trace temp file", "err", terr)
+			}
 
 			// Build machine.
 			m, err := machine.New(def, machine.WithMachineLogger(logger))
@@ -235,6 +256,16 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			if err := hostReg.ValidateAllowList(def.Hosts); err != nil {
 				return fmt.Errorf("validate hosts: %w", err)
 			}
+
+			// Build the agents registry (builtins + AppDef overrides) and
+			// install it process-wide so handlers honoring `agent:` (today
+			// host.oracle.ask_with_mcp; WS-A8 adds room/bg-job sites) can
+			// resolve names without rebuilding the registry per call.
+			agentReg, err := agents.BuildRegistry(def.AgentSpecs())
+			if err != nil {
+				return fmt.Errorf("build agents registry: %w", err)
+			}
+			host.SetAgentRegistry(agentReg)
 
 			// Build orchestrator.
 			orch := orchestrator.New(def, m, s, h,
@@ -264,7 +295,17 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			// transcript viewport. Copying text then requires Option
 			// (macOS) or Shift (Linux) held during selection to bypass
 			// mouse capture.
-			rootModel := tui.NewRootModel(orch, sid, appPath, initialView, tui.WithJobStore(jobStore))
+			tuiOptions := []tui.RootModelOption{
+				tui.WithJobStore(jobStore),
+				tui.WithChatStore(rawChatStore),
+				tui.WithTraceRingBuffer(traceRing),
+			}
+			if metaTraceExternal {
+				tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(metaTraceFilePath))
+			} else {
+				tuiOptions = append(tuiOptions, tui.WithTraceFilePath(metaTraceFilePath))
+			}
+			rootModel := tui.NewRootModel(orch, sid, appPath, initialView, tuiOptions...)
 			p := tea.NewProgram(rootModel,
 				tea.WithAltScreen(),
 				tea.WithMouseCellMotion(),

@@ -698,6 +698,12 @@ event has the off-path session ID and is replayable — but the inner
 graph is intentionally *not* declared as states. This is the only place
 where free-form chat is allowed.
 
+For the richer surface that replaces edit mode and supports persistent
+named sidebar conversations with their own agents — `meta_modes:` plus
+the declarative `agents:` block — see [`meta-mode.md`](meta-mode.md).
+Meta mode is what most authors should reach for today; off-path remains
+the simple banner-only escape hatch.
+
 ---
 
 ## 12. Worked example: one turn through Cloak of Darkness

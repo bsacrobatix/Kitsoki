@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -237,7 +236,8 @@ func TestTUIQuit(t *testing.T) {
 // ─── System menu (Esc overlay) ───────────────────────────────────────────────
 
 // TestTUIMenuEscOpens verifies that pressing Esc from ModeOnPath opens the
-// menu overlay and enters ModeMenu.
+// menu overlay and enters ModeMenu. Cloak declares a meta_modes.story
+// block, so the meta-mode row appears alongside Exit and Report bug.
 func TestTUIMenuEscOpens(t *testing.T) {
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
@@ -248,9 +248,12 @@ func TestTUIMenuEscOpens(t *testing.T) {
 	rm, ok := tuipkg.ExtractRootModel(m)
 	require.True(t, ok)
 	require.True(t, tuipkg.MenuSystemActive(rm))
-	require.Contains(t, tuipkg.MenuSystemView(rm), "Exit")
-	require.Contains(t, tuipkg.MenuSystemView(rm), "Report bug")
-	require.Contains(t, tuipkg.MenuSystemView(rm), "Edit mode")
+	view := tuipkg.MenuSystemView(rm)
+	require.Contains(t, view, "Exit")
+	require.Contains(t, view, "Report bug")
+	require.Contains(t, view, "improve the story")
+	require.NotContains(t, view, "Edit mode",
+		"edit mode entry should be gone (replaced by /meta:story)")
 }
 
 // TestTUIMenuEscDismisses verifies that pressing Esc inside the overlay
@@ -298,147 +301,6 @@ func TestTUIMenuReportBugStub(t *testing.T) {
 	require.Equal(t, tuipkg.ModeOnPath, extractMode(t, m))
 	transcript := extractTranscript(t, m)
 	require.Contains(t, transcript, "bug report: coming soon")
-}
-
-// TestEditModeFullFlow drives the LLM-authoring overlay end-to-end:
-// open the system menu → pick Edit mode → type a proposal → wait for
-// Claude to "rewrite" the file (via the fake-claude.sh testdata script
-// living in internal/authoring/testdata) → Apply → confirm the file
-// was written + the orchestrator reloaded.
-func TestEditModeFullFlow(t *testing.T) {
-	// Wire the fake claude binary used by internal/authoring tests.
-	fakeBin := "../authoring/testdata/fake-claude.sh"
-	abs, err := filepath.Abs(fakeBin)
-	require.NoError(t, err)
-	fi, err := os.Stat(abs)
-	require.NoError(t, err, "fake-claude.sh missing")
-	require.NotZero(t, fi.Mode()&0o111, "fake-claude.sh not executable")
-	t.Setenv("KITSOKI_ORACLE_CLAUDE_BIN", abs)
-
-	// Copy the cloak app.yaml into a temp dir so the test doesn't
-	// mutate the repo; build the orchestrator against the copy.
-	srcYAML, err := os.ReadFile("../../testdata/apps/cloak/app.yaml")
-	require.NoError(t, err)
-	dir := t.TempDir()
-	appPath := filepath.Join(dir, "app.yaml")
-	require.NoError(t, os.WriteFile(appPath, srcYAML, 0o644))
-
-	def, err := app.Load(appPath)
-	require.NoError(t, err)
-	mach, err := machine.New(def)
-	require.NoError(t, err)
-	s, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = s.Close() })
-	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
-	require.NoError(t, err)
-	orch := orchestrator.New(def, mach, s, h)
-	sid, err := orch.NewSession(context.Background())
-	require.NoError(t, err)
-
-	w := orch.InitialWorld()
-	initialView, err := orch.InitialView(w)
-	require.NoError(t, err)
-	m := tea.Model(tuipkg.NewRootModel(orch, sid, appPath, initialView))
-
-	// Open system menu, then pick row 3 (Edit mode).
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	var cmd tea.Cmd
-	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	m = processCommands(m, cmd, 5)
-	require.Equal(t, tuipkg.ModeEdit, extractMode(t, m))
-
-	rm, ok := tuipkg.ExtractRootModel(m)
-	require.True(t, ok)
-	require.Equal(t, tuipkg.EditPhaseInput, tuipkg.EditPhase(rm))
-
-	// Type the ADD_LINE sentinel proposal — fake-claude appends a
-	// comment so the diff is non-empty.
-	m, _ = typeString(m, "ADD_LINE: append a marker")
-	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = processCommands(m, cmd, 20)
-
-	rm, _ = tuipkg.ExtractRootModel(m)
-	require.Equal(t, tuipkg.EditPhaseReview, tuipkg.EditPhase(rm),
-		"after Propose returns, phase should be Review")
-	require.Contains(t, extractTranscript(t, m), "fake-claude appended this comment",
-		"diff in transcript should reference the appended comment")
-
-	// File on disk hasn't changed yet (Apply not called).
-	body, err := os.ReadFile(appPath)
-	require.NoError(t, err)
-	require.Equal(t, string(srcYAML), string(body),
-		"Propose alone must not write to disk")
-
-	// Hit 'a' to apply.
-	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
-	m = processCommands(m, cmd, 10)
-
-	require.Equal(t, tuipkg.ModeOnPath, extractMode(t, m),
-		"after a successful apply+reload, mode returns to ModeOnPath")
-	transcript := extractTranscript(t, m)
-	require.Contains(t, transcript, "applied + reloaded")
-
-	// File on disk now contains the appended marker comment.
-	body, err = os.ReadFile(appPath)
-	require.NoError(t, err)
-	require.Contains(t, string(body), "fake-claude appended this comment")
-}
-
-// TestEditModeCancelFromInput verifies that pressing Esc during the
-// proposal-input phase returns to ModeOnPath without invoking Claude.
-func TestEditModeCancelFromInput(t *testing.T) {
-	srcYAML, err := os.ReadFile("../../testdata/apps/cloak/app.yaml")
-	require.NoError(t, err)
-	dir := t.TempDir()
-	appPath := filepath.Join(dir, "app.yaml")
-	require.NoError(t, os.WriteFile(appPath, srcYAML, 0o644))
-
-	def, err := app.Load(appPath)
-	require.NoError(t, err)
-	mach, err := machine.New(def)
-	require.NoError(t, err)
-	s, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = s.Close() })
-	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
-	require.NoError(t, err)
-	orch := orchestrator.New(def, mach, s, h)
-	sid, err := orch.NewSession(context.Background())
-	require.NoError(t, err)
-	w := orch.InitialWorld()
-	initialView, err := orch.InitialView(w)
-	require.NoError(t, err)
-	m := tea.Model(tuipkg.NewRootModel(orch, sid, appPath, initialView))
-
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	var cmd tea.Cmd
-	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	m = processCommands(m, cmd, 5)
-	require.Equal(t, tuipkg.ModeEdit, extractMode(t, m))
-
-	// Cancel.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	require.Equal(t, tuipkg.ModeOnPath, extractMode(t, m))
-}
-
-// TestTUIMenuEditModeUnavailableWithoutAppPath verifies that picking
-// the Edit mode row from the system menu when no appPath was passed to
-// NewRootModel surfaces a polite "unavailable" message and stays in
-// ModeOnPath. Tests build the model with appPath="", so this is the
-// path most non-edit tests exercise.
-func TestTUIMenuEditModeUnavailableWithoutAppPath(t *testing.T) {
-	orch, sid := setupCloak(t)
-	m := buildModel(t, orch, sid)
-
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	var cmd tea.Cmd
-	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	m = processCommands(m, cmd, 5)
-
-	require.Equal(t, tuipkg.ModeOnPath, extractMode(t, m))
-	transcript := extractTranscript(t, m)
-	require.Contains(t, transcript, "edit mode: unavailable")
 }
 
 // ─── Ctrl+C tiered behaviour ─────────────────────────────────────────────────

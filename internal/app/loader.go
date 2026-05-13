@@ -11,8 +11,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+
+	"kitsoki/internal/agents"
 
 	goyaml "github.com/goccy/go-yaml"
 )
@@ -85,12 +88,20 @@ func parseAndMerge(b []byte, file, baseDir string) (*AppDef, []error) {
 		return nil, []error{ve}
 	}
 
+	// Resolve any agents: declared in the main file against the main file's dir.
+	var errs []error
+	if agentErrs := resolveAgentDecls(&def, file, baseDir); len(agentErrs) > 0 {
+		errs = append(errs, agentErrs...)
+	}
+
 	if len(def.Include) == 0 {
+		if len(errs) > 0 {
+			return nil, errs
+		}
 		return &def, nil
 	}
 
 	// Resolve each glob pattern and merge included files.
-	var errs []error
 	for _, pattern := range def.Include {
 		if !filepath.IsAbs(pattern) {
 			pattern = filepath.Join(baseDir, pattern)
@@ -109,6 +120,13 @@ func parseAndMerge(b []byte, file, baseDir string) (*AppDef, []error) {
 			var inclDef AppDef
 			if err := goyaml.UnmarshalWithOptions(inclBytes, &inclDef, goyaml.Strict()); err != nil {
 				errs = append(errs, &ValidationError{File: matchPath, Message: err.Error()})
+				continue
+			}
+			// Resolve agents in the included file against its own directory
+			// before merging, so system_prompt_path is interpreted from the
+			// file that authored the agent.
+			if agentErrs := resolveAgentDecls(&inclDef, matchPath, filepath.Dir(matchPath)); len(agentErrs) > 0 {
+				errs = append(errs, agentErrs...)
 				continue
 			}
 			if mergeErr := mergeInto(&def, &inclDef, matchPath); mergeErr != nil {
@@ -190,7 +208,130 @@ func mergeInto(dst, src *AppDef, srcFile string) []error {
 		dst.World[k] = v
 	}
 
+	// Merge meta modes.
+	for k, v := range src.MetaModes {
+		if _, exists := dst.MetaModes[k]; exists {
+			addErr(fmt.Sprintf("include: meta_mode %q is already declared", k))
+			continue
+		}
+		if dst.MetaModes == nil {
+			dst.MetaModes = make(map[string]*MetaModeDef)
+		}
+		dst.MetaModes[k] = v
+	}
+
+	// Merge agent declarations. Collision on key is an error so app authors
+	// can't accidentally end up with two definitions of the same agent
+	// across an include boundary.
+	for k, v := range src.Agents {
+		if _, exists := dst.Agents[k]; exists {
+			addErr(fmt.Sprintf("include: agent %q is already declared", k))
+			continue
+		}
+		if dst.Agents == nil {
+			dst.Agents = make(map[string]*AgentDecl)
+		}
+		dst.Agents[k] = v
+	}
+
 	return errs
+}
+
+// resolveAgentDecls walks def.Agents and, for each entry:
+//
+//   - enforces the system_prompt xor system_prompt_path one-of rule,
+//   - reads system_prompt_path (relative to baseDir) into SystemPrompt and
+//     clears SystemPromptPath so downstream code only sees resolved prompts,
+//   - env-expands Cwd, erroring on any unset ${VAR} reference,
+//   - normalises Tools entries to fully-qualified host.x.y form.
+//
+// A nil or empty Agents map is a no-op. The function reports all problems
+// it finds rather than stopping at the first.
+func resolveAgentDecls(def *AppDef, file, baseDir string) []error {
+	if def == nil || len(def.Agents) == 0 {
+		return nil
+	}
+	var errs []error
+	addErr := func(msg string) {
+		errs = append(errs, &ValidationError{File: file, Message: msg})
+	}
+
+	for _, name := range sortedKeys(def.Agents) {
+		decl := def.Agents[name]
+		if decl == nil {
+			addErr(fmt.Sprintf("agent %q: empty definition", name))
+			continue
+		}
+
+		// One-of: system_prompt xor system_prompt_path.
+		hasInline := decl.SystemPrompt != ""
+		hasPath := decl.SystemPromptPath != ""
+		switch {
+		case hasInline && hasPath:
+			addErr(fmt.Sprintf("agent %q: system_prompt and system_prompt_path are mutually exclusive", name))
+			continue
+		case !hasInline && !hasPath:
+			addErr(fmt.Sprintf("agent %q: one of system_prompt or system_prompt_path is required", name))
+			continue
+		}
+
+		// Resolve the prompt path against baseDir; promote to an absolute
+		// path so error messages and downstream code see a stable location
+		// independent of the loader's cwd.
+		if hasPath {
+			promptPath := decl.SystemPromptPath
+			if !filepath.IsAbs(promptPath) {
+				promptPath = filepath.Join(baseDir, promptPath)
+			}
+			if abs, absErr := filepath.Abs(promptPath); absErr == nil {
+				promptPath = abs
+			}
+			contents, err := os.ReadFile(promptPath)
+			if err != nil {
+				addErr(fmt.Sprintf("agent %q: system_prompt_path %q: %v", name, promptPath, err))
+				continue
+			}
+			decl.SystemPrompt = string(contents)
+			decl.SystemPromptPath = ""
+		}
+
+		// Env-expand cwd.
+		if decl.Cwd != "" {
+			expanded, missing := expandMetaCwd(decl.Cwd)
+			if missing != "" {
+				addErr(fmt.Sprintf("agent %q: cwd %q references unset env var %s", name, decl.Cwd, missing))
+				continue
+			}
+			decl.Cwd = expanded
+		}
+
+		// Normalise tools to fully-qualified form. Logic duplicates
+		// metamode.NormaliseToolName here because internal/metamode imports
+		// internal/app already; importing back would create a cycle.
+		if len(decl.Tools) > 0 {
+			out := make([]string, len(decl.Tools))
+			for i, t := range decl.Tools {
+				out[i] = normaliseAgentTool(t)
+			}
+			decl.Tools = out
+		}
+	}
+	return errs
+}
+
+// normaliseAgentTool maps a YAML-author-friendly tool name into the
+// fully-qualified host.x.y form. Empty strings pass through; names already
+// prefixed with "host." are returned unchanged. Logic mirrors
+// metamode.NormaliseToolName — duplicated here to keep internal/app free
+// of internal/metamode (which imports internal/app, see loader docs).
+func normaliseAgentTool(name string) string {
+	if name == "" {
+		return name
+	}
+	if strings.HasPrefix(name, "host.") {
+		return name
+	}
+	return "host." + name
 }
 
 // LoadBytes reads and validates an AppDef from a YAML byte slice.
@@ -284,7 +425,14 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	// ── 8. relevant_world keys exist in world schema ──────────────────────────
 	// (already done inside validateStates, which recurses into nested states)
 
-	// ── 9. proposal execute effect validation ─────────────────────────────────
+	// ── 9. meta-mode validation ──────────────────────────────────────────────
+	validateMetaModes(file, def, &errs)
+
+	// ── 9b. cross-reference: every agent name referenced anywhere in the
+	// AppDef must resolve in AppDef.Agents or agents.BuiltinNames().
+	validateAgentReferences(file, def, &errs)
+
+	// ── 10. proposal execute effect validation ────────────────────────────────
 	// ProposalExecute.Background and ProposalExecute.OnComplete are not covered
 	// by validateStates (proposals live outside the state tree).  Apply the same
 	// rules here: background: true requires invoke:; on_complete: cannot nest
@@ -512,6 +660,139 @@ func validateBackgroundEffect(file, location string, eff Effect, allowedHosts ma
 		// Recursively reject nested on_complete with background.
 		validateBackgroundEffect(file, loc, child, allowedHosts, errs)
 	}
+}
+
+// metaEnvVarRE matches `$NAME` and `${NAME}` tokens in a cwd: string.
+var metaEnvVarRE = regexp.MustCompile(`\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?`)
+
+// validateMetaModes checks every entry in def.MetaModes for required fields,
+// trigger uniqueness, intent-name collisions, and resolves cwd: env vars.
+// Successful cwd expansion is written back into the struct.
+func validateMetaModes(file string, def *AppDef, errs *[]error) {
+	if len(def.MetaModes) == 0 {
+		return
+	}
+	addErr := func(msg string) {
+		*errs = append(*errs, &ValidationError{File: file, Message: msg})
+	}
+
+	// Track triggers across modes to detect duplicates. Map trigger → first
+	// mode that claimed it, in declaration-sorted order for determinism.
+	triggerOwner := make(map[string]string, len(def.MetaModes))
+	for _, name := range sortedKeys(def.MetaModes) {
+		m := def.MetaModes[name]
+		if m == nil {
+			addErr(fmt.Sprintf("meta_mode %q: empty definition", name))
+			continue
+		}
+		if m.Trigger == "" {
+			addErr(fmt.Sprintf("meta_mode %q: trigger is required", name))
+		}
+		if m.Agent == "" {
+			addErr(fmt.Sprintf("meta_mode %q: agent is required", name))
+		}
+		if m.Trigger != "" {
+			if prior, ok := triggerOwner[m.Trigger]; ok {
+				addErr(fmt.Sprintf("meta_mode %q: trigger %q already claimed by meta_mode %q", name, m.Trigger, prior))
+			} else {
+				triggerOwner[m.Trigger] = name
+				// Note: no warning channel exists in the loader. Per the
+				// meta-mode plan we error on collisions with the global
+				// intents library.
+				if _, clash := def.Intents[m.Trigger]; clash {
+					addErr(fmt.Sprintf("meta_mode %q: trigger %q collides with a declared intent of the same name", name, m.Trigger))
+				}
+			}
+		}
+		if m.Cwd != "" {
+			expanded, expErr := expandMetaCwd(m.Cwd)
+			if expErr != "" {
+				addErr(fmt.Sprintf("meta_mode %q: cwd %q references unset env var %s", name, m.Cwd, expErr))
+				continue
+			}
+			m.Cwd = expanded
+		}
+	}
+}
+
+// validateAgentReferences walks every site in the AppDef where an agent name
+// can be selected (meta_modes[*].agent, off_path.agent) and asserts the
+// referenced name resolves either in def.Agents or in
+// agents.BuiltinNames(). Unknown references produce one error per site;
+// the error names the offending agent and lists the known agents so the
+// author can spot typos at a glance.
+//
+// Background-jobs sites are NOT walked here because kitsoki has no
+// top-level `background_jobs:` YAML block today. When that type is
+// introduced, add it to the site list and to the test fixture set.
+func validateAgentReferences(file string, def *AppDef, errs *[]error) {
+	if def == nil {
+		return
+	}
+
+	// Build the known-name set: every key in def.Agents plus every
+	// builtin name. The known set is the same regardless of which site
+	// is referenced, so compute it once.
+	known := make(map[string]struct{})
+	for name := range def.Agents {
+		known[name] = struct{}{}
+	}
+	for _, name := range agents.BuiltinNames() {
+		known[name] = struct{}{}
+	}
+
+	// Sort known names once for stable, deterministic error messages.
+	knownList := make([]string, 0, len(known))
+	for name := range known {
+		knownList = append(knownList, name)
+	}
+	sort.Strings(knownList)
+	knownStr := strings.Join(knownList, ", ")
+
+	addUnknown := func(name, site string) {
+		*errs = append(*errs, &ValidationError{
+			File: file,
+			Message: fmt.Sprintf(
+				"agent reference %q at %s is undefined (known agents: %s)",
+				name, site, knownStr,
+			),
+		})
+	}
+
+	// meta_modes.<name>.agent — sort for stable error order.
+	for _, modeName := range sortedKeys(def.MetaModes) {
+		m := def.MetaModes[modeName]
+		if m == nil || m.Agent == "" {
+			continue
+		}
+		if _, ok := known[m.Agent]; !ok {
+			addUnknown(m.Agent, fmt.Sprintf("meta_modes.%s.agent", modeName))
+		}
+	}
+
+	// off_path.agent — single site.
+	if def.OffPath != nil && def.OffPath.Agent != "" {
+		if _, ok := known[def.OffPath.Agent]; !ok {
+			addUnknown(def.OffPath.Agent, "off_path.agent")
+		}
+	}
+
+	// background_jobs.<name>.agent is intentionally absent: no first-class
+	// background_jobs YAML type exists today. Once it lands, walk it here.
+}
+
+// expandMetaCwd resolves `$VAR` / `${VAR}` tokens in s against os.Environ.
+// Returns (expanded, "") on success, or ("", varName) when any referenced
+// var is unset. Bare `$$` literals are passed through.
+func expandMetaCwd(s string) (string, string) {
+	matches := metaEnvVarRE.FindAllStringSubmatchIndex(s, -1)
+	for _, m := range matches {
+		name := s[m[2]:m[3]]
+		if _, ok := os.LookupEnv(name); !ok {
+			return "", name
+		}
+	}
+	return os.ExpandEnv(s), ""
 }
 
 // sortedKeys returns the keys of any map[string]T sorted alphabetically.

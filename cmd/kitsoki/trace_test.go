@@ -97,14 +97,24 @@ func TestPrettyPrintInvalidJSON(t *testing.T) {
 	assert.Contains(t, buf.String(), "not json at all")
 }
 
-// TestBuildTraceLoggerNoConfig returns default logger when no path is configured.
+// TestBuildTraceLoggerNoConfig returns a logger backed by the always-on
+// ring buffer when no path is configured. The ring is always non-nil so
+// the meta-mode trace dump path has something to snapshot even on a
+// vanilla `kitsoki run` with no --trace flag.
 func TestBuildTraceLoggerNoConfig(t *testing.T) {
 	cfg := TraceConfig{}
-	logger, cleanup, err := BuildTraceLogger(cfg)
+	logger, ring, cleanup, err := BuildTraceLogger(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, logger)
+	require.NotNil(t, ring, "ring buffer should always be wired, even with no --trace flag")
 	require.NotNil(t, cleanup)
-	cleanup()
+	defer cleanup()
+
+	// Emit an event and verify the ring captured it.
+	logger.Info("smoke", "k", "v")
+	snap := ring.Snapshot()
+	require.Contains(t, string(snap), `"msg":"smoke"`,
+		"event emitted via the default-no-flags logger should land in the ring buffer")
 }
 
 // TestBuildTraceLoggerBridgesBothSinks verifies that a package-level
@@ -115,7 +125,7 @@ func TestBuildTraceLoggerBridgesBothSinks(t *testing.T) {
 	jsonlPath := dir + "/trace.jsonl"
 	prettyPath := dir + "/trace.log"
 
-	logger, cleanup, err := BuildTraceLogger(TraceConfig{
+	logger, _, cleanup, err := BuildTraceLogger(TraceConfig{
 		JSONLPath:  jsonlPath,
 		PrettyPath: prettyPath,
 		Level:      slog.LevelInfo,
@@ -150,7 +160,7 @@ func TestBuildTraceLoggerBridgesSlogDefault(t *testing.T) {
 	dir := t.TempDir()
 	jsonlPath := dir + "/trace.jsonl"
 
-	logger, cleanup, err := BuildTraceLogger(TraceConfig{
+	logger, _, cleanup, err := BuildTraceLogger(TraceConfig{
 		JSONLPath: jsonlPath,
 		Level:     slog.LevelInfo,
 	})

@@ -139,11 +139,37 @@ func (m transcriptModel) Update(msg tea.Msg) (transcriptModel, tea.Cmd) {
 // AppendSystem adds a system-level message to the transcript (no user header).
 // The body goes through the same Markdown+preserve-newlines pipeline as
 // AppendTurn so the initial view renders identically to subsequent ones.
+//
+// Slash-command feedback lines (anything starting with "(") are styled
+// in blue so / output is visually distinct from narrative — bypasses
+// Markdown for those so the lipgloss ANSI survives.
 func (m *transcriptModel) AppendSystem(body string) {
+	if strings.HasPrefix(body, "(") {
+		m.AppendSlashOutput(body)
+		return
+	}
 	m.entries = append(m.entries, transcriptEntry{
 		body:   m.renderMarkdown(body),
 		source: body,
 	})
+	m.vp.SetContent(m.render())
+	m.vp.GotoBottom()
+}
+
+// AppendSlashOutput renders body in the blue slash-command style and
+// bypasses the Markdown pipeline so ANSI styles survive. Multi-line
+// bodies are styled line-by-line so each line carries the color
+// reset/start sequence (some terminals lose the colour on wrap
+// otherwise).
+func (m *transcriptModel) AppendSlashOutput(body string) {
+	var sb strings.Builder
+	for i, line := range strings.Split(body, "\n") {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(slashOutputStyle.Render(line))
+	}
+	m.entries = append(m.entries, transcriptEntry{body: sb.String()})
 	m.vp.SetContent(m.render())
 	m.vp.GotoBottom()
 }
@@ -279,6 +305,116 @@ func startsWithListMarker(s string) bool {
 		return true
 	}
 	return false
+}
+
+// AppendMetaList appends the /meta list output as one transcript
+// entry: a blue title banner, a header row (column names), one
+// blue-styled padded row per chat, then a closing rule. Column widths
+// are computed across rows AND the header so things line up. Bypasses
+// the Markdown pipeline so lipgloss ANSI survives.
+func (m *transcriptModel) AppendMetaList(headers []string, rows [][]string) {
+	// Per-column width = max(header, all rows in that column).
+	widths := make([]int, len(headers))
+	for i, h := range headers {
+		widths[i] = len(h)
+	}
+	for _, r := range rows {
+		for i, c := range r {
+			if i >= len(widths) {
+				continue
+			}
+			if n := runeLen(c); n > widths[i] {
+				widths[i] = n
+			}
+		}
+	}
+
+	render := func(cells []string) string {
+		var sb strings.Builder
+		for i, c := range cells {
+			if i > 0 {
+				sb.WriteString("  ")
+			}
+			if i == len(cells)-1 {
+				// Last column doesn't need trailing padding.
+				sb.WriteString(c)
+			} else {
+				sb.WriteString(padRight(c, widths[i]))
+			}
+		}
+		return sb.String()
+	}
+
+	totalWidth := 0
+	for i, w := range widths {
+		totalWidth += w
+		if i > 0 {
+			totalWidth += 2
+		}
+	}
+	if totalWidth < 20 {
+		totalWidth = 20
+	}
+
+	var sb strings.Builder
+	title := "meta chats"
+	leftBar := (totalWidth - len(title) - 2) / 2
+	if leftBar < 2 {
+		leftBar = 2
+	}
+	rightBar := totalWidth - len(title) - 2 - leftBar
+	if rightBar < 2 {
+		rightBar = 2
+	}
+	sb.WriteString(metaListHeaderStyle.Render(strings.Repeat("─", leftBar) + " " + title + " " + strings.Repeat("─", rightBar)))
+	sb.WriteString("\n")
+	sb.WriteString(metaListHeaderStyle.Render(render(headers)))
+	sb.WriteString("\n")
+	if len(rows) == 0 {
+		sb.WriteString(metaListItemStyle.Render("(no meta chats yet)"))
+		sb.WriteString("\n")
+	} else {
+		for _, r := range rows {
+			sb.WriteString(metaListItemStyle.Render(render(r)))
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString(metaListHeaderStyle.Render(strings.Repeat("─", totalWidth)))
+	m.entries = append(m.entries, transcriptEntry{body: sb.String()})
+	m.vp.SetContent(m.render())
+	m.vp.GotoBottom()
+}
+
+func runeLen(s string) int { return len([]rune(s)) }
+
+func padRight(s string, n int) string {
+	if d := n - runeLen(s); d > 0 {
+		return s + strings.Repeat(" ", d)
+	}
+	return s
+}
+
+// ContentHeight returns the line count of the rendered transcript at
+// the current viewport width. Used as a pre-append mark by callers
+// that want to scroll the viewport to a specific section after a
+// batch of appends — see ScrollToLine.
+func (m *transcriptModel) ContentHeight() int {
+	if len(m.entries) == 0 {
+		return 0
+	}
+	return lipgloss.Height(m.render())
+}
+
+// ScrollToLine positions the viewport so that line `n` of the rendered
+// content sits at the top of the visible window. Used by meta-mode
+// exit/reload paths so the new on-path content lands at the top of
+// the pane and the meta-mode chat scrolls off — still reachable by
+// scrolling up.
+func (m *transcriptModel) ScrollToLine(n int) {
+	if n < 0 {
+		n = 0
+	}
+	m.vp.SetYOffset(n)
 }
 
 // AppendError appends an error/rejection message.

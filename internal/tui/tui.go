@@ -10,9 +10,11 @@ package tui
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,11 +24,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"kitsoki/internal/app"
-	"kitsoki/internal/authoring"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
+	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/trace"
 	"kitsoki/internal/viz"
 )
 
@@ -47,9 +52,11 @@ const (
 	ModeAwaitingLLM
 	// ModeMenu is active while the Esc-triggered system menu is on screen.
 	ModeMenu
-	// ModeEdit is active while the LLM-driven authoring overlay owns the
-	// prompt and transcript (proposal → diff review → apply + reload).
-	ModeEdit
+	// ModeMeta is active while a /meta overlay owns the prompt and
+	// transcript (named, persistent sidebar conversation against a
+	// declared meta mode). See docs/proposals/meta-mode-proposal.md §3.
+	// Replaces the former ModeEdit / edit-mode overlay (Phase B).
+	ModeMeta
 )
 
 // ctrlCQuitWindow is how long after a Ctrl+C the next Ctrl+C will quit
@@ -91,7 +98,7 @@ type continueTurnOutcomeMsg struct {
 type RootModel struct {
 	orch     *orchestrator.Orchestrator
 	sid      app.SessionID
-	appPath  string // path to app.yaml, needed for edit mode reloads ("" disables edit)
+	appPath  string // path to app.yaml, needed for meta-mode orchestrator reloads ("" disables reload)
 	mode     Mode
 	width    int
 	height   int
@@ -105,8 +112,19 @@ type RootModel struct {
 	clarify        clarifyModel
 	disambiguation disambiguationModel
 	menuSystem     menuSystemModel
-	edit           editModel
+	metaMode       metaModel
 	prompt         textinput.Model
+
+	// chatStore is the persistent chat row backend; used by the
+	// metamode controller to resolve / append. nil disables /meta
+	// (no controller is constructed in NewRootModel).
+	chatStore *chats.Store
+
+	// metaController is the wire harness for /meta. nil disables /meta.
+	// Production wires this in NewRootModel from chatStore +
+	// host.AgentRegistry() + AppDef. Tests can inject a fake controller
+	// via WithMetaController.
+	metaController *metamode.Controller
 
 	// clk is the injectable time source used by the inbox polling ticker.
 	// When nil, clock.Real() is used. Tests inject a *clock.Fake so they can
@@ -153,6 +171,23 @@ type RootModel struct {
 	// Controlled at runtime via the /mouse slash command. Defaults to true
 	// because the program is launched with tea.WithMouseCellMotion.
 	mouseOn bool
+
+	// traceRing is the always-on in-memory ring buffer built by
+	// BuildTraceLogger.  buildMetaTurnContext snapshots it to
+	// traceFilePath on every meta-mode Send so the agent can Read
+	// the file for session-history context. Nil disables the dump
+	// (tests / headless callers).
+	traceRing *trace.RingBuffer
+	// traceFileExternal is true when traceFilePath points at a file an
+	// external writer is keeping current (e.g. --trace /path.jsonl).  In
+	// that case the TUI does NOT rewrite the file from the ring on each
+	// meta-mode turn — it just hands the agent the path that slog is
+	// already streaming to.  When false, the path is a TUI-owned temp
+	// file and the ring buffer is dumped to it on every Send.
+	traceFileExternal bool
+	// traceFilePath is the session-scoped temp file path the TUI
+	// rewrites with the ring snapshot. Empty disables the dump.
+	traceFilePath string
 }
 
 // RootModelOption is a functional option for RootModel construction.
@@ -175,6 +210,62 @@ func WithTUIClock(c clock.Clock) RootModelOption {
 // database connection is required (headless tests, serve mode).
 func WithJobStore(js *jobs.JobStore) RootModelOption {
 	return func(m *RootModel) { m.jobStore = js }
+}
+
+// WithChatStore wires a *chats.Store into the RootModel so the /meta
+// overlay can resolve and persist meta-mode chat rows. When omitted,
+// /meta is unavailable and the slash command surfaces a polite hint.
+//
+// Production passes the same *chats.Store that backs the chathost
+// adapter so meta-mode chats sit in the same SQLite file as everything
+// else.
+func WithChatStore(cs *chats.Store) RootModelOption {
+	return func(m *RootModel) { m.chatStore = cs }
+}
+
+// WithMetaController injects a pre-built *metamode.Controller into the
+// RootModel. Tests use this to bypass the production wiring (which
+// requires a real agent registry, chat store, and oracle adapter)
+// and inject a controller pointed at fakes.
+//
+// When non-nil, this controller is used regardless of what
+// NewRootModel would otherwise build from chatStore + AppDef +
+// host.AgentRegistry().
+func WithMetaController(c *metamode.Controller) RootModelOption {
+	return func(m *RootModel) { m.metaController = c }
+}
+
+// WithTraceRingBuffer wires the always-on in-memory trace ring into
+// the RootModel.  buildMetaTurnContext snapshots it to disk on every
+// meta-mode Send so the agent can Read the recent session history.
+// Production passes the ring built by BuildTraceLogger; tests pass nil
+// (the dump is silently skipped) unless they explicitly want to assert
+// on the on-disk file.
+func WithTraceRingBuffer(rb *trace.RingBuffer) RootModelOption {
+	return func(m *RootModel) { m.traceRing = rb }
+}
+
+// WithTraceFilePath sets the absolute path the TUI rewrites on every
+// meta-mode Send with the current ring snapshot. Production passes
+// the path returned by os.CreateTemp at session startup; tests pass
+// t.TempDir()+"/meta-trace.jsonl" to assert on the contents.
+func WithTraceFilePath(path string) RootModelOption {
+	return func(m *RootModel) {
+		m.traceFilePath = path
+		m.traceFileExternal = false
+	}
+}
+
+// WithExternalTraceFile points the meta-mode agent at a trace file an
+// external writer is already keeping current (typically the --trace
+// JSONL path). The TUI does NOT rewrite the file — it just surfaces
+// the path in TurnContext.TracePath so the agent can Read it. Takes
+// precedence over WithTraceFilePath when both are set.
+func WithExternalTraceFile(path string) RootModelOption {
+	return func(m *RootModel) {
+		m.traceFilePath = path
+		m.traceFileExternal = true
+	}
 }
 
 // NewRootModel creates the root TUI model.  appPath is the path to the
@@ -214,8 +305,8 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		offPath:        newOffPathModel(""),
 		clarify:        newClarifyModel(),
 		disambiguation: newDisambiguationModel(),
-		menuSystem:     newMenuSystemModel(),
-		edit:           newEditModel(),
+		menuSystem:     newMenuSystemModel(metaMenuLabel(orch.AppDef())),
+		metaMode:       newMetaModel(),
 		prompt:         ti,
 		spinner:        sp,
 		mouseOn:        true,
@@ -243,7 +334,55 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		opt(&m)
 	}
 
+	// Wire the metamode controller from production seams when the
+	// caller didn't inject one. Requires both a chat store and at
+	// least one declared meta_mode; without either, /meta stays
+	// unavailable and the slash command surfaces a polite hint.
+	if m.metaController == nil && m.chatStore != nil && len(orch.AppDef().MetaModes) > 0 {
+		if reg := host.AgentRegistry(); reg != nil {
+			m.metaController = &metamode.Controller{
+				Chats:  metamode.NewChatStoreAdapter(m.chatStore),
+				Agents: reg,
+				AppDef: orch.AppDef(),
+				Oracle: metamode.NewOracleCallerAdapter(),
+			}
+		}
+	}
+
 	return m
+}
+
+// metaMenuLabel picks the Esc-menu label for the meta entry. Returns
+// the first declared mode's Label (or "meta: <name>" when no Label),
+// or "" if no meta modes are declared (entry is omitted).
+func metaMenuLabel(def *app.AppDef) string {
+	if def == nil || len(def.MetaModes) == 0 {
+		return ""
+	}
+	names := sortedMetaModeNames(def)
+	first := firstMetaModeName(names)
+	if first == "" {
+		return ""
+	}
+	if mode := def.MetaModes[first]; mode != nil && mode.Label != "" {
+		return mode.Label
+	}
+	return "meta: " + first
+}
+
+// sortedMetaModeNames returns def.MetaModes keys in lexicographic
+// order. Used wherever we need a deterministic "first meta mode"
+// (Esc-menu entry label, bare /meta target).
+func sortedMetaModeNames(def *app.AppDef) []string {
+	if def == nil {
+		return nil
+	}
+	names := make([]string, 0, len(def.MetaModes))
+	for k := range def.MetaModes {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Init implements tea.Model.
@@ -308,9 +447,9 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.mode == ModeMenu {
 		return m.updateMenuSystem(msg)
 	}
-	// If edit mode is active, it owns the keyboard and prompt.
-	if m.mode == ModeEdit {
-		return m.updateEdit(msg)
+	// If meta mode is active, it owns the keyboard and prompt.
+	if m.mode == ModeMeta {
+		return m.updateMeta(msg)
 	}
 
 	switch msg := msg.(type) {
@@ -344,6 +483,18 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case menuSystemChoiceMsg:
 		return m.handleMenuSystemChoice(msg)
+
+	case metaEnterDoneMsg:
+		return m.handleMetaEnterDone(msg)
+
+	case metaSendDoneMsg:
+		return m.handleMetaSendDone(msg)
+
+	case metaListDoneMsg:
+		return m.handleMetaListDone(msg)
+
+	case metaNewDoneMsg:
+		return m.handleMetaNewDone(msg)
 
 	case spinner.TickMsg:
 		// Only animate when awaiting LLM.
@@ -725,6 +876,9 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.inbox.ToggleExpanded()
 		return m, nil
 
+	case "/meta":
+		return m.handleMetaSlash(parts[1:])
+
 	default:
 		m.transcript.AppendSystem(fmt.Sprintf("(unknown command: %s)", parts[0]))
 		return m, nil
@@ -944,80 +1098,420 @@ func (m RootModel) handleContinueTurnOutcome(msg continueTurnOutcomeMsg) (tea.Mo
 	return m.handleTurnOutcome(fakeMsg)
 }
 
-// updateEdit owns the keyboard while the LLM-driven edit overlay is
-// active. Phase transitions:
+// handleMetaSlash dispatches the `/meta ...` family. Recognised forms
+// (all relative to the current app):
 //
-//	editPhaseInput     → Enter starts authoring.Propose (→ editPhaseThinking)
-//	                     Esc cancels back to ModeOnPath
-//	editPhaseThinking  → Ctrl+C cancels the in-flight Propose
-//	                     editProposalReadyMsg arrives → editPhaseReview
-//	editPhaseReview    → 'a' applies + reloads (→ editPhaseApplying)
-//	                     'r' refines (→ editPhaseInput, keep last proposal text)
-//	                     'c' or Esc cancels back to ModeOnPath
-//	editPhaseApplying  → editApplyDoneMsg arrives → reload + return to ModeOnPath
-func (m RootModel) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case editProposalReadyMsg:
-		// Clear the spinner state.
-		m.inFlightCancel = nil
-		if msg.err != nil {
-			m.transcript.AppendError("(edit)", "proposal failed: "+msg.err.Error())
-			m.edit.phase = editPhaseInput
-			m.prompt.Placeholder = "describe a change to this story…"
-			return m, nil
-		}
-		m.edit.proposal = msg.proposal
-		m.edit.phase = editPhaseReview
-		summary := msg.proposal.Summary
-		if summary == "" {
-			summary = "(no summary returned)"
-		}
-		m.transcript.AppendSystem("**Proposal:** " + summary +
-			"\n\n" + renderDiffForTranscript(msg.proposal.UnifiedDiff))
+//	/meta                — enter the first declared meta mode
+//	/meta <name>         — enter the named meta mode
+//	/meta list           — inline-list this app's meta chats
+//	/meta new            — archive the active chat + open a fresh one
+//	/meta resume <id...> — resume a past meta chat by id prefix (≥3)
+//
+// The list / new / resume subcommands close the discovery gap
+// surfaced during manual smoke; they're Phase A.5 additions.
+// Subcommand identity is by exact match on the first arg, so a meta
+// mode literally named "list" would be unreachable via this surface —
+// the loader rejects reserved names so that collision is structural.
+func (m RootModel) handleMetaSlash(args []string) (tea.Model, tea.Cmd) {
+	if len(args) == 0 {
+		return m.startMetaMode("")
+	}
+	switch args[0] {
+	case "list":
+		return m.handleMetaList()
+	case "new":
+		return m.handleMetaNew()
+	case "resume":
+		return m.handleMetaResume(args[1:])
+	}
+	// Anything else is treated as a mode name (legacy behaviour).
+	return m.startMetaMode(args[0])
+}
+
+// handleMetaList kicks off a transcript-inline listing of this app's
+// meta chats. Works from any mode (ModeOnPath or ModeMeta) — the
+// caller can browse without leaving / before entering meta.
+func (m RootModel) handleMetaList() (tea.Model, tea.Cmd) {
+	if m.metaController == nil {
+		m.transcript.AppendSystem("(meta list: unavailable — no chat store or meta_modes wired to this session)")
 		return m, nil
+	}
+	appID := ""
+	if def := m.orch.AppDef(); def != nil {
+		appID = def.App.ID
+	}
+	return m, metaListCmd(context.Background(), m.metaController, appID)
+}
 
-	case editApplyDoneMsg:
-		if msg.err != nil {
-			m.transcript.AppendError("(edit)", "apply failed: "+msg.err.Error())
-			m.edit.phase = editPhaseReview
-			return m, nil
-		}
-		// File is on disk — reload the orchestrator.
-		res, err := m.orch.Reload(m.appPath, m.currentState)
-		if err != nil {
-			m.transcript.AppendError("(edit)",
-				"applied to disk but reload failed: "+err.Error())
-			m.edit.phase = editPhaseReview
-			return m, nil
-		}
-		// On reload, refresh menu and location from the new machine.
-		w := m.orch.CurrentWorld(m.sid)
-		computed := orchestrator.ComputeMenu(m.orch.AppDef(), m.orch.Machine(), m.currentState, w)
-		m.menu, _ = m.menu.Update(menuItemsChanged{items: computed.Primary, blocked: computed.Blocked})
-		loc := orchestrator.ComputeLocation(m.orch.AppDef(), m.currentState, w, 0)
-		m.location, _ = m.location.Update(locationUpdated{loc: loc})
+// handleMetaNew is only valid while in ModeMeta — outside, there is
+// no "active chat" to archive. Outside the surface prints a hint.
+func (m RootModel) handleMetaNew() (tea.Model, tea.Cmd) {
+	if m.mode != ModeMeta {
+		m.transcript.AppendSystem("(meta new: only valid inside meta mode — use /meta to enter first)")
+		return m, nil
+	}
+	if m.metaController == nil || m.metaMode.session == nil {
+		m.transcript.AppendSystem("(meta new: unavailable — no active session)")
+		return m, nil
+	}
+	return m, metaNewCmd(context.Background(), m.metaController, m.metaMode.session)
+}
 
-		note := "applied + reloaded."
-		if !res.PrevStateExists {
-			note += " (your current state no longer exists in the new app — restart to enter the new graph)"
-		}
-		m.transcript.AppendSystem("_" + note + "_")
-
-		// Re-render the current room with the new app definition so the
-		// user actually sees the change. Without this the transcript
-		// keeps the pre-reload view and the edit looks like a no-op.
-		if res.PrevStateExists {
-			if view, vErr := m.orch.Machine().RenderState(m.currentState, w); vErr == nil && view != "" {
-				m.transcript.AppendSystem(view)
+// handleMetaResume resolves an id prefix to a chat ID then enters
+// (or re-enters) meta mode against that chat. Works from any mode.
+// On ambiguity the matches are listed and no mode change happens.
+func (m RootModel) handleMetaResume(args []string) (tea.Model, tea.Cmd) {
+	if m.metaController == nil {
+		m.transcript.AppendSystem("(meta resume: unavailable — no chat store or meta_modes wired to this session)")
+		return m, nil
+	}
+	if len(args) == 0 {
+		m.transcript.AppendSystem("(meta resume: usage — /meta resume <id-prefix> (≥3 chars))")
+		return m, nil
+	}
+	prefix := args[0]
+	appID := ""
+	if def := m.orch.AppDef(); def != nil {
+		appID = def.App.ID
+	}
+	fullID, err := m.metaController.ResolveChatIDPrefix(context.Background(), appID, prefix)
+	if err != nil {
+		var amb *metamode.AmbiguousPrefixError
+		if errors.As(err, &amb) {
+			m.transcript.AppendSystem(fmt.Sprintf("(meta resume: prefix %q matched %d chats — retype with more characters:)", amb.Prefix, len(amb.Matches)))
+			for _, id := range amb.Matches {
+				m.transcript.AppendSystem("  - " + id)
 			}
+			return m, nil
 		}
-		m.edit.Open()
-		m.mode = ModeOnPath
-		m.prompt.Placeholder = "what now?"
+		m.transcript.AppendSystem(fmt.Sprintf("(meta resume: %v)", err))
 		return m, nil
+	}
 
+	// Look up the chat row to discover its mode (the room key).
+	listings, lerr := m.metaController.ListChats(context.Background(), appID)
+	if lerr != nil {
+		m.transcript.AppendSystem(fmt.Sprintf("(meta resume: %v)", lerr))
+		return m, nil
+	}
+	var modeName string
+	for _, l := range listings {
+		if l.ID == fullID {
+			modeName = l.ModeName
+			break
+		}
+	}
+	if modeName == "" {
+		m.transcript.AppendSystem(fmt.Sprintf("(meta resume: chat %s not present in this app's meta-chat list)", fullID))
+		return m, nil
+	}
+
+	snap := metamode.Snapshot{
+		SessionID: m.sid,
+		State:     m.currentState,
+		World:     m.orch.CurrentWorld(m.sid),
+		EnteredAt: time.Now(),
+	}
+	return m, metaResumeCmd(context.Background(), m.metaController, snap, modeName, fullID)
+}
+
+// handleMetaListDone renders the listing into the transcript. Called
+// from updateMeta (when listing was triggered from inside meta) and
+// from the on-path update path (handled below).
+func (m RootModel) handleMetaListDone(msg metaListDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.transcript.AppendSystem(fmt.Sprintf("(meta list: %v)", msg.err))
+		return m, nil
+	}
+	rows := make([][]string, 0, len(msg.listings))
+	for _, l := range msg.listings {
+		rows = append(rows, metaListingCells(l))
+	}
+	m.transcript.AppendMetaList(metaListColumns(), rows)
+	return m, nil
+}
+
+// metaListColumns is the header row for /meta list. Order matches
+// metaListingCells / formatMetaListing.
+func metaListColumns() []string {
+	return []string{"ID", "MODE", "SCOPE", "UPDATED", "PREVIEW"}
+}
+
+// dedupSorted returns the unique values from in, sorted lexicographically.
+// Used by the meta-mode exit summary to list every file the agent
+// touched across the session without repeats.
+func dedupSorted(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// handleMetaNewDone swaps the active session's chat to the freshly
+// resolved one, clears the transcript pane, and stays in ModeMeta.
+func (m RootModel) handleMetaNewDone(msg metaNewDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.transcript.AppendError("(meta new)", fmt.Sprintf("error: %v", msg.err))
+		return m, nil
+	}
+	if msg.session == nil {
+		m.transcript.AppendError("(meta new)", "controller returned no session")
+		return m, nil
+	}
+	m.metaMode.session = msg.session
+	// Reset the transcript so the new chat starts clean. The banner
+	// is re-emitted below so the user sees they're still in meta.
+	m.transcript = newTranscriptModel(m.transcript.vp.Width, m.transcript.vp.Height)
+	if banner := m.metaMode.Banner(); banner != "" {
+		m.transcript.AppendSystem(banner)
+	}
+	m.transcript.AppendSystem("(meta: opened a fresh chat — the previous one was archived)")
+	return m, nil
+}
+
+// metaListingCells renders one /meta list row as a slice of column
+// cells. AppendMetaList does the width-aware padding so columns
+// align across rows AND with metaListColumns()'s header.
+//
+// id is truncated to its first 8 chars; the preview to 50 chars
+// (which is shorter than the 100-char preview the controller
+// returns — listings stay scannable while resume keeps enough
+// context to disambiguate).
+func metaListingCells(l metamode.ChatListing) []string {
+	id8 := l.ID
+	if len(id8) > 8 {
+		id8 = id8[:8]
+	}
+	scope := l.ScopeKey
+	if scope == "" {
+		scope = "(no scope)"
+	}
+	ts := l.UpdatedAt.Local().Format("2006-01-02 15:04")
+	preview := l.FirstUserMessage
+	if preview == "" {
+		preview = "(no user turn yet)"
+	}
+	if r := []rune(preview); len(r) > 50 {
+		preview = string(r[:50])
+	}
+	return []string{id8, l.ModeName, scope, ts, preview}
+}
+
+// startMetaMode dispatches a /meta <name> entry. When name is empty,
+// the lexicographically-first declared meta mode is chosen (see
+// firstMetaModeName for the deterministic-order rationale). Surfaces
+// a polite hint when the controller is not wired (no chat store, no
+// meta_modes declared, or no agent registry installed).
+func (m RootModel) startMetaMode(name string) (tea.Model, tea.Cmd) {
+	if m.metaController == nil {
+		m.transcript.AppendSystem("(meta mode: unavailable — no chat store or meta_modes wired to this session)")
+		return m, nil
+	}
+	def := m.orch.AppDef()
+	if def == nil || len(def.MetaModes) == 0 {
+		m.transcript.AppendSystem("(meta mode: this app declares no meta_modes)")
+		return m, nil
+	}
+	names := sortedMetaModeNames(def)
+	if name == "" {
+		name = firstMetaModeName(names)
+	}
+	if _, ok := def.MetaModes[name]; !ok {
+		m.transcript.AppendSystem(fmt.Sprintf("(meta mode: unknown mode %q — declared: %s)",
+			name, strings.Join(names, ", ")))
+		return m, nil
+	}
+
+	// Build the snapshot from the current orchestrator state. The
+	// session id is captured so a future "drift on Exit" check has
+	// something to compare against.
+	snap := metamode.Snapshot{
+		SessionID: m.sid,
+		State:     m.currentState,
+		World:     m.orch.CurrentWorld(m.sid),
+		EnteredAt: time.Now(),
+	}
+
+	ctrl := m.metaController
+	return m, metaEnterCmd(context.Background(), ctrl, snap, name)
+}
+
+// handleMetaEnterDone activates the overlay (or surfaces an error) when
+// Controller.Enter / EnterByChatID returns asynchronously.
+//
+// When already in ModeMeta (e.g. /meta resume from inside meta), the
+// transcript pane is reset before the banner + replay so the prior
+// session's content doesn't bleed into the new one.
+func (m RootModel) handleMetaEnterDone(msg metaEnterDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.transcript.AppendError("/meta "+msg.modeName,
+			fmt.Sprintf("error opening meta mode: %v", msg.err))
+		return m, nil
+	}
+	if msg.session == nil {
+		m.transcript.AppendError("/meta "+msg.modeName, "meta controller returned no session")
+		return m, nil
+	}
+
+	// Re-entering meta from inside meta (resume) clears the pane so
+	// the new chat starts visually fresh. First-entry from on-path
+	// keeps the prior transcript so the user sees the context they
+	// came from.
+	if m.mode == ModeMeta {
+		m.transcript = newTranscriptModel(m.transcript.vp.Width, m.transcript.vp.Height)
+	}
+
+	m.metaMode.Enter(msg.session)
+	m.mode = ModeMeta
+	m.prompt.Placeholder = "meta chat — /onpath to return"
+
+	// Banner first so the user sees the mode they entered.
+	if banner := m.metaMode.Banner(); banner != "" {
+		m.transcript.AppendSystem(banner)
+	}
+
+	// Replay any prior transcript persisted on the chat row. Without
+	// this the in-memory transcript starts blank even when the chat
+	// row already has messages from a previous /meta session.
+	if m.chatStore != nil {
+		m.replayMetaTranscript(msg.session.Chat.ID())
+	}
+	return m, nil
+}
+
+// replayMetaTranscript loads the chat-row messages for the given chat
+// id and appends each one to the in-memory transcript. Errors are
+// non-fatal — a missing transcript just means an empty replay.
+func (m *RootModel) replayMetaTranscript(chatID string) {
+	if m.chatStore == nil || chatID == "" {
+		return
+	}
+	ctx := context.Background()
+	msgs, err := m.chatStore.Transcript(ctx, chatID, 0)
+	if err != nil {
+		slog.Warn("tui.meta: replay transcript failed", "err", err, "chat_id", chatID)
+		return
+	}
+	for _, msg := range msgs {
+		switch msg.Role {
+		case "user":
+			m.transcript.AppendTurn(msg.Content, "")
+		case "assistant":
+			m.transcript.AppendSystem(msg.Content)
+		default:
+			// system / tool / anything else — surface verbatim so the
+			// user sees the same history the chat row holds.
+			m.transcript.AppendSystem(msg.Content)
+		}
+	}
+}
+
+// handleMetaSendDone reacts to one completed meta-mode turn. The user
+// message was already appended to the in-memory transcript when the
+// user hit Enter; here we append the assistant reply and, when the
+// authoring tools fired, reload the orchestrator.
+func (m RootModel) handleMetaSendDone(msg metaSendDoneMsg) (tea.Model, tea.Cmd) {
+	m.metaMode.inFlight = false
+
+	if msg.err != nil {
+		m.transcript.AppendError("(meta)", fmt.Sprintf("error: %v", msg.err))
+		return m, nil
+	}
+	m.metaMode.turns++
+	if msg.result.Assistant != "" {
+		m.transcript.AppendSystem(msg.result.Assistant)
+	}
+	if msg.result.ReloadRequested && m.appPath != "" {
+		m.metaMode.edits++
+		m.metaMode.changedFiles = append(m.metaMode.changedFiles, msg.result.ChangedFiles...)
+		return m.reloadOrchestratorAfterMetaWithFiles(msg.result.ChangedFiles)
+	}
+	return m, nil
+}
+
+// reloadOrchestratorAfterMeta is the no-file-list overload used by
+// the dormant legacy authoring-token dispatcher.
+func (m RootModel) reloadOrchestratorAfterMeta() (tea.Model, tea.Cmd) {
+	return m.reloadOrchestratorAfterMetaWithFiles(nil)
+}
+
+// reloadOrchestratorAfterMetaWithFiles runs the same reload-and-rerender
+// path the edit overlay uses on apply and prints the list of files the
+// agent touched so the user can see whether the change landed in
+// app.yaml, an include, a prompt, or a script.
+func (m RootModel) reloadOrchestratorAfterMetaWithFiles(changed []string) (tea.Model, tea.Cmd) {
+	res, err := m.orch.Reload(m.appPath, m.currentState)
+	if err != nil {
+		m.transcript.AppendError("(meta)",
+			"applied to disk but reload failed: "+err.Error())
+		return m, nil
+	}
+	w := m.orch.CurrentWorld(m.sid)
+	computed := orchestrator.ComputeMenu(m.orch.AppDef(), m.orch.Machine(), m.currentState, w)
+	m.menu, _ = m.menu.Update(menuItemsChanged{items: computed.Primary, blocked: computed.Blocked})
+	loc := orchestrator.ComputeLocation(m.orch.AppDef(), m.currentState, w, 0)
+	m.location, _ = m.location.Update(locationUpdated{loc: loc})
+
+	// Mark the line where the post-reload section begins so we can scroll
+	// the meta-mode chat off the top of the viewport while keeping it
+	// reachable via scroll-up.
+	mark := m.transcript.ContentHeight()
+
+	var note string
+	if len(changed) == 0 {
+		note = fmt.Sprintf("(✓ reloaded — edit #%d this session)", m.metaMode.edits)
+	} else {
+		note = fmt.Sprintf("(✓ saved + reloaded — edit #%d this session)\n  changed: %s",
+			m.metaMode.edits, strings.Join(changed, ", "))
+	}
+	if !res.PrevStateExists {
+		note += "\n(your current state no longer exists in the new app — restart to enter the new graph)"
+	}
+	m.transcript.AppendSlashOutput(note)
+
+	if res.PrevStateExists {
+		if view, vErr := m.orch.Machine().RenderState(m.currentState, w); vErr == nil && view != "" {
+			m.transcript.AppendSystem(view)
+		}
+	}
+	m.transcript.ScrollToLine(mark)
+	return m, nil
+}
+
+// updateMeta owns the keyboard while a /meta overlay is active.
+//
+//   - Enter submits the current prompt as a chat turn through
+//     Controller.Send, surfaced via metaSendCmd.
+//   - "/onpath" (or the mode's configured exit intent) calls
+//     Controller.Exit and pops back to ModeOnPath.
+//   - Esc and Ctrl+C exit the overlay (same affordance as off-path
+//     plus edit mode).
+//   - Other slash commands are not processed while in meta mode —
+//     they would conflict with the meta agent. The user is hinted to
+//     /onpath first.
+//   - While inFlight (a turn is mid-flight), Enter is ignored.
+func (m RootModel) updateMeta(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case metaSendDoneMsg:
+		return m.handleMetaSendDone(msg)
+	case metaEnterDoneMsg:
+		return m.handleMetaEnterDone(msg)
+	case metaListDoneMsg:
+		return m.handleMetaListDone(msg)
+	case metaNewDoneMsg:
+		return m.handleMetaNewDone(msg)
 	case spinner.TickMsg:
-		if m.edit.phase == editPhaseThinking || m.edit.phase == editPhaseApplying {
+		if m.metaMode.inFlight {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -1030,91 +1524,186 @@ func (m RootModel) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Ctrl+C during thinking cancels the in-flight Claude call.
-	if keyMsg.Type == tea.KeyCtrlC {
-		if m.edit.phase == editPhaseThinking && m.inFlightCancel != nil {
-			m.inFlightCancel()
-			return m, nil
-		}
-		// Otherwise: same exit semantics as ModeOnPath.
-		m.mode = ModeOnPath
-		m.edit.Open()
-		m.prompt.Placeholder = "what now?"
-		m.transcript.AppendSystem("_(edit cancelled)_")
-		return m, nil
+	// Ctrl+C / Esc exit the overlay (same affordance as edit mode).
+	if keyMsg.Type == tea.KeyCtrlC || keyMsg.Type == tea.KeyEsc {
+		return m.exitMetaMode(), nil
 	}
 
-	if keyMsg.Type == tea.KeyEsc {
-		// Esc cancels in any phase except thinking (where Ctrl+C cancels the call).
-		if m.edit.phase == editPhaseThinking {
-			return m, nil
-		}
-		m.mode = ModeOnPath
-		m.edit.Open()
-		m.prompt.SetValue("")
-		m.prompt.Placeholder = "what now?"
-		m.transcript.AppendSystem("_(edit cancelled)_")
-		return m, nil
-	}
-
-	switch m.edit.phase {
-	case editPhaseInput:
-		if keyMsg.Type == tea.KeyEnter {
-			text := strings.TrimSpace(m.prompt.Value())
-			if text == "" {
-				return m, nil
-			}
-			m.prompt.SetValue("")
-			ctx, cancel := context.WithCancel(context.Background())
-			m.inFlightCancel = cancel
-			m.edit.phase = editPhaseThinking
-			m.transcript.AppendSystem("> " + text)
-
-			// Capture the runtime context Claude needs to pin the
-			// proposal to the right file: the state path the user is
-			// in plus the view that's literally on their screen.
-			runCtx := &authoring.Context{State: string(m.currentState)}
-			w := m.orch.CurrentWorld(m.sid)
-			if view, vErr := m.orch.Machine().RenderState(m.currentState, w); vErr == nil {
-				runCtx.View = view
-			}
-			return m, tea.Batch(m.spinner.Tick, proposeCmd(ctx, m.appPath, text, runCtx))
-		}
-		// All other keys feed the prompt textinput.
+	// Scroll keys pass through to the transcript even mid-turn.
+	if isScrollKey(keyMsg) {
 		var cmd tea.Cmd
-		m.prompt, cmd = m.prompt.Update(msg)
+		m.transcript, cmd = m.transcript.Update(keyMsg)
 		return m, cmd
+	}
 
-	case editPhaseThinking:
-		// Swallow keys other than Ctrl+C / Esc (handled above).
-		return m, nil
-
-	case editPhaseReview:
-		switch strings.ToLower(keyMsg.String()) {
-		case "a":
-			if m.edit.proposal == nil {
-				return m, nil
-			}
-			m.edit.phase = editPhaseApplying
-			return m, tea.Batch(m.spinner.Tick, applyCmd(m.edit.proposal))
-		case "r":
-			m.edit.phase = editPhaseInput
-			m.edit.proposal = nil
-			m.prompt.Placeholder = "refine the proposal…"
-			return m, nil
-		case "c":
-			m.mode = ModeOnPath
-			m.edit.Open()
-			m.prompt.Placeholder = "what now?"
-			m.transcript.AppendSystem("_(edit cancelled)_")
+	if keyMsg.Type != tea.KeyEnter {
+		// Feed the prompt textinput. Don't pass keys while a turn is
+		// in flight so the user can't queue typing into a stale input.
+		if m.metaMode.inFlight {
 			return m, nil
 		}
-		return m, nil
+		var cmd tea.Cmd
+		m.prompt, cmd = m.prompt.Update(keyMsg)
+		return m, cmd
+	}
 
-	case editPhaseApplying:
+	// Enter pressed.
+	if m.metaMode.inFlight {
+		m.transcript.AppendSystem("hold on — still thinking about the previous turn")
 		return m, nil
 	}
-	return m, nil
+
+	text := strings.TrimSpace(m.prompt.Value())
+	if text == "" {
+		return m, nil
+	}
+	m.prompt.SetValue("")
+
+	// Exit intent comes from the mode declaration; default is /onpath.
+	exitCmd := "/onpath"
+	if m.metaMode.session != nil && m.metaMode.session.Mode != nil {
+		exitCmd = "/" + m.metaMode.session.Mode.ExitIntentOrDefault()
+	}
+	if text == exitCmd {
+		return m.exitMetaMode(), nil
+	}
+
+	// The discovery subcommands /meta list, /meta new, /meta resume
+	// <id> are allowed inside meta mode — they pivot between meta
+	// chats without forcing /onpath first. Anything else with a "/"
+	// prefix is still discouraged.
+	if strings.HasPrefix(text, "/") {
+		parts := strings.Fields(text)
+		if len(parts) > 0 && parts[0] == "/meta" && len(parts) > 1 {
+			switch parts[1] {
+			case "list", "new", "resume":
+				return m.handleMetaSlash(parts[1:])
+			}
+		}
+		m.transcript.AppendSystem(fmt.Sprintf("(slash commands are paused in meta mode — use %s to return first)", exitCmd))
+		return m, nil
+	}
+
+	// Submit the user turn.
+	m.transcript.AppendTurn(text, "")
+	m.metaMode.inFlight = true
+	turn := m.buildMetaTurnContext()
+	return m, tea.Batch(m.spinner.Tick,
+		metaSendCmd(context.Background(), m.metaController, m.metaMode.session, text, turn))
+}
+
+// buildMetaTurnContext snapshots the ambient state (state path, app
+// file, rendered view, world variables, trace path) the controller
+// injects into the agent's user message. Called once per Enter-key
+// press while the meta overlay is active. RenderState errors are
+// swallowed — a missing view just leaves the field empty rather than
+// aborting the turn.
+//
+// When both traceRing and traceFilePath are wired (production path),
+// the ring is snapshotted and written truncate-then-write to the temp
+// file with 0o600 perms so the agent can Read it for full session
+// history. Write failures are logged but non-fatal — TracePath is set
+// only when the write succeeds so the agent never sees a stale or
+// missing file path in the preamble.
+func (m RootModel) buildMetaTurnContext() metamode.TurnContext {
+	w := m.orch.CurrentWorld(m.sid)
+	view, _ := m.orch.Machine().RenderState(m.currentState, w)
+
+	tracePath := ""
+	switch {
+	case m.traceFilePath == "":
+		// No trace plumbing wired — common in tests; silent skip.
+	case m.traceFileExternal:
+		// slog is streaming to this path already; just hand the agent
+		// the pointer. Skip the ring dump entirely (it would be stale
+		// relative to whatever slog has written since the last snapshot
+		// and would clobber the live file).
+		tracePath = m.traceFilePath
+	case m.traceRing != nil:
+		// TUI-owned temp file fed by the always-on ring buffer.
+		snap := m.traceRing.Snapshot()
+		if err := os.WriteFile(m.traceFilePath, snap, 0o600); err != nil {
+			slog.Warn("tui.meta: failed to write trace dump for agent",
+				"path", m.traceFilePath, "err", err)
+		} else {
+			tracePath = m.traceFilePath
+		}
+	}
+
+	return metamode.TurnContext{
+		StatePath:    string(m.currentState),
+		AppFile:      m.appPath,
+		RenderedView: view,
+		World:        w.Vars,
+		TracePath:    tracePath,
+	}
+}
+
+// exitMetaMode tears down the overlay and pops back to ModeOnPath.
+// Calls Controller.Exit so future workstreams that want to land
+// per-mode cleanup (discard-on-exit for non-persistent modes, for
+// example) have a single seam to extend.
+func (m RootModel) exitMetaMode() RootModel {
+	ctrl := m.metaController
+	sess := m.metaMode.session
+	if ctrl != nil && sess != nil {
+		// Exit is currently a no-op (proposal §4.3: drafts survive).
+		// Capture the error for diagnostics but don't block the UX.
+		if err := ctrl.Exit(context.Background(), sess); err != nil {
+			slog.Warn("tui.meta: controller.Exit error", "err", err)
+		}
+	}
+
+	// Mark where the post-exit section starts so we can scroll the
+	// meta-mode chat off the top of the viewport (still reachable via
+	// scroll-up).
+	mark := m.transcript.ContentHeight()
+
+	// Summarise the session so the user knows whether changes landed.
+	// Edits already triggered an in-flight reload on each Send that
+	// touched the story tree; this just makes the totals visible at
+	// /onpath time and lists every file the agent touched (dedup'd
+	// across turns) so the user can spot includes/prompts/scripts
+	// that wouldn't be obvious from the chat alone.
+	turns, edits := m.metaMode.turns, m.metaMode.edits
+	files := dedupSorted(m.metaMode.changedFiles)
+	var summary string
+	switch {
+	case edits > 0 && turns == 1:
+		summary = fmt.Sprintf("(✓ meta session: 1 turn, %d edit applied + reloaded)", edits)
+	case edits > 0:
+		summary = fmt.Sprintf("(✓ meta session: %d turns, %d edit(s) applied + reloaded)", turns, edits)
+	case turns == 0:
+		summary = "(meta session: no turns)"
+	case turns == 1:
+		summary = "(meta session: 1 turn, no file changes)"
+	default:
+		summary = fmt.Sprintf("(meta session: %d turns, no file changes)", turns)
+	}
+	if len(files) > 0 {
+		summary += "\n  files touched: " + strings.Join(files, ", ")
+	}
+	m.transcript.AppendSlashOutput(summary)
+
+	// Surface the configured return message after the summary so the
+	// user-authored greeting (if any) sits closest to the new view.
+	if sess != nil && sess.Mode != nil && sess.Mode.Return != nil && sess.Mode.Return.Message != "" {
+		m.transcript.AppendSystem(sess.Mode.Return.Message)
+	} else {
+		m.transcript.AppendSystem("(returned to on-path mode)")
+	}
+	// Re-render the current FSM view so the user sees what they're
+	// looking at on-path, fresh.
+	w := m.orch.CurrentWorld(m.sid)
+	if view, vErr := m.orch.Machine().RenderState(m.currentState, w); vErr == nil && view != "" {
+		m.transcript.AppendSystem(view)
+	}
+	m.transcript.ScrollToLine(mark)
+
+	m.metaMode.Exit()
+	m.mode = ModeOnPath
+	m.prompt.Placeholder = "what now?"
+	return m
 }
 
 // updateMenuSystem routes keys to the overlay and reverts to ModeOnPath when
@@ -1141,17 +1730,10 @@ func (m RootModel) handleMenuSystemChoice(msg menuSystemChoiceMsg) (tea.Model, t
 	case menuActionReportBug:
 		m.transcript.AppendSystem("(bug report: coming soon — this will bundle session state and a freeform note)")
 		return m, nil
-	case menuActionEditMode:
-		if m.appPath == "" {
-			m.transcript.AppendSystem("(edit mode: unavailable — no app path bound to this session)")
-			return m, nil
-		}
-		m.mode = ModeEdit
-		m.edit.Open()
-		m.prompt.SetValue("")
-		m.prompt.Placeholder = "describe a change to this story…"
-		m.transcript.AppendSystem("**Edit mode** — describe a change to any part of this story (rooms, prompts, scripts). Esc to cancel.")
-		return m, nil
+	case menuActionMetaStory:
+		// Same code path as the /meta slash command (bare form
+		// resolves to the first declared mode).
+		return m.startMetaMode("")
 	}
 	return m, nil
 }
@@ -1284,8 +1866,14 @@ func (m RootModel) View() string {
 	locationBar := m.location.View()
 
 	// Main body: transcript (left) + [menu + inbox] (right, stacked vertically).
+	// In ModeMeta the on-path actions menu is irrelevant (FSM is paused),
+	// so swap it for the meta-mode side panel that documents the meta
+	// slash commands.
 	transcriptView := m.transcript.View()
 	menuView := m.menu.View()
+	if m.mode == ModeMeta {
+		menuView = m.metaMode.MenuView(m.menu.width, m.menu.height)
+	}
 	inboxView := m.inbox.View()
 	rightCol := lipgloss.JoinVertical(lipgloss.Left, menuView, inboxView)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, transcriptView, rightCol)
@@ -1307,19 +1895,6 @@ func (m RootModel) View() string {
 		promptLine = m.disambiguation.View()
 	} else if m.mode == ModeMenu {
 		promptLine = m.menuSystem.View()
-	} else if m.mode == ModeEdit {
-		switch m.edit.phase {
-		case editPhaseInput:
-			promptLine = promptStyle.Render("✎ ") + m.prompt.View() + "\n" + editInputHint
-		case editPhaseThinking:
-			promptLine = promptStyle.Render("✎ ") + m.spinner.View() + " " +
-				lipgloss.NewStyle().Foreground(colorMuted).Render("claude is rewriting app.yaml… (Ctrl+C to cancel)")
-		case editPhaseReview:
-			promptLine = promptStyle.Render("✎ ") + editReviewHint
-		case editPhaseApplying:
-			promptLine = promptStyle.Render("✎ ") + m.spinner.View() + " " +
-				lipgloss.NewStyle().Foreground(colorMuted).Render("writing + reloading…")
-		}
 	} else if m.mode == ModeAwaitingLLM {
 		spinnerStr := m.spinner.View()
 		caption := "thinking via claude… (Ctrl+C to cancel)"
@@ -1328,6 +1903,13 @@ func (m RootModel) View() string {
 		}
 		promptLine = promptStyle.Render("> ") + spinnerStr + " " +
 			lipgloss.NewStyle().Foreground(colorMuted).Render(caption)
+	} else if m.mode == ModeMeta {
+		if m.metaMode.inFlight {
+			promptLine = promptStyle.Render("» ") + m.spinner.View() + " " +
+				lipgloss.NewStyle().Foreground(colorMuted).Render("agent is thinking… (Esc to cancel)")
+		} else {
+			promptLine = promptStyle.Render("» ") + m.prompt.View()
+		}
 	} else {
 		prefix := promptStyle.Render("> ")
 		if m.mode == ModeOffPath {

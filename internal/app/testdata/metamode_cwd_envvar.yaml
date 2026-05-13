@@ -1,0 +1,20 @@
+app:
+  id: metamode-cwd
+  version: 0.1.0
+
+root: foyer
+
+states:
+  foyer:
+    description: "Foyer"
+    view: "You are in the foyer."
+
+agents:
+  kitsoki-engineer:
+    system_prompt: "You are the kitsoki engineer fixture."
+
+meta_modes:
+  self:
+    trigger: meta-kitsoki
+    agent: kitsoki-engineer
+    cwd: "${KITSOKI_REPO}"

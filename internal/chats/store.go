@@ -199,10 +199,14 @@ func (s *Store) Resolve(ctx context.Context, appID, room, scopeKey, title string
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Archived rows are soft-deleted — Resolve treats them as not present
+	// so a fresh row gets created. /meta new in the TUI relies on this.
 	var id string
 	err = tx.QueryRowContext(ctx, `
 		SELECT id FROM chats
-		WHERE app_id = ? AND room = ? AND scope_key = ? AND parent_chat_id IS NULL
+		WHERE app_id = ? AND room = ? AND scope_key = ?
+		  AND parent_chat_id IS NULL
+		  AND status != 'archived'
 		ORDER BY last_active_at DESC
 		LIMIT 1`,
 		appID, room, scopeKey,

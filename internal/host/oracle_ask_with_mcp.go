@@ -260,15 +260,42 @@ func buildValidatorMCPServer(schemaPath, outputPath string, opts validatorOption
 // On all expected errors (binary missing, prompt unreadable, MCP config
 // marshal failure, non-zero exit) the handler returns Result{Error: ...}
 // rather than a Go error so on_error: routing remains deterministic.
+//
+// # Per-call agent: arg (WS-A7)
+//
+// When the `agent:` arg is set, the handler looks up the named agent in
+// the process-wide registry (see SetAgentRegistry) and uses the agent's
+// SystemPrompt as the prompt body, the agent's Tools as the MCP tool
+// allowlist hint, and the agent's DefaultCwd as the working directory
+// when `working_dir:` is not also supplied. `agent:` and `prompt_path:`
+// (or `prompt:`) are mutually exclusive — supplying both is an error.
+// An unknown agent name is an error too; the handler does NOT silently
+// fall back to prompt_path-style dispatch.
 func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, error) {
+	agentName, _ := args["agent"].(string)
+	agentName = strings.TrimSpace(agentName)
+
 	promptPath, _ := args["prompt_path"].(string)
-	if strings.TrimSpace(promptPath) == "" {
+	promptPath = strings.TrimSpace(promptPath)
+	if promptPath == "" {
 		// Accept the proposal-style "prompt:" alias too.
 		if alt, _ := args["prompt"].(string); strings.TrimSpace(alt) != "" {
 			promptPath = alt
 		}
 	}
-	if strings.TrimSpace(promptPath) == "" {
+
+	// Mutual exclusion: agent: drives the entire prompt + tools + cwd
+	// surface; prompt_path: is the legacy file-driven path. Mixing them
+	// would be ambiguous about which prompt wins, so reject loudly.
+	if agentName != "" && promptPath != "" {
+		return Result{Error: "host.oracle.ask_with_mcp: agent: and prompt_path: (or prompt:) are mutually exclusive — set only one"}, nil
+	}
+
+	if agentName != "" {
+		return runOracleAskWithMCPViaAgent(ctx, agentName, args)
+	}
+
+	if promptPath == "" {
 		return Result{Error: "host.oracle.ask_with_mcp: prompt_path (or prompt) argument is required"}, nil
 	}
 
@@ -304,7 +331,117 @@ func OracleAskWithMCPHandler(ctx context.Context, args map[string]any) (Result, 
 		return runOracleAskWithMCPWithChat(ctx, cs, chatID, rendered, resolved, args)
 	}
 
-	return oracleAskWithMCPCore(ctx, rendered, resolved, args, nil, "")
+	// Non-chat path: callers that own their own conversation persistence
+	// (e.g. internal/metamode) can pass claude_session_id to keep
+	// Claude-side context across turns. If absent, we mint a UUID so the
+	// caller can capture it from the result and pass it back next turn.
+	claudeSID, _ := args["claude_session_id"].(string)
+	minted := claudeSID == ""
+	if minted {
+		claudeSID = newUUID()
+	}
+	out, err := oracleAskWithMCPCore(ctx, rendered, resolved, args, nil, claudeSID, minted)
+	if err != nil {
+		return out, err
+	}
+	if out.Data == nil {
+		out.Data = make(map[string]any)
+	}
+	out.Data["claude_session_id"] = claudeSID
+	return out, nil
+}
+
+// runOracleAskWithMCPViaAgent dispatches an ask_with_mcp call against a
+// named agent. The agent's SystemPrompt becomes the prompt body (rendered
+// through expr with any `args:` map the caller supplied), the agent's
+// Tools become the tool-allowlist hint, and the agent's DefaultCwd is
+// used as `working_dir:` when the caller did not set one explicitly.
+//
+// The function constructs a fresh args map with `agent:` stripped and
+// `prompt_path:` set to a tempfile carrying the rendered system prompt,
+// then re-enters OracleAskWithMCPHandler. The recursive call cannot
+// re-trigger this branch because `agent:` is no longer set.
+//
+// Errors:
+//   - no registry wired (SetAgentRegistry never called): clear error.
+//   - unknown agent name: error includes the name and the list of
+//     registered names so authoring mistakes surface immediately.
+func runOracleAskWithMCPViaAgent(ctx context.Context, agentName string, args map[string]any) (Result, error) {
+	reg := AgentRegistry()
+	if reg == nil {
+		return Result{Error: fmt.Sprintf(
+			"host.oracle.ask_with_mcp: agent: %q requested but no agent registry is wired (call host.SetAgentRegistry at startup)",
+			agentName,
+		)}, nil
+	}
+	ag, ok := reg.Get(agentName)
+	if !ok {
+		return Result{Error: fmt.Sprintf(
+			"host.oracle.ask_with_mcp: unknown agent %q (registered: %s)",
+			agentName, strings.Join(reg.List(), ", "),
+		)}, nil
+	}
+
+	// Render the agent's SystemPrompt with the caller's `args:` scope
+	// (same template semantics the prompt_path path uses for its file
+	// content). Falling back to the full args map for back-compat would
+	// leak handler-control keys; keep it strict for the new code path.
+	templateArgs, _ := args["args"].(map[string]any)
+	if templateArgs == nil {
+		templateArgs = map[string]any{}
+	}
+	rendered, rerr := expr.Render(ag.SystemPrompt, expr.Env{Args: templateArgs})
+	if rerr != nil {
+		return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: render agent %q SystemPrompt: %v", agentName, rerr)}, nil
+	}
+
+	promptPath, cleanup, perr := WritePromptTempFile(rendered)
+	if perr != nil {
+		return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: %v", perr)}, nil
+	}
+	defer cleanup()
+
+	// Build a fresh args map. We copy the caller's keys (so chat_id,
+	// schema, validator, output_format, mcp_servers, etc. all flow
+	// through) but drop agent: (so the recursive call doesn't re-enter
+	// this branch) and prefer the agent's tool allowlist + cwd.
+	next := make(map[string]any, len(args)+2)
+	for k, v := range args {
+		if k == "agent" {
+			continue
+		}
+		next[k] = v
+	}
+	next["prompt_path"] = promptPath
+
+	// working_dir precedence: caller-supplied beats agent default. Today
+	// the handler reads `working_dir`; the agent's DefaultCwd is plumbed
+	// into that slot so the existing handler path picks it up unchanged.
+	if _, set := next["working_dir"].(string); !set || strings.TrimSpace(asString(next["working_dir"])) == "" {
+		if ag.DefaultCwd != "" {
+			next["working_dir"] = ag.DefaultCwd
+		}
+	}
+
+	// Tool allowlist hint. The handler today does NOT gate by tool name
+	// (open question §6.1 of the meta-mode proposal); we plumb the list
+	// through under the same key the metamode controller uses so a
+	// future gating pass has one consistent place to look. Tests assert
+	// on this key to confirm the agent's tool surface reached the call
+	// site.
+	if len(ag.Tools) > 0 {
+		next["__meta_tool_allowlist"] = append([]string(nil), ag.Tools...)
+	}
+
+	return OracleAskWithMCPHandler(ctx, next)
+}
+
+// asString coerces an interface{} to its string form when the underlying
+// value is a string; returns "" for any other type (including nil).
+// Used by the agent path to decide whether `working_dir` is already set.
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 // runOracleAskWithMCPWithChat executes the chat-aware path: acquires the
@@ -329,7 +466,8 @@ func runOracleAskWithMCPWithChat(ctx context.Context, cs ChatStore, chatID, rend
 		// the transcript). If this write fails we bail before appending
 		// anything.
 		claudeSID := chat.ClaudeSessionID
-		if claudeSID == "" {
+		minted := claudeSID == ""
+		if minted {
 			claudeSID = newUUID()
 			if err := cs.SetClaudeSessionID(ctx, chatID, claudeSID); err != nil {
 				out = Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: set claude session id: %v", err)}
@@ -343,7 +481,7 @@ func runOracleAskWithMCPWithChat(ctx context.Context, cs ChatStore, chatID, rend
 			return nil
 		}
 
-		inner, runErr := oracleAskWithMCPCore(ctx, rendered, resolvedPrompt, args, nil, claudeSID)
+		inner, runErr := oracleAskWithMCPCore(ctx, rendered, resolvedPrompt, args, nil, claudeSID, minted)
 		if runErr != nil {
 			return runErr
 		}
@@ -404,9 +542,12 @@ func runOracleAskWithMCPWithChat(ctx context.Context, cs ChatStore, chatID, rend
 }
 
 // oracleAskWithMCPCore executes the claude one-shot invocation. When
-// claudeSessionID is non-empty, --session-id is added to the CLI args so the
-// call participates in a Claude-side conversation.
-func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, args map[string]any, _ any, claudeSessionID string) (Result, error) {
+// claudeSessionID is non-empty:
+//   - claudeSessionMinted == true  → --session-id (claude creates this id)
+//   - claudeSessionMinted == false → --resume     (claude looks up an existing one)
+//
+// Mixing the two yields claude's "Session ID … is already in use" error.
+func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, args map[string]any, _ any, claudeSessionID string, claudeSessionMinted bool) (Result, error) {
 	bin, err := resolveOracleBin()
 	if err != nil {
 		return Result{Error: err.Error()}, nil
@@ -429,9 +570,15 @@ func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, 
 	}
 
 	// When participating in a chat, inject the session ID so Claude can
-	// resume the conversation from its own memory.
+	// resume the conversation from its own memory. --session-id is for
+	// the FIRST invocation with this id (claude assigns/creates it);
+	// --resume is for subsequent invocations (claude looks it up).
 	if claudeSessionID != "" {
-		cliArgs = append(cliArgs, "--session-id", claudeSessionID)
+		if claudeSessionMinted {
+			cliArgs = append(cliArgs, "--session-id", claudeSessionID)
+		} else {
+			cliArgs = append(cliArgs, "--resume", claudeSessionID)
+		}
 	}
 
 	// Build the merged mcp_servers map: caller-provided entries plus an

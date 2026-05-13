@@ -14,7 +14,10 @@ const (
 	menuActionNone menuSystemAction = iota
 	menuActionExit
 	menuActionReportBug
-	menuActionEditMode
+	// menuActionMetaStory opens the first declared meta mode (default
+	// = /meta with no name). Present when the AppDef declares any
+	// meta_modes; otherwise the row is omitted entirely.
+	menuActionMetaStory
 )
 
 // menuSystemChoiceMsg is emitted when the user selects a row.
@@ -30,22 +33,30 @@ type menuSystemEntry struct {
 }
 
 // menuSystemModel is the Esc-activated overlay that exposes session-level
-// actions (exit, report bug, edit mode). It follows the same Open/Close +
-// Update/View shape as disambiguationModel.
+// actions (exit, report bug, and any declared meta mode). It follows
+// the same Open/Close + Update/View shape as disambiguationModel.
 type menuSystemModel struct {
 	active   bool
 	entries  []menuSystemEntry
 	selected int
 }
 
-func newMenuSystemModel() menuSystemModel {
-	return menuSystemModel{
-		entries: []menuSystemEntry{
-			{action: menuActionExit, label: "Exit", hint: "quit this session"},
-			{action: menuActionReportBug, label: "Report bug", hint: "coming soon"},
-			{action: menuActionEditMode, label: "Edit mode", hint: "author rooms/intents via Claude"},
-		},
+// newMenuSystemModel builds the overlay's static entry list. metaLabel
+// is the human-readable label for the meta-mode row; pass "" to omit
+// the row (when the AppDef declares no meta_modes).
+func newMenuSystemModel(metaLabel string) menuSystemModel {
+	entries := []menuSystemEntry{
+		{action: menuActionExit, label: "Exit", hint: "quit this session"},
+		{action: menuActionReportBug, label: "Report bug", hint: "coming soon"},
 	}
+	if metaLabel != "" {
+		entries = append(entries, menuSystemEntry{
+			action: menuActionMetaStory,
+			label:  metaLabel,
+			hint:   "/meta — sidebar conversation",
+		})
+	}
+	return menuSystemModel{entries: entries}
 }
 
 // Open activates the overlay with the selection reset to the first row.

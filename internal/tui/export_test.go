@@ -10,6 +10,7 @@ import (
 
 	"kitsoki/internal/clock"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
 )
 
@@ -176,21 +177,6 @@ func SetPromptValue(m *RootModel, v string) { m.prompt.SetValue(v) }
 // GetPromptValue returns the current prompt input value.
 func GetPromptValue(m RootModel) string { return m.prompt.Value() }
 
-// ── Edit-mode test helpers ────────────────────────────────────────────────────
-
-// EditPhaseInput / Thinking / Review / Applying re-export the unexported
-// editPhase constants for use by tui_test code.
-const (
-	EditPhaseInput    = int(editPhaseInput)
-	EditPhaseThinking = int(editPhaseThinking)
-	EditPhaseReview   = int(editPhaseReview)
-	EditPhaseApplying = int(editPhaseApplying)
-)
-
-// EditPhase returns the current edit-overlay phase as an int (cast to
-// EditPhase* constants for assertions).
-func EditPhase(m RootModel) int { return int(m.edit.phase) }
-
 // ── Disambiguation test helpers ───────────────────────────────────────────────
 
 // TestDisambiguationModelWrapper wraps a disambiguationModel for testing.
@@ -285,4 +271,29 @@ func RootModelClock(m RootModel) clock.Clock { return m.clk }
 // After channel).
 func ScheduleInboxPollForTest(m RootModel, d time.Duration) tea.Cmd {
 	return m.scheduleInboxPoll(d)
+}
+
+// ── Meta-mode test helpers ───────────────────────────────────────────────────
+
+// NewMetaSendDoneMsgForTest constructs a metaSendDoneMsg for injection
+// into Update(). Used by reload-flag tests to exercise the
+// SendResult.ReloadRequested path without running a real oracle.
+func NewMetaSendDoneMsgForTest(userText, assistantText string, reload bool, err error) tea.Msg {
+	return metaSendDoneMsg{
+		userText: userText,
+		result: metamode.SendResult{
+			Assistant:       assistantText,
+			ReloadRequested: reload,
+		},
+		err: err,
+	}
+}
+
+// AppID returns the orchestrator-bound app ID. Phase A.5 tests use
+// this to seed chats under the same AppID the controller will read.
+func (m RootModel) AppID() string {
+	if def := m.orch.AppDef(); def != nil {
+		return def.App.ID
+	}
+	return ""
 }

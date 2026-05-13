@@ -17,6 +17,19 @@ hosts:
   - host.run
   - host.jobs.answer_clarification
 
+# Sidebar authoring conversation: /meta opens a chat with story-author
+# about this demo app's YAML.
+meta_modes:
+  story:
+    trigger: meta
+    label: "improve the story"
+    banner: "*** meta:story — discussing background-jobs-demo ***"
+    agent: story-author
+    persist: true
+    return:
+      intent: onpath
+      message: "back on the path."
+
 world:
   result: { type: string, default: "" }
   last_job_id: { type: string, default: "" }

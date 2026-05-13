@@ -1,0 +1,13 @@
+app:
+  id: agents-neither
+  version: 0.1.0
+
+root: foyer
+
+states:
+  foyer:
+    view: "Foyer."
+
+agents:
+  silent:
+    model: claude-opus-4-7

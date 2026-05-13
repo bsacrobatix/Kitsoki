@@ -636,10 +636,10 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		// time), this fires immediately before the handler is invoked.
 		// Replay treats it as a no-op (see store/replay.go).
 		events = append(events, newOrchestratorEvent(store.HostDispatched, map[string]any{
-			"namespace":     hc.Namespace,
-			"args":          invokeArgs,
+			"namespace":          hc.Namespace,
+			"args":               invokeArgs,
 			"rerender_fell_back": fellBack,
-			"background":    hc.Background,
+			"background":         hc.Background,
 		}, 0))
 
 		res, err := o.hosts.Invoke(ctx, hc.Namespace, invokeArgs)
