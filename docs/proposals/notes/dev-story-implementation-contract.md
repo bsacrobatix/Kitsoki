@@ -456,3 +456,225 @@ stories/bugfix/app.yaml` passing all ~10 flows. Once green:
   if they are not yet supported.
 
 See proposal §8 for the full Phase 2–8 plan.
+
+---
+
+# Wave 2 contract additions (Phase 2 — pr-refinement + dev-story hub)
+
+Wave 1 shipped `stories/bugfix/` plus the six base host_interfaces and
+the canonical §6 checkpoint shape. Wave 2 (this section) adds the
+`stories/pr-refinement/` first-class story and the `stories/dev-story/`
+engineer's-day hub that imports bf + pr. The additions below are
+strictly additive — every Wave 1 contract clause still holds.
+
+## W2.1 — New iface op: `vcs.merge`
+
+`pr-refinement`'s `merge_executing` room calls `iface.vcs.merge` to
+land the PR after CI passes. The op extends contract §2.2's `vcs`
+interface:
+
+```yaml
+vcs:
+  operations:
+    merge:
+      input:  { pr_id: string, strategy: string }   # strategy: squash | merge | rebase
+      output: { ok: bool, sha: string }
+```
+
+The default `host.git` handler backs it through the registry's
+prefix-fallback (one stub returning `{ok, sha}` satisfies the call in
+flow fixtures). A `host.github` rebind in Wave 3 will shell out to
+`gh pr merge --<strategy>`. A `host.bitbucket` rebind in cyber-repo
+hits the merge endpoint.
+
+The op is **PR-refinement-owned**: per proposal §10 question 6
+(pragmatic reading), the merge lives inside pr-refinement and the
+parent story consumes the `merged` exit. Stories that need a separate
+merge confirmation can refine instead of accept at
+`merge_awaiting_reply`, falling back to ci_monitoring.
+
+## W2.2 — `pr-refinement` world keys
+
+The new keys declared in `stories/pr-refinement/app.yaml`:
+
+```yaml
+world:
+  # PR identity
+  pr_id:            { type: string, default: "" }
+  pr_url:           { type: string, default: "" }
+  pr_title:         { type: string, default: "" }
+  pr_body:          { type: string, default: "" }
+
+  # CI state (poll output)
+  ci_state:         { type: string, default: "" }    # pending | success | failure | error
+  ci_attempts:      { type: int,    default: 0 }
+  ci_log:           { type: string, default: "" }
+  ci_failed_checks: { type: string, default: "" }
+
+  # Review-comment state
+  pr_comments:      { type: string, default: "" }    # JSON-ish blob from iface.vcs.pr_status
+  pending_comments: { type: int,    default: 0 }
+
+  # Pipeline control
+  ci_poll_budget:   { type: int,    default: 5 }
+  merge_strategy:   { type: string, default: "squash" }
+
+  # New checkpoint artifact
+  diagnose_artifact: { type: object, default: {} }
+
+  # Close-out
+  merge_sha:        { type: string, default: "" }
+  status:           { type: string, default: "open" }   # open | merged | abandoned
+```
+
+The existing Wave 1 keys (`judge_mode`, `judge_confidence_threshold`,
+`cycle`, `refine_feedback`, `llm_verdict`, `thread`, `ticket_id`,
+`ticket_title`, `workdir`, `base_branch`, `feature_branch`) carry
+straight through — pr-refinement uses the same vocabulary as bugfix.
+
+## W2.3 — New schemas
+
+| File | Purpose |
+|---|---|
+| `stories/pr-refinement/schemas/judge_verdict.json` | Identical to bugfix's `judge_verdict.json` (canonical §5 schema). Verbatim duplicate so pr-refinement can be loaded without a bugfix dependency. |
+| `stories/pr-refinement/schemas/diagnose_artifact.json` | New. `{ summary_title, summary_markdown, root_cause, fix_description, affected_files, failing_checks, confidence, reasoning }`. Produced by `diagnose_executing` and judged at `diagnose_awaiting_reply`. |
+
+## W2.4 — New exits
+
+pr-refinement adds three named return points:
+
+| Name | requires | Description |
+|---|---|---|
+| `merged` | `pr_url` | PR landed. Parent story consumes. |
+| `abandoned` | (none) | User or LLM bailed. |
+| `pushback_resolved` | (none) | Review pushback addressed; reserved for Wave 3 re-review loops. Wave 2's flows do not exercise it. |
+
+## W2.5 — `exports.intents:` on bugfix and pr-refinement
+
+Wave 1's `stories/bugfix/app.yaml` and Wave 2's
+`stories/pr-refinement/app.yaml` both now declare `exports.intents:`
+so importing parent stories (dev-story, kitsoki-dev) can lift
+imported intents into the parent's bare intent table via
+`imports.<alias>.intents.import`. This is a docs-only change —
+no behaviour shifts, just unlocks a Wave 2 surface.
+
+```yaml
+# stories/bugfix/app.yaml
+exports:
+  intents: [start, proceed, accept, refine, restart_from, quit, look]
+
+# stories/pr-refinement/app.yaml
+exports:
+  intents: [open, monitor, proceed, retry, resolve, merge_now, accept, refine, quit, look]
+```
+
+## W2.6 — Dev-story import shape
+
+`stories/dev-story/app.yaml` ships the canonical hub composition.
+The bf → pr handoff is one import edge: bf's `@exit:done` writes
+`pr_title` / `pr_body` in the parent via the importer's `exits.done.set`
+projection (read from `world.bf__done_artifact.summary_title` /
+`summary_markdown`), then transitions into the `pr` compound (entry:
+`open_pr`). pr's own `world_in:` projects those parent keys into
+`pr__<key>` and the pr-refinement room chain runs.
+
+```yaml
+# stories/dev-story/app.yaml (excerpt)
+imports:
+  bf:
+    source: ../bugfix
+    entry: idle
+    world_in: { ticket_id: "{{ world.ticket_id }}", … }
+    intents: { import: [start] }       # only bf-unique bare names
+    exits:
+      done:      { to: pr,   set: { pr_title: "{{ world.bf__done_artifact.summary_title }}", pr_body: "{{ world.bf__done_artifact.summary_markdown }}" } }
+      abandoned: { to: main, set: { status: "abandoned" } }
+
+  pr:
+    source: ../pr-refinement
+    entry: open_pr                     # bypass pr-refinement's standalone-only idle
+    world_in: { ticket_id: "{{ world.ticket_id }}", pr_title: "{{ world.pr_title }}", … }
+    intents: { import: [open, monitor, retry, resolve, merge_now] }
+    exits:
+      merged:           { to: main, set: { status: "merged", last_pr_url: "{{ world.pr__pr_url }}" } }
+      abandoned:        { to: main, set: { status: "abandoned" } }
+      pushback_resolved:{ to: main }
+```
+
+Two intent-import constraints learned in Wave 2:
+
+1. **Collision rule.** A parent's `intents.import: [X]` lifts the
+   child's `X` to the parent's bare intent table. The loader rejects
+   the lift if the bare name already exists in the parent OR has
+   already been lifted by a previous import. dev-story imports only
+   the *unique* bare names from each child (bf: `start`; pr:
+   `open, monitor, retry, resolve, merge_now`). Overlapping names
+   like `accept` / `refine` / `proceed` / `quit` / `look` stay
+   prefixed (`bf__accept`, `pr__accept`).
+
+2. **Dispatch via prefixed name.** Inside an imported child state,
+   the on-arc was rewritten to the prefixed name (`bf__accept` for
+   a child arc that authored `accept:`). The runtime dispatcher
+   routes through that prefixed name; the operator types
+   `bf__accept` (or `pr__accept`) when inside the imported
+   compound. The `intents.import` lift is purely for parent-level
+   menu surfaces (e.g. type-ahead completion); it does not change
+   the on-arc dispatch path.
+
+## W2.7 — `entry: open_pr` skips pr-refinement's standalone idle
+
+pr-refinement ships an `idle` state as its `root:` for standalone
+runs and flow fixtures (the `kitsoki test flows` seedInitialState
+path bypasses on_enter; an idle entry lets the first turn fire
+`open_pr.on_enter` via a real transition). When dev-story imports
+pr-refinement with `entry: open_pr`, the import compound drills
+straight into open_pr — the standalone idle state is unreachable
+from the importer.
+
+This pattern (a standalone-only idle entry for flow fixtures + a
+real entry state for importers) is reusable for any future
+sub-story whose entry runs material on_enter chains.
+
+## W2.8 — Runtime quirks confirmed (no contract change)
+
+The runtime quirks called out in the Wave 1 follow-up landed and
+continue to behave as the contract anticipates. For Wave 2 author
+reference:
+
+- `bind:` lands at orchestrator-dispatch time, not machine-time.
+  `when:` guards on a subsequent `on_enter` effect that read the
+  bound value DEFER via a post-bind re-evaluation pass. The bf
+  story's checkpoint shape exercises this; pr-refinement's diagnose
+  checkpoint reuses the exact pattern.
+- Views render BEFORE binds. Any view template referencing a bind
+  target (e.g. `world.pr_id`) must use `?? "(pending)"` defaults.
+- Parallel-state `emit_intent` is rejected by the runtime. Wave 2's
+  pr-refinement and dev-story hub do not use parallel encoding.
+
+## W2.9 — What Wave 2 does NOT include
+
+Explicit non-goals for Wave 2 (deferred to Wave 3+):
+
+- `stories/kitsoki-dev/` instance with `host.local_files.*` bindings
+  (Wave 3 — Phase 3 of the proposal). The dogfood loop closes there.
+- `stories/implementation/`, `stories/code-review/`, `stories/cypilot/`
+  sub-stories (Wave 3 — Phases 5–6). dev-story's rooms for these are
+  Wave-3 stubs that route back to `main`.
+- A `pushback_resolved` exit consumer in pr-refinement's room graph
+  (the exit is declared but no in-flow path produces it; Wave 3
+  re-review loops will).
+- Retiring `testdata/apps/dev-story/`. The stub still backs
+  `internal/app/loader_metamode_test.go` and several flow tests;
+  Wave 3 retires it once no test references it.
+
+## W2.10 — Wave 2 test surface (acceptance)
+
+| Story | Flow count | All pass? |
+|---|---|---|
+| `stories/bugfix/` | 10 | yes (Wave 1 preserved) |
+| `stories/pr-refinement/` | 4 | yes |
+| `stories/dev-story/` | 4 | yes (includes bf → pr full-chain) |
+| `stories/oregon-trail/` | 28 | yes (no regression) |
+
+Plus `go test ./...` is fully green.
+
