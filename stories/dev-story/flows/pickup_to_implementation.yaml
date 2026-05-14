@@ -1,0 +1,132 @@
+# pickup_to_implementation — search for a task ticket, pick it, dispatch
+# into the implementation sub-story. Proves the new go_implementation
+# arc fires, the impl import compound enters at impl.idle, and
+# world_in: projects parent ticket keys into impl__<key>.
+#
+# After entering impl, the flow walks through review_task → write_code
+# → test → review → handoff → pr (the pr-refinement import nested
+# inside impl) → @exit:done → back to main with status="merged".
+
+test_kind: flow
+app: ../app.yaml
+initial_state: main
+initial_world:
+  ticket_id:      "TKT-T-100"
+  ticket_title:   "Add /healthz endpoint"
+  thread:         "TKT-T-100"
+  workdir:        ".worktrees/tkt-t-100"
+  workspace_id:   "ws-t-100"
+  base_branch:    "main"
+  feature_branch: "task/tkt-t-100-healthz"
+  judge_mode:     "human"
+  judge_confidence_threshold: 0.8
+  merge_strategy: "squash"
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git:
+    data:
+      ok:       true
+      sha:      "abc123"
+      diff:     "diff --git a/x b/x"
+      url:      "https://example/pr/T-100"
+      pr_id:    "T-100"
+      state:    "success"
+      checks:   ""
+      comments: ""
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.local:
+    data: { ok: true, log: "PASS", state: "success", passed: 1, failed: 0 }
+  host.local_files.ticket:
+    data:
+      ok:    true
+      id:    "TKT-T-100"
+      title: "Add /healthz endpoint"
+      body:  "Stub task body."
+      url:   "issues/tasks/tkt-t-100.md"
+      tickets: "TKT-T-100: Add /healthz endpoint"
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Add /healthz"
+        summary_markdown: "Stub implementation artifact."
+        scope:            "single endpoint."
+        acceptance_criteria: ["GET /healthz returns 200."]
+        affected_files:   ["internal/server/healthz.go"]
+        confidence:       0.85
+        reasoning:        "Mechanical."
+        status:           "passed"
+        tests_run:        { passed: 1, failed: 0, log: "PASS" }
+        nits:             []
+        blockers:         []
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Stub."
+
+turns:
+  # main → go_implementation → impl.idle (the impl compound's entry).
+  # world_in: projects parent ticket_id / workdir / feature_branch /
+  # judge_mode / judge_confidence_threshold / merge_strategy into
+  # impl__<key>.
+  - intent: { name: go_implementation, slots: {} }
+    expect_state: impl.idle
+    expect_world:
+      impl__ticket_id:    "TKT-T-100"
+      impl__workdir:      ".worktrees/tkt-t-100"
+      impl__judge_mode:   "human"
+
+  # impl__start fires the bare `start` arc inside the impl child.
+  # The child's intents are prefixed (impl__start) because the
+  # parent's `start` was lifted by the bf import — no double lift.
+  - intent: { name: impl__start, slots: {} }
+    expect_state: impl.review_task_executing
+
+  - intent: { name: impl__proceed, slots: {} }
+    expect_state: impl.review_task_awaiting_reply
+  - intent: { name: impl__accept, slots: {} }
+    expect_state: impl.write_code_executing
+  - intent: { name: impl__proceed, slots: {} }
+    expect_state: impl.write_code_awaiting_reply
+  - intent: { name: impl__accept, slots: {} }
+    expect_state: impl.test_executing
+  - intent: { name: impl__proceed, slots: {} }
+    expect_state: impl.test_awaiting_reply
+  - intent: { name: impl__accept, slots: {} }
+    expect_state: impl.review_executing
+  - intent: { name: impl__proceed, slots: {} }
+    expect_state: impl.review_awaiting_reply
+
+  # accept on impl.review_awaiting_reply → impl.handoff. The arc
+  # populates pr_title / pr_body in impl's world for the pr_refinement
+  # inner import.
+  - intent: { name: impl__accept, slots: {} }
+    expect_state: impl.handoff
+
+  # proceed on impl.handoff → impl.pr.open_pr (the pr-refinement
+  # import compound nested INSIDE the impl import compound; the
+  # double-fold yields the path impl.pr.<state>).
+  - intent: { name: impl__proceed, slots: {} }
+    expect_state: impl.pr.open_pr
+
+  # The nested pr child's intents are double-prefixed: impl__pr__proceed.
+  - intent: { name: impl__pr__proceed, slots: {} }
+    expect_state: impl.pr.ci_monitoring
+  - intent: { name: impl__pr__proceed, slots: {} }
+    expect_state: impl.pr.merge_executing
+  - intent: { name: impl__pr__proceed, slots: {} }
+    expect_state: impl.pr.merge_awaiting_reply
+
+  # impl__pr__accept → @exit:merged inside pr → impl's
+  # imports.pr.exits.merged.to: "@exit:done" → impl's @exit:done →
+  # parent's imports.impl.exits.done.to: main with status="merged".
+  - intent: { name: impl__pr__accept, slots: {} }
+    expect_state: main
+    expect_world:
+      status: "merged"
+
+expect_no_errors: true

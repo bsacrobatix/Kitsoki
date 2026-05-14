@@ -4,8 +4,16 @@
 # manages the list).
 #
 # The dual-channel pattern (proposal §4.5) means every checkpoint in
-# bf / pr also writes here via host.inbox.add. Standalone runs see the
-# count via world.inbox_unread (set by the host).
+# bf / pr / impl also writes here via host.inbox.add. Standalone runs
+# see the count via world.inbox_unread (set by the host).
+#
+# Wave 3 / Phase 6 addition: `pick_review` is the routing entry for
+# "PR awaiting your review" notifications. The intent's slots
+# (pr_id, pr_title, pr_author) project a notification payload into
+# the `rev` import compound's world_in: via the parent world keys
+# (pr_id, pr_title, pr_author). Selecting `pick_review` then jumps
+# into the code-review story at its idle entry. The contract
+# appendix (W3.5) details the inbox→story routing.
 
 states:
 
@@ -16,12 +24,24 @@ states:
 
       Unread: {{ world.inbox_unread }}
 
-      (Inbox items render via the runtime's inbox subsystem; this room
-      is a navigation surface only in Wave 2.)
+      Pending review request: {{ world.pr_id ?? "(none)" }} {{ world.pr_title }}
 
-      Intents: go_back, go_main.
-    relevant_world: [inbox_unread]
+      Intents:
+        - pick_review id=<PR>     (route a review notification into code-review)
+        - go_back, go_main
+    relevant_world: [inbox_unread, pr_id, pr_title]
     on:
+      # Pick a review-request notification. The slots project into the
+      # parent world, then `target: rev` enters the code-review import
+      # compound which sees the projected fields via its world_in:.
+      pick_review:
+        - target: rev
+          effects:
+            - set:
+                pr_id:     "{{ slots.pr_id }}"
+                pr_title:  "{{ slots.pr_title ?? '' }}"
+                pr_author: "{{ slots.pr_author ?? '' }}"
+                thread:    "{{ slots.pr_id }}"
       go_back:
         - target: "{{ world.prev_state }}"
       go_main:

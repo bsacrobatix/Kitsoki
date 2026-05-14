@@ -82,11 +82,16 @@ states:
           effects:
             - set: { prev_state: "main" }
       # Dispatch to imported sub-stories. `target: bf` enters the bf
-      # compound at its entry state (idle); same for pr (entry: open_pr).
+      # compound at its entry state (idle); same for pr (entry: open_pr),
+      # impl (entry: idle), rev (entry: idle).
       go_bugfix:
         - target: bf
       go_pr_refinement:
         - target: pr
+      go_implementation:
+        - target: impl
+      go_code_review_story:
+        - target: rev
       go_main:
         - target: main
       go_back:

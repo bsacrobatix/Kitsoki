@@ -30,14 +30,20 @@
 # pr child's private world. The full bf → pr chain is one import
 # edge per child.
 #
-# # What is NOT here (Wave 3 / later)
+# # Wave 3 / Phase 6 additions
 #
-#   - `stories/implementation/` import (Wave 3)
-#   - `stories/code-review/` import (Wave 3)
-#   - `stories/cypilot/` import (Wave 3)
-#   - LLM-driven `code_review`, `deploy`, `incident`, etc. rooms — Wave 2
-#     ships these as STUBS that route back to main; their real content
-#     lands in later waves.
+#   - `stories/implementation/` import alias `impl` — small-task pipeline.
+#   - `stories/code-review/` import alias `rev` — teammate PR review.
+#   - `inbox.yaml` `pick_review` arc routes a selected review-request
+#     notification into `rev` via initial_world seeded from the
+#     notification payload.
+#
+# # What is NOT here (later waves)
+#
+#   - `stories/cypilot/` import — Wave 4.
+#   - LLM-driven `deploy`, `incident`, `observability`, `docs` rooms —
+#     Wave 2 ships these as STUBS that route back to main; their real
+#     content lands in later waves.
 
 app:
   id: dev-story
@@ -198,6 +204,12 @@ world:
   pr_title:            { type: string, default: "" }
   pr_body:             { type: string, default: "" }
 
+  # ── Inbox-routed review request payload (rev import) ──────────────
+  # The inbox `pick_review` intent populates these from a notification
+  # payload, then `target: rev` enters the code-review compound.
+  pr_id:               { type: string, default: "" }
+  pr_author:           { type: string, default: "" }
+
 # Intent vocabulary. Day-level rooms only; bf / pr's intents are lifted
 # via `imports.<alias>.intents.import` and re-exported into this table
 # at the bare names (start, proceed, accept, refine, restart_from, quit).
@@ -272,9 +284,9 @@ intents:
         required: true
         description: "Ticket id to pick."
 
-  # Pipeline-launching navigation (dispatches into bf / pr imports).
-  # `go_bugfix` targets the `bf` import compound; the import's entry
-  # (idle) handles the rest.
+  # Pipeline-launching navigation (dispatches into bf / pr / impl /
+  # rev imports). `go_bugfix` targets the `bf` import compound; the
+  # import's entry (idle) handles the rest.
   go_bugfix:
     description: "Hand off to the bugfix sub-story for the picked ticket."
     examples: ["fix bug", "bugfix", "work on bug"]
@@ -283,6 +295,28 @@ intents:
     description: "Hand off to the pr-refinement sub-story for an open PR."
     examples: ["pr refinement", "monitor pr", "pr"]
     priority: 50
+  go_implementation:
+    description: "Hand off to the implementation sub-story for the picked task."
+    examples: ["implement task", "implementation", "work on task"]
+    priority: 55
+  go_code_review_story:
+    description: "Hand off to the code-review sub-story (teammate PR review)."
+    examples: ["review teammate pr", "code review story", "rev"]
+    priority: 33
+
+  # Inbox-routed review-request pickup. Selects a "PR awaiting your
+  # review" inbox item and projects its payload (pr_id, pr_title,
+  # pr_author) into the rev import via world_in:. The inbox.yaml
+  # arc fires this intent with the slots populated by the operator
+  # (or by the inbox subsystem in autonomous mode).
+  pick_review:
+    description: "Pick a 'PR awaiting your review' notification from the inbox and enter the code-review story."
+    examples: ["pick PR-38", "review notification", "pick review"]
+    priority: 90
+    slots:
+      pr_id:    { type: string, required: true }
+      pr_title: { type: string, required: false }
+      pr_author: { type: string, required: false }
 
   # Inbox / oracle bare actions (kept minimal for Wave 2).
   ask_question:
@@ -410,6 +444,81 @@ imports:
       # main as a safety landing so the loader is happy.
       pushback_resolved:
         to: main
+
+  # Wave 3 / Phase 6 — small-task pipeline. Same projection shape as bf.
+  # impl's @exit:done routes to main with status="merged" and the
+  # last_pr_url projected from the pr-refinement merge that ran INSIDE
+  # impl's handoff room. impl is self-contained — it imports
+  # pr-refinement internally and projects @exit:done up to here.
+  impl:
+    source: ../implementation
+    entry: idle
+
+    world_in:
+      ticket_id:       "{{ world.ticket_id }}"
+      ticket_title:    "{{ world.ticket_title }}"
+      ticket_url:      "{{ world.ticket_url }}"
+      thread:          "{{ world.thread }}"
+      workspace_id:    "{{ world.workspace_id }}"
+      workdir:         "{{ world.workdir }}"
+      base_branch:     "{{ world.base_branch }}"
+      feature_branch:  "{{ world.feature_branch }}"
+      judge_mode:      "{{ world.judge_mode }}"
+      judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
+      merge_strategy:  "{{ world.merge_strategy }}"
+
+    # `start` already lifts to bare via the bf import; the operator
+    # types the prefixed `impl__start` inside impl. proceed / accept /
+    # refine / quit / look stay prefixed because they collide with
+    # parent intents.
+    intents:
+      import: []
+
+    exits:
+      done:
+        to: main
+        set:
+          status:      "merged"
+          last_pr_url: "{{ world.impl__last_pr_url }}"
+      abandoned:
+        to: main
+        set:
+          status: "abandoned"
+
+  # Wave 3 / Phase 6 — teammate-PR review. Triggered from the inbox
+  # `pick_review` arc. The review-request payload is projected into
+  # the rev child via world_in:.
+  rev:
+    source: ../code-review
+    entry: idle
+
+    world_in:
+      pr_id:      "{{ world.pr_id }}"
+      pr_title:   "{{ world.pr_title }}"
+      pr_author:  "{{ world.pr_author }}"
+      thread:     "{{ world.thread }}"
+      judge_mode: "{{ world.judge_mode }}"
+      judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
+
+    # `start` already lifts to bare via the bf import; pick_pr,
+    # approve, request_changes, dismiss are code-review-unique so
+    # they lift cleanly. The operator types `rev__start` to boot.
+    intents:
+      import: [pick_pr, approve, request_changes, dismiss]
+
+    exits:
+      reviewed:
+        to: main
+        set:
+          status: "reviewed"
+      dismissed:
+        to: main
+        set:
+          status: "dismissed"
+      abandoned:
+        to: main
+        set:
+          status: "abandoned"
 
 # Day-level rooms live in rooms/*.yaml.
 include:

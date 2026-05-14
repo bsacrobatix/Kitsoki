@@ -1,0 +1,102 @@
+# inbox_review_pickup — the inbox-routing path. Operator opens the
+# inbox, picks a "PR awaiting your review" notification, the
+# pick_review intent projects the notification payload into the rev
+# import via parent world keys, and the flow walks through the
+# code-review story to approve.
+#
+# Proves §W3.5 (inbox→code-review routing) in the contract appendix.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: main
+initial_world:
+  judge_mode: "human"
+  judge_confidence_threshold: 0.8
+  inbox_unread: 1   # represents the pending review notification
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git:
+    data:
+      ok:       true
+      url:      "https://example/pr/142"
+      pr_id:    "PR-142"
+      diff:     "diff --git a/api.go b/api.go"
+      state:    "open"
+      checks:   ""
+      comments: ""
+  host.local_files.ticket:
+    data: { ok: true }
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      stdout: "LGTM."
+      submitted:
+        summary_title:    "Reviewed PR-142"
+        summary_markdown: "Stub teammate-PR review summary."
+        overall_impression: "lgtm"
+        blockers:         []
+        nits:             []
+        confidence:       0.85
+        decision:         "approve"
+        rationale:        "Stub."
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Stub."
+
+turns:
+  # main → inbox.
+  - intent: { name: go_inbox, slots: {} }
+    expect_state: inbox
+
+  # Operator picks the "PR awaiting your review" notification. The
+  # slots project the notification payload (pr_id, pr_title, pr_author)
+  # into the parent world, then `target: rev` enters the code-review
+  # import at its idle entry; rev's world_in: lifts those parent keys
+  # into rev__pr_id / rev__pr_title / rev__pr_author.
+  - intent:
+      name: pick_review
+      slots:
+        pr_id:     "PR-142"
+        pr_title:  "feat: new API surface"
+        pr_author: "dana"
+    expect_state: rev.idle
+    expect_world:
+      pr_id:           "PR-142"
+      rev__pr_id:      "PR-142"
+      rev__pr_title:   "feat: new API surface"
+      rev__pr_author:  "dana"
+
+  # rev__start fires inside the rev child to boot the review.
+  - intent: { name: rev__start, slots: {} }
+    expect_state: rev.list_pending
+
+  # The notification seeded pr_id, so rev__proceed jumps to review_pr.
+  - intent: { name: rev__proceed, slots: {} }
+    expect_state: rev.review_pr_executing
+
+  - intent: { name: rev__proceed, slots: {} }
+    expect_state: rev.review_pr_awaiting_reply
+
+  - intent: { name: rev__accept, slots: {} }
+    expect_state: rev.comment_executing
+
+  - intent: { name: rev__proceed, slots: {} }
+    expect_state: rev.decide_executing
+
+  # approve fires the binary decision; pinned by the @exit:reviewed
+  # arc's requires: [decision_artifact].
+  - intent: { name: rev__approve, slots: {} }
+    expect_state: rev.decide_awaiting_reply
+
+  - intent: { name: rev__approve, slots: {} }
+    # @exit:reviewed → parent's imports.rev.exits.reviewed.to: main
+    # with status="reviewed".
+    expect_state: main
+    expect_world:
+      status: "reviewed"
+
+expect_no_errors: true
