@@ -356,6 +356,32 @@ type Effect struct {
 	// guard still applies — a false guard skips the entire effect,
 	// Target included.
 	Target string `yaml:"target,omitempty"`
+
+	// EmitIntent dispatches a synthetic intent against the current state
+	// after the surrounding effects chain completes. Used to auto-advance
+	// from on_enter (e.g. LLM judge → "accept") and from transition effect
+	// chains where a follow-up intent should fire without an external
+	// driver. Together with EmitSlots it forms a self-loop within the
+	// single-turn budget.
+	//
+	// Loader enforces:
+	//   - non-empty EmitIntent must resolve to an intent declared on the
+	//     current state's `on:` arcs (after compile-time intent prefix
+	//     expansion through imports);
+	//   - the synthetic dispatch is bounded by the depth cap (see
+	//     EmitIntentMaxDepth in the machine package);
+	//   - mixing EmitIntent with Target on the same effect is rejected.
+	//
+	// Template values are supported — the literal string may itself be a
+	// `{{ ... }}` expression resolved at fire time against the current
+	// world (e.g. `emit_intent: "{{ world.llm_verdict.intent }}"`).
+	EmitIntent string `yaml:"emit_intent,omitempty"`
+
+	// EmitSlots holds slot values passed to the synthesised intent call.
+	// Expression interpolation supported, evaluated against the world AT
+	// THE TIME the emit_intent effect fires (post all preceding effects
+	// in the same chain).
+	EmitSlots map[string]any `yaml:"slots,omitempty"`
 }
 
 // ProposalKind declares a named proposal kind (§3).

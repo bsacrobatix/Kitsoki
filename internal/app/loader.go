@@ -575,6 +575,14 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	allStatePaths := make(map[string]struct{})
 	collectStatePaths("", def.States, allStatePaths)
 
+	// Collect per-state-path the set of intent names declared in that
+	// state's `on:` block. Used by validateBackgroundEffectAware to
+	// statically verify emit_intent references — an emit_intent on a
+	// state's on_enter / transition effect must resolve to an intent
+	// that the state (or an ancestor compound) handles.
+	stateOnKeys := make(map[string]map[string]struct{})
+	collectStateOnKeys("", def.States, stateOnKeys)
+
 	// ── 5. validate root exists ───────────────────────────────────────────────
 	if rootName != "" {
 		if _, ok := allStatePaths[rootName]; !ok {
@@ -600,7 +608,7 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	for name := range def.Agents {
 		declaredAgents[name] = struct{}{}
 	}
-	validateStates(file, "", def.States, globalIntents, worldKeys, allStatePaths, allowedHosts, declaredAgents, &errs)
+	validateStates(file, "", def.States, globalIntents, worldKeys, allStatePaths, stateOnKeys, allowedHosts, declaredAgents, &errs)
 
 	// ── 7b. (removed) off-path agent reference: superseded by §9b
 	// validateAgentReferences which also recognises builtin agent names
@@ -659,7 +667,7 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 			// entry point so Target rules apply to it directly. Proposal-execute
 			// effects have no owning state; pass "" so a relative target: would
 			// resolve to the top-level namespace.
-			validateOnCompleteEffect(file, childLoc, "", child, allowedHosts, declaredAgents, allStatePaths, &errs)
+			validateOnCompleteEffect(file, childLoc, "", child, allowedHosts, declaredAgents, allStatePaths, stateOnKeys, &errs)
 		}
 	}
 
@@ -676,6 +684,53 @@ func collectStatePaths(prefix string, states map[string]*State, out map[string]s
 		if s != nil && len(s.States) > 0 {
 			collectStatePaths(path, s.States, out)
 		}
+	}
+}
+
+// collectStateOnKeys walks the state tree and records, per state path,
+// the set of intent names declared in that state's `on:` block. The
+// result is used by validateBackgroundEffectAware to statically
+// resolve emit_intent: references — a name must appear on the owning
+// state or some ancestor compound.
+func collectStateOnKeys(prefix string, states map[string]*State, out map[string]map[string]struct{}) {
+	for name, s := range states {
+		path := joinPath(prefix, name)
+		if s != nil && len(s.On) > 0 {
+			set := make(map[string]struct{}, len(s.On))
+			for intentName := range s.On {
+				set[intentName] = struct{}{}
+			}
+			out[path] = set
+		}
+		if s != nil && len(s.States) > 0 {
+			collectStateOnKeys(path, s.States, out)
+		}
+	}
+}
+
+// intentReachable returns true when `name` appears on `statePath`'s
+// declared `on:` arcs, or on any ancestor compound's `on:`. The
+// wildcard `*` arc is intentionally NOT treated as a match for an
+// emit_intent value — `*` is a fall-through handler for arbitrary
+// names, not an explicit target the author intended for synthetic
+// self-dispatch. If the state truly should accept a synthesised
+// dynamic intent name, declare a concrete `on: <name>` arc.
+func intentReachable(statePath, name string, stateOnKeys map[string]map[string]struct{}) bool {
+	if name == "" {
+		return false
+	}
+	path := statePath
+	for {
+		if set, ok := stateOnKeys[path]; ok {
+			if _, found := set[name]; found {
+				return true
+			}
+		}
+		idx := strings.LastIndexByte(path, '.')
+		if idx < 0 {
+			return false
+		}
+		path = path[:idx]
 	}
 }
 
@@ -696,6 +751,10 @@ func joinPath(prefix, name string) string {
 //   - compound states: initial child must exist.
 //   - invoke: host.* effects reference only declared hosts.
 //   - `with.agent:` on host.oracle.* effects resolves to a declared agent.
+//
+// stateOnKeys maps each state path to the set of intent names declared
+// in that state's `on:` block. It is used to statically validate
+// `emit_intent:` references on transition / on_enter effects.
 func validateStates(
 	file string,
 	prefix string,
@@ -703,6 +762,7 @@ func validateStates(
 	globalIntents map[string]struct{},
 	worldKeys map[string]struct{},
 	allPaths map[string]struct{},
+	stateOnKeys map[string]map[string]struct{},
 	allowedHosts map[string]struct{},
 	declaredAgents map[string]struct{},
 	errs *[]error,
@@ -756,7 +816,7 @@ func validateStates(
 						}
 					}
 					validateAgentRef(file, fmt.Sprintf("state %q intent %q effects[%d]", statePath, intentName, i), eff, declaredAgents, errs)
-					validateBackgroundEffect(file, fmt.Sprintf("state %q intent %q effects[%d]", statePath, intentName, i), statePath, eff, allowedHosts, declaredAgents, allPaths, errs)
+					validateBackgroundEffect(file, fmt.Sprintf("state %q intent %q effects[%d]", statePath, intentName, i), statePath, eff, allowedHosts, declaredAgents, allPaths, stateOnKeys, errs)
 				}
 			}
 		}
@@ -768,7 +828,7 @@ func validateStates(
 				}
 			}
 			validateAgentRef(file, fmt.Sprintf("state %q on_enter[%d]", statePath, i), eff, declaredAgents, errs)
-			validateBackgroundEffect(file, fmt.Sprintf("state %q on_enter[%d]", statePath, i), statePath, eff, allowedHosts, declaredAgents, allPaths, errs)
+			validateBackgroundEffect(file, fmt.Sprintf("state %q on_enter[%d]", statePath, i), statePath, eff, allowedHosts, declaredAgents, allPaths, stateOnKeys, errs)
 		}
 
 		// Validate Timeout: parse the duration and resolve the target.
@@ -813,7 +873,7 @@ func validateStates(
 
 		// Recurse into child states.
 		if len(s.States) > 0 {
-			validateStates(file, statePath, s.States, globalIntents, worldKeys, allPaths, allowedHosts, declaredAgents, errs)
+			validateStates(file, statePath, s.States, globalIntents, worldKeys, allPaths, stateOnKeys, allowedHosts, declaredAgents, errs)
 		}
 	}
 }
@@ -886,8 +946,8 @@ func resolveTarget(statePath, target string) string {
 // the recursive descent. originStatePath is the dotted-path of the state
 // that owns the effect chain (used to resolve relative target: refs); it
 // may be empty for proposal-execute effects (no owning state).
-func validateBackgroundEffect(file, location, originStatePath string, eff Effect, allowedHosts, declaredAgents, allStatePaths map[string]struct{}, errs *[]error) {
-	validateBackgroundEffectAware(file, location, originStatePath, eff, false /* outer effect, not inside on_complete */, allowedHosts, declaredAgents, allStatePaths, errs)
+func validateBackgroundEffect(file, location, originStatePath string, eff Effect, allowedHosts, declaredAgents, allStatePaths map[string]struct{}, stateOnKeys map[string]map[string]struct{}, errs *[]error) {
+	validateBackgroundEffectAware(file, location, originStatePath, eff, false /* outer effect, not inside on_complete */, allowedHosts, declaredAgents, allStatePaths, stateOnKeys, errs)
 }
 
 // validateOnCompleteEffect is the entry point used at proposal-execute call
@@ -895,14 +955,14 @@ func validateBackgroundEffect(file, location, originStatePath string, eff Effect
 // caller has unrolled the first level of the on_complete: list before
 // invoking). Target rules apply directly to eff in addition to its
 // descendants.
-func validateOnCompleteEffect(file, location, originStatePath string, eff Effect, allowedHosts, declaredAgents, allStatePaths map[string]struct{}, errs *[]error) {
-	validateBackgroundEffectAware(file, location, originStatePath, eff, true /* eff is already inside on_complete */, allowedHosts, declaredAgents, allStatePaths, errs)
+func validateOnCompleteEffect(file, location, originStatePath string, eff Effect, allowedHosts, declaredAgents, allStatePaths map[string]struct{}, stateOnKeys map[string]map[string]struct{}, errs *[]error) {
+	validateBackgroundEffectAware(file, location, originStatePath, eff, true /* eff is already inside on_complete */, allowedHosts, declaredAgents, allStatePaths, stateOnKeys, errs)
 }
 
 // validateBackgroundEffectAware is the on_complete-aware implementation.
 // insideOnComplete is true when eff itself is an entry inside a parent's
 // on_complete: list — Target is only legal in that case.
-func validateBackgroundEffectAware(file, location, originStatePath string, eff Effect, insideOnComplete bool, allowedHosts, declaredAgents, allStatePaths map[string]struct{}, errs *[]error) {
+func validateBackgroundEffectAware(file, location, originStatePath string, eff Effect, insideOnComplete bool, allowedHosts, declaredAgents, allStatePaths map[string]struct{}, stateOnKeys map[string]map[string]struct{}, errs *[]error) {
 	addErr := func(msg string) {
 		*errs = append(*errs, &ValidationError{File: file, Message: msg})
 	}
@@ -948,6 +1008,25 @@ func validateBackgroundEffectAware(file, location, originStatePath string, eff E
 			}
 		}
 	}
+
+	// emit_intent: validation.
+	//   - Mutually exclusive with target: on the same effect (transition
+	//     and self-dispatch are different shapes; declare them separately).
+	//   - When the value is not a template, the named intent must appear
+	//     in the on: arcs of the owning state (or an ancestor compound).
+	//     A template value (`{{ ... }}`) is checked at runtime by the
+	//     emit dispatch path — the loader can't know what it'll resolve
+	//     to.
+	if eff.EmitIntent != "" {
+		if eff.Target != "" {
+			addErr(fmt.Sprintf("%s: emit_intent: cannot be combined with target: on the same effect (split into separate effects)", location))
+		}
+		if !strings.Contains(eff.EmitIntent, "{{") {
+			if !intentReachable(originStatePath, eff.EmitIntent, stateOnKeys) {
+				addErr(fmt.Sprintf("%s: emit_intent %q is not declared on state %q's on: arcs (nor any ancestor's)", location, eff.EmitIntent, originStatePath))
+			}
+		}
+	}
 	for i, child := range eff.OnComplete {
 		loc := fmt.Sprintf("%s on_complete[%d]", location, i)
 		if child.Background {
@@ -962,7 +1041,7 @@ func validateBackgroundEffectAware(file, location, originStatePath string, eff E
 		// Validate any `agent: <name>` on the child effect's with: block.
 		validateAgentRef(file, loc, child, declaredAgents, errs)
 		// Recursively reject nested on_complete with background and validate target rules.
-		validateBackgroundEffectAware(file, loc, originStatePath, child, true /* this child IS inside on_complete */, allowedHosts, declaredAgents, allStatePaths, errs)
+		validateBackgroundEffectAware(file, loc, originStatePath, child, true /* this child IS inside on_complete */, allowedHosts, declaredAgents, allStatePaths, stateOnKeys, errs)
 	}
 }
 
