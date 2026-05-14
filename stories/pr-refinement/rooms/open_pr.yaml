@@ -1,0 +1,64 @@
+# open_pr — entry room. Opens the PR via iface.vcs.open_pr and binds
+# pr_id + pr_url. No checkpoint; the room threads straight into
+# ci_monitoring on `proceed`.
+#
+# When called from a parent story (bugfix → pr-refinement handoff), the
+# parent's world_in: usually projects pr_title, pr_body, workdir,
+# feature_branch, base_branch from the upstream done_artifact. When
+# called standalone (`kitsoki run … --warp scenarios/pr_<n>.yaml`) the
+# warp basis must seed those keys directly.
+
+states:
+
+  open_pr:
+    description: "Opening the PR (or recognising an existing one)."
+    view: |
+      Opening PR for {{ world.ticket_id }} — {{ world.ticket_title }}
+        feature_branch: {{ world.feature_branch }}
+        base_branch:    {{ world.base_branch }}
+        workdir:        {{ world.workdir }}
+
+      PR id:  {{ world.pr_id ?? "(pending)" }}
+      PR url: {{ world.pr_url ?? "(pending)" }}
+
+      Type `proceed` to start monitoring CI, or `quit` to abandon.
+    relevant_world: [ticket_id, ticket_title, feature_branch, base_branch, workdir, pr_id, pr_url]
+    on_enter:
+      # Open the PR. iface.vcs.open_pr → host.git.open_pr in the
+      # default binding; flow fixtures stub the handler to return
+      # {ok, url, pr_id}. A parent story may rebind iface.vcs to
+      # host.github or host.bitbucket without touching this YAML.
+      - invoke: iface.vcs.open_pr
+        with:
+          workdir:  "{{ world.workdir }}"
+          title:    "{{ world.pr_title }}"
+          body:     "{{ world.pr_body }}"
+          base:     "{{ world.base_branch }}"
+        bind:
+          pr_id:  pr_id
+          pr_url: url
+        on_error: open_pr
+      # Announce on the transport — same dual-channel pattern as the
+      # bugfix _awaiting_reply checkpoints.
+      - invoke: iface.transport.post
+        with:
+          thread:   "{{ world.thread }}"
+          title:    "PR opened: {{ world.ticket_id }}"
+          body:     "PR opened for {{ world.ticket_id }} — {{ world.pr_title }}\n\n{{ world.pr_url }}"
+          phase_id: "open_pr_{{ world.ticket_id }}"
+      - invoke: host.inbox.add
+        with:
+          kind:    info
+          title:   "PR opened: {{ world.ticket_id }}"
+          thread:  "{{ world.thread }}"
+          state:   open_pr
+          body:    "{{ world.pr_url ?? '(pending)' }}"
+    on:
+      proceed:
+        - target: ci_monitoring
+      monitor:
+        - target: ci_monitoring
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

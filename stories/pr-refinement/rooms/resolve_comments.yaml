@@ -1,0 +1,41 @@
+# resolve_comments — round-trip review comments. Operator-driven in
+# Wave 2 (no checkpoint LLM-judge yet); typing `resolve` posts a generic
+# response comment via iface.vcs.pr_comment, decrements
+# pending_comments, and threads into re_push for the followup commit.
+#
+# Wave 3 adds an LLM-driven "address all comments" subflow that drafts
+# replies per-comment; Wave 2's minimal shape is one round-trip.
+
+states:
+
+  resolve_comments:
+    description: "Round-tripping {{ world.pending_comments }} review comments."
+    view: |
+      Review comments on PR {{ world.pr_id }} — {{ world.pr_title }}
+        pending: {{ world.pending_comments }}
+        raw:     {{ world.pr_comments ?? "(none)" }}
+
+      Type `resolve` to post a follow-up comment and re-push,
+      `proceed` to skip ahead (treat as resolved), or `quit`.
+    relevant_world: [pr_id, pr_title, pending_comments, pr_comments]
+    on:
+      resolve:
+        - target: re_push
+          effects:
+            - invoke: iface.vcs.pr_comment
+              with:
+                pr_id: "{{ world.pr_id }}"
+                body:  "Addressed in next push."
+            - set:
+                pending_comments: 0
+                refine_feedback:  "Round-tripped review comments."
+      proceed:
+        # Treat as resolved without posting — operator vouches.
+        - target: ci_monitoring
+          effects:
+            - set:
+                pending_comments: 0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

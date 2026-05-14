@@ -1,0 +1,90 @@
+# happy_human — judge_mode=human, CI passes, no review comments.
+# open_pr → ci_monitoring (success) → merge_executing → merge_awaiting_reply
+# → @exit:merged.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:      "TKT-PR-001"
+  ticket_title:   "Fix the foo"
+  thread:         "TKT-PR-001"
+  workdir:        ".worktrees/tkt-pr-001"
+  base_branch:    "main"
+  feature_branch: "fix/tkt-pr-001-foo"
+  pr_title:       "TKT-PR-001: Fix the foo"
+  pr_body:        "Closes TKT-PR-001."
+  judge_mode:     "human"
+  judge_confidence_threshold: 0.8
+  merge_strategy: "squash"
+  pending_comments: 0
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  # iface.vcs.* → host.git.<op>. prefix-fallback lets one stub cover
+  # open_pr (returns url+pr_id), pr_status (returns state+checks+comments),
+  # commit (returns ok+sha), push, merge (returns sha).
+  host.git:
+    data:
+      ok:    true
+      url:   "https://example/pr/142"
+      pr_id: "142"
+      state: "success"
+      checks: ""
+      comments: ""
+      sha:   "deadbeef"
+  # iface.ci.* → host.local.<op>. Default `state: success` so the
+  # ci_monitoring poll doesn't loop.
+  host.local:
+    data: { ok: true, state: "success", checks: "" }
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "Stub artifact body."
+        root_cause:       "stub"
+        fix_description:  "stub"
+        verdict:          "pass"
+        intent:           "accept"
+        reason:           "stub"
+        confidence:       0.9
+
+turns:
+  # idle → open_pr. The transition fires open_pr.on_enter which runs
+  # iface.vcs.open_pr and binds pr_id + pr_url from the host.git stub.
+  - intent: { name: open, slots: {} }
+    expect_state: open_pr
+    expect_world:
+      pr_id:  "142"
+      pr_url: "https://example/pr/142"
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: ci_monitoring
+
+  # ci_monitoring's on_enter polled and bound ci_state=success.
+  # proceed branches: success + 0 comments → merge_executing.
+  - intent: { name: proceed, slots: {} }
+    expect_state: merge_executing
+    expect_world:
+      ci_state: "success"
+
+  # merge_executing.on_enter ran iface.vcs.merge and bound merge_sha.
+  - intent: { name: proceed, slots: {} }
+    expect_state: merge_awaiting_reply
+    expect_world:
+      merge_sha: "deadbeef"
+      status:    "merged"
+
+  # accept → @exit:merged.
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__merged
+    expect_world:
+      status: "merged"
+      pr_url: "https://example/pr/142"
+
+expect_terminal: true
+expect_no_errors: true

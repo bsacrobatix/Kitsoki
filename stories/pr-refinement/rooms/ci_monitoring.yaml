@@ -1,0 +1,77 @@
+# ci_monitoring — poll iface.vcs.pr_status (and/or iface.ci.remote_status)
+# for the current PR. The state itself is non-checkpointed; the operator
+# (or autonomous loop) advances on three intents:
+#
+#   monitor       — re-poll. ci_state may flip success | failure | pending.
+#   proceed       — move on based on the current ci_state:
+#                     success → resolve_comments (if pending_comments > 0) or merge.
+#                     failure → diagnose.
+#                     pending → stay (no-op).
+#   merge_now     — bypass the wait and jump straight to merge (skip
+#                   review-comment resolution; the operator vouches).
+#   quit          — abandon.
+#
+# A real provider (host.github, host.jenkins) polls the actual CI; the
+# default host.local stub returns `state: success` so flow fixtures
+# don't loop. Flow fixtures that want to exercise the failure-path
+# stub host.local with `state: failure` and a populated `checks: [...]`
+# array.
+
+states:
+
+  ci_monitoring:
+    description: "Polling CI for {{ world.pr_id }}."
+    view: |
+      Monitoring CI for PR {{ world.pr_id }} — {{ world.pr_title }}
+
+      CI state:    {{ world.ci_state ?? "(unknown)" }}
+      Attempts:    {{ world.ci_attempts }} / {{ world.ci_poll_budget }}
+      Failing:     {{ world.ci_failed_checks ?? "none" }}
+      Pending review comments: {{ world.pending_comments }}
+
+      Type `monitor` to re-poll, `proceed` to act on the current state,
+      `merge_now` to override and merge, or `quit` to abandon.
+    relevant_world: [pr_id, pr_title, ci_state, ci_attempts, ci_poll_budget, ci_failed_checks, pending_comments]
+    on_enter:
+      # Poll the PR's CI state. iface.vcs.pr_status returns
+      # { state, checks, comments }; we bind the three keys we care
+      # about. Subsequent visits (post-`monitor` intent) re-fire this
+      # block so the operator sees a fresh read each time.
+      - invoke: iface.vcs.pr_status
+        with:
+          pr_id: "{{ world.pr_id }}"
+        bind:
+          ci_state:         state
+          ci_failed_checks: checks
+          pr_comments:      comments
+        on_error: ci_monitoring
+      - set:
+          ci_attempts: "{{ world.ci_attempts + 1 }}"
+    on:
+      # `monitor` is the explicit re-poll — same target as . but the
+      # name documents intent. The on_enter re-runs because we're
+      # re-entering the same state.
+      monitor:
+        - target: ci_monitoring
+      proceed:
+        # Three guard arms decide the next room based on ci_state.
+        # success + no comments → merge. success + comments → resolve.
+        # failure → diagnose. anything else (pending / error) → stay.
+        - when: "world.ci_state == 'success' && world.pending_comments == 0"
+          target: merge_executing
+        - when: "world.ci_state == 'success' && world.pending_comments > 0"
+          target: resolve_comments
+        - when: "world.ci_state == 'failure'"
+          target: diagnose_executing
+        - default: true
+          target: ci_monitoring
+          guard_hint: "CI is still pending — type `monitor` to re-poll."
+      # Operator override: jump straight to merge without waiting on CI
+      # or review comments. Useful for `--warp` scenarios that want to
+      # exercise the merge path without the upstream CI machinery.
+      merge_now:
+        - target: merge_executing
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

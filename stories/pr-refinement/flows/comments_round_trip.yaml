@@ -1,0 +1,93 @@
+# comments_round_trip — judge_mode=human. CI passes but pending_comments
+# is non-zero, so ci_monitoring routes into resolve_comments. The
+# operator types `resolve` to post a follow-up and chain into re_push,
+# then proceed → ci_monitoring → merge.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:      "TKT-PR-003"
+  ticket_title:   "Foyer banner truncated"
+  thread:         "TKT-PR-003"
+  workdir:        ".worktrees/tkt-pr-003"
+  base_branch:    "main"
+  feature_branch: "fix/tkt-pr-003-foyer"
+  pr_title:       "TKT-PR-003: Foyer banner truncated"
+  pr_body:        "Closes TKT-PR-003."
+  judge_mode:     "human"
+  judge_confidence_threshold: 0.8
+  merge_strategy: "squash"
+  # Seed two pending review comments. ci_monitoring branches on this
+  # *after* the on_enter poll updates ci_state from host.git.
+  pending_comments: 2
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git:
+    data:
+      ok:    true
+      url:   "https://example/pr/144"
+      pr_id: "144"
+      state: "success"
+      checks: ""
+      comments: "rev1: please add a test; rev2: rename foo→bar"
+      sha:   "cafebabe"
+  host.local:
+    data: { ok: true, state: "success" }
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "Stub artifact body."
+        root_cause:       "stub"
+        fix_description:  "stub"
+        verdict:          "pass"
+        intent:           "accept"
+        reason:           "stub"
+        confidence:       0.9
+
+turns:
+  - intent: { name: open, slots: {} }
+    expect_state: open_pr
+    expect_world:
+      pr_id: "144"
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: ci_monitoring
+    expect_world:
+      ci_state: "success"
+
+  # proceed branches: ci_state=success AND pending_comments > 0 → resolve_comments.
+  - intent: { name: proceed, slots: {} }
+    expect_state: resolve_comments
+
+  # resolve posts a comment via iface.vcs.pr_comment and sets
+  # pending_comments=0, then chains into re_push.
+  - intent: { name: resolve, slots: {} }
+    expect_state: re_push
+    expect_world:
+      pending_comments: 0
+
+  # re_push → ci_monitoring.
+  - intent: { name: proceed, slots: {} }
+    expect_state: ci_monitoring
+
+  # ci_state=success, pending_comments=0 → merge_executing.
+  - intent: { name: proceed, slots: {} }
+    expect_state: merge_executing
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: merge_awaiting_reply
+
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__merged
+    expect_world:
+      status: "merged"
+
+expect_terminal: true
+expect_no_errors: true
