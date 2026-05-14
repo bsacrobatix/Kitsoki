@@ -169,6 +169,27 @@ type Machine interface {
 	// the session forward (oncomplete / timeout) use this to learn
 	// where the chain landed.
 	RunEffectsAndState(ctx context.Context, state app.StatePath, w world.World, effects []app.Effect) (app.StatePath, world.World, []HostInvocation, string, []store.Event, error)
+
+	// DispatchPostBindEmits re-evaluates the emit_intent: effects on
+	// the entered state's on_enter chain against a post-bind world
+	// snapshot, then dispatches any whose `when:` guard now passes.
+	// This is the bridge that makes emit_intent: composable with
+	// host.* invocations that bind into world AFTER machine.Turn
+	// returns — the canonical case being the bugfix story's LLM-judge
+	// step (host.oracle.ask_with_mcp binds llm_verdict, the next
+	// effect's `when:` reads it).
+	//
+	// The pass walks only emit_intent: entries; set/increment/say/invoke
+	// effects have already fired at machine.Turn time and are NOT
+	// re-applied. Returns the new leaf state, post-emit world, host
+	// calls collected by the synthetic dispatches, accumulated
+	// say-text, the events to append (TransitionApplied / EffectApplied /
+	// StateExited / StateEntered for each fired emit), and any error.
+	//
+	// When the state has no emit_intent: effects (or none whose guard
+	// passes), returns the inputs unchanged with empty event/hostCall
+	// slices — callers can guard on len(events) before doing anything.
+	DispatchPostBindEmits(ctx context.Context, state app.StatePath, w world.World) (app.StatePath, world.World, []HostInvocation, string, []store.Event, error)
 }
 
 // GuardDryRunResult is the result of TryGuards.
@@ -1063,6 +1084,26 @@ func (m *machineImpl) applyEffectsTraced(ctx context.Context, effects []app.Effe
 			}
 			ok, eerr := expr.EvalBool(prog, env)
 			if eerr != nil {
+				// emit_intent effects routinely reference world keys that
+				// only get populated by host-call binds (e.g. the bugfix
+				// story's `world.llm_verdict.confidence`, bound by
+				// host.oracle.ask_with_mcp later in the same on_enter
+				// chain). Binds happen at orchestrator-dispatch time, not
+				// machine-time, so the When eval can error against nil
+				// references here even though the post-bind eval would
+				// succeed. For emit_intent specifically, we DEFER the
+				// effect silently — the orchestrator's
+				// DispatchPostBindEmits pass re-evaluates against the
+				// post-bind world. For other effects (set/say/invoke)
+				// the error is a real authoring bug — propagate it.
+				if eff.EmitIntent != "" {
+					m.logger.DebugContext(ctx, trace.EvMachineEffectApplied,
+						slog.String("type", "emit_intent_deferred"),
+						slog.String("when", eff.When),
+						slog.String("reason", eerr.Error()),
+					)
+					continue
+				}
 				return world.World{}, nil, saySB, nil, nil, fmt.Errorf("effect when %q: eval: %w", eff.When, eerr)
 			}
 			if !ok {
@@ -1425,6 +1466,86 @@ func (m *machineImpl) applyEffects(effects []app.Effect, w world.World, env expr
 		}
 	}
 	return newWorld, hostCalls, saySB, effectEvents, nil
+}
+
+// DispatchPostBindEmits — see Machine interface doc-comment.
+//
+// Walks the leaf state's on_enter chain (parallel-encoded paths are
+// unsupported and return inputs unchanged, mirroring the rest of the
+// emit_intent dispatch path). For each effect that declares
+// emit_intent: (with its optional When: guard), evaluates the guard
+// against the post-bind world and dispatches the synthetic intent via
+// the shared dispatchEmittedIntents pipeline.
+func (m *machineImpl) DispatchPostBindEmits(ctx context.Context, state app.StatePath, w world.World) (app.StatePath, world.World, []HostInvocation, string, []store.Event, error) {
+	if parseParallel(string(state)).IsParallel {
+		return state, w, nil, "", nil, nil
+	}
+	cs, ok := m.states[string(state)]
+	if !ok || cs.s == nil || len(cs.s.OnEnter) == 0 {
+		return state, w, nil, "", nil, nil
+	}
+
+	// Build an env that sees the post-bind world.
+	env := expr.Env{
+		Slots: map[string]any{},
+		World: w.Vars,
+		Event: map[string]any{},
+	}
+
+	var emits []emittedIntent
+	for _, eff := range cs.s.OnEnter {
+		if eff.EmitIntent == "" {
+			continue
+		}
+		if strings.TrimSpace(eff.When) != "" {
+			prog, cerr := expr.CompileBool(eff.When)
+			if cerr != nil {
+				return state, w, nil, "", nil, fmt.Errorf("post-bind emit_intent when %q: compile: %w", eff.When, cerr)
+			}
+			ok, eerr := expr.EvalBool(prog, env)
+			if eerr != nil {
+				// A guard that errors against the post-bind world is
+				// (almost always) an authoring bug — the loader's
+				// when-eval check doesn't run pre-Turn either. Surface
+				// it so authors catch the case where the LLM-judge
+				// didn't bind at all and the guard reads through nil.
+				return state, w, nil, "", nil, fmt.Errorf("post-bind emit_intent when %q: eval: %w", eff.When, eerr)
+			}
+			if !ok {
+				continue
+			}
+		}
+		rendered := eff.EmitIntent
+		if strings.Contains(rendered, "{{") {
+			out, rerr := expr.Render(rendered, env)
+			if rerr != nil {
+				return state, w, nil, "", nil, fmt.Errorf("post-bind emit_intent: render %q: %w", eff.EmitIntent, rerr)
+			}
+			rendered = strings.TrimSpace(out)
+		}
+		if rendered == "" {
+			continue
+		}
+		slots := make(map[string]any, len(eff.EmitSlots))
+		for k, v := range eff.EmitSlots {
+			rv, rerr := resolveEffectValue(v, env, w)
+			if rerr != nil {
+				return state, w, nil, "", nil, fmt.Errorf("post-bind emit_intent %q slot %q: %w", rendered, k, rerr)
+			}
+			slots[k] = rv
+		}
+		emits = append(emits, emittedIntent{Name: rendered, Slots: slots})
+	}
+
+	if len(emits) == 0 {
+		return state, w, nil, "", nil, nil
+	}
+
+	finalState, finalWorld, hostCalls, sayText, events, derr := m.dispatchEmittedIntents(ctx, string(state), w, emits, env, 0)
+	if derr != nil {
+		return state, w, nil, "", nil, derr
+	}
+	return app.StatePath(finalState), finalWorld, hostCalls, sayText, events, nil
 }
 
 // RenderState renders the view for a state+world snapshot. Used by the

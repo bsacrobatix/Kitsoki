@@ -342,6 +342,11 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 		result.NewState = hostRedirect
 	}
 
+	// Post-bind emit_intent dispatch — see settlePostBindEmits doc.
+	if hostRedirect == "" && result.ValidationError == nil {
+		o.settlePostBindEmits(ctx, sid, &result, tl)
+	}
+
 	successEvents := append([]store.Event{startEvent}, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
 		"outcome": "transitioned",

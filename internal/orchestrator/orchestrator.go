@@ -673,6 +673,11 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		result.NewState = hostRedirect
 	}
 
+	// Post-bind emit_intent dispatch (see settlePostBindEmits doc).
+	if hostRedirect == "" && result.ValidationError == nil {
+		o.settlePostBindEmits(ctx, sid, &result, tl)
+	}
+
 	successEvents := append(prefix, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
 		"outcome": "transitioned",
@@ -738,6 +743,62 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		AllowedIntents: newAllowedNames,
 		TurnNumber:     turnNum,
 	}, nil
+}
+
+// settlePostBindEmits re-evaluates emit_intent: effects on the
+// just-entered state's on_enter chain against the post-bind world,
+// dispatches any whose `when:` guard now passes, and folds the
+// resulting events / state / world / view into `res`. The machine's
+// applyEffectsTraced silently defers emit_intent: effects whose
+// machine-time guard eval errors against an unbound world key
+// (typical when the same on_enter chain has a host.* invoke that
+// binds the key the emit's guard reads); this helper picks them up
+// after dispatchHostCalls has run the host call and applied the bind.
+//
+// emit_intent dispatches can themselves queue host calls (a target
+// state's on_enter may invoke); we dispatch those nested calls
+// synchronously so the whole chain settles in the same externally-
+// initiated turn.
+func (o *Orchestrator) settlePostBindEmits(ctx context.Context, sid app.SessionID, res *machine.TurnResult, tl *trace.TurnLogger) {
+	emState, emWorld, emHostCalls, emSay, emEvents, emErr := o.machine.DispatchPostBindEmits(ctx, res.NewState, res.World)
+	if emErr != nil {
+		if tl != nil {
+			tl.Debug(ctx, trace.EvHarnessError, slog.String("emit_intent_dispatch_error", emErr.Error()))
+		}
+		return
+	}
+	if len(emEvents) == 0 {
+		return
+	}
+	res.NewState = emState
+	res.World = emWorld
+	res.Events = append(res.Events, emEvents...)
+	if len(emHostCalls) > 0 {
+		ehe, ehw, ehv, ehr, _ := o.dispatchHostCalls(ctx, sid, emHostCalls, res.World, res.NewState)
+		if len(ehe) > 0 {
+			res.Events = append(res.Events, ehe...)
+			res.World = ehw
+			if ehv != "" {
+				res.View = ehv
+			}
+		}
+		if ehr != "" {
+			res.NewState = ehr
+		}
+		// After nested host dispatch the new state may itself have an
+		// emit_intent waiting on a freshly-bound world key — recurse
+		// once. The machine's EmitIntentMaxDepth still caps each
+		// individual dispatch chain.
+		o.settlePostBindEmits(ctx, sid, res, tl)
+	}
+	// Refresh the view so it reflects the final settled state.
+	if v, rErr := o.machine.RenderState(res.NewState, res.World); rErr == nil && v != "" {
+		if emSay != "" {
+			res.View = emSay + "\n\n" + v
+		} else {
+			res.View = v
+		}
+	}
 }
 
 // dispatchHostCalls invokes each HostInvocation, applies bindings to world,
@@ -1424,6 +1485,11 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 	}
 	if hostRedirect != "" {
 		result.NewState = hostRedirect
+	}
+
+	// Post-bind emit_intent dispatch — see settlePostBindEmits doc.
+	if hostRedirect == "" && result.ValidationError == nil {
+		o.settlePostBindEmits(ctx, sid, &result, tl)
 	}
 
 	successEvents := append([]store.Event{startEvent}, result.Events...)
