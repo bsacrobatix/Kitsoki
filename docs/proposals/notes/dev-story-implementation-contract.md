@@ -1377,3 +1377,307 @@ noting for future authors:
    budget gate evaluates against the just-updated counter (which
    the `world_override` seeded). No machine changes were needed.
 
+# Wave 3 / Phase 6 — `stories/implementation/` + `stories/code-review/`
+
+Wave 1–4 shipped bugfix, pr-refinement, cypilot, and dev-story. Phase 6
+(this section) fills out dev-story's hub with the two remaining
+sub-stories from proposal §4.3:
+
+- **`stories/implementation/`** — small-task pipeline; lighter than
+  bugfix (no reproduction phase, no separate security review).
+- **`stories/code-review/`** — review a teammate's PR; triggered from
+  the dev-story inbox by an external "PR awaiting your review"
+  notification.
+
+Both reuse `stories/pr-refinement/` for the tail (implementation only —
+code-review terminates at the review decision and does not open / merge
+a PR of its own).
+
+## W6.1 — `stories/implementation/` room set
+
+Five visible rooms plus a `handoff` that enters the pr-refinement
+import compound. Lighter than bugfix's seven rooms.
+
+| Room | Substates | Checkpoint? | On `accept` |
+|---|---|---|---|
+| `idle` | one atomic | n/a | `review_task_executing` (via `start`) |
+| `review_task` | `_executing`, `_awaiting_reply` | yes — `task_summary_artifact` | `write_code_executing` |
+| `write_code` | `_executing`, `_awaiting_reply` | yes — `code_artifact` | `test_executing` |
+| `test` | `_executing`, `_awaiting_reply` | yes — `test_artifact` | `review_executing` |
+| `review` | `_executing`, `_awaiting_reply` | yes — `review_artifact` | `handoff` |
+| `handoff` | one atomic | n/a | `pr` (the pr-refinement import compound) |
+
+The `test` and `review` rooms' `refine` arcs both bounce back to
+`write_code_executing` with feedback — the loop closes around the
+code-write room rather than the local checkpoint. This is the
+implementation-specific deviation from the bugfix pattern (where
+each checkpoint's `refine` recurses into its own `_executing`).
+
+### W6.1.1 — World keys
+
+```yaml
+world:
+  # Identity / ticket
+  ticket_id:        { type: string, default: "" }
+  ticket_title:     { type: string, default: "" }
+  ticket_body:      { type: string, default: "" }     # bound by iface.ticket.get
+  thread:           { type: string, default: "" }
+
+  # Workspace
+  workspace_id:     { type: string, default: "" }
+  workdir:          { type: string, default: "" }
+  base_branch:      { type: string, default: "main" }
+  feature_branch:   { type: string, default: "" }
+
+  # Pipeline control
+  judge_mode:                  { type: string, default: "human" }
+  judge_confidence_threshold:  { type: float,  default: 0.8 }
+  cycle:                       { type: int,    default: 0 }
+  refine_feedback:             { type: string, default: "" }
+
+  # Per-room artifacts
+  task_summary_artifact:  { type: object, default: {} }
+  code_artifact:          { type: object, default: {} }
+  test_artifact:          { type: object, default: {} }
+  review_artifact:        { type: object, default: {} }
+
+  # CI scratch
+  ci_log:           { type: string, default: "" }
+  ci_state:         { type: string, default: "" }
+
+  # PR handoff (populated by the pr-refinement import)
+  pr_id:            { type: string, default: "" }
+  pr_url:           { type: string, default: "" }
+  pr_title:         { type: string, default: "" }
+  pr_body:          { type: string, default: "" }
+  merge_strategy:   { type: string, default: "squash" }
+  last_pr_url:      { type: string, default: "" }
+
+  # Carry-forward to @exit:done
+  done_artifact:    { type: object, default: {} }
+  status:           { type: string, default: "open" }
+```
+
+### W6.1.2 — Exits
+
+| Name | Description | `requires:` keys |
+|---|---|---|
+| `done` | Pipeline succeeded; PR was opened + merged via pr-refinement. | `code_artifact` |
+| `abandoned` | User or LLM bailed. | — |
+
+The pr-refinement nested import projects `@exit:merged` →
+implementation's `@exit:done` via:
+
+```yaml
+imports:
+  pr:
+    source: ../pr-refinement
+    entry: open_pr
+    world_in: { … }
+    exits:
+      merged:
+        to: "@exit:done"
+        set:
+          status:        "merged"
+          last_pr_url:   "{{ world.pr__pr_url }}"
+          code_artifact: "{{ world.code_artifact }}"   # satisfies requires:
+          done_artifact: "{{ world.code_artifact }}"
+      abandoned:
+        to: "@exit:abandoned"
+        set: { status: "abandoned" }
+```
+
+The `set:` re-pins `code_artifact` on the @exit:done arc so the
+static `requires: [code_artifact]` check passes (see
+`internal/app/imports.go::checkExitRequiresRec`).
+
+## W6.2 — `stories/code-review/` room set
+
+Five visible rooms — no separate `_executing`/`_awaiting_reply`
+inflation for the navigation states.
+
+| Room | Substates | Checkpoint? | On `accept` / decision |
+|---|---|---|---|
+| `idle` | one atomic | n/a | `list_pending` (via `start`) |
+| `list_pending` | one atomic | n/a | `review_pr_executing` (via `pick_pr` / `proceed`) |
+| `review_pr` | `_executing`, `_awaiting_reply` | yes — `review_summary_artifact` | `comment_executing` |
+| `comment` | `_executing` only | no | `decide_executing` (via `proceed`) |
+| `decide` | `_executing`, `_awaiting_reply` | yes — `decision_artifact` | `@exit:reviewed` (via `approve` / `request_changes`) |
+
+The `decide` room's `accept` arc is polymorphic: it reads
+`world.decision_artifact.decision` and routes through the matching
+`request_changes` / `approve` arm so the LLM-judge auto-fire path
+works without forking the state graph.
+
+### W6.2.1 — World keys
+
+```yaml
+world:
+  # Identity / inbox-routed PR
+  pr_id:           { type: string, default: "" }
+  pr_url:          { type: string, default: "" }
+  pr_title:        { type: string, default: "" }
+  pr_author:       { type: string, default: "" }
+  thread:          { type: string, default: "" }
+
+  # Pending list
+  pending_prs:     { type: string, default: "" }
+  pending_count:   { type: int,    default: 0 }
+
+  # Diff + comments
+  pr_diff:         { type: string, default: "" }
+  pr_comments:     { type: string, default: "" }
+
+  # Per-room artifacts
+  review_summary_artifact: { type: object, default: {} }
+  decision_artifact:       { type: object, default: {} }
+  draft_comment:           { type: string, default: "" }
+
+  # Decision
+  decision:        { type: string, default: "" }   # approve | request_changes | dismiss
+
+  # Pipeline control + judge
+  judge_mode:                  { type: string, default: "human" }
+  judge_confidence_threshold:  { type: float,  default: 0.8 }
+  cycle:                       { type: int,    default: 0 }
+  llm_verdict:                 { type: object, default: {} }
+
+  status:          { type: string, default: "open" }
+```
+
+### W6.2.2 — Exits
+
+| Name | Description | `requires:` keys |
+|---|---|---|
+| `reviewed` | Final review posted (approve / request_changes). | `decision_artifact` |
+| `dismissed` | User explicitly dismissed (e.g. wrong reviewer). | — |
+| `abandoned` | User or LLM bailed. | — |
+
+## W6.3 — Inbox-trigger contract (the `pick_review` arc)
+
+The dev-story hub's `inbox.yaml` exposes a `pick_review` intent
+whose slots project a "PR awaiting your review" notification's
+payload into the `rev` import compound:
+
+```yaml
+# stories/dev-story/rooms/inbox.yaml
+on:
+  pick_review:
+    - target: rev
+      effects:
+        - set:
+            pr_id:     "{{ slots.pr_id }}"
+            pr_title:  "{{ slots.pr_title ?? '' }}"
+            pr_author: "{{ slots.pr_author ?? '' }}"
+            thread:    "{{ slots.pr_id }}"
+
+# stories/dev-story/app.yaml
+imports:
+  rev:
+    source: ../code-review
+    entry: idle
+    world_in:
+      pr_id:      "{{ world.pr_id }}"
+      pr_title:   "{{ world.pr_title }}"
+      pr_author:  "{{ world.pr_author }}"
+      thread:     "{{ world.thread }}"
+      judge_mode: "{{ world.judge_mode }}"
+      judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
+    intents:
+      import: [pick_pr, approve, request_changes, dismiss]
+    exits:
+      reviewed:  { to: main, set: { status: "reviewed" } }
+      dismissed: { to: main, set: { status: "dismissed" } }
+      abandoned: { to: main, set: { status: "abandoned" } }
+```
+
+The inbox subsystem (`internal/inbox/`) is not modified by Phase 6;
+the routing happens entirely at the YAML layer. In autonomous mode
+a daemon could enumerate inbox items and call
+`kitsoki session continue --intent pick_review --slots pr_id=PR-38`;
+in interactive mode the operator types the same intent at the inbox
+view.
+
+## W6.4 — New intents at the dev-story hub
+
+| Intent | Slots | Purpose |
+|---|---|---|
+| `go_implementation` | — | Dispatch into the `impl` import at `impl.idle`. |
+| `go_code_review_story` | — | Dispatch into the `rev` import at `rev.idle` (the standalone code-review entry, distinct from the inbox-routed `pick_review` path). |
+| `pick_review` | `pr_id`, `pr_title?`, `pr_author?` | Inbox-routed entry into `rev` with the notification payload. |
+
+`go_code_review` (the legacy Wave 2 navigation intent into the stub
+`code_review.yaml` room) is preserved; the stub room remains as a
+documentation surface for Wave 2 compatibility. The new
+`go_code_review_story` is the typed entry into the imported
+story-level code-review.
+
+## W6.5 — Sub-story alias intent collisions
+
+The bf import already lifts the bare `start` intent into the parent;
+impl and rev cannot lift it again. Both impl and rev's
+`intents.import:` clause omits `start` accordingly — the operator
+types `impl__start` / `rev__start` to boot each story.
+
+## W6.6 — Runtime observations
+
+1. **`emit_intent` does NOT auto-fire across import compound
+   boundaries.** The intent-name rewriter in
+   `internal/app/imports_rewriter.go` rewrites `world.<X>` references
+   inside the child, including the `emit_intent` value's
+   `{{ ... }}` interpolation. But the rendered intent name (e.g.
+   `"accept"`) is dispatched verbatim by
+   `internal/machine/machine.go::dispatchEmittedIntents`, which then
+   calls `findTransition` on the leaf state. After fold, that state's
+   `on:` map keys have been renamed to `<alias>__<intent>` — so the
+   bare emit name does not match. The dispatcher silently doesn't
+   find an arm and the auto-fire skips.
+
+   The implementation's `flows/happy_llm_then_human.yaml` documents
+   this gap and uses explicit `pr__accept` / `pr__proceed` once the
+   flow enters the pr-refinement import compound. The same gap
+   applies to the rev compound; standalone code-review flows
+   exercise auto-fire (the `llm_judge_approves.yaml` fixture),
+   inbox-routed flows in dev-story drive the tail with explicit
+   `rev__<intent>` calls.
+
+   Tracked as a runtime gap to fix in a later wave; not strictly
+   blocking Phase 6 acceptance because the parent-level intents
+   (`start`, `accept`, `refine` …) inside the same compound depth do
+   auto-fire correctly.
+
+2. **`requires:` on import-projected `@exit:` arcs** is satisfied by
+   the projection's `set:` clause. `internal/app/imports.go::checkExitRequiresRec`
+   walks every transition whose target is `@exit:<X>` and checks its
+   effects set the requires-keys; the import rewriter expands
+   `imports.<alias>.exits.<name>.set` into the rewritten arc's
+   effects so the static check sees the keys on the arc. This is why
+   implementation's `imports.pr.exits.merged.set` re-pins
+   `code_artifact: "{{ world.code_artifact }}"` even though
+   `code_artifact` was already set upstream by `write_code_executing`.
+
+3. **The `decide` room's polymorphic `accept` arc** demonstrates a
+   pattern for routing a single LLM-emitted intent into multiple
+   end-state effects. The two `when:` guards on the `accept` arc
+   examine `world.decision_artifact.decision` (populated by the
+   LLM's structured response) and route to the matching binary
+   outcome. This avoids defining one emit_intent value per outcome
+   (which would force the LLM to know its target intent name) — the
+   LLM just emits `accept` and the YAML decides what that means.
+
+## W6.7 — Phase 6 test surface (acceptance)
+
+| Suite | Pass count | Notes |
+|---|---|---|
+| `stories/implementation/flows/*.yaml` | 5 / 5 | happy_human, happy_llm_then_human, test_fails_refine, review_rejects_refine, quit_at_review |
+| `stories/code-review/flows/*.yaml` | 4 / 4 | happy_human_approve, happy_human_request_changes, llm_judge_approves, inbox_trigger_smoke |
+| `stories/dev-story/flows/*.yaml` | 6 / 6 | existing 4 + pickup_to_implementation + inbox_review_pickup |
+| `stories/bugfix/flows/*.yaml` | 42 / 42 | Phase 4 expanded set; regression |
+| `stories/pr-refinement/flows/*.yaml` | 4 / 4 | regression |
+| `stories/cypilot/flows/*.yaml` | 4 / 4 | regression |
+| `stories/kitsoki-dev/flows/*.yaml` | 4 / 4 | regression |
+| `stories/oregon-trail/flows/*.yaml` | 28 / 28 | regression (imports demo) |
+
+Full `go test ./...` clean. No runtime patches required.
+
+
