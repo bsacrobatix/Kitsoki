@@ -12,6 +12,7 @@ hosts:
   - host.run
   - host.workspace_manager.get
   - host.oracle.ask
+  - host.oracle.ask_with_mcp
   - host.oracle.talk
   - host.chat.resolve
   - host.chat.list
@@ -45,9 +46,10 @@ world:
   workspace_root:      { type: string, default: "" }
   jira_query:          { type: string, default: "" }
   jira_results:        { type: string, default: "" }
-  proposal_cmd:        { type: string, default: "" }
-  proposal_status:     { type: string, default: "idle" }
-  proposal_result:     { type: string, default: "" }
+  proposal_cmd:         { type: string, default: "" }
+  proposal_explanation: { type: string, default: "" }
+  proposal_status:      { type: string, default: "idle" }
+  proposal_result:      { type: string, default: "" }
   last_error:          { type: string, default: "" }
   inbox_unread:        { type: int,    default: 0 }
   standup_summary:     { type: string, default: "" }

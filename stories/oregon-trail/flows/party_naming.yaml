@@ -2,8 +2,9 @@
 # intro now exposes for the wagon roster:
 #
 #   1. name_party { names: CSV } — quick set-all
-#      Splits the CSV into party_member_1..5 and writes the canonical
-#      CSV into party_names (which start_journey still guards on).
+#      Splits the CSV into party_member_1..5 (which start_journey
+#      guards on via party_member_1) and writes the canonical CSV
+#      into party_names for display / illness-victim selection.
 #
 #   2. name_member { index, name } — per-seat
 #      Updates one party_member_N key in place; the other four are

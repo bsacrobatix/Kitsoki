@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"kitsoki/internal/expr"
+	kitsokimcp "kitsoki/internal/mcp"
 )
 
 // kitsokiBinaryEnv overrides the path to the kitsoki binary used to spawn the
@@ -769,7 +770,8 @@ func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, 
 	// JSON, independent of whatever final prose claude wrote — bind to
 	// `submitted` for the typed-output path.
 	if validatorOutputPath != "" {
-		if vBytes, vErr := os.ReadFile(validatorOutputPath); vErr == nil && len(vBytes) > 0 {
+		vBytes, vErr := kitsokimcp.ReadCapturedPayload(validatorOutputPath)
+		if vErr == nil && len(vBytes) > 0 {
 			var parsed any
 			if jErr := json.Unmarshal(vBytes, &parsed); jErr == nil {
 				res.Data["submitted"] = parsed
@@ -883,7 +885,7 @@ func runWithValidatorRetryLoop(ctx context.Context, p runValidatorLoopParams) Re
 			iterArgs = append(iterArgs, "--resume", sessionID)
 			// Inspect the validator's recorded last_error so the nudge
 			// can echo the most recent rejection reason.
-			_, _, lastErr := readValidatorState(p.ValidatorStatePath)
+			_, _, lastErr := kitsokimcp.ReadStateFile(p.ValidatorStatePath)
 			iterPrompt = renderNudge(lastErr)
 		}
 
@@ -905,7 +907,7 @@ func runWithValidatorRetryLoop(ctx context.Context, p runValidatorLoopParams) Re
 		// we're done. If it ran out of retries we're done (failure). If
 		// the LLM abandoned without submitting, loop and re-engage —
 		// unless we've used the outer budget.
-		attempts, success, lastErr := readValidatorState(p.ValidatorStatePath)
+		attempts, success, lastErr := kitsokimcp.ReadStateFile(p.ValidatorStatePath)
 		switch outcomeFromState(attempts, success, p.ValidatorMaxRetries) {
 		case mcpOutcomeSuccess:
 			return assembleResult(p, lastIterStdout, lastIterExit, lastIterStderr, "")
@@ -931,7 +933,7 @@ func runWithValidatorRetryLoop(ctx context.Context, p runValidatorLoopParams) Re
 		}
 		return Result{Error: msg}
 	}
-	attempts, _, lastErr := readValidatorState(p.ValidatorStatePath)
+	attempts, _, lastErr := kitsokimcp.ReadStateFile(p.ValidatorStatePath)
 	msg := lastErr
 	if strings.TrimSpace(msg) == "" {
 		msg = fmt.Sprintf("validator: session abandoned without successful submit after %d outer iteration(s), %d attempt(s)", maxOuter, attempts)
@@ -964,7 +966,8 @@ func assembleResult(p runValidatorLoopParams, stdout string, exitCode int, stder
 		}
 	}
 	if p.ValidatorOutputPath != "" {
-		if vBytes, vErr := os.ReadFile(p.ValidatorOutputPath); vErr == nil && len(vBytes) > 0 {
+		vBytes, vErr := kitsokimcp.ReadCapturedPayload(p.ValidatorOutputPath)
+		if vErr == nil && len(vBytes) > 0 {
 			var parsed any
 			if jErr := json.Unmarshal(vBytes, &parsed); jErr == nil {
 				res.Data["submitted"] = parsed
@@ -995,30 +998,6 @@ func renderNudge(lastError string) string {
 		block = "\n\nThe last submission attempt was rejected:\n" + lastError
 	}
 	return strings.Replace(abandonmentNudgeTemplate, "{{LAST_ERROR_BLOCK}}", block, 1)
-}
-
-// readValidatorState reads the validator's persisted counters. Returns
-// zeroes when the file is missing (the LLM never called submit) or
-// malformed (treated as "we don't know — assume abandoned"). Errors are
-// silently swallowed because the validator may legitimately not have
-// written anything yet on the very first iteration.
-func readValidatorState(path string) (attempts, successfulSubmits int, lastError string) {
-	if path == "" {
-		return 0, 0, ""
-	}
-	data, err := os.ReadFile(path)
-	if err != nil || len(data) == 0 {
-		return 0, 0, ""
-	}
-	var st struct {
-		Attempts          int    `json:"attempts"`
-		SuccessfulSubmits int    `json:"successful_submits"`
-		LastError         string `json:"last_error"`
-	}
-	if jErr := json.Unmarshal(data, &st); jErr != nil {
-		return 0, 0, ""
-	}
-	return st.Attempts, st.SuccessfulSubmits, st.LastError
 }
 
 // outcomeFromState mirrors mcp.ValidatorServer.Outcome() at the host

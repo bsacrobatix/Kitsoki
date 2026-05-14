@@ -26,8 +26,13 @@
 package proposal
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
+
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 
 	"kitsoki/internal/app"
 )
@@ -248,18 +253,66 @@ func FromMap(raw any) *Proposal {
 	return p
 }
 
-// ValidateAgainstSchema checks that all required fields in the kind schema
-// are present in the draft. Returns nil if valid.
+// ValidateAgainstSchema compiles the kind's shorthand schema to a draft
+// 2020-12 JSON Schema and validates the draft. Mirrors the error-formatting
+// style of internal/mcp/validator.go:formatValidationError so callers see
+// one line per failure.
 func ValidateAgainstSchema(draft map[string]any, kind *app.ProposalKind) error {
 	if kind == nil || len(kind.Schema) == 0 {
 		return nil
 	}
-	for field := range kind.Schema {
-		if _, ok := draft[field]; !ok {
-			return fmt.Errorf("proposal: draft missing required field %q", field)
-		}
+	schemaBytes, err := app.ShorthandToJSONSchema(kind.Schema)
+	if err != nil {
+		return fmt.Errorf("proposal: build schema: %w", err)
+	}
+	var doc any
+	if err := json.Unmarshal(schemaBytes, &doc); err != nil {
+		return fmt.Errorf("proposal: parse schema: %w", err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("proposal-schema.json", doc); err != nil {
+		return fmt.Errorf("proposal: register schema: %w", err)
+	}
+	sch, err := compiler.Compile("proposal-schema.json")
+	if err != nil {
+		return fmt.Errorf("proposal: compile schema: %w", err)
+	}
+	if err := sch.Validate(any(draft)); err != nil {
+		return fmt.Errorf("proposal: draft does not match schema:\n%s", formatSchemaErrors(err))
 	}
 	return nil
+}
+
+// formatSchemaErrors flattens a jsonschema.ValidationError into one
+// "instance/location: reason" line per leaf failure.
+func formatSchemaErrors(err error) string {
+	var ve *jsonschema.ValidationError
+	if !errors.As(err, &ve) {
+		return err.Error()
+	}
+	var lines []string
+	collectSchemaLeaves(ve.BasicOutput(), &lines)
+	if len(lines) == 0 {
+		return ve.Error()
+	}
+	return "  - " + strings.Join(lines, "\n  - ")
+}
+
+func collectSchemaLeaves(unit *jsonschema.OutputUnit, out *[]string) {
+	if unit == nil || unit.Valid {
+		return
+	}
+	if len(unit.Errors) == 0 && unit.Error != nil {
+		loc := unit.InstanceLocation
+		if loc == "" {
+			loc = "/"
+		}
+		*out = append(*out, loc+": "+unit.Error.String())
+		return
+	}
+	for i := range unit.Errors {
+		collectSchemaLeaves(&unit.Errors[i], out)
+	}
 }
 
 // cloneDraft makes a shallow copy of a draft map.

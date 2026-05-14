@@ -146,11 +146,11 @@ states:
         # Theme-based auto-fill.  Branches on world.narration so CI /
         # deterministic flows don't depend on a live Claude call:
         #
-        # - narrated (true)  → host.oracle.ask with prompts/name_party.md
-        #                       returns a CSV on stdout; we bind it
-        #                       into party_names and then split into
-        #                       the five per-seat keys, same shape as
-        #                       name_party.
+        # - narrated (true)  → host.oracle.ask_with_mcp with the
+        #                       party_names schema (mcp/party_names.json);
+        #                       Claude calls submit() with a typed JSON
+        #                       roster and we bind each name out of the
+        #                       schema-validated array.
         # - deterministic   → a small hardcoded theme→CSV table
         #   (false)            covers Western / Star Wars / Norse /
         #                       Lord of the Rings; everything else
@@ -158,23 +158,21 @@ states:
         - when: "world.narration"
           target: intro
           effects:
-            - invoke: host.oracle.ask
+            - invoke: host.oracle.ask_with_mcp
               with:
-                prompt_path: "prompts/name_party.md"
-                # Named agent — party_namer persona keeps the output
-                # tight (comma-separated names, no prose) which the
-                # split() chain below expects.
-                agent:       party_namer
+                prompt: "prompts/name_party.md"
+                schema: "mcp/party_names.json"
+                agent:  party_namer
                 args:
                   theme: "{{ slots.theme }}"
               bind:
-                party_names: stdout
-            - set:
-                party_member_1: '{{ trim(split(world.party_names, ",")[0]) }}'
-                party_member_2: '{{ trim(split(world.party_names, ",")[1]) }}'
-                party_member_3: '{{ trim(split(world.party_names, ",")[2]) }}'
-                party_member_4: '{{ trim(split(world.party_names, ",")[3]) }}'
-                party_member_5: '{{ trim(split(world.party_names, ",")[4]) }}'
+                party_member_1:    "submitted.names[0]"
+                party_member_2:    "submitted.names[1]"
+                party_member_3:    "submitted.names[2]"
+                party_member_4:    "submitted.names[3]"
+                party_member_5:    "submitted.names[4]"
+                party_names_list:  "submitted.names"
+              on_error: intro
             - say: "Named the wagon party from theme: {{ slots.theme }}."
         - default: true
           target: intro
@@ -213,7 +211,7 @@ states:
             - say: "Departure month set to {{ slots.month }}."
 
       start_journey:
-        - when: "world.party_names != '' && world.profession != nil && world.month != nil"
+        - when: "world.party_member_1 != '' && world.profession != nil && world.month != nil"
           target: general_store
           effects:
             - say: "Wagon's hitched. Off to the general store."

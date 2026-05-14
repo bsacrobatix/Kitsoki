@@ -197,21 +197,25 @@ states:
           effects:
             - set: { proposal_status: "reviewing" }
 
-      # Repair path — send the failed command, error, and stdout to Claude
-      # via a one-shot prompt file. The binary's stdout replaces
-      # proposal_cmd and the user lands on terminal_reviewing to confirm.
+      # Repair path — send the failed command, error, and stdout to
+      # Claude via a typed-JSON oracle call. The validator pins the
+      # response to {command, why}; binds replace proposal_cmd and
+      # proposal_explanation, then the user lands on terminal_reviewing.
       fix:
         - target: terminal_reviewing
           effects:
-            - invoke: host.oracle.ask
+            - invoke: host.oracle.ask_with_mcp
               with:
-                prompt_path: "prompts/shell_repair.md"
-                failed_cmd: "{{ world.proposal_cmd }}"
-                last_error: "{{ world.last_error }}"
-                last_stdout: "{{ world.proposal_result }}"
-                exit_code: 1
+                prompt: "prompts/shell_repair.md"
+                schema: "mcp/shell_repair.json"
+                args:
+                  failed_cmd:  "{{ world.proposal_cmd }}"
+                  last_error:  "{{ world.last_error }}"
+                  last_stdout: "{{ world.proposal_result }}"
+                  exit_code:   1
               bind:
-                proposal_cmd: "stdout"
+                proposal_cmd:         "submitted.command"
+                proposal_explanation: "submitted.why"
               on_error: terminal_error
             - set: { proposal_status: "reviewing" }
 

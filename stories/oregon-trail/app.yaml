@@ -64,6 +64,7 @@ world:
   # 1-indexed seat in name_member and for the intro roster header);
   # party_alive below tracks the CURRENT living-member count.
   party_names:      { type: string, default: "" }
+  party_names_list: { type: list,   default: [] }
   party_size:       { type: int,    default: 5 }
   party_member_1:   { type: string, default: "" }
   party_member_2:   { type: string, default: "" }
@@ -424,10 +425,11 @@ agents:
   party_namer:
     system_prompt: |
       You generate five-person Oregon Trail wagon-party names matching
-      a requested theme. Output ONLY five names, comma-separated, with
-      no other text and no trailing punctuation. Use one-word given
-      names appropriate to the theme. Example for theme "western":
-      "Hank,Jesse,Mary,Ezra,Sarah".
+      a requested theme. You MUST call the validator's submit tool
+      with the schema's exact shape: {"names": [<5 distinct one-word
+      given names>]}. No prose before the tool call — submit is your
+      only response. Use one-word given names appropriate to the
+      theme; the first entry is the leader.
 
   trail_narrator:
     system_prompt: |

@@ -27,6 +27,7 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/app"
+	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/trace"
 )
 
@@ -263,7 +264,7 @@ func (h *ClaudeCLIHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallT
 	// surfaces the LLM's free-form text to the user as a soft clarification
 	// rather than a red technical error. The trace still gets the technical
 	// form via the wrapped Underlying error.
-	captured, readErr := os.ReadFile(capturePath)
+	captured, readErr := kitsokimcp.ReadCapturedPayload(capturePath)
 	if readErr != nil || len(captured) == 0 {
 		var env claudeJSONEnvelope
 		_ = json.Unmarshal(raw, &env)

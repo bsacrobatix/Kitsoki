@@ -693,6 +693,8 @@ stories/oregon-trail/
   mcp/
     illness.json           — MCP submit-tool schema for the typed
                              illness diagnosis
+    party_names.json       — MCP submit-tool schema for the typed
+                             five-name party roster
   flows/                   — Mode 2 fixtures; see §6
   intents/                 — Mode 1 fixtures; see §6
   drive_scripts/

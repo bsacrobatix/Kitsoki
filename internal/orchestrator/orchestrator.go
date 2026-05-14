@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1179,35 +1180,88 @@ func containsTemplate(s string) bool {
 }
 
 // lookupBindPath resolves a dot-separated key path (e.g.
-// `submitted.summary_markdown`) inside a host result's `Data` map.
-// Returns the leaf value and true on success, or (nil, false) if any
-// segment is missing or hits a non-traversable value.  Single-segment
-// keys (the common case) are equivalent to a top-level lookup.
+// `submitted.summary_markdown` or `submitted.names[0]`) inside a host
+// result's `Data` map. Returns the leaf value and true on success, or
+// (nil, false) if any segment is missing or hits a non-traversable
+// value. Single-segment keys (the common case) are equivalent to a
+// top-level lookup.
 //
-// The path elements are exact map keys; no array indexing or wildcard
-// support — apps that need richer extraction can declare an
-// intermediate slot and chain.  Whitespace is not stripped, so app
-// authors should keep paths tight.
+// Path segments are exact map keys, with an optional trailing `[N]`
+// integer index for array fields (e.g. `names[0]` → first element of
+// the names slice on the current node, or chained `outer[0].inner` to
+// walk into an indexed element). N must be non-negative and in range.
+// Whitespace is not stripped, so app authors should keep paths tight.
 func lookupBindPath(data map[string]any, path string) (any, bool) {
 	if data == nil || path == "" {
 		return nil, false
 	}
-	if !strings.Contains(path, ".") {
-		v, ok := data[path]
-		return v, ok
-	}
 	var cur any = data
 	for _, seg := range strings.Split(path, ".") {
-		m, ok := cur.(map[string]any)
+		key, indices, ok := parseBindSegment(seg)
 		if !ok {
 			return nil, false
 		}
-		cur, ok = m[seg]
-		if !ok {
-			return nil, false
+		if key != "" {
+			m, ok := cur.(map[string]any)
+			if !ok {
+				return nil, false
+			}
+			cur, ok = m[key]
+			if !ok {
+				return nil, false
+			}
+		}
+		for _, idx := range indices {
+			arr, ok := cur.([]any)
+			if !ok {
+				return nil, false
+			}
+			if idx < 0 || idx >= len(arr) {
+				return nil, false
+			}
+			cur = arr[idx]
 		}
 	}
 	return cur, true
+}
+
+// parseBindSegment splits a single dot-segment into its leading key and
+// any trailing [N] indices. Returns (key, indices, true) on success or
+// (_, _, false) on a malformed segment. An empty key (segment starts
+// with `[`) is permitted so chains like `outer.[0]` could in principle
+// work — in practice authors write `outer[0]` so the leading key is
+// present.
+func parseBindSegment(seg string) (string, []int, bool) {
+	if seg == "" {
+		return "", nil, false
+	}
+	openIdx := strings.IndexByte(seg, '[')
+	if openIdx < 0 {
+		return seg, nil, true
+	}
+	key := seg[:openIdx]
+	rest := seg[openIdx:]
+	var indices []int
+	for len(rest) > 0 {
+		if rest[0] != '[' {
+			return "", nil, false
+		}
+		closeIdx := strings.IndexByte(rest, ']')
+		if closeIdx < 0 {
+			return "", nil, false
+		}
+		numStr := rest[1:closeIdx]
+		if numStr == "" {
+			return "", nil, false
+		}
+		n, err := strconv.Atoi(numStr)
+		if err != nil {
+			return "", nil, false
+		}
+		indices = append(indices, n)
+		rest = rest[closeIdx+1:]
+	}
+	return key, indices, true
 }
 
 // SubmitDirect submits an intent call directly to the machine, bypassing the

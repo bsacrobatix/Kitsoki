@@ -180,3 +180,25 @@ func TestValidateAgainstSchema(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestValidateAgainstSchema_TypeMismatch(t *testing.T) {
+	kind := &app.ProposalKind{
+		Schema: map[string]string{"items": "list", "total_cost": "int"},
+	}
+	// total_cost is a string, not an integer — must error.
+	err := proposal.ValidateAgainstSchema(map[string]any{
+		"items":      []any{"flour"},
+		"total_cost": "five",
+	}, kind)
+	if err == nil {
+		t.Fatal("expected schema validation error for wrong type on total_cost")
+	}
+	// Correct types should pass.
+	err = proposal.ValidateAgainstSchema(map[string]any{
+		"items":      []any{"flour"},
+		"total_cost": 5,
+	}, kind)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

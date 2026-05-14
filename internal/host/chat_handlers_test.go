@@ -2,8 +2,8 @@ package host_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -992,15 +992,14 @@ func TestChatSuggestTitleHandler_NoMessages(t *testing.T) {
 }
 
 func TestChatSuggestTitleHandler_HappyPath(t *testing.T) {
-	// Requires a stub claude binary via OracleBinEnv.
-	// Write a tiny shell script that just echoes a fixed title.
-	dir := t.TempDir()
-	stubPath := dir + "/claude-stub"
-	stubScript := "#!/bin/sh\necho 'ZTA proxy walkthrough'\n"
-	if err := os.WriteFile(stubPath, []byte(stubScript), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
-	t.Setenv(host.OracleBinEnv, stubPath)
+	// We still need claude to be resolvable for the resolveOracleBin probe
+	// inside AskStructured's default path, but the askStructuredFunc seam
+	// short-circuits the actual subprocess.
+	t.Setenv(host.OracleBinEnv, "/bin/true")
+	restore := host.SetAskStructuredForTest(func(_ context.Context, _ host.AskStructuredOptions) (json.RawMessage, error) {
+		return json.RawMessage(`{"title":"ZTA proxy walkthrough"}`), nil
+	})
+	t.Cleanup(restore)
 
 	cs := newFakeChatStore()
 	cs.addChat(host.ChatRecord{ID: "chat-1", Title: "untitled chat", Status: "active"})
@@ -1030,18 +1029,17 @@ func TestChatSuggestTitleHandler_HappyPath(t *testing.T) {
 	}
 }
 
-// TestChatSuggestTitleHandler_StripsControlChars asserts I6: a claude stub
-// emitting an ANSI escape inside its title is sanitized before Rename, so
-// the title persisted to the chat record is harmless when rendered to a TUI.
+// TestChatSuggestTitleHandler_StripsControlChars asserts I6: when the
+// validator-captured title contains an ANSI escape, sanitizeChatTitle
+// strips it before Rename so the persisted record is TUI-safe.
 func TestChatSuggestTitleHandler_StripsControlChars(t *testing.T) {
-	dir := t.TempDir()
-	stubPath := dir + "/claude-stub"
-	// Use printf so the \x1b makes it through without shell quoting headaches.
-	stubScript := "#!/bin/sh\nprintf 'Title with \\x1b[2J ANSI\\n'\n"
-	if err := os.WriteFile(stubPath, []byte(stubScript), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
-	t.Setenv(host.OracleBinEnv, stubPath)
+	t.Setenv(host.OracleBinEnv, "/bin/true")
+	// JSON \u001b decodes to ESC (0x1b); the validator schema accepts
+	// it, so the host-side sanitiser must strip it before Rename.
+	restore := host.SetAskStructuredForTest(func(_ context.Context, _ host.AskStructuredOptions) (json.RawMessage, error) {
+		return json.RawMessage(`{"title":"Title with \u001b[2J ANSI"}`), nil
+	})
+	t.Cleanup(restore)
 
 	cs := newFakeChatStore()
 	cs.addChat(host.ChatRecord{ID: "chat-1", Title: "untitled chat", Status: "active"})
@@ -1063,8 +1061,6 @@ func TestChatSuggestTitleHandler_StripsControlChars(t *testing.T) {
 	if strings.ContainsRune(title, '\x1b') {
 		t.Fatalf("title contains \\x1b ANSI escape: %q", title)
 	}
-	// The stored chat record must also be clean (Rename received the
-	// sanitized form, not the raw stdout).
 	stored, getErr := cs.Get(ctx, "chat-1")
 	if getErr != nil {
 		t.Fatalf("get chat: %v", getErr)
@@ -1076,17 +1072,15 @@ func TestChatSuggestTitleHandler_StripsControlChars(t *testing.T) {
 	}
 }
 
-// TestChatSuggestTitleHandler_EmptyOrWhitespace asserts I6: a claude stub
-// returning only whitespace yields a Result.Error and leaves the chat title
-// untouched in the DB.
+// TestChatSuggestTitleHandler_EmptyOrWhitespace asserts I6: when
+// AskStructured signals no payload (ErrNoValidatedPayload), the handler
+// surfaces the canonical "claude returned empty title" error.
 func TestChatSuggestTitleHandler_EmptyOrWhitespace(t *testing.T) {
-	dir := t.TempDir()
-	stubPath := dir + "/claude-stub"
-	stubScript := "#!/bin/sh\nprintf '\\n\\n   \\n'\n"
-	if err := os.WriteFile(stubPath, []byte(stubScript), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
-	t.Setenv(host.OracleBinEnv, stubPath)
+	t.Setenv(host.OracleBinEnv, "/bin/true")
+	restore := host.SetAskStructuredForTest(func(_ context.Context, _ host.AskStructuredOptions) (json.RawMessage, error) {
+		return nil, host.ErrNoValidatedPayload
+	})
+	t.Cleanup(restore)
 
 	cs := newFakeChatStore()
 	cs.addChat(host.ChatRecord{ID: "chat-1", Title: "untitled chat", Status: "active"})
@@ -1103,7 +1097,6 @@ func TestChatSuggestTitleHandler_EmptyOrWhitespace(t *testing.T) {
 	if !strings.Contains(res.Error, "claude returned empty title") {
 		t.Fatalf("expected 'claude returned empty title' error, got: %q", res.Error)
 	}
-	// Chat title must be unchanged.
 	stored, getErr := cs.Get(ctx, "chat-1")
 	if getErr != nil {
 		t.Fatalf("get chat: %v", getErr)
@@ -1113,19 +1106,16 @@ func TestChatSuggestTitleHandler_EmptyOrWhitespace(t *testing.T) {
 	}
 }
 
-// TestRunChatPicker_FallbackRegex asserts I8: when the LLM emits prose that
-// embeds a chat number (e.g. "I think it's #2 because…") the picker still
-// extracts the integer rather than treating the response as NONE. We exercise
-// this through the public ChatResolveRefHandler with a custom stub that emits
-// the prose for both the shallow and deep passes.
-func TestRunChatPicker_FallbackRegex(t *testing.T) {
-	dir := t.TempDir()
-	stubPath := dir + "/picker-prose.sh"
-	stubScript := "#!/bin/sh\nprintf \"I think it's #2 because of the title\\nshort reasoning here\\n\"\n"
-	if err := os.WriteFile(stubPath, []byte(stubScript), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
-	t.Setenv(host.OracleBinEnv, stubPath)
+// TestRunChatPicker_OutOfRangeChoice asserts that a validator-captured
+// choice value outside [1, len(chats)] is treated as no-pick rather than
+// returning a bogus chat.
+func TestRunChatPicker_OutOfRangeChoice(t *testing.T) {
+	t.Setenv(host.OracleBinEnv, "/bin/true")
+	restore := host.SetAskStructuredForTest(func(_ context.Context, _ host.AskStructuredOptions) (json.RawMessage, error) {
+		// Both passes return choice=99 (out of range for 2 chats).
+		return json.RawMessage(`{"choice":99,"reasoning":"too high"}`), nil
+	})
+	t.Cleanup(restore)
 
 	cs := newFakeChatStore()
 	cs.addChat(host.ChatRecord{ID: "01AAAAAAAAAAAAAAAAAAAAAAAA", Title: "alpha"})
@@ -1138,34 +1128,20 @@ func TestRunChatPicker_FallbackRegex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Error != "" {
-		t.Fatalf("unexpected Result.Error: %s", res.Error)
-	}
-	// The shallow pass should pick position 2 (BBBB...) thanks to the regex
-	// fallback parsing "#2" out of the prose.
-	if res.Data["chat_id"] != "01BBBBBBBBBBBBBBBBBBBBBBBB" {
-		t.Fatalf("chat_id = %v, want 01BBBB... (regex fallback)", res.Data["chat_id"])
-	}
-	if res.Data["kind"] != "llm_shallow" {
-		t.Fatalf("kind = %v, want llm_shallow", res.Data["kind"])
+	if !strings.Contains(res.Error, "no chat matches") {
+		t.Fatalf("expected no-match error, got %q", res.Error)
 	}
 }
 
 // TestChatResolveRefHandler_DeepRejectsOutOfRange asserts that a deep-pass
-// stub returning an out-of-range integer (99 against a 2-chat list) is
-// gracefully rejected with the standard "no chat matches" error rather than
-// panicking or silently returning a bogus chat.
+// validator payload with an out-of-range choice (99 against a 2-chat list)
+// is gracefully rejected with the standard "no chat matches" error.
 func TestChatResolveRefHandler_DeepRejectsOutOfRange(t *testing.T) {
-	dir := t.TempDir()
-	stubPath := dir + "/picker-oor.sh"
-	// Both passes return "99" — the shallow pass's bounds check rejects 99
-	// (only 2 chats), so the picker falls through to the deep pass which
-	// rejects it the same way; the handler then surfaces "no chat matches".
-	stubScript := "#!/bin/sh\nprintf '99\\nfound it\\n'\n"
-	if err := os.WriteFile(stubPath, []byte(stubScript), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
-	t.Setenv(host.OracleBinEnv, stubPath)
+	t.Setenv(host.OracleBinEnv, "/bin/true")
+	restore := host.SetAskStructuredForTest(func(_ context.Context, _ host.AskStructuredOptions) (json.RawMessage, error) {
+		return json.RawMessage(`{"choice":99,"reasoning":"found it"}`), nil
+	})
+	t.Cleanup(restore)
 
 	cs := newFakeChatStore()
 	cs.addChat(host.ChatRecord{ID: "01AAAAAAAAAAAAAAAAAAAAAAAA", Title: "alpha"})
@@ -1351,12 +1327,31 @@ func TestChatResolveRefHandler_EmptyList(t *testing.T) {
 
 // ─── ChatResolveRefHandler — LLM fallback ─────────────────────────────────────
 
-// resolveRefLLMSetup wires the fake-chat-picker.sh script as the claude
-// binary so resolve_ref's LLM passes return scripted answers. Uses
-// t.Setenv so cleanup is guaranteed and ordered with the test runner.
+// resolveRefLLMSetup swaps the AskStructured seam with a fake that
+// matches the same MAGIC_SHALLOW / MAGIC_DEEP / MAGIC_NONE behavior the
+// old fake-chat-picker.sh fixture provided. We still need claude to be
+// resolvable so llmPickChat's binary-availability probe succeeds.
 func resolveRefLLMSetup(t *testing.T) {
 	t.Helper()
-	t.Setenv(host.OracleBinEnv, "testdata/fake-chat-picker.sh")
+	t.Setenv(host.OracleBinEnv, "/bin/true")
+	restore := host.SetAskStructuredForTest(func(_ context.Context, opts host.AskStructuredOptions) (json.RawMessage, error) {
+		isDeep := strings.Contains(opts.Prompt, "by reading the transcripts")
+		switch {
+		case strings.Contains(opts.Prompt, "MAGIC_SHALLOW"):
+			if isDeep {
+				return json.RawMessage(`{"choice":null,"reasoning":"should-not-reach-deep"}`), nil
+			}
+			return json.RawMessage(`{"choice":2,"reasoning":"shallow match"}`), nil
+		case strings.Contains(opts.Prompt, "MAGIC_DEEP"):
+			if isDeep {
+				return json.RawMessage(`{"choice":1,"reasoning":"deep match"}`), nil
+			}
+			return json.RawMessage(`{"choice":null,"reasoning":"shallow no match"}`), nil
+		default:
+			return json.RawMessage(`{"choice":null,"reasoning":"no match"}`), nil
+		}
+	})
+	t.Cleanup(restore)
 }
 
 func TestChatResolveRefHandler_LLMShallowMatch(t *testing.T) {
@@ -1503,22 +1498,20 @@ func TestBuildDeepPickPrompt_EmptyRole(t *testing.T) {
 
 // TestChatResolveRefHandler_PromptInjection_Deterministic verifies that a
 // malicious ref containing forged instructions and a fake closing tag
-// reaches the picker stub as escaped data inside <user_query> rather than
+// reaches the picker as escaped data inside <user_query> rather than
 // leaking out into the instruction context.
 //
-// We replace fake-chat-picker.sh with a stub that captures the prompt to a
-// temp file and always answers NONE, then assert the captured prompt has
-// the ref wrapped in <user_query> tags and that the embedded `</user_query>`
-// has been HTML-escaped.
+// We swap the AskStructured seam with a fake that captures the prompt and
+// always answers null, then assert the captured prompt has the ref wrapped
+// in <user_query> tags and the embedded `</user_query>` has been HTML-escaped.
 func TestChatResolveRefHandler_PromptInjection_Deterministic(t *testing.T) {
-	dir := t.TempDir()
-	capturePath := dir + "/captured-prompt.txt"
-	stubPath := dir + "/picker-capture.sh"
-	stubScript := "#!/bin/sh\ncat > " + capturePath + "\nprintf 'NONE\\nstub no match\\n'\n"
-	if err := os.WriteFile(stubPath, []byte(stubScript), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
-	t.Setenv(host.OracleBinEnv, stubPath)
+	t.Setenv(host.OracleBinEnv, "/bin/true")
+	var captured string
+	restore := host.SetAskStructuredForTest(func(_ context.Context, opts host.AskStructuredOptions) (json.RawMessage, error) {
+		captured = opts.Prompt
+		return json.RawMessage(`{"choice":null,"reasoning":"stub no match"}`), nil
+	})
+	t.Cleanup(restore)
 
 	cs := newFakeChatStore()
 	cs.addChat(host.ChatRecord{ID: "01AAAAAAAAAAAAAAAAAAAAAAAA", Title: "alpha"})
@@ -1531,17 +1524,13 @@ func TestChatResolveRefHandler_PromptInjection_Deterministic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// The stub deterministically answers NONE for both passes, so we expect
+	// The seam deterministically answers null for both passes, so we expect
 	// a no-match error regardless of what the malicious ref says.
 	if !strings.Contains(res.Error, "no chat matches") {
-		t.Fatalf("expected stub-driven no-match error, got %q", res.Error)
+		t.Fatalf("expected seam-driven no-match error, got %q", res.Error)
 	}
 
-	captured, err := os.ReadFile(capturePath)
-	if err != nil {
-		t.Fatalf("read captured prompt: %v", err)
-	}
-	got := string(captured)
+	got := captured
 
 	// Structural check: ref appears inside <user_query> ... </user_query>.
 	if !strings.Contains(got, "<user_query>") {
