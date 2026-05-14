@@ -243,5 +243,17 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.chat.suggest_title", ChatSuggestTitleHandler)
 	r.Register("host.chat.resolve_ref", ChatResolveRefHandler)
 	r.Register("host.chat.drive", ChatDriveHandler)
+
+	// Dev-story / bugfix unify Slice β handlers — one prefix-fallback
+	// handler per provider surface (the registry dispatches every
+	// host.<name>.<op> call to the longest registered prefix).  See
+	// docs/proposals/notes/dev-story-implementation-contract.md §3.
+	r.Register("host.local_files.ticket", LocalFilesTicketHandler)
+	r.Register("host.git", GitVCSHandler)
+	r.Register("host.local", LocalCIHandler)
+	r.Register("host.git_worktree", GitWorktreeHandler)
+	r.Register("host.append_to_file", AppendFileTransportHandler)
+	r.Register("host.inbox.add", InboxAddHandler)
+
 	RegisterAuthoringBuiltins(r)
 }

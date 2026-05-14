@@ -1,0 +1,308 @@
+package host_test
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+
+	"kitsoki/internal/host"
+)
+
+// fakeRunner produces a deterministic mock for git/gh exec calls.
+// Each Call records what was asked; each Response is keyed by the
+// joined cmd+args so different invocations can return different things.
+type fakeRunner struct {
+	calls    []string
+	responses map[string]fakeResp
+	defaultResp fakeResp
+}
+
+type fakeResp struct {
+	stdout string
+	stderr string
+	code   int
+	err    error
+}
+
+func (f *fakeRunner) run(ctx context.Context, dir, name string, args ...string) (string, string, int, error) {
+	key := name + " " + strings.Join(args, " ")
+	f.calls = append(f.calls, key)
+	if r, ok := f.responses[key]; ok {
+		return r.stdout, r.stderr, r.code, r.err
+	}
+	// Substring / prefix-matched response — pick the longest matching prefix.
+	var bestKey string
+	for k := range f.responses {
+		if strings.HasPrefix(key, k) && len(k) > len(bestKey) {
+			bestKey = k
+		}
+	}
+	if bestKey != "" {
+		r := f.responses[bestKey]
+		return r.stdout, r.stderr, r.code, r.err
+	}
+	return f.defaultResp.stdout, f.defaultResp.stderr, f.defaultResp.code, f.defaultResp.err
+}
+
+func newFakeRunner() *fakeRunner {
+	return &fakeRunner{responses: map[string]fakeResp{}}
+}
+
+func TestGitVCS_RegisteredAsBuiltin(t *testing.T) {
+	r := host.NewRegistry()
+	host.RegisterBuiltins(r)
+	for _, name := range []string{
+		"host.git",
+		"host.git.branch",
+		"host.git.diff",
+		"host.git.commit",
+		"host.git.push",
+		"host.git.open_pr",
+		"host.git.pr_status",
+		"host.git.pr_comment",
+	} {
+		if _, ok := r.Get(name); !ok {
+			t.Fatalf("registry: %s missing", name)
+		}
+	}
+}
+
+func TestGitVCS_MissingOp(t *testing.T) {
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error == "" {
+		t.Fatal("expected domain error for missing op")
+	}
+}
+
+func TestGitVCS_UnknownOp(t *testing.T) {
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{"op": "fly"})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error == "" {
+		t.Fatal("expected domain error for unknown op")
+	}
+}
+
+func TestGitVCS_Branch_Happy(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["git checkout -b feature/x main"] = fakeResp{}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{
+		"op":      "branch",
+		"workdir": "/tmp",
+		"name":    "feature/x",
+		"base":    "main",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if res.Data["branch"] != "feature/x" {
+		t.Fatalf("branch: %v", res.Data["branch"])
+	}
+	if len(fr.calls) != 1 || !strings.Contains(fr.calls[0], "checkout -b feature/x main") {
+		t.Fatalf("calls: %v", fr.calls)
+	}
+}
+
+func TestGitVCS_Branch_MissingName(t *testing.T) {
+	restore := host.SetExecRunnerForTest(newFakeRunner().run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{"op": "branch"})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error == "" {
+		t.Fatal("expected domain error for missing name")
+	}
+}
+
+func TestGitVCS_Branch_ExitNonZero(t *testing.T) {
+	fr := newFakeRunner()
+	fr.defaultResp = fakeResp{stderr: "fatal: branch already exists", code: 128}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{
+		"op":   "branch",
+		"name": "feature/x",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if !strings.Contains(res.Error, "branch already exists") {
+		t.Fatalf("expected stderr in error, got: %s", res.Error)
+	}
+}
+
+func TestGitVCS_Diff_Happy(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["git diff --patch"] = fakeResp{stdout: "diff --git a/x b/x\n+hello\n"}
+	fr.responses["git diff --name-only"] = fakeResp{stdout: "x\ny\n"}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{"op": "diff"})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	diff, _ := res.Data["diff"].(string)
+	if !strings.Contains(diff, "hello") {
+		t.Fatalf("missing diff: %q", diff)
+	}
+	files, _ := res.Data["files"].([]any)
+	if len(files) != 2 {
+		t.Fatalf("files: %v", files)
+	}
+}
+
+func TestGitVCS_Commit_Happy(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["git commit -a -m fix: it"] = fakeResp{}
+	fr.responses["git rev-parse HEAD"] = fakeResp{stdout: "deadbeefcafe\n"}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{
+		"op":      "commit",
+		"message": "fix: it",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if res.Data["sha"] != "deadbeefcafe" {
+		t.Fatalf("sha: %v", res.Data["sha"])
+	}
+}
+
+func TestGitVCS_Commit_MissingMessage(t *testing.T) {
+	restore := host.SetExecRunnerForTest(newFakeRunner().run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{"op": "commit"})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error == "" {
+		t.Fatal("expected domain error for missing message")
+	}
+}
+
+func TestGitVCS_Push_Happy(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["git push -u origin HEAD"] = fakeResp{}
+	fr.responses["git remote get-url origin"] = fakeResp{stdout: "git@github.com:owner/repo.git\n"}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{"op": "push"})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if !strings.Contains(res.Data["url"].(string), "github.com") {
+		t.Fatalf("url: %v", res.Data["url"])
+	}
+}
+
+func TestGitVCS_OpenPR_NoGh(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["gh --version"] = fakeResp{err: fmt.Errorf("not found")}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{
+		"op":    "open_pr",
+		"title": "x",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error == "" {
+		t.Fatal("expected clean domain error when gh missing")
+	}
+	if !strings.Contains(res.Error, "gh") {
+		t.Fatalf("error should mention gh: %s", res.Error)
+	}
+}
+
+func TestGitVCS_OpenPR_Happy(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
+	fr.responses["gh pr create --title PR --body body"] = fakeResp{
+		stdout: "https://github.com/o/r/pull/42\n",
+	}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{
+		"op":    "open_pr",
+		"title": "PR",
+		"body":  "body",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if res.Data["pr_id"] != "42" {
+		t.Fatalf("pr_id: %v", res.Data["pr_id"])
+	}
+	if !strings.Contains(res.Data["url"].(string), "/pull/42") {
+		t.Fatalf("url: %v", res.Data["url"])
+	}
+}
+
+func TestGitVCS_PRStatus_NoGh(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["gh --version"] = fakeResp{code: 127}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{
+		"op":    "pr_status",
+		"pr_id": "1",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error == "" {
+		t.Fatal("expected clean domain error when gh missing")
+	}
+}
+
+func TestGitVCS_PRComment_RequiresArgs(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["gh --version"] = fakeResp{}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{
+		"op": "pr_comment",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error == "" {
+		t.Fatal("expected domain error when pr_id missing")
+	}
+}
