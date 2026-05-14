@@ -1,0 +1,35 @@
+# workspace_manager — list / create / switch workspaces. Dispatches
+# via iface.workspace.{list,create,sync}. Wave 2 ships a minimal
+# surface; cyber-repo's `workspace-manager` CLI rebinds the iface to
+# `host.workspace_manager` for the full feature set.
+
+states:
+
+  workspace_manager:
+    description: "Workspace manager — list / create / switch workspaces."
+    view: |
+      Workspace manager.
+
+      Current workspace: {{ world.current_workspace ?? "(none)" }}
+      Workdir:           {{ world.workdir ?? "(none)" }}
+      Feature branch:    {{ world.feature_branch ?? "(none)" }}
+
+      Type `proceed` to fetch the workspace list, `go_back`, or `go_main`.
+    relevant_world: [current_workspace, workdir, feature_branch]
+    on_enter:
+      - invoke: iface.workspace.list
+        bind:
+          last_error: log
+        on_error: workspace_manager
+    on:
+      proceed:
+        - target: workspace_manager
+      go_back:
+        - target: "{{ world.prev_state }}"
+      go_main:
+        - target: main
+      go_inbox:
+        - target: inbox
+          push_history: false
+      look:
+        - target: .

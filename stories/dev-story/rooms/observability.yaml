@@ -1,0 +1,19 @@
+# observability — STUB. Wave 3 / Phase 6 wires log + metric queries
+# against a real observability provider.
+
+states:
+
+  observability:
+    description: "Observability — logs / metrics (Wave 3 stub)."
+    view: |
+      Observability (Wave 3 stub).
+
+      Intents: go_back, go_main.
+    relevant_world: []
+    on:
+      go_back:
+        - target: "{{ world.prev_state }}"
+      go_main:
+        - target: main
+      look:
+        - target: .

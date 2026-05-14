@@ -1,0 +1,30 @@
+# inbox — TUI inbox view. Reads the live inbox via internal/inbox (host
+# side); the room itself is just a navigation surface (Wave 2 doesn't
+# enumerate items inside the view — the runtime's inbox subsystem
+# manages the list).
+#
+# The dual-channel pattern (proposal §4.5) means every checkpoint in
+# bf / pr also writes here via host.inbox.add. Standalone runs see the
+# count via world.inbox_unread (set by the host).
+
+states:
+
+  inbox:
+    description: "TUI inbox — unread checkpoints + notifications."
+    view: |
+      Inbox.
+
+      Unread: {{ world.inbox_unread }}
+
+      (Inbox items render via the runtime's inbox subsystem; this room
+      is a navigation surface only in Wave 2.)
+
+      Intents: go_back, go_main.
+    relevant_world: [inbox_unread]
+    on:
+      go_back:
+        - target: "{{ world.prev_state }}"
+      go_main:
+        - target: main
+      look:
+        - target: .

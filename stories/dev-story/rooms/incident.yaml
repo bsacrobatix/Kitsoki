@@ -1,0 +1,19 @@
+# incident — STUB. Wave 3 imports `stories/incident/` (or whatever
+# the on-call story is called).
+
+states:
+
+  incident:
+    description: "Incident — production triage (Wave 3 stub)."
+    view: |
+      Incident (Wave 3 stub).
+
+      Intents: go_back, go_main.
+    relevant_world: []
+    on:
+      go_back:
+        - target: "{{ world.prev_state }}"
+      go_main:
+        - target: main
+      look:
+        - target: .

@@ -1,0 +1,19 @@
+# docs — STUB. Wave 3 wires `update_inline_docs` / `generate_docs`
+# intents to LLM-driven doc-editing rooms.
+
+states:
+
+  docs:
+    description: "Docs — write / edit documentation (Wave 3 stub)."
+    view: |
+      Docs (Wave 3 stub).
+
+      Intents: go_back, go_main.
+    relevant_world: []
+    on:
+      go_back:
+        - target: "{{ world.prev_state }}"
+      go_main:
+        - target: main
+      look:
+        - target: .

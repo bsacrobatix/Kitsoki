@@ -1,0 +1,162 @@
+# bugfix_to_pr — the end-to-end chain. Operator picks a ticket, drives
+# the bugfix pipeline to @exit:done, observes the handoff into
+# pr-refinement, walks pr to @exit:merged. The merged exit lands back
+# in `main` with status="merged" and last_pr_url populated.
+#
+# This is the canonical "closed loop" walk-through from proposal §5.4
+# expressed as a deterministic flow fixture (judge_mode=human; each
+# checkpoint accepts manually).
+
+test_kind: flow
+app: ../app.yaml
+initial_state: main
+initial_world:
+  ticket_id:      "TKT-200"
+  ticket_title:   "TUI hangs on ESC"
+  thread:         "TKT-200"
+  workdir:        ".worktrees/tkt-200"
+  workspace_id:   "ws-200"
+  base_branch:    "main"
+  feature_branch: "fix/tkt-200-tui-esc"
+  judge_mode:     "human"
+  judge_confidence_threshold: 0.8
+  merge_strategy: "squash"
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  # Single host.git stub satisfies iface.vcs.{commit,push,open_pr,
+  # pr_status,merge} via prefix-fallback.
+  host.git:
+    data:
+      ok:     true
+      sha:    "deadbeef"
+      diff:   ""
+      url:    "https://example/pr/200"
+      pr_id:  "200"
+      state:  "success"
+      checks: ""
+      comments: ""
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.local:
+    data: { ok: true, state: "success", log: "PASS", passed: 4, failed: 0 }
+  host.local_files.ticket:
+    data: { ok: true, tickets: "" }
+  # Single oracle stub serves every executing room AND every judge
+  # checkpoint (the artifact-schema and judge-schema fields coexist on
+  # the same envelope; additionalProperties: true tolerates the unused
+  # fields per schema).
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        # Artifact fields (shared across reproduction / propose / test /
+        # validate / done — each room binds the WHOLE submitted: blob
+        # into its OWN world key, so they don't trample each other).
+        summary_title:    "Stub"
+        summary_markdown: "A stub artifact body; deterministic across rooms."
+        bug_verified:     true
+        steps:            ["s1", "s2"]
+        involved_components:
+          - { name: "internal/tui", reason: "ESC handler" }
+        fix_description:  "Drain the input queue in the ESC handler."
+        root_cause:       "The ESC handler blocks on a closed channel."
+        affected_files:   ["internal/tui/tui.go"]
+        confidence:       0.85
+        reasoning:        "Trace shows the deadlock; same shape as the foyer fix."
+        status:           "passed"
+        tests_added:      ["internal/tui/esc_test.go"]
+        tests_run:        { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:          "pass"
+        evidence:         { build: "ok", api: "n/a", ui: "n/a" }
+        lessons:
+          - { category: "channels", description: "Always unregister producers before closing channels; deadlock pattern.", severity: "high" }
+        # Judge verdict fields (additionalProperties: true on artifact
+        # schemas tolerates them).
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Stub artifact passes the schema; accept advances."
+
+turns:
+  # main → bf.idle. We seed ticket_id directly in initial_world rather
+  # than walking through ticket_search; the manual-walk doc covers that
+  # path. world_in: projects parent ticket_id → bf.ticket_id.
+  - intent: { name: go_bugfix, slots: {} }
+    expect_state: bf.idle
+    expect_world:
+      bf__ticket_id: "TKT-200"
+
+  # bf__start → bf.reproducing_executing. The child's on-arc was
+  # rewritten to `bf__start` at fold time; the `intents.import: [start]`
+  # adds the bare name to the parent's intent menu but the dispatcher
+  # routes through the prefixed name (same convention as oregon-trail's
+  # `frontier__scout`).
+  - intent: { name: bf__start, slots: {} }
+    expect_state: bf.reproducing_executing
+
+  # Walk the bugfix pipeline. The bugfix `proceed` and `accept` intents
+  # are NOT lifted to bare names (they collide), so we type the
+  # prefixed forms.
+  - intent: { name: bf__proceed, slots: {} }
+    expect_state: bf.reproducing_awaiting_reply
+  - intent: { name: bf__accept, slots: {} }
+    expect_state: bf.proposing_executing
+  - intent: { name: bf__proceed, slots: {} }
+    expect_state: bf.proposing_awaiting_reply
+  - intent: { name: bf__accept, slots: {} }
+    expect_state: bf.implementing_executing
+  - intent: { name: bf__proceed, slots: {} }
+    expect_state: bf.testing_executing
+  - intent: { name: bf__proceed, slots: {} }
+    expect_state: bf.testing_awaiting_reply
+  - intent: { name: bf__accept, slots: {} }
+    expect_state: bf.reviewing_executing
+  - intent: { name: bf__proceed, slots: {} }
+    expect_state: bf.validating_executing
+  - intent: { name: bf__proceed, slots: {} }
+    expect_state: bf.validating_awaiting_reply
+  - intent: { name: bf__accept, slots: {} }
+    expect_state: bf.done_executing
+  - intent: { name: bf__proceed, slots: {} }
+    expect_state: bf.done_awaiting_reply
+
+  # bf.done_awaiting_reply.on.accept fires @exit:done with effects
+  # setting done_artifact. The dev-story importer's exits.done.to: pr
+  # lifts pr_title / pr_body from world.bf__done_artifact and enters
+  # the pr compound at open_pr. pr's world_in: then projects the
+  # parent's pr_title / pr_body / workdir / etc into pr__<key>.
+  - intent: { name: bf__accept, slots: {} }
+    expect_state: pr.open_pr
+    expect_world:
+      pr_title:           "Stub"
+      pr__ticket_id:      "TKT-200"
+      pr__pr_title:       "Stub"
+      pr__workdir:        ".worktrees/tkt-200"
+
+  # pr.open_pr.on_enter ran iface.vcs.open_pr and bound pr_id / pr_url
+  # into pr__<key>.
+  - intent: { name: pr__proceed, slots: {} }
+    expect_state: pr.ci_monitoring
+    expect_world:
+      pr__pr_id:  "200"
+      pr__pr_url: "https://example/pr/200"
+
+  # ci_monitoring saw state=success, pending_comments=0 → merge_executing.
+  - intent: { name: pr__proceed, slots: {} }
+    expect_state: pr.merge_executing
+  - intent: { name: pr__proceed, slots: {} }
+    expect_state: pr.merge_awaiting_reply
+
+  # accept → @exit:merged. The dev-story importer's exits.merged.to:
+  # main projects pr__pr_url into the parent's last_pr_url and sets
+  # status="merged".
+  - intent: { name: pr__accept, slots: {} }
+    expect_state: main
+    expect_world:
+      status:      "merged"
+      last_pr_url: "https://example/pr/200"
+
+expect_no_errors: true

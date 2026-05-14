@@ -1,0 +1,51 @@
+# standup — daily standup prep. Aggregates the day's commits / PRs /
+# tickets via iface.{vcs,ticket}.list_mine. Wave 2 ships the room
+# skeleton; the prompt + aggregator is filled in by Wave 3.
+
+states:
+
+  standup:
+    description: "Standup — what's on my plate today."
+    view: |
+      Standup.
+
+      Picked ticket: {{ world.ticket_id ?? "(none)" }} {{ world.ticket_title }}
+      Last PR url:   {{ world.last_pr_url ?? "(none)" }}
+
+      Summary:
+      {{ world.standup_summary ?? "(empty — type `summarize_day` to generate)" }}
+
+      Intents: summarize_day, go_back, go_main.
+    relevant_world: [ticket_id, ticket_title, last_pr_url, standup_summary]
+    on:
+      summarize_day:
+        - target: standup_summarizing
+      go_back:
+        - target: "{{ world.prev_state }}"
+      go_main:
+        - target: main
+      look:
+        - target: .
+
+  standup_summarizing:
+    description: "Generating standup summary."
+    view: |
+      Generating standup summary…
+
+      Summary: {{ world.standup_summary ?? "(pending)" }}
+    relevant_world: [standup_summary]
+    on_enter:
+      # Pull tickets assigned to me via iface.ticket.list_mine.
+      - invoke: iface.ticket.list_mine
+        with:
+          filter: "assignee=me"
+        bind:
+          standup_summary: tickets
+        on_error: standup
+    on:
+      go_back:
+        - target: standup
+      go_main:
+        - target: main
+      look:
+        - target: .

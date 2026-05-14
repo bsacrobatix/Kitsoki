@@ -1,0 +1,95 @@
+# main — engineer's-day landing. Provider-neutral; no Jira-flavoured
+# vocabulary. The operator picks a sub-flow from here:
+#
+#   go_ticket_search   → ticket_search
+#   go_workspace_manager → workspace_manager
+#   go_inbox          → inbox
+#   go_oracle         → oracle
+#   go_standup        → standup
+#   go_code_review    → code_review (Wave 3 stub)
+#   go_bugfix         → bf (the bugfix import; enters at bf.idle)
+#   go_pr_refinement  → pr (the pr-refinement import; enters at pr.open_pr)
+#   go_deploy / go_observability / go_incident / go_docs — Wave 3 stubs
+
+states:
+
+  main:
+    description: "Main room — your engineer's-day landing."
+    view: |
+      dev-story — main.
+
+      Last PR url:  {{ world.last_pr_url ?? "(none)" }}
+      Status:       {{ world.status }}
+      Inbox unread: {{ world.inbox_unread }}
+      Current ticket: {{ world.ticket_id ?? "(none)" }} {{ world.ticket_title }}
+
+      Available areas:
+        - Pick a ticket          (ticket search)
+        - Continue existing task (workspace manager)
+        - Prep standup
+        - Ask the Oracle
+        - Review a teammate's PR (code review)
+        - Triage an incident
+        - View logs / metrics
+        - Deploy
+        - Edit docs
+
+        - Hand off picked ticket to bugfix (`bugfix` / `go_bugfix`)
+        - Hand off an open PR to pr-refinement (`go_pr_refinement`)
+
+      Inbox: {{ world.inbox_unread }} unread.
+    relevant_world: [last_pr_url, status, inbox_unread, ticket_id, ticket_title]
+    on:
+      go_ticket_search:
+        - target: ticket_search
+          effects:
+            - set: { prev_state: "main" }
+      go_workspace_manager:
+        - target: workspace_manager
+          effects:
+            - set: { prev_state: "main" }
+      go_inbox:
+        - target: inbox
+          push_history: false
+          effects:
+            - set: { prev_state: "main" }
+      go_oracle:
+        - target: oracle
+          effects:
+            - set: { prev_state: "main" }
+      go_standup:
+        - target: standup
+          effects:
+            - set: { prev_state: "main" }
+      go_code_review:
+        - target: code_review
+          effects:
+            - set: { prev_state: "main" }
+      go_deploy:
+        - target: deploy
+          effects:
+            - set: { prev_state: "main" }
+      go_observability:
+        - target: observability
+          effects:
+            - set: { prev_state: "main" }
+      go_incident:
+        - target: incident
+          effects:
+            - set: { prev_state: "main" }
+      go_docs:
+        - target: docs
+          effects:
+            - set: { prev_state: "main" }
+      # Dispatch to imported sub-stories. `target: bf` enters the bf
+      # compound at its entry state (idle); same for pr (entry: open_pr).
+      go_bugfix:
+        - target: bf
+      go_pr_refinement:
+        - target: pr
+      go_main:
+        - target: main
+      go_back:
+        - target: main
+      look:
+        - target: .
