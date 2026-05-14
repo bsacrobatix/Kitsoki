@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title":   "validating_artifact",
+  "description": "Artifact produced by the validating room: full-environment validation (build, deploy, end-to-end script).",
+  "type":    "object",
+  "required": ["summary_title", "summary_markdown", "outcome"],
+  "properties": {
+    "summary_title":    { "type": "string", "minLength": 4 },
+    "summary_markdown": { "type": "string", "minLength": 200 },
+    "outcome":          { "type": "string", "enum": ["pass", "fail_short", "fail", "infra_error"], "description": "pass → advance to done; fail_short → minor patch needed; fail → return to proposing; infra_error → environment, not the fix." },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "build":      { "type": "string" },
+        "api":        { "type": "string" },
+        "ui":         { "type": "string" },
+        "logs":       { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "next_action_hint": { "type": "string", "description": "Free-text hint about what should change next; consumed by proposing/implementing on retry." }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,134 @@
+# happy_llm — judge_mode=llm, LLM-judge fires at every checkpoint and
+# returns a confident verdict. Wave 1: the verdict lands in
+# world.llm_verdict but the runtime does not yet auto-fire the verdict's
+# intent (the contract's `emit_intent:` effect — see the Slice α report).
+# Until that ships, the flow types the verdict intent itself; this still
+# exercises:
+#   - the `when:` guard on the judge invoke (it fires in llm mode)
+#   - the binding of llm_verdict
+#   - the same accept path as happy_human
+# i.e. judge polymorphism works end-to-end except for the auto-emit step.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:        "TKT-002"
+  ticket_title:    "Foyer banner truncated"
+  thread:          "TKT-002"
+  workspace_id:    "ws-tkt-002"
+  workdir:         ".worktrees/tkt-002"
+  base_branch:     "main"
+  feature_branch:  "fix/tkt-002-foyer-banner"
+  bugfix_mode:     "full"
+  judge_mode:      "llm"
+  judge_confidence_threshold: 0.8
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "synced" }
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "diff --git a/x b/x\n", files: [] }
+  host.local:
+    data: { ok: true, log: "PASS: 12 tests", passed: 12, failed: 0 }
+
+  # In `llm` mode every _awaiting_reply also fires host.oracle.ask_with_mcp
+  # via the `judge_<phase>.md` prompt. The runtime can't yet branch the stub
+  # response on prompt (it returns the SAME Data for every call). So our
+  # stub returns a submitted: payload that satisfies BOTH the artifact
+  # schema AND the judge_verdict schema (verdict/intent/reason/confidence
+  # are additional fields the artifact schema ignores via
+  # additionalProperties: true).
+  host.oracle.ask_with_mcp:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        # Artifact fields
+        summary_title:    "Confident artifact"
+        summary_markdown: "An artifact body sufficient for state-machine testing."
+        bug_verified:     true
+        involved_components: [{ name: "tui", reason: "the foyer renders here" }]
+        fix_description:     "Render the banner with `truncate=false` so the title isn't clipped at small widths."
+        root_cause:          "The foyer's renderWidth() returns terminal-width-2 instead of terminal-width, which clips one-character titles."
+        affected_files:      ["internal/tui/foyer.go"]
+        confidence:          0.9
+        reasoning:           "Resize trace shows the off-by-one on terminal-width-2; the fix is well-established in similar renderer code in this repo."
+        status:              "passed"
+        tests_run:           { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:             "pass"
+        evidence:            { build: "ok", api: "n/a", ui: "ok" }
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need at least one regression test asserting on the exact width.", severity: "medium" }
+        # Judge fields (additionalProperties: true on artifact schemas
+        # tolerates these; the orchestrator doesn't validate either way
+        # because flow fixtures don't run the validator subprocess).
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Artifact looks complete and the confidence is high enough to advance."
+
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: reproducing_executing
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: reproducing_awaiting_reply
+    # In llm mode the judge fires in on_enter; world.llm_verdict is bound.
+    expect_world:
+      llm_verdict:
+        summary_title:    "Confident artifact"
+        summary_markdown: "An artifact body sufficient for state-machine testing."
+        bug_verified:     true
+        involved_components: [{ name: "tui", reason: "the foyer renders here" }]
+        fix_description:     "Render the banner with `truncate=false` so the title isn't clipped at small widths."
+        root_cause:          "The foyer's renderWidth() returns terminal-width-2 instead of terminal-width, which clips one-character titles."
+        affected_files:      ["internal/tui/foyer.go"]
+        confidence:          0.9
+        reasoning:           "Resize trace shows the off-by-one on terminal-width-2; the fix is well-established in similar renderer code in this repo."
+        status:              "passed"
+        tests_run:           { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:             "pass"
+        evidence:            { build: "ok", api: "n/a", ui: "ok" }
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need at least one regression test asserting on the exact width.", severity: "medium" }
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Artifact looks complete and the confidence is high enough to advance."
+
+  # Operator (or harness) fires the verdict intent — Wave 2's emit_intent:
+  # will do this automatically.
+  - intent: { name: accept, slots: {} }
+    expect_state: proposing_executing
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: proposing_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: implementing_executing
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: testing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: testing_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: reviewing_executing
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: validating_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: validating_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: done_executing
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: done_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+    expect_world:
+      status: "fixed"
+
+expect_terminal: true
+expect_no_errors: true

@@ -1,0 +1,170 @@
+# happy_human — judge_mode=human, accept at every checkpoint → done.
+#
+# The flow runner stubs every host call:
+#   - host.oracle.ask_with_mcp returns canned `submitted:` artifacts
+#     per room. The first call (reproducing_executing) returns the
+#     reproduction artifact; the next room's call binds the same key
+#     to its own canned payload, etc.
+#   - host.append_to_file (the iface.transport default) is stubbed to
+#     ok: true; the iface rewrite resolves iface.transport.post →
+#     host.append_to_file.post, which the registry's prefix-fallback
+#     dispatches to the bare host.append_to_file handler.
+#   - host.inbox.add is stubbed to ok: true.
+#   - iface.workspace.sync, iface.vcs.commit, iface.vcs.diff,
+#     iface.ci.run_tests, iface.ci.build all resolve to <binding>.<op>;
+#     each binding (host.git_worktree, host.git, host.local) is stubbed
+#     with the appropriate envelope shape.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:        "TKT-001"
+  ticket_title:    "TUI hangs on ESC"
+  ticket_url:      "issues/bugs/2026-05-14-tui-hangs-on-esc.md"
+  thread:          "TKT-001"
+  workspace_id:    "ws-tkt-001"
+  workdir:         ".worktrees/tkt-001"
+  base_branch:     "main"
+  feature_branch:  "fix/tkt-001-tui-esc"
+  bugfix_mode:     "full"
+  judge_mode:      "human"
+  judge_confidence_threshold: 0.8
+
+host_handlers:
+
+  # The iface.transport default — host.append_to_file. iface.transport.post
+  # resolves to host.append_to_file.post; registry prefix-fallback walks back
+  # to host.append_to_file when no per-op handler is registered.
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+
+  # Inbox mirror handler (Slice β provides the real one; stub for now).
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+
+  # Workspace iface — host.git_worktree prefix-fallback handles every
+  # iface.workspace.<op> dispatch.
+  host.git_worktree:
+    data: { ok: true, log: "synced" }
+
+  # VCS iface — host.git prefix-fallback. iface.vcs.commit returns ok+sha;
+  # iface.vcs.diff returns a diff string. Both come through the same stub
+  # (the room reads the `diff` key for vcs.diff and ignores extra fields
+  # for vcs.commit).
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "diff --git a/x b/x\n", files: [] }
+
+  # CI iface — host.local prefix-fallback. iface.ci.run_tests returns
+  # log/passed/failed; iface.ci.build returns log/ok.
+  host.local:
+    data: { ok: true, log: "PASS: 12 tests", passed: 12, failed: 0 }
+
+  # The oracle calls. We have to register host.oracle.ask_with_mcp once;
+  # every room's call hits the same stub and returns the same Data.
+  # That's intentional for happy_human — the artifact_* keys all read from
+  # the same submitted: payload, but each room binds it into its OWN world
+  # key (reproduction_artifact, propose_fix_artifact, etc.), so they don't
+  # clobber each other.
+  #
+  # The judge prompts ALSO go through host.oracle.ask_with_mcp; since we
+  # only have one stub, the judge prompts in judge_mode=human are NEVER
+  # invoked (the `when:` clause skips them). So a single Data payload that
+  # looks like an artifact is fine in this flow.
+  host.oracle.ask_with_mcp:
+    data:
+      stdout: "{\"summary_title\":\"...\",\"summary_markdown\":\"...\"}"
+      ok: true
+      submitted:
+        summary_title:    "Stub artifact"
+        summary_markdown: |
+          # Stub artifact body
+
+          This is a flow-fixture stub payload covering every checkpoint room.
+          The same payload binds into reproduction_artifact, propose_fix_artifact,
+          implement_review_artifact, validate_artifact, done_artifact in turn.
+
+          It satisfies the schemas only loosely — flow fixtures don't run the
+          validator subprocess (no -validate flag in the orchestrator call),
+          so this stub is sufficient for state-machine testing.
+        bug_verified: true
+        steps:        ["start kitsoki", "press ESC", "observe hang"]
+        involved_components:
+          - { name: "internal/tui", reason: "ESC handler routes through here" }
+        fix_description:        "Drain the input queue in the ESC handler instead of blocking on the channel send so the foyer rerender doesn't deadlock on a closed peer."
+        root_cause:             "The ESC handler blocks on a channel send to a peer that has already been closed by an earlier teardown; the rerender goroutine is the only consumer, and it has already exited."
+        affected_files:         ["internal/tui/tui.go", "internal/tui/keys.go"]
+        confidence:             0.85
+        reasoning:              "Trace shows the foyer's teardown closes the rerender channel before the ESC handler is unregistered; the next ESC press blocks. Draining-instead-of-send is the conventional fix for this pattern in our codebase (see internal/jobs/scheduler.go for a parallel example)."
+        status:                 "passed"
+        tests_added:            ["internal/tui/tui_esc_test.go"]
+        tests_run:              { passed: 12, failed: 0, log: "PASS: 12 tests" }
+        outcome:                "pass"
+        evidence:               { build: "ok", api: "n/a", ui: "n/a" }
+        next_action_hint:       ""
+        lessons:
+          - { category: "channel-lifetimes", description: "Closing a channel before unregistering its only producer is a deadlock pattern we've now hit twice; codify a lint rule.", severity: "high" }
+
+turns:
+
+  # Idle → reproducing_executing. on_enter runs host.oracle.ask_with_mcp
+  # and binds the whole submitted: payload into world.reproduction_artifact.
+  # We don't assert on the artifact's exact contents here — the flow path
+  # itself proves the bind happened (downstream rooms read the artifact's
+  # summary_markdown when posting to the transport).
+  - intent: { name: start, slots: {} }
+    expect_state: reproducing_executing
+
+  # reproducing_executing → reproducing_awaiting_reply.
+  - intent: { name: proceed, slots: {} }
+    expect_state: reproducing_awaiting_reply
+
+  # accept → proposing_executing.
+  - intent: { name: accept, slots: {} }
+    expect_state: proposing_executing
+
+  # proposing_executing → proposing_awaiting_reply.
+  - intent: { name: proceed, slots: {} }
+    expect_state: proposing_awaiting_reply
+
+  # accept → implementing_executing.
+  - intent: { name: accept, slots: {} }
+    expect_state: implementing_executing
+
+  # implementing_executing → testing_executing (no checkpoint).
+  - intent: { name: proceed, slots: {} }
+    expect_state: testing_executing
+
+  # testing_executing → testing_awaiting_reply.
+  - intent: { name: proceed, slots: {} }
+    expect_state: testing_awaiting_reply
+
+  # accept → reviewing_executing.
+  - intent: { name: accept, slots: {} }
+    expect_state: reviewing_executing
+
+  # reviewing_executing → validating_executing (no checkpoint).
+  - intent: { name: proceed, slots: {} }
+    expect_state: validating_executing
+
+  # validating_executing → validating_awaiting_reply.
+  - intent: { name: proceed, slots: {} }
+    expect_state: validating_awaiting_reply
+
+  # accept → done_executing.
+  - intent: { name: accept, slots: {} }
+    expect_state: done_executing
+
+  # done_executing → done_awaiting_reply.
+  - intent: { name: proceed, slots: {} }
+    expect_state: done_awaiting_reply
+
+  # accept → @exit:done (synthesised __exit__done terminal in standalone load).
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+    expect_world:
+      status: "fixed"
+      cycle: 0
+
+expect_terminal: true
+expect_no_errors: true

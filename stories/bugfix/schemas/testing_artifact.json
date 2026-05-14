@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title":   "testing_artifact",
+  "description": "Artifact produced by the testing room: review of the implementation + new tests, with a pass/blocked verdict.",
+  "type":    "object",
+  "required": ["summary_title", "summary_markdown", "status", "tests_added", "tests_run"],
+  "properties": {
+    "summary_title":    { "type": "string", "minLength": 4 },
+    "summary_markdown": { "type": "string", "minLength": 200 },
+    "status":           { "type": "string", "enum": ["passed", "failed", "blocked"] },
+    "tests_added": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string" },
+          { "type": "object", "properties": { "path": { "type": "string" }, "name": { "type": "string" } }, "additionalProperties": true }
+        ]
+      }
+    },
+    "tests_run": {
+      "type": "object",
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "log":    { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file":        { "type": "string" },
+          "description": { "type": "string" },
+          "severity":    { "type": "string", "enum": ["blocker", "major", "minor"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,37 @@
+# reviewing — phase 8 + 9 of the cyber-repo pipeline (code review + security).
+# No checkpoint (contract §7); threads into validating.
+
+states:
+
+  reviewing_executing:
+    description: "Self-review of the diff (code + security)."
+    view: |
+      Reviewing the fix for {{ world.ticket_id }} — {{ world.ticket_title }}
+
+      Code-review status: {{ world.implement_review_artifact.status ?? "(pending)" }}
+
+      Type `proceed` to advance to validating.
+    relevant_world: [ticket_id, ticket_title, implement_review_artifact]
+    on_enter:
+      # iface.vcs.diff fetches the patch the reviewer reads. Slice β wires
+      # host.git.diff to return the workspace diff; Wave 1 stub returns "".
+      - invoke: iface.vcs.diff
+        with:
+          workdir: "{{ world.workdir }}"
+        bind:
+          ci_log: diff
+        on_error: idle
+      - say: "Review pass complete — diff {{ world.implement_review_artifact.status ?? 'pending' }}."
+    on:
+      proceed:
+        - target: validating_executing
+      restart_from:
+        - target: proposing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

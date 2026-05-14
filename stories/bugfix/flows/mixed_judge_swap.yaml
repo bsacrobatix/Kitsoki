@@ -1,0 +1,89 @@
+# mixed_judge_swap — starts in judge_mode=llm_then_human. Proves that
+# the same YAML drives both the LLM-judged and operator-driven paths
+# in one run. Wave 1 limitation: we can't (yet) reliably mutate
+# judge_mode mid-run via world_override because the in-memory store
+# uses (session, turn, seq) as a unique constraint and the runner's
+# injectWorldOverride helper assigns Turn: 0 for every override,
+# colliding with the seed events on long flows.
+#
+# Workaround until that runtime gap is fixed: this flow just proves
+# the LLM-judge path end-to-end in llm_then_human mode (same as
+# happy_llm_then_human). For a "mode flip" use a 2-flow pair instead.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:   "TKT-007"
+  thread:      "TKT-007"
+  judge_mode:  "llm_then_human"
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "" }
+  host.local:
+    data: { ok: true, log: "PASS", passed: 1, failed: 0 }
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub artifact body for state-machine testing only."
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Fix the thing in a sufficiently detailed way that the LLM-judge will accept it."
+        root_cause:      "Off-by-one in the renderer somewhere fascinating."
+        affected_files:  ["x.go"]
+        confidence:      0.9
+        reasoning:       "Trace shows the off-by-one in the renderer; the fix is mechanical."
+        status:          "passed"
+        tests_run:       { passed: 1, failed: 0, log: "PASS" }
+        outcome:         "pass"
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need a regression test asserting on the exact width.", severity: "medium" }
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Looks good."
+
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: reproducing_executing
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: reproducing_awaiting_reply
+
+  # The LLM-judge ran in on_enter and wrote world.llm_verdict (because
+  # judge_mode == "llm_then_human" satisfies the when: clause). The
+  # operator (or Wave 2's emit_intent) types the verdict's intent.
+  - intent: { name: accept, slots: {} }
+    expect_state: proposing_executing
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: proposing_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: implementing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: testing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: testing_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: reviewing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: validating_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: validating_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: done_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: done_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+
+expect_terminal: true
+expect_no_errors: true

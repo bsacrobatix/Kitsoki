@@ -1,0 +1,107 @@
+# proposing — phase 3 of the cyber-repo pipeline (fix proposal).
+#
+# Produces the `propose_fix_artifact` (schemas/proposing_artifact.json):
+# a concrete proposed fix with root-cause analysis and confidence.
+
+states:
+
+  proposing_executing:
+    description: "Drafting the fix proposal."
+    view: |
+      Proposing fix for {{ world.ticket_id }} — {{ world.ticket_title }}
+
+      Summary:    {{ world.propose_fix_artifact.summary_title ?? "(pending)" }}
+      Confidence: {{ world.propose_fix_artifact.confidence ?? "(pending)" }}
+
+      Type `proceed` to deliver, `restart_from` to re-run, or `quit`.
+    relevant_world: [ticket_id, ticket_title, propose_fix_artifact, reproduction_artifact, cycle, refine_feedback]
+    on_enter:
+      - invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/proposing_executing.md
+          schema: schemas/proposing_artifact.json
+          args:
+            ticket_id:             "{{ world.ticket_id }}"
+            ticket_title:          "{{ world.ticket_title }}"
+            workdir:               "{{ world.workdir }}"
+            reproduction_summary:  "{{ world.reproduction_artifact.summary_markdown }}"
+            refine_feedback:       "{{ world.refine_feedback }}"
+            cycle:                 "{{ world.cycle }}"
+        bind:
+          propose_fix_artifact: submitted
+        on_error: idle
+    on:
+      proceed:
+        - target: proposing_awaiting_reply
+      restart_from:
+        - target: proposing_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback ?? '' }}"
+                cycle: 0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
+
+  proposing_awaiting_reply:
+    description: "Fix proposal posted; awaiting verdict."
+    view: |
+      Fix-proposal checkpoint — {{ world.ticket_id }}
+
+      {{ world.propose_fix_artifact.summary_markdown ?? "(artifact pending)" }}
+
+      Verdict slot: {{ world.llm_verdict.verdict ?? "(no LLM verdict)" }}  (confidence {{ world.llm_verdict.confidence ?? 0 }})
+      Reason:       {{ world.llm_verdict.reason ?? "" }}
+
+      Reply: accept | refine [feedback=...] | restart_from [stage=...] | quit
+    relevant_world: [judge_mode, ticket_id, propose_fix_artifact, llm_verdict, cycle]
+    on_enter:
+      - invoke: iface.transport.post
+        with:
+          thread:    "{{ world.thread }}"
+          title:     "Fix proposal: {{ world.ticket_id }}"
+          body:      "{{ world.propose_fix_artifact.summary_markdown }}"
+          phase_id:  "proposing_{{ world.ticket_id }}_{{ world.cycle }}"
+      - invoke: host.inbox.add
+        with:
+          kind:    checkpoint
+          title:   "Fix proposal: {{ world.ticket_id }}"
+          thread:  "{{ world.thread }}"
+          state:   proposing_awaiting_reply
+          body:    "{{ world.propose_fix_artifact.summary_markdown }}"
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/judge_proposing.md
+          schema: schemas/judge_verdict.json
+          args:
+            ticket_id:       "{{ world.ticket_id }}"
+            artifact_title:  "{{ world.propose_fix_artifact.summary_title }}"
+            artifact_body:   "{{ world.propose_fix_artifact.summary_markdown }}"
+        bind:
+          llm_verdict: submitted
+    on:
+      accept:
+        - target: implementing_executing
+          effects:
+            - set:
+                last_reply_author: "{{ slots.author ?? 'human' }}"
+                refine_feedback:   ""
+                cycle:             0
+      refine:
+        - target: proposing_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                cycle:           "{{ world.cycle + 1 }}"
+      restart_from:
+        - target: reproducing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'reproducing' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

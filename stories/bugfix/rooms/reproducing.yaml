@@ -1,0 +1,144 @@
+# reproducing — phase 1 + 1.5 of the cyber-repo pipeline.
+#
+# Produces the `reproduction_artifact` (schemas/reproducing_artifact.json):
+# evidence the bug is reproducible plus the components implicated.
+#
+# Auto-advance pattern: `_executing.on_enter` runs the artifact-producing LLM
+# call synchronously and binds world.reproduction_artifact. The state then
+# exposes a `proceed` intent so the operator (or the flow runner) advances
+# into `_awaiting_reply`, where the checkpoint shape (contract §6) fires:
+# post + inbox + conditional LLM-judge + (conditional) verdict capture.
+#
+# Why not auto-advance via `on_complete: target:`? Wave 1 keeps the artifact
+# call synchronous to dodge the background-job scheduler — a `proceed` intent
+# in the flow is the simplest deterministic harness. Wave 2 can swap in
+# background + on_complete + target once the judge harness in
+# `internal/judges/` lands.
+
+states:
+
+  reproducing_executing:
+    description: "Producing the reproduction artifact via the oracle."
+    view: |
+      Reproducing bug {{ world.ticket_id }} — {{ world.ticket_title }}
+
+      Artifact summary: {{ world.reproduction_artifact.summary_title ?? "(pending)" }}
+      Bug verified:     {{ world.reproduction_artifact.bug_verified ?? false }}
+
+      Type `proceed` to deliver the artifact to the transport / inbox,
+      or `restart_from` to re-run, or `quit` to abandon.
+    relevant_world: [ticket_id, ticket_title, reproduction_artifact, cycle]
+    on_enter:
+      # Synchronous oracle call — the schema-validated payload lands at
+      # Result.Data.submitted; bind: walks "submitted" and writes the whole
+      # object into world.reproduction_artifact.
+      - invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/reproducing_executing.md
+          schema: schemas/reproducing_artifact.json
+          args:
+            ticket_id:        "{{ world.ticket_id }}"
+            ticket_title:     "{{ world.ticket_title }}"
+            workdir:          "{{ world.workdir }}"
+            refine_feedback:  "{{ world.refine_feedback }}"
+            cycle:            "{{ world.cycle }}"
+        bind:
+          reproduction_artifact: submitted
+        on_error: idle
+    on:
+      proceed:
+        - target: reproducing_awaiting_reply
+      restart_from:
+        - target: reproducing_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback }}"
+                cycle: 0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
+
+  # Checkpoint shape — contract §6. IDENTICAL across all seven _awaiting_reply
+  # states; only `<phase>` and the `accept` target vary. Authors MUST NOT fork
+  # this shape between judge modes — judge polymorphism is one host call per
+  # checkpoint, gated by `when:`.
+  reproducing_awaiting_reply:
+    description: "Reproduction artifact posted; awaiting verdict."
+    view: |
+      Reproduction checkpoint — {{ world.ticket_id }}
+
+      {{ world.reproduction_artifact.summary_markdown ?? "(artifact pending)" }}
+
+      Verdict slot: {{ world.llm_verdict.verdict ?? "(no LLM verdict)" }}  (confidence {{ world.llm_verdict.confidence ?? 0 }})
+      Reason:       {{ world.llm_verdict.reason ?? "" }}
+
+      Reply: accept | refine [feedback=...] | restart_from [stage=...] | quit
+    relevant_world: [judge_mode, ticket_id, reproduction_artifact, llm_verdict, cycle]
+    on_enter:
+      # 1. Always: post the artifact to whichever transport is bound.
+      - invoke: iface.transport.post
+        with:
+          thread:    "{{ world.thread }}"
+          title:     "Reproduction artifact: {{ world.ticket_id }}"
+          body:      "{{ world.reproduction_artifact.summary_markdown }}"
+          phase_id:  "reproducing_{{ world.ticket_id }}_{{ world.cycle }}"
+
+      # 2. Always: mirror the artifact into the local inbox.
+      - invoke: host.inbox.add
+        with:
+          kind:    checkpoint
+          title:   "Reproduction artifact: {{ world.ticket_id }}"
+          thread:  "{{ world.thread }}"
+          state:   reproducing_awaiting_reply
+          body:    "{{ world.reproduction_artifact.summary_markdown }}"
+
+      # 3. Conditionally: ask an LLM-judge if the world says to.
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/judge_reproducing.md
+          schema: schemas/judge_verdict.json
+          args:
+            ticket_id:       "{{ world.ticket_id }}"
+            artifact_title:  "{{ world.reproduction_artifact.summary_title }}"
+            artifact_body:   "{{ world.reproduction_artifact.summary_markdown }}"
+        bind:
+          llm_verdict: submitted
+
+      # 4. Auto-fire the LLM's verdict via `emit_intent` is NOT supported by
+      #    the runtime in Wave 1 — see the Slice α report. The verdict still
+      #    lands in world.llm_verdict for the operator / harness to act on.
+      #    (When emit_intent ships, this block becomes:
+      #       - when: "world.judge_mode != 'human' &&
+      #                world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+      #                world.llm_verdict.verdict != 'uncertain' &&
+      #                world.llm_verdict.intent != 'uncertain'"
+      #         effects:
+      #           - emit_intent: "{{ world.llm_verdict.intent }}"
+      #             slots: { feedback: "{{ world.llm_verdict.reason }}" }
+      #    For Wave 1 the flow runner / operator types the same intent.)
+    on:
+      accept:
+        - target: proposing_executing
+          effects:
+            - set:
+                last_reply_author: "{{ slots.author ?? 'human' }}"
+                refine_feedback:   ""
+                cycle:             0
+      refine:
+        - target: reproducing_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                cycle:           "{{ world.cycle + 1 }}"
+      restart_from:
+        - target: reproducing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'reproducing' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

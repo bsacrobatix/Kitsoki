@@ -1,0 +1,48 @@
+# implementing — phase 6 + 6.5 of the cyber-repo pipeline. No checkpoint
+# (per contract §7); the room threads straight into testing.
+#
+# Wave 1 emits an implementation summary as a `say:` but does NOT produce a
+# separate artifact JSON — the implementation summary is folded into the
+# next room's `implement_review_artifact` (testing).
+
+states:
+
+  implementing_executing:
+    description: "Applying the proposed fix."
+    view: |
+      Implementing fix for {{ world.ticket_id }} — {{ world.ticket_title }}
+
+      Workspace: {{ world.workspace_id }} ({{ world.workdir }})
+      Feature branch: {{ world.feature_branch }}
+
+      Type `proceed` to move to testing, or `restart_from` to bail back.
+    relevant_world: [ticket_id, ticket_title, workspace_id, workdir, feature_branch, propose_fix_artifact]
+    on_enter:
+      # The actual code-edit happens here via iface.vcs.commit / iface.workspace.sync
+      # Slice β's host handlers implement the work; the iface call below is
+      # the canonical dispatch site. In Wave 1 the no-op iface.vcs.commit
+      # handler just records "implementation applied" against the workspace.
+      - invoke: iface.workspace.sync
+        with:
+          id: "{{ world.workspace_id }}"
+        on_error: idle
+      - invoke: iface.vcs.commit
+        with:
+          workdir: "{{ world.workdir }}"
+          message: "{{ world.propose_fix_artifact.summary_title }}"
+          files:   "{{ world.propose_fix_artifact.affected_files }}"
+        on_error: idle
+      - say: "Fix applied — {{ world.propose_fix_artifact.summary_title }}"
+    on:
+      proceed:
+        - target: testing_executing
+      restart_from:
+        - target: proposing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

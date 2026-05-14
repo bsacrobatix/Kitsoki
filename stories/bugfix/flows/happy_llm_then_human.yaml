@@ -1,0 +1,85 @@
+# happy_llm_then_human — judge_mode=llm_then_human, LLM-judge fires
+# at every checkpoint with a confident verdict. Same as happy_llm with
+# the mode flipped — proves the `when:` guard accepts both
+# llm_then_human and llm at the LLM-judge invoke site.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:        "TKT-003"
+  ticket_title:    "Inbox count off by one"
+  thread:          "TKT-003"
+  workspace_id:    "ws-tkt-003"
+  workdir:         ".worktrees/tkt-003"
+  base_branch:     "main"
+  feature_branch:  "fix/tkt-003-inbox-count"
+  bugfix_mode:     "full"
+  judge_mode:      "llm_then_human"
+  judge_confidence_threshold: 0.8
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "synced" }
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "" }
+  host.local:
+    data: { ok: true, log: "PASS", passed: 1, failed: 0 }
+  host.oracle.ask_with_mcp:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        summary_title:    "OK"
+        summary_markdown: "All checks pass; the LLM is confident."
+        bug_verified:     true
+        involved_components: [{ name: "inbox" }]
+        fix_description:  "Increment unread before the broadcast, not after, so the listener observes the count when it wakes."
+        root_cause:       "Counter increments after broadcast; listeners woken before the increment see the stale count."
+        affected_files:   ["internal/inbox/store.go"]
+        confidence:       0.9
+        reasoning:        "Trace shows the broadcast happens before the SQL UPDATE commits; flipping the order is mechanical."
+        status:           "passed"
+        tests_run:        { passed: 1, failed: 0, log: "PASS" }
+        outcome:          "pass"
+        lessons:
+          - { category: "race-conditions", description: "Broadcast-then-mutate is always wrong when the listener reads the mutation; lint for this pattern.", severity: "medium" }
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Looks good."
+
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: reproducing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: reproducing_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: proposing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: proposing_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: implementing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: testing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: testing_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: reviewing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: validating_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: validating_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: done_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: done_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+    expect_world: { status: "fixed" }
+
+expect_terminal: true
+expect_no_errors: true

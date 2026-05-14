@@ -1,0 +1,27 @@
+# idle — entry room. Pipeline parked. The `start` intent boots the
+# pipeline; `quit` exits via @exit:abandoned.
+#
+# Wave 1 doesn't gate on bugfix_mode (full | quick); both fall straight to
+# reproducing_executing. Wave 2 may add a `quick_fix` branch that skips to
+# implementing_executing.
+
+states:
+
+  idle:
+    description: "Bug-fix pipeline parked. Waiting for `start`."
+    view: |
+      Bug-fix pipeline — idle.
+
+      Ticket:    {{ world.ticket_id }} {{ world.ticket_title }}
+      Workspace: {{ world.workspace_id }}
+      Mode:      {{ world.bugfix_mode }} bugfix, judge_mode={{ world.judge_mode }}
+
+      Actions: start, quit, look.
+    relevant_world: [ticket_id, ticket_title, bugfix_mode, judge_mode, workspace_id]
+    on:
+      start:
+        - target: reproducing_executing
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

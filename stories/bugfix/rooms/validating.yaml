@@ -1,0 +1,112 @@
+# validating — phases 9.5–9.7 of the cyber-repo pipeline.
+#
+# Produces the `validate_artifact` (schemas/validating_artifact.json): the
+# full-environment validation outcome (pass | fail_short | fail | infra_error).
+
+states:
+
+  validating_executing:
+    description: "Validating the fix against the full environment."
+    view: |
+      Validating fix for {{ world.ticket_id }} — {{ world.ticket_title }}
+
+      Outcome:    {{ world.validate_artifact.outcome ?? "(pending)" }}
+      Summary:    {{ world.validate_artifact.summary_title ?? "(pending)" }}
+
+      Type `proceed` to deliver the validation artifact.
+    relevant_world: [ticket_id, ticket_title, validate_artifact, implement_review_artifact, cycle]
+    on_enter:
+      - invoke: iface.ci.build
+        with:
+          workdir: "{{ world.workdir }}"
+          target:  "default"
+        bind:
+          ci_log: log
+        on_error: idle
+      - invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/validating_executing.md
+          schema: schemas/validating_artifact.json
+          args:
+            ticket_id:    "{{ world.ticket_id }}"
+            ticket_title: "{{ world.ticket_title }}"
+            build_log:    "{{ world.ci_log }}"
+            review_body:  "{{ world.implement_review_artifact.summary_markdown }}"
+        bind:
+          validate_artifact: submitted
+        on_error: idle
+    on:
+      proceed:
+        - target: validating_awaiting_reply
+      restart_from:
+        - target: proposing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
+
+  validating_awaiting_reply:
+    description: "Validation artifact posted; awaiting verdict."
+    view: |
+      Validation checkpoint — {{ world.ticket_id }}
+
+      {{ world.validate_artifact.summary_markdown ?? "(artifact pending)" }}
+
+      Verdict slot: {{ world.llm_verdict.verdict ?? "(no LLM verdict)" }}  (confidence {{ world.llm_verdict.confidence ?? 0 }})
+      Reason:       {{ world.llm_verdict.reason ?? "" }}
+
+      Reply: accept | refine [feedback=...] | restart_from [stage=...] | quit
+    relevant_world: [judge_mode, ticket_id, validate_artifact, llm_verdict, cycle]
+    on_enter:
+      - invoke: iface.transport.post
+        with:
+          thread:    "{{ world.thread }}"
+          title:     "Validation: {{ world.ticket_id }}"
+          body:      "{{ world.validate_artifact.summary_markdown }}"
+          phase_id:  "validating_{{ world.ticket_id }}_{{ world.cycle }}"
+      - invoke: host.inbox.add
+        with:
+          kind:    checkpoint
+          title:   "Validation: {{ world.ticket_id }}"
+          thread:  "{{ world.thread }}"
+          state:   validating_awaiting_reply
+          body:    "{{ world.validate_artifact.summary_markdown }}"
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/judge_validating.md
+          schema: schemas/judge_verdict.json
+          args:
+            ticket_id:       "{{ world.ticket_id }}"
+            artifact_title:  "{{ world.validate_artifact.summary_title }}"
+            artifact_body:   "{{ world.validate_artifact.summary_markdown }}"
+        bind:
+          llm_verdict: submitted
+    on:
+      accept:
+        - target: done_executing
+          effects:
+            - set:
+                last_reply_author: "{{ slots.author ?? 'human' }}"
+                refine_feedback:   ""
+                cycle:             0
+      refine:
+        - target: validating_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                cycle:           "{{ world.cycle + 1 }}"
+      restart_from:
+        - target: proposing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

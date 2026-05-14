@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title":   "done_artifact",
+  "description": "Final handoff artifact — postmortem-style summary that closes out the bug-fix run. Parent stories that import bugfix may carry this into pr-refinement.",
+  "type":    "object",
+  "required": ["summary_title", "summary_markdown", "lessons"],
+  "properties": {
+    "summary_title":    { "type": "string", "minLength": 4 },
+    "summary_markdown": { "type": "string", "minLength": 200 },
+    "lessons": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["category", "description"],
+        "properties": {
+          "category":    { "type": "string" },
+          "description": { "type": "string", "minLength": 40 },
+          "phase":       { "type": "string", "description": "Which room (reproducing|proposing|…) the lesson applies to." },
+          "severity":    { "type": "string", "enum": ["critical", "high", "medium", "low"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "cycles":              { "type": "integer", "minimum": 0 },
+        "checkpoint_comments": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

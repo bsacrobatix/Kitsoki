@@ -1,0 +1,77 @@
+# llm_uncertain_holds — judge_mode=llm with an uncertain verdict.
+# The LLM-judge fires at the reproducing checkpoint and returns
+# `verdict: uncertain` + low confidence. In contract §6's step 4
+# (NOT YET IMPLEMENTED in Wave 1 — see Slice α report) this would mean
+# "no auto-emit; hold the state". Until the runtime supports auto-emit,
+# the difference between this flow and happy_llm is only what
+# world.llm_verdict ends up containing — the state holds at
+# reproducing_awaiting_reply with the uncertain verdict visible, and
+# the operator decides what to do.
+#
+# This flow proves:
+#   - the `when:` guard on the judge call DOES fire even when the
+#     verdict is "uncertain" — it doesn't auto-skip
+#   - world.llm_verdict.verdict ends up "uncertain" and confidence < threshold
+#   - no auto-advance happens (the state is reproducing_awaiting_reply
+#     after the proceed intent, and stays there until quit)
+#   - quit lands at @exit:abandoned
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:        "TKT-004"
+  thread:          "TKT-004"
+  judge_mode:      "llm"
+  judge_confidence_threshold: 0.8
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "" }
+  host.local:
+    data: { ok: true, log: "" }
+  host.oracle.ask_with_mcp:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        summary_title:    "Unclear reproduction"
+        summary_markdown: "The repro is intermittent; we cannot determine bug_verified=true from this run."
+        bug_verified:     false
+        involved_components: [{ name: "unknown" }]
+        verdict:    "uncertain"
+        intent:     "uncertain"
+        reason:     "Reproduction is intermittent and the involved component is unclear; defer to human."
+        confidence: 0.5
+
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: reproducing_executing
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: reproducing_awaiting_reply
+    expect_world:
+      llm_verdict:
+        summary_title:    "Unclear reproduction"
+        summary_markdown: "The repro is intermittent; we cannot determine bug_verified=true from this run."
+        bug_verified:     false
+        involved_components: [{ name: "unknown" }]
+        verdict:    "uncertain"
+        intent:     "uncertain"
+        reason:     "Reproduction is intermittent and the involved component is unclear; defer to human."
+        confidence: 0.5
+
+  # No auto-emit happens (Wave 1 runtime gap). The flow hangs here until
+  # an operator intervenes. We model "operator decides to quit" as the
+  # next user turn.
+  - intent: { name: quit, slots: {} }
+    expect_state: __exit__abandoned
+
+expect_terminal: true
+expect_no_errors: true

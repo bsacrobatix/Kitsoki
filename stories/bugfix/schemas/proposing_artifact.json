@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title":   "proposing_artifact",
+  "description": "Artifact produced by the proposing room: the proposed fix, root-cause analysis, and confidence.",
+  "type":    "object",
+  "required": ["summary_title", "summary_markdown", "fix_description", "root_cause", "affected_files", "confidence", "reasoning"],
+  "properties": {
+    "summary_title":    { "type": "string", "minLength": 4 },
+    "summary_markdown": { "type": "string", "minLength": 200, "description": "Markdown view delivered to the transport." },
+    "fix_description":  { "type": "string", "minLength": 40, "description": "Concrete description of what the fix does." },
+    "root_cause":       { "type": "string", "minLength": 40, "description": "Root-cause analysis." },
+    "affected_files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "type": "string", "pattern": "^[^/].+\\..+$" },
+          {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string", "pattern": "^[^/].+\\..+$" }
+            },
+            "additionalProperties": true
+          }
+        ]
+      }
+    },
+    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+    "reasoning":  { "type": "string", "minLength": 80, "description": "Reasoning behind the proposed fix." },
+    "alternative_approaches": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string" },
+          { "type": "object", "additionalProperties": true }
+        ]
+      }
+    },
+    "external_dependencies": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}
