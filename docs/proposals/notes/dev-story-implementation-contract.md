@@ -675,6 +675,460 @@ Explicit non-goals for Wave 2 (deferred to Wave 3+):
 | `stories/pr-refinement/` | 4 | yes |
 | `stories/dev-story/` | 4 | yes (includes bf → pr full-chain) |
 | `stories/oregon-trail/` | 28 | yes (no regression) |
+| `stories/kitsoki-dev/` (Phase 3) | 4 | yes (Wave 2 / Phase 3 — see below) |
 
 Plus `go test ./...` is fully green.
+
+## W2.11 — Wave 2 / Phase 3 — kitsoki-dev dogfood appendix
+
+Phase 3 of the proposal (the PoC milestone ★) lands
+`stories/kitsoki-dev/` — a ~50-line instance that imports
+`stories/dev-story/` under the alias `core` with concrete bindings
+to the local-files providers (`host.local_files.ticket`, `host.git`,
+`host.local`, `host.git_worktree`, `host.append_to_file`,
+`host.inbox.add`, `host.oracle.ask_with_mcp`). The PoC is "kitsoki
+working on kitsoki through its own UI, with the bug file as both
+ticket and conversation log".
+
+### W2.11.1 — Instance-level world keys (forward-looking)
+
+`stories/kitsoki-dev/app.yaml`'s `world:` block adds three keys for
+the dogfood seam that aren't consumed by any current room:
+
+```yaml
+world:
+  repo_root:    { type: string, default: "" }
+  ticket_globs: { type: string, default: "issues/bugs/*.md,issues/features/*.md,stories/*/issues/bugs/*.md,stories/*/issues/features/*.md" }
+  autonomous_default_mode: { type: string, default: "llm_then_human" }
+```
+
+These are documented at the instance for Wave 3.5 / Phase 5+
+consumers:
+
+- `repo_root` will be plumbed through to `iface.ticket.*` args as
+  `root:` once the local-files provider gains explicit `root` arg
+  support at the iface call site (current handler falls back to
+  `$KITSOKI_TICKETS_ROOT` then `os.Getwd()`).
+- `ticket_globs` will be honoured at the handler once the
+  multi-glob scan ships (today the handler reads
+  `<root>/issues/bugs/*.md` only). The dogfood instance's value
+  documents the FULL scan target so a future enhancement only
+  needs to thread the world key through.
+- `autonomous_default_mode` is informational — the actual judge
+  selection happens on `world.judge_mode` (= `human` | `llm` |
+  `llm_then_human`). The instance docs it as a hint for warp
+  scenarios.
+
+### W2.11.2 — `env.PWD` interpolation in `world_in:` — NOT implemented
+
+The proposal §5.2 example shows `world_in: { repo_root: "{{ env.PWD
+}}" }`. The expression engine (`internal/expr/`) has no `env.*`
+namespace; the `expr.Env` struct exposes `Slots`, `World`, `Event`,
+`Run`. Adding env-var access is a ~10-line enhancement (add an
+`Env map[string]string` field to `expr.Env`, populated at
+session-start from `os.Environ()`, accessed in expressions as
+`env.PWD`). Phase 3 sidesteps this by leaving `repo_root` as an
+empty default and relying on the local-files provider's cwd
+fallback. Operators running from any directory other than the
+kitsoki repo root will need `KITSOKI_TICKETS_ROOT` exported or
+`--set repo_root=/abs/path` at session start.
+
+### W2.11.3 — Multi-layer fold quirks fixed during Phase 3
+
+Two latent issues in `internal/app/imports.go` /
+`imports_rewriter.go` surfaced under kitsoki-dev's
+second-fold-of-dev-story-which-already-imports-bf-and-pr load:
+
+1. **Bare-name transition targets at depth > 0.** The
+   `rewriteChildStateTransitions` bare-name catch wrote `../X` for
+   every bare-name sibling target regardless of how deeply nested
+   the state was within the alias wrapper. After fold,
+   `bf.done_awaiting_reply.accept` had target `pr` (bare, from the
+   dev-story @exit:done mapping). On the second fold under
+   `core`, that bare `pr` was rewritten to `../pr` — but the state
+   `bf.done_awaiting_reply` sits one compound deep, so the runtime
+   `resolveTarget("core.bf.done_awaiting_reply", "../pr")` =
+   `"core.bf.pr"` (wrong; should be `"core.pr"`).
+   **Fix:** use `strings.Repeat("../", depth+1) + t` so
+   N-deep states need N+1 `..` segments to walk past the alias
+   wrapper to the sibling level. `dev-story`, `bugfix`,
+   `pr-refinement`, `oregon-trail` all still pass post-fix.
+
+2. **`emit_intent:` and `emit_slots:` weren't world-prefix
+   rewritten.** `rewriteEffect` rewrote `When`, `Say`, `Set`,
+   `Increment`, `With`, `Bind`, and nested `OnComplete`, but not
+   `EmitIntent` / `EmitSlots`. After fold, `emit_intent: "{{
+   world.llm_verdict.intent }}"` still referenced the unprefixed
+   key, so at runtime the rendered intent was empty (or stale) and
+   the autonomous mode silently no-op'd. **Fix:** add
+   `eff.EmitIntent = rw.rewriteExpr(eff.EmitIntent)` + a
+   `rewriteAny` loop over `eff.EmitSlots`.
+   Wave 2's flow fixtures didn't exercise autonomous-mode through
+   the dev-story import (the dev-story `bugfix_to_pr` flow uses
+   `judge_mode: human`), so the gap only surfaced when Phase 3
+   wrote `flows/pickup_autonomous_then_bail.yaml`.
+
+Both fixes are pure rewriter-side and don't change the runtime
+contract. The `internal/machine/dispatchEmittedIntents` path is
+unchanged — it always dispatched whatever name the template
+rendered to; the rewrite just ensures the template sees the right
+world key on its inputs.
+
+### W2.11.4 — Flow fixtures can't register REAL host handlers
+
+`testrunner/flows.go`'s `HostHandlers` map registers only STUB
+handlers via a closure over `HostStub.Data`. There's no path to
+register a REAL handler (e.g. the real
+`host.local_files.ticket` against a temp git repo) from a flow
+fixture, so the proposal §8 Phase 3 acceptance — "assert the bug
+file's `status:` is `resolved` after the run; assert at least 3
+`## Comment` blocks were appended" — isn't expressible as a flow
+assertion today. Phase 3 ships:
+
+- Four supervised + autonomous flow fixtures that pin the
+  state-machine walk and projected-world shape end-to-end with
+  stubbed handlers — proves the import composition + judge
+  polymorphism + emit_intent path through the multi-layer fold.
+- A manual-walkthrough doc in `stories/kitsoki-dev/README.md`
+  ("Manual walkthrough — the on-disk smoke") that exercises the
+  real handlers against the on-disk seed bugs. The on-disk
+  byte-exact assertion is run by hand; CI would need an explicit
+  "real-handler harness" mode for the testrunner that fixtures
+  could opt into.
+
+The minimal future enhancement: a new `host_handlers.<name>.real:
+true` discriminator in `FlowFixture.HostHandlers`, which short-
+circuits the stub closure and registers the real built-in
+handler. Five-line change in `flows.go`; deferred to a follow-up
+because the supervised + autonomous flows already pin the
+state-machine correctness, and the on-disk side has a manual smoke
+covering it.
+
+### W2.11.5 — Phase 3 test surface
+
+```
+$ kitsoki test flows stories/kitsoki-dev/app.yaml
+PASS      dogfood_smoke.yaml             (4 turns)
+PASS      pickup_self_bug_supervised.yaml (18 turns)
+PASS      pickup_story_bug_supervised.yaml (18 turns)
+PASS      pickup_autonomous_then_bail.yaml (12 turns)
+Summary: 4/4 flows pass
+```
+
+All four exercise the multi-layer fold under `core`. The two
+supervised fixtures walk the full bf → pr chain (18 turns each)
+and assert on projected `core__status` / `core__last_pr_url` at
+`@exit:merged`. The autonomous-then-bail fixture pins both the
+auto-fire and the mid-flow `world_override.judge_mode = "human"`
+swap — proving the autonomous-to-supervised handoff works hot.
+
+### W2.11.6 — What blocks the FULLY-real PoC today
+
+The only thing standing between Phase 3 as-shipped and a
+fully-end-to-end live run is the **bug-filing CLI from
+`bug-format-proposal.md` Phase A** that lives on a parallel
+worktree not yet merged into this branch. Once it lands, `/meta
+kitsoki bug` and `/meta story bug` will produce properly-formed
+bug files automatically, and the closed loop from proposal §5.4
+runs without any hand-editing. Everything else — provider
+handlers, story imports, flow-test coverage, the dogfood manifest,
+the seed bugs — is in place on this branch.
+
+---
+
+# Wave 3 / Phase 5 contract additions (cypilot story + GitHub / cypilot_artifacts providers)
+
+Wave 1 shipped the six base host_interfaces and `stories/bugfix/`;
+Wave 2 added `stories/pr-refinement/` and the `stories/dev-story/`
+hub. Wave 3 / Phase 5 (this section) introduces:
+
+1. The seventh host_interface — `artifact` — with the five canonical
+   ops scoped in proposal §2.6.
+2. Two new provider handlers — `host.gh.ticket` (GitHub Issues via
+   the `gh` CLI, backs the `ticket` iface) and `host.cypilot_artifacts`
+   (cypilot SDLC artifact store via the `cpt` CLI, backs the
+   `artifact` iface).
+3. The `stories/cypilot/` story (interim home in kitsoki; migrates to
+   the cypilot upstream repo at Phase 8 per proposal §5.5).
+
+The additions below are **strictly additive** — every Wave 1 / Wave 2
+contract clause still holds.
+
+## W3.1 — `artifact` iface canonical operation schemas
+
+```yaml
+host_interfaces:
+  artifact:
+    description: "Cypilot SDLC artifact store (PRD / ADR / DESIGN / DECOMPOSITION / FEATURE / CODE)."
+    operations:
+      list:
+        input:  { kind: string }                     # "prd" | "adr" | "design" | "feature" | …
+        output: { artifacts: list }                  # [{id, kind, title, path, status, …}]
+      get:
+        input:  { id: string }
+        output: { id: string, kind: string, title: string, body: string,
+                  frontmatter: object, path: string, depends_on: list }
+      create:
+        input:  { kind: string, title: string, slug: string, parent_id: string }
+        output: { ok: bool, id: string, path: string, artifact: object }
+      validate:                                      # the cypilot-analyze workflow
+        input:  { id: string, mode: string }         # "deterministic" | "semantic" | "consistency"
+        output: { ok: bool, findings: list, report: string }
+      decompose:                                     # the cypilot-plan workflow
+        input:  { id: string }                       # a PRD or DECOMPOSITION id
+        output: { ok: bool, plan_path: string, phase_count: int, artifact: object }
+    default: host.cypilot_artifacts
+```
+
+These map onto cypilot's three workflows (proposal §6.4):
+`cypilot-analyze` → `validate`, `cypilot-plan` → `decompose`,
+`cypilot-generate` → `create`. The provider implementation
+(§W3.3 below) shells to `cpt` for v1; the proposal flags that today's
+`cpt` CLI may need a `--json` flag and minor verb adjustments before
+the idealised shapes above land exactly. The provider tolerates both
+JSON envelope and plain-text fallback shapes for `list` and
+`decompose`.
+
+### W3.1.1 — The `artifact` field convention
+
+Per W3.3 the `create` and `decompose` ops return an `artifact:`
+nested object alongside the flat scalar fields. A room can bind the
+whole envelope into one world slot:
+
+```yaml
+bind:
+  prd_artifact: artifact            # binds the whole {id, path, kind, ...}
+```
+
+while still binding individual scalars via the dot-path syntax in
+`hc.Bind`'s value (e.g. `bind: { feature_count: phase_count }` to
+pull a scalar out of the same Result.Data).
+
+## W3.2 — New handler names (Go side)
+
+Two new prefix-fallback handler registrations land in
+`internal/host/handlers.go::RegisterBuiltins`:
+
+| Handler name | Iface op(s) it backs | File |
+|---|---|---|
+| `host.gh.ticket` (prefix-fallback handler) | all `ticket.*` ops via the `gh` CLI | `internal/host/github.go` |
+| `host.cypilot_artifacts` (prefix-fallback handler) | all `artifact.*` ops via the `cpt` CLI | `internal/host/cypilot_artifacts.go` |
+
+Per the registry's prefix-fallback (host.go::Get), a single
+registration of `host.gh.ticket` resolves `host.gh.ticket.search`,
+`host.gh.ticket.get`, etc. — same as `host.local_files.ticket` in
+Wave 1.
+
+GitHub's PR-side ops (open_pr / pr_status / pr_comment) are already
+served by `host.git`'s existing `gh pr ...` shell-out (Wave 1 /
+`internal/host/git_vcs.go`). A story binding GitHub picks
+`host.gh.ticket` for `ticket` and keeps `host.git` for `vcs` — the
+two cooperate without duplication. This is **explicit**: a parent
+story's `host_bindings:` block for GitHub looks like
+
+```yaml
+host_bindings:
+  ticket: host.gh.ticket
+  vcs:    host.git
+  # …
+```
+
+and the runtime dispatches accordingly.
+
+## W3.3 — Provider availability + error model
+
+Both providers shell out to a CLI that may not be installed on the
+operator's machine. The contract for `cpt` / `gh` absence is:
+
+- A `--version` probe at the top of every op (`cptCLIAvailable`,
+  `ghCLIAvailable` — both go through the shared `vcsExec` seam from
+  `git_vcs.go`).
+- If the probe fails, every op returns a clean `Result.Error` with
+  an installation hint:
+  - `host.cypilot_artifacts: cpt CLI not available — install cypilot from https://github.com/Acronis/cypilot or run from a checkout that has it on PATH`
+  - `host.gh.ticket: gh CLI not available — install github.com/cli/cli and run gh auth login`
+- The room's `on_error:` arc fires; the operator picks up at the
+  fallback state. No panics, no infra-error escalation.
+
+For `validate` specifically, a non-zero exit from `cpt analyze` is
+the canonical "findings present" signal in cypilot's existing
+workflows. The handler surfaces `ok: false` with `findings` +
+`report` populated and DOES NOT set `Result.Error` — the
+LLM-judge prompt reads the findings to decide refine vs. accept.
+Authors that want the on_error arc on validate-fail can wrap the
+call with an explicit `when:` against `world.validate_ok`.
+
+## W3.4 — cypilot story world keys
+
+New keys declared in `stories/cypilot/app.yaml`'s `world:` block:
+
+```yaml
+world:
+  # Already-declared keys (ticket_id, ticket_title, workdir, judge_mode,
+  # judge_confidence_threshold, cycle, refine_feedback, last_reply_author,
+  # llm_verdict, pr_id, pr_url, pr_title, pr_body, status, thread) carry
+  # straight through from bugfix / pr-refinement — same vocabulary.
+
+  # ── Artifact identity ─────────────────────────────────────────────
+  feature_slug:     { type: string, default: "" }   # hyphen-case slug for cpt
+  feature_index:    { type: int,    default: 0 }    # current decomposed phase
+  feature_count:    { type: int,    default: 0 }    # total phases produced by decompose
+
+  # ── Per-room artifacts ────────────────────────────────────────────
+  prd_artifact:           { type: object, default: {} }
+  adr_artifact:           { type: object, default: {} }
+  design_artifact:        { type: object, default: {} }
+  decomposition_artifact: { type: object, default: {} }
+  feature_artifact:       { type: object, default: {} }
+  code_artifact:          { type: object, default: {} }
+
+  # ── Validate report mirror ────────────────────────────────────────
+  validate_report:        { type: string, default: "" }
+  validate_ok:            { type: bool,   default: false }
+```
+
+`judge_mode` defaults to `llm_then_human` in the cypilot story
+(not `human` like bugfix) because the cypilot pipeline is
+autonomous-by-default per proposal §6.4 — humans intervene at
+checkpoints when the LLM-judge bails.
+
+## W3.5 — Exit surface for cypilot
+
+```yaml
+exits:
+  code_ready:                                     # the SUCCESS exit
+    requires: [code_artifact]                     # parent projects pr_title/pr_body
+  abandoned:                                      # user/LLM quit
+  validation_failed:                              # cycle-budget exhausted (Wave 4+)
+```
+
+A parent story that imports cypilot typically routes:
+
+```yaml
+imports:
+  cyp:
+    source: ../cypilot
+    entry: idle
+    world_in:
+      ticket_id:    "{{ world.ticket_id }}"
+      ticket_title: "{{ world.ticket_title }}"
+      feature_slug: "{{ world.feature_slug }}"      # required at entry
+      thread:       "{{ world.thread }}"
+      workdir:      "{{ world.workdir }}"
+      judge_mode:   "{{ world.judge_mode }}"
+    intents:
+      import: [begin, next_feature]                 # cyp-unique bare names
+    exits:
+      code_ready:
+        to: pr                                      # handoff to pr-refinement
+        set:
+          pr_title: "{{ world.cyp__code_artifact.pr_title }}"
+          pr_body:  "{{ world.cyp__code_artifact.pr_body }}"
+      abandoned:        { to: main, set: { status: "abandoned" } }
+      validation_failed: { to: main, set: { status: "validation_failed" } }
+```
+
+Overlapping names (`accept`, `refine`, `proceed`, `quit`, `look`)
+stay prefixed (`cyp__accept` etc.) per Wave 2's W2.6 collision rule.
+
+## W3.6 — Flow fixture stubs for the `artifact` iface
+
+Flow fixtures that exercise the cypilot story stub
+`host.cypilot_artifacts` with one shared `data:` dict that includes
+both the flat scalar fields (id, path, plan_path, phase_count, ok,
+report, findings) AND a nested `artifact:` object the rooms bind
+into `world.<kind>_artifact`. Example pattern:
+
+```yaml
+host_handlers:
+  host.cypilot_artifacts:
+    data:
+      ok: true
+      id: "stub-id"
+      path: "cypilot/artifacts/stub.md"
+      report: "PASS"
+      findings: []
+      plan_path: ".plans/stub"
+      phase_count: 3
+      artifact:                                     # what rooms bind
+        id:               "stub-id"
+        path:             "cypilot/artifacts/stub.md"
+        kind:             "prd"
+        summary_title:    "Stub artifact"
+        summary_markdown: "Stub body."
+        plan_path:        ".plans/stub"
+        phase_count:      3
+        pr_title:         "PR title"               # for the code room
+        pr_body:          "PR body"
+```
+
+Single-stub-per-handler is the prefix-fallback's design payoff:
+every `iface.artifact.<op>` dispatches to the same closure and
+returns the same Data, so flow authors don't have to special-case
+each op.
+
+## W3.7 — `cpt` CLI mismatch with the proposal's idealised shapes
+
+The provider issues commands in the proposal §6.4 idealised form:
+`cpt artifact list --kind <k>`, `cpt generate --kind --title --slug
+--parent`, `cpt analyze --target --mode`, `cpt plan --task`.
+
+Today's actual `cpt` CLI (per
+`cyber-repo/cypilot/.core/workflows/*.md`) uses different surface
+shapes:
+
+- `--json` is a TOP-LEVEL flag (`cpt --json validate ...`) rather
+  than per-subcommand.
+- Real subcommand verbs include `validate`, `validate-toc`,
+  `list-ids`, `chunk-input`, `info`, `update` — not exactly the
+  proposal's list/generate/analyze/plan vocabulary.
+
+The provider passes `--json` defensively immediately after the
+subcommand name (e.g. `cpt artifact list --json --kind <k>`); if a
+specific cpt version doesn't recognise it the call exits non-zero
+with stderr propagated, which the room's on_error arc handles
+cleanly. Bringing the real cpt CLI into line with the proposal's
+idealised vocabulary is a parallel piece of work owned by the
+cypilot upstream; this provider keeps the kitsoki side stable.
+
+## W3.8 — What Wave 3 / Phase 5 does NOT include
+
+Explicit non-goals for Phase 5 (deferred to later phases):
+
+- **Interactive prose editing.** Per proposal §6.4 final paragraph
+  the cypilot story is autonomous-only for v1; v2 may add an
+  interactive editor.
+- **Parallel ADR + DESIGN.** Proposal §3 sketches them as parallel
+  rooms; v1 serialises for simplicity.
+- **Per-feature code rooms.** Proposal §3 has one code room per
+  feature phase; v1 has one final code room.
+- **Cycle budgets / `validation_failed` exit consumer.** Wave 4
+  ports the L2 cycle-budget pattern from cyber-repo bugfix; until
+  then the exit is declared but no in-flow path produces it.
+- **Real `gh` authentication.** `host.gh.ticket` shells to a
+  pre-authenticated `gh` (`gh auth login` already run). Wrapping
+  the auth flow inside a state machine is out of scope.
+- **`stories/cypilot/` parent integration.** `stories/dev-story/`
+  does NOT yet import cypilot — that's a later wave. For Phase 5
+  the cypilot story is exercised standalone via flow fixtures.
+- **MCP wrapping of the providers.** Per proposal §11 / ideas.md
+  "providers behind mcp" the providers stay as native kitsoki
+  host handlers for v1.
+
+## W3.9 — Wave 3 / Phase 5 test surface (acceptance)
+
+| Story / package | Flow / test count | Pass? |
+|---|---|---|
+| `stories/cypilot/` | 4 flows (happy_prd_only, prd_to_feature, analyze_fails_bails, handoff_to_pr) | yes |
+| `stories/bugfix/` | 10 flows (Wave 1 preserved) | yes |
+| `stories/pr-refinement/` | 4 flows (Wave 2 preserved) | yes |
+| `stories/dev-story/` | 4 flows (Wave 2 preserved) | yes |
+| `stories/oregon-trail/` | 28 flows (no regression) | yes |
+| `stories/kitsoki-dev/` (Phase 3) | 4 flows (Phase 3 preserved) | yes |
+| `go test ./internal/host/...` (GitHub + cypilot_artifacts) | all happy + error paths | yes |
+
+The cypilot host tests (`github_test.go`, `cypilot_artifacts_test.go`)
+mock the `gh` / `cpt` CLIs via the shared `vcsExec` seam from
+`git_vcs.go` — no real binaries are required. The flow fixtures stub
+`host.cypilot_artifacts` per W3.6 above.
 

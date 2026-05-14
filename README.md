@@ -83,6 +83,40 @@ Type free text or pick an action. Sessions persist in
 ./kitsoki viz testdata/apps/cloak/app.yaml --mermaid > /tmp/cloak.mmd
 ```
 
+## Dogfood mode — fixing kitsoki with kitsoki
+
+`stories/kitsoki-dev/` is the dogfood instance: kitsoki working on
+kitsoki itself (and on each of its stories) through its own UI, with
+the bug file as both ticket and conversation log.
+
+```sh
+./kitsoki run stories/kitsoki-dev/app.yaml
+```
+
+Lands at the engineer's-day landing room. From there: `tickets` to
+search `issues/bugs/`, `pick <id>` to pick a bug, `bugfix` to walk
+the supervised 8-room pipeline (reproduce → propose → implement →
+test → review → validate → done → PR refinement → merge). Every
+checkpoint appends a `## Comment <iso> by <author>` block to the bug
+file, so the file itself is the conversation log + audit trail.
+
+Autonomous variant (LLM-judge auto-fires confident verdicts, bails
+to human only on uncertainty):
+
+```sh
+./kitsoki run stories/kitsoki-dev/app.yaml \
+    --warp scenarios/autonomous_ready.yaml
+```
+
+See **[`stories/kitsoki-dev/README.md`](stories/kitsoki-dev/README.md)**
+for the full operator walkthrough, the
+**[`docs/proposals/dev-story-bugfix-unify-proposal.md`](docs/proposals/dev-story-bugfix-unify-proposal.md)**
+proposal for the architecture, and
+**[`issues/README.md`](issues/README.md)** for the on-disk bug
+schema. The dogfood multi-glob covers both kitsoki-self bugs
+(`issues/bugs/*.md`) and per-story bugs
+(`stories/*/issues/bugs/*.md`) in one pipeline.
+
 ## Documentation
 
 | Doc | What |
