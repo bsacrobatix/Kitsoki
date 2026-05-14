@@ -1,0 +1,134 @@
+# review — phase 4 of the implementation pipeline. LLM code-review of
+# the diff. Produces a `review_artifact` (schemas/review_artifact.json)
+# capturing nits, blockers, and an overall accept/refine recommendation.
+# This collapses bugfix's separate reviewing + security phases into
+# one — implementation tickets are by definition small enough that a
+# combined pass suffices.
+
+states:
+
+  review_executing:
+    description: "Self-review of the diff (code-review pass)."
+    view: |
+      Reviewing the change for {{ world.ticket_id }} — {{ world.ticket_title }}
+
+      Review status:  {{ world.review_artifact.status ?? "(pending)" }}
+      Blockers:       {{ world.review_artifact.blockers ?? "(none)" }}
+
+      Type `proceed` to deliver, `refine` to redo, or `quit`.
+    relevant_world: [ticket_id, ticket_title, review_artifact, code_artifact, cycle]
+    on_enter:
+      - invoke: iface.vcs.diff
+        with:
+          workdir: "{{ world.workdir }}"
+        bind:
+          ci_log: diff
+        on_error: idle
+      - invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/review_executing.md
+          schema: schemas/review_artifact.json
+          args:
+            ticket_id:    "{{ world.ticket_id }}"
+            ticket_title: "{{ world.ticket_title }}"
+            code_summary: "{{ world.code_artifact.summary_markdown }}"
+            diff:         "{{ world.ci_log }}"
+            cycle:        "{{ world.cycle }}"
+        bind:
+          review_artifact: submitted
+        on_error: idle
+    on:
+      proceed:
+        - target: review_awaiting_reply
+      restart_from:
+        - target: review_task_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'review_task' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
+
+  # Canonical §6 checkpoint shape.
+  review_awaiting_reply:
+    description: "Review posted; awaiting verdict."
+    view: |
+      Review checkpoint — {{ world.ticket_id }}
+
+      {{ world.review_artifact.summary_markdown ?? "(artifact pending)" }}
+
+      Verdict slot: {{ world.llm_verdict.verdict ?? "(no LLM verdict)" }}  (confidence {{ world.llm_verdict.confidence ?? 0 }})
+      Reason:       {{ world.llm_verdict.reason ?? "" }}
+
+      Reply: accept | refine [feedback=...] | restart_from [stage=...] | quit
+    relevant_world: [judge_mode, ticket_id, review_artifact, llm_verdict, cycle]
+    on_enter:
+      - invoke: iface.transport.post
+        with:
+          thread:    "{{ world.thread }}"
+          title:     "Review: {{ world.ticket_id }}"
+          body:      "{{ world.review_artifact.summary_markdown }}"
+          phase_id:  "review_{{ world.ticket_id }}_{{ world.cycle }}"
+      - invoke: host.inbox.add
+        with:
+          kind:    checkpoint
+          title:   "Review: {{ world.ticket_id }}"
+          thread:  "{{ world.thread }}"
+          state:   review_awaiting_reply
+          body:    "{{ world.review_artifact.summary_markdown }}"
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/judge_review.md
+          schema: schemas/judge_verdict.json
+          args:
+            ticket_id:       "{{ world.ticket_id }}"
+            artifact_title:  "{{ world.review_artifact.summary_title }}"
+            artifact_body:   "{{ world.review_artifact.summary_markdown }}"
+        bind:
+          llm_verdict: submitted
+      - when: |
+          world.judge_mode != 'human' &&
+          world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+          world.llm_verdict.verdict != 'uncertain' &&
+          world.llm_verdict.intent != 'uncertain'
+        emit_intent: "{{ world.llm_verdict.intent }}"
+        slots:
+          feedback: "{{ world.llm_verdict.reason }}"
+    on:
+      accept:
+        - target: handoff
+          effects:
+            - set:
+                last_reply_author: "{{ slots.author ?? 'human' }}"
+                refine_feedback:   ""
+                cycle:             0
+                # Synthesise the PR title + body from the code artifact
+                # for the pr-refinement handoff. world_in: at the import
+                # edge projects pr_title / pr_body into the pr child.
+                # Note: `set:` expressions support a single `{{ ... }}`
+                # interpolation (the expr compiler does NOT concat
+                # literal text with expressions). Use the artifact's
+                # title verbatim; downstream PR-tracking systems can
+                # prepend the ticket id if needed.
+                pr_title:          "{{ world.code_artifact.summary_title }}"
+                pr_body:           "{{ world.code_artifact.summary_markdown }}"
+      # Reviewer rejected: refine bounces to write_code with feedback.
+      refine:
+        - target: write_code_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                cycle:           "{{ world.cycle + 1 }}"
+      restart_from:
+        - target: review_task_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'review_task' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

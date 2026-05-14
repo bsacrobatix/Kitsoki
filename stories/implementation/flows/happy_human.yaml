@@ -1,0 +1,167 @@
+# happy_human — judge_mode=human, accept at every checkpoint. Walks
+# idle → review_task → write_code → test → review → handoff → pr.open_pr
+# → pr.ci_monitoring → pr.merge_executing → pr.merge_awaiting_reply →
+# @exit:done.
+#
+# Same stub layout as bugfix/flows/happy_human.yaml — one oracle stub
+# serves every executing room AND every judge prompt; one host.git
+# stub satisfies every iface.vcs.<op>; host.local serves iface.ci.<op>.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:        "TKT-T-001"
+  ticket_title:    "Add a refresh-token endpoint"
+  ticket_url:      "issues/tasks/tkt-t-001.md"
+  thread:          "TKT-T-001"
+  workspace_id:    "ws-tkt-t-001"
+  workdir:         ".worktrees/tkt-t-001"
+  base_branch:     "main"
+  feature_branch:  "task/tkt-t-001-refresh-token"
+  judge_mode:      "human"
+  judge_confidence_threshold: 0.8
+  merge_strategy:  "squash"
+
+host_handlers:
+
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+
+  # iface.workspace.* — prefix-fallback to host.git_worktree.
+  host.git_worktree:
+    data: { ok: true, log: "synced" }
+
+  # iface.vcs.* — prefix-fallback. Stub satisfies commit (sha), open_pr
+  # (url, pr_id), pr_status (state, checks, comments), merge (sha), diff.
+  host.git:
+    data:
+      ok:     true
+      sha:    "abc123"
+      diff:   "diff --git a/x b/x"
+      url:    "https://example/pr/T-001"
+      pr_id:  "T-001"
+      state:  "success"
+      checks: ""
+      comments: ""
+
+  # iface.ci.run_tests — host.local prefix-fallback. The test_executing
+  # room binds ci_log from `log` and ci_state from `state` (the latter
+  # not in the schema but the prefix-fallback stub passes the whole
+  # envelope through unfiltered).
+  host.local:
+    data: { ok: true, log: "PASS: 5 tests", state: "success", passed: 5, failed: 0 }
+
+  # iface.ticket.get — populates ticket_body. Bind keys: body, title, url.
+  host.local_files.ticket:
+    data:
+      ok:    true
+      id:    "TKT-T-001"
+      title: "Add a refresh-token endpoint"
+      body:  "Add /auth/refresh endpoint returning a new access token from a valid refresh token."
+      url:   "issues/tasks/tkt-t-001.md"
+      status: "open"
+
+  # Oracle stub covers task_summary_artifact, code_artifact,
+  # test_artifact, review_artifact, judge_verdict (all keys live on the
+  # same envelope; additionalProperties: true on the artifact schemas
+  # tolerates the unused fields per schema).
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        # task_summary_artifact fields
+        summary_title:    "Stub task summary"
+        summary_markdown: "Add a /auth/refresh endpoint. Acceptance criteria: returns new access token for valid refresh; 401 otherwise; covered by unit tests."
+        scope:            "Endpoint and its handler; refresh-token validation."
+        acceptance_criteria:
+          - "POST /auth/refresh returns 200 with new access_token on valid refresh."
+          - "POST /auth/refresh returns 401 on expired or unknown refresh."
+        involved_components:
+          - { name: "internal/auth", reason: "refresh-token validation" }
+        # code_artifact fields
+        affected_files:   ["internal/auth/refresh.go", "internal/auth/refresh_test.go"]
+        confidence:       0.85
+        reasoning:        "Endpoint follows the existing handler pattern; refresh validation reuses the cache."
+        tests_planned:    ["TestRefreshOK", "TestRefreshExpired"]
+        patch_summary:    "Adds the endpoint + validation; tests cover the two acceptance criteria."
+        # test_artifact fields
+        status:           "passed"
+        tests_run:        { passed: 5, failed: 0, log: "PASS: 5 tests" }
+        # review_artifact fields (status reuses the same key by design;
+        # the artifact schemas allow either 'passed' or 'approved' via
+        # additionalProperties; flow fixtures don't run the validator).
+        nits:             []
+        blockers:         []
+        # judge_verdict fields
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Stub artifact; accept advances."
+
+turns:
+  # idle → review_task_executing.
+  - intent: { name: start, slots: {} }
+    expect_state: review_task_executing
+
+  # proceed → review_task_awaiting_reply.
+  - intent: { name: proceed, slots: {} }
+    expect_state: review_task_awaiting_reply
+
+  # accept → write_code_executing.
+  - intent: { name: accept, slots: {} }
+    expect_state: write_code_executing
+
+  # proceed → write_code_awaiting_reply.
+  - intent: { name: proceed, slots: {} }
+    expect_state: write_code_awaiting_reply
+
+  # accept → test_executing.
+  - intent: { name: accept, slots: {} }
+    expect_state: test_executing
+
+  # proceed → test_awaiting_reply.
+  - intent: { name: proceed, slots: {} }
+    expect_state: test_awaiting_reply
+
+  # accept → review_executing.
+  - intent: { name: accept, slots: {} }
+    expect_state: review_executing
+
+  # proceed → review_awaiting_reply.
+  - intent: { name: proceed, slots: {} }
+    expect_state: review_awaiting_reply
+
+  # accept → handoff. The arc populates pr_title / pr_body for the
+  # pr-refinement import's world_in:.
+  - intent: { name: accept, slots: {} }
+    expect_state: handoff
+    expect_world:
+      pr_title: "Stub task summary"
+
+  # proceed → pr.open_pr (the pr-refinement compound's entry state).
+  - intent: { name: proceed, slots: {} }
+    expect_state: pr.open_pr
+    expect_world:
+      pr__pr_id:  "T-001"
+      pr__pr_url: "https://example/pr/T-001"
+
+  # pr.proceed → pr.ci_monitoring → pr.merge_executing → pr.merge_awaiting_reply.
+  - intent: { name: pr__proceed, slots: {} }
+    expect_state: pr.ci_monitoring
+  - intent: { name: pr__proceed, slots: {} }
+    expect_state: pr.merge_executing
+  - intent: { name: pr__proceed, slots: {} }
+    expect_state: pr.merge_awaiting_reply
+
+  # pr__accept → @exit:merged → projects to our @exit:done via the
+  # imports.pr.exits.merged.to: "@exit:done" clause.
+  - intent: { name: pr__accept, slots: {} }
+    expect_state: __exit__done
+    expect_world:
+      status: "merged"
+
+expect_terminal: true
+expect_no_errors: true

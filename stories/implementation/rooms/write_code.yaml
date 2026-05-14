@@ -1,0 +1,129 @@
+# write_code — phase 2 of the implementation pipeline. The LLM produces
+# a concrete `code_artifact` (schemas/code_artifact.json) describing
+# the edits to apply: affected files, the patch summary, the rationale.
+# iface.vcs.commit lands the change in the workspace; the checkpoint
+# gates whether the edits are ready for testing.
+
+states:
+
+  write_code_executing:
+    description: "Drafting the code change for the task."
+    view: |
+      Writing code for {{ world.ticket_id }} — {{ world.ticket_title }}
+
+      Summary:    {{ world.code_artifact.summary_title ?? "(pending)" }}
+      Files:      {{ world.code_artifact.affected_files ?? "(pending)" }}
+      Confidence: {{ world.code_artifact.confidence ?? "(pending)" }}
+
+      Type `proceed` to deliver the code-artifact, `refine` to redo,
+      or `quit` to abandon.
+    relevant_world: [ticket_id, ticket_title, code_artifact, task_summary_artifact, cycle, refine_feedback]
+    on_enter:
+      - invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/write_code_executing.md
+          schema: schemas/code_artifact.json
+          args:
+            ticket_id:           "{{ world.ticket_id }}"
+            ticket_title:        "{{ world.ticket_title }}"
+            workdir:             "{{ world.workdir }}"
+            task_summary:        "{{ world.task_summary_artifact.summary_markdown }}"
+            acceptance_criteria: "{{ world.task_summary_artifact.acceptance_criteria }}"
+            refine_feedback:     "{{ world.refine_feedback }}"
+            cycle:               "{{ world.cycle }}"
+        bind:
+          code_artifact: submitted
+        on_error: idle
+      # Commit the change so subsequent rooms (test / review) see it
+      # in the workspace. iface.vcs.commit binds the sha but we don't
+      # need it here — the test room re-binds the diff via iface.vcs.diff.
+      - invoke: iface.vcs.commit
+        with:
+          workdir: "{{ world.workdir }}"
+          message: "{{ world.code_artifact.summary_title }}"
+          files:   "{{ world.code_artifact.affected_files }}"
+        on_error: idle
+    on:
+      proceed:
+        - target: write_code_awaiting_reply
+      restart_from:
+        - target: review_task_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'review_task' }}"
+                cycle: 0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
+
+  # Canonical §6 checkpoint shape.
+  write_code_awaiting_reply:
+    description: "Code change posted; awaiting verdict."
+    view: |
+      Code-write checkpoint — {{ world.ticket_id }}
+
+      {{ world.code_artifact.summary_markdown ?? "(artifact pending)" }}
+
+      Verdict slot: {{ world.llm_verdict.verdict ?? "(no LLM verdict)" }}  (confidence {{ world.llm_verdict.confidence ?? 0 }})
+      Reason:       {{ world.llm_verdict.reason ?? "" }}
+
+      Reply: accept | refine [feedback=...] | restart_from [stage=...] | quit
+    relevant_world: [judge_mode, ticket_id, code_artifact, llm_verdict, cycle]
+    on_enter:
+      - invoke: iface.transport.post
+        with:
+          thread:    "{{ world.thread }}"
+          title:     "Code change: {{ world.ticket_id }}"
+          body:      "{{ world.code_artifact.summary_markdown }}"
+          phase_id:  "write_code_{{ world.ticket_id }}_{{ world.cycle }}"
+      - invoke: host.inbox.add
+        with:
+          kind:    checkpoint
+          title:   "Code change: {{ world.ticket_id }}"
+          thread:  "{{ world.thread }}"
+          state:   write_code_awaiting_reply
+          body:    "{{ world.code_artifact.summary_markdown }}"
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/judge_write_code.md
+          schema: schemas/judge_verdict.json
+          args:
+            ticket_id:       "{{ world.ticket_id }}"
+            artifact_title:  "{{ world.code_artifact.summary_title }}"
+            artifact_body:   "{{ world.code_artifact.summary_markdown }}"
+        bind:
+          llm_verdict: submitted
+      - when: |
+          world.judge_mode != 'human' &&
+          world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+          world.llm_verdict.verdict != 'uncertain' &&
+          world.llm_verdict.intent != 'uncertain'
+        emit_intent: "{{ world.llm_verdict.intent }}"
+        slots:
+          feedback: "{{ world.llm_verdict.reason }}"
+    on:
+      accept:
+        - target: test_executing
+          effects:
+            - set:
+                last_reply_author: "{{ slots.author ?? 'human' }}"
+                refine_feedback:   ""
+                cycle:             0
+      refine:
+        - target: write_code_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                cycle:           "{{ world.cycle + 1 }}"
+      restart_from:
+        - target: review_task_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'review_task' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

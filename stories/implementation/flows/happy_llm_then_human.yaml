@@ -1,0 +1,118 @@
+# happy_llm_then_human — judge_mode=llm_then_human, LLM-judge fires
+# confidently at every checkpoint and emit_intent auto-fires `accept`.
+# The operator types `proceed` at each _executing room, the LLM-judge
+# runs at each _awaiting_reply, and the auto-fire path advances. Same
+# stub shape as bugfix/flows/happy_llm_then_human.yaml.
+#
+# NOTE — runtime gap: emit_intent does NOT auto-fire inside an imported
+# child compound (see Wave 3 / Phase 6 contract appendix). Implementation
+# auto-fires within its own rooms because they are top-level here; once
+# the flow enters the `pr` import compound, intent names get rewritten
+# to `pr__<name>` but emit_intent's rendered value stays bare and
+# `findTransition` can't match. So this flow drives the pr tail with
+# explicit pr__proceed / pr__accept.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:        "TKT-T-002"
+  ticket_title:    "Bump auth timeout default"
+  thread:          "TKT-T-002"
+  workspace_id:    "ws-tkt-t-002"
+  workdir:         ".worktrees/tkt-t-002"
+  base_branch:     "main"
+  feature_branch:  "task/tkt-t-002-timeout"
+  judge_mode:      "llm_then_human"
+  judge_confidence_threshold: 0.8
+  merge_strategy:  "squash"
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "synced" }
+  host.git:
+    data:
+      ok:     true
+      sha:    "abc123"
+      diff:   ""
+      url:    "https://example/pr/T-002"
+      pr_id:  "T-002"
+      state:  "success"
+      checks: ""
+      comments: ""
+  host.local:
+    data: { ok: true, log: "PASS", state: "success", passed: 3, failed: 0 }
+  host.local_files.ticket:
+    data:
+      ok:    true
+      id:    "TKT-T-002"
+      title: "Bump auth timeout default"
+      body:  "Change the default auth handshake timeout from 5s to 15s."
+      url:   "issues/tasks/tkt-t-002.md"
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Bump auth timeout to 15s"
+        summary_markdown: "Change the auth handshake default from 5s to 15s; update tests."
+        scope:            "Single constant + one test fixture."
+        acceptance_criteria:
+          - "Default timeout is 15s when no override is set."
+          - "Existing override path is unchanged."
+        affected_files:   ["internal/auth/config.go", "internal/auth/config_test.go"]
+        confidence:       0.92
+        reasoning:        "Single constant change; mechanical."
+        status:           "passed"
+        tests_run:        { passed: 3, failed: 0, log: "PASS" }
+        nits:             []
+        blockers:         []
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Confident accept; LLM auto-fires."
+
+turns:
+  # start → review_task_executing.
+  - intent: { name: start, slots: {} }
+    expect_state: review_task_executing
+
+  # proceed lands two states past _awaiting_reply because the LLM-judge
+  # auto-fires `accept` via emit_intent.
+  - intent: { name: proceed, slots: {} }
+    expect_state: write_code_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: test_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: review_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: handoff
+
+  # handoff is non-checkpointed; `proceed` enters the pr compound at
+  # pr.open_pr. pr's open_pr.on_enter fires iface.vcs.open_pr and pr_id
+  # / pr_url bind. The pr-refinement's own judge auto-fires too because
+  # judge_mode propagates through world_in.
+  - intent: { name: proceed, slots: {} }
+    expect_state: pr.open_pr
+    expect_world:
+      pr__judge_mode: "llm_then_human"
+
+  - intent: { name: pr__proceed, slots: {} }
+    expect_state: pr.ci_monitoring
+  - intent: { name: pr__proceed, slots: {} }
+    expect_state: pr.merge_executing
+    expect_world:
+      pr__judge_mode: "llm_then_human"
+  - intent: { name: pr__proceed, slots: {} }
+    # Emit-intent auto-fire breaks under fold (intent-name rewriter
+    # doesn't fold dynamic emit values). Drive the tail explicitly.
+    expect_state: pr.merge_awaiting_reply
+  - intent: { name: pr__accept, slots: {} }
+    expect_state: __exit__done
+    expect_world:
+      status: "merged"
+
+expect_terminal: true
+expect_no_errors: true

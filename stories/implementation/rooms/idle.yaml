@@ -1,0 +1,24 @@
+# idle — entry room. The `start` intent boots the pipeline; `quit`
+# exits via @exit:abandoned. Threads straight into review_task on
+# `start`.
+
+states:
+
+  idle:
+    description: "Implementation pipeline parked. Waiting for `start`."
+    view: |
+      Implementation pipeline — idle.
+
+      Ticket:    {{ world.ticket_id }} {{ world.ticket_title }}
+      Workspace: {{ world.workspace_id }}
+      Mode:      judge_mode={{ world.judge_mode }}
+
+      Actions: start, quit, look.
+    relevant_world: [ticket_id, ticket_title, judge_mode, workspace_id]
+    on:
+      start:
+        - target: review_task_executing
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

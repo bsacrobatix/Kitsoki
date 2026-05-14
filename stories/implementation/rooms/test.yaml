@@ -1,0 +1,130 @@
+# test — phase 3 of the implementation pipeline. Runs the workspace
+# tests via iface.ci.run_tests, captures the log, and the LLM produces
+# a `test_artifact` (schemas/test_artifact.json) summarising the run.
+# The checkpoint gates pass/fail: accept → review; refine → write_code
+# with the failing-test feedback so the code-write loop closes around
+# CI failures.
+
+states:
+
+  test_executing:
+    description: "Running tests for the applied code change."
+    view: |
+      Testing {{ world.ticket_id }} — {{ world.ticket_title }}
+
+      Tests artifact: {{ world.test_artifact.summary_title ?? "(pending)" }}
+      CI state:       {{ world.ci_state ?? "(pending)" }}
+
+      Type `proceed` to deliver the test artifact, `refine` to redo,
+      or `quit` to abandon.
+    relevant_world: [ticket_id, ticket_title, test_artifact, code_artifact, cycle, ci_state]
+    on_enter:
+      - invoke: iface.ci.run_tests
+        with:
+          workdir: "{{ world.workdir }}"
+          target:  "{{ world.code_artifact.summary_title }}"
+        bind:
+          ci_log:   log
+          ci_state: state
+        on_error: idle
+      - invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/judge_test.md
+          schema: schemas/test_artifact.json
+          args:
+            ticket_id:    "{{ world.ticket_id }}"
+            ticket_title: "{{ world.ticket_title }}"
+            code_summary: "{{ world.code_artifact.summary_markdown }}"
+            ci_log:       "{{ world.ci_log }}"
+            ci_state:     "{{ world.ci_state }}"
+        bind:
+          test_artifact: submitted
+        on_error: idle
+    on:
+      proceed:
+        - target: test_awaiting_reply
+      restart_from:
+        - target: review_task_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'review_task' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
+
+  # Canonical §6 checkpoint shape.
+  test_awaiting_reply:
+    description: "Test results posted; awaiting verdict."
+    view: |
+      Test checkpoint — {{ world.ticket_id }}
+
+      {{ world.test_artifact.summary_markdown ?? "(artifact pending)" }}
+
+      CI state:     {{ world.ci_state ?? "(unknown)" }}
+      Verdict slot: {{ world.llm_verdict.verdict ?? "(no LLM verdict)" }}  (confidence {{ world.llm_verdict.confidence ?? 0 }})
+      Reason:       {{ world.llm_verdict.reason ?? "" }}
+
+      Reply: accept | refine [feedback=...] | restart_from [stage=...] | quit
+    relevant_world: [judge_mode, ticket_id, test_artifact, ci_state, llm_verdict, cycle]
+    on_enter:
+      - invoke: iface.transport.post
+        with:
+          thread:    "{{ world.thread }}"
+          title:     "Tests: {{ world.ticket_id }}"
+          body:      "{{ world.test_artifact.summary_markdown }}"
+          phase_id:  "test_{{ world.ticket_id }}_{{ world.cycle }}"
+      - invoke: host.inbox.add
+        with:
+          kind:    checkpoint
+          title:   "Tests: {{ world.ticket_id }}"
+          thread:  "{{ world.thread }}"
+          state:   test_awaiting_reply
+          body:    "{{ world.test_artifact.summary_markdown }}"
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.ask_with_mcp
+        with:
+          prompt: prompts/judge_test.md
+          schema: schemas/judge_verdict.json
+          args:
+            ticket_id:       "{{ world.ticket_id }}"
+            artifact_title:  "{{ world.test_artifact.summary_title }}"
+            artifact_body:   "{{ world.test_artifact.summary_markdown }}"
+            ci_state:        "{{ world.ci_state }}"
+        bind:
+          llm_verdict: submitted
+      - when: |
+          world.judge_mode != 'human' &&
+          world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+          world.llm_verdict.verdict != 'uncertain' &&
+          world.llm_verdict.intent != 'uncertain'
+        emit_intent: "{{ world.llm_verdict.intent }}"
+        slots:
+          feedback: "{{ world.llm_verdict.reason }}"
+    on:
+      accept:
+        - target: review_executing
+          effects:
+            - set:
+                last_reply_author: "{{ slots.author ?? 'human' }}"
+                refine_feedback:   ""
+                cycle:             0
+      # CI failure path: refine bounces back to write_code with the
+      # failing-test feedback so the code-write loop closes around CI.
+      refine:
+        - target: write_code_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                cycle:           "{{ world.cycle + 1 }}"
+      restart_from:
+        - target: review_task_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'review_task' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
