@@ -55,34 +55,21 @@ turns:
   - intent: { name: start, slots: {} }
     expect_state: reproducing_executing
 
+  # LLM-judge fires in on_enter; emit_intent auto-advances each
+  # _awaiting_reply (judge_mode != 'human' && confident verdict).
   - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
-
-  # The LLM-judge ran in on_enter and wrote world.llm_verdict (because
-  # judge_mode == "llm_then_human" satisfies the when: clause). The
-  # operator (or Wave 2's emit_intent) types the verdict's intent.
-  - intent: { name: accept, slots: {} }
     expect_state: proposing_executing
-
   - intent: { name: proceed, slots: {} }
-    expect_state: proposing_awaiting_reply
-  - intent: { name: accept, slots: {} }
     expect_state: implementing_executing
   - intent: { name: proceed, slots: {} }
     expect_state: testing_executing
   - intent: { name: proceed, slots: {} }
-    expect_state: testing_awaiting_reply
-  - intent: { name: accept, slots: {} }
     expect_state: reviewing_executing
   - intent: { name: proceed, slots: {} }
     expect_state: validating_executing
   - intent: { name: proceed, slots: {} }
-    expect_state: validating_awaiting_reply
-  - intent: { name: accept, slots: {} }
     expect_state: done_executing
   - intent: { name: proceed, slots: {} }
-    expect_state: done_awaiting_reply
-  - intent: { name: accept, slots: {} }
     expect_state: __exit__done
 
 expect_terminal: true

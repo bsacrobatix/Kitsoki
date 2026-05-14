@@ -356,6 +356,7 @@ effects:
 | `background` | `true` → dispatch the invoke as a background job. See [`background-jobs/`](background-jobs/README.md). |
 | `on_complete` | Effects fired when the background job terminates. |
 | `emit` | Broadcast a named event to parallel siblings. |
+| `emit_intent` | Dispatch a synthetic intent against the current state as part of the same turn. Used to auto-advance from `on_enter` (e.g. an LLM judge → `accept` shape). Optional `slots:` map carries values into the dispatched intent. Depth-capped at `machine.EmitIntentMaxDepth` (= 8). Mutually exclusive with `target:` on the same effect. |
 
 Templates inside effects use the same `{{ … }}` syntax as views. Inside
 `with:` and `bind:`, **arguments and results are typed** —

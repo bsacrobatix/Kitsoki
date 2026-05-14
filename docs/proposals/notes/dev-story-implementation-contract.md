@@ -319,15 +319,22 @@ pattern:
 ```
 
 This shape MUST be identical across all seven rooms (only `<phase>` and
-`<next-room>` vary). Three things to flag for the bugfix-story author:
+`<next-room>` vary). Two things to flag for the bugfix-story author:
 
-- The `emit_intent:` effect and the `when:` clause on `on_enter` entries may
-  or may not be supported by the current runtime. If they aren't yet
-  supported, **flag it** in the agent's report so the runtime gets a
-  follow-up patch — do NOT write a workaround that splits the YAML between
-  modes. The whole point of judge polymorphism is one YAML.
+- The `emit_intent:` effect ships end-to-end (machine dispatch +
+  orchestrator post-bind re-evaluation; see
+  `internal/machine/machine.go::DispatchPostBindEmits` and
+  `internal/orchestrator/orchestrator.go::settlePostBindEmits`).
+  The dispatcher is depth-capped at `machine.EmitIntentMaxDepth` (= 8)
+  so a misbehaving LLM that returns a self-cycling verdict fails loud
+  rather than spinning. The author writes the shape above verbatim;
+  no per-mode YAML forks.
 - The `bind: { llm_verdict: "submitted" }` syntax follows the existing
   `host.oracle.ask_with_mcp` bind convention (see `internal/host/oracle_ask_with_mcp.go`).
+  Because `bind:` lands at orchestrator-dispatch time (not machine-time),
+  the emit_intent's `when:` guard is re-evaluated after the host call
+  completes — that's what makes the LLM-judge → auto-accept hop work
+  in one externally-initiated turn.
 - `relevant_world` lists every key the state's view + on_enter touches so
   the TUI can subscribe properly.
 

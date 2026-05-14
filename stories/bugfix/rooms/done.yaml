@@ -74,6 +74,16 @@ states:
             artifact_body:   "{{ world.done_artifact.summary_markdown }}"
         bind:
           llm_verdict: submitted
+      # Step 4: auto-fire the LLM's verdict above the confidence floor.
+      # Same shape across every checkpoint (see contract §6 / rooms/reproducing.yaml).
+      - when: |
+          world.judge_mode != 'human' &&
+          world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+          world.llm_verdict.verdict != 'uncertain' &&
+          world.llm_verdict.intent != 'uncertain'
+        emit_intent: "{{ world.llm_verdict.intent }}"
+        slots:
+          feedback: "{{ world.llm_verdict.reason }}"
     on:
       accept:
         # @exit:done.requires: [done_artifact] — the loader enforces that

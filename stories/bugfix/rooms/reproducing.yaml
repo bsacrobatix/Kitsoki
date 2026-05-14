@@ -106,18 +106,20 @@ states:
         bind:
           llm_verdict: submitted
 
-      # 4. Auto-fire the LLM's verdict via `emit_intent` is NOT supported by
-      #    the runtime in Wave 1 — see the Slice α report. The verdict still
-      #    lands in world.llm_verdict for the operator / harness to act on.
-      #    (When emit_intent ships, this block becomes:
-      #       - when: "world.judge_mode != 'human' &&
-      #                world.llm_verdict.confidence >= world.judge_confidence_threshold &&
-      #                world.llm_verdict.verdict != 'uncertain' &&
-      #                world.llm_verdict.intent != 'uncertain'"
-      #         effects:
-      #           - emit_intent: "{{ world.llm_verdict.intent }}"
-      #             slots: { feedback: "{{ world.llm_verdict.reason }}" }
-      #    For Wave 1 the flow runner / operator types the same intent.)
+      # 4. Auto-fire the LLM's verdict above the confidence floor — single
+      #    effect with `when:` gating + emit_intent + slot pass-through. The
+      #    machine dispatcher synthesises the named intent against this state
+      #    in the same turn; on `accept`/`refine`/etc. the matching arc below
+      #    fires. Bounded by machine.EmitIntentMaxDepth (= 8) so a misbehaving
+      #    LLM that emits a self-cycle fails loud rather than spinning.
+      - when: |
+          world.judge_mode != 'human' &&
+          world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+          world.llm_verdict.verdict != 'uncertain' &&
+          world.llm_verdict.intent != 'uncertain'
+        emit_intent: "{{ world.llm_verdict.intent }}"
+        slots:
+          feedback: "{{ world.llm_verdict.reason }}"
     on:
       accept:
         - target: proposing_executing

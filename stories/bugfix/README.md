@@ -145,24 +145,24 @@ is `world.judge_mode`:
 | Mode | Behaviour at every checkpoint |
 |---|---|
 | `human` | Post + inbox-mirror; wait for an explicit reply intent. (No LLM call.) |
-| `llm` | Post + inbox-mirror + run the LLM-judge. The verdict lands in `world.llm_verdict`; an operator-driven harness fires the verdict's intent. If verdict is uncertain in strict `llm` mode, the state holds until an operator intervenes. |
-| `llm_then_human` | Post + inbox-mirror + run the LLM-judge. The verdict lands in `world.llm_verdict`; if a Wave 2 `emit_intent:` effect ships, it auto-fires the verdict's intent above the confidence threshold. Until then, a human picks it up the same way as `human` mode. |
+| `llm` | Post + inbox-mirror + run the LLM-judge. The verdict lands in `world.llm_verdict`; when the verdict's `verdict`/`intent` are not "uncertain" AND `confidence >= judge_confidence_threshold` (defaults to 0.8), the `emit_intent:` effect at step 4 auto-fires the verdict's intent in the same turn. An uncertain or low-confidence verdict holds the state for an operator. |
+| `llm_then_human` | Same as `llm` for the auto-fire path; the mode flag exists so cyber-repo-flavour parent stories can declare "always also notify a human", which Wave 2 layers above this base contract. |
 
 The judge polymorphism is a single host call per checkpoint, gated by
 `when:` — **not** a fork in the state graph. The seven
 `_awaiting_reply` states have **identical** `on_enter` shapes
 (contract §6) — only `<phase>` and the next-room target vary.
 
+The `emit_intent:` effect is depth-capped at
+`machine.EmitIntentMaxDepth` (= 8); a misbehaving LLM that emits a
+self-cycling verdict fails loud rather than spinning. See
+`internal/machine/machine.go::dispatchEmittedIntents` for the runtime
+and `internal/machine/emit_intent_test.go` for the regression suite.
+
 ## Wave 1 limitations
 
 What is NOT in Wave 1 (deferred to Wave 2+):
 
-- **`emit_intent:` effect.** Contract §6 step 4 calls for an effect
-  that auto-fires the LLM-judge's verdict-intent when confidence
-  exceeds the threshold. The runtime does not yet recognise
-  `emit_intent:` — the verdict still lands in `world.llm_verdict` for
-  an operator / external harness to act on. See the Slice α report
-  for the exact runtime gap.
 - **`@exit:done` parent (pr-refinement import).** Standalone Wave 1
   exits at `__exit__done`. Wave 2 imports `stories/pr-refinement/`
   for the tail (CI watch, comment resolution, merge).
