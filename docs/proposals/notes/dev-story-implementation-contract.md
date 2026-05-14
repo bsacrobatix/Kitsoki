@@ -159,6 +159,19 @@ on_enter:
 
 `host.inbox.add` is always-on across modes — see proposal §4.5.
 
+**Adapter wiring (closed in commit `e6c949f`).** The handler defers
+persistence to an `InboxAdder` seam (see
+`internal/host/inbox_add.go`).  Production install lives at
+`internal/inbox/jobstore_adapter.go::JobStoreAdder` — bridges into
+`jobs.JobStore.InsertNotification` with a per-turn session ID,
+injected into ctx by the orchestrator's `dispatchHostCalls`.
+Severity map: `checkpoint` and `action_required` →
+`SeverityActionRequired`; `ack` → `SeveritySuccess`;
+`info`/unknown → `SeverityInfo`.  Without this seam (closed P1-C
+from the Opus code review) every production `host.inbox.add` call
+returned `persisted:false` and the notification was dropped on
+the floor.
+
 ## 3. Handler names (Go side)
 
 These are the strings passed to `Registry.Register(name, handler)`. Stories
@@ -325,10 +338,17 @@ This shape MUST be identical across all seven rooms (only `<phase>` and
   orchestrator post-bind re-evaluation; see
   `internal/machine/machine.go::DispatchPostBindEmits` and
   `internal/orchestrator/orchestrator.go::settlePostBindEmits`).
-  The dispatcher is depth-capped at `machine.EmitIntentMaxDepth` (= 8)
-  so a misbehaving LLM that returns a self-cycling verdict fails loud
-  rather than spinning. The author writes the shape above verbatim;
-  no per-mode YAML forks.
+  Two depth caps protect against cycles: the machine's
+  `EmitIntentMaxDepth` (= 8) bounds one chain of in-machine
+  dispatches; `orchestrator.OrchestratorPostBindMaxDepth` (= 4)
+  bounds the outer settle loop where a host call binds → emit
+  fires → target's on_enter has another host call binds → another
+  emit fires.  Total budget per turn is 32 emits.  Hitting either
+  cap fails loud — the orchestrator appends a `store.HarnessError`
+  event and populates `TurnOutcome.HarnessError` so a caller can
+  surface the "why" rather than seeing a silent half-bound limbo.
+  (P1-A/B from the Opus code review; commit `ca11d6b`.)
+  The author writes the shape above verbatim; no per-mode YAML forks.
 - The `bind: { llm_verdict: "submitted" }` syntax follows the existing
   `host.oracle.ask_with_mcp` bind convention (see `internal/host/oracle_ask_with_mcp.go`).
   Because `bind:` lands at orchestrator-dispatch time (not machine-time),
@@ -650,6 +670,20 @@ reference:
   target (e.g. `world.pr_id`) must use `?? "(pending)"` defaults.
 - Parallel-state `emit_intent` is rejected by the runtime. Wave 2's
   pr-refinement and dev-story hub do not use parallel encoding.
+- **`emit_intent` inside on_error / timeout / on_complete chains
+  steers the final landing state.** Three orchestrator callsites
+  previously discarded the post-emit state path (closed P1-D from
+  the Opus code review, commit `322abab`).  After the fix:
+  + an `on_error:` redirect whose error state's on_enter emits a
+    follow-on intent lands at the emit's target, not the literal
+    error state;
+  + a state with `timeout: { target: X }` whose `X.on_enter`
+    emits follows through to the emit target;
+  + a background job's `on_complete:` chain that emits follows
+    through to the emit target (Target: effects still only fire
+    when no emit has already routed).
+  All three sites now call `machine.RunEffectsAndState` and route
+  the returned leaf into their surrounding state-update logic.
 
 ## W2.9 — What Wave 2 does NOT include
 
