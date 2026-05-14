@@ -26,10 +26,44 @@ states:
       proceed:
         - target: validating_executing
       restart_from:
+        - when: "slots.stage == 'reproducing'"
+          target: reproducing_executing
+          effects:
+            - set:
+                restart_from_stage: "reproducing"
+                refine_feedback:    ""
+                reproducing_cycle:  0
+                cycle:              0
+        - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
+          target: proposing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
+                cycle:              0
+        - when: "slots.stage == 'implementing' || slots.stage == 'implement_review'"
+          target: implementing_executing
+          effects:
+            - set:
+                restart_from_stage:  "{{ slots.stage }}"
+                refine_feedback:     ""
+                implementing_cycle:  0
+                cycle:               0
+        - when: "slots.stage == 'testing' || slots.stage == 'test'"
+          target: testing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                testing_cycle:      0
+                cycle:              0
         - target: proposing_executing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
                 cycle:              0
       quit:
         - target: "@exit:abandoned"

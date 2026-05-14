@@ -96,12 +96,68 @@ states:
             - set:
                 status:        "fixed"
                 done_artifact: "{{ world.done_artifact }}"
+      # L2 cycle-budget gate on refine — see rooms/reproducing.yaml.
       refine:
+        - when: "world.done_cycle >= world.done_budget"
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "done_cycle_budget_exhausted"
+                status:         "abandoned"
         - target: done_executing
           effects:
             - set:
                 refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                done_cycle:      "{{ world.done_cycle + 1 }}"
                 cycle:           "{{ world.cycle + 1 }}"
+      restart_from:
+        - when: "slots.stage == 'reproducing'"
+          target: reproducing_executing
+          effects:
+            - set:
+                restart_from_stage: "reproducing"
+                refine_feedback:    ""
+                reproducing_cycle:  0
+                cycle:              0
+        - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
+          target: proposing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
+                cycle:              0
+        - when: "slots.stage == 'implementing' || slots.stage == 'implement_review'"
+          target: implementing_executing
+          effects:
+            - set:
+                restart_from_stage:  "{{ slots.stage }}"
+                refine_feedback:     ""
+                implementing_cycle:  0
+                cycle:               0
+        - when: "slots.stage == 'testing' || slots.stage == 'test'"
+          target: testing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                testing_cycle:      0
+                cycle:              0
+        - when: "slots.stage == 'validating' || slots.stage == 'validate'"
+          target: validating_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                validating_cycle:   0
+                cycle:              0
+        - target: validating_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'validating' }}"
+                refine_feedback:    ""
+                validating_cycle:   0
+                cycle:              0
       quit:
         - target: "@exit:abandoned"
       look:

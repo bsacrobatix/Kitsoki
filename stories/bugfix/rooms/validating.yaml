@@ -39,10 +39,44 @@ states:
       proceed:
         - target: validating_awaiting_reply
       restart_from:
+        - when: "slots.stage == 'reproducing'"
+          target: reproducing_executing
+          effects:
+            - set:
+                restart_from_stage: "reproducing"
+                refine_feedback:    ""
+                reproducing_cycle:  0
+                cycle:              0
+        - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
+          target: proposing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
+                cycle:              0
+        - when: "slots.stage == 'implementing' || slots.stage == 'implement_review'"
+          target: implementing_executing
+          effects:
+            - set:
+                restart_from_stage:  "{{ slots.stage }}"
+                refine_feedback:     ""
+                implementing_cycle:  0
+                cycle:               0
+        - when: "slots.stage == 'testing' || slots.stage == 'test'"
+          target: testing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                testing_cycle:      0
+                cycle:              0
         - target: proposing_executing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
                 cycle:              0
       quit:
         - target: "@exit:abandoned"
@@ -104,18 +138,72 @@ states:
                 last_reply_author: "{{ slots.author ?? 'human' }}"
                 refine_feedback:   ""
                 cycle:             0
+      # L2 cycle-budget gate on refine — see rooms/reproducing.yaml.
       refine:
+        - when: "world.validating_cycle >= world.validating_budget"
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "validating_cycle_budget_exhausted"
+                status:         "abandoned"
         - target: validating_executing
           effects:
             - set:
-                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
-                cycle:           "{{ world.cycle + 1 }}"
+                refine_feedback:   "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                validating_cycle:  "{{ world.validating_cycle + 1 }}"
+                cycle:             "{{ world.cycle + 1 }}"
       restart_from:
+        - when: "slots.stage == 'reproducing'"
+          target: reproducing_executing
+          effects:
+            - set:
+                restart_from_stage: "reproducing"
+                refine_feedback:    ""
+                reproducing_cycle:  0
+                cycle:              0
+        - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
+          target: proposing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
+                cycle:              0
+        - when: "slots.stage == 'implementing' || slots.stage == 'implement_review'"
+          target: implementing_executing
+          effects:
+            - set:
+                restart_from_stage:  "{{ slots.stage }}"
+                refine_feedback:     ""
+                implementing_cycle:  0
+                cycle:               0
+        - when: "slots.stage == 'testing' || slots.stage == 'test'"
+          target: testing_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                testing_cycle:      0
+                cycle:              0
         - target: proposing_executing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
                 cycle:              0
+      jump_to:
+        - when: "slots.stage == 'done' || slots.stage == 'pr'"
+          target: done_executing
+          effects:
+            - set:
+                jump_to:           "{{ slots.stage }}"
+                unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
+        - target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "jump_to_unknown_stage"
+                status:         "abandoned"
       quit:
         - target: "@exit:abandoned"
       look:

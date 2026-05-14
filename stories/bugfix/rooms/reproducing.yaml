@@ -54,6 +54,7 @@ states:
             - set:
                 refine_feedback: "{{ slots.feedback }}"
                 cycle: 0
+                reproducing_cycle: 0
       quit:
         - target: "@exit:abandoned"
       look:
@@ -128,18 +129,62 @@ states:
                 last_reply_author: "{{ slots.author ?? 'human' }}"
                 refine_feedback:   ""
                 cycle:             0
+      # L2 cycle-budget gate. When reproducing_cycle has hit its budget the
+      # refine arc instead routes to @exit:abandoned with a structured reason
+      # — the operator gets one bail-out rather than an infinite refine loop.
+      # Default arm increments both the per-phase counter and the global one.
       refine:
+        - when: "world.reproducing_cycle >= world.reproducing_budget"
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "reproducing_cycle_budget_exhausted"
+                status:         "abandoned"
         - target: reproducing_executing
           effects:
             - set:
-                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
-                cycle:           "{{ world.cycle + 1 }}"
+                refine_feedback:    "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                reproducing_cycle:  "{{ world.reproducing_cycle + 1 }}"
+                cycle:              "{{ world.cycle + 1 }}"
+      # restart_from rewinds to an earlier _executing room and resets the
+      # target's cycle counter. From reproducing there's nowhere earlier, so
+      # the only legal stage is `reproducing` (re-enter from the top).
       restart_from:
         - target: reproducing_executing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage ?? 'reproducing' }}"
+                refine_feedback:    ""
+                reproducing_cycle:  0
                 cycle:              0
+      # jump_to skips ahead to a later phase without backfilling earlier
+      # artifacts. Audited via world.unsafe_jumps_made. Supports four
+      # well-known stage names; an unrecognised stage falls through to
+      # @exit:abandoned with abandon_reason="jump_to_unknown_stage".
+      jump_to:
+        - when: "slots.stage == 'testing' || slots.stage == 'test'"
+          target: testing_executing
+          effects:
+            - set:
+                jump_to:           "{{ slots.stage }}"
+                unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
+        - when: "slots.stage == 'validating' || slots.stage == 'validate'"
+          target: validating_executing
+          effects:
+            - set:
+                jump_to:           "{{ slots.stage }}"
+                unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
+        - when: "slots.stage == 'done' || slots.stage == 'pr'"
+          target: done_executing
+          effects:
+            - set:
+                jump_to:           "{{ slots.stage }}"
+                unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
+        - target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "jump_to_unknown_stage"
+                status:         "abandoned"
       quit:
         - target: "@exit:abandoned"
       look:
