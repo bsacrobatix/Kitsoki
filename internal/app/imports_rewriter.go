@@ -75,6 +75,16 @@ func (rw *childRewriter) rewriteState(s *State) {
 	}
 
 	// On: rewrite intent-name keys and the transition list.
+	//
+	// Each renamed key (e.g. `accept` → `bf__accept`) is also recorded
+	// in s.IntentAliases so the runtime emit_intent dispatcher can
+	// resolve a bare LLM-emitted name against the actually-renamed arc.
+	// On a second fold (e.g. `bf__accept` → `core__bf__accept`), the
+	// existing alias entries that pointed to the now-stale name are
+	// chased forward to the new fully-prefixed key, and the
+	// intermediate name is itself recorded as an alias — so a state
+	// that has been folded N times answers to any of N+1 spellings of
+	// the same intent.
 	if len(s.On) > 0 {
 		newOn := make(map[string][]Transition, len(s.On))
 		for intent, list := range s.On {
@@ -83,6 +93,26 @@ func (rw *childRewriter) rewriteState(s *State) {
 				rw.rewriteTransition(&list[i])
 			}
 			newOn[newIntent] = list
+			if newIntent != intent {
+				if s.IntentAliases == nil {
+					s.IntentAliases = make(map[string]string)
+				}
+				// Chase forward: any existing alias entries that point
+				// to the pre-rewrite name (e.g. accept → bf__accept
+				// from the prior fold) now point to the post-rewrite
+				// name (accept → core__bf__accept).
+				for k, v := range s.IntentAliases {
+					if v == intent {
+						s.IntentAliases[k] = newIntent
+					}
+				}
+				// Record the bare → renamed mapping for THIS fold.
+				// On the first fold this captures e.g.
+				// `accept → bf__accept`; on the second, it captures
+				// `bf__accept → core__bf__accept` so the intermediate
+				// name remains resolvable too.
+				s.IntentAliases[intent] = newIntent
+			}
 		}
 		s.On = newOn
 	}

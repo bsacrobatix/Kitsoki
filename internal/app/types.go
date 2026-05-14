@@ -282,6 +282,19 @@ type State struct {
 	RelevantSlots []string `yaml:"relevant_slots,omitempty"`
 	// Timeout declares an automatic transition after a duration.
 	Timeout *TimeoutDef `yaml:"timeout,omitempty"`
+
+	// IntentAliases records the bare → renamed mapping produced by the
+	// imports rewriter. When this state lives inside one or more import
+	// alias wrappers, every intent that the rewriter renamed (e.g.
+	// `accept` → `bf__accept`, then `bf__accept` → `core__bf__accept`
+	// on a second fold) gains an entry here. Both the original bare
+	// name and any intermediate prefixed names point to the final,
+	// fully-prefixed key actually present in `On`. Used at runtime by
+	// the emit_intent dispatcher to resolve a bare intent name emitted
+	// by an LLM-judge inside the imported child against the renamed
+	// arc on the current state. Never set by YAML authors; populated
+	// by `internal/app/imports_rewriter.go::rewriteState` during fold.
+	IntentAliases map[string]string `yaml:"-"`
 }
 
 // Transition is one entry in a state's on[intent] list.

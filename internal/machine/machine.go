@@ -833,7 +833,27 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 			return "", world.World{}, nil, "", nil, fmt.Errorf("emit_intent %q: synthetic dispatch from a parallel-encoded state %q is not supported", emit.Name, state)
 		}
 
-		winningTr, winningPath, _, err := m.findTransitionTraced(ctx, state, emit.Name, dispEnv)
+		// Resolve the emitted name through the import alias map of the
+		// active state's ancestor chain. When the LLM-judge emits a
+		// bare intent name (e.g. `accept`) inside an imported child
+		// (e.g. active state `core.bf.reproducing_awaiting_reply`),
+		// the loader's rewriter renamed the corresponding on: arc to
+		// `core__bf__accept`. resolveEmittedIntentName walks the leaf
+		// → root ancestor chain looking for an IntentAliases entry
+		// that maps `accept` to its renamed form. Returns the bare
+		// name when no mapping applies (standalone stories — back
+		// compat).
+		dispatchName := m.resolveEmittedIntentName(state, emit.Name)
+		if dispatchName != emit.Name {
+			m.logger.DebugContext(ctx, trace.EvIntentEmitted,
+				slog.String("intent", emit.Name),
+				slog.String("resolved", dispatchName),
+				slog.String("state", state),
+				slog.String("kind", "import_alias_resolved"),
+			)
+		}
+
+		winningTr, winningPath, _, err := m.findTransitionTraced(ctx, state, dispatchName, dispEnv)
 		if err != nil {
 			return "", world.World{}, nil, "", nil, fmt.Errorf("emit_intent %q at %q: find transition: %w", emit.Name, state, err)
 		}
@@ -905,7 +925,7 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 		events = append(events, newEvent(store.TransitionApplied, map[string]any{
 			"from":      state,
 			"to":        resolvedTarget,
-			"intent":    emit.Name,
+			"intent":    dispatchName,
 			"slots":     map[string]any(slotBag),
 			"synthetic": true,
 		}))
@@ -944,6 +964,55 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 	}
 
 	return state, newWorld, hostCalls, saySB.String(), events, nil
+}
+
+// resolveEmittedIntentName resolves a bare intent name emitted by an
+// LLM-judge into the import-alias-rewritten form that the runtime's
+// on: arc map actually keys on at the current state (or anywhere up
+// its ancestor chain).
+//
+// Background. The imports loader's rewriter renames every child
+// state's `on:` arc keys from `<intent>` to `<alias>__<intent>` (and
+// stacks the prefix on multi-layer folds — `<outer>__<inner>__…__<intent>`).
+// The same intent is emitted by the LLM judge VERBATIM as the bare
+// name — there's no way for the judge prompt to know which alias
+// chain currently wraps the active state. Without this resolution
+// step the dispatcher's findTransition lookup on the bare name
+// silently no-ops inside import compounds.
+//
+// Resolution strategy. The rewriter records the rename mapping on
+// each child state in `IntentAliases` (see imports_rewriter.go). At
+// dispatch time we walk the active state's ancestor chain leaf →
+// root, consulting each state's alias map. The first hit wins. When
+// no ancestor knows about the name, the bare name is returned —
+// preserving the existing behaviour for standalone (un-imported)
+// stories.
+//
+// Why ancestor walk. The rewriter populates IntentAliases on every
+// rewritten state; the leaf is the canonical site, but some authoring
+// shapes (`on:` handler declared on a wrapping compound, not on the
+// leaf) need the walk to surface the alias map from one level up.
+// Mirrors findTransitionTraced's leaf-to-root walk so the two stay in
+// lock-step.
+func (m *machineImpl) resolveEmittedIntentName(leafPath, name string) string {
+	if name == "" {
+		return name
+	}
+	path := leafPath
+	for {
+		cs, ok := m.states[path]
+		if ok && cs.s != nil && len(cs.s.IntentAliases) > 0 {
+			if mapped, found := cs.s.IntentAliases[name]; found && mapped != "" {
+				return mapped
+			}
+		}
+		idx := strings.LastIndexByte(path, '.')
+		if idx < 0 {
+			break
+		}
+		path = path[:idx]
+	}
+	return name
 }
 
 // findTransitionTraced is findTransition with trace.EvMachineGuardEval / Winner emission.

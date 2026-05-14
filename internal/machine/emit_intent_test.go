@@ -349,3 +349,156 @@ func TestEmitIntent_OnTransitionEffect(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, app.StatePath("end"), res.NewState, "transition-effect emit dispatches against the post-transition leaf")
 }
+
+// TestEmitIntent_ResolvesThroughSingleImportAlias — the LLM emits a
+// bare intent name (`accept`) while the active state sits inside one
+// import alias wrapper. The state's `on:` map has the alias-prefixed
+// arc (`bf__accept`); the dispatcher must resolve the bare name via
+// State.IntentAliases (populated by the rewriter) and dispatch the
+// renamed form. Models the dev-story → bugfix bug fixed by Wave 3 /
+// Phase 6 §W6.6 #1.
+func TestEmitIntent_ResolvesThroughSingleImportAlias(t *testing.T) {
+	// Hand-construct the post-fold AppDef so the test exercises the
+	// runtime fix in isolation from the loader. The shape mirrors what
+	// the rewriter would produce for one fold under alias `bf`.
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "emit-one-alias"},
+		Root: "bf",
+		Intents: map[string]app.Intent{
+			"bf__accept": {},
+		},
+		States: map[string]*app.State{
+			"bf": {
+				Type:    "compound",
+				Initial: "checkpoint",
+				States: map[string]*app.State{
+					"checkpoint": {
+						On: map[string][]app.Transition{
+							"bf__accept": {{Target: "../../end"}},
+						},
+						// What the rewriter would record after fold.
+						IntentAliases: map[string]string{
+							"accept": "bf__accept",
+						},
+					},
+				},
+			},
+			"end": {Terminal: true},
+		},
+	}
+	m := mustNew(t, def)
+	newState, _, _, _, _, err := m.RunEffectsAndState(context.Background(), "bf.checkpoint", world.New(), []app.Effect{{EmitIntent: "accept"}})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("end"), newState, "bare `accept` must resolve through IntentAliases to `bf__accept`")
+}
+
+// TestEmitIntent_ResolvesThroughNestedImportAliases — two-layer fold
+// (e.g. dev-story imports bugfix as `bf`; kitsoki-dev imports
+// dev-story as `core`). Active state is inside `core.bf.<leaf>` and
+// the rewriter has chained the alias map so `accept` resolves to
+// `core__bf__accept`.
+func TestEmitIntent_ResolvesThroughNestedImportAliases(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "emit-nested-alias"},
+		Root: "core",
+		Intents: map[string]app.Intent{
+			"core__bf__accept": {},
+		},
+		States: map[string]*app.State{
+			"core": {
+				Type:    "compound",
+				Initial: "bf",
+				States: map[string]*app.State{
+					"bf": {
+						Type:    "compound",
+						Initial: "checkpoint",
+						States: map[string]*app.State{
+							"checkpoint": {
+								On: map[string][]app.Transition{
+									"core__bf__accept": {{Target: "../../../end"}},
+								},
+								// After two folds, IntentAliases holds
+								// both intermediate and final spellings.
+								IntentAliases: map[string]string{
+									"accept":     "core__bf__accept",
+									"bf__accept": "core__bf__accept",
+								},
+							},
+						},
+					},
+				},
+			},
+			"end": {Terminal: true},
+		},
+	}
+	m := mustNew(t, def)
+	newState, _, _, _, _, err := m.RunEffectsAndState(context.Background(), "core.bf.checkpoint", world.New(), []app.Effect{{EmitIntent: "accept"}})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("end"), newState, "bare `accept` must resolve through chained IntentAliases to `core__bf__accept`")
+
+	// And the intermediate name resolves too (operator might emit it).
+	newState2, _, _, _, _, err2 := m.RunEffectsAndState(context.Background(), "core.bf.checkpoint", world.New(), []app.Effect{{EmitIntent: "bf__accept"}})
+	require.NoError(t, err2)
+	require.Equal(t, app.StatePath("end"), newState2, "intermediate `bf__accept` must also resolve to `core__bf__accept`")
+}
+
+// TestEmitIntent_StandaloneNoAliasMap — at a state with no
+// IntentAliases (standalone story, no imports), the bare emit name is
+// dispatched verbatim. Back-compat for every story that doesn't use
+// imports.
+func TestEmitIntent_StandaloneNoAliasMap(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "emit-standalone"},
+		Root: "checkpoint",
+		Intents: map[string]app.Intent{
+			"accept": {},
+		},
+		States: map[string]*app.State{
+			"checkpoint": {
+				On: map[string][]app.Transition{
+					"accept": {{Target: "end"}},
+				},
+			},
+			"end": {Terminal: true},
+		},
+	}
+	m := mustNew(t, def)
+	newState, _, _, _, _, err := m.RunEffectsAndState(context.Background(), "checkpoint", world.New(), []app.Effect{{EmitIntent: "accept"}})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("end"), newState, "bare `accept` dispatches verbatim at a standalone state")
+}
+
+// TestEmitIntent_NonexistentNameInsideAliasMapIsNoArm — when the LLM
+// emits a name that exists nowhere (no alias entry, no bare arc), the
+// dispatcher surfaces the "no transition arm matched" error — same
+// loud-failure behaviour as before the fix.
+func TestEmitIntent_NonexistentNameInsideAliasMapIsNoArm(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "emit-missing"},
+		Root: "bf",
+		Intents: map[string]app.Intent{
+			"bf__accept": {},
+		},
+		States: map[string]*app.State{
+			"bf": {
+				Type:    "compound",
+				Initial: "checkpoint",
+				States: map[string]*app.State{
+					"checkpoint": {
+						On: map[string][]app.Transition{
+							"bf__accept": {{Target: "../../end"}},
+						},
+						IntentAliases: map[string]string{
+							"accept": "bf__accept",
+						},
+					},
+				},
+			},
+			"end": {Terminal: true},
+		},
+	}
+	m := mustNew(t, def)
+	_, _, _, _, _, err := m.RunEffectsAndState(context.Background(), "bf.checkpoint", world.New(), []app.Effect{{EmitIntent: "nonexistent_intent"}})
+	require.Error(t, err)
+	require.True(t, strings.Contains(err.Error(), "no transition arm matched"), "unknown emit must fail loud: %v", err)
+}
