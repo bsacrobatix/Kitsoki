@@ -255,5 +255,13 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.append_to_file", AppendFileTransportHandler)
 	r.Register("host.inbox.add", InboxAddHandler)
 
+	// Wave 3 / Phase 5 — GitHub Issues + cypilot artifact providers.
+	// `host.gh.ticket` backs the `ticket` iface against the gh CLI; the
+	// existing `host.git` already routes PR ops through gh.  `host.cypilot_artifacts`
+	// shells out to cpt for the SDLC artifact iface introduced in §2.6
+	// of the dev-story-bugfix unify proposal.
+	r.Register("host.gh.ticket", GitHubTicketHandler)
+	r.Register("host.cypilot_artifacts", CypilotArtifactsHandler)
+
 	RegisterAuthoringBuiltins(r)
 }
