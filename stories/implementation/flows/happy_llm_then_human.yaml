@@ -4,13 +4,14 @@
 # runs at each _awaiting_reply, and the auto-fire path advances. Same
 # stub shape as bugfix/flows/happy_llm_then_human.yaml.
 #
-# NOTE — runtime gap: emit_intent does NOT auto-fire inside an imported
-# child compound (see Wave 3 / Phase 6 contract appendix). Implementation
-# auto-fires within its own rooms because they are top-level here; once
-# the flow enters the `pr` import compound, intent names get rewritten
-# to `pr__<name>` but emit_intent's rendered value stays bare and
-# `findTransition` can't match. So this flow drives the pr tail with
-# explicit pr__proceed / pr__accept.
+# Wave 3 / Phase 6 §W6.6 #1 fix: emit_intent now auto-fires across
+# import compound boundaries — the dispatcher resolves bare intent
+# names through State.IntentAliases (populated by the rewriter).
+# This flow used to drive the pr tail with explicit `pr__proceed` /
+# `pr__accept` because emit_intent silently no-op'd inside the pr
+# import; with the fix in place the LLM-judge's bare `accept` value
+# resolves to `pr__accept` and auto-fires the same way it does in
+# pr-refinement's standalone tests.
 
 test_kind: flow
 app: ../app.yaml
@@ -105,11 +106,11 @@ turns:
     expect_state: pr.merge_executing
     expect_world:
       pr__judge_mode: "llm_then_human"
+  # With the §W6.6 #1 fix, the pr-refinement merge checkpoint's
+  # emit_intent: "{{ world.llm_verdict.intent }}" auto-resolves
+  # `accept` to `pr__accept` and the merge fires in the same turn —
+  # so this last `proceed` lands directly at __exit__done.
   - intent: { name: pr__proceed, slots: {} }
-    # Emit-intent auto-fire breaks under fold (intent-name rewriter
-    # doesn't fold dynamic emit values). Drive the tail explicitly.
-    expect_state: pr.merge_awaiting_reply
-  - intent: { name: pr__accept, slots: {} }
     expect_state: __exit__done
     expect_world:
       status: "merged"

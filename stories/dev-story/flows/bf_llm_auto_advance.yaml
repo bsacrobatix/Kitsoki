@@ -1,0 +1,107 @@
+# bf_llm_auto_advance — exercises the §W6.6 #1 fix: emit_intent
+# auto-fires across an import compound boundary.
+#
+# Setup: dev-story hub imports bugfix as `bf`. The flow picks a ticket,
+# dispatches into bf with judge_mode=llm_then_human, and proves that
+# the LLM-judge's bare `accept` verdict resolves to `bf__accept` at
+# dispatch time — so `proceed` at reproducing_executing lands two
+# states later at `bf.proposing_executing` (not at the
+# `bf.reproducing_awaiting_reply` it would have stalled at before
+# the runtime fix).
+#
+# This is the regression flow for the cross-import-boundary
+# dispatcher bug documented in Wave 3 / Phase 6 §W6.6 #1 and fixed
+# by `internal/machine/machine.go::resolveEmittedIntentName`.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: main
+initial_world:
+  ticket_id:                  "TKT-100"
+  ticket_title:               "Auto-advance across import boundary"
+  thread:                     "TKT-100"
+  workspace_id:               "ws-100"
+  workdir:                    ".worktrees/tkt-100"
+  base_branch:                "main"
+  feature_branch:             "fix/tkt-100"
+  bugfix_mode:                "full"
+  judge_mode:                 "llm_then_human"
+  judge_confidence_threshold: 0.8
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "synced" }
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "diff --git a/x b/x\n", files: [] }
+  host.local:
+    data: { ok: true, log: "PASS", passed: 4, failed: 0 }
+  host.local_files.ticket:
+    data:
+      ok: true
+      tickets: "TKT-100: Auto-advance across import boundary"
+      id:    "TKT-100"
+      title: "Auto-advance across import boundary"
+      body:  "Verify the §W6.6 fix end-to-end across the bf import."
+      url:   "issues/TKT-100.md"
+
+  # Single stub satisfies both artifact and verdict schemas — same
+  # shape bugfix/flows/happy_llm.yaml uses, only repointed at a
+  # different ticket. The verdict.intent="accept" is the BARE name
+  # the LLM produces; the dispatcher resolves it through the
+  # imported state's IntentAliases to `bf__accept` and fires the arc.
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Auto-advance regression"
+        summary_markdown: "Confirms emit_intent fires across imports."
+        bug_verified:     true
+        involved_components: [{ name: "machine", reason: "dispatcher resolution" }]
+        fix_description:     "Resolve bare emit names through State.IntentAliases."
+        root_cause:          "Dispatcher used bare emit name; rewriter renamed the arc."
+        affected_files:      ["internal/machine/machine.go"]
+        confidence:          0.92
+        reasoning:           "Static analysis matches the trace."
+        status:              "passed"
+        tests_run:           { passed: 4, failed: 0, log: "PASS" }
+        outcome:             "pass"
+        evidence:            { build: "ok", api: "n/a", ui: "ok" }
+        lessons:
+          - { category: "imports", description: "Cross-boundary intent dispatch needs alias resolution.", severity: "low" }
+        verdict: "pass"
+        intent:  "accept"
+        reason:  "High confidence; auto-advance."
+
+turns:
+  # main → ticket_search and pick the ticket.
+  - intent: { name: go_ticket_search, slots: {} }
+    expect_state: ticket_search
+  - intent: { name: pick_ticket, slots: { id: "TKT-100" } }
+    expect_state: ticket_search
+    expect_world:
+      ticket_id: "TKT-100"
+
+  # Dispatch into bf via the parent's `go_bugfix` intent. Lands at
+  # bf.idle with the world_in: projection in place.
+  - intent: { name: go_bugfix, slots: {} }
+    expect_state: bf.idle
+    expect_world:
+      bf__judge_mode: "llm_then_human"
+
+  # bf's `start` arc (renamed `bf__start` at fold time).
+  - intent: { name: bf__start, slots: {} }
+    expect_state: bf.reproducing_executing
+
+  # The critical assertion: at bf.reproducing_awaiting_reply the
+  # LLM-judge binds llm_verdict and emit_intent renders to bare
+  # `accept`. Pre-fix this stalled at bf.reproducing_awaiting_reply;
+  # post-fix the dispatcher resolves `accept` → `bf__accept` and
+  # the proposing_executing arc fires in the same turn.
+  - intent: { name: bf__proceed, slots: {} }
+    expect_state: bf.proposing_executing
+
+expect_no_errors: true

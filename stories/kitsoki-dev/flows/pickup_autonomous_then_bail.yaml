@@ -81,14 +81,16 @@ host_handlers:
           - { category: "render-ordering", description: "Subscribe-notify ordering trap.", severity: "high" }
         verdict:    "pass"
         # NOTE: the emit_intent expression in bf's checkpoint rooms is
-        # `{{ world.llm_verdict.intent }}`, dispatched verbatim by the
+        # `{{ world.llm_verdict.intent }}`, rendered verbatim by the
         # runtime. After bugfix is folded under dev-story (and then
         # again under kitsoki-dev's `core`), the state's on-arc key is
-        # `core__bf__accept`. The verdict stub here supplies the
-        # prefixed name directly; a live LLM-judge will need a
-        # post-bind alias-rewriting hook (Wave 3.5 follow-up) to
-        # produce the bare `accept` and have it dispatched correctly.
-        # See README "Runtime gaps" for the full story.
+        # `core__bf__accept`. As of the §W6.6 #1 fix the dispatcher
+        # resolves bare emit names through the state's IntentAliases
+        # map, so a live LLM-judge producing the bare `accept` works
+        # end-to-end (covered by stories/kitsoki-dev/flows/
+        # dogfood_autonomous_smoke.yaml). This fixture keeps the
+        # fully-prefixed spelling as regression coverage that
+        # already-prefixed names ALSO dispatch correctly.
         intent:     "core__bf__accept"
         reason:     "Confident; advance autonomously."
         confidence_pct: 90
