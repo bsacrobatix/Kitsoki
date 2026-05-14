@@ -1249,12 +1249,47 @@ func seedInitialState(ctx context.Context, rig *orchRig, def *app.AppDef, fixtur
 // injectWorldOverride writes a set of EffectApplied events for each
 // world_override key so the orchestrator's next journey load reflects the
 // override.
+//
+// Turn allocation: the override events are stamped with a fresh side-channel
+// turn = journey.Turn + 1 (i.e. one past the highest turn in the event log).
+// This mirrors the off-path appender in internal/orchestrator/offpath.go,
+// which faces the same constraint: the events table's PRIMARY KEY is
+// (session_id, turn, seq) and appendEventsTx overwrites Seq with a monotonic
+// 0..N-1 starting from 0 per call, so two AppendEvents calls that share a
+// turn number with any already-persisted events collide on the PK.
+//
+// Semantically these events sit *between* turn N-1 and the upcoming turn N:
+// they belong to neither, but live as a "side-channel patch" between them.
+// The orchestrator's next RunIntent recomputes turnNum = journey.Turn + 1
+// from a fresh loadJourney, so it will pick up override.Turn + 1 naturally —
+// the override and the next foreground turn cannot collide.
+//
+// The pre-existing bug was Turn: 0 hard-coded: the FIRST call worked because
+// seedInitialState wrote turn-0 events with seq 0..N-1 and the override then
+// appended at turn 0 with seq RESET to 0..M-1 (PK collision); SQLite raised
+// the constraint error on every override after the first. The earliest
+// known passing call (oregon-trail's winning_deterministic.yaml has 6
+// world_override blocks) didn't hit the bug because that fixture has no
+// host_handlers — it runs through the static-harness path (line ~573 in
+// this file) which mutates currentWorld.Vars in-place without touching the
+// event log at all.
 func injectWorldOverride(ctx context.Context, rig *orchRig, overrides map[string]any) error {
-	var events []store.Event
+	if len(overrides) == 0 {
+		return nil
+	}
+	// Allocate a fresh turn = max(history)+1, identical to the off-path
+	// appender's strategy. loadJourney already walks the event log and
+	// records the highest turn it saw, so we don't pay an extra DB hit.
+	preJ, err := rig.orch.LoadJourney(rig.sid)
+	if err != nil {
+		return fmt.Errorf("injectWorldOverride: load journey: %w", err)
+	}
+	overrideTurn := preJ.Turn + 1
+	events := make([]store.Event, 0, len(overrides))
 	for k, v := range overrides {
 		events = append(events, store.Event{
 			Kind: store.EffectApplied,
-			Turn: 0,
+			Turn: overrideTurn,
 			Payload: mustJSON(map[string]any{
 				"set": map[string]any{k: v},
 			}),

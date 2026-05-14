@@ -145,6 +145,92 @@ func TestAppendEvents_SeqResetsPerTurn(t *testing.T) {
 	require.Equal(t, app.TurnNumber(2), history[2].Turn)
 }
 
+// TestAppendEvents_SameTurnBatchesCollide pins the invariant that two
+// AppendEvents calls that share a turn number with already-persisted events
+// MUST collide on the (session_id, turn, seq) primary key.
+//
+// Rationale: appendEventsTx overwrites the incoming Seq fields with a
+// monotonic 0..N-1 starting at 0 per call. Two same-turn calls both start
+// their seq at 0, so the second insert hits the same (turn, seq=0) row that
+// the first wrote — SQLite must raise the constraint violation. This is the
+// invariant that caught the world_override bug (injectWorldOverride used to
+// hard-code Turn: 0 on every override regardless of where the journey was,
+// so the FIRST override succeeded after a seed-events flush but the SECOND
+// (and every subsequent) override collided).
+//
+// If a future refactor papers over this — e.g. by silently bumping seq on
+// duplicate — this test will catch it. The off-path appender in
+// internal/orchestrator/offpath.go and the testrunner's injectWorldOverride
+// both rely on this invariant by allocating a fresh turn = max(history)+1
+// for side-channel events; the collision contract here is what makes those
+// callers safe.
+func TestAppendEvents_SameTurnBatchesCollide(t *testing.T) {
+	st, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = st.Close() })
+
+	def := makeAppDef("test-app", "1.0.0")
+	sid, err := st.CreateSession(context.Background(), def)
+	require.NoError(t, err)
+
+	// First batch at turn 0 succeeds.
+	require.NoError(t, st.AppendEvents(sid, makeEvents(0, 3)),
+		"first batch at turn 0 should succeed")
+
+	// Second batch at the SAME turn must collide on (session_id, turn, seq=0).
+	err = st.AppendEvents(sid, makeEvents(0, 2))
+	require.Error(t, err,
+		"second batch at the same turn must collide on the (session_id, turn, seq) PK")
+	require.Contains(t, err.Error(), "UNIQUE",
+		"the error must surface the UNIQUE/PRIMARY KEY violation (got %v)", err)
+
+	// History should still contain only the first batch's three events; the
+	// failed second batch must roll back atomically (no partial writes).
+	hist, err := st.LoadHistory(sid)
+	require.NoError(t, err)
+	require.Len(t, hist, 3, "failed second batch must roll back; history unchanged")
+}
+
+// TestAppendEvents_FreshTurnAfterSameTurnFailure is the positive companion to
+// TestAppendEvents_SameTurnBatchesCollide: the side-channel pattern (allocate
+// a fresh turn = max(history)+1 for the next batch) MUST succeed even when
+// a prior same-turn call collided, because the failed call rolled back
+// cleanly. This is the contract the testrunner's injectWorldOverride and the
+// orchestrator's appendOffPathEvents both depend on.
+func TestAppendEvents_FreshTurnAfterSameTurnFailure(t *testing.T) {
+	st, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = st.Close() })
+
+	def := makeAppDef("test-app", "1.0.0")
+	sid, err := st.CreateSession(context.Background(), def)
+	require.NoError(t, err)
+
+	// Seed batch at turn 0.
+	require.NoError(t, st.AppendEvents(sid, makeEvents(0, 3)))
+
+	// Attempt (and fail) a same-turn append.
+	_ = st.AppendEvents(sid, makeEvents(0, 1))
+
+	// Recover by appending at a fresh turn (the side-channel pattern).
+	require.NoError(t, st.AppendEvents(sid, makeEvents(1, 2)),
+		"a fresh turn must succeed after a same-turn collision rolled back")
+
+	hist, err := st.LoadHistory(sid)
+	require.NoError(t, err)
+	require.Len(t, hist, 5, "3 seed events + 2 fresh-turn events; the failed batch left no trace")
+
+	// Verify the seq invariant: turn 0 has seq 0,1,2; turn 1 has seq 0,1.
+	require.Equal(t, app.TurnNumber(0), hist[0].Turn)
+	require.Equal(t, 0, hist[0].Seq)
+	require.Equal(t, app.TurnNumber(0), hist[2].Turn)
+	require.Equal(t, 2, hist[2].Seq)
+	require.Equal(t, app.TurnNumber(1), hist[3].Turn)
+	require.Equal(t, 0, hist[3].Seq)
+	require.Equal(t, app.TurnNumber(1), hist[4].Turn)
+	require.Equal(t, 1, hist[4].Seq)
+}
+
 func TestAppendEvents_Content(t *testing.T) {
 	st, err := store.OpenMemory()
 	require.NoError(t, err)
