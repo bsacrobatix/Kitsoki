@@ -1,0 +1,115 @@
+# refine_budget_exhaust_reproducing — when the operator refines reproducing
+# more times than reproducing_budget allows, the next refine routes to
+# @exit:abandoned with abandon_reason=reproducing_cycle_budget_exhausted.
+#
+# Mirrors cyber-repo's stories/bugfix/flows/cycle_budget_exhaust.yaml,
+# scenario 1, against the kitsoki bugfix story's per-phase counters.
+#
+# Pattern: world_override seeds the counter at the budget (3); the next
+# refine sees the gate condition `reproducing_cycle >= reproducing_budget`
+# and fires the abandon arm.
+#
+# Two scenarios:
+#   1. Counter pre-set at the limit → first refine abandons immediately.
+#   2. Walk the counter up via three real refines, then the fourth abandons.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: reproducing_awaiting_reply
+initial_world:
+  ticket_id:           "TKT-100"
+  thread:              "TKT-100"
+  judge_mode:          "human"
+  reproducing_budget:  3
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.git:
+    data: { ok: true, sha: "abc", diff: "" }
+  host.local:
+    data: { ok: true, log: "PASS", passed: 1, failed: 0 }
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub repro"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+
+turns:
+  # Counter at budget; refine takes the @exit:abandoned arm.
+  - intent: { name: refine, slots: { feedback: "one more" } }
+    world_override:
+      reproducing_cycle: 3
+    expect_state: __exit__abandoned
+    expect_world:
+      abandon_reason: "reproducing_cycle_budget_exhausted"
+      status:         "abandoned"
+
+expect_terminal: true
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: reproducing_awaiting_reply
+initial_world:
+  ticket_id:           "TKT-101"
+  thread:              "TKT-101"
+  judge_mode:          "human"
+  reproducing_budget:  3
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.git:
+    data: { ok: true, sha: "abc", diff: "" }
+  host.local:
+    data: { ok: true, log: "PASS", passed: 1, failed: 0 }
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub repro"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+
+turns:
+  # Walk three refines (counter: 0 → 1 → 2 → 3) under the budget.
+  - intent: { name: refine, slots: { feedback: "first" } }
+    expect_state: reproducing_executing
+    expect_world: { reproducing_cycle: 1 }
+  - intent: { name: proceed, slots: {} }
+    expect_state: reproducing_awaiting_reply
+  - intent: { name: refine, slots: { feedback: "second" } }
+    expect_state: reproducing_executing
+    expect_world: { reproducing_cycle: 2 }
+  - intent: { name: proceed, slots: {} }
+    expect_state: reproducing_awaiting_reply
+  - intent: { name: refine, slots: { feedback: "third" } }
+    expect_state: reproducing_executing
+    expect_world: { reproducing_cycle: 3 }
+  - intent: { name: proceed, slots: {} }
+    expect_state: reproducing_awaiting_reply
+
+  # Fourth refine — counter is now at budget, the gate fires.
+  - intent: { name: refine, slots: { feedback: "one too many" } }
+    expect_state: __exit__abandoned
+    expect_world:
+      abandon_reason: "reproducing_cycle_budget_exhausted"
+      status:         "abandoned"
+
+expect_terminal: true
+expect_no_errors: true

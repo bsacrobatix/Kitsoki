@@ -1,0 +1,86 @@
+# happy_quick_fix — quick_fix mode collapses the pipeline: reproducing →
+# proposing → implementing → testing → done (no reviewing, no validating).
+#
+# Proves the proposal §4.2 shortcut path. The first arm of
+# testing_awaiting_reply.accept checks `world.bugfix_mode == 'quick'` and
+# targets done_executing instead of reviewing_executing.
+#
+# Starting via `quick_fix` from idle sets bugfix_mode="quick".
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:        "TKT-400"
+  ticket_title:    "Trivial typo fix"
+  thread:          "TKT-400"
+  judge_mode:      "human"
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "synced" }
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "" }
+  host.local:
+    data: { ok: true, log: "PASS", passed: 1, failed: 0 }
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Trivial one-character typo fix in a comment."
+        root_cause:      "Fat-finger typo."
+        affected_files:  ["README.md"]
+        confidence:      0.95
+        reasoning:       "It's a typo; the fix is mechanical."
+        status:          "passed"
+        tests_run:       { passed: 0, failed: 0, log: "no tests run" }
+        outcome:         "pass"
+        lessons:
+          - { category: "trivial", description: "Quick-fix smoke test.", severity: "low" }
+
+turns:
+  # quick_fix from idle — sets bugfix_mode="quick" and lands at reproducing.
+  - intent: { name: quick_fix, slots: {} }
+    expect_state: reproducing_executing
+    expect_world:
+      bugfix_mode: "quick"
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: reproducing_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: proposing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: proposing_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: implementing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: testing_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: testing_awaiting_reply
+
+  # The mode-gated arm: accept skips reviewing + validating and lands at
+  # done_executing. (In full mode this same accept would go to
+  # reviewing_executing — see happy_human.)
+  - intent: { name: accept, slots: {} }
+    expect_state: done_executing
+    expect_world:
+      bugfix_mode: "quick"
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: done_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+    expect_world:
+      status:      "fixed"
+      bugfix_mode: "quick"
+
+expect_terminal: true
+expect_no_errors: true

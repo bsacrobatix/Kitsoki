@@ -1,0 +1,33 @@
+# full_pipeline_from_idle — `full_pipeline` is the explicit-mode default.
+# Sets bugfix_mode="full" and routes to reproducing_executing. Equivalent
+# to `start` except it pins the mode flag (useful when a previous run
+# left bugfix_mode="quick" in the carried world).
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:   "TKT-420"
+  thread:      "TKT-420"
+  judge_mode:  "human"
+  # Simulate a leftover quick from a previous run; full_pipeline overrides.
+  bugfix_mode: "quick"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: full_pipeline, slots: {} }
+    expect_state: reproducing_executing
+    expect_world:
+      bugfix_mode: "full"
+
+expect_no_errors: true

@@ -1,0 +1,55 @@
+# skip_to_pr_from_idle — operator skips the whole upstream pipeline
+# and walks straight into validating_executing. Use when the fix is
+# already in hand and the operator just wants the validate-and-PR tail.
+#
+# Asserts:
+#   - target state is validating_executing
+#   - world.restart_from_stage == "validate"  (audit; tells the parent
+#     "we skipped to validate")
+#   - world.unsafe_jumps_made == 1  (audit counter)
+#   - bugfix_mode == "full" (skip_to_pr does NOT switch to quick mode;
+#     the user wants the FULL validate/done tail)
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:  "TKT-410"
+  thread:     "TKT-410"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Validation"
+        summary_markdown: "stub"
+        outcome:          "pass"
+        evidence:         { build: "ok", api: "n/a", ui: "n/a" }
+
+turns:
+  - intent: { name: skip_to_pr, slots: {} }
+    expect_state: validating_executing
+    expect_world:
+      bugfix_mode:        "full"
+      restart_from_stage: "validate"
+      unsafe_jumps_made:  1
+
+  # Walk the validate + done tail to prove the jump landed in a working state.
+  - intent: { name: proceed, slots: {} }
+    expect_state: validating_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: done_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: done_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+
+expect_terminal: true
+expect_no_errors: true

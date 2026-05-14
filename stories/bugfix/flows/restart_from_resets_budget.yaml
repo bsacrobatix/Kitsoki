@@ -1,0 +1,56 @@
+# restart_from_resets_budget — proves restart_from to phase X resets
+# world.<X>_cycle to 0, giving the operator a fresh budget for that
+# phase.
+#
+# Setup: reproducing_cycle is at the budget (3) at proposing_awaiting_reply.
+# The operator restart_from reproducing — this transitions to
+# reproducing_executing and resets reproducing_cycle to 0. The next
+# refine at reproducing_awaiting_reply must NOT immediately abandon
+# (because the counter was reset).
+#
+# A regression that drops the cycle-reset would cause the post-restart
+# refine to fire @exit:abandoned immediately.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: proposing_awaiting_reply
+initial_world:
+  ticket_id:           "TKT-600"
+  thread:              "TKT-600"
+  judge_mode:          "human"
+  reproducing_cycle:   3
+  reproducing_budget:  3
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+
+turns:
+  # restart_from reproducing — reset reproducing_cycle to 0.
+  - intent: { name: restart_from, slots: { stage: "reproducing" } }
+    expect_state: reproducing_executing
+    expect_world:
+      restart_from_stage: "reproducing"
+      reproducing_cycle:  0
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: reproducing_awaiting_reply
+
+  # First refine post-restart — does NOT abandon (counter was reset to 0).
+  - intent: { name: refine, slots: { feedback: "post-restart" } }
+    expect_state: reproducing_executing
+    expect_world:
+      reproducing_cycle: 1
+
+expect_no_errors: true

@@ -1,0 +1,42 @@
+# refine_budget_exhaust_testing — testing_cycle hits testing_budget;
+# next refine routes to @exit:abandoned.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: testing_awaiting_reply
+initial_world:
+  ticket_id:        "TKT-120"
+  thread:           "TKT-120"
+  judge_mode:       "human"
+  testing_budget:   3
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.git:
+    data: { ok: true, sha: "abc", diff: "" }
+  host.local:
+    data: { ok: true, log: "PASS", passed: 1, failed: 0 }
+  host.oracle.ask_with_mcp:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub testing"
+        summary_markdown: "stub"
+        status:           "passed"
+        tests_run:        { passed: 1, failed: 0, log: "PASS" }
+
+turns:
+  - intent: { name: refine, slots: { feedback: "exhaust check" } }
+    world_override:
+      testing_cycle: 3
+    expect_state: __exit__abandoned
+    expect_world:
+      abandon_reason: "testing_cycle_budget_exhausted"
+
+expect_terminal: true
+expect_no_errors: true
