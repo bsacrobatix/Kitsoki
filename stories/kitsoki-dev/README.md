@@ -144,14 +144,33 @@ file's `status:` is `resolved`.
 
 ### Phase 0 — file the bug
 
-The bug-filing CLI (`kitsoki bug create`) is from
-`bug-format-proposal.md` Phase A — it lives on a parallel worktree
-not yet merged into this branch. Until that lands, hand-author bug
-files by copying the schema documented in
-[`../../issues/README.md`](../../issues/README.md) under
-"Frontmatter schema". Two seeded examples ship in
-`issues/bugs/` for the Phase 3 acceptance smoke (one
-"view-render-before-bind", one "glamour caps prose").
+The bug-filing CLI (`kitsoki bug create`) ships on main; here is how
+to use it end-to-end. Two-step shell snippet that goes from a real
+bug file to the bugfix pipeline:
+
+```
+$ kitsoki bug create --target kitsoki \
+    --title "TUI view renders before on_enter binds" \
+    --body "Expected: first frame shows bound values. Actual: '(pending)'." \
+    --severity med
+issues/bugs/2026-05-15T0407Z-tui-view-renders-before-on-enter-binds.md
+
+$ kitsoki run stories/kitsoki-dev/app.yaml
+# in the TUI: > tickets → > search "tui view" → > pick <id> → > bugfix → > start …
+```
+
+The first command writes a markdown file under `$KITSOKI_REPO/issues/bugs/`
+with the frontmatter schema documented in
+[`docs/bugs.md`](../../docs/bugs.md) (and mirrored in
+[`../../issues/README.md`](../../issues/README.md)). The second command
+boots the dogfood instance, which scans the same directory via
+`host.local_files.ticket` and picks the file up as a ticket.
+
+Two pre-seeded examples ship in `issues/bugs/` for the Phase 3
+acceptance smoke (one "view-render-before-bind", one
+"glamour caps prose") so the walkthrough works without filing a fresh
+bug first; either path (real `bug create` or one of the seeds) is
+equivalent from the pipeline's perspective.
 
 ### Phase 1 — pick up the bug
 
@@ -310,12 +329,13 @@ caveats:
    enhancement; the ticket rooms just need to pass
    `world.ticket_globs` through to `iface.ticket.search.args`.
 
-3. **`/meta kitsoki bug` doesn't emit a file yet.** The bug-filing
-   CLI (`bug-format-proposal.md` Phase A) lives on a parallel
-   worktree that hasn't merged. Until that lands, seed bug files
-   must be hand-authored from the schema in
-   `../../issues/README.md`. The dogfood loop reads + transitions
-   the file just fine; only the production-side is missing.
+3. **~~`/meta kitsoki bug` doesn't emit a file yet.~~ Resolved.**
+   The bug-filing CLI (`kitsoki bug create`) ships on main and
+   `/meta kitsoki bug` writes to `$KITSOKI_REPO/issues/bugs/`;
+   `/meta story bug` writes to `<app-dir>/issues/bugs/`. Both use the
+   same on-disk format documented in [`docs/bugs.md`](../../docs/bugs.md).
+   The dogfood loop reads + transitions the file the producer wrote;
+   the loop is now closed end-to-end.
 
 A fourth latent issue we surfaced while building this phase:
 
