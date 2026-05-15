@@ -157,7 +157,7 @@ func gitCommit(ctx context.Context, workdir string, args map[string]any) (Result
 	if len(filesAny) == 0 {
 		// No explicit files → assume -a so authors can use the
 		// fast-path on a dirty tree.
-		commitArgs = append([]string{"commit", "-a", "-m", message})
+		commitArgs = []string{"commit", "-a", "-m", message}
 	}
 	_, stderr, code, err := vcsExec(ctx, workdir, "git", commitArgs...)
 	if err != nil {
