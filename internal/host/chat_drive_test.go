@@ -6,7 +6,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"kitsoki/internal/clock"
 	"kitsoki/internal/host"
 )
 
@@ -151,24 +153,68 @@ func TestChatDrive_AwaitSuccess(t *testing.T) {
 // TestChatDrive_AwaitChatBusyReportsBusy: await:true with the lock held
 // elsewhere returns chat_busy in Result.Error and leaves the drive
 // pending.
+//
+// Uses an injected fake clock so the dispatcher's lock-contention
+// retry loop completes deterministically without burning the
+// production-default 300 s on real wall-clock sleeps. The fake never
+// frees the lock, so we drive the clock forward in 1 s ticks until
+// the retry budget elapses and the handler surfaces chat_busy. The
+// companion TestDispatchDriveWithTimeout_TimesOutWithoutFree exercises
+// the dispatcher directly with the same pattern.
 func TestChatDrive_AwaitChatBusyReportsBusy(t *testing.T) {
 	cs := newFakeChatStore()
 	cs.addChat(host.ChatRecord{ID: "chat-1", Status: "active"})
 	cs.withLockErr = host.NewChatBusyError(errors.New("chats: chat busy"))
-	ctx := host.WithChatStore(context.Background(), cs)
 
-	res, err := host.ChatDriveHandler(ctx, map[string]any{
-		"chat_id": "chat-1",
-		"payload": "hi",
-		"await":   true,
-	})
-	if err != nil {
-		t.Fatalf("unexpected Go error: %v", err)
+	clk := clock.NewFake(time.Unix(0, 0))
+	ctx := host.WithClock(host.WithChatStore(context.Background(), cs), clk)
+
+	type result struct {
+		res host.Result
+		err error
 	}
-	if !strings.Contains(res.Error, "chat_busy") {
-		t.Errorf("expected chat_busy in Result.Error, got %q", res.Error)
+	done := make(chan result, 1)
+	go func() {
+		// timeout_seconds: 2 → at most a couple of retry ticks before
+		// the dispatcher gives up and surfaces ErrChatBusy. Kept small
+		// so the advance-loop below is bounded.
+		r, err := host.ChatDriveHandler(ctx, map[string]any{
+			"chat_id":         "chat-1",
+			"payload":         "hi",
+			"await":           true,
+			"timeout_seconds": 2,
+		})
+		done <- result{r, err}
+	}()
+
+	// Drive the dispatcher's retry loop forward in 1-second ticks. Each
+	// iteration of DispatchDriveWithTimeout parks on clk.After exactly
+	// once, so BlockUntilContext(1) succeeds as long as the handler is
+	// still retrying. Once the budget elapses the goroutine returns and
+	// stops parking — BlockUntilContext then times out and we stop.
+	advanceCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	for i := 0; i < 5; i++ {
+		if err := clk.BlockUntilContext(advanceCtx, 1); err != nil {
+			break
+		}
+		clk.Advance(1 * time.Second)
 	}
-	driveID, _ := res.Data["drive_id"].(string)
+
+	var got result
+	select {
+	case got = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ChatDriveHandler did not return after retry budget elapsed")
+	}
+
+	if got.err != nil {
+		t.Fatalf("unexpected Go error: %v", got.err)
+	}
+	if !strings.Contains(got.res.Error, "chat_busy") {
+		t.Errorf("expected chat_busy in Result.Error, got %q", got.res.Error)
+	}
+	driveID, _ := got.res.Data["drive_id"].(string)
 	if driveID == "" {
 		t.Fatal("drive_id should still be returned on chat_busy")
 	}
