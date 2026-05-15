@@ -86,6 +86,32 @@ const (
 	EvTurnDeterministicHit  = "turn.deterministic_hit"
 	EvTurnDeterministicMiss = "turn.deterministic_miss"
 
+	// Semantic routing (semroute, Phase 2 of
+	// docs/proposals/semantic-routing-proposal.md). EvTurnSemanticHit
+	// fires when [semroute.Matcher.Match] returns a single-intent
+	// verdict above the configured high-bar; the orchestrator's
+	// SubmitDirect path runs immediately after. EvTurnSemanticMiss
+	// fires when the matcher returns zero confidence and we fall
+	// through to the LLM. EvTurnSemanticAmbiguous fires when the
+	// matcher returned a 0.50 tie and the orchestrator surfaces the
+	// disambiguation card.
+	//
+	// Field schema (locked by proposal §8 — TUI route badges read
+	// these names directly):
+	//   - semantic_hit:       intent, reason, confidence, state_path
+	//   - semantic_miss:      state_path
+	//   - semantic_ambiguous: candidates, state_path
+	//   - llm_routed:         intent, confidence, state_path, model
+	EvTurnSemanticHit       = "turn.semantic_hit"
+	EvTurnSemanticMiss      = "turn.semantic_miss"
+	EvTurnSemanticAmbiguous = "turn.semantic_ambiguous"
+
+	// EvTurnLLMRouted fires once on the orchestrator side after the
+	// harness resolves an intent via the LLM. Phase 5's cache
+	// writeback hooks into the same event (proposal §1); Phase 2
+	// only emits the trace breadcrumb.
+	EvTurnLLMRouted = "turn.llm_routed"
+
 	// Off-path side-channel (§7.7).  The off-path runtime is intentionally
 	// orthogonal to the state machine — no Turn() fires, no transition events
 	// land on the journey.  These trace constants are the only structured

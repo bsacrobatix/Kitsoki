@@ -3,6 +3,8 @@
 // yaml struct tags for deserialization via goccy/go-yaml.
 package app
 
+import "time"
+
 // StatePath is a slash-separated path identifying a state in the graph,
 // e.g. "bar/dark" for a nested compound state.
 type StatePath string
@@ -92,6 +94,130 @@ type AppDef struct {
 	// metamode controller's auto-watch so edits to a sibling
 	// imported story trigger reload.
 	LoadedManifests []string `yaml:"-"`
+
+	// Routing holds the per-app semantic-routing configuration
+	// (semantic-routing proposal §6). Lives at the root app level and
+	// is NOT merged across imports — when an importer folds a child,
+	// the importer's Routing block wins and the child's is dropped.
+	// A nil Routing means "use defaults" (see RoutingConfig.WithDefaults).
+	Routing *RoutingConfig `yaml:"routing,omitempty"`
+}
+
+// RoutingConfig is the per-app semantic-routing block declared under
+// `app.routing:` in YAML (semantic-routing proposal §6). All fields are
+// optional; zero values are replaced by WithDefaults so a partially-
+// specified routing: block still loads with sane defaults. The loader
+// calls WithDefaults once after unmarshalling.
+type RoutingConfig struct {
+	// Enabled toggles the semantic-routing tier on this app. Defaults
+	// to true; set false to keep today's deterministic-or-LLM behaviour.
+	Enabled bool `yaml:"enabled,omitempty"`
+	// SemanticHighBar is the confidence floor above which a semantic
+	// verdict is submitted directly (§2.1). Defaults to 0.80.
+	SemanticHighBar float64 `yaml:"semantic_high_bar,omitempty"`
+	// SemanticMidBar is the confidence floor above which a verdict
+	// triggers a clarification card (§2.1). Defaults to 0.65. Must be
+	// strictly less than SemanticHighBar.
+	SemanticMidBar float64 `yaml:"semantic_mid_bar,omitempty"`
+	// CacheEnabled toggles the turn-result cache (§2.2). Defaults to true.
+	CacheEnabled bool `yaml:"cache_enabled,omitempty"`
+	// CacheMaxAge is the duration after which a cold cache row is
+	// evicted (§7.4). Defaults to 30 days. Set "0" to disable.
+	CacheMaxAge Duration `yaml:"cache_max_age,omitempty"`
+	// StopwordsExtra extends the built-in stopword list (§2.3) with
+	// app-specific filler ("yall", "wagon", …).
+	StopwordsExtra []string `yaml:"stopwords_extra,omitempty"`
+	// CacheCap is the row-count ceiling per app before LRU trim fires
+	// (§7.3). Defaults to 10000.
+	CacheCap int `yaml:"cache_cap,omitempty"`
+	// CacheTrimFraction is the fraction of the cap evicted on overflow
+	// (§7.3). Defaults to 0.10.
+	CacheTrimFraction float64 `yaml:"cache_trim_fraction,omitempty"`
+	// RevalidateStrikes is the number of consecutive revalidate
+	// failures before a cache row is evicted (§7.2). Defaults to 3.
+	RevalidateStrikes int `yaml:"revalidate_strikes,omitempty"`
+	// ConfidenceDecay halves the effective CacheMaxAge for rows whose
+	// originating LLM verdict had confidence < 0.7 (§7.5). Default off.
+	ConfidenceDecay bool `yaml:"confidence_decay,omitempty"`
+}
+
+// DefaultRoutingConfig returns the all-defaults RoutingConfig used when
+// an app declares no `routing:` block. Callers that find AppDef.Routing
+// == nil should treat the app as if it carried this value.
+func DefaultRoutingConfig() RoutingConfig {
+	return RoutingConfig{
+		Enabled:           true,
+		SemanticHighBar:   0.80,
+		SemanticMidBar:    0.65,
+		CacheEnabled:      true,
+		CacheMaxAge:       Duration(30 * 24 * time.Hour),
+		CacheCap:          10000,
+		CacheTrimFraction: 0.10,
+		RevalidateStrikes: 3,
+		ConfidenceDecay:   false,
+	}
+}
+
+// WithDefaults returns a RoutingConfig where every zero-valued numeric /
+// duration field is replaced by the corresponding default from
+// DefaultRoutingConfig. Note: bool fields (Enabled, CacheEnabled,
+// ConfidenceDecay) pass through unchanged — Go's zero value for bool is
+// false, but two of the three default to true. The loader is responsible
+// for unmarshalling routing: through a code path that seeds defaults
+// before YAML decode, so an absent key keeps its default rather than
+// being overwritten by the zero value. UnmarshalYAML on this type does
+// exactly that (see below).
+//
+// String/slice fields (StopwordsExtra) pass through untouched: a nil
+// slice is the natural "no extras."
+func (r RoutingConfig) WithDefaults() RoutingConfig {
+	d := DefaultRoutingConfig()
+	out := r
+	if out.SemanticHighBar == 0 {
+		out.SemanticHighBar = d.SemanticHighBar
+	}
+	if out.SemanticMidBar == 0 {
+		out.SemanticMidBar = d.SemanticMidBar
+	}
+	if out.CacheMaxAge == 0 {
+		out.CacheMaxAge = d.CacheMaxAge
+	}
+	if out.CacheCap == 0 {
+		out.CacheCap = d.CacheCap
+	}
+	if out.CacheTrimFraction == 0 {
+		out.CacheTrimFraction = d.CacheTrimFraction
+	}
+	if out.RevalidateStrikes == 0 {
+		out.RevalidateStrikes = d.RevalidateStrikes
+	}
+	return out
+}
+
+// UnmarshalYAML implements goccy/go-yaml's BytesUnmarshaler. It seeds
+// the receiver with DefaultRoutingConfig before decoding the YAML body
+// so author-omitted bool fields (`enabled:`, `cache_enabled:`) keep
+// their default of true rather than landing on Go's zero value. After
+// decode the function calls WithDefaults to backfill numeric/duration
+// fields the author left out. The combined effect: a partial
+// `routing:` block like
+//
+//	routing: { semantic_high_bar: 0.85 }
+//
+// loads as { Enabled:true, CacheEnabled:true, SemanticHighBar:0.85,
+// SemanticMidBar:0.65, CacheMaxAge:30d, CacheCap:10000, … }.
+func (r *RoutingConfig) UnmarshalYAML(b []byte) error {
+	*r = DefaultRoutingConfig()
+	// Decode into a temporary type alias so we don't recurse into this
+	// UnmarshalYAML. The defaults seeded above survive any field the
+	// YAML body omits.
+	type raw RoutingConfig
+	tmp := raw(*r)
+	if err := unmarshalRoutingRaw(b, &tmp); err != nil {
+		return err
+	}
+	*r = RoutingConfig(tmp).WithDefaults()
+	return nil
 }
 
 // ImportWrapperInfo carries the post-fold metadata for one import
@@ -453,6 +579,14 @@ type Intent struct {
 	Priority    int             `yaml:"priority,omitempty"`
 	Hidden      bool            `yaml:"hidden,omitempty"`
 	Slots       map[string]Slot `yaml:"slots,omitempty"`
+	// Synonyms is the author-declared list of alternate phrasings that
+	// resolve to this intent (semantic-routing proposal §4.1, §4.3).
+	// Each entry is either a plain phrase ("wade", "walk it") or a
+	// template-shaped phrase ("buy {items} for {total_cost}"). At
+	// Phase 0 the loader stores the raw strings and validates that
+	// they're non-empty; template compilation lands in Phase 4
+	// (internal/semroute).
+	Synonyms []string `yaml:"synonyms,omitempty"`
 }
 
 // Slot is a typed parameter on an intent.
@@ -470,6 +604,11 @@ type Slot struct {
 	// the MCP validator's RegisterFormat hooks. Distinct from FormatHint,
 	// which is documentation-only.
 	Format string `yaml:"format,omitempty"`
+	// Synonyms maps each enum value to a list of alternate phrasings
+	// (semantic-routing proposal §4.2). Only meaningful when
+	// Type == "enum"; the loader rejects the field on non-enum slots
+	// and rejects keys that are not in Values.
+	Synonyms map[string][]string `yaml:"synonyms,omitempty"`
 }
 
 // GuardExpr is a compiled guard expression (produced by internal/expr).

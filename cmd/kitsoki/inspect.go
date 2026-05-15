@@ -56,34 +56,63 @@ type turnSummary struct {
 
 func inspectCmd() *cobra.Command {
 	var (
-		sessionID string
-		dbPath    string
-		lastTurns int
+		sessionID          string
+		dbPath             string
+		lastTurns          int
+		routingStats       bool
+		unusedSynonyms     bool
+		synonymSuggestions bool
+		cachePath          string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "inspect <app.yaml>",
-		Short: "Print a read-only JSON snapshot of a stored session",
+		Short: "Print a read-only JSON snapshot of a stored session or routing diagnostics",
 		Long: `Print a JSON snapshot of a kitsoki session: current state, world,
 allowed intents, last rendered view, and a tail of turn summaries.
 
 Read-only — does not lock the session, so it is safe to run while
 'kitsoki run' is driving the same session.
 
+Routing diagnostics (semantic-routing proposal §7.6 / §7.7) read the
+turncache + AppDef for the app and surface:
+
+  --routing-stats        per-intent hit counts across all routing tiers
+                         and the hottest cached signatures.
+  --unused-synonyms      every declared synonym with zero recorded hits.
+  --synonym-suggestions  copy-pasteable YAML for LLM-resolved phrasings
+                         that the synonym layer didn't catch.
+
 Examples:
   kitsoki inspect app.yaml --session-id <sid>
   kitsoki inspect app.yaml --session-id <sid> --last-turns 20 | jq .world
-  kitsoki inspect app.yaml --session-id <sid> --db /path/to/sessions.db`,
+  kitsoki inspect app.yaml --routing-stats --cache-db /tmp/cache.sqlite
+  kitsoki inspect app.yaml --unused-synonyms --cache-db /tmp/cache.sqlite
+  kitsoki inspect app.yaml --synonym-suggestions --cache-db /tmp/cache.sqlite`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if sessionID == "" {
-				return fmt.Errorf("--session-id is required")
-			}
 			appPath := args[0]
 
 			def, err := loadAppWithEnv(appPath)
 			if err != nil {
 				return err
+			}
+
+			// Routing-tier diagnostic surfaces. Each is mutually
+			// exclusive with the session-snapshot path because the
+			// data sources are disjoint (routing reads the cache; the
+			// snapshot reads the session store).
+			switch {
+			case routingStats:
+				return runRoutingStats(cmd, def, cachePath)
+			case unusedSynonyms:
+				return runUnusedSynonyms(cmd, def, cachePath)
+			case synonymSuggestions:
+				return runSynonymSuggestions(cmd, def, cachePath)
+			}
+
+			if sessionID == "" {
+				return fmt.Errorf("--session-id is required (or pass --routing-stats / --unused-synonyms / --synonym-suggestions)")
 			}
 
 			if dbPath == "" {
@@ -110,9 +139,13 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&sessionID, "session-id", "", "session ID to inspect (required)")
+	cmd.Flags().StringVar(&sessionID, "session-id", "", "session ID to inspect (required for the session snapshot)")
 	cmd.Flags().StringVar(&dbPath, "db", "", "path to SQLite session database (default: $XDG_DATA_HOME/kitsoki/sessions.db)")
 	cmd.Flags().IntVar(&lastTurns, "last-turns", 5, "number of recent turn summaries to include")
+	cmd.Flags().BoolVar(&routingStats, "routing-stats", false, "print per-intent routing-tier statistics from the turncache")
+	cmd.Flags().BoolVar(&unusedSynonyms, "unused-synonyms", false, "list every declared synonym with zero recorded hits")
+	cmd.Flags().BoolVar(&synonymSuggestions, "synonym-suggestions", false, "print copy-pasteable YAML for cache-resolved phrasings missing a synonym")
+	cmd.Flags().StringVar(&cachePath, "cache-db", "", "path to the routing turncache SQLite file (required for --routing-stats / --unused-synonyms / --synonym-suggestions)")
 
 	return cmd
 }

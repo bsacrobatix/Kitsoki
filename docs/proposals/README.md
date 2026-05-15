@@ -67,3 +67,8 @@ thought.
   `docs/hosts.md` for the user-facing surface); D/E/F/G partial
   or deferred; H not started. The status table at the top of the
   proposal is the source of truth for what's wired today.
+- [`semantic-routing-proposal.md`](semantic-routing-proposal.md) —
+  v1 shipped. The trimmed proposal keeps only open questions and
+  the Oregon Trail calibration history. The user-facing reference
+  for the shipped surface lives at
+  [`../semantic-routing.md`](../semantic-routing.md).

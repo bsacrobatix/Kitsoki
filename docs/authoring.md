@@ -302,6 +302,130 @@ For non-trivial apps, four features compress the YAML:
 Use them when you'd otherwise be copy-pasting the same five states.
 Don't use them on a five-state app.
 
+### 6.1 Synonyms — bare strings, templates, and enum-value tiers
+
+> The full story (latency budget, calibration workflow, cache
+> behaviour) lives in
+> **[`semantic-routing.md`](semantic-routing.md)**. This section is
+> the authoring cheat-sheet.
+
+Intents and enum slots accept a `synonyms:` block. Each intent
+`synonyms:` entry is either a bare phrase or a `{slot_name}`
+template:
+
+```yaml
+intents:
+  ford:
+    title: "Ford the river"
+    examples: ["ford", "ford the river"]
+    synonyms:
+      - wade
+      - "walk it"
+
+  propose_purchase:
+    title: "Draft a purchase"
+    slots:
+      items:      { type: string, required: true }
+      total_cost: { type: int,    required: true }
+    synonyms:
+      # Bag-style bare strings — match anywhere in the input.
+      - "buy supplies"
+      # Templates — positional, with {slot_name} captures fed to the
+      # slot's typed parser. Multiple templates supply alternatives.
+      - "buy {items} for {total_cost}"
+      - "purchase {items}"
+      - "spend {total_cost} on {items}"
+
+  pick_profession:
+    slots:
+      profession:
+        type: enum
+        values: [banker, carpenter, farmer]
+        synonyms:
+          banker:    ["banker", "rich guy"]
+          carpenter: ["carpenter", "builder"]
+          farmer:    ["farmer", "farmhand"]
+```
+
+An optional top-level `app.routing:` block tunes the matcher:
+
+```yaml
+app:
+  id: my-app
+  routing:
+    enabled: true            # set false to skip semroute entirely
+    semantic_high_bar: 0.80  # confidence floor for direct submit
+    semantic_mid_bar:  0.65  # confidence floor for slot-fill (Phase 4)
+    stopwords_extra: ["yall", "wagon"]
+```
+
+At load time `internal/semroute` compiles every declared synonym —
+plus every `examples:` entry, which it treats as an implicit
+synonym — into a per-app index. Each foreground turn runs
+`TryDeterministic` → `TrySemantic` → `tryTurnCache` → harness, so
+`"let's wade across"` matches the `wade` synonym above and resolves
+`ford` without an LLM call.
+
+**Confidence bands** decide what the orchestrator does with a hit:
+
+| Band | What triggered it                                              | Orchestrator action                              |
+|------|----------------------------------------------------------------|--------------------------------------------------|
+| 1.00 | Display string or unique example (deterministic tier)          | `SubmitDirect`, no LLM                           |
+| 0.90 | Bare-string synonym matched exactly one intent                 | `SubmitDirect`, no LLM                           |
+| 0.80 | Template matched and every `{slot}` capture parsed cleanly     | `SubmitDirect` with the parsed slots, no LLM     |
+| 0.65 | Template matched but ≥1 capture was named-but-unparseable      | `ComputeClarification` for the unparseable slot  |
+| 0.50 | Two or more intents tied                                       | `AMBIGUOUS_INTENT` disambiguation card           |
+| 0    | Nothing matched, or every match was on a non-allowed intent    | Fall through to the turn cache, then the LLM     |
+
+A worked template trace: with the three `propose_purchase`
+templates declared above, an input of `"buy 6 oxen and 200 lbs
+food for 240"` matches `"buy {items} for {total_cost}"`. The
+`{items}` capture (`6 oxen and 200 lbs food`) feeds the string
+slot (no parser specialisation — the raw text becomes the value).
+The `{total_cost}` capture (`240`) feeds the int parser. Both
+parse OK, so the verdict is band 0.80 and the orchestrator submits
+`propose_purchase{items, total_cost=240}` directly.
+
+The 0.65 band is conservative on purpose. If the user typed `"buy
+6 oxen for fjord"` the literal anchors still align (the
+`{total_cost}` capture lands on `fjord`), but the int parser
+refuses the captured tokens. The verdict downgrades to 0.65, the
+orchestrator runs `ComputeClarification` targeting `total_cost`,
+and the TUI prompts the user for the cost without throwing away
+the items they already typed.
+
+Template authoring rules:
+
+- Every `{slot_name}` must reference a real `slot:` on the same
+  intent. The compiler refuses an unknown name with a clear
+  `*CompileError`.
+- Captures must be separated by literal tokens. `"buy
+  {items}{total_cost}"` is a compile error because the matcher
+  cannot split the run between the two captures.
+- Leading and trailing captures are fine (`"{x} dollars"`,
+  `"spend money on {items}"`, plain `"{x}"`).
+- Templates are *positional* — they match input in the order the
+  author wrote them. Bare-string synonyms remain bag-style; pick
+  the shape that fits the phrase.
+- Multiple templates per intent are encouraged. Within an intent,
+  the matcher prefers the template that fills the most slots
+  (most-specific-wins); declaration order breaks fill-count ties.
+
+Enum-slot `synonyms:` are consumed by
+[`internal/slotparse`](../internal/slotparse/). The slot parser
+runs three tiers in order — direct stem match, synonym word-bag
+containment, and Damerau-Levenshtein-1 fuzzy match — so the same
+`pick_profession` fixture above will route "banker", "rich guy",
+"money man", and even the typo "bankr" all onto the canonical
+`banker` value without an LLM call. Adding a new synonym is one
+line of YAML; the matcher rebuilds its per-slot index at app load.
+
+The turn-result cache reads `routing.cache_*` to size and expire
+its rows. Calibrate the synonym library with
+`kitsoki replay-routing <app.yaml> --target 0.30` and grow it with
+`kitsoki inspect --synonym-suggestions --cache-db <path>` — see
+[`semantic-routing.md`](semantic-routing.md) for the full workflow.
+
 ---
 
 ## 7. Authoring tooling

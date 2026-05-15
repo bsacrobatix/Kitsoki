@@ -1,0 +1,26 @@
+app:
+  id: routing-synonyms-bad-key
+  version: 0.1.0
+
+root: start
+
+intents:
+  pick:
+    title: "Pick one"
+    slots:
+      colour:
+        type: enum
+        values: [red, green, blue]
+        synonyms:
+          red:    ["crimson"]
+          purple: ["violet"]   # not in values — must be rejected
+
+states:
+  start:
+    description: "Start"
+    on:
+      pick:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true

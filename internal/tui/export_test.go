@@ -337,3 +337,66 @@ func (m RootModel) AppID() string {
 	}
 	return ""
 }
+
+// ── Routing chip / queue test helpers ────────────────────────────────────────
+
+// PendingLineForTest wraps the package-private pendingLine queue so
+// the routing-chip tests can exercise its single-slot semantics from
+// the _test package without depending on its internal field layout.
+type PendingLineForTest struct {
+	q *pendingLine
+}
+
+// NewPendingLineForTest constructs an empty queue.
+func NewPendingLineForTest() PendingLineForTest {
+	return PendingLineForTest{q: &pendingLine{}}
+}
+
+// Enqueue calls pendingLine.Enqueue.
+func (p PendingLineForTest) Enqueue(s string) { p.q.Enqueue(s) }
+
+// Take calls pendingLine.Take.
+func (p PendingLineForTest) Take() (string, bool) { return p.q.Take() }
+
+// HasPending calls pendingLine.HasPending.
+func (p PendingLineForTest) HasPending() bool { return p.q.HasPending() }
+
+// FooterIndicator calls pendingLine.FooterIndicator.
+func (p PendingLineForTest) FooterIndicator() string { return p.q.FooterIndicator() }
+
+// Clear calls pendingLine.Clear.
+func (p PendingLineForTest) Clear() { p.q.Clear() }
+
+// ── Routing chip / overlay test helpers ──────────────────────────────────────
+
+// RoutingChipActive reports whether the in-flight chip is currently
+// visible on the prompt line (Wave 2 §8 wiring).
+func RoutingChipActive(m RootModel) bool { return m.routingChipActive }
+
+// RoutingChipTier returns the chip's resolved tier (TierNone while in
+// flight). Tests use this to assert the chip transitioned to the
+// expected tier after a routing event.
+func RoutingChipTier(m RootModel) RoutingTier { return m.routingChip.Tier() }
+
+// RoutingChipView returns the chip's rendered line — what View()
+// stitches onto the user-input echo. Empty when the chip is in its
+// pristine TierNone+no-spinner state.
+func RoutingChipView(m RootModel) string { return m.routingChip.View() }
+
+// RoutingTraceOpen reports whether the ctrl+r overlay is currently
+// visible.
+func RoutingTraceOpen(m RootModel) bool { return m.routingTraceOpen }
+
+// SetRoutingObserverForTest installs a *RoutingObserver on the model
+// for tests that need to exercise the overlay path without going
+// through NewRootModel's options.
+func SetRoutingObserverForTest(m *RootModel, obs *RoutingObserver) {
+	m.routingObserver = obs
+}
+
+// RenderRoutingTraceOverlayForTest exposes the overlay body builder
+// so the ctrl+r overlay test can assert on its content without
+// scraping the full View().
+func RenderRoutingTraceOverlayForTest(m RootModel) string {
+	return m.renderRoutingTraceOverlay()
+}

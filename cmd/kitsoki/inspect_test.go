@@ -67,11 +67,19 @@ func TestInspect_PopulatedSession(t *testing.T) {
 	assert.Equal(t, len(out.LastView), out.LastViewBytes)
 	assert.NotEmpty(t, out.AllowedIntents, "foyer must have at least one allowed intent")
 
-	// last_turns reflects the three turns we drove. The replay-harness path
-	// goes through Turn (LLM-routed), so each turn carries an Input.
+	// last_turns reflects the three turns we drove. With the
+	// semantic-routing tier (proposal §10 Phase 2) wired in front of
+	// the harness, "hang the cloak" matches the hang_cloak Example
+	// and routes via SubmitDirectFromInput, which preserves the
+	// user's original text on the audit trail (Wave 2 Item B). "go
+	// west" / "go east" still reach the LLM because the `go` intent
+	// has a required direction slot the matcher cannot fill in
+	// Phase 2 (proposal §4.4), but every turn — direct or LLM —
+	// records what the user actually typed.
 	require.Len(t, out.LastTurns, 3)
 	assert.Equal(t, "go west", out.LastTurns[0].Input)
-	assert.Equal(t, "hang the cloak", out.LastTurns[1].Input)
+	assert.Equal(t, "hang the cloak", out.LastTurns[1].Input,
+		"semroute-routed turns must record the original user text, not a [direct] marker")
 	assert.Equal(t, "go east", out.LastTurns[2].Input)
 	for i, ts := range out.LastTurns {
 		assert.NotEmpty(t, ts.ToState, "turn %d should record a destination state", i+1)

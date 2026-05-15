@@ -72,6 +72,14 @@ intents:
       - "name them all Star Wars"
       - "Norse mythology names"
       - "give us Lord of the Rings names"
+    # Phase-7 calibration: the recording's "use X names" / "generate
+    # X names" phrasings dominate. {theme} is a free-form string slot
+    # so the matcher captures whatever's between the literal anchors.
+    synonyms:
+      - "use {theme} names"
+      - "generate {theme} names"
+      - "generate names from a {theme} theme"
+      - "{theme} themed names"
     priority: 40
     slots:
       theme:
@@ -142,6 +150,15 @@ intents:
       - "buy 2 oxen and 200 lbs of food"
       - "propose 6 oxen, 300 lbs food, 1 set clothing"
       - "I'd like to spend $120"
+    # Phase-4 template synonyms (semantic-routing proposal §4.3 / §5.2):
+    # the matcher captures the {items} and {total_cost} runs and hands
+    # each to its typed slot parser. The Phase-2 bare-string list above
+    # stays — it's still useful for the "Matcher.Match returns a 0.90
+    # whole-utterance hit" path on the verb-only phrasings.
+    synonyms:
+      - "buy {items} for {total_cost}"
+      - "purchase {items}"
+      - "spend {total_cost} on {items}"
     priority: 100
     slots:
       items:
@@ -235,6 +252,16 @@ intents:
       - "actually 250 lbs of food"
       - "add 50 bullets"
       - "make it 4 spare wheels and bump the cost to 400"
+    # Phase-7 calibration: terse refine phrasings observed in the
+    # recording. Specific to the reviewing state — only fires when
+    # propose_purchase has produced a draft to refine.
+    synonyms:
+      - "less food"
+      - "more food"
+      - "less bullets"
+      - "more bullets"
+      - "fewer oxen"
+      - "more oxen"
     priority: 80
     slots:
       feedback:
@@ -344,6 +371,23 @@ intents:
       - "ford the river"
       - "propose caulking with high confidence"
       - "let's ferry"
+    # Phase-7 calibration synonyms (semantic-routing proposal §10).
+    # The earlier round (commit b26c31a) listed bare phrasings only;
+    # they routed the verb but left the required `method` slot empty,
+    # so production's RequiresUnfilledSlot guard kicked the turn to
+    # the LLM (issue H2). The fix replaces those bare entries with
+    # `{method}` templates: a single-capture template absorbs the
+    # user's text and the enum parser resolves it against
+    # slots.method.values + the slot-level synonyms map below.
+    # Single-word inputs ("ford", "caulk", "ferry", "wait") also
+    # land on `{method}` because the matcher only tries templates
+    # after bare-string fails — keeping a bare "ford" here would
+    # short-circuit the template and lose the slot fill.
+    synonyms:
+      - "{method}"
+      - "take the {method}"
+      - "{method} the river"
+      - "{method} the wagon"
     priority: 100
     slots:
       method:
@@ -354,6 +398,15 @@ intents:
         examples: ["ford", "caulk", "ferry", "wait"]
         format_hint: "One of ford/caulk/ferry/wait."
         prompt: "Ford, caulk, ferry, or wait?"
+        # Slot-level synonyms (Phase-7 calibration, issue H2) used by
+        # the enum parser when the `{method}` template captures
+        # phrasings that don't equal a canonical value. Each phrase
+        # here was observed in the recording and maps unambiguously
+        # to one of the four values.
+        synonyms:
+          caulk: ["caulk and float", "caulk the wagon", "seal and float"]
+          ferry: ["hire a ferryman", "take the ferry", "ferry across"]
+          wait: ["wait for the water to drop", "wait for water to drop", "hold off"]
       confidence:
         type: int
         required: false
@@ -462,6 +515,13 @@ intents:
     title: "Rest the party"
     description: "Make camp for a number of days to recover health."
     examples: ["rest", "camp", "rest 3 days", "make camp for a week"]
+    # Phase-7 calibration: "hold up" is the dominant alternative to
+    # "rest" in pre-checkpoint phrasings.
+    synonyms:
+      - "hold up"
+      - "hold up here"
+      - "let's hold up"
+      - "stop here"
     priority: 70
     slots:
       days:
@@ -628,6 +688,14 @@ intents:
       - "go back to Fort Kearney"
       - "restart from chimney"
       - "return to Fort Laramie"
+    # Phase-7 calibration: template forms capture which landmark.
+    # Each template's {stage} slot is parsed via the enum value list
+    # so e.g. "go back to fort kearney" → stage=kearney via the enum
+    # parser's stem-set containment rule.
+    synonyms:
+      - "restart from {stage}"
+      - "go back to {stage}"
+      - "return to {stage}"
     priority: 50
     slots:
       stage:

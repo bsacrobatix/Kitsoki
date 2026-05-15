@@ -23,11 +23,11 @@ import (
 
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
-	"kitsoki/internal/inbox"
 	"kitsoki/internal/chathost"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
+	"kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
@@ -65,6 +65,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(vizCmd())
 	root.AddCommand(traceCmd())
 	root.AddCommand(replayCmd())
+	root.AddCommand(replayRoutingCmd())
 	root.AddCommand(testCmd())
 	root.AddCommand(serveCmd())
 	root.AddCommand(renderCmd())
@@ -333,9 +334,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 
 			// ── Determine session ID (resume or fresh) ─────────────────────
 			var (
-				sid         app.SessionID
-				resumeMode  bool
-				tuiOptions  []tui.RootModelOption
+				sid        app.SessionID
+				resumeMode bool
+				tuiOptions []tui.RootModelOption
 			)
 
 			if continueFlag {

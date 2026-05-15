@@ -1,0 +1,23 @@
+app:
+  id: routing-bar-order
+  version: 0.1.0
+
+routing:
+  semantic_high_bar: 0.40
+  semantic_mid_bar: 0.80
+
+root: start
+
+intents:
+  noop:
+    title: "Do nothing"
+
+states:
+  start:
+    description: "Start"
+    on:
+      noop:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true

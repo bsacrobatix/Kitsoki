@@ -35,7 +35,12 @@ orchestration), see [`prior-art.md`](prior-art.md).
     kitsoki borrows from (and rejects from) Inform/TADS/Ink/Yarn,
     XState/SCXML/Temporal/LangGraph, Rasa/Dialogflow/Bot Framework,
     and the MCP tool-shape conventions.
-11. **[`bugs.md`](bugs.md)** — filing story and kitsoki bug reports
+11. **[`semantic-routing.md`](semantic-routing.md)** — the four-tier
+    routing stack between the deterministic match and the LLM:
+    synonyms, templates, typed slot parsers, and the turncache. Plus
+    `kitsoki replay-routing` and `kitsoki inspect --synonym-suggestions`
+    for growing the synonym library.
+12. **[`bugs.md`](bugs.md)** — filing story and kitsoki bug reports
     (`/meta story bug`, `/meta kitsoki bug`, `kitsoki bug create`),
     the on-disk markdown format, and the future `bug sync` design.
 
@@ -55,5 +60,10 @@ lives in the top-level `docs/*.md` above.
 
 ## Historical material
 
-- [`proposals/`](proposals/) — proposal documents, some of which have
-  been (partly) implemented; kept for design context.
+- [`proposals/`](proposals/) — proposal documents in design or
+  partially shipped; kept for design context. The semantic-routing
+  proposal has fully shipped; its design discussion is preserved at
+  [`proposals/semantic-routing-proposal.md`](proposals/semantic-routing-proposal.md)
+  for the open-questions appendix and the calibration history, but
+  the user-facing reference now lives at
+  [`semantic-routing.md`](semantic-routing.md).

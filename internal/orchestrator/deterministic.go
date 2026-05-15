@@ -209,7 +209,9 @@ func (o *Orchestrator) TryDeterministic(ctx context.Context, sid app.SessionID, 
 		if slots == nil {
 			slots = make(map[string]any)
 		}
-		outcome, err := o.SubmitDirect(ctx, sid, entry.Intent, slots)
+		// Preserve the user's original text on the audit trail — see
+		// SubmitDirectFromInput's doc for the why.
+		outcome, err := o.SubmitDirectFromInput(ctx, sid, entry.Intent, slots, input)
 		if err != nil {
 			return nil, false, err
 		}
@@ -229,7 +231,7 @@ func (o *Orchestrator) TryDeterministic(ctx context.Context, sid app.SessionID, 
 		if slots == nil {
 			slots = make(map[string]any)
 		}
-		outcome, err := o.SubmitDirect(ctx, sid, entry.Intent, slots)
+		outcome, err := o.SubmitDirectFromInput(ctx, sid, entry.Intent, slots, input)
 		if err != nil {
 			return nil, false, err
 		}

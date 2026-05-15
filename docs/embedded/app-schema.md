@@ -428,9 +428,33 @@ intents:
     examples:     ["go south", "head north", "n"]
     priority:     100                     # higher → more prominent in menu
     hidden:       false                   # if true, usable but not listed
+    synonyms:                             # optional — see note below
+      - "head out"                        # bare-string synonym
+      - "set off in {direction}"          # template synonym
     slots:
       direction: <Slot>
 ```
+
+`synonyms` is a list of alternate phrasings declared by the author.
+Each entry is either:
+
+1. A bare phrase — matched bag-style by stem-set containment. The
+   matcher resolves it at confidence 0.90 when the synonym's stems
+   are a subset of the input's stems.
+2. A `{slot_name}` template — a positional phrase where each
+   `{slot_name}` captures a contiguous run of input tokens to be
+   parsed by the slot's typed parser. The slot must exist in the
+   intent's `slots:` map; the compiler refuses unknown references
+   and rejects adjacent captures (`{a}{b}` — authors must put a
+   literal token between captures). Templates resolve at confidence
+   0.80 when every capture parses, 0.65 when a capture is named
+   but unparseable.
+
+Both shapes feed the same `*semroute.Matcher` and emit a `Verdict`
+the orchestrator routes via `TrySemantic`. See
+[`../../docs/semantic-routing.md`](../../docs/semantic-routing.md)
+for the full reference (slot parser types, calibration workflow,
+cache behaviour).
 
 ## `Slot`
 
@@ -446,7 +470,20 @@ slots:
     format_hint:  "One of n/s/e/w."
     prompt:       "Which direction?"
     validator:    "value != 'down'"       # expr — value is the slot value
+    synonyms:                             # optional, type: enum only
+      north: ["north", "n", "up"]
+      south: ["south", "s", "down"]
+      east:  ["east",  "e"]
+      west:  ["west",  "w"]
 ```
+
+`synonyms` on a slot is a map from each enum value to alternate
+phrasings. Each key must appear in `values`. The enum parser tries
+three tiers in order — direct stem match, synonym word-bag
+containment, then Damerau-Levenshtein-1 fuzzy — so `"banker"`,
+`"rich guy"`, `"money man"`, and the typo `"bankr"` all resolve to
+`banker`. See [`../../docs/semantic-routing.md`](../../docs/semantic-routing.md)
+for the slot-parser tier order.
 
 ## `OffPathDef`
 

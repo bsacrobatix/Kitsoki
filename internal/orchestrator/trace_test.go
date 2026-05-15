@@ -215,9 +215,27 @@ func TestOrchestratorTraceWinningPath(t *testing.T) {
 	}
 
 	// Acceptance criteria:
-	// - At least one harness.recording_hit per turn.
+	// - Exactly one harness.recording_hit per LLM-routed turn. The
+	//   semantic-routing tier (proposal §10 Phase 2) now resolves
+	//   "hang the cloak" and "read the message" via implicit-synonym
+	//   matches against the intent's Examples, so only the
+	//   slot-requiring `go` turns plus any other matcher misses go
+	//   to the replay harness. We assert equality (not >=) so the
+	//   test catches both directions of regression: a missed
+	//   recording_hit (real failure) AND a stray hit emitted
+	//   without a corresponding EvTurnLLMRouted breadcrumb (also a
+	//   real failure — the harness fired on a turn the orchestrator
+	//   didn't route to the LLM). We also require llmRoutedTurns >= 1
+	//   so the test still catches a regression that bypasses the
+	//   LLM entirely (the fixtures are designed to require it).
+	llmRoutedTurns := countMsg(handler.allRecords(), trace.EvTurnLLMRouted)
 	recordingHits := countMsg(handler.allRecords(), trace.EvHarnessRecordingHit)
-	assert.GreaterOrEqual(t, recordingHits, 5, "expected at least one recording_hit per turn")
+	t.Logf("trace counts: llmRoutedTurns=%d recordingHits=%d", llmRoutedTurns, recordingHits)
+	assert.GreaterOrEqual(t, llmRoutedTurns, 1,
+		"expected at least one turn to be LLM-routed (test fixtures require it)")
+	assert.Equal(t, llmRoutedTurns, recordingHits,
+		"every LLM-routed turn must produce exactly one harness.recording_hit (got %d hits for %d LLM-routed turns)",
+		recordingHits, llmRoutedTurns)
 
 	// - At least one machine.guard.winner event per transition.
 	guardWinners := countMsg(handler.allRecords(), trace.EvMachineGuardWinner)

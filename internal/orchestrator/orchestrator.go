@@ -28,9 +28,11 @@ import (
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
+	"kitsoki/internal/semroute"
 	"kitsoki/internal/store"
 	"kitsoki/internal/trace"
 	"kitsoki/internal/transport"
+	"kitsoki/internal/turncache"
 	"kitsoki/internal/world"
 )
 
@@ -119,6 +121,32 @@ type Orchestrator struct {
 	// deadlock.
 	obsMu     sync.Mutex
 	observers []SessionObserver
+
+	// matcher is the per-app semantic-routing index (semantic-routing
+	// proposal §2.1 / Phase 2). Compiled lazily on first
+	// TrySemantic call; subsequent calls reuse the cached *Matcher.
+	// matcherErr remembers a compile failure so we don't retry on
+	// every turn — the orchestrator surfaces the error once via
+	// trace and treats the matcher as a no-op thereafter.
+	//
+	// Both fields are guarded by matcherOnce. A nil matcher after
+	// matcherOnce.Do has run means "no semantic routing for this
+	// app" — either disabled in app.Routing, the AppDef declares no
+	// synonyms/examples, or compilation failed.
+	matcherOnce sync.Once
+	matcher     *semroute.Matcher
+	matcherErr  error
+
+	// cache is the optional turn-result cache (semantic-routing
+	// proposal §2.2 + §7). Wired via WithTurnCache; nil disables
+	// the cache tier entirely. The cache is per-orchestrator (and
+	// therefore per-app), so InvalidateOtherHashes / SweepCold /
+	// TrimLRU run at most once per orchestrator on first turn —
+	// see internal/orchestrator/cache.go.
+	cache          turncache.Cache
+	cacheSweepOnce sync.Once
+	appHashOnce    sync.Once
+	appHashValue   string
 }
 
 // New creates an Orchestrator.
@@ -413,6 +441,34 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+
+	// Semantic routing tier (semantic-routing proposal §1 Phase 2):
+	// run BEFORE acquiring the session lock so TrySemantic's own
+	// SubmitDirect call can take the lock without deadlocking. We
+	// skip the semantic tier when the caller passed supplemental
+	// slots — that path explicitly wants the LLM to classify the
+	// utterance so the supplements can be merged into a properly
+	// typed call. Routing-disabled apps short-circuit inside
+	// TrySemantic.
+	if len(cfg.supplementSlots) == 0 {
+		if outcome, hit, semErr := o.TrySemantic(ctx, sid, input); semErr != nil {
+			return nil, semErr
+		} else if hit {
+			return outcome, nil
+		}
+		// Turn-cache tier (semantic-routing proposal §5.4): after
+		// semroute misses and before the LLM, check whether this
+		// (state, signature) was resolved on a prior turn. On a
+		// successful re-Validate the cache short-circuits the LLM
+		// call; on a Validate failure the strike count increments
+		// and we fall through.
+		if outcome, hit, cacheErr := o.tryTurnCache(ctx, sid, input); cacheErr != nil {
+			return nil, cacheErr
+		} else if hit {
+			return outcome, nil
+		}
+	}
+
 	// Serialise foreground turn against any concurrent handleJobTerminal for
 	// this session: both compute turnNum = journey.Turn + 1 from the event
 	// log, so without this lock they can both pick the same N and collide on
@@ -515,6 +571,18 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		slog.Duration("dur", harnessDur),
 		slog.String("outcome", "hit"),
 		slog.String("intent", extractIntentName(params)),
+	)
+	// Semantic-routing proposal §1 / Phase 5 hook: emit a stable
+	// `turn.llm_routed` breadcrumb so the future turncache writeback
+	// (and the TUI route badges in §8) have a deterministic place to
+	// observe LLM-resolved turns. The field schema is locked by §8 —
+	// don't rename intent/confidence/state_path/model. The model
+	// name is empty in Phase 2: the harness owns its model choice
+	// and a future hook will plumb the resolved model up here.
+	tl.Debug(ctx, trace.EvTurnLLMRouted,
+		slog.String("intent", extractIntentName(params)),
+		slog.Float64("confidence", harnessConfidence(params)),
+		slog.String("model", ""),
 	)
 
 	// Append LLMCalled/LLMToolCall events.
@@ -703,6 +771,15 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		slog.Int("count", len(successEvents)),
 		slog.String("outcome", "transitioned"),
 	)
+
+	// Cache writeback (semantic-routing proposal §5.4): record this
+	// LLM-resolved verdict against the original input so subsequent
+	// turns at the same state with the same lexical signature can
+	// short-circuit. We deliberately key on journey.State (the state
+	// BEFORE the transition) — that's the state the user was in
+	// when they typed the input, which is what re-Validate runs
+	// against on a future hit.
+	o.putTurnCache(ctx, journey.State, input, call.Intent, slotsToMap(call.Slots), harnessConfidence(params), "", "")
 
 	// Clear any pending clarification for this session.
 	o.mu.Lock()
@@ -1464,7 +1541,33 @@ func parseBindSegment(seg string) (string, []int, bool) {
 // LLM harness entirely. This is the "direct path" for menu rows where all
 // required slots are already known (e.g. enum-expanded rows like "go south").
 // It mirrors the success path of Turn but skips harness.RunTurn.
+//
+// When called externally (CLI / TUI menu pick / programmatic intent), no
+// user free-text exists, so the recorded TurnStarted.input field carries a
+// synthetic "[direct] intent=<name>" marker. Routing tiers that DO have the
+// user's original text should call [SubmitDirectFromInput] instead so the
+// recorded input survives into inspect.LastTurns and any replay path.
 func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any) (*TurnOutcome, error) {
+	return o.submitDirect(ctx, sid, intentName, slots, "")
+}
+
+// SubmitDirectFromInput is identical to [SubmitDirect] except it records
+// userInput verbatim on the TurnStarted event. Internal routing tiers
+// (deterministic, semantic) call this so the user's original text — not a
+// "[direct] intent=…" marker — is what gets stored on the turn's audit
+// trail (cmd/kitsoki/inspect.LastTurns[].Input and the replay path read
+// this field).
+//
+// Pass userInput="" to fall back to the synthetic marker (equivalent to
+// calling SubmitDirect).
+func (o *Orchestrator) SubmitDirectFromInput(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any, userInput string) (*TurnOutcome, error) {
+	return o.submitDirect(ctx, sid, intentName, slots, userInput)
+}
+
+// submitDirect is the shared implementation behind [SubmitDirect] and
+// [SubmitDirectFromInput]. userInput is recorded verbatim on TurnStarted
+// when non-empty; when empty we fall back to "[direct] intent=<name>".
+func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any, userInput string) (*TurnOutcome, error) {
 	// Serialise against handleJobTerminal — see Turn for rationale.
 	sessMu := o.sessionLock(sid)
 	sessMu.Lock()
@@ -1535,9 +1638,26 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 				TurnNumber:    turnNum,
 			}, nil
 		}
+		// Recorded `input` prefers the user's original text when supplied
+		// (semantic / deterministic routing tiers); otherwise we keep the
+		// "[direct] intent=…" synthetic marker so external SubmitDirect
+		// callers (TUI menu pick, CLI --intent, etc.) still have a
+		// non-empty audit-trail value.
+		recordedInput := userInput
+		if recordedInput == "" {
+			recordedInput = fmt.Sprintf("[direct] intent=%s", intentName)
+		}
+		// view.rendered.user_input mirrors the same rule, falling back to
+		// the intent name (not the marker) so resumed transcripts render
+		// "> go" rather than "> [direct] intent=go" on external direct
+		// submissions — see TestAttachSession_SubmitDirectUsesIntentName.
+		journalUserInput := userInput
+		if journalUserInput == "" {
+			journalUserInput = intentName
+		}
 		startEvent := newOrchestratorEvent(store.TurnStarted, map[string]any{
 			"turn":   int64(turnNum),
-			"input":  fmt.Sprintf("[direct] intent=%s", intentName),
+			"input":  recordedInput,
 			"direct": true,
 		}, turnNum)
 		failureEvents := append([]store.Event{startEvent}, result.Events...)
@@ -1551,7 +1671,7 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 		}
 		// Site 5: dual-write journal entries for the SubmitDirect rejection turn.
 		sdFailJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), failureEvents,
-			journey.World, journey.World, "", journey.State, intentName)
+			journey.World, journey.World, "", journey.State, journalUserInput)
 		if appendErr := o.store.AppendEventsAndJournal(sid, failureEvents, sdFailJEntries); appendErr != nil {
 			return nil, fmt.Errorf("orchestrator: SubmitDirect: append failure events: %w", appendErr)
 		}
@@ -1572,9 +1692,19 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 	}
 
 	// Build and persist events (same as Turn success path).
+	// See the rejection branch above for the userInput → recorded
+	// input/journal mapping rules; mirror them here for the success path.
+	successRecordedInput := userInput
+	if successRecordedInput == "" {
+		successRecordedInput = fmt.Sprintf("[direct] intent=%s", intentName)
+	}
+	successJournalUserInput := userInput
+	if successJournalUserInput == "" {
+		successJournalUserInput = intentName
+	}
 	startEvent := newOrchestratorEvent(store.TurnStarted, map[string]any{
 		"turn":   int64(turnNum),
-		"input":  fmt.Sprintf("[direct] intent=%s", intentName),
+		"input":  successRecordedInput,
 		"direct": true,
 	}, turnNum)
 
@@ -1611,7 +1741,7 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 
 	// Site 6: dual-write journal entries for the SubmitDirect success turn.
 	sdSuccJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), successEvents,
-		journey.World, result.World, result.View, result.NewState, intentName)
+		journey.World, result.World, result.View, result.NewState, successJournalUserInput)
 	if appendErr := o.store.AppendEventsAndJournal(sid, successEvents, sdSuccJEntries); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator: SubmitDirect: append events: %w", appendErr)
 	}
@@ -2310,6 +2440,20 @@ func extractIntentName(params mcp.CallToolParams) string {
 		}
 	}
 	return ""
+}
+
+// harnessConfidence extracts the LLM's self-reported confidence from
+// CallToolParams without erroring. Returns 0 when the field is absent
+// or non-numeric. Used by the EvTurnLLMRouted trace event (semantic-
+// routing proposal §1 / §8) so the TUI route badge can render the
+// LLM's own confidence number next to the magenta ✦ chip.
+func harnessConfidence(params mcp.CallToolParams) float64 {
+	if m, ok := params.Arguments.(map[string]any); ok {
+		if c, ok := m["confidence"].(float64); ok {
+			return c
+		}
+	}
+	return 0
 }
 
 // newOrchestratorEvent creates an orchestrator-level event.

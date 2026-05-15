@@ -233,6 +233,34 @@ type RootModel struct {
 	// Replaced wholesale on every /sessions list; nil between
 	// invocations.
 	sessionList []chats.PtySession
+
+	// routingChip is the progressive resolution badge sub-model
+	// (semantic-routing proposal §8). On every Enter we reset it to
+	// the chip's TierNone "resolving…" state and render it next to
+	// the user-echoed input line; routing slog events arrive via
+	// RoutingTier*Msg from the routingObserver below.
+	routingChip RoutingChip
+	// routingChipActive is true between the moment we submit a turn
+	// and the moment the chip resolves (or the turn outcome arrives).
+	// Used to gate the chip's render on the prompt line so it only
+	// shows during the in-flight window.
+	routingChipActive bool
+	// routingHistory remembers the resolved chip lines per turn so
+	// promoted recent-turns rows still carry the resolution badge.
+	// Keyed by 1-indexed turn number; pruned to the most recent N.
+	routingHistory map[int64]string
+	// routingObserver is the slog→tea.Msg bridge that converts
+	// orchestrator routing-tier events into RoutingTier*Msg deliveries
+	// for the chip. nil disables the chip (headless / observer-less
+	// tests).
+	routingObserver *RoutingObserver
+	// routingTraceOpen toggles the ctrl+r overlay; when true View()
+	// renders the full routing-trace for the focused turn over the
+	// transcript.
+	routingTraceOpen bool
+	// routingTraceTurn is the turn the ctrl+r overlay focuses on
+	// (defaults to the latest turn that produced routing events).
+	routingTraceTurn int64
 }
 
 // RootModelOption is a functional option for RootModel construction.
@@ -322,6 +350,20 @@ func WithJournalWriter(jw journal.Writer) RootModelOption {
 	return func(m *RootModel) { m.journalWriter = jw }
 }
 
+// WithRoutingObserver wires a *RoutingObserver into the RootModel. The
+// observer is the slog→tea.Msg bridge that converts orchestrator
+// routing events into RoutingTier*Msg deliveries for the progressive
+// resolution chip (semantic-routing proposal §8). The caller is
+// responsible for inserting the observer as one handler in the slog
+// pipeline (typically alongside the trace ring buffer) and for
+// invoking obs.Attach(prog) once the *tea.Program is constructed.
+//
+// When omitted (or nil), the chip stays inactive — submitInput still
+// works; only the routing-tier UX is disabled.
+func WithRoutingObserver(obs *RoutingObserver) RootModelOption {
+	return func(m *RootModel) { m.routingObserver = obs }
+}
+
 // WithResumedJourney overrides the initial state, world, and menu/location
 // to match a previously-loaded journey (--continue resume path). Without
 // this option, NewRootModel starts from the app's declared initial state.
@@ -409,6 +451,8 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		prompt:         ti,
 		spinner:        sp,
 		mouseOn:        true,
+		routingChip:    NewRoutingChip(""),
+		routingHistory: make(map[int64]string),
 	}
 
 	// Set initial state.
@@ -706,12 +750,56 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSessionsPanelChoice(msg)
 
 	case spinner.TickMsg:
-		// Only animate when awaiting LLM.
+		// Two consumers can want spinner ticks: the awaiting-LLM
+		// spinner on the prompt line, and the routing chip's "⋯
+		// resolving…" spinner. Forward unconditionally to both so
+		// neither stalls if the other is idle.
+		var cmds []tea.Cmd
 		if m.mode == ModeAwaitingLLM {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
-			return m, cmd
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
+		if m.routingChipActive {
+			var chipCmd tea.Cmd
+			m.routingChip, chipCmd = m.routingChip.Update(msg)
+			if chipCmd != nil {
+				cmds = append(cmds, chipCmd)
+			}
+		}
+		if len(cmds) == 0 {
+			return m, nil
+		}
+		return m, tea.Batch(cmds...)
+
+	case RoutingChipReset:
+		var cmd tea.Cmd
+		m.routingChip, cmd = m.routingChip.Update(msg)
+		m.routingChipActive = true
+		return m, cmd
+
+	case RoutingTierMissMsg, RoutingTierHitMsg, RoutingAmbiguousMsg, RoutingCancelMsg:
+		var cmd tea.Cmd
+		m.routingChip, cmd = m.routingChip.Update(msg)
+		return m, cmd
+
+	case RoutingChipResolved:
+		// The chip reached a terminal state — capture the final
+		// rendered line under the latest turn the observer has seen
+		// routing events for. The observer is the only source we
+		// have for "what turn is currently being routed"; without
+		// it (headless test), we just key by 0.
+		var turn int64
+		if m.routingObserver != nil {
+			turn = m.routingObserver.LatestTurn()
+		}
+		if m.routingHistory == nil {
+			m.routingHistory = make(map[int64]string)
+		}
+		m.routingHistory[turn] = msg.Final
+		m.routingChipActive = false
 		return m, nil
 
 	case inboxPollMsg:
@@ -833,11 +921,33 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Ctrl+R toggles the routing-trace overlay (proposal §8.3) — a
+	// pretty-printed dump of the routing-tier events for the focused
+	// turn. ESC inside the overlay closes it via the routingTraceOpen
+	// branch below (no global mode switch needed).
+	if msg.Type == tea.KeyCtrlR {
+		if m.routingObserver != nil {
+			m.routingTraceOpen = !m.routingTraceOpen
+			if m.routingTraceOpen {
+				m.routingTraceTurn = m.routingObserver.LatestTurn()
+			}
+		}
+		return m, nil
+	}
+
 	// Esc opens the system menu from the default interactive modes.
 	// It deliberately does not fire during ModeAwaitingLLM (Ctrl+C cancels
 	// the turn first) or while a slot-filling / disambiguation overlay is
 	// already using Esc to back out.
 	if msg.Type == tea.KeyEsc {
+		// Esc inside the routing-trace overlay closes the overlay
+		// (no mode change) and falls through to the rest of the
+		// routeKey handler so subsequent presses still open the
+		// system menu.
+		if m.routingTraceOpen {
+			m.routingTraceOpen = false
+			return m, nil
+		}
 		if m.mode == ModeOnPath || m.mode == ModeOffPath {
 			m.mode = ModeMenu
 			m.menuSystem.Open()
@@ -1061,6 +1171,17 @@ func (m RootModel) submitInput() (tea.Model, tea.Cmd) {
 
 	m.lastInput = input
 
+	// Reset the progressive resolution chip — the orchestrator's
+	// routing tiers will emit slog events that the routingObserver
+	// bridges into RoutingTier*Msg deliveries, advancing the chip
+	// from "⋯ resolving…" to the resolved tier. We update the chip
+	// directly (instead of returning a chipCmd) so we don't nest a
+	// second tea.Batch on top of the one startAsyncTurn already
+	// produces — nested batches confuse the test-harness drainer
+	// (processCommands handles one level of BatchMsg, not two).
+	m.routingChip, _ = m.routingChip.Update(RoutingChipReset{Input: input})
+	m.routingChipActive = true
+
 	// Cheap, side-effect-free match against the current menu. This avoids the
 	// LLM round-trip when the user typed something we can route locally — but
 	// we still dispatch the resulting transition asynchronously so a slow
@@ -1075,7 +1196,7 @@ func (m RootModel) submitInput() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if hit {
-		return startAsyncTurn(m, input, asyncSubmitDirect(orch, sid, intent, slots), pendingDeterministic)
+		return startAsyncTurn(m, input, asyncSubmitDirectFromInput(orch, sid, intent, slots, input), pendingDeterministic)
 	}
 
 	// No deterministic match — call the LLM router asynchronously.
@@ -1108,6 +1229,15 @@ func asyncTurn(orch *orchestrator.Orchestrator, sid app.SessionID, input string)
 func asyncSubmitDirect(orch *orchestrator.Orchestrator, sid app.SessionID, intent string, slots map[string]any) func(context.Context) (*orchestrator.TurnOutcome, error) {
 	return func(ctx context.Context) (*orchestrator.TurnOutcome, error) {
 		return orch.SubmitDirect(ctx, sid, intent, slots)
+	}
+}
+
+// asyncSubmitDirectFromInput is asyncSubmitDirect's user-input-preserving
+// variant: the deterministic match has the user's original text, so we
+// thread it through onto the TurnStarted audit record.
+func asyncSubmitDirectFromInput(orch *orchestrator.Orchestrator, sid app.SessionID, intent string, slots map[string]any, userInput string) func(context.Context) (*orchestrator.TurnOutcome, error) {
+	return func(ctx context.Context) (*orchestrator.TurnOutcome, error) {
+		return orch.SubmitDirectFromInput(ctx, sid, intent, slots, userInput)
 	}
 }
 
@@ -2789,6 +2919,14 @@ func (m RootModel) View() string {
 		promptLine = prefix + m.prompt.View()
 	}
 
+	// Routing chip line (proposal §8). Rendered above the prompt
+	// while the chip is active so the in-flight or just-resolved
+	// resolution badge sits next to the user-echoed input.
+	var chipLine string
+	if m.routingChipActive {
+		chipLine = m.routingChip.View() + " " + m.lastInput
+	}
+
 	// Key hints — shown under the prompt so users know how to scroll back
 	// through prior turns. Bindings are picked to work on MacBook keyboards
 	// without PgUp/PgDn/Home/End physical keys. When mouse capture is off,
@@ -2810,8 +2948,40 @@ func (m RootModel) View() string {
 	if bannerLine != "" {
 		parts = append(parts, bannerLine)
 	}
+	if chipLine != "" {
+		parts = append(parts, chipLine)
+	}
 	parts = append(parts, promptLine, hints)
+
+	// Ctrl+R routing-trace overlay (§8.3). Rendered above the
+	// rest of the screen when toggled on; the existing transcript
+	// view stays behind it so ESC closes back to the same context.
+	if m.routingTraceOpen && m.routingObserver != nil {
+		overlay := m.renderRoutingTraceOverlay()
+		if overlay != "" {
+			parts = append([]string{overlay}, parts...)
+		}
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// renderRoutingTraceOverlay builds the ctrl+r overlay body — a
+// pretty-printed dump of the routingObserver's events for the
+// focused turn. Empty when the observer has no events recorded yet.
+func (m RootModel) renderRoutingTraceOverlay() string {
+	if m.routingObserver == nil {
+		return ""
+	}
+	turn := m.routingTraceTurn
+	if turn == 0 {
+		turn = m.routingObserver.LatestTurn()
+	}
+	body := FormatRoutingTrace(m.routingObserver.Trace(turn))
+	if body == "" {
+		body = fmt.Sprintf("turn %d routing trace\n  (no routing events captured yet)\n", turn)
+	}
+	header := lipgloss.NewStyle().Bold(true).Render("── routing trace ── (ctrl+r to close)")
+	return header + "\n" + body
 }
 
 // inboxBadge builds the status-line badge text from the latest notification

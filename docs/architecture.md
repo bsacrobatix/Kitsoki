@@ -158,6 +158,54 @@ The system goes out of its way to keep the user out of that branch.
 It also goes out of its way to never let the LLM **cause** something
 the author didn't declare.
 
+A four-tier **semantic routing** stack — author-declared synonyms,
+synonym templates that capture typed slots, a per-session turncache,
+and the LLM — sits between the deterministic menu match and the
+LLM call. Every foreground turn runs the tiers in order and stops
+at the first that resolves:
+
+1. **Deterministic** (`TryDeterministic`) — input exactly matches a
+   menu entry's display string or a unique intent example. Cost: a
+   map lookup. Confidence: 1.00.
+2. **Synonym** (`TrySemantic`, bare-string path) — input contains the
+   stem-bag of an author-declared synonym for an allowed intent.
+   Cost: ~3 µs via the Aho-Corasick pre-filter. Confidence: 0.90.
+3. **Synonym template** (`TrySemantic`, template path) — input
+   matches a `{slot}`-capturing template like `"buy {items} for
+   {total_cost}"`; captured ranges are fed to typed parsers in
+   `internal/slotparse` (int / money / enum / bool / list[T] / date).
+   Cost: per-template NFA walk plus per-slot parse, all <100 µs in
+   practice. Confidence: 0.80 (all slots filled) or 0.65 (some named
+   but unparseable).
+4. **Turn-result cache** (`tryTurnCache`) — keyed by `(app, app_hash,
+   state_path, lex.Signature(input))`. A hit re-runs `Machine.Validate`
+   against the live world; on success it short-circuits via
+   `SubmitDirect`. Cost: ~80 µs SQLite roundtrip. Confidence:
+   originating LLM verdict's self-reported value.
+5. **LLM** (`harness.RunTurn`) — the only tier that costs seconds.
+   Successful resolutions write back to the cache so subsequent turns
+   with the same lexical signature short-circuit at tier 4.
+
+Each tier emits a structured trace event
+(`turn.deterministic_*` / `turn.semantic_*` / `turn.turncache_hit` /
+`turn.llm_routed`) that the TUI subscribes to. The user-visible
+result is a small **route badge** next to the echoed input — `▣` for
+the deterministic match, `⌁`/`◐` for synonym/template hits, `⟲` for
+a cache hit, `✦` for the LLM, `◇` for off-path — and a progressive
+`[⋯ resolving…]` chip that pulses as the resolver descends the stack.
+Faded prior icons remain so the user can see how far down the
+pipeline the turn fell (`[▣· ⌁· ⟲· ✦ ask_question{…}]`). The chip
+itself lives in `internal/tui/routing_chip.go` and is driven by
+events, not orchestrator state, so it stays trivially unit-testable.
+
+The user-visible point of the routing stack is **latency**: a synonym
+or cache hit returns in microseconds; the LLM takes seconds. On the
+Oregon Trail recording the calibration loop reaches a ~22% LLM
+fallthrough rate — three out of four turns resolve without an LLM
+call. Authors grow the synonym library over time using
+`kitsoki replay-routing` and `kitsoki inspect --synonym-suggestions`
+(see [`semantic-routing.md`](semantic-routing.md)).
+
 ---
 
 ## 4. The LLM's role (and its boundaries)

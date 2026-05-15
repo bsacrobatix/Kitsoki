@@ -610,6 +610,12 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	}
 	validateStates(file, "", def.States, globalIntents, worldKeys, allStatePaths, stateOnKeys, allowedHosts, declaredAgents, &errs)
 
+	// ── 7a. Semantic-routing schema checks (semantic-routing proposal Phase 0).
+	// Validates Intent.Synonyms / Slot.Synonyms / AppDef.Routing against the
+	// rules in proposal §4 and §6. Errors here share the same shape as the
+	// surrounding validators (ValidationError via the errs slice).
+	validateRouting(file, def, &errs)
+
 	// ── 7b. (removed) off-path agent reference: superseded by §9b
 	// validateAgentReferences which also recognises builtin agent names
 	// like `story-author`.
@@ -1431,6 +1437,119 @@ func expandMetaCwd(s string) (string, string) {
 		}
 	}
 	return os.ExpandEnv(s), ""
+}
+
+// validateRouting walks every Intent (global + per-state) and every Slot
+// (on those intents) and asserts the semantic-routing proposal's
+// Phase-0 schema rules:
+//
+//   - Intent.Synonyms entries are non-empty after trim.
+//   - Slot.Synonyms is only set on enum slots.
+//   - Slot.Synonyms keys are present in Slot.Values.
+//   - AppDef.Routing.SemanticHighBar > SemanticMidBar, both in [0, 1].
+//
+// Errors are appended to *errs as ValidationError, matching the look of
+// the other validators in this file. The function visits global intents
+// first (sorted) for deterministic error ordering, then descends into
+// the state tree to pick up state-local intents.
+func validateRouting(file string, def *AppDef, errs *[]error) {
+	addErr := func(msg string) {
+		*errs = append(*errs, &ValidationError{File: file, Message: msg})
+	}
+
+	// Global intents.
+	for _, name := range sortedKeys(def.Intents) {
+		intent := def.Intents[name]
+		validateIntentSynonyms(file, fmt.Sprintf("intent %q", name), intent, errs)
+	}
+
+	// Per-state intents — walk the full tree.
+	walkStateIntents(def.States, "", func(statePath, intentName string, intent Intent) {
+		loc := fmt.Sprintf("state %q intent %q", statePath, intentName)
+		validateIntentSynonyms(file, loc, intent, errs)
+	})
+
+	// Routing block bar ordering.
+	if def.Routing != nil {
+		r := def.Routing
+		if r.SemanticHighBar < 0 || r.SemanticHighBar > 1 {
+			addErr(fmt.Sprintf("routing.semantic_high_bar: %.4f is outside [0, 1]", r.SemanticHighBar))
+		}
+		if r.SemanticMidBar < 0 || r.SemanticMidBar > 1 {
+			addErr(fmt.Sprintf("routing.semantic_mid_bar: %.4f is outside [0, 1]", r.SemanticMidBar))
+		}
+		if r.SemanticHighBar > 0 && r.SemanticMidBar > 0 && !(r.SemanticHighBar > r.SemanticMidBar) {
+			addErr(fmt.Sprintf("routing.semantic_high_bar (%.4f) must be greater than routing.semantic_mid_bar (%.4f)", r.SemanticHighBar, r.SemanticMidBar))
+		}
+	}
+}
+
+// validateIntentSynonyms checks one intent's Synonyms list and its slot
+// Synonyms maps. `where` is the human-readable prefix used in error
+// messages (e.g. `intent "ford"` or `state "foo" intent "bar"`).
+func validateIntentSynonyms(file, where string, intent Intent, errs *[]error) {
+	addErr := func(msg string) {
+		*errs = append(*errs, &ValidationError{File: file, Message: msg})
+	}
+	for i, s := range intent.Synonyms {
+		if strings.TrimSpace(s) == "" {
+			addErr(fmt.Sprintf("%s: synonyms[%d] is empty", where, i))
+		}
+	}
+	// Iterate slot names sorted for deterministic error ordering.
+	for _, slotName := range sortedKeys(intent.Slots) {
+		slot := intent.Slots[slotName]
+		if len(slot.Synonyms) == 0 {
+			continue
+		}
+		if slot.Type != "enum" {
+			addErr(fmt.Sprintf("%s slot %q: synonyms: is only valid on enum slots (got type %q)", where, slotName, slot.Type))
+			continue
+		}
+		valueSet := make(map[string]struct{}, len(slot.Values))
+		for _, v := range slot.Values {
+			valueSet[v] = struct{}{}
+		}
+		for _, key := range sortedKeys(slot.Synonyms) {
+			if _, ok := valueSet[key]; !ok {
+				addErr(fmt.Sprintf("%s slot %q: synonyms key %q is not in values: %v", where, slotName, key, slot.Values))
+				continue
+			}
+			for i, phrase := range slot.Synonyms[key] {
+				if strings.TrimSpace(phrase) == "" {
+					addErr(fmt.Sprintf("%s slot %q: synonyms[%q][%d] is empty", where, slotName, key, i))
+				}
+			}
+		}
+	}
+}
+
+// walkStateIntents traverses the state tree and invokes fn for every
+// state-local intent. Path is the dot-separated state address (same
+// shape as collectStatePaths produces). Used by validateRouting to
+// surface per-state synonyms errors with a precise location.
+func walkStateIntents(states map[string]*State, prefix string, fn func(statePath, intentName string, intent Intent)) {
+	for _, name := range sortedKeys(states) {
+		s := states[name]
+		if s == nil {
+			continue
+		}
+		path := joinPath(prefix, name)
+		for _, in := range sortedKeys(s.Intents) {
+			fn(path, in, s.Intents[in])
+		}
+		if len(s.States) > 0 {
+			walkStateIntents(s.States, path, fn)
+		}
+	}
+}
+
+// unmarshalRoutingRaw decodes the YAML body of a `routing:` block into
+// the supplied receiver. Lives in loader.go (not types.go) to keep the
+// goccy/go-yaml import out of the type-declaration file. Strict mode is
+// enabled so typos in routing field names surface as load errors.
+func unmarshalRoutingRaw(b []byte, dst interface{}) error {
+	return goyaml.UnmarshalWithOptions(b, dst, goyaml.Strict())
 }
 
 // sortedKeys returns the keys of any map[string]T sorted alphabetically.

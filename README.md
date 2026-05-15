@@ -25,6 +25,12 @@ go build -o kitsoki ./cmd/kitsoki
   human reply and resumes, all from declarative YAML.
 - Replayable, testable, demo-able LLM-driven flows. Mode 2 flow tests
   run with zero LLM cost and exit non-zero on regression.
+- Fast on the common case: a four-tier semantic-routing stack
+  (synonyms, slot templates, a turncache, and the LLM) resolves
+  most user input in microseconds without calling the LLM. On the
+  Oregon Trail story ~78% of recorded turns route deterministically
+  or via author-declared synonyms — the LLM only fires on the genuinely
+  open-ended ones. See [`docs/semantic-routing.md`](docs/semantic-routing.md).
 
 It is **not** a chat agent. The LLM has no latitude to invent actions
 outside the intent alphabet you declare.

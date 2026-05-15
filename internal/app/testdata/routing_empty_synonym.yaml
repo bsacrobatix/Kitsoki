@@ -1,0 +1,22 @@
+app:
+  id: routing-empty-synonym
+  version: 0.1.0
+
+root: start
+
+intents:
+  ford:
+    title: "Ford"
+    synonyms:
+      - wade
+      - "   "
+
+states:
+  start:
+    description: "Start"
+    on:
+      ford:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true

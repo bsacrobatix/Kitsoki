@@ -1,0 +1,19 @@
+app:
+  id: routing-no-block
+  version: 0.1.0
+
+root: start
+
+intents:
+  noop:
+    title: "Do nothing"
+
+states:
+  start:
+    description: "Start"
+    on:
+      noop:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true
