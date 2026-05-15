@@ -421,11 +421,13 @@ func (m *machineImpl) turnParallel(ctx context.Context, par parsedParallel, w wo
 		return TurnResult{}, err
 	}
 	if len(parEmits) > 0 {
-		m.logger.WarnContext(ctx, trace.EvIntentEmitted,
-			slog.String("phase", "parallel_drop"),
-			slog.String("state", parRoot),
-			slog.Int("count", len(parEmits)),
-		)
+		for _, em := range parEmits {
+			m.logger.WarnContext(ctx, trace.EvIntentEmitParallelDropped,
+				slog.String("site", "turn_parallel_transition"),
+				slog.String("intent", em.Name),
+				slog.String("state", parRoot),
+			)
+		}
 	}
 
 	// Build the new state-path (handling the exitedParallel case).
@@ -461,11 +463,13 @@ func (m *machineImpl) turnParallel(ctx context.Context, par parsedParallel, w wo
 				return TurnResult{}, fmt.Errorf("on_enter effects for %q: %w", ep, eerr)
 			}
 			if len(parEnterEmits) > 0 {
-				m.logger.WarnContext(ctx, trace.EvIntentEmitted,
-					slog.String("phase", "parallel_on_enter_drop"),
-					slog.String("state", ep),
-					slog.Int("count", len(parEnterEmits)),
-				)
+				for _, em := range parEnterEmits {
+					m.logger.WarnContext(ctx, trace.EvIntentEmitParallelDropped,
+						slog.String("site", "turn_parallel_on_enter"),
+						slog.String("intent", em.Name),
+						slog.String("state", ep),
+					)
+				}
 			}
 			newWorld = nw2
 			hostCalls = append(hostCalls, hcs2...)

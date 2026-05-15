@@ -65,8 +65,15 @@ const (
 	// Synthetic-intent dispatch (emit_intent effect; see machine.applyEffectsTraced).
 	// EvIntentEmitted records each successful self-dispatch; EvIntentEmitDepthCap
 	// records a depth-cap abort (machine.EmitIntentMaxDepth).
-	EvIntentEmitted       = "machine.intent.emitted"
-	EvIntentEmitDepthCap  = "machine.intent.emit.depth_cap"
+	// EvIntentEmitParallelDropped records a parallel-state emit_intent that was
+	// dropped per the W2.8 limitation (parallel regions ride a separate
+	// event-bus via propagateEmits; mixing the two muddles depth-cap accounting).
+	// Fires at any of the three sites that previously disagreed:
+	// machine.dispatchEmittedIntents, parallel.turnParallel (transition or
+	// on_enter), and machine.DispatchPostBindEmits.
+	EvIntentEmitted              = "machine.intent.emitted"
+	EvIntentEmitDepthCap         = "machine.intent.emit.depth_cap"
+	EvIntentEmitParallelDropped  = "machine.intent.emit.parallel_dropped"
 
 	// Expr.
 	EvExprCompileError = "expr.compile_error"

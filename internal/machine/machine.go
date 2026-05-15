@@ -842,8 +842,21 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 		// (the propagateEmits path) and mixing the two would muddle
 		// the depth-cap accounting. The common authoring shape (a
 		// state's on_enter auto-firing a verdict) is unaffected.
+		//
+		// Behaviour: log + drop the offending emit and continue with
+		// the remaining ones (rather than aborting the whole chain).
+		// Three sites disagreed historically — this one used to error
+		// loudly, parallel.turnParallel warn-logged silently, and
+		// DispatchPostBindEmits silently no-op'd. All three now emit
+		// EvIntentEmitParallelDropped through the trace logger and
+		// return no error so an otherwise-valid story is not bricked.
 		if parseParallel(state).IsParallel {
-			return "", world.World{}, nil, "", nil, fmt.Errorf("emit_intent %q: synthetic dispatch from a parallel-encoded state %q is not supported", emit.Name, state)
+			m.logger.WarnContext(ctx, trace.EvIntentEmitParallelDropped,
+				slog.String("site", "dispatch_emitted_intents"),
+				slog.String("intent", emit.Name),
+				slog.String("state", state),
+			)
+			continue
 		}
 
 		// Resolve the emitted name through the import alias map of the
@@ -1559,7 +1572,34 @@ func (m *machineImpl) applyEffects(effects []app.Effect, w world.World, env expr
 // against the post-bind world and dispatches the synthetic intent via
 // the shared dispatchEmittedIntents pipeline.
 func (m *machineImpl) DispatchPostBindEmits(ctx context.Context, state app.StatePath, w world.World) (app.StatePath, world.World, []HostInvocation, string, []store.Event, error) {
-	if parseParallel(string(state)).IsParallel {
+	if par := parseParallel(string(state)); par.IsParallel {
+		// Parallel-encoded paths can't host emit_intent dispatch
+		// (parallel.go's region semantics ride a separate event-bus
+		// — see dispatchEmittedIntents for the long-form rationale).
+		// Surface the no-op via the trace logger so operators get a
+		// signal that a queued emit was discarded; this matches the
+		// log+drop shape used at the other two emit-rejection sites.
+		// Walk the parallel parent's on_enter AND each region leaf's
+		// on_enter for any emit_intent and log one event per finding.
+		logDroppedEmit := func(statePath string, effs []app.Effect) {
+			for _, eff := range effs {
+				if eff.EmitIntent != "" {
+					m.logger.WarnContext(ctx, trace.EvIntentEmitParallelDropped,
+						slog.String("site", "dispatch_post_bind_emits"),
+						slog.String("intent", eff.EmitIntent),
+						slog.String("state", statePath),
+					)
+				}
+			}
+		}
+		if cs, ok := m.states[par.Root]; ok && cs.s != nil {
+			logDroppedEmit(string(state), cs.s.OnEnter)
+		}
+		for _, leaf := range par.RegionLeaves {
+			if cs, ok := m.states[leaf]; ok && cs.s != nil {
+				logDroppedEmit(string(state), cs.s.OnEnter)
+			}
+		}
 		return state, w, nil, "", nil, nil
 	}
 	cs, ok := m.states[string(state)]

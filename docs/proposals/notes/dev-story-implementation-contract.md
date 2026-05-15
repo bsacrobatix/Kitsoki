@@ -678,8 +678,18 @@ reference:
   the post-bind world. Authors only need `??` defaults for
   conditionally-bound fields (e.g. `world.llm_verdict.*`, populated
   only when `judge_mode in ('llm','llm_then_human')`).
-- Parallel-state `emit_intent` is rejected by the runtime. Wave 2's
-  pr-refinement and dev-story hub do not use parallel encoding.
+- Parallel-state `emit_intent` is **dropped with a trace warning,
+  not a hard error** (closed in `fix: machine — consistent log+drop
+  for parallel-state emit_intent across all three sites`).  Three
+  call-sites previously disagreed — `machine.dispatchEmittedIntents`
+  errored loudly, `parallel.turnParallel` warn-logged silently, and
+  `machine.DispatchPostBindEmits` returned a silent no-op.  All
+  three now emit `machine.intent.emit.parallel_dropped` (constant
+  `trace.EvIntentEmitParallelDropped`) with attributes
+  `{site, intent, state}` and return no error so an otherwise-valid
+  story is not bricked by a parallel-region author shape.  Wave 2's
+  pr-refinement and dev-story hub do not use parallel encoding
+  regardless.
 - **`emit_intent` inside on_error / timeout / on_complete chains
   steers the final landing state.** Three orchestrator callsites
   previously discarded the post-emit state path (closed P1-D from
