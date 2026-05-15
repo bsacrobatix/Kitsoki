@@ -18,8 +18,8 @@
 // `host.gh.ticket` for tickets and keeps `host.git` (which already routes to
 // `gh pr` under the hood) for vcs.
 //
-// All exec calls go through the same `vcsExec` seam declared in
-// `git_vcs.go` so tests can substitute a deterministic runner without
+// All exec calls go through the same `cliExec` seam declared in
+// `cli_exec.go` so tests can substitute a deterministic runner without
 // shelling out to the real `gh` binary.  When `gh` is not installed (or not
 // authenticated), every op returns a clean Result.Error rather than crashing,
 // so authors can route the YAML `on_error:` arc.
@@ -71,12 +71,12 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 	}
 }
 
-// ghCLIAvailable probes `gh --version` through the package vcsExec seam.
+// ghCLIAvailable probes `gh --version` through the package cliExec seam.
 // Returns true iff the binary exists, runs, and exits 0.  Matches the
 // availability pattern in git_vcs.go::ghAvailable but in a workdir-agnostic
 // form (ticket ops do not have a natural workdir argument).
 func ghCLIAvailable(ctx context.Context) bool {
-	_, _, code, err := vcsExec(ctx, "", "gh", "--version")
+	_, _, code, err := cliExec(ctx, "", "gh", "--version")
 	return err == nil && code == 0
 }
 
@@ -110,7 +110,7 @@ func ghTicketSearch(ctx context.Context, args map[string]any) (Result, error) {
 	if q := strings.TrimSpace(query); q != "" {
 		ghArgs = append(ghArgs, "--search", q)
 	}
-	stdout, stderr, code, err := vcsExec(ctx, "", "gh", ghArgs...)
+	stdout, stderr, code, err := cliExec(ctx, "", "gh", ghArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("ticket.search: exec: %v", err)}, nil
 	}
@@ -150,7 +150,7 @@ func ghTicketGet(ctx context.Context, args map[string]any) (Result, error) {
 	}
 	ghArgs = append(ghArgs, "--json",
 		"number,title,body,state,labels,assignees,url,comments")
-	stdout, stderr, code, err := vcsExec(ctx, "", "gh", ghArgs...)
+	stdout, stderr, code, err := cliExec(ctx, "", "gh", ghArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("ticket.get: exec: %v", err)}, nil
 	}
@@ -198,7 +198,7 @@ func ghTicketComment(ctx context.Context, args map[string]any) (Result, error) {
 		ghArgs = append(ghArgs, "--repo", repo)
 	}
 	ghArgs = append(ghArgs, "--body", body)
-	stdout, stderr, code, err := vcsExec(ctx, "", "gh", ghArgs...)
+	stdout, stderr, code, err := cliExec(ctx, "", "gh", ghArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("ticket.comment: exec: %v", err)}, nil
 	}
@@ -247,7 +247,7 @@ func ghTicketTransition(ctx context.Context, args map[string]any) (Result, error
 	if repo != "" {
 		ghArgs = append(ghArgs, "--repo", repo)
 	}
-	_, stderr, code, err := vcsExec(ctx, "", "gh", ghArgs...)
+	_, stderr, code, err := cliExec(ctx, "", "gh", ghArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("ticket.transition: exec: %v", err)}, nil
 	}
@@ -275,7 +275,7 @@ func ghTicketListMine(ctx context.Context, args map[string]any) (Result, error) 
 		"--limit", "100",
 		"--json", "number,title,state,labels,assignees,url",
 	)
-	stdout, stderr, code, err := vcsExec(ctx, "", "gh", ghArgs...)
+	stdout, stderr, code, err := cliExec(ctx, "", "gh", ghArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("ticket.list_mine: exec: %v", err)}, nil
 	}

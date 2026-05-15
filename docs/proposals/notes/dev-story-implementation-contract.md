@@ -975,8 +975,8 @@ Both providers shell out to a CLI that may not be installed on the
 operator's machine. The contract for `cpt` / `gh` absence is:
 
 - A `--version` probe at the top of every op (`cptCLIAvailable`,
-  `ghCLIAvailable` — both go through the shared `vcsExec` seam from
-  `git_vcs.go`).
+  `ghCLIAvailable` — both go through the shared `cliExec` seam from
+  `cli_exec.go`).
 - If the probe fails, every op returns a clean `Result.Error` with
   an installation hint:
   - `host.cypilot_artifacts: cpt CLI not available — install cypilot from https://github.com/Acronis/cypilot or run from a checkout that has it on PATH`
@@ -1162,8 +1162,8 @@ Explicit non-goals for Phase 5 (deferred to later phases):
 | `go test ./internal/host/...` (GitHub + cypilot_artifacts) | all happy + error paths | yes |
 
 The cypilot host tests (`github_test.go`, `cypilot_artifacts_test.go`)
-mock the `gh` / `cpt` CLIs via the shared `vcsExec` seam from
-`git_vcs.go` — no real binaries are required. The flow fixtures stub
+mock the `gh` / `cpt` CLIs via the shared `cliExec` seam from
+`cli_exec.go` — no real binaries are required. The flow fixtures stub
 `host.cypilot_artifacts` per W3.6 above.
 
 # Wave 3 / Phase 4 — cycle budgets + full checkpoint-intent vocabulary

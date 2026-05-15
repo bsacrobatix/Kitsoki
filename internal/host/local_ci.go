@@ -59,7 +59,7 @@ func ciRunTests(ctx context.Context, workdir string, args map[string]any) (Resul
 	if target, _ := args["target"].(string); target != "" {
 		cmdArgs = append(cmdArgs, target)
 	}
-	stdout, stderr, code, err := vcsExec(ctx, workdir, cmd, cmdArgs...)
+	stdout, stderr, code, err := cliExec(ctx, workdir, cmd, cmdArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("ci.run_tests: exec: %v", err)}, nil
 	}
@@ -83,7 +83,7 @@ func ciBuild(ctx context.Context, workdir string, args map[string]any) (Result, 
 	if target, _ := args["target"].(string); target != "" {
 		cmdArgs = append(cmdArgs, target)
 	}
-	stdout, stderr, code, err := vcsExec(ctx, workdir, cmd, cmdArgs...)
+	stdout, stderr, code, err := cliExec(ctx, workdir, cmd, cmdArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("ci.build: exec: %v", err)}, nil
 	}

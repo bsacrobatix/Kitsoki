@@ -58,9 +58,9 @@
 //   "host.cypilot_artifacts: cpt CLI not available — install cypilot from
 //    https://github.com/Acronis/cypilot or run from a checkout that has it on PATH"
 //
-// All exec calls go through the same `vcsExec` seam declared in
-// `git_vcs.go`, so tests substitute deterministic runners without shelling
-// to a real `cpt` binary.
+// All exec calls go through the same `cliExec` seam declared in
+// `cli_exec.go`, so tests substitute deterministic runners without
+// shelling to a real `cpt` binary.
 package host
 
 import (
@@ -112,10 +112,10 @@ func CypilotArtifactsHandler(ctx context.Context, args map[string]any) (Result, 
 	}
 }
 
-// cptCLIAvailable probes `cpt --version` through the package vcsExec seam.
+// cptCLIAvailable probes `cpt --version` through the package cliExec seam.
 // Returns true iff the binary exists, runs, and exits 0.
 func cptCLIAvailable(ctx context.Context, workdir string) bool {
-	_, _, code, err := vcsExec(ctx, workdir, "cpt", "--version")
+	_, _, code, err := cliExec(ctx, workdir, "cpt", "--version")
 	return err == nil && code == 0
 }
 
@@ -137,7 +137,7 @@ func cptArtifactList(ctx context.Context, workdir string, args map[string]any) (
 	if k := strings.TrimSpace(kind); k != "" {
 		cptArgs = append(cptArgs, "--kind", k)
 	}
-	stdout, stderr, code, err := vcsExec(ctx, workdir, "cpt", cptArgs...)
+	stdout, stderr, code, err := cliExec(ctx, workdir, "cpt", cptArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("artifact.list: exec: %v", err)}, nil
 	}
@@ -220,7 +220,7 @@ func cptArtifactGet(ctx context.Context, workdir string, args map[string]any) (R
 	}
 	// Resolve path via cpt if only id was supplied.
 	if strings.TrimSpace(path) == "" {
-		stdout, stderr, code, err := vcsExec(ctx, workdir, "cpt", "artifact", "path", "--id", id, "--json")
+		stdout, stderr, code, err := cliExec(ctx, workdir, "cpt", "artifact", "path", "--id", id, "--json")
 		if err != nil {
 			return Result{Error: fmt.Sprintf("artifact.get: resolve path: %v", err)}, nil
 		}
@@ -302,7 +302,7 @@ func cptArtifactCreate(ctx context.Context, workdir string, args map[string]any)
 	if parentID != "" {
 		cptArgs = append(cptArgs, "--parent", parentID)
 	}
-	stdout, stderr, code, err := vcsExec(ctx, workdir, "cpt", cptArgs...)
+	stdout, stderr, code, err := cliExec(ctx, workdir, "cpt", cptArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("artifact.create: exec: %v", err)}, nil
 	}
@@ -368,7 +368,7 @@ func cptArtifactValidate(ctx context.Context, workdir string, args map[string]an
 	if m := strings.TrimSpace(mode); m != "" {
 		cptArgs = append(cptArgs, "--mode", m)
 	}
-	stdout, stderr, code, err := vcsExec(ctx, workdir, "cpt", cptArgs...)
+	stdout, stderr, code, err := cliExec(ctx, workdir, "cpt", cptArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("artifact.validate: exec: %v", err)}, nil
 	}
@@ -428,7 +428,7 @@ func cptArtifactDecompose(ctx context.Context, workdir string, args map[string]a
 	if strings.TrimSpace(id) == "" {
 		return Result{Error: "artifact.decompose: id is required"}, nil
 	}
-	stdout, stderr, code, err := vcsExec(ctx, workdir, "cpt", "plan", "--json", "--task", id)
+	stdout, stderr, code, err := cliExec(ctx, workdir, "cpt", "plan", "--json", "--task", id)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("artifact.decompose: exec: %v", err)}, nil
 	}

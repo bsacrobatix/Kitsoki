@@ -7,9 +7,8 @@
 // `gh`, which is optional — if missing or unauthenticated the handler
 // returns a clean Result.Error rather than crashing.
 //
-// All exec calls go through git-cli wrappers that are exec-mockable via
-// the package-level execFunc variable so tests don't shell out for
-// real.
+// All exec calls go through the shared `cliExec` seam declared in
+// cli_exec.go so tests don't shell out for real.
 package host
 
 import (
@@ -18,11 +17,6 @@ import (
 	"os/exec"
 	"strings"
 )
-
-// execRunner is the function signature used to run external commands.
-// Production code wires it to runRealCommand; tests substitute their
-// own via SetExecRunnerForTest.
-type execRunner func(ctx context.Context, dir, name string, args ...string) (stdout string, stderr string, exitCode int, err error)
 
 // runRealCommand executes name+args with the given working directory
 // and captures stdout/stderr/exit-code.  An infrastructure error
@@ -44,17 +38,6 @@ func runRealCommand(ctx context.Context, dir, name string, args ...string) (stri
 		return stdoutBuf.String(), stderrBuf.String(), exitErr.ExitCode(), nil
 	}
 	return stdoutBuf.String(), stderrBuf.String(), -1, err
-}
-
-// vcsExec is the active runner; tests swap it out via SetExecRunnerForTest.
-var vcsExec execRunner = runRealCommand
-
-// SetExecRunnerForTest installs a fake runner.  Returns a restore func.
-// Test-only — production code calls runRealCommand directly via vcsExec.
-func SetExecRunnerForTest(r execRunner) func() {
-	prev := vcsExec
-	vcsExec = r
-	return func() { vcsExec = prev }
 }
 
 // GitVCSHandler implements host.git (prefix-fallback for all 7 ops).
@@ -106,7 +89,7 @@ func gitBranch(ctx context.Context, workdir string, args map[string]any) (Result
 	if base != "" {
 		gitArgs = append(gitArgs, base)
 	}
-	_, stderr, code, err := vcsExec(ctx, workdir, "git", gitArgs...)
+	_, stderr, code, err := cliExec(ctx, workdir, "git", gitArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("git.branch: exec: %v", err)}, nil
 	}
@@ -117,7 +100,7 @@ func gitBranch(ctx context.Context, workdir string, args map[string]any) (Result
 }
 
 func gitDiff(ctx context.Context, workdir string, _ map[string]any) (Result, error) {
-	stdout, stderr, code, err := vcsExec(ctx, workdir, "git", "diff", "--patch")
+	stdout, stderr, code, err := cliExec(ctx, workdir, "git", "diff", "--patch")
 	if err != nil {
 		return Result{Error: fmt.Sprintf("git.diff: exec: %v", err)}, nil
 	}
@@ -125,7 +108,7 @@ func gitDiff(ctx context.Context, workdir string, _ map[string]any) (Result, err
 		return Result{Error: fmt.Sprintf("git.diff: %s", strings.TrimSpace(stderr))}, nil
 	}
 	// Also surface the list of changed files for `bind:` ergonomics.
-	filesOut, _, _, _ := vcsExec(ctx, workdir, "git", "diff", "--name-only")
+	filesOut, _, _, _ := cliExec(ctx, workdir, "git", "diff", "--name-only")
 	var files []any
 	for _, ln := range strings.Split(strings.TrimSpace(filesOut), "\n") {
 		if ln != "" {
@@ -149,7 +132,7 @@ func gitCommit(ctx context.Context, workdir string, args map[string]any) (Result
 				addArgs = append(addArgs, s)
 			}
 		}
-		if _, stderr, code, err := vcsExec(ctx, workdir, "git", addArgs...); err != nil || code != 0 {
+		if _, stderr, code, err := cliExec(ctx, workdir, "git", addArgs...); err != nil || code != 0 {
 			return Result{Error: fmt.Sprintf("git.commit: stage: %s", strings.TrimSpace(stderr))}, nil
 		}
 	}
@@ -159,14 +142,14 @@ func gitCommit(ctx context.Context, workdir string, args map[string]any) (Result
 		// fast-path on a dirty tree.
 		commitArgs = []string{"commit", "-a", "-m", message}
 	}
-	_, stderr, code, err := vcsExec(ctx, workdir, "git", commitArgs...)
+	_, stderr, code, err := cliExec(ctx, workdir, "git", commitArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("git.commit: exec: %v", err)}, nil
 	}
 	if code != 0 {
 		return Result{Error: fmt.Sprintf("git.commit: %s", strings.TrimSpace(stderr))}, nil
 	}
-	sha, _, _, _ := vcsExec(ctx, workdir, "git", "rev-parse", "HEAD")
+	sha, _, _, _ := cliExec(ctx, workdir, "git", "rev-parse", "HEAD")
 	return Result{Data: map[string]any{
 		"ok":  true,
 		"sha": strings.TrimSpace(sha),
@@ -181,7 +164,7 @@ func gitPush(ctx context.Context, workdir string, args map[string]any) (Result, 
 	// Push the current HEAD.  `git push -u <remote> HEAD` makes the
 	// upstream tracking branch on first push, no-ops on subsequent
 	// pushes.
-	_, stderr, code, err := vcsExec(ctx, workdir, "git", "push", "-u", remote, "HEAD")
+	_, stderr, code, err := cliExec(ctx, workdir, "git", "push", "-u", remote, "HEAD")
 	if err != nil {
 		return Result{Error: fmt.Sprintf("git.push: exec: %v", err)}, nil
 	}
@@ -191,7 +174,7 @@ func gitPush(ctx context.Context, workdir string, args map[string]any) (Result, 
 	// Best-effort URL discovery (remote URL).  Not all push targets
 	// have a fetchable URL (e.g. local file remotes); empty string is
 	// fine and the contract just says `url: string`.
-	urlOut, _, _, _ := vcsExec(ctx, workdir, "git", "remote", "get-url", remote)
+	urlOut, _, _, _ := cliExec(ctx, workdir, "git", "remote", "get-url", remote)
 	return Result{Data: map[string]any{
 		"ok":  true,
 		"url": strings.TrimSpace(urlOut),
@@ -204,7 +187,7 @@ func gitPush(ctx context.Context, workdir string, args map[string]any) (Result, 
 // answer turns the four PR ops into a clean domain error so the YAML
 // `on_error:` arc fires instead of crashing.
 func ghAvailable(ctx context.Context, workdir string) bool {
-	_, _, code, err := vcsExec(ctx, workdir, "gh", "--version")
+	_, _, code, err := cliExec(ctx, workdir, "gh", "--version")
 	return err == nil && code == 0
 }
 
@@ -222,7 +205,7 @@ func ghOpenPR(ctx context.Context, workdir string, args map[string]any) (Result,
 	if base != "" {
 		ghArgs = append(ghArgs, "--base", base)
 	}
-	stdout, stderr, code, err := vcsExec(ctx, workdir, "gh", ghArgs...)
+	stdout, stderr, code, err := cliExec(ctx, workdir, "gh", ghArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("git.open_pr: exec: %v", err)}, nil
 	}
@@ -247,7 +230,7 @@ func ghPRStatus(ctx context.Context, workdir string, args map[string]any) (Resul
 	if strings.TrimSpace(prID) == "" {
 		return Result{Error: "git.pr_status: pr_id argument is required"}, nil
 	}
-	stdout, stderr, code, err := vcsExec(ctx, workdir, "gh", "pr", "view", prID, "--json", "state,statusCheckRollup")
+	stdout, stderr, code, err := cliExec(ctx, workdir, "gh", "pr", "view", prID, "--json", "state,statusCheckRollup")
 	if err != nil {
 		return Result{Error: fmt.Sprintf("git.pr_status: exec: %v", err)}, nil
 	}
@@ -273,7 +256,7 @@ func ghPRComment(ctx context.Context, workdir string, args map[string]any) (Resu
 	if strings.TrimSpace(prID) == "" || strings.TrimSpace(body) == "" {
 		return Result{Error: "git.pr_comment: pr_id and body are required"}, nil
 	}
-	_, stderr, code, err := vcsExec(ctx, workdir, "gh", "pr", "comment", prID, "--body", body)
+	_, stderr, code, err := cliExec(ctx, workdir, "gh", "pr", "comment", prID, "--body", body)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("git.pr_comment: exec: %v", err)}, nil
 	}

@@ -54,7 +54,7 @@ func GitWorktreeHandler(ctx context.Context, args map[string]any) (Result, error
 // worktreeList parses `git worktree list --porcelain` into a slice of
 // {id, path, branch, dirty} maps.
 func worktreeList(ctx context.Context, repo string) (Result, error) {
-	stdout, stderr, code, err := vcsExec(ctx, repo, "git", "worktree", "list", "--porcelain")
+	stdout, stderr, code, err := cliExec(ctx, repo, "git", "worktree", "list", "--porcelain")
 	if err != nil {
 		return Result{Error: fmt.Sprintf("workspace.list: exec: %v", err)}, nil
 	}
@@ -74,7 +74,7 @@ func worktreeGet(ctx context.Context, repo string, args map[string]any) (Result,
 	if strings.TrimSpace(id) == "" {
 		return Result{Error: "workspace.get: id argument is required"}, nil
 	}
-	stdout, _, _, err := vcsExec(ctx, repo, "git", "worktree", "list", "--porcelain")
+	stdout, _, _, err := cliExec(ctx, repo, "git", "worktree", "list", "--porcelain")
 	if err != nil {
 		return Result{Error: fmt.Sprintf("workspace.get: exec: %v", err)}, nil
 	}
@@ -83,7 +83,7 @@ func worktreeGet(ctx context.Context, repo string, args map[string]any) (Result,
 			// Also probe `git status --porcelain` in the worktree to
 			// resolve dirty.
 			dirty := false
-			if statusOut, _, _, sErr := vcsExec(ctx, wt.Path, "git", "status", "--porcelain"); sErr == nil {
+			if statusOut, _, _, sErr := cliExec(ctx, wt.Path, "git", "status", "--porcelain"); sErr == nil {
 				dirty = strings.TrimSpace(statusOut) != ""
 			}
 			wt.Dirty = dirty
@@ -109,7 +109,7 @@ func worktreeCreate(ctx context.Context, repo string, args map[string]any) (Resu
 	if base != "" {
 		gitArgs = append(gitArgs, base)
 	}
-	_, stderr, code, err := vcsExec(ctx, repo, "git", gitArgs...)
+	_, stderr, code, err := cliExec(ctx, repo, "git", gitArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("workspace.create: exec: %v", err)}, nil
 	}
@@ -128,7 +128,7 @@ func worktreeSync(ctx context.Context, repo string, args map[string]any) (Result
 		return Result{Error: "workspace.sync: id argument is required"}, nil
 	}
 	// Find the path for the named workspace.
-	stdout, _, _, err := vcsExec(ctx, repo, "git", "worktree", "list", "--porcelain")
+	stdout, _, _, err := cliExec(ctx, repo, "git", "worktree", "list", "--porcelain")
 	if err != nil {
 		return Result{Error: fmt.Sprintf("workspace.sync: exec: %v", err)}, nil
 	}
@@ -145,7 +145,7 @@ func worktreeSync(ctx context.Context, repo string, args map[string]any) (Result
 	}
 	// Pull --ff-only from the upstream — non-destructive, returns
 	// error if the branch has diverged.
-	pullOut, stderr, code, err := vcsExec(ctx, target.Path, "git", "pull", "--ff-only")
+	pullOut, stderr, code, err := cliExec(ctx, target.Path, "git", "pull", "--ff-only")
 	if err != nil {
 		return Result{Error: fmt.Sprintf("workspace.sync: exec: %v", err)}, nil
 	}
