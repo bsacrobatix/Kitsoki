@@ -1255,6 +1255,24 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	return events, w, view, "", nil
 }
 
+// redirectDepthKey is the context key holding the current
+// on_error-redirect recursion depth for the active turn-side host
+// dispatch. enterRedirectState increments it on each recursion and
+// surfaces a HarnessError when it exceeds the cap; values at the
+// top-level dispatch entry are zero.
+type redirectDepthKey struct{}
+
+func withRedirectDepth(ctx context.Context, d int) context.Context {
+	return context.WithValue(ctx, redirectDepthKey{}, d)
+}
+
+func redirectDepthFromCtx(ctx context.Context) int {
+	if v, ok := ctx.Value(redirectDepthKey{}).(int); ok {
+		return v
+	}
+	return 0
+}
+
 // enterRedirectState runs the on_enter chain for the named error state and
 // recursively dispatches any host calls it emits.  Used by dispatchHostCalls
 // to land the session in the on_error: target after a host failure.
@@ -1274,6 +1292,38 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 // already routed it onward.  (P1-D from the dev-story-bugfix-unify Opus
 // review.)
 func (o *Orchestrator) enterRedirectState(ctx context.Context, sid app.SessionID, prior, target app.StatePath, w world.World) ([]store.Event, world.World, string, app.StatePath, error) {
+	// Bound recursion depth. Each on_error redirect that runs an
+	// on_enter chain whose host calls fail with another on_error: arc
+	// recurses through dispatchHostCalls → enterRedirectState. Without
+	// a cap, a host that fails idempotently (e.g.
+	// `git worktree add` against an existing dir) loops forever:
+	// idle.on_enter creates a workspace that fails → on_error: idle →
+	// idle.on_enter runs again → repeat. Cap at 4 redirects per
+	// turn-side dispatch. On overflow we surface a HarnessError and
+	// stay at the deepest resolved state rather than infinite-looping
+	// or popping back to the original on_error target.
+	const maxRedirectDepth = 4
+	depth := redirectDepthFromCtx(ctx)
+	if depth > maxRedirectDepth {
+		o.logger.WarnContext(ctx, "orchestrator.on_error.depth_cap_exceeded",
+			slog.String("session_id", string(sid)),
+			slog.String("prior", string(prior)),
+			slog.String("target", string(target)),
+			slog.Int("depth", depth),
+			slog.Int("cap", maxRedirectDepth),
+		)
+		ev := newOrchestratorEvent(store.HarnessError, map[string]any{
+			"reason":     "on_error.depth_cap_exceeded",
+			"prior":      string(prior),
+			"target":     string(target),
+			"depth":      depth,
+			"cap":        maxRedirectDepth,
+			"message":    "on_error redirect chain exceeded depth cap; staying at the originating state. A host call's on_error: arc is looping (likely the same host failing repeatedly).",
+		}, 0)
+		return []store.Event{ev}, w, "", prior, fmt.Errorf("orchestrator: on_error redirect from %q to %q exceeded depth cap %d — host call's on_error chain is looping", prior, target, maxRedirectDepth)
+	}
+	ctx = withRedirectDepth(ctx, depth+1)
+
 	// Resolve `../`-relative on_error targets against the prior state
 	// path. The import rewriter (internal/app/imports.go) rewrites a
 	// bare-name on_error target like `ticket_search` declared inside an

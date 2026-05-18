@@ -189,6 +189,13 @@ world:
   # project this to true via their import's `world_in:`. See
   # stories/kitsoki-dev/app.yaml + stories/dev-story/app.yaml.
   auto_accept_on_post: { type: bool, default: false }
+
+  # bf_autostart_attempted gates bf.idle's on_enter setup+autostart
+  # chain so it fires exactly once per session per ticket. Without
+  # this, an on_error bounce back to idle would re-fire the chain
+  # against a stale workspace (the loop the dogfood walkthrough hit
+  # on 2026-05-18 — see rooms/idle.yaml's on_enter comment).
+  bf_autostart_attempted: { type: bool, default: false }
   judge_mode:       { type: string, default: "human" }           # human | llm | llm_then_human
   judge_confidence_threshold: { type: float, default: 0.8 }
 
