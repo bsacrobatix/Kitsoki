@@ -145,9 +145,14 @@ func (r *Renderer) WelcomeBlock(w Welcome) string {
 	}
 
 	body := strings.Join(lines, "\n")
+	// Thick border that spans the full terminal width — gives the
+	// welcome banner the heft the user asked for ("consume the
+	// full width and have a thicker border"). Width includes the
+	// border, so we set Width(r.Width) on the styled box.
 	border := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Padding(0, 1)
+		Border(lipgloss.ThickBorder()).
+		Padding(0, 2).
+		Width(r.Width - 2)
 	if !r.NoColor {
 		border = border.BorderForeground(r.Theme.Accent)
 	}

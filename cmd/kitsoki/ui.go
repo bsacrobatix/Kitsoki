@@ -68,7 +68,7 @@ Output is byte-stable for a fixed --width, --theme, --no-color, and
 fixture. Golden tests in cmd/kitsoki/ui_test.go pin it.
 
 Examples:
-  kitsoki ui preview                       # chat view, default theme
+  kitsoki ui preview                       # full catalog (every block + every view)
   kitsoki ui preview --view world          # /world dedicated view
   kitsoki ui preview --view trace          # /trace pipeline trace
   kitsoki ui preview --block menu          # just the actions block
@@ -89,8 +89,8 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&view, "view", "chat",
-		"which view to render: chat | world | trace")
+	cmd.Flags().StringVar(&view, "view", "",
+		"render one view: chat | world | trace. Default (no flag) prints the full catalog.")
 	cmd.Flags().StringVar(&block, "block", "",
 		"render just one block kind (header, user_turn, routing_status, routing, agent_turn, system_notice, slash_output, menu, inbox, background_complete, footer, prompt). Overrides --view.")
 	cmd.Flags().StringVar(&theme, "theme", "default",
@@ -154,6 +154,8 @@ func renderOne(out io.Writer, themeName string, opts previewOpts) error {
 		r = r.WithNoColor(true)
 	}
 
+	// --block: render just one block kind. Used for tight design
+	// iteration on a single template.
 	if opts.Block != "" {
 		body, err := renderSingleBlock(r, opts.Block)
 		if err != nil {
@@ -163,19 +165,69 @@ func renderOne(out io.Writer, themeName string, opts previewOpts) error {
 		return err
 	}
 
-	var body string
-	switch strings.ToLower(opts.View) {
-	case "", "chat":
-		body = r.RenderChatView(blocks.DefaultChatFixture())
-	case "world":
-		body = r.RenderWorldView("cypilot", blocks.WorldFixture())
-	case "trace":
-		body = r.RenderTraceView(blocks.TraceFixture())
-	default:
-		return fmt.Errorf("unknown --view %q (use chat|world|trace)", opts.View)
+	// --view: render one full-pane composition.
+	if opts.View != "" {
+		var body string
+		switch strings.ToLower(opts.View) {
+		case "chat":
+			body = r.RenderChatView(blocks.DefaultChatFixture())
+		case "world":
+			body = r.RenderWorldView("cypilot", blocks.WorldFixture())
+		case "trace":
+			body = r.RenderTraceView(blocks.TraceFixture())
+		default:
+			return fmt.Errorf("unknown --view %q (use chat|world|trace)", opts.View)
+		}
+		_, err := fmt.Fprintln(out, body)
+		return err
 	}
-	_, err := fmt.Fprintln(out, body)
-	return err
+
+	// Default: print the full catalog — every block kind + every
+	// composed view, labelled with section headers so authors can
+	// scroll through them in one pass.
+	return renderCatalog(out, r)
+}
+
+// renderCatalog dumps every block kind and every view in a fixed
+// order. Section labels are bold + bracketed so they stand out
+// against the surrounding rendered content. The catalog is the
+// default `kitsoki ui preview` output — no flags needed to see
+// everything.
+func renderCatalog(out io.Writer, r *blocks.Renderer) error {
+	sections := []struct {
+		title string
+		body  func() (string, error)
+	}{
+		{"welcome", func() (string, error) { return renderSingleBlock(r, "welcome") }},
+		{"header", func() (string, error) { return renderSingleBlock(r, "header") }},
+		{"divider", func() (string, error) { return renderSingleBlock(r, "divider") }},
+		{"user turn", func() (string, error) { return renderSingleBlock(r, "user_turn") }},
+		{"routing status (live frames)", func() (string, error) { return renderSingleBlock(r, "routing_status") }},
+		{"routing resolved", func() (string, error) { return renderSingleBlock(r, "routing") }},
+		{"agent turn", func() (string, error) { return renderSingleBlock(r, "agent_turn") }},
+		{"system notice", func() (string, error) { return renderSingleBlock(r, "system_notice") }},
+		{"slash output", func() (string, error) { return renderSingleBlock(r, "slash_output") }},
+		{"queued echo", func() (string, error) { return renderSingleBlock(r, "queued_echo") }},
+		{"menu / actions", func() (string, error) { return renderSingleBlock(r, "menu") }},
+		{"inbox notification", func() (string, error) { return renderSingleBlock(r, "inbox") }},
+		{"background complete", func() (string, error) { return renderSingleBlock(r, "background_complete") }},
+		{"trace block", func() (string, error) { return renderSingleBlock(r, "trace") }},
+		{"footer (two-line)", func() (string, error) { return renderSingleBlock(r, "footer") }},
+		{"status row", func() (string, error) { return renderSingleBlock(r, "status_row") }},
+		{"prompt (per mode)", func() (string, error) { return renderSingleBlock(r, "prompt") }},
+		{"world (dedicated view body)", func() (string, error) { return renderSingleBlock(r, "world") }},
+		{"VIEW: chat (full composition)", func() (string, error) { return r.RenderChatView(blocks.DefaultChatFixture()), nil }},
+		{"VIEW: world (full composition)", func() (string, error) { return r.RenderWorldView("cypilot", blocks.WorldFixture()), nil }},
+		{"VIEW: trace (full composition)", func() (string, error) { return r.RenderTraceView(blocks.TraceFixture()), nil }},
+	}
+	for _, s := range sections {
+		body, err := s.body()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "─── %s ───\n\n%s\n\n", s.title, body)
+	}
+	return nil
 }
 
 func renderSingleBlock(r *blocks.Renderer, name string) (string, error) {

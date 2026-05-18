@@ -74,6 +74,21 @@ func TestUIPreviewGolden(t *testing.T) {
 			args:   previewOpts{Block: "background_complete", Theme: "default", Width: 80, NoColor: true},
 			golden: "block_background_complete.golden",
 		},
+		{
+			name:   "block_welcome",
+			args:   previewOpts{Block: "welcome", Theme: "default", Width: 80, NoColor: true},
+			golden: "block_welcome.golden",
+		},
+		{
+			name:   "block_queued_echo",
+			args:   previewOpts{Block: "queued_echo", Theme: "default", Width: 80, NoColor: true},
+			golden: "block_queued_echo.golden",
+		},
+		{
+			name:   "catalog_default",
+			args:   previewOpts{Theme: "default", Width: 80, NoColor: true},
+			golden: "catalog_default.golden",
+		},
 	}
 
 	for _, tc := range cases {
