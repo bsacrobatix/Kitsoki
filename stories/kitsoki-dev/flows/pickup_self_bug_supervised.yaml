@@ -139,22 +139,20 @@ host_handlers:
         confidence_pct: 90
 
 turns:
-  # core.main → core.bf.idle (dispatch into the bugfix sub-story).
-  # The go_bugfix intent at dev-story's main level lifts through
-  # core's import; the operator types `core__go_bugfix` from inside
-  # the import compound.
+  # core.main → core.bf.reproducing_executing (dispatch into the
+  # bugfix sub-story AND auto-fire `start` via bf.idle's on_enter,
+  # which emit_intents `start` when entered with a ticket loaded
+  # and no reproduction artifact yet). One turn instead of two —
+  # the bf.idle dwell-and-type-start-again was needless friction.
+  # Historically this was a separate `core__bf__start` step; the
+  # auto-start collapses it. The `bf__start` rewriting story is
+  # still exercised by the bugfix story's own happy_human flow,
+  # which seeds initial_state=idle (seedInitialState bypasses
+  # on_enter, so the dwell is observable in that fixture).
   - intent: { name: core__go_bugfix, slots: {} }
-    expect_state: core.bf.idle
+    expect_state: core.bf.reproducing_executing
     expect_world:
       core__bf__ticket_id: "2026-05-14T103205Z-tui-view-render-before-bind"
-
-  # bf__start → reproducing. The bf__ prefix is set at fold time when
-  # dev-story imported bugfix; the further fold under core leaves
-  # bf__start intact (parent's import.intents.import only lifts to the
-  # parent's bare table without renaming the child arc dispatch
-  # target). So `core__bf__start` is the dispatched name.
-  - intent: { name: core__bf__start, slots: {} }
-    expect_state: core.bf.reproducing_executing
 
   # Walk the bugfix pipeline. proceed / accept are bf-internal arcs
   # that live in bf's intent table; they don't collide-lift to bare,

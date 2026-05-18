@@ -88,15 +88,16 @@ host_handlers:
         confidence_pct: 95
 
 turns:
+  # bf.idle's auto-start on_enter fires on this transition (ticket is
+  # loaded, no reproduction artifact yet), so we land at
+  # reproducing_executing without the bf.idle → start two-step.
   - intent: { name: core__go_bugfix, slots: {} }
-    expect_state: core.bf.idle
+    expect_state: core.bf.reproducing_executing
     expect_world:
       core__bf__ticket_id: "2026-05-14T120000Z-scenarios-readme-warp-flag-misnamed"
       # Confirm the story-bug path passes through to the bf child world.
       core__bf__thread:    "stories/oregon-trail/issues/bugs/2026-05-14T120000Z-scenarios-readme-warp-flag-misnamed.md"
 
-  - intent: { name: core__bf__start, slots: {} }
-    expect_state: core.bf.reproducing_executing
   - intent: { name: core__bf__proceed, slots: {} }
     expect_state: core.bf.reproducing_awaiting_reply
   - intent: { name: core__bf__accept, slots: {} }

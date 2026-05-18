@@ -84,12 +84,11 @@ host_handlers:
         reason:     "Confident; advance autonomously."
 
 turns:
-  # core.main → core.bf.idle.
+  # core.main → core.bf.reproducing_executing.
+  # bf.idle's on_enter auto-emits `start` when entered with a ticket
+  # loaded and no reproduction artifact yet, so go_bugfix lands the
+  # operator directly inside the pipeline (one turn instead of two).
   - intent: { name: core__go_bugfix, slots: {} }
-    expect_state: core.bf.idle
-
-  # bf__start → reproducing_executing (one fold deep, well-established).
-  - intent: { name: core__bf__start, slots: {} }
     expect_state: core.bf.reproducing_executing
 
   # The critical assertion — proceed lands two checkpoints later.

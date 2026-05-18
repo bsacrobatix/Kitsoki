@@ -97,12 +97,11 @@ host_handlers:
 
 turns:
   # core.main → core.bf.idle.
-  - intent: { name: core__go_bugfix, slots: {} }
-    expect_state: core.bf.idle
-
   # ── Phase A — autonomous walk (llm_then_human + confident) ──────────
-  # bf__start → reproducing_executing.
-  - intent: { name: core__bf__start, slots: {} }
+  # bf.idle's auto-start on_enter fires on this transition (ticket is
+  # loaded, no reproduction artifact yet), so we land at
+  # reproducing_executing without the bf.idle → start two-step.
+  - intent: { name: core__go_bugfix, slots: {} }
     expect_state: core.bf.reproducing_executing
 
   # proceed → reproducing_awaiting_reply, but the LLM-judge auto-fires

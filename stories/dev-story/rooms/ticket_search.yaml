@@ -69,9 +69,11 @@ states:
                 ticket_title:  "(picked from list)"
                 ticket_type:   "bug"
                 thread:        "{{ slots.id }}"
-      # Hand off to the bugfix sub-story for the picked ticket. The
-      # `target: bf` compound enters at bf.idle; world_in: projects
-      # ticket_id / workdir / etc.
+      # Hand off to the bugfix sub-story for the picked ticket.
+      # bf.idle's on_enter auto-emits `start` when entered with a
+      # ticket and no in-progress artifact, so the operator types
+      # `go_bugfix` ONCE and lands inside the pipeline. world_in:
+      # projects ticket_id / workdir / etc through the boundary.
       go_bugfix:
         - when: "world.ticket_id != ''"
           target: bf

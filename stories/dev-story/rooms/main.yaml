@@ -129,6 +129,10 @@ states:
       # local-files provider only sees issues/bugs/ today, so picks
       # land as ticket_type="bug" and route into bf. The `feature`
       # arm here is ready for the day a feature source comes online.
+      # bf.idle's on_enter auto-emits `start` when a ticket is loaded
+      # and no reproduction artifact exists yet (see
+      # stories/bugfix/rooms/idle.yaml), so the operator types `drive`
+      # ONCE and lands inside the pipeline.
       drive:
         - when: "world.ticket_id != '' && world.ticket_type == 'bug'"
           target: bf

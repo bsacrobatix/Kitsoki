@@ -24,7 +24,7 @@ states:
         bind:
           ci_log: diff
         on_error: idle
-      - say: "Review pass complete — diff {{ world.implement_review_artifact.status ?? 'pending' }}."
+      - say: "Review pass complete — diff {{ world.implement_review_artifact.status|default:'pending' }}."
     on:
       proceed:
         - target: validating_executing

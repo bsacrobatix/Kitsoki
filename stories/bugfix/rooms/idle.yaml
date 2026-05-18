@@ -30,7 +30,24 @@ states:
       Mode:      {{ world.bugfix_mode }} bugfix, judge_mode={{ world.judge_mode }}
 
       Actions: start, quick_fix, skip_to_pr, full_pipeline, change_ticket, quit, look.
-    relevant_world: [ticket_id, ticket_title, bugfix_mode, judge_mode, workspace_id]
+    relevant_world: [ticket_id, ticket_title, bugfix_mode, judge_mode, workspace_id, reproduction_artifact]
+    # Auto-start when entered fresh with a ticket loaded. The
+    # operator who lands here from dev-story's `go_bugfix` / `drive`
+    # / `tickets → pick → bugfix` chain has ALREADY chosen to start;
+    # forcing them to type `start` again was needless friction the
+    # dogfood loop made obvious. The guard excludes:
+    #   - ticket_id empty: nothing to work on (standalone bugfix
+    #     scenarios that start at idle without a ticket).
+    #   - reproduction_artifact already set: a restart_from has
+    #     bounced us back here mid-pipeline; the operator wants to
+    #     dwell, not auto-restart.
+    # Flow fixtures that seed initial_state=idle bypass on_enter
+    # entirely (seedInitialState writes events directly), so the
+    # `start_from_idle` / `quick_fix_from_idle` / `skip_to_pr_from_idle`
+    # contract tests still observe the parked state.
+    on_enter:
+      - emit_intent: start
+        when: "world.ticket_id != '' && (world.reproduction_artifact.summary_title == nil || world.reproduction_artifact.summary_title == '')"
     on:
       start:
         - target: reproducing_executing

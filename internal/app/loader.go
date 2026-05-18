@@ -709,10 +709,23 @@ func collectStatePaths(prefix string, states map[string]*State, out map[string]s
 func collectStateOnKeys(prefix string, states map[string]*State, out map[string]map[string]struct{}) {
 	for name, s := range states {
 		path := joinPath(prefix, name)
-		if s != nil && len(s.On) > 0 {
-			set := make(map[string]struct{}, len(s.On))
+		if s != nil && (len(s.On) > 0 || len(s.IntentAliases) > 0) {
+			set := make(map[string]struct{}, len(s.On)+len(s.IntentAliases))
 			for intentName := range s.On {
 				set[intentName] = struct{}{}
+			}
+			// Also count IntentAliases entries — they're the author-written
+			// intent names BEFORE the import rewriter renamed the on: arc
+			// (e.g. `start` was the name in stories/bugfix/rooms/idle.yaml
+			// and became `core__bf__start` after the dev-story → kitsoki-dev
+			// fold). The runtime emit_intent dispatcher
+			// (machine.resolveEmittedIntentName) walks IntentAliases at
+			// dispatch time to honour the original name, so the static
+			// validator should accept the same set of names — otherwise an
+			// imported room's own on_enter `emit_intent: <local-name>` fails
+			// to load through the fold while working standalone.
+			for aliasName := range s.IntentAliases {
+				set[aliasName] = struct{}{}
 			}
 			out[path] = set
 		}
