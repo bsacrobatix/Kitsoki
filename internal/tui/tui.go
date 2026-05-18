@@ -544,6 +544,16 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		opt(&m)
 	}
 
+	// Print a one-time startup header into scrollback (location bar
+	// styled like the legacy top status row). Subsequent content
+	// appends below it; the header scrolls off naturally as the
+	// transcript grows — Claude Code's model. Skipped when the
+	// location is empty (pre-first-transition).
+	m.location.theme = m.currentTheme()
+	if header := strings.TrimSpace(m.location.View()); header != "" {
+		m.transcript.pending = append(m.transcript.pending, m.location.View())
+	}
+
 	// Show initial view in transcript. When the root state's view is a
 	// typed element-array, prefer AppendSystemTyped so the elements
 	// dispatcher renders fresh at viewport width — feeding the
@@ -725,6 +735,12 @@ func (m RootModel) Init() tea.Cmd {
 	if m.jobStore != nil {
 		cmds = append(cmds, m.scheduleInboxPoll(2*time.Second))
 	}
+	// The location-bar header + seeded initial view print on the
+	// first Update — NewRootModel populates transcript.pending and
+	// the Update wrapper flushes it via tea.Println. We don't flush
+	// from Init because Init runs on a value copy of the model;
+	// any pending mutation here wouldn't clear the source's slice
+	// and we'd double-print on the first Update.
 	return tea.Batch(cmds...)
 }
 
@@ -767,8 +783,25 @@ func (m RootModel) pollInbox() tea.Msg {
 	return inboxRefreshed{notifications: ns}
 }
 
-// Update implements tea.Model.
+// Update implements tea.Model. Wraps updateInner so any
+// transcript.Append* calls queued by the inner handler are flushed
+// to scrollback via tea.Println before returning.
 func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	nm, cmd := m.updateInner(msg)
+	if rm, ok := nm.(RootModel); ok {
+		if flush := rm.transcript.FlushPending(); flush != nil {
+			if cmd == nil {
+				cmd = flush
+			} else {
+				cmd = tea.Batch(cmd, flush)
+			}
+		}
+		return rm, cmd
+	}
+	return nm, cmd
+}
+
+func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// If slot-filling is active, route to clarify model first.
 	if m.mode == ModeSlotFilling {
 		return m.updateSlotFilling(msg)
@@ -1171,13 +1204,13 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Scroll keys forward to the transcript viewport so prior turns can be
-	// re-read. Allowed in every mode (including ModeAwaitingLLM) because
-	// scrollback never mutates state.
+	// Scroll keys (Shift+↑/↓, Ctrl+U/D/B/F, PgUp/PgDn) used to drive
+	// the in-app viewport. With the no-alt-screen design, the
+	// terminal's native scrollback owns scroll — wheel, Cmd+↑, the
+	// terminal's own keybindings. We swallow the keys here so they
+	// don't fall through to the textarea and insert characters.
 	if isScrollKey(msg) {
-		var cmd tea.Cmd
-		m.transcript, cmd = m.transcript.Update(msg)
-		return m, cmd
+		return m, nil
 	}
 
 	// Alt+Enter inserts a literal newline into the textarea — short-
@@ -3438,54 +3471,21 @@ func (m RootModel) View() string {
 		return "Goodbye!\n"
 	}
 
-	// /world dedicated view fully replaces the chat pane until the
-	// user dismisses it (q / Esc). The chat keeps running underneath
-	// — only the View() output is swapped (single-pane-tui §"Phase 1.5").
+	// /world dedicated view fully replaces the bottom region until
+	// the user dismisses it (q / Esc). The chat keeps running
+	// underneath in scrollback (single-pane-tui §"Phase 1.5").
 	if m.mode == ModeWorldView {
 		return m.worldView.View()
 	}
 
 	// Sync the textarea's rendered height to its current value before
 	// rendering. resize() — which sets the initial height — only fires
-	// on WindowSizeMsg, not on every keystroke; without this re-sync,
-	// typing past wrap would cause the textarea's internal viewport
-	// to scroll vertically instead of growing the rendered block.
-	// We're a value receiver so mutations here only affect this
-	// View() snapshot.
-	//
-	// We ALSO shrink the transcript pane by the same delta so the
-	// total rendered output stays within the terminal's row budget.
+	// on WindowSizeMsg, not on every keystroke.
 	promptH := promptVisualHeight(m.prompt.Value(), m.prompt.Width())
 	m.prompt.SetHeight(promptH)
-	const minTranscriptViewport = 3
-	if promptH > 1 {
-		shrink := promptH - 1
-		newVp := m.transcript.vp.Height - shrink
-		if newVp < minTranscriptViewport {
-			newVp = minTranscriptViewport
-		}
-		actualShrink := m.transcript.vp.Height - newVp
-		m.transcript.SetHeightOnly(
-			m.transcript.height-actualShrink,
-			newVp,
-		)
-	}
 
-	// Location bar (full width). The active room's theme flows
-	// through to the bar's lipgloss style so per-room theme swaps
-	// (meta entry, author-declared theme:) are visible up here too,
-	// not just inside the transcript blocks.
-	m.location.theme = m.currentTheme()
-	locationBar := m.location.View()
-
-	// Single-pane redesign (phase 3): the transcript fills the full
-	// terminal width. The menu and inbox sub-models keep their data
-	// (read by /actions and /inbox) but their View() output is no
-	// longer composed into the body.
-	body := m.transcript.View()
-
-	// Action-required banner above the prompt is preserved — it's
-	// the one always-on inbox signal that doesn't need a panel.
+	// Action-required banner above the prompt — one always-on inbox
+	// signal that doesn't need a panel.
 	var bannerLine string
 	if banner := m.inbox.ActionRequiredBanner(); banner != "" {
 		bannerLine = banner
@@ -3541,14 +3541,19 @@ func (m RootModel) View() string {
 		promptLine = m.prompt.View()
 	}
 
-	// Two-line framework footer (single-pane-tui §"Mode visualization
-	// and footer"): line 1 is the framework default — room, state,
-	// mode, queue depth, unread badge. Line 2 is the story/room
-	// pongo2 template (empty by default; phase 6 ships only the
-	// framework line and a placeholder).
+	// Two-line framework footer above the prompt: room · state ·
+	// mode · queue depth · unread badge on line 1; story/room
+	// pongo2 template on line 2 (empty by default).
 	footer := m.renderFooter()
 
-	parts := []string{locationBar, body}
+	// Bottom chrome only — historic entries print to scrollback via
+	// tea.Println (transcript.FlushPending), so the View() footprint
+	// is just the live indicator + footer + prompt. The terminal's
+	// native scroll walks history.
+	var parts []string
+	if live := m.transcript.LiveLine(); live != "" {
+		parts = append(parts, live)
+	}
 	if bannerLine != "" {
 		parts = append(parts, bannerLine)
 	}

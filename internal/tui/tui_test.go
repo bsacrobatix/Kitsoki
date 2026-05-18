@@ -67,37 +67,43 @@ func buildModel(t *testing.T, orch *orchestrator.Orchestrator, sid app.SessionID
 	return m
 }
 
-// processCommands runs all synchronous commands until exhausted.
-// It handles tea.BatchMsg by processing each sub-command sequentially.
-// Spinner tick messages are skipped since they only drive animation.
+// processCommands runs all synchronous commands until exhausted. It
+// flattens nested tea.BatchMsg values by maintaining a queue of
+// pending cmds (FIFO) rather than tracking only the latest — without
+// that, a batch like Batch(asyncTurn, printLines) would discard the
+// turnOutcomeMsg's downstream Println cmds because each iteration
+// overwrites lastCmd. Spinner ticks are skipped (pure animation).
 func processCommands(m tea.Model, cmd tea.Cmd, maxDepth int) tea.Model {
-	for i := 0; i < maxDepth && cmd != nil; i++ {
-		msg := cmd()
-		if msg == nil {
-			cmd = nil
-			break
-		}
-		// Handle BatchMsg: process each sub-command sequentially.
-		if batch, ok := msg.(tea.BatchMsg); ok {
-			var lastCmd tea.Cmd
-			for _, subCmd := range batch {
-				if subCmd == nil {
-					continue
-				}
-				subMsg := subCmd()
-				if subMsg == nil {
-					continue
-				}
-				// Skip spinner tick messages (pure animation, not meaningful for tests).
-				if isSpinnerTick(subMsg) {
-					continue
-				}
-				m, lastCmd = m.Update(subMsg)
-			}
-			cmd = lastCmd
+	queue := []tea.Cmd{cmd}
+	for i := 0; i < maxDepth && len(queue) > 0; i++ {
+		next := queue[0]
+		queue = queue[1:]
+		if next == nil {
 			continue
 		}
-		m, cmd = m.Update(msg)
+		msg := next()
+		if msg == nil {
+			continue
+		}
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			// Enqueue every sub-cmd so its produced message lands
+			// in m.Update too (and any downstream cmd makes it onto
+			// the queue).
+			for _, subCmd := range batch {
+				if subCmd != nil {
+					queue = append(queue, subCmd)
+				}
+			}
+			continue
+		}
+		if isSpinnerTick(msg) {
+			continue
+		}
+		var newCmd tea.Cmd
+		m, newCmd = m.Update(msg)
+		if newCmd != nil {
+			queue = append(queue, newCmd)
+		}
 	}
 	return m
 }
@@ -329,11 +335,13 @@ func TestTUISlashFreeformAndOnpath(t *testing.T) {
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
 
-	// /freeform → mode should change to off-path.
+	// /freeform → mode should change to off-path. Single-pane redesign
+	// signals off-path via the footer's mode label + the prompt's "#"
+	// prefix; the legacy full-screen banner is gone.
 	m = runTurnBlocking(t, m, "/freeform")
 	view := m.View()
-	require.Contains(t, view, "off the path",
-		"off-path banner should appear after /freeform")
+	require.Contains(t, view, "off-path",
+		"footer should advertise off-path mode after /freeform")
 	require.Equal(t, tuipkg.ModeOffPath, extractMode(t, m),
 		"expected ModeOffPath after /freeform")
 
@@ -1170,36 +1178,20 @@ func TestMouseWheelMovesViewport(t *testing.T) {
 		"wheel-up should scroll transcript up (offset went %d → %d)", before, after)
 }
 
-// TestScrollKeyMovesViewport asserts that sending a PgUp keypress to the
-// root model moves the transcript viewport up when there is scrollable
-// content, i.e. the scroll keys are actually routed to the viewport and not
-// swallowed by the prompt.
-func TestScrollKeyMovesViewport(t *testing.T) {
+// TestScrollKeysAreNoOps locks the post-refactor contract: the
+// in-app viewport scroll is gone. Without alt-screen the terminal's
+// native scrollback owns scroll (mouse wheel, Cmd+↑). The PgUp/PgDn
+// + Shift+↑/↓ + Ctrl+U/D/B/F keys are swallowed by routeKey so they
+// don't fall through to the textarea as literal characters.
+func TestScrollKeysAreNoOps(t *testing.T) {
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
+	rm, _ := tuipkg.ExtractRootModel(m)
 
-	rm, ok := tuipkg.ExtractRootModel(m)
-	require.True(t, ok)
-
-	// Force the transcript viewport to a small height, then append enough
-	// content that scrolling is meaningful.
-	tuipkg.SetTranscriptSizeForTest(&rm, 60, 6)
-	for i := 0; i < 40; i++ {
-		tuipkg.AppendTranscriptForTest(&rm, "history line")
-	}
-
-	require.True(t, tuipkg.TranscriptAtBottom(rm),
-		"expected to start at bottom after appends (offset=%d)",
-		tuipkg.TranscriptYOffset(rm))
-
-	before := tuipkg.TranscriptYOffset(rm)
-
-	// Deliver a PgUp keypress through the root model's Update path.
-	out, _ := (tea.Model(rm)).Update(tea.KeyMsg{Type: tea.KeyPgUp})
-	rm2, ok := tuipkg.ExtractRootModel(out)
-	require.True(t, ok)
-	after := tuipkg.TranscriptYOffset(rm2)
-
-	require.Less(t, after, before,
-		"PgUp should scroll transcript up (offset went %d → %d)", before, after)
+	// PgUp shouldn't insert into the prompt and shouldn't error.
+	tuipkg.SetPromptValue(&rm, "")
+	out, _ := tea.Model(rm).Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	rm2, _ := tuipkg.ExtractRootModel(out)
+	require.Equal(t, "", tuipkg.GetPromptValue(rm2),
+		"PgUp should not insert into the prompt textarea")
 }

@@ -545,13 +545,13 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				metaSink := tui.NewMetaStreamSink()
 				tuiOptions = append(tuiOptions, tui.WithMetaStreamSink(metaSink))
 				rootModel := tui.NewRootModel(orch, sid, appPath, effectiveInitialView, tuiOptions...)
-				// Single-pane redesign (phase 5): no tea.WithMouseCellMotion.
-				// Mouse capture is gone — native terminal text selection works
-				// without modifiers, and keyboard scrolling
-				// (Shift+↑/↓, Ctrl+U/D/B/F) is unchanged.
-				p := tea.NewProgram(rootModel,
-					tea.WithAltScreen(),
-				)
+				// Single-pane redesign: no alt-screen + no mouse capture.
+				// Output prints into the terminal's normal scrollback so
+				// the header scrolls off naturally as content grows
+				// (Claude Code's model). The View() output is just the
+				// bottom chrome — footer + prompt — which Bubble Tea
+				// re-renders in place at the cursor row.
+				p := tea.NewProgram(rootModel)
 				metaSink.Attach(p)
 				defer metaSink.Detach()
 				detach := tui.AttachOrchestratorObserver(orch, p, sid)
@@ -672,12 +672,11 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			metaSink := tui.NewMetaStreamSink()
 			tuiOptions = append(tuiOptions, tui.WithMetaStreamSink(metaSink))
 			rootModel := tui.NewRootModel(orch, sid, appPath, initialView, tuiOptions...)
-			// Single-pane redesign (phase 5): mouse capture removed —
-			// native terminal text selection works without modifiers,
-			// keyboard scrolling (Shift+↑/↓, Ctrl+U/D/B/F) unchanged.
-			p := tea.NewProgram(rootModel,
-				tea.WithAltScreen(),
-			)
+			// Single-pane redesign: no alt-screen + no mouse capture.
+			// Output prints to normal scrollback so the terminal's
+			// native scroll (wheel / Cmd+↑) walks history; the prompt
+			// re-renders at the bottom in place.
+			p := tea.NewProgram(rootModel)
 			metaSink.Attach(p)
 			defer metaSink.Detach()
 			// Bridge orchestrator background-turn notifications into

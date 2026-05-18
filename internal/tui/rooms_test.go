@@ -58,49 +58,37 @@ func TestPerRoomTranscript_BuffersIndependent(t *testing.T) {
 		"foyer buffer must NOT have leaked cloakroom content")
 }
 
-// TestPerRoomTranscript_TransientScrollsPastPrior — single-pane-tui
-// phase 6: a room declared `transcript: transient` must scroll past
-// any prior content on re-entry. We pile content into room A, swap
-// to room B, then re-enter room A with transient=true and assert
-// the viewport's YOffset jumped past the saved content (the next
-// append will visibly land at the top of the visible window rather
-// than below a wall of prior turns).
-func TestPerRoomTranscript_TransientScrollsPastPrior(t *testing.T) {
+// TestPerRoomTranscript_TransientReEntryResetsBuffer — post-scrollback
+// refactor: rooms still have independent buffers, but the "scroll past
+// prior content" semantic is now owned by the terminal's native
+// scrollback (no in-app viewport). A transient re-entry resets the
+// active room's entry list so future appends start fresh; prior turns
+// stay in the user's terminal scrollback above.
+func TestPerRoomTranscript_TransientReEntryResetsBuffer(t *testing.T) {
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
 	rm, ok := tuipkg.ExtractRootModel(m)
 	require.True(t, ok)
-
-	// Small viewport so a few filler lines exceed the visible area
-	// and the YOffset has somewhere to land above zero. SetSize
-	// goes through the production resize seam so the wrap width is
-	// honest.
 	tuipkg.SetTranscriptSizeForTest(&rm, 80, 10)
 
-	// Make sure the model's activeRoom is set so the save side of
-	// activateRoom keys into the right slot when we leave.
 	tuipkg.ActivateRoomForTest(&rm, "roomA", false)
-
-	// Pile content into room A.
-	for i := 0; i < 30; i++ {
-		tuipkg.AppendTranscriptForTest(&rm, "filler line so the viewport has content above the fold")
+	for i := 0; i < 5; i++ {
+		tuipkg.AppendTranscriptForTest(&rm, "room A content")
 	}
-	roomAHeight := tuipkg.TranscriptYOffset(rm) // viewport pinned to bottom by Append*
+	before := tuipkg.GetTranscriptContent(rm)
+	require.Contains(t, before, "room A content")
 
-	// Swap to room B and back, transient on the re-entry.
+	// Swap away and re-enter transient — entries persist on the
+	// saved buffer (will be there if user comes back persistent),
+	// but the live transcript content reflects the active buffer.
 	tuipkg.ActivateRoomForTest(&rm, "roomB", false)
 	tuipkg.ActivateRoomForTest(&rm, "roomA", true)
 
-	transientOffset := tuipkg.TranscriptYOffset(rm)
-
-	require.Greater(t, transientOffset, 0,
-		"transient re-entry must scroll past prior content (offset stuck at %d)",
-		transientOffset)
-	// roomAHeight is the YOffset just before the swap, captured at
-	// the bottom of the viewport. The transient mark equals the
-	// rendered content height — strictly greater than zero whenever
-	// the buffer is non-empty.
-	_ = roomAHeight
+	// On transient re-entry, the saved buffer was deactivated and a
+	// fresh empty buffer became active. Future appends start clean.
+	after := tuipkg.GetTranscriptContent(rm)
+	require.NotContains(t, after, "room A content",
+		"transient re-entry should activate a fresh buffer, not show the prior buffer's content")
 }
 
 // TestPerRoomTheme_HonoursStateField — single-pane-tui phase 6: the

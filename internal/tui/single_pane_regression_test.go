@@ -115,29 +115,25 @@ func TestQueueClearsOnMetaEntry(t *testing.T) {
 // ─── Live routing tier events (Phase 2) ──────────────────────────────────
 
 // TestRoutingTierMissUpdatesTranscript asserts an inbound
-// RoutingTierMissMsg advances the live routing entry's phase label.
-// We drive a real submit first so submitInput creates the live entry
-// — without one, UpdateLive correctly no-ops.
+// RoutingTierMissMsg advances the live routing line. Post-scrollback
+// refactor: the live line lives on m.transcript.liveLine (rendered
+// in View() above the prompt), not in the entries slice — so we
+// check LiveLineForTest, not GetTranscriptContent.
 func TestRoutingTierMissUpdatesTranscript(t *testing.T) {
 	t.Parallel()
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
 	rm, _ := tuipkg.ExtractRootModel(m)
 
-	// Submit free-text that won't match deterministically so the
-	// LLM-phase live entry stays alive while we inject a miss event.
-	// Don't process the resulting cmd — we want the in-flight state.
 	tuipkg.SetPromptValue(&rm, "something nonexistent")
 	m2, _ := tea.Model(rm).Update(tea.KeyMsg{Type: tea.KeyEnter})
 
-	// Synthesise the deterministic-miss event the routingObserver
-	// would otherwise emit.
 	m3, _ := m2.Update(tuipkg.RoutingTierMissMsg{Tier: tuipkg.TierDeterministic})
 	rm, _ = tuipkg.ExtractRootModel(m3)
-	content := tuipkg.GetTranscriptContent(rm)
+	live := tuipkg.LiveLineForTest(rm)
 	require.True(t,
-		strings.Contains(content, "routing") || strings.Contains(content, "synonyms"),
-		"transcript should reflect routing tier advance; got:\n%s", content)
+		strings.Contains(live, "routing") || strings.Contains(live, "synonyms"),
+		"live line should reflect routing tier advance; got: %q", live)
 }
 
 // TestRoutingTierHitSettlesInTranscript asserts a hit message

@@ -462,6 +462,13 @@ func SetInputQueueForTest(m *RootModel, items ...string) {
 	m.inputQueue = append([]string(nil), items...)
 }
 
+// LiveLineForTest exposes the current in-flight live line that View()
+// renders just above the prompt. Empty when nothing live is showing.
+// Used by inline-routing tests that previously asserted on the live
+// entry's body — the entry no longer lives in m.entries, only in
+// m.liveLine.
+func LiveLineForTest(m RootModel) string { return m.transcript.LiveLine() }
+
 // BackgroundCompletions returns a copy of the background-completion
 // log keyed by /jump. Newest-first.
 func BackgroundCompletions(m RootModel) []string {

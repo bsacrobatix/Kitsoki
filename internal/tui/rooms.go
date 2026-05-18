@@ -167,13 +167,14 @@ func (m *RootModel) activateRoom(room app.StatePath, transient bool) {
 	m.activeRoom = room
 
 	if transient {
-		// Scroll past whatever was there on entry so the new content
-		// lands at the top of the visible window. Matches the
-		// ScrollToLine pattern exitMetaMode already uses for the
-		// meta-mode mark; here it's parameterised by the incoming
-		// room's transcript declaration.
-		mark := m.transcript.ContentHeight()
-		m.transcript.ScrollToLine(mark)
+		// Post-scrollback refactor: transient re-entry means "fresh
+		// start". Prior content is already in the user's terminal
+		// scrollback (printed via tea.Println at the time), so the
+		// active buffer drops its entries — the next append lands
+		// in a clean buffer that visually starts at the prompt.
+		m.transcript.entries = nil
+		m.transcript.pending = nil
+		m.transcript.liveLine = ""
 	}
 }
 

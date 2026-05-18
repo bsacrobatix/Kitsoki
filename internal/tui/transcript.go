@@ -79,22 +79,35 @@ type transcriptEntry struct {
 	appRenderer *render.AppRenderer
 }
 
-// transcriptModel is the append-only scrollable history pane.
+// transcriptModel is the append-only chat history. Historic entries
+// are emitted to the terminal's scrollback via tea.Println (queued in
+// `pending` and flushed by the root model on each Update), so the
+// terminal's native scroll (wheel, Cmd+↑) walks history. Only the
+// in-flight `liveLine` (routing-status placeholder) is rendered as
+// part of View() — settled lines move into pending and clear
+// liveLine.
 type transcriptModel struct {
-	entries  []transcriptEntry
+	// entries keeps the rendered history for AllContent() / journal
+	// reconstruction / resume. NOT consulted by View().
+	entries []transcriptEntry
+	// pending is the queue of newly-appended entries waiting to print
+	// to scrollback. The root model drains it after each Update via
+	// FlushPending().
+	pending []string
+	// liveLine is the single in-place-updatable bottom line rendered
+	// above the prompt while routing/etc. is in flight. Empty when
+	// nothing live is showing.
+	liveLine string
+
+	// Legacy viewport — retained only because resume/replay paths and
+	// the world view still touch SetSize. No longer rendered into the
+	// main chat View().
 	vp       viewport.Model
 	offPath  bool
 	width    int
 	height   int
 	renderer *glamour.TermRenderer
 	ready    bool
-	// liveEntryIdx points at the in-place-updatable entry created by
-	// AppendLive / updated by UpdateLive. -1 when no live entry is
-	// active. Used by the inline routing-status block: submitInput
-	// appends a placeholder; tier-event handlers replace it in place;
-	// settlement clears liveEntryIdx so subsequent live entries don't
-	// stomp the settled record.
-	liveEntryIdx int
 }
 
 func newTranscriptModel(width, height int) transcriptModel {
@@ -125,14 +138,46 @@ func newTranscriptModel(width, height int) transcriptModel {
 	}
 
 	return transcriptModel{
-		vp:           vp,
-		width:        width,
-		height:       height,
-		renderer:     renderer,
-		ready:        true,
-		liveEntryIdx: -1,
+		vp:       vp,
+		width:    width,
+		height:   height,
+		renderer: renderer,
+		ready:    true,
 	}
 }
+
+// queue marks rendered content for emission to scrollback on the next
+// FlushPending. Always called alongside an entries append so AllContent
+// (journal reconstruction, test inspection) stays consistent.
+func (m *transcriptModel) queue(body string) {
+	if body == "" {
+		return
+	}
+	m.pending = append(m.pending, body)
+}
+
+// FlushPending returns a tea.Cmd that emits every queued entry via
+// tea.Println (printed above the live bottom region) and clears the
+// queue. Returns nil when there's nothing to flush.
+//
+// Joins the queue into a single tea.Println call rather than batching
+// per-entry println cmds — the test harness's processCommands doesn't
+// recurse into nested tea.BatchMsg values, so a nested batch would
+// silently drop prints. One join, one println, no batch nesting.
+func (m *transcriptModel) FlushPending() tea.Cmd {
+	if len(m.pending) == 0 {
+		return nil
+	}
+	items := m.pending
+	m.pending = nil
+	joined := strings.Join(items, "\n")
+	return tea.Println(joined)
+}
+
+// LiveLine returns the currently-displayed in-flight line, or "" when
+// nothing live is showing. RootModel.View() places this just above
+// the prompt while it's non-empty.
+func (m *transcriptModel) LiveLine() string { return m.liveLine }
 
 // AppendUserInputEcho writes the immediate-on-Enter echo for the user's
 // submitted input. The transcript model becomes the source of truth for
@@ -148,8 +193,7 @@ func (m *transcriptModel) AppendUserInputEcho(input string) {
 	}
 	header := turnHeaderStyle.Render("> " + input)
 	m.entries = append(m.entries, transcriptEntry{body: header})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(header)
 }
 
 // AppendAgentBody appends a body-only entry — no "> input" header,
@@ -160,12 +204,9 @@ func (m *transcriptModel) AppendAgentBody(view string) {
 	if view == "" {
 		return
 	}
-	m.entries = append(m.entries, transcriptEntry{
-		body:   m.renderViewSource(view),
-		source: view,
-	})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	body := m.renderViewSource(view)
+	m.entries = append(m.entries, transcriptEntry{body: body, source: view})
+	m.queue(body)
 }
 
 // AppendAgentBodyTyped is AppendAgentBody's typed-view variant. Mirrors
@@ -183,48 +224,42 @@ func (m *transcriptModel) AppendAgentBodyTyped(fallbackView string, typed *app.V
 		renderEnv:   env,
 		appRenderer: rr,
 	})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(body)
 }
 
-// AppendLive appends a body-only entry whose contents can be replaced
-// in place via UpdateLive, until FinalizeLive is called. The caller
-// owns the body string — it's stored verbatim (already-styled), so
-// inline-routing renderers and any future live blocks can swap in
-// pre-formatted lines without going through Glamour.
-//
-// Returns the entry index, which is also recorded as the model's
-// liveEntryIdx so UpdateLive doesn't need an explicit reference.
+// AppendLive sets the in-flight bottom-line content that View() renders
+// just above the prompt. Until FinalizeLive lands, UpdateLive may
+// replace the line in-place. The body is NOT queued for scrollback —
+// it's a live indicator, not a historic entry. Returns 0 for API
+// compatibility with old callers (was the legacy entry index).
 func (m *transcriptModel) AppendLive(body string) int {
-	m.entries = append(m.entries, transcriptEntry{body: body})
-	m.liveEntryIdx = len(m.entries) - 1
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
-	return m.liveEntryIdx
+	m.liveLine = body
+	return 0
 }
 
-// UpdateLive replaces the body of the currently live entry, if any.
-// No-op when there is no live entry — defensive against late-arriving
-// tier events that fire after settlement.
+// UpdateLive replaces the in-flight line. No-op when no live line is
+// active — defensive against late-arriving tier events that fire
+// after settlement.
 func (m *transcriptModel) UpdateLive(body string) {
-	if m.liveEntryIdx < 0 || m.liveEntryIdx >= len(m.entries) {
+	if m.liveLine == "" {
 		return
 	}
-	m.entries[m.liveEntryIdx].body = body
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.liveLine = body
 }
 
-// FinalizeLive replaces the live entry's body one final time and
-// clears liveEntryIdx so the entry stays in the transcript as a
-// permanent record. Pass an empty body to keep the current contents.
+// FinalizeLive turns the in-flight line into a permanent scrollback
+// entry: queues `body` (or the current live line if body is empty)
+// for tea.Println on the next flush, then clears the live slot.
 func (m *transcriptModel) FinalizeLive(body string) {
-	if m.liveEntryIdx >= 0 && m.liveEntryIdx < len(m.entries) && body != "" {
-		m.entries[m.liveEntryIdx].body = body
-		m.vp.SetContent(m.render())
-		m.vp.GotoBottom()
+	settled := body
+	if settled == "" {
+		settled = m.liveLine
 	}
-	m.liveEntryIdx = -1
+	m.liveLine = ""
+	if settled != "" {
+		m.entries = append(m.entries, transcriptEntry{body: settled})
+		m.queue(settled)
+	}
 }
 
 // AppendBlock appends a pre-rendered styled multi-line body verbatim —
@@ -235,8 +270,7 @@ func (m *transcriptModel) AppendBlock(body string) {
 		return
 	}
 	m.entries = append(m.entries, transcriptEntry{body: body})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(body)
 }
 
 func (m transcriptModel) Init() tea.Cmd { return nil }
@@ -295,12 +329,12 @@ func (m *transcriptModel) AppendSystem(body string) {
 		m.AppendSlashOutput(body)
 		return
 	}
+	rendered := m.renderViewSource(body)
 	m.entries = append(m.entries, transcriptEntry{
-		body:   m.renderViewSource(body),
+		body:   rendered,
 		source: body,
 	})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(rendered)
 }
 
 // AppendSlashOutput renders body in the blue slash-command style and
@@ -316,9 +350,9 @@ func (m *transcriptModel) AppendSlashOutput(body string) {
 		}
 		sb.WriteString(slashOutputStyle.Render(line))
 	}
-	m.entries = append(m.entries, transcriptEntry{body: sb.String()})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	rendered := sb.String()
+	m.entries = append(m.entries, transcriptEntry{body: rendered})
+	m.queue(rendered)
 }
 
 // SetSize resizes the viewport and rebuilds the Glamour renderer at the new
@@ -384,15 +418,15 @@ func (m *transcriptModel) SetHeightOnly(outerHeight, viewportHeight int) {
 // glamour.WithPreservedNewLines() so hand-wrapped views don't get reflowed
 // into single paragraphs.
 func (m *transcriptModel) AppendTurn(userInput, view string) {
-	header := "> " + userInput
+	header := turnHeaderStyle.Render("> " + userInput)
 	body := m.renderViewSource(view)
 	m.entries = append(m.entries, transcriptEntry{
-		header: header,
+		header: "> " + userInput,
 		body:   body,
 		source: view,
 	})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(header)
+	m.queue(body)
 }
 
 // AppendTurnTyped is the typed-view variant of AppendTurn (Issue 4 /
@@ -408,8 +442,6 @@ func (m *transcriptModel) AppendTurnTyped(userInput, fallbackView string, typed 
 	header := "> " + userInput
 	body := m.renderViewWith(*typed, env, rr)
 	if body == "" {
-		// Fallback to the pre-rendered string (covers views whose typed
-		// dispatch returned "" — e.g. extends/blocks today).
 		body = m.renderViewSource(fallbackView)
 	}
 	m.entries = append(m.entries, transcriptEntry{
@@ -420,8 +452,8 @@ func (m *transcriptModel) AppendTurnTyped(userInput, fallbackView string, typed 
 		renderEnv:   env,
 		appRenderer: rr,
 	})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(turnHeaderStyle.Render(header))
+	m.queue(body)
 }
 
 // AppendSystemTyped is AppendSystem's typed-view variant. Used for
@@ -439,8 +471,7 @@ func (m *transcriptModel) AppendSystemTyped(fallbackView string, typed *app.View
 		renderEnv:   env,
 		appRenderer: rr,
 	})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(body)
 }
 
 // renderView styles a parsed app.View for the transcript pane. It is
@@ -610,10 +641,10 @@ func (m *transcriptModel) AppendOffPathAnswer(userInput, answer string) {
 	}
 	if userInput != "" {
 		entry.header = "> " + userInput
+		m.queue(turnHeaderStyle.Render(entry.header))
 	}
 	m.entries = append(m.entries, entry)
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(body)
 }
 
 // AppendMetaList appends the /meta list output as one transcript
@@ -711,9 +742,9 @@ func (m *transcriptModel) AppendStyledTable(title string, headers []string, rows
 		}
 	}
 	sb.WriteString(metaListHeaderStyle.Render(strings.Repeat("─", totalWidth)))
-	m.entries = append(m.entries, transcriptEntry{body: sb.String()})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	rendered := sb.String()
+	m.entries = append(m.entries, transcriptEntry{body: rendered})
+	m.queue(rendered)
 }
 
 func runeLen(s string) int { return len([]rune(s)) }
@@ -766,8 +797,7 @@ func (m *transcriptModel) AppendMetaStreamLine(text string) {
 		Italic(true).
 		Render("→ " + text)
 	m.entries = append(m.entries, transcriptEntry{body: body})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(body)
 }
 
 // AppendError appends an error/rejection message. The leading arrow
@@ -778,13 +808,14 @@ func (m *transcriptModel) AppendMetaStreamLine(text string) {
 // redesign already echoed the user's input via AppendUserInputEcho,
 // so a second header would be a duplicate.
 func (m *transcriptModel) AppendError(userInput, msg string) {
-	entry := transcriptEntry{body: errorStyle.Render("→ " + msg)}
+	body := errorStyle.Render("→ " + msg)
+	entry := transcriptEntry{body: body}
 	if userInput != "" {
 		entry.header = "> " + userInput
+		m.queue(turnHeaderStyle.Render(entry.header))
 	}
 	m.entries = append(m.entries, entry)
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(body)
 }
 
 // AppendGuardHint appends a guard-failure hint. The leading arrow softens
@@ -797,8 +828,7 @@ func (m *transcriptModel) AppendGuardHint(hint string) {
 	}
 	body := guardHintStyle.Render("→ " + hint)
 	m.entries = append(m.entries, transcriptEntry{body: body})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(body)
 }
 
 // AppendClarification renders a friendly rejection: the user's input did
@@ -819,8 +849,7 @@ func (m *transcriptModel) AppendDisambig(body string) {
 	}
 	rendered := clarificationStyle.Render("→ " + body)
 	m.entries = append(m.entries, transcriptEntry{body: rendered})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(rendered)
 }
 
 func (m *transcriptModel) AppendClarification(userInput, message string) {
@@ -830,11 +859,11 @@ func (m *transcriptModel) AppendClarification(userInput, message string) {
 	var header string
 	if userInput != "" {
 		header = "> " + userInput
+		m.queue(turnHeaderStyle.Render(header))
 	}
 	body := clarificationStyle.Render(message)
 	m.entries = append(m.entries, transcriptEntry{header: header, body: body})
-	m.vp.SetContent(m.render())
-	m.vp.GotoBottom()
+	m.queue(body)
 }
 
 func (m *transcriptModel) render() string {
