@@ -60,3 +60,16 @@
 - oversight/silent-background LLM sessions watching the trace internally for certain patterns or insights to file bugs, improvement or knowledge, watch the transcript live, add configurable prompts to watch out for bad patterns and jump in with guidance (when the LLM ignores CLAUDE.md for example or some other annoying pattern).  it's possible to list/attach the sessions but not normally (behind some extra arg), and the only normal output is async artifacts like bugs, knowledge, etc... and then the user gets an inbox notification that a bg agent has created some artifact and they can review it.  self-improvement, bugs, new synonyms, etc... can all be done like this.  include non-LLM (script) actions that can also produce artifacts and notify the user based on some schedule/precursor or LLM pattern detection trigger (tell the LLM to find some pattern and when it does call a script that does some thing)
 - make sure full deterministic replay so we can do bugfix test runs w/o actually using LLM - capture git diffs, etc... for replayable scenarios (like we did PLTFRM-89912 ad infinitum)
 - llm conversation vs decision, separate interfaces, conversation/task work wouldn't be done by humans but decisions may be (and the decision schema may drive a form for example)
+- tests are slow
+- meta mode should work well with imported stories - understanding where each aspect is (if different repos especially)
+- each room has a separate transcript, there's a navigational reference text that mentions "you came from xxx you're working on yyy" or something, but the screen clears and the new room is near the top.  when going back to rooms you've already been in, there's an option to keep the room persistent - it can be either persistent or transient up to the story developer
+- chat window doesn't wrap - cuts off inputs
+- change the TUI to a single-pane, and focus on good presentation views and /commmands - add an /actions that lists the available actions, we already have /world, just print to the chat when an inbox item is received and add an /inbox command
+- each meta mode has its own color theme to visually distinguish
+- we never got rid of the world dump in the header...
+- dynamic visibility on items, so items can be hidden/shown based on role checks for example
+- back as standard navigation that authors don't hook up (it was just processed by claude to do something)
+- input scrolls instead of wraps to newline
+- repo-persisted workflow state - allow multiple people to collaborate but keep the state in the repo (or optionally in tickets I guess...)
+- we keep losing features... there was a / command listing that's now gone, and I thought the world file stuff was done too but it somehow reverted, text box scrolling is gone... the test suite must be garbage
+
