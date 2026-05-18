@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -61,47 +59,26 @@ func (m locationModel) Update(msg tea.Msg) (locationModel, tea.Cmd) {
 }
 
 func (m locationModel) View() string {
+	// Single-pane redesign §"Mode visualization": header is one
+	// short line. The full world dump, the turn counter, and the
+	// relevant-world bracketed bag all moved off — the footer
+	// carries ambient state (mode, queue, unread) and /world is the
+	// way to inspect the world. ideas.md:56,69 specifically called
+	// out the header world dump as "crowding everything"; this is
+	// the kill site.
 	var parts []string
-
-	// On/off-path indicator.
 	if m.offPath {
 		parts = append(parts, "○")
 	} else {
 		parts = append(parts, "●")
 	}
-
-	// Breadcrumb.
 	if m.loc.Breadcrumb != "" {
 		parts = append(parts, m.loc.Breadcrumb)
 	}
-
-	// State description.
 	if m.loc.StateDescription != "" {
-		parts = append(parts, "—")
-		parts = append(parts, m.loc.StateDescription)
+		parts = append(parts, "—", m.loc.StateDescription)
 	}
-
-	// Turn counter.
-	if m.loc.TurnNumber > 0 {
-		parts = append(parts, fmt.Sprintf("(turn %d)", m.loc.TurnNumber))
-	}
-
 	line := strings.Join(parts, " ")
-
-	// World context (compact).
-	if len(m.loc.RelevantWorld) > 0 {
-		keys := make([]string, 0, len(m.loc.RelevantWorld))
-		for k := range m.loc.RelevantWorld {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-
-		worldParts := make([]string, 0, len(keys))
-		for _, k := range keys {
-			worldParts = append(worldParts, fmt.Sprintf("%s=%v", k, m.loc.RelevantWorld[k]))
-		}
-		line += "  [" + strings.Join(worldParts, ", ") + "]"
-	}
 
 	style := locationStyle
 	if m.offPath {
