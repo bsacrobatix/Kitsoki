@@ -7,7 +7,7 @@
 #                   implementing → testing → done (skip reviewing +
 #                   validating). The mode flag drives the gate in
 #                   testing_awaiting_reply.accept.
-#   skip_to_pr    — jump straight into validating_executing with
+#   skip_to_pr    — jump straight into validating with
 #                   restart_from_stage="validate"; the operator (or a
 #                   parent story) signalled the change is trivial.
 #   full_pipeline — explicit default; sets bugfix_mode=full and starts
@@ -91,12 +91,12 @@ states:
           bf_autostart_attempted: true
     on:
       start:
-        - target: reproducing_executing
+        - target: reproducing
       # Walk the full 7-room pipeline. Explicit alias for `start` that
       # also pins bugfix_mode=full so a previously-set quick flag is
       # cleared. Autonomous callers prefer this for unambiguity.
       full_pipeline:
-        - target: reproducing_executing
+        - target: reproducing
           effects:
             - set:
                 bugfix_mode: "full"
@@ -105,16 +105,16 @@ states:
       # done_executing instead. Still walks reproducing → proposing →
       # implementing → testing so the artifact chain has a body.
       quick_fix:
-        - target: reproducing_executing
+        - target: reproducing
           effects:
             - set:
                 bugfix_mode: "quick"
-      # Skip directly into validating_executing; reproducing/proposing/
+      # Skip directly into validating; reproducing/proposing/
       # implementing/testing/reviewing don't run. restart_from_stage gets
       # the value "validate" for audit. Use when the operator already
       # has the fix in hand and just wants to re-validate / open the PR.
       skip_to_pr:
-        - target: validating_executing
+        - target: validating
           effects:
             - set:
                 bugfix_mode:        "full"

@@ -1,9 +1,9 @@
 # happy_quick_fix — quick_fix mode collapses the pipeline: reproducing →
 # proposing → implementing → testing → done (no reviewing, no validating).
 #
-# Proves the proposal §4.2 shortcut path. The first arm of
-# testing_awaiting_reply.accept checks `world.bugfix_mode == 'quick'` and
-# targets done_executing instead of reviewing_executing.
+# Proves the proposal §4.2 shortcut path. The first arm of testing's
+# accept arc checks `world.bugfix_mode == 'quick'` and targets done
+# instead of reviewing.
 #
 # Starting via `quick_fix` from idle sets bugfix_mode="quick".
 
@@ -49,33 +49,25 @@ host_handlers:
 turns:
   # quick_fix from idle — sets bugfix_mode="quick" and lands at reproducing.
   - intent: { name: quick_fix, slots: {} }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world:
       bugfix_mode: "quick"
 
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
   - intent: { name: accept, slots: {} }
-    expect_state: proposing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_awaiting_reply
+    expect_state: proposing
   - intent: { name: accept, slots: {} }
-    expect_state: implementing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_awaiting_reply
+    expect_state: implementing
+  - intent: { name: accept, slots: {} }
+    expect_state: testing
 
   # The mode-gated arm: accept skips reviewing + validating and lands at
-  # done_executing. (In full mode this same accept would go to
-  # reviewing_executing — see happy_human.)
+  # done. (In full mode this same accept would go to reviewing —
+  # see happy_human.)
   - intent: { name: accept, slots: {} }
-    expect_state: done_executing
+    expect_state: done
     expect_world:
       bugfix_mode: "quick"
 
-  - intent: { name: proceed, slots: {} }
-    expect_state: done_awaiting_reply
   - intent: { name: accept, slots: {} }
     expect_state: __exit__done
     expect_world:

@@ -3,7 +3,7 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: done_awaiting_reply
+initial_state: done
 initial_world:
   ticket_id:     "TKT-140"
   thread:        "TKT-140"

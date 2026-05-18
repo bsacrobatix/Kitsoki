@@ -34,41 +34,32 @@ host_handlers:
 
 turns:
   - intent: { name: start, slots: {} }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world:
       bugfix_mode: "full"
 
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
-
   # Operator switches mode mid-flow. quick_fix at the checkpoint is a
   # self-loop with the side-effect of flipping bugfix_mode; state holds
-  # at reproducing_awaiting_reply.
+  # at reproducing.
   - intent: { name: quick_fix, slots: {} }
-    expect_state: reproducing_awaiting_reply
+    expect_state: reproducing
     expect_world:
       bugfix_mode: "quick"
 
   # Continue: accept walks the pipeline; the quick gate fires at testing.
   - intent: { name: accept, slots: {} }
-    expect_state: proposing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_awaiting_reply
+    expect_state: proposing
   - intent: { name: accept, slots: {} }
-    expect_state: implementing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_awaiting_reply
+    expect_state: implementing
+  - intent: { name: accept, slots: {} }
+    expect_state: testing
 
-  # Quick-mode gate fires — go to done_executing, skipping reviewing/validating.
+  # Quick-mode gate fires — go to done, skipping reviewing/validating.
   - intent: { name: accept, slots: {} }
-    expect_state: done_executing
+    expect_state: done
     expect_world:
       bugfix_mode: "quick"
 
-  - intent: { name: proceed, slots: {} }
-    expect_state: done_awaiting_reply
   - intent: { name: accept, slots: {} }
     expect_state: __exit__done
 

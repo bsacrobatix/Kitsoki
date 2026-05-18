@@ -1,12 +1,18 @@
-# happy_llm — judge_mode=llm, LLM-judge fires at every checkpoint and
-# returns a confident verdict. The runtime's emit_intent: effect
-# auto-advances each checkpoint by typing the verdict's intent
-# (contract §6 step 4). End-to-end this proves:
+# happy_llm — judge_mode=llm, LLM-judge fires on every checkpoint's
+# on_enter and returns a confident verdict. The runtime's emit_intent
+# effect auto-advances each checkpoint by dispatching the verdict's
+# intent (contract §6 step 4). End-to-end this proves:
 #   - the `when:` guard on the judge invoke (it fires in llm mode)
 #   - the binding of llm_verdict (post host.oracle.ask_with_mcp)
 #   - the post-bind emit_intent dispatch (DispatchPostBindEmits)
-#     auto-fires `accept` at every _awaiting_reply so each `proceed`
-#     turn lands two states later than in happy_human.
+#     auto-fires `accept` in the SAME turn as the artifact oracle,
+#     because the judge now runs in the merged room's on_enter.
+#
+# Cascade behaviour: each `accept` lands at the next room, whose
+# on_enter fires the judge and emits accept again — collapsing
+# consecutive autonomous checkpoints into one user-fired turn.
+# The cascade ends at the first room with no judge in on_enter
+# (implementing, reviewing) where the auto-emit cannot fire.
 
 test_kind: flow
 app: ../app.yaml
@@ -35,13 +41,13 @@ host_handlers:
   host.local:
     data: { ok: true, log: "PASS: 12 tests", passed: 12, failed: 0 }
 
-  # In `llm` mode every _awaiting_reply also fires host.oracle.ask_with_mcp
-  # via the `judge_<phase>.md` prompt. The runtime can't yet branch the stub
-  # response on prompt (it returns the SAME Data for every call). So our
-  # stub returns a submitted: payload that satisfies BOTH the artifact
-  # schema AND the judge_verdict schema (verdict/intent/reason/confidence
-  # are additional fields the artifact schema ignores via
-  # additionalProperties: true).
+  # In `llm` mode every merged room ALSO fires host.oracle.ask_with_mcp
+  # via the `judge_<phase>.md` prompt from on_enter. The runtime can't
+  # branch the stub response on prompt (it returns the SAME Data for
+  # every call). So our stub returns a submitted: payload that
+  # satisfies BOTH the artifact schema AND the judge_verdict schema
+  # (verdict/intent/reason/confidence are additional fields the artifact
+  # schema ignores via additionalProperties: true).
   host.oracle.ask_with_mcp:
     data:
       stdout: ""
@@ -71,33 +77,22 @@ host_handlers:
         reason:     "Artifact looks complete and the confidence is high enough to advance."
 
 turns:
+  # start fires idle → reproducing. reproducing.on_enter binds the
+  # artifact, fires the judge, and emit_intent accept. That cascades:
+  #   accept → proposing → on_enter → judge → emit accept →
+  #   implementing → on_enter (no judge, no emit) → STOP.
+  # Net: one user turn lands at implementing.
   - intent: { name: start, slots: {} }
-    expect_state: reproducing_executing
+    expect_state: implementing
 
-  # proceed: reproducing_executing → reproducing_awaiting_reply →
-  # (LLM-judge binds verdict) → emit_intent auto-fires accept →
-  # proposing_executing.  The whole hop is one turn now that
-  # DispatchPostBindEmits lands. (expect_world's deepEqualValues
-  # would have us list every nested key of the stubbed llm_verdict;
-  # the auto-advance to proposing_executing is sufficient proof
-  # that the verdict bound and the emit_intent dispatched.)
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_executing
+  # accept advances implementing → testing → on_enter → judge →
+  # emit accept → reviewing → on_enter (no judge) → STOP.
+  - intent: { name: accept, slots: {} }
+    expect_state: reviewing
 
-  - intent: { name: proceed, slots: {} }
-    expect_state: implementing_executing
-
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: reviewing_executing
-
-  - intent: { name: proceed, slots: {} }
-    expect_state: validating_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: done_executing
-
-  - intent: { name: proceed, slots: {} }
+  # accept advances reviewing → validating → judge → emit accept →
+  # done → judge → emit accept → @exit:done.
+  - intent: { name: accept, slots: {} }
     expect_state: __exit__done
     expect_world:
       status: "fixed"

@@ -68,9 +68,12 @@ turns:
 
   # Dispatch into the bf import compound. The transition enters bf at
   # its `idle` entry state; world_in: setters fire and project the
-  # parent's ticket_id / workdir / etc into bf__<key>.
+  # parent's ticket_id / workdir / etc into bf__<key>. bf.idle's
+  # on_enter auto-fires `start` when entered with a ticket loaded and
+  # no reproduction artifact yet, so we land at bf.reproducing
+  # directly (one turn instead of two).
   - intent: { name: go_bugfix, slots: {} }
-    expect_state: bf.idle
+    expect_state: bf.reproducing
     expect_world:
       bf__ticket_id:       "TKT-100"
       bf__workdir:         ".worktrees/tkt-100"

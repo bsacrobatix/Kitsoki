@@ -1,12 +1,15 @@
-# proposing — phase 3 of the cyber-repo pipeline (fix proposal).
+# proposing — phase 2 of the bugfix pipeline (fix proposal).
 #
 # Produces the `propose_fix_artifact` (schemas/proposing_artifact.json):
 # a concrete proposed fix with root-cause analysis and confidence.
+#
+# Single merged state — see rooms/reproducing.yaml for the design
+# rationale (no _executing / _awaiting_reply split).
 
 states:
 
-  proposing_executing:
-    description: "Drafting the fix proposal."
+  proposing:
+    description: "Draft the fix proposal; review and advance to implementing."
     view: |
       Proposing fix for {{ world.ticket_id }} — {{ world.ticket_title }}
 
@@ -15,8 +18,8 @@ states:
 
       {{ world.propose_fix_artifact.summary_markdown|default:"(artifact pending — oracle has not returned yet)" }}
 
-      Type `proceed` to deliver, `restart_from` to re-run, or `quit`.
-    relevant_world: [ticket_id, ticket_title, workdir, propose_fix_artifact, reproduction_artifact, cycle, refine_feedback]
+      Reply: `continue` (post + advance to implementing) · `refine feedback=…` · `restart_from stage=…` · `quit`
+    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, propose_fix_artifact, reproduction_artifact, llm_verdict, refine_feedback, cycle]
     on_enter:
       - invoke: host.oracle.ask_with_mcp
         with:
@@ -32,60 +35,7 @@ states:
         bind:
           propose_fix_artifact: submitted
         on_error: idle
-    on:
-      proceed:
-        - target: proposing_awaiting_reply
-      # restart_from on _executing routes back to the named earlier room with
-      # the relevant per-phase counter reset (the runtime can't yet
-      # parameterise the set: key by `{{ slots.stage }}_cycle`, so we list
-      # each well-known stage as its own arm).
-      restart_from:
-        - when: "slots.stage == 'reproducing'"
-          target: reproducing_executing
-          effects:
-            - set:
-                restart_from_stage: "reproducing"
-                refine_feedback:    ""
-                reproducing_cycle:  0
-                cycle:              0
-        - target: proposing_executing
-          effects:
-            - set:
-                restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
-                refine_feedback:    ""
-                proposing_cycle:    0
-                cycle:              0
-      quit:
-        - target: "@exit:abandoned"
-      look:
-        - target: .
 
-  proposing_awaiting_reply:
-    description: "Fix proposal posted; awaiting verdict."
-    view: |
-      ✓ Fix proposal posted to transport + inbox.
-
-      Summary: {{ world.propose_fix_artifact.summary_title|default:"(none)" }}
-      Confidence: {{ world.propose_fix_artifact.confidence|default:"(none)" }}
-      LLM verdict: {{ world.llm_verdict.verdict|default:"(skipped — human mode)" }}{% if world.llm_verdict.confidence %}  (confidence {{ world.llm_verdict.confidence }}){% endif %}{% if world.llm_verdict.reason %}
-      Reason: {{ world.llm_verdict.reason }}{% endif %}
-
-      Reply: `accept` (advance to implementing) · `refine feedback=...` · `restart_from stage=...` · `quit`
-    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, thread, propose_fix_artifact, llm_verdict, cycle]
-    on_enter:
-      - invoke: iface.transport.post
-        with:
-          thread:    "{{ world.thread }}"
-          title:     "Fix proposal: {{ world.ticket_id }}"
-          body:      "{{ world.propose_fix_artifact.summary_markdown }}"
-          phase_id:  "proposing_{{ world.ticket_id }}_{{ world.cycle }}"
-      - invoke: host.inbox.add
-        with:
-          kind:    checkpoint
-          title:   "Fix proposal: {{ world.ticket_id }}"
-          thread:  "{{ world.thread }}"
-          state:   proposing_awaiting_reply
-          body:    "{{ world.propose_fix_artifact.summary_markdown }}"
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
         invoke: host.oracle.ask_with_mcp
         with:
@@ -97,8 +47,7 @@ states:
             artifact_body:   "{{ world.propose_fix_artifact.summary_markdown }}"
         bind:
           llm_verdict: submitted
-      # Step 4: auto-fire the LLM's verdict above the confidence floor.
-      # Same shape across every checkpoint (see contract §6 / rooms/reproducing.yaml).
+
       - when: |
           world.judge_mode != 'human' &&
           world.llm_verdict.confidence >= world.judge_confidence_threshold &&
@@ -107,23 +56,21 @@ states:
         emit_intent: "{{ world.llm_verdict.intent }}"
         slots:
           feedback: "{{ world.llm_verdict.reason }}"
-
-      # Step 5: human-mode auto-accept. See rooms/reproducing.yaml for
-      # the rationale — `proceed`/`continue` from `_executing` already
-      # implies accept; the second-keystroke confirmation pause is gone.
-      - when: "world.judge_mode == 'human' && world.auto_accept_on_post"
-        emit_intent: accept
-        slots:
-          author: "human"
     on:
       accept:
-        - target: implementing_executing
+        - target: implementing
           effects:
+            - invoke: iface.transport.post
+              with:
+                thread:   "{{ world.thread }}"
+                title:    "Fix proposal: {{ world.ticket_id }}"
+                body:     "{{ world.propose_fix_artifact.summary_markdown }}"
+                phase_id: "proposing_{{ world.ticket_id }}_{{ world.cycle }}"
             - set:
                 last_reply_author: "{{ slots.author ?? 'human' }}"
                 refine_feedback:   ""
                 cycle:             0
-      # L2 cycle-budget gate on refine — see rooms/reproducing.yaml.
+
       refine:
         - when: "world.proposing_cycle >= world.proposing_budget"
           target: "@exit:abandoned"
@@ -131,47 +78,45 @@ states:
             - set:
                 abandon_reason: "proposing_cycle_budget_exhausted"
                 status:         "abandoned"
-        - target: proposing_executing
+        - target: proposing
           effects:
             - set:
                 refine_feedback:  "{{ slots.feedback ?? world.llm_verdict.reason }}"
                 proposing_cycle:  "{{ world.proposing_cycle + 1 }}"
                 cycle:            "{{ world.cycle + 1 }}"
-      # restart_from rewinds to a prior phase. `reproducing` is the only
-      # earlier phase from proposing; everything else is an unknown stage.
-      # Default arm (proposing) catches `propose_fix` aliases and re-enters
-      # the current room cleanly.
+
       restart_from:
         - when: "slots.stage == 'reproducing'"
-          target: reproducing_executing
+          target: reproducing
           effects:
             - set:
                 restart_from_stage: "reproducing"
                 refine_feedback:    ""
                 reproducing_cycle:  0
                 cycle:              0
-        - target: reproducing_executing
+        - target: proposing
           effects:
             - set:
-                restart_from_stage: "{{ slots.stage ?? 'reproducing' }}"
+                restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
                 refine_feedback:    ""
-                reproducing_cycle:  0
+                proposing_cycle:    0
                 cycle:              0
+
       jump_to:
         - when: "slots.stage == 'testing' || slots.stage == 'test'"
-          target: testing_executing
+          target: testing
           effects:
             - set:
                 jump_to:           "{{ slots.stage }}"
                 unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
         - when: "slots.stage == 'validating' || slots.stage == 'validate'"
-          target: validating_executing
+          target: validating
           effects:
             - set:
                 jump_to:           "{{ slots.stage }}"
                 unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
         - when: "slots.stage == 'done' || slots.stage == 'pr'"
-          target: done_executing
+          target: done
           effects:
             - set:
                 jump_to:           "{{ slots.stage }}"
@@ -181,6 +126,7 @@ states:
             - set:
                 abandon_reason: "jump_to_unknown_stage"
                 status:         "abandoned"
+
       quit:
         - target: "@exit:abandoned"
       look:

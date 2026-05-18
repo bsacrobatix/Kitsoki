@@ -1,8 +1,11 @@
 # refine_at_each_stage — port of cyber-repo's refine.yaml.
 #
-# At each checkpoint state, `refine: <feedback>` routes back to the
-# phase's _executing state with refine_feedback set and the per-phase
-# cycle counter incremented.
+# At each merged checkpoint room, `refine: <feedback>` self-transitions
+# back into the same room with refine_feedback set and the per-phase
+# cycle counter incremented. The self-transition does NOT re-run
+# on_enter (the engine's "newly entered" gate skips self-transitions),
+# but the effects chain still fires — which is what the regression
+# property tests.
 #
 # A regression that drops the `set: { refine_feedback }` effect or
 # fails to increment the right counter must fail this flow.
@@ -11,7 +14,7 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: reproducing_awaiting_reply
+initial_state: reproducing
 initial_world:
   ticket_id:  "TKT-700"
   thread:     "TKT-700"
@@ -30,7 +33,7 @@ host_handlers:
 
 turns:
   - intent: { name: refine, slots: { feedback: "please also check the /bc route" } }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world:
       refine_feedback:   "please also check the /bc route"
       reproducing_cycle: 1
@@ -42,7 +45,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposing_awaiting_reply
+initial_state: proposing
 initial_world:
   ticket_id:  "TKT-701"
   thread:     "TKT-701"
@@ -61,7 +64,7 @@ host_handlers:
 
 turns:
   - intent: { name: refine, slots: { feedback: "use a single transaction in the migration" } }
-    expect_state: proposing_executing
+    expect_state: proposing
     expect_world:
       refine_feedback: "use a single transaction in the migration"
       proposing_cycle: 1
@@ -72,7 +75,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: testing_awaiting_reply
+initial_state: testing
 initial_world:
   ticket_id:  "TKT-702"
   thread:     "TKT-702"
@@ -91,7 +94,7 @@ host_handlers:
 
 turns:
   - intent: { name: refine, slots: { feedback: "add a regression test for the null case" } }
-    expect_state: testing_executing
+    expect_state: testing
     expect_world:
       refine_feedback: "add a regression test for the null case"
       testing_cycle:   1
@@ -102,7 +105,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: validating_awaiting_reply
+initial_state: validating
 initial_world:
   ticket_id:  "TKT-703"
   thread:     "TKT-703"
@@ -121,7 +124,7 @@ host_handlers:
 
 turns:
   - intent: { name: refine, slots: { feedback: "rerun against staging after redeploy" } }
-    expect_state: validating_executing
+    expect_state: validating
     expect_world:
       refine_feedback:   "rerun against staging after redeploy"
       validating_cycle:  1
@@ -132,7 +135,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: done_awaiting_reply
+initial_state: done
 initial_world:
   ticket_id:  "TKT-704"
   thread:     "TKT-704"
@@ -151,7 +154,7 @@ host_handlers:
 
 turns:
   - intent: { name: refine, slots: { feedback: "tighten the lessons section" } }
-    expect_state: done_executing
+    expect_state: done
     expect_world:
       refine_feedback: "tighten the lessons section"
       done_cycle:      1

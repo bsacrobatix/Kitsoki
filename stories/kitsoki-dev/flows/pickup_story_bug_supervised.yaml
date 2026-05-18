@@ -5,7 +5,7 @@
 # in one pipeline.
 #
 # The state-machine walk is byte-identical to the self-bug case (same
-# 8-room bf pipeline → @exit:done → pr → @exit:merged → main); the
+# 7 merged bf rooms → @exit:done → pr → @exit:merged → main); the
 # only difference is the seeded ticket_url + thread paths. This is
 # what the proposal §5.4 means by "the state graph doesn't care".
 
@@ -89,37 +89,29 @@ host_handlers:
 
 turns:
   # bf.idle's auto-start on_enter fires on this transition (ticket is
-  # loaded, no reproduction artifact yet), so we land at
-  # reproducing_executing without the bf.idle → start two-step.
+  # loaded, no reproduction artifact yet), so we land at reproducing
+  # without the bf.idle → start two-step.
   - intent: { name: core__go_bugfix, slots: {} }
-    expect_state: core.bf.reproducing_executing
+    expect_state: core.bf.reproducing
     expect_world:
       core__bf__ticket_id: "2026-05-14T120000Z-scenarios-readme-warp-flag-misnamed"
       # Confirm the story-bug path passes through to the bf child world.
       core__bf__thread:    "stories/oregon-trail/issues/bugs/2026-05-14T120000Z-scenarios-readme-warp-flag-misnamed.md"
 
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.reproducing_awaiting_reply
+  # Walk the merged bugfix pipeline. Each accept posts the current
+  # artifact and advances to the next phase in one turn.
   - intent: { name: core__bf__accept, slots: {} }
-    expect_state: core.bf.proposing_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.proposing_awaiting_reply
+    expect_state: core.bf.proposing
   - intent: { name: core__bf__accept, slots: {} }
-    expect_state: core.bf.implementing_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.testing_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.testing_awaiting_reply
+    expect_state: core.bf.implementing
   - intent: { name: core__bf__accept, slots: {} }
-    expect_state: core.bf.reviewing_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.validating_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.validating_awaiting_reply
+    expect_state: core.bf.testing
   - intent: { name: core__bf__accept, slots: {} }
-    expect_state: core.bf.done_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.done_awaiting_reply
+    expect_state: core.bf.reviewing
+  - intent: { name: core__bf__accept, slots: {} }
+    expect_state: core.bf.validating
+  - intent: { name: core__bf__accept, slots: {} }
+    expect_state: core.bf.done
 
   - intent: { name: core__bf__accept, slots: {} }
     expect_state: core.pr.open_pr

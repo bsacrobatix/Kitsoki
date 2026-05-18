@@ -4,7 +4,7 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: validating_awaiting_reply
+initial_state: validating
 initial_world:
   ticket_id:           "TKT-130"
   thread:              "TKT-130"

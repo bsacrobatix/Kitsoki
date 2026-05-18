@@ -1,7 +1,7 @@
 # full_pipeline_from_idle — `full_pipeline` is the explicit-mode default.
-# Sets bugfix_mode="full" and routes to reproducing_executing. Equivalent
-# to `start` except it pins the mode flag (useful when a previous run
-# left bugfix_mode="quick" in the carried world).
+# Sets bugfix_mode="full" and routes to reproducing. Equivalent to `start`
+# except it pins the mode flag (useful when a previous run left
+# bugfix_mode="quick" in the carried world).
 
 test_kind: flow
 app: ../app.yaml
@@ -26,7 +26,7 @@ host_handlers:
 
 turns:
   - intent: { name: full_pipeline, slots: {} }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world:
       bugfix_mode: "full"
 

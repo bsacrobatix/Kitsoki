@@ -2,7 +2,7 @@
 # at every checkpoint with a confident verdict. Same as happy_llm with
 # the mode flipped — proves the `when:` guard accepts both
 # llm_then_human and llm at the LLM-judge invoke site AND that
-# emit_intent's gate (`judge_mode != 'human'`) also accepts both.
+# emit_intent's gate (`world.judge_mode != 'human'`) also accepts both.
 
 test_kind: flow
 app: ../app.yaml
@@ -54,23 +54,15 @@ host_handlers:
         reason:     "Looks good."
 
 turns:
+  # See happy_llm for the cascade explanation. start lands at
+  # implementing (cascade through reproducing → proposing → STOP),
+  # accept lands at reviewing (testing → STOP), accept lands at
+  # @exit:done (validating → done → @exit:done).
   - intent: { name: start, slots: {} }
-    expect_state: reproducing_executing
-  # proceed lands two states past _awaiting_reply because the LLM-judge
-  # auto-fires accept via emit_intent.
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: implementing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: reviewing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: validating_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: done_executing
-  - intent: { name: proceed, slots: {} }
+    expect_state: implementing
+  - intent: { name: accept, slots: {} }
+    expect_state: reviewing
+  - intent: { name: accept, slots: {} }
     expect_state: __exit__done
     expect_world: { status: "fixed" }
 

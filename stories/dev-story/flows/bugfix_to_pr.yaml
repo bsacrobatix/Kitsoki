@@ -81,53 +81,35 @@ host_handlers:
         reason:     "Stub artifact passes the schema; accept advances."
 
 turns:
-  # main → bf.idle. We seed ticket_id directly in initial_world rather
-  # than walking through ticket_search; the manual-walk doc covers that
-  # path. world_in: projects parent ticket_id → bf.ticket_id.
+  # main → bf.idle → bf.idle.on_enter auto-fires `start` (ticket_id is
+  # set, reproduction_artifact empty), so we land at bf.reproducing in
+  # one turn. world_in: projects parent ticket_id → bf.ticket_id.
   - intent: { name: go_bugfix, slots: {} }
-    expect_state: bf.idle
+    expect_state: bf.reproducing
     expect_world:
       bf__ticket_id: "TKT-200"
 
-  # bf__start → bf.reproducing_executing. The child's on-arc was
-  # rewritten to `bf__start` at fold time; the `intents.import: [start]`
-  # adds the bare name to the parent's intent menu but the dispatcher
-  # routes through the prefixed name (same convention as oregon-trail's
-  # `frontier__scout`).
-  - intent: { name: bf__start, slots: {} }
-    expect_state: bf.reproducing_executing
+  # Walk the merged bugfix pipeline. The bugfix `accept` intent is NOT
+  # lifted to bare (it collides with impl's), so we type the prefixed
+  # form. Each accept posts the artifact AND advances in one turn.
+  - intent: { name: bf__accept, slots: {} }
+    expect_state: bf.proposing
+  - intent: { name: bf__accept, slots: {} }
+    expect_state: bf.implementing
+  - intent: { name: bf__accept, slots: {} }
+    expect_state: bf.testing
+  - intent: { name: bf__accept, slots: {} }
+    expect_state: bf.reviewing
+  - intent: { name: bf__accept, slots: {} }
+    expect_state: bf.validating
+  - intent: { name: bf__accept, slots: {} }
+    expect_state: bf.done
 
-  # Walk the bugfix pipeline. The bugfix `proceed` and `accept` intents
-  # are NOT lifted to bare names (they collide), so we type the
-  # prefixed forms.
-  - intent: { name: bf__proceed, slots: {} }
-    expect_state: bf.reproducing_awaiting_reply
-  - intent: { name: bf__accept, slots: {} }
-    expect_state: bf.proposing_executing
-  - intent: { name: bf__proceed, slots: {} }
-    expect_state: bf.proposing_awaiting_reply
-  - intent: { name: bf__accept, slots: {} }
-    expect_state: bf.implementing_executing
-  - intent: { name: bf__proceed, slots: {} }
-    expect_state: bf.testing_executing
-  - intent: { name: bf__proceed, slots: {} }
-    expect_state: bf.testing_awaiting_reply
-  - intent: { name: bf__accept, slots: {} }
-    expect_state: bf.reviewing_executing
-  - intent: { name: bf__proceed, slots: {} }
-    expect_state: bf.validating_executing
-  - intent: { name: bf__proceed, slots: {} }
-    expect_state: bf.validating_awaiting_reply
-  - intent: { name: bf__accept, slots: {} }
-    expect_state: bf.done_executing
-  - intent: { name: bf__proceed, slots: {} }
-    expect_state: bf.done_awaiting_reply
-
-  # bf.done_awaiting_reply.on.accept fires @exit:done with effects
-  # setting done_artifact. The dev-story importer's exits.done.to: pr
-  # lifts pr_title / pr_body from world.bf__done_artifact and enters
-  # the pr compound at open_pr. pr's world_in: then projects the
-  # parent's pr_title / pr_body / workdir / etc into pr__<key>.
+  # bf.done.on.accept fires @exit:done with effects setting
+  # done_artifact. The dev-story importer's exits.done.to: pr lifts
+  # pr_title / pr_body from world.bf__done_artifact and enters the pr
+  # compound at open_pr. pr's world_in: then projects the parent's
+  # pr_title / pr_body / workdir / etc into pr__<key>.
   - intent: { name: bf__accept, slots: {} }
     expect_state: pr.open_pr
     expect_world:

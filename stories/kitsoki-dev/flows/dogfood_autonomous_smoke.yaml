@@ -4,16 +4,13 @@
 # verdict resolves through the chained alias map
 # (`accept` → `core__bf__accept`) at every checkpoint, so the flow
 # advances autonomously past reproducing + proposing before stopping
-# at implementing (which has no checkpoint and thus no emit_intent
-# step to exercise).
+# at implementing (which has no judge in on_enter and thus no
+# emit_intent step to exercise).
 #
-# Contrast with pickup_autonomous_then_bail.yaml — that fixture
-# pre-fixes the verdict's intent value to the FULLY prefixed
-# `core__bf__accept` (because at the time it was authored the
-# dispatcher did not resolve aliases). This flow asserts the new
-# alias-resolution path: the verdict's `intent` field carries the
-# bare `accept` exactly as a real LLM would produce, and the
-# dispatcher does the rewrite at runtime.
+# Contrast with pickup_autonomous_then_bail.yaml — same shape, but
+# this fixture exercises the autonomous chain in one user turn
+# (core__go_bugfix cascades all the way to implementing because the
+# autonomous-emit chain runs in each merged room's on_enter).
 
 test_kind: flow
 app: ../app.yaml
@@ -84,30 +81,17 @@ host_handlers:
         reason:     "Confident; advance autonomously."
 
 turns:
-  # core.main → core.bf.reproducing_executing.
+  # core.main → core.bf.implementing in one user turn.
+  #
   # bf.idle's on_enter auto-emits `start` when entered with a ticket
-  # loaded and no reproduction artifact yet, so go_bugfix lands the
-  # operator directly inside the pipeline (one turn instead of two).
+  # loaded and no reproduction artifact yet, dropping into reproducing.
+  # reproducing.on_enter binds the artifact, runs the judge (returns
+  # confident accept), and emit_intent("accept") resolves through
+  # IntentAliases at core.bf.reproducing to `core__bf__accept`; the
+  # accept arc advances to proposing, whose on_enter cascades the
+  # same way. The cascade stops at implementing because implementing
+  # has no judge in on_enter, so no emit_intent fires.
   - intent: { name: core__go_bugfix, slots: {} }
-    expect_state: core.bf.reproducing_executing
-
-  # The critical assertion — proceed lands two checkpoints later.
-  #   reproducing_executing → reproducing_awaiting_reply
-  #     → emit_intent("accept") → resolveEmittedIntentName resolves to
-  #       `core__bf__accept` via IntentAliases at
-  #       core.bf.reproducing_awaiting_reply
-  #     → arc fires → proposing_executing.
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.proposing_executing
-
-  # Same auto-advance for the proposing checkpoint.
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.implementing_executing
-
-  # implementing has no checkpoint; proceed lands at testing_executing.
-  # Stop here — the goal is to prove the two prior auto-advances; the
-  # later checkpoints are covered by pickup_autonomous_then_bail.yaml.
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.testing_executing
+    expect_state: core.bf.implementing
 
 expect_no_errors: true

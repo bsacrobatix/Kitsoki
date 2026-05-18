@@ -1,7 +1,7 @@
 # refine_once_then_accept — judge_mode=human, the operator refines the
 # reproducing artifact once with feedback, then accepts on the re-run.
 # Proves:
-#   - refine intent transitions back to <phase>_executing (not idle)
+#   - refine intent self-transitions back to reproducing (not idle)
 #   - world.refine_feedback carries the operator's note into the next
 #     prompt invocation
 #   - world.cycle increments
@@ -46,50 +46,39 @@ host_handlers:
 
 turns:
   - intent: { name: start, slots: {} }
-    expect_state: reproducing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
+    expect_state: reproducing
     expect_world:
       cycle: 0
       refine_feedback: ""
 
   # Operator refines with feedback. The state arc fires:
-  #   target: reproducing_executing
-  #   effects: set refine_feedback, cycle++
+  #   target: reproducing (self-transition)
+  #   effects: set refine_feedback, reproducing_cycle++, cycle++
   - intent:
       name: refine
       slots: { feedback: "Need a deterministic test, not a shell trace." }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world:
       cycle:           1
       refine_feedback: "Need a deterministic test, not a shell trace."
 
-  # Re-execute and advance through the rest of the pipeline.
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
+  # accept resets cycle/refine_feedback and advances to proposing.
   - intent: { name: accept, slots: {} }
-    expect_state: proposing_executing
+    expect_state: proposing
     expect_world:
       cycle:           0   # accept resets cycle on next-room transition
       refine_feedback: ""
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_awaiting_reply
+
   - intent: { name: accept, slots: {} }
-    expect_state: implementing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_awaiting_reply
+    expect_state: implementing
   - intent: { name: accept, slots: {} }
-    expect_state: reviewing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: validating_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: validating_awaiting_reply
+    expect_state: testing
   - intent: { name: accept, slots: {} }
-    expect_state: done_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: done_awaiting_reply
+    expect_state: reviewing
+  - intent: { name: accept, slots: {} }
+    expect_state: validating
+  - intent: { name: accept, slots: {} }
+    expect_state: done
   - intent: { name: accept, slots: {} }
     expect_state: __exit__done
     expect_world: { status: "fixed" }

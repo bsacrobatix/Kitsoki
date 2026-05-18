@@ -1,12 +1,14 @@
-# testing — phase 7 + 7.5 of the cyber-repo pipeline (test review + impl).
+# testing — phase 4 of the bugfix pipeline (test review + tests added).
 #
 # Produces the `implement_review_artifact` (schemas/testing_artifact.json):
-# review of the implementation plus added tests, with a pass/blocked verdict.
+# review of the implementation plus added tests, with pass/blocked verdict.
+#
+# Single merged state — see rooms/reproducing.yaml for the design.
 
 states:
 
-  testing_executing:
-    description: "Reviewing and adding tests for the applied fix."
+  testing:
+    description: "Run + review tests for the applied fix; advance to reviewing (or done in quick mode)."
     view: |
       Testing {{ world.ticket_id }} — {{ world.ticket_title }}
 
@@ -15,13 +17,12 @@ states:
 
       {{ world.implement_review_artifact.summary_markdown|default:"(artifact pending — oracle has not returned yet)" }}
 
-      Type `proceed` to deliver the artifact, `restart_from` to back up.
-    relevant_world: [ticket_id, ticket_title, workdir, implement_review_artifact, propose_fix_artifact, ci_log, cycle]
+      Reply: `continue` (post + advance) · `refine feedback=…` · `restart_from stage=…` · `quit`
+    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, implement_review_artifact, propose_fix_artifact, ci_log, llm_verdict, refine_feedback, cycle, bugfix_mode]
     on_enter:
-      # Run tests against the changes (iface.ci.run_tests is wired by Slice β
-      # to host.local — Wave 1 returns canned ok and the log goes into
-      # world.ci_log for the oracle call below). We bind into a scratch key
-      # so the structured-artifact bind below doesn't overwrite itself.
+      # Run tests against the change. iface.ci.run_tests is wired by
+      # the instance binding (host.local in kitsoki-dev). The log is
+      # bound to ci_log so the next invoke can read it.
       - invoke: iface.ci.run_tests
         with:
           workdir: "{{ world.workdir }}"
@@ -29,6 +30,7 @@ states:
         bind:
           ci_log: log
         on_error: idle
+
       # Produce the structured testing artifact from the run output.
       - invoke: host.oracle.ask_with_mcp
         with:
@@ -42,64 +44,7 @@ states:
         bind:
           implement_review_artifact: submitted
         on_error: idle
-    on:
-      proceed:
-        - target: testing_awaiting_reply
-      restart_from:
-        - when: "slots.stage == 'reproducing'"
-          target: reproducing_executing
-          effects:
-            - set:
-                restart_from_stage: "reproducing"
-                refine_feedback:    ""
-                reproducing_cycle:  0
-                cycle:              0
-        - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
-          target: proposing_executing
-          effects:
-            - set:
-                restart_from_stage: "{{ slots.stage }}"
-                refine_feedback:    ""
-                proposing_cycle:    0
-                cycle:              0
-        - target: proposing_executing
-          effects:
-            - set:
-                restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
-                refine_feedback:    ""
-                proposing_cycle:    0
-                cycle:              0
-      quit:
-        - target: "@exit:abandoned"
-      look:
-        - target: .
 
-  testing_awaiting_reply:
-    description: "Test review posted; awaiting verdict."
-    view: |
-      ✓ Test review posted to transport + inbox.
-
-      Summary: {{ world.implement_review_artifact.summary_title|default:"(none)" }}
-      Status: {{ world.implement_review_artifact.status|default:"(none)" }}
-      LLM verdict: {{ world.llm_verdict.verdict|default:"(skipped — human mode)" }}{% if world.llm_verdict.confidence %}  (confidence {{ world.llm_verdict.confidence }}){% endif %}{% if world.llm_verdict.reason %}
-      Reason: {{ world.llm_verdict.reason }}{% endif %}
-
-      Reply: `accept` (advance to reviewing/validating per bugfix_mode) · `refine feedback=...` · `restart_from stage=...` · `quit`
-    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, thread, implement_review_artifact, llm_verdict, cycle]
-    on_enter:
-      - invoke: iface.transport.post
-        with:
-          thread:    "{{ world.thread }}"
-          title:     "Test review: {{ world.ticket_id }}"
-          body:      "{{ world.implement_review_artifact.summary_markdown }}"
-          phase_id:  "testing_{{ world.ticket_id }}_{{ world.cycle }}"
-      - invoke: host.inbox.add
-        with:
-          kind:    checkpoint
-          title:   "Test review: {{ world.ticket_id }}"
-          thread:  "{{ world.thread }}"
-          state:   testing_awaiting_reply
-          body:    "{{ world.implement_review_artifact.summary_markdown }}"
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
         invoke: host.oracle.ask_with_mcp
         with:
@@ -111,8 +56,7 @@ states:
             artifact_body:   "{{ world.implement_review_artifact.summary_markdown }}"
         bind:
           llm_verdict: submitted
-      # Step 4: auto-fire the LLM's verdict above the confidence floor.
-      # Same shape across every checkpoint (see contract §6 / rooms/reproducing.yaml).
+
       - when: |
           world.judge_mode != 'human' &&
           world.llm_verdict.confidence >= world.judge_confidence_threshold &&
@@ -121,32 +65,37 @@ states:
         emit_intent: "{{ world.llm_verdict.intent }}"
         slots:
           feedback: "{{ world.llm_verdict.reason }}"
-
-      # Step 5: human-mode auto-accept. See rooms/reproducing.yaml.
-      - when: "world.judge_mode == 'human' && world.auto_accept_on_post"
-        emit_intent: accept
-        slots:
-          author: "human"
     on:
-      # bugfix_mode=quick collapses the pipeline by jumping straight from
-      # testing to done (skipping reviewing + validating). The first arm
-      # gates on world.bugfix_mode; full mode falls through to the default
-      # reviewing_executing arc.
+      # bugfix_mode=quick collapses the pipeline by skipping reviewing +
+      # validating. The first arm fires the quick path; full mode falls
+      # through to reviewing.
       accept:
         - when: "world.bugfix_mode == 'quick'"
-          target: done_executing
+          target: done
           effects:
+            - invoke: iface.transport.post
+              with:
+                thread:   "{{ world.thread }}"
+                title:    "Test review: {{ world.ticket_id }}"
+                body:     "{{ world.implement_review_artifact.summary_markdown }}"
+                phase_id: "testing_{{ world.ticket_id }}_{{ world.cycle }}"
             - set:
                 last_reply_author: "{{ slots.author ?? 'human' }}"
                 refine_feedback:   ""
                 cycle:             0
-        - target: reviewing_executing
+        - target: reviewing
           effects:
+            - invoke: iface.transport.post
+              with:
+                thread:   "{{ world.thread }}"
+                title:    "Test review: {{ world.ticket_id }}"
+                body:     "{{ world.implement_review_artifact.summary_markdown }}"
+                phase_id: "testing_{{ world.ticket_id }}_{{ world.cycle }}"
             - set:
                 last_reply_author: "{{ slots.author ?? 'human' }}"
                 refine_feedback:   ""
                 cycle:             0
-      # L2 cycle-budget gate on refine — see rooms/reproducing.yaml.
+
       refine:
         - when: "world.testing_cycle >= world.testing_budget"
           target: "@exit:abandoned"
@@ -154,15 +103,16 @@ states:
             - set:
                 abandon_reason: "testing_cycle_budget_exhausted"
                 status:         "abandoned"
-        - target: testing_executing
+        - target: testing
           effects:
             - set:
                 refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
                 testing_cycle:   "{{ world.testing_cycle + 1 }}"
                 cycle:           "{{ world.cycle + 1 }}"
+
       restart_from:
         - when: "slots.stage == 'reproducing'"
-          target: reproducing_executing
+          target: reproducing
           effects:
             - set:
                 restart_from_stage: "reproducing"
@@ -170,7 +120,7 @@ states:
                 reproducing_cycle:  0
                 cycle:              0
         - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
-          target: proposing_executing
+          target: proposing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage }}"
@@ -178,29 +128,30 @@ states:
                 proposing_cycle:    0
                 cycle:              0
         - when: "slots.stage == 'implementing' || slots.stage == 'implement'"
-          target: implementing_executing
+          target: implementing
           effects:
             - set:
                 restart_from_stage:  "{{ slots.stage }}"
                 refine_feedback:     ""
                 implementing_cycle:  0
                 cycle:               0
-        - target: proposing_executing
+        - target: proposing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
                 refine_feedback:    ""
                 proposing_cycle:    0
                 cycle:              0
+
       jump_to:
         - when: "slots.stage == 'validating' || slots.stage == 'validate'"
-          target: validating_executing
+          target: validating
           effects:
             - set:
                 jump_to:           "{{ slots.stage }}"
                 unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
         - when: "slots.stage == 'done' || slots.stage == 'pr'"
-          target: done_executing
+          target: done
           effects:
             - set:
                 jump_to:           "{{ slots.stage }}"
@@ -210,6 +161,7 @@ states:
             - set:
                 abandon_reason: "jump_to_unknown_stage"
                 status:         "abandoned"
+
       quit:
         - target: "@exit:abandoned"
       look:

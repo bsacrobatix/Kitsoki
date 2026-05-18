@@ -2,18 +2,18 @@
 # world.<X>_cycle to 0, giving the operator a fresh budget for that
 # phase.
 #
-# Setup: reproducing_cycle is at the budget (3) at proposing_awaiting_reply.
-# The operator restart_from reproducing — this transitions to
-# reproducing_executing and resets reproducing_cycle to 0. The next
-# refine at reproducing_awaiting_reply must NOT immediately abandon
-# (because the counter was reset).
+# Setup: reproducing_cycle is at the budget (3) at the proposing
+# checkpoint. The operator restart_from reproducing — this transitions
+# to reproducing and resets reproducing_cycle to 0. The next refine
+# from reproducing must NOT immediately abandon (because the counter
+# was reset).
 #
 # A regression that drops the cycle-reset would cause the post-restart
 # refine to fire @exit:abandoned immediately.
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposing_awaiting_reply
+initial_state: proposing
 initial_world:
   ticket_id:           "TKT-600"
   thread:              "TKT-600"
@@ -39,17 +39,14 @@ host_handlers:
 turns:
   # restart_from reproducing — reset reproducing_cycle to 0.
   - intent: { name: restart_from, slots: { stage: "reproducing" } }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world:
       restart_from_stage: "reproducing"
       reproducing_cycle:  0
 
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
-
   # First refine post-restart — does NOT abandon (counter was reset to 0).
   - intent: { name: refine, slots: { feedback: "post-restart" } }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world:
       reproducing_cycle: 1
 

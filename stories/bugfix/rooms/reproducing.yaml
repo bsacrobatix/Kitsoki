@@ -1,24 +1,49 @@
-# reproducing — phase 1 + 1.5 of the cyber-repo pipeline.
+# reproducing — phase 1 of the bugfix pipeline.
 #
 # Produces the `reproduction_artifact` (schemas/reproducing_artifact.json):
 # evidence the bug is reproducible plus the components implicated.
 #
-# Auto-advance pattern: `_executing.on_enter` runs the artifact-producing LLM
-# call synchronously and binds world.reproduction_artifact. The state then
-# exposes a `proceed` intent so the operator (or the flow runner) advances
-# into `_awaiting_reply`, where the checkpoint shape (contract §6) fires:
-# post + inbox + conditional LLM-judge + (conditional) verdict capture.
+# Design — one state per phase (no _executing / _awaiting_reply split).
+# The Wave 1 contract split each phase into two states (an artifact-
+# producing _executing and a transport-posting _awaiting_reply) to keep
+# the shape symmetric across human and autonomous judge modes. In
+# practice the split paid for that symmetry with confusion: in human
+# mode the _awaiting_reply room had nothing for the operator to do
+# beyond confirming a decision they'd already made; in autonomous
+# mode the LLM judge could just as easily run in _executing's on_enter
+# as in a separate room. Path B (this file) merges the two states.
 #
-# Why not auto-advance via `on_complete: target:`? Wave 1 keeps the artifact
-# call synchronous to dodge the background-job scheduler — a `proceed` intent
-# in the flow is the simplest deterministic harness. Wave 2 can swap in
-# background + on_complete + target once the judge harness in
-# `internal/judges/` lands.
+# Per-mode behavior in the merged state:
+#
+#   human mode:
+#     on_enter   → artifact oracle binds reproduction_artifact.
+#     view       → renders the artifact for the operator to read.
+#     operator   → types `continue` (or any accept-alias) to advance,
+#                  `refine feedback=…` to re-run with feedback,
+#                  `restart_from stage=…` to bounce earlier,
+#                  or `quit` to abandon.
+#     accept arc → posts the artifact to the transport AND transitions
+#                  to proposing. The post is a side-effect of the
+#                  decision; the operator decides, then the post
+#                  happens, then advance — all in one keystroke.
+#
+#   llm / llm_then_human:
+#     on_enter   → artifact oracle, THEN judge oracle, THEN emit_intent
+#                  the verdict (accept|refine|uncertain). All in the
+#                  same turn. Human sees the room only if the judge's
+#                  verdict was `uncertain` (llm_then_human falls back).
+#
+# inbox.add — REMOVED. It was firing a notification to an operator
+# who was actively present in the room that emitted it. Inbox is the
+# channel for things that happen WHILE YOU'RE ELSEWHERE: background
+# jobs completing, CI results, async clarifications. If/when a phase
+# moves to background: true the inbox.add can come back. The
+# synchronous human-mode pipeline doesn't need it.
 
 states:
 
-  reproducing_executing:
-    description: "Producing the reproduction artifact via the oracle."
+  reproducing:
+    description: "Reproduce the bug; produce the reproduction artifact for review."
     view: |
       Reproducing bug {{ world.ticket_id }} — {{ world.ticket_title }}
 
@@ -27,13 +52,12 @@ states:
 
       {{ world.reproduction_artifact.summary_markdown|default:"(artifact pending — oracle has not returned yet)" }}
 
-      Type `proceed` to deliver the artifact to the transport / inbox,
-      `restart_from` to re-run, or `quit` to abandon.
-    relevant_world: [ticket_id, ticket_title, workdir, reproduction_artifact, refine_feedback, cycle]
+      Reply: `continue` (post + advance to proposing) · `refine feedback=…` · `restart_from stage=…` · `quit`
+    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, reproduction_artifact, llm_verdict, refine_feedback, cycle]
     on_enter:
-      # Synchronous oracle call — the schema-validated payload lands at
-      # Result.Data.submitted; bind: walks "submitted" and writes the whole
-      # object into world.reproduction_artifact.
+      # 1. Always: produce the reproduction artifact. Schema-validated
+      #    payload lands at Result.Data.submitted; bind walks
+      #    "submitted" → world.reproduction_artifact.
       - invoke: host.oracle.ask_with_mcp
         with:
           prompt: prompts/reproducing_executing.md
@@ -47,55 +71,9 @@ states:
         bind:
           reproduction_artifact: submitted
         on_error: idle
-    on:
-      proceed:
-        - target: reproducing_awaiting_reply
-      restart_from:
-        - target: reproducing_executing
-          effects:
-            - set:
-                refine_feedback: "{{ slots.feedback }}"
-                cycle: 0
-                reproducing_cycle: 0
-      quit:
-        - target: "@exit:abandoned"
-      look:
-        - target: .
 
-  # Checkpoint shape — contract §6. IDENTICAL across all seven _awaiting_reply
-  # states; only `<phase>` and the `accept` target vary. Authors MUST NOT fork
-  # this shape between judge modes — judge polymorphism is one host call per
-  # checkpoint, gated by `when:`.
-  reproducing_awaiting_reply:
-    description: "Reproduction artifact posted; awaiting verdict."
-    view: |
-      ✓ Reproduction artifact posted to transport + inbox.
-
-      Summary: {{ world.reproduction_artifact.summary_title|default:"(none)" }}
-      LLM verdict: {{ world.llm_verdict.verdict|default:"(skipped — human mode)" }}{% if world.llm_verdict.confidence %}  (confidence {{ world.llm_verdict.confidence }}){% endif %}{% if world.llm_verdict.reason %}
-      Reason: {{ world.llm_verdict.reason }}{% endif %}
-
-      Reply: `accept` (advance to proposing) · `refine feedback=...` · `restart_from stage=...` · `quit`
-    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, thread, reproduction_artifact, llm_verdict, cycle]
-    on_enter:
-      # 1. Always: post the artifact to whichever transport is bound.
-      - invoke: iface.transport.post
-        with:
-          thread:    "{{ world.thread }}"
-          title:     "Reproduction artifact: {{ world.ticket_id }}"
-          body:      "{{ world.reproduction_artifact.summary_markdown }}"
-          phase_id:  "reproducing_{{ world.ticket_id }}_{{ world.cycle }}"
-
-      # 2. Always: mirror the artifact into the local inbox.
-      - invoke: host.inbox.add
-        with:
-          kind:    checkpoint
-          title:   "Reproduction artifact: {{ world.ticket_id }}"
-          thread:  "{{ world.thread }}"
-          state:   reproducing_awaiting_reply
-          body:    "{{ world.reproduction_artifact.summary_markdown }}"
-
-      # 3. Conditionally: ask an LLM-judge if the world says to.
+      # 2. Conditionally: run the LLM judge against the artifact.
+      #    Skipped in human mode (operator IS the judge).
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
         invoke: host.oracle.ask_with_mcp
         with:
@@ -108,12 +86,9 @@ states:
         bind:
           llm_verdict: submitted
 
-      # 4. Auto-fire the LLM's verdict above the confidence floor — single
-      #    effect with `when:` gating + emit_intent + slot pass-through. The
-      #    machine dispatcher synthesises the named intent against this state
-      #    in the same turn; on `accept`/`refine`/etc. the matching arc below
-      #    fires. Bounded by machine.EmitIntentMaxDepth (= 8) so a misbehaving
-      #    LLM that emits a self-cycle fails loud rather than spinning.
+      # 3. Auto-fire the judge's verdict above the confidence floor.
+      #    `uncertain` verdicts fall through to the human-mode view.
+      #    Bounded by machine.EmitIntentMaxDepth (=8).
       - when: |
           world.judge_mode != 'human' &&
           world.llm_verdict.confidence >= world.judge_confidence_threshold &&
@@ -122,30 +97,28 @@ states:
         emit_intent: "{{ world.llm_verdict.intent }}"
         slots:
           feedback: "{{ world.llm_verdict.reason }}"
-
-      # 5. Human-mode auto-accept. The operator already reviewed the
-      #    artifact in `_executing` and typed `proceed`/`continue` —
-      #    that's "accept and advance" in plain English. Forcing a
-      #    SECOND keystroke (`accept`) at a checkpoint room that only
-      #    confirms what they just decided was the UX wart the dogfood
-      #    loop made obvious. The post effects (1+2 above) still fire;
-      #    only the second-keystroke pause is collapsed.
-      - when: "world.judge_mode == 'human' && world.auto_accept_on_post"
-        emit_intent: accept
-        slots:
-          author: "human"
     on:
+      # `accept` advances to proposing. Examples include "continue" and
+      # "proceed" so the LLM router maps the canonical user verbs here.
+      # The transport.post is a side-effect of the decision — the
+      # operator decides, the artifact gets durably recorded, the
+      # session advances. One arc, one keystroke.
       accept:
-        - target: proposing_executing
+        - target: proposing
           effects:
+            - invoke: iface.transport.post
+              with:
+                thread:   "{{ world.thread }}"
+                title:    "Reproduction artifact: {{ world.ticket_id }}"
+                body:     "{{ world.reproduction_artifact.summary_markdown }}"
+                phase_id: "reproducing_{{ world.ticket_id }}_{{ world.cycle }}"
             - set:
                 last_reply_author: "{{ slots.author ?? 'human' }}"
                 refine_feedback:   ""
                 cycle:             0
-      # L2 cycle-budget gate. When reproducing_cycle has hit its budget the
-      # refine arc instead routes to @exit:abandoned with a structured reason
-      # — the operator gets one bail-out rather than an infinite refine loop.
-      # Default arm increments both the per-phase counter and the global one.
+
+      # L2 cycle-budget gate. Refining past the budget routes to
+      # @exit:abandoned with a structured reason instead of looping.
       refine:
         - when: "world.reproducing_cycle >= world.reproducing_budget"
           target: "@exit:abandoned"
@@ -153,42 +126,40 @@ states:
             - set:
                 abandon_reason: "reproducing_cycle_budget_exhausted"
                 status:         "abandoned"
-        - target: reproducing_executing
+        - target: reproducing
           effects:
             - set:
                 refine_feedback:    "{{ slots.feedback ?? world.llm_verdict.reason }}"
                 reproducing_cycle:  "{{ world.reproducing_cycle + 1 }}"
                 cycle:              "{{ world.cycle + 1 }}"
-      # restart_from rewinds to an earlier _executing room and resets the
-      # target's cycle counter. From reproducing there's nowhere earlier, so
-      # the only legal stage is `reproducing` (re-enter from the top).
+
+      # restart_from re-enters this phase fresh; nothing earlier to
+      # rewind to from reproducing.
       restart_from:
-        - target: reproducing_executing
+        - target: reproducing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage ?? 'reproducing' }}"
                 refine_feedback:    ""
                 reproducing_cycle:  0
                 cycle:              0
-      # jump_to skips ahead to a later phase without backfilling earlier
-      # artifacts. Audited via world.unsafe_jumps_made. Supports four
-      # well-known stage names; an unrecognised stage falls through to
-      # @exit:abandoned with abandon_reason="jump_to_unknown_stage".
+
+      # jump_to skips ahead. Audited via world.unsafe_jumps_made.
       jump_to:
         - when: "slots.stage == 'testing' || slots.stage == 'test'"
-          target: testing_executing
+          target: testing
           effects:
             - set:
                 jump_to:           "{{ slots.stage }}"
                 unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
         - when: "slots.stage == 'validating' || slots.stage == 'validate'"
-          target: validating_executing
+          target: validating
           effects:
             - set:
                 jump_to:           "{{ slots.stage }}"
                 unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
         - when: "slots.stage == 'done' || slots.stage == 'pr'"
-          target: done_executing
+          target: done
           effects:
             - set:
                 jump_to:           "{{ slots.stage }}"
@@ -198,12 +169,10 @@ states:
             - set:
                 abandon_reason: "jump_to_unknown_stage"
                 status:         "abandoned"
-      # Operator-driven mode switch from the first checkpoint. quick_fix
-      # flips bugfix_mode to "quick" without state movement — the operator
-      # then `accept`s and the rest of the pipeline collapses. skip_to_pr
-      # jumps directly into validating_executing (same shape as the idle
-      # arc, but reachable mid-flow if reproducing already established
-      # the bug is trivial). full_pipeline restores the default mode.
+
+      # Mid-flow mode switches. quick_fix flips bugfix_mode without
+      # state movement; skip_to_pr jumps to validating; full_pipeline
+      # restores the default.
       quick_fix:
         - target: .
           effects:
@@ -215,12 +184,13 @@ states:
             - set:
                 bugfix_mode: "full"
       skip_to_pr:
-        - target: validating_executing
+        - target: validating
           effects:
             - set:
                 bugfix_mode:        "full"
                 restart_from_stage: "validate"
                 unsafe_jumps_made:  "{{ world.unsafe_jumps_made + 1 }}"
+
       quit:
         - target: "@exit:abandoned"
       look:

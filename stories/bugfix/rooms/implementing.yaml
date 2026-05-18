@@ -1,14 +1,15 @@
-# implementing — phase 6 + 6.5 of the cyber-repo pipeline. No checkpoint
-# (per contract §7); the room threads straight into testing.
+# implementing — phase 3 of the bugfix pipeline (apply the proposed fix).
 #
-# Wave 1 emits an implementation summary as a `say:` but does NOT produce a
-# separate artifact JSON — the implementation summary is folded into the
-# next room's `implement_review_artifact` (testing).
+# No artifact-producing oracle and no separate decision room. The
+# implementation is a side-effect chain that runs on_enter (workspace
+# sync + vcs commit), and `continue` advances to testing. There's no
+# checkpoint here because the implementation has no body to review
+# independently — it's reviewed in testing's run-and-review pass.
 
 states:
 
-  implementing_executing:
-    description: "Applying the proposed fix."
+  implementing:
+    description: "Apply the proposed fix to the workspace; advance to testing."
     view: |
       Implementing fix for {{ world.ticket_id }} — {{ world.ticket_title }}
 
@@ -19,26 +20,14 @@ states:
 
       {{ world.propose_fix_artifact.summary_markdown|default:"(no proposal body available)" }}
 
-      Type `proceed` to move to testing, or `restart_from` to bail back.
+      Reply: `continue` (advance to testing) · `restart_from stage=…` · `quit`
     relevant_world: [ticket_id, ticket_title, workspace_id, workdir, feature_branch, propose_fix_artifact]
     on_enter:
-      # The actual code-edit happens here via iface.vcs.commit / iface.workspace.sync
-      # Slice β's host handlers implement the work; the iface call below is
-      # the canonical dispatch site. In Wave 1 the no-op iface.vcs.commit
-      # handler just records "implementation applied" against the workspace.
-      #
-      # The workspace_id / workdir guards keep dogfood walkthroughs that
-      # operate against the live repo cwd (no isolated worktree was set
-      # up at pickup time) from face-planting into on_error: idle here:
-      # an empty workspace_id meant iface.workspace.sync errored out and
-      # bounced the operator back to bf.idle the moment they accepted
-      # the proposed fix. Stories that DO own a worktree set the id
-      # earlier in the chain (the ticket_search → pick path can be
-      # extended to do so, or a `setup_workspace` step can land before
-      # this room). When the id is empty the implementing step is a
-      # narrative-only beat — the fix is applied directly in cwd by
-      # whoever drives the implementation outside the orchestrator
-      # (or the implementation pipeline handles it next).
+      # The iface.workspace.sync + iface.vcs.commit are the workspace-
+      # side write seams (instance bindings: host.git_worktree / host.git
+      # in kitsoki-dev). Guarded on non-empty ids so dogfood walks
+      # without an isolated worktree degrade to a narrative-only beat
+      # instead of bouncing to idle via on_error.
       - when: "world.workspace_id != ''"
         invoke: iface.workspace.sync
         with:
@@ -53,11 +42,12 @@ states:
         on_error: idle
       - say: "Fix applied — {{ world.propose_fix_artifact.summary_title }}"
     on:
-      proceed:
-        - target: testing_executing
+      accept:
+        - target: testing
+
       restart_from:
         - when: "slots.stage == 'reproducing'"
-          target: reproducing_executing
+          target: reproducing
           effects:
             - set:
                 restart_from_stage: "reproducing"
@@ -65,20 +55,21 @@ states:
                 reproducing_cycle:  0
                 cycle:              0
         - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
-          target: proposing_executing
+          target: proposing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage }}"
                 refine_feedback:    ""
                 proposing_cycle:    0
                 cycle:              0
-        - target: proposing_executing
+        - target: proposing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
                 refine_feedback:    ""
                 proposing_cycle:    0
                 cycle:              0
+
       quit:
         - target: "@exit:abandoned"
       look:

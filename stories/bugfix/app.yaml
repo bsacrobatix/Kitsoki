@@ -179,17 +179,6 @@ world:
   # ── Pipeline control ──────────────────────────────────────────────────
   bugfix_mode:      { type: string, default: "full" }            # full | quick
 
-  # auto_accept_on_post controls whether each `_awaiting_reply` room's
-  # on_enter chain auto-emits `accept` in human mode. Default false
-  # preserves the canonical "proceed → _awaiting_reply (pause) →
-  # accept → next_executing" contract every bugfix flow fixture relies
-  # on. Parent stories that want the one-keystroke dogfood UX (the
-  # operator types `continue` once in `_executing` and the pipeline
-  # advances all the way to the next real artifact-producing room)
-  # project this to true via their import's `world_in:`. See
-  # stories/kitsoki-dev/app.yaml + stories/dev-story/app.yaml.
-  auto_accept_on_post: { type: bool, default: false }
-
   # bf_autostart_attempted gates bf.idle's on_enter setup+autostart
   # chain so it fires exactly once per session per ticket. Without
   # this, an on_error bounce back to idle would re-fire the chain
@@ -274,14 +263,10 @@ intents:
     description: "Begin the pipeline from idle."
     examples: [start, "begin", "kick off"]
     priority: 90
-  proceed:
-    description: "Advance from an _executing room to its _awaiting_reply checkpoint."
-    examples: [proceed, "next", "deliver"]
-    priority: 85
   accept:
-    description: "Accept the current checkpoint artifact; advance."
-    examples: [accept, "approve", "lgtm", "ship it"]
-    priority: 80
+    description: "Accept the current room's artifact and advance to the next phase. Posts the artifact to the transport as a side-effect."
+    examples: ["continue", "proceed", "accept", "next", "deliver", "approve", "lgtm", "ship it", "ok"]
+    priority: 85
   refine:
     description: "Refine the current checkpoint; re-execute with feedback."
     examples: [refine, "rework", "redo"]
@@ -336,7 +321,7 @@ intents:
 # lifts these into the parent's bare intent table so an operator can
 # drive the imported pipeline without typing the `bf__` prefix.
 exports:
-  intents: [start, proceed, accept, refine, restart_from, jump_to, quick_fix, skip_to_pr, full_pipeline, change_ticket, quit, look]
+  intents: [start, accept, refine, restart_from, jump_to, quick_fix, skip_to_pr, full_pipeline, change_ticket, quit, look]
 
 # Named return points. A parent story (dev-story / kitsoki-dev / cyber-devstory)
 # maps each to one of its own states. Standalone load synthesises

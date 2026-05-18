@@ -1,10 +1,11 @@
-# reviewing — phase 8 + 9 of the cyber-repo pipeline (code review + security).
-# No checkpoint (contract §7); threads into validating.
+# reviewing — phase 5 of the bugfix pipeline (self code + security review).
+# No artifact-producing oracle. The reviewing pass is a synchronous
+# narrative beat: read the diff, say something, advance to validating.
 
 states:
 
-  reviewing_executing:
-    description: "Self-review of the diff (code + security)."
+  reviewing:
+    description: "Self-review the diff (code + security); advance to validating."
     view: |
       Reviewing the fix for {{ world.ticket_id }} — {{ world.ticket_title }}
 
@@ -13,11 +14,9 @@ states:
 
       {{ world.implement_review_artifact.summary_markdown|default:"(artifact pending — oracle has not returned yet)" }}
 
-      Type `proceed` to advance to validating.
+      Reply: `continue` (advance to validating) · `restart_from stage=…` · `quit`
     relevant_world: [ticket_id, ticket_title, workdir, implement_review_artifact]
     on_enter:
-      # iface.vcs.diff fetches the patch the reviewer reads. Slice β wires
-      # host.git.diff to return the workspace diff; Wave 1 stub returns "".
       - invoke: iface.vcs.diff
         with:
           workdir: "{{ world.workdir }}"
@@ -26,11 +25,12 @@ states:
         on_error: idle
       - say: "Review pass complete — diff {{ world.implement_review_artifact.status|default:'pending' }}."
     on:
-      proceed:
-        - target: validating_executing
+      accept:
+        - target: validating
+
       restart_from:
         - when: "slots.stage == 'reproducing'"
-          target: reproducing_executing
+          target: reproducing
           effects:
             - set:
                 restart_from_stage: "reproducing"
@@ -38,7 +38,7 @@ states:
                 reproducing_cycle:  0
                 cycle:              0
         - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
-          target: proposing_executing
+          target: proposing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage }}"
@@ -46,7 +46,7 @@ states:
                 proposing_cycle:    0
                 cycle:              0
         - when: "slots.stage == 'implementing' || slots.stage == 'implement_review'"
-          target: implementing_executing
+          target: implementing
           effects:
             - set:
                 restart_from_stage:  "{{ slots.stage }}"
@@ -54,20 +54,21 @@ states:
                 implementing_cycle:  0
                 cycle:               0
         - when: "slots.stage == 'testing' || slots.stage == 'test'"
-          target: testing_executing
+          target: testing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage }}"
                 refine_feedback:    ""
                 testing_cycle:      0
                 cycle:              0
-        - target: proposing_executing
+        - target: proposing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
                 refine_feedback:    ""
                 proposing_cycle:    0
                 cycle:              0
+
       quit:
         - target: "@exit:abandoned"
       look:

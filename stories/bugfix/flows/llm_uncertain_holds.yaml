@@ -1,11 +1,11 @@
 # llm_uncertain_holds — judge_mode=llm with an uncertain verdict.
-# The LLM-judge fires at the reproducing checkpoint and returns
+# The LLM-judge fires from reproducing.on_enter and returns
 # `verdict: uncertain` + low confidence. Contract §6 step 4's
 # emit_intent guard requires `verdict != 'uncertain' && intent !=
 # 'uncertain' && confidence >= threshold`; an uncertain verdict
-# fails all three predicates, so the state holds at
-# reproducing_awaiting_reply with the verdict visible. This flow
-# proves emit_intent doesn't auto-fire on an uncertain verdict.
+# fails all three predicates, so the state holds at reproducing
+# with the verdict visible. This flow proves emit_intent doesn't
+# auto-fire on an uncertain verdict.
 #
 # Asserts:
 #   - the `when:` guard on the judge call fires even on uncertain
@@ -13,8 +13,7 @@
 #     is confident")
 #   - world.llm_verdict.verdict ends up "uncertain"
 #   - the post-bind emit_intent dispatch does NOT advance the state
-#     (so the proceed turn settles at reproducing_awaiting_reply,
-#     not proposing_executing)
+#     (so the start turn settles at reproducing, not proposing)
 #   - quit lands at @exit:abandoned
 
 test_kind: flow
@@ -53,10 +52,7 @@ host_handlers:
 
 turns:
   - intent: { name: start, slots: {} }
-    expect_state: reproducing_executing
-
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
+    expect_state: reproducing
     expect_world:
       llm_verdict:
         summary_title:    "Unclear reproduction"
@@ -69,8 +65,8 @@ turns:
         confidence: 0.5
 
   # No auto-emit fires — the guard `verdict != 'uncertain'` rejects.
-  # The state holds at reproducing_awaiting_reply until an operator
-  # intervenes; we model "operator decides to quit" as the next turn.
+  # The state holds at reproducing until an operator intervenes; we
+  # model "operator decides to quit" as the next turn.
   - intent: { name: quit, slots: {} }
     expect_state: __exit__abandoned
 

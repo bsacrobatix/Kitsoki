@@ -1,6 +1,6 @@
 # quit_at_proposing — judge_mode=human, operator quits at the proposing
 # checkpoint. Proves the quit arc routes through @exit:abandoned for
-# every _awaiting_reply room (not just done).
+# every merged checkpoint room (not just done).
 
 test_kind: flow
 app: ../app.yaml
@@ -37,13 +37,9 @@ host_handlers:
 
 turns:
   - intent: { name: start, slots: {} }
-    expect_state: reproducing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
+    expect_state: reproducing
   - intent: { name: accept, slots: {} }
-    expect_state: proposing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_awaiting_reply
+    expect_state: proposing
   - intent: { name: quit, slots: {} }
     expect_state: __exit__abandoned
 

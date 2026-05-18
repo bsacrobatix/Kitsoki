@@ -1,23 +1,23 @@
 # restart_from_each_stage — port of cyber-repo's
 # stories/bugfix/flows/restart_from_each_stage.yaml.
 #
-# The done_awaiting_reply checkpoint's restart_from arc has a when:-ladder
-# across each well-known prior stage:
+# The done room's restart_from arc has a when:-ladder across each
+# well-known prior stage:
 #
-#   reproducing   → reproducing_executing
-#   proposing     → proposing_executing
-#   implementing  → implementing_executing
-#   testing       → testing_executing
-#   validating    → validating_executing
+#   reproducing   → reproducing
+#   proposing     → proposing
+#   implementing  → implementing
+#   testing       → testing
+#   validating    → validating
 #
-# Each scenario probes a single stage from done_awaiting_reply (the
-# latest checkpoint, where every prior stage is reachable). Each also
-# asserts restart_from_stage was set and the relevant <phase>_cycle
-# counter was reset to 0 — a regression that drops the reset must fail.
+# Each scenario probes a single stage from done (the latest checkpoint,
+# where every prior stage is reachable). Each also asserts
+# restart_from_stage was set and the relevant <phase>_cycle counter was
+# reset to 0 — a regression that drops the reset must fail.
 
 test_kind: flow
 app: ../app.yaml
-initial_state: done_awaiting_reply
+initial_state: done
 initial_world:
   ticket_id:           "TKT-200"
   thread:              "TKT-200"
@@ -46,7 +46,7 @@ host_handlers:
 
 turns:
   - intent: { name: restart_from, slots: { stage: "reproducing" } }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world:
       restart_from_stage: "reproducing"
       reproducing_cycle:  0
@@ -58,7 +58,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: done_awaiting_reply
+initial_state: done
 initial_world:
   ticket_id:        "TKT-201"
   thread:           "TKT-201"
@@ -85,7 +85,7 @@ host_handlers:
 
 turns:
   - intent: { name: restart_from, slots: { stage: "proposing" } }
-    expect_state: proposing_executing
+    expect_state: proposing
     expect_world:
       restart_from_stage: "proposing"
       proposing_cycle:    0
@@ -96,7 +96,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: done_awaiting_reply
+initial_state: done
 initial_world:
   ticket_id:           "TKT-202"
   thread:              "TKT-202"
@@ -123,7 +123,7 @@ host_handlers:
 
 turns:
   - intent: { name: restart_from, slots: { stage: "implementing" } }
-    expect_state: implementing_executing
+    expect_state: implementing
     expect_world:
       restart_from_stage:   "implementing"
       implementing_cycle:   0
@@ -134,7 +134,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: done_awaiting_reply
+initial_state: done
 initial_world:
   ticket_id:       "TKT-203"
   thread:          "TKT-203"
@@ -161,7 +161,7 @@ host_handlers:
 
 turns:
   - intent: { name: restart_from, slots: { stage: "testing" } }
-    expect_state: testing_executing
+    expect_state: testing
     expect_world:
       restart_from_stage: "testing"
       testing_cycle:      0
@@ -172,7 +172,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: done_awaiting_reply
+initial_state: done
 initial_world:
   ticket_id:          "TKT-204"
   thread:             "TKT-204"
@@ -199,7 +199,7 @@ host_handlers:
 
 turns:
   - intent: { name: restart_from, slots: { stage: "validating" } }
-    expect_state: validating_executing
+    expect_state: validating
     expect_world:
       restart_from_stage:  "validating"
       validating_cycle:    0

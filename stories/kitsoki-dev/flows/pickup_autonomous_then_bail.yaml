@@ -1,10 +1,11 @@
 # pickup_autonomous_then_bail — judge_mode=llm_then_human with a
-# mid-flow bail-out. The LLM-judge auto-fires `accept` for the first
-# two checkpoints (confident verdict 0.9 >= threshold 0.8), then a
-# world_override flips judge_mode to `human` to simulate "operator
-# intervened because verdict looked dodgy". The next checkpoint HOLDS
-# at *_awaiting_reply (the emit_intent gate closes on
-# `judge_mode == 'human'`) and only resolves on a manual `accept`.
+# mid-flow bail-out. The LLM-judge auto-fires `accept` from each
+# merged room's on_enter (confident verdict 0.9 >= threshold 0.8),
+# cascading through every room with a judge until it stops at one
+# without (implementing, reviewing). A world_override later flips
+# judge_mode to `human` to simulate "operator intervened because
+# verdict looked dodgy"; subsequent rooms HOLD because the
+# emit_intent gate closes on `judge_mode == 'human'`.
 #
 # Proves the autonomous loop bails cleanly to human in mid-stream
 # without restart, replay, or state reload — the same exact mechanism
@@ -96,35 +97,21 @@ host_handlers:
         confidence_pct: 90
 
 turns:
-  # core.main → core.bf.idle.
   # ── Phase A — autonomous walk (llm_then_human + confident) ──────────
-  # bf.idle's auto-start on_enter fires on this transition (ticket is
-  # loaded, no reproduction artifact yet), so we land at
-  # reproducing_executing without the bf.idle → start two-step.
+  # core.main → core.bf.idle. bf.idle's auto-start on_enter fires on
+  # this transition (ticket is loaded, no reproduction artifact yet),
+  # emit_intents `start`, and reproducing.on_enter cascades the
+  # autonomous-emit chain through every room with a judge until it
+  # hits one without (implementing). Net landing: core.bf.implementing.
   - intent: { name: core__go_bugfix, slots: {} }
-    expect_state: core.bf.reproducing_executing
-
-  # proceed → reproducing_awaiting_reply, but the LLM-judge auto-fires
-  # accept via emit_intent; we land at proposing_executing in one turn.
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.proposing_executing
-
-  # Same shape — proceed → proposing_awaiting_reply → emit_intent → implementing_executing.
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.implementing_executing
+    expect_state: core.bf.implementing
 
   # ── Bail-out — operator flips judge_mode to "human" ─────────────────
-  # implementing_executing has no checkpoint; proceed lands at testing.
-  # AFTER this turn the override flips the mode, so the very next
-  # checkpoint (testing) holds for an operator instead of auto-firing.
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.testing_executing
-
-  # ── Phase B — supervised; operator drives ────────────────────────────
-  # world_override flips judge_mode mid-flow. emit_intent's gate
-  # (`world.judge_mode != 'human'`) closes, so the next checkpoint
-  # HOLDS at testing_awaiting_reply waiting for a human.
-  - intent: { name: core__bf__proceed, slots: {} }
+  # accept advances to testing. The world_override flips the mode
+  # BEFORE testing.on_enter evaluates its emit_intent guard, so the
+  # autonomous chain stops at testing (rather than cascading on to
+  # reviewing).
+  - intent: { name: core__bf__accept, slots: {} }
     world_override:
       # Flip ALL judge_mode keys (top-level + nested under core / bf
       # / pr) because the emit_intent gate at the bf checkpoint reads
@@ -134,21 +121,17 @@ turns:
       core__judge_mode:     "human"
       core__bf__judge_mode: "human"
       core__pr__judge_mode: "human"
-    expect_state: core.bf.testing_awaiting_reply
+    expect_state: core.bf.testing
 
-  # Manual accept resolves the hold; pipeline resumes.
+  # ── Phase B — supervised; operator drives ────────────────────────────
+  # emit_intent's gate (`world.judge_mode != 'human'`) now closes, so
+  # every remaining accept requires a manual operator decision.
   - intent: { name: core__bf__accept, slots: {} }
-    expect_state: core.bf.reviewing_executing
-
-  # ── Continue supervised to done ─────────────────────────────────────
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.validating_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.validating_awaiting_reply
+    expect_state: core.bf.reviewing
   - intent: { name: core__bf__accept, slots: {} }
-    expect_state: core.bf.done_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.done_awaiting_reply
+    expect_state: core.bf.validating
+  - intent: { name: core__bf__accept, slots: {} }
+    expect_state: core.bf.done
 
   # done.accept → @exit:done → handoff to pr.open_pr.
   - intent: { name: core__bf__accept, slots: {} }

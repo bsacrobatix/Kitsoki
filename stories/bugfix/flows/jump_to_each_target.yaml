@@ -2,27 +2,27 @@
 # stories/bugfix/flows/jump_to.yaml (provider-neutral).
 #
 # Per-phase jump_to ladders advance the pipeline forward to a later
-# _executing room. Each scenario asserts:
+# room. Each scenario asserts:
 #   - the target state matches the slot alias
 #   - world.jump_to was set to the slot value
 #   - world.unsafe_jumps_made was incremented (audit)
 #
 # Coverage:
-#   1. reproducing_awaiting_reply → testing (alias `test`)
-#   2. reproducing_awaiting_reply → validating
-#   3. reproducing_awaiting_reply → done (alias `pr`)
-#   4. proposing_awaiting_reply  → testing
-#   5. proposing_awaiting_reply  → validating (alias `validate`)
-#   6. testing_awaiting_reply    → validating
-#   7. testing_awaiting_reply    → done (alias `pr`)
-#   8. validating_awaiting_reply → done
+#   1. reproducing → testing (alias `test`)
+#   2. reproducing → validating
+#   3. reproducing → done (alias `pr`)
+#   4. proposing  → testing
+#   5. proposing  → validating (alias `validate`)
+#   6. testing    → validating
+#   7. testing    → done (alias `pr`)
+#   8. validating → done
 #   9. unknown stage from reproducing → @exit:abandoned with reason set
 #
 # A regression that drops or reorders an arm must fail this flow.
 
 test_kind: flow
 app: ../app.yaml
-initial_state: reproducing_awaiting_reply
+initial_state: reproducing
 initial_world:
   ticket_id:  "TKT-300"
   thread:     "TKT-300"
@@ -41,7 +41,7 @@ host_handlers:
 
 turns:
   - intent: { name: jump_to, slots: { stage: "test" } }
-    expect_state: testing_executing
+    expect_state: testing
     expect_world:
       jump_to:           "test"
       unsafe_jumps_made: 1
@@ -52,7 +52,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: reproducing_awaiting_reply
+initial_state: reproducing
 initial_world:
   ticket_id:  "TKT-301"
   thread:     "TKT-301"
@@ -71,7 +71,7 @@ host_handlers:
 
 turns:
   - intent: { name: jump_to, slots: { stage: "validating" } }
-    expect_state: validating_executing
+    expect_state: validating
     expect_world:
       jump_to:           "validating"
       unsafe_jumps_made: 1
@@ -82,7 +82,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: reproducing_awaiting_reply
+initial_state: reproducing
 initial_world:
   ticket_id:  "TKT-302"
   thread:     "TKT-302"
@@ -101,7 +101,7 @@ host_handlers:
 
 turns:
   - intent: { name: jump_to, slots: { stage: "pr" } }
-    expect_state: done_executing
+    expect_state: done
     expect_world:
       jump_to:           "pr"
       unsafe_jumps_made: 1
@@ -112,7 +112,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposing_awaiting_reply
+initial_state: proposing
 initial_world:
   ticket_id:  "TKT-303"
   thread:     "TKT-303"
@@ -131,7 +131,7 @@ host_handlers:
 
 turns:
   - intent: { name: jump_to, slots: { stage: "testing" } }
-    expect_state: testing_executing
+    expect_state: testing
     expect_world:
       jump_to:           "testing"
       unsafe_jumps_made: 1
@@ -142,7 +142,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposing_awaiting_reply
+initial_state: proposing
 initial_world:
   ticket_id:  "TKT-304"
   thread:     "TKT-304"
@@ -161,7 +161,7 @@ host_handlers:
 
 turns:
   - intent: { name: jump_to, slots: { stage: "validate" } }
-    expect_state: validating_executing
+    expect_state: validating
     expect_world:
       jump_to:           "validate"
       unsafe_jumps_made: 1
@@ -172,7 +172,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: testing_awaiting_reply
+initial_state: testing
 initial_world:
   ticket_id:  "TKT-305"
   thread:     "TKT-305"
@@ -191,7 +191,7 @@ host_handlers:
 
 turns:
   - intent: { name: jump_to, slots: { stage: "validating" } }
-    expect_state: validating_executing
+    expect_state: validating
     expect_world:
       jump_to:           "validating"
       unsafe_jumps_made: 1
@@ -202,7 +202,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: testing_awaiting_reply
+initial_state: testing
 initial_world:
   ticket_id:  "TKT-306"
   thread:     "TKT-306"
@@ -221,7 +221,7 @@ host_handlers:
 
 turns:
   - intent: { name: jump_to, slots: { stage: "pr" } }
-    expect_state: done_executing
+    expect_state: done
     expect_world:
       jump_to:           "pr"
       unsafe_jumps_made: 1
@@ -232,7 +232,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: validating_awaiting_reply
+initial_state: validating
 initial_world:
   ticket_id:  "TKT-307"
   thread:     "TKT-307"
@@ -251,7 +251,7 @@ host_handlers:
 
 turns:
   - intent: { name: jump_to, slots: { stage: "done" } }
-    expect_state: done_executing
+    expect_state: done
     expect_world:
       jump_to:           "done"
       unsafe_jumps_made: 1
@@ -266,7 +266,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: reproducing_awaiting_reply
+initial_state: reproducing
 initial_world:
   ticket_id:  "TKT-308"
   thread:     "TKT-308"

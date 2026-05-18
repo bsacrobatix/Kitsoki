@@ -1,15 +1,21 @@
 # happy_human — judge_mode=human, accept at every checkpoint → done.
 #
+# Each phase is a single merged state (no _executing / _awaiting_reply
+# split). on_enter binds the artifact; `accept` posts to transport AND
+# advances to the next phase — one keystroke per checkpoint.
+#
 # The flow runner stubs every host call:
 #   - host.oracle.ask_with_mcp returns canned `submitted:` artifacts
-#     per room. The first call (reproducing_executing) returns the
+#     per room. The first call (reproducing.on_enter) returns the
 #     reproduction artifact; the next room's call binds the same key
 #     to its own canned payload, etc.
 #   - host.append_to_file (the iface.transport default) is stubbed to
 #     ok: true; the iface rewrite resolves iface.transport.post →
 #     host.append_to_file.post, which the registry's prefix-fallback
 #     dispatches to the bare host.append_to_file handler.
-#   - host.inbox.add is stubbed to ok: true.
+#   - host.inbox.add is stubbed to ok: true (the dispatch was removed
+#     from the bugfix rooms, but the handler stays registered as a
+#     no-op safety net for harnesses that still resolve the name).
 #   - iface.workspace.sync, iface.vcs.commit, iface.vcs.diff,
 #     iface.ci.run_tests, iface.ci.build all resolve to <binding>.<op>;
 #     each binding (host.git_worktree, host.git, host.local) is stubbed
@@ -39,7 +45,8 @@ host_handlers:
   host.append_to_file:
     data: { ok: true, message_id: "msg-1" }
 
-  # Inbox mirror handler (Slice β provides the real one; stub for now).
+  # Inbox mirror handler (kept as a no-op; rooms no longer fire inbox.add
+  # but the host_handlers entry is harmless and defends against re-add).
   host.inbox.add:
     data: { ok: true, id: "ib-1" }
 
@@ -107,59 +114,36 @@ host_handlers:
 
 turns:
 
-  # Idle → reproducing_executing. on_enter runs host.oracle.ask_with_mcp
-  # and binds the whole submitted: payload into world.reproduction_artifact.
-  # We don't assert on the artifact's exact contents here — the flow path
-  # itself proves the bind happened (downstream rooms read the artifact's
-  # summary_markdown when posting to the transport).
+  # Idle → reproducing. on_enter runs host.oracle.ask_with_mcp and binds
+  # the whole submitted: payload into world.reproduction_artifact.
   - intent: { name: start, slots: {} }
-    expect_state: reproducing_executing
+    expect_state: reproducing
 
-  # reproducing_executing → reproducing_awaiting_reply.
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
-
-  # accept → proposing_executing.
+  # accept posts the reproduction artifact and advances to proposing.
   - intent: { name: accept, slots: {} }
-    expect_state: proposing_executing
+    expect_state: proposing
 
-  # proposing_executing → proposing_awaiting_reply.
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_awaiting_reply
-
-  # accept → implementing_executing.
+  # accept posts the proposal and advances to implementing.
   - intent: { name: accept, slots: {} }
-    expect_state: implementing_executing
+    expect_state: implementing
 
-  # implementing_executing → testing_executing (no checkpoint).
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_executing
-
-  # testing_executing → testing_awaiting_reply.
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_awaiting_reply
-
-  # accept → reviewing_executing.
+  # implementing has no checkpoint body; accept advances to testing.
   - intent: { name: accept, slots: {} }
-    expect_state: reviewing_executing
+    expect_state: testing
 
-  # reviewing_executing → validating_executing (no checkpoint).
-  - intent: { name: proceed, slots: {} }
-    expect_state: validating_executing
-
-  # validating_executing → validating_awaiting_reply.
-  - intent: { name: proceed, slots: {} }
-    expect_state: validating_awaiting_reply
-
-  # accept → done_executing.
+  # accept posts the test review and advances (full mode → reviewing).
   - intent: { name: accept, slots: {} }
-    expect_state: done_executing
+    expect_state: reviewing
 
-  # done_executing → done_awaiting_reply.
-  - intent: { name: proceed, slots: {} }
-    expect_state: done_awaiting_reply
+  # reviewing has no checkpoint body; accept advances to validating.
+  - intent: { name: accept, slots: {} }
+    expect_state: validating
 
-  # accept → @exit:done (synthesised __exit__done terminal in standalone load).
+  # accept posts the validation artifact and advances to done.
+  - intent: { name: accept, slots: {} }
+    expect_state: done
+
+  # accept posts the close-out artifact and exits via @exit:done.
   - intent: { name: accept, slots: {} }
     expect_state: __exit__done
     expect_world:

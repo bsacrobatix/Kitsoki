@@ -1,13 +1,13 @@
 # mixed_judge_swap — one YAML, both judge modes in a single run.
 #
 # Start: judge_mode=llm_then_human + confident verdict + threshold 0.8.
-# The first two checkpoints auto-fire the LLM verdict (one `proceed`
-# crosses two states because emit_intent dispatches the verdict's
-# `accept` from on_enter of *_awaiting_reply).
+# `start` enters reproducing; the cascade fires through every room with
+# a judge in on_enter until it hits one without (implementing, reviewing).
+# Net: start lands at implementing in one user turn.
 #
-# Mid-run: world_override flips judge_mode to "human". The emit_intent
-# gate (`world.judge_mode != 'human'`) closes, so subsequent checkpoints
-# hold at *_awaiting_reply and require a manual `accept` to advance.
+# Mid-run: world_override flips judge_mode to "human" on the next
+# `accept`. The emit_intent gate (`world.judge_mode != 'human'`) closes,
+# so subsequent checkpoints hold for an operator instead of auto-firing.
 #
 # This proves a key polymorphism property of the bugfix story: the same
 # checkpoint state-graph drives both LLM-judged and operator-driven
@@ -59,57 +59,30 @@ host_handlers:
 turns:
 
   # ── Phase A — judge_mode=llm_then_human; LLM auto-fires ─────────────
+  # start cascades reproducing → proposing → implementing. The cascade
+  # stops at implementing because it has no judge in on_enter (no
+  # emit_intent to fire).
   - intent: { name: start, slots: {} }
-    expect_state: reproducing_executing
+    expect_state: implementing
 
-  # `proceed` enters reproducing_awaiting_reply; emit_intent dispatches
-  # the LLM verdict (accept) from on_enter, advancing to proposing_executing
-  # in the same turn.
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_executing
-
-  # Same shape: proceed → proposing_awaiting_reply → accept (LLM) → implementing_executing.
-  - intent: { name: proceed, slots: {} }
-    expect_state: implementing_executing
-
-  # ── Mid-flow swap — flip judge_mode to "human" ──────────────────────
-  # implementing_executing has no checkpoint; proceed lands at
-  # testing_executing.  AFTER this turn we flip the mode, so the very
-  # next checkpoint (testing) holds for an operator instead of auto-firing.
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_executing
-
-  # ── Phase B — judge_mode=human; operator drives ─────────────────────
-  # World-override the swap; in the static-harness path this is an
-  # in-place world mutation, in the orchestrator path this is a
-  # side-channel EffectApplied event at turn = max(history)+1 (the
-  # injectWorldOverride helper picks a fresh turn to dodge the
-  # (session_id, turn, seq) PK).
-  - intent: { name: proceed, slots: {} }
+  # ── Mid-flow swap — flip judge_mode to "human" before the next
+  # autonomous-capable room (testing) gets a chance to auto-fire.
+  - intent: { name: accept, slots: {} }
     world_override:
       judge_mode: "human"
-    expect_state: testing_awaiting_reply
+    expect_state: testing
+    expect_world:
+      judge_mode: "human"
 
+  # ── Phase B — judge_mode=human; operator drives ─────────────────────
   # emit_intent's guard now fails (`judge_mode == 'human'`), so we
-  # must accept manually.
+  # must accept manually through every remaining checkpoint.
   - intent: { name: accept, slots: {} }
-    expect_state: reviewing_executing
-
-  # reviewing → validating (no checkpoint).
-  - intent: { name: proceed, slots: {} }
-    expect_state: validating_executing
-
-  # validating checkpoint — still in human mode.
-  - intent: { name: proceed, slots: {} }
-    expect_state: validating_awaiting_reply
-
+    expect_state: reviewing
   - intent: { name: accept, slots: {} }
-    expect_state: done_executing
-
-  # done checkpoint — still in human mode.
-  - intent: { name: proceed, slots: {} }
-    expect_state: done_awaiting_reply
-
+    expect_state: validating
+  - intent: { name: accept, slots: {} }
+    expect_state: done
   - intent: { name: accept, slots: {} }
     expect_state: __exit__done
     expect_world:

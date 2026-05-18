@@ -1,14 +1,16 @@
-# done — phase 12 + 12.5 + 13 of the cyber-repo pipeline.
+# done — phase 7 of the bugfix pipeline (close-out artifact + handoff).
 #
-# Produces the `done_artifact` (schemas/done_artifact.json): postmortem-style
-# summary that closes out the run and is carried into pr-refinement by parent
-# stories in Wave 2. The @exit:done's requires: [done_artifact] is enforced
-# at load time — the accept arc here must set done_artifact via `bind:`.
+# Produces the `done_artifact` (schemas/done_artifact.json): postmortem-
+# style summary carried into pr-refinement by parent stories. The
+# @exit:done.requires: [done_artifact] is enforced at load time —
+# the accept arc here must set done_artifact via effects.
+#
+# Single merged state — see rooms/reproducing.yaml for the design.
 
 states:
 
-  done_executing:
-    description: "Building the run's done artifact."
+  done:
+    description: "Build the run's close-out artifact; accept to exit:done (hands off to pr-refinement)."
     view: |
       Wrapping up {{ world.ticket_id }} — {{ world.ticket_title }}
 
@@ -16,54 +18,22 @@ states:
 
       {{ world.done_artifact.summary_markdown|default:"(artifact pending — oracle has not returned yet)" }}
 
-      Type `proceed` to deliver the final artifact.
-    relevant_world: [ticket_id, ticket_title, done_artifact, validate_artifact, cycle]
+      Reply: `continue` (post + exit done, hand off to pr-refinement) · `refine` · `quit`
+    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, done_artifact, validate_artifact, llm_verdict, refine_feedback, cycle]
     on_enter:
       - invoke: host.oracle.ask_with_mcp
         with:
           prompt: prompts/done_executing.md
           schema: schemas/done_artifact.json
           args:
-            ticket_id:           "{{ world.ticket_id }}"
-            ticket_title:        "{{ world.ticket_title }}"
-            validate_summary:    "{{ world.validate_artifact.summary_markdown }}"
-            cycle:               "{{ world.cycle }}"
+            ticket_id:        "{{ world.ticket_id }}"
+            ticket_title:     "{{ world.ticket_title }}"
+            validate_summary: "{{ world.validate_artifact.summary_markdown }}"
+            cycle:            "{{ world.cycle }}"
         bind:
           done_artifact: submitted
         on_error: idle
-    on:
-      proceed:
-        - target: done_awaiting_reply
-      quit:
-        - target: "@exit:abandoned"
-      look:
-        - target: .
 
-  done_awaiting_reply:
-    description: "Final artifact posted; awaiting close-out."
-    view: |
-      ✓ Done artifact posted to transport + inbox.
-
-      Summary: {{ world.done_artifact.summary_title|default:"(none)" }}
-      LLM verdict: {{ world.llm_verdict.verdict|default:"(skipped — human mode)" }}{% if world.llm_verdict.confidence %}  (confidence {{ world.llm_verdict.confidence }}){% endif %}{% if world.llm_verdict.reason %}
-      Reason: {{ world.llm_verdict.reason }}{% endif %}
-
-      Reply: `accept` (close out, hand off to pr-refinement) · `refine` · `quit`
-    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, thread, done_artifact, llm_verdict]
-    on_enter:
-      - invoke: iface.transport.post
-        with:
-          thread:    "{{ world.thread }}"
-          title:     "Bug-fix done: {{ world.ticket_id }}"
-          body:      "{{ world.done_artifact.summary_markdown }}"
-          phase_id:  "done_{{ world.ticket_id }}"
-      - invoke: host.inbox.add
-        with:
-          kind:    checkpoint
-          title:   "Bug-fix done: {{ world.ticket_id }}"
-          thread:  "{{ world.thread }}"
-          state:   done_awaiting_reply
-          body:    "{{ world.done_artifact.summary_markdown }}"
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
         invoke: host.oracle.ask_with_mcp
         with:
@@ -75,8 +45,7 @@ states:
             artifact_body:   "{{ world.done_artifact.summary_markdown }}"
         bind:
           llm_verdict: submitted
-      # Step 4: auto-fire the LLM's verdict above the confidence floor.
-      # Same shape across every checkpoint (see contract §6 / rooms/reproducing.yaml).
+
       - when: |
           world.judge_mode != 'human' &&
           world.llm_verdict.confidence >= world.judge_confidence_threshold &&
@@ -85,25 +54,24 @@ states:
         emit_intent: "{{ world.llm_verdict.intent }}"
         slots:
           feedback: "{{ world.llm_verdict.reason }}"
-
-      # Step 5: human-mode auto-accept. See rooms/reproducing.yaml.
-      - when: "world.judge_mode == 'human' && world.auto_accept_on_post"
-        emit_intent: accept
-        slots:
-          author: "human"
     on:
+      # accept fires @exit:done. @exit:done.requires: [done_artifact]
+      # is checked statically against the effects on this arc — we
+      # re-pin done_artifact (it was bound on_enter) so the requires
+      # gate sees an explicit set.
       accept:
-        # @exit:done.requires: [done_artifact] — the loader enforces that
-        # an effect on this transition writes done_artifact. The bind on
-        # done_executing already populated it; we re-pin it here so the
-        # static check sees `done_artifact` set explicitly on the @exit:done
-        # arc (the requires: gate runs against the transition's effects).
         - target: "@exit:done"
           effects:
+            - invoke: iface.transport.post
+              with:
+                thread:   "{{ world.thread }}"
+                title:    "Bug-fix done: {{ world.ticket_id }}"
+                body:     "{{ world.done_artifact.summary_markdown }}"
+                phase_id: "done_{{ world.ticket_id }}"
             - set:
                 status:        "fixed"
                 done_artifact: "{{ world.done_artifact }}"
-      # L2 cycle-budget gate on refine — see rooms/reproducing.yaml.
+
       refine:
         - when: "world.done_cycle >= world.done_budget"
           target: "@exit:abandoned"
@@ -111,15 +79,16 @@ states:
             - set:
                 abandon_reason: "done_cycle_budget_exhausted"
                 status:         "abandoned"
-        - target: done_executing
+        - target: done
           effects:
             - set:
                 refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
                 done_cycle:      "{{ world.done_cycle + 1 }}"
                 cycle:           "{{ world.cycle + 1 }}"
+
       restart_from:
         - when: "slots.stage == 'reproducing'"
-          target: reproducing_executing
+          target: reproducing
           effects:
             - set:
                 restart_from_stage: "reproducing"
@@ -127,7 +96,7 @@ states:
                 reproducing_cycle:  0
                 cycle:              0
         - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
-          target: proposing_executing
+          target: proposing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage }}"
@@ -135,7 +104,7 @@ states:
                 proposing_cycle:    0
                 cycle:              0
         - when: "slots.stage == 'implementing' || slots.stage == 'implement_review'"
-          target: implementing_executing
+          target: implementing
           effects:
             - set:
                 restart_from_stage:  "{{ slots.stage }}"
@@ -143,7 +112,7 @@ states:
                 implementing_cycle:  0
                 cycle:               0
         - when: "slots.stage == 'testing' || slots.stage == 'test'"
-          target: testing_executing
+          target: testing
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage }}"
@@ -151,20 +120,21 @@ states:
                 testing_cycle:      0
                 cycle:              0
         - when: "slots.stage == 'validating' || slots.stage == 'validate'"
-          target: validating_executing
+          target: validating
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage }}"
                 refine_feedback:    ""
                 validating_cycle:   0
                 cycle:              0
-        - target: validating_executing
+        - target: validating
           effects:
             - set:
                 restart_from_stage: "{{ slots.stage ?? 'validating' }}"
                 refine_feedback:    ""
                 validating_cycle:   0
                 cycle:              0
+
       quit:
         - target: "@exit:abandoned"
       look:

@@ -1,9 +1,9 @@
 # skip_to_pr_from_idle — operator skips the whole upstream pipeline
-# and walks straight into validating_executing. Use when the fix is
-# already in hand and the operator just wants the validate-and-PR tail.
+# and walks straight into validating. Use when the fix is already in
+# hand and the operator just wants the validate-and-PR tail.
 #
 # Asserts:
-#   - target state is validating_executing
+#   - target state is validating
 #   - world.restart_from_stage == "validate"  (audit; tells the parent
 #     "we skipped to validate")
 #   - world.unsafe_jumps_made == 1  (audit counter)
@@ -35,19 +35,15 @@ host_handlers:
 
 turns:
   - intent: { name: skip_to_pr, slots: {} }
-    expect_state: validating_executing
+    expect_state: validating
     expect_world:
       bugfix_mode:        "full"
       restart_from_stage: "validate"
       unsafe_jumps_made:  1
 
   # Walk the validate + done tail to prove the jump landed in a working state.
-  - intent: { name: proceed, slots: {} }
-    expect_state: validating_awaiting_reply
   - intent: { name: accept, slots: {} }
-    expect_state: done_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: done_awaiting_reply
+    expect_state: done
   - intent: { name: accept, slots: {} }
     expect_state: __exit__done
 

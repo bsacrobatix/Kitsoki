@@ -4,7 +4,7 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposing_awaiting_reply
+initial_state: proposing
 initial_world:
   ticket_id:         "TKT-110"
   thread:            "TKT-110"
@@ -38,16 +38,13 @@ host_handlers:
 
 turns:
   # Walk to budget (2): two refines bring proposing_cycle 0 → 1 → 2.
+  # Self-transitions; no on_enter re-fire.
   - intent: { name: refine, slots: { feedback: "first" } }
-    expect_state: proposing_executing
+    expect_state: proposing
     expect_world: { proposing_cycle: 1 }
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_awaiting_reply
   - intent: { name: refine, slots: { feedback: "second" } }
-    expect_state: proposing_executing
+    expect_state: proposing
     expect_world: { proposing_cycle: 2 }
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_awaiting_reply
 
   # Third refine fires the gate.
   - intent: { name: refine, slots: { feedback: "one too many" } }

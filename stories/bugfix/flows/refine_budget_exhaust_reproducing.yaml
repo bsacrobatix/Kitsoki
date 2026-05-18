@@ -15,7 +15,7 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: reproducing_awaiting_reply
+initial_state: reproducing
 initial_world:
   ticket_id:           "TKT-100"
   thread:              "TKT-100"
@@ -59,7 +59,7 @@ expect_no_errors: true
 
 test_kind: flow
 app: ../app.yaml
-initial_state: reproducing_awaiting_reply
+initial_state: reproducing
 initial_world:
   ticket_id:           "TKT-101"
   thread:              "TKT-101"
@@ -88,21 +88,18 @@ host_handlers:
 
 turns:
   # Walk three refines (counter: 0 → 1 → 2 → 3) under the budget.
+  # Each refine self-transitions back to reproducing; on_enter does NOT
+  # re-fire (self-transition), so a single refine turn fully describes
+  # the cycle increment.
   - intent: { name: refine, slots: { feedback: "first" } }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world: { reproducing_cycle: 1 }
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
   - intent: { name: refine, slots: { feedback: "second" } }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world: { reproducing_cycle: 2 }
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
   - intent: { name: refine, slots: { feedback: "third" } }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world: { reproducing_cycle: 3 }
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
 
   # Fourth refine — counter is now at budget, the gate fires.
   - intent: { name: refine, slots: { feedback: "one too many" } }

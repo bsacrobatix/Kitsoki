@@ -1,7 +1,7 @@
 # pickup_self_bug_supervised — the canonical Phase 3 PoC walkthrough.
 #
 # Walks the full closed loop from §5.4 of the proposal:
-#   main → ticket_search → pick → bf.idle → bugfix pipeline (8 rooms)
+#   main → ticket_search → pick → bf.idle → bugfix pipeline (7 merged rooms)
 #       → @exit:done (hands off to pr) → open_pr → ci_monitoring →
 #         merge → @exit:merged → main(status=merged)
 #
@@ -58,7 +58,8 @@ host_handlers:
   host.append_to_file:
     data: { ok: true, message_id: "msg-1" }
 
-  # Inbox mirror.
+  # Inbox mirror (no-op; bf rooms no longer fire inbox.add but the
+  # handler is harmless when registered).
   host.inbox.add:
     data: { ok: true, id: "ib-1" }
 
@@ -91,11 +92,11 @@ host_handlers:
       tickets:
         - { id: "2026-05-14T103205Z-tui-view-render-before-bind", title: "TUI view templates render BEFORE on_enter binds", status: "open", priority: "P2", assignee: "" }
 
-  # Oracle calls — single stub serves every executing room AND every
-  # judge prompt. The bf rooms each bind the whole `submitted:` blob
-  # into their own world key; judge prompts are NOT invoked in
-  # judge_mode=human (the `when:` clause skips them) so the verdict
-  # fields are inert here.
+  # Oracle calls — single stub serves every merged room's on_enter
+  # artifact bind AND every judge prompt. The bf rooms each bind the
+  # whole `submitted:` blob into their own world key; judge prompts
+  # are NOT invoked in judge_mode=human (the `when:` clause skips
+  # them) so the verdict fields are inert here.
   host.oracle.ask_with_mcp:
     data:
       ok: true
@@ -139,48 +140,34 @@ host_handlers:
         confidence_pct: 90
 
 turns:
-  # core.main → core.bf.reproducing_executing (dispatch into the
-  # bugfix sub-story AND auto-fire `start` via bf.idle's on_enter,
-  # which emit_intents `start` when entered with a ticket loaded
-  # and no reproduction artifact yet). One turn instead of two —
-  # the bf.idle dwell-and-type-start-again was needless friction.
-  # Historically this was a separate `core__bf__start` step; the
-  # auto-start collapses it. The `bf__start` rewriting story is
-  # still exercised by the bugfix story's own happy_human flow,
-  # which seeds initial_state=idle (seedInitialState bypasses
-  # on_enter, so the dwell is observable in that fixture).
+  # core.main → core.bf.reproducing (dispatch into the bugfix sub-story
+  # AND auto-fire `start` via bf.idle's on_enter, which emit_intents
+  # `start` when entered with a ticket loaded and no reproduction
+  # artifact yet). One turn instead of two — the bf.idle dwell-and-
+  # type-start-again was needless friction. Historically this was a
+  # separate `core__bf__start` step; the auto-start collapses it.
   - intent: { name: core__go_bugfix, slots: {} }
-    expect_state: core.bf.reproducing_executing
+    expect_state: core.bf.reproducing
     expect_world:
       core__bf__ticket_id: "2026-05-14T103205Z-tui-view-render-before-bind"
 
-  # Walk the bugfix pipeline. proceed / accept are bf-internal arcs
-  # that live in bf's intent table; they don't collide-lift to bare,
-  # so the dispatched form is core__bf__proceed / core__bf__accept.
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.reproducing_awaiting_reply
+  # Walk the merged bugfix pipeline. accept is bf-internal; the
+  # dispatched form is core__bf__accept. Each accept posts the
+  # current artifact and advances to the next phase in one turn.
   - intent: { name: core__bf__accept, slots: {} }
-    expect_state: core.bf.proposing_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.proposing_awaiting_reply
+    expect_state: core.bf.proposing
   - intent: { name: core__bf__accept, slots: {} }
-    expect_state: core.bf.implementing_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.testing_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.testing_awaiting_reply
+    expect_state: core.bf.implementing
   - intent: { name: core__bf__accept, slots: {} }
-    expect_state: core.bf.reviewing_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.validating_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.validating_awaiting_reply
+    expect_state: core.bf.testing
   - intent: { name: core__bf__accept, slots: {} }
-    expect_state: core.bf.done_executing
-  - intent: { name: core__bf__proceed, slots: {} }
-    expect_state: core.bf.done_awaiting_reply
+    expect_state: core.bf.reviewing
+  - intent: { name: core__bf__accept, slots: {} }
+    expect_state: core.bf.validating
+  - intent: { name: core__bf__accept, slots: {} }
+    expect_state: core.bf.done
 
-  # bf.done_awaiting_reply.accept fires @exit:done. dev-story's
+  # bf.done.accept fires @exit:done. dev-story's
   # imports.bf.exits.done.to = pr lifts done_artifact's summary_*
   # fields into the dev-story-level pr_title / pr_body, then
   # transitions into the pr import. Under kitsoki-dev's wrapper,

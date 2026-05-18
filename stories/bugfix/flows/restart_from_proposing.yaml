@@ -1,8 +1,8 @@
 # restart_from_proposing — operator types `restart_from stage=reproducing`
 # at the proposing checkpoint. Wave 1 lands the intent on the previous
-# room's _executing with restart_from_stage set in world; Wave 2 wires
-# the full jump table. Until then the operator can `restart_from` and
-# then `proceed` back through manually.
+# room with restart_from_stage set in world; Wave 2 wires the full jump
+# table. Until then the operator can `restart_from` and then `accept`
+# back through manually.
 
 test_kind: flow
 app: ../app.yaml
@@ -44,48 +44,33 @@ host_handlers:
 
 turns:
   - intent: { name: start, slots: {} }
-    expect_state: reproducing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
+    expect_state: reproducing
   - intent: { name: accept, slots: {} }
-    expect_state: proposing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_awaiting_reply
+    expect_state: proposing
 
-  # Operator restarts from reproducing. Wave 1 implementation: the
-  # proposing_awaiting_reply restart_from arc targets reproducing_executing
-  # and sets restart_from_stage.
+  # Operator restarts from reproducing. The proposing room's
+  # restart_from arc targets reproducing and sets restart_from_stage.
   - intent:
       name: restart_from
       slots: { stage: "reproducing" }
-    expect_state: reproducing_executing
+    expect_state: reproducing
     expect_world:
       restart_from_stage: "reproducing"
       cycle:              0
 
   # Walk back through the pipeline to confirm no state is corrupted.
-  - intent: { name: proceed, slots: {} }
-    expect_state: reproducing_awaiting_reply
   - intent: { name: accept, slots: {} }
-    expect_state: proposing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: proposing_awaiting_reply
+    expect_state: proposing
   - intent: { name: accept, slots: {} }
-    expect_state: implementing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: testing_awaiting_reply
+    expect_state: implementing
   - intent: { name: accept, slots: {} }
-    expect_state: reviewing_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: validating_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: validating_awaiting_reply
+    expect_state: testing
   - intent: { name: accept, slots: {} }
-    expect_state: done_executing
-  - intent: { name: proceed, slots: {} }
-    expect_state: done_awaiting_reply
+    expect_state: reviewing
+  - intent: { name: accept, slots: {} }
+    expect_state: validating
+  - intent: { name: accept, slots: {} }
+    expect_state: done
   - intent: { name: accept, slots: {} }
     expect_state: __exit__done
 
