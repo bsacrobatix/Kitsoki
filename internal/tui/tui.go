@@ -2850,27 +2850,24 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 	switch ev.Type {
 	case "assistant":
 		if ev.Tool != "" {
-			line := ev.Tool
-			if ev.Preview != "" {
-				// Truncate the args preview to 80 chars so a fat
-				// tool_use input doesn't blow up the chat pane. The
-				// runner already capped at 120; tighten further here
-				// because the "Tool " prefix eats a few columns.
-				p := ev.Preview
-				if r := []rune(p); len(r) > 80 {
-					p = string(r[:80]) + "…"
-				}
-				line = ev.Tool + " " + p
+			// Tool use: separate styling, leading blank line for
+			// breathing room (handled inside AppendMetaToolUse).
+			args := ev.Preview
+			if r := []rune(args); len(r) > 80 {
+				args = string(r[:80]) + "…"
 			}
-			m.transcript.AppendMetaStreamLine(line)
+			m.transcript.AppendMetaToolUse(ev.Tool, args)
 			return m
 		}
 		if ev.Preview != "" {
-			m.transcript.AppendMetaStreamLine(ev.Preview)
+			// Narration / "thinking" prose. Tight (no leading
+			// blank line) so consecutive thoughts read as one
+			// paragraph.
+			m.transcript.AppendMetaThinking(ev.Preview)
 		}
 	case "system":
 		if ev.Subtype == "api_retry" {
-			m.transcript.AppendMetaStreamLine("(retrying claude request…)")
+			m.transcript.AppendMetaSystemNotice("(retrying claude request…)")
 		}
 	case "user", "result":
 		// Skipped — tool_result content is too noisy, and result

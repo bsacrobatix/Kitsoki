@@ -840,6 +840,70 @@ func (m *transcriptModel) AppendMetaStreamLine(text string) {
 	m.queue(body)
 }
 
+// AppendMetaThinking renders an agent narration / "thinking" line —
+// muted italic prose without a tool label. Visually distinct from
+// tool-use rows (which call AppendMetaToolUse) so the scrollback
+// reads as "what the agent is reasoning about" vs "what it ran."
+func (m *transcriptModel) AppendMetaThinking(text string) {
+	if text == "" {
+		return
+	}
+	body := lipgloss.NewStyle().
+		Foreground(colorMuted).
+		Italic(true).
+		Render("  " + text)
+	m.entries = append(m.entries, transcriptEntry{body: body})
+	m.queue(body)
+}
+
+// AppendMetaToolUse renders a tool-invocation breadcrumb: an accent-
+// coloured bold tool name with a muted-grey args preview. Lands with
+// a leading blank line so consecutive tool calls get breathing room
+// between themselves and any prior thinking lines.
+//
+// Examples:
+//
+//	  ▸ Read /path/to/file.go
+//	  ▸ Bash ls /worktrees
+//
+// args is allowed to be empty (some tool_use events ship without a
+// preview); in that case only the tool name is shown.
+func (m *transcriptModel) AppendMetaToolUse(tool, args string) {
+	if tool == "" {
+		return
+	}
+	toolPart := lipgloss.NewStyle().
+		Foreground(colorAccent).
+		Bold(true).
+		Render(tool)
+	row := "  ▸ " + toolPart
+	if args != "" {
+		row += " " + lipgloss.NewStyle().
+			Foreground(colorMuted).
+			Render(args)
+	}
+	// Leading newline for the visual gap; embedded in the queued body
+	// so tea.Println produces a blank scrollback row before the
+	// breadcrumb.
+	body := "\n" + row
+	m.entries = append(m.entries, transcriptEntry{body: body})
+	m.queue(body)
+}
+
+// AppendMetaSystemNotice renders a parenthesised system breadcrumb
+// like "(retrying claude request…)". Muted, no italic — the
+// parentheses already mark it as engine-side narration.
+func (m *transcriptModel) AppendMetaSystemNotice(text string) {
+	if text == "" {
+		return
+	}
+	body := lipgloss.NewStyle().
+		Foreground(colorMuted).
+		Render("  " + text)
+	m.entries = append(m.entries, transcriptEntry{body: body})
+	m.queue(body)
+}
+
 // AppendError appends an error/rejection message. The leading arrow
 // matches AppendGuardHint and AppendClarification so a user reading the
 // scrollback sees a consistent prefix for engine-side feedback.

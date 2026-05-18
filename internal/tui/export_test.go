@@ -469,6 +469,16 @@ func SetInputQueueForTest(m *RootModel, items ...string) {
 // m.liveLine.
 func LiveLineForTest(m RootModel) string { return m.transcript.LiveLine() }
 
+// AppendMetaThinkingForTest exposes the narration-line append.
+func AppendMetaThinkingForTest(m *RootModel, text string) {
+	m.transcript.AppendMetaThinking(text)
+}
+
+// AppendMetaToolUseForTest exposes the tool-use breadcrumb append.
+func AppendMetaToolUseForTest(m *RootModel, tool, args string) {
+	m.transcript.AppendMetaToolUse(tool, args)
+}
+
 // AppendSystemForTest drives the production AppendSystem path so
 // regression tests can exercise the assistant-replay rendering site.
 // (Renders the input through Glamour, queues to scrollback pending.)

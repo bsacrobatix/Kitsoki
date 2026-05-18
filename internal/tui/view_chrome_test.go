@@ -90,7 +90,6 @@ func stripStyles(s string) string { return ansiRE.ReplaceAllString(s, "") }
 // produces double-spaced rows. lipgloss.Height should equal the
 // number of "\n" + 1 in the joined output.
 func TestViewChrome_NoDoubleNewlinesInLiveRegion(t *testing.T) {
-	t.Parallel()
 	forceTrueColor(t)
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
@@ -114,7 +113,6 @@ func TestViewChrome_NoDoubleNewlinesInLiveRegion(t *testing.T) {
 // must be ≤ terminal width. A wider row means lipgloss padded past
 // the terminal, which manifests as visible bleed.
 func TestViewChrome_NoRowExceedsTerminalWidth(t *testing.T) {
-	t.Parallel()
 	forceTrueColor(t)
 	const w = 100
 	orch, sid := setupCloak(t)
@@ -136,7 +134,6 @@ func TestViewChrome_NoRowExceedsTerminalWidth(t *testing.T) {
 // "\n" after split — i.e. JoinVertical / Render didn't produce
 // content like "row1\nrow2" inside a single logical row.
 func TestViewChrome_NoEmbeddedNewlinesWithinRows(t *testing.T) {
-	t.Parallel()
 	forceTrueColor(t)
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
@@ -157,7 +154,6 @@ func TestViewChrome_NoEmbeddedNewlinesWithinRows(t *testing.T) {
 // end-of-line. We walk the line for the LAST escape sequence and
 // require it to be a reset.
 func TestViewChrome_AnsiBalanced(t *testing.T) {
-	t.Parallel()
 	forceTrueColor(t)
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
@@ -189,7 +185,6 @@ func TestViewChrome_AnsiBalanced(t *testing.T) {
 // columns. Anything narrower leaves an un-filled trailing column
 // (where the next paint can leak), anything wider wraps and bleeds.
 func TestViewChrome_StatusRowExactlyTerminalWidth(t *testing.T) {
-	t.Parallel()
 	forceTrueColor(t)
 	for _, w := range []int{60, 80, 100, 140} {
 		w := w
@@ -224,7 +219,6 @@ func TestViewChrome_StatusRowExactlyTerminalWidth(t *testing.T) {
 // visible during ModeAwaitingLLM and an indicator row appears
 // above it.
 func TestViewChrome_AwaitingLLMShowsTextarea(t *testing.T) {
-	t.Parallel()
 	forceTrueColor(t)
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
@@ -253,7 +247,6 @@ func TestViewChrome_AwaitingLLMShowsTextarea(t *testing.T) {
 // transcript (a multi-line bullet list with long ticket titles) so
 // the test exercises the realistic shape.
 func TestScrollback_NoRowExceedsTerminalWidth(t *testing.T) {
-	t.Parallel()
 	forceTrueColor(t)
 	const w = 100
 	orch, sid := setupCloak(t)
@@ -308,7 +301,6 @@ func TestScrollback_NoRowExceedsTerminalWidth(t *testing.T) {
 // is wrapped in a real 0x1b prefix (i.e. it's a real escape, not
 // the stripped-but-visible form).
 func TestScrollback_AlreadyAnsiContentDoesNotProduceLiteralEscapes(t *testing.T) {
-	t.Parallel()
 	forceTrueColor(t)
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
@@ -341,6 +333,55 @@ func TestScrollback_AlreadyAnsiContentDoesNotProduceLiteralEscapes(t *testing.T)
 	}
 }
 
+// TestMetaStream_ThinkingAndToolUseAreDistinct pins the user's
+// "thinking and tools need different presentation and more space
+// between them" complaint. Asserts:
+//   - thinking lines render with italic + the muted-gray foreground.
+//   - tool-use lines render with bold + the accent (green) foreground.
+//   - tool-use entries have a leading blank line for breathing room.
+func TestMetaStream_ThinkingAndToolUseAreDistinct(t *testing.T) {
+	forceTrueColor(t)
+	orch, sid := setupCloak(t)
+	m := buildModel(t, orch, sid)
+	rm, _ := tuipkg.ExtractRootModel(m)
+	rm = resizeForTest(rm, 100, 24)
+	tuipkg.ClearTranscriptPendingForTest(&rm)
+
+	tuipkg.AppendMetaThinkingForTest(&rm, "Let me check the schema.")
+	tuipkg.AppendMetaToolUseForTest(&rm, "Read", "/path/to/file.go")
+	tuipkg.AppendMetaThinkingForTest(&rm, "Now I'll run the test.")
+	tuipkg.AppendMetaToolUseForTest(&rm, "Bash", "go test ./...")
+
+	queued := tuipkg.PendingTranscriptForTest(rm)
+	require.Len(t, queued, 4, "should queue 4 entries (2 thinking + 2 tool)")
+
+	// Thinking lines: italic (SGR param 3 — appears as ";3;", ";3m"
+	// or "[3;" depending on lipgloss's emit order).
+	hasItalic := strings.Contains(queued[0], "[3;") ||
+		strings.Contains(queued[0], ";3;") ||
+		strings.Contains(queued[0], ";3m") ||
+		strings.Contains(queued[0], "[3m")
+	require.True(t, hasItalic,
+		"thinking line should be italic (SGR 3); raw=%q", queued[0])
+
+	// Tool-use lines: leading blank line + bold (SGR param 1).
+	require.True(t, strings.HasPrefix(queued[1], "\n"),
+		"tool-use entry should start with a blank line for breathing room; got %q",
+		stripStyles(queued[1]))
+	hasBold := strings.Contains(queued[1], "[1;") ||
+		strings.Contains(queued[1], ";1;") ||
+		strings.Contains(queued[1], ";1m") ||
+		strings.Contains(queued[1], "[1m")
+	require.True(t, hasBold,
+		"tool-use line should be bold (SGR 1); raw=%q", queued[1])
+	require.Contains(t, stripStyles(queued[1]), "Read", "tool-use should show tool name")
+	require.Contains(t, stripStyles(queued[1]), "/path/to/file.go", "tool-use should show args")
+
+	// Glyphs differ: tool-use has "▸", thinking does not.
+	require.Contains(t, stripStyles(queued[1]), "▸", "tool-use should use the ▸ glyph")
+	require.NotContains(t, stripStyles(queued[0]), "▸", "thinking should not use the tool-use glyph")
+}
+
 // TestViewChrome_LiveRegionDoesNotChangeRowCountAcrossFrames pins
 // the contract that a deterministic state produces a deterministic
 // number of rendered rows. If View() is called twice with no
@@ -349,7 +390,6 @@ func TestScrollback_AlreadyAnsiContentDoesNotProduceLiteralEscapes(t *testing.T)
 // scrollback. (The kind of bug a static unit test would miss without
 // this check.)
 func TestViewChrome_LiveRegionDoesNotChangeRowCountAcrossFrames(t *testing.T) {
-	t.Parallel()
 	forceTrueColor(t)
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
