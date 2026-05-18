@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // applyOverrides walks imp.Overrides and patches child in place. Errors
@@ -109,6 +110,68 @@ func applyOverrides(child *AppDef, ov *ImportOverrides, file, alias, parentBaseD
 	}
 
 	return errs
+}
+
+// rebaseEffectPaths walks an imported child's state tree and rewrites
+// every relative `prompt:` / `schema:` arg in effect `with:` blocks to
+// an absolute path rooted at the child's directory. Without this, the
+// runtime joins the relative path against $KITSOKI_APP_DIR (the parent
+// app's directory) and fails to find files that live in the child
+// story's prompts/ or schemas/ tree.
+//
+// Idempotent: paths already absolute or containing template syntax
+// (`{{`) are left alone — the latter because we can't resolve them
+// statically and the runtime renders them at dispatch time.
+func rebaseEffectPaths(states map[string]*State, childDir string) {
+	if childDir == "" {
+		return
+	}
+	for _, s := range states {
+		if s == nil {
+			continue
+		}
+		rebaseEffectPathsInEffects(s.OnEnter, childDir)
+		for _, list := range s.On {
+			for i := range list {
+				rebaseEffectPathsInEffects(list[i].Effects, childDir)
+			}
+		}
+		if len(s.States) > 0 {
+			rebaseEffectPaths(s.States, childDir)
+		}
+	}
+}
+
+func rebaseEffectPathsInEffects(effs []Effect, childDir string) {
+	for i := range effs {
+		rebaseWithMap(effs[i].With, childDir)
+		for j := range effs[i].OnComplete {
+			rebaseWithMap(effs[i].OnComplete[j].With, childDir)
+		}
+	}
+}
+
+func rebaseWithMap(with map[string]any, childDir string) {
+	for _, key := range []string{"prompt", "prompt_path", "schema"} {
+		raw, ok := with[key].(string)
+		if !ok || raw == "" {
+			continue
+		}
+		if filepath.IsAbs(raw) {
+			continue
+		}
+		if containsTemplate(raw) {
+			continue
+		}
+		with[key] = filepath.Join(childDir, raw)
+	}
+}
+
+// containsTemplate reports whether s carries a pongo2/expr template
+// delimiter — `{{` or `{%`. Used to guard static path rewrites from
+// touching dynamic expressions the runtime renders at dispatch time.
+func containsTemplate(s string) bool {
+	return strings.Contains(s, "{{") || strings.Contains(s, "{%")
 }
 
 // applyPromptOverridesToStates walks every Effect.With["prompt"] in the

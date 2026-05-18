@@ -28,6 +28,7 @@ import (
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
+	"kitsoki/internal/render"
 	"kitsoki/internal/semroute"
 	"kitsoki/internal/store"
 	"kitsoki/internal/trace"
@@ -293,6 +294,81 @@ func (o *Orchestrator) NewSession(ctx context.Context) (app.SessionID, error) {
 		o.startSessionListener(sid)
 	}
 	return sid, nil
+}
+
+// RunInitialOnEnter dispatches the initial state's on_enter chain for a
+// freshly-created session, so on-enter-bound world keys (e.g.
+// `iface.ticket.list_mine`'s ticket queue on dev-story's main view) are
+// populated before the first frame renders. Machine.Turn already fires
+// on_enter when a transition LANDS in a new state, but the initial
+// state is not arrived at via a transition — without this method any
+// app whose root room has an on_enter chain renders the first frame
+// against the default (empty) world, and the user sees a blank list
+// until they navigate away and back.
+//
+// Safe to call multiple times — but only the first call within a fresh
+// session is meaningful; subsequent transitions own their own on_enter
+// dispatch. No-ops when the initial state declares no on_enter
+// effects, when the orchestrator has no host registry, when the
+// session has already taken at least one turn (guarded by checking
+// journey.Turn), or when the initial state can't be looked up.
+//
+// Errors only on infrastructure failure (store / host registry).
+// Host call failures route through the state's on_error: arc and are
+// surfaced via world.last_error — same as a normal transition.
+func (o *Orchestrator) RunInitialOnEnter(ctx context.Context, sid app.SessionID) error {
+	sessMu := o.sessionLock(sid)
+	sessMu.Lock()
+	defer sessMu.Unlock()
+
+	journey, err := o.loadJourney(sid)
+	if err != nil {
+		return fmt.Errorf("orchestrator: RunInitialOnEnter: load journey: %w", err)
+	}
+	// Only fire on a fresh session; subsequent on_enter chains are owned
+	// by Machine.Turn after their respective transitions land.
+	if journey.Turn > 0 {
+		return nil
+	}
+	state := lookupStateByPath(o.def, journey.State)
+	if state == nil || len(state.OnEnter) == 0 {
+		return nil
+	}
+
+	resolved, newWorld, hostCalls, _, effEvents, runErr := o.machine.RunEffectsAndState(ctx, journey.State, journey.World, state.OnEnter)
+	if runErr != nil {
+		return fmt.Errorf("orchestrator: RunInitialOnEnter: run on_enter for %q: %w", journey.State, runErr)
+	}
+
+	events := effEvents
+	if len(hostCalls) > 0 {
+		hostEvents, hostWorld, _, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, hostCalls, newWorld, resolved)
+		if hostErr != nil {
+			return fmt.Errorf("orchestrator: RunInitialOnEnter: dispatch host calls: %w", hostErr)
+		}
+		events = append(events, hostEvents...)
+		newWorld = hostWorld
+		if hostRedirect != "" {
+			resolved = hostRedirect
+		}
+	}
+
+	// No events to persist? Nothing to do.
+	if len(events) == 0 {
+		return nil
+	}
+
+	// Persist as a synthetic turn-0 event slice. Stamp turn=0 so the
+	// journal replay path sees these as part of session initialisation,
+	// not as a real user turn.
+	for i := range events {
+		events[i].Turn = 0
+	}
+	jEntries := journalEntriesForEvents(sid, 0, time.Now(), events, journey.World, newWorld, "", resolved, "")
+	if appendErr := o.store.AppendEventsAndJournal(sid, events, jEntries); appendErr != nil {
+		return fmt.Errorf("orchestrator: RunInitialOnEnter: append events: %w", appendErr)
+	}
+	return nil
 }
 
 // startSessionListener subscribes to terminal job events for sid and routes
@@ -1198,10 +1274,35 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 // already routed it onward.  (P1-D from the dev-story-bugfix-unify Opus
 // review.)
 func (o *Orchestrator) enterRedirectState(ctx context.Context, sid app.SessionID, prior, target app.StatePath, w world.World) ([]store.Event, world.World, string, app.StatePath, error) {
+	// Resolve `../`-relative on_error targets against the prior state
+	// path. The import rewriter (internal/app/imports.go) rewrites a
+	// bare-name on_error target like `ticket_search` declared inside an
+	// imported sub-story to `../ticket_search` so it resolves to a
+	// sibling of the import wrapper. lookupStateByPath only understands
+	// flat dotted paths, so without resolving the `..` first the
+	// redirect would always fail with "on_error target state not found"
+	// for any import-folded room with an `on_error:` arc — which is
+	// every dev-story room with an on_enter invoke.
+	target = app.StatePath(resolveOnCompleteTarget(string(prior), string(target)))
+
 	// Validate target exists; if not, surface as an infrastructure error.
 	tgtState := lookupStateByPath(o.def, target)
 	if tgtState == nil {
 		return nil, w, "", target, fmt.Errorf("orchestrator: on_error target state %q not found", target)
+	}
+
+	// Self-redirect: the on_error arc points back at the current room.
+	// Re-firing on_enter would re-invoke the host call that just failed,
+	// land here again, and loop. Treat this as "stay in place, surface
+	// the failure via last_error" and return without re-running on_enter.
+	// Authors writing `on_error: <self>` mean "don't bail out" — not
+	// "re-enter and try again forever".
+	if target == prior {
+		o.logger.DebugContext(ctx, "orchestrator.on_error.self_redirect_skipped",
+			slog.String("session_id", string(sid)),
+			slog.String("state", string(target)),
+		)
+		return nil, w, "", target, nil
 	}
 
 	var events []store.Event
@@ -2283,26 +2384,53 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 // template calling `available("...")` panicked with a nil-pointer dereference
 // on the first frame.
 func (o *Orchestrator) InitialView(w world.World) (string, error) {
-	initialState := app.StatePath("")
-	if s, ok := o.def.Root.(string); ok {
-		initialState = app.StatePath(s)
-	}
-	s := lookupStateByPath(o.def, initialState)
-	if s == nil {
-		return "", nil
-	}
-	if s.View.IsEmpty() {
-		return s.Description, nil
-	}
-	return o.machine.RenderState(initialState, w)
+	text, _, _, _, err := o.InitialViewTyped(w)
+	return text, err
 }
 
-// InitialState returns the initial state path for the app.
-func (o *Orchestrator) InitialState() app.StatePath {
-	if s, ok := o.def.Root.(string); ok {
-		return app.StatePath(s)
+// InitialViewTyped is InitialView with the typed-view payload surfaced
+// so the TUI's initial-paint seam can call AppendSystemTyped (which
+// re-runs the typed-element pipeline on resize) instead of
+// AppendSystem (which routes pre-rendered ANSI back through Glamour
+// and corrupts the escape bytes). Returns the rendered text plus the
+// typed View / env / renderer when the resolved leaf's view shape is
+// a pure element-array form; typed is nil for legacy string,
+// extends, template_file, parallel, and empty-view leaves — callers
+// fall back to AppendSystem in that case.
+func (o *Orchestrator) InitialViewTyped(w world.World) (string, *app.View, expr.Env, *render.AppRenderer, error) {
+	initialState := o.InitialState()
+	s := lookupStateByPath(o.def, initialState)
+	if s == nil {
+		return "", nil, expr.Env{}, nil, nil
 	}
-	return ""
+	if s.View.IsEmpty() {
+		return s.Description, nil, expr.Env{}, nil, nil
+	}
+	return o.machine.RenderStateTyped(initialState, w)
+}
+
+// InitialState returns the initial state path for the app, descending
+// into any compound root to its initial leaf. This matters for dogfood
+// instances that import a sub-story under an alias and declare that
+// alias as the root (e.g. kitsoki-dev's `root: core`, where `core` is
+// the import wrapper compound with `initial: main`). Without the
+// descent, the first frame renders against the bare wrapper — which
+// carries no view block — and the operator sees an empty intro with
+// no available intents.
+func (o *Orchestrator) InitialState() app.StatePath {
+	s, ok := o.def.Root.(string)
+	if !ok {
+		return ""
+	}
+	rootPath := app.StatePath(s)
+	if o.machine == nil {
+		return rootPath
+	}
+	leaf, err := o.machine.ResolveInitialLeaf(rootPath, o.InitialWorld())
+	if err != nil || leaf == "" {
+		return rootPath
+	}
+	return leaf
 }
 
 // InitialWorld returns a world initialised from the app's schema defaults.

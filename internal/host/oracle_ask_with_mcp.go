@@ -568,12 +568,27 @@ func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, 
 	outputFormat := "text"
 	if of, _ := args["output_format"].(string); of != "" {
 		outputFormat = of
+	} else if StreamSinkFrom(ctx) != nil {
+		// Auto-enable streaming when a sink is wired into the context.
+		// The TUI installs one for every turn so on_enter oracle calls
+		// stream live progress events into the chat transcript — same
+		// surface meta-mode already uses. Callers that explicitly want
+		// buffered text output can still set output_format: text.
+		outputFormat = "stream-json"
 	}
 
 	cliArgs := []string{
 		"-p",
 		"--output-format", outputFormat,
 		"--permission-mode", "bypassPermissions",
+	}
+	// claude requires --verbose alongside --output-format stream-json
+	// in -p (one-shot) mode; without it the binary exits with a usage
+	// error. Only metamode opts into stream-json today (see
+	// internal/metamode/adapter.go); all other callers default to
+	// "text" and skip this branch.
+	if outputFormat == "stream-json" {
+		cliArgs = append(cliArgs, "--verbose")
 	}
 
 	// When participating in a chat, inject the session ID so Claude can
@@ -733,7 +748,18 @@ func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, 
 		}), nil
 	}
 
-	cr, runErr := runClaudeOneShot(ctx, bin, cliArgs, rendered, workingDir)
+	var (
+		cr           ClaudeRun
+		runErr       error
+		streamSID    string
+		usedStreamer bool
+	)
+	if outputFormat == "stream-json" {
+		usedStreamer = true
+		cr, streamSID, runErr = runClaudeStreamJSON(ctx, bin, cliArgs, rendered, workingDir)
+	} else {
+		cr, runErr = runClaudeOneShot(ctx, bin, cliArgs, rendered, workingDir)
+	}
 	if runErr != nil {
 		return Result{}, runErr
 	}
@@ -751,6 +777,15 @@ func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, 
 			"exit_code": cr.ExitCode,
 			"ok":        cr.ExitCode == 0,
 		},
+	}
+	// When the streamer extracted a session_id from the stream's
+	// system.init / result event, prefer it over the host-minted UUID
+	// so downstream resume calls hit the same Claude-side session.
+	// (Defensive: claude normally honors --session-id we passed in, so
+	// streamSID typically equals claudeSessionID; if they diverge, the
+	// stream's value is canonical.)
+	if usedStreamer && streamSID != "" {
+		res.Data["claude_session_id"] = streamSID
 	}
 
 	if outputFormat == "json" && cr.ExitCode == 0 && cr.Stdout != "" {

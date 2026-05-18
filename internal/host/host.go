@@ -25,6 +25,7 @@ package host
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -86,20 +87,28 @@ func (r *Registry) Register(name string, h Handler) {
 // Returns (nil, false) if neither the exact name nor any prefix
 // resolves to a registered handler.
 func (r *Registry) Get(name string) (Handler, bool) {
+	h, _, ok := r.getWithName(name)
+	return h, ok
+}
+
+// getWithName is Get plus the actual registered name that matched —
+// either the exact `name` or the prefix it fell back to. Invoke uses
+// the difference to inject the dropped suffix as args["op"].
+func (r *Registry) getWithName(name string) (Handler, string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if h, ok := r.handlers[name]; ok {
-		return h, true
+		return h, name, true
 	}
 	// Walk back from the end, stripping one dotted segment per iteration.
 	for cur := name; ; {
 		dot := lastDot(cur)
 		if dot < 0 {
-			return nil, false
+			return nil, "", false
 		}
 		cur = cur[:dot]
 		if h, ok := r.handlers[cur]; ok {
-			return h, true
+			return h, cur, true
 		}
 	}
 }
@@ -133,11 +142,35 @@ func (r *Registry) ValidateAllowList(allowList []string) error {
 }
 
 // Invoke calls the named handler with the provided args.
+//
+// When the lookup falls back to a registered prefix (e.g.
+// `host.local_files.ticket.search` → `host.local_files.ticket`), the
+// dropped suffix is injected into args as `op` so the shared handler
+// can dispatch on it. This is what makes
+// `iface.ticket.search` → `host.local_files.ticket` work without each
+// op getting its own Register call: the handler reads `args["op"]`
+// and switches. If the caller already supplied an `op` it wins (the
+// suffix is only filled in when op is absent or empty).
+//
 // Returns ErrHostNotFound if no handler is registered under name.
 func (r *Registry) Invoke(ctx context.Context, name string, args map[string]any) (Result, error) {
-	h, ok := r.Get(name)
+	h, registeredName, ok := r.getWithName(name)
 	if !ok {
 		return Result{}, fmt.Errorf("host: no handler registered for %q", name)
+	}
+	if registeredName != name {
+		// Prefix-fallback hit: inject the trailing suffix as args["op"]
+		// when the caller hasn't already supplied one.
+		if op, _ := args["op"].(string); op == "" {
+			suffix := name[len(registeredName):]
+			suffix = strings.TrimPrefix(suffix, ".")
+			if suffix != "" {
+				if args == nil {
+					args = map[string]any{}
+				}
+				args["op"] = suffix
+			}
+		}
 	}
 	return h(ctx, args)
 }

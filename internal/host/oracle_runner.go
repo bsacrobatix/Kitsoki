@@ -5,11 +5,15 @@
 package host
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -108,6 +112,423 @@ func runClaudeOneShotReal(ctx context.Context, bin string, cliArgs []string, std
 		return ClaudeRun{Stdout: out, Stderr: se.String(), Infra: runErr}, nil
 	}
 	return ClaudeRun{Stdout: out, Stderr: se.String()}, nil
+}
+
+// runClaudeStreamJSON is the streaming sibling of runClaudeOneShot.
+// It runs `claude -p --output-format stream-json --verbose` and reads
+// stdout line by line, emitting a "metamode.oracle.event" slog record
+// for each JSONL event (system/assistant/user/result/etc.) so the trace
+// surface shows live progress in real time. It then synthesizes a
+// ClaudeRun whose Stdout is the assistant's final text reply (the
+// `result` event's `result` field, or — as a fallback — the
+// concatenation of any text-content blocks across all assistant
+// events). Tests that install a ClaudeRunner stub via WithClaudeRunner
+// see the stub run and the raw stub output get parsed line-by-line
+// (no events when the stub emits plain text — the function falls back
+// to using the entire stub stdout as the reply, preserving the legacy
+// text-mode contract). The streaming branch only kicks in when no stub
+// is wired AND the binary actually emits JSONL.
+//
+// Stream-event shapes (Anthropic-style) we recognise:
+//   - {"type":"system","subtype":"init","session_id":"…",…}
+//   - {"type":"assistant","message":{"content":[{"type":"text","text":"…"}]…}}
+//   - {"type":"assistant","message":{"content":[{"type":"tool_use","name":"…","input":{…}}]}}
+//   - {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"…",…}]}}
+//   - {"type":"result","subtype":"success","result":"<final text>",
+//     "session_id":"…","total_cost_usd":…,"is_error":false}
+//
+// Defensive parsing: any unrecognised shape still emits an event with
+// the bare "type" + "subtype" so a future claude release adding a new
+// event kind doesn't go silently missing from the trace.
+func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdin, workingDir string) (ClaudeRun, string, error) {
+	if r := ClaudeRunnerFromContext(ctx); r != nil {
+		// Test seam: stub almost certainly emits non-JSONL text. Run
+		// it once, parse what we can (zero or more JSONL events), and
+		// fall back to using its raw output as the assistant reply.
+		cr, err := r(ctx, cliArgs, stdin, workingDir)
+		if err != nil {
+			return cr, "", err
+		}
+		reply, sessionID := parseStreamJSONOutput(ctx, cr.Stdout)
+		if strings.TrimSpace(reply) == "" {
+			// Fallback: stub emitted plain text. Honor the legacy
+			// buffered-text contract so the existing fake-claude
+			// harness keeps producing usable replies.
+			reply = cr.Stdout
+		}
+		cr.Stdout = reply
+		return cr, sessionID, nil
+	}
+
+	cmd := exec.CommandContext(ctx, bin, cliArgs...)
+	cmd.Stdin = strings.NewReader(stdin)
+	cmd.Dir = workingDir
+	cmd.Env = envWithKitsokiBinOnPath(os.Environ())
+
+	stdoutPipe, pipeErr := cmd.StdoutPipe()
+	if pipeErr != nil {
+		return ClaudeRun{Infra: pipeErr}, "", nil
+	}
+	var se strings.Builder
+	cmd.Stderr = &se
+
+	if startErr := cmd.Start(); startErr != nil {
+		return ClaudeRun{Infra: startErr}, "", nil
+	}
+
+	// Read stdout line by line, emitting an event per parseable JSON
+	// line and accumulating text content + the final reply string.
+	scanner := bufio.NewScanner(stdoutPipe)
+	// claude can emit very long single lines (a fat tool_use input,
+	// for example). Lift the per-line buffer from 64 KiB to 8 MiB to
+	// match what real sessions produce in practice.
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+
+	var (
+		assembledText strings.Builder
+		finalResult   string
+		sessionID     string
+		sawAnyJSON    bool
+		rawLines      strings.Builder
+	)
+	for scanner.Scan() {
+		line := scanner.Text()
+		rawLines.WriteString(line)
+		rawLines.WriteByte('\n')
+
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		var ev map[string]any
+		if jErr := json.Unmarshal([]byte(trimmed), &ev); jErr != nil {
+			// Not a JSON line — could be a transient claude diagnostic
+			// or a trailing newline. Skip silently; we'll fall back to
+			// raw text if no JSON ever lands.
+			continue
+		}
+		sawAnyJSON = true
+		emitStreamEvent(ctx, ev)
+		text, tool, isResult, resultText, sid := classifyStreamEvent(ev)
+		_ = tool
+		if text != "" {
+			assembledText.WriteString(text)
+		}
+		if isResult && resultText != "" {
+			finalResult = resultText
+		}
+		if sid != "" && sessionID == "" {
+			sessionID = sid
+		}
+	}
+	// scanner.Err() can return a "token too long" error if a single
+	// JSON line exceeds the 8 MiB cap. Surface that so the caller
+	// doesn't silently truncate the reply.
+	scanErr := scanner.Err()
+
+	waitErr := cmd.Wait()
+
+	cr := ClaudeRun{Stderr: se.String()}
+	if waitErr != nil {
+		if ctx.Err() != nil {
+			return ClaudeRun{}, sessionID, ctx.Err()
+		}
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			cr.ExitCode = exitErr.ExitCode()
+		} else {
+			cr.Infra = waitErr
+		}
+	}
+	if scanErr != nil && cr.Infra == nil {
+		cr.Infra = fmt.Errorf("read stream-json stdout: %w", scanErr)
+	}
+
+	// Synthesize the final reply text. Prefer the `result` event's
+	// `result` field; fall back to the accumulated assistant text
+	// blocks; fall back to the raw stdout if neither produced
+	// anything (e.g. binary emitted no JSONL — covers manual
+	// invocations where someone forgot --verbose).
+	reply := finalResult
+	if strings.TrimSpace(reply) == "" {
+		reply = assembledText.String()
+	}
+	if strings.TrimSpace(reply) == "" && !sawAnyJSON {
+		reply = rawLines.String()
+	}
+	cr.Stdout = strings.TrimRight(reply, "\n")
+	return cr, sessionID, nil
+}
+
+// emitStreamEvent surfaces one parsed stream-json event into slog so
+// it lands in kitsoki's --trace-pretty output as it happens. We keep
+// each record tiny (type/subtype/tool/preview) — full content blocks
+// would dwarf the log; the preview is enough to see the agent making
+// progress.
+//
+// When a StreamSink is installed on ctx (the TUI's metaSendCmd wires
+// one in via WithStreamSink), the same payload is also forwarded to
+// the sink so the chat transcript can render live progress lines.
+// The sink call happens BEFORE the slog emit so a panicking sink can't
+// swallow the trace record — though sink implementations are required
+// to be non-blocking and non-panicking by contract.
+func emitStreamEvent(ctx context.Context, ev map[string]any) {
+	evType, _ := ev["type"].(string)
+	subtype, _ := ev["subtype"].(string)
+	text, tool, isResult, resultText, sessionID := classifyStreamEvent(ev)
+
+	preview := text
+	if isResult && resultText != "" {
+		preview = resultText
+	}
+	preview = onelinePreview(preview, 120)
+
+	// Tee to the TUI sink, if any. Mirrors the slog attrs below in
+	// structured form so the consumer doesn't have to re-parse strings.
+	if sink := StreamSinkFrom(ctx); sink != nil {
+		out := StreamEvent{
+			Type:      evType,
+			Subtype:   subtype,
+			Tool:      tool,
+			Preview:   preview,
+			SessionID: sessionID,
+			IsResult:  isResult,
+		}
+		if isResult {
+			if cost, ok := ev["total_cost_usd"].(float64); ok {
+				out.CostUSD = cost
+			}
+		}
+		sink.OnStreamEvent(ctx, out)
+	}
+
+	attrs := []any{
+		"type", evType,
+	}
+	if subtype != "" {
+		attrs = append(attrs, "subtype", subtype)
+	}
+	if tool != "" {
+		attrs = append(attrs, "tool", tool)
+	}
+	if preview != "" {
+		attrs = append(attrs, "preview", preview)
+	}
+	if isResult {
+		if cost, ok := ev["total_cost_usd"].(float64); ok {
+			attrs = append(attrs, "total_cost_usd", cost)
+		}
+		if isErr, ok := ev["is_error"].(bool); ok {
+			attrs = append(attrs, "is_error", isErr)
+		}
+		if sessionID != "" {
+			attrs = append(attrs, "session_id", sessionID)
+		}
+	}
+	slog.InfoContext(ctx, "metamode.oracle.event", attrs...)
+}
+
+// classifyStreamEvent extracts the bits the caller and the logger need
+// from one parsed event: any text content, any tool_use tool name,
+// whether this is the terminal `result` event, the `result.result`
+// field text, and any session_id surfaced by the event. Best-effort and
+// defensive — unknown shapes return zero values.
+func classifyStreamEvent(ev map[string]any) (text, tool string, isResult bool, resultText, sessionID string) {
+	evType, _ := ev["type"].(string)
+	if sid, _ := ev["session_id"].(string); sid != "" {
+		sessionID = sid
+	}
+	switch evType {
+	case "system":
+		// system.init carries session_id (already pulled above).
+	case "assistant", "user":
+		msg, _ := ev["message"].(map[string]any)
+		contentRaw, _ := msg["content"].([]any)
+		var firstText, firstTool string
+		for _, c := range contentRaw {
+			block, _ := c.(map[string]any)
+			btype, _ := block["type"].(string)
+			switch btype {
+			case "text":
+				if t, _ := block["text"].(string); t != "" && firstText == "" {
+					firstText = t
+				}
+			case "tool_use":
+				if n, _ := block["name"].(string); n != "" && firstTool == "" {
+					firstTool = n
+					if firstText == "" {
+						input, _ := block["input"].(map[string]any)
+						firstText = toolUseArgsPreview(n, input)
+					}
+				}
+			case "tool_result":
+				if firstText == "" {
+					// tool_result content can be a string or a list of
+					// {type:text,text:…} blocks. Surface a short preview
+					// either way.
+					switch v := block["content"].(type) {
+					case string:
+						firstText = v
+					case []any:
+						for _, sub := range v {
+							sb, _ := sub.(map[string]any)
+							if t, _ := sb["text"].(string); t != "" {
+								firstText = t
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		text = firstText
+		tool = firstTool
+	case "result":
+		isResult = true
+		if r, _ := ev["result"].(string); r != "" {
+			resultText = r
+		}
+	}
+	return text, tool, isResult, resultText, sessionID
+}
+
+// toolUseArgsPreview extracts a short, human-readable summary of a
+// tool_use block's input arguments. The result feeds the per-event
+// `preview` field, so the TUI renders e.g. "Read prompt.md" /
+// "Bash ls flows/" / "Grep -rn 'foo' ." instead of a bare tool
+// name. Best-effort and defensive — unknown shapes return "".
+//
+// The arg keys looked up are the canonical Anthropic tool input
+// schemas (Read.file_path, Bash.command, Grep.pattern, Edit.file_path,
+// Write.file_path, Glob.pattern, …). For any other tool we fall back
+// to the first string-valued field in declaration-stable order.
+func toolUseArgsPreview(name string, input map[string]any) string {
+	if len(input) == 0 {
+		return ""
+	}
+	str := func(k string) string {
+		v, _ := input[k].(string)
+		return strings.TrimSpace(v)
+	}
+	// Per-tool primary-arg shortcuts. Keep concise — the line ends up
+	// prefixed with "→ <tool> " in the transcript.
+	switch name {
+	case "Bash":
+		return str("command")
+	case "Read", "Edit", "Write", "NotebookEdit":
+		return str("file_path")
+	case "Glob":
+		if p := str("pattern"); p != "" {
+			if path := str("path"); path != "" {
+				return p + " (in " + path + ")"
+			}
+			return p
+		}
+	case "Grep":
+		pat := str("pattern")
+		if pat == "" {
+			break
+		}
+		var extras []string
+		if path := str("path"); path != "" {
+			extras = append(extras, "in "+path)
+		}
+		if glob := str("glob"); glob != "" {
+			extras = append(extras, glob)
+		}
+		if len(extras) > 0 {
+			return pat + " (" + strings.Join(extras, ", ") + ")"
+		}
+		return pat
+	case "WebFetch":
+		return str("url")
+	case "WebSearch":
+		return str("query")
+	case "Task", "Agent":
+		if d := str("description"); d != "" {
+			return d
+		}
+		return str("prompt")
+	case "TodoWrite":
+		// Surface the count of todos; the array values are too big.
+		if todos, ok := input["todos"].([]any); ok {
+			return fmt.Sprintf("%d todos", len(todos))
+		}
+	}
+	// Fallback: first non-empty string field, in alpha-sorted key order
+	// for deterministic output. Skip very long values (likely a body
+	// blob) — onelinePreview will truncate, but a 10KB pongo template
+	// pasted as a tool arg shouldn't make the log line obnoxious.
+	keys := make([]string, 0, len(input))
+	for k := range input {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if s, _ := input[k].(string); s != "" {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			return s
+		}
+	}
+	return ""
+}
+
+// onelinePreview collapses whitespace and truncates to n runes so a
+// streamed event's text content fits cleanly into the slog trace.
+func onelinePreview(s string, n int) string {
+	if s == "" {
+		return ""
+	}
+	// Collapse newlines / tabs to single spaces.
+	repl := strings.NewReplacer("\r\n", " ", "\n", " ", "\t", " ", "\r", " ")
+	s = repl.Replace(s)
+	s = strings.TrimSpace(s)
+	if n <= 0 {
+		return s
+	}
+	if len([]rune(s)) <= n {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:n]) + "…"
+}
+
+// parseStreamJSONOutput parses a possibly-buffered chunk of stream-json
+// output (one event per line) without forking a subprocess. Used by
+// the test-stub fallback in runClaudeStreamJSON.
+func parseStreamJSONOutput(ctx context.Context, raw string) (reply, sessionID string) {
+	var assembled strings.Builder
+	var finalResult string
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var ev map[string]any
+		if jErr := json.Unmarshal([]byte(line), &ev); jErr != nil {
+			continue
+		}
+		emitStreamEvent(ctx, ev)
+		text, _, isResult, resultText, sid := classifyStreamEvent(ev)
+		if text != "" {
+			assembled.WriteString(text)
+		}
+		if isResult && resultText != "" {
+			finalResult = resultText
+		}
+		if sid != "" && sessionID == "" {
+			sessionID = sid
+		}
+	}
+	reply = finalResult
+	if strings.TrimSpace(reply) == "" {
+		reply = assembled.String()
+	}
+	return reply, sessionID
 }
 
 // claudeExitErrorMessage builds the Result.Error string for a non-zero

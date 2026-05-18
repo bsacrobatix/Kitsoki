@@ -89,6 +89,43 @@ import (
 func init() {
 	// Disable HTML autoescape globally — see package doc.
 	pongo2.SetAutoescape(false)
+
+	// Register the `reverse` filter. pongo2/v6 ships `sort` but not
+	// `reverse`; YAML authors reach for `|reverse` to flip an ASC-sorted
+	// host result into newest-first (e.g. ticket lists where filenames
+	// are ISO timestamps). Without it, every view using the idiom dies
+	// with "Filter 'reverse' does not exist." at render time.
+	//
+	// The filter accepts any slice-shaped value (the underlying Go type
+	// can be []any, []map[string]any, []string, etc.); a non-slice
+	// input is returned unchanged so author typos don't crash render.
+	_ = pongo2.RegisterFilter("reverse", filterReverse)
+}
+
+// filterReverse returns a new slice with the input's elements in
+// reverse order. Strings reverse rune-by-rune (so "abc" → "cba"). Any
+// other type is passed through unchanged so a misapplied filter
+// degrades to a no-op rather than a render error.
+func filterReverse(in *pongo2.Value, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+	if in == nil || in.IsNil() {
+		return in, nil
+	}
+	if in.IsString() {
+		runes := []rune(in.String())
+		for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+			runes[i], runes[j] = runes[j], runes[i]
+		}
+		return pongo2.AsValue(string(runes)), nil
+	}
+	if !in.CanSlice() {
+		return in, nil
+	}
+	n := in.Len()
+	out := make([]any, n)
+	for i := 0; i < n; i++ {
+		out[n-1-i] = in.Index(i).Interface()
+	}
+	return pongo2.AsValue(out), nil
 }
 
 // Pongo renders an inline pongo2 template string against an expr.Env.

@@ -121,6 +121,126 @@ func TestOrchestrator_HostDispatchOnError_RoutesToErrorState(t *testing.T) {
 		"expected error-state on_enter to fire, got view: %q", out.View)
 }
 
+// TestOrchestrator_RunInitialOnEnter_FiresHostCallAndBinds verifies
+// that a freshly-created session runs the initial state's on_enter
+// chain before the first frame renders. Without this, any app whose
+// root room declares `on_enter: invoke …` to populate world keys
+// (e.g. dev-story's main view: `iface.ticket.list_mine` → my_tickets)
+// would render the first frame against the default world and show
+// "(empty)" until the user navigates away and back.
+//
+// The fixture's `idle` (initial) state on_enter invokes host.probe
+// which binds greeting="hello world"; the test asserts the world key
+// is populated after RunInitialOnEnter and that subsequent calls are
+// no-ops.
+func TestOrchestrator_RunInitialOnEnter_FiresHostCallAndBinds(t *testing.T) {
+	def, err := app.Load("testdata/initial_onenter/app.yaml")
+	require.NoError(t, err)
+
+	m, err := machine.New(def)
+	require.NoError(t, err)
+
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	invokeCount := 0
+	reg := host.NewRegistry()
+	reg.Register("host.probe", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		invokeCount++
+		return host.Result{Data: map[string]any{"message": "hello world"}}, nil
+	})
+
+	orch := orchestrator.New(def, m, s, noopHarness{}, orchestrator.WithHostRegistry(reg))
+
+	ctx := context.Background()
+	sid, err := orch.NewSession(ctx)
+	require.NoError(t, err)
+
+	// Pre-condition: world key is at default before RunInitialOnEnter.
+	j0, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	require.Equal(t, "", j0.World.Vars["greeting"], "greeting should be at default before initial on_enter")
+
+	require.NoError(t, orch.RunInitialOnEnter(ctx, sid))
+	require.Equal(t, 1, invokeCount, "host.probe must be invoked exactly once")
+
+	j1, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	require.Equal(t, "hello world", j1.World.Vars["greeting"],
+		"greeting must be bound from host.probe's Data.message after RunInitialOnEnter")
+
+	// Idempotent: subsequent calls are no-ops because journey.Turn > 0
+	// once a real turn has run, but for a session that's still at
+	// turn 0 a second call would re-fire (no journey.Turn change
+	// happens — initial on_enter is stamped turn=0).
+	//
+	// In practice cmd/kitsoki/main.go calls this exactly once
+	// post-NewSession; the guard above is just belt-and-braces. Run
+	// a real Turn next and confirm RunInitialOnEnter then no-ops.
+	out, err := orch.SubmitDirect(ctx, sid, "go_forward", map[string]any{})
+	require.NoError(t, err)
+	require.Equal(t, orchestrator.ModeTransitioned, out.Mode)
+
+	preCount := invokeCount
+	require.NoError(t, orch.RunInitialOnEnter(ctx, sid))
+	require.Equal(t, preCount, invokeCount,
+		"RunInitialOnEnter must be a no-op once journey.Turn > 0")
+}
+
+// TestOrchestrator_HostDispatchOnError_SelfRedirectDoesNotLoop guards
+// against an infinite loop when a state's on_enter `invoke:` has
+// `on_error: <self>`. The author's intent for self-targeting on_error
+// is "stay in place, surface the failure" — not "re-enter and try
+// again, forever". Re-firing on_enter on self-redirect would invoke
+// the same failing host call again, land here again, loop forever.
+//
+// Regression for the dev-story dogfood: ticket_search has
+// `on_enter: invoke iface.ticket.search ... on_error: ticket_search`,
+// which folded under the `core` import alias became
+// `on_error: ../ticket_search` resolving to `core.ticket_search`
+// (the same room). With the resolve-relative-target fix in place but
+// no self-guard, typing `tickets` froze the TUI in a tight loop —
+// 200k+ invoke effects in seconds. The guard returns after the
+// transition events, without re-running on_enter.
+func TestOrchestrator_HostDispatchOnError_SelfRedirectDoesNotLoop(t *testing.T) {
+	def, err := app.Load("testdata/hosterror_selfredirect/app.yaml")
+	require.NoError(t, err)
+
+	m, err := machine.New(def)
+	require.NoError(t, err)
+
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	var invokeCount int64
+	reg := host.NewRegistry()
+	reg.Register("host.fail", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		invokeCount++
+		return host.Result{Error: "deliberate failure"}, nil
+	})
+
+	orch := orchestrator.New(def, m, s, noopHarness{}, orchestrator.WithHostRegistry(reg))
+
+	ctx := context.Background()
+	sid, err := orch.NewSession(ctx)
+	require.NoError(t, err)
+
+	// Submit completes synchronously if the loop is broken; before the
+	// guard landed this would never return (or hit the recursion cap and
+	// surface a HarnessError after thousands of invocations). One invoke
+	// is expected: the original on_enter call. The self-redirect must
+	// NOT trigger a second.
+	out, err := orch.SubmitDirect(ctx, sid, "ask", map[string]any{})
+	require.NoError(t, err)
+	require.Equal(t, orchestrator.ModeTransitioned, out.Mode)
+	require.Equal(t, app.StatePath("probe"), out.NewState,
+		"session must land in probe (the self-target), not loop or escape")
+	require.Equal(t, int64(1), invokeCount,
+		"host.fail must be invoked exactly once; self-redirect must not re-fire on_enter")
+}
+
 // TestOrchestrator_WithChatStore_InjectsStoreIntoContext verifies that when
 // a ChatStore is wired via orchestrator.WithChatStore, it is injected into
 // the handler context so ChatStoreFromContext returns it inside the handler.

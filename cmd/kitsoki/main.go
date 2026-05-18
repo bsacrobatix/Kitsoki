@@ -509,11 +509,18 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				} else {
 					tuiOptions = append(tuiOptions, tui.WithTraceFilePath(metaTraceFilePath))
 				}
+				// Allocate the meta-mode stream sink up-front so the
+				// model can hold a reference; bind it to the program
+				// post-construction via sink.Attach(p) below.
+				metaSink := tui.NewMetaStreamSink()
+				tuiOptions = append(tuiOptions, tui.WithMetaStreamSink(metaSink))
 				rootModel := tui.NewRootModel(orch, sid, appPath, effectiveInitialView, tuiOptions...)
 				p := tea.NewProgram(rootModel,
 					tea.WithAltScreen(),
 					tea.WithMouseCellMotion(),
 				)
+				metaSink.Attach(p)
+				defer metaSink.Detach()
 				detach := tui.AttachOrchestratorObserver(orch, p, sid)
 				defer detach()
 
@@ -540,9 +547,35 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				return fmt.Errorf("create session: %w", err)
 			}
 
-			// Get initial view.
-			w := orch.InitialWorld()
-			initialView, err = orch.InitialView(w)
+			// Fire the initial state's on_enter chain BEFORE rendering
+			// the first frame. Machine.Turn already runs on_enter for a
+			// transition that lands in a new state, but the initial
+			// state isn't entered via a transition — without this call
+			// any app whose root room has on_enter (e.g. dev-story's
+			// main view that invokes iface.ticket.list_mine to
+			// populate its ticket queue) renders the first frame
+			// against default-empty world keys, and the user sees a
+			// blank list until they navigate away and back.
+			if err := orch.RunInitialOnEnter(ctx, sid); err != nil {
+				return fmt.Errorf("run initial on_enter: %w", err)
+			}
+
+			// Reload the journey so InitialViewTyped renders against
+			// the post-on_enter world.
+			j, jerr := orch.LoadJourney(sid)
+			if jerr != nil {
+				return fmt.Errorf("load journey post-on_enter: %w", jerr)
+			}
+			w := j.World
+
+			// Get initial view. Capture the typed-view payload alongside
+			// the rendered fallback string so the TUI's initial-paint
+			// seam can route through AppendSystemTyped when the root
+			// state's view is a typed element-array — otherwise the
+			// pre-rendered ANSI would be re-routed through Glamour by
+			// AppendSystem, which strips the ESC bytes and surfaces
+			// literal `[1;…m` codes in the rendered output.
+			initialView, initialTypedView, initialTypedEnv, initialTypedRR, err := orch.InitialViewTyped(w)
 			if err != nil {
 				return fmt.Errorf("initial view: %w", err)
 			}
@@ -574,6 +607,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				}
 				if out != nil && out.View != "" {
 					initialView = out.View
+					initialTypedView = out.TypedView
+					initialTypedEnv = out.RenderEnv
+					initialTypedRR = out.Renderer
 				}
 			}
 
@@ -587,17 +623,28 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				tui.WithChatStore(rawChatStore),
 				tui.WithTraceRingBuffer(traceRing),
 				tui.WithJournalWriter(jw),
+				tui.WithInitialTypedView(initialTypedView, initialTypedEnv, initialTypedRR),
 			}
 			if metaTraceExternal {
 				tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(metaTraceFilePath))
 			} else {
 				tuiOptions = append(tuiOptions, tui.WithTraceFilePath(metaTraceFilePath))
 			}
+			// Allocate the meta-mode stream sink up-front so the
+			// model can hold a reference; bind it to the program
+			// post-construction via sink.Attach(p) below. This is
+			// what lets the user see live agent progress (tool calls,
+			// narration, retries) in the transcript while a meta-mode
+			// Send is in flight, instead of a buffered spinner.
+			metaSink := tui.NewMetaStreamSink()
+			tuiOptions = append(tuiOptions, tui.WithMetaStreamSink(metaSink))
 			rootModel := tui.NewRootModel(orch, sid, appPath, initialView, tuiOptions...)
 			p := tea.NewProgram(rootModel,
 				tea.WithAltScreen(),
 				tea.WithMouseCellMotion(),
 			)
+			metaSink.Attach(p)
+			defer metaSink.Detach()
 			// Bridge orchestrator background-turn notifications into
 			// the Bubble Tea message loop so the main transcript
 			// re-renders when a background job's on_complete fires —

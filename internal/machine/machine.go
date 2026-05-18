@@ -150,6 +150,15 @@ type Machine interface {
 	// Used by the orchestrator to refresh the view after host-call bindings land
 	// so the user sees the updated world on the same turn.
 	RenderState(cur app.StatePath, w world.World) (string, error)
+	// RenderStateTyped is RenderState with the typed-view payload surfaced.
+	// Returns the rendered text plus, when the resolved leaf's view is a
+	// pure element-array form, the typed View / env / renderer needed for
+	// the TUI to re-render at viewport width without double-processing
+	// the ANSI output through Glamour. Used by the initial-paint seam in
+	// Orchestrator.InitialViewTyped so the first frame of a typed-view
+	// root state (e.g. dev-story/rooms/main.yaml's heading/prose/kv
+	// composition) renders the same way subsequent turns do.
+	RenderStateTyped(cur app.StatePath, w world.World) (string, *app.View, expr.Env, *render.AppRenderer, error)
 	// TryGuards performs a dry-run of the guards for the given intent and
 	// prefilled slots. It returns the resolved target state path (if a guard
 	// matches) and the blocking hint (if no guard matches). It never mutates
@@ -209,6 +218,20 @@ type Machine interface {
 	// passes), returns the inputs unchanged with empty event/hostCall
 	// slices — callers can guard on len(events) before doing anything.
 	DispatchPostBindEmits(ctx context.Context, state app.StatePath, w world.World) (app.StatePath, world.World, []HostInvocation, string, []store.Event, error)
+
+	// ResolveInitialLeaf descends a compound state to its initial leaf,
+	// recursively. For non-compound states (or unknown paths) it returns
+	// the input unchanged. The world is needed because a compound's
+	// `initial:` field can be a pongo template (e.g. cloak's
+	// `{% if world.wearing_cloak %}dark{% else %}lit{% endif %}`).
+	//
+	// Used by the orchestrator on session start when the app's root is
+	// itself a compound (e.g. an import-alias root in a dogfood instance:
+	// `root: core` where `core` is an import wrapper with `initial: main`).
+	// Without this descent, the first frame renders against the bare
+	// compound wrapper — which has no view block — and the operator sees
+	// an empty intro with no intents.
+	ResolveInitialLeaf(cur app.StatePath, w world.World) (app.StatePath, error)
 }
 
 // GuardDryRunResult is the result of TryGuards.
@@ -1769,6 +1792,19 @@ func (m *machineImpl) DispatchPostBindEmits(ctx context.Context, state app.State
 // orchestrator to refresh the on-screen view after host-call bindings write
 // new values into world on the same turn.
 func (m *machineImpl) RenderState(cur app.StatePath, w world.World) (string, error) {
+	text, _, _, _, err := m.RenderStateTyped(cur, w)
+	return text, err
+}
+
+// RenderStateTyped is RenderState with the typed-view payload surfaced.
+// Returns (text, typed, env, rr, err). typed is non-nil only when the
+// resolved leaf's view is a pure element-array form (the same shape
+// renderViewWithTyped surfaces for per-turn renders) — the TUI uses it
+// to drive AppendSystemTyped at the initial-paint seam so the rendered
+// ANSI doesn't get double-processed through Glamour. Parallel views
+// and legacy string/extends/template_file shapes return typed=nil and
+// the existing string-rendering path is used.
+func (m *machineImpl) RenderStateTyped(cur app.StatePath, w world.World) (string, *app.View, expr.Env, *render.AppRenderer, error) {
 	env := expr.Env{
 		Slots: map[string]any{},
 		World: w.Vars,
@@ -1780,13 +1816,16 @@ func (m *machineImpl) RenderState(cur app.StatePath, w world.World) (string, err
 		// Parallel composition: parent view (if any) + each leaf view.
 		// Each leaf renders with its own State metadata so the per-region
 		// view sees its own `{{ state.path }}` / `{{ state.description }}`.
+		// Typed-view payload is not surfaced for parallel composites —
+		// the composition is per-leaf and there is no single typed View
+		// to re-render at viewport width.
 		var sb strings.Builder
 		if parCS, ok := m.states[par.Root]; ok && parCS.s != nil && !parCS.s.View.IsEmpty() {
 			parentEnv := env
 			parentEnv.State = stateMetaFor(m, app.StatePath(par.Root))
 			v, err := m.renderViewBody(parCS.s.View, parentEnv, par.Root)
 			if err != nil {
-				return "", fmt.Errorf("render parallel parent view %q: %w", par.Root, err)
+				return "", nil, env, nil, fmt.Errorf("render parallel parent view %q: %w", par.Root, err)
 			}
 			sb.WriteString(v)
 		}
@@ -1799,20 +1838,30 @@ func (m *machineImpl) RenderState(cur app.StatePath, w world.World) (string, err
 			leafEnv.State = stateMetaFor(m, app.StatePath(leaf))
 			v, err := m.renderViewBody(cs.s.View, leafEnv, leaf)
 			if err != nil {
-				return "", fmt.Errorf("render region leaf view %q: %w", leaf, err)
+				return "", nil, env, nil, fmt.Errorf("render region leaf view %q: %w", leaf, err)
 			}
 			if sb.Len() > 0 {
 				sb.WriteString("\n\n")
 			}
 			sb.WriteString(v)
 		}
-		return sb.String(), nil
+		return sb.String(), nil, env, nil, nil
 	}
 	cs, ok := m.states[string(cur)]
 	if !ok || cs.s == nil || cs.s.View.IsEmpty() {
-		return "", nil
+		return "", nil, env, nil, nil
 	}
-	return m.renderViewBody(cs.s.View, env, string(cur))
+	text, err := m.renderViewBody(cs.s.View, env, string(cur))
+	if err != nil {
+		return "", nil, env, nil, err
+	}
+	rr := m.rendererFor(string(cur))
+	var typed *app.View
+	if typedViewIsElementArray(cs.s.View) {
+		v := cs.s.View
+		typed = &v
+	}
+	return text, typed, env, rr, nil
 }
 
 // stateMetaFor returns the `state` metadata map populated for pongo
@@ -1831,6 +1880,20 @@ func stateMetaFor(m *machineImpl, p app.StatePath) map[string]any {
 		out["description"] = cs.s.Description
 	}
 	return out
+}
+
+// ResolveInitialLeaf descends a compound state to its initial leaf. See
+// the Machine interface doc-comment for motivation.
+func (m *machineImpl) ResolveInitialLeaf(cur app.StatePath, w world.World) (app.StatePath, error) {
+	env := expr.Env{
+		Slots: map[string]any{},
+		World: w.Vars,
+	}
+	leaf, err := m.resolveInitialAware(string(cur), env)
+	if err != nil {
+		return cur, err
+	}
+	return app.StatePath(leaf), nil
 }
 
 // RunEffects walks effects and returns the new world, host calls collected,

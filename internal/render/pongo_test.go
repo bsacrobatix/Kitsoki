@@ -345,6 +345,38 @@ func TestPongo_FastPathSkipsParse(t *testing.T) {
 	}
 }
 
+// TestPongo_ReverseFilter guards the `|reverse` filter we register in
+// init() — pongo2/v6 ships `sort` but not `reverse`, and YAML authors
+// (dev-story ticket_search and friends) reach for `|reverse` to flip
+// an ASC-sorted host result into newest-first. Without the filter
+// registration every view using the idiom dies with "Filter 'reverse'
+// does not exist." at render time.
+func TestPongo_ReverseFilter(t *testing.T) {
+	env := makeEnv()
+
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"slice_of_strings", "{% for x in world.items|reverse %}{{ x }}{% endfor %}", "cba"},
+		{"slice_of_maps", "{% for m in world.members|reverse %}{{ m.name }} {% endfor %}", "Bob Alice "},
+		{"string", "{{ world.foo|reverse }}", "olleh"},
+		{"missing_value", "{{ world.does_not_exist|reverse }}", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := Pongo(c.src, env)
+			if err != nil {
+				t.Fatalf("Pongo(%q) error: %v", c.src, err)
+			}
+			if got != c.want {
+				t.Fatalf("Pongo(%q) = %q want %q", c.src, got, c.want)
+			}
+		})
+	}
+}
+
 func TestToContext_KeysExposed(t *testing.T) {
 	env := makeEnv()
 	ctx := ToContext(env)

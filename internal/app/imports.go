@@ -105,6 +105,18 @@ func resolveImports(def *AppDef, file, baseDir string, parents []string) []error
 			}
 		}
 
+		// Re-base relative `prompt:` and `schema:` args in the child's
+		// effects to absolute paths rooted at the child's own directory.
+		// The runtime (resolvePromptPath / schema resolution) joins these
+		// against $KITSOKI_APP_DIR, which is the PARENT app's directory at
+		// runtime. Without re-rooting, an imported sub-story's effect like
+		// `with: { prompt: prompts/foo.md }` would resolve to
+		// `<parent-dir>/prompts/foo.md` instead of
+		// `<child-dir>/prompts/foo.md` — and the prompt file wouldn't be
+		// found. This is the same idea applyOverrides uses for prompt
+		// overrides, applied to the base case.
+		rebaseEffectPaths(childDef.States, filepath.Dir(childPath))
+
 		// Fold the child into the parent under the alias.
 		if foldErrs := foldChild(def, alias, imp, childDef, file); len(foldErrs) > 0 {
 			errs = append(errs, foldErrs...)

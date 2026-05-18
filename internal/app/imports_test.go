@@ -49,6 +49,61 @@ func TestImports_ParentFold(t *testing.T) {
 	require.Equal(t, 1, hostCount, "host.run should not be duplicated")
 }
 
+// TestImports_PromptPathsRebasedToChildDir verifies that relative
+// `prompt:` and `schema:` args in an imported child's effects are
+// rewritten to absolute paths rooted at the child's own directory.
+//
+// At runtime, host.oracle.ask_with_mcp's resolvePromptPath joins
+// relative paths against $KITSOKI_APP_DIR — which is the PARENT app's
+// directory. Without this rebase, an imported sub-story's
+// `with: { prompt: prompts/foo.md }` would resolve to
+// `<parent-dir>/prompts/foo.md` and the file wouldn't be found,
+// triggering the room's on_error and short-circuiting the pipeline.
+//
+// Regression for the dogfood: typing `start` in core.bf.idle queued
+// host.oracle.ask_with_mcp with `prompt: prompts/reproducing_executing.md`;
+// the runtime looked for it under stories/kitsoki-dev/ (parent) and
+// failed because it lives under stories/bugfix/ (child). The visible
+// symptom was "I typed start and nothing happened" — the redirect
+// landed back at idle.
+func TestImports_PromptPathsRebasedToChildDir(t *testing.T) {
+	def, err := Load("../../testdata/apps/imports_prompt_rebase/parent/app.yaml")
+	require.NoError(t, err)
+	require.NotNil(t, def)
+
+	// Walk to c.work_executing's on_enter.
+	c, ok := def.States["c"]
+	require.True(t, ok, "import alias `c` should be a compound state")
+	work, ok := c.States["work_executing"]
+	require.True(t, ok, "c.work_executing should exist")
+	require.NotEmpty(t, work.OnEnter, "c.work_executing should have on_enter")
+
+	var promptArg, schemaArg string
+	for _, eff := range work.OnEnter {
+		if eff.Invoke == "host.oracle.ask" {
+			promptArg, _ = eff.With["prompt"].(string)
+			schemaArg, _ = eff.With["schema"].(string)
+		}
+	}
+	require.NotEmpty(t, promptArg, "prompt arg should be set on the host.oracle.ask invoke")
+
+	// The rewritten path must be absolute.
+	require.True(t, filepath.IsAbs(promptArg),
+		"prompt arg must be rebased to absolute; got %q", promptArg)
+	require.True(t, filepath.IsAbs(schemaArg),
+		"schema arg must be rebased to absolute; got %q", schemaArg)
+
+	// And it must point at the CHILD's directory, not the parent's.
+	require.Contains(t, promptArg, "/imports_prompt_rebase/child/prompts/work.md",
+		"prompt must resolve under the child's directory; got %q", promptArg)
+	require.Contains(t, schemaArg, "/imports_prompt_rebase/child/schemas/result.json",
+		"schema must resolve under the child's directory; got %q", schemaArg)
+
+	// The rebased file must actually exist on disk (sanity).
+	_, statErr := os.Stat(promptArg)
+	require.NoError(t, statErr, "rebased prompt file must exist on disk")
+}
+
 // TestImports_StateRewriting asserts that child state bodies have their
 // world.<key> references rewritten to world.<alias>__<key>.
 func TestImports_StateRewriting(t *testing.T) {

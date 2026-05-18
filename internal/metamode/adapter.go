@@ -237,6 +237,12 @@ func (a *oracleAdapter) Ask(ctx context.Context, in AskInput) (AskOutput, error)
 		// since the file body has none, this is a no-op render and
 		// the rendered prompt is byte-identical to body.
 		"args": map[string]any{},
+		// Opt into streaming so each tool-use / assistant chunk lands
+		// in the slog trace in real time (see
+		// internal/host/oracle_ask_with_mcp.go's stream-json branch).
+		// Only metamode sets this — every other oracle caller still
+		// uses the buffered "text" path.
+		"output_format": "stream-json",
 	}
 	if in.Cwd != "" {
 		args["working_dir"] = expandCwd(in.Cwd)

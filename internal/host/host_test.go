@@ -47,6 +47,74 @@ func TestRegistry_DuplicatePanics(t *testing.T) {
 	})
 }
 
+// TestRegistry_Invoke_PrefixFallbackInjectsOp guards the registry's
+// prefix-fallback contract: when a name like `host.local_files.ticket.search`
+// has no exact handler but a shorter prefix (`host.local_files.ticket`)
+// is registered, the dropped trailing segment is injected into args as
+// "op" so the shared handler can dispatch on it.
+//
+// Regression for the dev-story dogfood: `iface.ticket.search` resolved
+// to `host.local_files.ticket.search` at the call site, but the only
+// registered handler was `host.local_files.ticket` (which switches on
+// args["op"]). Without the suffix injection the handler always saw
+// op="" and returned "op argument is required" — which then triggered
+// the room's `on_error` arc and prevented the ticket list from rendering.
+func TestRegistry_Invoke_PrefixFallbackInjectsOp(t *testing.T) {
+	r := host.NewRegistry()
+	var capturedOp string
+	r.Register("host.thing", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		capturedOp, _ = args["op"].(string)
+		return host.Result{Data: map[string]any{"ok": true}}, nil
+	})
+
+	// Exact match: op is not injected.
+	capturedOp = "should-stay-empty"
+	_, err := r.Invoke(context.Background(), "host.thing", map[string]any{})
+	if err != nil {
+		t.Fatalf("exact-match invoke error: %v", err)
+	}
+	if capturedOp != "" {
+		t.Fatalf("exact-match should not inject op; got %q", capturedOp)
+	}
+
+	// Suffix fallback: trailing segment lands in args["op"].
+	_, err = r.Invoke(context.Background(), "host.thing.search", map[string]any{})
+	if err != nil {
+		t.Fatalf("suffix-fallback invoke error: %v", err)
+	}
+	if capturedOp != "search" {
+		t.Fatalf("suffix-fallback should inject op=\"search\"; got %q", capturedOp)
+	}
+
+	// Multi-segment suffix: full tail joins.
+	_, err = r.Invoke(context.Background(), "host.thing.deep.nested", map[string]any{})
+	if err != nil {
+		t.Fatalf("nested-suffix invoke error: %v", err)
+	}
+	if capturedOp != "deep.nested" {
+		t.Fatalf("nested-suffix should inject op=\"deep.nested\"; got %q", capturedOp)
+	}
+
+	// Caller-supplied op wins — the registry must not clobber.
+	_, err = r.Invoke(context.Background(), "host.thing.search", map[string]any{"op": "caller-wins"})
+	if err != nil {
+		t.Fatalf("caller-op invoke error: %v", err)
+	}
+	if capturedOp != "caller-wins" {
+		t.Fatalf("caller-supplied op should win; got %q", capturedOp)
+	}
+
+	// Nil args: should still inject without panicking.
+	capturedOp = ""
+	_, err = r.Invoke(context.Background(), "host.thing.search", nil)
+	if err != nil {
+		t.Fatalf("nil-args invoke error: %v", err)
+	}
+	if capturedOp != "search" {
+		t.Fatalf("nil-args path should inject op=\"search\"; got %q", capturedOp)
+	}
+}
+
 func TestRegistry_NotFound(t *testing.T) {
 	r := host.NewRegistry()
 	_, err := r.Invoke(context.Background(), "host.missing", nil)
