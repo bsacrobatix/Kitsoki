@@ -3568,7 +3568,25 @@ func (m RootModel) View() string {
 				Render(line2))
 	}
 	parts = append(parts, r.StatusRow(footerFrameworkLine(m), modeLabel(m.mode)))
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+
+	// Anchor the live region to the bottom of the terminal by
+	// top-padding the View() output so its total rendered height
+	// equals m.height. Without padding the prompt sits in the
+	// middle of the screen at startup until the user generates
+	// enough content to push it down. With it, the prompt is
+	// always at row m.height; tea.Println sends prior turns into
+	// the terminal's scrollback above. The padding shrinks
+	// naturally as more live content (in-flight routing line,
+	// banner) lands. On resize (tea.WindowSizeMsg), m.height
+	// updates and the next render re-pads.
+	body := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	if m.height > 0 {
+		used := lipgloss.Height(body)
+		if pad := m.height - used; pad > 0 {
+			body = strings.Repeat("\n", pad) + body
+		}
+	}
+	return body
 }
 
 // promptPrefix returns the styled mode-specific prompt prefix.
