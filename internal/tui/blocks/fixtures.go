@@ -96,7 +96,7 @@ func DefaultChatFixture() ChatFixture {
 			{Index: 2, Name: "request_changes", Label: "Request changes", Available: true},
 			{Index: 3, Name: "approve", Label: "Approve", Available: false, GuardHint: "CI not yet green"},
 		},
-		FooterLine1: "proposing · cypilot · normal · 2 queued · 1 unread",
+		FooterLine1: "proposing · cypilot · 2 queued · 1 unread",
 		FooterLine2: "PR #4821 · CI: failing (3) · PLTFRM-90014",
 		PromptMode:  ModeNormal,
 	}

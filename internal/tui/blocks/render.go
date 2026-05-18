@@ -68,25 +68,55 @@ func (r *Renderer) Divider() string {
 		Render(strings.Repeat("─", w))
 }
 
-// StatusRow renders a single-line colour-banded row at the bottom
-// chrome: theme Primary background with Text foreground so it pops
-// against the muted prompt area. Truncated to width with an
-// ellipsis on overflow.
+// StatusRow renders a single-line colour-banded status row.
+//
+// Invariant: the styled output is EXACTLY r.Width visible columns,
+// composed as plain text BEFORE styling is applied. This avoids
+// lipgloss's `Width(n)` padding from hard-wrapping or leaking the
+// background colour into the next line — which was the source of
+// the earlier "footer garbled into transcript" bug.
+//
+// Layout: left content, padding, right content (right-aligned).
+// If they overflow w columns, the left side is truncated so the
+// right side (typically the mode label — high-signal) stays
+// visible.
 func (r *Renderer) StatusRow(left, right string) string {
 	w := r.Width
 	if w < 1 {
 		w = 1
 	}
-	style := r.style(r.Theme.Text, r.Theme.Primary, true, false)
-	// Build "left  right" with right-aligned trailing content.
-	gap := w - len([]rune(left)) - len([]rune(right))
+	// lipgloss.Width measures visible display columns (handles
+	// ANSI + wide runes); using it instead of rune count avoids
+	// off-by-one bleed on multi-cell glyphs.
+	lW, rW := lipgloss.Width(left), lipgloss.Width(right)
+	// Reserve at least 3 columns of gap between left and right.
+	if lW+rW+3 > w {
+		room := w - rW - 3
+		if room < 1 {
+			left, lW = "", 0
+		} else {
+			left = truncate(left, room)
+			lW = lipgloss.Width(left)
+		}
+	}
+	gap := w - lW - rW
 	if gap < 1 {
-		// Overflow — truncate left side.
-		combined := truncate(left+" "+right, w)
-		return style.Padding(0, 1).Width(w).Render(combined)
+		gap = 0
 	}
 	row := left + strings.Repeat(" ", gap) + right
-	return style.Width(w).Render(row)
+	// One more safety pass: ensure the composed row is exactly w
+	// display columns. Truncate any overflow before styling so
+	// lipgloss never sees a row wider than w (which would trigger
+	// hard-wrap + bleed). Pad with spaces if shorter (so the
+	// background fills the row).
+	if rowW := lipgloss.Width(row); rowW > w {
+		row = truncate(row, w)
+	} else if rowW < w {
+		row += strings.Repeat(" ", w-rowW)
+	}
+	// Now apply colour — the row is exactly w wide, lipgloss won't
+	// pad further, and the background ends cleanly at column w.
+	return r.style(r.Theme.Text, r.Theme.Primary, true, false).Render(row)
 }
 
 // ─── Welcome block ───────────────────────────────────────────────────────

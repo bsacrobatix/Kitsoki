@@ -203,27 +203,24 @@ func TestPromptPrefixPerMode(t *testing.T) {
 }
 
 // TestFooterFrameworkLineCarriesState asserts the framework footer
-// line carries the active mode, queue depth, and unread count.
+// line carries location + queue depth + unread count. (The mode
+// label moved off the framework line and onto the right side of
+// the colored StatusRow — without that split, "awaiting awaiting"
+// showed twice in the bottom chrome.)
 func TestFooterFrameworkLineCarriesState(t *testing.T) {
 	t.Parallel()
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
 	rm, _ := tuipkg.ExtractRootModel(m)
 
-	// Default mode: normal.
+	// Default: contains the location.
 	got := tuipkg.FooterLine1ForTest(rm)
-	require.Contains(t, got, "normal", "footer should label normal mode; got %q", got)
+	require.Contains(t, got, "foyer", "footer should mention the foyer location; got %q", got)
 
 	// Queue depth should surface when non-empty.
 	tuipkg.SetInputQueueForTest(&rm, "x", "y")
 	got = tuipkg.FooterLine1ForTest(rm)
 	require.Contains(t, got, "2 queued", "footer should report queue depth; got %q", got)
-
-	// Off-path mode swaps the label.
-	tuipkg.SetInputQueueForTest(&rm)
-	tuipkg.SetModeForTest(&rm, tuipkg.ModeOffPath)
-	got = tuipkg.FooterLine1ForTest(rm)
-	require.Contains(t, got, "off-path", "footer should reflect off-path mode; got %q", got)
 }
 
 // ─── Immediate echo + settled line (Phase 1) ────────────────────────────

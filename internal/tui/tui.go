@@ -3742,7 +3742,15 @@ func footerStoryLine(m RootModel) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(out)
+	// Single-line guarantee: footer renders as one row beneath
+	// the prompt. Multi-line pongo output would push the prompt
+	// up unpredictably and (worse) bleed into the colored status
+	// row's line via Bubble Tea's inline renderer.
+	line := strings.TrimSpace(out)
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	return line
 }
 
 // lookupState walks the AppDef's nested state map by the dot-separated

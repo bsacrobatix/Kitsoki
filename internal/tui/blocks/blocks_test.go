@@ -166,7 +166,7 @@ func TestRenderChatViewContainsAllBlocks(t *testing.T) {
 		"1. Open review",                        // menu row 1
 		"3. Approve",                            // menu row 3
 		"CI not yet green",                      // guard hint
-		"proposing · cypilot · normal",          // footer line 1
+		"proposing · cypilot · 2 queued",        // footer line 1 (mode moved off line 1 — see footerFrameworkLine)
 		"PR #4821 · CI: failing (3) · PLTFRM-90014", // footer line 2
 		"> _", // prompt
 	} {
