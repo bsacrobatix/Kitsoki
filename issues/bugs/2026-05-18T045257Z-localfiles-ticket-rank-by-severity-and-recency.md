@@ -254,3 +254,64 @@ Two defects in `internal/host/localfiles_ticket.go`:
 0.9 — both defects are pinpointed by FAILing repro tests on HEAD, the on-disk schema is documented in `issues/README.md` and `docs/proposals/bug-format-proposal.md`, and the fix surface is small and local. The 0.1 uncertainty is that the `dev-story-implementation-contract.md` §2.1 still documents `priority`; aligning the contract is a follow-up doc edit (called out in alternatives), not required for the repro tests to pass.
 
 _phase: proposing_2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency_0_
+## Comment 2026-05-18T09:15:34Z by kitsoki
+
+### Reproduction artifact: 2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency
+
+## Bug verified ✅
+
+Two distinct defects in `internal/host/localfiles_ticket.go` produce one rendered symptom in the dogfood ticket browser (`stories/dev-story/rooms/ticket_search.yaml`). Both are encoded as failing Go tests against HEAD of this worktree.
+
+### Defect 1 — `bugSummary` projects `priority`, but bug files use `severity`
+
+`internal/host/localfiles_ticket.go:473-482`:
+
+```go
+"priority": b.frontString("priority"),   // ← reads "priority"
+```
+
+On-disk bug frontmatter uses `severity: P0|P1|P2|P3` (per `issues/README.md` and `docs/proposals/bug-format-proposal.md` §2). Every file under `issues/bugs/` has `severity:` set; none has `priority:`. So `t.priority` is `""` for every locally-filed ticket, and the view's `{% if t.priority %} · {{ t.priority }}{% endif %}` badge in `stories/dev-story/rooms/ticket_search.yaml:40` never renders.
+
+### Defect 2 — `listAllBugs` sorts by `ID` ASC
+
+`internal/host/localfiles_ticket.go:295`:
+
+```go
+sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+```
+
+Because IDs are ISO-timestamp-prefixed, this is effectively `filed_at` ASC (oldest first). Severity has no weight in the order. The view papers over half of this with `world.ticket_results|reverse`, but a P0 filed last week still sorts below a P3 filed yesterday.
+
+### Reproduction
+
+Test file on disk: `internal/host/localfiles_ticket_repro_test.go` (committed in this worktree). Two tests encode the *expected* behaviour and therefore FAIL on HEAD — re-verified this turn:
+
+```
+$ go test ./internal/host/ -run TestRepro_ -v
+=== RUN   TestRepro_BugSummary_ProjectsSeverity
+    localfiles_ticket_repro_test.go:71: expected severity P0 in summary, got ""
+    (full summary: map[assignee:"brad" id:"2026-05-18T010000Z-a" priority:"" status:"open" title:"Alpha" url:""])
+--- FAIL: TestRepro_BugSummary_ProjectsSeverity (0.00s)
+=== RUN   TestRepro_ListAllBugs_OrdersBySeverityThenRecency
+    localfiles_ticket_repro_test.go:118: ordering mismatch at index 0:
+      want "2026-05-17T000000Z-new", got "2026-05-10T000000Z-old"
+      (full order: [old mid new])
+      defect: listAllBugs sorts by ID ASC; expected severity ASC, filed_at DESC
+--- FAIL: TestRepro_ListAllBugs_OrdersBySeverityThenRecency (0.00s)
+FAIL    kitsoki/internal/host    0.016s
+```
+
+`TestRepro_BugSummary_ProjectsSeverity` seeds a single P0 bug and asserts `tickets[0]["severity"] == "P0"`. `TestRepro_ListAllBugs_OrdersBySeverityThenRecency` seeds three bugs (P3 oldest, P2 middle, P0 newest) with IDs designed so id-ASC and severity-then-recency produce *distinct* orderings, then asserts the expected order is `newP0 → midP2 → oldP3`.
+
+### Evidence
+
+- `internal/host/localfiles_ticket_repro_test.go` — deterministic Go test, FAILs on HEAD.
+- `stories/bugfix/evidence/2026-05-18T045257Z-localfiles-ticket-rank.log` — captured failing run.
+
+### Implicated components
+
+- **`internal/host` package** — `localfiles_ticket.go`, specifically `bugSummary` (key projection) and `listAllBugs` (sort comparator).
+- **`iface.ticket` operations** — `ticket.search` and `ticket.list_mine` both consume the broken summary + sort; the fix must land in both call sites.
+- **`stories/dev-story/rooms/ticket_search.yaml`** — view-side consumer that branches on `t.priority` and applies the `|reverse` workaround.
+
+_phase: reproducing_2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency_0_
