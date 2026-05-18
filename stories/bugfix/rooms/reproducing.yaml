@@ -122,6 +122,18 @@ states:
         emit_intent: "{{ world.llm_verdict.intent }}"
         slots:
           feedback: "{{ world.llm_verdict.reason }}"
+
+      # 5. Human-mode auto-accept. The operator already reviewed the
+      #    artifact in `_executing` and typed `proceed`/`continue` —
+      #    that's "accept and advance" in plain English. Forcing a
+      #    SECOND keystroke (`accept`) at a checkpoint room that only
+      #    confirms what they just decided was the UX wart the dogfood
+      #    loop made obvious. The post effects (1+2 above) still fire;
+      #    only the second-keystroke pause is collapsed.
+      - when: "world.judge_mode == 'human' && world.auto_accept_on_post"
+        emit_intent: accept
+        slots:
+          author: "human"
     on:
       accept:
         - target: proposing_executing

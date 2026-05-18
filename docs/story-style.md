@@ -1,0 +1,259 @@
+# Story style guide
+
+How a kitsoki story should look. Short by design — when a new room
+doesn't fit a section below, copy the closest Oregon Trail room and
+edit. That's the style guide in one sentence.
+
+The gold standard is [`stories/oregon-trail/`](../stories/oregon-trail/).
+[`stories/robbery/`](../stories/robbery/) shows the same shape in a
+small sub-story. The new typed-element form is specified in
+[`proposals/view-elements-proposal.md`](proposals/view-elements-proposal.md).
+
+---
+
+## 1. Where color comes from
+
+Authors don't write color. They pick elements; the renderer paints.
+The palette lives in
+[`internal/tui/styles.go`](../internal/tui/styles.go) and the
+element renderers under
+[`internal/render/elements/`](../internal/render/elements/).
+
+| Visual | Means | Where it lands |
+|---|---|---|
+| Emerald, **bold** | Section header / available action | `heading:` elements; `list:` items whose guards pass |
+| Red, *italic* | Blocked action | `list:` items whose `available(...)` is false |
+| Violet, **bold** | Chrome — location bar, prompt cursor, turn header | `status` block, the input line |
+| Amber, ***bold italic*** | Off-path mode, guard-failure hint | `guard_hint:` text, off-path banner |
+| Blue, **bold** | Slash-command echo | `/meta`, `/onpath`, `/trace` output |
+| Gray, *italic* | Soft "didn't catch that" | Clarification card |
+
+If you want emphasis, **choose the right element**. There is no
+inline bold or color in author strings — that's a feature, not a gap.
+
+---
+
+## 2. The shape of a room
+
+Every room extends `views/base.pongo`. The base defines five blocks;
+override only the ones you need:
+
+```
+status   — top status line (cash, day, picked ticket, …)
+heading  — room title (default: state.description)
+body     — main narration / status content
+choices  — action menu
+footer   — optional bottom matter
+```
+
+Inside `body` and `choices`, prefer **typed elements** over a string
+`view: |`. The kinds, in order of how often you'll reach for them:
+
+| Kind | Use for |
+|---|---|
+| `prose:` | One paragraph of narration. Reflows. |
+| `heading:` | Section break. Not bulleted. No trailing colon. |
+| `list:` | Bulleted actions or enumerations. Optional aligned `hint:` column. |
+| `kv:` | Short key/value status. Key column auto-aligns. |
+| `code:` | Layout-preserved content (tables, ASCII art, `{% include %}`). |
+| `template:` | Escape hatch — raw pongo, today's pipeline. |
+
+The canonical pattern (from `stories/oregon-trail/rooms/intro.yaml`):
+
+```yaml
+view:
+  extends: "base"
+  blocks:
+    body:
+      - prose: >
+          It is {{ world.year }}. You are in Independence, Missouri,
+          preparing to lead a wagon party of five to Oregon.
+      - heading: "Party of {{ world.party_size }}"
+      - kv:
+          pairs:
+            Profession: '{{ world.profession|default:"(not yet chosen)" }}'
+            Departure:  '{{ world.month|default:"(not yet chosen)" }}'
+    choices:
+      - heading: "Choose"
+      - list:
+          items:
+            - "pick a profession (banker / carpenter / farmer)"
+            - label: "start the journey"
+              when:  "available('start_journey')"
+            - label: "✗ start_journey — {{ blocked_reason('start_journey') }}"
+              when:  "!available('start_journey')"
+```
+
+Rules of thumb:
+
+- One paragraph = one `prose:`. Blank lines between are automatic.
+- `heading:` for section breaks. Never bullet them. No trailing colon.
+- If you're hand-aligning columns inside a `prose:` or string view,
+  you picked the wrong element — use `kv:` or `list:` with a hint.
+- Shared content (an inventory readout used in three rooms) goes in
+  `views/partials/*.pongo` and is `{% include %}`d from a `code:`
+  element. See [`stories/oregon-trail/views/partials/inventory.pongo`](../stories/oregon-trail/views/partials/inventory.pongo).
+
+---
+
+## 3. Action menus
+
+The `choices` block is almost always:
+
+```yaml
+choices:
+  - heading: "Actions"
+  - list:
+      items: [...]
+```
+
+Conventions:
+
+- **The intent name is the label.** Use the bare name (`pay`, `ford`,
+  `accept_purchase`) — don't wrap it in backticks, don't paraphrase
+  it as a sentence. The TUI styles it.
+- **Hint = cost or consequence**, not a restatement. "buy them off
+  (\${{ world.threat_level * 50 }})", not "pay them money".
+- **Availability has two standard shapes — pick one:**
+
+  *Affordability* — the action is always offered, the hint shows
+  the cost. Use mutually-exclusive `when:` guards on two copies:
+
+  ```yaml
+  - label: "pay"
+    hint:  "buy them off (${{ world.threat_level * 50 }})"
+    when:  "world.party_money >= world.threat_level * 50"
+  - label: "pay"
+    hint:  "not enough money (${{ world.threat_level * 50 }} needed)"
+    when:  "world.party_money < world.threat_level * 50"
+  ```
+
+  *Prerequisite* — the action is named-but-not-yet-doable, and the
+  label should grey out. Use the `available()` / `blocked_reason()`
+  helpers and the `✗` prefix:
+
+  ```yaml
+  - label: "start the journey"
+    when:  "available('start_journey')"
+  - label: "✗ start_journey — {{ blocked_reason('start_journey') }}"
+    when:  "!available('start_journey')"
+  ```
+
+- **`look` is always last** and always `target: .`. It needs no hint.
+- Don't number the items. Selection highlight is the renderer's job.
+
+---
+
+## 4. Placeholders for empty / pending values
+
+Lowercase, in parentheses. The pongo `|default` filter is the standard
+splice:
+
+| What | Render as |
+|---|---|
+| Unset configurable value | `(not yet chosen)` |
+| Empty list | `(empty — type \`tickets\` to search)` |
+| Awaiting host result | `(pending)` |
+| Not applicable here | `(n/a)` |
+| Nothing / null / absent | `(none)` |
+
+```yaml
+- kv:
+    pairs:
+      "Picked ticket":  '{{ world.ticket_id|default:"(none — pick one below)" }}'
+      "Workspace":      '{{ world.workdir|default:"(none — created when you drive)" }}'
+```
+
+Parentheses + lowercase signals "this is metadata about the missing
+value, not part of it".
+
+---
+
+## 5. Narration voice
+
+Two voices, one per story. **Don't mix them inside a room.**
+
+- **In-character** (Oregon Trail's Matt, Robbery's masked rider).
+  Full sentences. Quoted dialog gets its own `prose:` so the blank
+  line above the quote falls naturally.
+- **Operator-facing** (dev-story, bugfix, implementation, kitsoki-dev).
+  Terse, declarative, no in-world voice. "Bug-fix pipeline parked.
+  Waiting for `start`." — not "The bug glares at you menacingly."
+
+`say:` effects follow the same split. Oregon Trail says
+`"Matt licks his pencil and writes it down."`; bugfix says
+`"Cycle 1 ✓ reviewing passed."`
+
+---
+
+## 6. Cases without a standard yet
+
+These shapes recur across stories but have no canonical presentation
+today. Each deserves a one-time decision. **Listed for discussion —
+not yet adopted.**
+
+1. **Awaiting an external result** (LLM, host invoke, background job).
+   Today bugfix's `proposing_executing` shows
+   `Summary: (pending)` plus a freeform "(artifact pending — oracle
+   has not returned yet)" paragraph. Other stories say nothing.
+   *Proposed:* a `kv:` entry with value `(pending — <what's running>)`,
+   or a future `pending: true` flag on `prose:`/`kv:` that the
+   renderer styles in muted gray.
+
+2. **Live result lists from `iface.X` calls** (dev-story `my_tickets`,
+   `ticket_results`). Today: hand-rolled `code: |` with a `{% for %}`
+   loop and inline status badges.
+   *Proposed:* a `list:` element variant that consumes a world array
+   directly — `list: { from: world.my_tickets, label_field: title, hint_field: status }`.
+   Until then, copy the dev-story `code:` shape verbatim instead of
+   reinventing it.
+
+3. **Status bars on operator stories.** Oregon Trail and Robbery have
+   one (`Day · miles · cash · party · landmark`); dev-story, bugfix,
+   implementation don't.
+   *Proposed:* every story's `base.pongo` provides a `status` block.
+   Dev-story shows `Picked · Workspace · Branch · PR`; bugfix shows
+   `Ticket · Stage · Cycle · Mode`. Separator is ` · ` (middle dot)
+   for content, `  |  ` (pipe with spaces) only for the wide marquee
+   shape.
+
+4. **Multi-field verdicts.** Bugfix `proposing_awaiting_reply` packs
+   verdict + confidence + reason into one prose line with `{% if %}`
+   gymnastics.
+   *Proposed:* whenever you have ≥ 3 named fields, use a `kv:` block.
+
+5. **Confidence / progress indicators.** Stored as floats; today
+   rendered as floats (`0.83`).
+   *Proposed:* always render as `83%` (`{{ int(world.confidence * 100) }}%`),
+   or a `★★★★☆` glyph bar — pick one across all stories and stick
+   with it.
+
+6. **Outcome / end-state rooms** (`done`, `@exit:*`). Each story
+   styles its own.
+   *Proposed:* one `heading:` ("Done" / "Killed" / "Resolved"), one
+   `prose:` paragraph, one `kv:` with the lifted outcome fields, one
+   `list:` of next-step choices (usually just `leave`/`go_main`).
+
+7. **In-character vs system lines in the same transcript.** Stories
+   that import a narrative sub-story into an operator host (kitsoki-dev
+   importing dev-story which imports bugfix) currently let both
+   voices land in the same scrollback.
+   *Proposed:* multi-voice stories pick a prefix glyph (e.g. `▸` for
+   system) or route system lines to a separate transport. Single-voice
+   stories don't need anything.
+
+---
+
+## 7. Quick author checklist
+
+Before you ship a new room:
+
+- [ ] `view: extends: "base"` — not a string `view: |`.
+- [ ] Each paragraph is its own `prose:`.
+- [ ] Section breaks are `heading:`, no trailing colon.
+- [ ] Status data is in a `kv:`, not hand-aligned in prose.
+- [ ] Actions are a `list:` with `hint:` for cost / consequence.
+- [ ] Empty / pending values use the parenthetical-lowercase
+      placeholders from §4.
+- [ ] `look` is the last action and `target: .`.
+- [ ] You haven't reached for ANSI escapes or backticks-around-intent-names.

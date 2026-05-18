@@ -168,11 +168,27 @@ world:
   # ── Workspace ─────────────────────────────────────────────────────────
   workspace_id:     { type: string, default: "" }
   workdir:          { type: string, default: "" }
-  base_branch:      { type: string, default: "" }
+  # base_branch defaults to "main" so bf.idle's auto-create has a
+  # sane root for `git worktree add -b <feature_branch> <path> <base>`.
+  # Parent stories that work off a different long-lived branch
+  # (release/* etc.) override via world_in or by setting the key
+  # explicitly before transitioning into bf.
+  base_branch:      { type: string, default: "main" }
   feature_branch:   { type: string, default: "" }
 
   # ── Pipeline control ──────────────────────────────────────────────────
   bugfix_mode:      { type: string, default: "full" }            # full | quick
+
+  # auto_accept_on_post controls whether each `_awaiting_reply` room's
+  # on_enter chain auto-emits `accept` in human mode. Default false
+  # preserves the canonical "proceed → _awaiting_reply (pause) →
+  # accept → next_executing" contract every bugfix flow fixture relies
+  # on. Parent stories that want the one-keystroke dogfood UX (the
+  # operator types `continue` once in `_executing` and the pipeline
+  # advances all the way to the next real artifact-producing room)
+  # project this to true via their import's `world_in:`. See
+  # stories/kitsoki-dev/app.yaml + stories/dev-story/app.yaml.
+  auto_accept_on_post: { type: bool, default: false }
   judge_mode:       { type: string, default: "human" }           # human | llm | llm_then_human
   judge_confidence_threshold: { type: float, default: 0.8 }
 

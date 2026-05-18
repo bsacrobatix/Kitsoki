@@ -43,6 +43,9 @@ orchestration), see [`prior-art.md`](prior-art.md).
 12. **[`bugs.md`](bugs.md)** — filing story and kitsoki bug reports
     (`/meta story bug`, `/meta kitsoki bug`, `kitsoki bug create`),
     the on-disk markdown format, and the future `bug sync` design.
+13. **[`story-style.md`](story-style.md)** — how a story should look:
+    blocks, elements, colors, action menus, placeholders. The short
+    guide; copy Oregon Trail when in doubt.
 
 ## Reference (embedded in the binary)
 

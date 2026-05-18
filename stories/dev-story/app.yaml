@@ -194,6 +194,12 @@ world:
   judge_confidence_threshold:  { type: float,  default: 0.8 }
   bugfix_mode:                 { type: string, default: "full" }
   merge_strategy:              { type: string, default: "squash" }
+  # auto_accept_on_post is forwarded into bf via the import's world_in
+  # so parent stories (kitsoki-dev, cyber-devstory) can opt the
+  # checkpoint pause out for the dogfood one-keystroke UX. Default
+  # false preserves the canonical pause behaviour for tests + flows
+  # that walk the proceed → _awaiting_reply → accept contract.
+  auto_accept_on_post:         { type: bool,   default: false }
 
   # ── Standup / oracle / code-review scratch ────────────────────────
   standup_summary:     { type: string, default: "" }
@@ -390,6 +396,11 @@ imports:
       bugfix_mode:     "{{ world.bugfix_mode }}"
       judge_mode:      "{{ world.judge_mode }}"
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
+      # One-keystroke advance through bf checkpoints in human mode.
+      # Forwarded from a dev-story-level world key so parent stories
+      # (kitsoki-dev / cyber-devstory) can flip it via their own
+      # world_in projection.
+      auto_accept_on_post: "{{ world.auto_accept_on_post }}"
 
     # Lift bf-unique intents into the parent's bare intent table.
     # Overlapping names (accept, refine, restart_from, quit, look,

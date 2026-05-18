@@ -46,6 +46,33 @@ states:
     # `start_from_idle` / `quick_fix_from_idle` / `skip_to_pr_from_idle`
     # contract tests still observe the parked state.
     on_enter:
+      # Auto-create the bug-fix worktree if one isn't already set up.
+      # Every bug-fix run owns its own .worktrees/bf-<ticket_id>/ dir
+      # so the operator never has to manage it manually. The gate
+      # `world.workspace_id == ''` keeps standalone bugfix flow
+      # fixtures (which seed workspace_id in initial_world) and
+      # restart_from re-entries from re-running the create. The
+      # set: comes first so the invoke's `name:` resolves the
+      # already-set feature_branch, then the create fires; if
+      # `git worktree add` errors (e.g. the worktree exists from
+      # a prior aborted run), the on_error keeps us at idle for
+      # the operator to inspect rather than bouncing into the
+      # pipeline against an inconsistent workspace state.
+      - when: "world.ticket_id != '' && world.workspace_id == ''"
+        set:
+          workspace_id:   "bf-{{ world.ticket_id }}"
+          feature_branch: "fix/{{ world.ticket_id }}"
+          workdir:        ".worktrees/bf-{{ world.ticket_id }}"
+      - when: "world.ticket_id != '' && world.feature_branch != '' && world.workdir != ''"
+        invoke: iface.workspace.create
+        with:
+          name: "{{ world.feature_branch }}"
+          base: "{{ world.base_branch }}"
+        on_error: idle
+
+      # Auto-start the pipeline if a ticket is loaded and no
+      # reproduction artifact exists yet (excludes restart_from
+      # bounces, which leave summary_title set).
       - emit_intent: start
         when: "world.ticket_id != '' && (world.reproduction_artifact.summary_title == nil || world.reproduction_artifact.summary_title == '')"
     on:

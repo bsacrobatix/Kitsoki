@@ -107,6 +107,14 @@ imports:
     world_in:
       judge_mode:                 "{{ world.judge_mode }}"
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
+      # One-keystroke advance through the bf checkpoints in human mode.
+      # The operator already reviewed the artifact in `_executing` and
+      # typed `proceed`/`continue` — that's "accept and advance", not
+      # "post the artifact then ask me to accept it as a separate
+      # decision." Stories that exercise the canonical proceed →
+      # _awaiting_reply (pause) → accept contract via flow fixtures
+      # leave this defaulted to false; the dogfood instance opts in.
+      auto_accept_on_post: true
 
 # Instance-level world. Provider-pointing keys plus judge-mode
 # defaults; the operator can override any of them at session start

@@ -85,6 +85,12 @@ states:
         emit_intent: "{{ world.llm_verdict.intent }}"
         slots:
           feedback: "{{ world.llm_verdict.reason }}"
+
+      # Step 5: human-mode auto-accept. See rooms/reproducing.yaml.
+      - when: "world.judge_mode == 'human' && world.auto_accept_on_post"
+        emit_intent: accept
+        slots:
+          author: "human"
     on:
       accept:
         # @exit:done.requires: [done_artifact] — the loader enforces that
