@@ -213,7 +213,7 @@ func (m inboxModel) View() string {
 	if w < 10 {
 		w = 10
 	}
-	return menuStyle.Width(w).Height(m.height).Render(sb.String())
+	return menuStyle.Width(w).Height(m.height).MaxHeight(m.height).Render(sb.String())
 }
 
 // ActionRequiredBanner returns a one-line banner for the first unread

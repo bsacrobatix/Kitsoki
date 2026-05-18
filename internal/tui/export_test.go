@@ -200,10 +200,12 @@ func SetPromptValue(m *RootModel, v string) { m.prompt.SetValue(v) }
 // GetPromptValue returns the current prompt input value.
 func GetPromptValue(m RootModel) string { return m.prompt.Value() }
 
-// GetPromptWidth returns the textinput.Model.Width set on the prompt.
-// Tests use this to assert resize() set a non-zero clip width so long
-// input scrolls horizontally instead of bleeding past the terminal edge.
-func GetPromptWidth(m RootModel) int { return m.prompt.Width }
+// GetPromptWidth returns the textarea inner content width set on the
+// prompt by resize(). Tests use this to assert resize() reserves a
+// usable input column count after the prompt prefix and safety margin.
+// For a textarea, Width() reports the inner content area (terminal
+// width minus the prompt-prefix gutter and any outer borders).
+func GetPromptWidth(m RootModel) int { return m.prompt.Width() }
 
 // GetInputHistory returns a copy of the in-memory prompt history (oldest
 // first). Used by tui_history_test.go to assert append / dedupe semantics.

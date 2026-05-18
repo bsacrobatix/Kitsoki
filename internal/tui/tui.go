@@ -21,13 +21,14 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
+	"kitsoki/internal/expr"
 	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/intent"
@@ -35,6 +36,7 @@ import (
 	"kitsoki/internal/journal"
 	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/render"
 	"kitsoki/internal/trace"
 	"kitsoki/internal/viz"
 	"kitsoki/internal/world"
@@ -124,7 +126,7 @@ type RootModel struct {
 	menuSystem     menuSystemModel
 	metaMode       metaModel
 	sessionsPanel  sessionsPanelModel
-	prompt         textinput.Model
+	prompt         textarea.Model
 
 	// chatStore is the persistent chat row backend; used by the
 	// metamode controller to resolve / append. nil disables /meta
@@ -136,6 +138,25 @@ type RootModel struct {
 	// host.AgentRegistry() + AppDef. Tests can inject a fake controller
 	// via WithMetaController.
 	metaController *metamode.Controller
+
+	// metaStreamSink, when non-nil, tees streaming oracle events from
+	// each meta-mode Send into the transcript pane via MetaStreamMsg.
+	// The sink is allocated up-front (NewMetaStreamSink) and bound to
+	// the tea.Program post-construction via Attach() — mirrors the
+	// RoutingObserver lifecycle (see WithRoutingObserver above).  Nil
+	// leaves stream events on the slog trace only; the user falls
+	// back to the buffered "agent is thinking…" UX.
+	metaStreamSink *MetaStreamSink
+
+	// initialTypedView carries the typed-view payload for the very
+	// first frame so NewRootModel can paint via AppendSystemTyped (the
+	// typed-element-aware path) instead of AppendSystem (which re-runs
+	// pre-rendered ANSI through Glamour and corrupts the escapes).
+	// Set by WithInitialTypedView; nil when the root state's view is a
+	// legacy string / extends / template_file / parallel composition.
+	initialTypedView *app.View
+	initialTypedEnv  expr.Env
+	initialTypedRR   *render.AppRenderer
 
 	// clk is the injectable time source used by the inbox polling ticker.
 	// When nil, clock.Real() is used. Tests inject a *clock.Fake so they can
@@ -350,6 +371,34 @@ func WithJournalWriter(jw journal.Writer) RootModelOption {
 	return func(m *RootModel) { m.journalWriter = jw }
 }
 
+// WithInitialTypedView wires the typed-view payload for the initial
+// frame (typed View / runtime env / per-app renderer) so NewRootModel
+// can call transcript.AppendSystemTyped instead of AppendSystem when
+// the root state's view is a pure element-array form. Without it, the
+// pre-rendered ANSI string is re-routed through Glamour, which strips
+// ESC bytes and surfaces literal `[1;…m` codes in the rendered output.
+// typed may be nil — the option is a no-op then and the legacy
+// AppendSystem path is used.
+func WithInitialTypedView(typed *app.View, env expr.Env, rr *render.AppRenderer) RootModelOption {
+	return func(m *RootModel) {
+		m.initialTypedView = typed
+		m.initialTypedEnv = env
+		m.initialTypedRR = rr
+	}
+}
+
+// WithMetaStreamSink wires a *MetaStreamSink into the RootModel so
+// meta-mode Send calls stream live progress lines into the chat
+// transcript. The sink itself is unbound at construction time; the
+// caller binds it to the *tea.Program post-construction via
+// sink.Attach(prog), exactly like RoutingObserver.Attach. When
+// omitted (or nil), meta-mode falls back to the buffered "agent is
+// thinking…" spinner UX — slog still records the stream-json events
+// for --trace-pretty consumers.
+func WithMetaStreamSink(sink *MetaStreamSink) RootModelOption {
+	return func(m *RootModel) { m.metaStreamSink = sink }
+}
+
 // WithRoutingObserver wires a *RoutingObserver into the RootModel. The
 // observer is the slog→tea.Msg bridge that converts orchestrator
 // routing events into RoutingTier*Msg deliveries for the progressive
@@ -422,10 +471,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	const transcriptHeight = 30
 	const inboxHeight = 12
 
-	ti := textinput.New()
-	ti.Placeholder = "what now?"
-	ti.Focus()
-	ti.CharLimit = 512
+	ti := newPromptTextarea()
 
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
@@ -458,8 +504,34 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	// Set initial state.
 	m.currentState = orch.InitialState()
 
-	// Show initial view in transcript.
-	if initialView != "" {
+	// Apply functional options FIRST so option-supplied state (e.g. the
+	// typed-view payload from WithInitialTypedView) is in place before
+	// any setup step reads it. The initial-view paint below branches on
+	// m.initialTypedView; running options afterward would always paint
+	// via the legacy AppendSystem path no matter what callers wired in.
+	for _, opt := range opts {
+		opt(&m)
+	}
+
+	// Show initial view in transcript. When the root state's view is a
+	// typed element-array, prefer AppendSystemTyped so the elements
+	// dispatcher renders fresh at viewport width — feeding the
+	// pre-rendered ANSI string through AppendSystem instead would
+	// double-route it through Glamour and corrupt the escape bytes.
+	if m.initialTypedView != nil {
+		slog.Info("tui.initial_paint",
+			"path", "typed",
+			"elements", len(m.initialTypedView.Elements),
+			"fallback_bytes", len(initialView),
+			"fallback_has_ansi", strings.Contains(initialView, "\x1b["),
+		)
+		m.transcript.AppendSystemTyped(initialView, m.initialTypedView, m.initialTypedEnv, m.initialTypedRR)
+	} else if initialView != "" {
+		slog.Info("tui.initial_paint",
+			"path", "legacy_system",
+			"bytes", len(initialView),
+			"has_ansi", strings.Contains(initialView, "\x1b["),
+		)
 		m.transcript.AppendSystem(initialView)
 	}
 
@@ -471,11 +543,6 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	// Set initial location.
 	loc := orchestrator.ComputeLocation(orch.AppDef(), m.currentState, w, 0)
 	m.location, _ = m.location.Update(locationUpdated{loc: loc})
-
-	// Apply functional options (e.g. WithTUIClock from tests).
-	for _, opt := range opts {
-		opt(&m)
-	}
 
 	// Wire the metamode controller from production seams when the
 	// caller didn't inject one. Requires both a chat store and at
@@ -623,7 +690,7 @@ func sortedMetaModeNames(def *app.AppDef) []string {
 
 // Init implements tea.Model.
 func (m RootModel) Init() tea.Cmd {
-	cmds := []tea.Cmd{textinput.Blink, m.spinner.Tick}
+	cmds := []tea.Cmd{textarea.Blink, m.spinner.Tick}
 	if m.jobStore != nil {
 		cmds = append(cmds, m.scheduleInboxPoll(2*time.Second))
 	}
@@ -742,6 +809,14 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case metaDoneDoneMsg:
 		return m.handleMetaDoneDone(msg)
+
+	case MetaStreamMsg:
+		// Stale stream event arriving after meta mode exited (the
+		// oracle subprocess goroutine outlives our mode flip when
+		// the user cancels mid-call). Silently drop — same effect
+		// as handleMetaStreamEvent's not-in-flight guard, but
+		// without re-entering the meta handler from on-path mode.
+		return m, nil
 
 	case sessionsPanelLoadedMsg:
 		return m.handleSessionsPanelLoaded(msg)
@@ -1021,6 +1096,18 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "enter":
+		// Backslash-Enter inserts a literal newline (bash-style line
+		// continuation). The terminal can't always distinguish
+		// Shift+Enter from plain Enter, so we also honour the typed
+		// "\<Enter>" idiom: if the prompt ends with an unescaped
+		// trailing "\", strip it and fold the Enter into a real
+		// newline rather than submitting.
+		if submit, after := shouldSubmitOnEnter(m.prompt.Value()); !submit {
+			m.prompt.SetValue(after)
+			m.prompt.CursorEnd()
+			m.prompt.InsertString("\n")
+			return m, nil
+		}
 		// If the prompt is empty and a menu row is highlighted, dispatch it directly.
 		if strings.TrimSpace(m.prompt.Value()) == "" {
 			if entry := m.menu.SelectedEntry(); entry != nil {
@@ -1029,16 +1116,44 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.submitInput()
 
+	case "alt+enter", "ctrl+j", "shift+enter":
+		// Explicit "insert a literal newline" shortcuts. We forward to
+		// the textarea, whose remapped InsertNewline binding matches
+		// these aliases. shift+enter is included for the (small) set
+		// of terminals that surface it as a distinct key sequence;
+		// alt+enter and ctrl+j cover everyone else.
+		if m.historyNavigating() {
+			m.commitHistoryNavigation()
+		}
+		var cmd tea.Cmd
+		m.prompt, cmd = m.prompt.Update(msg)
+		return m, cmd
+
 	case "up":
-		// Plain Up arrow walks input history backward (newer → older).
+		// Plain Up arrow walks input history backward (newer → older)
+		// ONLY when the prompt is a single visual row. Multi-line
+		// drafts (either via \n or wrap) should let Up navigate
+		// within the textarea so the user can edit upper rows.
 		// Modified Up (shift+up / alt+up) is already routed to the
-		// transcript viewport by isScrollKey above, so we only see the
-		// unmodified key here.
+		// transcript viewport by isScrollKey above, so we only see
+		// the unmodified key here.
+		if promptIsMultiLine(m.prompt) {
+			var cmd tea.Cmd
+			m.prompt, cmd = m.prompt.Update(msg)
+			return m, cmd
+		}
 		return m.historyPrev(), nil
 
 	case "down":
 		// Plain Down arrow walks input history forward (older → newer);
 		// stepping past the newest entry restores the saved draft.
+		// As with Up, multi-line prompts hand the key to the textarea
+		// for in-input cursor movement.
+		if promptIsMultiLine(m.prompt) {
+			var cmd tea.Cmd
+			m.prompt, cmd = m.prompt.Update(msg)
+			return m, cmd
+		}
 		return m.historyNext(), nil
 
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
@@ -1056,7 +1171,7 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Any non-arrow, non-Enter keystroke while walking history should
 	// "commit" the navigation: the currently-displayed entry becomes
 	// the active draft and we leave history-walk mode. We don't mutate
-	// the prompt text — the textinput.Update call below will fold the
+	// the prompt text — the textarea.Update call below will fold the
 	// new key into whatever's already shown.
 	if m.historyNavigating() {
 		m.commitHistoryNavigation()
@@ -1251,6 +1366,15 @@ func startAsyncTurn(
 	kind pendingKind,
 ) (RootModel, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
+	// Wire the meta-stream sink into the turn context so any
+	// host.oracle.ask_with_mcp call fired by an on_enter chain streams
+	// live tool-use / narration events into the chat transcript — same
+	// surface meta-mode already uses. The oracle handler auto-enables
+	// stream-json output when StreamSinkFrom(ctx) != nil, and the
+	// orchestrator passes this ctx straight through to host.Invoke.
+	if m.metaStreamSink != nil {
+		ctx = host.WithStreamSink(ctx, m.metaStreamSink)
+	}
 	m.inFlightCancel = cancel
 	m.mode = ModeAwaitingLLM
 	m.pendingKind = kind
@@ -2310,6 +2434,12 @@ func (m RootModel) handleMetaEnterDone(msg metaEnterDoneMsg) (tea.Model, tea.Cmd
 	m.metaMode.Enter(msg.session)
 	m.mode = ModeMeta
 	m.prompt.Placeholder = "meta chat — /onpath to return"
+	// Swap the textarea's per-line prefix to "» " for meta mode. The
+	// continuation indent (line idx > 0) is the same 2-column gutter
+	// so wrapped meta-chat input stays visually aligned. Style stays
+	// on the on-path violet/bold.
+	setPromptPrefix(&m.prompt, promptPrefixMeta)
+	setPromptStyle(&m.prompt, promptStyle)
 
 	// Banner first so the user sees the mode they entered.
 	if banner := m.metaMode.Banner(); banner != "" {
@@ -2356,6 +2486,71 @@ func (m *RootModel) replayMetaTranscript(chatID string) {
 // message was already appended to the in-memory transcript when the
 // user hit Enter; here we append the assistant reply and, when the
 // authoring tools fired, reload the orchestrator.
+// handleMetaStreamEvent renders one streaming oracle event into the
+// chat transcript as a muted "→ …" line. Called from updateMeta only
+// (the top-level Update silently drops stale events from cancelled or
+// already-finished sends).
+//
+// Per-event rules:
+//   - assistant + tool name → "Tool args" (e.g. "Read prompt.md")
+//   - assistant + narration → just the preview text
+//   - system.api_retry      → "(retrying claude request…)"
+//   - user                  → SKIPPED (tool results: too noisy)
+//   - result                → SKIPPED (final reply lands via
+//     metaSendDoneMsg's AppendSystem; the stream-side result event
+//     would duplicate it)
+//
+// The handler fires whenever an oracle call is in flight — that's
+// either a meta-mode turn (ModeMeta + metaMode.inFlight) or an
+// on-path turn that's invoking host.oracle.ask_with_mcp from an
+// on_enter chain (ModeAwaitingLLM). Both surface the live tool-use
+// trail so the user sees progress instead of a silent spinner.
+// Defensive: events arriving when neither path is in flight are
+// dropped — they'd land underneath whatever the user is doing now
+// and just confuse them.
+func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
+	// Only render while some turn is in flight. Stale events from a
+	// cancelled or just-finished call would otherwise land in the
+	// transcript after the final reply.
+	inFlight := (m.mode == ModeMeta && m.metaMode.inFlight) ||
+		m.mode == ModeAwaitingLLM
+	if !inFlight {
+		return m
+	}
+	ev := msg.Event
+	switch ev.Type {
+	case "assistant":
+		if ev.Tool != "" {
+			line := ev.Tool
+			if ev.Preview != "" {
+				// Truncate the args preview to 80 chars so a fat
+				// tool_use input doesn't blow up the chat pane. The
+				// runner already capped at 120; tighten further here
+				// because the "Tool " prefix eats a few columns.
+				p := ev.Preview
+				if r := []rune(p); len(r) > 80 {
+					p = string(r[:80]) + "…"
+				}
+				line = ev.Tool + " " + p
+			}
+			m.transcript.AppendMetaStreamLine(line)
+			return m
+		}
+		if ev.Preview != "" {
+			m.transcript.AppendMetaStreamLine(ev.Preview)
+		}
+	case "system":
+		if ev.Subtype == "api_retry" {
+			m.transcript.AppendMetaStreamLine("(retrying claude request…)")
+		}
+	case "user", "result":
+		// Skipped — tool_result content is too noisy, and result
+		// would duplicate the assistant reply already appended via
+		// metaSendDoneMsg.
+	}
+	return m
+}
+
 func (m RootModel) handleMetaSendDone(msg metaSendDoneMsg) (tea.Model, tea.Cmd) {
 	m.metaMode.inFlight = false
 
@@ -2469,6 +2664,8 @@ func (m RootModel) updateMeta(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMetaDoneDone(msg)
 	case metaAttachDoneMsg:
 		return m.handleMetaAttachDone(msg)
+	case MetaStreamMsg:
+		return m.handleMetaStreamEvent(msg), nil
 	case spinner.TickMsg:
 		if m.metaMode.inFlight {
 			var cmd tea.Cmd
@@ -2496,7 +2693,7 @@ func (m RootModel) updateMeta(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if keyMsg.Type != tea.KeyEnter {
-		// Feed the prompt textinput. Don't pass keys while a turn is
+		// Feed the prompt textarea. Don't pass keys while a turn is
 		// in flight so the user can't queue typing into a stale input.
 		if m.metaMode.inFlight {
 			return m, nil
@@ -2509,6 +2706,16 @@ func (m RootModel) updateMeta(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Enter pressed.
 	if m.metaMode.inFlight {
 		m.transcript.AppendSystem("hold on — still thinking about the previous turn")
+		return m, nil
+	}
+
+	// Bash-style line continuation: trailing unescaped "\" + Enter
+	// inserts a literal newline instead of submitting. Mirrors the
+	// on-path / off-path behaviour in routeKey.
+	if submit, after := shouldSubmitOnEnter(m.prompt.Value()); !submit {
+		m.prompt.SetValue(after)
+		m.prompt.CursorEnd()
+		m.prompt.InsertString("\n")
 		return m, nil
 	}
 
@@ -2558,8 +2765,10 @@ func (m RootModel) updateMeta(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.transcript.AppendTurn(text, "")
 	m.metaMode.inFlight = true
 	turn := m.buildMetaTurnContext()
+	// m.metaStreamSink is *MetaStreamSink (or nil); host.WithStreamSink
+	// inside metaSendCmd is nil-safe so either path works.
 	return m, tea.Batch(m.spinner.Tick,
-		metaSendCmd(context.Background(), m.metaController, m.metaMode.session, text, turn))
+		metaSendCmd(context.Background(), m.metaController, m.metaMode.session, text, turn, m.metaStreamSink))
 }
 
 // buildMetaTurnContext snapshots the ambient state (state path, app
@@ -2683,6 +2892,9 @@ func (m RootModel) exitMetaMode() RootModel {
 	m.metaMode.Exit()
 	m.mode = ModeOnPath
 	m.prompt.Placeholder = "what now?"
+	// Restore the on-path prefix glyph.
+	setPromptPrefix(&m.prompt, promptPrefixOnPath)
+	setPromptStyle(&m.prompt, promptStyle)
 	return m
 }
 
@@ -2787,8 +2999,19 @@ func (m RootModel) updateLocation(out *orchestrator.TurnOutcome) RootModel {
 func (m RootModel) resize() RootModel {
 	const minMenuWidth = 28
 	const locationHeight = 2
-	const promptHeight = 3
 	const minInboxHeight = 8
+
+	// Prompt height is variable now that the input is a multi-line
+	// textarea: 1 row when the value fits on one line, growing by 1
+	// per wrapped/literal newline up to promptMaxHeight. Anchor the
+	// transcript layout to (prompt height + 2) so the scroll-hint and
+	// optional banner have room beneath the prompt; this matches the
+	// legacy const-3 budget when the prompt is at its 1-row minimum.
+	promptInnerWidth := m.width - promptPrefixCols - promptSafetyMargin
+	if promptInnerWidth < promptMinWidth {
+		promptInnerWidth = promptMinWidth
+	}
+	promptHeight := promptVisualHeight(m.prompt.Value(), promptInnerWidth) + 2
 
 	menuWidth := minMenuWidth
 
@@ -2836,25 +3059,29 @@ func (m RootModel) resize() RootModel {
 
 	m.location, _ = m.location.Update(tea.WindowSizeMsg{Width: m.width, Height: 1})
 
-	// Prompt width — set so textinput clips & horizontally scrolls once the
-	// value exceeds the visible area. With Width == 0 the bubbles textinput
-	// renders the entire string with no clipping, so long input bleeds past
-	// the right terminal edge and disappears.
+	// Prompt sizing — the textarea wraps long values rather than
+	// horizontally scrolling. SetWidth takes the OUTER width (including
+	// the prompt prefix textarea reserves internally) and computes the
+	// inner content width from there. We pass the terminal width minus
+	// a small safety margin so cursor and edge quirks don't push past
+	// the last column; the textarea's reserved-inner accounting (see
+	// promptPrefixCols, set via SetPromptFunc in newPromptTextarea)
+	// trims that to the inner content area.
 	//
-	// The prompt line is a full-width row at the bottom of the screen,
-	// preceded by a 2-column prefix ("> ", "» ", or off-path "> "). The
-	// prefix style (promptStyle / promptOffPathStyle) is foreground-only
-	// (see styles.go) so it adds no padding beyond the 2 visible glyphs.
-	// We still subtract a small safety margin so the cursor + any terminal-
-	// edge quirks don't push past the last column.
-	const promptPrefixCols = 2 // "> " / "» "
-	const promptSafetyMargin = 2
-	const promptMinWidth = 20
-	promptWidth := m.width - promptPrefixCols - promptSafetyMargin
-	if promptWidth < promptMinWidth {
-		promptWidth = promptMinWidth
+	// SetHeight is set to the dynamic visual-row count so the input
+	// grows downward as the user types and shrinks when they delete.
+	// promptMaxHeight caps growth so a runaway paste doesn't eat the
+	// transcript pane.
+	promptOuterWidth := m.width - promptSafetyMargin
+	if promptOuterWidth < promptMinWidth+promptPrefixCols {
+		promptOuterWidth = promptMinWidth + promptPrefixCols
 	}
-	m.prompt.Width = promptWidth
+	m.prompt.SetWidth(promptOuterWidth)
+	// SetWidth updates m.prompt.Width() to the post-reservation inner
+	// width. Recompute visual height against THAT (not promptInnerWidth
+	// above, which was the pre-SetWidth estimate) so wrap counts match
+	// what the textarea will actually render.
+	m.prompt.SetHeight(promptVisualHeight(m.prompt.Value(), m.prompt.Width()))
 
 	return m
 }
@@ -2863,6 +3090,43 @@ func (m RootModel) resize() RootModel {
 func (m RootModel) View() string {
 	if m.quitting {
 		return "Goodbye!\n"
+	}
+
+	// Sync the textarea's rendered height to its current value before
+	// rendering. resize() — which sets the initial height — only
+	// fires on WindowSizeMsg, not on every keystroke; without this
+	// re-sync, typing past wrap would cause the textarea's internal
+	// viewport to scroll vertically instead of growing the rendered
+	// block. We're a value receiver so mutations here only affect
+	// this View() snapshot, never the caller's model.
+	//
+	// We ALSO shrink the transcript pane by the same delta so the
+	// total rendered output stays within the terminal's row budget
+	// (the program runs under tea.WithAltScreen — overflow clips the
+	// top). SetHeightOnly avoids the Glamour rerender that the full
+	// resize()/transcript.SetSize path triggers; wrap width hasn't
+	// changed so existing entry bodies are still correct.
+	promptH := promptVisualHeight(m.prompt.Value(), m.prompt.Width())
+	m.prompt.SetHeight(promptH)
+	// Reclaim the extra rows above the baseline (1-row) prompt by
+	// shrinking the transcript by (promptH-1). Floors viewport at
+	// minTranscriptViewport so the transcript doesn't disappear
+	// entirely when the user makes the prompt very tall on a short
+	// terminal; the cost is that overflow rows do clip on small
+	// windows, which is a far better failure mode than losing the
+	// location bar.
+	const minTranscriptViewport = 3
+	if promptH > 1 {
+		shrink := promptH - 1
+		newVp := m.transcript.vp.Height - shrink
+		if newVp < minTranscriptViewport {
+			newVp = minTranscriptViewport
+		}
+		actualShrink := m.transcript.vp.Height - newVp
+		m.transcript.SetHeightOnly(
+			m.transcript.height-actualShrink,
+			newVp,
+		)
 	}
 
 	// Location bar (full width).
@@ -2913,14 +3177,19 @@ func (m RootModel) View() string {
 			promptLine = promptStyle.Render("» ") + m.spinner.View() + " " +
 				lipgloss.NewStyle().Foreground(colorMuted).Render("agent is thinking… (Esc to cancel)")
 		} else {
-			promptLine = promptStyle.Render("» ") + m.prompt.View()
+			// In meta mode the textarea's per-line prefix function is
+			// pointed at "» " on entry; View() renders the marker
+			// in-place at the top-left of the input block (so wrapped
+			// rows align without repeating the marker).
+			promptLine = m.prompt.View()
 		}
 	} else {
-		prefix := promptStyle.Render("> ")
-		if m.mode == ModeOffPath {
-			prefix = promptOffPathStyle.Render("> ")
-		}
-		promptLine = prefix + m.prompt.View()
+		// On-path / off-path: the textarea owns its own prefix via
+		// SetPromptFunc (see newPromptTextarea + enterOffPath /
+		// exitOffPath). View() renders "> " at the input's top-left
+		// and indents wrapped rows by the same 2-column gutter so
+		// long input flows visually as a single block.
+		promptLine = m.prompt.View()
 	}
 
 	// Routing chip line (proposal §8). Rendered above the prompt

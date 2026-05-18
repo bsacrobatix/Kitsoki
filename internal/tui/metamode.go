@@ -20,6 +20,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"kitsoki/internal/host"
 	"kitsoki/internal/metamode"
 )
 
@@ -142,7 +143,7 @@ func (m metaModel) MenuView(width, height int) string {
 	if w < 10 {
 		w = 10
 	}
-	return menuStyle.Width(w).Height(height).Render(sb.String())
+	return menuStyle.Width(w).Height(height).MaxHeight(height).Render(sb.String())
 }
 
 func maxInt(a, b int) int {
@@ -210,11 +211,17 @@ func metaEnterCmd(ctx context.Context, ctrl *metamode.Controller, snap metamode.
 // state (state path, app file, rendered view, world snapshot) the
 // controller injects into the agent's user message — see
 // metamode.TurnContext.
-func metaSendCmd(ctx context.Context, ctrl *metamode.Controller, sess *metamode.Session, userText string, turn metamode.TurnContext) tea.Cmd {
+//
+// When sink is non-nil, it is installed on ctx via host.WithStreamSink
+// so the oracle-runner tees its stream-json events into the
+// transcript pane in real time. Nil sink falls back to the buffered
+// behaviour (slog only). host.WithStreamSink is itself nil-safe.
+func metaSendCmd(ctx context.Context, ctrl *metamode.Controller, sess *metamode.Session, userText string, turn metamode.TurnContext, sink host.StreamSink) tea.Cmd {
 	return func() tea.Msg {
 		if ctrl == nil {
 			return metaSendDoneMsg{userText: userText, err: fmt.Errorf("meta mode unavailable: controller not wired")}
 		}
+		ctx = host.WithStreamSink(ctx, sink)
 		res, err := ctrl.Send(ctx, sess, userText, turn)
 		return metaSendDoneMsg{userText: userText, result: res, err: err}
 	}

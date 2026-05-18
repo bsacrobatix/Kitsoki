@@ -354,13 +354,14 @@ func TestTUIInitialMode(t *testing.T) {
 }
 
 // TestTUIPromptWidthClipsLongInput verifies that resize() sets a non-zero
-// textinput.Width so the prompt clips and horizontally scrolls when the
-// value is longer than the visible area. Without this, bubbles renders the
-// full string with no clipping and long input disappears past the terminal
-// edge.
+// textarea inner content width so the prompt wraps long input rather than
+// bleeding past the right edge. Without an explicit SetWidth call the
+// textarea uses its 40-column default, which truncates / mis-wraps on
+// wider terminals.
 //
-// Formula in resize(): promptWidth = m.width - 2 (prefix "> ") - 2 (safety)
-// At Width=80 we expect 76.
+// Formula in resize(): promptOuterWidth = m.width - 2 (safety), then the
+// textarea reserves 2 cols for the per-line "> " prefix (no line numbers)
+// so Width() == m.width - 4. At Width=80 we expect 76.
 func TestTUIPromptWidthClipsLongInput(t *testing.T) {
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)

@@ -253,6 +253,19 @@ func (m *transcriptModel) SetSize(outerWidth, outerHeight, viewportWidth, viewpo
 	}
 }
 
+// SetHeightOnly adjusts the transcript pane's outer + viewport heights
+// WITHOUT rebuilding the Glamour renderer or re-rendering existing
+// entries. Use this when only the vertical layout shifts (e.g. the
+// prompt grew downward as the user typed past wrap) — the wrap width
+// hasn't changed, so the cached entry bodies are still correct.
+// Calling SetSize on every keystroke would re-Glamour every transcript
+// entry, which is O(entries × Glamour-cost) and noticeably stutters on
+// long sessions.
+func (m *transcriptModel) SetHeightOnly(outerHeight, viewportHeight int) {
+	m.height = outerHeight
+	m.vp.Height = viewportHeight
+}
+
 // AppendTurn appends a user turn with header and rendered view.
 // The view is passed through glamour for Markdown styling, with
 // glamour.WithPreservedNewLines() so hand-wrapped views don't get reflowed
@@ -620,6 +633,28 @@ func (m *transcriptModel) ScrollToLine(n int) {
 		n = 0
 	}
 	m.vp.SetYOffset(n)
+}
+
+// AppendMetaStreamLine appends a single muted "→ <text>" line to the
+// transcript.  Used by the meta-mode stream observer to render live
+// progress from a streaming oracle call (tool calls, narration,
+// retry notes) above the eventual final assistant reply.  The leading
+// arrow matches AppendError / AppendGuardHint / AppendDisambig so the
+// reader sees a consistent prefix for engine-side breadcrumbs.
+//
+// Empty text is a no-op; an empty muted arrow alone would be visual
+// noise without information.
+func (m *transcriptModel) AppendMetaStreamLine(text string) {
+	if text == "" {
+		return
+	}
+	body := lipgloss.NewStyle().
+		Foreground(colorMuted).
+		Italic(true).
+		Render("→ " + text)
+	m.entries = append(m.entries, transcriptEntry{body: body})
+	m.vp.SetContent(m.render())
+	m.vp.GotoBottom()
 }
 
 // AppendError appends an error/rejection message. The leading arrow

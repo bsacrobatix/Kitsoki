@@ -119,6 +119,10 @@ func (m RootModel) enterOffPath() (tea.Model, tea.Cmd) {
 	m.transcript, _ = m.transcript.Update(offPathToggled{on: true})
 	_, exitCmd := offPathTriggers(m.orch.AppDef())
 	m.prompt.Placeholder = fmt.Sprintf("freeform chat — type to ask the oracle, %s to return", exitCmd)
+	// Off-path prefix stays "> " but recolors to amber so the prompt
+	// matches the off-path framing (transcript border, location bar).
+	setPromptPrefix(&m.prompt, promptPrefixOnPath)
+	setPromptStyle(&m.prompt, promptOffPathStyle)
 	m.transcript.AppendSystem(m.offPath.Banner())
 	m.transcript.AppendSystem(fmt.Sprintf("(type %s to return to your journey)", exitCmd))
 	if err := m.orch.MarkOffPathEntered(m.sid, m.currentState); err != nil {
@@ -138,6 +142,9 @@ func (m RootModel) exitOffPath() (tea.Model, tea.Cmd) {
 	m.location, _ = m.location.Update(offPathToggled{on: false})
 	m.transcript, _ = m.transcript.Update(offPathToggled{on: false})
 	m.prompt.Placeholder = "what now?"
+	// Restore the on-path prefix glyph + violet bold style.
+	setPromptPrefix(&m.prompt, promptPrefixOnPath)
+	setPromptStyle(&m.prompt, promptStyle)
 	m.transcript.AppendSystem("(returned to on-path mode)")
 	if err := m.orch.MarkOffPathExited(m.sid, m.currentState); err != nil {
 		m.transcript.AppendSystem(fmt.Sprintf("(off-path: log exit failed: %v)", err))
