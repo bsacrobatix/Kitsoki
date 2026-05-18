@@ -3700,14 +3700,15 @@ func (m RootModel) renderFooter() string {
 	return r.Footer(line1, line2)
 }
 
-// footerFrameworkLine assembles the "room · state · mode · queue ·
-// unread" framework default footer line.
+// footerFrameworkLine assembles the location-and-counters portion of
+// the framework footer: room · state · queue · unread. Mode label
+// lives on the right side of the status row, so it's NOT included
+// here (was causing a duplicate "awaiting awaiting" pattern).
 func footerFrameworkLine(m RootModel) string {
 	var parts []string
 	if loc := strings.TrimSpace(m.location.LocationLine()); loc != "" {
 		parts = append(parts, loc)
 	}
-	parts = append(parts, modeLabel(m.mode))
 	if n := len(m.inputQueue); n > 0 {
 		parts = append(parts, queueDepthLabel(n))
 	}

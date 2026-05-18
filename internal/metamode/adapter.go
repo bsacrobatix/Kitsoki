@@ -224,7 +224,30 @@ func (a *oracleAdapter) Ask(ctx context.Context, in AskInput) (AskOutput, error)
 	// host.WritePromptTempFile; the composition step (prepending
 	// system prompt to user text) stays here because it is a
 	// metamode-specific semantic decision.
-	body := composePromptBody(in.SystemPrompt, in.UserMessage)
+	// Compose the agent's system prompt + user message, then wrap the
+	// whole thing in pongo2's `{% verbatim %}…{% endverbatim %}` block
+	// so the downstream host.oracle.ask_with_mcp's mandatory pongo2
+	// render pass treats the body as literal text — not a template.
+	//
+	// The body routinely contains pongo2 syntax (the system prompt
+	// documents `{% if world.X %}…{% endif %}` patterns; the user's
+	// free-form message often pastes YAML view bodies or expressions
+	// straight from the story being edited). Without the verbatim
+	// wrap, any embedded `{{`, `{%`, or even a multi-line string
+	// inside what pongo2's lexer thinks is a string literal crashes
+	// render with a parser/lexer error. The wrap is the canonical
+	// fix — pongo2's `verbatim` tag is the language's "treat this
+	// region as plain text" escape hatch.
+	//
+	// Limitation: pongo2/v6 doesn't support named-verbatim
+	// (`{% verbatim NAME %}…{% endverbatim NAME %}`) so if the body
+	// happens to contain a literal `{% endverbatim %}` token it
+	// would terminate the block early. That's vanishingly unlikely
+	// in metamode chat content (the operator would have to be
+	// literally discussing pongo2 verbatim syntax); not worth
+	// guarding for. If it ever comes up, escape the body's `{% e`
+	// runs before wrapping.
+	body := "{% verbatim %}" + composePromptBody(in.SystemPrompt, in.UserMessage) + "{% endverbatim %}"
 	promptPath, cleanup, err := host.WritePromptTempFile(body)
 	if err != nil {
 		return AskOutput{}, fmt.Errorf("metamode.OracleAdapter: %w", err)
@@ -233,9 +256,7 @@ func (a *oracleAdapter) Ask(ctx context.Context, in AskInput) (AskOutput, error)
 
 	args := map[string]any{
 		"prompt_path": promptPath,
-		// Empty args map → expr.Render gets no template variables;
-		// since the file body has none, this is a no-op render and
-		// the rendered prompt is byte-identical to body.
+		// Empty args map → no template variables to substitute.
 		"args": map[string]any{},
 		// Opt into streaming so each tool-use / assistant chunk lands
 		// in the slog trace in real time (see
