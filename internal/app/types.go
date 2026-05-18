@@ -444,6 +444,13 @@ type State struct {
 	Menu []string `yaml:"menu,omitempty"`
 	// RelevantWorld pins world keys shown in the §7.1 location indicator.
 	RelevantWorld []string `yaml:"relevant_world,omitempty"`
+	// Footer is an optional pongo2 template body rendered as the
+	// per-room status line beneath the prompt (single-pane-tui
+	// proposal §"Two-line footer"). Same expression env as Views
+	// (world, slots, menu). Empty falls back to the framework
+	// default — room · state · mode · queue · unread. Only honoured
+	// on top-level states (one room = one footer).
+	Footer string `yaml:"footer,omitempty"`
 	// RelevantSlots pins slot names shown in the §7.1 location indicator.
 	RelevantSlots []string `yaml:"relevant_slots,omitempty"`
 	// Timeout declares an automatic transition after a duration.

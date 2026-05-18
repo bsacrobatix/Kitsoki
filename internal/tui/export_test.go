@@ -469,6 +469,16 @@ func SetInputQueueForTest(m *RootModel, items ...string) {
 // m.liveLine.
 func LiveLineForTest(m RootModel) string { return m.transcript.LiveLine() }
 
+// PendingTranscriptForTest exposes the transcript's pending-print
+// queue so tests can assert what will land in scrollback on the
+// next FlushPending — used by the welcome-block test that needs to
+// see content queued in NewRootModel before any Update fires.
+func PendingTranscriptForTest(m RootModel) []string {
+	out := make([]string, len(m.transcript.pending))
+	copy(out, m.transcript.pending)
+	return out
+}
+
 // BackgroundCompletions returns a copy of the background-completion
 // log keyed by /jump. Newest-first.
 func BackgroundCompletions(m RootModel) []string {

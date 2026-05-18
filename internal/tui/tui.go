@@ -544,14 +544,10 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		opt(&m)
 	}
 
-	// Print a one-time startup header into scrollback (location bar
-	// styled like the legacy top status row). Subsequent content
-	// appends below it; the header scrolls off naturally as the
-	// transcript grows — Claude Code's model. Skipped when the
-	// location is empty (pre-first-transition).
-	m.location.theme = m.currentTheme()
-	if header := strings.TrimSpace(m.location.View()); header != "" {
-		m.transcript.pending = append(m.transcript.pending, m.location.View())
+	// Print a Claude-Code-style welcome banner into scrollback once
+	// at startup. It scrolls off naturally as content grows.
+	if welcome := buildWelcome(orch, sid, appPath, m.currentTheme(), defaultWidth); welcome != "" {
+		m.transcript.pending = append(m.transcript.pending, welcome)
 	}
 
 	// Show initial view in transcript. When the root state's view is a
@@ -3541,15 +3537,20 @@ func (m RootModel) View() string {
 		promptLine = m.prompt.View()
 	}
 
-	// Two-line framework footer above the prompt: room · state ·
-	// mode · queue depth · unread badge on line 1; story/room
-	// pongo2 template on line 2 (empty by default).
-	footer := m.renderFooter()
-
-	// Bottom chrome only — historic entries print to scrollback via
-	// tea.Println (transcript.FlushPending), so the View() footprint
-	// is just the live indicator + footer + prompt. The terminal's
-	// native scroll walks history.
+	// Bottom chrome — historic entries print to scrollback via
+	// tea.Println, so the View() footprint is the live indicator +
+	// banner + divider + prompt + per-room status row + framework
+	// footer row. The terminal's native scroll walks the rest.
+	//
+	// Layout from top to bottom:
+	//
+	//   [in-flight line, if any]
+	//   [action-required banner, if any]
+	//   ─────────────────────────────────────────
+	//   > [prompt textarea]
+	//   [per-room status row, if the state declares Footer]
+	//   [coloured framework status row: room · state · mode · queue]
+	r := blocks.New(m.width, m.currentTheme())
 	var parts []string
 	if live := m.transcript.LiveLine(); live != "" {
 		parts = append(parts, live)
@@ -3557,7 +3558,16 @@ func (m RootModel) View() string {
 	if bannerLine != "" {
 		parts = append(parts, bannerLine)
 	}
-	parts = append(parts, footer, promptLine)
+	parts = append(parts, r.Divider())
+	parts = append(parts, promptLine)
+	if line2 := footerStoryLine(m); line2 != "" {
+		parts = append(parts,
+			lipgloss.NewStyle().
+				Foreground(colorMuted).
+				Italic(true).
+				Render(line2))
+	}
+	parts = append(parts, r.StatusRow(footerFrameworkLine(m), modeLabel(m.mode)))
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -3680,11 +3690,53 @@ func footerFrameworkLine(m RootModel) string {
 	return strings.Join(parts, " · ")
 }
 
-// footerStoryLine is the placeholder for the story/room pongo2
-// template result. Phase 6 ships the framework line; story authors
-// will wire pongo templates into App / State in a later iteration.
-func footerStoryLine(_ RootModel) string {
-	return ""
+// footerStoryLine evaluates the active room's State.Footer pongo2
+// template against the current world. Returns "" when the state
+// declares no footer (the framework line is enough on its own) or
+// when evaluation errors — the footer is decorative, not load-bearing,
+// so we never bubble template errors up to the user.
+func footerStoryLine(m RootModel) string {
+	def := m.orch.AppDef()
+	if def == nil {
+		return ""
+	}
+	state := lookupState(def, m.currentState)
+	if state == nil || strings.TrimSpace(state.Footer) == "" {
+		return ""
+	}
+	w := m.orch.CurrentWorld(m.sid)
+	env := expr.Env{
+		Slots: map[string]any{},
+		World: w.Vars,
+		Event: map[string]any{},
+	}
+	out, err := render.Pongo(state.Footer, env)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// lookupState walks the AppDef's nested state map by the dot-separated
+// path and returns the matching State, or nil when any segment is
+// missing.
+func lookupState(def *app.AppDef, path app.StatePath) *app.State {
+	if def == nil || path == "" {
+		return nil
+	}
+	segments := strings.Split(string(path), ".")
+	states := def.States
+	for i, seg := range segments {
+		s, ok := states[seg]
+		if !ok || s == nil {
+			return nil
+		}
+		if i == len(segments)-1 {
+			return s
+		}
+		states = s.States
+	}
+	return nil
 }
 
 // modeLabel returns the human-readable footer label for each Mode.

@@ -55,6 +55,105 @@ func (r *Renderer) Header(location, room string) string {
 	return bar
 }
 
+// ─── Divider + status row (prompt chrome) ──────────────────────────────
+
+// Divider renders a single full-width horizontal rule. Used above
+// the prompt to mark "your input goes here" visually.
+func (r *Renderer) Divider() string {
+	w := r.Width
+	if w < 1 {
+		w = 1
+	}
+	return r.style(r.Theme.Border, nil, false, false).
+		Render(strings.Repeat("─", w))
+}
+
+// StatusRow renders a single-line colour-banded row at the bottom
+// chrome: theme Primary background with Text foreground so it pops
+// against the muted prompt area. Truncated to width with an
+// ellipsis on overflow.
+func (r *Renderer) StatusRow(left, right string) string {
+	w := r.Width
+	if w < 1 {
+		w = 1
+	}
+	style := r.style(r.Theme.Text, r.Theme.Primary, true, false)
+	// Build "left  right" with right-aligned trailing content.
+	gap := w - len([]rune(left)) - len([]rune(right))
+	if gap < 1 {
+		// Overflow — truncate left side.
+		combined := truncate(left+" "+right, w)
+		return style.Padding(0, 1).Width(w).Render(combined)
+	}
+	row := left + strings.Repeat(" ", gap) + right
+	return style.Width(w).Render(row)
+}
+
+// ─── Welcome block ───────────────────────────────────────────────────────
+
+// Welcome holds the data shown in the startup welcome banner — a
+// Claude-Code-style bordered intro that prints once into scrollback
+// and scrolls off naturally as the user takes turns.
+type Welcome struct {
+	// Title is the headline (e.g. "kitsoki · cypilot"). Rendered bold.
+	Title string
+	// Subtitle is the second line, smaller (e.g. version + author).
+	// Optional.
+	Subtitle string
+	// Hints is the short list of next-step commands (e.g.
+	// "/help for commands · /world to inspect state"). Rendered
+	// muted. Each entry becomes its own line.
+	Hints []string
+	// Status is the optional bottom-row context line (e.g.
+	// "session: sess_42 · room: idle"). Rendered muted-italic.
+	Status string
+}
+
+// WelcomeBlock renders the multi-line bordered welcome banner. Boxed
+// with the active theme's accent so it visually anchors the top of
+// the scrollback. Width is the available terminal columns; the box
+// auto-fits with a small right margin.
+func (r *Renderer) WelcomeBlock(w Welcome) string {
+	innerW := r.Width - 4
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	var lines []string
+	if w.Title != "" {
+		marker := "✻ "
+		if r.NoColor {
+			marker = "* "
+		}
+		title := r.style(r.Theme.Accent, nil, true, false).Render(marker + w.Title)
+		lines = append(lines, title)
+	}
+	if w.Subtitle != "" {
+		lines = append(lines, r.style(r.Theme.Muted, nil, false, false).Render("  "+w.Subtitle))
+	}
+	if len(w.Hints) > 0 || w.Status != "" {
+		lines = append(lines, "") // blank separator
+	}
+	for _, h := range w.Hints {
+		lines = append(lines, r.style(r.Theme.Muted, nil, false, false).Render("  "+h))
+	}
+	if w.Status != "" {
+		if len(w.Hints) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, r.style(r.Theme.Muted, nil, false, true).Render("  "+w.Status))
+	}
+
+	body := strings.Join(lines, "\n")
+	border := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1)
+	if !r.NoColor {
+		border = border.BorderForeground(r.Theme.Accent)
+	}
+	return border.Render(body)
+}
+
 // ─── User turn ───────────────────────────────────────────────────────────
 
 // UserTurn renders the immediate echo of the user's submitted text.
