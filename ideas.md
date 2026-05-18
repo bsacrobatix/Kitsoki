@@ -72,4 +72,5 @@
 - input scrolls instead of wraps to newline
 - repo-persisted workflow state - allow multiple people to collaborate but keep the state in the repo (or optionally in tickets I guess...)
 - we keep losing features... there was a / command listing that's now gone, and I thought the world file stuff was done too but it somehow reverted, text box scrolling is gone... the test suite must be garbage
+- choice widget (yes/no, multi-choice single or multi-select, explain like claude code)
 

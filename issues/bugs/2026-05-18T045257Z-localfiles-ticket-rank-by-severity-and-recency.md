@@ -225,3 +225,32 @@ The first test seeds one P0 ticket and asserts `tickets[0]["severity"] == "P0"`.
 - **`stories/dev-story/rooms/ticket_search.yaml`** — view-side consumer that branches on `t.priority` and applies the `|reverse` workaround.
 
 _phase: reproducing_2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency_0_
+## Comment 2026-05-18T08:54:20Z by kitsoki
+
+### Fix proposal: 2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency
+
+## Bug
+`iface.ticket.search` against the local-files provider produces ticket summaries with an empty `priority` field for every ticket and an ordering that puts old P3s above new P0s. The `stories/dev-story/rooms/ticket_search.yaml` browser therefore renders rows like `[open]` (no severity badge) and shows the oldest filings at the top after the `|reverse` view-side workaround.
+
+## Root cause
+Two defects in `internal/host/localfiles_ticket.go`:
+
+1. **Wrong key in projection.** `bugSummary` (line 478) reads `b.frontString("priority")`, but bug files use `severity:` (`issues/README.md`, `docs/proposals/bug-format-proposal.md` §2). The summary's `priority` field is therefore always `""`, and the view's `{% if t.priority %}` badge never renders.
+2. **Wrong sort key.** `listAllBugs` (line 295) sorts strictly by `BugFile.ID` ASC. Because IDs are ISO-timestamp-prefixed, this is effectively filed_at ASC. Severity has zero weight in the order; a `|reverse` in the view papers over the recency half but does nothing about severity.
+
+## Fix
+1. In `internal/host/localfiles_ticket.go`:
+   - `bugSummary`: replace the `"priority": …` line with `"severity": b.frontString("severity")` so the summary exposes the field the contract's local-files binding actually stores. Update the doc comment on the function to reference the renamed key.
+   - `listAllBugs`: replace the single-key sort with a two-key `sort.SliceStable` that orders by `severityRank(b.frontString("severity"))` ASC and, on tie, by `filed_at` (frontmatter) DESC, falling back to `b.ID` DESC when `filed_at` is missing. Add an unexported `severityRank(string) int` helper that returns `0,1,2,3` for `P0..P3` and `4` for empty/unknown.
+2. In `internal/host/localfiles_ticket_test.go`: update the `sampleBug` / `sampleBugWithComment` fixtures from `priority: med|high` to `severity: P2|P0`, and change `TestLocalFilesTicket_Get_Happy` to assert on `res.Data["severity"] == "P0"` instead of `priority == "high"`. These existing tests are currently locking in the wrong schema.
+3. In `stories/dev-story/rooms/ticket_search.yaml`: switch the badge from `{% if t.priority %} · {{ t.priority }}{% endif %}` to `{% if t.severity %} · {{ t.severity }}{% endif %}`, drop the `|reverse` filter on `world.ticket_results` (the host now returns the right order), and refresh the `NOTE: ordering today is filed_at-ASC …` comment to describe the post-fix behaviour (severity-then-recency, host-side).
+
+## Affected files
+- `internal/host/localfiles_ticket.go`
+- `internal/host/localfiles_ticket_test.go`
+- `stories/dev-story/rooms/ticket_search.yaml`
+
+## Confidence
+0.9 — both defects are pinpointed by FAILing repro tests on HEAD, the on-disk schema is documented in `issues/README.md` and `docs/proposals/bug-format-proposal.md`, and the fix surface is small and local. The 0.1 uncertainty is that the `dev-story-implementation-contract.md` §2.1 still documents `priority`; aligning the contract is a follow-up doc edit (called out in alternatives), not required for the repro tests to pass.
+
+_phase: proposing_2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency_0_
