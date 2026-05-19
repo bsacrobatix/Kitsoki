@@ -12,13 +12,26 @@ states:
 
   decomposition_executing:
     description: "Decomposing the PRD via cpt plan."
-    view: |
-      Decomposing PRD {{ world.prd_artifact.id|default:"(unknown)" }}
-
-      Plan path:    {{ world.decomposition_artifact.plan_path|default:"(pending)" }}
-      Phase count:  {{ world.decomposition_artifact.phase_count|default:0 }}
-
-      Type `proceed` to deliver the plan, `refine` to re-run, `quit` to abandon.
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                "Parent PRD":  '{{ world.prd_artifact.id|default:"(unknown)" }}'
+                "Plan path":   '{{ world.decomposition_artifact.plan_path|default:"(pending)" }}'
+                "Phase count": '{{ world.decomposition_artifact.phase_count|default:0 }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "proceed"
+                  hint:  "deliver the plan to the checkpoint"
+                - label: "refine feedback=…"
+                  hint:  "re-run cpt plan with feedback"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [prd_artifact, decomposition_artifact, feature_count, cycle]
     on_enter:
       - invoke: iface.artifact.decompose
@@ -51,16 +64,29 @@ states:
 
   decomposition_awaiting_reply:
     description: "Decomposition plan posted; awaiting verdict."
-    view: |
-      Decomposition checkpoint — {{ world.ticket_id }}
-
-      Plan path:    {{ world.decomposition_artifact.plan_path }}
-      Phase count:  {{ world.feature_count }}
-
-      Verdict slot: {{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}  (confidence {{ world.llm_verdict.confidence|default:0 }})
-      Reason:       {{ world.llm_verdict.reason|default:"" }}
-
-      Reply: accept (advance to first feature) | refine | quit
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ticket:        "{{ world.ticket_id }}"
+                "Plan path":   '{{ world.decomposition_artifact.plan_path|default:"(none)" }}'
+                "Phase count": "{{ world.feature_count }}"
+                Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+                Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
+                Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "accept"
+                  hint:  "advance to the first feature"
+                - label: "refine feedback=…"
+                  hint:  "bounce back to decomposition_executing with feedback"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [judge_mode, ticket_id, decomposition_artifact, feature_count, llm_verdict, cycle]
     on_enter:
       - invoke: iface.transport.post

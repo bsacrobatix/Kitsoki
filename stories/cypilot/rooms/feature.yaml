@@ -12,14 +12,28 @@ states:
 
   feature_executing:
     description: "Producing feature artifact for phase {{ world.feature_index }}."
-    view: |
-      Generating feature {{ world.feature_index }}/{{ world.feature_count }} for {{ world.ticket_id }}
-        feature_slug: {{ world.feature_slug }}
-
-      Feature id:   {{ world.feature_artifact.id|default:"(pending)" }}
-      Validate ok:  {{ world.validate_ok }}
-
-      Type `proceed`, `refine`, or `quit`.
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ticket:         "{{ world.ticket_id }}"
+                "Feature slug": "{{ world.feature_slug }}"
+                Phase:          "{{ world.feature_index }}/{{ world.feature_count }}"
+                "Feature id":   '{{ world.feature_artifact.id|default:"(pending)" }}'
+                "Validate ok":  "{{ world.validate_ok }}"
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "proceed"
+                  hint:  "deliver the feature to the checkpoint"
+                - label: "refine feedback=…"
+                  hint:  "re-run cpt generate with feedback"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [ticket_id, feature_slug, feature_index, feature_count, feature_artifact, validate_ok, validate_report, cycle]
     on_enter:
       - invoke: iface.artifact.create
@@ -59,18 +73,33 @@ states:
 
   feature_awaiting_reply:
     description: "Feature artifact posted; awaiting verdict."
-    view: |
-      Feature checkpoint — phase {{ world.feature_index }}/{{ world.feature_count }}
-
-      Feature: {{ world.feature_artifact.summary_title|default:world.feature_artifact.id|default:"(unknown)" }}
-      Validate ok: {{ world.validate_ok }}
-      Report excerpt:
-      {{ world.validate_report|default:"(no report)" }}
-
-      Verdict slot: {{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}  (confidence {{ world.llm_verdict.confidence|default:0 }})
-      Reason:       {{ world.llm_verdict.reason|default:"" }}
-
-      Reply: accept (next feature or → code) | refine | quit
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Phase:         "{{ world.feature_index }}/{{ world.feature_count }}"
+                Feature:       '{{ world.feature_artifact.summary_title|default:world.feature_artifact.id|default:"(unknown)" }}'
+                "Validate ok": "{{ world.validate_ok }}"
+                Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+                Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
+                Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
+          - heading: "Report"
+          - code: '{{ world.validate_report|default:"(no report)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "accept"
+                  hint:  "advance to the next feature, or to CODE on the last phase"
+                - label: "next_feature"
+                  hint:  "explicit alias of accept"
+                - label: "refine feedback=…"
+                  hint:  "bounce back to feature_executing with feedback"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [judge_mode, ticket_id, feature_artifact, feature_index, feature_count, validate_ok, validate_report, llm_verdict, cycle]
     on_enter:
       - invoke: iface.transport.post
