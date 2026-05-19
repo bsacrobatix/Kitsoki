@@ -71,6 +71,11 @@ hosts:
   # Bare hosts the chain calls directly.
   - host.inbox.add
   - host.oracle.ask_with_mcp
+  # Pulled in transitively via dev-story → cypilot import (cypilot
+  # uses host.run for its prd/adr/decomposition rooms). The strict
+  # `hosts: declared` import on `core` requires every transitively-
+  # exposed host to appear here too.
+  - host.run
 
 # This instance has no day-level rooms of its own — every visible
 # state comes from the imported dev-story hub. Imports are folded in
