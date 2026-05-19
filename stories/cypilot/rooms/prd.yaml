@@ -20,16 +20,29 @@ states:
 
   prd_executing:
     description: "Producing the PRD via cpt generate."
-    view: |
-      Drafting PRD for {{ world.ticket_id }} — {{ world.ticket_title }}
-        feature_slug: {{ world.feature_slug }}
-
-      PRD id:       {{ world.prd_artifact.id|default:"(pending)" }}
-      Validate ok:  {{ world.validate_ok }}
-      Report:       {{ world.validate_report|default:"(none)" }}
-
-      Type `proceed` to deliver the PRD to the checkpoint,
-      or `refine` to re-run with feedback, or `quit` to abandon.
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ticket:         "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                "Feature slug": "{{ world.feature_slug }}"
+                "PRD id":       '{{ world.prd_artifact.id|default:"(pending)" }}'
+                "Validate ok":  "{{ world.validate_ok }}"
+          - heading: "Report"
+          - code: '{{ world.validate_report|default:"(none)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "proceed"
+                  hint:  "deliver the PRD to the checkpoint"
+                - label: "refine feedback=…"
+                  hint:  "re-run cpt generate with feedback"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [ticket_id, ticket_title, feature_slug, prd_artifact, validate_ok, validate_report, cycle]
     on_enter:
       # 1. Create the PRD artifact via cpt generate.
@@ -74,18 +87,31 @@ states:
   # good?" without re-running cpt itself.
   prd_awaiting_reply:
     description: "PRD posted; awaiting validate verdict."
-    view: |
-      PRD checkpoint — {{ world.ticket_id }}
-
-      PRD: {{ world.prd_artifact.summary_title|default:world.prd_artifact.id|default:"(unknown)" }}
-      Validate ok: {{ world.validate_ok }}
-      Report excerpt:
-      {{ world.validate_report|default:"(no report)" }}
-
-      Verdict slot: {{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}  (confidence {{ world.llm_verdict.confidence|default:0 }})
-      Reason:       {{ world.llm_verdict.reason|default:"" }}
-
-      Reply: accept | refine [feedback=...] | quit
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ticket:        "{{ world.ticket_id }}"
+                PRD:           '{{ world.prd_artifact.summary_title|default:world.prd_artifact.id|default:"(unknown)" }}'
+                "Validate ok": "{{ world.validate_ok }}"
+                Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+                Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
+                Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
+          - heading: "Report"
+          - code: '{{ world.validate_report|default:"(no report)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "accept"
+                  hint:  "advance to ADR"
+                - label: "refine feedback=…"
+                  hint:  "bounce back to prd_executing with feedback"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [judge_mode, ticket_id, prd_artifact, validate_ok, validate_report, llm_verdict, cycle]
     on_enter:
       - invoke: iface.transport.post

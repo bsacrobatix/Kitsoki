@@ -9,14 +9,27 @@ states:
 
   adr_executing:
     description: "Producing the ADR via cpt generate."
-    view: |
-      Drafting ADR for PRD {{ world.prd_artifact.id|default:"(unknown)" }}
-        feature_slug: {{ world.feature_slug }}
-
-      ADR id:       {{ world.adr_artifact.id|default:"(pending)" }}
-      Validate ok:  {{ world.validate_ok }}
-
-      Type `proceed`, `refine`, or `quit`.
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                "Parent PRD":   '{{ world.prd_artifact.id|default:"(unknown)" }}'
+                "Feature slug": "{{ world.feature_slug }}"
+                "ADR id":       '{{ world.adr_artifact.id|default:"(pending)" }}'
+                "Validate ok":  "{{ world.validate_ok }}"
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "proceed"
+                  hint:  "deliver the ADR to the checkpoint"
+                - label: "refine feedback=…"
+                  hint:  "re-run cpt generate with feedback"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [prd_artifact, feature_slug, adr_artifact, validate_ok, validate_report, cycle]
     on_enter:
       - invoke: iface.artifact.create
@@ -53,18 +66,31 @@ states:
 
   adr_awaiting_reply:
     description: "ADR posted; awaiting validate verdict."
-    view: |
-      ADR checkpoint — {{ world.ticket_id }}
-
-      ADR: {{ world.adr_artifact.summary_title|default:world.adr_artifact.id|default:"(unknown)" }}
-      Validate ok: {{ world.validate_ok }}
-      Report excerpt:
-      {{ world.validate_report|default:"(no report)" }}
-
-      Verdict slot: {{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}  (confidence {{ world.llm_verdict.confidence|default:0 }})
-      Reason:       {{ world.llm_verdict.reason|default:"" }}
-
-      Reply: accept | refine [feedback=...] | quit
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ticket:        "{{ world.ticket_id }}"
+                ADR:           '{{ world.adr_artifact.summary_title|default:world.adr_artifact.id|default:"(unknown)" }}'
+                "Validate ok": "{{ world.validate_ok }}"
+                Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+                Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
+                Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
+          - heading: "Report"
+          - code: '{{ world.validate_report|default:"(no report)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "accept"
+                  hint:  "advance to DESIGN"
+                - label: "refine feedback=…"
+                  hint:  "bounce back to adr_executing with feedback"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [judge_mode, ticket_id, adr_artifact, validate_ok, validate_report, llm_verdict, cycle]
     on_enter:
       - invoke: iface.transport.post
