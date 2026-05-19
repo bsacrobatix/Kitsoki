@@ -6,14 +6,23 @@ states:
 
   code_review:
     description: "Code review — review teammates' open PRs (Wave 3 stub)."
-    view: |
-      Code review (Wave 3 stub).
-
-      In Wave 3 this room imports `stories/code-review/` which lists
-      PRs assigned to me via iface.vcs.pr_status / iface.ticket.list_mine,
-      walks through each diff, and posts review comments.
-
-      Intents: go_back, go_main.
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Code review (Wave 3 stub)."
+          - prose: >
+              In Wave 3 this room imports stories/code-review/ which
+              lists PRs assigned to me via iface.vcs.pr_status /
+              iface.ticket.list_mine, walks through each diff, and posts
+              review comments.
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "go_back"
+                - label: "go_main"
+                - label: "look"
     relevant_world: []
     on:
       go_back:

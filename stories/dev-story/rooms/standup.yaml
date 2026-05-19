@@ -6,16 +6,25 @@ states:
 
   standup:
     description: "Standup — what's on my plate today."
-    view: |
-      Standup.
-
-      Picked ticket: {{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}
-      Last PR url:   {{ world.last_pr_url|default:"(none)" }}
-
-      Summary:
-      {{ world.standup_summary|default:"(empty — type `summarize_day` to generate)" }}
-
-      Intents: summarize_day, go_back, go_main.
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                "Picked ticket": '{{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}'
+                "Last PR url":   '{{ world.last_pr_url|default:"(none)" }}'
+          - heading: "Summary"
+          - code: '{{ world.standup_summary|default:"(empty — type summarize_day to generate)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "summarize_day"
+                  hint:  "generate today's standup summary"
+                - label: "go_back"
+                - label: "go_main"
+                - label: "look"
     relevant_world: [ticket_id, ticket_title, last_pr_url, standup_summary]
     on:
       summarize_day:
@@ -29,10 +38,20 @@ states:
 
   standup_summarizing:
     description: "Generating standup summary."
-    view: |
-      Generating standup summary…
-
-      Summary: {{ world.standup_summary|default:"(pending)" }}
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Summary: '{{ world.standup_summary|default:"(pending — aggregator has not returned yet)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "go_back"
+                - label: "go_main"
+                - label: "look"
     relevant_world: [standup_summary]
     on_enter:
       # Pull tickets assigned to me via iface.ticket.list_mine.

@@ -10,15 +10,28 @@
 states:
 
   done:
-    description: "Build the run's close-out artifact; accept to exit:done (hands off to pr-refinement)."
-    view: |
-      Wrapping up {{ world.ticket_id }} — {{ world.ticket_title }}
-
-      Summary: {{ world.done_artifact.summary_title|default:"(pending)" }}
-
-      {{ world.done_artifact.summary_markdown|default:"(artifact pending — oracle has not returned yet)" }}
-
-      Reply: `continue` (post + exit done, hand off to pr-refinement) · `refine` · `quit`
+    description: "Build the run's close-out artifact; accept to hand off to pr-refinement."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Summary: '{{ world.done_artifact.summary_title|default:"(pending)" }}'
+          - heading: "Artifact"
+          - code: '{{ world.done_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "continue"
+                  hint:  "post and hand off to pr-refinement"
+                - label: "refine"
+                  hint:  "re-draft the close-out"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, done_artifact, validate_artifact, llm_verdict, refine_feedback, cycle]
     on_enter:
       - invoke: host.oracle.ask_with_mcp

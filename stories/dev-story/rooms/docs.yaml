@@ -5,10 +5,18 @@ states:
 
   docs:
     description: "Docs — write / edit documentation (Wave 3 stub)."
-    view: |
-      Docs (Wave 3 stub).
-
-      Intents: go_back, go_main.
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Docs (Wave 3 stub)."
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "go_back"
+                - label: "go_main"
+                - label: "look"
     relevant_world: []
     on:
       go_back:

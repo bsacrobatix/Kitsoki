@@ -10,15 +10,30 @@ states:
 
   proposing:
     description: "Draft the fix proposal; review and advance to implementing."
-    view: |
-      Proposing fix for {{ world.ticket_id }} — {{ world.ticket_title }}
-
-      Summary:    {{ world.propose_fix_artifact.summary_title|default:"(pending)" }}
-      Confidence: {{ world.propose_fix_artifact.confidence|default:"(pending)" }}
-
-      {{ world.propose_fix_artifact.summary_markdown|default:"(artifact pending — oracle has not returned yet)" }}
-
-      Reply: `continue` (post + advance to implementing) · `refine feedback=…` · `restart_from stage=…` · `quit`
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ticket:     "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Summary:    '{{ world.propose_fix_artifact.summary_title|default:"(pending)" }}'
+                Confidence: '{{ world.propose_fix_artifact.confidence|default:"(pending)" }}'
+          - heading: "Artifact"
+          - code: '{{ world.propose_fix_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "continue"
+                  hint:  "post the proposal and advance to implementing"
+                - label: "refine feedback=…"
+                  hint:  "re-draft with feedback"
+                - label: "restart_from stage=…"
+                  hint:  "bounce back to an earlier room"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, propose_fix_artifact, reproduction_artifact, llm_verdict, refine_feedback, cycle]
     on_enter:
       - invoke: host.oracle.ask_with_mcp

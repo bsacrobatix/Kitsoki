@@ -6,15 +6,28 @@ states:
 
   reviewing:
     description: "Self-review the diff (code + security); advance to validating."
-    view: |
-      Reviewing the fix for {{ world.ticket_id }} — {{ world.ticket_title }}
-
-      Summary: {{ world.implement_review_artifact.summary_title|default:"(pending)" }}
-      Status:  {{ world.implement_review_artifact.status|default:"(pending)" }}
-
-      {{ world.implement_review_artifact.summary_markdown|default:"(artifact pending — oracle has not returned yet)" }}
-
-      Reply: `continue` (advance to validating) · `restart_from stage=…` · `quit`
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Summary: '{{ world.implement_review_artifact.summary_title|default:"(pending)" }}'
+                Status:  '{{ world.implement_review_artifact.status|default:"(pending)" }}'
+          - heading: "Artifact"
+          - code: '{{ world.implement_review_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "continue"
+                  hint:  "advance to validating"
+                - label: "restart_from stage=…"
+                  hint:  "bounce back to an earlier room"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [ticket_id, ticket_title, workdir, implement_review_artifact]
     on_enter:
       - invoke: iface.vcs.diff

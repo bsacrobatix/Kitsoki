@@ -21,15 +21,34 @@
 states:
 
   idle:
-    description: "Bug-fix pipeline parked. Waiting for `start`."
-    view: |
-      Bug-fix pipeline — idle.
-
-      Ticket:    {{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}
-      Workspace: {{ world.workspace_id|default:"(none)" }}
-      Mode:      {{ world.bugfix_mode }} bugfix, judge_mode={{ world.judge_mode }}
-
-      Actions: start, quick_fix, skip_to_pr, full_pipeline, change_ticket, quit, look.
+    description: "Bug-fix pipeline parked. Waiting for start."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ticket:    '{{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}'
+                Workspace: '{{ world.workspace_id|default:"(none)" }}'
+                Mode:      "{{ world.bugfix_mode }} bugfix"
+                Judge:     "{{ world.judge_mode }}"
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "start"
+                  hint:  "boot the full pipeline (mode-agnostic)"
+                - label: "full_pipeline"
+                  hint:  "pin bugfix_mode=full and start"
+                - label: "quick_fix"
+                  hint:  "skip reviewing + validating"
+                - label: "skip_to_pr"
+                  hint:  "jump straight to validating (fix in hand)"
+                - label: "change_ticket"
+                  hint:  "exit to parent's ticket picker"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [ticket_id, ticket_title, bugfix_mode, judge_mode, workspace_id, reproduction_artifact]
     # Auto-start when entered fresh with a ticket loaded. The
     # operator who lands here from dev-story's `go_bugfix` / `drive`

@@ -9,15 +9,30 @@ states:
 
   testing:
     description: "Run + review tests for the applied fix; advance to reviewing (or done in quick mode)."
-    view: |
-      Testing {{ world.ticket_id }} — {{ world.ticket_title }}
-
-      Summary: {{ world.implement_review_artifact.summary_title|default:"(pending)" }}
-      Status:  {{ world.implement_review_artifact.status|default:"(pending)" }}
-
-      {{ world.implement_review_artifact.summary_markdown|default:"(artifact pending — oracle has not returned yet)" }}
-
-      Reply: `continue` (post + advance) · `refine feedback=…` · `restart_from stage=…` · `quit`
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Summary: '{{ world.implement_review_artifact.summary_title|default:"(pending)" }}'
+                Status:  '{{ world.implement_review_artifact.status|default:"(pending)" }}'
+          - heading: "Artifact"
+          - code: '{{ world.implement_review_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "continue"
+                  hint:  "post and advance to reviewing (or done in quick mode)"
+                - label: "refine feedback=…"
+                  hint:  "re-run tests with feedback"
+                - label: "restart_from stage=…"
+                  hint:  "bounce back to an earlier room"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, implement_review_artifact, propose_fix_artifact, ci_log, llm_verdict, refine_feedback, cycle, bugfix_mode]
     on_enter:
       # Run tests against the change. iface.ci.run_tests is wired by

@@ -41,7 +41,12 @@ host_handlers:
   host.local_files.ticket:
     data:
       ok: true
-      tickets: "TKT-100: Auto-advance across import boundary"
+      # iface.ticket.search.output declares tickets as a list (see
+      # stories/dev-story/app.yaml). The previous stub returned a bare
+      # string, which crashed ticket_search.view's `{% for %}` loop. The
+      # list shape matches what host.local_files.ticket actually returns.
+      tickets:
+        - { id: "TKT-100", title: "Auto-advance across import boundary", status: "open" }
       id:    "TKT-100"
       title: "Auto-advance across import boundary"
       body:  "Verify the §W6.6 fix end-to-end across the bf import."
@@ -84,20 +89,18 @@ turns:
     expect_world:
       ticket_id: "TKT-100"
 
-  # Dispatch into bf via the parent's `go_bugfix` intent. Lands at
-  # bf.idle with the world_in: projection in place.
+  # Dispatch into bf via the parent's `go_bugfix` intent. bf.idle's
+  # on_enter auto-emits `start` when entered with a ticket loaded
+  # (see stories/bugfix/rooms/idle.yaml). The emit immediately fires
+  # reproducing.on_enter, which (in llm_then_human mode) runs the
+  # artifact + judge oracle and emit_intent's the verdict. The
+  # dispatcher resolves bare `accept` → `bf__accept` via IntentAliases
+  # and the next phase's on_enter cascades the same way — landing at
+  # bf.implementing (no judge in implementing, so the chain stops).
+  # The critical assertion is this end-state, not the per-room transit.
   - intent: { name: go_bugfix, slots: {} }
-    expect_state: bf.idle
+    expect_state: bf.implementing
     expect_world:
       bf__judge_mode: "llm_then_human"
-
-  # bf's `start` arc (renamed `bf__start` at fold time).
-  # The critical assertion: reproducing.on_enter binds the artifact,
-  # runs the judge, and emit_intent renders to bare `accept`. The
-  # dispatcher resolves `accept` → `bf__accept` via IntentAliases
-  # and the next phase's on_enter cascades the same way — landing
-  # at bf.implementing (no judge in implementing, so the chain stops).
-  - intent: { name: bf__start, slots: {} }
-    expect_state: bf.implementing
 
 expect_no_errors: true

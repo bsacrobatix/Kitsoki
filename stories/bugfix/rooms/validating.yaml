@@ -9,15 +9,30 @@ states:
 
   validating:
     description: "Validate the fix against the full environment; advance to done."
-    view: |
-      Validating fix for {{ world.ticket_id }} — {{ world.ticket_title }}
-
-      Summary: {{ world.validate_artifact.summary_title|default:"(pending)" }}
-      Outcome: {{ world.validate_artifact.outcome|default:"(pending)" }}
-
-      {{ world.validate_artifact.summary_markdown|default:"(artifact pending — oracle has not returned yet)" }}
-
-      Reply: `continue` (post + advance to done) · `refine feedback=…` · `restart_from stage=…` · `quit`
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Summary: '{{ world.validate_artifact.summary_title|default:"(pending)" }}'
+                Outcome: '{{ world.validate_artifact.outcome|default:"(pending)" }}'
+          - heading: "Artifact"
+          - code: '{{ world.validate_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "continue"
+                  hint:  "post and advance to done"
+                - label: "refine feedback=…"
+                  hint:  "re-validate with feedback"
+                - label: "restart_from stage=…"
+                  hint:  "bounce back to an earlier room"
+                - label: "quit"
+                  hint:  "abandon the pipeline"
+                - label: "look"
     relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, validate_artifact, implement_review_artifact, ci_log, llm_verdict, refine_feedback, cycle]
     on_enter:
       - invoke: iface.ci.build

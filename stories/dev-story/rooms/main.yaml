@@ -15,40 +15,43 @@ states:
 
   main:
     description: "dev-story — Independence, Missouri for the engineer's day."
-    relevant_world: [inbox_unread]
+    relevant_world: [ticket_id, ticket_title, ticket_type, last_pr_url, status, inbox_unread, workdir, feature_branch]
 
     view:
-      - heading: "dev-story — engineer's day"
-      - prose: >
-          You drive tickets through their pipeline from here. Pick a
-          ticket first, then `drive` it. Bug tickets route through
-          the bugfix pipeline; feature tickets route through the
-          implementation pipeline — the ticket's type chooses, you
-          don't pick the pipeline yourself.
-
-      - heading: "Status"
-      - kv:
-          pairs:
-            "Inbox unread":   "{{ world.inbox_unread }}"
-
-      - heading: "Choose"
-      - list:
-          items:
-            - "`tickets` — search for a ticket to pick"
-            - "`workspaces` — resume a workspace you already started"
-            - label: "`drive` — push the picked ticket through its pipeline"
-              when:  "available('drive')"
-            - label: "`drive` ✗ — {{ blocked_reason('drive') }}"
-              when:  "!available('drive')"
-            - label: "`pr` — hand the picked workspace's PR to pr-refinement"
-              when:  "available('go_pr_refinement')"
-            - label: "`pr` ✗ — {{ blocked_reason('go_pr_refinement') }}"
-              when:  "!available('go_pr_refinement')"
-            - "`code review` — review a teammate's PR"
-            - "`inbox` — read notifications ({{ world.inbox_unread }} unread)"
-            - "`oracle` — ask the LLM a one-shot question"
-            - "`standup` — prep today's standup summary"
-            - "`deploy` · `observability` · `incident` · `docs` — stubs"
+      extends: "base"
+      blocks:
+        body:
+          - prose: >
+              You drive tickets through their pipeline from here. Pick a
+              ticket first, then drive it. Bug tickets route through the
+              bugfix pipeline; feature tickets route through the
+              implementation pipeline — the ticket's type chooses, you
+              don't pick the pipeline yourself.
+        choices:
+          - heading: "Actions"
+          # Bare list (no hint column) — the `available()`/`blocked_reason()`
+          # pair on `drive`/`pr` produces long blocked labels (the guard hint
+          # is the value of blocked_reason); using a two-column list would
+          # size every row's gutter to that long label. Style guide §3
+          # "Prerequisite" pattern is well-suited to bare lists.
+          - list:
+              items:
+                - "tickets — search for a ticket to pick"
+                - "workspaces — resume a workspace you already started"
+                - label: "drive — push the picked ticket through its pipeline"
+                  when:  "available('drive')"
+                - label: "✗ drive — {{ blocked_reason('drive') }}"
+                  when:  "!available('drive')"
+                - label: "pr — hand the picked workspace's PR to pr-refinement"
+                  when:  "available('go_pr_refinement')"
+                - label: "✗ pr — {{ blocked_reason('go_pr_refinement') }}"
+                  when:  "!available('go_pr_refinement')"
+                - "code review — review a teammate's PR"
+                - "inbox — read notifications ({{ world.inbox_unread }} unread)"
+                - "oracle — ask the LLM a one-shot question"
+                - "standup — prep today's standup summary"
+                - "deploy · observability · incident · docs — stubs"
+                - "look"
 
     on:
       go_ticket_search:

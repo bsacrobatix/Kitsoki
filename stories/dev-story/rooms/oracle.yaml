@@ -7,13 +7,23 @@ states:
 
   oracle:
     description: "Oracle — Q&A with Claude."
-    view: |
-      Oracle.
-
-      Last question: {{ world.oracle_question|default:"(none)" }}
-      Last answer:   {{ world.oracle_answer|default:"(none)" }}
-
-      Intents: ask_question, go_back, go_main.
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                "Last question": '{{ world.oracle_question|default:"(none)" }}'
+                "Last answer":   '{{ world.oracle_answer|default:"(none)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "ask_question question=<…>"
+                  hint:  "fire one Oracle query"
+                - label: "go_back"
+                - label: "go_main"
+                - label: "look"
     relevant_world: [oracle_question, oracle_answer]
     on:
       ask_question:
@@ -29,11 +39,21 @@ states:
 
   oracle_asking:
     description: "Querying the Oracle."
-    view: |
-      Oracle (querying).
-
-      Question: {{ world.oracle_question }}
-      Answer:   {{ world.oracle_answer|default:"(pending)" }}
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Question: "{{ world.oracle_question }}"
+                Answer:   '{{ world.oracle_answer|default:"(pending — oracle has not returned yet)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "go_back"
+                - label: "go_main"
+                - label: "look"
     relevant_world: [oracle_question, oracle_answer]
     on_enter:
       - invoke: host.oracle.ask_with_mcp

@@ -33,15 +33,35 @@ states:
         bind:
           ticket_results: tickets
         on_error: ticket_search
-    view: |
-      Tickets{% if world.ticket_query %} (filter: `{{ world.ticket_query }}`){% endif %}
-
-      {% if world.ticket_results|length == 0 %}(none — file one in `issues/bugs/`)
-      {% else %}{% for t in world.ticket_results|reverse %}- `{{ t.id }}` — {{ t.title }} **`[{{ t.status|default:"?" }}{% if t.priority %} · {{ t.priority }}{% endif %}]`**
-      {% endfor %}{% endif %}
-      Picked: {{ world.ticket_id|default:"(none — `pick_ticket id=<TKT>`)" }} {{ world.ticket_title }}
-
-      Intents: `pick_ticket id=<TKT>`, `search_tickets query=<text>` (narrow), `go_bugfix`, `go_back`, `go_main`.
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: 'Tickets{% if world.ticket_query %} (filter: {{ world.ticket_query }}){% endif %}'
+          # Live result list bound from iface.ticket.search in on_enter.
+          # Style guide §6.2 — the canonical "render a world array as a
+          # list element" shape is still TBD; until then this code: block
+          # is the agreed pattern across operator stories.
+          - code: |
+              {% if world.ticket_results|length == 0 %}(none — file one in issues/bugs/)
+              {% else %}{% for t in world.ticket_results|reverse %}- {{ t.id }} — {{ t.title }} [{{ t.status|default:"?" }}{% if t.priority %} · {{ t.priority }}{% endif %}]
+              {% endfor %}{% endif %}
+          - kv:
+              pairs:
+                Picked: '{{ world.ticket_id|default:"(none — type pick_ticket id=<TKT>)" }} {{ world.ticket_title }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "pick_ticket id=<TKT>"
+                  hint:  "pick a ticket from the list above"
+                - label: "search_tickets query=<text>"
+                  hint:  "narrow the list"
+                - label: "go_bugfix"
+                  hint:  "hand the picked ticket to the bugfix pipeline"
+                - label: "go_back"
+                - label: "go_main"
+                - label: "look"
     on:
       search_tickets:
         - target: ticket_searching
@@ -97,13 +117,23 @@ states:
 
   ticket_searching:
     description: "Running ticket search."
-    view: |
-      Searching for: {{ world.ticket_query }}
-
-      Results:
-      {{ world.ticket_results|default:"(empty)" }}
-
-      Type `pick_ticket id=<TKT>` to pick, or `go_back`.
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                "Searching for": "{{ world.ticket_query }}"
+          - heading: "Results"
+          - code: '{{ world.ticket_results|default:"(empty)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "pick_ticket id=<TKT>"
+                  hint:  "pick a ticket from the results"
+                - label: "go_back"
+                - label: "look"
     relevant_world: [ticket_query, ticket_results]
     on_enter:
       - invoke: iface.ticket.search

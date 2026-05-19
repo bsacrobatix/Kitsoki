@@ -19,16 +19,23 @@ states:
 
   inbox:
     description: "TUI inbox — unread checkpoints + notifications."
-    view: |
-      Inbox.
-
-      Unread: {{ world.inbox_unread }}
-
-      Pending review request: {{ world.pr_id|default:"(none)" }} {{ world.pr_title }}
-
-      Intents:
-        - pick_review id=<PR>     (route a review notification into code-review)
-        - go_back, go_main
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Unread:                 "{{ world.inbox_unread }}"
+                "Pending review request": '{{ world.pr_id|default:"(none)" }} {{ world.pr_title }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "pick_review id=<PR>"
+                  hint:  "route a review notification into code-review"
+                - label: "go_back"
+                - label: "go_main"
+                - label: "look"
     relevant_world: [inbox_unread, pr_id, pr_title]
     on:
       # Pick a review-request notification. The slots project into the
