@@ -34,13 +34,19 @@ states:
                 - label: "look"
     relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, done_artifact, validate_artifact, llm_verdict, refine_feedback, cycle]
     on_enter:
+      # `working_dir` pins the oracle to the bugfix worktree even though
+      # done's postmortem oracle mostly reads upstream artifact text —
+      # consistency across rooms means an operator never has to remember
+      # which oracle calls see which tree.
       - invoke: host.oracle.ask_with_mcp
         with:
           prompt: prompts/done_executing.md
           schema: schemas/done_artifact.json
+          working_dir: "{{ world.workdir }}"
           args:
             ticket_id:        "{{ world.ticket_id }}"
             ticket_title:     "{{ world.ticket_title }}"
+            workdir:          "{{ world.workdir }}"
             validate_summary: "{{ world.validate_artifact.summary_markdown }}"
             cycle:            "{{ world.cycle }}"
         bind:
@@ -52,6 +58,7 @@ states:
         with:
           prompt: prompts/judge_done.md
           schema: schemas/judge_verdict.json
+          working_dir: "{{ world.workdir }}"
           args:
             ticket_id:       "{{ world.ticket_id }}"
             artifact_title:  "{{ world.done_artifact.summary_title }}"

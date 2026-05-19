@@ -73,10 +73,14 @@ states:
       # 1. Always: produce the reproduction artifact. Schema-validated
       #    payload lands at Result.Data.submitted; bind walks
       #    "submitted" → world.reproduction_artifact.
+      #    `working_dir` pins the oracle subprocess to the bugfix
+      #    worktree so any greps/reads the oracle runs read the right
+      #    tree. See implementing.yaml header for the regression context.
       - invoke: host.oracle.ask_with_mcp
         with:
           prompt: prompts/reproducing_executing.md
           schema: schemas/reproducing_artifact.json
+          working_dir: "{{ world.workdir }}"
           args:
             ticket_id:        "{{ world.ticket_id }}"
             ticket_title:     "{{ world.ticket_title }}"
@@ -94,6 +98,7 @@ states:
         with:
           prompt: prompts/judge_reproducing.md
           schema: schemas/judge_verdict.json
+          working_dir: "{{ world.workdir }}"
           args:
             ticket_id:       "{{ world.ticket_id }}"
             artifact_title:  "{{ world.reproduction_artifact.summary_title }}"

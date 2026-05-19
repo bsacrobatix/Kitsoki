@@ -36,10 +36,14 @@ states:
                 - label: "look"
     relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, propose_fix_artifact, reproduction_artifact, llm_verdict, refine_feedback, cycle]
     on_enter:
+      # `working_dir` pins the oracle subprocess to the bugfix worktree
+      # so greps/reads against the live tree land on the feature branch,
+      # not on main. See implementing.yaml header for the regression.
       - invoke: host.oracle.ask_with_mcp
         with:
           prompt: prompts/proposing_executing.md
           schema: schemas/proposing_artifact.json
+          working_dir: "{{ world.workdir }}"
           args:
             ticket_id:             "{{ world.ticket_id }}"
             ticket_title:          "{{ world.ticket_title }}"
@@ -56,6 +60,7 @@ states:
         with:
           prompt: prompts/judge_proposing.md
           schema: schemas/judge_verdict.json
+          working_dir: "{{ world.workdir }}"
           args:
             ticket_id:       "{{ world.ticket_id }}"
             artifact_title:  "{{ world.propose_fix_artifact.summary_title }}"

@@ -968,3 +968,401 @@ func newSmokeOrchestratorWithCIStub(t *testing.T, repoRoot string) (*orchestrato
 	require.NoError(t, err)
 	return orch, s, sid, &oracleCalls
 }
+
+// =============================================================================
+// Outcome-aware routing tests
+//
+// These regression-guard the 2026-05-19 fixes to rooms/testing.yaml and
+// rooms/validating.yaml: pre-fix the `accept` arc in each room advanced
+// (or posted!) regardless of the artifact's verdict. The bugfix room
+// trace at /tmp/kitsoki-dogfood-trace.jsonl captured the exact production
+// failure — a `fail_short` validation outcome was broadcast as the
+// success close-out and the session terminated at done with the actual
+// fix never applied.
+//
+// Each test below stubs the oracle per-prompt so a specific gate room
+// produces a non-pass artifact while every other room produces the
+// canonical pass artifact. The smoke test then asserts:
+//   - the room routes to implementing (not advancing forward),
+//   - no transport.post (iface.transport.post → host.append_to_file)
+//     fired on the failure arm,
+//   - the corresponding cycle counter was bumped,
+//   - every oracle invocation received working_dir == world.workdir,
+//   - and iface.ci.build was not handed a spurious target arg.
+// =============================================================================
+
+// promptArtifact maps a prompt path fragment (e.g. "validating_executing")
+// to the artifact payload the stub returns. The fallback is the canonical
+// `dogfoodArtifact` so unconfigured prompts get the happy-path shape.
+type promptArtifact map[string]map[string]any
+
+// oracleRouter returns a host.oracle.ask_with_mcp stub that:
+//   - picks the artifact for the matching prompt fragment, falling back
+//     to dogfoodArtifact for prompts not in the map,
+//   - records every (prompt, working_dir) pair into *seen for the
+//     working-dir assertion below.
+type oracleSeen struct {
+	prompt     string
+	workingDir string
+}
+
+func oracleRouter(artifacts promptArtifact, seen *[]oracleSeen) host.Handler {
+	return func(ctx context.Context, args map[string]any) (host.Result, error) {
+		promptArg, _ := args["prompt"].(string)
+		workingDir, _ := args["working_dir"].(string)
+		*seen = append(*seen, oracleSeen{prompt: promptArg, workingDir: workingDir})
+
+		payload := dogfoodArtifact
+		for fragment, override := range artifacts {
+			if strings.Contains(promptArg, fragment) {
+				payload = override
+				break
+			}
+		}
+		stdoutJSON, _ := json.Marshal(payload)
+		return host.Result{Data: map[string]any{
+			"submitted": payload,
+			"stdout":    string(stdoutJSON),
+			"ok":        true,
+		}}, nil
+	}
+}
+
+// hostLocalCapture wraps the CI stub used by the existing smoke tests
+// and records the args of every "build" invocation so a test can assert
+// the spurious `target: "default"` regression doesn't recur.
+type hostLocalSeen struct {
+	op   string
+	args map[string]any
+}
+
+func hostLocalCapture(seen *[]hostLocalSeen) host.Handler {
+	return func(ctx context.Context, args map[string]any) (host.Result, error) {
+		op, _ := args["op"].(string)
+		// Shallow copy so later mutations don't clobber the record.
+		snap := make(map[string]any, len(args))
+		for k, v := range args {
+			snap[k] = v
+		}
+		*seen = append(*seen, hostLocalSeen{op: op, args: snap})
+
+		switch op {
+		case "run_tests":
+			return host.Result{Data: map[string]any{
+				"ok": true, "passed": 1, "failed": 0,
+				"log": "PASS (stubbed)", "junit": "",
+			}}, nil
+		case "build":
+			return host.Result{Data: map[string]any{
+				"ok": true, "log": "build ok (stubbed)",
+			}}, nil
+		default:
+			return host.Result{Data: map[string]any{"ok": true}}, nil
+		}
+	}
+}
+
+// newSmokeOrchestratorWithRouters builds an orchestrator pinned to the
+// flexible oracle + ci stubs. Returns the orchestrator, store, session
+// id, and the (oracleSeen, hostLocalSeen) capture slices.
+func newSmokeOrchestratorWithRouters(t *testing.T, repoRoot string, artifacts promptArtifact) (*orchestrator.Orchestrator, store.Store, app.SessionID, *[]oracleSeen, *[]hostLocalSeen) {
+	t.Helper()
+	appPath := filepath.Join(repoRoot, "stories", "kitsoki-dev", "app.yaml")
+	def, err := app.Load(appPath)
+	require.NoError(t, err)
+
+	m, err := machine.New(def)
+	require.NoError(t, err)
+
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	oracleSeenSlice := []oracleSeen{}
+	hostLocalSeenSlice := []hostLocalSeen{}
+
+	reg := host.NewRegistry()
+	reg.Register("host.oracle.ask_with_mcp", oracleRouter(artifacts, &oracleSeenSlice))
+	reg.Register("host.local", hostLocalCapture(&hostLocalSeenSlice))
+	reg.Register("host.local_files.ticket", host.LocalFilesTicketHandler)
+	reg.Register("host.git", host.GitVCSHandler)
+	reg.Register("host.git_worktree", host.GitWorktreeHandler)
+	reg.Register("host.append_to_file", host.AppendFileTransportHandler)
+	reg.Register("host.inbox.add", host.InboxAddHandler)
+
+	orch := orchestrator.New(def, m, s, noopHarness{}, orchestrator.WithHostRegistry(reg))
+	sid, err := orch.NewSession(context.Background())
+	require.NoError(t, err)
+	return orch, s, sid, &oracleSeenSlice, &hostLocalSeenSlice
+}
+
+// driveBugfixPipelineTo runs the on-enter chain plus a teleport to
+// core.main, then submits accept intents in sequence to walk the bugfix
+// pipeline. Each step asserts the resulting state matches `want`. Stops
+// once `stopAt` is reached (or after all steps if stopAt == "").
+//
+// Used by both fail-routing tests to set up identical state before the
+// fail intent fires at the gate under test.
+func driveBugfixPipelineTo(t *testing.T, orch *orchestrator.Orchestrator, sid app.SessionID, ticketID string, stopAt app.StatePath) {
+	t.Helper()
+	ctx := context.Background()
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		require.NoError(t, orch.RunInitialOnEnter(c, sid))
+		cancel()
+	}
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		_, err := orch.Teleport(c, sid, inbox.TeleportTarget{
+			State: app.StatePath("core.main"),
+			Slots: seedDogfoodWorld(ticketID),
+		})
+		require.NoError(t, err)
+		cancel()
+	}
+
+	type step struct {
+		label  string
+		intent string
+		want   app.StatePath
+	}
+	steps := []step{
+		{"kickoff", "core__go_bugfix", "core.bf.reproducing"},
+		{"reproducing", "core__bf__accept", "core.bf.proposing"},
+		{"proposing", "core__bf__accept", "core.bf.implementing"},
+		{"implementing", "core__bf__accept", "core.bf.testing"},
+		{"testing", "core__bf__accept", "core.bf.reviewing"},
+		{"reviewing", "core__bf__accept", "core.bf.validating"},
+	}
+	for _, st := range steps {
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		out, err := orch.SubmitDirect(c, sid, st.intent, nil)
+		cancel()
+		require.NoError(t, err, "%s: SubmitDirect(%s)", st.label, st.intent)
+		require.NotNil(t, out, "%s: nil out", st.label)
+		require.Equal(t, st.want, out.NewState,
+			"%s: %s should land at %q; got %q (view: %q)",
+			st.label, st.intent, st.want, out.NewState, out.View)
+		if st.want == stopAt {
+			return
+		}
+	}
+}
+
+// countTransportPosts returns the number of host.append_to_file
+// HostDispatched events in the session history. iface.transport.post is
+// bound to host.append_to_file in kitsoki-dev (see app.yaml). Used to
+// assert "no post fired" on a failure-routing arc.
+func countTransportPosts(t *testing.T, s store.Store, sid app.SessionID) int {
+	t.Helper()
+	hist, err := s.LoadHistory(sid)
+	require.NoError(t, err)
+	n := 0
+	for _, ev := range hist {
+		if ev.Kind != store.HostDispatched {
+			continue
+		}
+		var p map[string]any
+		if jsonErr := json.Unmarshal(ev.Payload, &p); jsonErr != nil {
+			continue
+		}
+		ns, _ := p["namespace"].(string)
+		if ns == "host.append_to_file" {
+			n++
+		}
+	}
+	return n
+}
+
+// TestDogfoodSmoke_ValidatingFailShortRoutesToImplementing locks in
+// rooms/validating.yaml's outcome-aware accept arc: when the validation
+// oracle returns outcome=fail_short, `core__bf__accept` MUST route to
+// implementing (not advance to done), MUST NOT fire transport.post,
+// and MUST bump implementing_cycle. See rooms/validating.yaml header
+// for the dogfood-trace context that motivated this fix.
+func TestDogfoodSmoke_ValidatingFailShortRoutesToImplementing(t *testing.T) {
+	repoRoot, ticketID := setupDogfoodRepo(t)
+
+	// Override the validating oracle ONLY — every other room sees the
+	// canonical pass artifact. The failure path lives inside one room.
+	failShort := map[string]any{}
+	for k, v := range dogfoodArtifact {
+		failShort[k] = v
+	}
+	failShort["outcome"] = "fail_short"
+	failShort["next_action_hint"] = "fail_short test hint"
+	artifacts := promptArtifact{
+		"validating_executing": failShort,
+	}
+	orch, s, sid, _, _ := newSmokeOrchestratorWithRouters(t, repoRoot, artifacts)
+
+	// Walk the pipeline up to core.bf.validating.
+	driveBugfixPipelineTo(t, orch, sid, ticketID, "core.bf.validating")
+
+	// transport.post count at validating's entry (the reviewing.accept
+	// posts the test review, plus the testing.accept posts the test
+	// review). We capture the count before submitting to detect any new
+	// post on this arc.
+	postsBefore := countTransportPosts(t, s, sid)
+
+	// THE FAIL_SHORT ARM: accept at validating must route to implementing,
+	// not to done, AND must not fire a transport.post.
+	c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	out, err := orch.SubmitDirect(c, sid, "core__bf__accept", nil)
+	cancel()
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	require.Equal(t, app.StatePath("core.bf.implementing"), out.NewState,
+		"validating.accept on fail_short must route to implementing; got %q (view: %q)",
+		out.NewState, out.View)
+
+	postsAfter := countTransportPosts(t, s, sid)
+	require.Equal(t, postsBefore, postsAfter,
+		"validating.accept on fail_short must NOT fire transport.post (broadcasting failure as success); got %d new posts",
+		postsAfter-postsBefore)
+
+	// implementing_cycle must have been bumped.
+	journey, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), worldInt64(journey.World.Vars, "core__bf__implementing_cycle"),
+		"implementing_cycle must increment when fail_short re-routes to implementing")
+}
+
+// worldInt64 normalises numeric world values to int64. World vars
+// typed `int` in app.yaml come back from the orchestrator as int64.
+func worldInt64(vars map[string]any, key string) int64 {
+	switch v := vars[key].(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case float64:
+		return int64(v)
+	default:
+		return 0
+	}
+}
+
+// TestDogfoodSmoke_TestingFailedRoutesToImplementing locks in
+// rooms/testing.yaml's status-aware accept arc: when the testing oracle
+// returns status=failed, accept MUST route to implementing (not advance
+// to reviewing or done), MUST NOT fire transport.post, and MUST bump
+// implementing_cycle.
+func TestDogfoodSmoke_TestingFailedRoutesToImplementing(t *testing.T) {
+	repoRoot, ticketID := setupDogfoodRepo(t)
+
+	failed := map[string]any{}
+	for k, v := range dogfoodArtifact {
+		failed[k] = v
+	}
+	failed["status"] = "failed"
+	artifacts := promptArtifact{
+		"testing_executing": failed,
+	}
+	orch, s, sid, _, _ := newSmokeOrchestratorWithRouters(t, repoRoot, artifacts)
+
+	driveBugfixPipelineTo(t, orch, sid, ticketID, "core.bf.testing")
+
+	postsBefore := countTransportPosts(t, s, sid)
+
+	c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	out, err := orch.SubmitDirect(c, sid, "core__bf__accept", nil)
+	cancel()
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	require.Equal(t, app.StatePath("core.bf.implementing"), out.NewState,
+		"testing.accept on status=failed must route to implementing; got %q (view: %q)",
+		out.NewState, out.View)
+
+	postsAfter := countTransportPosts(t, s, sid)
+	require.Equal(t, postsBefore, postsAfter,
+		"testing.accept on status=failed must NOT fire transport.post; got %d new posts",
+		postsAfter-postsBefore)
+
+	journey, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), worldInt64(journey.World.Vars, "core__bf__implementing_cycle"),
+		"implementing_cycle must increment when testing-failed re-routes")
+}
+
+// TestDogfoodSmoke_OracleAlwaysReceivesWorkingDir locks in the second
+// half of the dogfood fix: every bugfix-room oracle invocation must pass
+// `working_dir` = the bugfix worktree. Without it the oracle's MCP
+// filesystem tools default to kitsoki's cwd (the main worktree) and
+// any grep/read the oracle runs lands on the wrong tree.
+//
+// Drives the full pass path (so every room's oracle fires at least
+// once), then asserts each phase-executing prompt was invoked with
+// working_dir set and pointing to .worktrees/bf-<ticket>.
+func TestDogfoodSmoke_OracleAlwaysReceivesWorkingDir(t *testing.T) {
+	repoRoot, ticketID := setupDogfoodRepo(t)
+	orch, _, sid, oracleCalls, _ := newSmokeOrchestratorWithRouters(t, repoRoot, promptArtifact{})
+
+	driveBugfixPipelineTo(t, orch, sid, ticketID, "core.bf.validating")
+	// One more accept to land at done — exercises validating's oracle on
+	// the pass arm and done's oracle on entry.
+	c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	out, err := orch.SubmitDirect(c, sid, "core__bf__accept", nil)
+	cancel()
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("core.bf.done"), out.NewState)
+
+	expected := filepath.Join(".worktrees", "bf-"+ticketID)
+
+	// For each phase-executing prompt, find the matching oracle call and
+	// assert working_dir was set and points at the bugfix worktree.
+	phasePrompts := []string{
+		"reproducing_executing",
+		"proposing_executing",
+		"implementing_executing",
+		"testing_executing",
+		"validating_executing",
+		"done_executing",
+	}
+	for _, phase := range phasePrompts {
+		found := false
+		for _, call := range *oracleCalls {
+			if !strings.Contains(call.prompt, phase) {
+				continue
+			}
+			found = true
+			require.NotEmpty(t, call.workingDir,
+				"%s oracle invocation must set working_dir; got empty (prompt=%q)",
+				phase, call.prompt)
+			require.True(t, strings.HasSuffix(call.workingDir, expected) || call.workingDir == expected,
+				"%s oracle working_dir must point at the bugfix worktree (want suffix %q); got %q",
+				phase, expected, call.workingDir)
+			break
+		}
+		require.True(t, found, "expected at least one oracle call for prompt %s", phase)
+	}
+}
+
+// TestDogfoodSmoke_ValidatingBuildSkipsSpuriousTargetArg locks in the
+// third dogfood fix: rooms/validating.yaml no longer passes
+// `target: "default"` to iface.ci.build. Pre-fix, ciBuild appended
+// the literal string "default" to `go build ./...`, synthesising a
+// `package default is not in std` error on every full-pipeline run.
+// The oracle then mistook that synthesised error for evidence the fix
+// wasn't applied. Now: no target arg at all.
+func TestDogfoodSmoke_ValidatingBuildSkipsSpuriousTargetArg(t *testing.T) {
+	repoRoot, ticketID := setupDogfoodRepo(t)
+	orch, _, sid, _, hostLocalCalls := newSmokeOrchestratorWithRouters(t, repoRoot, promptArtifact{})
+
+	// Drive through to validating so iface.ci.build fires on entry.
+	driveBugfixPipelineTo(t, orch, sid, ticketID, "core.bf.validating")
+
+	buildCalls := 0
+	for _, call := range *hostLocalCalls {
+		if call.op != "build" {
+			continue
+		}
+		buildCalls++
+		target, _ := call.args["target"].(string)
+		require.Empty(t, target,
+			"iface.ci.build target arg must be empty (pre-fix: literal 'default' got appended as a go-package path); got %q",
+			target)
+	}
+	require.GreaterOrEqual(t, buildCalls, 1,
+		"validating.on_enter must invoke iface.ci.build at least once")
+}

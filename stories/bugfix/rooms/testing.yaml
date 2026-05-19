@@ -4,6 +4,25 @@
 # review of the implementation plus added tests, with pass/blocked verdict.
 #
 # Single merged state — see rooms/reproducing.yaml for the design.
+#
+# # The accept arc is status-aware
+#
+# Pre-2026-05-19 the accept arc unconditionally posted the artifact and
+# advanced to reviewing (or to done in quick mode), regardless of the
+# artifact's `status`. So a `failed` or `blocked` verdict was broadcast
+# as a successful test-review and progress carried on past a broken
+# implementation. Same shape as the validating room's pre-fix bug; see
+# rooms/validating.yaml for the full history.
+#
+# Post-fix the arc branches on `world.implement_review_artifact.status`:
+#
+#   passed  → post + advance to reviewing (or to done in quick mode)
+#   failed  → return to implementing — patch the fix (no post)
+#   blocked → return to implementing — the suite couldn't decide (no post)
+#
+# Each non-pass arm bumps `implementing_cycle` so the existing
+# `implementing_budget` guard bails the session out if the operator keeps
+# cycling. The `continue` hint renders per status.
 
 states:
 
@@ -25,7 +44,10 @@ states:
           - list:
               items:
                 - label: "continue"
-                  hint:  "post and advance to reviewing (or done in quick mode)"
+                  # Hint reflects the status-aware routing in `on.accept`
+                  # below. Default branch covers passed + the
+                  # legacy/missing-status shape.
+                  hint:  '{% if world.implement_review_artifact.status == "failed" %}return to implementing — patch the fix{% elif world.implement_review_artifact.status == "blocked" %}return to implementing — suite couldn''t decide{% elif world.bugfix_mode == "quick" %}post and advance to done (quick mode){% else %}post and advance to reviewing{% endif %}'
                 - label: "refine feedback=…"
                   hint:  "re-run tests with feedback"
                 - label: "restart_from stage=…"
@@ -51,13 +73,19 @@ states:
         on_error: idle
 
       # Produce the structured testing artifact from the run output.
+      # `working_dir` pins the oracle (and its MCP filesystem tools) to
+      # the bugfix worktree — without it, any grep/read the oracle runs
+      # to verify the fix lands on the wrong tree (kitsoki's cwd = main,
+      # where the fix never lives).
       - invoke: host.oracle.ask_with_mcp
         with:
           prompt: prompts/testing_executing.md
           schema: schemas/testing_artifact.json
+          working_dir: "{{ world.workdir }}"
           args:
             ticket_id:    "{{ world.ticket_id }}"
             ticket_title: "{{ world.ticket_title }}"
+            workdir:      "{{ world.workdir }}"
             fix_summary:  "{{ world.propose_fix_artifact.summary_markdown }}"
             ci_log:       "{{ world.ci_log }}"
         bind:
@@ -69,6 +97,7 @@ states:
         with:
           prompt: prompts/judge_testing.md
           schema: schemas/judge_verdict.json
+          working_dir: "{{ world.workdir }}"
           args:
             ticket_id:       "{{ world.ticket_id }}"
             artifact_title:  "{{ world.implement_review_artifact.summary_title }}"
@@ -85,10 +114,34 @@ states:
         slots:
           feedback: "{{ world.llm_verdict.reason }}"
     on:
-      # bugfix_mode=quick collapses the pipeline by skipping reviewing +
-      # validating. The first arm fires the quick path; full mode falls
-      # through to reviewing.
+      # accept routes by implement_review_artifact.status (failed/blocked
+      # → implementing; passed → reviewing or done-in-quick). The
+      # bugfix_mode=quick branch collapses past reviewing on pass. See
+      # file header for the full history.
       accept:
+        # failed / blocked — fix needs another pass; check budget.
+        - when: |
+            (world.implement_review_artifact.status == 'failed' ||
+             world.implement_review_artifact.status == 'blocked') &&
+            world.implementing_cycle >= world.implementing_budget
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "implementing_cycle_budget_exhausted_after_testing"
+                status:         "abandoned"
+        - when: |
+            world.implement_review_artifact.status == 'failed' ||
+            world.implement_review_artifact.status == 'blocked'
+          target: implementing
+          effects:
+            - set:
+                refine_feedback:    "{{ world.implement_review_artifact.summary_markdown }}"
+                implementing_cycle: "{{ world.implementing_cycle + 1 }}"
+                cycle:              "{{ world.cycle + 1 }}"
+
+        # passed (or legacy/missing status) — post and advance. The
+        # bugfix_mode=quick path skips reviewing + validating and lands
+        # at done directly.
         - when: "world.bugfix_mode == 'quick'"
           target: done
           effects:

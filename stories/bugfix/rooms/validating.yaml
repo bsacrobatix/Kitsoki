@@ -4,6 +4,28 @@
 # the full-environment validation outcome (pass | fail_short | fail | infra_error).
 #
 # Single merged state — see rooms/reproducing.yaml for the design.
+#
+# # The accept arc is outcome-aware
+#
+# Pre-2026-05-19 the accept arc unconditionally posted the artifact and
+# advanced to done. A `fail_short` verdict (proposal correct, edits never
+# landed) was therefore broadcast as the success close-out, even though
+# the validator's own narrative said "control should return to
+# implementing." That happened to a real dogfood session — see the
+# trace in /tmp/kitsoki-dogfood-trace.jsonl around 2026-05-19 07:42 UTC.
+#
+# Post-fix the arc branches on `world.validate_artifact.outcome`:
+#
+#   pass        → post + advance to done (the success close-out)
+#   fail_short  → return to implementing — minor patch needed (no post;
+#                 a failure isn't a closing message)
+#   fail        → return to proposing — proposal needs re-draft (no post)
+#   infra_error → retry validation — environment problem (no post)
+#
+# Each non-pass arm bumps the relevant phase cycle so the existing
+# `_budget` guards bail the session out if the operator keeps cycling.
+# The `continue`-hint in the view renders per outcome so the operator
+# can see exactly where `continue` will land before pressing it.
 
 states:
 
@@ -25,7 +47,11 @@ states:
           - list:
               items:
                 - label: "continue"
-                  hint:  "post and advance to done"
+                  # Hint reflects the outcome-aware routing in `on.accept`
+                  # below so the operator can see where `continue` will
+                  # land before pressing it. The default branch covers
+                  # pass + the legacy/missing-outcome shape.
+                  hint:  '{% if world.validate_artifact.outcome == "fail_short" %}return to implementing — minor patch needed{% elif world.validate_artifact.outcome == "fail" %}return to proposing — proposal needs re-draft{% elif world.validate_artifact.outcome == "infra_error" %}retry validation — environment problem{% else %}post and advance to done{% endif %}'
                 - label: "refine feedback=…"
                   hint:  "re-validate with feedback"
                 - label: "restart_from stage=…"
@@ -35,21 +61,34 @@ states:
                 - label: "look"
     relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, validate_artifact, implement_review_artifact, ci_log, llm_verdict, refine_feedback, cycle]
     on_enter:
+      # `target:` is intentionally absent — ciBuild treats target as a
+      # literal go-package-path arg appended to `go build ./...`. Pre-fix,
+      # passing `target: "default"` here produced
+      # `package default is not in std (.../toolchain@...)` on every run
+      # and the oracle then mistook this synthesised error for evidence
+      # the fix wasn't applied. See dogfood_smoke_test.go::
+      # TestValidatingBuild_NoSpuriousTargetArg for the lock-in.
       - invoke: iface.ci.build
         with:
           workdir: "{{ world.workdir }}"
-          target:  "default"
         bind:
           ci_log: log
         on_error: idle
 
+      # `working_dir` pins the oracle subprocess (and its MCP filesystem
+      # tools) to the bugfix worktree. Without it the oracle reads from
+      # kitsoki's cwd (the main worktree) and confidently reports "fix
+      # not applied" when grepping for changes that landed on the
+      # feature branch. See implementing.yaml for the same pattern.
       - invoke: host.oracle.ask_with_mcp
         with:
           prompt: prompts/validating_executing.md
           schema: schemas/validating_artifact.json
+          working_dir: "{{ world.workdir }}"
           args:
             ticket_id:    "{{ world.ticket_id }}"
             ticket_title: "{{ world.ticket_title }}"
+            workdir:      "{{ world.workdir }}"
             build_log:    "{{ world.ci_log }}"
             review_body:  "{{ world.implement_review_artifact.summary_markdown }}"
         bind:
@@ -61,6 +100,7 @@ states:
         with:
           prompt: prompts/judge_validating.md
           schema: schemas/judge_verdict.json
+          working_dir: "{{ world.workdir }}"
           args:
             ticket_id:       "{{ world.ticket_id }}"
             artifact_title:  "{{ world.validate_artifact.summary_title }}"
@@ -77,7 +117,64 @@ states:
         slots:
           feedback: "{{ world.llm_verdict.reason }}"
     on:
+      # accept routes by validate_artifact.outcome (see file header).
+      # Each non-pass arm bumps the relevant phase cycle and lets that
+      # phase's own _budget guard catch a runaway ping-pong. The pass
+      # arm is unchanged from the pre-fix behaviour.
       accept:
+        # fail_short — implementation needs a minor patch.
+        - when: |
+            world.validate_artifact.outcome == 'fail_short' &&
+            world.implementing_cycle >= world.implementing_budget
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "implementing_cycle_budget_exhausted_after_validation"
+                status:         "abandoned"
+        - when: "world.validate_artifact.outcome == 'fail_short'"
+          target: implementing
+          effects:
+            - set:
+                refine_feedback:    "{{ world.validate_artifact.next_action_hint ?? world.validate_artifact.summary_markdown }}"
+                implementing_cycle: "{{ world.implementing_cycle + 1 }}"
+                cycle:              "{{ world.cycle + 1 }}"
+
+        # fail — proposal needs a re-draft.
+        - when: |
+            world.validate_artifact.outcome == 'fail' &&
+            world.proposing_cycle >= world.proposing_budget
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "proposing_cycle_budget_exhausted_after_validation"
+                status:         "abandoned"
+        - when: "world.validate_artifact.outcome == 'fail'"
+          target: proposing
+          effects:
+            - set:
+                refine_feedback:  "{{ world.validate_artifact.next_action_hint ?? world.validate_artifact.summary_markdown }}"
+                proposing_cycle:  "{{ world.proposing_cycle + 1 }}"
+                cycle:            "{{ world.cycle + 1 }}"
+
+        # infra_error — environment problem; retry validation.
+        - when: |
+            world.validate_artifact.outcome == 'infra_error' &&
+            world.validating_cycle >= world.validating_budget
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "validating_cycle_budget_exhausted_infra_error"
+                status:         "abandoned"
+        - when: "world.validate_artifact.outcome == 'infra_error'"
+          target: validating
+          effects:
+            - set:
+                refine_feedback:   "{{ world.validate_artifact.next_action_hint ?? world.validate_artifact.summary_markdown }}"
+                validating_cycle:  "{{ world.validating_cycle + 1 }}"
+                cycle:             "{{ world.cycle + 1 }}"
+
+        # pass — the success close-out. Also the fall-through for legacy
+        # artifacts that don't set `outcome`.
         - target: done
           effects:
             - invoke: iface.transport.post
