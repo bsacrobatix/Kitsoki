@@ -124,16 +124,39 @@ func gitCommit(ctx context.Context, workdir string, args map[string]any) (Result
 		return Result{Error: "git.commit: message argument is required"}, nil
 	}
 	// Optional files list; when empty, fall back to `git commit -a`.
+	// Tolerate two states that aren't really failures from the
+	// pipeline's perspective:
+	//   1. A listed file doesn't exist in the worktree yet (the
+	//      proposer named files the operator hasn't created).
+	//   2. There's nothing staged/dirty (the operator hasn't made
+	//      edits yet, or the proposed file list was conceptual).
+	// Both used to bubble out as `on_error: idle` and silently
+	// bounce the bugfix pipeline back to the parked room. Treat as
+	// "no commit made" success so the pipeline keeps moving and the
+	// downstream phases can show their own diagnostics.
 	filesAny, _ := args["files"].([]any)
 	if len(filesAny) > 0 {
 		addArgs := []string{"add", "--"}
+		var listed []string
 		for _, f := range filesAny {
 			if s, ok := f.(string); ok && s != "" {
 				addArgs = append(addArgs, s)
+				listed = append(listed, s)
 			}
 		}
-		if _, stderr, code, err := cliExec(ctx, workdir, "git", addArgs...); err != nil || code != 0 {
-			return Result{Error: fmt.Sprintf("git.commit: stage: %s", strings.TrimSpace(stderr))}, nil
+		if _, addStderr, addCode, addErr := cliExec(ctx, workdir, "git", addArgs...); addErr != nil || addCode != 0 {
+			// `pathspec ... did not match any files` — files the
+			// proposal named don't exist yet. Surface as a soft skip
+			// rather than failing the room.
+			if strings.Contains(addStderr, "did not match any files") {
+				return Result{Data: map[string]any{
+					"ok":             true,
+					"sha":            "",
+					"skipped_reason": "pathspec did not match (no files to commit)",
+					"files":          listed,
+				}}, nil
+			}
+			return Result{Error: fmt.Sprintf("git.commit: stage: %s", strings.TrimSpace(addStderr))}, nil
 		}
 	}
 	commitArgs := []string{"commit", "-m", message}
@@ -142,12 +165,33 @@ func gitCommit(ctx context.Context, workdir string, args map[string]any) (Result
 		// fast-path on a dirty tree.
 		commitArgs = []string{"commit", "-a", "-m", message}
 	}
-	_, stderr, code, err := cliExec(ctx, workdir, "git", commitArgs...)
+	stdout, stderr, code, err := cliExec(ctx, workdir, "git", commitArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("git.commit: exec: %v", err)}, nil
 	}
 	if code != 0 {
-		return Result{Error: fmt.Sprintf("git.commit: %s", strings.TrimSpace(stderr))}, nil
+		// `nothing to commit` and `no changes added to commit` go to
+		// git's STDOUT (not stderr), so check both streams. Without
+		// this the leniency check above silently misses the most
+		// common no-op state and the on_error: idle arc fires.
+		combined := stdout + "\n" + stderr
+		if strings.Contains(combined, "nothing to commit") || strings.Contains(combined, "no changes added to commit") {
+			return Result{Data: map[string]any{
+				"ok":             true,
+				"sha":            "",
+				"skipped_reason": "nothing to commit",
+			}}, nil
+		}
+		// Surface a non-empty message even when stderr is empty —
+		// otherwise the operator sees `git.commit: ` with no clue.
+		msg := strings.TrimSpace(stderr)
+		if msg == "" {
+			msg = strings.TrimSpace(stdout)
+		}
+		if msg == "" {
+			msg = fmt.Sprintf("git exited with code %d (no output)", code)
+		}
+		return Result{Error: fmt.Sprintf("git.commit: %s", msg)}, nil
 	}
 	sha, _, _, _ := cliExec(ctx, workdir, "git", "rev-parse", "HEAD")
 	return Result{Data: map[string]any{

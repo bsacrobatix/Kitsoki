@@ -315,15 +315,12 @@ func TestDogfoodSmoke_AutoStartThroughBugfix(t *testing.T) {
 			out.NewState, out.View)
 	}
 
-	// Worktree must exist on disk. The created dir is
-	// `.worktrees/fix-<ticket_id>` because
-	// `internal/host/git_worktree.go::worktreeCreate` derives the dir
-	// basename from the branch name (feature_branch="fix/<id>"),
-	// flattening slashes to dashes. Note the proposal text mentions
-	// `.worktrees/bf-<id>` — that's `world.workdir`, which doesn't
-	// match the actual on-disk dir produced by the handler. The
-	// real-handler contract is what we verify here.
-	workdir := filepath.Join(repoRoot, ".worktrees", "fix-"+ticketID)
+	// Worktree must exist on disk at `.worktrees/<workspace_id>` —
+	// matching world.workdir (i.e. `bf-<ticket_id>`). idle.on_enter
+	// passes `id: workspace_id` to iface.workspace.create so the
+	// on-disk dir aligns with what `iface.workspace.sync` (and
+	// implementing.on_enter's commit) will later key on.
+	workdir := filepath.Join(repoRoot, ".worktrees", "bf-"+ticketID)
 	_, statErr := os.Stat(workdir)
 	require.NoError(t, statErr,
 		"worktree dir must exist after go_bugfix; expected %s", workdir)
@@ -456,4 +453,372 @@ func TestDogfoodSmoke_StaleWorktreeRecoversOrFailsCleanly(t *testing.T) {
 	}
 	require.True(t, acceptable[journey.State],
 		"session must settle at a coherent resting place after stale-worktree failure; got %q (acceptable: %v)", journey.State, acceptable)
+}
+
+// TestDogfoodSmoke_ContinueFromProposingReachesImplementing reproduces
+// the exact scenario the user hit on 2026-05-18: at `core.bf.proposing`,
+// typing `continue` (intent: core__bf__accept) silently bounced the
+// session back to `core.bf.idle` instead of advancing to
+// `core.bf.implementing`.
+//
+// Root cause: bf.idle.on_enter pinned `bf_autostart_attempted=true`,
+// so any re-entry to idle is a no-op (workspace.create gated by
+// `!bf_autostart_attempted`). If the worktree dir vanishes between
+// turns — common after a process restart or a manual `rm -rf` —
+// implementing.on_enter's `iface.workspace.sync` fails because git's
+// worktree list no longer has an entry for `<workspace_id>`. The
+// arc's `on_error: idle` quietly bounces back to idle, and idle's
+// on_enter is now a no-op, so the operator sees a parked idle with
+// no diagnostic.
+//
+// This test simulates that state by driving the happy path to
+// `proposing`, then `rm -rf`'ing the worktree dir + `git worktree
+// prune`-ing git's index. Typing `accept` next MUST land at
+// `core.bf.implementing` (the bugfix-room contract), not at idle.
+func TestDogfoodSmoke_ContinueFromProposingReachesImplementing(t *testing.T) {
+	repoRoot, ticketID := setupDogfoodRepo(t)
+	orch, _, sid, _ := newSmokeOrchestrator(t, repoRoot)
+
+	ctx := context.Background()
+
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		require.NoError(t, orch.RunInitialOnEnter(c, sid))
+		cancel()
+	}
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		_, err := orch.Teleport(c, sid, inbox.TeleportTarget{
+			State: app.StatePath("core.main"),
+			Slots: seedDogfoodWorld(ticketID),
+		})
+		require.NoError(t, err)
+		cancel()
+	}
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		out, err := orch.SubmitDirect(c, sid, "core__go_bugfix", nil)
+		cancel()
+		require.NoError(t, err)
+		require.Equal(t, app.StatePath("core.bf.reproducing"), out.NewState)
+	}
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		out, err := orch.SubmitDirect(c, sid, "core__bf__accept", nil)
+		cancel()
+		require.NoError(t, err)
+		require.Equal(t, app.StatePath("core.bf.proposing"), out.NewState)
+	}
+
+	// Simulate the user's broken state: the worktree dir is gone but
+	// bf_autostart_attempted is pinned true. A re-entry to idle won't
+	// recreate the dir; an arc that depends on it will fail.
+	workdir := filepath.Join(repoRoot, ".worktrees", "bf-"+ticketID)
+	require.NoError(t, os.RemoveAll(workdir))
+	pruneCmd := exec.Command("git", "worktree", "prune")
+	pruneCmd.Dir = repoRoot
+	pruneOut, pruneErr := pruneCmd.CombinedOutput()
+	require.NoError(t, pruneErr, "git worktree prune: %s", string(pruneOut))
+
+	// THE BUG: typing `accept` at proposing used to silently bounce
+	// back to idle because implementing.on_enter's
+	// `iface.workspace.sync` failed (no worktree registered for
+	// `bf-<id>`) and `on_error: idle` fired. Post-fix, implementing's
+	// on_enter idempotently re-creates the worktree first, so the
+	// session advances to implementing regardless of whether the
+	// worktree survived between turns.
+	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	out, err := orch.SubmitDirect(c, sid, "core__bf__accept", nil)
+	cancel()
+	require.NoError(t, err, "core__bf__accept from proposing must complete within 10s")
+	require.NotNil(t, out)
+	require.Equal(t, app.StatePath("core.bf.implementing"), out.NewState,
+		"accept at proposing must land at implementing, not bounce to idle; got %q (view: %q)",
+		out.NewState, out.View)
+
+	// Worktree must be back on disk after implementing.on_enter ran.
+	_, statErr := os.Stat(workdir)
+	require.NoError(t, statErr,
+		"implementing.on_enter must have re-created the worktree at %s", workdir)
+}
+
+// TestDogfoodSmoke_ProposingAccept_RegisteredWorktreeDirtyTree reproduces
+// the *production* shape of the bounce-to-idle bug — the one the user
+// hit on a live session that the earlier prune-based test couldn't
+// reach. The earlier test removes the worktree dir AND prunes the
+// registration, then verifies that implementing.on_enter can re-create
+// it. But the real bug fires in a different ordering: the worktree dir
+// *exists* on disk AND *is registered* with git (via an absolute
+// path), the branch is checked out there, and the worktree carries
+// some stale dirty file from a prior aborted run. The previous
+// implementation of `worktreeCreate.findWorktreeByPath` compared a
+// relative path against git's absolute path and silently missed the
+// match — falling through to `git worktree add` which then failed with
+// `<path> already exists`. on_error: idle fired. Operator sees parked
+// idle. No diagnostic.
+//
+// This test mirrors that exact shape:
+//
+//  1. Drive go_bugfix → reproducing → accept → proposing (real flow).
+//  2. Leave the worktree where it is — registered, on disk, branch
+//     checked out — but write an unrelated dirty file in it (mirrors
+//     the user's `stories/bugfix/evidence/<ticket>.log` change).
+//  3. Submit core__bf__accept.
+//
+// MUST land at core.bf.implementing. Pre-path-normalisation-fix this
+// landed at core.bf.idle.
+func TestDogfoodSmoke_ProposingAccept_RegisteredWorktreeDirtyTree(t *testing.T) {
+	repoRoot, ticketID := setupDogfoodRepo(t)
+	orch, _, sid, _ := newSmokeOrchestrator(t, repoRoot)
+
+	ctx := context.Background()
+
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		require.NoError(t, orch.RunInitialOnEnter(c, sid))
+		cancel()
+	}
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		_, err := orch.Teleport(c, sid, inbox.TeleportTarget{
+			State: app.StatePath("core.main"),
+			Slots: seedDogfoodWorld(ticketID),
+		})
+		require.NoError(t, err)
+		cancel()
+	}
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		out, err := orch.SubmitDirect(c, sid, "core__go_bugfix", nil)
+		cancel()
+		require.NoError(t, err)
+		require.Equal(t, app.StatePath("core.bf.reproducing"), out.NewState)
+	}
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		out, err := orch.SubmitDirect(c, sid, "core__bf__accept", nil)
+		cancel()
+		require.NoError(t, err)
+		require.Equal(t, app.StatePath("core.bf.proposing"), out.NewState)
+	}
+
+	// Dirty the worktree with an unrelated change — the actual on-disk
+	// shape the user had (stale evidence log from a prior aborted run).
+	// The implementation phase's git.commit will see this in the index
+	// but it isn't in the proposal's affected_files, so a naive
+	// `git add <listed> && git commit -m` stages nothing and `git
+	// commit` exits non-zero with "no changes added to commit" on
+	// STDOUT (not stderr).
+	workdir := filepath.Join(repoRoot, ".worktrees", "bf-"+ticketID)
+	staleEvidence := filepath.Join(workdir, "stale_evidence.txt")
+	require.NoError(t, os.WriteFile(staleEvidence, []byte("dirty\n"), 0o644))
+
+	// Confirm: the worktree is registered with git via its ABSOLUTE
+	// path. The path-comparison bug surfaces when worktreeCreate
+	// re-enters and constructs `<repo>/.worktrees/<id>` as a relative
+	// path (because repo arg is empty / cwd) then fails to match
+	// git's absolute path in `git worktree list --porcelain`.
+	listCmd := exec.Command("git", "worktree", "list", "--porcelain")
+	listCmd.Dir = repoRoot
+	listOut, listErr := listCmd.CombinedOutput()
+	require.NoError(t, listErr)
+	require.Contains(t, string(listOut), workdir,
+		"worktree must be registered at the absolute path %s", workdir)
+
+	// THE BUG: accept at proposing used to bounce back to idle because
+	// (a) findWorktreeByPath compared relative vs absolute paths and
+	// missed the registered worktree, (b) the fallback `git worktree
+	// add` failed because the dir/branch already existed, (c)
+	// on_error: idle fired silently. Post-fix this advances cleanly.
+	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	out, err := orch.SubmitDirect(c, sid, "core__bf__accept", nil)
+	cancel()
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	require.Equal(t, app.StatePath("core.bf.implementing"), out.NewState,
+		"accept at proposing must land at implementing despite a registered/dirty worktree; got %q (view: %q)",
+		out.NewState, out.View)
+}
+
+// TestDogfoodSmoke_FullBugfixPipeline drives the bugfix pipeline from
+// `core.main` through go_bugfix → reproducing → proposing →
+// implementing → testing → reviewing → validating → done in one shot,
+// asserting each phase advances cleanly. This is the regression net
+// for "did we break the happy path?" — any room that fails to advance
+// here means the user types `continue` and watches the TUI silently
+// bounce.
+//
+// Both the oracle and local CI are stubbed: real-LLM tests cost money
+// and `go test ./...` against the temp repo would just exercise our
+// own tests recursively. The git_worktree + git + append_to_file
+// handlers run for real so the workspace-side seams get exercised.
+func TestDogfoodSmoke_FullBugfixPipeline(t *testing.T) {
+	repoRoot, ticketID := setupDogfoodRepo(t)
+	orch, _, sid, _ := newSmokeOrchestratorWithCIStub(t, repoRoot)
+
+	ctx := context.Background()
+
+	step := func(label, intent string, want app.StatePath) {
+		t.Helper()
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		out, err := orch.SubmitDirect(c, sid, intent, nil)
+		require.NoError(t, err, "%s: SubmitDirect(%s)", label, intent)
+		require.NotNil(t, out, "%s: nil out", label)
+		require.Equal(t, want, out.NewState,
+			"%s: %s should land at %q; got %q (view: %q)",
+			label, intent, want, out.NewState, out.View)
+	}
+
+	// Bootstrap into the bugfix pipeline.
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		require.NoError(t, orch.RunInitialOnEnter(c, sid))
+		cancel()
+	}
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		_, err := orch.Teleport(c, sid, inbox.TeleportTarget{
+			State: app.StatePath("core.main"),
+			Slots: seedDogfoodWorld(ticketID),
+		})
+		require.NoError(t, err)
+		cancel()
+	}
+
+	// Drive every accept boundary. Pre-fix any of these could have
+	// silently bounced to idle; post-fix they must all advance.
+	step("kickoff",      "core__go_bugfix",  "core.bf.reproducing")
+	step("reproducing",  "core__bf__accept", "core.bf.proposing")
+	step("proposing",    "core__bf__accept", "core.bf.implementing")
+	step("implementing", "core__bf__accept", "core.bf.testing")
+	step("testing",      "core__bf__accept", "core.bf.reviewing")
+	step("reviewing",    "core__bf__accept", "core.bf.validating")
+	step("validating",   "core__bf__accept", "core.bf.done")
+}
+
+// TestDogfoodSmoke_FullImplementationPipeline drives the implementation
+// pipeline (small-task / feature flow) end-to-end:
+// go_implementation → review_task → write_code → test → review →
+// handoff → pr.open_pr → pr.ci → pr.merge → done. Same shape as the
+// bugfix-pipeline test but exercises the dev-story `impl` sub-app
+// instead of `bf`. Catches "did we break a feature-track room?"
+// regressions before users hit them.
+//
+// Notes on intent prefixing: the impl pipeline keeps separate
+// `_executing` / `_awaiting_reply` rooms (unlike bugfix which merged
+// them), so the operator types `proceed` then `accept` at each phase.
+// After import folding, the intents become `core__impl__proceed` /
+// `core__impl__accept`; the PR-refinement sub-import inside impl uses
+// `core__pr__proceed` / `core__pr__accept`.
+func TestDogfoodSmoke_FullImplementationPipeline(t *testing.T) {
+	repoRoot, _ := setupDogfoodRepo(t)
+	// Switch the seeded ticket to a feature so go_implementation
+	// guard (`world.ticket_type == 'feature'` is implicit via the
+	// dev-story drive arc, but here we use go_implementation directly
+	// which only checks ticket_id != ''). Reusing the bug ticket is
+	// fine for transition exercise.
+	ticketID := "2026-05-17T111838Z-integration-smoke-bug-picked-up-by-dogfood"
+	orch, _, sid, _ := newSmokeOrchestratorWithCIStub(t, repoRoot)
+
+	ctx := context.Background()
+
+	step := func(label, intent string, want app.StatePath) {
+		t.Helper()
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		out, err := orch.SubmitDirect(c, sid, intent, nil)
+		require.NoError(t, err, "%s: SubmitDirect(%s)", label, intent)
+		require.NotNil(t, out, "%s: nil out", label)
+		require.Equal(t, want, out.NewState,
+			"%s: %s should land at %q; got %q (view: %q)",
+			label, intent, want, out.NewState, out.View)
+	}
+
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		require.NoError(t, orch.RunInitialOnEnter(c, sid))
+		cancel()
+	}
+	seed := seedDogfoodWorld(ticketID)
+	seed["core__ticket_type"] = "feature"
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		_, err := orch.Teleport(c, sid, inbox.TeleportTarget{
+			State: app.StatePath("core.main"),
+			Slots: seed,
+		})
+		require.NoError(t, err)
+		cancel()
+	}
+
+	step("kickoff",            "core__go_implementation", "core.impl.idle")
+	step("idle → review_task", "core__impl__start",       "core.impl.review_task_executing")
+	step("review_task → wait", "core__impl__proceed",     "core.impl.review_task_awaiting_reply")
+	step("review_task → write", "core__impl__accept",     "core.impl.write_code_executing")
+	step("write → wait",       "core__impl__proceed",     "core.impl.write_code_awaiting_reply")
+	step("write → test",       "core__impl__accept",      "core.impl.test_executing")
+	step("test → wait",        "core__impl__proceed",     "core.impl.test_awaiting_reply")
+	step("test → review",      "core__impl__accept",      "core.impl.review_executing")
+	step("review → wait",      "core__impl__proceed",     "core.impl.review_awaiting_reply")
+	step("review → handoff",   "core__impl__accept",      "core.impl.handoff")
+}
+
+// newSmokeOrchestratorWithCIStub mirrors newSmokeOrchestrator but also
+// stubs `host.local` (the iface.ci default in kitsoki-dev). Real CI
+// invokes `go test ./...` inside the temp worktree, which would either
+// blow up (no Go files outside the copied trees) or take seconds to
+// finish. Returning canned passed/failed counts keeps the smoke test
+// fast and focused on the state-machine transitions.
+func newSmokeOrchestratorWithCIStub(t *testing.T, repoRoot string) (*orchestrator.Orchestrator, store.Store, app.SessionID, *int) {
+	t.Helper()
+	appPath := filepath.Join(repoRoot, "stories", "kitsoki-dev", "app.yaml")
+	def, err := app.Load(appPath)
+	require.NoError(t, err)
+
+	m, err := machine.New(def)
+	require.NoError(t, err)
+
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	reg := host.NewRegistry()
+	oracleCalls := 0
+	reg.Register("host.oracle.ask_with_mcp", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		oracleCalls++
+		stdoutJSON, _ := json.Marshal(dogfoodArtifact)
+		return host.Result{Data: map[string]any{
+			"submitted": dogfoodArtifact,
+			"stdout":    string(stdoutJSON),
+			"ok":        true,
+		}}, nil
+	})
+	reg.Register("host.local", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		op, _ := args["op"].(string)
+		switch op {
+		case "run_tests":
+			return host.Result{Data: map[string]any{
+				"ok": true, "passed": 1, "failed": 0,
+				"log": "PASS (stubbed)", "junit": "",
+			}}, nil
+		case "build":
+			return host.Result{Data: map[string]any{
+				"ok": true, "log": "build ok (stubbed)",
+			}}, nil
+		default:
+			return host.Result{Data: map[string]any{"ok": true}}, nil
+		}
+	})
+
+	reg.Register("host.local_files.ticket", host.LocalFilesTicketHandler)
+	reg.Register("host.git", host.GitVCSHandler)
+	reg.Register("host.git_worktree", host.GitWorktreeHandler)
+	reg.Register("host.append_to_file", host.AppendFileTransportHandler)
+	reg.Register("host.inbox.add", host.InboxAddHandler)
+
+	orch := orchestrator.New(def, m, s, noopHarness{}, orchestrator.WithHostRegistry(reg))
+	sid, err := orch.NewSession(context.Background())
+	require.NoError(t, err)
+	return orch, s, sid, &oracleCalls
 }

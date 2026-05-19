@@ -1137,6 +1137,14 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			// route here", and "never registered" is a stronger failure
 			// than a non-zero exit.  Stop processing further calls.
 			if hc.OnError != "" {
+				o.logger.DebugContext(ctx, trace.EvHostOnErrorRedirect,
+					slog.String("session_id", string(sid)),
+					slog.String("namespace", hc.Namespace),
+					slog.String("from", string(state)),
+					slog.String("to", hc.OnError),
+					slog.String("error", err.Error()),
+					slog.String("phase", "infra"),
+				)
 				redirect = app.StatePath(hc.OnError)
 				break
 			}
@@ -1212,6 +1220,14 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		// host scripts (the bugfix room's verifier, deploy, etc.)
 		// actually block the pipeline instead of silently advancing.
 		if res.Error != "" && hc.OnError != "" {
+			o.logger.DebugContext(ctx, trace.EvHostOnErrorRedirect,
+				slog.String("session_id", string(sid)),
+				slog.String("namespace", hc.Namespace),
+				slog.String("from", string(state)),
+				slog.String("to", hc.OnError),
+				slog.String("error", res.Error),
+				slog.String("phase", "domain"),
+			)
 			redirect = app.StatePath(hc.OnError)
 			break
 		}
@@ -2142,6 +2158,13 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			}, 0))
 			applied = true
 			if hc.OnError != "" {
+				o.logger.DebugContext(ctx, trace.EvHostOnErrorRedirect,
+					slog.String("namespace", hc.Namespace),
+					slog.String("from", string(state)),
+					slog.String("to", hc.OnError),
+					slog.String("error", err.Error()),
+					slog.String("phase", "infra"),
+				)
 				redirect = app.StatePath(hc.OnError)
 				break
 			}
@@ -2181,6 +2204,13 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 		events = append(events, newOrchestratorEvent(store.HostReturned, payload, 0))
 
 		if res.Error != "" && hc.OnError != "" {
+			o.logger.DebugContext(ctx, trace.EvHostOnErrorRedirect,
+				slog.String("namespace", hc.Namespace),
+				slog.String("from", string(state)),
+				slog.String("to", hc.OnError),
+				slog.String("error", res.Error),
+				slog.String("phase", "domain"),
+			)
 			redirect = app.StatePath(hc.OnError)
 			break
 		}

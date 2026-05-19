@@ -143,6 +143,13 @@ const (
 	// rather than failing the turn.
 	EvHostBindError = "host.bind.error"
 
+	// host.on_error.redirect fires when a host call's `on_error:` arc
+	// supersedes machine.Turn's resolved state and bounces the session
+	// to a redirect target. Logs `namespace`, `error`, `from`, `to` so
+	// a "why did we land back at idle?" diagnosis from the JSONL trace
+	// doesn't need to dig into the (separate) store-event journal.
+	EvHostOnErrorRedirect = "host.on_error.redirect"
+
 	// Background-job lifecycle (orchestrator-side view; the scheduler has its
 	// own job-table events but the user-visible mode transitions go here).
 	EvJobSubmitted             = "job.submitted"

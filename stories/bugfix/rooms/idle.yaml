@@ -69,10 +69,18 @@ states:
           feature_branch: "fix/{{ world.ticket_id }}"
           workdir:        ".worktrees/bf-{{ world.ticket_id }}"
 
-      # Step 2: create the worktree on disk.
+      # Step 2: create the worktree on disk. `id:` pins the on-disk
+      # dir basename to `world.workspace_id` so the later
+      # `iface.workspace.sync` lookup (keyed on workspace_id) matches
+      # the directory worktreeCreate actually made. Without it,
+      # worktreeCreate would derive its dir from the branch name
+      # (`fix/<ticket>` → `fix-<ticket>`) while world.workspace_id is
+      # `bf-<ticket>`, so sync would silently fail and bounce the
+      # operator back to idle.
       - when: "world.ticket_id != '' && world.feature_branch != '' && world.workdir != '' && !world.bf_autostart_attempted"
         invoke: iface.workspace.create
         with:
+          id:   "{{ world.workspace_id }}"
           name: "{{ world.feature_branch }}"
           base: "{{ world.base_branch }}"
         on_error: idle

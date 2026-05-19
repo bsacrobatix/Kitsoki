@@ -23,6 +23,24 @@ states:
       Reply: `continue` (advance to testing) · `restart_from stage=…` · `quit`
     relevant_world: [ticket_id, ticket_title, workspace_id, workdir, feature_branch, propose_fix_artifact]
     on_enter:
+      # Self-heal the workspace before we touch it. bf.idle's auto-
+      # create only runs when `!bf_autostart_attempted`, so once that
+      # flag is pinned (which it is after the first attempt regardless
+      # of outcome), any session whose worktree dir later goes missing
+      # — process restart, manual `rm -rf`, a prior aborted create —
+      # would fail at sync below with `on_error: idle` and silently
+      # bounce. iface.workspace.create is idempotent (returns ok when
+      # the worktree is already registered at our path with our
+      # branch; reattaches an orphaned branch when the dir was
+      # deleted), so calling it here costs nothing in the happy case
+      # and rescues the bounce case.
+      - when: "world.workspace_id != '' && world.feature_branch != ''"
+        invoke: iface.workspace.create
+        with:
+          id:   "{{ world.workspace_id }}"
+          name: "{{ world.feature_branch }}"
+          base: "{{ world.base_branch }}"
+        on_error: idle
       # The iface.workspace.sync + iface.vcs.commit are the workspace-
       # side write seams (instance bindings: host.git_worktree / host.git
       # in kitsoki-dev). Guarded on non-empty ids so dogfood walks
