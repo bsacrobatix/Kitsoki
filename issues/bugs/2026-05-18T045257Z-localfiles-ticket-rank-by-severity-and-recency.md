@@ -1,19 +1,19 @@
 ---
-id: 2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency
-title: "localfiles_ticket: rank tickets by severity + recency (today: id-ASC and priority field is always empty)"
-target: kitsoki
-filed_at: 2026-05-18T04:52:57Z
-filed_by: cloud-user
-status: open
-severity: P2
-component: host
-kitsoki_rev: 3ff850e
-trace_ref: ""
-external: {}
 assignee: ""
-url: "issues/bugs/2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency.md"
+component: host
+external: {}
+filed_at: "2026-05-18T04:52:57Z"
+filed_by: cloud-user
+id: 2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency
+kitsoki_rev: 3ff850e
 related:
-  - 2026-05-14T103205Z-tui-view-render-before-bind
+- 2026-05-14T103205Z-tui-view-render-before-bind
+severity: P2
+status: resolved
+target: kitsoki
+title: "localfiles_ticket: rank tickets by severity + recency (today: id-ASC and priority field is always empty)"
+trace_ref: ""
+url: issues/bugs/2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency.md
 ---
 
 ## Body
@@ -109,7 +109,10 @@ severity badge populated from `severity:` frontmatter.
   here to demonstrate.
 - `iface.ticket.list_mine` (used by `core.main`'s queue list) has
   the same defect; the fix needs to land in both call sites at once.
+
 ## Comment 2026-05-18T07:20:37Z by kitsoki
+
+
 
 ### Reproduction artifact: 2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency
 
@@ -164,7 +167,10 @@ The first test seeds one P0 ticket and asserts `tickets[0]["severity"] == "P0"`.
 - **`stories/dev-story/rooms/ticket_search.yaml`** — view-side consumer that branches on `t.priority` and applies the `|reverse` workaround.
 
 _phase: reproducing_2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency_0_
+
 ## Comment 2026-05-18T08:47:21Z by kitsoki
+
+
 
 ### Reproduction artifact: 2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency
 
@@ -225,7 +231,10 @@ The first test seeds one P0 ticket and asserts `tickets[0]["severity"] == "P0"`.
 - **`stories/dev-story/rooms/ticket_search.yaml`** — view-side consumer that branches on `t.priority` and applies the `|reverse` workaround.
 
 _phase: reproducing_2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency_0_
+
 ## Comment 2026-05-18T08:54:20Z by kitsoki
+
+
 
 ### Fix proposal: 2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency
 
@@ -254,7 +263,10 @@ Two defects in `internal/host/localfiles_ticket.go`:
 0.9 — both defects are pinpointed by FAILing repro tests on HEAD, the on-disk schema is documented in `issues/README.md` and `docs/proposals/bug-format-proposal.md`, and the fix surface is small and local. The 0.1 uncertainty is that the `dev-story-implementation-contract.md` §2.1 still documents `priority`; aligning the contract is a follow-up doc edit (called out in alternatives), not required for the repro tests to pass.
 
 _phase: proposing_2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency_0_
+
 ## Comment 2026-05-18T09:15:34Z by kitsoki
+
+
 
 ### Reproduction artifact: 2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency
 
