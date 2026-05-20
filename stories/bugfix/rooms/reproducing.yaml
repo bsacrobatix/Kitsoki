@@ -54,7 +54,7 @@ states:
               color:    "#06B6D4"   # cyan — cool start of the pipeline
           - kv:
               pairs:
-                Ticket:         "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Ticket:         '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
                 Summary:        '{{ world.reproduction_artifact.summary_title|default:"(pending)" }}'
                 "Bug verified": '{{ world.reproduction_artifact.bug_verified|default:"(pending)" }}'
           - heading: "Artifact"

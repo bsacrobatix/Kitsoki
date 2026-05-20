@@ -2289,6 +2289,12 @@ func (m *RootModel) intentMenuText() string {
 
 func (m RootModel) handleContinueTurnOutcome(msg continueTurnOutcomeMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
+		// Reset mode so the user isn't stranded in ModeAwaitingLLM
+		// after a clarify-continue failure. (handleSupplementSlots
+		// parks the model in AwaitingLLM to keep impatient
+		// double-Enter from triggering a competing Turn.)
+		m.mode = ModeOnPath
+		m.inFlightCancel = nil
 		m.transcript.AppendError("(slot-fill)", fmt.Sprintf("error: %v", msg.err))
 		return m, nil
 	}
@@ -3378,7 +3384,19 @@ func (m RootModel) handleDisambiguationChoice(msg disambiguationChoiceMsg) (tea.
 }
 
 func (m RootModel) handleSupplementSlots(msg supplementSlotsMsg) (tea.Model, tea.Cmd) {
-	m.mode = ModeOnPath
+	// Stay in an in-flight mode while ContinueTurn runs. Setting
+	// ModeOnPath here was a race: any subsequent KeyEnter (e.g. the
+	// user impatiently double-tapping) would dispatch the menu's
+	// default intent via SubmitDirect, whose successful Turn clears
+	// the orchestrator's pending clarification — and the in-flight
+	// ContinueTurn arriving moments later then errored with
+	// "no pending clarification for session ...".
+	//
+	// ModeAwaitingLLM routes follow-up Enter keys to submitInput's
+	// queue (which drains when the in-flight turn finishes) instead
+	// of starting a competing Turn. handleContinueTurnOutcome resets
+	// the mode based on the outcome's own Mode field.
+	m.mode = ModeAwaitingLLM
 	orch := m.orch
 	sid := m.sid
 	return m, func() tea.Msg {

@@ -16,7 +16,7 @@ states:
         body:
           - kv:
               pairs:
-                Ticket:                "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Ticket:                '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
                 Summary:               '{{ world.task_summary_artifact.summary_title|default:"(pending)" }}'
                 "Acceptance criteria": '{{ world.task_summary_artifact.acceptance_criteria|default:"(pending)" }}'
           - heading: "Artifact"
@@ -84,7 +84,7 @@ states:
         body:
           - kv:
               pairs:
-                Ticket:     "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Ticket:     '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
                 Verdict:    '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
                 Confidence: '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
                 Reason:     '{{ world.llm_verdict.reason|default:"(none)" }}'

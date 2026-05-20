@@ -37,23 +37,34 @@ states:
       extends: "base"
       blocks:
         body:
-          - prose: 'Tickets{% if world.ticket_query %} (filter: {{ world.ticket_query }}){% endif %}'
+          - heading: 'Tickets{% if world.ticket_query %} (filter: {{ world.ticket_query }}){% endif %}'
           # Live result list bound from iface.ticket.search in on_enter.
           # Style guide §6.2 — the canonical "render a world array as a
           # list element" shape is still TBD; until then this code: block
-          # is the agreed pattern across operator stories. The leading
-          # `▸` (vs `-`) marker visually pins the picked row so the
-          # operator can scan past the list and confirm what's about to
-          # be handed to the bugfix pipeline.
+          # is the agreed pattern across operator stories.
+          #
+          # Row marker:
+          #   ★ — the currently-picked ticket (visually pinned for scan)
+          #   · — every other row (gentler than `-` so the star pops)
+          # The hint suffix shows the picked ticket's status as a small
+          # glyph (○ open, ● resolved/closed, ◐ in-progress) so the
+          # operator sees the lifecycle state at a glance.
           - code: |
               {% if world.ticket_results|length == 0 %}(none — file one in issues/bugs/)
-              {% else %}{% for t in world.ticket_results|reverse %}{% if t.id == world.ticket_id %}▸{% else %}-{% endif %} {{ t.id }} — {{ t.title }} [{{ t.status|default:"?" }}{% if t.priority %} · {{ t.priority }}{% endif %}]
+              {% else %}{% for t in world.ticket_results|reverse %}{% if t.id == world.ticket_id %}★{% else %}·{% endif %} {{ t.id }} — {{ t.title }} [{% if t.status == "resolved" or t.status == "closed" %}● {% elif t.status == "in-progress" or t.status == "in_progress" %}◐ {% elif t.status == "open" %}○ {% endif %}{{ t.status|default:"?" }}{% if t.priority %} · {{ t.priority }}{% endif %}]
               {% endfor %}{% endif %}
-          - heading: "Selection"
+          # Readiness banner. Two sibling elements with mutually-exclusive
+          # `when:` guards: the ready case is a `heading:` (emerald-bold,
+          # the style-guide §1 "go" color), the not-ready case is a plain
+          # `prose:` paragraph (no false green). The glyph carries the
+          # state across mono-colour renders too.
+          - heading: "✓ Ready — type `continue` to hand off to the bugfix pipeline"
+            when:  "world.ticket_id != ''"
+          - prose: "✗ Pick a ticket from the list above to continue."
+            when:  "world.ticket_id == ''"
           - kv:
               pairs:
                 Picked: '{{ world.ticket_id|default:"(none — type `pick_ticket id=<TKT>`)" }} {{ world.ticket_title }}'
-                Ready:  '{% if world.ticket_id %}yes — type `continue` to hand off to bugfix{% else %}no — pick a ticket first{% endif %}'
         choices:
           - heading: "Actions"
           - list:
@@ -102,9 +113,19 @@ states:
           effects:
             - set:
                 ticket_id:     "{{ slots.id }}"
-                ticket_title:  "(picked from list)"
                 ticket_type:   "{{ slots.type ?? world.ticket_type }}"
                 thread:        "{{ slots.id }}"
+            # iface.ticket.get returns the real human-readable
+            # title from the ticket's frontmatter; bind it as
+            # ticket_title so downstream rooms (bugfix phases,
+            # impl review) display "Date — Title" instead of
+            # the 60-char ID slug + "(picked from list)" stub.
+            - invoke: iface.ticket.get
+              with:
+                id: "{{ slots.id }}"
+              bind:
+                ticket_title: title
+              on_error: idle
       # Hand off to the bugfix sub-story for the picked ticket.
       # bf.idle's on_enter auto-emits `start` when entered with a
       # ticket and no in-progress artifact, so the operator types

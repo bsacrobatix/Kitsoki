@@ -19,7 +19,7 @@ states:
         body:
           - kv:
               pairs:
-                Ticket:     "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Ticket:     '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
                 "PR title": '{{ world.pr_title|default:"(none)" }}'
                 Workdir:    '{{ world.workdir|default:"(none)" }}'
         choices:

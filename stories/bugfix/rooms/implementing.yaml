@@ -26,7 +26,7 @@ states:
               color:    "#8B5CF6"   # violet — doing the work
           - kv:
               pairs:
-                Ticket:           "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Ticket:           '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
                 Workspace:        '{{ world.workspace_id|default:"(none)" }} ({{ world.workdir|default:"(no path)" }})'
                 "Feature branch": '{{ world.feature_branch|default:"(none)" }}'
                 Applied:          '{{ world.implement_artifact.summary_title|default:"(pending — oracle has not returned yet)" }}'

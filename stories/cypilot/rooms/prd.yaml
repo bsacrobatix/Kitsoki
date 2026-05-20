@@ -26,7 +26,7 @@ states:
         body:
           - kv:
               pairs:
-                Ticket:         "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Ticket:         '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
                 "Feature slug": "{{ world.feature_slug }}"
                 "PRD id":       '{{ world.prd_artifact.id|default:"(pending)" }}'
                 "Validate ok":  "{{ world.validate_ok }}"

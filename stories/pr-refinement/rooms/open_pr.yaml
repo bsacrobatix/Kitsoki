@@ -18,7 +18,7 @@ states:
         body:
           - kv:
               pairs:
-                Ticket:           "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Ticket:           '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
                 "Feature branch": '{{ world.feature_branch|default:"(none)" }}'
                 "Base branch":    "{{ world.base_branch }}"
                 Workspace:        '{{ world.workdir|default:"(none)" }}'

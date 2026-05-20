@@ -38,7 +38,7 @@ states:
               color:    "#F59E0B"   # amber — caution
           - kv:
               pairs:
-                Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
+                Ticket:  '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
                 Summary: '{{ world.implement_review_artifact.summary_title|default:"(pending)" }}'
                 Status:  '{{ world.implement_review_artifact.status|default:"(pending)" }}'
           - heading: "Artifact"
