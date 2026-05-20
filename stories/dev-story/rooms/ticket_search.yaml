@@ -43,31 +43,35 @@ states:
           # list element" shape is still TBD; until then this code: block
           # is the agreed pattern across operator stories.
           #
-          # Row format (two lines per ticket):
+          # # Table format (one line per ticket)
           #
-          #   {marker} {status-glyph} {title}
-          #     {severity} · {status} · {id}
+          #   {pick} {status} {sev} {date}     {title-truncated}
           #
-          # Marker:
-          #   ★ — currently-picked ticket (visually pinned for scan)
-          #   · — every other row (gentler than `-` so the star pops)
+          # Columns (all fixed-width via `|col:N`, so the header line
+          # and every row align even when terminal width is tight):
           #
-          # Status glyph (also the first scan signal):
-          #   ●  resolved / closed
-          #   ◐  in-progress
-          #   ○  open
+          #   pick    1 char  — ★ for the currently-picked ticket, blank
+          #                     otherwise
+          #   status  1 char  — ●/◐/○ glyph by ticket lifecycle state
+          #   sev     3 chars — P0..P3 (or blank for severity-less rows)
+          #   date   10 chars — `id|slice:":10"` is the ISO-prefix
+          #                     YYYY-MM-DD portion of the local-files-
+          #                     provider id, used as the "Filed" date
+          #                     until the host exposes filed_at as a
+          #                     first-class summary field
+          #   title  52 chars — `truncatechars:52` adds an ellipsis when
+          #                     the title overflows so the operator sees
+          #                     "this row has more text"
           #
-          # # Why the badge moved to line 2
+          # # Why a `code:` block instead of a typed `table:` element
           #
-          # Pre-2026-05-20 the row was a single line `{id} — {title} […]`.
-          # The 60-char ISO-timestamped ID dominated the first 60 chars
-          # and pushed the title off-screen. The first attempt fixed
-          # that (title-first, ID below) but kept the `[severity · status]`
-          # badge on the title line, which caused a new wrap glitch on
-          # long-title tickets: glamour's word-wrap landed mid-bracket
-          # and split `[\nopen]` across lines. Putting the badge on the
-          # metadata line eliminates the bracket entirely (we just use
-          # `·` separators) and means title-line wraps are pure title.
+          # A dedicated `table:` element would be cleaner long-term but
+          # is a meatier addition (new element kind in app/view_element.go,
+          # new renderer in render/elements/, new dispatcher case). The
+          # `|col:N` / `|rcol:N` pongo2 filters added in this commit
+          # let an author build aligned-column output inside a regular
+          # `code:` block — same primitive a Python author would reach
+          # for, no element-layer churn.
           #
           # # README-style ghost rows
           #
@@ -89,10 +93,23 @@ states:
           # ticket-rank-by-severity-and-recency) still projects the
           # field as `priority` on HEAD; once that fix lands the
           # fallback is a no-op.
+          #
+          # # Where's the ticket ID?
+          #
+          # Local-files-provider IDs are 60-char ISO-timestamped slugs.
+          # Showing them in a row inflates the line past every
+          # reasonable terminal width and pushes the title off-screen.
+          # We omit the ID column from the table and keep the full ID
+          # in the `Picked:` kv pair below so the operator can see
+          # exactly what was selected. For first-time picks, the
+          # operator reads the title to identify the ticket and types
+          # `pick_ticket id=<filename>`; a future change should expose
+          # an index-based pick (`pick_ticket n=2`) so the ID stops
+          # being typed at all.
           - code: |
               {% if world.ticket_results|length == 0 %}(none — file one in issues/bugs/)
-              {% else %}{% for t in world.ticket_results|reverse %}{% if t.status %}{% if t.id == world.ticket_id %}★{% else %}·{% endif %} {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %} {{ t.title|default:"(untitled)" }}
-                {% if t.severity %}{{ t.severity }} · {% elif t.priority %}{{ t.priority }} · {% endif %}{{ t.status }} · {{ t.id }}
+              {% else %}     St  Sev  Filed       Title
+              {% for t in world.ticket_results|reverse %}{% if t.status %}   {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
               {% endif %}{% endfor %}{% endif %}
           # Readiness banner. Two sibling elements with mutually-exclusive
           # `when:` guards: the ready case is a `heading:` (emerald-bold,

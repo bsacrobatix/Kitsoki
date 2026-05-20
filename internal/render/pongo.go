@@ -100,6 +100,61 @@ func init() {
 	// can be []any, []map[string]any, []string, etc.); a non-slice
 	// input is returned unchanged so author typos don't crash render.
 	_ = pongo2.RegisterFilter("reverse", filterReverse)
+
+	// `col:N` / `rcol:N` pad-or-clip a string to exactly N visible
+	// runes — the primitive for building aligned-column "tables"
+	// inside a `code:` block without a dedicated table: element.
+	//
+	// col is left-aligned (padding goes on the right, used for text
+	// columns); rcol is right-aligned (padding on the left, used for
+	// numeric / index columns).
+	//
+	// Distinct from pongo2's built-in `ljust:N` / `rjust:N`, which
+	// follow Django semantics (pad only, no clip). For a table column
+	// the asymmetric overflow of pad-only is a foot-gun — a single
+	// long value would push every following column out of alignment.
+	// We pick distinct names rather than override the built-ins so
+	// authors familiar with Django get the behaviour they expect from
+	// ljust/rjust.
+	//
+	// The filters count runes (not bytes), so multibyte glyphs like
+	// `●`/`○`/`★` count as one column, matching the visible width
+	// the terminal will render. Clipping is hard-cut (no ellipsis);
+	// authors who want ellipsis-on-overflow should chain
+	// `truncatechars:N-1|col:N`.
+	_ = pongo2.RegisterFilter("col", filterCol)
+	_ = pongo2.RegisterFilter("rcol", filterRcol)
+}
+
+// filterCol pads or truncates the input to exactly N runes,
+// left-aligned (padding goes on the right). See the registration
+// site in init() for the rationale on the col/rcol naming and the
+// rune-counting + no-ellipsis trade-offs.
+func filterCol(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+	width := param.Integer()
+	if width < 0 {
+		width = 0
+	}
+	runes := []rune(in.String())
+	if len(runes) >= width {
+		return pongo2.AsValue(string(runes[:width])), nil
+	}
+	return pongo2.AsValue(string(runes) + strings.Repeat(" ", width-len(runes))), nil
+}
+
+// filterRcol is col's right-aligned twin: padding goes on the left.
+// Useful for numeric / index columns where right-alignment makes a
+// sorted column read more naturally.
+func filterRcol(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+	width := param.Integer()
+	if width < 0 {
+		width = 0
+	}
+	runes := []rune(in.String())
+	if len(runes) >= width {
+		return pongo2.AsValue(string(runes[:width])), nil
+	}
+	return pongo2.AsValue(strings.Repeat(" ", width-len(runes)) + string(runes)), nil
 }
 
 // filterReverse returns a new slice with the input's elements in

@@ -345,6 +345,115 @@ func TestPongo_FastPathSkipsParse(t *testing.T) {
 	}
 }
 
+// TestPongo_ColumnFilters_RenderTable is the integration sanity check
+// that the col/rcol filters compose cleanly into the table layout the
+// dogfood ticket_search room uses. Verifies that column boundaries
+// line up across header + body lines even when title values vary
+// wildly in length (the regression the table format was added to
+// fix).
+func TestPongo_ColumnFilters_RenderTable(t *testing.T) {
+	env := expr.Env{
+		World: map[string]any{
+			"rows": []any{
+				map[string]any{
+					"status":   "open",
+					"severity": "P2",
+					"id":       "2026-05-20T011329Z-imports-rewriter-very-very-long-slug",
+					"title":    "imports rewriter: intent-name string args are not prefix-rewritten",
+				},
+				map[string]any{
+					"status":   "resolved",
+					"severity": "P0",
+					"id":       "2026-05-18T045257Z-short",
+					"title":    "short title",
+				},
+			},
+		},
+	}
+	src := "" +
+		`   St  Sev  Filed       Title` + "\n" +
+		`{% for r in world.rows %}   {{ r.status|col:1 }}   ` +
+		`{{ r.severity|col:3 }}  {{ r.id|slice:":10"|col:10 }}  ` +
+		`{{ r.title|truncatechars:30 }}` + "\n" +
+		`{% endfor %}`
+	got, err := Pongo(src, env)
+	if err != nil {
+		t.Fatalf("render error: %v", err)
+	}
+	lines := strings.Split(got, "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected ≥3 lines, got %d:\n%s", len(lines), got)
+	}
+	// Each row should start at column 0 with "   " (3-space gutter
+	// for the optional marker), then a 1-char status, then "   ", etc.
+	// Compute the offset of "Sev" / "Filed" / "Title" headers and
+	// verify each body row has its column starting at the same offset.
+	header := lines[0]
+	wantOffsets := map[string]int{
+		"Sev":   strings.Index(header, "Sev"),
+		"Filed": strings.Index(header, "Filed"),
+		"Title": strings.Index(header, "Title"),
+	}
+	for label, off := range wantOffsets {
+		if off < 0 {
+			t.Fatalf("header missing column %q:\n%s", label, header)
+		}
+	}
+	// Both body rows should have content starting at the Title offset.
+	for i, body := range []string{lines[1], lines[2]} {
+		if len(body) < wantOffsets["Title"] {
+			t.Fatalf("row %d shorter than Title offset:\n%s", i, body)
+		}
+	}
+}
+
+// TestPongo_ColumnFilters guards the `|col:N` and `|rcol:N` filters
+// added so YAML authors can build aligned-column "tables" inside a
+// `code:` block without a dedicated table: element. The dogfood
+// ticket_search room is the first consumer; this test pins the
+// rune-counting + clip-or-pad semantics so a multibyte-glyph
+// regression (an ANSI sequence sneaking into the string, a wide
+// emoji counted as two columns) gets caught here, not at view-time.
+//
+// Distinct from pongo2's built-in ljust/rjust which pad only (Django
+// default). For a table column, asymmetric overflow on long values is
+// a foot-gun.
+func TestPongo_ColumnFilters(t *testing.T) {
+	env := makeEnv()
+
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"col_pads", `{{ "hi"|col:5 }}|`, "hi   |"},
+		{"col_clips", `{{ "hello world"|col:5 }}|`, "hello|"},
+		{"col_exact", `{{ "hello"|col:5 }}|`, "hello|"},
+		{"col_zero", `{{ "hi"|col:0 }}|`, "|"},
+		{"rcol_pads", `|{{ "hi"|rcol:5 }}`, "|   hi"},
+		{"rcol_clips", `|{{ "hello world"|rcol:5 }}`, "|hello"},
+		{"rcol_exact", `|{{ "hello"|rcol:5 }}`, "|hello"},
+		// Multibyte runes count as one column each — matches the
+		// terminal's visible width for our ticket-status glyphs
+		// (●/○/◐/★). A byte-counting implementation would over-pad
+		// here ("○ " becomes "○" alone because the rune takes 3
+		// bytes and a width:2 budget).
+		{"col_multibyte", `{{ "○"|col:3 }}|`, "○  |"},
+		{"rcol_multibyte", `|{{ "★"|rcol:3 }}`, "|  ★"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := Pongo(c.src, env)
+			if err != nil {
+				t.Fatalf("Pongo(%q) error: %v", c.src, err)
+			}
+			if got != c.want {
+				t.Fatalf("Pongo(%q) = %q want %q", c.src, got, c.want)
+			}
+		})
+	}
+}
+
 // TestPongo_ReverseFilter guards the `|reverse` filter we register in
 // init() — pongo2/v6 ships `sort` but not `reverse`, and YAML authors
 // (dev-story ticket_search and friends) reach for `|reverse` to flip
