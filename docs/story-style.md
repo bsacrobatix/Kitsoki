@@ -354,3 +354,55 @@ Before you ship a new room:
       (`{}`). Action-menu / reply prompt is unconditional.
 - [ ] No `{% for %}` over a world key that might be absent / nil.
       Either guard with `{% if %}` or use a typed `list: from: …`.
+
+---
+
+## 8. Source-color: template vs LLM (preview, not yet wired)
+
+When a view mixes templated text with LLM-generated text, the two are
+distinguished by **terminal background color**, not punctuation or
+quoting. The author writes nothing special — the renderer tags spans
+based on where the bytes came from.
+
+| Source | Background | Why this hue |
+|---|---|---|
+| Templated / deterministic | Cool slate `#2a3550` | The scaffolding. Predictable. |
+| LLM-generated / interpretive | Warm bronze `#5c3e28` | Generative. "Examine before trusting." |
+| Chrome / outside the view | Terminal default | Frames, status bars, prompt. |
+
+Two render modes, picked automatically by the renderer:
+
+- **Inline.** An LLM value substituted into a single field (`{{
+  llm.title }}`) switches bg only around the LLM bytes; the rest of
+  the line stays cool.
+- **Block.** An LLM value containing newlines (`{{ llm.summary }}`
+  where the summary is a paragraph) gets each line padded to the
+  terminal width so the warm band is solid edge-to-edge. The visual
+  "shoulder" above and below the block makes the boundary
+  unmistakable.
+
+Nesting works through a background-color stack. Entering a span pushes
+its bg; exiting pops and restores the parent's bg — never a bare
+reset. So an LLM tool-call that quotes earlier LLM output stays warm,
+and a template fragment substituted into an LLM block (rare) would
+return to cool only for that span.
+
+**Wire mechanism.** LLM outputs are wrapped at the operator boundary
+with zero-width sentinel runs (`U+200B U+2063 LLM U+2063` /
+`U+200B U+2063 /LLM U+2063`). The wrap survives pongo rendering, JSON
+marshalling, and string ops without changing visible width. A final
+render pass lexes sentinels and emits ANSI bg switches with stack
+tracking.
+
+**Preview the rendering before authoring against it:**
+
+    go run ./cmd/source-color-demo
+    go run ./cmd/source-color-demo -theme=high-contrast
+    go run ./cmd/source-color-demo -theme=light
+    go run ./cmd/source-color-demo -all
+    go run ./cmd/source-color-demo -fill-template
+
+The demo is hand-fed sentinel-laced strings — a static reference for
+the visual scheme. The pipeline (operator wrap + renderer post-pass)
+lands after this section is signed off; until then, authors don't
+need to mark anything: existing rooms render identically.
