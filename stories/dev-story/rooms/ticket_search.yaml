@@ -20,11 +20,10 @@ states:
     # empty `ticket_query` default returns the full list; the optional
     # `search_tickets` intent narrows it via the ticket_searching state.
     #
-    # NOTE: ordering today is filed_at-ASC (host's listAllBugs sorts by
-    # id, and ids are ISO-prefixed). `|reverse` in the view flips that
-    # to newest-first. True priority ranking requires the host to read
-    # `severity:` (not `priority:`) and sort multi-key — see
-    # internal/host/localfiles_ticket.go: bugSummary / listAllBugs.
+    # Ordering: severity ASC then id DESC (newest first within each
+    # severity bucket). Sorted host-side by listAllBugs in
+    # `internal/host/localfiles_ticket.go`; the view iterates the
+    # results as-is, no `|reverse` workaround needed.
     on_enter:
       - invoke: iface.ticket.search
         with:
@@ -59,15 +58,14 @@ states:
       #   title  52 chars — truncatechars:52 adds an ellipsis on overflow
       #
       # README-style ghost rows (frontmatter-less *.md under issues/) are
-      # dropped via `{% if t.status %}`. The `t.severity|default:t.priority`
-      # fallback bridges the transition until ticket
-      # `2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency`
-      # lands.
+      # dropped via `{% if t.status %}`. Severity reads only `t.severity`
+      # — the local-files provider's `bugSummary` no longer projects
+      # `priority`, and no host emits it on this branch.
       - heading: 'Tickets{% if world.ticket_query %} (filter: {{ world.ticket_query }}){% endif %}'
       - code: |
           {% if world.ticket_results|length == 0 %}(none — file one in issues/bugs/)
           {% else %}     St  Sev  Filed       Title
-          {% for t in world.ticket_results|reverse %}{% if t.status %}   {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% for t in world.ticket_results %}{% if t.status %}   {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
           {% endif %}{% endfor %}{% endif %}
       # Readiness banner — two sibling elements with mutually-exclusive
       # `when:` guards. The ready case is a `heading:` (style-guide §1

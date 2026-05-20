@@ -323,7 +323,20 @@ func listAllBugs(root string) ([]*BugFile, error) {
 			out = append(out, bf)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	// Multi-key sort: severity ASC (P0 first), then ID DESC. IDs are
+	// ISO-timestamp-prefixed, so ID DESC is effectively filed_at DESC
+	// — newest first within each severity bucket. The view used to
+	// |reverse the host result to compensate for the old id-ASC
+	// ordering; with the host returning the right order, that view-
+	// side hack should go away.
+	sort.SliceStable(out, func(i, j int) bool {
+		si := severityRank(out[i].frontString("severity"))
+		sj := severityRank(out[j].frontString("severity"))
+		if si != sj {
+			return si < sj
+		}
+		return out[i].ID > out[j].ID
+	})
 	return out, nil
 }
 
@@ -332,7 +345,7 @@ func listAllBugs(root string) ([]*BugFile, error) {
 // ticketSearch implements ticket.search.
 //
 // Input  args: query (string, substring match against title+body), limit (int).
-// Output Data: tickets ([]{id,title,status,priority,assignee,url}).
+// Output Data: tickets ([]{id,title,status,severity,assignee,url}).
 func ticketSearch(root string, args map[string]any) (Result, error) {
 	query, _ := args["query"].(string)
 	query = strings.ToLower(strings.TrimSpace(query))
@@ -361,7 +374,7 @@ func ticketSearch(root string, args map[string]any) (Result, error) {
 // ticketGet implements ticket.get.
 //
 // Input args:  id (string).
-// Output Data: id, title, body, status, priority, assignee, url, comments.
+// Output Data: id, title, body, status, severity, assignee, url, comments.
 func ticketGet(root string, args map[string]any) (Result, error) {
 	id, _ := args["id"].(string)
 	if strings.TrimSpace(id) == "" {
@@ -514,15 +527,24 @@ func ticketListMine(root string, args map[string]any) (Result, error) {
 // ─── Field accessors / projections ──────────────────────────────────────────
 
 // bugSummary projects a BugFile into the ticket summary shape the
-// contract pins (§2.1): id/title/status/priority/assignee/url. A `type`
-// key is added when the lister tagged the row by source dir so dev-story
-// can route on `ticket_type`.
+// contract pins (§2.1): id/title/status/severity/assignee/url. A
+// `type` key is added when the lister tagged the row by source dir
+// so dev-story can route on `ticket_type`.
+//
+// `severity` is the on-disk frontmatter field per `issues/README.md`
+// §2 and `docs/proposals/bug-format-proposal.md` §2. The earlier
+// summary shape projected `priority` instead; that field has been
+// removed entirely — no consumer in this repo branched on
+// `t.priority` after the 2026-05-20 dogfood cycle, and keeping a
+// dead key alive only invited the kind of "branch on priority,
+// silently get '' for every bug" mistake that produced the original
+// defect.
 func bugSummary(b *BugFile) map[string]any {
 	out := map[string]any{
 		"id":       b.ID,
 		"title":    b.titleString(),
 		"status":   b.frontString("status"),
-		"priority": b.frontString("priority"),
+		"severity": b.frontString("severity"),
 		"assignee": b.frontString("assignee"),
 		"url":      b.frontString("url"),
 	}
@@ -530,6 +552,24 @@ func bugSummary(b *BugFile) map[string]any {
 		out["type"] = b.Kind
 	}
 	return out
+}
+
+// severityRank maps a P0–P3 severity tag to a 0–3 sort weight, with
+// anything else (empty, unknown) bucketed at 4 so unranked bugs sort
+// after every explicit one. Whitespace-tolerant + case-insensitive
+// so a hand-typed `severity: p0  ` doesn't slip through.
+func severityRank(s string) int {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "P0":
+		return 0
+	case "P1":
+		return 1
+	case "P2":
+		return 2
+	case "P3":
+		return 3
+	}
+	return 4
 }
 
 // frontString reads a string-valued frontmatter key, defaulting to "" when

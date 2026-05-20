@@ -13,7 +13,7 @@ import (
 const sampleBug = `---
 title: "Esc in foyer hangs the TUI"
 status: open
-priority: med
+severity: P2
 assignee: brad
 url: ""
 component: tui
@@ -28,7 +28,7 @@ Actual:   TUI freezes; only Ctrl-C exits.
 const sampleBugWithComment = `---
 title: "PR refinement loops on stale CI"
 status: in_progress
-priority: high
+severity: P0
 assignee: brad
 ---
 
@@ -161,8 +161,11 @@ func TestLocalFilesTicket_Get_Happy(t *testing.T) {
 	if res.Data["status"] != "in_progress" {
 		t.Fatalf("status: %v", res.Data["status"])
 	}
-	if res.Data["priority"] != "high" {
-		t.Fatalf("priority: %v", res.Data["priority"])
+	if res.Data["severity"] != "P0" {
+		t.Fatalf("severity: %v", res.Data["severity"])
+	}
+	if _, present := res.Data["priority"]; present {
+		t.Fatalf("priority should no longer be projected, got %v", res.Data["priority"])
 	}
 	body, _ := res.Data["body"].(string)
 	if !strings.Contains(body, "The CI check stays") {
