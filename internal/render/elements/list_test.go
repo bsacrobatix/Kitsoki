@@ -20,7 +20,7 @@ func TestList_BareList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	want := "- ford\n- caulk\n- ferry"
+	want := "• ford\n• caulk\n• ferry"
 	if out != want {
 		t.Errorf("got:\n%s\nwant:\n%s", out, want)
 	}
@@ -58,10 +58,13 @@ func TestList_TwoColumnAlignment(t *testing.T) {
 		t.Fatalf("expected 3 lines, got %d:\n%s", len(lines), out)
 	}
 	// The longest label is "Continue existing task" (22 chars).
-	// Layout: "- " (2) + label-padded-to-22 + 2 gap + hint
-	// → hint column starts at index 26 for every row.
+	// Layout: "• " (1 rune + space = 2 visible cols) + label-padded-to-22
+	// + 2 gap + hint → hint column starts at visible column 26 for every
+	// row. We measure in runes (not bytes) because the bullet glyph "•"
+	// is a multi-byte rune; strings.Index returns byte offsets and would
+	// over-count by the marker rune's byte-width.
 	for i, line := range lines {
-		idx := strings.Index(line, "jira search")
+		idx := runeIndex(line, "jira search")
 		if i == 0 && idx != 26 {
 			t.Errorf("row 0 hint at column %d (line %q); expected 26", idx, line)
 		}
@@ -124,11 +127,25 @@ func TestList_FilteredRowDoesNotSizeLabelColumn(t *testing.T) {
 	if strings.Contains(out, "very very long") {
 		t.Errorf("filtered long label leaked into output:\n%s", out)
 	}
-	// Layout: "- " + "ok" + "  " + "Y" — hint column at index 6.
-	yIdx := strings.Index(out, "Y")
+	// Layout: "• " + "ok" + "  " + "Y" — hint column at visible col 6.
+	// Same rune-index caveat as TestList_TwoColumnAlignment.
+	yIdx := runeIndex(out, "Y")
 	if yIdx != 6 {
 		t.Errorf("hint Y at column %d; expected 6 (filtered row should not size the label column). Output:\n%s", yIdx, out)
 	}
+}
+
+// runeIndex returns the rune offset of needle in s, or -1 if absent.
+// We need this for assertions that talk about visible columns because
+// the default list marker is the multi-byte rune "•"; strings.Index
+// returns byte offsets, which over-count by the marker rune's
+// byte-width.
+func runeIndex(s, needle string) int {
+	byteIdx := strings.Index(s, needle)
+	if byteIdx < 0 {
+		return -1
+	}
+	return len([]rune(s[:byteIdx]))
 }
 
 func TestList_PongoInterpolationInLabelAndHint(t *testing.T) {

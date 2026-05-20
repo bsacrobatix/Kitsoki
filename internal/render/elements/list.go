@@ -27,12 +27,25 @@ type List struct {
 	Marker string
 }
 
-// defaultMarker is the bullet marker applied when Marker is empty. The
-// proposal §2.2 spec ("Optional. Default: \"-\"") puts this at the
-// element-render layer, not at YAML load — authors who write `marker: ""`
-// explicitly still get the default. (If we ever want a bare bulletless
-// list, we can introduce `bare: true` or accept a sentinel.)
-const defaultMarker = "-"
+// defaultMarker is the bullet marker applied when Marker is empty.
+//
+// The proposal §2.2 spec originally said "\"-\"". We use the Unicode
+// bullet "•" instead because the typed-element output is composed
+// into a glamour-styled markdown document downstream (the TUI's
+// transcript pane runs the entire view through glamour after the
+// dispatcher pre-renders blocks — see element.go::RenderAll). When
+// the marker is "-", glamour parses our output as a markdown list and
+// re-flows the body at its own wrap width, collapsing the hint-column
+// alignment we just baked in (continuation lines snap back to the
+// marker indent, the hint column gets re-wrapped at glamour's
+// possibly-narrower wrap budget, etc.).
+//
+// "•" is not a markdown list marker, so glamour leaves our line alone
+// — column padding survives, inline code (`backtick`) chip styling
+// still applies, hint continuations stay at the hint-column indent.
+// Authors who want a different glyph (or the legacy "-") can still
+// override via `list.marker:` in the YAML.
+const defaultMarker = "•"
 
 // gutterWidth is the column gap between the label column and the hint
 // column in a two-column list. Two spaces matches the cloak / dev-story

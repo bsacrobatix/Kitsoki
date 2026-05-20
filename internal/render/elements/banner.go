@@ -4,55 +4,70 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	figure "github.com/common-nighthawk/go-figure"
 
 	"kitsoki/internal/expr"
 )
 
-// Banner is a phase-marker block. Renders Source as figlet-style ASCII
-// art in Color (defaulting to a neutral accent) so an operator skimming
-// the transcript can find phase boundaries at a glance, followed by an
-// optional Subtitle line in muted text.
+// Banner is a phase-marker block. Renders as a 3-line strip — a top
+// divider, a centred title line, a bottom divider — all in the
+// supplied Color. Compact enough to scan past, distinct enough that an
+// operator skimming a transcript top-to-bottom finds phase boundaries
+// at a glance.
 //
-// Why a typed element instead of a `code:` with pre-baked art? Pre-baked
-// banners in YAML are fragile (one-off line wrapping, mis-counted
-// columns, font drift when a phase is renamed). Generating the art at
-// render time from a plain phase name keeps the authoring surface
-// declarative — change `text: "REPRODUCING"` to `text: "REPRO"` and the
-// banner re-renders.
+// We previously rendered the phase name as figlet-style ASCII art via
+// go-figure, but glamour's markdown layer (run over the full composite
+// in the TUI's typed-extends path) reinterprets the figlet output —
+// backslashes start an escape, underscores become italic, pipe-runs
+// become table separators — and the art arrives at the terminal
+// corrupted. A plain text line bracketed by box-drawing dividers
+// survives glamour because U+2550 ("═") isn't a markdown token.
 type Banner struct {
-	// Source is the phase text the renderer figlets. Required.
+	// Source is the phase title that goes in the centre line. Required.
 	Source string
-	// Subtitle is the optional one-line caption shown beneath the art
-	// (e.g. "Phase 1 / 7  ·  reproduce the bug").
+	// Subtitle is the optional caption appended after a "·" separator
+	// (e.g. "Phase 1 / 7  ·  verify the bug; produce reproduction
+	// artifact"). Folds into the same line as the title so a phase
+	// banner stays compact at 3 lines total.
 	Subtitle string
-	// Color is an optional CSS-style hex foreground for the art (the
-	// subtitle stays unstyled so it doesn't compete visually). Defaults
-	// to bannerDefaultColor when empty.
+	// Color is an optional CSS-style hex foreground for the whole
+	// strip. Defaults to bannerDefaultColor when empty.
 	Color string
 }
 
-// bannerFont is the go-figure font name used for the ASCII art. "small"
-// is a 4-line block style: compact enough to render "IMPLEMENTING" in
-// ~86 cols while staying recognisable as figlet output, distinct enough
-// from `prose:` and `heading:` that it can't be mistaken for ordinary
-// body text. If we ever want a denser style, "mini" is 3 lines tall.
-const bannerFont = "small"
-
 // bannerDefaultColor is the foreground used when the author leaves
-// `color:` unset. Neutral emerald — matches the heading element so a
+// `color:` unset. Emerald — matches the heading element so a
 // banner-less older room still reads as the same visual family.
 const bannerDefaultColor = "#10B981"
 
-// bannerSubtitleColor is the muted foreground for the caption line.
-// Lighter grey than the chrome so the eye lands on the art first.
-const bannerSubtitleColor = "#9CA3AF"
+// bannerDividerRune is the character used for the top + bottom strips.
+// U+2550 (BOX DRAWINGS DOUBLE HORIZONTAL) is heavier than a single
+// dash so the banner reads as a "title plate" rather than a casual
+// separator. Not a markdown token: glamour passes it through
+// untouched.
+const bannerDividerRune = '═'
 
-// Render generates the ASCII art from Source, applies Color, and tacks
-// on Subtitle (if any) on the next-but-one line. The output is layout-
-// preserving — no reflow, no trimming of leading whitespace — so the
-// figlet output renders character-for-character verbatim.
-func (b Banner) Render(_ int, env expr.Env, rr ViewRenderer) (string, error) {
+// bannerLeftPad is the indent applied to the title line so it doesn't
+// sit flush against the left edge.
+const bannerLeftPad = "  "
+
+// bannerSeparator is the dot inserted between Source and Subtitle.
+// Pre/post-padded with two spaces so the line reads as three beats
+// (title · phase counter · description) without crowding.
+const bannerSeparator = "  ·  "
+
+// bannerMinWidth floors the divider length so the banner stays
+// readable in narrow viewports (e.g. a split-pane TUI at 50 cols).
+const bannerMinWidth = 40
+
+// Render builds the 3-line banner: divider, title (source + optional
+// subtitle), divider. The whole strip is wrapped in lipgloss with
+// Color so the eye lands on it immediately.
+//
+// Width arg sizes the divider — the dividers fit the title line plus a
+// small overflow, capped to the viewport so they never wrap. The
+// caller's width is the dispatcher width; the TUI passes its actual
+// viewport, the orchestrator passes blockRenderWidth=80.
+func (b Banner) Render(width int, env expr.Env, rr ViewRenderer) (string, error) {
 	source, err := renderLeaf(rr, b.Source, env)
 	if err != nil {
 		return "", err
@@ -67,24 +82,30 @@ func (b Banner) Render(_ int, env expr.Env, rr ViewRenderer) (string, error) {
 	}
 	subtitle = strings.TrimSpace(subtitle)
 
-	art := figure.NewFigure(source, bannerFont, true).String()
-	art = strings.TrimRight(art, "\n")
+	title := bannerLeftPad + source
+	if subtitle != "" {
+		title += bannerSeparator + subtitle
+	}
+
+	// Divider matches the title's visible width plus a 2-char trailing
+	// margin so the strip extends just past the text on each side. Capped
+	// to width so the strip never wraps; floored to bannerMinWidth so a
+	// short title still reads as a banner rather than a stub.
+	titleRunes := len([]rune(title))
+	divWidth := titleRunes + 2
+	if divWidth > width && width >= bannerMinWidth {
+		divWidth = width
+	}
+	if divWidth < bannerMinWidth {
+		divWidth = bannerMinWidth
+	}
+	divider := strings.Repeat(string(bannerDividerRune), divWidth)
 
 	colour := b.Color
 	if colour == "" {
 		colour = bannerDefaultColor
 	}
-	artStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(colour)).Render(art)
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(colour))
 
-	if subtitle == "" {
-		return artStyled, nil
-	}
-	subtitleStyled := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(bannerSubtitleColor)).
-		Render(subtitle)
-	// Blank line between art and subtitle so the caption reads as its
-	// own visual beat — the dispatcher's inter-element spacing handles
-	// the separation FROM the next element, but the intra-banner gap
-	// belongs to this element.
-	return artStyled + "\n\n" + subtitleStyled, nil
+	return style.Render(divider) + "\n" + style.Render(title) + "\n" + style.Render(divider), nil
 }

@@ -12,9 +12,7 @@ import (
 )
 
 // stripANSI removes ANSI SGR escapes so tests can assert on visible
-// content without knowing the active colour profile. Mirrors the
-// helper in transcript.go (kept inline here so the elements package
-// stays free of TUI imports).
+// content without knowing the active colour profile.
 func stripANSI(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -25,7 +23,7 @@ func stripANSI(s string) string {
 				j++
 			}
 			if j < len(s) {
-				i = j // skip past the final byte of the SGR sequence
+				i = j
 				continue
 			}
 		}
@@ -42,40 +40,51 @@ func init() {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 }
 
-// TestBanner_RendersFigletArtFromText covers the happy path: a non-
-// empty text produces multi-line figlet output, layout preserved.
-func TestBanner_RendersFigletArtFromText(t *testing.T) {
-	out, err := Banner{Source: "REPRODUCING"}.Render(120, expr.Env{}, nil)
+// TestBanner_RendersThreeLines covers the happy path: divider, title,
+// divider — three lines total, no figlet art, no markdown reformatting
+// hazards.
+func TestBanner_RendersThreeLines(t *testing.T) {
+	out, err := Banner{Source: "REPRODUCING"}.Render(80, expr.Env{}, nil)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	plain := stripANSI(out)
 	lines := strings.Split(plain, "\n")
-	if len(lines) < 4 {
-		t.Errorf("expected at least 4 lines of figlet art; got %d:\n%s", len(lines), plain)
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d:\n%s", len(lines), plain)
 	}
-	// Every line is non-empty (the "small" figlet font has no empty
-	// rows for a single-word source). A blank line would mean the
-	// art mid-renders — usually a sign the font went missing.
-	for i, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			t.Errorf("line %d unexpectedly blank in figlet art:\n%s", i, plain)
+	// Top and bottom are pure dividers.
+	for _, idx := range []int{0, 2} {
+		line := lines[idx]
+		if line == "" {
+			t.Errorf("divider line %d is empty", idx)
 		}
+		for _, r := range line {
+			if r != bannerDividerRune {
+				t.Errorf("divider line %d contains non-divider rune %q: %q", idx, r, line)
+				break
+			}
+		}
+	}
+	// Middle carries the title (with the left-pad).
+	if !strings.Contains(lines[1], "REPRODUCING") {
+		t.Errorf("middle line missing source text: %q", lines[1])
+	}
+	if !strings.HasPrefix(lines[1], bannerLeftPad) {
+		t.Errorf("title should start with leftPad %q; got: %q", bannerLeftPad, lines[1])
 	}
 }
 
 // TestBanner_AppliesColor asserts the Color field flows through to
 // lipgloss: a known hex value lands in the output as a TrueColor SGR
-// sequence (e.g. "38;2;6;182;212" for #06B6D4 cyan).
+// sequence.
 func TestBanner_AppliesColor(t *testing.T) {
-	out, err := Banner{Source: "REPRODUCING", Color: "#06B6D4"}.Render(120, expr.Env{}, nil)
+	out, err := Banner{Source: "REPRODUCING", Color: "#06B6D4"}.Render(80, expr.Env{}, nil)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	// 0x06=6, 0xB6=182, 0xD4≈212 in decimal. lipgloss/termenv may
-	// round the B channel by ±1 when round-tripping the colour
-	// through their internal palette, so we anchor on R and G
-	// (which never quantize-shift for TrueColor profiles).
+	// 0x06=6, 0xB6=182, 0xD4≈212. Anchor on R+G; lipgloss/termenv may
+	// quantize the B channel by ±1.
 	if !strings.Contains(out, "38;2;6;182;") {
 		t.Errorf("expected #06B6D4 TrueColor escape in output; got: %q", out)
 	}
@@ -84,46 +93,71 @@ func TestBanner_AppliesColor(t *testing.T) {
 // TestBanner_DefaultColorWhenColorEmpty asserts the bannerDefaultColor
 // fallback fires when Color is unset.
 func TestBanner_DefaultColorWhenColorEmpty(t *testing.T) {
-	out, err := Banner{Source: "DONE"}.Render(120, expr.Env{}, nil)
+	out, err := Banner{Source: "DONE"}.Render(80, expr.Env{}, nil)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	// bannerDefaultColor = #10B981 → 16, 185, 129. Anchor on R+G
-	// (see TestBanner_AppliesColor for the rationale).
+	// bannerDefaultColor = #10B981 → 16, 185, 129. Anchor on R+G.
 	if !strings.Contains(out, "38;2;16;185;") {
 		t.Errorf("expected default colour escape; got: %q", out)
 	}
 }
 
-// TestBanner_AppendsSubtitle asserts the subtitle lands beneath the
-// art on a separate visual beat (one blank line between).
-func TestBanner_AppendsSubtitle(t *testing.T) {
+// TestBanner_AppendsSubtitleInline asserts the subtitle folds onto the
+// title line with the bannerSeparator rather than its own line —
+// keeps the strip at 3 lines total.
+func TestBanner_AppendsSubtitleInline(t *testing.T) {
 	out, err := Banner{
 		Source:   "DONE",
 		Subtitle: "Phase 7 / 7  ·  close-out artifact",
-	}.Render(120, expr.Env{}, nil)
+	}.Render(80, expr.Env{}, nil)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	plain := stripANSI(out)
-	if !strings.Contains(plain, "Phase 7 / 7  ·  close-out artifact") {
-		t.Errorf("subtitle missing from output:\n%s", plain)
-	}
-	// Subtitle must be on a separate line from the art's last line.
 	lines := strings.Split(plain, "\n")
-	subtitleIdx := -1
-	for i, line := range lines {
-		if strings.Contains(line, "Phase 7") {
-			subtitleIdx = i
-			break
+	if len(lines) != 3 {
+		t.Errorf("expected 3 lines with subtitle inline; got %d:\n%s", len(lines), plain)
+	}
+	if !strings.Contains(lines[1], "DONE") || !strings.Contains(lines[1], "Phase 7 / 7") {
+		t.Errorf("title line should carry both source and subtitle:\n%q", lines[1])
+	}
+	if !strings.Contains(lines[1], bannerSeparator) {
+		t.Errorf("title line should join source + subtitle with %q; got: %q", bannerSeparator, lines[1])
+	}
+}
+
+// TestBanner_DividerCapsToWidth asserts the divider extends to (at
+// most) the dispatcher's width so a long title doesn't push the strip
+// past the viewport into a wrap.
+func TestBanner_DividerCapsToWidth(t *testing.T) {
+	out, err := Banner{
+		Source:   "VALIDATING",
+		Subtitle: "Phase 6 / 7  ·  full-environment validation of the fix",
+	}.Render(80, expr.Env{}, nil)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	plain := stripANSI(out)
+	for _, line := range strings.Split(plain, "\n") {
+		if w := len([]rune(line)); w > 80 {
+			t.Errorf("line wider than dispatcher width 80 (got %d): %q", w, line)
 		}
 	}
-	if subtitleIdx < 1 {
-		t.Fatalf("subtitle not found in any line: %v", lines)
+}
+
+// TestBanner_DividerFloorAtMinWidth asserts a very narrow dispatcher
+// still gets a banner readable enough to skim.
+func TestBanner_DividerFloorAtMinWidth(t *testing.T) {
+	out, err := Banner{Source: "X"}.Render(10, expr.Env{}, nil)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
 	}
-	// One blank line of separation between art and caption.
-	if strings.TrimSpace(lines[subtitleIdx-1]) != "" {
-		t.Errorf("expected blank line before subtitle; got %q", lines[subtitleIdx-1])
+	plain := stripANSI(out)
+	lines := strings.Split(plain, "\n")
+	// Floor is bannerMinWidth — confirm the divider is at least that wide.
+	if w := len([]rune(lines[0])); w < bannerMinWidth {
+		t.Errorf("divider %d wide; expected ≥ bannerMinWidth (%d)", w, bannerMinWidth)
 	}
 }
 
@@ -131,7 +165,7 @@ func TestBanner_AppendsSubtitle(t *testing.T) {
 // an empty source skips the element entirely (so a guard'd-off banner
 // doesn't leak whitespace).
 func TestBanner_EmptyTextRendersEmpty(t *testing.T) {
-	out, err := Banner{Source: ""}.Render(120, expr.Env{}, nil)
+	out, err := Banner{Source: ""}.Render(80, expr.Env{}, nil)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -141,8 +175,8 @@ func TestBanner_EmptyTextRendersEmpty(t *testing.T) {
 }
 
 // TestBanner_DispatchedFromTypedView is the integration test: a View
-// with a banner element flows through RenderAll and lands as figlet
-// art in the composed output.
+// with a banner element flows through RenderAll and lands as a 3-line
+// strip in the composed output.
 func TestBanner_DispatchedFromTypedView(t *testing.T) {
 	view := app.View{
 		Elements: []app.ViewElement{
@@ -155,19 +189,21 @@ func TestBanner_DispatchedFromTypedView(t *testing.T) {
 			{Kind: "prose", Source: "body text"},
 		},
 	}
-	out, err := RenderAll(view, expr.Env{}, 120, IdentityGlamour, nil)
+	out, err := RenderAll(view, expr.Env{}, 80, IdentityGlamour, nil)
 	if err != nil {
 		t.Fatalf("RenderAll: %v", err)
 	}
 	plain := stripANSI(out)
+	if !strings.Contains(plain, "TESTING") {
+		t.Errorf("source missing from dispatcher output:\n%s", plain)
+	}
 	if !strings.Contains(plain, "Phase 4 / 7") {
 		t.Errorf("subtitle missing from dispatcher output:\n%s", plain)
 	}
 	if !strings.Contains(plain, "body text") {
 		t.Errorf("subsequent prose element missing from output:\n%s", plain)
 	}
-	// The amber colour escape must be present somewhere. Anchor on
-	// R+G (see TestBanner_AppliesColor for the rounding rationale).
+	// Amber colour escape present.
 	if !strings.Contains(out, "38;2;245;158;") {
 		t.Errorf("expected #F59E0B amber escape in dispatched output")
 	}
