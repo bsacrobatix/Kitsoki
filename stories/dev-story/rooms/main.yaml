@@ -29,29 +29,44 @@ states:
               don't pick the pipeline yourself.
         choices:
           - heading: "Actions"
-          # Bare list (no hint column) — the `available()`/`blocked_reason()`
-          # pair on `drive`/`pr` produces long blocked labels (the guard hint
-          # is the value of blocked_reason); using a two-column list would
-          # size every row's gutter to that long label. Style guide §3
-          # "Prerequisite" pattern is well-suited to bare lists.
+          # Every row uses {label, hint} form so the TUI applies the
+          # action-chip style to the bare intent name (style guide §3).
+          # Blocked rows use the `✗` prefix + blocked_reason() hint per
+          # the "Prerequisite" pattern.
           - list:
               items:
-                - "tickets — search for a ticket to pick"
-                - "workspaces — resume a workspace you already started"
-                - label: "drive — push the picked ticket through its pipeline"
+                - label: "`tickets`"
+                  hint:  "search for a ticket to pick"
+                - label: "`workspaces`"
+                  hint:  "resume a workspace you already started"
+                - label: "`drive`"
+                  hint:  "push the picked ticket through its pipeline"
                   when:  "available('drive')"
-                - label: "✗ drive — {{ blocked_reason('drive') }}"
+                - label: "✗ `drive`"
+                  hint:  "{{ blocked_reason('drive') }}"
                   when:  "!available('drive')"
-                - label: "pr — hand the picked workspace's PR to pr-refinement"
+                - label: "`pr`"
+                  hint:  "hand the picked workspace's PR to pr-refinement"
                   when:  "available('go_pr_refinement')"
-                - label: "✗ pr — {{ blocked_reason('go_pr_refinement') }}"
+                - label: "✗ `pr`"
+                  hint:  "{{ blocked_reason('go_pr_refinement') }}"
                   when:  "!available('go_pr_refinement')"
-                - "code review — review a teammate's PR"
-                - "inbox — read notifications ({{ world.inbox_unread }} unread)"
-                - "oracle — ask the LLM a one-shot question"
-                - "standup — prep today's standup summary"
-                - "deploy · observability · incident · docs — stubs"
-                - "look"
+                - label: "`code review`"
+                  hint:  "review a teammate's PR"
+                - label: "`inbox`"
+                  hint:  "read notifications ({{ world.inbox_unread }} unread)"
+                - label: "`oracle`"
+                  hint:  "ask the LLM a one-shot question"
+                - label: "`standup`"
+                  hint:  "prep today's standup summary"
+                # `deploy`, `observability`, `incident`, `docs` are stubs;
+                # consolidated under one short hint instead of a mega-
+                # label so the list's max_label stays sane (a 49-char
+                # row forces every other row's hint column down to ~23
+                # chars and surfaces as cross-row wrap).
+                - label: "`stubs`"
+                  hint:  "deploy · observability · incident · docs (not wired)"
+                - label: "`look`"
 
     on:
       go_ticket_search:

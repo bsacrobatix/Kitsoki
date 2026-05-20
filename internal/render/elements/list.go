@@ -52,6 +52,18 @@ const defaultMarker = "•"
 // hand-tuned spacing that the proposal §1 motivates replacing.
 const gutterWidth = 2
 
+// minHintWidth is the floor the two-column layout keeps for the hint
+// column when there's at least one row with a hint. If padding every
+// label to a single outlier's width would leave less than this for
+// the hint, max_label is capped to (width - marker - gutter -
+// minHintWidth) and rows whose label exceeds the cap render WITHOUT
+// padding — their hint follows immediately after the label + gutter,
+// and they don't align with the rest of the column. This keeps a
+// single 49-char "stubs · group · of · labels" entry from squeezing
+// every other row's hint column down to ~20 chars when the viewport
+// is anywhere shy of huge.
+const minHintWidth = 40
+
 // listRow is one already-substituted list entry, ready for layout. Held
 // at file scope so the bare / two-column helpers can share the type.
 type listRow struct {
@@ -144,13 +156,33 @@ func renderBareList(rows []listRow, markerPrefix string, width int) string {
 // the longest label (so the colon column is aligned), gutterWidth spaces
 // of gap, and the hint reflowed into whatever width remains. Rows with
 // no hint render the label alone, no trailing gutter.
+//
+// max_label cap: when one outlier row's label would push the hint
+// column below minHintWidth, the column is capped instead — so a
+// single 49-char mega-label doesn't shrink every other row's hint
+// down to 23 chars. Rows whose label exceeds the cap render in
+// "overflow" mode: their label runs into the gutter (no padding),
+// and the hint follows immediately after a single gutter gap. They
+// don't align with the rest of the column — better than forcing the
+// whole column narrow for every other row.
 func renderTwoColumnList(rows []listRow, markerPrefix string, width int) string {
 	indent := strings.Repeat(" ", visibleLen(markerPrefix))
-	maxLabel := 0
+	measuredMax := 0
 	for _, r := range rows {
-		if n := visibleLen(r.label); n > maxLabel {
-			maxLabel = n
+		if n := visibleLen(r.label); n > measuredMax {
+			measuredMax = n
 		}
+	}
+	// Effective label cap: never narrower than would leave less than
+	// minHintWidth for the hint column. When measuredMax exceeds this
+	// cap, the column aligns to the cap and outlier rows overflow.
+	maxBudget := width - visibleLen(markerPrefix) - gutterWidth - minHintWidth
+	maxLabel := measuredMax
+	if maxBudget >= 1 && maxLabel > maxBudget {
+		maxLabel = maxBudget
+	}
+	if maxLabel < 1 {
+		maxLabel = 1
 	}
 	// Width budget for the hint column = total - marker - label - gutter.
 	hintWidth := width - visibleLen(markerPrefix) - maxLabel - gutterWidth
@@ -167,7 +199,18 @@ func renderTwoColumnList(rows []listRow, markerPrefix string, width int) string 
 		if i > 0 {
 			sb.WriteByte('\n')
 		}
-		labelPadded := r.label + strings.Repeat(" ", maxLabel-visibleLen(r.label))
+		labelLen := visibleLen(r.label)
+		// Overflow rows: label is wider than the capped column. Don't
+		// pad; emit the label as-is, then a single-space gutter, then
+		// the hint (wrapped at the same hintWidth budget as everyone
+		// else so the overflow row doesn't run off the right edge).
+		overflow := labelLen > maxLabel
+		var labelPadded string
+		if overflow {
+			labelPadded = r.label
+		} else {
+			labelPadded = r.label + strings.Repeat(" ", maxLabel-labelLen)
+		}
 		if r.hint == "" {
 			sb.WriteString(markerPrefix)
 			sb.WriteString(strings.TrimRight(labelPadded, " "))

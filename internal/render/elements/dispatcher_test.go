@@ -202,18 +202,23 @@ func (fakeExtendsRenderer) RenderExtended(_ string, blocks map[string]string, _ 
 }
 
 // TestRenderAll_ExtendsUsesDispatcherWidth is the regression guard for
-// the 2026-05-20 narrow-hint-column bug. Pre-fix, RenderAll early-
-// returned "" for any extends-shaped view, forcing the TUI to fall
-// back to the orchestrator-side machine.renderViewBody output rendered
-// at the fixed blockRenderWidth=80. A single wide label in any block
-// would then clamp the hint column to ~25 chars even on a 150-col
-// terminal — the user-witnessed "search for a ticket to\n  pick"
-// wrap in stories/dev-story/rooms/main.yaml when one row's label is
-// 51 chars long.
+// the 2026-05-20 narrow-hint-column bug. The narrow case has TWO
+// failure modes the list renderer must defend against:
 //
-// Post-fix, RenderAll pre-renders each block at the supplied width,
-// so passing the actual viewport width gives the list element enough
-// room to fit short hints on one line.
+//   1. Extends-form views falling back to the orchestrator's fixed
+//      blockRenderWidth=80 — fixed by RenderAll's extends branch
+//      pre-rendering at the dispatcher's actual viewport width.
+//
+//   2. A single outlier label setting maxLabel for the whole list
+//      and squeezing every other row's hint column. The list
+//      renderer's max_label cap (minHintWidth floor) now keeps a
+//      49-char mega-label from forcing every other row's hint
+//      column below 40 chars; the outlier row overflows alone
+//      instead.
+//
+// Post-fix the short-label row's hint must land on one line at any
+// reasonable viewport width — narrow OR wide — because the cap
+// keeps the hint column at ≥ minHintWidth.
 func TestRenderAll_ExtendsUsesDispatcherWidth(t *testing.T) {
 	view := app.View{
 		Extends: "base",
@@ -223,8 +228,10 @@ func TestRenderAll_ExtendsUsesDispatcherWidth(t *testing.T) {
 					Kind: "list",
 					Items: []app.ListItem{
 						{Label: "tickets", Hint: "search for a ticket to pick"},
-						// 50-char "wide" label sets maxLabel for the list,
-						// constraining every row's hint column.
+						// 50-char "wide" label — would set maxLabel for the
+						// whole list pre-cap. Post-cap it overflows
+						// individually but the short-label row's hint stays
+						// on one line.
 						{Label: "deploy · observability · incident · docs · etc", Hint: "stubs"},
 					},
 				},
@@ -232,15 +239,15 @@ func TestRenderAll_ExtendsUsesDispatcherWidth(t *testing.T) {
 		},
 	}
 
-	// Width 80: hint budget = 80 - 2(marker) - 46(maxLabel) - 2(gutter) = 30.
-	// "search for a ticket to pick" is 27 chars — fits at 80.
-	// Width 60: hint budget = 60 - 50 = 10. Hint must wrap.
+	// Both narrow (60) AND wide (120) widths must keep the short
+	// "tickets" row's hint on one line — minHintWidth (40 chars) is
+	// always enough for "search for a ticket to pick" (27 chars).
 	cases := []struct {
 		name       string
 		width      int
 		shouldWrap bool
 	}{
-		{"narrow", 60, true},
+		{"narrow", 60, false},
 		{"viewport", 120, false},
 	}
 	for _, tc := range cases {
