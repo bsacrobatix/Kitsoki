@@ -486,6 +486,80 @@ func TestPongo_ReverseFilter(t *testing.T) {
 	}
 }
 
+// TestPongo_SliceOfMapIndexAccess pins what pongo2's expression
+// evaluator supports — and crucially what it does NOT — for index
+// access on a `[]any` of `map[string]any`, the shape iface.ticket.search
+// binds into `world.ticket_results` (see `bugSummary` in
+// `internal/host/localfiles_ticket.go`).
+//
+// The dev-story ticket_search room offers a `pick_ticket n=<index>`
+// shape that reads `world.ticket_results[slots.n - 1].id` at dispatch
+// time. That expression runs through expr-lang (set: effects use
+// `expr.RenderValue`), NOT through pongo2 — pongo2's Django-derived
+// parser doesn't accept `[N]` subscript syntax in templates and rejects
+// chained `.field` after a subscript. So the view layer can only
+// surface picked-row data via:
+//
+//  1. literal-index dotted notation (`world.ticket_results.1.id` — N
+//     must be a parser-time literal), or
+//  2. a for-loop with `{% if forloop.Counter == n %}` (works for
+//     view-time computed indices).
+//
+// This test pins both forms so the operator-facing view continues to
+// render the right ticket id when the picker advances. The companion
+// "computed-index in expr-lang" path is covered by
+// `internal/expr` tests / the dogfood smoke and is the contract the
+// `set:` effect actually depends on.
+func TestPongo_SliceOfMapIndexAccess(t *testing.T) {
+	env := expr.Env{
+		World: map[string]any{
+			"ticket_results": []any{
+				map[string]any{"id": "2026-05-18T045257Z-first", "severity": "P0"},
+				map[string]any{"id": "2026-05-18T045258Z-second", "severity": "P1"},
+				map[string]any{"id": "2026-05-18T045259Z-third", "severity": "P2"},
+			},
+		},
+		Slots: map[string]any{
+			"n": 2,
+		},
+	}
+
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "literal dotted index .1.id",
+			src:  `{{ world.ticket_results.1.id }}`,
+			want: "2026-05-18T045258Z-second",
+		},
+		{
+			name: "literal dotted index .0.severity",
+			src:  `{{ world.ticket_results.0.severity }}`,
+			want: "P0",
+		},
+		{
+			name: "for-loop + forloop.Counter selects row n",
+			src: `{% for t in world.ticket_results %}` +
+				`{% if forloop.Counter == slots.n %}{{ t.id }}{% endif %}` +
+				`{% endfor %}`,
+			want: "2026-05-18T045258Z-second",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := Pongo(tc.src, env)
+			if err != nil {
+				t.Fatalf("Pongo(%q) error: %v", tc.src, err)
+			}
+			if out != tc.want {
+				t.Fatalf("Pongo(%q): got %q want %q", tc.src, out, tc.want)
+			}
+		})
+	}
+}
+
 func TestToContext_KeysExposed(t *testing.T) {
 	env := makeEnv()
 	ctx := ToContext(env)

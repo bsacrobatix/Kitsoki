@@ -287,13 +287,24 @@ intents:
         description: "Search query (provider-neutral)."
   pick_ticket:
     description: "Pick a ticket from the current results and start working on it."
-    examples: ["pick TKT-001", "select 1", "open this ticket"]
+    examples: ["pick TKT-001", "select 1", "pick 2", "open this ticket"]
     priority: 95
     slots:
       id:
         type: string
-        required: true
-        description: "Ticket id to pick."
+        # NOT required at the intent level — the room offers two
+        # picking shapes (id=<filename> or n=<index>) via two
+        # separate `choice:` items, each with its own `required:`
+        # param. The room's `pick_ticket` arc resolves slots.n →
+        # world.ticket_results[n-1].id when id is absent; an
+        # out-of-range / both-missing call falls through to a
+        # guarded no-op (see ticket_search.yaml).
+        required: false
+        description: "Ticket id to pick (60-char filename slug). Mutually exclusive with `n`."
+      n:
+        type: int
+        required: false
+        description: "1-based index into world.ticket_results (the currently displayed list). Resolves to ticket_results[n-1].id at dispatch time. Mutually exclusive with `id`."
       type:
         type: string
         required: false

@@ -48,14 +48,21 @@ states:
       #
       # Table format (one line per ticket):
       #
-      #   {pick} {status} {sev} {date}     {title-truncated}
+      #   {n} {pick} {status} {sev} {date}     {title-truncated}
       #
-      # Columns (fixed-width via `|col:N`):
+      # Columns (fixed-width via `|col:N` / `|rcol:N`):
+      #   n       2 chars — `forloop.Counter` right-aligned (1-based row index);
+      #                     paired with the `pick_ticket n=<index>` choice item below
       #   pick    1 char  — ★ for the currently-picked ticket
       #   status  1 char  — ●/◐/○ by ticket lifecycle state
       #   sev     3 chars — P0..P3 (blank for severity-less rows)
       #   date   10 chars — `id|slice:":10"` ISO-date prefix
       #   title  52 chars — truncatechars:52 adds an ellipsis on overflow
+      #
+      # The host (`internal/host/localfiles_ticket.go`) sorts results by
+      # severity ASC + id DESC, so the row index is stable across renders
+      # within a session — safe to type `pick_ticket n=2` and have it
+      # mean the same row the operator just read.
       #
       # README-style ghost rows (frontmatter-less *.md under issues/) are
       # dropped via `{% if t.status %}`. Severity reads only `t.severity`
@@ -64,8 +71,8 @@ states:
       - heading: 'Tickets{% if world.ticket_query %} (filter: {{ world.ticket_query }}){% endif %}'
       - code: |
           {% if world.ticket_results|length == 0 %}(none — file one in issues/bugs/)
-          {% else %}     St  Sev  Filed       Title
-          {% for t in world.ticket_results %}{% if t.status %}   {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% else %} #     St  Sev  Filed       Title
+          {% for t in world.ticket_results %}{% if t.status %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
           {% endif %}{% endfor %}{% endif %}
       # Readiness banner — two sibling elements with mutually-exclusive
       # `when:` guards. The ready case is a `heading:` (style-guide §1
@@ -84,13 +91,27 @@ states:
           mode: single
           prompt: "Actions"
           items:
+            # Two `pick_ticket` shapes coexist: index-by-number (n=) and
+            # by-filename (id=). The intent-level slots in app.yaml mark
+            # both as optional; the arc below short-circuits via `??` so
+            # whichever the operator provides wins. We keep both items so
+            # tab-completed id picks from copy-paste / fixture YAML still
+            # work, while live operators get the scannable `n=2` path.
             - label:  "pick_ticket"
               intent: pick_ticket
-              hint:   "pick a ticket from the list above"
+              hint:   "pick by row number from the table above"
+              param:
+                slot:        n
+                type:        int
+                placeholder: "row number (e.g. 2)"
+                required:    true
+            - label:  "pick_ticket_by_id"
+              intent: pick_ticket
+              hint:   "pick by filename id (for fixtures / tab-completed paste)"
               param:
                 slot:        id
                 type:        string
-                placeholder: "ticket id (e.g. TKT-123)"
+                placeholder: "ticket id (60-char filename slug)"
                 required:    true
             - label:  "search_tickets"
               intent: search_tickets
@@ -135,12 +156,29 @@ states:
         # `target: .` is deliberate — pick should NOT re-fire on_enter
         # (the list is already in world.ticket_results from the fresh
         # fetch on the way in).
+        #
+        # Two picking shapes: `id=<filename>` and `n=<row index>`.
+        # The arc walks them in priority order:
+        #   1. n out of range → bounce with guard_hint
+        #   2. either slot present → resolve via `slots.id ?? results[n-1].id`
+        #   3. neither present → bounce with guard_hint
+        - when: "slots.n != nil && (slots.n < 1 || slots.n > len(world.ticket_results))"
+          target: .
+          guard_hint: "Row {{ slots.n }} is out of range — pick 1..{{ len(world.ticket_results) }}."
+        - when: "slots.id == nil && slots.n == nil"
+          target: .
+          guard_hint: "Provide either id=<filename> or n=<row number>."
         - target: .
           effects:
+            # slots.id wins when supplied; otherwise fall through to the
+            # n-based row lookup. expr-lang's `??` is nil-coalesce (NOT
+            # empty-string coalesce), so the `param.required: true` on
+            # each choice item is what guarantees the surviving value is
+            # non-empty.
             - set:
-                ticket_id:     "{{ slots.id }}"
+                ticket_id:     "{{ slots.id ?? world.ticket_results[slots.n - 1].id }}"
                 ticket_type:   "{{ slots.type ?? world.ticket_type }}"
-                thread:        "{{ slots.id }}"
+                thread:        "{{ slots.id ?? world.ticket_results[slots.n - 1].id }}"
             # iface.ticket.get returns the real human-readable
             # title from the ticket's frontmatter; bind it as
             # ticket_title so downstream rooms (bugfix phases,
@@ -148,7 +186,7 @@ states:
             # the 60-char ID slug + "(picked from list)" stub.
             - invoke: iface.ticket.get
               with:
-                id: "{{ slots.id }}"
+                id: "{{ slots.id ?? world.ticket_results[slots.n - 1].id }}"
               bind:
                 ticket_title: title
               on_error: idle
@@ -197,13 +235,23 @@ states:
           mode: single
           prompt: "Actions"
           items:
+            # Same two-shape picker as ticket_search above — see comment
+            # there. The n=<row number> variant is the default offering.
             - label:  "pick_ticket"
               intent: pick_ticket
-              hint:   "pick a ticket from the results"
+              hint:   "pick by row number from the results"
+              param:
+                slot:        n
+                type:        int
+                placeholder: "row number (e.g. 2)"
+                required:    true
+            - label:  "pick_ticket_by_id"
+              intent: pick_ticket
+              hint:   "pick by filename id (for fixtures / tab-completed paste)"
               param:
                 slot:        id
                 type:        string
-                placeholder: "ticket id (e.g. TKT-123)"
+                placeholder: "ticket id (60-char filename slug)"
                 required:    true
             - { label: "go_back", intent: go_back, hint: "return to ticket_search" }
             - { label: "look",    intent: look,    hint: "re-render" }
@@ -218,15 +266,23 @@ states:
         on_error: ticket_search
     on:
       pick_ticket:
-        # Mirror of pick_ticket in ticket_search above — slot/world
-        # precedence on ticket_type; see comment there.
+        # Mirror of pick_ticket in ticket_search above — same id-or-n
+        # short-circuit and out-of-range guard, but the target lands
+        # back in ticket_search (not `.`) so the operator sees the
+        # full table after picking.
+        - when: "slots.n != nil && (slots.n < 1 || slots.n > len(world.ticket_results))"
+          target: ticket_searching
+          guard_hint: "Row {{ slots.n }} is out of range — pick 1..{{ len(world.ticket_results) }}."
+        - when: "slots.id == nil && slots.n == nil"
+          target: ticket_searching
+          guard_hint: "Provide either id=<filename> or n=<row number>."
         - target: ticket_search
           effects:
             - set:
-                ticket_id:    "{{ slots.id }}"
+                ticket_id:    "{{ slots.id ?? world.ticket_results[slots.n - 1].id }}"
                 ticket_title: "(picked from search)"
                 ticket_type:  "{{ slots.type ?? world.ticket_type }}"
-                thread:       "{{ slots.id }}"
+                thread:       "{{ slots.id ?? world.ticket_results[slots.n - 1].id }}"
       search_tickets:
         - target: ticket_searching
           effects:
