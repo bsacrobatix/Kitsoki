@@ -7,10 +7,31 @@ You have a reproduction artifact from the previous room:
 
 > {{ args.reproduction_summary }}
 
-{% if args.refine_feedback %}**Refinement feedback from the previous attempt
-(cycle {{ args.cycle }}):**
+{% if args.refine_feedback %}## ⚠ Operator refinement directive (cycle {{ args.cycle }})
+
+This is a refine cycle — the previous fix proposal was rejected. The
+operator's feedback below is a **binding directive**: it OVERRIDES
+any default behaviour or constraint further down this prompt whenever
+the two conflict. Treat every statement as a hard requirement, not a
+suggestion.
 
 > {{ args.refine_feedback }}
+
+Before submitting:
+
+1. Walk the feedback statement-by-statement and confirm the new
+   proposal addresses each point. If the feedback says "do not X",
+   the proposal must NOT do X — including in `fix_description`,
+   `root_cause`, and `affected_files`.
+2. If you genuinely cannot honour a statement (schema-incompatible,
+   factually impossible), say so in `summary_markdown` and explain
+   why. Silent non-compliance is the failure mode this directive
+   guards against.
+3. If the feedback contradicts the default constraints below,
+   follow the feedback and flag the conflict in `summary_markdown`.
+
+---
+
 {% endif %}
 
 ## Constraints
