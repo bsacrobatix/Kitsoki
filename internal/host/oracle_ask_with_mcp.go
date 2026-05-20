@@ -810,7 +810,7 @@ func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, 
 		if vErr == nil && len(vBytes) > 0 {
 			var parsed any
 			if jErr := json.Unmarshal(vBytes, &parsed); jErr == nil {
-				res.Data["submitted"] = parsed
+				res.Data["submitted"] = unescapeOverEscapedStrings(parsed)
 			} else {
 				// The validator only writes payloads that already passed
 				// schema validation, so a parse error here is a real bug.
@@ -1006,7 +1006,7 @@ func assembleResult(p runValidatorLoopParams, stdout string, exitCode int, stder
 		if vErr == nil && len(vBytes) > 0 {
 			var parsed any
 			if jErr := json.Unmarshal(vBytes, &parsed); jErr == nil {
-				res.Data["submitted"] = parsed
+				res.Data["submitted"] = unescapeOverEscapedStrings(parsed)
 			} else {
 				// The validator only writes schema-passed payloads; a
 				// parse error here is a real bug.
@@ -1063,3 +1063,62 @@ func outcomeFromState(attempts, success, maxRetries int) mcpOutcome {
 // fallback. The host-side outcome computation must agree with the
 // in-validator one or we'd misclassify exhaustion vs abandonment.
 const validatorDefaultMaxRetries = 5
+
+// unescapeOverEscapedStrings walks the parsed validator payload and
+// fixes string values that arrive with literal "\n" / "\t" / "\r"
+// instead of real newlines / tabs. Claude occasionally double-escapes
+// when submitting structured JSON via the schema-validator MCP tool —
+// claude writes `"summary_markdown": "## Title\\n\\n### Body"` where
+// the inner `\\n` is JSON-source for the 2-char literal `\n`, not the
+// 1-char newline escape. We see this only intermittently (turn 3 of
+// the 2026-05-20 dogfood trace rendered cleanly; turn 4 of the same
+// trace landed with literal `\n` everywhere), so this is best-treated
+// as a defense at the seam where claude's output enters the world.
+//
+// The unescape is conservative: only strings that contain at least
+// one of the over-escape signatures are rewritten, and only the three
+// most-common escape pairs (\n, \t, \r) are converted. Strings that
+// happen to mention `\n` legitimately (a string literal in
+// documentation, say) AND have ≤ 3 such occurrences are left
+// alone — most markdown bodies have far more line-breaks than that.
+func unescapeOverEscapedStrings(v any) any {
+	switch t := v.(type) {
+	case string:
+		return maybeUnescapeString(t)
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, vv := range t {
+			out[k] = unescapeOverEscapedStrings(vv)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, vv := range t {
+			out[i] = unescapeOverEscapedStrings(vv)
+		}
+		return out
+	}
+	return v
+}
+
+// maybeUnescapeString turns literal `\n` / `\t` / `\r` 2-char
+// sequences into the matching control character — but only when the
+// input has enough of them to suggest over-escaping rather than
+// incidental mention. The threshold (≥ 3 of any one escape) tracks
+// the dogfood symptom: a fix-proposal markdown body had 30+ literal
+// `\n` separators; a typical docstring mentioning escape sequences
+// has at most one or two.
+func maybeUnescapeString(s string) string {
+	if !strings.Contains(s, `\n`) && !strings.Contains(s, `\t`) && !strings.Contains(s, `\r`) {
+		return s
+	}
+	if strings.Count(s, `\n`) < 3 && strings.Count(s, `\t`) < 3 && strings.Count(s, `\r`) < 3 {
+		return s
+	}
+	r := strings.NewReplacer(
+		`\n`, "\n",
+		`\t`, "\t",
+		`\r`, "\r",
+	)
+	return r.Replace(s)
+}
