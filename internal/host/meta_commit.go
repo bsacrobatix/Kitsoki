@@ -1,20 +1,21 @@
 // Package host — deterministic git-commit step that runs after every
-// successful meta-mode authoring.apply.
+// meta-mode turn that edited files in the story tree.
 //
 // # Why this lives in the controller, not in Claude's prompt
 //
-// Meta-mode (story-author, /meta edit, etc.) emits authoring.propose
-// then authoring.apply tool calls; without this file, an apply just
-// copies the shadow files into the story dir and leaves the user with
-// uncommitted changes. The brief is "when meta completes a change, it
-// should do a git commit; if someone wants updates in the same convo
-// just amend the existing commit" — that has to be wired into the Go
-// path because anything depending on Claude remembering to emit
-// "<<<commit>>>" tokens is non-deterministic by construction.
+// Meta-mode (story-author, /meta edit, …) lets Claude edit files in
+// the story tree via Edit/Write tools. Without this file, the edits
+// would sit uncommitted in the working tree and the user would have
+// to remember to commit them by hand. The brief is "when meta
+// completes a change, it should do a git commit; if someone wants
+// updates in the same convo just amend the existing commit" — that
+// has to be wired into the Go path because anything depending on
+// Claude remembering to emit "<<<commit>>>" tokens is non-deterministic
+// by construction.
 //
 // # The amend decision is encoded in HEAD's commit trailer
 //
-// CommitProposal stamps every commit it creates with a trailer:
+// CommitChangedFiles stamps every commit it creates with a trailer:
 //
 //	Kitsoki-Meta-Session: <chat_id>
 //
@@ -27,16 +28,17 @@
 // "did we commit yet" bool to keep in sync with the filesystem. The
 // trailer IS the bookkeeping.
 //
-// # Best-effort: never fail the apply
+// # Best-effort: never fail the turn
 //
-// authoring.Apply already wrote the files when CommitProposal runs;
-// failing the apply because git refused (pre-commit hook, no repo,
-// network filesystem, …) would corrupt the user's mental model:
-// they'd see "apply failed" but the shadow had in fact landed. So
-// CommitProposal returns (sha, amended, err) and the caller surfaces
-// the error in AuthoringApplyResult.CommitError without flipping
-// Applied to false. The TUI can display "applied but commit failed:
-// <reason>" — the user knows the files moved and the commit didn't.
+// The file edits are already on disk when CommitChangedFiles runs;
+// failing the meta-mode turn because git refused (pre-commit hook, no
+// repo, network filesystem, …) would corrupt the user's mental model:
+// they'd see "turn failed" but the edits would in fact have landed.
+// So CommitChangedFiles returns (sha, amended, err) and the caller
+// (metamode.sendLocked) surfaces the error in SendResult.CommitError
+// without failing the turn. The TUI can display "applied but commit
+// failed: <reason>" — the user knows the files moved and the commit
+// didn't.
 package host
 
 import (
@@ -46,7 +48,6 @@ import (
 	"strings"
 
 	"kitsoki/internal/app"
-	"kitsoki/internal/authoring"
 )
 
 // metaSessionTrailer is the git-commit trailer key that ties a commit
@@ -60,36 +61,10 @@ const metaSessionTrailer = "Kitsoki-Meta-Session"
 // for a fake. Production points at runGitCommit.
 var commitRunner = runGitCommit
 
-// CommitProposal stamps the just-applied proposal into a git commit.
-// Thin wrapper over CommitChangedFiles — see that function for the
-// commit / amend protocol. This wrapper exists for the legacy
-// authoring.propose/apply shadow-dir flow; the modern direct-edit
-// flow (metamode.sendLocked) calls CommitChangedFiles directly.
-func CommitProposal(ctx context.Context, p *authoring.Proposal, chatID string) (sha string, amended bool, err error) {
-	if p == nil {
-		return "", false, fmt.Errorf("CommitProposal: nil proposal")
-	}
-	if len(p.Changes) == 0 {
-		return "", false, nil
-	}
-	addPaths := make([]string, 0, len(p.Changes))
-	for _, c := range p.Changes {
-		addPaths = append(addPaths, joinPath(p.AppDir, c.RelPath))
-	}
-	// authoring.Propose already validates the shadow's app.yaml loads
-	// before returning, so the proposal can only refer to a manifest
-	// that parsed cleanly. We still re-validate here against the live
-	// (post-Apply) tree — a concurrent edit between Propose and Apply,
-	// or a race with another writer, could leave the AppDir in a
-	// state the shadow's pre-check didn't see.
-	return CommitChangedFiles(ctx, p.AppDir, addPaths, p.Summary, chatID, p.AppPath)
-}
-
-// CommitChangedFiles stamps a meta-mode edit into a git commit. Used by
-// both the legacy authoring.propose/apply path and the modern direct-
-// edit path (where the agent uses Edit/Write tools against the live
-// tree, with the controller diffing a pre/post snapshot to know which
-// files changed).
+// CommitChangedFiles stamps a meta-mode edit into a git commit. Called
+// by metamode.sendLocked after the agent's Edit/Write tools have
+// touched files in the story tree (detected via a pre/post snapshot
+// diff).
 //
 // First call per chat_id creates a new commit; subsequent calls with
 // the same chat_id amend HEAD (provided HEAD still carries this
@@ -111,7 +86,7 @@ func CommitProposal(ctx context.Context, p *authoring.Proposal, chatID string) (
 //                  broken edits (e.g. an undeclared intent referenced
 //                  from an `on:` arc) from being amended into history.
 //                  Pass "" to skip validation (useful when the change
-//                  doesn't include the manifest or for legacy callers).
+//                  doesn't include the manifest).
 //
 // Returns (sha, amended, err). On any git failure, sha may be empty
 // and err carries the diagnostic. Callers MUST NOT treat err as a
@@ -195,24 +170,9 @@ func headHasSessionMarker(ctx context.Context, repoRoot, chatID string) bool {
 func buildCommitMessage(summary, chatID string) string {
 	subject := strings.TrimSpace(summary)
 	if subject == "" {
-		subject = "meta-mode: applied proposal"
+		subject = "meta-mode: applied edit"
 	}
 	return fmt.Sprintf("%s\n\n%s: %s\n", subject, metaSessionTrailer, chatID)
-}
-
-// joinPath is filepath.Join inlined to avoid importing filepath in
-// this file's small footprint. Pure for stable test seams.
-func joinPath(a, b string) string {
-	if a == "" {
-		return b
-	}
-	if b == "" {
-		return a
-	}
-	if strings.HasSuffix(a, "/") {
-		return a + b
-	}
-	return a + "/" + b
 }
 
 // runGitCommit is the default commitRunner. It maps a small set of
@@ -229,7 +189,7 @@ func joinPath(a, b string) string {
 //	commit-amend        args ignored;        amends HEAD with --no-edit
 //	commit-new          args = [message];    creates a new commit
 //
-// dir is repo root (or, for rev-parse-toplevel, AppDir). git -C handles
+// dir is repo root (or, for rev-parse-toplevel, anyDir). git -C handles
 // the rest.
 func runGitCommit(ctx context.Context, op, dir string, args []string) (string, error) {
 	var cmdArgs []string
@@ -258,4 +218,18 @@ func runGitCommit(ctx context.Context, op, dir string, args []string) (string, e
 		return string(out), fmt.Errorf("git %s: %w (output: %s)", op, err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+// OverrideCommitRunner replaces the commitRunner seam (see above) with
+// a stub. Used by tests that want to assert the post-apply commit step
+// was invoked with specific arguments without actually shelling out to
+// git. Returns a restore function the caller must invoke to revert.
+//
+// The package-test seam used to live in authoring_tools_seam.go
+// alongside OverrideApplyRunner / OverrideProposeRunner — those went
+// away with the legacy authoring surface; only this one survives.
+func OverrideCommitRunner(fn func(ctx context.Context, op, dir string, args []string) (string, error)) func() {
+	prev := commitRunner
+	commitRunner = fn
+	return func() { commitRunner = prev }
 }

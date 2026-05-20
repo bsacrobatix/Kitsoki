@@ -2,7 +2,6 @@ package metamode
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,9 +14,7 @@ import (
 
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
-	"kitsoki/internal/authoring"
 	"kitsoki/internal/host"
-	"kitsoki/internal/journal"
 )
 
 // osStat is a package-local indirection so tests can swap the fs
@@ -43,11 +40,6 @@ type Controller struct {
 	// Clock is the time source for Snapshot.EnteredAt (and any future
 	// timestamps). Defaults to time.Now when zero.
 	Clock func() time.Time
-	// JournalWriter, when non-nil, is threaded into each ProposalLedger
-	// created by Enter/New/Resume so ledger lifecycle events (staged /
-	// discarded / applied) emit typed journal entries (continue-mode §4.7 v3).
-	// Nil disables ledger journal writes (back-compat default).
-	JournalWriter journal.Writer
 }
 
 // ChatStore is the controller-facing chat store seam. ResolveMeta
@@ -173,7 +165,6 @@ func (c *Controller) Enter(ctx context.Context, snap Snapshot, modeName string) 
 		Agent:    agent,
 		Chat:     chat,
 		Snapshot: snap,
-		Ledger:   c.newLedger(snap.SessionID),
 	}, nil
 }
 
@@ -319,7 +310,6 @@ func (c *Controller) EnterByChatID(ctx context.Context, snap Snapshot, modeName,
 		Agent:    agent,
 		Chat:     chat,
 		Snapshot: snap,
-		Ledger:   c.newLedger(snap.SessionID),
 	}, nil
 }
 
@@ -374,7 +364,6 @@ func (c *Controller) NewChat(ctx context.Context, s *Session) (*Session, error) 
 		Agent:    s.Agent,
 		Chat:     fresh,
 		Snapshot: s.Snapshot,
-		Ledger:   c.newLedger(s.Snapshot.SessionID),
 	}, nil
 }
 
@@ -548,15 +537,6 @@ func (c *Controller) sendLocked(ctx context.Context, s *Session, userText string
 		ClaudeSessionID: s.Chat.ClaudeSessionID(),
 	}
 
-	// Register the per-session ledger so the host-side
-	// authoring.{propose,apply,discard} handlers can find it by
-	// chat_id, if the agent still emits structured propose tokens.
-	// The dispatcher is dormant when the agent uses direct file
-	// edits (the current story-author protocol); the registration is
-	// kept defensive for legacy chats that resume with old prompts.
-	host.RegisterAuthoringLedger(chatID, ledgerAdapter{l: s.Ledger})
-	defer host.UnregisterAuthoringLedger(chatID)
-
 	// Snapshot the story directory tree before the LLM call so we can
 	// detect direct edits to ANY file in the story (app.yaml, includes,
 	// prompts, scripts) — not just the manifest — and trigger an
@@ -599,12 +579,6 @@ func (c *Controller) sendLocked(ctx context.Context, s *Session, userText string
 		"new_claude_session_id", out.NewClaudeSessionID,
 	)
 
-	// Dormant safety net: if a legacy chat still emits the structured
-	// propose/apply tokens, parse and dispatch them so the resumed
-	// chat keeps working. Modern chats won't trigger any of this
-	// because the prompt no longer documents the protocol.
-	out.Reply = c.dispatchAuthoringCalls(ctx, chatID, out.Reply, turn)
-
 	if out.NewClaudeSessionID != "" && out.NewClaudeSessionID != s.Chat.ClaudeSessionID() {
 		if err := s.Chat.SetClaudeSessionID(out.NewClaudeSessionID); err != nil {
 			return SendResult{Err: err}, fmt.Errorf("metamode.Send: persist claude session id: %w", err)
@@ -617,11 +591,9 @@ func (c *Controller) sendLocked(ctx context.Context, s *Session, userText string
 		return SendResult{Err: err}, fmt.Errorf("metamode.Send: append assistant: %w", err)
 	}
 
-	// Reload trigger #1 (modern): the agent edited ANY file in the story
-	// directory tree (app.yaml, an include, a prompt, a script…) — or
-	// in any imported child story's directory (proposal §16.4).
-	// Reload trigger #2 (legacy): the ledger flipped during the
-	// structured-token dispatch above. Either is sufficient.
+	// Reload trigger: the agent edited ANY file in the story directory
+	// tree (app.yaml, an include, a prompt, a script…) — or in any
+	// imported child story's directory (proposal §16.4).
 	var (
 		changedFiles    []string
 		changedAbsPaths []string
@@ -632,12 +604,12 @@ func (c *Controller) sendLocked(ctx context.Context, s *Session, userText string
 		changedAbsPaths = changedFilesAbsPaths(preTree, postTree, treeRoot)
 	}
 	_ = preStat // kept for symmetry with the legacy single-file diagnostic
-	reload := s.Ledger.ConsumeReload() || len(changedFiles) > 0
+	reload := len(changedFiles) > 0
 
 	// Deterministic post-turn git commit: if the agent's tools
 	// (Edit/Write) touched any file in the watched tree, stage exactly
 	// those paths and commit (or amend, when this chat already owns
-	// HEAD). See internal/host/authoring_commit.go for the protocol.
+	// HEAD). See internal/host/meta_commit.go for the protocol.
 	//
 	// Best-effort — a failed commit does NOT fail the Send turn (the
 	// file edits already landed; we'd corrupt the user's mental model
@@ -952,74 +924,6 @@ func displayKey(k string) string {
 	return base + string(filepath.Separator) + rel
 }
 
-// dispatchAuthoringCalls scans the assistant reply for the Path-Y
-// structured authoring tokens (see host/authoring_tools.go for the
-// grammar), invokes the matching in-process handler for each, and
-// rewrites the reply by replacing each token with a short result
-// summary so the user sees what happened. Errors are captured inline
-// rather than aborting — the agent can recover on the next turn.
-//
-// turn.AppFile (if set) is used as a defense-in-depth default when
-// the agent's propose payload omits app_file. CurrentState /
-// CurrentView in the payload are likewise auto-filled from
-// turn.StatePath / turn.RenderedView when the agent left them blank,
-// so the editing sub-agent always sees the same per-turn context the
-// story-author received.
-func (c *Controller) dispatchAuthoringCalls(ctx context.Context, chatID, reply string, turn TurnContext) string {
-	calls := host.ParseAuthoringCalls(reply)
-	if len(calls) == 0 {
-		return reply
-	}
-
-	rewriter := newReplyRewriter(reply)
-	for _, call := range calls {
-		switch call.Kind {
-		case host.AuthoringCallPropose:
-			var args host.AuthoringProposeArgs
-			if err := json.Unmarshal([]byte(call.Payload), &args); err != nil {
-				rewriter.replaceFirstProposeBlock(fmt.Sprintf("[authoring.propose error: invalid JSON payload: %v]", err))
-				continue
-			}
-			args.ChatID = chatID
-			// Defense-in-depth: auto-fill app_file / current_state /
-			// current_view from the TurnContext when the agent omits
-			// them. The prompt asks the agent to set them; this guards
-			// against a forgetful agent strand.
-			if strings.TrimSpace(args.AppFile) == "" {
-				args.AppFile = turn.AppFile
-			}
-			if strings.TrimSpace(args.CurrentState) == "" {
-				args.CurrentState = turn.StatePath
-			}
-			if strings.TrimSpace(args.CurrentView) == "" {
-				args.CurrentView = turn.RenderedView
-			}
-			out, err := host.AuthoringPropose(ctx, args)
-			if err != nil {
-				rewriter.replaceFirstProposeBlock(fmt.Sprintf("[authoring.propose error: %v]", err))
-				continue
-			}
-			rewriter.replaceFirstProposeBlock(fmt.Sprintf("[proposal %s drafted: %s]", out.ProposalID, out.Summary))
-		case host.AuthoringCallApply:
-			out, err := host.AuthoringApply(ctx, host.AuthoringApplyArgs{ChatID: chatID, ProposalID: call.ProposalID})
-			if err != nil {
-				rewriter.replaceApplyToken(call.ProposalID, fmt.Sprintf("[authoring.apply %s error: %v]", call.ProposalID, err))
-				continue
-			}
-			rewriter.replaceApplyToken(call.ProposalID, fmt.Sprintf("[proposal %s applied: %s]", call.ProposalID, out.Summary))
-		case host.AuthoringCallDiscard:
-			out, err := host.AuthoringDiscard(ctx, host.AuthoringDiscardArgs{ChatID: chatID, ProposalID: call.ProposalID})
-			if err != nil {
-				rewriter.replaceDiscardToken(call.ProposalID, fmt.Sprintf("[authoring.discard %s error: %v]", call.ProposalID, err))
-				continue
-			}
-			_ = out
-			rewriter.replaceDiscardToken(call.ProposalID, fmt.Sprintf("[proposal %s discarded]", call.ProposalID))
-		}
-	}
-	return rewriter.String()
-}
-
 // Exit finalizes a meta-mode session.
 //
 // Disposition of pending proposals (decision flagged in the WS-A3
@@ -1185,18 +1089,6 @@ func absolutiseAgainst(raw, baseDir string) string {
 // listing path.
 func metaRoom(modeName string) string { return "meta:" + modeName }
 
-// newLedger creates a ProposalLedger and, when c.JournalWriter is non-nil,
-// wires the writer and session ID into the ledger for continue-mode
-// journal writes (§4.7 v3). This centralises the wiring so Enter,
-// EnterByChatID, and NewChat all get the same treatment.
-func (c *Controller) newLedger(sid app.SessionID) *ProposalLedger {
-	l := NewProposalLedger()
-	if c.JournalWriter != nil {
-		l.WithLedgerJournalWriter(c.JournalWriter, sid)
-	}
-	return l
-}
-
 // SelfAppID is the synthetic app_id under which kitsoki-target meta
 // chats are stored. It is intentionally not a valid app YAML id (no app
 // could declare `app.id: kitsoki-self` and collide), so chats keyed
@@ -1245,51 +1137,6 @@ func metaScopeKey(modeName, statePath string) string {
 	}
 	return statePath
 }
-
-// ─── ledger adapter (avoids an import cycle metamode→host→metamode) ─────────
-//
-// host.AuthoringLedger / host.LedgerEntry are interfaces declared in
-// the host package so the authoring handlers can mutate a per-session
-// ledger without an import cycle. The two adapter types below bridge
-// *ProposalLedger / *PendingProposal to those interfaces. The
-// Controller registers a ledgerAdapter under the chat id before each
-// Oracle.Ask and de-registers after.
-
-// ledgerAdapter wraps *ProposalLedger as a host.AuthoringLedger.
-type ledgerAdapter struct{ l *ProposalLedger }
-
-func (a ledgerAdapter) Add(p *authoring.Proposal) string {
-	return a.l.Add(p)
-}
-
-func (a ledgerAdapter) Get(id string) (host.LedgerEntry, bool) {
-	pp, ok := a.l.Get(id)
-	if !ok {
-		return nil, false
-	}
-	return entryAdapter{pp: pp}, true
-}
-
-func (a ledgerAdapter) Discard(id string) error {
-	return a.l.Discard(id)
-}
-
-func (a ledgerAdapter) RecordApplied(id string) {
-	a.l.RecordApplied(id)
-}
-
-// entryAdapter wraps *PendingProposal as a host.LedgerEntry.
-type entryAdapter struct{ pp *PendingProposal }
-
-func (a entryAdapter) ProposalID() string              { return a.pp.ID }
-func (a entryAdapter) Underlying() *authoring.Proposal { return a.pp.Proposal }
-
-// Compile-time interface checks so a future field rename trips here
-// rather than at runtime.
-var (
-	_ host.AuthoringLedger = ledgerAdapter{}
-	_ host.LedgerEntry     = entryAdapter{}
-)
 
 // ─── per-turn context preamble ───────────────────────────────────────────────
 //

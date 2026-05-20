@@ -32,15 +32,12 @@
 //     store (via ChatStore adapter) for transcript persistence and the
 //     oracle (via OracleCaller adapter) for the actual LLM dispatch.
 //
-//  4. Pending authoring proposals are session-scoped, tracked on a
-//     ProposalLedger that lives on the Session. WS-A4 will wire the
-//     authoring.{propose,apply,discard} tool handlers into this
-//     ledger; WS-A3 leaves the shape ready but does not implement
-//     those handlers.
-//
-//  5. SendResult.ReloadRequested is the contract WS-A4 and WS-A5 will
-//     use to ask the TUI to reload the orchestrator after a
-//     successful authoring.apply. WS-A3 always sets it false.
+//  4. The agent edits files in the story tree directly via Edit/Write
+//     tools. metamode.sendLocked diffs a pre/post snapshot of the
+//     tree to detect changes, then commits them via
+//     host.CommitChangedFiles (see internal/host/meta_commit.go).
+//     SendResult.ReloadRequested is set whenever an edit lands so the
+//     TUI can reload the orchestrator before the next turn.
 //
 // Resolved imports (the brief listed sketch types; here are the real
 // names used in this codebase):
@@ -89,9 +86,6 @@ type Session struct {
 	// Snapshot is the state captured at Enter — used by the TUI on
 	// Exit to defensively compare against the live orchestrator.
 	Snapshot Snapshot
-	// Ledger tracks authoring proposals raised during this session.
-	// WS-A4 will add/get/discard entries via the controller wiring.
-	Ledger *ProposalLedger
 }
 
 // TurnContext is the per-turn ambient state the TUI threads into
