@@ -804,17 +804,20 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	}
 
 	// Pre-dispatch room-entry hook: when the machine landed us in a new
-	// room (top-level state changed), fire the RoomEnterSink BEFORE the
-	// on_enter chain's host calls so a live TUI can paint the room's
-	// banner above the tool-call breadcrumbs about to stream in. Hook
-	// is a no-op when no sink was installed (the headless path).
-	if o.roomEnterSink != nil && result.NewState != "" {
-		if prev, curr := journey.State.TopLevel(), result.NewState.TopLevel(); prev != curr {
-			if st := o.def.States[string(result.NewState)]; st != nil {
-				env := expr.Env{World: result.World.Vars}
-				if banner := renderRoomBanner(o.def, st, env); banner != "" {
-					o.roomEnterSink.OnRoomEnter(result.NewState, banner)
-				}
+	// state, fire the RoomEnterSink BEFORE the on_enter chain's host
+	// calls so a live TUI can paint the new room's banner above the
+	// tool-call breadcrumbs about to stream in.
+	//
+	// The trigger is ANY state change — including bf.proposing →
+	// bf.implementing where both states share the same TopLevel("core")
+	// but each maps to a different "room" from the user's perspective.
+	// Rooms without a banner element are filtered by the helper
+	// returning "", so non-banner rooms never fire.
+	if o.roomEnterSink != nil && result.NewState != "" && result.NewState != journey.State {
+		if st := o.def.States[string(result.NewState)]; st != nil {
+			env := expr.Env{World: result.World.Vars}
+			if banner := renderRoomBanner(o.def, st, env); banner != "" {
+				o.roomEnterSink.OnRoomEnter(result.NewState, banner)
 			}
 		}
 	}
@@ -846,6 +849,23 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	var harnessErrMsg string
 	if hostRedirect == "" && result.ValidationError == nil {
 		harnessErrMsg = o.settlePostBindEmits(ctx, sid, &result, tl, 0)
+	}
+
+	// Safety net: if no path along the way set result.View (machine.Turn
+	// skipped the initial render because on_enter had binding host calls;
+	// dispatchHostCalls's post-bind render returned ""; settlePostBindEmits
+	// likewise returned ""), force-render the current state here so the
+	// user is never left with a blank transcript entry. Failures are
+	// logged but non-fatal — the operator still gets a turn outcome.
+	if result.View == "" && result.NewState != "" {
+		if v, rErr := o.machine.RenderState(result.NewState, result.World); rErr != nil {
+			o.logger.Warn("orchestrator.fallback_render_failed",
+				slog.String("state", string(result.NewState)),
+				slog.String("err", rErr.Error()),
+			)
+		} else if v != "" {
+			result.View = v
+		}
 	}
 
 	successEvents := append(prefix, result.Events...)
@@ -1311,6 +1331,18 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	view, err := o.machine.RenderState(state, w)
 	if err != nil {
 		return events, w, "", "", fmt.Errorf("orchestrator: re-render after host dispatch: %w", err)
+	}
+	// A nil-error empty view is the silent dead-end mode the user
+	// witnessed on 2026-05-20: the post-bind RenderState returned
+	// ("", nil) and result.View ended up empty (the initial machine.Turn
+	// render skipped because the on_enter chain had host calls that
+	// would bind). Surface the unusual case to the trace so a future
+	// occurrence is diagnosable from the trace alone.
+	if view == "" {
+		o.logger.Warn("orchestrator.post_bind_render_empty",
+			slog.String("state", string(state)),
+			slog.Int("world_keys", len(w.Vars)),
+		)
 	}
 	return events, w, view, "", nil
 }
