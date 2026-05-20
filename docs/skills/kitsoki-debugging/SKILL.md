@@ -72,6 +72,34 @@ If `next_state` is the room the user expects, the bug is fixed (or never existed
 - Skipping a required `propose_fix_artifact` (etc.) on the world doesn't fail the intent — it fails some host call inside the target room's `on_enter:` with a confusing template render error. If you see `effect ... render` errors, your world is incomplete.
 - `--input "..."` routes through the real LLM harness (claude-cli) and burns budget. **Use `--intent` for diagnosis.**
 
+## Step 1.5 — `kitsoki turn` does NOT write `KITSOKI_TRACE_FILE`
+
+The `turn` subcommand has no slog destination wired in. Setting
+`KITSOKI_TRACE_FILE=…` does nothing under `kitsoki turn` — only the TUI
+(`run`) and `session create/continue` write events to the trace file.
+
+What `kitsoki turn` does give you, per call, is the **full JSON output**:
+`host_calls[]` (each with `args`, `data`, and `error` when it failed),
+`effects_applied[]`, `next_state`, `world_before`/`world_after`, and
+`view_rendered`. Aggregate those into your own JSONL if you need to
+inspect a multi-turn drive:
+
+```sh
+kitsoki turn app.yaml --state X --intent Y --world @w.json \
+  | tee -a /tmp/my-turn-trace.jsonl >/dev/null
+```
+
+For multi-turn drives where you want the canonical event stream
+(`turn.start`, `harness.request`, `machine.transition`,
+`host.on_error.redirect`, …) **use `kitsoki session create` +
+`kitsoki session continue --intent <name>`** with
+`KITSOKI_TRACE_FILE=/tmp/foo.jsonl`. The session subcommand persists
+to SQLite and emits the trace events `turn` doesn't.
+
+Trade-off: `session` carries a persistent state machine across calls
+(useful), but you have to think about session keys and locks. `turn`
+is stateless and you thread `--world` yourself between calls.
+
 ## Step 2 — cross-check the trace
 
 `/tmp/kitsoki-dogfood-trace.jsonl` (path is `KITSOKI_TRACE_FILE` env or the TUI's default) is a slog JSONL log. Useful greps:
