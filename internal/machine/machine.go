@@ -749,9 +749,40 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 	}
 
 	// 6b. Apply on_enter effects of the target state (and any entered ancestors).
-	// on_enter fires whenever a state is newly entered (not on self-transitions).
-	if resolvedTarget != string(cur) {
-		entered := stateEnterPathsAware(string(cur), resolvedTarget)
+	//
+	// on_enter fires whenever a state is newly entered. "Newly entered"
+	// means either:
+	//   - resolvedTarget differs from cur (a real transition), OR
+	//   - resolvedTarget equals cur but the author wrote an EXPLICIT
+	//     target (i.e. rawTarget != "."), which is the "re-enter this
+	//     same state with fresh on_enter" idiom used by the bugfix
+	//     `refine:` arcs:
+	//
+	//       refine:
+	//         - target: reproducing      # ← explicit, fires on_enter
+	//           effects: { set: cycle++ }
+	//
+	//       look:
+	//         - target: .                # ← "stay here", on_enter skipped
+	//
+	// Pre-2026-05-20 the test was just `resolvedTarget != cur`, which
+	// silently swallowed the refine arc's intent: the user typed
+	// `refine` in reproducing, the cycle counter bumped, but the oracle
+	// never re-fired and the artifact text stayed identical. The user
+	// described it as "the refinement came back immediately and didn't
+	// change the artifact text."
+	isReEntry := resolvedTarget == string(cur) && strings.TrimSpace(rawTarget) != "." && strings.TrimSpace(rawTarget) != ""
+	if resolvedTarget != string(cur) || isReEntry {
+		var entered []string
+		if isReEntry {
+			// Self-reentry: the regular stateEnterPaths walks oldPath →
+			// newPath and returns nothing when they're equal. Manually
+			// list the state itself (plus any compound ancestors that
+			// would be re-entered — same as the cur path).
+			entered = []string{string(cur)}
+		} else {
+			entered = stateEnterPathsAware(string(cur), resolvedTarget)
+		}
 		for _, enteredPath := range entered {
 			cs, ok := m.states[enteredPath]
 			if !ok || cs.s == nil || len(cs.s.OnEnter) == 0 {
