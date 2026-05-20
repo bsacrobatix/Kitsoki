@@ -464,6 +464,7 @@ func WithResumedJourney(state app.StatePath, w world.World, turn app.TurnNumber)
 		m.currentState = state
 		computedMenu := orchestrator.ComputeMenu(m.orch.AppDef(), m.orch.Machine(), state, w)
 		m.menu, _ = m.menu.Update(menuItemsChanged{items: computedMenu.Primary, blocked: computedMenu.Blocked})
+		m.refreshPromptPlaceholder()
 		loc := orchestrator.ComputeLocation(m.orch.AppDef(), state, w, turn)
 		m.location, _ = m.location.Update(locationUpdated{loc: loc})
 	}
@@ -576,6 +577,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	w := orch.InitialWorld()
 	computedMenu := orchestrator.ComputeMenu(orch.AppDef(), orch.Machine(), m.currentState, w)
 	m.menu, _ = m.menu.Update(menuItemsChanged{items: computedMenu.Primary, blocked: computedMenu.Blocked})
+	m.refreshPromptPlaceholder()
 
 	// Set initial location.
 	loc := orchestrator.ComputeLocation(orch.AppDef(), m.currentState, w, 0)
@@ -2945,6 +2947,7 @@ func (m RootModel) reloadOrchestratorAfterMetaWithFiles(changed []string) (tea.M
 	w := m.orch.CurrentWorld(m.sid)
 	computed := orchestrator.ComputeMenu(m.orch.AppDef(), m.orch.Machine(), m.currentState, w)
 	m.menu, _ = m.menu.Update(menuItemsChanged{items: computed.Primary, blocked: computed.Blocked})
+	m.refreshPromptPlaceholder()
 	loc := orchestrator.ComputeLocation(m.orch.AppDef(), m.currentState, w, 0)
 	m.location, _ = m.location.Update(locationUpdated{loc: loc})
 
@@ -3238,10 +3241,12 @@ func (m RootModel) exitMetaMode() RootModel {
 
 	m.metaMode.Exit()
 	m.mode = ModeOnPath
-	m.prompt.Placeholder = "what now?"
-	// Restore the on-path prefix glyph.
+	// Restore the on-path prefix glyph + a placeholder that advertises
+	// the room's default action (so a bare Enter has a discoverable
+	// meaning).
 	setPromptPrefix(&m.prompt, promptPrefixOnPath)
 	setPromptStyle(&m.prompt, promptStyle)
+	m.refreshPromptPlaceholder()
 	return m
 }
 
@@ -3388,7 +3393,41 @@ func (m RootModel) updateMenuFromAllowed(allowedNames []string, w interface{}) R
 	world := m.orch.CurrentWorld(m.sid)
 	computedMenu := orchestrator.ComputeMenu(m.orch.AppDef(), m.orch.Machine(), m.currentState, world)
 	m.menu, _ = m.menu.Update(menuItemsChanged{items: computedMenu.Primary, blocked: computedMenu.Blocked})
+	m.refreshPromptPlaceholder()
 	return m
+}
+
+// refreshPromptPlaceholder syncs m.prompt.Placeholder to advertise
+// the menu's first primary action — what Enter on an empty prompt
+// will dispatch. Without this hint the placeholder just says "what
+// now?" and the user has no way to know that a bare Enter triggers
+// the room's default action (typically `continue`).
+//
+// The placeholder reads "↵ <intent> · what now?" when there's a
+// primary entry to advertise; falls back to "what now?" otherwise
+// (e.g. a terminal state where no action is in the menu).
+//
+// No-op when the prompt is in a mode that owns its own placeholder
+// — meta-mode ("meta chat — /onpath to return") and the game-over
+// state ("(game over)") shouldn't be silently overwritten by a
+// stale menu refresh.
+func (m *RootModel) refreshPromptPlaceholder() {
+	if m.mode == ModeMeta {
+		return
+	}
+	if m.prompt.Placeholder == "(game over)" {
+		return
+	}
+	def := m.menu.SelectedEntry()
+	if def == nil {
+		m.prompt.Placeholder = "what now?"
+		return
+	}
+	label := def.Intent
+	if def.Display != "" {
+		label = def.Display
+	}
+	m.prompt.Placeholder = "↵ " + label + " · what now?"
 }
 
 func (m RootModel) updateLocation(out *orchestrator.TurnOutcome) RootModel {
