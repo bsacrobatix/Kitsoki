@@ -17,56 +17,53 @@ states:
     description: "dev-story — Independence, Missouri for the engineer's day."
     relevant_world: [ticket_id, ticket_title, ticket_type, last_pr_url, status, inbox_unread, workdir, feature_branch]
 
+    # Flattened view (no extends/blocks) — `choice:` cannot live
+    # inside a `blocks:` map (typed metadata is lost through the
+    # inheritance pipeline; see docs/choice-widget.md §3.1). The
+    # standalone path loses the inherited status / heading chrome
+    # from views/base.pongo; the data plane is preserved as
+    # sibling typed elements.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - prose: >
-              You drive tickets through their pipeline from here. Pick a
-              ticket first, then drive it. Bug tickets route through the
-              bugfix pipeline; feature tickets route through the
-              implementation pipeline — the ticket's type chooses, you
-              don't pick the pipeline yourself.
-        choices:
-          - heading: "Actions"
-          # Every row uses {label, hint} form so the TUI applies the
-          # action-chip style to the bare intent name (style guide §3).
-          # Blocked rows use the `✗` prefix + blocked_reason() hint per
-          # the "Prerequisite" pattern.
-          - list:
-              items:
-                - label: "`tickets`"
-                  hint:  "search for a ticket to pick"
-                - label: "`workspaces`"
-                  hint:  "resume a workspace you already started"
-                - label: "`drive`"
-                  hint:  "push the picked ticket through its pipeline"
-                  when:  "available('drive')"
-                - label: "✗ `drive`"
-                  hint:  "{{ blocked_reason('drive') }}"
-                  when:  "!available('drive')"
-                - label: "`pr`"
-                  hint:  "hand the picked workspace's PR to pr-refinement"
-                  when:  "available('go_pr_refinement')"
-                - label: "✗ `pr`"
-                  hint:  "{{ blocked_reason('go_pr_refinement') }}"
-                  when:  "!available('go_pr_refinement')"
-                - label: "`code review`"
-                  hint:  "review a teammate's PR"
-                - label: "`inbox`"
-                  hint:  "read notifications ({{ world.inbox_unread }} unread)"
-                - label: "`oracle`"
-                  hint:  "ask the LLM a one-shot question"
-                - label: "`standup`"
-                  hint:  "prep today's standup summary"
-                # `deploy`, `observability`, `incident`, `docs` are stubs;
-                # consolidated under one short hint instead of a mega-
-                # label so the list's max_label stays sane (a 49-char
-                # row forces every other row's hint column down to ~23
-                # chars and surfaces as cross-row wrap).
-                - label: "`stubs`"
-                  hint:  "deploy · observability · incident · docs (not wired)"
-                - label: "`look`"
+      - prose: >
+          You drive tickets through their pipeline from here. Pick a
+          ticket first, then drive it. Bug tickets route through the
+          bugfix pipeline; feature tickets route through the
+          implementation pipeline — the ticket's type chooses, you
+          don't pick the pipeline yourself.
+      # The `drive` / `pr` rows use the two-rows-same-intent pattern
+      # (cookbook §2.2) so the operator sees *why* an action is
+      # unavailable. The per-item `when:` guards mirror what the
+      # underlying `on:` arcs already enforce — the dispatch result
+      # stays in sync with the affordability hint.
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "tickets",    intent: go_ticket_search,     hint: "search for a ticket to pick" }
+            - { label: "workspaces", intent: go_workspace_manager, hint: "resume a workspace you already started" }
+            - label: "drive"
+              intent: drive
+              hint:   "push the picked ticket through its pipeline"
+              when:   "available('drive')"
+            - label: "✗ drive — {{ blocked_reason('drive') }}"
+              intent: drive
+              when:   "!available('drive')"
+            - label: "pr"
+              intent: go_pr_refinement
+              hint:   "hand the picked workspace's PR to pr-refinement"
+              when:   "available('go_pr_refinement')"
+            - label: "✗ pr — {{ blocked_reason('go_pr_refinement') }}"
+              intent: go_pr_refinement
+              when:   "!available('go_pr_refinement')"
+            - { label: "code review",    intent: go_code_review,   hint: "review a teammate's PR" }
+            - { label: "inbox",          intent: go_inbox,         hint: "read notifications ({{ world.inbox_unread }} unread)" }
+            - { label: "oracle",         intent: go_oracle,        hint: "ask the LLM a one-shot question" }
+            - { label: "standup",        intent: go_standup,       hint: "prep today's standup summary" }
+            - { label: "deploy",         intent: go_deploy,        hint: "stub (Wave 3)" }
+            - { label: "observability",  intent: go_observability, hint: "stub (Wave 3)" }
+            - { label: "incident",       intent: go_incident,      hint: "stub (Wave 3)" }
+            - { label: "docs",           intent: go_docs,          hint: "stub (Wave 3)" }
+            - { label: "look",           intent: look,             hint: "re-render the room" }
 
     on:
       go_ticket_search:

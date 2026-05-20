@@ -1,0 +1,13 @@
+# form_required — submit with a non-empty value; effects fire. Commit
+# advances to form_bounds.
+test_kind: flow
+app: ../app.yaml
+initial_state: form_required
+
+turns:
+  - intent: { name: submit_required_form, slots: { value: "filled" } }
+    expect_state: form_bounds
+    expect_world:
+      form_required_value: "filled"
+
+expect_no_errors: true

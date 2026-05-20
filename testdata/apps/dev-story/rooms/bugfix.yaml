@@ -3,24 +3,25 @@
 states:
   bugfix:
     description: "Bug Fix Room — work through the reproduce-localize-fix-verify cycle."
+    # Flattened view: `choice:` is not allowed inside `blocks:`, so we
+    # drop the extends/blocks chrome and inline the body as sibling
+    # elements. The base.pongo status block is lost — acceptable cost
+    # for the lifecycle picker affordance.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Workspace: "{{ world.current_workspace }}"
-          - prose: "Steps: reproduce → localize → apply fix → verify → open PR"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - { label: "reproduce bug", hint: "failing test or repro script" }
-                - { label: "localize bug",  hint: "trace logs / code to root cause" }
-                - { label: "apply fix",     hint: "minimal change" }
-                - { label: "verify fix",    hint: "re-run repro + related tests" }
-                - { label: "open pr",       hint: "hand off to PR room" }
-                - { label: "go back",       hint: "return to previous room" }
+      - kv:
+          pairs:
+            Workspace: "{{ world.current_workspace }}"
+      - prose: "Steps: reproduce → localize → apply fix → verify → open PR"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "reproduce bug", intent: reproduce_bug, hint: "failing test or repro script" }
+            - { label: "localize bug",  intent: localize_bug,  hint: "trace logs / code to root cause" }
+            - { label: "apply fix",     intent: apply_fix,     hint: "minimal change" }
+            - { label: "verify fix",    intent: verify_fix,    hint: "re-run repro + related tests" }
+            - { label: "open pr",       intent: open_pr,       hint: "hand off to PR room" }
+            - { label: "go back",       intent: go_back,       hint: "return to previous room" }
     relevant_world: [current_workspace, proposal_result]
     relevant_slots: []
     on:

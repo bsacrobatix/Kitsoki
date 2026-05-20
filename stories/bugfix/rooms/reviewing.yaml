@@ -5,33 +5,51 @@
 states:
 
   reviewing:
-    description: "Starting reviewing — self-review the diff (code + security); advance to validating."
+    description: "Self-review the diff (code + security); advance to validating."
+    # Flattened view (no extends/blocks chrome) — `choice:` cannot live
+    # inside a `blocks:` map. The base.pongo status line is inlined.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - banner:
-              text:     "REVIEWING"
-              subtitle: "Phase 5 / 7  ·  self-review the diff (code + security)"
-              color:    "#F43F5E"   # rose — review under scrutiny
-          - kv:
-              pairs:
-                Ticket:  '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
-                Summary: '{{ world.implement_review_artifact.summary_title|default:"(pending)" }}'
-                Status:  '{{ world.implement_review_artifact.status|default:"(pending)" }}'
-          - heading: "Artifact"
-          - code: '{{ world.implement_review_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "continue"
-                  hint:  "advance to validating"
-                - label: "restart_from stage=…"
-                  hint:  "bounce back to an earlier room"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - banner:
+          text:     "REVIEWING"
+          subtitle: "Phase 5 / 7  ·  self-review the diff (code + security)"
+          color:    "#F43F5E"   # rose — review under scrutiny
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
+      - kv:
+          pairs:
+            Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Summary: '{{ world.implement_review_artifact.summary_title|default:"(pending)" }}'
+            Status:  '{{ world.implement_review_artifact.status|default:"(pending)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.implement_review_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "continue"
+              hint:   "advance to validating"
+              intent: accept
+            - label:  "restart from reproducing"
+              hint:   "bounce back to phase 1 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: reproducing }
+            - label:  "restart from proposing"
+              hint:   "bounce back to phase 2 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: proposing }
+            - label:  "restart from implementing"
+              hint:   "bounce back to phase 3 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: implementing }
+            - label:  "restart from testing"
+              hint:   "bounce back to phase 4 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: testing }
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
     relevant_world: [ticket_id, ticket_title, workdir, implement_review_artifact]
     on_enter:
       - invoke: iface.vcs.diff

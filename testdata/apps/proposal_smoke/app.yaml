@@ -63,9 +63,26 @@ intents:
 states:
   terminal:
     description: "Terminal Room — propose and run commands."
-    view: |
-      Terminal Room. Stage: {{ world.stage }}
-      Last exit code: {{ world.last_exit_code }}
+    # Two-row single picker: propose carries a free-form `cmd` slot, so
+    # it gets a `param:` block; cancel is bare. The prose status line
+    # remains a sibling element so view chrome data is preserved.
+    view:
+      - prose: |
+          Terminal Room. Stage: {{ world.stage }}
+          Last exit code: {{ world.last_exit_code }}
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "propose"
+              hint:   "draft a shell command to run"
+              intent: propose
+              param:
+                slot:        cmd
+                type:        string
+                placeholder: "e.g. ls -la"
+                required:    true
+            - { label: "cancel", intent: cancel, hint: "reset to idle" }
     on:
       propose:
         - target: reviewing
@@ -81,8 +98,18 @@ states:
 
   reviewing:
     description: "Review the proposed command before executing."
-    view: |
-      Reviewing proposal. Stage: {{ world.stage }}
+    # Verdict picker: accept / retry / cancel — the canonical
+    # three-option proposal-review pattern from docs/choice-widget.md
+    # §2.1. Zero-slot intents render as flat label/hint rows.
+    view:
+      - prose: "Reviewing proposal. Stage: {{ world.stage }}"
+      - choice:
+          mode: single
+          prompt: "How do you respond?"
+          items:
+            - { label: "accept", intent: accept, hint: "execute the proposed command" }
+            - { label: "retry",  intent: retry,  hint: "redraft from the same starting point" }
+            - { label: "cancel", intent: cancel, hint: "drop the proposal" }
     on:
       accept:
         - target: terminal

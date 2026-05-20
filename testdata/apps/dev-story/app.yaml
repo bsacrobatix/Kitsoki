@@ -167,6 +167,18 @@ intents:
     examples: ["fix", "have claude fix it", "repair", "ask claude"]
     priority: 82
 
+  # Workspace category picker (wizard split — workspace_room → sub-state)
+  pick_category:
+    title: "Pick Category"
+    description: "Open one of the workspace sub-menus (actions / engineering / project)."
+    examples: ["actions", "engineering", "project"]
+    priority: 75
+    slots:
+      category:
+        type: string
+        required: true
+        description: "Which sub-menu to open: actions | engineering | project."
+
   # Workspace actions
   open_vscode:
     title: "Open VS Code"

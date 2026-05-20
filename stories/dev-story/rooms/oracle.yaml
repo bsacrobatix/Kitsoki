@@ -2,28 +2,41 @@
 # a single ask_question intent that fires host.oracle.ask_with_mcp and
 # binds the answer. The existing pattern (testdata/apps/dev-story/
 # rooms/oracle.yaml) has multi-turn chat surfaces; Wave 3 ports those.
+#
+# Per docs/choice-widget.md §1 the oracle is an open-ended chat
+# surface — the canonical "type your question" mode is still the
+# semroute path. We expose `ask_question` here as a `single + param:`
+# row anyway so operators driving by widget have a deterministic entry,
+# but a free-typed prose question continues to route through the
+# semantic router and lands on this same intent.
 
 states:
 
   oracle:
     description: "Oracle — Q&A with Claude."
+    # Flattened view (no extends/blocks) — `choice:` cannot live inside a
+    # `blocks:` map (typed metadata is lost through the inheritance
+    # pipeline; see docs/choice-widget.md §3.1).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                "Last question": '{{ world.oracle_question|default:"(none)" }}'
-                "Last answer":   '{{ world.oracle_answer|default:"(none)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "ask_question question=<…>"
-                  hint:  "fire one Oracle query"
-                - label: "go_back"
-                - label: "go_main"
-                - label: "look"
+      - kv:
+          pairs:
+            "Last question": '{{ world.oracle_question|default:"(none)" }}'
+            "Last answer":   '{{ world.oracle_answer|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "ask_question"
+              intent: ask_question
+              hint:   "fire one Oracle query"
+              param:
+                slot:        question
+                type:        string
+                placeholder: "what do you want to ask?"
+                required:    true
+            - { label: "go_back", intent: go_back, hint: "return to the previous room" }
+            - { label: "go_main", intent: go_main, hint: "back to the engineer's day landing" }
+            - { label: "look",    intent: look,    hint: "re-render" }
     relevant_world: [oracle_question, oracle_answer]
     on:
       ask_question:
@@ -39,21 +52,19 @@ states:
 
   oracle_asking:
     description: "Querying the Oracle."
+    # Flattened view (see above).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Question: "{{ world.oracle_question }}"
-                Answer:   '{{ world.oracle_answer|default:"(pending — oracle has not returned yet)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "go_back"
-                - label: "go_main"
-                - label: "look"
+      - kv:
+          pairs:
+            Question: "{{ world.oracle_question }}"
+            Answer:   '{{ world.oracle_answer|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "go_back", intent: go_back, hint: "return to oracle" }
+            - { label: "go_main", intent: go_main, hint: "back to the engineer's day landing" }
+            - { label: "look",    intent: look,    hint: "re-render" }
     relevant_world: [oracle_question, oracle_answer]
     on_enter:
       - invoke: host.oracle.ask_with_mcp

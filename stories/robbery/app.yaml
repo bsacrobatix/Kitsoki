@@ -103,52 +103,56 @@ root: encounter
 states:
   encounter:
     description: "A masked rider blocks the trail."
-    # Typed view with block inheritance. `extends: "base"` resolves
-    # against robbery/views/base.pongo when this story runs STANDALONE,
-    # and against the HOST's views/base.pongo when robbery is imported
-    # (frontier_event → oregon-trail). Both base templates declare the
-    # shared block convention (status / heading / body / choices /
-    # footer), so the same room composes into either context — host's
-    # status chrome wins when imported; robbery's minimal status fills
-    # in standalone. See views/base.pongo for the design note.
+    # Choice-widget canary (proposal §6 row #1). The previous version
+    # used `view: { extends: "base", blocks: { heading, body, choices } }`
+    # to inherit a shared status-line chrome, but §4.5 forbids a
+    # `choice:` element inside `blocks:` — typed metadata is lost
+    # through the inheritance pipeline. The pragmatic path until the
+    # View shape grows an `{extends, blocks, elements}` triplet is to
+    # inline the prose and status line as a sibling typed-element
+    # array. The importer-host path (frontier_event → oregon-trail) is
+    # unaffected because hosts supply their own status chrome via
+    # their `base.pongo`; the standalone path loses the borders/glyph
+    # treatment from `views/base.pongo` but keeps the data plane.
     view:
-      extends: "base"
-      blocks:
-        heading:
-          - heading: "Holdup on the trail"
-        body:
-          # First paragraph: the scene. Reflows to viewport width.
-          - prose: >
-              A masked rider on a sorrel pony blocks the road, rifle
-              across the saddle.
-          # Second paragraph: the demand. Kept as its own prose element
-          # so the quote sits in its own paragraph with a blank line
-          # above. The price scales with threat_level.
-          - prose: '"{{ world.threat_level * 50 }} dollars or there''ll be trouble."'
-        choices:
-          - heading: "Actions"
-          # Typed list with hint column. `pay` carries a per-item
-          # `when:` showing the affordability hint only when the party
-          # cannot afford the tribute; expr-lang evaluates against the
-          # same env as the transition guards, so the hint mirrors the
-          # `world.party_money >= world.threat_level * 50` arm above.
-          # `fight` always fires (the default arm routes to @exit:killed
-          # when under-strength), so no per-item guard there — the
-          # outcome is the player's choice, not an availability gate.
-          - list:
-              items:
-                - label: "pay"
-                  hint:  "buy them off ({{ world.threat_level * 50 }})"
-                  when:  "world.party_money >= world.threat_level * 50"
-                - label: "pay"
-                  hint:  "not enough money ({{ world.threat_level * 50 }} needed)"
-                  when:  "world.party_money < world.threat_level * 50"
-                - label: "fight"
-                  hint:  "shoot it out (party_alive >= {{ 2 + world.threat_level }} to win)"
-                - label: "flee"
-                  hint:  "ride off without engaging"
-                - label: "look"
-                  hint:  "re-render the scene"
+      - prose: "Party: {{ world.party_alive }} alive  |  ${{ world.party_money }}  |  Threat: {{ world.threat_level }}/3"
+      - heading: "Holdup on the trail"
+      # First paragraph: the scene. Reflows to viewport width.
+      - prose: >
+          A masked rider on a sorrel pony blocks the road, rifle
+          across the saddle.
+      # Second paragraph: the demand. Kept as its own prose element so
+      # the quote sits in its own paragraph with a blank line above.
+      # The price scales with threat_level.
+      - prose: '"{{ world.threat_level * 50 }} dollars or there''ll be trouble."'
+      # Authored decision set, single-mode. Each item's `intent:`
+      # resolves against the surrounding on: arc map below; no
+      # pre-bound slots are needed since the underlying intents are
+      # zero-slot. The two pay rows are mutually exclusive via `when:`
+      # guards on the same expression the engine's pay/0 transition
+      # arm uses (world.party_money >= world.threat_level * 50), so
+      # the affordability hint matches the actual dispatch result.
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "pay"
+              hint:   "buy them off (${{ world.threat_level * 50 }})"
+              intent: pay
+              when:   "world.party_money >= world.threat_level * 50"
+            - label:  "pay ✗"
+              hint:   "not enough money (${{ world.threat_level * 50 }} needed)"
+              intent: pay
+              when:   "world.party_money < world.threat_level * 50"
+            - label:  "fight"
+              hint:   "shoot it out (party_alive >= {{ 2 + world.threat_level }} to win)"
+              intent: fight
+            - label:  "flee"
+              hint:   "ride off without engaging"
+              intent: flee
+            - label:  "look"
+              hint:   "re-render the scene"
+              intent: look
     relevant_world: [party_money, party_alive, threat_level]
     on_enter:
       # Exercises the multi-op host_interface (proposal §11.1):

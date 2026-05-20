@@ -12,29 +12,26 @@ states:
 
   open_pr:
     description: "Opening the PR (or recognising an existing one)."
+    # Flattened view (choice-widget proposal §4.5).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:           '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
-                "Feature branch": '{{ world.feature_branch|default:"(none)" }}'
-                "Base branch":    "{{ world.base_branch }}"
-                Workspace:        '{{ world.workdir|default:"(none)" }}'
-                "PR id":          '{{ world.pr_id|default:"(pending)" }}'
-                "PR url":         '{{ world.pr_url|default:"(pending)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "proceed"
-                  hint:  "start monitoring CI"
-                - label: "monitor"
-                  hint:  "alias for proceed"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - kv:
+          pairs:
+            Ticket:           "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            "Feature branch": '{{ world.feature_branch|default:"(none)" }}'
+            "Base branch":    "{{ world.base_branch }}"
+            Workspace:        '{{ world.workdir|default:"(none)" }}'
+            "PR id":          '{{ world.pr_id|default:"(pending)" }}'
+            "PR url":         '{{ world.pr_url|default:"(pending)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              hint:   "start monitoring CI"
+              intent: proceed
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
     relevant_world: [ticket_id, ticket_title, feature_branch, base_branch, workdir, pr_id, pr_url]
     on_enter:
       # Open the PR. iface.vcs.open_pr → host.git.open_pr in the

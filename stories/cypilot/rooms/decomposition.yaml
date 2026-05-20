@@ -7,31 +7,42 @@
 # have a separate semantic-validate step today — the plan files ARE the
 # output and the LLM-judge prompt reads the phase listing as its
 # verdict input.
+#
+# Views flattened from extends:"base" + blocks because choice-widget
+# proposal §4.5 / §8 forbids `choice:` inside blocks.
 
 states:
 
   decomposition_executing:
     description: "Decomposing the PRD via cpt plan."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                "Parent PRD":  '{{ world.prd_artifact.id|default:"(unknown)" }}'
-                "Plan path":   '{{ world.decomposition_artifact.plan_path|default:"(pending)" }}'
-                "Phase count": '{{ world.decomposition_artifact.phase_count|default:0 }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "proceed"
-                  hint:  "deliver the plan to the checkpoint"
-                - label: "refine feedback=…"
-                  hint:  "re-run cpt plan with feedback"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.feature_slug|default:"(no feature)" }} ({{ world.feature_index }}/{{ world.feature_count }})  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "{{ state.description }}"
+      - kv:
+          pairs:
+            "Parent PRD":  '{{ world.prd_artifact.id|default:"(unknown)" }}'
+            "Plan path":   '{{ world.decomposition_artifact.plan_path|default:"(pending)" }}'
+            "Phase count": '{{ world.decomposition_artifact.phase_count|default:0 }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              hint:   "deliver the plan to the checkpoint"
+              intent: proceed
+            - label:  "refine"
+              hint:   "re-run cpt plan with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              intent: look
     relevant_world: [prd_artifact, decomposition_artifact, feature_count, cycle]
     on_enter:
       - invoke: iface.artifact.decompose
@@ -65,28 +76,36 @@ states:
   decomposition_awaiting_reply:
     description: "Decomposition plan posted; awaiting verdict."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:        "{{ world.ticket_id }}"
-                "Plan path":   '{{ world.decomposition_artifact.plan_path|default:"(none)" }}'
-                "Phase count": "{{ world.feature_count }}"
-                Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-                Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
-                Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "accept"
-                  hint:  "advance to the first feature"
-                - label: "refine feedback=…"
-                  hint:  "bounce back to decomposition_executing with feedback"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.feature_slug|default:"(no feature)" }} ({{ world.feature_index }}/{{ world.feature_count }})  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "{{ state.description }}"
+      - kv:
+          pairs:
+            Ticket:        "{{ world.ticket_id }}"
+            "Plan path":   '{{ world.decomposition_artifact.plan_path|default:"(none)" }}'
+            "Phase count": "{{ world.feature_count }}"
+            Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+            Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
+            Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "accept"
+              hint:   "advance to the first feature"
+              intent: accept
+            - label:  "refine"
+              hint:   "bounce back to decomposition_executing with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              intent: look
     relevant_world: [judge_mode, ticket_id, decomposition_artifact, feature_count, llm_verdict, cycle]
     on_enter:
       - invoke: iface.transport.post

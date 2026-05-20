@@ -5,33 +5,39 @@
 # concise normalisation of the task into "what to build" + acceptance
 # criteria + scope. The checkpoint gates whether the operator agrees
 # with the understanding before any code is written.
+#
+# Flattened away from `extends: "base"` (choice-widget proposal §4.5 /
+# §8): a `choice:` element cannot live inside `blocks:`. The base.pongo
+# status line is inlined as the leading prose element.
 
 states:
 
   review_task_executing:
     description: "Reviewing the task and drafting a task-summary artifact."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:                '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
-                Summary:               '{{ world.task_summary_artifact.summary_title|default:"(pending)" }}'
-                "Acceptance criteria": '{{ world.task_summary_artifact.acceptance_criteria|default:"(pending)" }}'
-          - heading: "Artifact"
-          - code: '{{ world.task_summary_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "proceed"
-                  hint:  "deliver the task summary to the checkpoint"
-                - label: "restart_from stage=…"
-                  hint:  "bounce back to re-run review_task"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.workdir|default:"(no workspace)" }}  ·  {{ world.feature_branch|default:"(no branch)" }}  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "Reviewing the task"
+      - kv:
+          pairs:
+            Ticket:                "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Summary:               '{{ world.task_summary_artifact.summary_title|default:"(pending)" }}'
+            "Acceptance criteria": '{{ world.task_summary_artifact.acceptance_criteria|default:"(pending)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.task_summary_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "proceed", intent: proceed, hint: "deliver the task summary to the checkpoint" }
+            - label:  "restart_from"
+              intent: restart_from
+              hint:   "bounce back to an earlier stage"
+              param:
+                slot:        stage
+                type:        string
+                placeholder: "e.g. review_task"
+            - { label: "quit", intent: quit, hint: "abandon the pipeline" }
+            - { label: "look", intent: look, hint: "re-render" }
     relevant_world: [ticket_id, ticket_title, ticket_body, task_summary_artifact, cycle]
     on_enter:
       # Fetch the ticket. The default host.local_files.ticket binding
@@ -79,30 +85,37 @@ states:
   review_task_awaiting_reply:
     description: "Task summary posted; awaiting verdict."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:     '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
-                Verdict:    '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-                Confidence: '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
-                Reason:     '{{ world.llm_verdict.reason|default:"(none)" }}'
-          - heading: "Artifact"
-          - code: '{{ world.task_summary_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "accept"
-                  hint:  "advance to write_code"
-                - label: "refine feedback=…"
-                  hint:  "re-draft the task summary with feedback"
-                - label: "restart_from stage=…"
-                  hint:  "bounce back to an earlier room"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.workdir|default:"(no workspace)" }}  ·  {{ world.feature_branch|default:"(no branch)" }}  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "Task summary — awaiting verdict"
+      - kv:
+          pairs:
+            Ticket:     "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Verdict:    '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+            Confidence: '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
+            Reason:     '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.task_summary_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "accept", intent: accept, hint: "advance to write_code" }
+            - label:  "refine"
+              intent: refine
+              hint:   "re-draft the task summary with feedback"
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+            - label:  "restart_from"
+              intent: restart_from
+              hint:   "bounce back to an earlier stage"
+              param:
+                slot:        stage
+                type:        string
+                placeholder: "e.g. review_task"
+            - { label: "quit", intent: quit, hint: "abandon the pipeline" }
+            - { label: "look", intent: look, hint: "re-render" }
     relevant_world: [judge_mode, ticket_id, task_summary_artifact, llm_verdict, cycle]
     on_enter:
       - invoke: iface.transport.post

@@ -2034,6 +2034,9 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 	return &TurnOutcome{
 		Mode:           mode,
 		View:           result.View,
+		TypedView:      result.TypedView,
+		RenderEnv:      result.RenderEnv,
+		Renderer:       result.Renderer,
 		NewState:       result.NewState,
 		Events:         successEvents,
 		AllowedIntents: newAllowedNames,
@@ -2431,6 +2434,11 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 				allowedNames = append(allowedNames, a.Name)
 			}
 		}
+		// Rejection path: TypedView/RenderEnv/Renderer intentionally
+		// omitted. The state did not transition (NewState == journey.State),
+		// so the TUI keeps rendering the current room's typed view from the
+		// last successful outcome. Re-emitting them here would be a no-op at
+		// best and risk shadowing in-progress widget focus at worst.
 		return &TurnOutcome{
 			Mode:         ModeRejected,
 			NewState:     journey.State,
@@ -2529,6 +2537,9 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 	return &TurnOutcome{
 		Mode:           mode,
 		View:           result.View,
+		TypedView:      result.TypedView,
+		RenderEnv:      result.RenderEnv,
+		Renderer:       result.Renderer,
 		NewState:       result.NewState,
 		Events:         successEvents,
 		AllowedIntents: newAllowedNames,

@@ -1,0 +1,18 @@
+# multi_templated — seed day + money so templated labels resolve.
+# Submit two LITERAL trait values (multi-mode values must be literals
+# per proposal §4.4(5) — the widget refuses to materialize templated
+# values). Commit advances to form_basic (start of form-mode chain).
+test_kind: flow
+app: ../app.yaml
+initial_state: multi_templated
+initial_world:
+  day:   4
+  money: 80
+
+turns:
+  - intent: { name: chose_templated_traits, slots: { traits: [brave, kind] } }
+    expect_state: form_basic
+    expect_world:
+      picked_templated: [brave, kind]
+
+expect_no_errors: true

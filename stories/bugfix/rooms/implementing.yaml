@@ -15,49 +15,52 @@
 states:
 
   implementing:
-    description: "Starting implementing — apply the proposed fix to the workspace; advance to testing."
+    description: "Apply the proposed fix to the workspace; advance to testing."
+    # Flattened view (no extends/blocks chrome) — `choice:` cannot live
+    # inside a `blocks:` map. The base.pongo status line is inlined.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - banner:
-              text:     "IMPLEMENTING"
-              subtitle: "Phase 3 / 7  ·  apply the proposed fix to the workspace"
-              color:    "#8B5CF6"   # violet — doing the work
-          - kv:
-              pairs:
-                Ticket:           '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
-                Workspace:        '{{ world.workspace_id|default:"(none)" }} ({{ world.workdir|default:"(no path)" }})'
-                "Feature branch": '{{ world.feature_branch|default:"(none)" }}'
-                Applied:          '{{ world.implement_artifact.summary_title|default:"(pending — oracle has not returned yet)" }}'
-                Status:           '{% if world.implement_artifact.applied == false %}blocked{% elif world.implement_artifact.summary_title %}applied{% else %}(pending){% endif %}'
-                Files:            '{{ world.implement_artifact.files_changed|default:"(none recorded)" }}'
-          - heading: "Artifact"
-          - code: '{{ world.implement_artifact.summary_markdown|default:"(no implementation body — oracle pending or failed)" }}'
-          # Bare `when: "world.x"` triggers truthy() in
-          # internal/render/elements/element.go — nil / empty-slice /
-          # empty-map / empty-string are all falsy; anything else is
-          # truthy. Before truthy() landed, expr-lang's bool([]any)
-          # threw "invalid operation" and the orchestrator's post-bind
-          # render path silently dropped the view to "" (the
-          # "we dead-ended" symptom in the 2026-05-20 trace).
-          - heading: "Blockers"
-            when:  "world.implement_artifact.blockers"
-          - code: |
-              {% for b in world.implement_artifact.blockers %}- {{ b }}
-              {% endfor %}
-            when: "world.implement_artifact.blockers"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "continue"
-                  hint:  "advance to testing"
-                - label: "restart_from stage=…"
-                  hint:  "bounce back to reproducing or proposing"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - banner:
+          text:     "IMPLEMENTING"
+          subtitle: "Phase 3 / 7  ·  apply the proposed fix to the workspace"
+          color:    "#8B5CF6"   # violet — doing the work
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
+      - kv:
+          pairs:
+            Ticket:           "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Workspace:        '{{ world.workspace_id|default:"(none)" }} ({{ world.workdir|default:"(no path)" }})'
+            "Feature branch": '{{ world.feature_branch|default:"(none)" }}'
+            Applied:          '{{ world.implement_artifact.summary_title|default:"(pending — oracle has not returned yet)" }}'
+            Status:           '{% if world.implement_artifact.applied == false %}blocked{% elif world.implement_artifact.summary_title %}applied{% else %}(pending){% endif %}'
+            Files:            '{{ world.implement_artifact.files_changed|default:"(none recorded)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.implement_artifact.summary_markdown|default:"(no implementation body — oracle pending or failed)" }}'
+      - heading: "Blockers"
+        when:  "world.implement_artifact.blockers"
+      - code: |
+          {% for b in world.implement_artifact.blockers %}- {{ b }}
+          {% endfor %}
+        when: "world.implement_artifact.blockers"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "continue"
+              hint:   "advance to testing"
+              intent: accept
+            - label:  "restart from reproducing"
+              hint:   "bounce back to phase 1 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: reproducing }
+            - label:  "restart from proposing"
+              hint:   "bounce back to phase 2 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: proposing }
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
     relevant_world: [ticket_id, ticket_title, workspace_id, workdir, feature_branch, propose_fix_artifact, implement_artifact]
     on_enter:
       # Self-heal the workspace before we touch it. bf.idle's auto-

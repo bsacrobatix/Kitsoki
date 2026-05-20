@@ -27,38 +27,63 @@
 states:
 
   testing:
-    description: "Starting testing — run + review tests for the applied fix; advance to reviewing (or done in quick mode)."
+    description: "Run + review tests for the applied fix; advance to reviewing (or done in quick mode)."
+    # Flattened view (no extends/blocks chrome) — `choice:` cannot live
+    # inside a `blocks:` map. The base.pongo status line is inlined.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - banner:
-              text:     "TESTING"
-              subtitle: "Phase 4 / 7  ·  run + review tests against the applied fix"
-              color:    "#F59E0B"   # amber — caution
-          - kv:
-              pairs:
-                Ticket:  '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
-                Summary: '{{ world.implement_review_artifact.summary_title|default:"(pending)" }}'
-                Status:  '{{ world.implement_review_artifact.status|default:"(pending)" }}'
-          - heading: "Artifact"
-          - code: '{{ world.implement_review_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "continue"
-                  # Hint reflects the status-aware routing in `on.accept`
-                  # below. Default branch covers passed + the
-                  # legacy/missing-status shape.
-                  hint:  '{% if world.implement_review_artifact.status == "failed" %}return to implementing — patch the fix{% elif world.implement_review_artifact.status == "blocked" %}return to implementing — suite couldn''t decide{% elif world.bugfix_mode == "quick" %}post and advance to done (quick mode){% else %}post and advance to reviewing{% endif %}'
-                - label: "refine feedback=…"
-                  hint:  "re-run tests with feedback"
-                - label: "restart_from stage=…"
-                  hint:  "bounce back to an earlier room"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - banner:
+          text:     "TESTING"
+          subtitle: "Phase 4 / 7  ·  run + review tests against the applied fix"
+          color:    "#F59E0B"   # amber — caution
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
+      - kv:
+          pairs:
+            Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Summary: '{{ world.implement_review_artifact.summary_title|default:"(pending)" }}'
+            Status:  '{{ world.implement_review_artifact.status|default:"(pending)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.implement_review_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "continue"
+              hint:   "post and advance to reviewing (or done in quick mode)"
+              intent: accept
+            - label:  "refine"
+              hint:   "re-run tests with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to redo"
+                required:    false
+            - label:  "restart from reproducing"
+              hint:   "bounce back to phase 1 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: reproducing }
+            - label:  "restart from proposing"
+              hint:   "bounce back to phase 2 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: proposing }
+            - label:  "restart from implementing"
+              hint:   "bounce back to phase 3 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: implementing }
+            - label:  "jump to validating"
+              hint:   "skip ahead (audited)"
+              intent: jump_to
+              slots:  { stage: validating }
+            - label:  "jump to done"
+              hint:   "skip to close-out (audited)"
+              intent: jump_to
+              slots:  { stage: done }
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
     relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, implement_review_artifact, propose_fix_artifact, ci_log, llm_verdict, refine_feedback, cycle, bugfix_mode]
     on_enter:
       # Run tests against the change. iface.ci.run_tests is wired by

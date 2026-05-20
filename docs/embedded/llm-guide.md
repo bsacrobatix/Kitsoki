@@ -500,6 +500,14 @@ What to remember when writing apps:
   turn. See `kitsoki docs app-schema §Background jobs` for the lifecycle,
   injected world variables (`last_job_id`, `last_job_status`, `last_job_result`),
   the same-turn race, and the mid-flight clarification flow.
+- **Interactive `choice:` widget.** If a state's typed `view:` declares a
+  `choice` element, the TUI auto-focuses an inline interactive picker —
+  single-pick, multi-select, or mad-lib form — that dispatches an intent
+  through the same `SubmitDirect` path the action menu uses. Flow tests,
+  `kitsoki turn`, and non-TUI transports bypass the widget and submit the
+  underlying intent directly; the same `app.yaml` runs everywhere. See
+  `kitsoki docs app-schema §choice` for the field reference and
+  `docs/choice-widget.md` for the author cookbook.
 
 ## 10. Error codes you will see (and how to react)
 

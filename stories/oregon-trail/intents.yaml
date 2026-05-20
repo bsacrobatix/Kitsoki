@@ -817,6 +817,116 @@ intents:
     examples: ["back", "return", "go back"]
     priority: 25
 
+  edit_step:
+    title: "Edit a setup step"
+    description: "Jump back to an earlier intro-wizard step (profession, month, or names) from the summary screen."
+    examples: ["change profession", "edit month", "rename party"]
+    priority: 30
+    slots:
+      step:
+        type: enum
+        required: true
+        values: [profession, month, names]
+        description: "Which wizard step to return to."
+        examples: ["profession", "month", "names"]
+        format_hint: "One of: profession, month, names."
+        prompt: "Which step do you want to change?"
+
+  begin_setup:
+    title: "Begin setup"
+    description: "Start the intro wizard from the welcome screen."
+    examples: ["begin", "start setup", "let's go"]
+    priority: 80
+
+  browse_items:
+    title: "Browse what's on the shelves"
+    description: "Read Matt's item-by-item descriptions before drafting a purchase."
+    examples: ["browse", "what's available", "describe items", "look around"]
+    priority: 40
+
+  open_compose:
+    title: "Open the compose form"
+    description: "Enter the item-by-item compose form for the general store."
+    examples: ["compose", "compose form", "item-by-item"]
+    priority: 35
+
+  propose_budget:
+    title: "Propose a purchase by total budget"
+    description: "Tell Matt how much you want to spend; he assembles a balanced kit."
+    examples:
+      - "spend $200"
+      - "spend 120"
+      - "spend two hundred dollars"
+    synonyms:
+      - "spend {total_cost}"
+      - "${total_cost}"
+    priority: 80
+    slots:
+      total_cost:
+        type: int
+        required: true
+        description: "Total dollar budget. Matt picks the basket."
+        examples: ["120", "200", "300"]
+        format_hint: "A positive integer (whole dollars)."
+        prompt: "How much do you want to spend?"
+
+  propose_kit:
+    title: "Compose a kit item-by-item"
+    description: "Compose a purchase from per-item counts only — no free-text description. Total cost is computed from the counts × local prices."
+    examples:
+      - "buy 4 oxen, 1500 lbs food, 50 bullets"
+    priority: 70
+    slots:
+      oxen:
+        type: int
+        required: false
+        description: "Number of oxen ($40/yoke at the Independence store)."
+        examples: ["0", "2", "4"]
+        format_hint: "Non-negative integer."
+        prompt: "Oxen?"
+      food:
+        type: int
+        required: false
+        description: "Pounds of food ($0.20/lb)."
+        examples: ["0", "500", "1500"]
+        format_hint: "Non-negative integer."
+        prompt: "Food (lbs)?"
+      bullets:
+        type: int
+        required: false
+        description: "Boxes of bullets ($2.00/box of 20)."
+        examples: ["0", "20", "100"]
+        format_hint: "Non-negative integer."
+        prompt: "Bullets (boxes)?"
+      clothing:
+        type: int
+        required: false
+        description: "Sets of clothing ($10/set)."
+        examples: ["0", "2", "5"]
+        format_hint: "Non-negative integer."
+        prompt: "Clothing (sets)?"
+      wheels:
+        type: int
+        required: false
+        description: "Spare wheels ($10 each)."
+        examples: ["0", "1", "2"]
+        format_hint: "Non-negative integer."
+        prompt: "Spare wheels?"
+      axles:
+        type: int
+        required: false
+        description: "Spare axles ($10 each)."
+        examples: ["0", "1", "2"]
+        format_hint: "Non-negative integer."
+        prompt: "Spare axles?"
+      tongues:
+        type: int
+        required: false
+        description: "Spare tongues ($10 each)."
+        examples: ["0", "1", "2"]
+        format_hint: "Non-negative integer."
+        prompt: "Spare tongues?"
+
   enter_fort:
     title: "Enter the fort"
     description: "Pull into the fort at this landmark to resupply (forts have marked-up prices)."

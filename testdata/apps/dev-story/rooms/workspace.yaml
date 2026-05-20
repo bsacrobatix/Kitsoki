@@ -1,34 +1,86 @@
 # Workspace Room — hub for a specific project workspace.
+#
+# Wizard-split (mirrors stories/oregon-trail/rooms/intro.yaml):
+# the original 14-item dump was split into a category picker plus three
+# focused sub-states so each screen carries one decision.
+#
+#   workspace_room    → category picker (Actions / Engineering / Project)
+#   workspace_actions → terminal · check pr · sync · open vscode · jira (5)
+#   workspace_eng     → fix bug · implement · debug · test · docs · refactor (6)
+#   workspace_proj    → plan · deploy · logs (3)
+#
+# The entry state name `workspace_room` is preserved because the flow
+# tests target it. Sub-states use `go_back` to return to the hub and do
+# not touch `prev_state` on entry (so the hub-level back-history still
+# resolves to whatever room opened workspace_room).
 
 states:
   workspace_room:
-    description: "Workspace Room — your project hub. Run commands, check PRs, navigate to sub-rooms."
+    description: "Workspace Room — your project hub. Pick a category of actions."
+    # Flattened view (no extends/blocks) so the inline `choice:` is
+    # allowed. Matches the pattern used in rooms/bugfix.yaml.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Workspace: "{{ world.current_workspace }}"
-                Root:      "{{ world.workspace_root }}"
-        choices:
-          - heading: "Available actions"
-          - list:
-              items:
-                - { label: "terminal",     hint: "run commands" }
-                - { label: "check pr",     hint: "PR status" }
-                - { label: "fix bug",      hint: "bug fix room" }
-                - { label: "implement",    hint: "implementation room" }
-                - { label: "debug",        hint: "debug room" }
-                - { label: "test",         hint: "test room" }
-                - { label: "docs",         hint: "docs room" }
-                - { label: "refactor",     hint: "refactor room" }
-                - { label: "plan",         hint: "planning room" }
-                - { label: "deploy",       hint: "deploy room" }
-                - { label: "logs",         hint: "observability room" }
-                - { label: "sync",         hint: "pull latest" }
-                - { label: "open vscode",  hint: "open editor" }
-                - { label: "jira",         hint: "search Jira" }
+      - kv:
+          pairs:
+            Workspace: "{{ world.current_workspace }}"
+            Root:      "{{ world.workspace_root }}"
+      - choice:
+          mode: single
+          prompt: "Category"
+          items:
+            - label:  "Actions"
+              hint:   "terminal · check pr · sync · open vscode · jira"
+              intent: pick_category
+              slots:  { category: actions }
+            - label:  "Engineering"
+              hint:   "fix bug · implement · debug · test · docs · refactor"
+              intent: pick_category
+              slots:  { category: engineering }
+            - label:  "Project"
+              hint:   "plan · deploy · logs"
+              intent: pick_category
+              slots:  { category: project }
+            - { label: "go back", intent: go_back, hint: "return to previous room" }
+    relevant_world: [current_workspace, workspace_root]
+    relevant_slots: []
+    on:
+      pick_category:
+        - when: "slots.category == 'actions'"
+          target: workspace_actions
+        - when: "slots.category == 'engineering'"
+          target: workspace_eng
+        - when: "slots.category == 'project'"
+          target: workspace_proj
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+          effects:
+            - set: { prev_state: "main" }
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  # ── Sub-state: Workspace actions ──────────────────────────────────
+  workspace_actions:
+    description: "Workspace Actions — operate on the workspace itself."
+    view:
+      - kv:
+          pairs:
+            Workspace: "{{ world.current_workspace }}"
+      - choice:
+          mode: single
+          prompt: "Action"
+          items:
+            - { label: "terminal",    intent: go_terminal,    hint: "run commands" }
+            - { label: "check pr",    intent: check_pr,       hint: "PR status" }
+            - { label: "sync",        intent: sync_workspace, hint: "pull latest" }
+            - { label: "open vscode", intent: open_vscode,    hint: "open editor" }
+            - { label: "jira",        intent: go_jira,        hint: "search Jira" }
+            - { label: "go back",     intent: go_back,        hint: "return to workspace" }
     relevant_world: [current_workspace, workspace_root]
     relevant_slots: []
     on:
@@ -42,6 +94,57 @@ states:
           effects:
             - set: { prev_state: "workspace_room" }
 
+      sync_workspace:
+        - target: workspace_syncing
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      open_vscode:
+        - target: workspace_actions
+          effects:
+            - invoke: host.run
+              with:
+                cmd: "echo 'Opening VS Code in {{ world.workspace_root }}'"
+            - say: "Opening VS Code in {{ world.workspace_root }}..."
+
+      go_jira:
+        - target: jira_search
+          effects:
+            - set: { prev_state: "workspace_room" }
+
+      go_back:
+        - target: workspace_room
+
+      go_main:
+        - target: main
+          effects:
+            - set: { prev_state: "main" }
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  # ── Sub-state: Engineering tasks ──────────────────────────────────
+  workspace_eng:
+    description: "Engineering Tasks — fix, build, debug, test, document, refactor."
+    view:
+      - kv:
+          pairs:
+            Workspace: "{{ world.current_workspace }}"
+      - choice:
+          mode: single
+          prompt: "Task"
+          items:
+            - { label: "fix bug",   intent: go_bugfix,    hint: "bug fix room" }
+            - { label: "implement", intent: go_implement, hint: "implementation room" }
+            - { label: "debug",     intent: go_debug,     hint: "debug room" }
+            - { label: "test",      intent: go_test,      hint: "test room" }
+            - { label: "docs",      intent: go_docs,      hint: "docs room" }
+            - { label: "refactor",  intent: go_refactor,  hint: "refactor room" }
+            - { label: "go back",   intent: go_back,      hint: "return to workspace" }
+    relevant_world: [current_workspace, workspace_root]
+    relevant_slots: []
+    on:
       go_bugfix:
         - target: bugfix
           effects:
@@ -72,6 +175,36 @@ states:
           effects:
             - set: { prev_state: "workspace_room" }
 
+      go_back:
+        - target: workspace_room
+
+      go_main:
+        - target: main
+          effects:
+            - set: { prev_state: "main" }
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  # ── Sub-state: Project ops ────────────────────────────────────────
+  workspace_proj:
+    description: "Project — plan, deploy, and observe."
+    view:
+      - kv:
+          pairs:
+            Workspace: "{{ world.current_workspace }}"
+      - choice:
+          mode: single
+          prompt: "Project action"
+          items:
+            - { label: "plan",    intent: go_planning,      hint: "planning room" }
+            - { label: "deploy",  intent: go_deploy,        hint: "deploy room" }
+            - { label: "logs",    intent: go_observability, hint: "observability room" }
+            - { label: "go back", intent: go_back,          hint: "return to workspace" }
+    relevant_world: [current_workspace, workspace_root]
+    relevant_slots: []
+    on:
       go_planning:
         - target: planning_room
           effects:
@@ -87,26 +220,8 @@ states:
           effects:
             - set: { prev_state: "workspace_room" }
 
-      sync_workspace:
-        - target: workspace_syncing
-          effects:
-            - set: { prev_state: "workspace_room" }
-
-      open_vscode:
-        - target: workspace_room
-          effects:
-            - invoke: host.run
-              with:
-                cmd: "echo 'Opening VS Code in {{ world.workspace_root }}'"
-            - say: "Opening VS Code in {{ world.workspace_root }}..."
-
-      go_jira:
-        - target: jira_search
-          effects:
-            - set: { prev_state: "workspace_room" }
-
       go_back:
-        - target: "{{ world.prev_state }}"
+        - target: workspace_room
 
       go_main:
         - target: main

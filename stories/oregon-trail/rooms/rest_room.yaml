@@ -15,23 +15,30 @@ states:
 
       rest_idle:
         description: "Choosing how many days to rest."
+        # Flattened from `extends: base + blocks` so the choice: widget
+        # can sit in the view. Single + param: captures the `days` slot
+        # via the inline mini-prompt.
         view:
-          extends: "base"
-          blocks:
-            body:
-              - prose: "Making camp at {{ world.current_landmark }}."
-              - kv:
-                  pairs:
-                    Health: "{{ world.health_avg }}"
-                    Food:   "{{ world.food_lbs }} lbs"
-                    Party:  "{{ world.party_alive }} alive"
-            choices:
-              - heading: "Actions"
-              - list:
-                  items:
-                    - label: "rest days=<n>"
-                      hint:  "make camp for n days (≥ 1)"
-                    - "look"
+          - prose: "Making camp at {{ world.current_landmark }}."
+          - kv:
+              pairs:
+                Health: "{{ world.health_avg }}"
+                Food:   "{{ world.food_lbs }} lbs"
+                Party:  "{{ world.party_alive }} alive"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "rest"
+                  hint:   "make camp for n days (≥ 1)"
+                  intent: rest
+                  param:
+                    slot:        days
+                    type:        int
+                    placeholder: "e.g. 3"
+                    required:    true
+                - label:  "look"
+                  intent: look
         on:
           rest:
             - when: "int(slots.days) > 0"
@@ -53,19 +60,17 @@ states:
       rest_running:
         description: "Camp set; party resting."
         view:
-          extends: "base"
-          blocks:
-            body:
-              - prose: "Camp set near {{ world.current_landmark }}."
-              - kv:
-                  pairs:
-                    Job:     "{{ world.last_job_id }} (running)"
-                    Resting: "{{ world.pending_rest_days }} day(s)"
-            choices:
-              - heading: "Actions"
-              - list:
-                  items:
-                    - "look"
+          - prose: "Camp set near {{ world.current_landmark }}."
+          - kv:
+              pairs:
+                Job:     "{{ world.last_job_id }} (running)"
+                Resting: "{{ world.pending_rest_days }} day(s)"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "look"
+                  intent: look
         on_enter:
           - set:
               last_job_originating_state: "rest_room.rest_running"
@@ -99,21 +104,20 @@ states:
       rest_done:
         description: "Camp broken; back on the trail."
         view:
-          extends: "base"
-          blocks:
-            body:
-              - prose: "Camp broken at {{ world.current_landmark }}."
-              - kv:
-                  pairs:
-                    Health: "{{ world.health_avg }}"
-                    Food:   "{{ world.food_lbs }} lbs"
-            choices:
-              - heading: "Actions"
-              - list:
-                  items:
-                    - label: "continue"
-                      hint:  "return to the trail"
-                    - "look"
+          - prose: "Camp broken at {{ world.current_landmark }}."
+          - kv:
+              pairs:
+                Health: "{{ world.health_avg }}"
+                Food:   "{{ world.food_lbs }} lbs"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "continue"
+                  hint:   "return to the trail"
+                  intent: continue
+                - label:  "look"
+                  intent: look
         relevant_world: [health_avg, food_lbs, day, current_landmark]
         on:
           continue:

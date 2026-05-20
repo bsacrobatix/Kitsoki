@@ -14,28 +14,40 @@
 # (pr_id, pr_title, pr_author). Selecting `pick_review` then jumps
 # into the code-review story at its idle entry. The contract
 # appendix (W3.5) details the inbox→story routing.
+#
+# Choice-widget shape: the inbox subsystem itself owns the list of
+# notifications, so this room renders only the navigation actions as
+# a single-mode picker. `pick_review` uses `param:` to capture the
+# required pr_id slot; pr_title / pr_author are optional and fall
+# through to post-dispatch clarify when the operator wants them.
 
 states:
 
   inbox:
     description: "TUI inbox — unread checkpoints + notifications."
+    # Flattened view (no extends/blocks) — `choice:` cannot live inside a
+    # `blocks:` map (typed metadata is lost through the inheritance
+    # pipeline; see docs/choice-widget.md §3.1).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Unread:                 "{{ world.inbox_unread }}"
-                "Pending review request": '{{ world.pr_id|default:"(none)" }} {{ world.pr_title }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "pick_review id=<PR>"
-                  hint:  "route a review notification into code-review"
-                - label: "go_back"
-                - label: "go_main"
-                - label: "look"
+      - kv:
+          pairs:
+            Unread:                 "{{ world.inbox_unread }}"
+            "Pending review request": '{{ world.pr_id|default:"(none)" }} {{ world.pr_title }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "pick_review"
+              intent: pick_review
+              hint:   "route a review notification into code-review"
+              param:
+                slot:        pr_id
+                type:        string
+                placeholder: "PR id"
+                required:    true
+            - { label: "go_back", intent: go_back, hint: "return to the previous room" }
+            - { label: "go_main", intent: go_main, hint: "back to the engineer's day landing" }
+            - { label: "look",    intent: look,    hint: "re-render" }
     relevant_world: [inbox_unread, pr_id, pr_title]
     on:
       # Pick a review-request notification. The slots project into the

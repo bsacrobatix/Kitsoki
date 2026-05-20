@@ -101,6 +101,303 @@ Rules:
 - Intent names in `on:` must be declared globally (`intents:`), locally
   (`states.X.intents:`), or be the wildcard `"*"`.
 
+## `view:` — string form vs typed elements
+
+A state's `view:` accepts two shapes. Loader normalises both into the
+same `[]ViewElement` slice; the runtime renders them through the same
+pipeline.
+
+```yaml
+# String form — single pongo2 template body.
+view: |
+  You are in the foyer. Counter = {{ world.counter }}.
+
+# Typed form — a sequence of typed elements.
+view:
+  - prose: "You are in the foyer."
+  - kv:
+      pairs:
+        Counter: "{{ world.counter }}"
+```
+
+The typed form is preferred (story-style guidance:
+[`docs/story-style.md`](../story-style.md)) because each element
+renders in isolation — a single broken `{{ ... }}` cannot zero the
+whole view.
+
+A typed view may also reference a shared chrome:
+
+```yaml
+view:
+  extends: "base"            # views/base.pongo
+  blocks:
+    body:    [ <ViewElement>, ... ]
+    choices: [ <ViewElement>, ... ]
+```
+
+### View element kinds
+
+| Kind        | Body shape                                                | Use for                                                  |
+|-------------|-----------------------------------------------------------|----------------------------------------------------------|
+| `prose:`    | `<string>` (pongo2 body)                                  | One paragraph of narration. Reflows.                     |
+| `heading:`  | `<string>`                                                | Section break. No trailing colon.                        |
+| `list:`     | `{ items: [<ListItem>, ...] }`                            | Bulleted actions / enumerations. Optional `hint:` column.|
+| `kv:`       | `{ pairs: { <key>: <value>, ... } }`                      | Short key/value status. Key column auto-aligns.          |
+| `code:`     | `<string>`                                                | Layout-preserved content (tables, ASCII art, includes).  |
+| `template:` | `<string>` (pongo2 body)                                  | Raw pongo escape hatch.                                  |
+| `choice:`   | `{ mode, prompt, items / fields, ... }` (see below)       | Interactive picker / multi-select / mad-lib form.        |
+
+Every element accepts an optional element-level `when:` guard (expr-lang)
+evaluated against `world.*` / `slots.*`. Items in a `list:` accept their
+own `when:`. Examples: see [`docs/story-style.md`](../story-style.md) §2.
+
+## `choice:` — interactive picker / multi / form
+
+A `choice:` element is an interactive transcript widget that dispatches
+an intent + slots through the same `SubmitDirect` path the right-pane
+action menu and `kitsoki turn --intent ... --slots ...` use. Three
+modes share one envelope:
+
+| Mode             | Interaction                                          | Dispatches                                                    |
+|------------------|------------------------------------------------------|---------------------------------------------------------------|
+| `single` (default)| ▸ cursor; Enter picks ONE item.                     | One intent (per item) with item's `slots:` ∪ `{param: <buf>}`.|
+| `multi`          | `[ ]` / `[x]` checkboxes; Space toggles.              | One intent with one list-valued slot of selected `value:`s.   |
+| `form`           | Mad-lib `template:` with `{field}` blanks; Tab cycles.| One intent with one slot per editable field.                  |
+
+A `choice` element is always interactive in the TUI and renders as a
+static numbered-list / template-echo fallback under `kitsoki render`
+and the Jira / Bitbucket transports — flow fixtures (`intent:` blocks)
+bypass the widget and submit the intent directly, so the same `app.yaml`
+runs across every transport.
+
+Worked, runnable reference: [`testdata/apps/choice_smoke/app.yaml`](../../testdata/apps/choice_smoke/app.yaml)
+covers every feature combo across 23 demo spokes. See its
+[README](../../testdata/apps/choice_smoke/README.md) for the per-spoke
+walkthrough; specific line refs appear in the field tables below.
+
+### `single` mode
+
+```yaml
+view:
+  - choice:
+      prompt: "Choose a profession"        # optional heading line
+      when:   "world.party_size > 0"       # optional element-level guard
+      items:
+        - label:  "Banker"
+          hint:   "$1,600 starting cash — easy"     # optional right-column
+          intent: pick_profession                   # required
+          slots:  { profession: banker }            # optional pre-bound slots
+        - label:  "Generate names from a theme"
+          intent: generate_names
+          param:                                    # optional one-shot slot capture
+            slot:        theme
+            type:        string                     # string | int | enum
+            placeholder: "e.g. norse mythology"
+            required:    true
+            # values: [...]   # required when type: enum
+        - label: "✗ start_journey — {{ blocked_reason('start_journey') }}"
+          intent: start_journey
+          when:   "!available('start_journey')"     # per-item guard (renderer-side)
+```
+
+| Field                  | Required          | Notes                                                   |
+|------------------------|-------------------|---------------------------------------------------------|
+| `mode`                 | no (default single)| Discriminator. Omit for single mode.                    |
+| `prompt`               | no                | Heading line shown above the picker.                    |
+| `when`                 | no                | Element-level guard (expr-lang).                        |
+| `items`                | yes               | ≥1 item.                                                |
+| `items[].label`        | yes               | Display text.                                           |
+| `items[].intent`       | yes               | Intent dispatched on Enter. Must be in `on:` / `intents:`.|
+| `items[].hint`         | no                | Right-aligned auxiliary text (cost / consequence).      |
+| `items[].slots`        | no                | Pre-bound slot map. Keys must be declared slots of `intent`.|
+| `items[].param`        | no                | One-shot free-form slot capture. One slot only.         |
+| `items[].param.slot`   | yes (if `param`)  | Slot name; must be a declared slot of `intent`.         |
+| `items[].param.type`   | yes (if `param`)  | `string` / `int` / `enum`.                              |
+| `items[].param.values` | yes (if `enum`)   | Cycle list for `Space`.                                 |
+| `items[].param.placeholder`| no            | Shown when buffer is empty.                             |
+| `items[].param.required`| no               | Refuse commit on empty buffer.                          |
+| `items[].when`         | no                | Renderer-side guard — hide the row when false. **NOT behavioural**: also gate the `on:` arc if you need to block dispatch. |
+
+Single-mode keymap:
+
+| Key           | Behavior                                                             |
+|---------------|----------------------------------------------------------------------|
+| `↑` / `↓`     | Move cursor.                                                         |
+| `Enter`       | Pick current item → dispatch intent. On an item with `param:`, enter param mode if the buffer is empty; commit if non-empty. |
+| `Tab`         | Off-ramp to chat — close the widget and restore the prompt textarea. `/input` recalls any draft you typed before the widget opened. |
+| `Esc`         | Cancel; focus prompt textarea.                                       |
+| `Backspace`   | In param mode: edit buffer.                                          |
+| `Space`       | In param mode with `type: enum`: cycle to next value. Bool field: toggle. |
+| Printable     | Ignored at the picker level. In param mode (text/int): edit buffer. On enum/bool fields: ignored. |
+
+Reference spokes: `single_basic` (`testdata/apps/choice_smoke/app.yaml:323`),
+`single_per_item_when` (line 394), `single_templated_slots` (line 485),
+`single_param_string` (line 529), `single_param_enum` (line 605).
+
+### `multi` mode
+
+```yaml
+view:
+  - choice:
+      mode:   multi
+      prompt: "Select symptoms"
+      intent: report_symptoms       # required
+      slot:   symptoms              # required — list-valued slot name
+      min:    1                     # optional (default 0)
+      max:    5                     # optional (default len(visible items))
+      items:
+        - { value: fever,    label: "Fever",    hint: ">100.4°F" }
+        - { value: cough,    label: "Cough" }
+        - { value: rash,     label: "Rash", when: "world.day > 3" }
+```
+
+| Field            | Required | Notes                                                     |
+|------------------|----------|-----------------------------------------------------------|
+| `mode`           | yes      | `multi`.                                                  |
+| `intent`         | yes      | Dispatched once on commit.                                |
+| `slot`           | yes      | Receives the list of selected `value:`s.                  |
+| `min` / `max`    | no       | Selection bounds. Widget enforces; flow fixtures bypass.  |
+| `items[].value`  | yes      | Literal string. **Templated values are rejected at load.**|
+| `items[].label`  | no       | Defaults to `value`.                                      |
+| `items[].hint`   | no       | Right-column hint.                                        |
+| `items[].when`   | no       | Renderer-side guard.                                      |
+
+Multi-mode keymap:
+
+| Key       | Behavior                                       |
+|-----------|------------------------------------------------|
+| `↑` / `↓` | Move cursor.                                   |
+| `Space`   | Toggle current item.                           |
+| `Enter`   | Submit the whole selection.                    |
+| `Tab`     | Off-ramp to chat — close the widget and restore the prompt textarea. |
+| `Esc`     | Cancel; focus prompt textarea.                 |
+| Printable | Ignored — the widget owns focus.               |
+
+Reference spokes: `multi_basic` (`testdata/apps/choice_smoke/app.yaml:647`),
+`multi_min_zero` (line 685), `multi_no_max` (line 722),
+`multi_per_item_when` (line 762).
+
+### `form` mode
+
+```yaml
+view:
+  - choice:
+      mode:     form
+      prompt:   "Compose your purchase"
+      intent:   propose_purchase
+      template: "Buy {items} for ${total_cost}, leaving ${remaining}."
+      fields:
+        items:
+          type:        string
+          placeholder: "oxen=4, food=1500"
+          required:    true
+        total_cost:
+          type:    int
+          min:     1
+          max:     "{{ world.money }}"     # templated bounds are OK
+          default: 0
+        remaining:
+          type:     int
+          expr:     "world.money - world.total_cost"   # required when readonly
+          readonly: true                                # not editable; see note
+```
+
+| Field                | Required           | Notes                                                                                |
+|----------------------|--------------------|--------------------------------------------------------------------------------------|
+| `mode`               | yes                | `form`.                                                                              |
+| `intent`             | yes                | Dispatched once on Enter.                                                            |
+| `template`           | yes                | Mad-lib body. Every `{name}` placeholder must have a matching `fields:` entry.       |
+| `fields`             | yes                | ≥1 field. Author order is preserved.                                                 |
+| `fields.<n>.type`    | yes                | `string` / `int` / `float` / `bool` / `enum`.                                        |
+| `fields.<n>.values`  | yes (if `enum`)    | Cycle list for `Space`.                                                              |
+| `fields.<n>.hint`    | no                 | One-line description.                                                                |
+| `fields.<n>.placeholder` | no             | Shown when buffer is empty.                                                          |
+| `fields.<n>.default` | no                 | Initial buffer. May be templated.                                                    |
+| `fields.<n>.min` / `max`| no             | Numeric bounds. May be templated.                                                    |
+| `fields.<n>.required`| no                 | Widget refuses commit on empty buffer.                                               |
+| `fields.<n>.readonly`| no                 | Display-only. Requires `expr:`. Submitted as a slot when the intent declares it.     |
+| `fields.<n>.expr`    | yes (if `readonly`)| expr-lang expression over `world.*` / `slots.*` (NOT live over sibling form fields). |
+| `fields.<n>.when`    | no                 | Renderer-side guard — hidden fields are not submitted.                               |
+
+Form-mode keymap:
+
+| Key            | Behavior                                                       |
+|----------------|----------------------------------------------------------------|
+| `Tab` / `S-Tab`| Next / previous editable field.                                |
+| `Space`        | Enum field: cycle next value. Bool field: toggle. Text field: insert space. |
+| `Printable`    | Edit current text field.                                       |
+| `Backspace`    | Edit current text field.                                       |
+| `Enter`        | Submit the form.                                               |
+| `Esc`          | Cancel; focus prompt textarea.                                 |
+
+Reference spokes: `form_basic` (`testdata/apps/choice_smoke/app.yaml:850`),
+`form_bool` (line 901), `form_enum` (line 970),
+`form_required` (line 1037), `form_per_field_when` (line 1107),
+`form_readonly_expr` (line 1146).
+
+### Static rendering fallback
+
+Non-TUI transports (`kitsoki render`, Jira, Bitbucket) and flow-test
+output get the same view but with the widget rendered statically — a
+numbered list with intent name in parentheses for `single` / `multi`,
+and a plain template echo with placeholders for `form`. Flow fixtures
+dispatch `intent: { name, slots }` directly and never traverse the
+widget; the same `app.yaml` works across every surface.
+
+### Validation
+
+Layered at load time:
+
+1. **JSON Schema** — structural shape and per-mode required fields.
+   Source: [`docs/embedded/schemas/choice.schema.json`](schemas/choice.schema.json)
+   (mirror of `internal/app/schemas/choice.schema.json`). Consumable
+   by yaml-language-server for inline IDE validation.
+2. **expr-lang compile-pass** — every `when:` (element / per-item /
+   per-field) is compiled via `expr.CompileBool`. Every `expr:` on a
+   readonly form field is compiled via `expr.Compile`. Undefined
+   identifiers, AST violations, and typos surface as load errors.
+3. **pongo2 compile-pass** — templated leaves (slot values,
+   placeholders, defaults, min/max, the form template body) are
+   compile-checked for syntax. Undefined-identifier errors are NOT
+   surfaced (they're runtime concerns).
+4. **Loader cross-references** — `items[].intent` resolves against
+   the surrounding state/global `intents:`; `slots:` keys, `param.slot`,
+   `slot` (multi), and `fields.<name>` (form, non-readonly) must be
+   declared slots of the chosen intent; every `{name}` in a form
+   `template:` must have a matching `fields:` entry; multi-mode
+   `items[].value` must be a literal (not templated).
+
+Errors surface with the same `state → view → element index` path
+prefix the loader uses for other view-element errors.
+
+### Limitations
+
+- **One `choice` per view.** Loader-enforced.
+- **No `choice` inside `blocks:` (extends-form views).** Typed
+  metadata is lost through `AppRenderer.RenderExtended`. Workaround:
+  put the `extends:` at the wrapping view and the `choice:` as a
+  sibling element in the same `view:`, not inside a block. (See
+  §Limitations in [`docs/proposals/choice-widget-proposal.md`](../proposals/choice-widget-proposal.md).)
+- **Mode is fixed per element.** No blending. Use two states.
+- **`param:` captures exactly one slot.** Use `form` mode for ≥2.
+- **`form` fields are flat scalars only.** Lists and maps need
+  `multi` mode or post-dispatch clarify.
+- **Multi dispatches a single intent.** Not a shorthand for "fire
+  one intent per selected item."
+- **`form.<other_field>` is NOT live in `expr:`.** Readonly fields
+  see `world.*` / `slots.*` at widget-open time only — sibling buffer
+  changes don't re-trigger the eval. See [`docs/choice-widget.md`](../choice-widget.md)
+  §3.3 for the worked example and precompute-into-world workaround.
+- **`when:` on items / fields is renderer-side, not behavioural.**
+  A guard-false item is hidden but the underlying `on:` arc still
+  fires if the intent is dispatched some other way (flow test, menu).
+  For true gating, also guard the transition `when:`.
+
+Full design rationale: [`docs/proposals/choice-widget-proposal.md`](../proposals/choice-widget-proposal.md)
+(§3 YAML shapes, §4 authoritative shape, §8 limitations).
+Author-facing cookbook: [`docs/choice-widget.md`](../choice-widget.md).
+Story-style guidance: [`docs/story-style.md`](../story-style.md) §3.6.
+
 ## `Transition`
 
 ```yaml

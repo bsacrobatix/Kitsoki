@@ -39,6 +39,7 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -110,6 +111,47 @@ type ViewElement struct {
 	Subtitle string
 	Color    string
 	When     string
+
+	// ---- Choice fields (Phase A of the choice-widget proposal).
+	// Populated only when Kind == "choice"; otherwise zero. See
+	// docs/proposals/choice-widget-proposal.md §4.1 for the YAML shape.
+
+	// ChoiceMode discriminates the three submodes: "single", "multi", "form".
+	// Default applied at unmarshal time is "single" per the proposal.
+	ChoiceMode string
+	// ChoicePrompt is the optional heading line above the widget.
+	ChoicePrompt string
+	// ChoiceItems holds the entries for single and multi modes. The
+	// discriminator (Value vs Label vs Intent / Slots / Param) is the
+	// enclosing ChoiceMode.
+	ChoiceItems []ChoiceItem
+	// ChoiceIntent is the top-level intent fired on submit for multi
+	// and form modes. Single mode carries per-item intents on each
+	// ChoiceItem.Intent.
+	ChoiceIntent string
+	// ChoiceSlot names the list-valued slot bound to the selection in
+	// multi mode. Empty in single / form.
+	ChoiceSlot string
+	// ChoiceMin / ChoiceMax constrain multi-mode selection size. The
+	// "Set" flags distinguish an unset field from an explicit zero so
+	// downstream code can apply per-mode defaults at render time
+	// rather than at load time.
+	ChoiceMin    int
+	ChoiceMax    int
+	ChoiceMinSet bool
+	ChoiceMaxSet bool
+	// ChoiceTemplate is the mad-lib template body for form mode.
+	ChoiceTemplate string
+	// ChoiceFields is the ordered (author-declared) field list for
+	// form mode. Order matters because the renderer walks the
+	// template body and substitutes {field} placeholders in author
+	// sequence; iterating a Go map would lose that.
+	ChoiceFields []ChoiceField
+	// ChoiceRaw is the original parsed YAML subtree re-marshalled to
+	// JSON. Held so (ViewElement).validate() can re-hand it to the
+	// JSON Schema validator without re-decoding from YAML. Empty for
+	// non-choice elements.
+	ChoiceRaw json.RawMessage
 }
 
 // ListItem is one entry in a "list" element. An author may write a bare
@@ -251,14 +293,15 @@ func (v *View) UnmarshalYAML(data []byte) error {
 // nested structs. The other kinds (prose, heading, code, template) carry
 // a string body directly.
 type rawViewElementYAML struct {
-	Prose    *string         `yaml:"prose,omitempty"`
-	Heading  *string         `yaml:"heading,omitempty"`
-	Code     *string         `yaml:"code,omitempty"`
-	Template *string         `yaml:"template,omitempty"`
-	List     *rawListYAML    `yaml:"list,omitempty"`
-	KV       *rawKVYAML      `yaml:"kv,omitempty"`
-	Banner   *rawBannerYAML  `yaml:"banner,omitempty"`
-	When     string          `yaml:"when,omitempty"`
+	Prose    *string        `yaml:"prose,omitempty"`
+	Heading  *string        `yaml:"heading,omitempty"`
+	Code     *string        `yaml:"code,omitempty"`
+	Template *string        `yaml:"template,omitempty"`
+	List     *rawListYAML   `yaml:"list,omitempty"`
+	KV       *rawKVYAML     `yaml:"kv,omitempty"`
+	Banner   *rawBannerYAML `yaml:"banner,omitempty"`
+	Choice   *rawChoiceYAML `yaml:"choice,omitempty"`
+	When     string         `yaml:"when,omitempty"`
 }
 
 // rawBannerYAML decodes the banner element body. Text is the phase name
@@ -375,9 +418,24 @@ func (r rawViewElementYAML) toElement() (ViewElement, error) {
 			When:     when,
 		}
 	}
+	if r.Choice != nil {
+		set = append(set, "choice")
+		out = ViewElement{Kind: "choice", When: when}
+		if err := r.Choice.resolve(&out); err != nil {
+			return ViewElement{}, err
+		}
+		// Element-level when may have been supplied either at the
+		// element level (the rawViewElementYAML.When field) or inside
+		// the choice subtree. The choice resolver writes the subtree
+		// value over the element-level one; if only the element-level
+		// was set, restore it.
+		if out.When == "" && when != "" {
+			out.When = when
+		}
+	}
 	switch len(set) {
 	case 0:
-		return ViewElement{}, fmt.Errorf("element has no kind (expected one of prose / heading / list / kv / code / template / banner)")
+		return ViewElement{}, fmt.Errorf("element has no kind (expected one of prose / heading / list / kv / code / template / banner / choice)")
 	case 1:
 		return out, nil
 	default:
@@ -396,13 +454,30 @@ func (r rawViewElementYAML) toElement() (ViewElement, error) {
 // Phase A validates structure only — expression contents (When source,
 // pongo2 templates in leaf strings) are left to later phases.
 func (v View) Validate() error {
+	// At most one choice element per view (choice-widget proposal §4.5).
+	// Counted across the Elements slice; Blocks are forbidden from
+	// containing choice at all (checked below) so they don't participate.
+	choiceCount := 0
 	for i, el := range v.Elements {
+		if el.Kind == "choice" {
+			choiceCount++
+			if choiceCount > 1 {
+				return fmt.Errorf("view[%d] (choice): only one choice element per view is allowed", i)
+			}
+		}
 		if err := el.validate(); err != nil {
 			return fmt.Errorf("view[%d] (%s): %w", i, el.Kind, err)
 		}
 	}
 	for name, els := range v.Blocks {
 		for i, el := range els {
+			// Choice elements cannot live inside an extends-form block
+			// (choice-widget proposal §4.5 / §8). The typed metadata is
+			// lost through the inheritance pipeline, so authors must
+			// place the choice as a sibling of the extends form.
+			if el.Kind == "choice" {
+				return fmt.Errorf("blocks.%s[%d] (choice): choice elements are not allowed inside extends/blocks views", name, i)
+			}
 			if err := el.validate(); err != nil {
 				return fmt.Errorf("blocks.%s[%d] (%s): %w", name, i, el.Kind, err)
 			}
@@ -444,7 +519,9 @@ func (e ViewElement) validate() error {
 			return fmt.Errorf("banner requires a non-empty text:")
 		}
 		return nil
+	case "choice":
+		return validateChoice(e)
 	default:
-		return fmt.Errorf("unknown element kind %q (expected one of prose / heading / list / kv / code / template / banner)", e.Kind)
+		return fmt.Errorf("unknown element kind %q (expected one of prose / heading / list / kv / code / template / banner / choice)", e.Kind)
 	}
 }

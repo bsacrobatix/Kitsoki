@@ -1,0 +1,14 @@
+# single_param_string — captures a string param. The widget would
+# render paramMode and accept a typed buffer; the flow dispatches the
+# captured slot directly. Commit advances to single_param_int.
+test_kind: flow
+app: ../app.yaml
+initial_state: single_param_string
+
+turns:
+  - intent: { name: set_hero_name, slots: { name: "Aria" } }
+    expect_state: single_param_int
+    expect_world:
+      hero_name: "Aria"
+
+expect_no_errors: true

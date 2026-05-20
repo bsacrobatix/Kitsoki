@@ -1,120 +1,270 @@
-# intro — Atomic state. Player names the party, picks a profession,
-# picks a departure month, then starts the journey. start_journey is
-# guarded on all three having been set.
+# intro — wizard for setup. The room walks the player through three
+# decisions (profession → month → name your party) and finishes at a
+# summary screen that confirms before start_journey fires.
 #
-# Phase A: prompts the player through three setup choices, then hands
-# off to general_store. No host invocations.
+# Wizard states:
+#   intro             → welcome screen, "begin setup"
+#   intro_profession  → pick profession
+#   intro_month       → pick departure month
+#   intro_party_names → name your party (per-member rows, CSV, or theme)
+#   intro_summary     → confirm and depart
+#
+# The naming intents (name_party / name_member / generate_names) live
+# on intro_party_names and self-loop there so the roster updates inline
+# as the player picks names. start_journey is dispatched from
+# intro_summary only, after all three decisions are made.
 
 states:
+
+  # ── 0. Welcome ─────────────────────────────────────────────────────
   intro:
-    description: "Independence, Missouri — preparing to leave for Oregon."
-    relevant_world: [party_names, party_size, party_member_1, party_member_2, party_member_3, party_member_4, party_member_5, profession, month]
-    relevant_slots: []
-    # Proposal §5.5 — intro is the canonical block-inheritance case.
-    # The five hand-copied roster lines stay as five typed `code` elements
-    # with per-element `when:` guards (the only way to fan out a flat-key
-    # world today). Switching world.party_member_1..5 to a list-shaped
-    # world.party_members would collapse these to a single `{% for %}` —
-    # see the proposal note at §5.5 ("assumes a small refactor of the
-    # world schema"). Until then the typed-element form owns the
-    # conditional logic.
+    description: "Independence, Missouri — overview and setup."
+    relevant_world: [year]
     view:
-      extends: "base"
-      blocks:
-        body:
-          - prose: >
-              It is {{ world.year }}. You are in Independence, Missouri,
-              preparing to lead a wagon party of five to the Willamette
-              Valley in Oregon.
-          - prose: >
-              The trail runs about 1,500 miles to Oregon City. At a steady
-              pace most parties make the crossing in 120 to 150 days. You
-              can push harder — strenuous or grueling — but the oxen tire,
-              folks fall ill, and the wagon breaks down more often.
-          - heading: "Before you outfit at Matt's General Store, size up what you'll need"
-          - list:
-              items:
-                - label: "Oxen ($40/yoke)"
-                  hint:  "≥ 2 to leave town; 6–8 is comfortable"
-                - label: "Food ($0.20/lb)"
-                  hint:  "~2 lbs/soul/day at filling; 5×150d ≈ 1,500 lbs floor"
-                - label: "Bullets ($2.00/box of 20)"
-                  hint:  "~100 lbs of meat per hunt; 100 boxes is comfortable"
-                - label: "Clothing ($10/set)"
-                  hint:  "burned through treating illness; 2 floor, 5+ warm"
-                - label: "Spare wheels / axles / tongues ($10 each)"
-                  hint:  "eaten by breakdown events; 1 floor, 2–3 safer"
-          - heading: "Starting cash by profession"
-          - kv:
-              pairs:
-                Banker:    "$1,600 (easy; lowest score multiplier)"
-                Carpenter: "$800 (medium)"
-                Farmer:    "$400 (hard; highest score multiplier)"
-          - heading: "Departure month — load-bearing"
-          - list:
-              items:
-                - label: "Daylight / pace"
-                  hint:  "summer 100%, mar/oct 85%, nov 80%, dec–feb 70%"
-                - label: "Forage"
-                  hint:  "rich may/jun; fair apr/jul; sparse mar/aug; gone in winter"
-                - label: "River flooding"
-                  hint:  "april ×1.60, july 80%, august 70%"
-                - label: "Snow-blocked passes"
-                  hint:  "South Pass closes oct–mar"
-                - label: "Severe-weather kind"
-                  hint:  "snow / heavy_rain / hail / fog biased by month"
-          - heading: "Common shapes"
-          - list:
-              items:
-                - "March / April — early start, but snowmelt rivers + snow can still close South Pass if you're slow."
-                - "May / June — the sweet spot; rich grass, fair rivers, long daylight."
-                - "July — late; pace good, but you may meet snow at South Pass."
-                - "August+ — likely to overwinter at the pass."
-          - prose: >
-              Mid-trail you can consult the wagon master (or drop into
-              /freeform) for free-form advice. Plan your purchase here so
-              you're not trapped out on the prairie with empty barrels.
-          - heading: "Party of {{ world.party_size }}"
-          # Five per-element prose rows. Each row's text is itself a
-          # tiny pongo template: `world.party_member_N|default:"(unnamed)"`
-          # replaces the `?? '(unnamed)'` shape. The leader badge sits on
-          # the first row only — the rest are guarded by nothing because
-          # they always render. Switching world.party_members to a list
-          # would collapse these to one `{% for %}` (see file header).
-          - code: |
-              {{ world.party_member_1|default:"(unnamed)" }} (leader)
-          - code: |
-              {{ world.party_member_2|default:"(unnamed)" }}
-          - code: |
-              {{ world.party_member_3|default:"(unnamed)" }}
-          - code: |
-              {{ world.party_member_4|default:"(unnamed)" }}
-          - code: |
-              {{ world.party_member_5|default:"(unnamed)" }}
-          - kv:
-              pairs:
-                Profession: '{{ world.profession|default:"(not yet chosen)" }}'
-                Departure:  '{{ world.month|default:"(not yet chosen)" }}'
-        choices:
-          - heading: "Choose"
-          - list:
-              items:
-                - "name the party (or: name member N, or: generate names <theme>)"
-                - "pick a profession (banker / carpenter / farmer)"
-                - "pick a departure month (march / april / may / june / july)"
-                - label: "start the journey"
-                  when:  "available('start_journey')"
-                - label: "✗ start_journey — {{ blocked_reason('start_journey') }}"
-                  when:  "!available('start_journey')"
+      - prose: >
+          It is {{ world.year }}. You are in Independence, Missouri,
+          preparing to lead a wagon party of five to the Willamette
+          Valley in Oregon.
+      - prose: >
+          The trail runs about 1,500 miles to Oregon City. At a steady
+          pace most parties make the crossing in 120 to 150 days. You
+          can push harder — strenuous or grueling — but the oxen tire,
+          folks fall ill, and the wagon breaks down more often.
+      - heading: "Before you outfit at Matt's General Store, size up what you'll need"
+      - list:
+          items:
+            - label: "Oxen ($40/yoke)"
+              hint:  "≥ 2 to leave town; 6–8 is comfortable"
+            - label: "Food ($0.20/lb)"
+              hint:  "~2 lbs/soul/day at filling; 5×150d ≈ 1,500 lbs floor"
+            - label: "Bullets ($2.00/box of 20)"
+              hint:  "~100 lbs of meat per hunt; 100 boxes is comfortable"
+            - label: "Clothing ($10/set)"
+              hint:  "burned through treating illness; 2 floor, 5+ warm"
+            - label: "Spare wheels / axles / tongues ($10 each)"
+              hint:  "eaten by breakdown events; 1 floor, 2–3 safer"
+      - heading: "Departure month — load-bearing"
+      - list:
+          items:
+            - label: "Daylight / pace"
+              hint:  "summer 100%, mar/oct 85%, nov 80%, dec–feb 70%"
+            - label: "Forage"
+              hint:  "rich may/jun; fair apr/jul; sparse mar/aug; gone in winter"
+            - label: "River flooding"
+              hint:  "april ×1.60, july 80%, august 70%"
+            - label: "Snow-blocked passes"
+              hint:  "South Pass closes oct–mar"
+            - label: "Severe-weather kind"
+              hint:  "snow / heavy_rain / hail / fog biased by month"
+      - prose: >
+          Mid-trail you can consult the wagon master (or drop into
+          /freeform) for free-form advice. Plan your purchase here so
+          you're not trapped out on the prairie with empty barrels.
+      - choice:
+          mode: single
+          prompt: "Ready?"
+          items:
+            - label:  "begin setup"
+              hint:   "pick profession, departure month, and name your party"
+              intent: begin_setup
+            - { label: "look", intent: look }
+    on:
+      begin_setup:
+        - target: intro_profession
+      look:
+        - target: intro
+
+  # ── 1. Pick profession ─────────────────────────────────────────────
+  intro_profession:
+    description: "Pick your profession — sets starting cash and score multiplier."
+    relevant_world: [profession, money]
+    view:
+      - kv:
+          pairs:
+            Profession: '{{ world.profession|default:"(not yet chosen)" }}'
+      - prose: >
+          Your profession determines starting cash and the score
+          multiplier on a successful crossing. Banker is the easiest
+          start; farmer is the hardest but earns the most.
+      - choice:
+          mode: single
+          prompt: "Profession"
+          items:
+            - label:  "Banker"
+              hint:   "$1,600 starting cash — easy, lowest score multiplier"
+              intent: pick_profession
+              slots:  { profession: banker }
+            - label:  "Carpenter"
+              hint:   "$800 starting cash — medium"
+              intent: pick_profession
+              slots:  { profession: carpenter }
+            - label:  "Farmer"
+              hint:   "$400 starting cash — hard, highest score multiplier"
+              intent: pick_profession
+              slots:  { profession: farmer }
+            - { label: "back", intent: back }
+            - { label: "look", intent: look }
+    on:
+      pick_profession:
+        - target: intro_month
+          effects:
+            - set:
+                profession: "{{ slots.profession }}"
+                money: "{{ slots.profession == 'banker' ? 1600 : (slots.profession == 'carpenter' ? 800 : 400) }}"
+            - say: "Profession set to {{ slots.profession }}; starting cash ${{ world.money }}."
+      back:
+        - target: intro
+      look:
+        - target: intro_profession
+
+  # ── 2. Pick departure month ────────────────────────────────────────
+  intro_month:
+    description: "Pick departure month."
+    relevant_world: [profession, month]
+    view:
+      - kv:
+          pairs:
+            Profession: '{{ world.profession }}'
+            Departure:  '{{ world.month|default:"(not yet chosen)" }}'
+      - prose: >
+          May/June is the sweet spot — rich grass, fair rivers, long
+          daylight. March/April leaves time but rivers may flood. July
+          risks meeting snow at South Pass.
+      - choice:
+          mode: single
+          prompt: "Departure month"
+          items:
+            - label:  "Depart in March"
+              hint:   "early start; snowmelt rivers + South Pass may still close"
+              intent: pick_month
+              slots:  { month: march }
+            - label:  "Depart in April"
+              hint:   "rivers can flood ×1.60"
+              intent: pick_month
+              slots:  { month: april }
+            - label:  "Depart in May"
+              hint:   "sweet spot — rich grass, fair rivers"
+              intent: pick_month
+              slots:  { month: may }
+            - label:  "Depart in June"
+              hint:   "sweet spot — long daylight"
+              intent: pick_month
+              slots:  { month: june }
+            - label:  "Depart in July"
+              hint:   "late; pace good but may meet snow at South Pass"
+              intent: pick_month
+              slots:  { month: july }
+            - { label: "back", intent: back }
+            - { label: "look", intent: look }
+    on:
+      pick_month:
+        - target: intro_party_names
+          effects:
+            - set: { month: "{{ slots.month }}" }
+            - say: "Departure month set to {{ slots.month }}."
+      back:
+        - target: intro_profession
+      look:
+        - target: intro_month
+
+  # ── 3. Name the party ──────────────────────────────────────────────
+  # Self-loops on naming intents so the roster updates inline as the
+  # player picks names. continue advances to intro_summary once at
+  # least one name is set.
+  intro_party_names:
+    description: "Name your wagon party of five."
+    relevant_world: [party_names, party_size, party_member_1, party_member_2, party_member_3, party_member_4, party_member_5]
+    view:
+      - kv:
+          pairs:
+            Profession: '{{ world.profession }}'
+            Departure:  '{{ world.month }}'
+      - heading: "Party of {{ world.party_size }}"
+      - code: |
+          1. {{ world.party_member_1|default:"(unnamed)" }} (leader)
+      - code: |
+          2. {{ world.party_member_2|default:"(unnamed)" }}
+      - code: |
+          3. {{ world.party_member_3|default:"(unnamed)" }}
+      - code: |
+          4. {{ world.party_member_4|default:"(unnamed)" }}
+      - code: |
+          5. {{ world.party_member_5|default:"(unnamed)" }}
+      - choice:
+          mode: single
+          prompt: "Name them"
+          items:
+            - label:  "Name member 1 (leader)"
+              intent: name_member
+              slots:  { index: 1 }
+              param:
+                slot:        name
+                type:        string
+                placeholder: "leader's name"
+                required:    true
+            - label:  "Name member 2"
+              intent: name_member
+              slots:  { index: 2 }
+              param:
+                slot:        name
+                type:        string
+                placeholder: "member 2's name"
+                required:    true
+            - label:  "Name member 3"
+              intent: name_member
+              slots:  { index: 3 }
+              param:
+                slot:        name
+                type:        string
+                placeholder: "member 3's name"
+                required:    true
+            - label:  "Name member 4"
+              intent: name_member
+              slots:  { index: 4 }
+              param:
+                slot:        name
+                type:        string
+                placeholder: "member 4's name"
+                required:    true
+            - label:  "Name member 5"
+              intent: name_member
+              slots:  { index: 5 }
+              param:
+                slot:        name
+                type:        string
+                placeholder: "member 5's name"
+                required:    true
+            - label:  "Set all five (CSV)"
+              hint:   "comma-separated, leader first"
+              intent: name_party
+              param:
+                slot:        names
+                type:        string
+                placeholder: "Adam,Beth,Carol,Daniel,Edith"
+                required:    true
+            - label:  "Generate from a theme"
+              hint:   "Western / Star Wars / Norse mythology / Lord of the Rings"
+              intent: generate_names
+              param:
+                slot:        theme
+                type:        string
+                placeholder: "e.g. norse mythology"
+                required:    true
+            - label:  "continue"
+              hint:   "review and start the journey"
+              intent: continue
+              when:   "world.party_names != '' || world.party_member_1 != ''"
+            - label:  "✗ continue — name at least the leader first"
+              intent: continue
+              when:   "world.party_names == '' && world.party_member_1 == ''"
+            - { label: "back", intent: back }
+            - { label: "look", intent: look }
     on:
       name_party:
         # Quick "set them all" entry point: write the canonical CSV
         # into party_names AND mirror each comma-separated element into
-        # party_member_1..5 so the intro roster + per-seat name_member
-        # intent address the same data. trim() drops the spaces the
-        # player likely typed around the commas; the deterministic
-        # fixtures use no spaces and round-trip identically.
-        - target: intro
+        # party_member_1..5.
+        - target: intro_party_names
           effects:
             - set:
                 party_names:    "{{ slots.names }}"
@@ -126,58 +276,43 @@ states:
             - say: "Party named: {{ slots.names }}."
 
       name_member:
-        # Per-seat naming. slots.index is 1-indexed (1 = leader). A
-        # nested ternary selects which party_member_N key to write —
-        # Effect.Set targets must be static keys, so we route through
-        # an expr-lang `key:` map by writing all five keys and using
-        # the ternary to pass through the existing value for every
-        # other seat. (set: is a merge, so untouched keys stay put.)
+        # Per-seat naming. slots.index is 1-indexed (1 = leader).
+        # Only writes that one member; party_names is computed by the
+        # `continue` arc below when the player is done naming.
         - when: "slots.index == 1"
-          target: intro
+          target: intro_party_names
           effects:
             - set: { party_member_1: "{{ slots.name }}" }
             - say: "Member 1 (leader) named {{ slots.name }}."
         - when: "slots.index == 2"
-          target: intro
+          target: intro_party_names
           effects:
             - set: { party_member_2: "{{ slots.name }}" }
             - say: "Member 2 named {{ slots.name }}."
         - when: "slots.index == 3"
-          target: intro
+          target: intro_party_names
           effects:
             - set: { party_member_3: "{{ slots.name }}" }
             - say: "Member 3 named {{ slots.name }}."
         - when: "slots.index == 4"
-          target: intro
+          target: intro_party_names
           effects:
             - set: { party_member_4: "{{ slots.name }}" }
             - say: "Member 4 named {{ slots.name }}."
         - when: "slots.index == 5"
-          target: intro
+          target: intro_party_names
           effects:
             - set: { party_member_5: "{{ slots.name }}" }
             - say: "Member 5 named {{ slots.name }}."
         - default: true
-          target: intro
+          target: intro_party_names
           guard_hint: "Index must be 1..{{ world.party_size }}."
           effects:
             - say: "Index {{ slots.index }} is out of range — pick 1..{{ world.party_size }}."
 
       generate_names:
-        # Theme-based auto-fill.  Branches on world.narration so CI /
-        # deterministic flows don't depend on a live Claude call:
-        #
-        # - narrated (true)  → host.oracle.ask_with_mcp with the
-        #                       party_names schema (mcp/party_names.json);
-        #                       Claude calls submit() with a typed JSON
-        #                       roster and we bind each name out of the
-        #                       schema-validated array.
-        # - deterministic   → a small hardcoded theme→CSV table
-        #   (false)            covers Western / Star Wars / Norse /
-        #                       Lord of the Rings; everything else
-        #                       falls back to the default seeded crew.
         - when: "world.narration"
-          target: intro
+          target: intro_party_names
           effects:
             - invoke: host.oracle.ask_with_mcp
               with:
@@ -194,16 +329,11 @@ states:
                 party_member_5:    "submitted.names[4]"
                 party_names_list:  "submitted.names"
                 party_names:       "{{ join(result.submitted.names, ',') }}"
-              on_error: intro
+              on_error: intro_party_names
             - say: "Named the wagon party from theme: {{ slots.theme }}."
         - default: true
-          target: intro
+          target: intro_party_names
           effects:
-            # Deterministic theme→CSV table. lower(slots.theme) so
-            # "Western" / "western" / "WESTERN" all hit the same arm,
-            # and hasPrefix on a handful of recognizable cues catches
-            # phrasings like "Norse mythology", "Lord of the Rings
-            # names", "give us star wars".
             - set:
                 party_names: '{{ hasPrefix(lower(slots.theme), "west") ? "Hank,Jesse,Mary,Ezra,Sarah" : (hasPrefix(lower(slots.theme), "star wars") ? "Luke,Leia,Han,Chewie,Yoda" : (hasPrefix(lower(slots.theme), "norse") ? "Erik,Helga,Thor,Sigrid,Bjorn" : (hasPrefix(lower(slots.theme), "lord of the rings") ? "Frodo,Sam,Merry,Pippin,Bilbo" : "Adam,Beth,Carol,Daniel,Edith"))) }}'
             - set:
@@ -214,34 +344,70 @@ states:
                 party_member_5: '{{ trim(split(world.party_names, ",")[4]) }}'
             - say: "Named the wagon party from theme: {{ slots.theme }} → {{ world.party_names }}."
 
-      pick_profession:
-        - target: intro
-          effects:
-            # Banker = $1600, carpenter = $800, farmer = $400 (per the
-            # 1985 MECC scaling). Stored unconditionally; later cash
-            # transactions decrement from here.
-            - set:
-                profession: "{{ slots.profession }}"
-                money: "{{ slots.profession == 'banker' ? 1600 : (slots.profession == 'carpenter' ? 800 : 400) }}"
-            - say: "Profession set to {{ slots.profession }}; starting cash ${{ world.money }}."
-
-      pick_month:
-        - target: intro
+      continue:
+        # If party_names is already set (CSV or theme path), advance.
+        - when: "world.party_names != ''"
+          target: intro_summary
+        # Otherwise the user came via per-member naming; compute a
+        # canonical CSV from the per-member keys (empty slots stay
+        # empty), then advance.
+        - when: "world.party_member_1 != ''"
+          target: intro_summary
           effects:
             - set:
-                month: "{{ slots.month }}"
-            - say: "Departure month set to {{ slots.month }}."
+                party_names: "{{ world.party_member_1 }},{{ world.party_member_2 }},{{ world.party_member_3 }},{{ world.party_member_4 }},{{ world.party_member_5 }}"
+        - default: true
+          target: intro_party_names
+          guard_hint: "Name at least the leader (member 1) before continuing."
+          effects:
+            - say: "Name at least the leader (member 1) before you continue."
+      back:
+        - target: intro_month
+      look:
+        - target: intro_party_names
 
+  # ── 4. Summary + start ─────────────────────────────────────────────
+  intro_summary:
+    description: "Confirm setup and depart."
+    relevant_world: [profession, month, party_names, money]
+    view:
+      - heading: "Ready to roll"
+      - kv:
+          pairs:
+            Profession:    '{{ world.profession }}'
+            Departure:     '{{ world.month }}'
+            Roster:        '{{ world.party_names }}'
+            Starting cash: '${{ world.money }}'
+      - choice:
+          mode: single
+          prompt: "Confirm"
+          items:
+            - label:  "Start the journey"
+              hint:   "depart Independence and head for Matt's General Store"
+              intent: start_journey
+            - { label: "Change profession", intent: edit_step, slots: { step: profession } }
+            - { label: "Change month",      intent: edit_step, slots: { step: month } }
+            - { label: "Change names",      intent: edit_step, slots: { step: names } }
+            - { label: "look",              intent: look }
+    on:
       start_journey:
         - when: "world.party_names != '' && world.profession != nil && world.month != nil"
           target: general_store
           effects:
             - say: "Wagon's hitched. Off to the general store."
         - default: true
-          target: intro
-          guard_hint: "Name the party, pick a profession, and pick a month before you can leave."
+          target: intro_summary
+          guard_hint: "Setup isn't complete — return to an earlier step."
           effects:
-            - say: "Not ready yet — name the party, pick a profession, and pick a departure month first."
+            - say: "Setup isn't complete. Use Change X to return to an earlier step."
+
+      edit_step:
+        - when: "slots.step == 'profession'"
+          target: intro_profession
+        - when: "slots.step == 'month'"
+          target: intro_month
+        - when: "slots.step == 'names'"
+          target: intro_party_names
 
       look:
-        - target: intro
+        - target: intro_summary

@@ -21,25 +21,45 @@ states:
     # Conditional row pattern (proposal §2.2): the hunt-result prose
     # element is gated by per-element `when:` so an empty hunt outcome
     # doesn't leave a stray "Hunt result:" line.
+    #
+    # "Dynamic" job pick: cookbook v1 has no dynamic items, so we
+    # pre-bind `job_id: "{{ world.last_job_id }}"` (templated values
+    # are pongo-compiled at load time, §4.3, and resolved at dispatch)
+    # and hide the row with `when:` when no job is pending. This is
+    # the single-job pattern; multi-job inboxes would need either a
+    # multi mode (one row per pending job, with literal value: keys
+    # precomputed into world) or post-dispatch clarify to disambiguate.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - heading: "Inbox ({{ world.inbox_unread }} unread)"
-          - kv:
-              pairs:
-                Last job: "{{ world.last_job_id|default:\"(none)\" }}"
-          - prose: "Hunt result: {{ world.last_hunt_lbs }} lbs of {{ world.last_hunt_target }} ({{ world.last_hunt_outcome }})."
-            when:  "world.last_hunt_outcome != ''"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "answer_clarification job_id=… answer=…"
-                  hint:  "resolve a paused job"
-                - label: "open_job job_id=…"
-                  hint:  "teleport back to the originating room"
-                - "look"
+      - heading: "Inbox ({{ world.inbox_unread }} unread)"
+      - kv:
+          pairs:
+            Last job: "{{ world.last_job_id|default:\"(none)\" }}"
+      - prose: "Hunt result: {{ world.last_hunt_lbs }} lbs of {{ world.last_hunt_target }} ({{ world.last_hunt_outcome }})."
+        when:  "world.last_hunt_outcome != ''"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "Answer the last job's clarification"
+              hint:   "resolve the paused job ({{ world.last_job_id }})"
+              intent: answer_clarification
+              slots:  { job_id: "{{ world.last_job_id }}" }
+              param:
+                slot:        answer
+                type:        string
+                placeholder: "e.g. bison"
+                required:    true
+              when: "world.last_job_id != ''"
+            - label:  "Open the last job"
+              hint:   "teleport back to the originating room"
+              intent: open_job
+              slots:  { job_id: "{{ world.last_job_id }}" }
+              when:   "world.last_job_id != ''"
+            - label:  "(no pending jobs)"
+              intent: look
+              when:   "world.last_job_id == ''"
+            - label:  "look"
+              intent: look
     on:
       # answer_clarification — resolve a paused background job. The
       # host.jobs.answer_clarification handler writes the answer into the

@@ -113,6 +113,13 @@ func (m RootModel) enterOffPath() (tea.Model, tea.Cmd) {
 		// Idempotent — already off-path; no-op silently.
 		return m, nil
 	}
+	// Close any active inline choice widget — the help banner takes
+	// over (choice-widget proposal §7 "Coexistence"). The next room
+	// entry's handleTurnOutcome re-opens.
+	if m.mode == ModeChoosing {
+		m.choice.Close()
+		m.transcript.FinalizeLive("")
+	}
 	m.mode = ModeOffPath
 	m.offPath, _ = m.offPath.Update(enterOffPathMsg{})
 	m.location, _ = m.location.Update(offPathToggled{on: true})

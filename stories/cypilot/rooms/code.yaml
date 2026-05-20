@@ -5,34 +5,45 @@
 # once at the end of the feature chain (the LLM agent's actual code-write
 # work happens via iface.artifact.create + host.run rather than per-phase).
 # That's a simplification — v2 may parallelise.
+#
+# Views flattened from extends:"base" + blocks because choice-widget
+# proposal §4.5 / §8 forbids `choice:` inside blocks.
 
 states:
 
   code_executing:
     description: "Generating code for {{ world.feature_slug }}."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:          '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
-                "Feature slug":  "{{ world.feature_slug }}"
-                Workdir:         '{{ world.workdir|default:"(none)" }}'
-                "Code artifact": '{{ world.code_artifact.summary_title|default:"(pending)" }}'
-                "Tests passed":  '{{ world.code_artifact.tests_passed|default:0 }}'
-                "Tests failed":  '{{ world.code_artifact.tests_failed|default:0 }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "proceed"
-                  hint:  "deliver the patch to the final checkpoint"
-                - label: "refine feedback=…"
-                  hint:  "re-run cpt generate with feedback"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.feature_slug|default:"(no feature)" }} ({{ world.feature_index }}/{{ world.feature_count }})  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "{{ state.description }}"
+      - kv:
+          pairs:
+            Ticket:          "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            "Feature slug":  "{{ world.feature_slug }}"
+            Workdir:         '{{ world.workdir|default:"(none)" }}'
+            "Code artifact": '{{ world.code_artifact.summary_title|default:"(pending)" }}'
+            "Tests passed":  '{{ world.code_artifact.tests_passed|default:0 }}'
+            "Tests failed":  '{{ world.code_artifact.tests_failed|default:0 }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              hint:   "deliver the patch to the final checkpoint"
+              intent: proceed
+            - label:  "refine"
+              hint:   "re-run cpt generate with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              intent: look
     relevant_world: [ticket_id, ticket_title, feature_slug, workdir, code_artifact, cycle]
     on_enter:
       - invoke: iface.artifact.create
@@ -72,30 +83,38 @@ states:
   code_awaiting_reply:
     description: "Code artifact posted; awaiting final verdict."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:         "{{ world.ticket_id }}"
-                "Tests passed": '{{ world.code_artifact.tests_passed|default:0 }}'
-                "Tests failed": '{{ world.code_artifact.tests_failed|default:0 }}'
-                Verdict:        '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-                Confidence:     '{{ world.llm_verdict.confidence|default:0 }}'
-                Reason:         '{{ world.llm_verdict.reason|default:"(none)" }}'
-          - heading: "Artifact"
-          - code: '{{ world.code_artifact.summary_markdown|default:"(artifact pending)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "accept"
-                  hint:  "hand off to pr-refinement"
-                - label: "refine feedback=…"
-                  hint:  "bounce back to code_executing with feedback"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.feature_slug|default:"(no feature)" }} ({{ world.feature_index }}/{{ world.feature_count }})  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "{{ state.description }}"
+      - kv:
+          pairs:
+            Ticket:         "{{ world.ticket_id }}"
+            "Tests passed": '{{ world.code_artifact.tests_passed|default:0 }}'
+            "Tests failed": '{{ world.code_artifact.tests_failed|default:0 }}'
+            Verdict:        '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+            Confidence:     '{{ world.llm_verdict.confidence|default:0 }}'
+            Reason:         '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.code_artifact.summary_markdown|default:"(artifact pending)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "accept"
+              hint:   "hand off to pr-refinement"
+              intent: accept
+            - label:  "refine"
+              hint:   "bounce back to code_executing with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              intent: look
     relevant_world: [judge_mode, ticket_id, code_artifact, validate_ok, validate_report, llm_verdict, cycle]
     on_enter:
       - invoke: iface.transport.post

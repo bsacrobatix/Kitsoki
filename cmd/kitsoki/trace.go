@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -399,9 +400,16 @@ func BuildTraceLogger(cfg TraceConfig) (l *slog.Logger, ring *trace.RingBuffer, 
 }
 
 // openSink opens a write sink. "-" → os.Stderr; anything else → file.
+// Creates any missing parent directories so callers can pass a path
+// like /tmp/kitsoki-traces/foo.jsonl without pre-creating the dir.
 func openSink(path string) (io.Writer, func(), error) {
 	if path == "-" {
 		return os.Stderr, func() {}, nil
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, func() {}, fmt.Errorf("mkdir %q: %w", dir, err)
+		}
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {

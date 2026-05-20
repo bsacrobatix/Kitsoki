@@ -183,6 +183,25 @@ func filterReverse(in *pongo2.Value, _ *pongo2.Value) (*pongo2.Value, *pongo2.Er
 	return pongo2.AsValue(out), nil
 }
 
+// PongoParse compiles a pongo2 template WITHOUT executing it. This is
+// the load-time syntax probe — any non-nil error from this function is
+// unambiguously a parse / syntax error (undefined-identifier and
+// type-mismatch errors only surface during Execute). Callers that need
+// to discriminate syntax-vs-runtime errors at load time use this
+// instead of inspecting the message text of a full render call.
+//
+// If src contains no template delimiters the function returns nil
+// (pure prose is by definition syntactically valid).
+func PongoParse(src string) error {
+	if !hasDelims(src) {
+		return nil
+	}
+	if _, err := pongo2.FromString(preprocessCoalesce(src)); err != nil {
+		return wrapTemplateError(src, err)
+	}
+	return nil
+}
+
 // Pongo renders an inline pongo2 template string against an expr.Env.
 //
 // If src contains no template delimiters ("{{" or "{%") the source is

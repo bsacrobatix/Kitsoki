@@ -1,0 +1,19 @@
+# form_basic — readonly + string + int. The readonly `color` field is
+# rendered from world.picked_color but NOT submitted as a slot (the
+# widget skips readonly fields at commit). Slots: { name, count }.
+# Commit advances to form_bool.
+test_kind: flow
+app: ../app.yaml
+initial_state: form_basic
+initial_world:
+  picked_color: blue
+
+turns:
+  - intent: { name: submit_basic_form, slots: { name: "Aria", count: 2 } }
+    expect_state: form_bool
+    expect_world:
+      form_basic_color: blue
+      form_basic_name:  "Aria"
+      form_basic_count: 2
+
+expect_no_errors: true

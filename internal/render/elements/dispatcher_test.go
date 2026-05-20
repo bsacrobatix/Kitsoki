@@ -326,6 +326,36 @@ func TestRenderAll_UnknownKindErrors(t *testing.T) {
 	}
 }
 
+// TestRenderAll_ChoiceElementDispatch asserts the dispatcher routes a
+// Kind="choice" element through the Choice renderer and threads the
+// typed ChoiceMode / ChoicePrompt / ChoiceItems fields through. Acts
+// as the integration check for the case "choice": branch in
+// element.go.
+func TestRenderAll_ChoiceElementDispatch(t *testing.T) {
+	view := app.View{
+		Elements: []app.ViewElement{
+			{
+				Kind:         "choice",
+				ChoiceMode:   "single",
+				ChoicePrompt: "Choose",
+				ChoiceItems: []app.ChoiceItem{
+					{Label: "alpha", Intent: "pick"},
+					{Label: "beta", Intent: "pick"},
+				},
+			},
+		},
+	}
+	out, err := RenderAll(view, expr.Env{}, 80, IdentityGlamour, nil)
+	if err != nil {
+		t.Fatalf("RenderAll: %v", err)
+	}
+	for _, want := range []string{"Choose:", "alpha", "beta", "[↑/↓ move"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestRenderAll_WhenGuardCacheIsPerSource asserts the guard cache
 // keys on the raw expression source — repeated guards across rooms
 // compile once. We exercise this indirectly by running the same guard

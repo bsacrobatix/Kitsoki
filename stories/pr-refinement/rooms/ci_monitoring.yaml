@@ -1,6 +1,5 @@
 # ci_monitoring — poll iface.vcs.pr_status (and/or iface.ci.remote_status)
-# for the current PR. The state itself is non-checkpointed; the operator
-# (or autonomous loop) advances on three intents:
+# for the current PR. Wait state but with operator actions:
 #
 #   monitor       — re-poll. ci_state may flip success | failure | pending.
 #   proceed       — move on based on the current ci_state:
@@ -21,30 +20,31 @@ states:
 
   ci_monitoring:
     description: "Polling CI; proceed once a verdict lands."
+    # Flattened view (choice-widget proposal §4.5).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                PR:                "{{ world.pr_id }} — {{ world.pr_title }}"
-                "CI state":        '{{ world.ci_state|default:"(unknown)" }}'
-                Attempts:          "{{ world.ci_attempts }} / {{ world.ci_poll_budget }}"
-                Failing:           '{{ world.ci_failed_checks|default:"(none)" }}'
-                "Pending comments": "{{ world.pending_comments }}"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "monitor"
-                  hint:  "re-poll CI"
-                - label: "proceed"
-                  hint:  "act on the current state (success → merge/resolve, failure → diagnose)"
-                - label: "merge_now"
-                  hint:  "override and jump to merge"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - kv:
+          pairs:
+            PR:                "{{ world.pr_id }} — {{ world.pr_title }}"
+            "CI state":        '{{ world.ci_state|default:"(unknown)" }}'
+            Attempts:          "{{ world.ci_attempts }} / {{ world.ci_poll_budget }}"
+            Failing:           '{{ world.ci_failed_checks|default:"(none)" }}'
+            "Pending comments": "{{ world.pending_comments }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "monitor"
+              hint:   "re-poll CI"
+              intent: monitor
+            - label:  "proceed"
+              hint:   "act on the current state (success → merge/resolve, failure → diagnose)"
+              intent: proceed
+            - label:  "merge_now"
+              hint:   "override and jump to merge"
+              intent: merge_now
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
     relevant_world: [pr_id, pr_title, ci_state, ci_attempts, ci_poll_budget, ci_failed_checks, pending_comments]
     on_enter:
       # Poll the PR's CI state. iface.vcs.pr_status returns
@@ -79,7 +79,7 @@ states:
           target: diagnose_executing
         - default: true
           target: ci_monitoring
-          guard_hint: "CI is still pending — type `monitor` to re-poll."
+          guard_hint: "CI is still pending — pick `monitor` to re-poll."
       # Operator override: jump straight to merge without waiting on CI
       # or review comments. Useful for `--warp` scenarios that want to
       # exercise the merge path without the upstream CI machinery.

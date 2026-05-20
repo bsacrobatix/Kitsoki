@@ -148,6 +148,8 @@ schema. The dogfood multi-glob covers both kitsoki-self bugs
 | **[`docs/architecture.md`](docs/architecture.md)** | Layers, packages, data flow, persistence model, conversation surfaces. |
 | **[`docs/state-machine.md`](docs/state-machine.md)** | Rooms, phases, states, intents, slots, world, guards, the turn loop. The directed cyclic graph in detail. |
 | **[`docs/authoring.md`](docs/authoring.md)** | How to write an `app.yaml`. Patterns, scaling-up, pitfalls. |
+| **[`docs/choice-widget.md`](docs/choice-widget.md)** | Author cookbook for `choice:` view elements (single / multi / form picker). |
+| **[`docs/story-style.md`](docs/story-style.md)** | Story style guide — typed view elements, narration voice, choice-widget conventions. |
 | **[`docs/developer-guide.md`](docs/developer-guide.md)** | For contributors: build, test, debug, add features. |
 | **[`docs/testing.md`](docs/testing.md)** | Mode 1 (intent pass-rate) and Mode 2 (deterministic flow) tests. |
 | **[`docs/hosts.md`](docs/hosts.md)** | Every built-in `host.*` handler with input/output contracts. |

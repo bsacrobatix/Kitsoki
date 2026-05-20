@@ -8,31 +8,31 @@
 # On entry we `say:` the handoff and immediately fire the `open` intent
 # against the `pr` compound, which enters at pr.open_pr per the
 # imports.pr.entry: open_pr clause.
+#
+# Flattened away from `extends: "base"` (choice-widget proposal §4.5 /
+# §8): a `choice:` element cannot live inside `blocks:`. The base.pongo
+# status line is inlined as the leading prose element.
 
 states:
 
   handoff:
     description: "Handing off to pr-refinement (opens the PR and runs the tail)."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:     '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
-                "PR title": '{{ world.pr_title|default:"(none)" }}'
-                Workdir:    '{{ world.workdir|default:"(none)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "open"
-                  hint:  "enter the pr-refinement tail (opens the PR)"
-                - label: "proceed"
-                  hint:  "alias for open"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.workdir|default:"(no workspace)" }}  ·  {{ world.feature_branch|default:"(no branch)" }}  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "Handing off to pr-refinement"
+      - kv:
+          pairs:
+            Ticket:     "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            "PR title": '{{ world.pr_title|default:"(none)" }}'
+            Workdir:    '{{ world.workdir|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "open",    intent: open,    hint: "enter the pr-refinement tail (opens the PR)" }
+            - { label: "proceed", intent: proceed, hint: "alias for open" }
+            - { label: "quit",    intent: quit,    hint: "abandon the pipeline" }
+            - { label: "look",    intent: look,    hint: "re-render" }
     relevant_world: [ticket_id, ticket_title, pr_title, pr_body, workdir]
     on:
       # Dispatch into the `pr` import compound. The compound's entry

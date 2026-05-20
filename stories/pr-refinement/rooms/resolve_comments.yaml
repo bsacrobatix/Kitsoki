@@ -1,35 +1,38 @@
 # resolve_comments — round-trip review comments. Operator-driven in
-# Wave 2 (no checkpoint LLM-judge yet); typing `resolve` posts a generic
+# Wave 2 (no checkpoint LLM-judge yet); picking `resolve` posts a generic
 # response comment via iface.vcs.pr_comment, decrements
 # pending_comments, and threads into re_push for the followup commit.
 #
 # Wave 3 adds an LLM-driven "address all comments" subflow that drafts
-# replies per-comment; Wave 2's minimal shape is one round-trip.
+# replies per-comment; Wave 2's minimal shape is one round-trip. Per-
+# comment picks (resolve / acknowledge / push-back) would need a
+# structured pr_comments list in world; today pr_comments is just a
+# raw string blob, so the data plane doesn't support a multi-pick yet.
 
 states:
 
   resolve_comments:
     description: "Round-tripping review comments."
+    # Flattened view (choice-widget proposal §4.5).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                PR:       "{{ world.pr_id }} — {{ world.pr_title }}"
-                Pending:  "{{ world.pending_comments }}"
-                Raw:      '{{ world.pr_comments|default:"(none)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "resolve"
-                  hint:  "post a follow-up comment and re-push"
-                - label: "proceed"
-                  hint:  "skip ahead (treat as resolved without posting)"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - kv:
+          pairs:
+            PR:       "{{ world.pr_id }} — {{ world.pr_title }}"
+            Pending:  "{{ world.pending_comments }}"
+            Raw:      '{{ world.pr_comments|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "resolve"
+              hint:   "post a follow-up comment and re-push"
+              intent: resolve
+            - label:  "proceed"
+              hint:   "skip ahead (treat as resolved without posting)"
+              intent: proceed
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
     relevant_world: [pr_id, pr_title, pending_comments, pr_comments]
     on:
       resolve:

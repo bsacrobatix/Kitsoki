@@ -397,6 +397,9 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 	return &TurnOutcome{
 		Mode:           mode,
 		View:           result.View,
+		TypedView:      result.TypedView,
+		RenderEnv:      result.RenderEnv,
+		Renderer:       result.Renderer,
 		NewState:       result.NewState,
 		Events:         successEvents,
 		AllowedIntents: newAllowed,

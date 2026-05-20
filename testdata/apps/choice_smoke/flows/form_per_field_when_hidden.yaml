@@ -1,0 +1,21 @@
+# form_per_field_when (gate false) — the `secret` field is hidden, so
+# the widget would dispatch the form with an empty slot map. The
+# orchestrator accepts this because the slot is not required. The
+# field's `when:` is enforced at render time, not at the orchestrator
+# layer — the flow test mirrors what the widget would commit. Commit
+# advances to form_readonly_expr and also seeds money + day for the
+# next spoke's readonly arithmetic.
+test_kind: flow
+app: ../app.yaml
+initial_state: form_per_field_when
+initial_world:
+  show_secret_field: false
+
+turns:
+  - intent: { name: submit_gated_form, slots: {} }
+    expect_state: form_readonly_expr
+    expect_world:
+      money: 100
+      day:   3
+
+expect_no_errors: true

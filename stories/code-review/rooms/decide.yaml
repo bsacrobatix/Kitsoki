@@ -13,31 +13,36 @@ states:
 
   decide_executing:
     description: "Recording the review decision."
+    # Choice-widget migration (§4 row 4, verdict picker). Flattened
+    # the `extends: "base"` / `blocks:` shell (§4.5).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                PR:       "{{ world.pr_id }} — {{ world.pr_title }}"
-                Decision: '{{ world.decision|default:"(pending)" }}'
-          - heading: "Comment posted"
-            when: "world.draft_comment != ''"
-          - code: "{{ world.draft_comment }}"
-            when: "world.draft_comment != ''"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "approve"
-                  hint:  "stage an approval decision"
-                - label: "request_changes"
-                  hint:  "stage a changes-requested decision"
-                - label: "proceed"
-                  hint:  "advance to the final-decision checkpoint"
-                - label: "quit"
-                  hint:  "abandon the review"
-                - label: "look"
+      - kv:
+          pairs:
+            PR:       "{{ world.pr_id }} — {{ world.pr_title }}"
+            Decision: '{{ world.decision|default:"(pending)" }}'
+      - heading: "Comment posted"
+        when: "world.draft_comment != ''"
+      - code: "{{ world.draft_comment }}"
+        when: "world.draft_comment != ''"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "approve"
+              hint:   "stage an approval decision"
+              intent: approve
+            - label:  "request_changes"
+              hint:   "stage a changes-requested decision"
+              intent: request_changes
+            - label:  "proceed"
+              hint:   "advance to the final-decision checkpoint"
+              intent: proceed
+            - label:  "quit"
+              hint:   "abandon the review"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render the scene"
+              intent: look
     relevant_world: [pr_id, pr_title, decision, draft_comment]
     on_enter:
       # Produce the structured decision artifact; the verdict is
@@ -78,31 +83,39 @@ states:
   decide_awaiting_reply:
     description: "Final decision posted; awaiting confirmation."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                PR:         "{{ world.pr_id }} — {{ world.pr_title }}"
-                Decision:   '{{ world.decision|default:"(pending)" }}'
-                Verdict:    '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-                Confidence: '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
-                Reason:     '{{ world.llm_verdict.reason|default:"(none)" }}'
-          - heading: "Artifact"
-          - code: '{{ world.decision_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "approve"
-                  hint:  "post the final approval and exit reviewed"
-                - label: "request_changes"
-                  hint:  "post changes-requested and exit reviewed"
-                - label: "refine feedback=…"
-                  hint:  "bounce back to redraft the comment"
-                - label: "quit"
-                  hint:  "abandon the review"
-                - label: "look"
+      - kv:
+          pairs:
+            PR:         "{{ world.pr_id }} — {{ world.pr_title }}"
+            Decision:   '{{ world.decision|default:"(pending)" }}'
+            Verdict:    '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+            Confidence: '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
+            Reason:     '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.decision_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "approve"
+              hint:   "post the final approval and exit reviewed"
+              intent: approve
+            - label:  "request_changes"
+              hint:   "post changes-requested and exit reviewed"
+              intent: request_changes
+            - label:  "refine"
+              hint:   "bounce back to redraft the comment"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the review"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render the scene"
+              intent: look
     relevant_world: [judge_mode, pr_id, pr_title, decision, decision_artifact, llm_verdict]
     on_enter:
       - invoke: iface.transport.post

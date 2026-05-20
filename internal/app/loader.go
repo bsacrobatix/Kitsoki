@@ -647,7 +647,7 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	for name := range def.Agents {
 		declaredAgents[name] = struct{}{}
 	}
-	validateStates(file, "", def.States, globalIntents, worldKeys, allStatePaths, stateOnKeys, allowedHosts, declaredAgents, &errs)
+	validateStates(file, "", def.States, globalIntents, def.Intents, nil, worldKeys, allStatePaths, stateOnKeys, allowedHosts, declaredAgents, &errs)
 
 	// ── 7a. Semantic-routing schema checks (semantic-routing proposal Phase 0).
 	// Validates Intent.Synonyms / Slot.Synonyms / AppDef.Routing against the
@@ -813,11 +813,23 @@ func joinPath(prefix, name string) string {
 // stateOnKeys maps each state path to the set of intent names declared
 // in that state's `on:` block. It is used to statically validate
 // `emit_intent:` references on transition / on_enter effects.
+// validateStates' ancestorIntents parameter carries the union of all
+// `intents:` declarations on every compound-state ancestor on the path
+// from the root to the current state. SCXML-style intent inheritance
+// means a child state can fire an `on:` arc declared on a parent (the
+// runtime machine in internal/machine/ walks the compound stack to
+// resolve intents). The loader's choice cross-reference must use the
+// same scope; otherwise a child `choice:` referencing an ancestor-
+// declared intent would fail load with "intent not declared". A nil /
+// empty map is fine — resolution falls through to the global intent
+// library declared at the AppDef level.
 func validateStates(
 	file string,
 	prefix string,
 	states map[string]*State,
 	globalIntents map[string]struct{},
+	globalIntentDefs map[string]Intent,
+	ancestorIntents map[string]Intent,
 	worldKeys map[string]struct{},
 	allPaths map[string]struct{},
 	stateOnKeys map[string]map[string]struct{},
@@ -844,6 +856,20 @@ func validateStates(
 			localIntents[k] = struct{}{}
 		}
 
+		// Compose the intents-in-scope map used by the choice cross-ref:
+		// every intent declared on any compound-state ancestor PLUS this
+		// state's own intents, with state-local entries shadowing
+		// ancestor entries when names collide. Mirrors how the runtime
+		// machine resolves intents up the compound stack so a child
+		// `choice:` may reference an intent declared on a parent.
+		inScopeIntents := make(map[string]Intent, len(ancestorIntents)+len(s.Intents))
+		for k, v := range ancestorIntents {
+			inScopeIntents[k] = v
+		}
+		for k, v := range s.Intents {
+			inScopeIntents[k] = v
+		}
+
 		// Validate relevant_world references.
 		for _, wk := range s.RelevantWorld {
 			if _, ok := worldKeys[wk]; !ok {
@@ -857,6 +883,20 @@ func validateStates(
 		// don't get a Phase-D renderer panic for a YAML-shape problem.
 		if err := s.View.Validate(); err != nil {
 			addErr(fmt.Sprintf("state %q: %v", statePath, err))
+		} else {
+			// Phase A of the choice-widget proposal — cross-reference
+			// walk over choice elements. Runs after structural Validate
+			// passes; pulls in the surrounding state-local + global
+			// intents so item/element intent refs can be resolved to
+			// concrete Slot maps for slot-key existence checks.
+			for i, el := range s.View.Elements {
+				if el.Kind != "choice" {
+					continue
+				}
+				if err := validateChoiceCrossRefs(el, globalIntentDefs, inScopeIntents); err != nil {
+					addErr(fmt.Sprintf("state %q: view[%d] (choice): %v", statePath, i, err))
+				}
+			}
 		}
 
 		// Validate transcript/theme: only allowed on top-level (room)
@@ -897,6 +937,17 @@ func validateStates(
 				}
 				if err := tr.View.Validate(); err != nil {
 					addErr(fmt.Sprintf("state %q intent %q: transition view: %v", statePath, intentName, err))
+				} else {
+					// Cross-reference choice elements in transition views
+					// against the same intents map. (choice-widget proposal §4.4.)
+					for vi, el := range tr.View.Elements {
+						if el.Kind != "choice" {
+							continue
+						}
+						if err := validateChoiceCrossRefs(el, globalIntentDefs, inScopeIntents); err != nil {
+							addErr(fmt.Sprintf("state %q intent %q: transition view[%d] (choice): %v", statePath, intentName, vi, err))
+						}
+					}
 				}
 				// Validate invoke: host.* effects against the allow-list.
 				for i, eff := range tr.Effects {
@@ -962,9 +1013,11 @@ func validateStates(
 			}
 		}
 
-		// Recurse into child states.
+		// Recurse into child states. Pass the in-scope intent set as the
+		// new ancestor scope so grandchildren also inherit this state's
+		// intent declarations.
 		if len(s.States) > 0 {
-			validateStates(file, statePath, s.States, globalIntents, worldKeys, allPaths, stateOnKeys, allowedHosts, declaredAgents, errs)
+			validateStates(file, statePath, s.States, globalIntents, globalIntentDefs, inScopeIntents, worldKeys, allPaths, stateOnKeys, allowedHosts, declaredAgents, errs)
 		}
 	}
 }

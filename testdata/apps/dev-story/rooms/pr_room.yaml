@@ -3,24 +3,24 @@
 states:
   pr_room:
     description: "PR Room — review status, fix CI, resolve comments, and merge your PRs."
+    # Flattened view: `choice:` is not allowed inside `blocks:`. Surface
+    # labels are user-facing; intent names are the routing keys (e.g.
+    # "check status" → check_pr).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Workspace: "{{ world.current_workspace }}"
-                PR status: "{{ world.pr_status|default:\"(unknown)\" }}"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - { label: "check status",        hint: "checks, reviews, mergeability" }
-                - { label: "fix ci",              hint: "LLM-assisted CI repair" }
-                - { label: "resolve comments",    hint: "respond to reviewers" }
-                - { label: "update pr description", hint: "regenerate summary" }
-                - { label: "merge pr",            hint: "land after checks pass" }
-                - { label: "go back",             hint: "return to previous room" }
+      - kv:
+          pairs:
+            Workspace: "{{ world.current_workspace }}"
+            PR status: "{{ world.pr_status|default:\"(unknown)\" }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "check status",          intent: check_pr,              hint: "checks, reviews, mergeability" }
+            - { label: "fix ci",                intent: fix_ci,                hint: "LLM-assisted CI repair" }
+            - { label: "resolve comments",      intent: resolve_comments,      hint: "respond to reviewers" }
+            - { label: "update pr description", intent: update_pr_description, hint: "regenerate summary" }
+            - { label: "merge pr",              intent: merge_pr,              hint: "land after checks pass" }
+            - { label: "go back",               intent: go_back,               hint: "return to previous room" }
     relevant_world: [current_workspace, pr_status]
     relevant_slots: []
     on:

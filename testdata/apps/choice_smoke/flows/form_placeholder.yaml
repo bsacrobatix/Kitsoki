@@ -1,0 +1,14 @@
+# form_placeholder — submit with a value (placeholder is
+# presentational only; once a buffer exists the placeholder
+# disappears). Commit advances to form_required.
+test_kind: flow
+app: ../app.yaml
+initial_state: form_placeholder
+
+turns:
+  - intent: { name: submit_placeholder_form, slots: { note: "hello" } }
+    expect_state: form_required
+    expect_world:
+      form_note: "hello"
+
+expect_no_errors: true

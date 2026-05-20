@@ -7,24 +7,26 @@ states:
 
   workspace_manager:
     description: "Workspace manager — list / create / switch workspaces."
+    # Flattened view (no extends/blocks) — `choice:` cannot live inside a
+    # `blocks:` map (typed metadata is lost through the inheritance
+    # pipeline; see docs/choice-widget.md §3.1).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                "Current workspace": '{{ world.current_workspace|default:"(none)" }}'
-                Workdir:             '{{ world.workdir|default:"(none)" }}'
-                "Feature branch":    '{{ world.feature_branch|default:"(none)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "proceed"
-                  hint:  "fetch the workspace list"
-                - label: "go_back"
-                - label: "go_main"
-                - label: "look"
+      - kv:
+          pairs:
+            "Current workspace": '{{ world.current_workspace|default:"(none)" }}'
+            Workdir:             '{{ world.workdir|default:"(none)" }}'
+            "Feature branch":    '{{ world.feature_branch|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              intent: proceed
+              hint:   "fetch the workspace list"
+            - { label: "go_back",  intent: go_back,  hint: "return to the previous room" }
+            - { label: "go_main",  intent: go_main,  hint: "back to the engineer's day landing" }
+            - { label: "go_inbox", intent: go_inbox, hint: "check the inbox" }
+            - { label: "look",     intent: look,     hint: "re-render" }
     relevant_world: [current_workspace, workdir, feature_branch]
     on_enter:
       - invoke: iface.workspace.list

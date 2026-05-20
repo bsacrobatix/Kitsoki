@@ -217,6 +217,117 @@ let the chrome carry the floor.
 
 ---
 
+## 3.6 Interactive `choice:` widgets
+
+A `choice:` element is an interactive in-transcript picker. Three
+modes — `single`, `multi`, `form` — share one envelope and dispatch
+an intent directly, short-circuiting the semantic router. Schema
+reference: `kitsoki docs app-schema` §`choice:`. Author cookbook:
+[`choice-widget.md`](choice-widget.md).
+
+Prescriptive guidance for when you reach for one:
+
+- **Prefer `choice:` over a prose hint + free-text routing whenever
+  the room's `on:` arc set is enumerable and stable.** A `list:` of
+  inert labels paired with a "type the action" prose hint is the
+  legacy pattern; convert it to a `choice:` and you save an LLM
+  call per turn on the cold-route path AND give the user a
+  first-class affordance. If the action set changes on every entry
+  (a dynamic ticket list, a free-form composition), keep the prose
+  hint.
+- **`prompt:` is sentence-case, action-oriented, no trailing
+  punctuation.** "Choose a profession", "Select symptoms",
+  "Compose your purchase". Not "Choose a profession:" and not
+  "What is your profession?".
+- **`label:` is terse, one phrase, and mirrors the underlying
+  intent's name where possible.** `"pay"` rather than `"pay them
+  off"`; `"accept"` rather than `"yes, accept the proposal"`. The
+  intent name is the label by convention; if you paraphrase, the
+  user has to translate.
+- **`hint:` carries cost / availability / consequence — not a
+  restatement of the label.** Good: `"${{ world.threat_level * 50 }}
+  starting cash — easy"`. Bad: `"pick the banker option"`.
+- **Per-item `when:` — pick one of two patterns:**
+
+  *Hide-when-unavailable* — drop the row entirely. Use when showing
+  the option would mislead (e.g. an action that depends on a flag
+  the user hasn't seen yet).
+
+  ```yaml
+  items:
+    - { label: "drink", intent: drink, when: "world.canteen > 0" }
+  ```
+
+  *Show-disabled-with-reason* — keep the row visible but greyed,
+  with the reason in the label. Use when the user benefits from
+  knowing the option exists (affordability splits, unmet
+  prerequisites). Follow the `✗ <intent> — <reason>` convention
+  from §3 above.
+
+  ```yaml
+  items:
+    - { label: "pay", intent: pay, when: "world.money >= cost" }
+    - label: "✗ pay — not enough money (${{ cost }} needed)"
+      intent: pay
+      when: "world.money < cost"
+  ```
+
+- **Multi-mode `min:` / `max:`** — set them when the dispatched
+  intent has hard requirements. Omit them when "any selection is
+  fine" (the widget defaults to `min: 0`, `max: len(visible)`). Use
+  `min: 1` when the intent's slot is required; `min: 0` when an
+  empty list is a meaningful submission ("none of these apply").
+- **`param: { required: false }` for optional free-form args.**
+  Common on `refine` rows where an LLM judge has already filled in
+  a reason — Enter accepts the judge's text, type-then-Enter
+  overrides. Use the `(optional — …)` placeholder convention so the
+  user sees the affordance.
+- **Form-mode field type:**
+  - `string` for free text and identifiers.
+  - `enum` when the value comes from a short fixed list — gives
+    the user a cycle-on-Space picker rather than a typo-prone text
+    field.
+  - `int` / `float` for numeric input — also gives the user
+    `min:` / `max:` bounds.
+  - `bool` for toggles — Space flips. (Note: a `bool` world key
+    set from `"{{ slots.x }}"` will fail because template
+    substitution always produces strings — store as `string` or
+    coerce in an effect.)
+- **Form-mode `default:`** — set when there is a sensible starting
+  value (a recommendation, the last-used value, a world-derived
+  number). Omit when 0 / "" should look distinct from "the user
+  typed 0 / ""." Combine with `required: true` to mean "we suggest
+  X, but you must confirm or change it."
+- **`readonly:` form fields** — use sparingly and only when the
+  value is *genuinely derived* from world state (a running total,
+  a computed cost). If you find yourself writing `readonly: true,
+  expr: "'a literal label'"`, you want a `prose:` element above
+  the choice instead. Readonly fields ARE submitted when the
+  intent declares a matching slot — confirm this is what you want
+  before adding one.
+
+Authoring checklist (additive to the §7 list):
+
+- [ ] The room's `on:` arc set is enumerable. (If not, use a
+      prose hint + router.)
+- [ ] `prompt:` is sentence case, action-oriented, no trailing
+      `:` or `?`.
+- [ ] Each `label:` mirrors the intent name or is a one-phrase
+      action verb.
+- [ ] Each `hint:` adds cost / consequence info — never restates
+      the label.
+- [ ] Disabled rows use the `✗ <intent> — <reason>` shape from §3.
+- [ ] Multi-mode `min:` matches the intent's slot-required-ness.
+- [ ] Form-mode enums prefer `type: enum` over `type: string +
+      validator`.
+- [ ] No `readonly:` field whose `expr:` is a literal — use
+      `prose:` instead.
+
+Worked end-to-end reference: [`testdata/apps/choice_smoke/`](../testdata/apps/choice_smoke/)
+covers every feature combo across 23 spokes.
+
+---
+
 ## 4. Placeholders for empty / pending values
 
 Lowercase, in parentheses. The pongo `|default` filter is the standard

@@ -10,6 +10,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/clock"
+	"kitsoki/internal/expr"
 	"kitsoki/internal/intent"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/metamode"
@@ -216,6 +217,39 @@ func SetPromptValue(m *RootModel, v string) { m.prompt.SetValue(v) }
 // GetPromptValue returns the current prompt input value.
 func GetPromptValue(m RootModel) string { return m.prompt.Value() }
 
+// ── Choice-widget integration test helpers ───────────────────────────────────
+
+// SetPendingDraftForTest seeds m.pendingDraft so /input tests can
+// assert the slash command's restore behaviour without first having to
+// drive a choice widget to seize focus.
+func SetPendingDraftForTest(m *RootModel, v string) { m.pendingDraft = v }
+
+// GetPendingDraftForTest exposes m.pendingDraft so tests can assert
+// /input cleared the snapshot (or that handleTurnOutcome captured one
+// before opening the picker).
+func GetPendingDraftForTest(m RootModel) string { return m.pendingDraft }
+
+// HandleSlashCommandForTest routes a slash command through the
+// production dispatcher. Slash commands are normally handled inside
+// submitInput, but tests targeting the /input restore path want the
+// dispatch in isolation (no prompt-echo / no Update plumbing).
+func HandleSlashCommandForTest(m RootModel, cmd string) (RootModel, tea.Cmd) {
+	updated, tcmd := m.handleSlashCommand(cmd)
+	rm, _ := updated.(RootModel)
+	return rm, tcmd
+}
+
+// ChoiceWidgetIsActive reports whether the inline choice widget owns
+// focus. Mirrors the production check at handleTurnOutcome's
+// auto-focus site.
+func ChoiceWidgetIsActive(m RootModel) bool { return m.choice.IsActive() }
+
+// ViewWithoutChoiceForTest exposes the package-private helper that
+// strips choice elements from a typed View. The regression test pins
+// its shallow-copy semantics so future tweaks can't quietly mutate the
+// caller's view.
+func ViewWithoutChoiceForTest(v *app.View) *app.View { return viewWithoutChoice(v) }
+
 // GetPromptWidth returns the textarea inner content width set on the
 // prompt by resize(). Tests use this to assert resize() reserves a
 // usable input column count after the prompt prefix and safety margin.
@@ -291,6 +325,78 @@ func (w *TestDisambiguationModelWrapper) InlineBlock() string {
 func (w *TestDisambiguationModelWrapper) SubmitValue(input string) (intent.Candidate, error) {
 	return w.m.SubmitValue(input)
 }
+
+// ── Choice widget test helpers ───────────────────────────────────────────────
+
+// TestChoiceWidget wraps a choiceWidgetModel for unit tests that need
+// to drive the inline picker without spinning up a full RootModel.
+// Tests in the tui_test package use this rather than poking at
+// unexported fields directly.
+type TestChoiceWidget struct {
+	m *choiceWidgetModel
+}
+
+// NewTestChoiceWidget creates a new, inactive choice widget.
+func NewTestChoiceWidget() *TestChoiceWidget {
+	m := newChoiceWidgetModel()
+	return &TestChoiceWidget{m: &m}
+}
+
+// OpenChoice initialises the widget from a typed ViewElement. World is
+// a map exposed to expr-lang's `world.*` namespace for When-guard
+// evaluation; pass nil when no When filtering is needed.
+func (w *TestChoiceWidget) OpenChoice(el app.ViewElement, world map[string]any) error {
+	env := expr.Env{World: world}
+	return w.m.Open(el, env, nil)
+}
+
+// IsActive reports widget activity for assertions.
+func (w *TestChoiceWidget) IsActive() bool { return w.m.IsActive() }
+
+// View renders the widget at the given width.
+func (w *TestChoiceWidget) View(width int) string { return w.m.View(width) }
+
+// SendKey forwards a tea.KeyMsg through the widget's Update path and
+// returns the resulting commit (nil when the widget stays open).
+func (w *TestChoiceWidget) SendKey(msg tea.KeyMsg) *ChoiceCommit {
+	next, _, commit := w.m.Update(msg)
+	*w.m = next
+	return commit
+}
+
+// SendRune is a convenience that wraps a single rune as a tea.KeyMsg
+// of type KeyRunes and forwards through SendKey.
+func (w *TestChoiceWidget) SendRune(r rune) *ChoiceCommit {
+	return w.SendKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+}
+
+// FieldBuffers returns a snapshot of the form-mode editable buffers
+// (one per field in field order).
+func (w *TestChoiceWidget) FieldBuffers() []string {
+	out := make([]string, len(w.m.fieldBuffers))
+	copy(out, w.m.fieldBuffers)
+	return out
+}
+
+// Cursor returns the current selection cursor (single / multi modes).
+func (w *TestChoiceWidget) Cursor() int { return w.m.cursor }
+
+// FieldCursor returns the current focused field index (form mode).
+func (w *TestChoiceWidget) FieldCursor() int { return w.m.fieldCursor }
+
+// ParamMode reports whether the widget is in param-capture mode.
+func (w *TestChoiceWidget) ParamMode() bool { return w.m.paramMode }
+
+// ParamBuf returns the current param-mode input buffer. Used by tests
+// that need to confirm whether enum params seed with Values[0] and
+// whether printable letters mutate the buffer.
+func (w *TestChoiceWidget) ParamBuf() string { return w.m.paramBuf }
+
+// ItemCount returns the number of items visible after When filtering.
+func (w *TestChoiceWidget) ItemCount() int { return len(w.m.items) }
+
+// ErrMsg returns the transient error footer text.
+func (w *TestChoiceWidget) ErrMsg() string { return w.m.errMsg }
 
 // ── Inbox test helpers ────────────────────────────────────────────────────────
 

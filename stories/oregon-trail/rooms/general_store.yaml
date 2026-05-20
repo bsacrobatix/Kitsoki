@@ -47,32 +47,76 @@ states:
           local_price_pct: 100
     states:
 
-      # ── idle: pre-draft. propose_purchase drafts; leave_store departs.
+      # ── idle: method picker. Pick how to draft a purchase, or leave.
+      # Free-text propose_purchase (semroute) still dispatches the legacy
+      # 8-field form straight to reviewing — flow fixtures rely on this.
       idle:
-        description: "At Matt's counter — propose a purchase or leave."
-        # Proposal §5.4 — stock readout via the shared partial. The
-        # inventory.pongo include is the canonical "what's in the
-        # wagon" table used here AND in forts (proposal §6 — re-use
-        # mentioned). Authoring the table once and including it twice
-        # means a price/column tweak touches one file.
+        description: "At Matt's counter — pick how to draft a purchase, or leave."
         view:
-          extends: "base"
-          blocks:
-            body:
-              - prose: >
-                  Matt's General Store. Stock up before you head out — once
-                  you leave Independence there's no road back, only forts
-                  with markup.
-              - code: "{% include \"partials/inventory.pongo\" %}"
-            choices:
-              - heading: "Actions"
-              - list:
-                  items:
-                    - label: "propose_purchase items=… total_cost=…"
-                      hint:  "auto-accepts when total_cost < $5; otherwise review/refine"
-                    - label: "leave the store"
-                      hint:  "requires ≥ 2 oxen and ≥ 200 lbs food"
+          - prose: >
+              Matt's General Store. Stock up before you head out — once
+              you leave Independence there's no road back, only forts
+              with markup.
+          - code: "{% include \"partials/inventory.pongo\" %}"
+          - choice:
+              mode:   single
+              prompt: "How would you like to proceed?"
+              items:
+                - label:  "Browse what's on the shelves"
+                  hint:   "see each item with prices and uses"
+                  intent: browse_items
+                - label:  "Set a budget — let Matt pick a balanced kit"
+                  hint:   "you say how much; Matt assembles the basket"
+                  intent: propose_budget
+                  param:
+                    slot:        total_cost
+                    type:        int
+                    placeholder: "e.g. 200"
+                    required:    true
+                - label:  "Compose item-by-item (numbers only)"
+                  hint:   "form with per-item counts; Matt totals it"
+                  intent: open_compose
+                - label:  "Leave the store"
+                  hint:   "depart once oxen ≥ 2 and food ≥ 200 lbs"
+                  intent: leave_store
+                  when:   "world.oxen >= 2 && world.food_lbs >= 200"
+                - label:  "✗ Leave the store — need ≥ 2 oxen and ≥ 200 lbs food"
+                  intent: leave_store
+                  when:   "!(world.oxen >= 2 && world.food_lbs >= 200)"
+                - { label: "look", intent: look }
         on:
+          browse_items:
+            - target: ../describe
+          open_compose:
+            - target: ../compose
+          propose_budget:
+            # Balanced kit: ~30% oxen, 50% food, 10% bullets, 10% spare
+            # parts. Allocations rounded into whole-unit counts at the
+            # local prices (oxen $40/yoke, food $0.20/lb, bullets $2/box,
+            # clothing $10, wheels/axles/tongues $10 each). Remaining
+            # cents from the rounding get absorbed silently — the totals
+            # below sum to ≤ the requested budget by construction.
+            - when: "int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)"
+              target: ../reviewing
+              effects:
+                - set:
+                    proposal_items: "Matt's balanced kit"
+                    proposal_total_cost:   "{{ int(slots.total_cost) }}"
+                    proposal_refine_count: 0
+                    proposal_oxen:     "{{ int(int(slots.total_cost) * 30 / 100 / 40) }}"
+                    proposal_food:     "{{ int(int(slots.total_cost) * 50 / 100 / 0.2) }}"
+                    proposal_bullets:  "{{ int(int(slots.total_cost) * 10 / 100 / 2) }}"
+                    proposal_clothing: 0
+                    proposal_wheels:   "{{ int(slots.total_cost) >= 100 ? 1 : 0 }}"
+                    proposal_axles:    "{{ int(slots.total_cost) >= 200 ? 1 : 0 }}"
+                    proposal_tongues:  0
+                - say: "Matt scribbles for a minute and slides the slate across. 'Balanced kit for ${{ slots.total_cost }} — proposed.'"
+            - default: true
+              target: .
+              guard_hint: "Budget must be a positive integer and within your cash on hand."
+              effects:
+                - say: "Matt looks at the slate then back at you. 'That budget won't work, friend — check your cash on hand.'"
+
           propose_purchase:
             # Auto-accept tiny baskets straight to done, per policy
             # buy_supplies.auto_accept_if: $proposal.total_cost < 5.
@@ -149,31 +193,176 @@ states:
           look:
             - target: .
 
+      # ── describe: educational read-only — item prices and uses.
+      describe:
+        description: "Matt walks you through what's on the shelves."
+        view:
+          - heading: "What's on Matt's shelves"
+          - kv:
+              pairs:
+                Oxen ($40/yoke):                       "≥ 2 to leave town; 6–8 is comfortable for the trail."
+                Food ($0.20/lb):                       "~2 lbs/soul/day. 5 × 150d ≈ 1,500 lbs floor; 2,500+ is safer."
+                Bullets ($2.00/box of 20):             "~100 lbs of meat per hunt. 100 boxes is comfortable for a 5-leg journey."
+                Clothing ($10/set):                    "Burned through treating illness; 2 floor, 5+ is warm."
+                Spare wheels / axles / tongues ($10):  "Eaten by breakdown events. 1 floor each; 2–3 each is safer."
+          - prose: >
+              The local price multiplier here is 100% (Independence rates).
+              Forts on the trail mark items up — buy what you can now.
+          - choice:
+              mode:   single
+              prompt: "Now what?"
+              items:
+                - label:  "Set a budget"
+                  hint:   "you say how much; Matt picks a balanced kit"
+                  intent: propose_budget
+                  param:
+                    slot:        total_cost
+                    type:        int
+                    placeholder: "e.g. 200"
+                    required:    true
+                - label:  "Compose item-by-item (form)"
+                  intent: open_compose
+                - { label: "back",  intent: back }
+                - { label: "look",  intent: look }
+        on:
+          back:
+            - target: ../idle
+          open_compose:
+            - target: ../compose
+          propose_budget:
+            - when: "int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)"
+              target: ../reviewing
+              effects:
+                - set:
+                    proposal_items: "Matt's balanced kit"
+                    proposal_total_cost:   "{{ int(slots.total_cost) }}"
+                    proposal_refine_count: 0
+                    proposal_oxen:     "{{ int(int(slots.total_cost) * 30 / 100 / 40) }}"
+                    proposal_food:     "{{ int(int(slots.total_cost) * 50 / 100 / 0.2) }}"
+                    proposal_bullets:  "{{ int(int(slots.total_cost) * 10 / 100 / 2) }}"
+                    proposal_clothing: 0
+                    proposal_wheels:   "{{ int(slots.total_cost) >= 100 ? 1 : 0 }}"
+                    proposal_axles:    "{{ int(slots.total_cost) >= 200 ? 1 : 0 }}"
+                    proposal_tongues:  0
+                - say: "Matt scribbles for a minute and slides the slate across. 'Balanced kit for ${{ slots.total_cost }} — proposed.'"
+            - default: true
+              target: .
+              guard_hint: "Budget must be positive and within your cash."
+              effects:
+                - say: "Matt shakes his head — 'budget doesn't work, friend.'"
+          look:
+            - target: .
+
+      # ── compose: form mode, numeric only. Items label is auto-computed.
+      compose:
+        description: "Compose a kit item-by-item (numbers only)."
+        view:
+          - code: "{% include \"partials/inventory.pongo\" %}"
+          - prose: >
+              Prices: oxen $40/yoke, food $0.20/lb, bullets $2/box,
+              clothing $10/set, wheels/axles/tongues $10 each. Matt
+              totals it after you submit.
+          - choice:
+              mode:     form
+              prompt:   "Item counts"
+              intent:   propose_kit
+              template: "Buy oxen={oxen}, food={food} lbs, bullets={bullets}, clothing={clothing}, wheels={wheels}, axles={axles}, tongues={tongues}."
+              fields:
+                oxen:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "head ($40/yoke)"
+                food:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "lbs ($0.20/lb)"
+                bullets:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "boxes ($2/box of 20)"
+                clothing:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "sets ($10/set)"
+                wheels:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "spare ($10 each)"
+                axles:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "spare ($10 each)"
+                tongues:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "spare ($10 each)"
+        on:
+          propose_kit:
+            # Compute total_cost from item counts × local prices.
+            # Prices: oxen $40/yoke, food $0.20/lb, bullets $2/box of 20,
+            # clothing $10/set, wheels/axles/tongues $10 each. Local
+            # multiplier (world.local_price_pct) is in %, so divide by 100.
+            - when: "world.money >= int((int(slots.oxen ?? 0) * 40 + int(slots.food ?? 0) * 0.2 + int(slots.bullets ?? 0) * 2 + int(slots.clothing ?? 0) * 10 + int(slots.wheels ?? 0) * 10 + int(slots.axles ?? 0) * 10 + int(slots.tongues ?? 0) * 10) * world.local_price_pct / 100)"
+              target: ../reviewing
+              effects:
+                - set:
+                    # Build a human-readable items string from the
+                    # numeric slots so reviewing's prose has something
+                    # to echo back. Skips zero-count categories.
+                    proposal_items: '{{ (int(slots.oxen ?? 0) > 0 ? string(int(slots.oxen)) + " oxen, " : "") + (int(slots.food ?? 0) > 0 ? string(int(slots.food)) + " lbs food, " : "") + (int(slots.bullets ?? 0) > 0 ? string(int(slots.bullets)) + " bullets, " : "") + (int(slots.clothing ?? 0) > 0 ? string(int(slots.clothing)) + " clothing, " : "") + (int(slots.wheels ?? 0) > 0 ? string(int(slots.wheels)) + " wheels, " : "") + (int(slots.axles ?? 0) > 0 ? string(int(slots.axles)) + " axles, " : "") + (int(slots.tongues ?? 0) > 0 ? string(int(slots.tongues)) + " tongues" : "") }}'
+                    proposal_total_cost:   "{{ int((int(slots.oxen ?? 0) * 40 + int(slots.food ?? 0) * 0.2 + int(slots.bullets ?? 0) * 2 + int(slots.clothing ?? 0) * 10 + int(slots.wheels ?? 0) * 10 + int(slots.axles ?? 0) * 10 + int(slots.tongues ?? 0) * 10) * world.local_price_pct / 100) }}"
+                    proposal_refine_count: 0
+                    proposal_oxen:     "{{ int(slots.oxen ?? 0) }}"
+                    proposal_food:     "{{ int(slots.food ?? 0) }}"
+                    proposal_bullets:  "{{ int(slots.bullets ?? 0) }}"
+                    proposal_clothing: "{{ int(slots.clothing ?? 0) }}"
+                    proposal_wheels:   "{{ int(slots.wheels ?? 0) }}"
+                    proposal_axles:    "{{ int(slots.axles ?? 0) }}"
+                    proposal_tongues:  "{{ int(slots.tongues ?? 0) }}"
+                - say: "Matt counts the slate. 'Total comes to ${{ world.proposal_total_cost }} — speak up if I've got it wrong.'"
+            - default: true
+              target: .
+              guard_hint: "Not enough cash for that kit."
+              effects:
+                - say: "Matt looks back at you. 'You haven't the money for that kit, friend.'"
+          back:
+            - target: ../idle
+          look:
+            - target: .
+
       # ── reviewing: a draft is in hand. accept / refine / cancel.
       reviewing:
         description: "Matt reads back the order."
         view:
-          extends: "base"
-          blocks:
-            body:
-              - prose: "Matt sets the slate on the counter, thumbs down the column, looks up."
-              - prose: >
-                  "Let's see now — {{ world.proposal_items }}.
-                  {{ world.proposal_total_cost }} dollars even. You'd have
-                  ${{ world.money - world.proposal_total_cost }} left in
-                  your pouch. That right?"
-            choices:
-              - heading: "Actions"
-              - list:
-                  items:
-                    - label: "accept_purchase"
-                      hint:  "take it"
-                    - label: "refine_purchase"
-                      hint:  "change a line"
-                    - label: "cancel_purchase"
-                      hint:  "walk it back"
-                    - label: "look"
-                      hint:  "read the slate again"
+          - prose: "Matt sets the slate on the counter, thumbs down the column, looks up."
+          - prose: >
+              "Let's see now — {{ world.proposal_items }}.
+              {{ world.proposal_total_cost }} dollars even. You'd have
+              ${{ world.money - world.proposal_total_cost }} left in
+              your pouch. That right?"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "accept_purchase"
+                  hint:   "take it"
+                  intent: accept_purchase
+                - label:  "refine_purchase"
+                  hint:   "change a line (free-text: type the new fields)"
+                  intent: refine_purchase
+                - label:  "cancel_purchase"
+                  hint:   "walk it back"
+                  intent: cancel_purchase
+                - label:  "look"
+                  hint:   "read the slate again"
+                  intent: look
         relevant_world: [proposal_items, proposal_total_cost, money, proposal_refine_count]
         on:
           accept_purchase:
@@ -243,23 +432,23 @@ states:
               title:     "Wagon loaded at Independence"
               body:      "Bought {{ world.proposal_items }} for ${{ world.proposal_total_cost }} at Matt's. ${{ world.money }} cash on hand, {{ world.oxen }} oxen yoked, {{ world.food_lbs }} lbs of food in the wagon."
         view:
-          extends: "base"
-          blocks:
-            body:
-              - prose: >
-                  Matt slides the parcel across the boards and looks up
-                  over his spectacles. "{{ world.proposal_items }}.
-                  That'll do you. ${{ world.money }} left in your pouch."
-            choices:
-              - heading: "Actions"
-              - list:
-                  items:
-                    - label: "repeat_purchase"
-                      hint:  "ask Matt for something else off the shelves"
-                    - label: "leave_store"
-                      hint:  "head out onto the road west"
-                    - label: "look"
-                      hint:  "read the counter again"
+          - prose: >
+              Matt slides the parcel across the boards and looks up
+              over his spectacles. "{{ world.proposal_items }}.
+              That'll do you. ${{ world.money }} left in your pouch."
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "repeat_purchase"
+                  hint:   "ask Matt for something else off the shelves"
+                  intent: repeat_purchase
+                - label:  "leave_store"
+                  hint:   "head out onto the road west (needs ≥ 2 oxen, ≥ 200 lbs food)"
+                  intent: leave_store
+                - label:  "look"
+                  hint:   "read the counter again"
+                  intent: look
         relevant_world: [proposal_items, proposal_total_cost, money, oxen, food_lbs]
         on:
           repeat_purchase:

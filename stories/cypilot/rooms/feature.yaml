@@ -7,33 +7,44 @@
 # autonomous-mode walk the same `_executing` → `_awaiting_reply` cycle for
 # each phase.  This is the cleanest mapping of proposal §3's "one room,
 # walked N times for N features."
+#
+# Views flattened from extends:"base" + blocks because choice-widget
+# proposal §4.5 / §8 forbids `choice:` inside blocks.
 
 states:
 
   feature_executing:
     description: "Producing feature artifact for phase {{ world.feature_index }}."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:         "{{ world.ticket_id }}"
-                "Feature slug": "{{ world.feature_slug }}"
-                Phase:          "{{ world.feature_index }}/{{ world.feature_count }}"
-                "Feature id":   '{{ world.feature_artifact.id|default:"(pending)" }}'
-                "Validate ok":  "{{ world.validate_ok }}"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "proceed"
-                  hint:  "deliver the feature to the checkpoint"
-                - label: "refine feedback=…"
-                  hint:  "re-run cpt generate with feedback"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.feature_slug|default:"(no feature)" }} ({{ world.feature_index }}/{{ world.feature_count }})  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "{{ state.description }}"
+      - kv:
+          pairs:
+            Ticket:         "{{ world.ticket_id }}"
+            "Feature slug": "{{ world.feature_slug }}"
+            Phase:          "{{ world.feature_index }}/{{ world.feature_count }}"
+            "Feature id":   '{{ world.feature_artifact.id|default:"(pending)" }}'
+            "Validate ok":  "{{ world.validate_ok }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              hint:   "deliver the feature to the checkpoint"
+              intent: proceed
+            - label:  "refine"
+              hint:   "re-run cpt generate with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              intent: look
     relevant_world: [ticket_id, feature_slug, feature_index, feature_count, feature_artifact, validate_ok, validate_report, cycle]
     on_enter:
       - invoke: iface.artifact.create
@@ -74,32 +85,41 @@ states:
   feature_awaiting_reply:
     description: "Feature artifact posted; awaiting verdict."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Phase:         "{{ world.feature_index }}/{{ world.feature_count }}"
-                Feature:       '{{ world.feature_artifact.summary_title|default:world.feature_artifact.id|default:"(unknown)" }}'
-                "Validate ok": "{{ world.validate_ok }}"
-                Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-                Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
-                Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
-          - heading: "Report"
-          - code: '{{ world.validate_report|default:"(no report)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "accept"
-                  hint:  "advance to the next feature, or to CODE on the last phase"
-                - label: "next_feature"
-                  hint:  "explicit alias of accept"
-                - label: "refine feedback=…"
-                  hint:  "bounce back to feature_executing with feedback"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.feature_slug|default:"(no feature)" }} ({{ world.feature_index }}/{{ world.feature_count }})  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "{{ state.description }}"
+      - kv:
+          pairs:
+            Phase:         "{{ world.feature_index }}/{{ world.feature_count }}"
+            Feature:       '{{ world.feature_artifact.summary_title|default:world.feature_artifact.id|default:"(unknown)" }}'
+            "Validate ok": "{{ world.validate_ok }}"
+            Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+            Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
+            Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - heading: "Report"
+      - code: '{{ world.validate_report|default:"(no report)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "accept"
+              hint:   "advance to the next feature, or to CODE on the last phase"
+              intent: accept
+            - label:  "next_feature"
+              hint:   "explicit alias of accept"
+              intent: next_feature
+            - label:  "refine"
+              hint:   "bounce back to feature_executing with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              intent: look
     relevant_world: [judge_mode, ticket_id, feature_artifact, feature_index, feature_count, validate_ok, validate_report, llm_verdict, cycle]
     on_enter:
       - invoke: iface.transport.post

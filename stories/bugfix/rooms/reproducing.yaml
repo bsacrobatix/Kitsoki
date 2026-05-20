@@ -43,35 +43,59 @@
 states:
 
   reproducing:
-    description: "Starting reproducing — produce the reproduction artifact for review."
+    description: "Reproduce the bug; produce the reproduction artifact for review."
+    # Flattened view (no extends/blocks chrome) — `choice:` cannot live
+    # inside a `blocks:` map. The base.pongo status line is inlined.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - banner:
-              text:     "REPRODUCING"
-              subtitle: "Phase 1 / 7  ·  verify the bug; produce reproduction artifact"
-              color:    "#06B6D4"   # cyan — cool start of the pipeline
-          - kv:
-              pairs:
-                Ticket:         '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
-                Summary:        '{{ world.reproduction_artifact.summary_title|default:"(pending)" }}'
-                "Bug verified": '{{ world.reproduction_artifact.bug_verified|default:"(pending)" }}'
-          - heading: "Artifact"
-          - code: '{{ world.reproduction_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "continue"
-                  hint:  "post the artifact and advance to proposing"
-                - label: "refine feedback=…"
-                  hint:  "re-run with feedback"
-                - label: "restart_from stage=…"
-                  hint:  "bounce back to an earlier room"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - banner:
+          text:     "REPRODUCING"
+          subtitle: "Phase 1 / 7  ·  verify the bug; produce reproduction artifact"
+          color:    "#06B6D4"   # cyan — cool start of the pipeline
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
+      - kv:
+          pairs:
+            Ticket:         "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Summary:        '{{ world.reproduction_artifact.summary_title|default:"(pending)" }}'
+            "Bug verified": '{{ world.reproduction_artifact.bug_verified|default:"(pending)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.reproduction_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "continue"
+              hint:   "post the artifact and advance to proposing"
+              intent: accept
+            - label:  "refine"
+              hint:   "re-run with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to redo"
+                required:    false
+            - label:  "restart"
+              hint:   "re-enter reproducing fresh (resets cycle)"
+              intent: restart_from
+              slots:  { stage: reproducing }
+            - label:  "jump to testing"
+              hint:   "skip ahead (audited)"
+              intent: jump_to
+              slots:  { stage: testing }
+            - label:  "jump to validating"
+              hint:   "skip ahead to validation (audited)"
+              intent: jump_to
+              slots:  { stage: validating }
+            - label:  "jump to done"
+              hint:   "skip to close-out (audited)"
+              intent: jump_to
+              slots:  { stage: done }
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
     relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, reproduction_artifact, llm_verdict, refine_feedback, cycle]
     on_enter:
       # 1. Always: produce the reproduction artifact. Schema-validated

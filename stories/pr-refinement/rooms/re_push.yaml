@@ -6,28 +6,28 @@ states:
 
   re_push:
     description: "Committing + pushing the fix."
+    # Flattened view (choice-widget proposal §4.5).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                PR:                "{{ world.pr_id }} — {{ world.pr_title }}"
-                Workspace:         '{{ world.workdir|default:"(none)" }}'
-                "Feature branch":  '{{ world.feature_branch|default:"(none)" }}'
-                Cycle:             "{{ world.cycle }}"
-                Feedback:          '{{ world.refine_feedback|default:"(none)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "proceed"
-                  hint:  "return to ci_monitoring"
-                - label: "retry"
-                  hint:  "re-run the commit + push"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - kv:
+          pairs:
+            PR:                "{{ world.pr_id }} — {{ world.pr_title }}"
+            Workspace:         '{{ world.workdir|default:"(none)" }}'
+            "Feature branch":  '{{ world.feature_branch|default:"(none)" }}'
+            Cycle:             "{{ world.cycle }}"
+            Feedback:          '{{ world.refine_feedback|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              hint:   "return to ci_monitoring"
+              intent: proceed
+            - label:  "retry"
+              hint:   "re-run the commit + push"
+              intent: retry
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
     relevant_world: [pr_id, pr_title, workdir, feature_branch, cycle, refine_feedback]
     on_enter:
       # Commit + push. iface.vcs.commit binds sha; iface.vcs.push binds

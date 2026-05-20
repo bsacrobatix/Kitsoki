@@ -15,34 +15,45 @@
 #
 # Accept → adr_executing (the proposal §3 sketch puts ADR and DESIGN in
 # parallel; we serialise them for v1 simplicity).
+#
+# Views flattened from extends:"base" + blocks because choice-widget
+# proposal §4.5 / §8 forbids `choice:` inside blocks.
 
 states:
 
   prd_executing:
     description: "Producing the PRD via cpt generate."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:         '{{ world.ticket_id|slice:":10" }} · {{ world.ticket_title }}'
-                "Feature slug": "{{ world.feature_slug }}"
-                "PRD id":       '{{ world.prd_artifact.id|default:"(pending)" }}'
-                "Validate ok":  "{{ world.validate_ok }}"
-          - heading: "Report"
-          - code: '{{ world.validate_report|default:"(none)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "proceed"
-                  hint:  "deliver the PRD to the checkpoint"
-                - label: "refine feedback=…"
-                  hint:  "re-run cpt generate with feedback"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.feature_slug|default:"(no feature)" }} ({{ world.feature_index }}/{{ world.feature_count }})  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "{{ state.description }}"
+      - kv:
+          pairs:
+            Ticket:         "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            "Feature slug": "{{ world.feature_slug }}"
+            "PRD id":       '{{ world.prd_artifact.id|default:"(pending)" }}'
+            "Validate ok":  "{{ world.validate_ok }}"
+      - heading: "Report"
+      - code: '{{ world.validate_report|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              hint:   "deliver the PRD to the checkpoint"
+              intent: proceed
+            - label:  "refine"
+              hint:   "re-run cpt generate with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              intent: look
     relevant_world: [ticket_id, ticket_title, feature_slug, prd_artifact, validate_ok, validate_report, cycle]
     on_enter:
       # 1. Create the PRD artifact via cpt generate.
@@ -88,30 +99,38 @@ states:
   prd_awaiting_reply:
     description: "PRD posted; awaiting validate verdict."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:        "{{ world.ticket_id }}"
-                PRD:           '{{ world.prd_artifact.summary_title|default:world.prd_artifact.id|default:"(unknown)" }}'
-                "Validate ok": "{{ world.validate_ok }}"
-                Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-                Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
-                Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
-          - heading: "Report"
-          - code: '{{ world.validate_report|default:"(no report)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "accept"
-                  hint:  "advance to ADR"
-                - label: "refine feedback=…"
-                  hint:  "bounce back to prd_executing with feedback"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.feature_slug|default:"(no feature)" }} ({{ world.feature_index }}/{{ world.feature_count }})  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "{{ state.description }}"
+      - kv:
+          pairs:
+            Ticket:        "{{ world.ticket_id }}"
+            PRD:           '{{ world.prd_artifact.summary_title|default:world.prd_artifact.id|default:"(unknown)" }}'
+            "Validate ok": "{{ world.validate_ok }}"
+            Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+            Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
+            Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - heading: "Report"
+      - code: '{{ world.validate_report|default:"(no report)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "accept"
+              hint:   "advance to ADR"
+              intent: accept
+            - label:  "refine"
+              hint:   "bounce back to prd_executing with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              intent: look
     relevant_world: [judge_mode, ticket_id, prd_artifact, validate_ok, validate_report, llm_verdict, cycle]
     on_enter:
       - invoke: iface.transport.post

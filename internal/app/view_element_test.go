@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -428,3 +429,519 @@ func TestView_Unmarshal_ListItem_MissingLabel(t *testing.T) {
 		t.Errorf("err = %v; want missing-label error", err)
 	}
 }
+
+// ---- Choice element (Phase A of the choice-widget proposal) ----------------
+
+// TestView_Choice_SingleMode_Parses covers a representative single-mode
+// element: per-item intent + slots + hint + when guard, plus one item
+// with a one-shot param. Every typed field on ViewElement / ChoiceItem
+// / ChoiceParam should be populated.
+func TestView_Choice_SingleMode_Parses(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: single
+      prompt: "Pick one"
+      items:
+        - label: "Alpha"
+          hint: "first option"
+          intent: pick
+          slots: { value: a }
+        - label: "Beta"
+          intent: pick
+          slots: { value: b }
+          when: "world.beta_unlocked"
+        - label: "Custom"
+          intent: pick_named
+          param:
+            slot: name
+            type: string
+            placeholder: "your name"
+            required: true
+`
+	v := unmarshalView(t, body)
+	if len(v.Elements) != 1 {
+		t.Fatalf("Elements len = %d; want 1", len(v.Elements))
+	}
+	el := v.Elements[0]
+	if el.Kind != "choice" {
+		t.Fatalf("Kind = %q; want choice", el.Kind)
+	}
+	if el.ChoiceMode != "single" {
+		t.Errorf("ChoiceMode = %q; want single", el.ChoiceMode)
+	}
+	if el.ChoicePrompt != "Pick one" {
+		t.Errorf("ChoicePrompt = %q", el.ChoicePrompt)
+	}
+	if len(el.ChoiceItems) != 3 {
+		t.Fatalf("ChoiceItems len = %d; want 3", len(el.ChoiceItems))
+	}
+	if el.ChoiceItems[0].Label != "Alpha" || el.ChoiceItems[0].Hint != "first option" || el.ChoiceItems[0].Intent != "pick" {
+		t.Errorf("item 0 = %+v", el.ChoiceItems[0])
+	}
+	if got := el.ChoiceItems[0].Slots["value"]; got != "a" {
+		t.Errorf("item 0 slots.value = %v; want a", got)
+	}
+	if el.ChoiceItems[1].When != "world.beta_unlocked" {
+		t.Errorf("item 1 when = %q", el.ChoiceItems[1].When)
+	}
+	p := el.ChoiceItems[2].Param
+	if p == nil {
+		t.Fatalf("item 2 param is nil")
+	}
+	if p.Slot != "name" || p.Type != "string" || p.Placeholder != "your name" || !p.Required {
+		t.Errorf("param = %+v", p)
+	}
+}
+
+func TestView_Choice_SingleMode_DefaultMode(t *testing.T) {
+	// mode is required by the schema, but the decoder applies "single"
+	// as the default before schema-validation runs. validate() will
+	// reject the *absence* of mode because the schema's `required:
+	// [mode]` rule fires on the JSON re-marshal. We only test the
+	// decoder path here.
+	body := `view:
+  - choice:
+      mode: single
+      items:
+        - { label: "Only", intent: only_intent }
+`
+	v := unmarshalView(t, body)
+	if v.Elements[0].ChoiceMode != "single" {
+		t.Errorf("ChoiceMode = %q; want single", v.Elements[0].ChoiceMode)
+	}
+}
+
+func TestView_Choice_MultiMode_Parses(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: multi
+      prompt: "Select symptoms"
+      intent: report_symptoms
+      slot: symptoms
+      min: 1
+      max: 5
+      items:
+        - { value: fever, label: "Fever", hint: ">100.4F" }
+        - { value: cough }
+        - { value: rash, when: "world.day > 3" }
+`
+	v := unmarshalView(t, body)
+	el := v.Elements[0]
+	if el.ChoiceMode != "multi" {
+		t.Errorf("ChoiceMode = %q; want multi", el.ChoiceMode)
+	}
+	if el.ChoiceIntent != "report_symptoms" || el.ChoiceSlot != "symptoms" {
+		t.Errorf("intent/slot = %q/%q", el.ChoiceIntent, el.ChoiceSlot)
+	}
+	if !el.ChoiceMinSet || el.ChoiceMin != 1 {
+		t.Errorf("min = %d (set=%v); want 1", el.ChoiceMin, el.ChoiceMinSet)
+	}
+	if !el.ChoiceMaxSet || el.ChoiceMax != 5 {
+		t.Errorf("max = %d (set=%v); want 5", el.ChoiceMax, el.ChoiceMaxSet)
+	}
+	if len(el.ChoiceItems) != 3 {
+		t.Fatalf("items len = %d; want 3", len(el.ChoiceItems))
+	}
+	if el.ChoiceItems[0].Value != "fever" || el.ChoiceItems[0].Label != "Fever" {
+		t.Errorf("item 0 = %+v", el.ChoiceItems[0])
+	}
+}
+
+func TestView_Choice_FormMode_Parses(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: form
+      prompt: "Compose your purchase"
+      intent: propose_purchase
+      template: "Buy {items} for ${total_cost}, leaving ${remaining}."
+      fields:
+        items:
+          type: string
+          placeholder: "oxen=4"
+          required: true
+        total_cost:
+          type: int
+          min: 1
+          max: 9999
+          default: 0
+        remaining:
+          type: int
+          expr: "world.money - form.total_cost"
+          readonly: true
+`
+	v := unmarshalView(t, body)
+	el := v.Elements[0]
+	if el.ChoiceMode != "form" {
+		t.Errorf("ChoiceMode = %q; want form", el.ChoiceMode)
+	}
+	if el.ChoiceIntent != "propose_purchase" {
+		t.Errorf("intent = %q", el.ChoiceIntent)
+	}
+	if !strings.Contains(el.ChoiceTemplate, "{items}") {
+		t.Errorf("template = %q", el.ChoiceTemplate)
+	}
+	// Author-declared order: items, total_cost, remaining.
+	if len(el.ChoiceFields) != 3 {
+		t.Fatalf("fields len = %d; want 3", len(el.ChoiceFields))
+	}
+	wantNames := []string{"items", "total_cost", "remaining"}
+	for i, name := range wantNames {
+		if el.ChoiceFields[i].Name != name {
+			t.Errorf("fields[%d].Name = %q; want %q", i, el.ChoiceFields[i].Name, name)
+		}
+	}
+	if !el.ChoiceFields[2].Readonly || el.ChoiceFields[2].Expr == "" {
+		t.Errorf("remaining field not marked readonly: %+v", el.ChoiceFields[2])
+	}
+}
+
+// ---- Schema-rejection tests (validate()) -----------------------------------
+
+// validateChoiceYAML decodes and validates a YAML view body, returning
+// the validate() error for the choice element. Returns nil if parsing
+// fails (the test author wanted a parse-only case).
+func validateChoiceYAML(t *testing.T, body string) error {
+	t.Helper()
+	v := unmarshalView(t, body)
+	return v.Validate()
+}
+
+func TestView_Choice_SchemaRejects_MissingMode(t *testing.T) {
+	// Bypass the decoder's default-mode shim by hand-crafting a
+	// ViewElement with a raw subtree that omits "mode".
+	el := ViewElement{
+		Kind:      "choice",
+		ChoiceRaw: json.RawMessage(`{"items":[{"label":"x","intent":"foo"}]}`),
+	}
+	err := validateChoice(el)
+	if err == nil || !strings.Contains(err.Error(), "mode") {
+		t.Errorf("err = %v; want missing-mode error", err)
+	}
+}
+
+func TestView_Choice_SchemaRejects_MissingRequiredField_Multi(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: multi
+      intent: report
+      items:
+        - { value: a }
+`
+	err := validateChoiceYAML(t, body)
+	if err == nil || !strings.Contains(err.Error(), "slot") {
+		t.Errorf("err = %v; want missing-slot error", err)
+	}
+}
+
+func TestView_Choice_SchemaRejects_MissingRequiredField_Form(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: form
+      intent: x
+      template: "go {a}"
+`
+	err := validateChoiceYAML(t, body)
+	if err == nil || !strings.Contains(err.Error(), "fields") {
+		t.Errorf("err = %v; want missing-fields error", err)
+	}
+}
+
+func TestView_Choice_SchemaRejects_UnknownProperty(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: single
+      bogus_property: 42
+      items:
+        - { label: a, intent: foo }
+`
+	err := validateChoiceYAML(t, body)
+	if err == nil {
+		t.Fatalf("err = nil; want unknown-property error")
+	}
+}
+
+func TestView_Choice_SchemaRejects_BadEnumValue(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: weird
+      items:
+        - { label: a, intent: foo }
+`
+	err := validateChoiceYAML(t, body)
+	if err == nil {
+		t.Fatalf("err = nil; want bad-enum error")
+	}
+}
+
+func TestView_Choice_SchemaRejects_MissingEnumValues_OnParam(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: single
+      items:
+        - label: pick
+          intent: foo
+          param:
+            slot: x
+            type: enum
+`
+	err := validateChoiceYAML(t, body)
+	if err == nil || !strings.Contains(err.Error(), "values") {
+		t.Errorf("err = %v; want missing-values error", err)
+	}
+}
+
+func TestView_Choice_SchemaRejects_MissingEnumValues_OnField(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: form
+      intent: x
+      template: "go {a}"
+      fields:
+        a:
+          type: enum
+`
+	err := validateChoiceYAML(t, body)
+	if err == nil || !strings.Contains(err.Error(), "values") {
+		t.Errorf("err = %v; want missing-values error", err)
+	}
+}
+
+// ---- (View).Validate() rules -----------------------------------------------
+
+func TestView_Validate_RejectsChoiceInsideBlocks(t *testing.T) {
+	body := `view:
+  extends: base
+  blocks:
+    body:
+      - choice:
+          mode: single
+          items:
+            - { label: a, intent: foo }
+`
+	v := unmarshalView(t, body)
+	err := v.Validate()
+	if err == nil || !strings.Contains(err.Error(), "not allowed inside extends/blocks") {
+		t.Errorf("err = %v; want block-rejection error", err)
+	}
+}
+
+func TestView_Validate_RejectsMultipleChoicesPerView(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: single
+      items:
+        - { label: a, intent: foo }
+  - choice:
+      mode: single
+      items:
+        - { label: b, intent: bar }
+`
+	v := unmarshalView(t, body)
+	err := v.Validate()
+	if err == nil || !strings.Contains(err.Error(), "only one choice element") {
+		t.Errorf("err = %v; want multiple-choice error", err)
+	}
+}
+
+// ---- Loader cross-reference tests ------------------------------------------
+
+const choiceLoaderFixturePrefix = `
+app:
+  id: choice-test
+  version: "0.0.1"
+intents:
+  pick_profession:
+    title: "pick"
+    slots:
+      profession:
+        type: enum
+        values: [banker, carpenter, farmer]
+  generate_names:
+    title: "gen"
+    slots:
+      theme:
+        type: string
+  report_symptoms:
+    title: "report"
+    slots:
+      symptoms:
+        type: list
+  propose_purchase:
+    title: "propose"
+    slots:
+      items:
+        type: string
+      total_cost:
+        type: int
+root: start
+states:
+  start:
+    type: atomic
+`
+
+func TestView_Choice_Loader_UnknownIntent(t *testing.T) {
+	body := choiceLoaderFixturePrefix + `
+    view:
+      - choice:
+          mode: single
+          items:
+            - { label: Banker, intent: nonexistent_intent }
+`
+	_, err := LoadBytes([]byte(body))
+	if err == nil || !strings.Contains(err.Error(), "not declared") {
+		t.Errorf("err = %v; want unknown-intent error", err)
+	}
+}
+
+func TestView_Choice_Loader_SlotKeyNotDeclared(t *testing.T) {
+	body := choiceLoaderFixturePrefix + `
+    view:
+      - choice:
+          mode: single
+          items:
+            - label: Banker
+              intent: pick_profession
+              slots: { not_a_slot: banker }
+`
+	_, err := LoadBytes([]byte(body))
+	if err == nil || !strings.Contains(err.Error(), "not_a_slot") {
+		t.Errorf("err = %v; want not-declared-slot error", err)
+	}
+}
+
+func TestView_Choice_Loader_FormPlaceholderWithoutField(t *testing.T) {
+	body := choiceLoaderFixturePrefix + `
+    view:
+      - choice:
+          mode: form
+          intent: propose_purchase
+          template: "Buy {items} for {missing_field}"
+          fields:
+            items:
+              type: string
+            total_cost:
+              type: int
+`
+	_, err := LoadBytes([]byte(body))
+	if err == nil || !strings.Contains(err.Error(), "missing_field") {
+		t.Errorf("err = %v; want missing-placeholder error", err)
+	}
+}
+
+func TestView_Choice_Loader_MultiValueWithTemplate(t *testing.T) {
+	body := choiceLoaderFixturePrefix + `
+    view:
+      - choice:
+          mode: multi
+          intent: report_symptoms
+          slot: symptoms
+          items:
+            - { value: "{{ world.dynamic }}", label: dyn }
+`
+	_, err := LoadBytes([]byte(body))
+	if err == nil || !strings.Contains(err.Error(), "literal") {
+		t.Errorf("err = %v; want literal-required error", err)
+	}
+}
+
+func TestView_Choice_Loader_ParamSlotDuplicate(t *testing.T) {
+	body := choiceLoaderFixturePrefix + `
+    view:
+      - choice:
+          mode: single
+          items:
+            - label: "Generate"
+              intent: generate_names
+              slots: { theme: "norse" }
+              param:
+                slot: theme
+                type: string
+`
+	_, err := LoadBytes([]byte(body))
+	if err == nil || !strings.Contains(err.Error(), "already pre-bound") {
+		t.Errorf("err = %v; want duplicate-slot error", err)
+	}
+}
+
+func TestView_Choice_Loader_EnumSlotValueRejected(t *testing.T) {
+	body := choiceLoaderFixturePrefix + `
+    view:
+      - choice:
+          mode: single
+          items:
+            - label: "Banker"
+              intent: pick_profession
+              slots: { profession: not_in_enum }
+`
+	_, err := LoadBytes([]byte(body))
+	if err == nil || !strings.Contains(err.Error(), "enum") {
+		t.Errorf("err = %v; want enum-value error", err)
+	}
+}
+
+func TestView_Choice_Loader_AcceptsValidApp(t *testing.T) {
+	body := choiceLoaderFixturePrefix + `
+    view:
+      - choice:
+          mode: single
+          items:
+            - { label: Banker, intent: pick_profession, slots: { profession: banker } }
+            - { label: Carpenter, intent: pick_profession, slots: { profession: carpenter } }
+`
+	if _, err := LoadBytes([]byte(body)); err != nil {
+		t.Errorf("LoadBytes err = %v; want nil", err)
+	}
+}
+
+// ---- Compile-pass tests (expr / pongo) -------------------------------------
+
+func TestView_Choice_CompilePass_MalformedWhen(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: single
+      items:
+        - label: "Bad"
+          intent: foo
+          when: "not %% a valid expression $$"
+`
+	err := validateChoiceYAML(t, body)
+	if err == nil {
+		t.Fatalf("err = nil; want expr compile error")
+	}
+}
+
+func TestView_Choice_CompilePass_MalformedExpr_ReadonlyField(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: form
+      intent: propose_purchase
+      template: "Buy {items}, total {total}"
+      fields:
+        items:
+          type: string
+        total:
+          type: int
+          readonly: true
+          expr: "not %% valid expr"
+`
+	err := validateChoiceYAML(t, body)
+	if err == nil {
+		t.Fatalf("err = nil; want expr compile error")
+	}
+}
+
+func TestView_Choice_CompilePass_MalformedPongoTemplate(t *testing.T) {
+	body := `view:
+  - choice:
+      mode: single
+      items:
+        - label: "Bad slot"
+          intent: foo
+          slots: { x: "{{ unterminated " }
+`
+	err := validateChoiceYAML(t, body)
+	if err == nil {
+		t.Fatalf("err = nil; want pongo syntax error")
+	}
+}
+

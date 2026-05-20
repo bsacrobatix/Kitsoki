@@ -8,29 +8,41 @@ states:
 
   review_pr_executing:
     description: "Reviewing PR diff via the oracle."
+    # Choice-widget migration (§4 row 4). Flattened the
+    # `extends: "base"` / `blocks:` shell because §4.5 forbids
+    # `choice:` inside `blocks:`. The status / heading chrome from
+    # views/base.pongo is dropped on standalone runs; importer-host
+    # paths supply their own chrome.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                PR:         "{{ world.pr_id }} — {{ world.pr_title }}"
-                Author:     '{{ world.pr_author|default:"(unknown)" }}'
-                Summary:    '{{ world.review_summary_artifact.summary_title|default:"(pending)" }}'
-                Confidence: '{{ world.review_summary_artifact.confidence|default:"(pending)" }}'
-          - heading: "Artifact"
-          - code: '{{ world.review_summary_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "proceed"
-                  hint:  "deliver the review summary at the checkpoint"
-                - label: "refine feedback=…"
-                  hint:  "re-run the reviewer with feedback"
-                - label: "quit"
-                  hint:  "abandon the review"
-                - label: "look"
+      - kv:
+          pairs:
+            PR:         "{{ world.pr_id }} — {{ world.pr_title }}"
+            Author:     '{{ world.pr_author|default:"(unknown)" }}'
+            Summary:    '{{ world.review_summary_artifact.summary_title|default:"(pending)" }}'
+            Confidence: '{{ world.review_summary_artifact.confidence|default:"(pending)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.review_summary_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              hint:   "deliver the review summary at the checkpoint"
+              intent: proceed
+            - label:  "refine"
+              hint:   "re-run the reviewer with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the review"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render the scene"
+              intent: look
     relevant_world: [pr_id, pr_title, pr_author, pr_diff, pr_comments, review_summary_artifact, cycle]
     on_enter:
       # Fetch the diff. iface.vcs.diff with pr_id (the host handler
@@ -84,30 +96,38 @@ states:
   review_pr_awaiting_reply:
     description: "Review summary posted; awaiting verdict."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                PR:         "{{ world.pr_id }} — {{ world.pr_title }}"
-                Verdict:    '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-                Confidence: '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
-                Reason:     '{{ world.llm_verdict.reason|default:"(none)" }}'
-          - heading: "Artifact"
-          - code: '{{ world.review_summary_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "accept"
-                  hint:  "advance to drafting a review comment"
-                - label: "refine feedback=…"
-                  hint:  "re-run the reviewer with feedback"
-                - label: "dismiss"
-                  hint:  "drop the review request (wrong reviewer)"
-                - label: "quit"
-                  hint:  "abandon the review"
-                - label: "look"
+      - kv:
+          pairs:
+            PR:         "{{ world.pr_id }} — {{ world.pr_title }}"
+            Verdict:    '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+            Confidence: '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
+            Reason:     '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.review_summary_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "accept"
+              hint:   "advance to drafting a review comment"
+              intent: accept
+            - label:  "refine"
+              hint:   "re-run the reviewer with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "dismiss"
+              hint:   "drop the review request (wrong reviewer)"
+              intent: dismiss
+            - label:  "quit"
+              hint:   "abandon the review"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render the scene"
+              intent: look
     relevant_world: [judge_mode, pr_id, pr_title, review_summary_artifact, llm_verdict, cycle]
     on_enter:
       - invoke: iface.transport.post

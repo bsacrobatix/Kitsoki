@@ -46,19 +46,29 @@ states:
 
   terminal_reviewing:
     description: "Review the proposed command before executing."
+    # Flattened view: `choice:` is not allowed inside `blocks:`, so we
+    # drop the extends/blocks chrome and inline the body as sibling
+    # elements. The base.pongo `status` block (host clock / inbox) is
+    # lost — acceptable cost for the verdict-picker affordance.
+    # `refine` carries a free-form `feedback` slot via param.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - heading: "Proposed command"
-          - code: "{{ world.proposal_cmd }}"
-          - prose: "Accept to run, refine with feedback, or cancel."
-        choices:
-          - list:
-              items:
-                - { label: "accept",  hint: "execute the proposed command" }
-                - { label: "refine",  hint: "edit with feedback" }
-                - { label: "cancel",  hint: "discard the proposal" }
+      - heading: "Proposed command"
+      - code: "{{ world.proposal_cmd }}"
+      - prose: "Accept to run, refine with feedback, or cancel."
+      - choice:
+          mode: single
+          prompt: "How do you respond?"
+          items:
+            - { label: "accept", intent: accept, hint: "execute the proposed command" }
+            - label:  "refine"
+              hint:   "edit with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    true
+            - { label: "cancel", intent: cancel, hint: "discard the proposal" }
     relevant_world: [proposal_cmd, proposal_status]
     relevant_slots: []
     on:
@@ -144,22 +154,29 @@ states:
 
   terminal_result:
     description: "Command result — review output and decide next step."
+    # Flattened view to allow inline `choice:` (see terminal_reviewing
+    # note). `propose another` carries a free-form `cmd` slot via param.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Command: "{{ world.proposal_cmd }}"
-                Status:  "{{ world.proposal_status }}"
-          - heading: "Result"
-          - code: "{{ world.proposal_result }}"
-        choices:
-          - list:
-              items:
-                - { label: "propose another", hint: "draft a new command" }
-                - { label: "retry",           hint: "rerun the same command" }
-                - { label: "go back",         hint: "return to the previous room" }
+      - kv:
+          pairs:
+            Command: "{{ world.proposal_cmd }}"
+            Status:  "{{ world.proposal_status }}"
+      - heading: "Result"
+      - code: "{{ world.proposal_result }}"
+      - choice:
+          mode: single
+          prompt: "Next step"
+          items:
+            - label:  "propose another"
+              hint:   "draft a new command"
+              intent: propose
+              param:
+                slot:        cmd
+                type:        string
+                placeholder: "e.g. git status"
+                required:    true
+            - { label: "retry",   intent: retry,   hint: "rerun the same command" }
+            - { label: "go back", intent: go_back, hint: "return to the previous room" }
     relevant_world: [proposal_cmd, proposal_result, proposal_status]
     relevant_slots: []
     on:
@@ -196,22 +213,29 @@ states:
 
   terminal_error:
     description: "Command failed with an error."
+    # Flattened view (see terminal_reviewing). Four-way recovery picker:
+    # retry / refine (with `feedback` param) / fix (LLM repair) / cancel.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Command: "{{ world.proposal_cmd }}"
-                Status:  "FAILED"
-                Error:   "{{ world.last_error }}"
-        choices:
-          - list:
-              items:
-                - { label: "retry",  hint: "rerun the same command" }
-                - { label: "refine", hint: "edit with feedback" }
-                - { label: "fix",    hint: "ask Claude to repair" }
-                - { label: "cancel", hint: "discard and start over" }
+      - kv:
+          pairs:
+            Command: "{{ world.proposal_cmd }}"
+            Status:  "FAILED"
+            Error:   "{{ world.last_error }}"
+      - choice:
+          mode: single
+          prompt: "Recover"
+          items:
+            - { label: "retry", intent: retry, hint: "rerun the same command" }
+            - label:  "refine"
+              hint:   "edit with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    true
+            - { label: "fix",    intent: fix,    hint: "ask Claude to repair" }
+            - { label: "cancel", intent: cancel, hint: "discard and start over" }
     relevant_world: [proposal_cmd, last_error]
     relevant_slots: []
     on:
@@ -317,13 +341,26 @@ states:
 
   terminal_bg_reviewing:
     description: "Review the background command before submitting."
+    # Flattened view (see terminal_reviewing). Background-submit verdict
+    # picker: accept / refine (with `feedback` param) / cancel.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - heading: "Background command"
-          - code: "{{ world.proposal_cmd }}"
-          - prose: "Accept to submit as background job, or cancel."
+      - heading: "Background command"
+      - code: "{{ world.proposal_cmd }}"
+      - prose: "Accept to submit as background job, or cancel."
+      - choice:
+          mode: single
+          prompt: "Submit as background job?"
+          items:
+            - { label: "accept", intent: accept, hint: "submit and run in background" }
+            - label:  "refine"
+              hint:   "edit with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    true
+            - { label: "cancel", intent: cancel, hint: "discard the proposal" }
     relevant_world: [proposal_cmd]
     relevant_slots: []
     on:

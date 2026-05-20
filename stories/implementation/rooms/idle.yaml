@@ -1,29 +1,32 @@
 # idle — entry room. The `start` intent boots the pipeline; `quit`
 # exits via @exit:abandoned. Threads straight into review_task on
 # `start`.
+#
+# Flattened away from `extends: "base"` because the choice widget
+# cannot live inside `blocks:` (choice-widget proposal §4.5 / §8).
+# The base.pongo status line is inlined as the first prose element so
+# the standalone render still carries the ticket / workspace / branch
+# context.
 
 states:
 
   idle:
     description: "Implementation pipeline parked. Waiting for start."
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:    '{{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}'
-                Workspace: '{{ world.workspace_id|default:"(none)" }}'
-                Judge:     "{{ world.judge_mode }}"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "start"
-                  hint:  "boot the pipeline (enters review_task)"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.workdir|default:"(no workspace)" }}  ·  {{ world.feature_branch|default:"(no branch)" }}  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "Implementation pipeline parked"
+      - kv:
+          pairs:
+            Ticket:    '{{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}'
+            Workspace: '{{ world.workspace_id|default:"(none)" }}'
+            Judge:     "{{ world.judge_mode }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "start", intent: start, hint: "boot the pipeline (enters review_task)" }
+            - { label: "quit",  intent: quit,  hint: "abandon the pipeline" }
+            - { label: "look",  intent: look,  hint: "re-render" }
     relevant_world: [ticket_id, ticket_title, judge_mode, workspace_id]
     on:
       start:

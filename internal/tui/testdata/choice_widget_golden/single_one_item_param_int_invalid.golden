@@ -1,0 +1,6 @@
+Set hero age:
+
+  Set age
+    age? abc_
+
+[Enter confirm • Backspace edit • Esc back to picker]

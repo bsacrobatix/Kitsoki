@@ -33,119 +33,85 @@ states:
         bind:
           ticket_results: tickets
         on_error: ticket_search
+    # Flattened view (no extends/blocks) — `choice:` cannot live
+    # inside a `blocks:` map (see docs/choice-widget.md §3.1).
+    #
+    # The ticket list is dynamic (world.ticket_results), so the
+    # picker uses `param:` to capture the id rather than a literal
+    # items[] enumeration. The two-rows-same-intent pattern
+    # (cookbook §2.2) guards `go_bugfix` so the operator sees why
+    # it's unavailable until a ticket is picked.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - heading: 'Tickets{% if world.ticket_query %} (filter: {{ world.ticket_query }}){% endif %}'
-          # Live result list bound from iface.ticket.search in on_enter.
-          # Style guide §6.2 — the canonical "render a world array as a
-          # list element" shape is still TBD; until then this code: block
-          # is the agreed pattern across operator stories.
-          #
-          # # Table format (one line per ticket)
-          #
-          #   {pick} {status} {sev} {date}     {title-truncated}
-          #
-          # Columns (all fixed-width via `|col:N`, so the header line
-          # and every row align even when terminal width is tight):
-          #
-          #   pick    1 char  — ★ for the currently-picked ticket, blank
-          #                     otherwise
-          #   status  1 char  — ●/◐/○ glyph by ticket lifecycle state
-          #   sev     3 chars — P0..P3 (or blank for severity-less rows)
-          #   date   10 chars — `id|slice:":10"` is the ISO-prefix
-          #                     YYYY-MM-DD portion of the local-files-
-          #                     provider id, used as the "Filed" date
-          #                     until the host exposes filed_at as a
-          #                     first-class summary field
-          #   title  52 chars — `truncatechars:52` adds an ellipsis when
-          #                     the title overflows so the operator sees
-          #                     "this row has more text"
-          #
-          # # Why a `code:` block instead of a typed `table:` element
-          #
-          # A dedicated `table:` element would be cleaner long-term but
-          # is a meatier addition (new element kind in app/view_element.go,
-          # new renderer in render/elements/, new dispatcher case). The
-          # `|col:N` / `|rcol:N` pongo2 filters added in this commit
-          # let an author build aligned-column output inside a regular
-          # `code:` block — same primitive a Python author would reach
-          # for, no element-layer churn.
-          #
-          # # README-style ghost rows
-          #
-          # The local-files provider's lister scans `issues/{bugs,features
-          # ,epics}/` and emits a row per `*.md`, including section
-          # READMEs without frontmatter. Those rows have empty `status`
-          # and no `severity`, so the `{% if t.status %}` guard below
-          # drops them — a real ticket always has a status per
-          # `issues/README.md` §2. (A host-side filter is the right
-          # long-term fix; this is the band-aid until the same dogfood
-          # cycle resolves the open localfiles ticket.)
-          #
-          # # Severity field name
-          #
-          # `t.severity` is the on-disk frontmatter field per
-          # `issues/README.md` §2. The fallback to `t.priority` covers
-          # the transition window — the local-files provider's
-          # `bugSummary` (open ticket 2026-05-18T045257Z-localfiles-
-          # ticket-rank-by-severity-and-recency) still projects the
-          # field as `priority` on HEAD; once that fix lands the
-          # fallback is a no-op.
-          #
-          # # Where's the ticket ID?
-          #
-          # Local-files-provider IDs are 60-char ISO-timestamped slugs.
-          # Showing them in a row inflates the line past every
-          # reasonable terminal width and pushes the title off-screen.
-          # We omit the ID column from the table and keep the full ID
-          # in the `Picked:` kv pair below so the operator can see
-          # exactly what was selected. For first-time picks, the
-          # operator reads the title to identify the ticket and types
-          # `pick_ticket id=<filename>`; a future change should expose
-          # an index-based pick (`pick_ticket n=2`) so the ID stops
-          # being typed at all.
-          - code: |
-              {% if world.ticket_results|length == 0 %}(none — file one in issues/bugs/)
-              {% else %}     St  Sev  Filed       Title
-              {% for t in world.ticket_results|reverse %}{% if t.status %}   {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
-              {% endif %}{% endfor %}{% endif %}
-          # Readiness banner. Two sibling elements with mutually-exclusive
-          # `when:` guards: the ready case is a `heading:` (emerald-bold,
-          # the style-guide §1 "go" color), the not-ready case is a plain
-          # `prose:` paragraph (no false green). The glyph carries the
-          # state across mono-colour renders too.
-          - heading: "✓ Ready — type `continue` to hand off to the bugfix pipeline"
-            when:  "world.ticket_id != ''"
-          - prose: "✗ Pick a ticket from the list above to continue."
-            when:  "world.ticket_id == ''"
-          - kv:
-              pairs:
-                # Title-first to match the row format above; ID trails in
-                # parentheses so a quick glance lands on the human label.
-                # The "(none — …)" hint advertises the pick_ticket syntax
-                # when the operator has not picked yet.
-                Picked: '{% if world.ticket_id %}{{ world.ticket_title|default:"(no title)" }}  ({{ world.ticket_id }}){% else %}(none — type `pick_ticket id=<TKT>` from the list above){% endif %}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                # Primary drive-forward action. `continue` is the canonical
-                # name; `go_bugfix` is kept as a hidden alias on the `on:`
-                # block below for flows/fixtures that still reference it.
-                - label: "continue"
-                  hint:  "hand the picked ticket to the bugfix pipeline"
-                  when:  "available('continue')"
-                - label: "✗ continue — {{ blocked_reason('continue') }}"
-                  when:  "!available('continue')"
-                - label: "pick_ticket id=<TKT>"
-                  hint:  "pick a ticket from the list above"
-                - label: "search_tickets query=<text>"
-                  hint:  "narrow the list"
-                - label: "go_back"
-                - label: "go_main"
-                - label: "look"
+      # Live result list bound from iface.ticket.search in on_enter.
+      # Style guide §6.2 — the canonical "render a world array as a
+      # list element" shape is still TBD; until then this code: block
+      # is the agreed pattern across operator stories.
+      #
+      # Table format (one line per ticket):
+      #
+      #   {pick} {status} {sev} {date}     {title-truncated}
+      #
+      # Columns (fixed-width via `|col:N`):
+      #   pick    1 char  — ★ for the currently-picked ticket
+      #   status  1 char  — ●/◐/○ by ticket lifecycle state
+      #   sev     3 chars — P0..P3 (blank for severity-less rows)
+      #   date   10 chars — `id|slice:":10"` ISO-date prefix
+      #   title  52 chars — truncatechars:52 adds an ellipsis on overflow
+      #
+      # README-style ghost rows (frontmatter-less *.md under issues/) are
+      # dropped via `{% if t.status %}`. The `t.severity|default:t.priority`
+      # fallback bridges the transition until ticket
+      # `2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency`
+      # lands.
+      - heading: 'Tickets{% if world.ticket_query %} (filter: {{ world.ticket_query }}){% endif %}'
+      - code: |
+          {% if world.ticket_results|length == 0 %}(none — file one in issues/bugs/)
+          {% else %}     St  Sev  Filed       Title
+          {% for t in world.ticket_results|reverse %}{% if t.status %}   {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% endif %}{% endfor %}{% endif %}
+      # Readiness banner — two sibling elements with mutually-exclusive
+      # `when:` guards. The ready case is a `heading:` (style-guide §1
+      # emerald "go"); the not-ready case is plain prose (no false green).
+      # The glyph carries the state across mono-colour renders.
+      - heading: "✓ Ready — pick `go_bugfix` to hand off to the bugfix pipeline"
+        when:  "world.ticket_id != ''"
+      - prose: "✗ Pick a ticket from the list above to continue."
+        when:  "world.ticket_id == ''"
+      - kv:
+          pairs:
+            # Title-first to match the row format above; ID trails in
+            # parentheses so a quick glance lands on the human label.
+            Picked: '{% if world.ticket_id %}{{ world.ticket_title|default:"(no title)" }}  ({{ world.ticket_id }}){% else %}(none — pick one below){% endif %}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "pick_ticket"
+              intent: pick_ticket
+              hint:   "pick a ticket from the list above"
+              param:
+                slot:        id
+                type:        string
+                placeholder: "ticket id (e.g. TKT-123)"
+                required:    true
+            - label:  "search_tickets"
+              intent: search_tickets
+              hint:   "narrow the list"
+              param:
+                slot:        query
+                type:        string
+                placeholder: "text to filter on"
+                required:    true
+            - label:  "go_bugfix"
+              intent: go_bugfix
+              hint:   "hand the picked ticket to the bugfix pipeline"
+              when:   "world.ticket_id != ''"
+            - label:  "✗ go_bugfix — pick a ticket first"
+              intent: go_bugfix
+              when:   "world.ticket_id == ''"
+            - { label: "go_back", intent: go_back, hint: "return to the previous room" }
+            - { label: "go_main", intent: go_main, hint: "back to the engineer's day landing" }
+            - { label: "look",    intent: look,    hint: "re-render" }
     on:
       search_tickets:
         - target: ticket_searching
@@ -222,23 +188,27 @@ states:
 
   ticket_searching:
     description: "Running ticket search."
+    # Flattened view (see above).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                "Searching for": "{{ world.ticket_query }}"
-          - heading: "Results"
-          - code: '{{ world.ticket_results|default:"(empty)" }}'
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "pick_ticket id=<TKT>"
-                  hint:  "pick a ticket from the results"
-                - label: "go_back"
-                - label: "look"
+      - kv:
+          pairs:
+            "Searching for": "{{ world.ticket_query }}"
+      - heading: "Results"
+      - code: '{{ world.ticket_results|default:"(empty)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "pick_ticket"
+              intent: pick_ticket
+              hint:   "pick a ticket from the results"
+              param:
+                slot:        id
+                type:        string
+                placeholder: "ticket id (e.g. TKT-123)"
+                required:    true
+            - { label: "go_back", intent: go_back, hint: "return to ticket_search" }
+            - { label: "look",    intent: look,    hint: "re-render" }
     relevant_world: [ticket_query, ticket_results]
     on_enter:
       - invoke: iface.ticket.search

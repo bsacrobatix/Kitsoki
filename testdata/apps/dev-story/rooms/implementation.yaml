@@ -3,24 +3,25 @@
 states:
   implementation:
     description: "Implementation Room — build a feature or complete a task."
+    # Flattened view (see bugfix hub note). The action labels map to
+    # the intents below; "plan approach" → go_planning, "write tests"
+    # → go_test (the on: arc names diverge from the surface labels by
+    # design — the labels are user-facing, the intents are routing).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Workspace: "{{ world.current_workspace }}"
-          - prose: "Steps: review task → plan → write code → write tests → open PR"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - { label: "review task",   hint: "load Jira issue + acceptance criteria" }
-                - { label: "plan approach", hint: "break down the work" }
-                - { label: "write code",    hint: "iterative edit/run/test loop" }
-                - { label: "write tests",   hint: "cover uncovered paths" }
-                - { label: "open pr",       hint: "hand off to PR room" }
-                - { label: "go back",       hint: "return to previous room" }
+      - kv:
+          pairs:
+            Workspace: "{{ world.current_workspace }}"
+      - prose: "Steps: review task → plan → write code → write tests → open PR"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "review task",   intent: review_task, hint: "load Jira issue + acceptance criteria" }
+            - { label: "plan approach", intent: go_planning, hint: "break down the work" }
+            - { label: "write code",    intent: write_code,  hint: "iterative edit/run/test loop" }
+            - { label: "write tests",   intent: go_test,     hint: "cover uncovered paths" }
+            - { label: "open pr",       intent: open_pr,     hint: "hand off to PR room" }
+            - { label: "go back",       intent: go_back,     hint: "return to previous room" }
     relevant_world: [current_workspace]
     relevant_slots: []
     on:

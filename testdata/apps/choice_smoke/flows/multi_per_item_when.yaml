@@ -1,0 +1,20 @@
+# multi_per_item_when — with day > 3, "rash" is visible; dispatch
+# including it. Flow tests don't render the widget; we seed day=5 so
+# anyone reading this fixture next to the spoke YAML sees the gate
+# condition is met. The commit arc bumps day/money so multi_templated
+# (the next spoke) has deterministic values for its templated hints.
+test_kind: flow
+app: ../app.yaml
+initial_state: multi_per_item_when
+initial_world:
+  day: 5
+
+turns:
+  - intent: { name: chose_gated_traits, slots: { traits: [fever, rash] } }
+    expect_state: multi_templated
+    expect_world:
+      picked_gated: [fever, rash]
+      day:          4
+      money:        80
+
+expect_no_errors: true

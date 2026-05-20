@@ -5,18 +5,18 @@ states:
 
   deploy:
     description: "Deploy — ship changes (Wave 3 stub)."
+    # Flattened view (no extends/blocks) — `choice:` cannot live inside a
+    # `blocks:` map (typed metadata is lost through the inheritance
+    # pipeline; see docs/choice-widget.md §3.1).
     view:
-      extends: "base"
-      blocks:
-        body:
-          - prose: "Deploy (Wave 3 stub)."
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "go_back"
-                - label: "go_main"
-                - label: "look"
+      - prose: "Deploy (Wave 3 stub)."
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "go_back", intent: go_back, hint: "return to the previous room" }
+            - { label: "go_main", intent: go_main, hint: "back to the engineer's day landing" }
+            - { label: "look",    intent: look,    hint: "re-render" }
     relevant_world: []
     on:
       go_back:

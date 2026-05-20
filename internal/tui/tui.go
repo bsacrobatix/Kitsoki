@@ -75,6 +75,12 @@ const (
 	// or collapses nodes; q/Esc returns to chat. Single-pane-tui
 	// proposal §"Phase 1.5".
 	ModeWorldView
+	// ModeChoosing is active while an inline choice widget owns the
+	// keyboard focus. Arrow keys / Space / Tab / Enter drive the
+	// picker; Esc cancels; a printable letter defocuses the widget
+	// back to the prompt textarea so the user always has the free-
+	// text escape hatch (choice-widget proposal §2.2 / §5 Phase C).
+	ModeChoosing
 )
 
 // ctrlCQuitWindow is how long after a Ctrl+C the next Ctrl+C will quit
@@ -133,11 +139,19 @@ type RootModel struct {
 	offPath        offPathModel
 	clarify        clarifyModel
 	disambiguation disambiguationModel
+	choice         choiceWidgetModel
 	menuSystem     menuSystemModel
 	metaMode       metaModel
 	sessionsPanel  sessionsPanelModel
 	worldView      worldViewModel
 	prompt         textarea.Model
+
+	// pendingDraft holds whatever was in the prompt textarea when an
+	// interactive choice widget seized focus. Open() clears the
+	// textarea so the user can't keep typing into an unresponsive
+	// field; /input restores this draft so the user can resume
+	// composing.
+	pendingDraft string
 
 	// chatStore is the persistent chat row backend; used by the
 	// metamode controller to resolve / append. nil disables /meta
@@ -526,11 +540,12 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		offPath:        newOffPathModel(offPathBannerFromApp(orch.AppDef())),
 		clarify:        newClarifyModel(),
 		disambiguation: newDisambiguationModel(),
+		choice:         newChoiceWidgetModel(),
 		menuSystem:     newMenuSystemModel(metaMenuEntries(orch.AppDef())),
-		metaMode:      newMetaModel(),
-		sessionsPanel: newSessionsPanelModel(),
-		prompt:        ti,
-		spinner:       sp,
+		metaMode:       newMetaModel(),
+		sessionsPanel:  newSessionsPanelModel(),
+		prompt:         ti,
+		spinner:        sp,
 	}
 
 	// Set initial state.
@@ -563,7 +578,32 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 			"fallback_bytes", len(initialView),
 			"fallback_has_ansi", strings.Contains(initialView, "\x1b["),
 		)
-		m.transcript.AppendSystemTyped(initialView, m.initialTypedView, m.initialTypedEnv, m.initialTypedRR)
+		// If the initial frame carries an interactive choice element,
+		// open the widget straight away so the first thing the user
+		// sees is a focused picker. Mirrors handleTurnOutcome's auto-
+		// focus branch. Strip the choice element from the typed view
+		// passed to AppendSystemTyped so the body doesn't render the
+		// static picker on top of the live widget — only the
+		// interactive overlay shows the choice rows.
+		typedForBody := m.initialTypedView
+		if el, ok := findChoiceElement(m.initialTypedView); ok {
+			if err := m.choice.Open(el, m.initialTypedEnv, m.initialTypedRR); err != nil {
+				slog.Warn("tui.choice.open_initial", "err", err)
+			} else {
+				m.mode = ModeChoosing
+				typedForBody = viewWithoutChoice(m.initialTypedView)
+				// Snapshot whatever was in the prompt textarea (if
+				// anything) so /input can restore it later, then clear
+				// the textarea so the user can't keep typing into an
+				// inert field while the widget owns focus.
+				m.pendingDraft = m.prompt.Value()
+				m.prompt.SetValue("")
+			}
+		}
+		m.transcript.AppendSystemTyped(initialView, typedForBody, m.initialTypedEnv, m.initialTypedRR)
+		if m.mode == ModeChoosing {
+			m.transcript.AppendLive(m.choice.View(m.transcript.wrapWidth()))
+		}
 	} else if initialView != "" {
 		slog.Info("tui.initial_paint",
 			"path", "legacy_system",
@@ -806,6 +846,10 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// If disambiguating, route to disambiguation model first.
 	if m.mode == ModeDisambiguating {
 		return m.updateDisambiguating(msg)
+	}
+	// If a choice widget is active, route keys through it.
+	if m.mode == ModeChoosing {
+		return m.updateChoosing(msg)
 	}
 	// If the system menu overlay is active, it owns the keyboard.
 	if m.mode == ModeMenu {
@@ -1681,6 +1725,20 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 
+	case "/input":
+		// Restore the pre-widget draft into the prompt textarea. When
+		// a choice widget seizes focus the textarea contents are
+		// snapshotted to pendingDraft and cleared; /input re-hydrates
+		// the buffer so the user can continue composing.
+		if m.pendingDraft == "" {
+			m.transcript.AppendSystem("(no pending draft to restore)")
+			return m, nil
+		}
+		m.prompt.SetValue(m.pendingDraft)
+		m.pendingDraft = ""
+		m.transcript.AppendSystem("(restored your prior draft into the prompt)")
+		return m, nil
+
 	case "/help":
 		body, next, cmd := HelpCommand{}.Run(m, parts[1:])
 		next.transcript.AppendBlock(body)
@@ -2118,10 +2176,35 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 			res := settledFromOutcome(out, prevState, msg.input, false)
 			m.transcript.FinalizeLive(ir.r.RoutingResolved(res))
 		}
-		if out.TypedView != nil {
-			m.transcript.AppendAgentBodyTyped(out.View, out.TypedView, out.RenderEnv, out.Renderer)
+		// If the new view declares an interactive choice widget,
+		// open it FIRST so we can strip the choice element from the
+		// typed view passed to AppendAgentBodyTyped — otherwise the
+		// body re-renders the static picker on top of the live widget.
+		// Off-path takes precedence (the help banner owns the pane).
+		typedForBody := out.TypedView
+		if m.mode != ModeOffPath {
+			if el, ok := findChoiceElement(out.TypedView); ok {
+				if err := m.choice.Open(el, out.RenderEnv, out.Renderer); err != nil {
+					slog.Warn("tui.choice.open", "err", err)
+				} else {
+					m.mode = ModeChoosing
+					typedForBody = viewWithoutChoice(out.TypedView)
+					// Snapshot the textarea draft (if any) so /input
+					// can restore it; then clear so the user can't
+					// type into an inert field while the widget owns
+					// focus.
+					m.pendingDraft = m.prompt.Value()
+					m.prompt.SetValue("")
+				}
+			}
+		}
+		if typedForBody != nil {
+			m.transcript.AppendAgentBodyTyped(out.View, typedForBody, out.RenderEnv, out.Renderer)
 		} else {
 			m.transcript.AppendAgentBody(out.View)
+		}
+		if m.mode == ModeChoosing {
+			m.transcript.AppendLive(m.choice.View(m.transcript.wrapWidth()))
 		}
 
 		// Update menu.
@@ -3439,6 +3522,164 @@ func (m RootModel) updateDisambiguating(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateChoosing handles input while an inline choice widget owns the
+// keyboard. Routes tea.KeyMsg through choiceWidgetModel.Update; resize
+// / turn-outcome / observer messages fall through to the default Update
+// path so the rest of the model keeps reacting (mirror updateSlotFilling).
+//
+// The widget surfaces decisions via *ChoiceCommit:
+//
+//   - Cancel == true && ToChat == true: Tab was pressed — explicit
+//     off-ramp. Close the widget and focus the prompt textarea so the
+//     user can type freely; the prior draft remains in m.pendingDraft.
+//   - Cancel == true: Esc was pressed. Close the widget and return to
+//     ModeOnPath, restoring the pre-widget draft.
+//   - Cancel == false: the user finalised. Dispatch through
+//     asyncSubmitDirect, the same call dispatchMenuEntry uses for the
+//     right-pane menu (proposal §2.3 — dispatch parity).
+func (m RootModel) updateChoosing(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m = m.resize()
+		// Re-render the widget at the new width so the live region
+		// reflows in place.
+		m.transcript.UpdateLive(m.choice.View(m.transcript.wrapWidth()))
+		return m, nil
+
+	case turnOutcomeMsg:
+		// A turn outcome arriving while ModeChoosing means an
+		// off-widget submission completed (e.g. the user defocused +
+		// pressed Enter on the prompt). Close the widget and fall
+		// through to the normal handler.
+		m.choice.Close()
+		m.transcript.FinalizeLive("")
+		m.mode = ModeOnPath
+		return m.handleTurnOutcome(msg)
+
+	case continueTurnOutcomeMsg:
+		return m.handleContinueTurnOutcome(msg)
+
+	case tea.KeyMsg:
+		// Ctrl+C is a hard exit hatch even inside the widget.
+		if msg.Type == tea.KeyCtrlC {
+			if strings.TrimSpace(m.prompt.Value()) != "" {
+				m.prompt.SetValue("")
+				return m, nil
+			}
+			m.quitting = true
+			return m, tea.Quit
+		}
+
+		var commit *ChoiceCommit
+		var cmd tea.Cmd
+		m.choice, cmd, commit = m.choice.Update(msg)
+
+		// Always refresh the live region after a key — even a no-op
+		// arrow may have moved the cursor.
+		m.transcript.UpdateLive(m.choice.View(m.transcript.wrapWidth()))
+
+		if commit == nil {
+			return m, cmd
+		}
+
+		// Surface the choice as a permanent entry, then dispatch.
+		body := m.choice.View(m.transcript.wrapWidth())
+
+		if commit.Cancel {
+			m.choice.Close()
+			m.mode = ModeOnPath
+			if commit.ToChat {
+				// Explicit off-ramp (Tab pressed) — focus the prompt
+				// textarea for free-text chat. Leave the textarea
+				// empty so the user can start typing fresh; the prior
+				// draft remains in m.pendingDraft, reachable via
+				// /input.
+				slog.Debug("tui.choice.to_chat")
+				m.transcript.FinalizeLive("")
+				m.transcript.AppendSystem("(picker dismissed — type to chat. /input restores your prior draft.)")
+			} else {
+				m.transcript.FinalizeLive(body)
+				m.transcript.AppendSystem("(picker cancelled)")
+				// Cancel via Esc — restore the pre-widget draft so
+				// the user can continue editing where they left off.
+				if m.pendingDraft != "" {
+					m.prompt.SetValue(m.pendingDraft)
+					m.pendingDraft = ""
+				}
+			}
+			// cmd is currently always nil from the widget; revisit if
+			// choiceWidgetModel.Update ever returns an async cmd.
+			return m, cmd
+		}
+
+		// Commit — finalise the widget and dispatch.
+		m.choice.Close()
+		m.transcript.FinalizeLive(body)
+		display := commit.Intent
+		m.lastInput = display
+		next, asyncCmd := startAsyncTurn(m, display,
+			asyncSubmitDirect(m.orch, m.sid, commit.Intent, commit.Slots),
+			pendingDeterministic,
+		)
+		if cmd == nil {
+			return next, asyncCmd
+		}
+		return next, tea.Batch(cmd, asyncCmd)
+	}
+
+	// Everything else (spinner ticks, inbox poll, routing observer
+	// messages) falls through to the default branch so the model
+	// keeps reacting underneath the widget overlay.
+	return m, nil
+}
+
+// findChoiceElement returns the first Kind=="choice" element in a
+// typed View, if any. Choice elements are loader-restricted to one per
+// view (see internal/app/view_element.go), so callers can rely on this
+// returning the *only* choice if it returns true. Returns the zero
+// ViewElement + false when v is nil or contains no choice element.
+func findChoiceElement(v *app.View) (app.ViewElement, bool) {
+	if v == nil {
+		return app.ViewElement{}, false
+	}
+	for _, el := range v.Elements {
+		if el.Kind == "choice" {
+			return el, true
+		}
+	}
+	return app.ViewElement{}, false
+}
+
+// viewWithoutChoice returns a shallow copy of v with any choice
+// elements stripped from Elements. Used at the auto-focus sites
+// (NewRootModel initial paint + handleTurnOutcome) so the transcript
+// body doesn't re-render the static choice picker on top of the live
+// interactive widget. Returns nil for nil input.
+//
+// INVARIANT: Callers MUST also call m.choice.Open(...) so the user has
+// a way to interact with the stripped choice element. Calling
+// viewWithoutChoice without Open will silently hide an action the
+// user needs to take — the room appears to have no choice surface at
+// all. The auto-focus path in handleTurnOutcome enforces this pairing;
+// any future caller must do the same.
+func viewWithoutChoice(v *app.View) *app.View {
+	if v == nil {
+		return nil
+	}
+	filtered := make([]app.ViewElement, 0, len(v.Elements))
+	for _, el := range v.Elements {
+		if el.Kind == "choice" {
+			continue
+		}
+		filtered = append(filtered, el)
+	}
+	out := *v
+	out.Elements = filtered
+	return &out
+}
+
 func (m RootModel) handleDisambiguationChoice(msg disambiguationChoiceMsg) (tea.Model, tea.Cmd) {
 	m.disambiguation.Close()
 	chosen := msg.chosen
@@ -3656,6 +3897,26 @@ func (m RootModel) View() string {
 	m.prompt.SetHeight(promptHeightFor(&m.prompt))
 	var promptLine string
 	switch m.mode {
+	case ModeChoosing:
+		// While the choice widget owns focus the prompt textarea is
+		// inert — keystrokes route to the widget, not the buffer.
+		// Suppress the textarea entirely; the widget's own footer
+		// (above the divider) advertises its keymap, so a second
+		// hint here would either repeat it or — worse — mislead in
+		// modes where typed letters get absorbed by the picker
+		// (paramMode, form mode). When there's a draft worth
+		// restoring, surface a single line about /input.
+		if m.pendingDraft != "" {
+			promptLine = lipgloss.NewStyle().
+				Foreground(colorMuted).
+				Italic(true).
+				Render("(picker active — /input restores your prior draft)")
+		} else {
+			promptLine = lipgloss.NewStyle().
+				Foreground(colorMuted).
+				Italic(true).
+				Render("(picker active)")
+		}
 	case ModeMenu:
 		promptLine = m.menuSystem.View()
 	case ModeMetaSessions:

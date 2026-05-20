@@ -59,35 +59,44 @@ states:
       trail_guide_list:
         mode: conversational
         description: "Wagon-master chats — list, open, rename, archive, fork, or start fresh."
+        # ask_question (single + param: question) is the dominant verb;
+        # chat-management actions (open / rename / archive / fork) stay
+        # as free-text because their `chat_id` slot resolves list-position
+        # refs ("1", "2") and rename/fork need a second `title` slot —
+        # both shapes don't fit cleanly under a single `param:` capture.
+        # `back` and `look` are pre-bound zero-slot rows.
         view:
-          extends: "base"
-          blocks:
-            heading:
-              - heading: "Wagon master — profession: {{ world.profession }}"
-            body:
-              - kv:
-                  pairs:
-                    Chats: "{{ world.wagon_chat_count }}"
-              # The chat list is pre-rendered by host.chat.list into
-              # world.wagon_chats_view (markdown table). Keep it in a
-              # `code` element so monospace alignment survives.
-              - code: "{{ world.wagon_chats_view }}"
-            choices:
-              - heading: "Actions"
-              - list:
-                  items:
-                    - label: 'ask "..."'
-                      hint:  "start a fresh wagon-master conversation"
-                    - label: "open <number/id>"
-                      hint:  "resume an existing chat"
-                    - label: 'rename <number/id> "title"'
-                      hint:  "rename a chat"
-                    - label: "archive <number/id>"
-                      hint:  "hide a chat from the list"
-                    - label: 'fork <number/id> "title"'
-                      hint:  "fork a chat into a what-if branch"
-                    - label: "back"
-                      hint:  "return to the trail"
+          - heading: "Wagon master — profession: {{ world.profession }}"
+          - kv:
+              pairs:
+                Chats: "{{ world.wagon_chat_count }}"
+          # The chat list is pre-rendered by host.chat.list into
+          # world.wagon_chats_view (markdown table). Keep it in a
+          # `code` element so monospace alignment survives.
+          - code: "{{ world.wagon_chats_view }}"
+          - prose: |
+              For chat management, type:
+                open <number>          — resume an existing chat
+                rename <number> "title" — rename a chat
+                archive <number>       — hide a chat from the list
+                fork <number> "title"  — branch into a what-if chat
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "Ask the wagon master"
+                  hint:   "start a fresh conversation with a question"
+                  intent: ask_question
+                  param:
+                    slot:        question
+                    type:        string
+                    placeholder: "what should we do at the next river?"
+                    required:    true
+                - label:  "back"
+                  hint:   "return to the trail"
+                  intent: back
+                - label:  "look"
+                  intent: look
         relevant_world: [wagon_chats_view, wagon_chat_count, profession]
         on_enter:
           - invoke: host.chat.list
@@ -207,23 +216,34 @@ states:
         mode: conversational
         description: "Wagon master — active chat. Ask another question or go back."
         view:
-          extends: "base"
-          blocks:
-            heading:
-              - heading: "Wagon master — {{ world.wagon_chat_title }}"
-            body:
-              - kv:
-                  pairs:
-                    Chat:  "{{ world.wagon_chat_id }}"
-                    Turns: "{{ world.wagon_chat_turns }}"
-              - kv:
-                  pairs:
-                    Q: "{{ world.wagon_question }}"
-              - kv:
-                  pairs:
-                    A: "{{ world.wagon_answer }}"
-            choices:
-              - prose: 'Ask another question, or "back" for the chat list.'
+          - heading: "Wagon master — {{ world.wagon_chat_title }}"
+          - kv:
+              pairs:
+                Chat:  "{{ world.wagon_chat_id }}"
+                Turns: "{{ world.wagon_chat_turns }}"
+          - kv:
+              pairs:
+                Q: "{{ world.wagon_question }}"
+          - kv:
+              pairs:
+                A: "{{ world.wagon_answer }}"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "Ask another question"
+                  hint:   "continue the conversation"
+                  intent: ask_question
+                  param:
+                    slot:        question
+                    type:        string
+                    placeholder: "follow-up question"
+                    required:    true
+                - label:  "back"
+                  hint:   "return to the chat list"
+                  intent: back
+                - label:  "look"
+                  intent: look
         relevant_world: [wagon_chat_id, wagon_chat_title, wagon_question, wagon_answer, wagon_chat_turns]
         on_enter:
           - invoke: host.oracle.talk
@@ -297,23 +317,34 @@ states:
         mode: conversational
         description: "Wagon master — starting a fresh chat."
         view:
-          extends: "base"
-          blocks:
-            heading:
-              - heading: "Wagon master — {{ world.wagon_chat_title }}"
-            body:
-              - kv:
-                  pairs:
-                    Chat:  "{{ world.wagon_chat_id }}"
-                    Turns: "{{ world.wagon_chat_turns }}"
-              - kv:
-                  pairs:
-                    Q: "{{ world.wagon_question }}"
-              - kv:
-                  pairs:
-                    A: "{{ world.wagon_answer }}"
-            choices:
-              - prose: 'Ask another question, or "back" for the chat list.'
+          - heading: "Wagon master — {{ world.wagon_chat_title }}"
+          - kv:
+              pairs:
+                Chat:  "{{ world.wagon_chat_id }}"
+                Turns: "{{ world.wagon_chat_turns }}"
+          - kv:
+              pairs:
+                Q: "{{ world.wagon_question }}"
+          - kv:
+              pairs:
+                A: "{{ world.wagon_answer }}"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "Ask another question"
+                  hint:   "continue the conversation"
+                  intent: ask_question
+                  param:
+                    slot:        question
+                    type:        string
+                    placeholder: "follow-up question"
+                    required:    true
+                - label:  "back"
+                  hint:   "return to the chat list"
+                  intent: back
+                - label:  "look"
+                  intent: look
         relevant_world: [wagon_chat_id, wagon_chat_title, wagon_question, wagon_answer, wagon_chat_turns]
         on_enter:
           - invoke: host.chat.create

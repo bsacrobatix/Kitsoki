@@ -1,0 +1,18 @@
+# form_bounds — submit an int within [1, 10]. Bounds enforcement is
+# widget-only; the orchestrator does not range-check. A flow test that
+# dispatches an out-of-range int (e.g. 99) WILL succeed at the
+# orchestrator — see the README's "NOT covered" section. The commit
+# arc also flips show_secret_field so form_per_field_when (the next
+# spoke) renders its gated field.
+test_kind: flow
+app: ../app.yaml
+initial_state: form_bounds
+
+turns:
+  - intent: { name: submit_bounds_form, slots: { bounded: 7 } }
+    expect_state: form_per_field_when
+    expect_world:
+      form_bounded:      7
+      show_secret_field: true
+
+expect_no_errors: true

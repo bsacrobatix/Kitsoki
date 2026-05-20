@@ -22,7 +22,7 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: intro
+initial_state: intro_party_names
 initial_world:
   narration:     false
   party_names:   ""
@@ -35,7 +35,7 @@ turns:
       name: name_party
       slots:
         names: "Adam,Beth,Carol,Daniel,Edith"
-    expect_state: intro
+    expect_state: intro_party_names
     expect_world:
       party_names:    "Adam,Beth,Carol,Daniel,Edith"
       party_member_1: "Adam"
@@ -53,7 +53,7 @@ turns:
       slots:
         index: 3
         name:  "Sarah"
-    expect_state: intro
+    expect_state: intro_party_names
     expect_world:
       party_member_1: "Adam"
       party_member_2: "Beth"
@@ -69,7 +69,7 @@ turns:
       name: generate_names
       slots:
         theme: "Western"
-    expect_state: intro
+    expect_state: intro_party_names
     expect_world:
       party_names:    "Hank,Jesse,Mary,Ezra,Sarah"
       party_member_1: "Hank"
@@ -85,7 +85,7 @@ turns:
       name: generate_names
       slots:
         theme: "Klingon Empire"
-    expect_state: intro
+    expect_state: intro_party_names
     expect_world:
       party_names:    "Adam,Beth,Carol,Daniel,Edith"
       party_member_1: "Adam"
@@ -98,7 +98,7 @@ turns:
       slots:
         index: 9
         name:  "Nobody"
-    expect_state: intro
+    expect_state: intro_party_names
     expect_world:
       party_member_1: "Adam"
       party_member_5: "Edith"

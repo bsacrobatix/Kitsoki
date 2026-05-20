@@ -32,6 +32,7 @@ func (HelpCommand) Run(m RootModel, _ []string) (string, RootModel, tea.Cmd) {
 			{"/inbox [<n>]", "list recent notifications; <n> opens one"},
 			{"/trace", "print the last turn's routing trace"},
 			{"/viz", "export the state diagram to a DOT file"},
+			{"/input", "restore your prior chat draft (cleared when a choice widget opens)"},
 		}},
 		{"dedicated views", []row{
 			{"/world", "open the world viewer (q or Esc to close)"},

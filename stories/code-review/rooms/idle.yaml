@@ -6,24 +6,31 @@ states:
 
   idle:
     description: "Code-review pipeline parked. Waiting for start."
+    # Choice-widget migration (§4 row 4). The previous version used
+    # `view: { extends: "base", blocks: { body, choices } }` for the
+    # shared status-chrome, but §4.5 forbids a `choice:` element inside
+    # `blocks:`. Flatten to a sibling typed-element array; standalone
+    # runs lose the base.pongo status line, importer-host paths render
+    # via the host's own chrome.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                "Pending PRs": "{{ world.pending_count }}"
-                Picked:        '{{ world.pr_id|default:"(none)" }} {{ world.pr_title }}'
-                Judge:         "{{ world.judge_mode }}"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "start"
-                  hint:  "list PRs awaiting your review"
-                - label: "quit"
-                  hint:  "abandon the review"
-                - label: "look"
+      - kv:
+          pairs:
+            "Pending PRs": "{{ world.pending_count }}"
+            Picked:        '{{ world.pr_id|default:"(none)" }} {{ world.pr_title }}'
+            Judge:         "{{ world.judge_mode }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "start"
+              hint:   "list PRs awaiting your review"
+              intent: start
+            - label:  "quit"
+              hint:   "abandon the review"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render the scene"
+              intent: look
     relevant_world: [pending_count, pr_id, pr_title, judge_mode]
     on:
       start:

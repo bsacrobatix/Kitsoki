@@ -232,6 +232,15 @@ func renderOne(el app.ViewElement, env expr.Env, width int, glamour GlamourFunc,
 		return Template{Source: el.Source, Glamour: glamour}.Render(width, env, rr)
 	case "banner":
 		return Banner{Source: el.Source, Subtitle: el.Subtitle, Color: el.Color}.Render(width, env, rr)
+	case "choice":
+		return Choice{
+			Mode: el.ChoiceMode, Prompt: el.ChoicePrompt,
+			Items:  el.ChoiceItems,
+			Intent: el.ChoiceIntent, Slot: el.ChoiceSlot,
+			Min: el.ChoiceMin, MinSet: el.ChoiceMinSet,
+			Max: el.ChoiceMax, MaxSet: el.ChoiceMaxSet,
+			Template: el.ChoiceTemplate, Fields: el.ChoiceFields,
+		}.Render(width, env, rr)
 	default:
 		return "", fmt.Errorf("unknown element kind %q", el.Kind)
 	}

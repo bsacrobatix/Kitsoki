@@ -22,33 +22,45 @@ states:
 
   idle:
     description: "Bug-fix pipeline parked. Waiting for start."
+    # Flattened view (no extends/blocks chrome) — `choice:` cannot live
+    # inside a `blocks:` map (typed metadata is lost through the
+    # inheritance pipeline; see docs/choice-widget.md §3.1). The
+    # status/heading the base.pongo used to render is now inlined as a
+    # prose status line + the kv body; the standalone-only border
+    # chrome is dropped.
     view:
-      extends: "base"
-      blocks:
-        body:
-          - kv:
-              pairs:
-                Ticket:    '{{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}'
-                Workspace: '{{ world.workspace_id|default:"(none)" }}'
-                Mode:      "{{ world.bugfix_mode }} bugfix"
-                Judge:     "{{ world.judge_mode }}"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "start"
-                  hint:  "boot the full pipeline (mode-agnostic)"
-                - label: "full_pipeline"
-                  hint:  "pin bugfix_mode=full and start"
-                - label: "quick_fix"
-                  hint:  "skip reviewing + validating"
-                - label: "skip_to_pr"
-                  hint:  "jump straight to validating (fix in hand)"
-                - label: "change_ticket"
-                  hint:  "exit to parent's ticket picker"
-                - label: "quit"
-                  hint:  "abandon the pipeline"
-                - label: "look"
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
+      - kv:
+          pairs:
+            Ticket:    '{{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}'
+            Workspace: '{{ world.workspace_id|default:"(none)" }}'
+            Mode:      "{{ world.bugfix_mode }} bugfix"
+            Judge:     "{{ world.judge_mode }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "start"
+              hint:   "boot the full pipeline (mode-agnostic)"
+              intent: start
+            - label:  "full_pipeline"
+              hint:   "pin bugfix_mode=full and start"
+              intent: full_pipeline
+            - label:  "quick_fix"
+              hint:   "skip reviewing + validating"
+              intent: quick_fix
+            - label:  "skip_to_pr"
+              hint:   "jump straight to validating (fix in hand)"
+              intent: skip_to_pr
+            - label:  "change_ticket"
+              hint:   "exit to parent's ticket picker"
+              intent: change_ticket
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
     relevant_world: [ticket_id, ticket_title, bugfix_mode, judge_mode, workspace_id, reproduction_artifact]
     # Auto-start when entered fresh with a ticket loaded. The
     # operator who lands here from dev-story's `go_bugfix` / `drive`

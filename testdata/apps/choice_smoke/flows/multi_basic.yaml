@@ -1,0 +1,13 @@
+# multi_basic — submit two traits within bounds (min=1, max=3). Commit
+# advances to multi_min_zero.
+test_kind: flow
+app: ../app.yaml
+initial_state: multi_basic
+
+turns:
+  - intent: { name: chose_traits, slots: { traits: [brave, clever] } }
+    expect_state: multi_min_zero
+    expect_world:
+      picked_traits: [brave, clever]
+
+expect_no_errors: true

@@ -16,7 +16,7 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: intro
+initial_state: intro_party_names
 initial_world:
   narration:     true
   party_size:    5
@@ -45,7 +45,7 @@ turns:
       name: generate_names
       slots:
         theme: "Star Wars"
-    expect_state: intro
+    expect_state: intro_party_names
     expect_world:
       party_member_1: "Luke"
       party_member_2: "Leia"
