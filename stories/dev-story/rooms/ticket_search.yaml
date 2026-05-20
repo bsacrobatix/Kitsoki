@@ -43,16 +43,57 @@ states:
           # list element" shape is still TBD; until then this code: block
           # is the agreed pattern across operator stories.
           #
-          # Row marker:
-          #   ★ — the currently-picked ticket (visually pinned for scan)
+          # Row format (two lines per ticket):
+          #
+          #   {marker} {status-glyph} {title}
+          #     {severity} · {status} · {id}
+          #
+          # Marker:
+          #   ★ — currently-picked ticket (visually pinned for scan)
           #   · — every other row (gentler than `-` so the star pops)
-          # The hint suffix shows the picked ticket's status as a small
-          # glyph (○ open, ● resolved/closed, ◐ in-progress) so the
-          # operator sees the lifecycle state at a glance.
+          #
+          # Status glyph (also the first scan signal):
+          #   ●  resolved / closed
+          #   ◐  in-progress
+          #   ○  open
+          #
+          # # Why the badge moved to line 2
+          #
+          # Pre-2026-05-20 the row was a single line `{id} — {title} […]`.
+          # The 60-char ISO-timestamped ID dominated the first 60 chars
+          # and pushed the title off-screen. The first attempt fixed
+          # that (title-first, ID below) but kept the `[severity · status]`
+          # badge on the title line, which caused a new wrap glitch on
+          # long-title tickets: glamour's word-wrap landed mid-bracket
+          # and split `[\nopen]` across lines. Putting the badge on the
+          # metadata line eliminates the bracket entirely (we just use
+          # `·` separators) and means title-line wraps are pure title.
+          #
+          # # README-style ghost rows
+          #
+          # The local-files provider's lister scans `issues/{bugs,features
+          # ,epics}/` and emits a row per `*.md`, including section
+          # READMEs without frontmatter. Those rows have empty `status`
+          # and no `severity`, so the `{% if t.status %}` guard below
+          # drops them — a real ticket always has a status per
+          # `issues/README.md` §2. (A host-side filter is the right
+          # long-term fix; this is the band-aid until the same dogfood
+          # cycle resolves the open localfiles ticket.)
+          #
+          # # Severity field name
+          #
+          # `t.severity` is the on-disk frontmatter field per
+          # `issues/README.md` §2. The fallback to `t.priority` covers
+          # the transition window — the local-files provider's
+          # `bugSummary` (open ticket 2026-05-18T045257Z-localfiles-
+          # ticket-rank-by-severity-and-recency) still projects the
+          # field as `priority` on HEAD; once that fix lands the
+          # fallback is a no-op.
           - code: |
               {% if world.ticket_results|length == 0 %}(none — file one in issues/bugs/)
-              {% else %}{% for t in world.ticket_results|reverse %}{% if t.id == world.ticket_id %}★{% else %}·{% endif %} {{ t.id }} — {{ t.title }} [{% if t.status == "resolved" or t.status == "closed" %}● {% elif t.status == "in-progress" or t.status == "in_progress" %}◐ {% elif t.status == "open" %}○ {% endif %}{{ t.status|default:"?" }}{% if t.priority %} · {{ t.priority }}{% endif %}]
-              {% endfor %}{% endif %}
+              {% else %}{% for t in world.ticket_results|reverse %}{% if t.status %}{% if t.id == world.ticket_id %}★{% else %}·{% endif %} {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %} {{ t.title|default:"(untitled)" }}
+                {% if t.severity %}{{ t.severity }} · {% elif t.priority %}{{ t.priority }} · {% endif %}{{ t.status }} · {{ t.id }}
+              {% endif %}{% endfor %}{% endif %}
           # Readiness banner. Two sibling elements with mutually-exclusive
           # `when:` guards: the ready case is a `heading:` (emerald-bold,
           # the style-guide §1 "go" color), the not-ready case is a plain
@@ -64,7 +105,11 @@ states:
             when:  "world.ticket_id == ''"
           - kv:
               pairs:
-                Picked: '{{ world.ticket_id|default:"(none — type `pick_ticket id=<TKT>`)" }} {{ world.ticket_title }}'
+                # Title-first to match the row format above; ID trails in
+                # parentheses so a quick glance lands on the human label.
+                # The "(none — …)" hint advertises the pick_ticket syntax
+                # when the operator has not picked yet.
+                Picked: '{% if world.ticket_id %}{{ world.ticket_title|default:"(no title)" }}  ({{ world.ticket_id }}){% else %}(none — type `pick_ticket id=<TKT>` from the list above){% endif %}'
         choices:
           - heading: "Actions"
           - list:
