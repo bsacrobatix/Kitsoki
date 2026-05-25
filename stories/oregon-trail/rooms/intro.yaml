@@ -314,7 +314,7 @@ states:
         - when: "world.narration"
           target: intro_party_names
           effects:
-            - invoke: host.oracle.ask_with_mcp
+            - invoke: host.oracle.decide
               with:
                 prompt: "prompts/name_party.md"
                 schema: "mcp/party_names.json"

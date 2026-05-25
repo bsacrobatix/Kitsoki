@@ -78,8 +78,13 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(sessionCmd())
 	root.AddCommand(chatCmd())
 	root.AddCommand(mcpValidatorCmd())
+	root.AddCommand(mcpBashCmd())
 	root.AddCommand(bugCmd())
 	root.AddCommand(uiCmd())
+	root.AddCommand(extractCmd())
+	root.AddCommand(oracleCmd())
+	root.AddCommand(oracleServeCmd())
+	root.AddCommand(migrateOracleCmd())
 
 	return root
 }
@@ -1017,18 +1022,7 @@ Examples:
 }
 
 // traceCmd is defined in trace.go.
-
-func replayCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "replay <session>",
-		Short: "Replay a session's event log and diff against snapshots",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// TODO(stage-4): use internal/trace.Replayer.
-			return fmt.Errorf("not implemented")
-		},
-	}
-}
+// replayCmd is defined in replay.go (oracle-split Phase 4).
 
 func testCmd() *cobra.Command {
 	cmd := &cobra.Command{

@@ -3,7 +3,7 @@
 # effect auto-advances each checkpoint by dispatching the verdict's
 # intent (contract §6 step 4). End-to-end this proves:
 #   - the `when:` guard on the judge invoke (it fires in llm mode)
-#   - the binding of llm_verdict (post host.oracle.ask_with_mcp)
+#   - the binding of llm_verdict (post host.oracle.decide)
 #   - the post-bind emit_intent dispatch (DispatchPostBindEmits)
 #     auto-fires `accept` in the SAME turn as the artifact oracle,
 #     because the judge now runs in the merged room's on_enter.
@@ -41,14 +41,70 @@ host_handlers:
   host.local:
     data: { ok: true, log: "PASS: 12 tests", passed: 12, failed: 0 }
 
-  # In `llm` mode every merged room ALSO fires host.oracle.ask_with_mcp
+  # In `llm` mode every merged room ALSO fires host.oracle.decide
   # via the `judge_<phase>.md` prompt from on_enter. The runtime can't
   # branch the stub response on prompt (it returns the SAME Data for
   # every call). So our stub returns a submitted: payload that
   # satisfies BOTH the artifact schema AND the judge_verdict schema
   # (verdict/intent/reason/confidence are additional fields the artifact
   # schema ignores via additionalProperties: true).
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        # Artifact fields
+        summary_title:    "Confident artifact"
+        summary_markdown: "An artifact body sufficient for state-machine testing."
+        bug_verified:     true
+        involved_components: [{ name: "tui", reason: "the foyer renders here" }]
+        fix_description:     "Render the banner with `truncate=false` so the title isn't clipped at small widths."
+        root_cause:          "The foyer's renderWidth() returns terminal-width-2 instead of terminal-width, which clips one-character titles."
+        affected_files:      ["internal/tui/foyer.go"]
+        confidence:          0.9
+        reasoning:           "Resize trace shows the off-by-one on terminal-width-2; the fix is well-established in similar renderer code in this repo."
+        status:              "passed"
+        tests_run:           { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:             "pass"
+        evidence:            { build: "ok", api: "n/a", ui: "ok" }
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need at least one regression test asserting on the exact width.", severity: "medium" }
+        # Judge fields (additionalProperties: true on artifact schemas
+        # tolerates these; the orchestrator doesn't validate either way
+        # because flow fixtures don't run the validator subprocess).
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Artifact looks complete and the confidence is high enough to advance."
+
+  host.oracle.ask:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        # Artifact fields
+        summary_title:    "Confident artifact"
+        summary_markdown: "An artifact body sufficient for state-machine testing."
+        bug_verified:     true
+        involved_components: [{ name: "tui", reason: "the foyer renders here" }]
+        fix_description:     "Render the banner with `truncate=false` so the title isn't clipped at small widths."
+        root_cause:          "The foyer's renderWidth() returns terminal-width-2 instead of terminal-width, which clips one-character titles."
+        affected_files:      ["internal/tui/foyer.go"]
+        confidence:          0.9
+        reasoning:           "Resize trace shows the off-by-one on terminal-width-2; the fix is well-established in similar renderer code in this repo."
+        status:              "passed"
+        tests_run:           { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:             "pass"
+        evidence:            { build: "ok", api: "n/a", ui: "ok" }
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need at least one regression test asserting on the exact width.", severity: "medium" }
+        # Judge fields (additionalProperties: true on artifact schemas
+        # tolerates these; the orchestrator doesn't validate either way
+        # because flow fixtures don't run the validator subprocess).
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Artifact looks complete and the confidence is high enough to advance."
+
+  host.oracle.decide:
     data:
       stdout: ""
       ok: true

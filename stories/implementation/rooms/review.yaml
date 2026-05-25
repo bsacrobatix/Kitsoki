@@ -52,7 +52,7 @@ states:
         bind:
           ci_log: diff
         on_error: idle
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.decide
         with:
           prompt: prompts/review_executing.md
           schema: schemas/review_artifact.json
@@ -130,7 +130,7 @@ states:
           state:   review_awaiting_reply
           body:    "{{ world.review_artifact.summary_markdown }}"
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
-        invoke: host.oracle.ask_with_mcp
+        invoke: host.oracle.decide
         with:
           prompt: prompts/judge_review.md
           schema: schemas/judge_verdict.json

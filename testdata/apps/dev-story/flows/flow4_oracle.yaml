@@ -2,7 +2,7 @@
 #
 # New flow (post-redesign):
 #  1. Go to oracle list (empty list shows "No chats yet" branch)
-#  2. ask_question → routes through oracle_asking_new (host.chat.create + host.oracle.talk + host.chat.suggest_title)
+#  2. ask_question → routes through oracle_asking_new (host.chat.create + host.oracle.converse + host.chat.suggest_title)
 #  3. Ask another question (continues in oracle_asking — re-uses existing chat)
 #  4. go_back → oracle list (now shows 1 chat)
 #  5. rename_chat → list refreshes with new title
@@ -34,7 +34,7 @@ host_handlers:
       latest_seq: -1
       title:      "who is beasy"
 
-  host.oracle.talk:
+  host.oracle.converse:
     data:
       answer:            "Here is my answer."
       session_id:        "stub-session-id"

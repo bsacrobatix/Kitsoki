@@ -310,8 +310,8 @@ func TestLocalFilesTicket_Transition_RewritesStatus(t *testing.T) {
 
 func TestLocalFilesTicket_ListMine_FilterMatches(t *testing.T) {
 	root := seedTicketsRoot(t, map[string]string{
-		"a.md": sampleBug,             // assignee: brad
-		"b.md": sampleBugWithComment,  // assignee: brad
+		"a.md": sampleBug,            // assignee: brad
+		"b.md": sampleBugWithComment, // assignee: brad
 		"c.md": withFront(sampleBug, "assignee", "alice"),
 	})
 	res, err := host.LocalFilesTicketHandler(context.Background(), map[string]any{

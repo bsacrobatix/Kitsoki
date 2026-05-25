@@ -53,7 +53,7 @@ states:
           ticket_url:   url
         on_error: idle
       # Produce the structured task summary.
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.decide
         with:
           prompt: prompts/review_task_executing.md
           schema: schemas/task_summary_artifact.json
@@ -132,7 +132,7 @@ states:
           state:   review_task_awaiting_reply
           body:    "{{ world.task_summary_artifact.summary_markdown }}"
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
-        invoke: host.oracle.ask_with_mcp
+        invoke: host.oracle.decide
         with:
           prompt: prompts/judge_review_task.md
           schema: schemas/judge_verdict.json

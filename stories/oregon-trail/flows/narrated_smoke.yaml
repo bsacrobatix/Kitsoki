@@ -17,7 +17,7 @@
 #                              is on presence-in-the-right-world-key,
 #                              not on content.)
 #
-#   host.oracle.ask_with_mcp   submitted: { illness: cholera,
+#   host.oracle.decide         submitted: { illness: cholera,
 #                                            severity: 3,
 #                                            treatment: fluids }
 #                              (used for event_disease.on_enter,
@@ -130,7 +130,7 @@ host_handlers:
       ok:        true
     delay: "0s"
 
-  host.oracle.ask_with_mcp:
+  host.oracle.decide:
     data:
       stdout:    "diagnosed: cholera (severity 3, treatment fluids)"
       exit_code: 0
@@ -149,7 +149,7 @@ turns:
   # event_disease.on_enter:
   #   1. shared baseline: health -= 10, current_event_attempts := 0
   #   2. when: not narration   SKIPPED (narration is true)
-  #   3. when: narration       invokes host.oracle.ask_with_mcp;
+  #   3. when: narration       invokes host.oracle.decide;
   #                             bind populates illness_* from submitted.*.
   - intent: { name: continue, slots: {} }
     expect_state: leg_a_executing.event_disease

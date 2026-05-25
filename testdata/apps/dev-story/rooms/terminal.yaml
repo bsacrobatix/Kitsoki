@@ -262,7 +262,7 @@ states:
       fix:
         - target: terminal_reviewing
           effects:
-            - invoke: host.oracle.ask_with_mcp
+            - invoke: host.oracle.decide
               with:
                 prompt: "prompts/shell_repair.md"
                 schema: "mcp/shell_repair.json"

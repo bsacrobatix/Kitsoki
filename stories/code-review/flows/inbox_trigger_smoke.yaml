@@ -38,10 +38,9 @@ host_handlers:
       comments: ""
   host.local_files.ticket:
     data: { ok: true }
-  host.oracle.ask_with_mcp:
+  host.oracle.decide:
     data:
       ok: true
-      stdout: "Looks fine."
       submitted:
         summary_title:    "Timezone-aware reports look fine"
         summary_markdown: "Stub review summary; one nit on the docstring."
@@ -54,6 +53,10 @@ host_handlers:
         verdict:    "pass"
         intent:     "accept"
         reason:     "Stub."
+  host.oracle.ask:
+    data:
+      ok: true
+      stdout: "Looks fine."
 
 turns:
   # The inbox-routed entry: the dev-story inbox.yaml `pick_review`

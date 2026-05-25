@@ -6,10 +6,10 @@
 
 - App ID: `oregon-trail`
 - Entry room: [`intro`](#room-intro)
-- Rooms: 106
-- Intents: 65
-- World variables: 99
-- Host allow-list: `host.run`, `host.jobs.answer_clarification`, `host.oracle.ask_with_mcp`, `host.oracle.ask`, `host.oracle.talk`, `host.chat.resolve`, `host.chat.list`, `host.chat.transcript`, `host.chat.create`, `host.chat.fork`, `host.chat.archive`, `host.chat.rename`, `host.chat.suggest_title`, `host.chat.resolve_ref`, `host.transport.post`, `host.run.announce`, `host.run.close`
+- Rooms: 114
+- Intents: 71
+- World variables: 100
+- Host allow-list: `host.run`, `host.jobs.answer_clarification`, `host.oracle.decide`, `host.oracle.ask`, `host.oracle.converse`, `host.chat.resolve`, `host.chat.list`, `host.chat.transcript`, `host.chat.create`, `host.chat.fork`, `host.chat.archive`, `host.chat.rename`, `host.chat.suggest_title`, `host.chat.resolve_ref`, `host.transport.post`, `host.run.announce`, `host.run.close`
 
 ## State Diagram
 
@@ -18,6 +18,8 @@ flowchart LR
   ended_lost["ended_lost"]
   ended_won["ended_won"]
   fort["fort"]
+  fort__compose["fort.compose"]
+  fort__describe["fort.describe"]
   fort__done["fort.done"]
   fort__idle["fort.idle"]
   fort__reviewing["fort.reviewing"]
@@ -26,6 +28,8 @@ flowchart LR
   frontier__bandits__encounter["frontier.bandits.encounter"]
   frontier__scouting["frontier.scouting"]
   general_store["general_store"]
+  general_store__compose["general_store.compose"]
+  general_store__describe["general_store.describe"]
   general_store__done["general_store.done"]
   general_store__idle["general_store.idle"]
   general_store__reviewing["general_store.reviewing"]
@@ -35,6 +39,10 @@ flowchart LR
   hunt__hunt_running["hunt.hunt_running"]
   inbox["inbox"]
   intro["intro"]
+  intro_month["intro_month"]
+  intro_party_names["intro_party_names"]
+  intro_profession["intro_profession"]
+  intro_summary["intro_summary"]
   leg_a_awaiting_reply["leg_a_awaiting_reply"]
   leg_a_error["leg_a_error"]
   leg_a_executing["leg_a_executing"]
@@ -121,15 +129,28 @@ flowchart LR
   world_clock__weather__dry["world_clock.weather.dry"]
   world_clock__weather__rain["world_clock.weather.rain"]
   world_clock__weather__snow["world_clock.weather.snow"]
+  fort__compose -->|back| fort__idle
+  fort__compose -->|look| fort__compose
+  fort__compose -->|propose_kit [world.money >= int((int(slots.oxen ?? 0) * 40 + int(slots.food ?? 0) * 0.2 + int(slots.bullets ?? 0) * 2 + int(slots.clothing ?? 0) * 10 + int(slots.wheels ?? 0) * 10 + int(slots.axles ?? 0) * 10 + int(slots.tongues ?? 0) * 10) * world.local_price_pct / 100)]| fort__reviewing
+  fort__compose -->|propose_kit (default)| fort__compose
+  fort__describe -->|back| fort__idle
+  fort__describe -->|look| fort__describe
+  fort__describe -->|open_compose| fort__compose
+  fort__describe -->|propose_budget [int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)]| fort__reviewing
+  fort__describe -->|propose_budget (default)| fort__describe
   fort__done -->|leave_fort [world.current_landmark == 'Fort Kearney']| leg_c_executing
   fort__done -->|leave_fort [world.current_landmark == 'Fort Laramie']| leg_e_executing
   fort__done -->|leave_fort (default)| ended_lost
   fort__done -->|look| fort__done
   fort__done -->|repeat_purchase| fort__idle
+  fort__idle -->|browse_items| fort__describe
   fort__idle -->|leave_fort [world.current_landmark == 'Fort Kearney']| leg_c_executing
   fort__idle -->|leave_fort [world.current_landmark == 'Fort Laramie']| leg_e_executing
   fort__idle -->|leave_fort (default)| ended_lost
   fort__idle -->|look| fort__idle
+  fort__idle -->|open_compose| fort__compose
+  fort__idle -->|propose_budget [int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)]| fort__reviewing
+  fort__idle -->|propose_budget (default)| fort__idle
   fort__idle -->|propose_purchase [int(slots.total_cost) < 5 && world.money >= int(slots.total_cost)]| fort__done
   fort__idle -->|propose_purchase [world.money >= int(slots.total_cost)]| fort__reviewing
   fort__idle -->|propose_purchase (default)| fort__idle
@@ -146,13 +167,26 @@ flowchart LR
   frontier__scouting -->|frontier__look| frontier__scouting
   frontier__scouting -->|frontier__proceed| frontier__bandits
   frontier__scouting -->|frontier__scout| frontier__scouting
+  general_store__compose -->|back| general_store__idle
+  general_store__compose -->|look| general_store__compose
+  general_store__compose -->|propose_kit [world.money >= int((int(slots.oxen ?? 0) * 40 + int(slots.food ?? 0) * 0.2 + int(slots.bullets ?? 0) * 2 + int(slots.clothing ?? 0) * 10 + int(slots.wheels ?? 0) * 10 + int(slots.axles ?? 0) * 10 + int(slots.tongues ?? 0) * 10) * world.local_price_pct / 100)]| general_store__reviewing
+  general_store__compose -->|propose_kit (default)| general_store__compose
+  general_store__describe -->|back| general_store__idle
+  general_store__describe -->|look| general_store__describe
+  general_store__describe -->|open_compose| general_store__compose
+  general_store__describe -->|propose_budget [int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)]| general_store__reviewing
+  general_store__describe -->|propose_budget (default)| general_store__describe
   general_store__done -->|leave_store [world.oxen >= 2 && world.food_lbs >= 200]| leg_a_executing
   general_store__done -->|leave_store (default)| general_store__idle
   general_store__done -->|look| general_store__done
   general_store__done -->|repeat_purchase| general_store__idle
+  general_store__idle -->|browse_items| general_store__describe
   general_store__idle -->|leave_store [world.oxen >= 2 && world.food_lbs >= 200]| leg_a_executing
   general_store__idle -->|leave_store (default)| general_store__idle
   general_store__idle -->|look| general_store__idle
+  general_store__idle -->|open_compose| general_store__compose
+  general_store__idle -->|propose_budget [int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)]| general_store__reviewing
+  general_store__idle -->|propose_budget (default)| general_store__idle
   general_store__idle -->|propose_purchase [int(slots.total_cost) < 5 && world.money >= int(slots.total_cost)]| general_store__done
   general_store__idle -->|propose_purchase [world.money >= int(slots.total_cost)]| general_store__reviewing
   general_store__idle -->|propose_purchase (default)| general_store__idle
@@ -179,20 +213,34 @@ flowchart LR
   hunt__hunt_running -->|continue (default)| hunt__hunt_running
   hunt__hunt_running -->|look| hunt__hunt_running
   inbox -->|look| inbox
-  intro -->|generate_names [world.narration]| intro
-  intro -->|generate_names (default)| intro
+  intro -->|begin_setup| intro_profession
   intro -->|look| intro
-  intro -->|name_member [slots.index == 1]| intro
-  intro -->|name_member [slots.index == 2]| intro
-  intro -->|name_member [slots.index == 3]| intro
-  intro -->|name_member [slots.index == 4]| intro
-  intro -->|name_member [slots.index == 5]| intro
-  intro -->|name_member (default)| intro
-  intro -->|name_party| intro
-  intro -->|pick_month| intro
-  intro -->|pick_profession| intro
-  intro -->|start_journey [world.party_names != '' && world.profession != nil && world.month != nil]| general_store
-  intro -->|start_journey (default)| intro
+  intro_month -->|back| intro_profession
+  intro_month -->|look| intro_month
+  intro_month -->|pick_month| intro_party_names
+  intro_party_names -->|back| intro_month
+  intro_party_names -->|continue [world.party_names != '']| intro_summary
+  intro_party_names -->|continue [world.party_member_1 != '']| intro_summary
+  intro_party_names -->|continue (default)| intro_party_names
+  intro_party_names -->|generate_names [world.narration]| intro_party_names
+  intro_party_names -->|generate_names (default)| intro_party_names
+  intro_party_names -->|look| intro_party_names
+  intro_party_names -->|name_member [slots.index == 1]| intro_party_names
+  intro_party_names -->|name_member [slots.index == 2]| intro_party_names
+  intro_party_names -->|name_member [slots.index == 3]| intro_party_names
+  intro_party_names -->|name_member [slots.index == 4]| intro_party_names
+  intro_party_names -->|name_member [slots.index == 5]| intro_party_names
+  intro_party_names -->|name_member (default)| intro_party_names
+  intro_party_names -->|name_party| intro_party_names
+  intro_profession -->|back| intro
+  intro_profession -->|look| intro_profession
+  intro_profession -->|pick_profession| intro_month
+  intro_summary -->|edit_step [slots.step == 'profession']| intro_profession
+  intro_summary -->|edit_step [slots.step == 'month']| intro_month
+  intro_summary -->|edit_step [slots.step == 'names']| intro_party_names
+  intro_summary -->|look| intro_summary
+  intro_summary -->|start_journey [world.party_names != '' && world.profession != nil && world.month != nil]| general_store
+  intro_summary -->|start_journey (default)| intro_summary
   leg_a_awaiting_reply -->|approach_river [true]| river_crossing
   leg_a_awaiting_reply -->|approach_river (default)| leg_a_awaiting_reply
   leg_a_awaiting_reply -->|consult_guide| trail_guide
@@ -802,6 +850,7 @@ flowchart LR
 | `party_member_4` | `string` | `` |  |
 | `party_member_5` | `string` | `` |  |
 | `party_names` | `string` | `` |  |
+| `party_names_list` | `list` | `[]` |  |
 | `party_size` | `int` | `5` |  |
 | `pending_bullet_spend` | `int` | `0` |  |
 | `pending_rest_days` | `int` | `0` |  |
@@ -916,6 +965,20 @@ Return to the previous room (stackless — used by trail_guide and inbox).
 - Priority **25**
 - Examples: `back`, `return`, `go back`
 
+### <a id="intent-begin-setup"></a> `begin_setup` — Begin setup
+
+Start the intro wizard from the welcome screen.
+
+- Priority **80**
+- Examples: `begin`, `start setup`, `let's go`
+
+### <a id="intent-browse-items"></a> `browse_items` — Browse what's on the shelves
+
+Read Matt's item-by-item descriptions before drafting a purchase.
+
+- Priority **40**
+- Examples: `browse`, `what's available`, `describe items`, `look around`
+
 ### <a id="intent-cancel-crossing"></a> `cancel_crossing` — Cancel the crossing
 
 Walk back from the riverbank to the prior landmark.
@@ -964,6 +1027,19 @@ Refuse the trade and move on.
 
 - Priority **80**
 - Examples: `decline`, `no trade`, `refuse`, `no thanks`
+
+### <a id="intent-edit-step"></a> `edit_step` — Edit a setup step
+
+Jump back to an earlier intro-wizard step (profession, month, or names) from the summary screen.
+
+- Priority **30**
+- Examples: `change profession`, `edit month`, `rename party`
+
+**Slots**:
+
+| Name | Type | Required | Default | Values | Description |
+|---|---|---|---|---|---|
+| `step` | `enum` | yes |  | `profession`, `month`, `names` | Which wizard step to return to. |
 
 ### <a id="intent-enter-fort"></a> `enter_fort` — Enter the fort
 
@@ -1158,6 +1234,13 @@ Resume an existing wagon-master chat by list position or chat ID.
 |---|---|---|---|---|---|
 | `chat_id` | `string` | yes |  |  | Chat list-position, ULID prefix, or full chat ULID. |
 
+### <a id="intent-open-compose"></a> `open_compose` — Open the compose form
+
+Enter the item-by-item compose form for the general store.
+
+- Priority **35**
+- Examples: `compose`, `compose form`, `item-by-item`
+
 ### <a id="intent-open-job"></a> `open_job` — Open a job notification
 
 From inbox: teleport back to the room that launched the job.
@@ -1204,6 +1287,19 @@ Synthetic emit fired by the weather region on entering rain. Calendar reacts.
 - Priority **1**
 - Hidden (not shown in default menu)
 
+### <a id="intent-propose-budget"></a> `propose_budget` — Propose a purchase by total budget
+
+Tell Matt how much you want to spend; he assembles a balanced kit.
+
+- Priority **80**
+- Examples: `spend $200`, `spend 120`, `spend two hundred dollars`
+
+**Slots**:
+
+| Name | Type | Required | Default | Values | Description |
+|---|---|---|---|---|---|
+| `total_cost` | `int` | yes |  |  | Total dollar budget. Matt picks the basket. |
+
 ### <a id="intent-propose-crossing"></a> `propose_crossing` — Draft a crossing strategy
 
 Pick a method (ford/caulk/ferry/wait) and a confidence.
@@ -1217,6 +1313,25 @@ Pick a method (ford/caulk/ferry/wait) and a confidence.
 |---|---|---|---|---|---|
 | `confidence` | `int` |  | `50` |  | Confidence 0-100 (narrated-mode hint; deterministic-mode ignores). |
 | `method` | `enum` | yes |  | `ford`, `caulk`, `ferry`, `wait` | How to cross. |
+
+### <a id="intent-propose-kit"></a> `propose_kit` — Compose a kit item-by-item
+
+Compose a purchase from per-item counts only — no free-text description. Total cost is computed from the counts × local prices.
+
+- Priority **70**
+- Examples: `buy 4 oxen, 1500 lbs food, 50 bullets`
+
+**Slots**:
+
+| Name | Type | Required | Default | Values | Description |
+|---|---|---|---|---|---|
+| `axles` | `int` |  |  |  | Spare axles ($10 each). |
+| `bullets` | `int` |  |  |  | Boxes of bullets ($2.00/box of 20). |
+| `clothing` | `int` |  |  |  | Sets of clothing ($10/set). |
+| `food` | `int` |  |  |  | Pounds of food ($0.20/lb). |
+| `oxen` | `int` |  |  |  | Number of oxen ($40/yoke at the Independence store). |
+| `tongues` | `int` |  |  |  | Spare tongues ($10 each). |
+| `wheels` | `int` |  |  |  | Spare wheels ($10 each). |
 
 ### <a id="intent-propose-purchase"></a> `propose_purchase` — Draft a purchase
 
@@ -1473,6 +1588,33 @@ Inside the fort ({{ world.current_landmark }}) — buy_supplies at marked-up pri
 
 1. set `local_price_pct = 150`
 
+### <a id="room-fort-compose"></a> `fort.compose`
+
+Compose a kit item-by-item at fort price (numbers only).
+
+**Transitions**:
+
+| # | Intent | Guard | → | Effects |
+|---|---|---|---|---|
+| 1 | [`back`](#intent-back) |  | `../idle` |  |
+| 2 | [`look`](#intent-look) |  | `.` |  |
+| 3 | [`propose_kit`](#intent-propose-kit) | `world.money >= int((int(slots.oxen ?? 0) * 40 + int(slots.food ?? 0) * 0.2 + int(slots.bullets ?? 0) * 2 + int(slots.clothing ?? 0) * 10 + int(slots.wheels ?? 0) * 10 + int(slots.axles ?? 0) * 10 + int(slots.tongues ?? 0) * 10) * world.local_price_pct / 100)` | `../reviewing` | set `proposal_axles = "{{ int(slots.axles ?? 0) }}"`, `proposal_bullets = "{{ int(slots.bullets ?? 0) }}"`, `proposal_clothing = "{{ int(slots.clothing ?? 0) }}"`, `proposal_food = "{{ int(slots.food ?? 0) }}"`, `proposal_items = "{{ (int(slots.oxen ?? 0) > 0 ? string(int(slots.oxen)) + \" oxen, \" : \"\") + (int(slots.food ?? 0) > 0 ? string(int(slots.food)) + \" lbs food, \" : \"\") + (int(slots.bullets ?? 0) > 0 ? string(int(slots.bullets)) + \" bullets, \" : \"\") + (int(slots.clothing ?? 0) > 0 ? string(int(slots.clothing)) + \" clothing, \" : \"\") + (int(slots.wheels ?? 0) > 0 ? string(int(slots.wheels)) + \" wheels, \" : \"\") + (int(slots.axles ?? 0) > 0 ? string(int(slots.axles)) + \" axles, \" : \"\") + (int(slots.tongues ?? 0) > 0 ? string(int(slots.tongues)) + \" tongues\" : \"\") }}"`, `proposal_oxen = "{{ int(slots.oxen ?? 0) }}"`, `proposal_refine_count = 0`, `proposal_tongues = "{{ int(slots.tongues ?? 0) }}"`, `proposal_total_cost = "{{ int((int(slots.oxen ?? 0) * 40 + int(slots.food ?? 0) * 0.2 + int(slots.bullets ?? 0) * 2 + int(slots.clothing ?? 0) * 10 + int(slots.wheels ?? 0) * 10 + int(slots.axles ?? 0) * 10 + int(slots.tongues ?? 0) * 10) * world.local_price_pct / 100) }}"`, `proposal_wheels = "{{ int(slots.wheels ?? 0) }}"` · say "The sutler tallies the slate. 'Fort price comes to ${{ world.proposal_total_cost }} — take it or leave it.'" |
+| 4 | [`propose_kit`](#intent-propose-kit) | _default_ | `.` | _hint: Not enough cash for that kit at fort prices._ · say "The sutler looks back at you. 'Haven't the coin for that, traveller.'" |
+
+### <a id="room-fort-describe"></a> `fort.describe`
+
+The sutler walks you through what's on the shelves.
+
+**Transitions**:
+
+| # | Intent | Guard | → | Effects |
+|---|---|---|---|---|
+| 1 | [`back`](#intent-back) |  | `../idle` |  |
+| 2 | [`look`](#intent-look) |  | `.` |  |
+| 3 | [`open_compose`](#intent-open-compose) |  | `../compose` |  |
+| 4 | [`propose_budget`](#intent-propose-budget) | `int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)` | `../reviewing` | set `proposal_axles = "{{ int(slots.total_cost) >= 300 ? 1 : 0 }}"`, `proposal_bullets = "{{ int(int(slots.total_cost) * 10 / 100 / 2 / (world.local_price_pct / 100)) }}"`, `proposal_clothing = 0`, `proposal_food = "{{ int(int(slots.total_cost) * 50 / 100 / 0.2 / (world.local_price_pct / 100)) }}"`, `proposal_items = "Sutler's balanced kit"`, `proposal_oxen = "{{ int(int(slots.total_cost) * 30 / 100 / 40 / (world.local_price_pct / 100)) }}"`, `proposal_refine_count = 0`, `proposal_tongues = 0`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.total_cost) >= 150 ? 1 : 0 }}"` · say "The sutler scratches on the slate. 'Balanced kit for ${{ slots.total_cost }} — proposed.'" |
+| 5 | [`propose_budget`](#intent-propose-budget) | _default_ | `.` | _hint: Budget must be positive and within your cash._ · say "The sutler shakes his head — 'budget doesn't carry, traveller.'" |
+
 ### <a id="room-fort-done"></a> `fort.done`
 
 Purchase complete at {{ world.current_landmark }}.
@@ -1495,19 +1637,23 @@ Purchase complete at {{ world.current_landmark }}.
 
 ### <a id="room-fort-idle"></a> `fort.idle`
 
-At the fort sutler ({{ world.current_landmark }}).
+At the fort sutler ({{ world.current_landmark }}) — pick how to draft a purchase, or leave.
 
 **Transitions**:
 
 | # | Intent | Guard | → | Effects |
 |---|---|---|---|---|
-| 1 | [`leave_fort`](#intent-leave-fort) | `world.current_landmark == 'Fort Kearney'` | [`leg_c_executing`](#room-leg-c-executing) | set `proposal_axles = 0`, `proposal_bullets = 0`, `proposal_clothing = 0`, `proposal_food = 0`, `proposal_items = ""`, `proposal_oxen = 0`, `proposal_refine_count = 0`, `proposal_tongues = 0`, `proposal_total_cost = 0`, `proposal_wheels = 0` · say "Back on the trail, heading for Chimney Rock." |
-| 2 | [`leave_fort`](#intent-leave-fort) | `world.current_landmark == 'Fort Laramie'` | [`leg_e_executing`](#room-leg-e-executing) | set `proposal_axles = 0`, `proposal_bullets = 0`, `proposal_clothing = 0`, `proposal_food = 0`, `proposal_items = ""`, `proposal_oxen = 0`, `proposal_refine_count = 0`, `proposal_tongues = 0`, `proposal_total_cost = 0`, `proposal_wheels = 0` · say "Back on the trail, heading for South Pass." |
-| 3 | [`leave_fort`](#intent-leave-fort) | _default_ | [`ended_lost`](#room-ended-lost) | _hint: Lost track of which fort we're in — ending the run._ |
-| 4 | [`look`](#intent-look) |  | `.` |  |
-| 5 | [`propose_purchase`](#intent-propose-purchase) | `int(slots.total_cost) < 5 && world.money >= int(slots.total_cost)` | `../done` | set `bullets = "{{ world.bullets + int(slots.bullets ?? 0) }}"`, `clothing_sets = "{{ world.clothing_sets + int(slots.clothing ?? 0) }}"`, `food_lbs = "{{ world.food_lbs + int(slots.food ?? 0) }}"`, `money = "{{ world.money - int(slots.total_cost) }}"`, `oxen = "{{ world.oxen + int(slots.oxen ?? 0) }}"`, `proposal_axles = "{{ int(slots.axles ?? 0) }}"`, `proposal_bullets = "{{ int(slots.bullets ?? 0) }}"`, `proposal_clothing = "{{ int(slots.clothing ?? 0) }}"`, `proposal_food = "{{ int(slots.food ?? 0) }}"`, `proposal_items = "{{ slots.items }}"`, `proposal_oxen = "{{ int(slots.oxen ?? 0) }}"`, `proposal_refine_count = 0`, `proposal_tongues = "{{ int(slots.tongues ?? 0) }}"`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.wheels ?? 0) }}"`, `spare_axles = "{{ world.spare_axles + int(slots.axles ?? 0) }}"`, `spare_tongues = "{{ world.spare_tongues + int(slots.tongues ?? 0) }}"`, `spare_wheels = "{{ world.spare_wheels + int(slots.wheels ?? 0) }}"` · say "The sutler grunts, tosses a tin onto the counter — {{ slots.items }} — and palms the ${{ slots.total_cost }}." |
-| 6 | [`propose_purchase`](#intent-propose-purchase) | `world.money >= int(slots.total_cost)` | `../reviewing` | set `proposal_axles = "{{ int(slots.axles ?? 0) }}"`, `proposal_bullets = "{{ int(slots.bullets ?? 0) }}"`, `proposal_clothing = "{{ int(slots.clothing ?? 0) }}"`, `proposal_food = "{{ int(slots.food ?? 0) }}"`, `proposal_items = "{{ slots.items }}"`, `proposal_oxen = "{{ int(slots.oxen ?? 0) }}"`, `proposal_refine_count = 0`, `proposal_tongues = "{{ int(slots.tongues ?? 0) }}"`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.wheels ?? 0) }}"` · say "The sutler chalks it on the board behind him. '{{ slots.items }}. Fort price — ${{ slots.total_cost }}. Take it or leave it.'" |
-| 7 | [`propose_purchase`](#intent-propose-purchase) | _default_ | `.` | _hint: Not enough cash at fort prices._ · say "The sutler shrugs. 'You haven't got the coin, traveller.'" |
+| 1 | [`browse_items`](#intent-browse-items) |  | `../describe` |  |
+| 2 | [`leave_fort`](#intent-leave-fort) | `world.current_landmark == 'Fort Kearney'` | [`leg_c_executing`](#room-leg-c-executing) | set `proposal_axles = 0`, `proposal_bullets = 0`, `proposal_clothing = 0`, `proposal_food = 0`, `proposal_items = ""`, `proposal_oxen = 0`, `proposal_refine_count = 0`, `proposal_tongues = 0`, `proposal_total_cost = 0`, `proposal_wheels = 0` · say "Back on the trail, heading for Chimney Rock." |
+| 3 | [`leave_fort`](#intent-leave-fort) | `world.current_landmark == 'Fort Laramie'` | [`leg_e_executing`](#room-leg-e-executing) | set `proposal_axles = 0`, `proposal_bullets = 0`, `proposal_clothing = 0`, `proposal_food = 0`, `proposal_items = ""`, `proposal_oxen = 0`, `proposal_refine_count = 0`, `proposal_tongues = 0`, `proposal_total_cost = 0`, `proposal_wheels = 0` · say "Back on the trail, heading for South Pass." |
+| 4 | [`leave_fort`](#intent-leave-fort) | _default_ | [`ended_lost`](#room-ended-lost) | _hint: Lost track of which fort we're in — ending the run._ |
+| 5 | [`look`](#intent-look) |  | `.` |  |
+| 6 | [`open_compose`](#intent-open-compose) |  | `../compose` |  |
+| 7 | [`propose_budget`](#intent-propose-budget) | `int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)` | `../reviewing` | set `proposal_axles = "{{ int(slots.total_cost) >= 300 ? 1 : 0 }}"`, `proposal_bullets = "{{ int(int(slots.total_cost) * 10 / 100 / 2 / (world.local_price_pct / 100)) }}"`, `proposal_clothing = 0`, `proposal_food = "{{ int(int(slots.total_cost) * 50 / 100 / 0.2 / (world.local_price_pct / 100)) }}"`, `proposal_items = "Sutler's balanced kit"`, `proposal_oxen = "{{ int(int(slots.total_cost) * 30 / 100 / 40 / (world.local_price_pct / 100)) }}"`, `proposal_refine_count = 0`, `proposal_tongues = 0`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.total_cost) >= 150 ? 1 : 0 }}"` · say "The sutler scratches on the slate, slides it across. 'Balanced kit for ${{ slots.total_cost }} at fort price — proposed.'" |
+| 8 | [`propose_budget`](#intent-propose-budget) | _default_ | `.` | _hint: Budget must be a positive integer and within your cash on hand._ · say "The sutler eyes the slate. 'That budget won't carry at fort prices, traveller.'" |
+| 9 | [`propose_purchase`](#intent-propose-purchase) | `int(slots.total_cost) < 5 && world.money >= int(slots.total_cost)` | `../done` | set `bullets = "{{ world.bullets + int(slots.bullets ?? 0) }}"`, `clothing_sets = "{{ world.clothing_sets + int(slots.clothing ?? 0) }}"`, `food_lbs = "{{ world.food_lbs + int(slots.food ?? 0) }}"`, `money = "{{ world.money - int(slots.total_cost) }}"`, `oxen = "{{ world.oxen + int(slots.oxen ?? 0) }}"`, `proposal_axles = "{{ int(slots.axles ?? 0) }}"`, `proposal_bullets = "{{ int(slots.bullets ?? 0) }}"`, `proposal_clothing = "{{ int(slots.clothing ?? 0) }}"`, `proposal_food = "{{ int(slots.food ?? 0) }}"`, `proposal_items = "{{ slots.items }}"`, `proposal_oxen = "{{ int(slots.oxen ?? 0) }}"`, `proposal_refine_count = 0`, `proposal_tongues = "{{ int(slots.tongues ?? 0) }}"`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.wheels ?? 0) }}"`, `spare_axles = "{{ world.spare_axles + int(slots.axles ?? 0) }}"`, `spare_tongues = "{{ world.spare_tongues + int(slots.tongues ?? 0) }}"`, `spare_wheels = "{{ world.spare_wheels + int(slots.wheels ?? 0) }}"` · say "The sutler grunts, tosses a tin onto the counter — {{ slots.items }} — and palms the ${{ slots.total_cost }}." |
+| 10 | [`propose_purchase`](#intent-propose-purchase) | `world.money >= int(slots.total_cost)` | `../reviewing` | set `proposal_axles = "{{ int(slots.axles ?? 0) }}"`, `proposal_bullets = "{{ int(slots.bullets ?? 0) }}"`, `proposal_clothing = "{{ int(slots.clothing ?? 0) }}"`, `proposal_food = "{{ int(slots.food ?? 0) }}"`, `proposal_items = "{{ slots.items }}"`, `proposal_oxen = "{{ int(slots.oxen ?? 0) }}"`, `proposal_refine_count = 0`, `proposal_tongues = "{{ int(slots.tongues ?? 0) }}"`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.wheels ?? 0) }}"` · say "The sutler chalks it on the board behind him. '{{ slots.items }}. Fort price — ${{ slots.total_cost }}. Take it or leave it.'" |
+| 11 | [`propose_purchase`](#intent-propose-purchase) | _default_ | `.` | _hint: Not enough cash at fort prices._ · say "The sutler shrugs. 'You haven't got the coin, traveller.'" |
 
 ### <a id="room-fort-reviewing"></a> `fort.reviewing`
 
@@ -1554,7 +1700,7 @@ A masked rider blocks the trail.
 
 **On enter**:
 
-1. invoke `host.run.announce` with `cmd = "true # bandit shows up, threat={{ world.frontier__bandits__threat_level }}"`, `prompt = "prompts/encounter_intro.md"`
+1. invoke `host.run.announce` with `cmd = "true # bandit shows up, threat={{ world.frontier__bandits__threat_level }}"`, `prompt = "/home/cloud-user/code/kitsoki/.worktrees/oracle-split/stories/robbery/prompts/encounter_intro.md"`
 
 **Transitions**:
 
@@ -1575,7 +1721,7 @@ A scout rides ahead to look the trail over.
 
 **On enter**:
 
-1. invoke `host.run.announce` with `cmd = "true # trail-flavoured scouting"`, `prompt = "/home/cloud-user/code/kitsoki/.worktrees/view-elements-proposal/stories/oregon-trail/prompts/scout_brief_trail.md"`
+1. invoke `host.run.announce` with `cmd = "true # trail-flavoured scouting"`, `prompt = "/home/cloud-user/code/kitsoki/.worktrees/oracle-split/stories/oregon-trail/prompts/scout_brief_trail.md"`
 
 **Transitions**:
 
@@ -1596,6 +1742,33 @@ Matt's General Store, Independence — outfit the wagon before leaving.
 **On enter**:
 
 1. set `local_price_pct = 100`
+
+### <a id="room-general-store-compose"></a> `general_store.compose`
+
+Compose a kit item-by-item (numbers only).
+
+**Transitions**:
+
+| # | Intent | Guard | → | Effects |
+|---|---|---|---|---|
+| 1 | [`back`](#intent-back) |  | `../idle` |  |
+| 2 | [`look`](#intent-look) |  | `.` |  |
+| 3 | [`propose_kit`](#intent-propose-kit) | `world.money >= int((int(slots.oxen ?? 0) * 40 + int(slots.food ?? 0) * 0.2 + int(slots.bullets ?? 0) * 2 + int(slots.clothing ?? 0) * 10 + int(slots.wheels ?? 0) * 10 + int(slots.axles ?? 0) * 10 + int(slots.tongues ?? 0) * 10) * world.local_price_pct / 100)` | `../reviewing` | set `proposal_axles = "{{ int(slots.axles ?? 0) }}"`, `proposal_bullets = "{{ int(slots.bullets ?? 0) }}"`, `proposal_clothing = "{{ int(slots.clothing ?? 0) }}"`, `proposal_food = "{{ int(slots.food ?? 0) }}"`, `proposal_items = "{{ (int(slots.oxen ?? 0) > 0 ? string(int(slots.oxen)) + \" oxen, \" : \"\") + (int(slots.food ?? 0) > 0 ? string(int(slots.food)) + \" lbs food, \" : \"\") + (int(slots.bullets ?? 0) > 0 ? string(int(slots.bullets)) + \" bullets, \" : \"\") + (int(slots.clothing ?? 0) > 0 ? string(int(slots.clothing)) + \" clothing, \" : \"\") + (int(slots.wheels ?? 0) > 0 ? string(int(slots.wheels)) + \" wheels, \" : \"\") + (int(slots.axles ?? 0) > 0 ? string(int(slots.axles)) + \" axles, \" : \"\") + (int(slots.tongues ?? 0) > 0 ? string(int(slots.tongues)) + \" tongues\" : \"\") }}"`, `proposal_oxen = "{{ int(slots.oxen ?? 0) }}"`, `proposal_refine_count = 0`, `proposal_tongues = "{{ int(slots.tongues ?? 0) }}"`, `proposal_total_cost = "{{ int((int(slots.oxen ?? 0) * 40 + int(slots.food ?? 0) * 0.2 + int(slots.bullets ?? 0) * 2 + int(slots.clothing ?? 0) * 10 + int(slots.wheels ?? 0) * 10 + int(slots.axles ?? 0) * 10 + int(slots.tongues ?? 0) * 10) * world.local_price_pct / 100) }}"`, `proposal_wheels = "{{ int(slots.wheels ?? 0) }}"` · say "Matt counts the slate. 'Total comes to ${{ world.proposal_total_cost }} — speak up if I've got it wrong.'" |
+| 4 | [`propose_kit`](#intent-propose-kit) | _default_ | `.` | _hint: Not enough cash for that kit._ · say "Matt looks back at you. 'You haven't the money for that kit, friend.'" |
+
+### <a id="room-general-store-describe"></a> `general_store.describe`
+
+Matt walks you through what's on the shelves.
+
+**Transitions**:
+
+| # | Intent | Guard | → | Effects |
+|---|---|---|---|---|
+| 1 | [`back`](#intent-back) |  | `../idle` |  |
+| 2 | [`look`](#intent-look) |  | `.` |  |
+| 3 | [`open_compose`](#intent-open-compose) |  | `../compose` |  |
+| 4 | [`propose_budget`](#intent-propose-budget) | `int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)` | `../reviewing` | set `proposal_axles = "{{ int(slots.total_cost) >= 200 ? 1 : 0 }}"`, `proposal_bullets = "{{ int(int(slots.total_cost) * 10 / 100 / 2) }}"`, `proposal_clothing = 0`, `proposal_food = "{{ int(int(slots.total_cost) * 50 / 100 / 0.2) }}"`, `proposal_items = "Matt's balanced kit"`, `proposal_oxen = "{{ int(int(slots.total_cost) * 30 / 100 / 40) }}"`, `proposal_refine_count = 0`, `proposal_tongues = 0`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.total_cost) >= 100 ? 1 : 0 }}"` · say "Matt scribbles for a minute and slides the slate across. 'Balanced kit for ${{ slots.total_cost }} — proposed.'" |
+| 5 | [`propose_budget`](#intent-propose-budget) | _default_ | `.` | _hint: Budget must be positive and within your cash._ · say "Matt shakes his head — 'budget doesn't work, friend.'" |
 
 ### <a id="room-general-store-done"></a> `general_store.done`
 
@@ -1618,18 +1791,22 @@ Purchase complete.
 
 ### <a id="room-general-store-idle"></a> `general_store.idle`
 
-At Matt's counter — propose a purchase or leave.
+At Matt's counter — pick how to draft a purchase, or leave.
 
 **Transitions**:
 
 | # | Intent | Guard | → | Effects |
 |---|---|---|---|---|
-| 1 | [`leave_store`](#intent-leave-store) | `world.oxen >= 2 && world.food_lbs >= 200` | [`leg_a_executing`](#room-leg-a-executing) | set `proposal_axles = 0`, `proposal_bullets = 0`, `proposal_clothing = 0`, `proposal_food = 0`, `proposal_items = ""`, `proposal_oxen = 0`, `proposal_refine_count = 0`, `proposal_tongues = 0`, `proposal_total_cost = 0`, `proposal_wheels = 0` · say "Matt walks out from behind the counter, claps the lead ox on the shoulder, and waves the wagon onto the road west. 'Mind the river bottoms.'" |
-| 2 | [`leave_store`](#intent-leave-store) | _default_ | `.` | _hint: Need at least 2 oxen and 200 lbs of food before leaving._ · say "Matt eyes your wagon. 'You won't make it to Kansas with that load — at least 2 oxen and 200 lbs of food.'" |
-| 3 | [`look`](#intent-look) |  | `.` |  |
-| 4 | [`propose_purchase`](#intent-propose-purchase) | `int(slots.total_cost) < 5 && world.money >= int(slots.total_cost)` | `../done` | set `bullets = "{{ world.bullets + int(slots.bullets ?? 0) }}"`, `clothing_sets = "{{ world.clothing_sets + int(slots.clothing ?? 0) }}"`, `food_lbs = "{{ world.food_lbs + int(slots.food ?? 0) }}"`, `money = "{{ world.money - int(slots.total_cost) }}"`, `oxen = "{{ world.oxen + int(slots.oxen ?? 0) }}"`, `proposal_axles = "{{ int(slots.axles ?? 0) }}"`, `proposal_bullets = "{{ int(slots.bullets ?? 0) }}"`, `proposal_clothing = "{{ int(slots.clothing ?? 0) }}"`, `proposal_food = "{{ int(slots.food ?? 0) }}"`, `proposal_items = "{{ slots.items }}"`, `proposal_oxen = "{{ int(slots.oxen ?? 0) }}"`, `proposal_refine_count = 0`, `proposal_tongues = "{{ int(slots.tongues ?? 0) }}"`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.wheels ?? 0) }}"`, `spare_axles = "{{ world.spare_axles + int(slots.axles ?? 0) }}"`, `spare_tongues = "{{ world.spare_tongues + int(slots.tongues ?? 0) }}"`, `spare_wheels = "{{ world.spare_wheels + int(slots.wheels ?? 0) }}"` · say "Matt rings it up without a word — {{ slots.items }}, ${{ slots.total_cost }}. Hands it across the counter." |
-| 5 | [`propose_purchase`](#intent-propose-purchase) | `world.money >= int(slots.total_cost)` | `../reviewing` | set `proposal_axles = "{{ int(slots.axles ?? 0) }}"`, `proposal_bullets = "{{ int(slots.bullets ?? 0) }}"`, `proposal_clothing = "{{ int(slots.clothing ?? 0) }}"`, `proposal_food = "{{ int(slots.food ?? 0) }}"`, `proposal_items = "{{ slots.items }}"`, `proposal_oxen = "{{ int(slots.oxen ?? 0) }}"`, `proposal_refine_count = 0`, `proposal_tongues = "{{ int(slots.tongues ?? 0) }}"`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.wheels ?? 0) }}"` · say "Matt licks his pencil and writes it down. 'So that's {{ slots.items }} — comes to ${{ slots.total_cost }}. Speak up if I've got it wrong.'" |
-| 6 | [`propose_purchase`](#intent-propose-purchase) | _default_ | `.` | _hint: Not enough cash for that basket._ · say "Matt shakes his head. 'You haven't got the money for that, friend.'" |
+| 1 | [`browse_items`](#intent-browse-items) |  | `../describe` |  |
+| 2 | [`leave_store`](#intent-leave-store) | `world.oxen >= 2 && world.food_lbs >= 200` | [`leg_a_executing`](#room-leg-a-executing) | set `proposal_axles = 0`, `proposal_bullets = 0`, `proposal_clothing = 0`, `proposal_food = 0`, `proposal_items = ""`, `proposal_oxen = 0`, `proposal_refine_count = 0`, `proposal_tongues = 0`, `proposal_total_cost = 0`, `proposal_wheels = 0` · say "Matt walks out from behind the counter, claps the lead ox on the shoulder, and waves the wagon onto the road west. 'Mind the river bottoms.'" |
+| 3 | [`leave_store`](#intent-leave-store) | _default_ | `.` | _hint: Need at least 2 oxen and 200 lbs of food before leaving._ · say "Matt eyes your wagon. 'You won't make it to Kansas with that load — at least 2 oxen and 200 lbs of food.'" |
+| 4 | [`look`](#intent-look) |  | `.` |  |
+| 5 | [`open_compose`](#intent-open-compose) |  | `../compose` |  |
+| 6 | [`propose_budget`](#intent-propose-budget) | `int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)` | `../reviewing` | set `proposal_axles = "{{ int(slots.total_cost) >= 200 ? 1 : 0 }}"`, `proposal_bullets = "{{ int(int(slots.total_cost) * 10 / 100 / 2) }}"`, `proposal_clothing = 0`, `proposal_food = "{{ int(int(slots.total_cost) * 50 / 100 / 0.2) }}"`, `proposal_items = "Matt's balanced kit"`, `proposal_oxen = "{{ int(int(slots.total_cost) * 30 / 100 / 40) }}"`, `proposal_refine_count = 0`, `proposal_tongues = 0`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.total_cost) >= 100 ? 1 : 0 }}"` · say "Matt scribbles for a minute and slides the slate across. 'Balanced kit for ${{ slots.total_cost }} — proposed.'" |
+| 7 | [`propose_budget`](#intent-propose-budget) | _default_ | `.` | _hint: Budget must be a positive integer and within your cash on hand._ · say "Matt looks at the slate then back at you. 'That budget won't work, friend — check your cash on hand.'" |
+| 8 | [`propose_purchase`](#intent-propose-purchase) | `int(slots.total_cost) < 5 && world.money >= int(slots.total_cost)` | `../done` | set `bullets = "{{ world.bullets + int(slots.bullets ?? 0) }}"`, `clothing_sets = "{{ world.clothing_sets + int(slots.clothing ?? 0) }}"`, `food_lbs = "{{ world.food_lbs + int(slots.food ?? 0) }}"`, `money = "{{ world.money - int(slots.total_cost) }}"`, `oxen = "{{ world.oxen + int(slots.oxen ?? 0) }}"`, `proposal_axles = "{{ int(slots.axles ?? 0) }}"`, `proposal_bullets = "{{ int(slots.bullets ?? 0) }}"`, `proposal_clothing = "{{ int(slots.clothing ?? 0) }}"`, `proposal_food = "{{ int(slots.food ?? 0) }}"`, `proposal_items = "{{ slots.items }}"`, `proposal_oxen = "{{ int(slots.oxen ?? 0) }}"`, `proposal_refine_count = 0`, `proposal_tongues = "{{ int(slots.tongues ?? 0) }}"`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.wheels ?? 0) }}"`, `spare_axles = "{{ world.spare_axles + int(slots.axles ?? 0) }}"`, `spare_tongues = "{{ world.spare_tongues + int(slots.tongues ?? 0) }}"`, `spare_wheels = "{{ world.spare_wheels + int(slots.wheels ?? 0) }}"` · say "Matt rings it up without a word — {{ slots.items }}, ${{ slots.total_cost }}. Hands it across the counter." |
+| 9 | [`propose_purchase`](#intent-propose-purchase) | `world.money >= int(slots.total_cost)` | `../reviewing` | set `proposal_axles = "{{ int(slots.axles ?? 0) }}"`, `proposal_bullets = "{{ int(slots.bullets ?? 0) }}"`, `proposal_clothing = "{{ int(slots.clothing ?? 0) }}"`, `proposal_food = "{{ int(slots.food ?? 0) }}"`, `proposal_items = "{{ slots.items }}"`, `proposal_oxen = "{{ int(slots.oxen ?? 0) }}"`, `proposal_refine_count = 0`, `proposal_tongues = "{{ int(slots.tongues ?? 0) }}"`, `proposal_total_cost = "{{ int(slots.total_cost) }}"`, `proposal_wheels = "{{ int(slots.wheels ?? 0) }}"` · say "Matt licks his pencil and writes it down. 'So that's {{ slots.items }} — comes to ${{ slots.total_cost }}. Speak up if I've got it wrong.'" |
+| 10 | [`propose_purchase`](#intent-propose-purchase) | _default_ | `.` | _hint: Not enough cash for that basket._ · say "Matt shakes his head. 'You haven't got the money for that, friend.'" |
 
 ### <a id="room-general-store-reviewing"></a> `general_store.reviewing`
 
@@ -1730,28 +1907,86 @@ Inbox — pending background-job notifications.
 
 ### <a id="room-intro"></a> `intro`  _(root)_
 
-Independence, Missouri — preparing to leave for Oregon.
+Independence, Missouri — overview and setup.
 
-**Shows world**: `party_names`, `party_size`, `party_member_1`, `party_member_2`, `party_member_3`, `party_member_4`, `party_member_5`, `profession`, `month`
+**Shows world**: `year`
 
 **Transitions**:
 
 | # | Intent | Guard | → | Effects |
 |---|---|---|---|---|
-| 1 | [`generate_names`](#intent-generate-names) | `world.narration` | [`intro`](#room-intro) | invoke `host.oracle.ask` with `agent = "party_namer"`, `args = map[theme:{{ slots.theme }}]`, `prompt_path = "prompts/name_party.md"`, bind `party_names ← stdout` · set `party_member_1 = "{{ trim(split(world.party_names, \",\")[0]) }}"`, `party_member_2 = "{{ trim(split(world.party_names, \",\")[1]) }}"`, `party_member_3 = "{{ trim(split(world.party_names, \",\")[2]) }}"`, `party_member_4 = "{{ trim(split(world.party_names, \",\")[3]) }}"`, `party_member_5 = "{{ trim(split(world.party_names, \",\")[4]) }}"` · say "Named the wagon party from theme: {{ slots.theme }}." |
-| 2 | [`generate_names`](#intent-generate-names) | _default_ | [`intro`](#room-intro) | set `party_names = "{{ hasPrefix(lower(slots.theme), \"west\") ? \"Hank,Jesse,Mary,Ezra,Sarah\" : (hasPrefix(lower(slots.theme), \"star wars\") ? \"Luke,Leia,Han,Chewie,Yoda\" : (hasPrefix(lower(slots.theme), \"norse\") ? \"Erik,Helga,Thor,Sigrid,Bjorn\" : (hasPrefix(lower(slots.theme), \"lord of the rings\") ? \"Frodo,Sam,Merry,Pippin,Bilbo\" : \"Adam,Beth,Carol,Daniel,Edith\"))) }}"` · set `party_member_1 = "{{ trim(split(world.party_names, \",\")[0]) }}"`, `party_member_2 = "{{ trim(split(world.party_names, \",\")[1]) }}"`, `party_member_3 = "{{ trim(split(world.party_names, \",\")[2]) }}"`, `party_member_4 = "{{ trim(split(world.party_names, \",\")[3]) }}"`, `party_member_5 = "{{ trim(split(world.party_names, \",\")[4]) }}"` · say "Named the wagon party from theme: {{ slots.theme }} → {{ world.party_names }}." |
-| 3 | [`look`](#intent-look) |  | [`intro`](#room-intro) |  |
-| 4 | [`name_member`](#intent-name-member) | `slots.index == 1` | [`intro`](#room-intro) | set `party_member_1 = "{{ slots.name }}"` · say "Member 1 (leader) named {{ slots.name }}." |
-| 5 | [`name_member`](#intent-name-member) | `slots.index == 2` | [`intro`](#room-intro) | set `party_member_2 = "{{ slots.name }}"` · say "Member 2 named {{ slots.name }}." |
-| 6 | [`name_member`](#intent-name-member) | `slots.index == 3` | [`intro`](#room-intro) | set `party_member_3 = "{{ slots.name }}"` · say "Member 3 named {{ slots.name }}." |
-| 7 | [`name_member`](#intent-name-member) | `slots.index == 4` | [`intro`](#room-intro) | set `party_member_4 = "{{ slots.name }}"` · say "Member 4 named {{ slots.name }}." |
-| 8 | [`name_member`](#intent-name-member) | `slots.index == 5` | [`intro`](#room-intro) | set `party_member_5 = "{{ slots.name }}"` · say "Member 5 named {{ slots.name }}." |
-| 9 | [`name_member`](#intent-name-member) | _default_ | [`intro`](#room-intro) | _hint: Index must be 1..{{ world.party_size }}._ · say "Index {{ slots.index }} is out of range — pick 1..{{ world.party_size }}." |
-| 10 | [`name_party`](#intent-name-party) |  | [`intro`](#room-intro) | set `party_member_1 = "{{ trim(split(slots.names, \",\")[0]) }}"`, `party_member_2 = "{{ trim(split(slots.names, \",\")[1]) }}"`, `party_member_3 = "{{ trim(split(slots.names, \",\")[2]) }}"`, `party_member_4 = "{{ trim(split(slots.names, \",\")[3]) }}"`, `party_member_5 = "{{ trim(split(slots.names, \",\")[4]) }}"`, `party_names = "{{ slots.names }}"` · say "Party named: {{ slots.names }}." |
-| 11 | [`pick_month`](#intent-pick-month) |  | [`intro`](#room-intro) | set `month = "{{ slots.month }}"` · say "Departure month set to {{ slots.month }}." |
-| 12 | [`pick_profession`](#intent-pick-profession) |  | [`intro`](#room-intro) | set `money = "{{ slots.profession == 'banker' ? 1600 : (slots.profession == 'carpenter' ? 800 : 400) }}"`, `profession = "{{ slots.profession }}"` · say "Profession set to {{ slots.profession }}; starting cash ${{ world.money }}." |
-| 13 | [`start_journey`](#intent-start-journey) | `world.party_names != '' && world.profession != nil && world.month != nil` | [`general_store`](#room-general-store) | say "Wagon's hitched. Off to the general store." |
-| 14 | [`start_journey`](#intent-start-journey) | _default_ | [`intro`](#room-intro) | _hint: Name the party, pick a profession, and pick a month before you can leave._ · say "Not ready yet — name the party, pick a profession, and pick a departure month first." |
+| 1 | [`begin_setup`](#intent-begin-setup) |  | [`intro_profession`](#room-intro-profession) |  |
+| 2 | [`look`](#intent-look) |  | [`intro`](#room-intro) |  |
+
+### <a id="room-intro-month"></a> `intro_month`
+
+Pick departure month.
+
+**Shows world**: `profession`, `month`
+
+**Transitions**:
+
+| # | Intent | Guard | → | Effects |
+|---|---|---|---|---|
+| 1 | [`back`](#intent-back) |  | [`intro_profession`](#room-intro-profession) |  |
+| 2 | [`look`](#intent-look) |  | [`intro_month`](#room-intro-month) |  |
+| 3 | [`pick_month`](#intent-pick-month) |  | [`intro_party_names`](#room-intro-party-names) | set `month = "{{ slots.month }}"` · say "Departure month set to {{ slots.month }}." |
+
+### <a id="room-intro-party-names"></a> `intro_party_names`
+
+Name your wagon party of five.
+
+**Shows world**: `party_names`, `party_size`, `party_member_1`, `party_member_2`, `party_member_3`, `party_member_4`, `party_member_5`
+
+**Transitions**:
+
+| # | Intent | Guard | → | Effects |
+|---|---|---|---|---|
+| 1 | [`back`](#intent-back) |  | [`intro_month`](#room-intro-month) |  |
+| 2 | [`continue`](#intent-continue) | `world.party_names != ''` | [`intro_summary`](#room-intro-summary) |  |
+| 3 | [`continue`](#intent-continue) | `world.party_member_1 != ''` | [`intro_summary`](#room-intro-summary) | set `party_names = "{{ world.party_member_1 }},{{ world.party_member_2 }},{{ world.party_member_3 }},{{ world.party_member_4 }},{{ world.party_member_5 }}"` |
+| 4 | [`continue`](#intent-continue) | _default_ | [`intro_party_names`](#room-intro-party-names) | _hint: Name at least the leader (member 1) before continuing._ · say "Name at least the leader (member 1) before you continue." |
+| 5 | [`generate_names`](#intent-generate-names) | `world.narration` | [`intro_party_names`](#room-intro-party-names) | invoke `host.oracle.decide` with `agent = "party_namer"`, `args = map[theme:{{ slots.theme }}]`, `prompt = "prompts/name_party.md"`, `schema = "mcp/party_names.json"`, bind `party_member_1 ← submitted.names[0]`, `party_member_2 ← submitted.names[1]`, `party_member_3 ← submitted.names[2]`, `party_member_4 ← submitted.names[3]`, `party_member_5 ← submitted.names[4]`, `party_names ← {{ join(result.submitted.names, ',') }}`, `party_names_list ← submitted.names`, on_error → `intro_party_names` · say "Named the wagon party from theme: {{ slots.theme }}." |
+| 6 | [`generate_names`](#intent-generate-names) | _default_ | [`intro_party_names`](#room-intro-party-names) | set `party_names = "{{ hasPrefix(lower(slots.theme), \"west\") ? \"Hank,Jesse,Mary,Ezra,Sarah\" : (hasPrefix(lower(slots.theme), \"star wars\") ? \"Luke,Leia,Han,Chewie,Yoda\" : (hasPrefix(lower(slots.theme), \"norse\") ? \"Erik,Helga,Thor,Sigrid,Bjorn\" : (hasPrefix(lower(slots.theme), \"lord of the rings\") ? \"Frodo,Sam,Merry,Pippin,Bilbo\" : \"Adam,Beth,Carol,Daniel,Edith\"))) }}"` · set `party_member_1 = "{{ trim(split(world.party_names, \",\")[0]) }}"`, `party_member_2 = "{{ trim(split(world.party_names, \",\")[1]) }}"`, `party_member_3 = "{{ trim(split(world.party_names, \",\")[2]) }}"`, `party_member_4 = "{{ trim(split(world.party_names, \",\")[3]) }}"`, `party_member_5 = "{{ trim(split(world.party_names, \",\")[4]) }}"` · say "Named the wagon party from theme: {{ slots.theme }} → {{ world.party_names }}." |
+| 7 | [`look`](#intent-look) |  | [`intro_party_names`](#room-intro-party-names) |  |
+| 8 | [`name_member`](#intent-name-member) | `slots.index == 1` | [`intro_party_names`](#room-intro-party-names) | set `party_member_1 = "{{ slots.name }}"` · say "Member 1 (leader) named {{ slots.name }}." |
+| 9 | [`name_member`](#intent-name-member) | `slots.index == 2` | [`intro_party_names`](#room-intro-party-names) | set `party_member_2 = "{{ slots.name }}"` · say "Member 2 named {{ slots.name }}." |
+| 10 | [`name_member`](#intent-name-member) | `slots.index == 3` | [`intro_party_names`](#room-intro-party-names) | set `party_member_3 = "{{ slots.name }}"` · say "Member 3 named {{ slots.name }}." |
+| 11 | [`name_member`](#intent-name-member) | `slots.index == 4` | [`intro_party_names`](#room-intro-party-names) | set `party_member_4 = "{{ slots.name }}"` · say "Member 4 named {{ slots.name }}." |
+| 12 | [`name_member`](#intent-name-member) | `slots.index == 5` | [`intro_party_names`](#room-intro-party-names) | set `party_member_5 = "{{ slots.name }}"` · say "Member 5 named {{ slots.name }}." |
+| 13 | [`name_member`](#intent-name-member) | _default_ | [`intro_party_names`](#room-intro-party-names) | _hint: Index must be 1..{{ world.party_size }}._ · say "Index {{ slots.index }} is out of range — pick 1..{{ world.party_size }}." |
+| 14 | [`name_party`](#intent-name-party) |  | [`intro_party_names`](#room-intro-party-names) | set `party_member_1 = "{{ trim(split(slots.names, \",\")[0]) }}"`, `party_member_2 = "{{ trim(split(slots.names, \",\")[1]) }}"`, `party_member_3 = "{{ trim(split(slots.names, \",\")[2]) }}"`, `party_member_4 = "{{ trim(split(slots.names, \",\")[3]) }}"`, `party_member_5 = "{{ trim(split(slots.names, \",\")[4]) }}"`, `party_names = "{{ slots.names }}"` · say "Party named: {{ slots.names }}." |
+
+### <a id="room-intro-profession"></a> `intro_profession`
+
+Pick your profession — sets starting cash and score multiplier.
+
+**Shows world**: `profession`, `money`
+
+**Transitions**:
+
+| # | Intent | Guard | → | Effects |
+|---|---|---|---|---|
+| 1 | [`back`](#intent-back) |  | [`intro`](#room-intro) |  |
+| 2 | [`look`](#intent-look) |  | [`intro_profession`](#room-intro-profession) |  |
+| 3 | [`pick_profession`](#intent-pick-profession) |  | [`intro_month`](#room-intro-month) | set `money = "{{ slots.profession == 'banker' ? 1600 : (slots.profession == 'carpenter' ? 800 : 400) }}"`, `profession = "{{ slots.profession }}"` · say "Profession set to {{ slots.profession }}; starting cash ${{ world.money }}." |
+
+### <a id="room-intro-summary"></a> `intro_summary`
+
+Confirm setup and depart.
+
+**Shows world**: `profession`, `month`, `party_names`, `money`
+
+**Transitions**:
+
+| # | Intent | Guard | → | Effects |
+|---|---|---|---|---|
+| 1 | [`edit_step`](#intent-edit-step) | `slots.step == 'profession'` | [`intro_profession`](#room-intro-profession) |  |
+| 2 | [`edit_step`](#intent-edit-step) | `slots.step == 'month'` | [`intro_month`](#room-intro-month) |  |
+| 3 | [`edit_step`](#intent-edit-step) | `slots.step == 'names'` | [`intro_party_names`](#room-intro-party-names) |  |
+| 4 | [`look`](#intent-look) |  | [`intro_summary`](#room-intro-summary) |  |
+| 5 | [`start_journey`](#intent-start-journey) | `world.party_names != '' && world.profession != nil && world.month != nil` | [`general_store`](#room-general-store) | say "Wagon's hitched. Off to the general store." |
+| 6 | [`start_journey`](#intent-start-journey) | _default_ | [`intro_summary`](#room-intro-summary) | _hint: Setup isn't complete — return to an earlier step._ · say "Setup isn't complete. Use Change X to return to an earlier step." |
 
 ### <a id="room-leg-a-awaiting-reply"></a> `leg_a_awaiting_reply`
 
@@ -1859,7 +2094,7 @@ Illness has struck the party ({{ world.illness_kind }}).
 
 1. set `current_event_attempts = 0`, `health_avg = "{{ world.health_avg - 10 }}"`, `illness_member = "{{ split(world.party_names, ',')[world.rng_last % world.party_alive] }}"`
 2. set `illness_kind = "{{ if world.rng_last % 5 == 0 }}dysentery{{ else }}{{ if world.rng_last % 5 == 1 }}cholera{{ else }}{{ if world.rng_last % 5 == 2 }}typhoid{{ else }}{{ if world.rng_last % 5 == 3 }}measles{{ else }}exhaustion{{ end }}{{ end }}{{ end }}{{ end }}"`, `illness_severity = "{{ world.rng_last % 5 + 1 }}"`, `illness_treatment = "rest"`
-3. invoke `host.oracle.ask_with_mcp` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_a_error`
+3. invoke `host.oracle.decide` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_a_error`
 
 **Transitions**:
 
@@ -2063,7 +2298,7 @@ Illness has struck the party ({{ world.illness_kind }}).
 
 1. set `current_event_attempts = 0`, `health_avg = "{{ world.health_avg - 10 }}"`, `illness_member = "{{ split(world.party_names, ',')[world.rng_last % world.party_alive] }}"`
 2. set `illness_kind = "{{ if world.rng_last % 5 == 0 }}dysentery{{ else }}{{ if world.rng_last % 5 == 1 }}cholera{{ else }}{{ if world.rng_last % 5 == 2 }}typhoid{{ else }}{{ if world.rng_last % 5 == 3 }}measles{{ else }}exhaustion{{ end }}{{ end }}{{ end }}{{ end }}"`, `illness_severity = "{{ world.rng_last % 5 + 1 }}"`, `illness_treatment = "rest"`
-3. invoke `host.oracle.ask_with_mcp` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_b_error`
+3. invoke `host.oracle.decide` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_b_error`
 
 **Transitions**:
 
@@ -2267,7 +2502,7 @@ Illness has struck the party ({{ world.illness_kind }}).
 
 1. set `current_event_attempts = 0`, `health_avg = "{{ world.health_avg - 10 }}"`, `illness_member = "{{ split(world.party_names, ',')[world.rng_last % world.party_alive] }}"`
 2. set `illness_kind = "{{ if world.rng_last % 5 == 0 }}dysentery{{ else }}{{ if world.rng_last % 5 == 1 }}cholera{{ else }}{{ if world.rng_last % 5 == 2 }}typhoid{{ else }}{{ if world.rng_last % 5 == 3 }}measles{{ else }}exhaustion{{ end }}{{ end }}{{ end }}{{ end }}"`, `illness_severity = "{{ world.rng_last % 5 + 1 }}"`, `illness_treatment = "rest"`
-3. invoke `host.oracle.ask_with_mcp` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_c_error`
+3. invoke `host.oracle.decide` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_c_error`
 
 **Transitions**:
 
@@ -2471,7 +2706,7 @@ Illness has struck the party ({{ world.illness_kind }}).
 
 1. set `current_event_attempts = 0`, `health_avg = "{{ world.health_avg - 10 }}"`, `illness_member = "{{ split(world.party_names, ',')[world.rng_last % world.party_alive] }}"`
 2. set `illness_kind = "{{ if world.rng_last % 5 == 0 }}dysentery{{ else }}{{ if world.rng_last % 5 == 1 }}cholera{{ else }}{{ if world.rng_last % 5 == 2 }}typhoid{{ else }}{{ if world.rng_last % 5 == 3 }}measles{{ else }}exhaustion{{ end }}{{ end }}{{ end }}{{ end }}"`, `illness_severity = "{{ world.rng_last % 5 + 1 }}"`, `illness_treatment = "rest"`
-3. invoke `host.oracle.ask_with_mcp` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_d_error`
+3. invoke `host.oracle.decide` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_d_error`
 
 **Transitions**:
 
@@ -2675,7 +2910,7 @@ Illness has struck the party ({{ world.illness_kind }}).
 
 1. set `current_event_attempts = 0`, `health_avg = "{{ world.health_avg - 10 }}"`, `illness_member = "{{ split(world.party_names, ',')[world.rng_last % world.party_alive] }}"`
 2. set `illness_kind = "{{ if world.rng_last % 5 == 0 }}dysentery{{ else }}{{ if world.rng_last % 5 == 1 }}cholera{{ else }}{{ if world.rng_last % 5 == 2 }}typhoid{{ else }}{{ if world.rng_last % 5 == 3 }}measles{{ else }}exhaustion{{ end }}{{ end }}{{ end }}{{ end }}"`, `illness_severity = "{{ world.rng_last % 5 + 1 }}"`, `illness_treatment = "rest"`
-3. invoke `host.oracle.ask_with_mcp` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_e_error`
+3. invoke `host.oracle.decide` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_e_error`
 
 **Transitions**:
 
@@ -2879,7 +3114,7 @@ Illness has struck the party ({{ world.illness_kind }}).
 
 1. set `current_event_attempts = 0`, `health_avg = "{{ world.health_avg - 10 }}"`, `illness_member = "{{ split(world.party_names, ',')[world.rng_last % world.party_alive] }}"`
 2. set `illness_kind = "{{ if world.rng_last % 5 == 0 }}dysentery{{ else }}{{ if world.rng_last % 5 == 1 }}cholera{{ else }}{{ if world.rng_last % 5 == 2 }}typhoid{{ else }}{{ if world.rng_last % 5 == 3 }}measles{{ else }}exhaustion{{ end }}{{ end }}{{ end }}{{ end }}"`, `illness_severity = "{{ world.rng_last % 5 + 1 }}"`, `illness_treatment = "rest"`
-3. invoke `host.oracle.ask_with_mcp` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_f_error`
+3. invoke `host.oracle.decide` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_f_error`
 
 **Transitions**:
 
@@ -3083,7 +3318,7 @@ Illness has struck the party ({{ world.illness_kind }}).
 
 1. set `current_event_attempts = 0`, `health_avg = "{{ world.health_avg - 10 }}"`, `illness_member = "{{ split(world.party_names, ',')[world.rng_last % world.party_alive] }}"`
 2. set `illness_kind = "{{ if world.rng_last % 5 == 0 }}dysentery{{ else }}{{ if world.rng_last % 5 == 1 }}cholera{{ else }}{{ if world.rng_last % 5 == 2 }}typhoid{{ else }}{{ if world.rng_last % 5 == 3 }}measles{{ else }}exhaustion{{ end }}{{ end }}{{ end }}{{ end }}"`, `illness_severity = "{{ world.rng_last % 5 + 1 }}"`, `illness_treatment = "rest"`
-3. invoke `host.oracle.ask_with_mcp` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_g_error`
+3. invoke `host.oracle.decide` with `agent = "frontier_doctor"`, `args = map[clothing_sets:{{ world.clothing_sets }} current_landmark:{{ world.current_landmark }} food_lbs:{{ world.food_lbs }} health_avg:{{ world.health_avg }} party_alive:{{ world.party_alive }} rng_last:{{ world.rng_last }}]`, `prompt = "prompts/event_disease.md"`, `schema = "mcp/illness.json"`, bind `illness_kind ← submitted.illness`, `illness_severity ← submitted.severity`, `illness_treatment ← submitted.treatment`, on_error → `leg_g_error`
 
 **Transitions**:
 
@@ -3383,14 +3618,14 @@ Wagon master — active chat. Ask another question or go back.
 
 **On enter**:
 
-1. invoke `host.oracle.talk` with `agent = "wagon_master"`, `chat_id = "{{ world.wagon_chat_id }}"`, `question = "{{ world.wagon_question }}"`, bind `wagon_answer ← answer`, `wagon_chat_id ← chat_id`, `wagon_session_id ← claude_session_id`
+1. invoke `host.oracle.converse` with `agent = "wagon_master"`, `chat_id = "{{ world.wagon_chat_id }}"`, `question = "{{ world.wagon_question }}"`, bind `wagon_answer ← answer`, `wagon_chat_id ← chat_id`, `wagon_session_id ← claude_session_id`
 2. invoke `host.chat.suggest_title` with `chat_id = "{{ world.wagon_chat_id }}"`, `force = false`, bind `wagon_chat_title ← title`
 
 **Transitions**:
 
 | # | Intent | Guard | → | Effects |
 |---|---|---|---|---|
-| 1 | [`ask_question`](#intent-ask-question) |  | [`trail_guide.trail_guide_active`](#room-trail-guide-trail-guide-active) | set `wagon_answer = ""`, `wagon_question = "{{ slots.question }}"` · increment `wagon_chat_turns += 1` · invoke `host.oracle.talk` with `agent = "wagon_master"`, `chat_id = "{{ world.wagon_chat_id }}"`, `question = "{{ slots.question }}"`, bind `wagon_answer ← answer`, `wagon_chat_id ← chat_id`, `wagon_session_id ← claude_session_id` · invoke `host.chat.suggest_title` with `chat_id = "{{ world.wagon_chat_id }}"`, `force = false`, bind `wagon_chat_title ← title` |
+| 1 | [`ask_question`](#intent-ask-question) |  | [`trail_guide.trail_guide_active`](#room-trail-guide-trail-guide-active) | set `wagon_answer = ""`, `wagon_question = "{{ slots.question }}"` · increment `wagon_chat_turns += 1` · invoke `host.oracle.converse` with `agent = "wagon_master"`, `chat_id = "{{ world.wagon_chat_id }}"`, `question = "{{ slots.question }}"`, bind `wagon_answer ← answer`, `wagon_chat_id ← chat_id`, `wagon_session_id ← claude_session_id` · invoke `host.chat.suggest_title` with `chat_id = "{{ world.wagon_chat_id }}"`, `force = false`, bind `wagon_chat_title ← title` |
 | 2 | [`back`](#intent-back) |  | [`trail_guide.trail_guide_list`](#room-trail-guide-trail-guide-list) |  |
 | 3 | [`look`](#intent-look) |  | `.` |  |
 
@@ -3403,7 +3638,7 @@ Wagon master — starting a fresh chat.
 **On enter**:
 
 1. invoke `host.chat.create` with `app = "oregon-trail"`, `room = "trail_guide"`, `scope_key = "{{ world.profession }}"`, `title = "Question about the trail"`, bind `wagon_chat_id ← chat_id`, `wagon_chat_title ← title`
-2. invoke `host.oracle.talk` with `agent = "wagon_master"`, `chat_id = "{{ world.wagon_chat_id }}"`, `question = "{{ world.wagon_question }}"`, bind `wagon_answer ← answer`, `wagon_chat_id ← chat_id`, `wagon_session_id ← claude_session_id`
+2. invoke `host.oracle.converse` with `agent = "wagon_master"`, `chat_id = "{{ world.wagon_chat_id }}"`, `question = "{{ world.wagon_question }}"`, bind `wagon_answer ← answer`, `wagon_chat_id ← chat_id`, `wagon_session_id ← claude_session_id`
 3. invoke `host.chat.suggest_title` with `chat_id = "{{ world.wagon_chat_id }}"`, `force = false`, bind `wagon_chat_title ← title`
 
 **Transitions**:

@@ -34,7 +34,33 @@ host_handlers:
   host.git_worktree:   { data: { ok: true, log: "" } }
   host.git:            { data: { ok: true, sha: "abc", diff: "" } }
   host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        verdict:    "refine"
+        intent:     "refine"
+        reason:     "Need a deterministic reproducer rather than a shell trace."
+        confidence: 0.9
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        verdict:    "refine"
+        intent:     "refine"
+        reason:     "Need a deterministic reproducer rather than a shell trace."
+        confidence: 0.9
+
+  host.oracle.decide:
     data:
       ok: true
       submitted:

@@ -5,7 +5,7 @@
 // the state machine — no Turn() is fired, no TransitionApplied event is
 // emitted, the journey state is inviolate.
 //
-// The orchestrator owns the chat-thread resolution and the host.oracle.talk
+// The orchestrator owns the chat-thread resolution and the host.oracle.converse
 // invocation directly (no allow-list check on the app's `hosts:` block —
 // off-path is engine-provided, not app-provided). Events OffPathQuestion
 // and OffPathAnswer are appended for replay parity; OffPathEntered and
@@ -32,7 +32,7 @@ import (
 // within the same session.
 const offPathRoom = "off_path"
 
-// AskOffPath fires a single host.oracle.talk turn for an off-path question
+// AskOffPath fires a single host.oracle.converse turn for an off-path question
 // against a per-session chat thread. It does NOT mutate world, advance the
 // state machine, or emit StateExited/StateEntered events.
 //
@@ -75,7 +75,7 @@ func (o *Orchestrator) AskOffPath(ctx context.Context, sid app.SessionID, questi
 		}
 	}
 
-	// Build args mirroring the dev-story oracle.yaml host.oracle.talk pattern.
+	// Build args mirroring the dev-story oracle.yaml host.oracle.converse pattern.
 	args := map[string]any{
 		"question": question,
 	}
@@ -116,7 +116,7 @@ func (o *Orchestrator) AskOffPath(ctx context.Context, sid app.SessionID, questi
 		"chat_id":  chatID,
 	}, 0)
 
-	res, err := host.OracleTalkHandler(ctx, args)
+	res, err := host.OracleConverseHandler(ctx, args)
 	if err != nil {
 		// Infrastructure failure (claude binary issues, etc.) — record the
 		// question, surface the error to the caller.

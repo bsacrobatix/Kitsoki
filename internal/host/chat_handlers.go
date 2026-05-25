@@ -275,27 +275,27 @@ func ChatTranscriptHandler(ctx context.Context, args map[string]any) (Result, er
 //
 // Follow-up (Phase G):
 //
-//   The on_complete chain is persisted on the drive row (on_complete_json),
-//   but is NOT yet fired automatically when the drive completes. Two
-//   integration points are still missing:
+//	The on_complete chain is persisted on the drive row (on_complete_json),
+//	but is NOT yet fired automatically when the drive completes. Two
+//	integration points are still missing:
 //
-//     1. The orchestrator's dispatchHostCalls must, for host.chat.drive
-//        invocations with an on_complete: block, pre-inject the args
-//        listed above (__on_complete + __origin_session_id + __origin_state)
-//        before invoking the handler — mirroring how dispatchBackground
-//        does this for background jobs.
+//	  1. The orchestrator's dispatchHostCalls must, for host.chat.drive
+//	     invocations with an on_complete: block, pre-inject the args
+//	     listed above (__on_complete + __origin_session_id + __origin_state)
+//	     before invoking the handler — mirroring how dispatchBackground
+//	     does this for background jobs.
 //
-//     2. A consumer (the inbox/notification producer in Phase G, or a future
-//        kitsoki serve daemon, or the CLI dispatch path when running under a
-//        session) must, on observing a drive transition to a terminal status
-//        with a non-empty on_complete_json, deserialize the chain and run
-//        machine.RunEffects(origin_state, world+{last_drive_result}, chain)
-//        analogous to orchestrator.handleJobTerminal.
+//	  2. A consumer (the inbox/notification producer in Phase G, or a future
+//	     kitsoki serve daemon, or the CLI dispatch path when running under a
+//	     session) must, on observing a drive transition to a terminal status
+//	     with a non-empty on_complete_json, deserialize the chain and run
+//	     machine.RunEffects(origin_state, world+{last_drive_result}, chain)
+//	     analogous to orchestrator.handleJobTerminal.
 //
-//   Until both are wired, drives initiated with on_complete: in their effect
-//   spec will run to completion but the chain will not fire — callers should
-//   either use await:true (synchronous result) or poll via kitsoki chat
-//   queue list. This is a deliberate Phase B+ scope cut.
+//	Until both are wired, drives initiated with on_complete: in their effect
+//	spec will run to completion but the chain will not fire — callers should
+//	either use await:true (synchronous result) or poll via kitsoki chat
+//	queue list. This is a deliberate Phase B+ scope cut.
 func ChatDriveHandler(ctx context.Context, args map[string]any) (Result, error) {
 	cs := ChatStoreFromContext(ctx)
 	if cs == nil {

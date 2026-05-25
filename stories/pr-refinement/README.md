@@ -115,7 +115,7 @@ See the "Wave 2 contract additions" appendix at the end of
 ### Host requirements
 
 Standalone Wave 2 needs every iface's default handler plus
-`host.inbox.add` and `host.oracle.ask_with_mcp`. The flow fixtures
+`host.inbox.add` and the oracle verb handlers below. The flow fixtures
 stub them all with canned envelopes; Slice β shipped most of these in
 Wave 1.
 
@@ -126,7 +126,7 @@ Wave 1.
 | `host.local` | Wave 1 | `internal/host/local_ci.go` |
 | `host.append_to_file` | Wave 1 | `internal/host/append_file_transport.go` |
 | `host.inbox.add` | Wave 1 | `internal/host/inbox_add.go` |
-| `host.oracle.ask_with_mcp` | already shipped | `internal/host/oracle_ask_with_mcp.go` |
+| `host.oracle.decide` | oracle-split Phase 8 | `internal/host/oracle_decide.go` |
 
 The host registry's prefix-fallback lets each default handler back
 every op on the iface; per-op handlers can be added later without
@@ -135,15 +135,31 @@ the bare `host.git` handler is invoked for `host.git.merge` calls in
 flow fixtures (the handler's `data:` envelope just returns the
 canned `sha`).
 
+### Oracle-split persona table (Phase 8)
+
+This story's oracle calls are all verdict-producing judgments. The
+`diagnoser` persona additionally does structured CI failure analysis
+(still classified `decide` because the output is a JSON artifact schema
+with no file writes — see oracle-split proposal §6 table).
+
+| Persona | Verb | Phases |
+|---|---|---|
+| `diagnoser` | `decide` | `diagnose_executing` CI-failure analysis |
+| `judge` | `decide` | `diagnose_awaiting_reply` and `merge_awaiting_reply` checkpoint verdicts |
+
+Both personas carry `tools: []` — they evaluate context provided in the
+prompt, no file access needed.
+
 ## Judge polymorphism
 
 Identical to bugfix. Two checkpoints (`diagnose_awaiting_reply` and
-`merge_awaiting_reply`) follow the canonical contract §6 shape.
+`merge_awaiting_reply`) follow the canonical contract §6 shape, each
+calling `host.oracle.decide` (agent: `judge`) when `judge_mode != 'human'`.
 
 | Mode | Behaviour at every checkpoint |
 |---|---|
 | `human` | Post + inbox-mirror; wait for an explicit reply intent. |
-| `llm` | Post + inbox-mirror + run LLM-judge. Confident verdict auto-fires via `emit_intent:`. |
+| `llm` | Post + inbox-mirror + `host.oracle.decide`. Confident verdict auto-fires via `emit_intent:`. |
 | `llm_then_human` | Same as `llm` for the auto-fire path; uncertain or low-confidence verdicts hold the state for a human. |
 
 ## File layout

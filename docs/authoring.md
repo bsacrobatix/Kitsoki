@@ -428,6 +428,71 @@ its rows. Calibrate the synonym library with
 
 ---
 
+## 6.2 host.oracle.extract — tiered resolver for effects
+
+`host.oracle.extract` solves a different problem than transport-level
+routing: it resolves *any* free-text field inside an effect into a
+typed payload. Use it when a state transition needs to extract a
+structured value from something the user typed, from a file, or from
+a background tool output.
+
+```yaml
+effects:
+  - invoke: host.oracle.extract
+    with:
+      input: "{{ world.user_input }}"
+      schema: ./schemas/direction.json
+      resolvers:
+        - synonyms: ./synonyms/directions.yaml
+        - slot_template: ./templates/directions.yaml
+        - llm:
+            prompt: ./prompts/extract_direction.md
+            agent: extractor
+    bind:
+      submitted:   world.extracted_direction
+      resolved_by: world.extract_tier
+    on_error:
+      - invoke: host.transport.post
+        with:
+          transport: tui
+          body: "Could not extract a direction from your input."
+```
+
+**Synonyms file format** (`synonyms/directions.yaml`):
+
+```yaml
+"go north,head north,north": { direction: "north" }
+"go south,head south,south": { direction: "south" }
+wade: { action: "wade" }
+```
+
+Keys are case-insensitive, comma-separated phrase lists. Values are
+the typed payload. Keep the file next to the app's other YAML; the
+path in `resolvers:` is relative to the file that contains the effect.
+
+**Result shape:**
+
+| Field | Notes |
+|---|---|
+| `submitted` | The typed payload. `null` on no-match. |
+| `resolved_by` | `synonyms` \| `slot_template` \| `llm` \| `no_match` |
+| `claude_session_id` | Claude session ID when the LLM tier matched. |
+
+On `no_match`, `Result.Error` is set so `on_error:` fires. Use this
+to show the user a helpful fallback.
+
+**Progressive determinism** — after any LLM-tier resolution, run:
+
+```
+kitsoki extract suggest-synonym <session-id> <call-id>
+```
+
+The command prints a YAML snippet with the exact phrase→payload
+mapping that will move the *next* identical input to the deterministic
+tier. Add it to your synonyms file to shrink the LLM dependency.
+
+---
+
 ## 7. Authoring tooling
 
 | Command | What it does |
@@ -441,6 +506,7 @@ its rows. Calibrate the synonym library with
 | `kitsoki run --warp <path>` | Boot the TUI directly into a primed mid-game state from a YAML "warp basis". See [`imports.md`](imports.md#operator-tooling-warp-and---warp). |
 | In-TUI `/warp` | Slash command equivalent. `/warp <state> world.X=Y` for inline; `/warp file:<path>` to load a basis. |
 | `kitsoki docs apply-proposal` | LLM-facing guide for "implement this prose proposal against `app.yaml`". |
+| `kitsoki extract suggest-synonym <session-id> <call-id>` | Propose a synonym entry from a recorded LLM-tier `host.oracle.extract` call. |
 | In-TUI `Edit mode` | Hot-reload editing — see [`developer-guide.md` §8](developer-guide.md#8-hot-reload-edit-mode). |
 
 `kitsoki render` is one-way: the Markdown never feeds back into the
@@ -471,10 +537,70 @@ engine. Re-run after every change to keep `APP.md` in sync.
 
 ---
 
-## 9. Where to next
+## 9. Choosing tool profiles for agents
+
+When an agent declares `Bash` in its `tools:` list and is used with
+`host.oracle.ask` or `host.oracle.decide`, you must also supply a
+`bash_profile:`. Pick the profile that gives the LLM exactly the
+capability it needs — no more.
+
+**`read-only`** — the LLM can only run commands on a built-in allowlist:
+`grep`, `find`, `cat`, `head`, `tail`, `ls`, `git`, `jq`, `rg`, `wc`,
+`stat`, `awk`, `sed`, `sort`, `uniq`, `echo`, and a handful of others.
+Use this for diagnosis / code-review agents that only need to inspect
+the repository. The loader enforces the allowlist; multi-command chains
+(`;`, `|`, `&&`, backticks) are always rejected regardless of profile.
+
+```yaml
+agents:
+  code-reviewer:
+    system_prompt_path: prompts/review.md
+    tools: [Read, Grep, Glob, Bash]
+    bash_profile: read-only
+```
+
+**`commands: [...]`** — an explicit argv0 allowlist you maintain. Prefer
+this when the agent needs a tool not on the `read-only` list but you
+still want the guarantee "this agent cannot run `rm`, `curl`, or
+arbitrary binaries." Useful for CI-diagnoser patterns that need `kubectl`
+or `docker inspect` but nothing else.
+
+```yaml
+agents:
+  ci-diagnoser:
+    system_prompt_path: prompts/diagnose_ci.md
+    tools: [Read, Bash]
+    bash_profile:
+      commands: [git, jq, grep, kubectl]
+```
+
+**`sandboxed_write: <dir>`** — the LLM may write, but only under a
+per-call scratch directory. Network is denied via the `HTTP_PROXY` env
+var trick (best-effort: raw TCP connections are not blocked). Use this
+for "build the project and inspect the output" patterns where the agent
+needs to produce temp files without touching the working tree.
+
+```yaml
+agents:
+  build-inspector:
+    system_prompt_path: prompts/build_inspect.md
+    tools: [Read, Bash]
+    bash_profile:
+      sandboxed_write: ""   # empty → system TempDir; or supply a base path
+```
+
+For `host.oracle.task` and `host.oracle.converse`, `bash_profile` is
+not consulted — those verbs allow unrestricted Bash by design; the
+blast-radius contract comes from the explicit `agent:` declaration and
+the `external_side_effect:` field.
+
+---
+
+## 10. Where to next
 
 - **The schema** — `kitsoki docs app-schema`.
 - **Worked examples** — `testdata/apps/cloak`, `testdata/apps/dev-story`,
   `testdata/apps/proposal_smoke`, `testdata/apps/background_jobs`.
 - **Embedded operator manual** — `kitsoki docs llm-guide`.
 - **The state machine in depth** — [`state-machine.md`](state-machine.md).
+- **Agent declaration reference** — [`hosts.md` §Agent declaration](hosts.md#agent-declaration).

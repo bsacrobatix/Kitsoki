@@ -20,23 +20,23 @@
 //
 // The proposal §6.4 idealized command shapes:
 //
-//   list      →  cpt artifact list --kind <k>           (today's cpt may need
-//                                                        a --json flag added;
-//                                                        we pass --json
-//                                                        defensively and
-//                                                        accept whatever
-//                                                        envelope comes back)
-//   get       →  read the artifact file directly        (cpt's artifacts.toml
-//                                                        owns path conventions
-//                                                        — but the file is
-//                                                        the source of truth)
-//   create    →  cpt generate --kind <k> --title <t>
-//                             --slug <s> --parent <p>
-//   validate  →  cpt analyze --target <id> --mode <m>   (mode in
-//                                                        {deterministic,
-//                                                        semantic, consistency})
-//   decompose →  cpt plan --task <id>                    (writes
-//                                                        .plans/<slug>/phase-NN-*.md)
+//	list      →  cpt artifact list --kind <k>           (today's cpt may need
+//	                                                     a --json flag added;
+//	                                                     we pass --json
+//	                                                     defensively and
+//	                                                     accept whatever
+//	                                                     envelope comes back)
+//	get       →  read the artifact file directly        (cpt's artifacts.toml
+//	                                                     owns path conventions
+//	                                                     — but the file is
+//	                                                     the source of truth)
+//	create    →  cpt generate --kind <k> --title <t>
+//	                          --slug <s> --parent <p>
+//	validate  →  cpt analyze --target <id> --mode <m>   (mode in
+//	                                                     {deterministic,
+//	                                                     semantic, consistency})
+//	decompose →  cpt plan --task <id>                    (writes
+//	                                                     .plans/<slug>/phase-NN-*.md)
 //
 // Today's real cpt CLI (per cyber-repo/cypilot/.core/workflows/) uses
 // `--json` as a top-level flag (e.g. `cpt --json validate --artifact <path>`)
@@ -55,8 +55,8 @@
 // deliberately verbose so the operator running this from a non-cypilot
 // repo gets actionable guidance:
 //
-//   "host.cypilot_artifacts: cpt CLI not available — install cypilot from
-//    https://github.com/Acronis/cypilot or run from a checkout that has it on PATH"
+//	"host.cypilot_artifacts: cpt CLI not available — install cypilot from
+//	 https://github.com/Acronis/cypilot or run from a checkout that has it on PATH"
 //
 // All exec calls go through the same `cliExec` seam declared in
 // `cli_exec.go`, so tests substitute deterministic runners without
@@ -209,8 +209,10 @@ func parseArtifactList(stdout string) ([]map[string]any, error) {
 // Go — we just accept the resolved path on the args.
 //
 // Input  args: id (string), path (string, optional — when set, read
-//              directly).  When only id is supplied we shell to
-//              `cpt artifact path --id <id> --json` to resolve.
+//
+//	directly).  When only id is supplied we shell to
+//	`cpt artifact path --id <id> --json` to resolve.
+//
 // Output Data: id, kind, title, body, frontmatter, path, depends_on.
 func cptArtifactGet(ctx context.Context, workdir string, args map[string]any) (Result, error) {
 	id, _ := args["id"].(string)
@@ -271,7 +273,9 @@ func cptArtifactGet(ctx context.Context, workdir string, args map[string]any) (R
 // `cpt generate --kind <k> --title <t> --slug <s> --parent <p>`.
 //
 // Input  args: kind (string, required), title (string, required),
-//              slug (string, optional), parent_id (string, optional).
+//
+//	slug (string, optional), parent_id (string, optional).
+//
 // Output Data: ok (bool), id (string), path (string).
 //
 // The handler does not attempt to interpret cpt's interactive prompts —
@@ -347,12 +351,13 @@ func cptArtifactCreate(ctx context.Context, workdir string, args map[string]any)
 	}}, nil
 }
 
-
 // cptArtifactValidate implements artifact.validate via
 // `cpt analyze --target <id> --mode <m>` (the proposal's idealized form).
 //
 // Input  args: id (string, required), mode (string, optional — one of
-//              "deterministic" | "semantic" | "consistency").
+//
+//	"deterministic" | "semantic" | "consistency").
+//
 // Output Data: ok (bool), findings (list), report (string).
 //
 // The "report" key is the raw cpt stdout — useful for the LLM-judge prompt
@@ -391,9 +396,13 @@ func cptArtifactValidate(ctx context.Context, workdir string, args map[string]an
 // parseAnalyzeFindings extracts the `findings` list from cpt analyze's
 // envelope when one is present.  Cypilot's analyze workflow emits a JSON
 // envelope per `cpt --json validate` of the form
-//   {"status":"PASS","findings":[...]}
+//
+//	{"status":"PASS","findings":[...]}
+//
 // or
-//   {"status":"FAIL","findings":[{...}, ...]}
+//
+//	{"status":"FAIL","findings":[{...}, ...]}
+//
 // We accept either; non-JSON stdout yields an empty list.
 func parseAnalyzeFindings(stdout string) []any {
 	trimmed := strings.TrimSpace(stdout)

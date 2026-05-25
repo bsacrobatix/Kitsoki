@@ -537,7 +537,7 @@ func ticketListMine(root string, args map[string]any) (Result, error) {
 // removed entirely — no consumer in this repo branched on
 // `t.priority` after the 2026-05-20 dogfood cycle, and keeping a
 // dead key alive only invited the kind of "branch on priority,
-// silently get '' for every bug" mistake that produced the original
+// silently get ” for every bug" mistake that produced the original
 // defect.
 func bugSummary(b *BugFile) map[string]any {
 	out := map[string]any{

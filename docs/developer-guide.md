@@ -236,9 +236,10 @@ kitsoki mcp-validator --schema schema.json
 
 A standalone stdio MCP server that validates a JSON payload against a
 JSON Schema and returns a structured error envelope. The same code
-powers the side-channel that `host.oracle.ask_with_mcp` exposes to
-Claude when the prompt needs typed-JSON output. Run it directly when
-debugging a schema-shaped prompt.
+powers the typed-JSON submit side-channel that oracle handlers
+(`host.oracle.decide`, `host.oracle.task`, `host.oracle.ask` with
+`schema:`) attach to Claude. Run it directly when debugging a
+schema-shaped prompt.
 
 ---
 

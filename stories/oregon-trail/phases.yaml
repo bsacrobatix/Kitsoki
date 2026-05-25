@@ -369,9 +369,9 @@ phase_templates:
           # on_enter picks illness_kind by a deterministic sub-roll
           # (rng_last % 5) and zeroes current_event_attempts. In
           # narrated mode (world.narration == true) the diagnosis comes
-          # from host.oracle.ask_with_mcp with the typed-JSON validator
+          # from host.oracle.decide with the typed-JSON validator
           # bound to stories/oregon-trail/mcp/illness.json — Claude
-          # returns { illness, severity, treatment } via the MCP submit
+          # returns { illness, severity, treatment } via the submit
           # tool (proposal §9.6). The narrated arm also writes
           # illness_severity + illness_treatment; deterministic mode
           # fills those in with defaults so downstream views never see
@@ -408,13 +408,12 @@ phase_templates:
                   illness_kind: "{{ if world.rng_last % 5 == 0 }}dysentery{{ else }}{{ if world.rng_last % 5 == 1 }}cholera{{ else }}{{ if world.rng_last % 5 == 2 }}typhoid{{ else }}{{ if world.rng_last % 5 == 3 }}measles{{ else }}exhaustion{{ end }}{{ end }}{{ end }}{{ end }}"
                   illness_severity: "{{ world.rng_last % 5 + 1 }}"
                   illness_treatment: "rest"
-              # Narrated arm — Claude returns typed JSON via the MCP
-              # `submit` tool. host.oracle.ask_with_mcp auto-attaches
-              # the schema validator (see internal/host/oracle_ask_with_mcp.go);
-              # the validated payload is exposed as Result.Data.submitted
-              # which `bind:` walks via dotted paths.
+              # Narrated arm — Claude returns typed JSON via the submit
+              # tool. host.oracle.decide validates the payload against
+              # the schema; the validated payload is exposed as
+              # Result.Data.submitted which `bind:` walks via dotted paths.
               - when: "world.narration"
-                invoke: host.oracle.ask_with_mcp
+                invoke: host.oracle.decide
                 with:
                   prompt: "prompts/event_disease.md"
                   schema: "mcp/illness.json"

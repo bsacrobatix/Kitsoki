@@ -392,7 +392,7 @@ effects:
 Templates inside effects use the same `{{ … }}` syntax as views. Inside
 `with:` and `bind:`, **arguments and results are typed** —
 `stdout`, `exit_code`, `ok` for `host.run`; `answer`, `chat_id`, etc.
-for `host.oracle.talk`.
+for `host.oracle.converse`.
 
 ---
 

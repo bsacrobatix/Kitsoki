@@ -38,9 +38,9 @@ import (
 // Optional args:
 //   - author    (string): the comment author tag; default "kitsoki".
 //   - title     (string): rendered as a `### <title>` line at the top
-//                         of the comment body.
+//     of the comment body.
 //   - phase_id  (string): forwarded to the heading for traceability
-//                         (`## Comment <ts> by <author> (phase=<id>)`).
+//     (`## Comment <ts> by <author> (phase=<id>)`).
 //
 // Returns Result.Data with:
 //   - ok         (bool):   true on successful append.

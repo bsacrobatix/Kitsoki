@@ -21,7 +21,7 @@ host_handlers:
     data:
       ok: true
       tickets: "TKT-100: foo"
-  # bugfix's executing rooms call host.oracle.ask_with_mcp + iface
+  # bugfix's executing rooms call host.oracle.task / decide / ask + iface
   # handlers; we provide bare stubs even though pickup_to_bugfix only
   # walks INTO bf and stops at idle.
   host.append_to_file:
@@ -34,7 +34,39 @@ host_handlers:
     data: { ok: true, log: "" }
   host.local:
     data: { ok: true, state: "success", log: "" }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "Stub artifact body."
+        bug_verified:     true
+        root_cause:       "stub"
+        fix_description:  "stub fix"
+        affected_files:   []
+        confidence:       0.9
+        reasoning:        "stub"
+        verdict:          "pass"
+        intent:           "accept"
+        reason:           "stub"
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "Stub artifact body."
+        bug_verified:     true
+        root_cause:       "stub"
+        fix_description:  "stub fix"
+        affected_files:   []
+        confidence:       0.9
+        reasoning:        "stub"
+        verdict:          "pass"
+        intent:           "accept"
+        reason:           "stub"
+
+  host.oracle.decide:
     data:
       ok: true
       submitted:

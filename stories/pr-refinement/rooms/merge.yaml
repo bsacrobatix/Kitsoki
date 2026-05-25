@@ -101,8 +101,9 @@ states:
           state:   merge_awaiting_reply
           body:    "PR {{ world.pr_id }} merged at {{ world.merge_sha }}."
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
-        invoke: host.oracle.ask_with_mcp
+        invoke: host.oracle.decide
         with:
+          agent: judge
           prompt: prompts/judge_merge.md
           schema: schemas/judge_verdict.json
           args:

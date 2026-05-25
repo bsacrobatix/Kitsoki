@@ -34,7 +34,51 @@ host_handlers:
     data: { ok: true, sha: "abc123", diff: "" }
   host.local:
     data: { ok: true, log: "PASS", passed: 1, failed: 0 }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub artifact body for state-machine testing only."
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Fix the thing in a sufficiently detailed way that the LLM-judge will accept it."
+        root_cause:      "Off-by-one in the renderer somewhere fascinating."
+        affected_files:  ["x.go"]
+        confidence:      0.9
+        reasoning:       "Trace shows the off-by-one in the renderer; the fix is mechanical."
+        status:          "passed"
+        tests_run:       { passed: 1, failed: 0, log: "PASS" }
+        outcome:         "pass"
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need a regression test asserting on the exact width.", severity: "medium" }
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Looks good."
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub artifact body for state-machine testing only."
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Fix the thing in a sufficiently detailed way that the LLM-judge will accept it."
+        root_cause:      "Off-by-one in the renderer somewhere fascinating."
+        affected_files:  ["x.go"]
+        confidence:      0.9
+        reasoning:       "Trace shows the off-by-one in the renderer; the fix is mechanical."
+        status:          "passed"
+        tests_run:       { passed: 1, failed: 0, log: "PASS" }
+        outcome:         "pass"
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need a regression test asserting on the exact width.", severity: "medium" }
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Looks good."
+
+  host.oracle.decide:
     data:
       ok: true
       submitted:

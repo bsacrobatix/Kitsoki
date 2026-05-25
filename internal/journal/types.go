@@ -148,14 +148,40 @@ const KindChatDriveFailed = "chat.drive.failed"
 // without dispatch. Body: {drive_id, chat_id, reason}.
 const KindChatDriveDismissed = "chat.drive.dismissed"
 
+// ---- oracle-split Phase 4 event kinds (task trace) ---------------------------
+
+// KindTaskTool records a single tool call by a task agent. Body shape:
+//
+//	{tool, input, output_preview, trace_id, parent_trace_id, seq}
+//
+// Stream-only variants (task.tool.start / task.tool.end) are emitted
+// to the StreamSink but NOT written to the journal (D17). Only this
+// rolled-up event is journalled — one entry per tool call.
+const KindTaskTool = "task.tool"
+
+// KindTaskAcceptanceAttempt records one pass of the acceptance loop
+// (post_cmd run or schema-only check). Body:
+//
+//	{attempt, exit_code, stdout_preview, rejected_reason}
+const KindTaskAcceptanceAttempt = "task.acceptance.attempt"
+
+// KindTaskEnd records the terminal event of a task call. Body:
+//
+//	{outcome, submitted, files_changed, final_diff, replay_mode,
+//	 initial_state_hash, trace_id}
+//
+// replay_mode is one of "file_diff", "sandboxed_write", or
+// "external_side_effect".
+const KindTaskEnd = "task.end"
+
 // ---- Predicate helpers ------------------------------------------------------
 
 // patchKinds is the set of patch-entry kind values.
 var patchKinds = map[string]struct{}{
-	KindWorldPatch:    {},
+	KindWorldPatch:      {},
 	KindStateTransition: {},
-	KindChatsAppend:   {},
-	KindJobsUpdate:    {},
+	KindChatsAppend:     {},
+	KindJobsUpdate:      {},
 }
 
 // checkpointKinds is the set of checkpoint-entry kind values.

@@ -9,7 +9,7 @@ A "story" is a directory the engine loads as one app: `app.yaml` (the
 manifest), `rooms/*.yaml` (state definitions, glued in via `include:`),
 `prompts/*.md` (LLM templates), `views/*.pongo` (typed-element base
 templates), `flows/*.yaml` (Mode-2 deterministic tests), optional
-`schemas/*.json` (typed-JSON contracts for `ask_with_mcp`), and an
+`schemas/*.json` (typed-JSON contracts for `decide`/`task`/`ask`), and an
 optional `README.md`.
 
 The gold-standard reference stories live in this repo. Read them in
@@ -42,7 +42,7 @@ stories/<name>/
 ├── views/                    optional; typed-element base templates
 │   ├── base.pongo            block contract: status / heading / body / choices / footer
 │   └── partials/             reusable {% include %}-able fragments
-├── schemas/*.json            JSON-schema contracts for ask_with_mcp
+├── schemas/*.json            JSON-schema contracts for decide/task/ask
 ├── flows/*.yaml              Mode-2 deterministic test fixtures
 ├── scenarios/*.yaml          optional; warp bases for operator smoke tests
 └── README.md                 mandatory if the story is importable
@@ -61,7 +61,7 @@ app:
 # Every host.* the story invokes must be listed here. iface defaults
 # (declared under host_interfaces:) are added implicitly by the loader.
 hosts:
-  - host.oracle.ask_with_mcp
+  - host.oracle.decide
   - host.inbox.add
 
 # Provider-neutral capability surfaces. Importers rebind via host_bindings.
@@ -136,7 +136,7 @@ states:
                 - label: "quit"
                 - label: "look"
     on_enter:
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.decide
         with:
           prompt: prompts/proposing_executing.md
           schema: schemas/proposing_artifact.json
@@ -223,7 +223,7 @@ effect — useful inside `on_enter:` for conditional host calls.
 ## 5. Host calls (`invoke:`)
 
 ```yaml
-- invoke: host.oracle.ask_with_mcp
+- invoke: host.oracle.decide
   with:
     prompt: prompts/proposing_executing.md
     schema: schemas/proposing_artifact.json
@@ -260,9 +260,11 @@ The built-in handlers (full reference in `docs/hosts.md`):
 | Handler | Use for |
 |---|---|
 | `host.run` | Shell out (argv mode preferred when args come from world). Returns `{stdout, exit_code, ok, stdout_json}`. |
-| `host.oracle.ask` | One-shot Claude call with a Markdown prompt template, `{{ args.X }}` placeholders. Returns `{stdout, exit_code, ok}`. |
-| `host.oracle.ask_with_mcp` | Same plus MCP servers + typed-JSON validator. The schema-checked payload comes back as `Result.Data.submitted`. The canonical pattern for "Claude produces a structured artifact." |
-| `host.oracle.talk` | Conversational, optionally chat-aware via `chat_id`. |
+| `host.oracle.extract` | Tiered resolver: synonyms → slot_template → llm. Returns typed JSON + `resolved_by`. |
+| `host.oracle.decide` | Typed LLM verdict; schema required; `submit` auto-attached; read-only tools. The canonical pattern for "Claude produces a structured artifact." |
+| `host.oracle.ask` | Read-only one-shot prose call; schema optional. |
+| `host.oracle.task` | Agentic write call with acceptance loop (schema required). |
+| `host.oracle.converse` | Conversational, optionally chat-aware via `chat_id`. |
 | `host.transport.post` | Post a message to a registered transport (tui / jira / bitbucket). |
 | `host.inbox.add` | Mirror an artifact into the operator's local inbox. |
 | `host.chat.*` | Persistent multi-turn chat threads scoped by `(app, room, scope_key)`. |

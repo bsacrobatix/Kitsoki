@@ -22,7 +22,35 @@ host_handlers:
     data: { ok: true, sha: "abc", diff: "" }
   host.local:
     data: { ok: true, log: "PASS", passed: 1, failed: 0 }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub proposal"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description:  "Sufficiently detailed fix description for the schemas."
+        root_cause:       "off-by-one"
+        affected_files:   ["x.go"]
+        confidence:       0.85
+        reasoning:        "Trace shows the off-by-one in the obvious place."
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub proposal"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description:  "Sufficiently detailed fix description for the schemas."
+        root_cause:       "off-by-one"
+        affected_files:   ["x.go"]
+        confidence:       0.85
+        reasoning:        "Trace shows the off-by-one in the obvious place."
+
+  host.oracle.decide:
     data:
       ok: true
       submitted:

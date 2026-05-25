@@ -35,7 +35,8 @@ app:
 
 hosts:
   - host.inbox.add
-  - host.oracle.ask_with_mcp
+  - host.oracle.ask
+  - host.oracle.decide
 
 # Four host_interfaces — code-review only needs ticket (optional, for
 # author lookups), vcs (diff, pr_status, pr_comment), and transport

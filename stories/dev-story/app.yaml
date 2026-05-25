@@ -56,7 +56,20 @@ app:
 # are unioned implicitly at fold time via resolveAllInterfaces.
 hosts:
   - host.inbox.add
-  - host.oracle.ask_with_mcp
+  - host.oracle.ask
+
+# Persona table (oracle-split proposal §3.5).
+#
+# The dev-story hub's own oracle room makes one-shot prose Q&A
+# calls — read-only inspection, no schema. The verb is ask.
+#
+#   oracle_qa    ask   one-shot prose Q&A (oracle_asking room)
+agents:
+  oracle_qa:
+    system_prompt: "You are an engineering assistant. Answer the operator's question clearly and concisely based on your knowledge and any context provided."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob]
+    bash_profile: read-only
 
 # Six host_interfaces — same provider-neutral surfaces declared by the
 # imported stories. Declaring them here too lets the dev-story hub

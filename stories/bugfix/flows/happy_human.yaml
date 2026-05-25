@@ -5,7 +5,7 @@
 # advances to the next phase — one keystroke per checkpoint.
 #
 # The flow runner stubs every host call:
-#   - host.oracle.ask_with_mcp returns canned `submitted:` artifacts
+#   - host.oracle.decide returns canned `submitted:` artifacts
 #     per room. The first call (reproducing.on_enter) returns the
 #     reproduction artifact; the next room's call binds the same key
 #     to its own canned payload, etc.
@@ -67,18 +67,84 @@ host_handlers:
   host.local:
     data: { ok: true, log: "PASS: 12 tests", passed: 12, failed: 0 }
 
-  # The oracle calls. We have to register host.oracle.ask_with_mcp once;
-  # every room's call hits the same stub and returns the same Data.
-  # That's intentional for happy_human — the artifact_* keys all read from
-  # the same submitted: payload, but each room binds it into its OWN world
-  # key (reproduction_artifact, propose_fix_artifact, etc.), so they don't
-  # clobber each other.
+  # The oracle calls. Every room's decide/ask/task call hits its matching
+  # stub and returns the same Data. That's intentional for happy_human —
+  # the artifact_* keys all read from the same submitted: payload, but each
+  # room binds it into its OWN world key (reproduction_artifact, etc.), so
+  # they don't clobber each other.
   #
-  # The judge prompts ALSO go through host.oracle.ask_with_mcp; since we
-  # only have one stub, the judge prompts in judge_mode=human are NEVER
-  # invoked (the `when:` clause skips them). So a single Data payload that
-  # looks like an artifact is fine in this flow.
-  host.oracle.ask_with_mcp:
+  # Judge prompts use host.oracle.decide; since judge_mode=human, the
+  # `when:` clause skips them. The single Data payload looks like an
+  # artifact, which is fine.
+  host.oracle.task:
+    data:
+      stdout: "{\"summary_title\":\"...\",\"summary_markdown\":\"...\"}"
+      ok: true
+      submitted:
+        summary_title:    "Stub artifact"
+        summary_markdown: |
+          # Stub artifact body
+
+          This is a flow-fixture stub payload covering every checkpoint room.
+          The same payload binds into reproduction_artifact, propose_fix_artifact,
+          implement_review_artifact, validate_artifact, done_artifact in turn.
+
+          It satisfies the schemas only loosely — flow fixtures don't run the
+          validator subprocess (no -validate flag in the orchestrator call),
+          so this stub is sufficient for state-machine testing.
+        bug_verified: true
+        steps:        ["start kitsoki", "press ESC", "observe hang"]
+        involved_components:
+          - { name: "internal/tui", reason: "ESC handler routes through here" }
+        fix_description:        "Drain the input queue in the ESC handler instead of blocking on the channel send so the foyer rerender doesn't deadlock on a closed peer."
+        root_cause:             "The ESC handler blocks on a channel send to a peer that has already been closed by an earlier teardown; the rerender goroutine is the only consumer, and it has already exited."
+        affected_files:         ["internal/tui/tui.go", "internal/tui/keys.go"]
+        confidence:             0.85
+        reasoning:              "Trace shows the foyer's teardown closes the rerender channel before the ESC handler is unregistered; the next ESC press blocks. Draining-instead-of-send is the conventional fix for this pattern in our codebase (see internal/jobs/scheduler.go for a parallel example)."
+        status:                 "passed"
+        tests_added:            ["internal/tui/tui_esc_test.go"]
+        tests_run:              { passed: 12, failed: 0, log: "PASS: 12 tests" }
+        outcome:                "pass"
+        evidence:               { build: "ok", api: "n/a", ui: "n/a" }
+        next_action_hint:       ""
+        lessons:
+          - { category: "channel-lifetimes", description: "Closing a channel before unregistering its only producer is a deadlock pattern we've now hit twice; codify a lint rule.", severity: "high" }
+
+  host.oracle.ask:
+    data:
+      stdout: "{\"summary_title\":\"...\",\"summary_markdown\":\"...\"}"
+      ok: true
+      submitted:
+        summary_title:    "Stub artifact"
+        summary_markdown: |
+          # Stub artifact body
+
+          This is a flow-fixture stub payload covering every checkpoint room.
+          The same payload binds into reproduction_artifact, propose_fix_artifact,
+          implement_review_artifact, validate_artifact, done_artifact in turn.
+
+          It satisfies the schemas only loosely — flow fixtures don't run the
+          validator subprocess (no -validate flag in the orchestrator call),
+          so this stub is sufficient for state-machine testing.
+        bug_verified: true
+        steps:        ["start kitsoki", "press ESC", "observe hang"]
+        involved_components:
+          - { name: "internal/tui", reason: "ESC handler routes through here" }
+        fix_description:        "Drain the input queue in the ESC handler instead of blocking on the channel send so the foyer rerender doesn't deadlock on a closed peer."
+        root_cause:             "The ESC handler blocks on a channel send to a peer that has already been closed by an earlier teardown; the rerender goroutine is the only consumer, and it has already exited."
+        affected_files:         ["internal/tui/tui.go", "internal/tui/keys.go"]
+        confidence:             0.85
+        reasoning:              "Trace shows the foyer's teardown closes the rerender channel before the ESC handler is unregistered; the next ESC press blocks. Draining-instead-of-send is the conventional fix for this pattern in our codebase (see internal/jobs/scheduler.go for a parallel example)."
+        status:                 "passed"
+        tests_added:            ["internal/tui/tui_esc_test.go"]
+        tests_run:              { passed: 12, failed: 0, log: "PASS: 12 tests" }
+        outcome:                "pass"
+        evidence:               { build: "ok", api: "n/a", ui: "n/a" }
+        next_action_hint:       ""
+        lessons:
+          - { category: "channel-lifetimes", description: "Closing a channel before unregistering its only producer is a deadlock pattern we've now hit twice; codify a lint rule.", severity: "high" }
+
+  host.oracle.decide:
     data:
       stdout: "{\"summary_title\":\"...\",\"summary_markdown\":\"...\"}"
       ok: true
@@ -114,7 +180,7 @@ host_handlers:
 
 turns:
 
-  # Idle → reproducing. on_enter runs host.oracle.ask_with_mcp and binds
+  # Idle → reproducing. on_enter runs host.oracle.task and binds
   # the whole submitted: payload into world.reproduction_artifact.
   - intent: { name: start, slots: {} }
     expect_state: reproducing

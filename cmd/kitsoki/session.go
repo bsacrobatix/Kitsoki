@@ -616,8 +616,8 @@ If no lock row exists, exits 0 with {"detached":false}.`,
 			db := s.DB()
 
 			var (
-				ownerPID    int
-				ownerHost   string
+				ownerPID     int
+				ownerHost    string
 				acquiredAtUS int64
 			)
 			err = db.QueryRowContext(ctx,
@@ -1304,7 +1304,7 @@ func externalKeysView(keys []store.ExternalKey) []map[string]any {
 // JIRA_USERNAME, and JIRA_API_TOKEN env vars are all set; adds a
 // BitbucketTransport when a Bitbucket Bearer token is discoverable
 // (either via $BITBUCKET_TOKEN or the standard Acronis location
-// ``~/.config/acronis/bitbucket-token``).
+// “~/.config/acronis/bitbucket-token“).
 //
 // Setting JIRA_INSECURE_SKIP_VERIFY=1 disables TLS verification on the
 // Jira HTTP client.  This is needed for internal/self-hosted instances
@@ -1359,7 +1359,7 @@ func buildTransportRegistry() (*transport.Registry, error) {
 
 // loadBitbucketToken resolves the Bitbucket bearer token.  Preference:
 //  1. $BITBUCKET_TOKEN (test overrides + CI),
-//  2. ``~/.config/acronis/bitbucket-token`` (the standard Acronis location
+//  2. “~/.config/acronis/bitbucket-token“ (the standard Acronis location
 //     read by tools/loopy/bugfix/lib/creds.bitbucket_token).
 //
 // Returns the empty string when neither source is available so

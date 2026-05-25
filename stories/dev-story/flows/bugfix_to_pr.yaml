@@ -49,7 +49,69 @@ host_handlers:
   # checkpoint (the artifact-schema and judge-schema fields coexist on
   # the same envelope; additionalProperties: true tolerates the unused
   # fields per schema).
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        # Artifact fields (shared across reproduction / propose / test /
+        # validate / done — each room binds the WHOLE submitted: blob
+        # into its OWN world key, so they don't trample each other).
+        summary_title:    "Stub"
+        summary_markdown: "A stub artifact body; deterministic across rooms."
+        bug_verified:     true
+        steps:            ["s1", "s2"]
+        involved_components:
+          - { name: "internal/tui", reason: "ESC handler" }
+        fix_description:  "Drain the input queue in the ESC handler."
+        root_cause:       "The ESC handler blocks on a closed channel."
+        affected_files:   ["internal/tui/tui.go"]
+        confidence:       0.85
+        reasoning:        "Trace shows the deadlock; same shape as the foyer fix."
+        status:           "passed"
+        tests_added:      ["internal/tui/esc_test.go"]
+        tests_run:        { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:          "pass"
+        evidence:         { build: "ok", api: "n/a", ui: "n/a" }
+        lessons:
+          - { category: "channels", description: "Always unregister producers before closing channels; deadlock pattern.", severity: "high" }
+        # Judge verdict fields (additionalProperties: true on artifact
+        # schemas tolerates them).
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Stub artifact passes the schema; accept advances."
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        # Artifact fields (shared across reproduction / propose / test /
+        # validate / done — each room binds the WHOLE submitted: blob
+        # into its OWN world key, so they don't trample each other).
+        summary_title:    "Stub"
+        summary_markdown: "A stub artifact body; deterministic across rooms."
+        bug_verified:     true
+        steps:            ["s1", "s2"]
+        involved_components:
+          - { name: "internal/tui", reason: "ESC handler" }
+        fix_description:  "Drain the input queue in the ESC handler."
+        root_cause:       "The ESC handler blocks on a closed channel."
+        affected_files:   ["internal/tui/tui.go"]
+        confidence:       0.85
+        reasoning:        "Trace shows the deadlock; same shape as the foyer fix."
+        status:           "passed"
+        tests_added:      ["internal/tui/esc_test.go"]
+        tests_run:        { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:          "pass"
+        evidence:         { build: "ok", api: "n/a", ui: "n/a" }
+        lessons:
+          - { category: "channels", description: "Always unregister producers before closing channels; deadlock pattern.", severity: "high" }
+        # Judge verdict fields (additionalProperties: true on artifact
+        # schemas tolerates them).
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Stub artifact passes the schema; accept advances."
+
+  host.oracle.decide:
     data:
       ok: true
       submitted:

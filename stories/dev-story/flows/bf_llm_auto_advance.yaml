@@ -57,7 +57,53 @@ host_handlers:
   # different ticket. The verdict.intent="accept" is the BARE name
   # the LLM produces; the dispatcher resolves it through the
   # imported state's IntentAliases to `bf__accept` and fires the arc.
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Auto-advance regression"
+        summary_markdown: "Confirms emit_intent fires across imports."
+        bug_verified:     true
+        involved_components: [{ name: "machine", reason: "dispatcher resolution" }]
+        fix_description:     "Resolve bare emit names through State.IntentAliases."
+        root_cause:          "Dispatcher used bare emit name; rewriter renamed the arc."
+        affected_files:      ["internal/machine/machine.go"]
+        confidence:          0.92
+        reasoning:           "Static analysis matches the trace."
+        status:              "passed"
+        tests_run:           { passed: 4, failed: 0, log: "PASS" }
+        outcome:             "pass"
+        evidence:            { build: "ok", api: "n/a", ui: "ok" }
+        lessons:
+          - { category: "imports", description: "Cross-boundary intent dispatch needs alias resolution.", severity: "low" }
+        verdict: "pass"
+        intent:  "accept"
+        reason:  "High confidence; auto-advance."
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Auto-advance regression"
+        summary_markdown: "Confirms emit_intent fires across imports."
+        bug_verified:     true
+        involved_components: [{ name: "machine", reason: "dispatcher resolution" }]
+        fix_description:     "Resolve bare emit names through State.IntentAliases."
+        root_cause:          "Dispatcher used bare emit name; rewriter renamed the arc."
+        affected_files:      ["internal/machine/machine.go"]
+        confidence:          0.92
+        reasoning:           "Static analysis matches the trace."
+        status:              "passed"
+        tests_run:           { passed: 4, failed: 0, log: "PASS" }
+        outcome:             "pass"
+        evidence:            { build: "ok", api: "n/a", ui: "ok" }
+        lessons:
+          - { category: "imports", description: "Cross-boundary intent dispatch needs alias resolution.", severity: "low" }
+        verdict: "pass"
+        intent:  "accept"
+        reason:  "High confidence; auto-advance."
+
+  host.oracle.decide:
     data:
       ok: true
       submitted:

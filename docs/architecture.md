@@ -661,7 +661,219 @@ file is a complete after-the-fact transcript.
 
 ---
 
-## 12. Where to go next
+## 12. Oracle-split foundations (Phase 1)
+
+The oracle-split work separates the oracle surface into five named verbs
+ordered by blast radius (`extract`, `decide`, `ask`, `task`, `converse`).
+Phase 1 lands the shared infrastructure all five verbs build on.
+See [`docs/hosts.md` — Oracle verb summary](hosts.md#oracle-verb-summary)
+for the verb table and selection guide.
+
+### Streaming sink (`internal/host/oracle_stream.go`)
+
+Every oracle handler calls `OracleStreamer.Run(ctx)` instead of forking claude
+directly. When a `StreamSink` is installed on the context (the TUI wires one in
+for live progress), the streamer appends `--output-format stream-json --verbose`
+and tees each event to the sink via the existing `emitStreamEvent` path. When no
+sink is present, it falls back to `--output-format text`. This ensures all five
+verbs stream by default in any `StreamSink`-aware context and produce no
+behavioural regression in test/CLI paths.
+
+### Bash-profile wrapper (`internal/host/bash_profile.go` + `bash_mcp.go`)
+
+Three profiles restrict the Bash tool surface for `ask` and `decide` agents:
+
+- **read-only** — conservative built-in allowlist: grep, rg, find, cat, head,
+  tail, ls, wc, file, stat, jq, sort, uniq, cut, tr, echo, printf, env, which,
+  type, git (read-only subcommands only — see below), sed (no `-i`/`--in-place`),
+  awk (no `system()` or `getline`). `python3` is **not** on the default allowlist
+  because `python3 -c '…'` allows arbitrary code; authors who need it must use the
+  `commands:` profile and explicitly own the risk.
+- **commands** — explicit argv0 allowlist maintained by the author.
+- **sandboxed-write** — any command allowed, but cwd is a per-call temp dir
+  and `HTTP_PROXY` is set to an invalid value to block HTTP/HTTPS. Raw TCP
+  connections are not blocked — full network isolation is a hardening TODO.
+
+#### Read-only per-subcommand checks
+
+The read-only profile applies per-subcommand checks for programs whose default
+operation is safe but whose dangerous subsets would be missed by argv0 matching alone:
+
+- **git** — only `log`, `diff`, `show`, `status`, `blame`, `rev-parse`, `ls-files`,
+  `cat-file`, `branch` (listing flags only: `-a`, `-r`, `--list`, …), `tag -l`,
+  `remote -v` are allowed. All mutating subcommands (`push`, `pull`, `fetch`,
+  `reset`, `rm`, `commit`, `checkout`, `merge`, `rebase`, `clean`, `stash`, `gc`,
+  `prune`) and any flag containing `--exec` or `--upload-pack` are rejected.
+- **sed** — `-i`/`--in-place` (in-place file mutation) is rejected; stream editing
+  from stdin to stdout is allowed.
+- **awk** — scripts containing `system(` or `getline` are rejected; safe field-
+  extraction scripts are allowed. Note: awk scripts using `{}` block syntax contain
+  shell metacharacters (`{`, `}`) which are caught by the metacharacter check
+  before the awk-specific check; authors who need awk with block syntax should use
+  the `commands:` profile.
+
+Shell metacharacters (`;`, `|`, `&`, backticks, `$(…)`, `{`, `}`) are rejected in
+all profiles to prevent injection chains. The wrapper is best-effort: it does not
+parse shell quoting; a command containing metacharacters inside a quoted string is
+blocked even if it is safe. Full shell AST parsing is a hardening TODO.
+
+#### Bash MCP enforcement (`internal/host/bash_mcp.go`)
+
+Before this fix, `ApplyBashProfile` was defined but never called from production
+code. Claude's built-in Bash implementation ran commands directly, bypassing all
+profile restrictions.
+
+The fix routes every Bash call through a kitsoki-owned MCP server
+(`BashMCPServer`). When an `ask` or `decide` agent declares `Bash` in its tool
+list, the handler:
+
+1. Calls `BuildBashMCPEntry` to write a profile config temp file and build an MCP
+   server entry that runs `kitsoki mcp-bash --profile-config <path>`.
+2. Rewrites `"Bash"` → `"mcp__kitsoki-bash__Bash"` in `--allowedTools` so claude
+   routes Bash calls through the kitsoki server.
+3. Passes `--mcp-config` pointing at the combined MCP config (kitsoki-bash plus any
+   submit validator) to claude.
+
+The `kitsoki mcp-bash` subprocess reads the profile config, calls `ApplyBashProfile`
+on every command, and either rejects (returning a tool error the LLM sees and can
+self-correct from) or execs the command directly (no `sh -c`; command is split on
+whitespace to avoid shell injection).
+
+For `task` and `converse`, the agent gets unrestricted Bash from claude's built-in
+implementation. Those verbs are the mutation verbs and their Bash surface is
+intentionally unrestricted within the agent's declared permissions.
+
+### Validator sandbox (`internal/host/validator_sandbox.go`)
+
+Validator subprocesses for `decide` and `extract` calls run inside
+`RunValidatorSandboxed`. Platform support:
+
+- **Linux** — attempts `unshare -rn` (new user namespace + new network namespace)
+  via a probe invocation (`unshare -rn /bin/true`) before running the real
+  subprocess. The `-r` flag maps the current UID to root inside the user namespace,
+  enabling unprivileged network-namespace creation on kernels where
+  `CONFIG_USER_NS=y` and `/proc/sys/kernel/unprivileged_userns_clone` is enabled.
+  If the probe fails (binary not found, kernel rejects the syscall, or unprivileged
+  user namespaces are disabled), the handler emits `slog.WarnContext` with
+  "validator sandbox unavailable: network not isolated; only HTTP_PROXY env-var
+  protection applies" and runs the subprocess unsandboxed. Operators who see this
+  warning should check `/proc/sys/kernel/unprivileged_userns_clone` or consider
+  enabling user namespaces. Filesystem write isolation is NOT enforced on Linux in
+  Phase 1; full mount-namespace isolation requires root or a suid helper and is a
+  hardening TODO.
+- **macOS** — uses `sandbox-exec -f <profile>` with a Seatbelt profile that denies
+  writes outside the scratch dir and denies network. Falls back to the env-var deny
+  path when `sandbox-exec` is not found.
+- **Windows** — no sandbox support in Phase 1. Callers must set
+  `UnsafeNoSandbox: true`; the loader emits a warn-line when an app running on
+  Windows declares a validator without this opt-out.
+
+All platforms set `HOME` and `TMPDIR` to the scratch dir and apply `MakeSandboxEnv()`
+(HTTP_PROXY trick) to the subprocess environment.
+
+---
+
+## 13. Task spans and replay modes
+
+`host.oracle.task` is the agentic verb in the oracle-split vocabulary. Unlike
+the single-shot oracle verbs (`extract`, `decide`, `ask`), a task span launches
+a multi-turn Claude session with a declared tool surface, monitors every tool
+call, and records enough state to re-run or analyse the task later without
+invoking the LLM again.
+
+### 13.1 What a task span records
+
+When a `host.oracle.task` invocation completes, three replay artifacts are
+captured in the terminal `task.end` journal event:
+
+| Artifact | Field | What it is |
+|---|---|---|
+| Initial state hash | `initial_state_hash` | `git:<HEAD SHA>` for git trees; `tree:<sha256>` for non-git directories. Fingerprints the working tree *before* the task ran. |
+| Final diff | `final_diff` | Output of `git diff --no-color HEAD`, or empty string if nothing changed. |
+| Files changed | `files_changed` | List of paths from `git diff --name-only HEAD`. |
+| Replay mode | `replay_mode` | One of `file_diff`, `sandboxed_write`, `external_side_effect` — see §12.2. |
+
+For Mode B tasks (sandboxed writes), an optional tarball of the scratch
+directory is available for offline inspection.
+
+During the task, every tool call the embedded Claude session makes is
+journalled as a `task.tool` event. The streaming surface emits transient
+`task.tool.start` / `task.tool.end` events so a TUI can show live tool
+activity; only the rolled-up `task.tool` is persisted.
+
+The three journal event kinds defined in `internal/journal/types.go`:
+
+| Kind | Stream | Journal | Purpose |
+|---|---|---|---|
+| `task.tool.start` | Yes | No | Tool invocation began (live feed). |
+| `task.tool.end` | Yes | No | Tool invocation finished (live feed). |
+| `task.tool` | No | Yes | Rolled-up tool record (input preview, output preview, seq, trace IDs). |
+| `task.acceptance.attempt` | Yes | Yes | Each attempt against the acceptance validator. |
+| `task.end` | Yes | Yes | Terminal event with replay artifacts and outcome. |
+
+### 13.2 Replay modes
+
+Every task span is classified into one of three replay modes at recording time.
+The classification is deterministic: it depends only on the agent declaration,
+not on what actually ran.
+
+**Mode A — `file_diff`**: The agent uses only filesystem tools (Read, Grep,
+Glob, Edit, Write, Bash with a read-only or unrestricted profile) and has no
+declared external side effects. The task can be re-applied to any working tree
+that matches `initial_state_hash` by feeding `final_diff` through `git apply`.
+This is the regression-replay mode for code-writing tasks and is the default.
+
+**Mode B — `sandboxed_write`**: The agent's `BashProfile` is
+`BashProfileSandboxWrite`. Writes are isolated to a scratch directory. The
+task can be replayed by re-running the agent against a fresh scratch
+environment; a tarball of the original scratch dir is captured for comparison.
+
+**Mode C — `external_side_effect`**: The agent has `external_side_effect: true`
+(author-declared) or the tool surface includes `WebFetch` / `WebSearch`.
+Replay of external writes is not safe. Mode C spans are skipped in
+`kitsoki replay --mode file_diff` and counted in the end-of-replay summary:
+`"skipped N external-side-effect spans."` They can be re-run interactively
+with `--mode llm_rerun` or `--mode hybrid`.
+
+Classification logic lives in `internal/host/oracle_task_replay.go`:
+`inferReplayMode(agent Agent, tools []string) ReplayMode`.
+
+### 13.3 Read-snapshot cap
+
+To keep replay artifacts manageable, tool output stored in `task.tool` journal
+events is capped at **256 KiB**. Output that fits is stored verbatim. Output
+that exceeds the cap is replaced with:
+
+```
+sha256:<hex-of-full-output> (first 4096 bytes follow)
+<first 4096 bytes of the output>
+```
+
+This preserves debuggability (the digest identifies the exact content; the
+prefix gives enough context to see what was large) without unbounded journal
+growth. The cap applies to the stored preview only; the Claude session itself
+sees the full output.
+
+### 13.4 Acceptance loop
+
+`host.oracle.task` runs an acceptance loop. On first run, the agent gets a fresh Claude session
+(`--session-id` from a new ULID). On each retry (up to `max_retries`, default
+5), `--resume` continues the same session so the agent retains its conversational
+context. The kitsoki-internal `kitsoki.oracle.validate` and
+`kitsoki.oracle.task_context` MCP tools are injected automatically into the
+tool surface for the duration of the task.
+
+### 13.5 KITSOKI_SESSION_ID propagation
+
+The outer kitsoki session ID is injected into the subprocess environment as
+`KITSOKI_SESSION_ID`. This lets tool scripts and shell commands invoked by the
+embedded Claude session emit trace events that are attributed to the right
+session in the journal, enabling cross-process span stitching when the agent
+runs `kitsoki turn` or other kitsoki subcommands as tools.
+
+---
+
+## 14. Where to go next
 
 - **Authoring an app** → [`authoring.md`](authoring.md) and
   `kitsoki docs app-schema`.

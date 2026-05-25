@@ -12,8 +12,8 @@ hosts:
   - host.run
   - host.workspace_manager.get
   - host.oracle.ask
-  - host.oracle.ask_with_mcp
-  - host.oracle.talk
+  - host.oracle.decide
+  - host.oracle.converse
   - host.chat.resolve
   - host.chat.list
   - host.chat.transcript

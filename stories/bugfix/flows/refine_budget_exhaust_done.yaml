@@ -21,7 +21,25 @@ host_handlers:
     data: { ok: true, sha: "abc", diff: "" }
   host.local:
     data: { ok: true, log: "PASS", passed: 1, failed: 0 }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub done"
+        summary_markdown: "stub close-out"
+        lessons:
+          - { category: "stub", description: "Budget exhaust test for the done room.", severity: "low" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub done"
+        summary_markdown: "stub close-out"
+        lessons:
+          - { category: "stub", description: "Budget exhaust test for the done room.", severity: "low" }
+
+  host.oracle.decide:
     data:
       ok: true
       submitted:

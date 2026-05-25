@@ -48,12 +48,25 @@ app:
 
 # Host allow-list.  iface.<name>.<op> dispatch sites union their bindings
 # into the hosts list implicitly through resolveAllInterfaces; bare calls
-# (host.inbox.add, host.oracle.ask_with_mcp, host.run) must be listed
+# (host.inbox.add, host.oracle.decide, host.run) must be listed
 # explicitly.
 hosts:
   - host.inbox.add
-  - host.oracle.ask_with_mcp
+  - host.oracle.decide
   - host.run
+
+# Persona table (oracle-split proposal §3.5).
+#
+# All LLM calls in cypilot are inter-phase judges — every
+# artifact is produced by iface.artifact.create (the cypilot
+# CLI). The oracle surface is verdict-only.
+#
+#   judge    decide   schema=judge_verdict.json; every awaiting_reply gate
+agents:
+  judge:
+    system_prompt: "You are a quality gate. Evaluate the provided artifact against the stated criteria and emit a structured verdict: accept, refine, or uncertain."
+    model: claude-sonnet-4-6
+    tools: []
 
 # Five host_interfaces — the four provider-neutral surfaces every parent
 # story binds (ticket, vcs, ci, transport) plus the NEW `artifact` iface

@@ -289,7 +289,7 @@ func newTestController(t *testing.T, opts ...func(*Controller)) (*Controller, *f
 	reg := newFakeRegistry(agents.Agent{
 		Name:         "story-author",
 		SystemPrompt: "you are the story author.",
-		Tools:        []string{"host.oracle.talk", "host.oracle.ask"},
+		Tools:        []string{"host.oracle.converse", "host.oracle.ask"},
 		DefaultCwd:   "/tmp/agent-default-cwd",
 	})
 	def := &app.AppDef{
@@ -299,7 +299,7 @@ func newTestController(t *testing.T, opts ...func(*Controller)) (*Controller, *f
 				Trigger: "meta",
 				Label:   "improve the story",
 				Agent:   "story-author",
-				Tools:   []string{"host.oracle.talk"},
+				Tools:   []string{"host.oracle.converse"},
 			},
 		},
 	}
@@ -478,7 +478,7 @@ func TestController_Send_NoSessionWriteWhenUnchanged(t *testing.T) {
 func TestController_Send_ToolAllowlistPassed(t *testing.T) {
 	c, _, oracle := newTestController(t)
 	// Override the mode's tool list to a known value.
-	c.AppDef.MetaModes["story"].Tools = []string{"host.oracle.talk"}
+	c.AppDef.MetaModes["story"].Tools = []string{"host.oracle.converse"}
 
 	s, err := c.Enter(context.Background(), makeSnapshot("main"), "story")
 	if err != nil {
@@ -489,7 +489,7 @@ func TestController_Send_ToolAllowlistPassed(t *testing.T) {
 	}
 
 	got := oracle.gotInput.ToolAllowlist
-	want := []string{"host.oracle.talk"}
+	want := []string{"host.oracle.converse"}
 	if !equalStrings(got, want) {
 		t.Errorf("ToolAllowlist = %v, want %v", got, want)
 	}
@@ -1024,7 +1024,7 @@ func TestController_Send_NormalisesToolNames(t *testing.T) {
 	// Mix of short and qualified names — both should pass through
 	// to the oracle as host.*.
 	c.AppDef.MetaModes["story"].Tools = []string{
-		"oracle.talk",
+		"oracle.converse",
 		"host.oracle.ask",
 		"git.diff",
 	}
@@ -1040,7 +1040,7 @@ func TestController_Send_NormalisesToolNames(t *testing.T) {
 	if _, err := c.Send(context.Background(), s, "hi", TurnContext{}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	want := []string{"host.oracle.talk", "host.oracle.ask", "host.git.diff"}
+	want := []string{"host.oracle.converse", "host.oracle.ask", "host.git.diff"}
 	if !equalStrings(seenAllowlist, want) {
 		t.Errorf("ToolAllowlist = %v, want %v", seenAllowlist, want)
 	}
@@ -1141,7 +1141,7 @@ func TestNormaliseToolName(t *testing.T) {
 	cases := []struct {
 		in, want string
 	}{
-		{"oracle.talk", "host.oracle.talk"},
+		{"oracle.converse", "host.oracle.converse"},
 		{"host.oracle.ask", "host.oracle.ask"},
 		{"git.diff", "host.git.diff"},
 		{"", ""},

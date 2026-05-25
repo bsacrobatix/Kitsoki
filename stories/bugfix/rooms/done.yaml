@@ -72,8 +72,9 @@ states:
       # done's postmortem oracle mostly reads upstream artifact text —
       # consistency across rooms means an operator never has to remember
       # which oracle calls see which tree.
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.ask
         with:
+          agent: proposer
           prompt: prompts/done_executing.md
           schema: schemas/done_artifact.json
           working_dir: "{{ world.workdir }}"
@@ -89,8 +90,9 @@ states:
         on_error: idle
 
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
-        invoke: host.oracle.ask_with_mcp
+        invoke: host.oracle.decide
         with:
+          agent: judge
           prompt: prompts/judge_done.md
           schema: schemas/judge_verdict.json
           working_dir: "{{ world.workdir }}"

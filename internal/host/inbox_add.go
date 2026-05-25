@@ -68,20 +68,20 @@ func InboxAdderFromContext(ctx context.Context) InboxAdder {
 //
 // Optional args:
 //   - kind   (string): one of checkpoint / ack / info / action_required.
-//                      Defaults to "info" — the always-on contract has
-//                      no required severity.
+//     Defaults to "info" — the always-on contract has
+//     no required severity.
 //   - thread (string): correlation thread (e.g. the bug file path or
-//                      ticket id) so a future re-attach can wire the
-//                      notification back to its source.
+//     ticket id) so a future re-attach can wire the
+//     notification back to its source.
 //   - state  (string): destination state for the teleport target.  Bound
-//                      verbatim into the notification so the inbox UI
-//                      can deep-link.
+//     verbatim into the notification so the inbox UI
+//     can deep-link.
 //
 // Returns Result.Data with:
 //   - ok        (bool):  true when the call was accepted (even if the
-//                        adapter was absent — see package doc).
+//     adapter was absent — see package doc).
 //   - id        (string): the adapter-assigned notification id, "" if
-//                        no adapter was installed.
+//     no adapter was installed.
 //   - persisted (bool):  true iff an adapter accepted the write.
 //
 // Domain errors (returned via Result.Error) are reserved for malformed

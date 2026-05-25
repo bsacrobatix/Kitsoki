@@ -27,9 +27,9 @@ func TestCakeProject_AllThreeKindsListed(t *testing.T) {
 		t.Fatalf("expected 3 tickets, got %d (%v)", len(tickets), tickets)
 	}
 	wantByID := map[string]string{
-		"B-2026-05-18-list-broken":     "bug",
-		"F-2026-05-18-export-csv":      "feature",
-		"E-2026-05-18-notes-platform":  "epic",
+		"B-2026-05-18-list-broken":    "bug",
+		"F-2026-05-18-export-csv":     "feature",
+		"E-2026-05-18-notes-platform": "epic",
 	}
 	for _, row := range tickets {
 		id, _ := row["id"].(string)

@@ -30,10 +30,9 @@ host_handlers:
       comments: ""
   host.local_files.ticket:
     data: { ok: true }
-  host.oracle.ask_with_mcp:
+  host.oracle.decide:
     data:
       ok: true
-      stdout: "LGTM."
       submitted:
         summary_title:    "Docs LGTM"
         summary_markdown: "Doc-only PR; no functional concerns."
@@ -46,6 +45,10 @@ host_handlers:
         verdict:    "pass"
         intent:     "accept"
         reason:     "Docs PR; LGTM."
+  host.oracle.ask:
+    data:
+      ok: true
+      stdout: "LGTM."
 
 turns:
   - intent: { name: start, slots: {} }

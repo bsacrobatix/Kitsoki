@@ -236,6 +236,19 @@ groups):
 The entire `kitsoki.*` group is omitted from the injection set
 when `KITSOKI_REPO` is unset.
 
+**Oracle verb for read-only metas.** The two read-only modes above
+(`story.ask`, `kitsoki.ask`) — and any app-declared meta whose agent's
+`Tools` contains only read-only entries — use `host.oracle.ask` as
+their underlying oracle verb (oracle-split proposal §2.3, decision
+D14). The loader cross-checks: a meta whose agent carries `Edit` or
+`Write` in its tool list cannot be wired to `ask`; it must use
+`host.oracle.converse` (Phase 7) or `host.oracle.task` (Phase 4)
+instead. When declaring a read-only `/meta` overlay, set the agent's
+tools to the read-only allowlist and omit `bash_profile:` unless
+`Bash` is needed. The `host.oracle.ask` handler enforces the read-only
+contract at call time as a safety net even if the loader check is
+bypassed.
+
 An app suppresses or replaces a builtin by declaring its own
 `meta_modes.<group.verb>` with the same key. Trigger collisions
 between a builtin and a user-declared mode surface through normal
@@ -251,22 +264,23 @@ carrying compatibility shims. Use `/meta story bug` /
 
 ---
 
-## 4. Per-call agent selection on `host.oracle.ask_with_mcp`
+## 4. Per-call agent selection
 
 Outside meta mode, any state's `on_enter:` or transition `effects:`
 can target an agent for a single LLM call via the `agent:` argument
-on `host.oracle.ask_with_mcp`:
+on any `host.oracle.*` verb:
 
 ```yaml
 states:
   forecast:
     on_enter:
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.converse
         with:
           agent: weather-bot          # named agent from agents:
           args:
             location: "{{ world.where }}"
           chat_id: "{{ world.chat_id }}"
+          question: "What is the forecast for {{ world.where }}?"
         bind: { answer: answer }
 ```
 
@@ -296,7 +310,7 @@ per-call `agent:` arg > meta_modes[mode].agent > off_path.agent > app default
 ```
 
 Today the orchestrator-side off-path runtime still uses the legacy
-prompt-driven dispatch (see §10), so `off_path.agent:` loads,
+prompt-driven dispatch (see §11), so `off_path.agent:` loads,
 validates, but does not yet drive an LLM call. The slot is reserved
 so the future runtime stays declaratively configured.
 
@@ -498,7 +512,7 @@ contract.
 | Agents registry + `story-author` builtin | `internal/agents/` |
 | Meta-mode controller (Enter / Send / Exit, ledger, tree-diff reload, WithLock integration so meta turns serialize against drive dispatch / `chat continue` / `/attach`) | `internal/metamode/controller.go` |
 | TUI overlay, slash-command dispatch, `/meta list` rendering, `/attach` + `/sessions list|attach` | `internal/tui/metamode.go`, `internal/tui/tui.go`, `internal/tui/meta_attach.go`, `internal/tui/sessions.go` |
-| Per-call `agent:` arg on `host.oracle.ask_with_mcp` | `internal/host/oracle_ask_with_mcp.go` |
+| Per-call `agent:` arg on `host.oracle.*` verbs | `internal/host/oracle_ask.go`, `internal/host/oracle_decide.go`, `internal/host/oracle_extract.go`, `internal/host/oracle_task.go`, `internal/host/oracle_converse.go` |
 | Authoring-tool dispatcher (legacy structured tokens) | `internal/host/authoring_tools.go` |
 | Trace ring buffer + per-turn dump        | `internal/trace/ringbuffer.go` |
 | Process-wide wiring (registry install, trace file, chat store, tmux client, inbox watcher) | `cmd/kitsoki/main.go` |
@@ -514,7 +528,44 @@ In-tree apps with a working `meta_modes.story`:
 
 ---
 
-## 10. Limitations
+## 10. Oracle-verb mapping for meta and off-path (oracle-split Phase 7)
+
+The oracle-split proposal (§2.5 / D14) defines two flavours for the
+oracle call that backs each meta turn:
+
+| Flavour | Oracle verb | Permission surface |
+|---|---|---|
+| Read-only metas (inspect, explain, Q&A) | `host.oracle.ask` | Read-only tool surface; enforced by loader |
+| Free-form metas (edit files, run tools) | `host.oracle.converse` | `permission_mode:` gates mutation |
+
+**Today** all meta turns go through the controller's built-in dispatch
+path (not through a raw `host.oracle.*` effect). The mapping above is
+the *declarative target* — the shape that `/meta <name>` entries will
+declare in `app.yaml` once the controller is updated to route through
+the oracle surface:
+
+```yaml
+meta_modes:
+  advisor:
+    agent: bugfix-advisor
+    oracle_verb: converse        # free-form; may mutate
+    permission_mode: ask         # operator confirms each mutation
+
+  explainer:
+    agent: story-explainer
+    oracle_verb: ask             # read-only; loader enforces tool surface
+```
+
+For now the controller hardcodes `--permission-mode bypassPermissions`
+(see §10 Limitations below). When the controller migrates to the
+`host.oracle.*` surface, free-form metas that currently use
+`bypassPermissions` will declare `oracle_verb: converse` and read-only
+metas will declare `oracle_verb: ask`. The loader will cross-check the
+declared verb against the agent's tool surface at app-load time.
+
+---
+
+## 11. Limitations
 
 What you can rely on today, and what is still incomplete. Bring fresh
 eyes to these before designing a new app around them.

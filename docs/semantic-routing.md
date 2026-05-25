@@ -311,12 +311,36 @@ synonym layer maps them, the cache only sees exact lexical match.
 This is intentional: signature collision rates stay low, and the
 synonym → cache flow is the documented promotion path.
 
-## 5. See also
+## 5. Transport routing seam (oracle-split D13)
+
+The semantic routing tiers (§1.2 and §1.3) run through the same
+`host.oracle.extract` handler that an app author invokes explicitly via
+effects. `TrySemantic` calls `host.RunExtractForRouting`, which injects
+the already-compiled `semroute.Matcher` into the context rather than
+re-loading YAML from disk.
+
+This makes transport-level routing one consumer of the extract handler,
+not a parallel code path. Concretely:
+
+- All `extract.resolver.matched` trace events fire regardless of whether
+  the resolution came from a live session turn or a programmatic call.
+- The `resolved_by` field on journal entries (`synonyms` / `slot_template`
+  / `no_match`) is available for replay tools and dashboards.
+- A future `host.oracle.extract` invocation in an effect can reuse the
+  same in-process matcher the router already built — no double compile.
+
+From the app author's perspective there is no visible difference.
+Transport tests continue to pass unchanged; the seam is below the
+`Turn()` surface.
+
+## 6. See also
 
 - [`architecture.md`](architecture.md) §3 — where the routing tiers
   sit in the broader turn pipeline.
 - [`authoring.md`](authoring.md) §6.1 — the YAML reference for
   `synonyms:`.
+- [`hosts.md`](hosts.md#hostoracleextract) — `host.oracle.extract`
+  reference (oracle-split Phase 5 handler).
 - [`proposals/semantic-routing-proposal.md`](proposals/semantic-routing-proposal.md)
   — the design discussion + open questions.
 - `internal/slotparse/` godoc — every typed parser's exact contract.

@@ -78,12 +78,14 @@ func fakeOneShotMCPBin(t *testing.T) string {
 	return path
 }
 
-// TestOracleAskWithMCP_RegisteredAsBuiltin verifies the handler is wired in.
-func TestOracleAskWithMCP_RegisteredAsBuiltin(t *testing.T) {
+// TestOracleAskWithMCP_RemovedAsBuiltin verifies the handler is no longer
+// registered after Phase 9 alias removal. The handler Go code is retained
+// for internal use (offpath, metamode) but is not exposed in the registry.
+func TestOracleAskWithMCP_RemovedAsBuiltin(t *testing.T) {
 	r := host.NewRegistry()
 	host.RegisterBuiltins(r)
-	if _, ok := r.Get("host.oracle.ask_with_mcp"); !ok {
-		t.Fatal("host.oracle.ask_with_mcp was not registered by RegisterBuiltins")
+	if _, ok := r.Get("host.oracle.ask_with_mcp"); ok {
+		t.Fatal("host.oracle.ask_with_mcp should not be registered after Phase 9 alias removal")
 	}
 }
 

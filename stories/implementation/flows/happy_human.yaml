@@ -69,7 +69,7 @@ host_handlers:
   # test_artifact, review_artifact, judge_verdict (all keys live on the
   # same envelope; additionalProperties: true on the artifact schemas
   # tolerates the unused fields per schema).
-  host.oracle.ask_with_mcp:
+  host.oracle.decide:
     data:
       ok: true
       submitted:

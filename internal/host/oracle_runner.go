@@ -29,6 +29,12 @@ type ClaudeRun struct {
 	// surface this through Result.Error rather than a Go error so
 	// on_error: routing stays deterministic.
 	Infra error
+	// RawEvents holds every parsed JSONL event from a stream-json run.
+	// Populated by runClaudeStreamJSON; nil on the buffered-text path.
+	// Callers (e.g. observeTaskToolCalls) read RawEvents instead of
+	// re-parsing Stdout so they see the full stream including tool_use
+	// and tool_result blocks that runClaudeStreamJSON discards from Stdout.
+	RawEvents []json.RawMessage
 }
 
 // ClaudeRunner runs the claude binary one-shot and returns its
@@ -64,7 +70,16 @@ func ClaudeRunnerFromContext(ctx context.Context) ClaudeRunner {
 // stub) might naively return raw output. Enforce the contract at the
 // dispatcher so callers (and downstream code that splits on \n) never
 // see drift between exec and stubbed paths.
-func runClaudeOneShot(ctx context.Context, bin string, cliArgs []string, stdin, workingDir string) (ClaudeRun, error) {
+//
+// The optional sessionID, when non-empty, is injected as KITSOKI_SESSION_ID
+// into the subprocess environment per-subprocess (not via os.Setenv) so
+// concurrent callers don't race on the global env. Callers that don't yet
+// thread sessionID may omit the argument; existing call sites are unaffected.
+func runClaudeOneShot(ctx context.Context, bin string, cliArgs []string, stdin, workingDir string, sessionID ...string) (ClaudeRun, error) {
+	sid := ""
+	if len(sessionID) > 0 {
+		sid = sessionID[0]
+	}
 	var (
 		cr  ClaudeRun
 		err error
@@ -72,7 +87,7 @@ func runClaudeOneShot(ctx context.Context, bin string, cliArgs []string, stdin, 
 	if r := ClaudeRunnerFromContext(ctx); r != nil {
 		cr, err = r(ctx, cliArgs, stdin, workingDir)
 	} else {
-		cr, err = runClaudeOneShotReal(ctx, bin, cliArgs, stdin, workingDir)
+		cr, err = runClaudeOneShotReal(ctx, bin, cliArgs, stdin, workingDir, sid)
 	}
 	cr.Stdout = strings.TrimRight(cr.Stdout, "\n")
 	return cr, err
@@ -90,11 +105,14 @@ func runClaudeOneShot(ctx context.Context, bin string, cliArgs []string, stdin, 
 // `kitsoki` is only on PATH when the user has run `go install` or
 // otherwise placed it there — which `go run ./cmd/kitsoki ...`
 // users don't do, and the subprocess fails with "command not found".
-func runClaudeOneShotReal(ctx context.Context, bin string, cliArgs []string, stdin, workingDir string) (ClaudeRun, error) {
+//
+// sessionID, when non-empty, is injected as KITSOKI_SESSION_ID into
+// the subprocess environment without mutating the process-global env.
+func runClaudeOneShotReal(ctx context.Context, bin string, cliArgs []string, stdin, workingDir, sessionID string) (ClaudeRun, error) {
 	cmd := exec.CommandContext(ctx, bin, cliArgs...)
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Dir = workingDir
-	cmd.Env = envWithKitsokiBinOnPath(os.Environ())
+	cmd.Env = envWithSessionID(envWithKitsokiBinOnPath(os.Environ()), sessionID)
 
 	var so, se strings.Builder
 	cmd.Stdout = &so
@@ -129,6 +147,14 @@ func runClaudeOneShotReal(ctx context.Context, bin string, cliArgs []string, std
 // text-mode contract). The streaming branch only kicks in when no stub
 // is wired AND the binary actually emits JSONL.
 //
+// sessionID, when non-empty, is injected as KITSOKI_SESSION_ID into
+// the subprocess environment without mutating the process-global env.
+//
+// The returned ClaudeRun.RawEvents contains every parsed JSONL event
+// (in order). Callers such as observeTaskToolCalls read RawEvents
+// rather than re-parsing Stdout so they see the full stream including
+// tool_use / tool_result blocks.
+//
 // Stream-event shapes (Anthropic-style) we recognise:
 //   - {"type":"system","subtype":"init","session_id":"…",…}
 //   - {"type":"assistant","message":{"content":[{"type":"text","text":"…"}]…}}
@@ -140,7 +166,15 @@ func runClaudeOneShotReal(ctx context.Context, bin string, cliArgs []string, std
 // Defensive parsing: any unrecognised shape still emits an event with
 // the bare "type" + "subtype" so a future claude release adding a new
 // event kind doesn't go silently missing from the trace.
-func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdin, workingDir string) (ClaudeRun, string, error) {
+// runClaudeStreamJSON accepts an optional sessionID variadic; callers that
+// don't thread the session may omit it. The first element, if present, is
+// injected as KITSOKI_SESSION_ID per-subprocess (not via os.Setenv).
+func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdin, workingDir string, sessionID ...string) (ClaudeRun, string, error) {
+	sid := ""
+	if len(sessionID) > 0 {
+		sid = sessionID[0]
+	}
+
 	if r := ClaudeRunnerFromContext(ctx); r != nil {
 		// Test seam: stub almost certainly emits non-JSONL text. Run
 		// it once, parse what we can (zero or more JSONL events), and
@@ -149,7 +183,7 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		if err != nil {
 			return cr, "", err
 		}
-		reply, sessionID := parseStreamJSONOutput(ctx, cr.Stdout)
+		reply, parsedSID, rawEvs := parseStreamJSONOutput(ctx, cr.Stdout)
 		if strings.TrimSpace(reply) == "" {
 			// Fallback: stub emitted plain text. Honor the legacy
 			// buffered-text contract so the existing fake-claude
@@ -157,13 +191,14 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 			reply = cr.Stdout
 		}
 		cr.Stdout = reply
-		return cr, sessionID, nil
+		cr.RawEvents = rawEvs
+		return cr, parsedSID, nil
 	}
 
 	cmd := exec.CommandContext(ctx, bin, cliArgs...)
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Dir = workingDir
-	cmd.Env = envWithKitsokiBinOnPath(os.Environ())
+	cmd.Env = envWithSessionID(envWithKitsokiBinOnPath(os.Environ()), sid)
 
 	stdoutPipe, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
@@ -187,9 +222,10 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 	var (
 		assembledText strings.Builder
 		finalResult   string
-		sessionID     string
+		parsedSID     string
 		sawAnyJSON    bool
 		rawLines      strings.Builder
+		rawEvents     []json.RawMessage
 	)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -208,6 +244,7 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 			continue
 		}
 		sawAnyJSON = true
+		rawEvents = append(rawEvents, json.RawMessage(trimmed))
 		emitStreamEvent(ctx, ev)
 		text, tool, isResult, resultText, sid := classifyStreamEvent(ev)
 		_ = tool
@@ -217,8 +254,8 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		if isResult && resultText != "" {
 			finalResult = resultText
 		}
-		if sid != "" && sessionID == "" {
-			sessionID = sid
+		if sid != "" && parsedSID == "" {
+			parsedSID = sid
 		}
 	}
 	// scanner.Err() can return a "token too long" error if a single
@@ -228,10 +265,10 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 
 	waitErr := cmd.Wait()
 
-	cr := ClaudeRun{Stderr: se.String()}
+	cr := ClaudeRun{Stderr: se.String(), RawEvents: rawEvents}
 	if waitErr != nil {
 		if ctx.Err() != nil {
-			return ClaudeRun{}, sessionID, ctx.Err()
+			return ClaudeRun{}, parsedSID, ctx.Err()
 		}
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			cr.ExitCode = exitErr.ExitCode()
@@ -256,7 +293,7 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		reply = rawLines.String()
 	}
 	cr.Stdout = strings.TrimRight(reply, "\n")
-	return cr, sessionID, nil
+	return cr, parsedSID, nil
 }
 
 // emitStreamEvent surfaces one parsed stream-json event into slog so
@@ -497,8 +534,9 @@ func onelinePreview(s string, n int) string {
 
 // parseStreamJSONOutput parses a possibly-buffered chunk of stream-json
 // output (one event per line) without forking a subprocess. Used by
-// the test-stub fallback in runClaudeStreamJSON.
-func parseStreamJSONOutput(ctx context.Context, raw string) (reply, sessionID string) {
+// the test-stub fallback in runClaudeStreamJSON. Returns the reply
+// text, the session ID from system.init, and all parsed raw events.
+func parseStreamJSONOutput(ctx context.Context, raw string) (reply, sessionID string, rawEvents []json.RawMessage) {
 	var assembled strings.Builder
 	var finalResult string
 	scanner := bufio.NewScanner(strings.NewReader(raw))
@@ -512,6 +550,7 @@ func parseStreamJSONOutput(ctx context.Context, raw string) (reply, sessionID st
 		if jErr := json.Unmarshal([]byte(line), &ev); jErr != nil {
 			continue
 		}
+		rawEvents = append(rawEvents, json.RawMessage(line))
 		emitStreamEvent(ctx, ev)
 		text, _, isResult, resultText, sid := classifyStreamEvent(ev)
 		if text != "" {
@@ -528,7 +567,7 @@ func parseStreamJSONOutput(ctx context.Context, raw string) (reply, sessionID st
 	if strings.TrimSpace(reply) == "" {
 		reply = assembled.String()
 	}
-	return reply, sessionID
+	return reply, sessionID, rawEvents
 }
 
 // claudeExitErrorMessage builds the Result.Error string for a non-zero
@@ -587,6 +626,31 @@ func envWithKitsokiBinOnPath(env []string) []string {
 	}
 	if !found {
 		out = append(out, "PATH="+dir)
+	}
+	return out
+}
+
+// envWithSessionID returns a copy of env with KITSOKI_SESSION_ID set to
+// sessionID. When sessionID is empty the env is returned unchanged so
+// callers don't need to guard the call site. This is the per-subprocess
+// equivalent of os.Setenv — it does NOT mutate the process-global env.
+func envWithSessionID(env []string, sessionID string) []string {
+	if sessionID == "" {
+		return env
+	}
+	const key = "KITSOKI_SESSION_ID"
+	out := make([]string, 0, len(env)+1)
+	found := false
+	for _, kv := range env {
+		if strings.HasPrefix(kv, key+"=") {
+			out = append(out, key+"="+sessionID)
+			found = true
+			continue
+		}
+		out = append(out, kv)
+	}
+	if !found {
+		out = append(out, key+"="+sessionID)
 	}
 	return out
 }

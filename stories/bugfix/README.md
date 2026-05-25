@@ -122,7 +122,7 @@ workspace: host.workspace_manager, transport: host.jira_comment}`.
 ### Host requirements
 
 Standalone Wave 1 needs every iface's default handler PLUS
-`host.inbox.add` and `host.oracle.ask_with_mcp`. The flow fixtures
+`host.inbox.add` and the oracle verb handlers below. The flow fixtures
 stub them all with canned envelopes; Slice β ships the real handlers
 in `internal/host/`.
 
@@ -134,11 +134,34 @@ in `internal/host/`.
 | `host.git_worktree` | Slice β (in flight) | `internal/host/git_worktree.go` |
 | `host.append_to_file` | Slice β (in flight) | `internal/host/append_file_transport.go` |
 | `host.inbox.add` | Slice β (in flight) | `internal/host/inbox_add.go` |
-| `host.oracle.ask_with_mcp` | already shipped | `internal/host/oracle_ask_with_mcp.go` |
+| `host.oracle.task` | oracle-split Phase 8 | `internal/host/oracle_task.go` |
+| `host.oracle.ask` | oracle-split Phase 8 | `internal/host/oracle_ask.go` |
+| `host.oracle.decide` | oracle-split Phase 8 | `internal/host/oracle_decide.go` |
 
 The host registry's prefix-fallback lets each "default" handler back
 every op on the iface; per-op handlers can be added later without
 touching the YAML.
+
+### Oracle-split persona table (Phase 8)
+
+Each oracle call carries an `agent:` key selecting a persona declared
+in `app.yaml agents:`. The verb used per phase follows the oracle-split
+proposal §3.5 classification rules:
+
+| Persona | Verb | Phases |
+|---|---|---|
+| `reproducer` | `task` | `reproducing_executing` artifact call |
+| `proposer` | `ask` | `proposing_executing` artifact call, `done_executing` close-out |
+| `implementer` | `task` | `implementing_executing` implementation call |
+| `test_author` | `task` | `testing_executing` test-review call |
+| `validator` | `task` | `validating_executing` validation call |
+| `judge` | `decide` | every `*_awaiting_reply` judge call |
+
+`task` is for agentic calls that may read or write files. `ask` is for
+read-only structured analysis (no mutations; `proposer` carries
+`bash_profile: read-only`). `decide` is for verdict-only calls that
+evaluate a provided artifact and emit `{ verdict, intent, reason,
+confidence }` — no file access, no schema output beyond the verdict.
 
 ## Judge polymorphism
 
@@ -149,11 +172,11 @@ is `world.judge_mode`:
 | Mode | Behaviour at every checkpoint |
 |---|---|
 | `human` | Post + inbox-mirror; wait for an explicit reply intent. (No LLM call.) |
-| `llm` | Post + inbox-mirror + run the LLM-judge. The verdict lands in `world.llm_verdict`; when the verdict's `verdict`/`intent` are not "uncertain" AND `confidence >= judge_confidence_threshold` (defaults to 0.8), the `emit_intent:` effect at step 4 auto-fires the verdict's intent in the same turn. An uncertain or low-confidence verdict holds the state for an operator. |
+| `llm` | Post + inbox-mirror + run `host.oracle.decide` with the `judge` persona. The verdict lands in `world.llm_verdict`; when the verdict's `verdict`/`intent` are not "uncertain" AND `confidence >= judge_confidence_threshold` (defaults to 0.8), the `emit_intent:` effect at step 4 auto-fires the verdict's intent in the same turn. An uncertain or low-confidence verdict holds the state for an operator. |
 | `llm_then_human` | Same as `llm` for the auto-fire path; the mode flag exists so cyber-repo-flavour parent stories can declare "always also notify a human", which Wave 2 layers above this base contract. |
 
-The judge polymorphism is a single host call per checkpoint, gated by
-`when:` — **not** a fork in the state graph. The seven
+The judge polymorphism is a single `host.oracle.decide` call per
+checkpoint, gated by `when:` — **not** a fork in the state graph. The seven
 `_awaiting_reply` states have **identical** `on_enter` shapes
 (contract §6) — only `<phase>` and the next-room target vary.
 

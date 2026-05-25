@@ -3,12 +3,12 @@
 # State layout:
 #   oracle              — chat list view; on_enter loads the list via host.chat.list
 #   oracle_active       — transcript view for an existing open chat
-#   oracle_asking_new   — creates a fresh chat THEN calls host.oracle.talk (ask_question from list)
-#   oracle_asking       — calls host.oracle.talk in an already-open chat
+#   oracle_asking_new   — creates a fresh chat THEN calls host.oracle.converse (ask_question from list)
+#   oracle_asking       — calls host.oracle.converse in an already-open chat
 #   oracle_error        — error fallback
 #
 # Auto-persistence: every ask_question from the list view creates a new chat
-# (host.chat.create), fires host.oracle.talk, then host.chat.suggest_title
+# (host.chat.create), fires host.oracle.converse, then host.chat.suggest_title
 # generates a polished title. Each chat persists across restarts.
 #
 # Effect.When is NOT supported — conditional create vs no-create is achieved
@@ -65,7 +65,7 @@ states:
     on:
       ask_question:
         # Ask from list → create a fresh chat then ask. Routes to oracle_asking_new
-        # which creates the chat in on_enter before firing host.oracle.talk.
+        # which creates the chat in on_enter before firing host.oracle.converse.
         - target: oracle_asking_new
           effects:
             - set:
@@ -300,7 +300,7 @@ states:
         on_error: oracle_error
 
       # Step 2: Ask the question in the new chat.
-      - invoke: host.oracle.talk
+      - invoke: host.oracle.converse
         with:
           question: "{{ world.oracle_question }}"
           chat_id:  "{{ world.oracle_chat_id }}"
@@ -376,7 +376,7 @@ states:
     relevant_world: [oracle_chat_id, oracle_chat_title, oracle_question, oracle_answer]
     relevant_slots: []
     on_enter:
-      - invoke: host.oracle.talk
+      - invoke: host.oracle.converse
         with:
           question: "{{ world.oracle_question }}"
           chat_id:  "{{ world.oracle_chat_id }}"
@@ -485,7 +485,7 @@ states:
     relevant_world: [oracle_chat_id, oracle_chat_title, oracle_question, oracle_answer, last_job_id]
     relevant_slots: []
     on_enter:
-      - invoke: host.oracle.talk
+      - invoke: host.oracle.converse
         with:
           question: "{{ world.oracle_question }}"
           chat_id:  "{{ world.oracle_chat_id }}"

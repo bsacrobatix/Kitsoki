@@ -25,7 +25,45 @@ host_handlers:
     data: { ok: true, sha: "abc123", diff: "" }
   host.local:
     data: { ok: true, log: "PASS", passed: 1, failed: 0 }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Reproducer"
+        summary_markdown: "A stub reproduction artifact."
+        bug_verified:     true
+        involved_components: [{ name: "tui" }]
+        fix_description:  "Fix the thing in a sufficiently detailed way that the LLM-judge will accept it."
+        root_cause:       "Off-by-one in the renderer; the listener observes the stale count."
+        affected_files:   ["internal/tui/foo.go"]
+        confidence:       0.85
+        reasoning:        "Trace shows the off-by-one; well-trodden territory."
+        status:           "passed"
+        tests_run:        { passed: 1, failed: 0, log: "PASS" }
+        outcome:          "pass"
+        lessons:
+          - { category: "stub", description: "A flow stub with enough body to satisfy the schemas loosely.", severity: "low" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Reproducer"
+        summary_markdown: "A stub reproduction artifact."
+        bug_verified:     true
+        involved_components: [{ name: "tui" }]
+        fix_description:  "Fix the thing in a sufficiently detailed way that the LLM-judge will accept it."
+        root_cause:       "Off-by-one in the renderer; the listener observes the stale count."
+        affected_files:   ["internal/tui/foo.go"]
+        confidence:       0.85
+        reasoning:        "Trace shows the off-by-one; well-trodden territory."
+        status:           "passed"
+        tests_run:        { passed: 1, failed: 0, log: "PASS" }
+        outcome:          "pass"
+        lessons:
+          - { category: "stub", description: "A flow stub with enough body to satisfy the schemas loosely.", severity: "low" }
+
+  host.oracle.decide:
     data:
       ok: true
       submitted:

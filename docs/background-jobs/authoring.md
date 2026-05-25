@@ -289,7 +289,7 @@ The corresponding flow test is at
 
 ## Chat-aware background turns
 
-When a `host.oracle.talk` or `host.oracle.ask_with_mcp` invocation carries a
+When a `host.oracle.converse` or `host.oracle.decide` invocation carries a
 `chat_id:` arg and the orchestrator has been wired with a chat store
 (`orchestrator.WithChatStore(...)`), the handler runs in chat-aware mode:
 the user message and assistant reply are persisted to a transcript, the

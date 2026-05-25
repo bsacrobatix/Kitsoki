@@ -202,7 +202,7 @@ to the originating room with `world.last_job_result.answer` bound.
 ```yaml
 hosts:
   - host.chat.resolve
-  - host.oracle.ask_with_mcp
+  - host.oracle.decide
 
 states:
   phase_3_executing:
@@ -210,7 +210,7 @@ states:
       - invoke: host.chat.resolve
         with: { app: "bugfix", room: "phase_3", scope_key: "{{ world.ticket_key }}" }
         bind: { active_chat_id: "chat_id" }
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.decide
         with:
           chat_id: "{{ world.active_chat_id }}"
           prompt: prompts/03-fix-proposal.txt
@@ -232,7 +232,7 @@ states:
 
 ### Notes
 
-- `host.oracle.talk` works the same way; use it for free-form Q&A rooms.
+- `host.oracle.converse` works the same way; use it for free-form Q&A rooms.
 - `host.chat.resolve` is idempotent — calling it on every `on_enter` is
   cheap and correct.
 

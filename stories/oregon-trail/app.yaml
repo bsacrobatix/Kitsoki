@@ -16,22 +16,17 @@ app:
 # Host allow-list. Phase D wires host.run (for the river_strategy
 # proposal's background execute). Phase E adds host.jobs.answer_clarification
 # (built-in; resolves paused background jobs from the inbox).
-# Phase C/§9.6 adds host.oracle.ask_with_mcp for narrated illness
-# diagnosis (typed JSON via the MCP `submit` tool; schema lives in
-# mcp/illness.json). Later phases will add host.oracle.ask,
-# host.oracle.talk, host.chat.*, host.transport.*.
+# Phase C/§9.6: narrated illness diagnosis uses host.oracle.decide
+# (typed JSON via submit tool; schema in mcp/illness.json).
+# Phase H: one-shot prose narration uses host.oracle.ask.
+# Phase F: trail_guide persistent chat uses host.oracle.converse.
 hosts:
   - host.run
   - host.jobs.answer_clarification
-  - host.oracle.ask_with_mcp
-  # Phase H — one-shot prompt-template narration for the four
-  # non-illness event substates and landmark arrivals. Illness uses
-  # the MCP-validated `ask_with_mcp` variant above; everything else
-  # only needs free-form prose into world.last_event_prose /
-  # world.last_landmark_prose.
+  - host.oracle.decide
   - host.oracle.ask
   # Phase F — trail_guide persistent chat room.
-  - host.oracle.talk
+  - host.oracle.converse
   - host.chat.resolve
   - host.chat.list
   - host.chat.transcript
@@ -114,7 +109,7 @@ world:
   illness_kind:     { type: string, default: "" }
   # illness_severity / illness_treatment (§9.6) are filled by either
   # the deterministic rng_last % 5 heuristic or, in narrated mode, by
-  # host.oracle.ask_with_mcp's typed-JSON submit payload. Both modes
+  # host.oracle.decide's typed-JSON submit payload. Both modes
   # write the same world keys so downstream views / on_complete logic
   # see one consistent shape.
   illness_severity:  { type: int,    default: 0 }

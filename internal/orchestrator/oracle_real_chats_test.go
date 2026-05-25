@@ -20,7 +20,7 @@ import (
 
 // TestOracle_E2E_RealChatsStore drives the dev-story Oracle flow through the
 // orchestrator with a *real* chats.Store backing the host.chat.* handlers (no
-// stubs). It also stubs ONLY host.oracle.talk so claude isn't invoked. This
+// stubs). It also stubs ONLY host.oracle.converse so claude isn't invoked. This
 // closes the gap left by flow4 / flow8 which use host_handlers: stubs and
 // short-circuit handler logic.
 //
@@ -57,7 +57,7 @@ func TestOracle_E2E_RealChatsStore(t *testing.T) {
 	chatStore := chathost.NewAdapter(rawChatStore)
 
 	// Build the host registry with the REAL host.chat.* handlers; stub only
-	// host.oracle.talk and host.chat.suggest_title so claude isn't invoked.
+	// host.oracle.converse and host.chat.suggest_title so claude isn't invoked.
 	reg := host.NewRegistry()
 	reg.Register("host.chat.resolve", host.ChatResolveHandler)
 	reg.Register("host.chat.list", host.ChatListHandler)
@@ -76,7 +76,7 @@ func TestOracle_E2E_RealChatsStore(t *testing.T) {
 			"skipped":        false,
 		}}, nil
 	})
-	reg.Register("host.oracle.talk", func(ctx context.Context, args map[string]any) (host.Result, error) {
+	reg.Register("host.oracle.converse", func(ctx context.Context, args map[string]any) (host.Result, error) {
 		// Mimic the chat-aware path: append messages so the transcript reflects
 		// the turn just like the real handler would.
 		chatID, _ := args["chat_id"].(string)
@@ -157,7 +157,7 @@ func TestOracle_E2E_RealChatsStore(t *testing.T) {
 	require.Len(t, allChats, 1, "expected exactly one chat row after new_chat")
 	chatID := allChats[0].ID
 
-	// Step 4: ask_question → oracle_asking → host.oracle.talk stub appends user+assistant.
+	// Step 4: ask_question → oracle_asking → host.oracle.converse stub appends user+assistant.
 	out, err = orch.SubmitDirect(ctx, sid, "ask_question", map[string]any{
 		"question": "what is the meaning of life?",
 	})

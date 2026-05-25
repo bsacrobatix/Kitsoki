@@ -50,7 +50,7 @@ host_handlers:
         kind:             "prd"
         summary_title:    "PRD: Auth refactor"
         summary_markdown: "Initial PRD draft (incomplete)."
-  host.oracle.ask_with_mcp:
+  host.oracle.decide:
     # Not used in human mode; provided defensively so any incidental
     # oracle call doesn't infrastructure-error.
     data:

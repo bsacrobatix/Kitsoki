@@ -285,11 +285,11 @@ Exit codes:
 				return fmt.Errorf("get chat: %w", getErr)
 			}
 
-			// Wire the chat store into context so OracleTalkHandler picks it up.
+			// Wire the chat store into context so OracleConverseHandler picks it up.
 			adapter := chathost.NewAdapter(rawStore)
 			handlerCtx := host.WithChatStore(ctx, adapter)
 
-			res, hostErr := host.OracleTalkHandler(handlerCtx, map[string]any{
+			res, hostErr := host.OracleConverseHandler(handlerCtx, map[string]any{
 				"question":    raw,
 				"chat_id":     chatID,
 				"working_dir": workingDir,

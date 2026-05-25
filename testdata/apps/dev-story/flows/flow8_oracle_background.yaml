@@ -1,11 +1,11 @@
 # Flow 8: Oracle Room — background chat turn.
 #
-# Proves end-to-end that Effect.Background + chat-aware host.oracle.talk +
+# Proves end-to-end that Effect.Background + chat-aware host.oracle.converse +
 # on_complete bridge work together:
 #
 #  1. Navigate to oracle list (on_enter loads the list).
 #  2. Start a new chat → oracle_active_new (on_enter: host.chat.create).
-#  3. Fire ask_question_bg → oracle_asking_bg: on_enter dispatches host.oracle.talk
+#  3. Fire ask_question_bg → oracle_asking_bg: on_enter dispatches host.oracle.converse
 #     as a background job and binds last_job_id synchronously.
 #  4. advance_clock: "2s" moves virtual time past the 1s handler delay, letting
 #     the job complete and on_complete fire (sets oracle_answer).
@@ -35,7 +35,7 @@ host_handlers:
       app_id:  "dev-story"
       room:    "oracle"
 
-  host.oracle.talk:
+  host.oracle.converse:
     data:
       answer:            "Here is the background answer."
       session_id:        "stub-bg-session-id"
@@ -64,7 +64,7 @@ turns:
       oracle_chat_title: "Background Oracle Chat"
 
   # Fire ask_question_bg → transitions to oracle_asking_bg.
-  # on_enter dispatches host.oracle.talk as a background job and binds last_job_id.
+  # on_enter dispatches host.oracle.converse as a background job and binds last_job_id.
   # advance_clock: "2s" unblocks the 1s stub delay, job completes, on_complete fires.
   - intent:
       name: ask_question_bg

@@ -74,19 +74,19 @@ var commitRunner = runGitCommit
 //
 // Args:
 //   - anyDir:      any directory inside the target git repo. Usually
-//                  the story root. Used to discover repo top-level.
+//     the story root. Used to discover repo top-level.
 //   - paths:       absolute paths of files to stage. Empty → no-op
-//                  (returns "", false, nil).
+//     (returns "", false, nil).
 //   - summary:     commit subject. Empty → falls back to a placeholder.
 //   - chatID:      meta-mode chat identifier; becomes the trailer value.
 //   - appFilePath: optional path to the story's app.yaml. If non-empty,
-//                  CommitChangedFiles runs app.Load against it BEFORE
-//                  staging; on validation failure, NO commit is made
-//                  and the load error is returned. This prevents
-//                  broken edits (e.g. an undeclared intent referenced
-//                  from an `on:` arc) from being amended into history.
-//                  Pass "" to skip validation (useful when the change
-//                  doesn't include the manifest).
+//     CommitChangedFiles runs app.Load against it BEFORE
+//     staging; on validation failure, NO commit is made
+//     and the load error is returned. This prevents
+//     broken edits (e.g. an undeclared intent referenced
+//     from an `on:` arc) from being amended into history.
+//     Pass "" to skip validation (useful when the change
+//     doesn't include the manifest).
 //
 // Returns (sha, amended, err). On any git failure, sha may be empty
 // and err carries the diagnostic. Callers MUST NOT treat err as a

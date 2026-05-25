@@ -26,7 +26,17 @@ host_handlers:
   host.git_worktree:   { data: { ok: true, log: "" } }
   host.git:            { data: { ok: true, sha: "abc", diff: "" } }
   host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
     data:
       ok: true
       submitted: { summary_title: "stub", summary_markdown: "stub" }
@@ -57,7 +67,17 @@ host_handlers:
   host.git_worktree:   { data: { ok: true, log: "" } }
   host.git:            { data: { ok: true, sha: "abc", diff: "" } }
   host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
     data:
       ok: true
       submitted: { summary_title: "stub", summary_markdown: "stub" }
@@ -87,7 +107,17 @@ host_handlers:
   host.git_worktree:   { data: { ok: true, log: "" } }
   host.git:            { data: { ok: true, sha: "abc", diff: "" } }
   host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
     data:
       ok: true
       submitted: { summary_title: "stub", summary_markdown: "stub" }
@@ -117,7 +147,17 @@ host_handlers:
   host.git_worktree:   { data: { ok: true, log: "" } }
   host.git:            { data: { ok: true, sha: "abc", diff: "" } }
   host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
     data:
       ok: true
       submitted: { summary_title: "stub", summary_markdown: "stub" }
@@ -147,7 +187,17 @@ host_handlers:
   host.git_worktree:   { data: { ok: true, log: "" } }
   host.git:            { data: { ok: true, sha: "abc", diff: "" } }
   host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
     data:
       ok: true
       submitted: { summary_title: "stub", summary_markdown: "stub" }

@@ -9,6 +9,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -524,8 +525,68 @@ func resolveAgentDecls(def *AppDef, file, baseDir string) []error {
 			}
 			decl.Tools = out
 		}
+
+		// bash_profile validation: if Bash is in the tool surface,
+		// bash_profile is required when the agent is used with
+		// host.oracle.ask or host.oracle.decide. The cross-check against
+		// which verbs actually reference this agent is deferred to a TODO
+		// once those handlers exist (Phase 2 / Phase 3). For now we record
+		// the structural fact — presence of Bash without a profile — so
+		// the stub infrastructure is exercisable.
+		//
+		// TODO(oracle-split Phase 2/3): cross-check: if this agent is
+		// referenced by a host.oracle.ask or host.oracle.decide effect and
+		// has Bash in tools but no bash_profile, reject with:
+		//   "agent %q declares Bash but no bash_profile; required for ask/decide use"
+		// The cross-check needs the full effect graph, built after validateDef
+		// runs in the normal validateAgentRef pass.
+		if hasTool(decl.Tools, "host.Bash") && decl.BashProfile == nil {
+			// Warn only — not yet an error since we can't statically know
+			// whether this agent is used with ask/decide at Phase 1.
+			slog.Warn("agent declares Bash without bash_profile; required when agent is used with host.oracle.ask or host.oracle.decide",
+				"agent", name, "file", file)
+		}
+
+		// external_side_effect inference: infer from the tool surface when
+		// the field is absent, and warn when declared value disagrees with
+		// the inferred value (oracle-split proposal §3.3, D3).
+		inferred := inferExternalSideEffect(decl.Tools)
+		if decl.ExternalSideEffect == nil {
+			// No explicit declaration — store the inferred value.
+			decl.ExternalSideEffect = &inferred
+		} else if *decl.ExternalSideEffect != inferred {
+			slog.Warn("agent external_side_effect declaration disagrees with inferred value from tool surface",
+				"agent", name, "file", file,
+				"declared", *decl.ExternalSideEffect, "inferred", inferred)
+		}
 	}
 	return errs
+}
+
+// hasTool reports whether tools contains name (exact match after normalisation).
+func hasTool(tools []string, name string) bool {
+	for _, t := range tools {
+		if t == name {
+			return true
+		}
+	}
+	return false
+}
+
+// inferExternalSideEffect returns true when the tool surface includes
+// WebFetch, WebSearch, or any MCP server that isn't known to be read-only.
+// The MCP read_only check is best-effort here — full cross-checking against
+// declared mcp_servers blocks requires the effect graph and is deferred to
+// later phases. For now: any tool named "host.WebFetch" or "host.WebSearch"
+// in the tool list implies external side effects.
+func inferExternalSideEffect(tools []string) bool {
+	for _, t := range tools {
+		switch t {
+		case "host.WebFetch", "host.WebSearch":
+			return true
+		}
+	}
+	return false
 }
 
 // normaliseAgentTool maps a YAML-author-friendly tool name into the
@@ -576,6 +637,14 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 	// LoadBytes skips parseAndMerge, so inject builtin meta_modes here
 	// before validation. Same rationale as the Load() path.
 	injectBuiltinMetaModes(&def)
+
+	// Resolve agent declarations (tools normalisation, external_side_effect
+	// inference, bash_profile checks). baseDir is "" in the LoadBytes path —
+	// system_prompt_path resolution is intentionally not supported here;
+	// use Load(path) for file-backed apps.
+	if agentErrs := resolveAgentDecls(&def, file, ""); len(agentErrs) > 0 {
+		return nil, agentErrs
+	}
 
 	return validateDef(&def, file)
 }
@@ -682,6 +751,12 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	// the rewriter) are not affected; this guard only fires for
 	// authored absolute paths at the parent level.
 	validateNoReachIntoChild(file, def, &errs)
+
+	// ── 9d. oracle-split verb × agent.Tools cross-checks (oracle-split
+	// proposal invariant 1 / M6 / M3).
+	// Enforces: ask/decide/extract → no mutation tools; task → acceptance.schema
+	// required; task + external_side_effect:false + WebFetch/WebSearch → error.
+	validateOracleVerbCrossChecks(file, def, &errs)
 
 	// ── 10. proposal execute effect validation ────────────────────────────────
 	// ProposalExecute.Background and ProposalExecute.OnComplete are not covered
@@ -1225,6 +1300,188 @@ func validateAgentRef(file, location string, eff Effect, declaredAgents map[stri
 			File:    file,
 			Message: fmt.Sprintf("%s: with.agent %q is not declared in agents", location, name),
 		})
+	}
+}
+
+// oracleMutationTools is the set of tools that are forbidden for
+// host.oracle.ask, host.oracle.decide, and host.oracle.extract (read-only
+// verbs). This mirrors the runtime check in oracle_decide.go and
+// oracle_ask.go. The loader check here is the primary enforcement point.
+var oracleMutationTools = map[string]bool{
+	"host.Edit":         true,
+	"host.Write":        true,
+	"host.NotebookEdit": true,
+}
+
+// readOnlyArgv0s is a best-effort allowlist of programs whose argv0 is
+// clearly read-only (cat, grep, git, jq, etc.). Used by the decide/extract
+// validator warn-line check: a post_cmd whose argv0 is NOT on this list
+// gets a warn-line flagging it as potentially mutating.
+var readOnlyArgv0s = map[string]bool{
+	"cat": true, "grep": true, "rg": true, "ripgrep": true,
+	"git": true, "jq": true, "yq": true, "find": true,
+	"ls": true, "head": true, "tail": true, "wc": true,
+	"diff": true, "awk": true, "sed": true, "sort": true,
+	"echo": true, "true": true, "false": true, "stat": true,
+	"file": true, "which": true, "type": true,
+}
+
+// validateOracleVerbCrossChecks walks every host.oracle.* effect across the
+// entire AppDef (states + proposals) and enforces three rules from the
+// oracle-split proposal:
+//
+//  1. (M6a) ask/decide/extract agents must not declare Edit/Write/NotebookEdit.
+//  2. (M6b) task effects must have acceptance.schema set in their with: block.
+//  3. (M3)  task effects referencing an agent that declares
+//     external_side_effect: false but has WebFetch or WebSearch in its tool
+//     surface are rejected at load time (the declarations contradict each
+//     other; the agent would behave as Mode C despite claiming Mode A/B).
+//
+// Additionally (M6c), a warn-line is emitted when decide/extract effects
+// declare a validator.post_cmd whose argv0 is not on the known-read-only
+// allowlist — the runtime sandbox catches actual mutations, but the warning
+// surfaces the potential problem at app-load.
+func validateOracleVerbCrossChecks(file string, def *AppDef, errs *[]error) {
+	if def == nil {
+		return
+	}
+	// Walk all effects in the state tree.
+	walkAllEffects(def.States, func(loc string, eff Effect) {
+		checkOracleEffect(file, loc, eff, def.Agents, errs)
+	})
+	// Walk proposal execute effects.
+	for pname, pk := range def.Proposals {
+		if pk == nil || pk.Execute == nil {
+			continue
+		}
+		loc := fmt.Sprintf("proposal %q execute", pname)
+		checkOracleEffect(file, loc, Effect{
+			Invoke: pk.Execute.Invoke,
+			With:   pk.Execute.With,
+		}, def.Agents, errs)
+		for i, child := range pk.Execute.OnComplete {
+			checkOracleEffect(file, fmt.Sprintf("%s on_complete[%d]", loc, i), child, def.Agents, errs)
+		}
+	}
+}
+
+// walkAllEffects visits every Effect across the state tree, calling fn
+// with a human-readable location string and the Effect.
+func walkAllEffects(states map[string]*State, fn func(loc string, eff Effect)) {
+	walkAllEffectsPrefix("", states, fn)
+}
+
+func walkAllEffectsPrefix(prefix string, states map[string]*State, fn func(loc string, eff Effect)) {
+	for name, s := range states {
+		if s == nil {
+			continue
+		}
+		stateLoc := name
+		if prefix != "" {
+			stateLoc = prefix + "." + name
+		}
+		for i, eff := range s.OnEnter {
+			fn(fmt.Sprintf("state %q on_enter[%d]", stateLoc, i), eff)
+			for j, child := range eff.OnComplete {
+				fn(fmt.Sprintf("state %q on_enter[%d] on_complete[%d]", stateLoc, i, j), child)
+			}
+		}
+		for intentName, arcs := range s.On {
+			for ai, arc := range arcs {
+				for ei, eff := range arc.Effects {
+					fn(fmt.Sprintf("state %q intent %q arc[%d] effect[%d]", stateLoc, intentName, ai, ei), eff)
+					for j, child := range eff.OnComplete {
+						fn(fmt.Sprintf("state %q intent %q arc[%d] effect[%d] on_complete[%d]", stateLoc, intentName, ai, ei, j), child)
+					}
+				}
+			}
+		}
+		walkAllEffectsPrefix(stateLoc, s.States, fn)
+	}
+}
+
+// checkOracleEffect enforces M6 and M3 rules on one effect.
+func checkOracleEffect(file, loc string, eff Effect, agents map[string]*AgentDecl, errs *[]error) {
+	if eff.With == nil {
+		return
+	}
+	verb := eff.Invoke
+	if !strings.HasPrefix(verb, "host.oracle.") {
+		return
+	}
+	shortVerb := strings.TrimPrefix(verb, "host.oracle.")
+
+	agentName, _ := eff.With["agent"].(string)
+	if strings.Contains(agentName, "{{") {
+		// Templated agent name — cannot resolve statically.
+		agentName = ""
+	}
+	var decl *AgentDecl
+	if agentName != "" && agents != nil {
+		decl = agents[agentName]
+	}
+
+	addErr := func(msg string) {
+		*errs = append(*errs, &ValidationError{File: file, Message: msg})
+	}
+
+	switch shortVerb {
+	case "ask", "decide", "extract":
+		// M6a: reject mutation tools.
+		if decl != nil {
+			for _, t := range decl.Tools {
+				if oracleMutationTools[t] {
+					addErr(fmt.Sprintf(
+						"%s: agent %q declares mutation tool %q — not permitted for host.oracle.%s (read-only verb); use host.oracle.task for agentic work",
+						loc, agentName, t, shortVerb,
+					))
+				}
+			}
+		}
+		// M6c: warn when decide/extract validator.post_cmd argv0 is not read-only.
+		if shortVerb == "decide" || shortVerb == "extract" {
+			if validatorBlock, _ := eff.With["validator"].(map[string]any); validatorBlock != nil {
+				if postCmd, _ := validatorBlock["post_cmd"].(string); strings.TrimSpace(postCmd) != "" {
+					parts := strings.Fields(postCmd)
+					if len(parts) > 0 {
+						argv0 := filepath.Base(parts[0])
+						if !readOnlyArgv0s[argv0] {
+							slog.Warn("oracle verb cross-check: decide/extract validator.post_cmd argv0 is not on the read-only allowlist; runtime sandbox enforces isolation",
+								"location", loc, "argv0", argv0, "file", file)
+						}
+					}
+				}
+			}
+		}
+
+	case "task":
+		// M6b: require acceptance.schema.
+		{
+			schemaVal := ""
+			if acceptanceBlock, _ := eff.With["acceptance"].(map[string]any); acceptanceBlock != nil {
+				schemaVal, _ = acceptanceBlock["schema"].(string)
+			}
+			if strings.TrimSpace(schemaVal) == "" {
+				addErr(fmt.Sprintf(
+					"%s: host.oracle.task requires acceptance.schema to be set in the with: block",
+					loc,
+				))
+			}
+		}
+
+		// M3: hard-fail when external_side_effect: false contradicts WebFetch/WebSearch.
+		if decl != nil && decl.ExternalSideEffect != nil && !*decl.ExternalSideEffect {
+			for _, t := range decl.Tools {
+				if t == "host.WebFetch" || t == "host.WebSearch" {
+					addErr(fmt.Sprintf(
+						"%s: agent %q declares external_side_effect: false but has %q in tools — these declarations contradict each other; "+
+							"an agent with network tools implies external side effects (Mode C). "+
+							"Remove external_side_effect: false or remove the network tool.",
+						loc, agentName, t,
+					))
+				}
+			}
+		}
 	}
 }
 

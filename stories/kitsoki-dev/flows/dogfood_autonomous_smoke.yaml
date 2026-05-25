@@ -57,7 +57,7 @@ host_handlers:
   # IntentAliases entry to `core__bf__accept` for bf-internal
   # checkpoints (and through pr's analogous chain when the flow
   # reaches that compound).
-  host.oracle.ask_with_mcp:
+  host.oracle.decide:
     data:
       ok: true
       submitted:

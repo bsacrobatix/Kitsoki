@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/host"
 	"kitsoki/internal/semroute"
 	"kitsoki/internal/trace"
 	"kitsoki/internal/turncache"
@@ -165,6 +166,12 @@ func (o *Orchestrator) semanticBars() (high, mid float64) {
 // the orchestrator runs deterministic first, semantic second, LLM
 // last (semantic-routing proposal §1).
 //
+// After the oracle-split Phase 5, this method dispatches through
+// [host.RunExtractForRouting] — making the semantic router one consumer
+// of the host.oracle.extract tiered-resolver (proposal §2.1, D13).
+// The transport-level routing tests are unaffected: they test Turn()
+// outcomes, not the internal routing path.
+//
 // Returns:
 //
 //   - (outcome, true, nil)  — verdict resolved; outcome is ready to
@@ -209,22 +216,32 @@ func (o *Orchestrator) TrySemantic(ctx context.Context, sid app.SessionID, input
 		allowedNames[i] = ai.Name
 	}
 
-	verdict, matchErr := m.Match(ctx, string(journey.State), allowedNames, input)
-	if matchErr != nil {
-		// Match only errors on context cancellation today; bubble it
-		// so the caller can decide to abort the turn.
-		return nil, false, matchErr
+	// Phase 5 (oracle-split D13): dispatch through host.oracle.extract's
+	// tiered resolver so the semantic router is one consumer of the extract
+	// handler rather than a standalone path. RunExtractForRouting injects the
+	// compiled Matcher into a context and calls the synonyms tier, returning
+	// the full semroute.Verdict so the confidence-band logic below is unchanged.
+	extractRes, extractErr := host.RunExtractForRouting(ctx, m, host.RoutingExtractArgs{
+		Input:   input,
+		State:   string(journey.State),
+		Allowed: allowedNames,
+	})
+	if extractErr != nil {
+		return nil, false, extractErr
+	}
+
+	verdict := extractRes.Verdict
+	if extractRes.ResolvedBy == host.ResolvedByNoMatch() {
+		// No hit from the extract tier — fall through to LLM.
+		tl.Debug(ctx, trace.EvTurnSemanticMiss,
+			slog.String("input", input),
+		)
+		return nil, false, nil
 	}
 
 	highBar, midBar := o.semanticBars()
 
 	switch {
-	case verdict.Confidence == 0:
-		tl.Debug(ctx, trace.EvTurnSemanticMiss,
-			slog.String("input", input),
-		)
-		return nil, false, nil
-
 	case verdict.Confidence == semroute.ConfidenceTie:
 		// Build the candidate-name list deterministically (Match
 		// already sorts; we copy for trace + outcome).

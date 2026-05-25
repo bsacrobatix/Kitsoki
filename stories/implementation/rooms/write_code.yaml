@@ -39,7 +39,7 @@ states:
             - { label: "look", intent: look, hint: "re-render" }
     relevant_world: [ticket_id, ticket_title, code_artifact, task_summary_artifact, cycle, refine_feedback]
     on_enter:
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.decide
         with:
           prompt: prompts/write_code_executing.md
           schema: schemas/code_artifact.json
@@ -128,7 +128,7 @@ states:
           state:   write_code_awaiting_reply
           body:    "{{ world.code_artifact.summary_markdown }}"
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
-        invoke: host.oracle.ask_with_mcp
+        invoke: host.oracle.decide
         with:
           prompt: prompts/judge_write_code.md
           schema: schemas/judge_verdict.json

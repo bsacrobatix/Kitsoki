@@ -131,8 +131,9 @@ states:
           state:  code_awaiting_reply
           body:   "{{ world.code_artifact.summary_markdown }}"
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
-        invoke: host.oracle.ask_with_mcp
+        invoke: host.oracle.decide
         with:
+          agent: judge
           prompt: prompts/judge_code.md
           schema: schemas/judge_verdict.json
           args:

@@ -75,7 +75,7 @@ dev rebinds to `host.local_files.ticket`. Same YAML, two providers.
 | `ticket_search` | Wave 2 | iface.ticket.search; picks a ticket; dispatches into bf. |
 | `workspace_manager` | Wave 2 | iface.workspace.list. Minimal Wave 2 shape. |
 | `inbox` | Wave 2 | Navigation surface; the runtime's inbox subsystem manages items. |
-| `oracle` | Wave 2 | One-shot ask_question via host.oracle.ask_with_mcp. |
+| `oracle` | Wave 2 | One-shot ask_question via `host.oracle.ask` (agent: `oracle_qa`). |
 | `standup` | Wave 2 | Aggregates iface.ticket.list_mine. |
 | `code_review` | Wave 3 stub | Reserves the room; imports `stories/code-review/` in Wave 3. |
 | `deploy`, `observability`, `incident`, `docs` | Wave 3 stubs | Routing-back-to-main placeholders. |
@@ -145,6 +145,27 @@ $ kitsoki run stories/dev-story/app.yaml
 In Wave 3 the kitsoki-dev instance rebinds the providers and the same
 20-turn walk-through writes real diffs / opens a real PR / merges
 on github.com.
+
+## Oracle-split persona table (Phase 8)
+
+The dev-story hub's own oracle room makes prose Q&A calls. The
+`oracle_qa` agent is declared in `app.yaml agents:` and carries
+`bash_profile: read-only` (no mutations).
+
+| Persona | Verb | Room |
+|---|---|---|
+| `oracle_qa` | `ask` | `oracle_asking` — one-shot prose Q&A answer |
+
+`ask` is the oracle-split verb for read-only, prose-output inspection.
+It is distinct from `decide` (which requires a JSON schema and emits a
+structured verdict) and `task` (which may write files). The oracle
+persona has `tools: [Read, Grep, Glob]` — codebase inspection without
+side effects.
+
+Note: imported sub-stories (`stories/implementation/`,
+`stories/code-review/`) were migrated to the new oracle verbs in Phase 9.
+Flow fixtures that exercise those imports carry `host.oracle.decide:` and
+`host.oracle.ask:` stubs alongside the Phase 8 stubs.
 
 ## See also
 

@@ -27,7 +27,45 @@ host_handlers:
     data: { ok: true, sha: "abc123", diff: "" }
   host.local:
     data: { ok: true, log: "PASS", passed: 1, failed: 0 }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Trivial one-character typo fix in a comment."
+        root_cause:      "Fat-finger typo."
+        affected_files:  ["README.md"]
+        confidence:      0.95
+        reasoning:       "It's a typo; the fix is mechanical."
+        status:          "passed"
+        tests_run:       { passed: 0, failed: 0, log: "no tests run" }
+        outcome:         "pass"
+        lessons:
+          - { category: "trivial", description: "Quick-fix smoke test.", severity: "low" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Trivial one-character typo fix in a comment."
+        root_cause:      "Fat-finger typo."
+        affected_files:  ["README.md"]
+        confidence:      0.95
+        reasoning:       "It's a typo; the fix is mechanical."
+        status:          "passed"
+        tests_run:       { passed: 0, failed: 0, log: "no tests run" }
+        outcome:         "pass"
+        lessons:
+          - { category: "trivial", description: "Quick-fix smoke test.", severity: "low" }
+
+  host.oracle.decide:
     data:
       ok: true
       submitted:

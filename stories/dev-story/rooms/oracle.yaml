@@ -1,5 +1,5 @@
 # oracle — Q&A surface against the oracle host. Minimal Wave 2 shape:
-# a single ask_question intent that fires host.oracle.ask_with_mcp and
+# a single ask_question intent that fires host.oracle.ask and
 # binds the answer. The existing pattern (testdata/apps/dev-story/
 # rooms/oracle.yaml) has multi-turn chat surfaces; Wave 3 ports those.
 #
@@ -67,8 +67,9 @@ states:
             - { label: "look",    intent: look,    hint: "re-render" }
     relevant_world: [oracle_question, oracle_answer]
     on_enter:
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.ask
         with:
+          agent: oracle_qa
           prompt: prompts/oracle_ask.md
           args:
             question: "{{ world.oracle_question }}"

@@ -97,7 +97,7 @@ host_handlers:
   # whole `submitted:` blob into their own world key; judge prompts
   # are NOT invoked in judge_mode=human (the `when:` clause skips
   # them) so the verdict fields are inert here.
-  host.oracle.ask_with_mcp:
+  host.oracle.decide:
     data:
       ok: true
       stdout: ""

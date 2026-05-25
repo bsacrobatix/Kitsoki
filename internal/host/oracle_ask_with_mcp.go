@@ -213,7 +213,15 @@ func buildValidatorMCPServer(schemaPath, outputPath string, opts validatorOption
 	}, nil
 }
 
-// OracleAskWithMCPHandler implements host.oracle.ask_with_mcp.
+// OracleAskWithMCPHandler is no longer a registered verb (Phase 9 unregistered
+// host.oracle.ask_with_mcp from the host dispatcher). It survives as an
+// internal Go-callable entry point for chat-aware metamode in
+// internal/metamode/adapter.go, which depends on the chat-store and validator
+// loop machinery this function carries. New verb call sites must use one of
+// the five public verbs (extract / decide / ask / task / converse). When the
+// metamode call path eventually migrates onto host.oracle.converse (or a
+// dedicated chat-aware oracle abstraction), this function and its supporting
+// helpers go away.
 //
 // Required args:
 //   - prompt_path | prompt (string): path to a prompt template file. If
@@ -624,6 +632,11 @@ func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, 
 	}
 	if strings.TrimSpace(agent.Model) != "" {
 		cliArgs = append(cliArgs, "--model", agent.Model)
+	}
+	// Thread agent tools (or per-call override) via --allowedTools. Per-call
+	// wins over agent.Tools per D5; effectiveTools emits a warn-line on conflict.
+	if tools := effectiveTools(ctx, args, agent); len(tools) > 0 {
+		cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 	}
 
 	// Build the merged mcp_servers map: caller-provided entries plus an

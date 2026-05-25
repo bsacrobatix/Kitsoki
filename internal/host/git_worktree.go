@@ -160,10 +160,10 @@ func worktreeCreate(ctx context.Context, repo string, args map[string]any) (Resu
 		}
 		if retryCode == 0 {
 			return Result{Data: map[string]any{
-				"ok":       true,
-				"path":     path,
-				"reused":   true,
-				"branch":   name,
+				"ok":     true,
+				"path":   path,
+				"reused": true,
+				"branch": name,
 			}}, nil
 		}
 		// Reattach can fail when the branch is checked out at *another*

@@ -62,11 +62,29 @@ app:
 # Host allow-list. The four iface defaults below (vcs, ci, transport,
 # ticket) register implicitly through resolveAllInterfaces — every
 # `iface.<name>.<op>` site is union'd into hosts as `<binding>.<op>`
-# at load time. Bare `host.inbox.add` and `host.oracle.ask_with_mcp`
+# at load time. Bare `host.inbox.add` and `host.oracle.decide`
 # calls are listed explicitly because they are not wrapped by an iface.
 hosts:
   - host.inbox.add
-  - host.oracle.ask_with_mcp
+  - host.oracle.decide
+
+# Persona table (oracle-split proposal §3.5).
+#
+# All LLM calls in pr-refinement are judgment calls — analysis
+# and inter-phase gates. No file-mutation oracles in this story.
+#
+#   diagnoser    decide   reads CI log, produces typed diagnosis artifact
+#   judge        decide   every awaiting_reply gate
+agents:
+  diagnoser:
+    system_prompt: "You are a CI failure analyst. Read the provided CI log and failing checks, identify the root cause, and produce a structured diagnosis artifact with a concrete fix proposal."
+    model: claude-sonnet-4-6
+    tools: []
+
+  judge:
+    system_prompt: "You are a quality gate. Evaluate the provided artifact against the stated criteria and emit a structured verdict: accept, refine, or uncertain."
+    model: claude-sonnet-4-6
+    tools: []
 
 # Four host_interfaces — same provider-neutral surfaces as bugfix
 # (contract §2). pr-refinement only really exercises vcs + ci +

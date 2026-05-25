@@ -290,7 +290,112 @@ GIF bytes. No external dependencies (no VHS, no ttyd, no ffmpeg).
 
 ---
 
-## 6. CI recipe
+## 6. Stubbing oracle calls
+
+Every `host.oracle.*` handler reads its claude subprocess from the context via
+`host.WithClaudeRunner`. Tests inject a `ClaudeRunner` function in-process so no
+real subprocess is forked. Phase 1 ships per-verb fake factories for the five new
+verbs:
+
+```go
+// Simplest form — always returns the scripted text.
+ctx := host.WithClaudeRunner(context.Background(), host.FakeDecide("verdict"))
+res, _ := host.OracleDecideHandler(ctx, args)
+
+// Meta form — embeds flag metadata so tests can assert forwarding.
+ctx := host.WithClaudeRunner(context.Background(), host.FakeDecideWithMeta("verdict"))
+res, _ := host.OracleDecideHandler(ctx, args)
+result, sp, model, tools := host.ParseFakeMetaReply(res.Data["stdout"].(string))
+// tools == "host.Read,host.Grep" — asserts --allowedTools was forwarded.
+```
+
+Available factories:
+
+| Factory | Verb |
+|---|---|
+| `host.FakeExtract(text)` | `host.oracle.extract` |
+| `host.FakeDecide(text)` | `host.oracle.decide` |
+| `host.FakeAsk(text)` | `host.oracle.ask` |
+| `host.FakeTask(text)` | `host.oracle.task` |
+| `host.FakeConverse(text)` | `host.oracle.converse` |
+| `host.FakeDecideWithMeta(text)` | decide — embeds flags in reply |
+| `host.FakeAskWithMeta(text)` | ask — embeds flags in reply |
+| `host.FakeExtractJSON(v)` | extract — JSON-encodes v as stdout |
+| `host.FakeDecideJSON(v)` | decide — JSON-encodes v as stdout |
+
+The `…WithMeta` factories append ` system=[<sp>] model=[<m>] tools=[<csv>]`
+to the reply string. Use `host.ParseFakeMetaReply` to destructure it. This
+lets a single test assert that an agent's `Tools`, `Model`, and `SystemPrompt`
+were all threaded through correctly without writing a custom runner.
+
+**Costs-nothing rule.** Real-LLM tests are opt-in and are never run by
+default (they consume tokens and require a live claude binary). Use the
+fake factories for all new tests; gate real-LLM tests behind a build tag
+or an explicit environment variable.
+
+---
+
+## 7. Replay tooling
+
+`kitsoki replay <session-id>` re-runs the `host.oracle.task` spans recorded
+in a session's event log. It is used for regression testing of code-writing
+tasks (did the agent still produce the same files?) and for evaluating model
+upgrades (does a newer model diverge from the recorded output?).
+
+### Modes
+
+| Mode | Flag | What runs |
+|---|---|---|
+| `file_diff` | `--mode file_diff` (default) | Replay Mode A/B spans deterministically from `(initial_state_hash, final_diff)`. Mode C spans are skipped. |
+| `llm_rerun` | `--mode llm_rerun` | Re-ask every recorded LLM prompt with a fresh Claude call. Diff the new output against the recorded output. |
+| `hybrid` | `--mode hybrid` | Replay Mode A/B deterministically, then re-run LLM spans for divergence comparison. |
+
+### Mode C skip behaviour
+
+Spans with `replay_mode: external_side_effect` are never re-applied in
+`file_diff` mode. At the end of a replay run, a summary line is printed for
+any skipped spans:
+
+```
+skipped 2 external-side-effect spans (host.oracle.task, trace IDs: tsk-abc123, tsk-def456)
+```
+
+These spans can be inspected with `kitsoki inspect --session-id <id>
+--span-kind task.end` and re-run interactively with `--mode llm_rerun`.
+
+### Model selection
+
+For `llm_rerun` and `hybrid` modes, `--model <model-id>` overrides the
+model recorded in the span. Omit the flag to use the same model that ran
+originally. This is the intended path for model-upgrade evaluation:
+
+```sh
+kitsoki replay ses-abc123 --mode llm_rerun --model claude-haiku-4-5
+```
+
+### Tier-swap detection (Phase 5)
+
+For `host.oracle.extract` spans, the replay additionally checks whether a
+recently-added synonym or slot-template would have resolved an input that
+previously required an LLM call. This is the "progressive determinism" loop
+documented in the oracle-split proposal §4: as the author grows the synonym
+library, earlier LLM calls become unnecessary and the deterministic tier
+covers more.
+
+The authoring surface for suggesting synonyms is `kitsoki extract
+suggest-synonym`, which is planned for Phase 5. The replay machinery hooks
+are present in Phase 4; the CLI surface is not yet wired.
+
+### Status
+
+Journal traversal is not yet implemented (Phase 6 will wire the full
+traversal against the oracle-serve surface). Phase 4 delivers the CLI
+surface, flags, and mode classification. Running `kitsoki replay` in any
+mode returns a structured error explaining what remains.
+
+---
+
+## 8. CI recipe
 
 ```sh
 go vet ./...                                    # fast static check

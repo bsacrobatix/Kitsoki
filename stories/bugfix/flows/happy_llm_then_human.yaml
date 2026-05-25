@@ -30,7 +30,53 @@ host_handlers:
     data: { ok: true, sha: "abc123", diff: "" }
   host.local:
     data: { ok: true, log: "PASS", passed: 1, failed: 0 }
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        summary_title:    "OK"
+        summary_markdown: "All checks pass; the LLM is confident."
+        bug_verified:     true
+        involved_components: [{ name: "inbox" }]
+        fix_description:  "Increment unread before the broadcast, not after, so the listener observes the count when it wakes."
+        root_cause:       "Counter increments after broadcast; listeners woken before the increment see the stale count."
+        affected_files:   ["internal/inbox/store.go"]
+        confidence:       0.9
+        reasoning:        "Trace shows the broadcast happens before the SQL UPDATE commits; flipping the order is mechanical."
+        status:           "passed"
+        tests_run:        { passed: 1, failed: 0, log: "PASS" }
+        outcome:          "pass"
+        lessons:
+          - { category: "race-conditions", description: "Broadcast-then-mutate is always wrong when the listener reads the mutation; lint for this pattern.", severity: "medium" }
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Looks good."
+
+  host.oracle.ask:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        summary_title:    "OK"
+        summary_markdown: "All checks pass; the LLM is confident."
+        bug_verified:     true
+        involved_components: [{ name: "inbox" }]
+        fix_description:  "Increment unread before the broadcast, not after, so the listener observes the count when it wakes."
+        root_cause:       "Counter increments after broadcast; listeners woken before the increment see the stale count."
+        affected_files:   ["internal/inbox/store.go"]
+        confidence:       0.9
+        reasoning:        "Trace shows the broadcast happens before the SQL UPDATE commits; flipping the order is mechanical."
+        status:           "passed"
+        tests_run:        { passed: 1, failed: 0, log: "PASS" }
+        outcome:          "pass"
+        lessons:
+          - { category: "race-conditions", description: "Broadcast-then-mutate is always wrong when the listener reads the mutation; lint for this pattern.", severity: "medium" }
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Looks good."
+
+  host.oracle.decide:
     data:
       stdout: ""
       ok: true

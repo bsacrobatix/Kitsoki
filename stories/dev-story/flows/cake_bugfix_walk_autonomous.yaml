@@ -87,7 +87,63 @@ host_handlers:
 
   # confidence: 0.95 is well above the threshold (0.8) so emit_intent
   # auto-fires at every judge gate.
-  host.oracle.ask_with_mcp:
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Note list disappears — defer state mutation"
+        summary_markdown: "Stub bugfix artifact body; deterministic across rooms."
+        bug_verified:     true
+        steps:            ["create alpha", "create beta", "list re-renders empty"]
+        involved_components:
+          - { name: "frontend/src/NotesList.tsx", reason: "list state mutation" }
+        environment_check:
+          frontend_running: true
+          backend_running:  true
+          dataset_ready:    true
+        fix_description:  "Replace the in-place splice with a new array on add."
+        root_cause:       "The list re-render reuses the same array reference."
+        affected_files:   ["frontend/src/NotesList.tsx"]
+        confidence:       0.95
+        reasoning:        "Trace shows the array identity unchanged; React's diff bails out."
+        status:           "passed"
+        tests_added:      ["frontend/src/NotesList.test.tsx"]
+        tests_run:        { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:          "pass"
+        evidence:         { build: "ok", api: "n/a", ui: "list shows both notes" }
+        verdict:          "pass"
+        intent:           "accept"
+        reason:           "Stub LLM verdict: pass."
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Note list disappears — defer state mutation"
+        summary_markdown: "Stub bugfix artifact body; deterministic across rooms."
+        bug_verified:     true
+        steps:            ["create alpha", "create beta", "list re-renders empty"]
+        involved_components:
+          - { name: "frontend/src/NotesList.tsx", reason: "list state mutation" }
+        environment_check:
+          frontend_running: true
+          backend_running:  true
+          dataset_ready:    true
+        fix_description:  "Replace the in-place splice with a new array on add."
+        root_cause:       "The list re-render reuses the same array reference."
+        affected_files:   ["frontend/src/NotesList.tsx"]
+        confidence:       0.95
+        reasoning:        "Trace shows the array identity unchanged; React's diff bails out."
+        status:           "passed"
+        tests_added:      ["frontend/src/NotesList.test.tsx"]
+        tests_run:        { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:          "pass"
+        evidence:         { build: "ok", api: "n/a", ui: "list shows both notes" }
+        verdict:          "pass"
+        intent:           "accept"
+        reason:           "Stub LLM verdict: pass."
+
+  host.oracle.decide:
     data:
       ok: true
       submitted:

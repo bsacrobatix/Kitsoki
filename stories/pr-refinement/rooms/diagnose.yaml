@@ -1,6 +1,6 @@
 # diagnose — CI failure analysis. Two substates:
 #
-#   diagnose_executing       — runs host.oracle.ask_with_mcp with the
+#   diagnose_executing       — runs host.oracle.decide with the
 #                              ci_log + failed_checks; binds the
 #                              diagnose_artifact (root cause + fix
 #                              proposal).
@@ -44,8 +44,9 @@ states:
               intent: quit
     relevant_world: [pr_id, pr_title, ci_failed_checks, ci_log, diagnose_artifact, cycle]
     on_enter:
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.decide
         with:
+          agent: diagnoser
           prompt: prompts/diagnose_executing.md
           schema: schemas/diagnose_artifact.json
           args:
@@ -124,8 +125,9 @@ states:
 
       # 3. Conditionally: ask an LLM-judge.
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
-        invoke: host.oracle.ask_with_mcp
+        invoke: host.oracle.decide
         with:
+          agent: judge
           prompt: prompts/judge_diagnose.md
           schema: schemas/judge_verdict.json
           args:

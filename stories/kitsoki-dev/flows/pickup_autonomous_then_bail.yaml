@@ -60,7 +60,7 @@ host_handlers:
     data: { ok: true, tickets: "" }
   # Confident verdict — every checkpoint where judge_mode is non-human
   # will auto-fire `accept` until we flip the mode.
-  host.oracle.ask_with_mcp:
+  host.oracle.decide:
     data:
       ok: true
       submitted:

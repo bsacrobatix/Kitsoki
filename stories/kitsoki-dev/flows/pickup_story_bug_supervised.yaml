@@ -50,7 +50,7 @@ host_handlers:
       ok: true
       tickets:
         - { id: "2026-05-14T120000Z-scenarios-readme-warp-flag-misnamed", title: "scenarios/README.md says --warp …", status: "open", priority: "P3", assignee: "" }
-  host.oracle.ask_with_mcp:
+  host.oracle.decide:
     data:
       ok: true
       submitted:

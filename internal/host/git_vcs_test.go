@@ -13,8 +13,8 @@ import (
 // Each Call records what was asked; each Response is keyed by the
 // joined cmd+args so different invocations can return different things.
 type fakeRunner struct {
-	calls    []string
-	responses map[string]fakeResp
+	calls       []string
+	responses   map[string]fakeResp
 	defaultResp fakeResp
 }
 

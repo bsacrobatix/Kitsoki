@@ -120,7 +120,7 @@ func TestOracleTalk_GeneratesSessionID(t *testing.T) {
 	t.Parallel()
 	ctx := host.WithClaudeRunner(context.Background(), stubOracleRunner())
 
-	res, err := host.OracleTalkHandler(ctx, map[string]any{
+	res, err := host.OracleConverseHandler(ctx, map[string]any{
 		"question": "how does X work",
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func TestOracleTalk_PreservesSessionID(t *testing.T) {
 	ctx := host.WithClaudeRunner(context.Background(), stubOracleRunner())
 
 	const existingSID = "11111111-2222-4333-8444-555555555555"
-	res, err := host.OracleTalkHandler(ctx, map[string]any{
+	res, err := host.OracleConverseHandler(ctx, map[string]any{
 		"question":   "second turn",
 		"session_id": existingSID,
 	})
@@ -182,7 +182,7 @@ func TestOracleTalk_SystemPromptThreaded(t *testing.T) {
 	ctx := host.WithClaudeRunner(context.Background(), stubOracleRunner())
 
 	const persona = "you speak like a frontier scout"
-	res, err := host.OracleTalkHandler(ctx, map[string]any{
+	res, err := host.OracleConverseHandler(ctx, map[string]any{
 		"question":      "where to camp?",
 		"system_prompt": persona,
 	})
@@ -205,7 +205,7 @@ func TestOracleTalk_SystemPromptOmitted(t *testing.T) {
 	t.Parallel()
 	ctx := host.WithClaudeRunner(context.Background(), stubOracleRunner())
 
-	res, err := host.OracleTalkHandler(ctx, map[string]any{
+	res, err := host.OracleConverseHandler(ctx, map[string]any{
 		"question": "anything",
 	})
 	if err != nil {
@@ -224,7 +224,7 @@ func TestOracleTalk_SystemPromptOmitted(t *testing.T) {
 // application-level error (Result.Error), not a Go error.
 func TestOracleTalk_MissingQuestion(t *testing.T) {
 	t.Parallel()
-	res, err := host.OracleTalkHandler(context.Background(), map[string]any{})
+	res, err := host.OracleConverseHandler(context.Background(), map[string]any{})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestOracleTalk_MissingQuestion(t *testing.T) {
 func TestOracleTalk_BinaryMissing(t *testing.T) {
 	t.Setenv(host.OracleBinEnv, "/definitely/does/not/exist/claude")
 
-	res, err := host.OracleTalkHandler(context.Background(), map[string]any{
+	res, err := host.OracleConverseHandler(context.Background(), map[string]any{
 		"question": "anything",
 	})
 	if err != nil {
@@ -250,17 +250,6 @@ func TestOracleTalk_BinaryMissing(t *testing.T) {
 	}
 	if sid, _ := res.Data["session_id"].(string); sid == "" {
 		t.Fatal("expected a session_id to be echoed even on failure so caller can retry")
-	}
-}
-
-// TestOracleTalk_RegisteredAsBuiltin verifies the handler is wired into the
-// default Registry via RegisterBuiltins.
-func TestOracleTalk_RegisteredAsBuiltin(t *testing.T) {
-	t.Parallel()
-	r := host.NewRegistry()
-	host.RegisterBuiltins(r)
-	if _, ok := r.Get("host.oracle.talk"); !ok {
-		t.Fatal("host.oracle.talk was not registered by RegisterBuiltins")
 	}
 }
 
@@ -441,7 +430,7 @@ func TestOracleTalk_ChatAwarePath_FirstTurn(t *testing.T) {
 	cs.addChat(host.ChatRecord{ID: "chat-1", Title: "My Chat", Status: "active"})
 	ctx := host.WithClaudeRunner(host.WithChatStore(context.Background(), cs), stubOracleRunner())
 
-	res, err := host.OracleTalkHandler(ctx, map[string]any{
+	res, err := host.OracleConverseHandler(ctx, map[string]any{
 		"question": "What is X?",
 		"chat_id":  "chat-1",
 	})
@@ -505,7 +494,7 @@ func TestOracleTalk_ChatAwarePath_ReusesSessionID(t *testing.T) {
 	})
 	ctx := host.WithClaudeRunner(host.WithChatStore(context.Background(), cs), stubOracleRunner())
 
-	res, err := host.OracleTalkHandler(ctx, map[string]any{
+	res, err := host.OracleConverseHandler(ctx, map[string]any{
 		"question": "Second question",
 		"chat_id":  "chat-1",
 	})
@@ -532,7 +521,7 @@ func TestOracleTalk_ChatAwarePath_ReusesSessionID(t *testing.T) {
 // but no store in context produces a domain-level error.
 func TestOracleTalk_ChatAwarePath_NoChatStore(t *testing.T) {
 	t.Parallel()
-	res, err := host.OracleTalkHandler(context.Background(), map[string]any{
+	res, err := host.OracleConverseHandler(context.Background(), map[string]any{
 		"question": "anything",
 		"chat_id":  "chat-1",
 	})
@@ -555,7 +544,7 @@ func TestRunOracleTalkWithChat_AssistantAppendFails_SurfacesError(t *testing.T) 
 	cs.failAppendOnRole = "assistant" // user append succeeds; assistant fails
 	ctx := host.WithClaudeRunner(host.WithChatStore(context.Background(), cs), stubOracleRunner())
 
-	res, err := host.OracleTalkHandler(ctx, map[string]any{
+	res, err := host.OracleConverseHandler(ctx, map[string]any{
 		"question": "ping",
 		"chat_id":  "chat-c2",
 	})
@@ -594,7 +583,7 @@ func TestOracleTalk_AgentArg_AppliesSystemPrompt(t *testing.T) {
 		stubOracleRunner(),
 	)
 
-	res, err := host.OracleTalkHandler(ctx, map[string]any{
+	res, err := host.OracleConverseHandler(ctx, map[string]any{
 		"question": "should we ford or caulk?",
 		"agent":    "wagon_master",
 	})
@@ -628,7 +617,7 @@ func TestOracleTalk_AgentArg_InlineSystemPromptWins(t *testing.T) {
 		stubOracleRunner(),
 	)
 
-	res, err := host.OracleTalkHandler(ctx, map[string]any{
+	res, err := host.OracleConverseHandler(ctx, map[string]any{
 		"question":      "anything",
 		"agent":         "wagon_master",
 		"system_prompt": inline,
@@ -657,7 +646,7 @@ func TestOracleTalk_AgentArg_UnknownAgent_NoSystemPrompt(t *testing.T) {
 	t.Parallel()
 	ctx := host.WithClaudeRunner(context.Background(), stubOracleRunner())
 
-	res, err := host.OracleTalkHandler(ctx, map[string]any{
+	res, err := host.OracleConverseHandler(ctx, map[string]any{
 		"question": "anything",
 		"agent":    "does_not_exist",
 	})
@@ -722,7 +711,7 @@ func TestRunOracleTalkWithChat_SetSessionFails_NoTranscriptPollution(t *testing.
 	cs.failSetSession = true
 	ctx := host.WithClaudeRunner(host.WithChatStore(context.Background(), cs), stubOracleRunner())
 
-	res, err := host.OracleTalkHandler(ctx, map[string]any{
+	res, err := host.OracleConverseHandler(ctx, map[string]any{
 		"question": "ping",
 		"chat_id":  "chat-i10",
 	})

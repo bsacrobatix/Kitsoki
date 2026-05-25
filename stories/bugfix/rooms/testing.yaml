@@ -106,26 +106,30 @@ states:
       # the bugfix worktree — without it, any grep/read the oracle runs
       # to verify the fix lands on the wrong tree (kitsoki's cwd = main,
       # where the fix never lives).
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.task
         with:
-          prompt: prompts/testing_executing.md
-          schema: schemas/testing_artifact.json
+          agent: test_author
           working_dir: "{{ world.workdir }}"
-          args:
-            ticket_id:       "{{ world.ticket_id }}"
-            ticket_title:    "{{ world.ticket_title }}"
-            workdir:         "{{ world.workdir }}"
-            fix_summary:     "{{ world.propose_fix_artifact.summary_markdown }}"
-            ci_log:          "{{ world.ci_log }}"
-            refine_feedback: "{{ world.refine_feedback }}"
-            cycle:           "{{ world.cycle }}"
+          acceptance:
+            schema: schemas/testing_artifact.json
+          context:
+            prompt: prompts/testing_executing.md
+            args:
+              ticket_id:       "{{ world.ticket_id }}"
+              ticket_title:    "{{ world.ticket_title }}"
+              workdir:         "{{ world.workdir }}"
+              fix_summary:     "{{ world.propose_fix_artifact.summary_markdown }}"
+              ci_log:          "{{ world.ci_log }}"
+              refine_feedback: "{{ world.refine_feedback }}"
+              cycle:           "{{ world.cycle }}"
         bind:
           implement_review_artifact: submitted
         on_error: idle
 
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
-        invoke: host.oracle.ask_with_mcp
+        invoke: host.oracle.decide
         with:
+          agent: judge
           prompt: prompts/judge_testing.md
           schema: schemas/judge_verdict.json
           working_dir: "{{ world.workdir }}"

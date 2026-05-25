@@ -203,9 +203,13 @@ func newSmokeOrchestrator(t *testing.T, repoRoot string) (*orchestrator.Orchestr
 		}}, nil
 	}
 	reg.Register("host.oracle.ask_with_mcp", stub)
+	// oracle-split Phase 8 verbs used by bugfix/pr-refinement/dev-story.
+	reg.Register("host.oracle.task", stub)
+	reg.Register("host.oracle.ask", stub)
+	reg.Register("host.oracle.decide", stub)
 
 	// Register the prod handlers kitsoki-dev declares in its hosts
-	// allow-list, MINUS host.oracle.ask_with_mcp (already stubbed).
+	// allow-list, MINUS the oracle verbs (already stubbed above).
 	reg.Register("host.local_files.ticket", host.LocalFilesTicketHandler)
 	reg.Register("host.git", host.GitVCSHandler)
 	reg.Register("host.local", host.LocalCIHandler)
@@ -810,9 +814,19 @@ func TestDogfoodSmoke_ImplementingActuallyEditsFiles(t *testing.T) {
 	// Per-prompt-path oracle dispatch: the implementing prompt's stub
 	// edits a marker file in the worktree; every other prompt returns
 	// the generic canned artifact.
+	//
+	// Registered for both ask_with_mcp (stories/implementation —
+	// out of Phase 8 scope) and task (bugfix rooms post Phase 8).
 	markerFile := "STUB_EDITED_BY_IMPLEMENTING_ORACLE.txt"
-	reg.Register("host.oracle.ask_with_mcp", func(ctx context.Context, args map[string]any) (host.Result, error) {
+	implementingOracleStub := func(ctx context.Context, args map[string]any) (host.Result, error) {
+		// Read prompt from either flat ask_with_mcp shape (args["prompt"]) or
+		// the new task shape (args["context"]["prompt"]) — see oracle-split C2.
 		promptArg, _ := args["prompt"].(string)
+		if promptArg == "" {
+			if ctxBlock, ok := args["context"].(map[string]any); ok {
+				promptArg, _ = ctxBlock["prompt"].(string)
+			}
+		}
 		// The implementing prompt is the one whose name contains
 		// "implementing_executing.md" (after path resolution). The
 		// stub WRITES a real file in working_dir to prove edits
@@ -843,7 +857,12 @@ func TestDogfoodSmoke_ImplementingActuallyEditsFiles(t *testing.T) {
 			"stdout":    string(stdoutJSON),
 			"ok":        true,
 		}}, nil
-	})
+	}
+	reg.Register("host.oracle.ask_with_mcp", implementingOracleStub)
+	// oracle-split Phase 8: bugfix uses task/ask/decide instead of ask_with_mcp.
+	reg.Register("host.oracle.task", implementingOracleStub)
+	reg.Register("host.oracle.ask", implementingOracleStub)
+	reg.Register("host.oracle.decide", implementingOracleStub)
 	reg.Register("host.local", func(ctx context.Context, args map[string]any) (host.Result, error) {
 		return host.Result{Data: map[string]any{
 			"ok": true, "passed": 1, "failed": 0, "log": "PASS (stub)",
@@ -931,7 +950,7 @@ func newSmokeOrchestratorWithCIStub(t *testing.T, repoRoot string) (*orchestrato
 
 	reg := host.NewRegistry()
 	oracleCalls := 0
-	reg.Register("host.oracle.ask_with_mcp", func(ctx context.Context, args map[string]any) (host.Result, error) {
+	oracleStub2 := func(ctx context.Context, args map[string]any) (host.Result, error) {
 		oracleCalls++
 		stdoutJSON, _ := json.Marshal(dogfoodArtifact)
 		return host.Result{Data: map[string]any{
@@ -939,7 +958,12 @@ func newSmokeOrchestratorWithCIStub(t *testing.T, repoRoot string) (*orchestrato
 			"stdout":    string(stdoutJSON),
 			"ok":        true,
 		}}, nil
-	})
+	}
+	reg.Register("host.oracle.ask_with_mcp", oracleStub2)
+	// oracle-split Phase 8 verbs used by bugfix rooms.
+	reg.Register("host.oracle.task", oracleStub2)
+	reg.Register("host.oracle.ask", oracleStub2)
+	reg.Register("host.oracle.decide", oracleStub2)
 	reg.Register("host.local", func(ctx context.Context, args map[string]any) (host.Result, error) {
 		op, _ := args["op"].(string)
 		switch op {
@@ -1009,6 +1033,11 @@ type oracleSeen struct {
 func oracleRouter(artifacts promptArtifact, seen *[]oracleSeen) host.Handler {
 	return func(ctx context.Context, args map[string]any) (host.Result, error) {
 		promptArg, _ := args["prompt"].(string)
+		if promptArg == "" {
+			if ctxBlock, ok := args["context"].(map[string]any); ok {
+				promptArg, _ = ctxBlock["prompt"].(string)
+			}
+		}
 		workingDir, _ := args["working_dir"].(string)
 		*seen = append(*seen, oracleSeen{prompt: promptArg, workingDir: workingDir})
 
@@ -1082,7 +1111,13 @@ func newSmokeOrchestratorWithRouters(t *testing.T, repoRoot string, artifacts pr
 	hostLocalSeenSlice := []hostLocalSeen{}
 
 	reg := host.NewRegistry()
-	reg.Register("host.oracle.ask_with_mcp", oracleRouter(artifacts, &oracleSeenSlice))
+	oracleRouterFn := oracleRouter(artifacts, &oracleSeenSlice)
+	reg.Register("host.oracle.ask_with_mcp", oracleRouterFn)
+	// oracle-split Phase 8 verbs used by bugfix rooms. All route through
+	// the same prompt-dispatch logic so per-phase artifact overrides apply.
+	reg.Register("host.oracle.task", oracleRouterFn)
+	reg.Register("host.oracle.ask", oracleRouterFn)
+	reg.Register("host.oracle.decide", oracleRouterFn)
 	reg.Register("host.local", hostLocalCapture(&hostLocalSeenSlice))
 	reg.Register("host.local_files.ticket", host.LocalFilesTicketHandler)
 	reg.Register("host.git", host.GitVCSHandler)

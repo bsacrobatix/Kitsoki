@@ -131,7 +131,9 @@ func ghTicketSearch(ctx context.Context, args map[string]any) (Result, error) {
 // ghTicketGet implements ticket.get via `gh issue view --json`.
 //
 // Input args:  id (string — accepts either "owner/repo#N" or a bare "N"),
-//              repo (string, optional fallback when id lacks a slug).
+//
+//	repo (string, optional fallback when id lacks a slug).
+//
 // Output Data: id, title, body, status, priority, assignee, url, comments.
 func ghTicketGet(ctx context.Context, args map[string]any) (Result, error) {
 	id, _ := args["id"].(string)
@@ -177,7 +179,8 @@ func ghTicketGet(ctx context.Context, args map[string]any) (Result, error) {
 //
 // Input  args: id (string), body (string), repo (string, optional).
 // Output Data: ok (bool), comment_id (string — the comment URL from gh's
-//              stdout when present, else the issue url).
+//
+//	stdout when present, else the issue url).
 func ghTicketComment(ctx context.Context, args map[string]any) (Result, error) {
 	id, _ := args["id"].(string)
 	body, _ := args["body"].(string)
@@ -217,7 +220,9 @@ func ghTicketComment(ctx context.Context, args map[string]any) (Result, error) {
 // any `to:` value not in the closed-set re-opens.
 //
 // Input  args: id (string), to (string — "closed" | "resolved" | "open" | ...),
-//              repo (string, optional).
+//
+//	repo (string, optional).
+//
 // Output Data: ok (bool).
 func ghTicketTransition(ctx context.Context, args map[string]any) (Result, error) {
 	id, _ := args["id"].(string)
@@ -260,7 +265,9 @@ func ghTicketTransition(ctx context.Context, args map[string]any) (Result, error
 // ghTicketListMine implements ticket.list_mine via `gh issue list --assignee`.
 //
 // Input  args: filter (string — GitHub login of the assignee; defaults to
-//              "@me"), repo (string, optional).
+//
+//	"@me"), repo (string, optional).
+//
 // Output Data: tickets ([]).
 func ghTicketListMine(ctx context.Context, args map[string]any) (Result, error) {
 	filter, _ := args["filter"].(string)

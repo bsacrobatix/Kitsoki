@@ -1425,12 +1425,12 @@ func (o *Orchestrator) enterRedirectState(ctx context.Context, sid app.SessionID
 			slog.Int("cap", maxRedirectDepth),
 		)
 		ev := newOrchestratorEvent(store.HarnessError, map[string]any{
-			"reason":     "on_error.depth_cap_exceeded",
-			"prior":      string(prior),
-			"target":     string(target),
-			"depth":      depth,
-			"cap":        maxRedirectDepth,
-			"message":    "on_error redirect chain exceeded depth cap; staying at the originating state. A host call's on_error: arc is looping (likely the same host failing repeatedly).",
+			"reason":  "on_error.depth_cap_exceeded",
+			"prior":   string(prior),
+			"target":  string(target),
+			"depth":   depth,
+			"cap":     maxRedirectDepth,
+			"message": "on_error redirect chain exceeded depth cap; staying at the originating state. A host call's on_error: arc is looping (likely the same host failing repeatedly).",
 		}, 0)
 		return []store.Event{ev}, w, "", prior, fmt.Errorf("orchestrator: on_error redirect from %q to %q exceeded depth cap %d — host call's on_error chain is looping", prior, target, maxRedirectDepth)
 	}
@@ -2800,10 +2800,45 @@ func agentsForContext(def *app.AppDef) map[string]host.Agent {
 	}
 	out := make(map[string]host.Agent, len(def.Agents))
 	for name, a := range def.Agents {
-		out[name] = host.Agent{
+		agent := host.Agent{
 			SystemPrompt: a.SystemPrompt,
 			Model:        a.Model,
+			DefaultCwd:   a.Cwd,
 		}
+		if len(a.Tools) > 0 {
+			agent.Tools = append([]string(nil), a.Tools...)
+		}
+		if a.BashProfile != nil {
+			agent.BashProfile = convertBashProfile(a.BashProfile)
+		}
+		if a.ExternalSideEffect != nil {
+			v := *a.ExternalSideEffect
+			agent.ExternalSideEffect = &v
+		}
+		out[name] = agent
 	}
 	return out
+}
+
+// convertBashProfile translates an app-layer BashProfileDecl into the
+// host-layer BashProfile. The two types are structurally identical; the
+// separation keeps the host package free of an app import.
+func convertBashProfile(d *app.BashProfileDecl) *host.BashProfile {
+	if d == nil {
+		return nil
+	}
+	p := &host.BashProfile{}
+	switch d.Kind {
+	case app.BashProfileReadOnly:
+		p.Kind = host.BashProfileReadOnly
+	case app.BashProfileCommands:
+		p.Kind = host.BashProfileCommands
+		if len(d.Commands) > 0 {
+			p.Commands = append([]string(nil), d.Commands...)
+		}
+	case app.BashProfileSandboxWrite:
+		p.Kind = host.BashProfileSandboxWrite
+		p.ScratchDir = d.ScratchDir
+	}
+	return p
 }

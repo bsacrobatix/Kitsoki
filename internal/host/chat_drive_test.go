@@ -334,11 +334,11 @@ func TestChatDrive_PersistsOnCompleteMetadata(t *testing.T) {
 
 	chain := `[{"set":{"foo":"bar"}}]`
 	res, err := host.ChatDriveHandler(ctx, map[string]any{
-		"chat_id":               "chat-1",
-		"payload":               "drive me",
-		"__on_complete":         chain,
-		"__origin_session_id":   "SESS-A",
-		"__origin_state":        "bugfix.phase_7",
+		"chat_id":             "chat-1",
+		"payload":             "drive me",
+		"__on_complete":       chain,
+		"__origin_session_id": "SESS-A",
+		"__origin_state":      "bugfix.phase_7",
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)

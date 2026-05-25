@@ -30,7 +30,29 @@ host_handlers:
       comments: ""
   host.local_files.ticket:
     data: { ok: true }
-  host.oracle.ask_with_mcp:
+  # Phase 9: code-review rooms now use host.oracle.decide (review/judge)
+  # and host.oracle.ask (comment draft).
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Reviewed PR-142"
+        summary_markdown: "Stub teammate-PR review summary."
+        overall_impression: "lgtm"
+        blockers:         []
+        nits:             []
+        confidence:       0.85
+        decision:         "approve"
+        rationale:        "Stub."
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Stub."
+  host.oracle.ask:
+    data:
+      ok: true
+      stdout: "LGTM."
+
+  host.oracle.task:
     data:
       ok: true
       stdout: "LGTM."

@@ -47,7 +47,7 @@ states:
           ci_log:   log
           ci_state: state
         on_error: idle
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.decide
         with:
           prompt: prompts/judge_test.md
           schema: schemas/test_artifact.json
@@ -126,7 +126,7 @@ states:
           state:   test_awaiting_reply
           body:    "{{ world.test_artifact.summary_markdown }}"
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
-        invoke: host.oracle.ask_with_mcp
+        invoke: host.oracle.decide
         with:
           prompt: prompts/judge_test.md
           schema: schemas/judge_verdict.json

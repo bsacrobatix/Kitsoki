@@ -99,20 +99,23 @@ states:
       # applied". See the file header above for the regression
       # history.
       - when: "world.workdir != ''"
-        invoke: host.oracle.ask_with_mcp
+        invoke: host.oracle.task
         with:
-          prompt: prompts/implementing_executing.md
-          schema: schemas/implementing_artifact.json
+          agent: implementer
           working_dir: "{{ world.workdir }}"
-          args:
-            ticket_id:        "{{ world.ticket_id }}"
-            ticket_title:     "{{ world.ticket_title }}"
-            workdir:          "{{ world.workdir }}"
-            fix_description:  "{{ world.propose_fix_artifact.fix_description }}"
-            root_cause:       "{{ world.propose_fix_artifact.root_cause }}"
-            affected_files:   "{{ world.propose_fix_artifact.affected_files }}"
-            refine_feedback:  "{{ world.refine_feedback }}"
-            cycle:            "{{ world.cycle }}"
+          acceptance:
+            schema: schemas/implementing_artifact.json
+          context:
+            prompt: prompts/implementing_executing.md
+            args:
+              ticket_id:        "{{ world.ticket_id }}"
+              ticket_title:     "{{ world.ticket_title }}"
+              workdir:          "{{ world.workdir }}"
+              fix_description:  "{{ world.propose_fix_artifact.fix_description }}"
+              root_cause:       "{{ world.propose_fix_artifact.root_cause }}"
+              affected_files:   "{{ world.propose_fix_artifact.affected_files }}"
+              refine_feedback:  "{{ world.refine_feedback }}"
+              cycle:            "{{ world.cycle }}"
         bind:
           implement_artifact: submitted
         on_error: idle

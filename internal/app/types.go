@@ -3,7 +3,90 @@
 // yaml struct tags for deserialization via goccy/go-yaml.
 package app
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	goyaml "github.com/goccy/go-yaml"
+
+	"kitsoki/internal/bashprofile"
+)
+
+// BashProfileDecl is the YAML representation of a bash_profile: field on an
+// agent declaration. Three forms are supported (oracle-split proposal §2.3):
+//
+//	bash_profile: read-only               # built-in read-only allowlist
+//	bash_profile:
+//	  commands: [git, jq, grep]           # explicit argv0 allowlist
+//	bash_profile:
+//	  sandboxed_write: /optional/dir      # write to scratch dir; network denied
+//
+// The string "read-only" parses to Kind==bashprofile.ReadOnly. A map with
+// "commands" parses to Kind==bashprofile.Commands. A map with
+// "sandboxed_write" parses to Kind==bashprofile.SandboxWrite.
+type BashProfileDecl struct {
+	Kind       bashprofile.Kind // resolved form
+	Commands   []string         // set when Kind == bashprofile.Commands
+	ScratchDir string           // set when Kind == bashprofile.SandboxWrite
+}
+
+// BashProfileKind is an alias for bashprofile.Kind kept for source compatibility.
+// New callers should prefer bashprofile.Kind directly.
+type BashProfileKind = bashprofile.Kind
+
+// BashProfileReadOnly, BashProfileCommands, and BashProfileSandboxWrite are
+// aliases for the canonical constants in package bashprofile.
+const (
+	BashProfileReadOnly     = bashprofile.ReadOnly
+	BashProfileCommands     = bashprofile.Commands
+	BashProfileSandboxWrite = bashprofile.SandboxWrite
+)
+
+// UnmarshalYAML implements goccy/go-yaml's BytesUnmarshaler. Accepts the three
+// author forms described on BashProfileDecl.
+func (bp *BashProfileDecl) UnmarshalYAML(b []byte) error {
+	s := strings.TrimSpace(string(b))
+
+	// Strip surrounding quotes if present (goccy/go-yaml hands raw scalar bytes).
+	if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
+		s = s[1 : len(s)-1]
+	}
+
+	// String scalar forms.
+	if s == "read-only" {
+		bp.Kind = BashProfileReadOnly
+		return nil
+	}
+
+	// Map form — try to decode as a raw map.
+	var raw map[string]any
+	if err := goyaml.Unmarshal(b, &raw); err == nil {
+		if cmds, ok := raw["commands"]; ok {
+			bp.Kind = BashProfileCommands
+			switch v := cmds.(type) {
+			case []any:
+				for _, item := range v {
+					if str, ok2 := item.(string); ok2 {
+						bp.Commands = append(bp.Commands, str)
+					}
+				}
+			case []string:
+				bp.Commands = append(bp.Commands, v...)
+			}
+			return nil
+		}
+		if dir, ok := raw["sandboxed_write"]; ok {
+			bp.Kind = BashProfileSandboxWrite
+			if dirStr, ok2 := dir.(string); ok2 {
+				bp.ScratchDir = dirStr
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("app.BashProfileDecl: unrecognised form %q; expected \"read-only\", {commands:[...]}, or {sandboxed_write:<dir>}", s)
+}
 
 // StatePath is a slash-separated path identifying a state in the graph,
 // e.g. "bar/dark" for a nested compound state.
@@ -715,8 +798,8 @@ type TimeoutDef struct {
 	Target string `yaml:"target"`
 }
 
-// AgentDecl is one entry in the top-level agents: map (meta-mode proposal
-// §2.1). Exactly one of SystemPrompt or SystemPromptPath must be set; the
+// AgentDecl is one entry in the top-level agents: map (oracle-split proposal
+// §3.3). Exactly one of SystemPrompt or SystemPromptPath must be set; the
 // loader resolves SystemPromptPath against the app YAML directory and
 // rewrites SystemPrompt with the file contents (clearing SystemPromptPath).
 type AgentDecl struct {
@@ -727,6 +810,20 @@ type AgentDecl struct {
 	Model string   `yaml:"model,omitempty"`
 	Tools []string `yaml:"tools,omitempty"`
 	Cwd   string   `yaml:"cwd,omitempty"`
+
+	// BashProfile restricts Bash tool usage when the agent's tool surface
+	// includes "Bash". Required when Bash is in Tools and the agent is
+	// referenced by a host.oracle.ask or host.oracle.decide effect (enforced
+	// by the loader). Ignored for host.oracle.task and host.oracle.converse.
+	BashProfile *BashProfileDecl `yaml:"bash_profile,omitempty"`
+
+	// ExternalSideEffect, when non-nil, declares whether the agent may
+	// mutate external state (Mode C in the oracle-split proposal §4.2).
+	// When nil, the loader infers the value from the tool surface:
+	// WebFetch/WebSearch or any non-read_only MCP server → true; otherwise
+	// false. A disagreement between inferred and declared values produces a
+	// loader warn-line.
+	ExternalSideEffect *bool `yaml:"external_side_effect,omitempty"`
 }
 
 // MetaModeDef declares one meta mode.

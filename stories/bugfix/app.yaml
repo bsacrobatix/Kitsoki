@@ -46,12 +46,67 @@ app:
 
 # Host allow-list. The six iface defaults below register implicitly through
 # resolveAllInterfaces — every `iface.<name>.<op>` site is union'd into hosts
-# as `<binding>.<op>` at load time. Bare `host.inbox.add` and
-# `host.oracle.ask_with_mcp` calls are listed explicitly because they are not
-# wrapped by an iface.
+# as `<binding>.<op>` at load time. Bare host calls listed explicitly because
+# they are not wrapped by an iface.
 hosts:
   - host.inbox.add
-  - host.oracle.ask_with_mcp
+  - host.oracle.ask
+  - host.oracle.decide
+  - host.oracle.task
+
+# Persona table (oracle-split proposal §3.5).
+#
+# Each persona declares the model, tool surface, and blast-radius
+# classification for one class of LLM work. The verb at every call site
+# is chosen to match the persona's declared surface:
+#
+#   ask     — read-only inspection; returns prose or typed JSON
+#   decide  — LLM reasoning verdict; schema mandatory; read-only tools
+#   task    — agentic; may mutate files; external_side_effect declared
+#
+# Personas used in this story:
+#
+#   reproducer       task    phase_1 (reproducing artifact)
+#   proposer         ask     phase_2 (fix proposal), phase_7 (close-out)
+#   implementer      task    phase_3 (applying the fix)
+#   test_author      task    phase_4 (testing + test-writing)
+#   validator        task    phase_6 (full-env validation)
+#   judge_<phase>    decide  every inter-phase gate
+agents:
+  reproducer:
+    system_prompt: "You are a bug reproduction analyst. Read the codebase, reproduce the reported bug, identify the affected components, and produce a structured reproduction artifact."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Bash]
+    external_side_effect: false
+
+  proposer:
+    system_prompt: "You are a senior engineer performing code analysis. Read the codebase, analyse the reproduction evidence, and produce a structured fix proposal or close-out summary."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Bash]
+    bash_profile: read-only
+
+  implementer:
+    system_prompt: "You are a software engineer applying a proposed fix. Read the proposal artifact, locate the affected files, and apply the minimal correct edit to fix the bug."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Edit, Write, Bash]
+    external_side_effect: false
+
+  test_author:
+    system_prompt: "You are a software engineer reviewing test coverage and authoring regression tests. Read the applied fix, run the tests, and produce a structured test-review artifact."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Edit, Write, Bash]
+    external_side_effect: false
+
+  validator:
+    system_prompt: "You are a validation engineer verifying a fix in a full environment. Build the project, run tests, check the fix applies, and produce a structured validation artifact."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Bash]
+    external_side_effect: false
+
+  judge:
+    system_prompt: "You are a quality gate. Evaluate the provided artifact against the stated criteria and emit a structured verdict: accept, refine, or uncertain."
+    model: claude-sonnet-4-6
+    tools: []
 
 # Six host_interfaces — the provider-neutral surfaces every parent story
 # binds to a concrete handler at import time. Operation names + I/O shapes

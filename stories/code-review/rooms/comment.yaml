@@ -45,7 +45,7 @@ states:
       # LLM drafts the comment body. The draft itself is a free-form
       # string (no schema); the LLM may take cues from
       # review_summary_artifact.blockers / nits.
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.ask
         with:
           prompt: prompts/comment_executing.md
           args:

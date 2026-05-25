@@ -1,20 +1,30 @@
-// Package host — host.oracle.ask handler for one-shot Claude prompt-file calls.
+// Package host — host.oracle.ask: read-only inspection handler (oracle-split Phase 3).
 //
-// host.oracle.ask reads a prompt template file from disk, substitutes
-// {{ args.X }} placeholders against the handler's invocation args, and pipes
-// the rendered text to `claude -p`. The binary's stdout is returned verbatim.
-// Each invocation is independent — no session_id is tracked.
+// host.oracle.ask is the "read-only inspection" rung of the oracle verb ladder
+// (oracle-split proposal §2.3). The LLM may use read tools (Read, Grep, Glob,
+// WebFetch, WebSearch, Bash under a profile, read-only MCP servers) but cannot
+// mutate anything. Returns prose output; when a schema: is supplied the LLM also
+// calls a submit MCP tool and the handler returns typed JSON alongside stdout.
 //
-// This is the primitive behind patterns like:
-//   - propose: natural-language intent  → drafted shell command
-//   - refine:  current draft + feedback → updated shell command
-//   - repair:  failed cmd + error       → corrected shell command
+// Backward compatibility:
+//   - The legacy host.oracle.ask (text-only, no schema) is this handler.
+//     Call sites that pass no schema see the same { stdout, exit_code, ok }
+//     result shape.
 //
-// For conversational, session-preserving calls see host.oracle.talk (oracle.go).
+// Tool surface enforcement:
+//   - Mutation tools (Edit, Write) are rejected at the handler level as a
+//     safety net; the loader already rejects them at app-load time.
+//   - Bash is allowed only when the agent declares a bash_profile:. Every Bash
+//     invocation passes through ApplyBashProfile before reaching the shell.
+//   - MCP servers must carry read_only: true in the app declaration; the handler
+//     verifies this at run time.
+//
+// No acceptance loop. One call, one answer.
 package host
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,82 +35,253 @@ import (
 	"kitsoki/internal/render/sourcecolor"
 )
 
-// OracleAskHandler implements host.oracle.ask.
+// mutationTools is the set of tool names that are never permitted in a
+// read-only oracle call (ask, decide, extract LLM tier). The loader rejects
+// these at app-load; the handler is a safety net so a manually assembled call
+// cannot sneak mutation tools through.
+var mutationTools = map[string]bool{
+	"Edit":         true,
+	"Write":        true,
+	"NotebookEdit": true,
+}
+
+// OracleAskHandler implements host.oracle.ask — the read-only inspection verb.
 //
-// Required args:
-//   - prompt_path (string): path to a prompt template file. If relative, it
-//     is resolved against the directory containing app.yaml (set by the loader
-//     via KITSOKI_APP_DIR) or the process working directory as a fallback.
+// Required args (one of):
+//   - prompt_path (string): path to a prompt template file. If relative,
+//     resolved against KITSOKI_APP_DIR or cwd.
+//   - prompt (string): either a file path (resolved as above when the path
+//     exists and the value is a single-line string) or inline prompt content.
+//     Inline content is used directly without template rendering — this is the
+//     M8 path: `kitsoki oracle ask --prompt -` reads stdin bytes and stores
+//     them here; treating them as a file path would ENOENT.
 //
 // Optional args:
-//   - working_dir   (string): cwd passed to the claude subprocess (scopes
-//     tool access). Defaults to the directory containing the prompt file.
-//   - system_prompt (string): persona / system-prompt instruction. Threaded
-//     to `claude --append-system-prompt`. When also passing `agent:`, the
-//     inline value wins (override).
-//   - agent         (string): name of an entry in AppDef.Agents (injected
-//     via WithAgents); applies the agent's SystemPrompt as the system prompt
-//     and forwards its Model (when set) as `claude --model`.
-//
-// All other keys in args are treated as template variables and are
-// available to the prompt template as {{ args.X }}.
+//   - agent       (string): name of an entry in AppDef.Agents (injected via
+//     WithAgents). Supplies SystemPrompt, Model, Tools, BashProfile, DefaultCwd.
+//   - system_prompt (string): inline persona; wins over agent.SystemPrompt.
+//   - working_dir (string): cwd for the claude subprocess. Defaults to
+//     agent.DefaultCwd, then the prompt file's directory.
+//   - args        (map): explicit prompt-template variables ({{ args.X }}).
+//     Falls back to the full call-args map for legacy compatibility.
+//   - schema      (string): path to a JSON schema. When set, kitsoki attaches
+//     a submit MCP tool and the LLM must call it; the handler returns
+//     `submitted` alongside `stdout`.
+//   - tools       ([]string): per-call tool override. Wins over agent.Tools
+//     (D5). Must still be a subset of the read-only allowlist.
 //
 // Returns Result.Data with:
-//   - stdout    (string): claude's final text reply, stripped of a trailing newline
-//   - exit_code (int):    claude's exit code (0 on success)
-//   - ok        (bool):   true iff exit_code == 0
+//   - stdout    (string): claude's text reply (source-color wrapped)
+//   - exit_code (int):    claude's exit code
+//   - ok        (bool):   exit_code == 0
+//   - submitted (any):    parsed JSON payload — only present when schema: is set
+//     and the LLM called submit().
 //
-// If the claude binary is unavailable, the prompt file cannot be read, or
-// the template fails to render, the handler returns Result{Error: ...}
-// rather than a Go error so flow tests stay deterministic and the state
-// machine can surface the failure via on_error:.
+// Tool safety net: if the effective tool list contains Edit or Write the
+// handler returns Result{Error: ...} immediately. This mirrors the loader
+// check and protects call sites that bypass the loader (tests, CLI).
 func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) {
+	// Resolve the prompt. Two cases:
+	//   prompt_path: (or the legacy prompt: alias used as a file path) — read
+	//     from disk, render as a pongo2 template, strip source-color sentinels.
+	//   prompt: with inline content — used directly when the value is not a
+	//     resolvable file (M8: `kitsoki oracle ask --prompt -` reads stdin and
+	//     stores the bytes under the "prompt" key; treating them as a file path
+	//     would ENOENT).
+	//
+	// Resolution order:
+	//   1. prompt_path: — always treated as a file path.
+	//   2. prompt: — if the resolved path is a readable file, read it (backward
+	//      compat with existing call sites that alias prompt → prompt_path).
+	//      If the path does not exist or the value is multi-line inline content,
+	//      use the raw string directly as the rendered prompt.
+	var rendered string
+	var promptFileDir string
+
 	promptPath, _ := args["prompt_path"].(string)
-	if strings.TrimSpace(promptPath) == "" {
-		return Result{Error: "host.oracle.ask: prompt_path argument is required"}, nil
+	inlinePrompt, _ := args["prompt"].(string)
+
+	switch {
+	case strings.TrimSpace(promptPath) != "":
+		resolved := resolvePromptPath(strings.TrimSpace(promptPath))
+		raw, readErr := os.ReadFile(resolved)
+		if readErr != nil {
+			return Result{Error: fmt.Sprintf("host.oracle.ask: read prompt %q: %v", resolved, readErr)}, nil
+		}
+		templateArgs, _ := args["args"].(map[string]any)
+		if templateArgs == nil {
+			templateArgs = args
+		}
+		r, tmplErr := render.Pongo(string(raw), expr.Env{Args: templateArgs})
+		if tmplErr != nil {
+			return Result{Error: fmt.Sprintf("host.oracle.ask: render prompt %q: %v", resolved, tmplErr)}, nil
+		}
+		rendered = sourcecolor.Strip(r)
+		promptFileDir = filepath.Dir(resolved)
+
+	case strings.TrimSpace(inlinePrompt) != "":
+		// Check if it looks like a file path (single-line, no whitespace other
+		// than leading/trailing, resolves to an existing file).
+		candidate := strings.TrimSpace(inlinePrompt)
+		if !strings.ContainsAny(candidate, "\n\r") {
+			resolved := resolvePromptPath(candidate)
+			if raw, readErr := os.ReadFile(resolved); readErr == nil {
+				// File exists — treat as a path alias (backward compat).
+				templateArgs, _ := args["args"].(map[string]any)
+				if templateArgs == nil {
+					templateArgs = args
+				}
+				r, tmplErr := render.Pongo(string(raw), expr.Env{Args: templateArgs})
+				if tmplErr != nil {
+					return Result{Error: fmt.Sprintf("host.oracle.ask: render prompt %q: %v", resolved, tmplErr)}, nil
+				}
+				rendered = sourcecolor.Strip(r)
+				promptFileDir = filepath.Dir(resolved)
+				break
+			}
+		}
+		// Not a file (or multi-line): use the value as inline content directly.
+		rendered = sourcecolor.Strip(inlinePrompt)
+
+	default:
+		return Result{Error: "host.oracle.ask: prompt_path (or prompt) argument is required"}, nil
 	}
 
-	resolved := resolvePromptPath(promptPath)
-	raw, err := os.ReadFile(resolved)
-	if err != nil {
-		return Result{Error: fmt.Sprintf("host.oracle.ask: read prompt %q: %v", resolved, err)}, nil
+	// Choose template scope: prefer explicit `args:` map for new callers;
+	// fall back to full call-args for backward compatibility with rooms that
+	// pass vars at the top level.
+	_ = rendered // already set above
+
+	// Resolve the agent (optional) and compute effective tools.
+	agent, _ := resolveAgent(ctx, args)
+	tools := effectiveTools(ctx, args, agent)
+
+	// Safety net: reject mutation tools regardless of source.
+	for _, t := range tools {
+		if mutationTools[t] {
+			return Result{Error: fmt.Sprintf(
+				"host.oracle.ask: tool %q is not permitted in a read-only ask call (use host.oracle.task for mutation tools)",
+				t,
+			)}, nil
+		}
 	}
 
-	rendered, err := render.Pongo(string(raw), expr.Env{Args: args})
-	if err != nil {
-		return Result{Error: fmt.Sprintf("host.oracle.ask: render prompt %q: %v", resolved, err)}, nil
+	// Bash gate: if Bash is in the effective tool list, the agent must declare
+	// a BashProfile. When no profile is set we deny the call rather than
+	// silently allowing unrestricted Bash.
+	hasBash := false
+	for _, t := range tools {
+		if t == "Bash" {
+			hasBash = true
+			break
+		}
 	}
-	// Strip source-color sentinels before piping to claude — see the
-	// commentary in oracle_ask_with_mcp.go for the rationale.
-	rendered = sourcecolor.Strip(rendered)
+	if hasBash && agent.BashProfile == nil {
+		return Result{Error: "host.oracle.ask: Bash is in the tool list but the agent declares no bash_profile; " +
+			"set bash_profile: read-only, commands, or sandboxed-write on the agent declaration"}, nil
+	}
 
 	bin, err := resolveOracleBin(ctx)
 	if err != nil {
 		return Result{Error: err.Error()}, nil
 	}
 
+	// Resolve working directory: per-call > agent.DefaultCwd > prompt file dir.
 	workingDir, _ := args["working_dir"].(string)
-	if workingDir == "" {
-		workingDir = filepath.Dir(resolved)
+	workingDir = appendDefaultCwd(workingDir, agent)
+	if workingDir == "" && promptFileDir != "" {
+		workingDir = promptFileDir
+	}
+
+	// Bash MCP wiring: when Bash is in the effective tool list, replace it with
+	// the namespaced mcp__kitsoki-bash__Bash entry and attach the kitsoki-bash
+	// MCP server. This routes every Bash call through ApplyBashProfile before
+	// execution rather than letting claude use the unrestricted built-in.
+	if hasBash {
+		tools = rewriteToolsForBashMCP(tools)
 	}
 
 	cliArgs := []string{
 		"-p",
-		"--output-format", "text",
 		"--permission-mode", "bypassPermissions",
 	}
-	// Per-call agent + inline system_prompt — applied via the same shared
-	// helper as host.oracle.talk so apps see one consistent shape across
-	// every oracle handler.
-	agent, _ := resolveAgent(ctx, args)
 	if sp := effectiveSystemPrompt(args, agent); strings.TrimSpace(sp) != "" {
 		cliArgs = append(cliArgs, "--append-system-prompt", sp)
 	}
 	if strings.TrimSpace(agent.Model) != "" {
 		cliArgs = append(cliArgs, "--model", agent.Model)
 	}
+	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 
-	cr, runErr := runClaudeOneShot(ctx, bin, cliArgs, rendered, workingDir)
+	// Build the MCP servers map. When Bash is in use we attach the kitsoki-bash
+	// server; when a schema: is given we attach the submit validator. Both can
+	// coexist in the same --mcp-config file.
+	mcpServers := make(map[string]any)
+
+	if hasBash {
+		bashEntry, bashConfigPath, bashErr := BuildBashMCPEntry(agent.BashProfile, workingDir)
+		if bashErr != nil {
+			return Result{Error: fmt.Sprintf("host.oracle.ask: build bash MCP server: %v", bashErr)}, nil
+		}
+		defer os.Remove(bashConfigPath)
+		mcpServers["kitsoki-bash"] = bashEntry
+	}
+
+	// Schema mode: attach a submit MCP tool so the LLM can return typed JSON
+	// alongside its prose answer. The validator binary is the same kitsoki
+	// mcp-validator used by ask_with_mcp, reused here without the retry loop.
+	schemaPath, _ := args["schema"].(string)
+	schemaPath = strings.TrimSpace(schemaPath)
+	var submittedOutputPath string
+	if schemaPath != "" {
+		var submittedFile *os.File
+		submittedFile, err = os.CreateTemp("", "kitsoki-ask-submit-*.json")
+		if err != nil {
+			return Result{Error: fmt.Sprintf("host.oracle.ask: create submit tempfile: %v", err)}, nil
+		}
+		submittedFile.Close()
+		submittedOutputPath = submittedFile.Name()
+		defer func() {
+			if submittedOutputPath != "" {
+				_ = os.Remove(submittedOutputPath)
+			}
+		}()
+
+		validatorEntry, buildErr := buildValidatorMCPServer(schemaPath, submittedOutputPath, validatorOptions{})
+		if buildErr != nil {
+			return Result{Error: fmt.Sprintf("host.oracle.ask: build validator MCP server: %v", buildErr)}, nil
+		}
+		mcpServers["validator"] = validatorEntry
+	}
+
+	var mcpConfigPath string
+	if len(mcpServers) > 0 {
+		mcpConfig := map[string]any{"mcpServers": mcpServers}
+		mcpBytes, mErr := json.Marshal(mcpConfig)
+		if mErr != nil {
+			return Result{Error: fmt.Sprintf("host.oracle.ask: marshal mcp config: %v", mErr)}, nil
+		}
+		f, fErr := os.CreateTemp("", "kitsoki-ask-mcp-*.json")
+		if fErr != nil {
+			return Result{Error: fmt.Sprintf("host.oracle.ask: create mcp config tempfile: %v", fErr)}, nil
+		}
+		if _, wErr := f.Write(mcpBytes); wErr != nil {
+			_ = f.Close()
+			_ = os.Remove(f.Name())
+			return Result{Error: fmt.Sprintf("host.oracle.ask: write mcp config: %v", wErr)}, nil
+		}
+		_ = f.Close()
+		mcpConfigPath = f.Name()
+		defer os.Remove(mcpConfigPath)
+		cliArgs = append(cliArgs, "--mcp-config", mcpConfigPath)
+	}
+
+	cr, _, runErr := OracleStreamer{
+		Bin:        bin,
+		CLIArgs:    cliArgs,
+		Stdin:      rendered,
+		WorkingDir: workingDir,
+	}.Run(ctx)
 	if runErr != nil {
 		return Result{}, runErr
 	}
@@ -112,18 +293,25 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		return Result{Error: msg}, nil
 	}
 
-	res := Result{
-		Data: map[string]any{
-			// Wrap stdout with source-color sentinels so downstream
-			// consumers (transcript, view templates) carry the
-			// LLM-provenance label through to the final paint. The
-			// sentinels are zero-width and survive pongo render,
-			// hardwrap, and JSON serialization.
-			"stdout":    sourcecolor.Wrap(cr.Stdout),
-			"exit_code": cr.ExitCode,
-			"ok":        cr.ExitCode == 0,
-		},
+	data := map[string]any{
+		"stdout":    sourcecolor.Wrap(cr.Stdout),
+		"exit_code": cr.ExitCode,
+		"ok":        cr.ExitCode == 0,
 	}
+
+	// Schema mode: read the submitted payload from the tempfile (written by
+	// kitsoki mcp-validator on successful submit).
+	if schemaPath != "" && submittedOutputPath != "" {
+		if payload, readErr := os.ReadFile(submittedOutputPath); readErr == nil && len(payload) > 0 {
+			var parsed any
+			if jErr := json.Unmarshal(payload, &parsed); jErr == nil {
+				data["submitted"] = parsed
+			}
+		}
+		// submittedOutputPath is cleaned up by the defer above.
+	}
+
+	res := Result{Data: data}
 	if cr.ExitCode != 0 {
 		res.Error = claudeExitErrorMessage(cr.ExitCode, cr.Stderr, cr.Stdout)
 	}

@@ -229,8 +229,6 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.workspace_manager.get", WorkspaceManagerGetHandler)
 	r.Register("host.run", RunHandler)
 	r.Register("host.oracle.ask", OracleAskHandler)
-	r.Register("host.oracle.ask_with_mcp", OracleAskWithMCPHandler)
-	r.Register("host.oracle.talk", OracleTalkHandler)
 	r.Register("host.transport.post", TransportPostHandler)
 	r.Register("host.jobs.answer_clarification", AnswerClarificationHandler)
 	r.Register("host.chat.resolve", ChatResolveHandler)
@@ -263,4 +261,19 @@ func RegisterBuiltins(r *Registry) {
 	// of the dev-story-bugfix unify proposal.
 	r.Register("host.gh.ticket", GitHubTicketHandler)
 	r.Register("host.cypilot_artifacts", CypilotArtifactsHandler)
+
+	// Oracle-split five verbs (Phases 2–7 implementations).
+	// host.oracle.ask is registered above.
+	r.Register("host.oracle.extract", OracleExtractHandler)
+	r.Register("host.oracle.decide", OracleDecideHandler)
+	r.Register("host.oracle.task", OracleTaskHandler)
+	r.Register("host.oracle.converse", OracleConverseHandler)
 }
+
+// OracleExtractHandler is implemented in oracle_extract.go (oracle-split Phase 5).
+
+// OracleDecideHandler is the Phase 2 implementation of host.oracle.decide.
+// See oracle_decide.go for the full contract.
+
+// OracleTaskHandler is defined in oracle_task.go (oracle-split Phase 4).
+// OracleConverseHandler is defined in oracle_converse.go (oracle-split Phase 7).

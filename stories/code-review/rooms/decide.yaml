@@ -48,7 +48,7 @@ states:
       # Produce the structured decision artifact; the verdict is
       # informational (the actual decide intents below carry the
       # approve / request_changes flag to iface.vcs.pr_comment).
-      - invoke: host.oracle.ask_with_mcp
+      - invoke: host.oracle.decide
         with:
           prompt: prompts/judge_decide.md
           schema: schemas/decision_artifact.json
@@ -132,7 +132,7 @@ states:
           state:   decide_awaiting_reply
           body:    "{{ world.decision_artifact.summary_markdown }}"
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
-        invoke: host.oracle.ask_with_mcp
+        invoke: host.oracle.decide
         with:
           prompt: prompts/judge_decide.md
           schema: schemas/judge_verdict.json

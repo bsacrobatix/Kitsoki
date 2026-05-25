@@ -3,20 +3,20 @@
 // The dispatcher is the seam between an already-enqueued drive (a row
 // in chat_input_queue) and an actually-run claude turn. Two callers:
 //
-//   1. host.chat.drive with await: true — after Enqueue, the handler
-//      immediately Dispatches the just-enqueued drive synchronously so
-//      the result text and chat_messages.seq can be returned to the
-//      state-machine effect.
-//   2. kitsoki chat queue dispatch <drive-id> — operator-driven
-//      promotion of a specific drive ahead of any other pending rows.
+//  1. host.chat.drive with await: true — after Enqueue, the handler
+//     immediately Dispatches the just-enqueued drive synchronously so
+//     the result text and chat_messages.seq can be returned to the
+//     state-machine effect.
+//  2. kitsoki chat queue dispatch <drive-id> — operator-driven
+//     promotion of a specific drive ahead of any other pending rows.
 //
 // Flow (with the chat lock held throughout the chat-state mutations):
 //
-//   WithLock(chat_id):
-//       ClaimDrive(drive_id)            pending → dispatching
-//       doOracleChatTurn(chat_id, …)    runs claude, appends messages
-//       MarkDriveDone(drive_id, seq)    dispatching → done
-//       (or MarkDriveFailed on error)
+//	WithLock(chat_id):
+//	    ClaimDrive(drive_id)            pending → dispatching
+//	    doOracleChatTurn(chat_id, …)    runs claude, appends messages
+//	    MarkDriveDone(drive_id, seq)    dispatching → done
+//	    (or MarkDriveFailed on error)
 //
 // The drive is claimed inside the lock so an aborted dispatch (e.g.
 // chat busy somewhere) never strands a row in 'dispatching' without a
@@ -137,7 +137,7 @@ func DispatchDrive(ctx context.Context, cs ChatStore, driveID, workingDir string
 			return claimErr
 		}
 
-		// Run the turn through the same code path host.oracle.talk uses
+		// Run the turn through the same code path host.oracle.converse uses
 		// for chat-aware turns. doOracleChatTurn assumes it is being
 		// called inside WithLock — which we are.
 		//
@@ -146,7 +146,7 @@ func DispatchDrive(ctx context.Context, cs ChatStore, driveID, workingDir string
 		// preamble the enqueuer chose to attach), and there is no
 		// per-drive agent override yet. When future revisions plumb
 		// agent metadata onto the drive row, thread it through here.
-		turn, runErr := doOracleChatTurn(lockedCtx, cs, drive.ChatID, drive.Payload, workingDir, "", "")
+		turn, runErr := doConverseChatTurn(lockedCtx, cs, drive.ChatID, drive.Payload, workingDir, "", "", "bypassPermissions", nil)
 		if runErr != nil {
 			// Infra failure: mark the drive failed with the underlying
 			// error so the row carries forensics, then re-surface to the

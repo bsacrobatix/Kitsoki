@@ -552,7 +552,7 @@ Built-ins (`internal/host/`):
   and any other keys you add — those become `{{ args.X }}` inside the
   prompt. Returns `{stdout, exit_code, ok}`. See "LLM-backed effects"
   below for the common patterns.
-- **`host.oracle.talk`** — conversational Claude session via `claude -p
+- **`host.oracle.converse`** — conversational Claude session via `claude -p
   --session-id`. Args:
     - `question` (string, required)
     - `chat_id` (string, optional) — when set AND a `ChatStore` is wired,
@@ -561,18 +561,18 @@ Built-ins (`internal/host/`):
       `claude_session_id` across turns. Acquires the per-chat singleton
       lock for the duration of the turn. Returns
       `{answer, session_id, chat_id, claude_session_id, transcript_seq}`.
-    - `session_id` (string, optional, legacy non-chat path) — round-tripped
+    - `session_id` (string, optional, non-chat path) — round-tripped
       so the caller can persist it in world and resume the session.
       Ignored when `chat_id` is set.
     - `working_dir` (string, optional)
   Use this when the user is having a multi-turn conversation; use
   `host.oracle.ask` when you want a one-shot response derived from a named
   prompt file.
-- **`host.oracle.ask_with_mcp`** — one-shot Claude call with optional MCP
-  servers (typed-JSON validators, etc.). Same shape as `host.oracle.ask`
-  plus an `mcp_servers:` map. Accepts an optional `chat_id:` arg with the
-  same chat-aware semantics as `host.oracle.talk` (transcript persistence
-  + Claude session reuse + singleton lock).
+- **`host.oracle.decide`** — one-shot Claude verdict call with a JSON schema.
+  The schema is required; a `submit` MCP tool is auto-attached so Claude
+  must call `submit()` before exiting. Returns `{submitted, rationale,
+  exit_code, ok}`. Use this for "Claude produces a structured artifact" —
+  the canonical pattern for "Claude produces a structured artifact."
 - **`host.chat.resolve`** — get-or-create a chat for `(app, room,
   scope_key)`. Args `app`, `room`, `scope_key` (optional), `title`
   (optional). Returns `{chat_id, title, status, is_new}`. Idempotent —
