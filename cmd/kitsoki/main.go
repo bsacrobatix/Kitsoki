@@ -85,6 +85,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(oracleCmd())
 	root.AddCommand(oracleServeCmd())
 	root.AddCommand(migrateOracleCmd())
+	root.AddCommand(exportStatusCmd())
 
 	return root
 }
