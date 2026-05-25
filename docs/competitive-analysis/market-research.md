@@ -4,7 +4,7 @@ inputDocuments: []
 workflowType: research
 lastStep: 6
 research_type: market
-research_topic: kitsoki — deterministic conversation engine for LLM-driven workflows
+research_topic: kitsoki — deterministic conversational workflow engine for LLM-driven workflows
 research_goals: Produce a market-research report feeding a business value proposition for kitsoki presentation
 user_name: Brad Smith
 date: 2026-05-19
@@ -23,7 +23,7 @@ source_verification: true
 
 ## Research Overview
 
-Kitsoki is a Go-based deterministic conversation engine. The user (or an external orchestrator) drives a finite-state YAML-defined application with free text; an LLM is used only to translate that text into an author-declared finite alphabet of intents. Every transition, every guard, every world mutation is in declared YAML. No hallucinated flags, no out-of-state actions.
+Kitsoki is a Go-based deterministic conversational workflow engine. The user (or an external orchestrator) drives a finite-state YAML-defined application with free text; an LLM is used only to translate that text into an author-declared finite alphabet of intents. Every transition, every guard, every world mutation is in declared YAML. No hallucinated flags, no out-of-state actions.
 
 This research locates kitsoki on the 2026 conversational-AI / LLM-orchestration landscape, sizes the market it could play in, characterises the buyer, and identifies the competitive set it must position against. The driving outcome is a slide-ready business value proposition: who does kitsoki serve, what problem only it solves cleanly, and what the buyer is willing to pay for.
 
@@ -400,7 +400,7 @@ The honest feature-by-feature table:
 
 Lead the value proposition with **auditability and replay** for the regulated-enterprise buyer, with **token-cost efficiency** as the financial close. Specifically:
 
-> *"Kitsoki is the deterministic conversation engine for LLM-driven workflows that have to pass an audit. Free-text input, an author-declared finite intent alphabet, every transition logged. Mode-2 flow tests run in CI with zero LLM cost. One state machine drives your TUI, your Jira ticket, and your Bitbucket PR comments — every checkpoint is on disk, every replay is byte-identical."*
+> *"Kitsoki is the deterministic conversational workflow engine for LLM-driven workflows that have to pass an audit. Free-text input, an author-declared finite intent alphabet, every transition logged. Mode-2 flow tests run in CI with zero LLM cost. One state machine drives your TUI, your Jira ticket, and your Bitbucket PR comments — every checkpoint is on disk, every replay is byte-identical."*
 
 Avoid positioning kitsoki as:
 
@@ -462,11 +462,11 @@ One architectural commitment: **cleanly separate the interpretive points in a wo
 
 **The one-line value proposition for the slide:**
 
-> *Kitsoki is the deterministic conversation engine for any LLM-driven workflow that needs predictable progression, clean introspection, and the option to improve over time — free-text in, author-declared intent alphabet, every transition replayable, every regression test runnable with zero LLM cost.*
+> *Kitsoki is the deterministic conversational workflow engine for any LLM-driven workflow that needs predictable progression, clean introspection, and the option to improve over time — free-text in, author-declared intent alphabet, every transition replayable, every regression test runnable with zero LLM cost.*
 
 When the audience is specifically regulated industry, a tighter variant works:
 
-> *Kitsoki is the deterministic conversation engine for LLM workflows that must pass an audit.*
+> *Kitsoki is the deterministic conversational workflow engine for LLM workflows that must pass an audit.*
 
 ---
 

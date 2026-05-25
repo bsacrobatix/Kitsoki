@@ -278,7 +278,7 @@ orchestrator (today `loop.py`) drives the session by feeding inbound
 comments to kitsoki one at a time; output flows to whichever transports
 the application has wired up.
 
-This is what makes kitsoki usable as the **conversation engine behind a
+This is what makes kitsoki usable as the **conversational workflow engine behind a
 ticket-thread bot**. The state machine is identical; only the surface
 moves.
 

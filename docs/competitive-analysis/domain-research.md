@@ -209,7 +209,7 @@ Each departure is documented and justified. For a domain-expert auditor or migra
 
 ### 6.3 Domain-grounded value proposition (one paragraph)
 
-> *Kitsoki is the engineering-workflow conversation engine for regulated software teams using AI assistants. It encodes the human-guided coding-agent pipeline as a YAML state machine, runs the same machine across local terminal, Jira tickets, and Bitbucket PR comments, and writes every checkpoint into the bug file as a permanent audit record. Mode-2 flow tests replay the whole workflow in CI without an LLM call. The LLM is used only to translate free text into an author-declared intent — never to invent flags, never to step outside the graph.*
+> *Kitsoki is the conversational workflow engine for regulated software engineering teams using AI assistants. It encodes the human-guided coding-agent pipeline as a YAML state machine, runs the same machine across local terminal, Jira tickets, and Bitbucket PR comments, and writes every checkpoint into the bug file as a permanent audit record. Mode-2 flow tests replay the whole workflow in CI without an LLM call. The LLM is used only to translate free text into an author-declared intent — never to invent flags, never to step outside the graph.*
 
 ---
 

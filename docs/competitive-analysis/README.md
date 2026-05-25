@@ -10,7 +10,7 @@
 
 ### The slide-ready value proposition
 
-> **Kitsoki is the deterministic conversation engine for any LLM-driven workflow that needs predictable progression, clean introspection, and the option to get measurably better over time.**
+> **Kitsoki is the deterministic conversational workflow engine for any LLM-driven workflow that needs predictable progression, clean introspection, and the option to get measurably better over time.**
 >
 > *Free-text input. An author-declared finite intent alphabet. Every transition replayable, every regression test runnable with zero LLM cost. One state machine drives your local terminal, your Jira ticket, and your Bitbucket PR comments — every checkpoint is on disk, every replay is byte-identical.*
 >
@@ -192,11 +192,11 @@ See [`technical-research.md`][technical] for the full chain of evidence for each
 
 ### 4.1 The one-line value proposition
 
-> **Kitsoki is the deterministic conversation engine for LLM-driven workflows that need predictable progression, clean introspection, and the option to improve over time.**
+> **Kitsoki is the deterministic conversational workflow engine for LLM-driven workflows that need predictable progression, clean introspection, and the option to improve over time.**
 
 A tighter variant for the regulated-industry segment, when that's the audience:
 
-> *Kitsoki is the deterministic conversation engine for LLM-driven workflows that must pass an audit.*
+> *Kitsoki is the deterministic conversational workflow engine for LLM-driven workflows that must pass an audit.*
 
 ### 4.2 The three-line elevator pitch
 

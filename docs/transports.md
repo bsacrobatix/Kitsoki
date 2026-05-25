@@ -14,7 +14,7 @@ Sessions are persistent and are addressed two ways:
   singleton lookup cheap, and the session writer lock guarantees
   serial execution.
 
-This is what makes kitsoki usable as the conversation engine behind a
+This is what makes kitsoki usable as the conversational workflow engine behind a
 comment-thread bot.
 
 ---

@@ -1,6 +1,6 @@
 # Concept
 
-Kitsoki is a conversation engine built on one commitment: **make
+Kitsoki is a conversational workflow engine built on one commitment: **make
 workflows as deterministic as possible, and confine the LLM to narrow,
 identified, traceable decision points or tasks.**
 

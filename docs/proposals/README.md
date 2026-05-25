@@ -76,3 +76,11 @@ thought.
   multi-pane mouse-driven TUI with a Claude Code-style single-pane
   chat + slash commands, keeping typed-view + pongo2 rendering.
   Nothing implemented yet.
+- [`oracle-split-and-cli-proposal.md`](oracle-split-and-cli-proposal.md) —
+  split `host.oracle.*` into `decide` (pure JSON) / `task`
+  (agentic, every tool call traced) / `converse` (chat), and
+  expose `kitsoki oracle` as the one entry point so subprocesses
+  (validators, tooling) stop shelling out to `claude` directly.
+  Subsumes the prior `per-call-agent-tools-proposal.md` (deleted)
+  — `host.Agent.Tools` plumbing lands as Phase 1. Nothing
+  implemented yet.

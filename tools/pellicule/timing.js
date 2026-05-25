@@ -70,6 +70,14 @@ const TIMING = {
   trace_turn_2:        45,
   trace_caption:       30,
   trace_hold:         180,  // 6.0 s
+
+  // ── Thread scene (pitch) — Jira/Bitbucket comment-driven flow ───────────
+  thread_title:        20,
+  thread_panel_0:      40,  // ~1.3 s per panel reveal
+  thread_panel_1:      40,
+  thread_panel_2:      40,
+  thread_caption:      30,
+  thread_hold:        300,  // 10 s — generous read time for two threads
 };
 
 module.exports = TIMING;

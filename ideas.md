@@ -78,3 +78,4 @@
 - control the next proposed message - template it, tab to accept and then press enter to execute
 - identify field as secret - do not log/trace/etc... (needs to be individually provided - exception to deterministic replay) - extensive testing/verification
 - full abstraction of jira/github/local issues as CLI/mcp and use it instead of writing md to disk and just reading the md - can do file as the starting point but make sure the interface is full and correct compared to jira/github real issues
+- kitsoki turn needs to publish to trace

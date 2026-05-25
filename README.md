@@ -1,6 +1,6 @@
 # kitsoki
 
-A conversation engine built on one commitment: **make workflows as
+A conversational workflow engine built on one commitment: **make workflows as
 deterministic as possible, and confine the LLM to narrow, identified,
 traceable decision points.**
 
@@ -183,7 +183,7 @@ kitsoki/
 **Kitsoki** (*kit-soh-kee*) is a Hopi word for a contemporary
 settlement — a collection of houses, ceremonial chambers, and public
 plazas arranged into one living whole. The metaphor fits a
-conversation engine that hosts many surfaces (TUI, daemon, Jira,
+conversational workflow engine that hosts many surfaces (TUI, daemon, Jira,
 Bitbucket) as connected rooms under one architecture.
 
 Greek mythology is exhausted as a source of software names. Every

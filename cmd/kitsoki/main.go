@@ -850,9 +850,14 @@ func defaultDBPath() string {
 
 func vizCmd() *cobra.Command {
 	var (
-		outPath   string
-		doMermaid bool
-		byRoom    bool
+		outPath     string
+		doMermaid   bool
+		byRoom      bool
+		doFlowchart bool
+		detailLevel string
+		filterRoom  string
+		filterFrom  string
+		filterTo    string
 	)
 
 	cmd := &cobra.Command{
@@ -868,13 +873,30 @@ Default: Graphviz DOT to <appname>-viz.dot.
     top-level compound state if any, else the prefix before the first '_'
     in the state name. Useful for apps with many states (devstory, etc.)
     where the single all-up diagram is unreadable.
+--flowchart: Mermaid flowchart LR (data-flow view) to <appname>-flow.mmd.
+    Shows rooms as subgraphs, on_enter effects as hex nodes, world writes
+    as cylinder nodes — styled like the bugfix pipeline diagrams.
+    Use --detail to control verbosity:
+      rooms  — one node per room, cross-room transitions only
+      states — states in room subgraphs, all transitions (default)
+      steps  — + on_enter effect chains (shell/llm/work hex nodes)
+      full   — + world writes (bind/set cylinders) and error targets
+    Use --room or --from/--to to scope the diagram to a subset of rooms:
+      --room <name>: limit flowchart to a single room (stub nodes for external exits)
+      --from <room> --to <room>: limit flowchart to rooms on any path between the two
+          (includes both endpoints; stub nodes for exits outside the slice)
 
 Examples:
   kitsoki viz testdata/apps/cloak/app.yaml
   kitsoki viz myapp.yaml --out /tmp/g.dot && dot -Tsvg /tmp/g.dot -o /tmp/g.svg
   kitsoki viz testdata/apps/cloak/app.yaml --mermaid --out -
   kitsoki viz myapp.yaml --mermaid --rooms --out viz/
-  kitsoki viz myapp.yaml --mermaid | mmdc -i - -o graph.svg`,
+  kitsoki viz myapp.yaml --mermaid | mmdc -i - -o graph.svg
+  kitsoki viz myapp.yaml --flowchart --detail steps
+  kitsoki viz myapp.yaml --flowchart --detail full --out flow.mmd
+  kitsoki viz myapp.yaml --flowchart --detail full | mmdc -i - -o flow.svg
+  kitsoki viz myapp.yaml --flowchart --detail steps --room reproducing
+  kitsoki viz myapp.yaml --flowchart --detail full --from reproducing --to testing`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appPath := args[0]
@@ -885,6 +907,39 @@ Examples:
 			def, err := loadAppWithEnv(appPath)
 			if err != nil {
 				return err
+			}
+
+			if doFlowchart {
+				dl, err := viz.ParseDetailLevel(detailLevel)
+				if err != nil {
+					return err
+				}
+				filter := viz.FlowchartFilter{Room: filterRoom, From: filterFrom, To: filterTo}
+				if err := filter.Validate(); err != nil {
+					return err
+				}
+				if outPath == "" {
+					outPath = def.App.ID + "-flow.mmd"
+				}
+				var w io.Writer
+				if outPath == "-" {
+					w = cmd.OutOrStdout()
+				} else {
+					f, err := os.Create(outPath)
+					if err != nil {
+						return fmt.Errorf("create %q: %w", outPath, err)
+					}
+					defer func() { _ = f.Close() }()
+					w = f
+				}
+				if err := viz.ExportFlowchart(def, dl, filter, w); err != nil {
+					return fmt.Errorf("export flowchart: %w", err)
+				}
+				if outPath != "-" {
+					fmt.Printf("wrote %s\n", outPath)
+					fmt.Printf("render: mmdc -i %s -o flow.svg\n", outPath)
+				}
+				return nil
 			}
 
 			if byRoom {
@@ -953,6 +1008,11 @@ Examples:
 	cmd.Flags().StringVar(&outPath, "out", "", `output file or directory (default: <appid>-viz.{dot,mmd} or <appid>-viz/ with --rooms; "-" for stdout)`)
 	cmd.Flags().BoolVar(&doMermaid, "mermaid", false, "emit Mermaid stateDiagram-v2 instead of Graphviz DOT")
 	cmd.Flags().BoolVar(&byRoom, "rooms", false, "split into per-room files plus an overview (requires --mermaid)")
+	cmd.Flags().BoolVar(&doFlowchart, "flowchart", false, "emit Mermaid flowchart LR (data-flow view) instead of stateDiagram")
+	cmd.Flags().StringVar(&detailLevel, "detail", "states", "detail level for --flowchart: rooms|states|steps|full")
+	cmd.Flags().StringVar(&filterRoom, "room", "", "filter flowchart to a single room (--flowchart only)")
+	cmd.Flags().StringVar(&filterFrom, "from", "", "start room for a range filter (--flowchart only; requires --to)")
+	cmd.Flags().StringVar(&filterTo, "to", "", "end room for a range filter (--flowchart only; requires --from)")
 	return cmd
 }
 

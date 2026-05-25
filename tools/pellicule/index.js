@@ -43,6 +43,10 @@ if (args.length < 2 || args.includes('--help') || args.includes('-h')) {
     '    --keep-frames              Keep temp frame directory after render',
     '    --frames-dir <path>        Use this directory for frames instead of a temp dir',
     '    --capture-log <file>       Write live HTTP responses to JSON (for playback freeze)',
+    '    --scenes <spec>            Render only the listed scenes (zero-indexed).',
+    '                               Spec: comma-separated indices and/or ranges,',
+    '                               e.g.  --scenes 4     --scenes 0,3-5,7',
+    '                               Selected scenes are still combined into one MP4.',
     '',
     '  Examples:',
     '    node index.js examples/vp-5623-mock.demo.json out.mp4',
@@ -67,6 +71,31 @@ const framesDirIdx  = args.indexOf('--frames-dir');
 const framesDirOpt  = framesDirIdx !== -1 ? args[framesDirIdx + 1] : null;
 const captureLogIdx = args.indexOf('--capture-log');
 const captureLogOpt = captureLogIdx !== -1 ? args[captureLogIdx + 1] : null;
+const scenesIdx     = args.indexOf('--scenes');
+const scenesOpt     = scenesIdx !== -1 ? args[scenesIdx + 1] : null;
+
+// Parse --scenes "0,3-5,7" into a Set of scene indices. null = all scenes.
+function parseScenes(spec) {
+  if (!spec) return null;
+  const set = new Set();
+  for (const part of spec.split(',')) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const dash = trimmed.indexOf('-');
+    if (dash === -1) {
+      const n = parseInt(trimmed, 10);
+      if (!Number.isNaN(n)) set.add(n);
+    } else {
+      const from = parseInt(trimmed.slice(0, dash), 10);
+      const to   = parseInt(trimmed.slice(dash + 1), 10);
+      if (!Number.isNaN(from) && !Number.isNaN(to)) {
+        for (let i = from; i <= to; i++) set.add(i);
+      }
+    }
+  }
+  return set;
+}
+const selectedScenes = parseScenes(scenesOpt);
 
 // Parse --context key=value overrides (repeatable)
 const cliContext = {};
@@ -126,7 +155,12 @@ async function main() {
   console.log(`[pellicule] Output : ${path.resolve(outputPath)}`);
   console.log(`[pellicule] FPS    : ${fps}`);
   console.log(`[pellicule] Frames : ${framesDir}`);
-  console.log(`[pellicule] Scenes : ${spec.scenes.length}`);
+  if (selectedScenes) {
+    const picked = [...selectedScenes].sort((a, b) => a - b).join(',');
+    console.log(`[pellicule] Scenes : ${spec.scenes.length} total, rendering [${picked}]`);
+  } else {
+    console.log(`[pellicule] Scenes : ${spec.scenes.length}`);
+  }
   if (captureLogPath) console.log(`[pellicule] CaptureLog: ${captureLogPath}`);
   console.log('');
 
@@ -138,7 +172,7 @@ async function main() {
         process.stdout.write(`\r[pellicule] Rendering: ${label.padEnd(24)}  frame ${idx}`);
         lastLabel = label;
       }
-    }, captureLogPath, absInput);
+    }, captureLogPath, absInput, selectedScenes);
     process.stdout.write('\n');
   } catch (err) {
     console.error(`\n[pellicule] ERROR during rendering: ${err.message}`);

@@ -526,8 +526,9 @@ body.mode-pitch #pitch-stage { display: flex; }
 /* ── Narrative ───────────────────────────────────────────────────────────── */
 #narrative-region { gap: 36px; max-width: 1500px; margin: 0 auto; text-align: center; }
 #narrative-eyebrow {
-  font-size: 22px;
-  letter-spacing: 0.4em;
+  font-size: 36px;
+  font-weight: bold;
+  letter-spacing: 0.32em;
   text-transform: uppercase;
   color: #58a6ff;
 }
@@ -556,8 +557,9 @@ body.mode-pitch #pitch-stage { display: flex; }
 /* ── Diagram ─────────────────────────────────────────────────────────────── */
 #diagram-region { gap: 40px; max-width: 1700px; }
 #diagram-title {
-  font-size: 22px;
-  letter-spacing: 0.4em;
+  font-size: 36px;
+  font-weight: bold;
+  letter-spacing: 0.32em;
   text-transform: uppercase;
   color: #58a6ff;
 }
@@ -678,8 +680,9 @@ body.mode-pitch #pitch-stage { display: flex; }
 /* ── Diagram SVG ─────────────────────────────────────────────────────────── */
 #diagramsvg-region { gap: 36px; max-width: 1700px; width: 100%; }
 #diagramsvg-title {
-  font-size: 22px;
-  letter-spacing: 0.4em;
+  font-size: 36px;
+  font-weight: bold;
+  letter-spacing: 0.32em;
   text-transform: uppercase;
   color: #58a6ff;
   text-align: center;
@@ -703,8 +706,32 @@ body.mode-pitch #pitch-stage { display: flex; }
   flex-direction: column;
   gap: 16px;
 }
+/* Single-panel diagrams (e.g. surface fanout) use a wider, less boxy frame. */
+#diagramsvg-panels.diagramsvg-panels-single .diagramsvg-panel {
+  max-width: 1280px;
+  background: transparent;
+  border: 0;
+  padding: 12px 0 0;
+}
+#diagramsvg-panels.diagramsvg-panels-single .diagramsvg-panel-label { display: none; }
+/* Cap SVG height so the scene title and caption remain visible above/below. */
+#diagramsvg-panels.diagramsvg-panels-single .diagramsvg-svg {
+  aspect-ratio: auto;
+  height: 680px;
+  width: auto;
+  max-width: 100%;
+  margin: 0 auto;
+  display: block;
+}
+/* Single-panel diagrams use much larger node text so labels read at 1080p. */
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-label      { font-size: 36px; }
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-sub        { font-size: 22px; }
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-edge-label { font-size: 22px; }
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-node rect            { stroke-width: 2.5; }
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-node.dsvg-style-primary   rect { stroke-width: 3; }
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-node.dsvg-style-secondary rect { stroke-width: 3; }
 .diagramsvg-panel-label {
-  font-size: 22px;
+  font-size: 30px;
   letter-spacing: 0.15em;
   text-transform: uppercase;
   color: #8b949e;
@@ -714,21 +741,22 @@ body.mode-pitch #pitch-stage { display: flex; }
 .diagramsvg-svg {
   width: 100%;
   height: auto;
-  aspect-ratio: 1 / 0.95;
+  aspect-ratio: 1 / 0.7;
   display: block;
 }
 .diagramsvg-panel-caption {
-  font-size: 18px;
-  color: #8b949e;
-  text-align: center;
-  margin-top: 4px;
-}
-#diagramsvg-caption {
   font-size: 28px;
   color: #cdd9e5;
   text-align: center;
-  max-width: 1400px;
-  line-height: 1.5;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+#diagramsvg-caption {
+  font-size: 36px;
+  color: #cdd9e5;
+  text-align: center;
+  max-width: 1500px;
+  line-height: 1.4;
   margin: 0 auto;
 }
 
@@ -750,13 +778,13 @@ body.mode-pitch #pitch-stage { display: flex; }
 }
 .dsvg-label {
   font-family: 'JetBrains Mono', 'Courier New', monospace;
-  font-size: 22px;
+  font-size: 30px;
   font-weight: bold;
   fill: #e6edf3;
 }
 .dsvg-sub {
   font-family: 'JetBrains Mono', 'Courier New', monospace;
-  font-size: 14px;
+  font-size: 19px;
   fill: #8b949e;
 }
 .dsvg-edge line {
@@ -767,19 +795,43 @@ body.mode-pitch #pitch-stage { display: flex; }
 .dsvg-arrow path { fill: #58a6ff; stroke: none; }
 .dsvg-edge-label {
   font-family: 'JetBrains Mono', 'Courier New', monospace;
-  font-size: 15px;
+  font-size: 20px;
   fill: #cdd9e5;
   paint-order: stroke;
   stroke: #0d1117;
-  stroke-width: 6px;
+  stroke-width: 7px;
   stroke-linejoin: round;
+}
+.dsvg-line {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 18px;
+  fill: #8b949e;
+}
+.dsvg-edge-gate {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 18px;
+  font-weight: bold;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  fill: #f0883e;
+  paint-order: stroke;
+  stroke: #0d1117;
+  stroke-width: 7px;
+  stroke-linejoin: round;
+}
+.dsvg-gate-bar {
+  stroke: #f0883e;
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  fill: none;
 }
 
 /* ── Trace ───────────────────────────────────────────────────────────────── */
 #trace-region { gap: 32px; max-width: 1500px; width: 100%; }
 #trace-title {
-  font-size: 22px;
-  letter-spacing: 0.4em;
+  font-size: 36px;
+  font-weight: bold;
+  letter-spacing: 0.32em;
   text-transform: uppercase;
   color: #58a6ff;
   text-align: center;
@@ -881,6 +933,111 @@ body.mode-pitch #pitch-stage { display: flex; }
   color: #cdd9e5;
   text-align: center;
   max-width: 1300px;
+  line-height: 1.5;
+  margin: 0 auto;
+}
+
+/* ── Thread (comment-driven flow) ────────────────────────────────────────── */
+#thread-region { gap: 30px; max-width: 1500px; width: 100%; }
+#thread-title {
+  font-size: 36px;
+  font-weight: bold;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: #58a6ff;
+  text-align: center;
+}
+#thread-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  width: 100%;
+  align-items: center;
+}
+.thread-panel {
+  width: 100%;
+  max-width: 1300px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.thread-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 26px;
+  background: #21262d;
+  border-bottom: 1px solid #30363d;
+}
+.thread-system {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-weight: bold;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 22px;
+}
+.thread-system.thread-system-jira      { color: #58a6ff; }
+.thread-system.thread-system-bitbucket { color: #79c0ff; }
+.thread-system.thread-system-github    { color: #c9d1d9; }
+.thread-ref {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  color: #cdd9e5;
+  font-size: 22px;
+}
+.thread-sep { color: #484f58; font-size: 22px; }
+.thread-stage {
+  margin-left: auto;
+  padding: 4px 14px;
+  border-radius: 4px;
+  background: #1c2128;
+  color: #8b949e;
+  border: 1px solid #30363d;
+  font-size: 18px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: bold;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+}
+.thread-messages {
+  padding: 20px 28px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.thread-message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.thread-author {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-weight: bold;
+  font-size: 22px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.thread-author.thread-author-dev { color: #e3b341; }
+.thread-author.thread-author-bot { color: #3fb950; }
+.thread-author-role {
+  color: #484f58;
+  font-weight: normal;
+  font-size: 18px;
+}
+.thread-body {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  color: #e6edf3;
+  font-size: 24px;
+  line-height: 1.5;
+  padding-left: 24px;
+  white-space: pre-line;
+}
+#thread-caption {
+  font-size: 28px;
+  color: #cdd9e5;
+  text-align: center;
+  max-width: 1400px;
   line-height: 1.5;
   margin: 0 auto;
 }
@@ -1066,6 +1223,13 @@ body.mode-pitch #pitch-stage { display: flex; }
       <div id="trace-title" class="reveal"></div>
       <div id="trace-turns"></div>
       <div id="trace-caption" class="reveal"></div>
+    </div>
+
+    <!-- Thread (Jira/Bitbucket comment-driven flow) -->
+    <div id="thread-region" class="scene-region">
+      <div id="thread-title" class="reveal"></div>
+      <div id="thread-panels"></div>
+      <div id="thread-caption" class="reveal"></div>
     </div>
 
     <!-- CTA -->
@@ -1488,7 +1652,9 @@ window.pellicule = {
 
     const wrap = $('diagramsvg-panels');
     wrap.innerHTML = '';
-    (scene.panels || []).forEach((p, i) => {
+    const panels = scene.panels || [];
+    wrap.classList.toggle('diagramsvg-panels-single', panels.length === 1);
+    panels.forEach((p, i) => {
       const panel = document.createElement('div');
       panel.className = 'diagramsvg-panel reveal';
       panel.id = `diagramsvg-panel-${i}`;
@@ -1508,35 +1674,82 @@ window.pellicule = {
     const nodesSvg = nodes.map(n => {
       const cx = n.x + n.w / 2;
       const cy = n.y + n.h / 2;
-      const labelY = n.sub ? cy - 4 : cy + 8;
-      const subSvg = n.sub
-        ? `<text class="dsvg-sub" x="${cx}" y="${cy + 22}" text-anchor="middle">${escapeHTML(n.sub)}</text>`
-        : '';
+
+      // Build the stack of lines inside this node: label (big), optional sub
+      // (medium), and an optional `lines` array of extra small lines beneath.
+      // Vertically centred as a group within the rect.
+      const stack = [];
+      if (n.label) stack.push({ text: n.label, cls: 'dsvg-label', lh: 38 });
+      if (n.sub)   stack.push({ text: n.sub,   cls: 'dsvg-sub',   lh: 26 });
+      (n.lines || []).forEach(t => stack.push({ text: t, cls: 'dsvg-line', lh: 26 }));
+
+      const totalH = stack.reduce((s, l) => s + l.lh, 0);
+      let y = cy - totalH / 2 + stack[0].lh / 2;
+      const textsSvg = stack.map(l => {
+        const el = `<text class="${l.cls}" x="${cx}" y="${y}" text-anchor="middle" dominant-baseline="middle">${escapeHTML(l.text)}</text>`;
+        y += l.lh;
+        return el;
+      }).join('');
+
       return `<g class="dsvg-node dsvg-style-${n.style || 'default'}">` +
              `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="14" ry="14"/>` +
-             `<text class="dsvg-label" x="${cx}" y="${labelY}" text-anchor="middle" dominant-baseline="middle">${escapeHTML(n.label || '')}</text>` +
-             subSvg +
+             textsSvg +
              `</g>`;
     }).join('');
 
     const edgesSvg = (panel.edges || []).map(e => {
       const from = nodeMap[e.from], to = nodeMap[e.to];
       if (!from || !to) return '';
-      const fromBelow = (from.y + from.h / 2) > (to.y + to.h / 2);
-      // Endpoints: edge starts at the side of `from` facing `to` and ends at the side of `to` facing `from`
-      let y1, y2;
-      if (fromBelow) { y1 = from.y;          y2 = to.y + to.h; }
-      else           { y1 = from.y + from.h; y2 = to.y; }
-      const offset = e.side === 'left' ? -32 : (e.side === 'right' ? 32 : 0);
-      const x1 = from.x + from.w / 2 + offset;
-      const x2 = to.x   + to.w   / 2 + offset;
 
-      const labelX  = (x1 + x2) / 2 + (e.side === 'left' ? -10 : (e.side === 'right' ? 10 : 0));
-      const labelY  = (y1 + y2) / 2;
-      const anchor  = e.side === 'left' ? 'end' : (e.side === 'right' ? 'start' : 'middle');
+      // Pick endpoints on the sides of from/to that face each other.
+      // Whichever axis (horizontal or vertical) has the larger center-to-center
+      // delta dominates — the edge anchors on those sides. The optional
+      // `side: "left"|"right"` parameter offsets the edge perpendicular to its
+      // direction (so e.g. two parallel arrows can coexist between the same
+      // node pair).
+      const fromCx = from.x + from.w / 2, fromCy = from.y + from.h / 2;
+      const toCx   = to.x   + to.w   / 2, toCy   = to.y   + to.h   / 2;
+      const dx = toCx - fromCx, dy = toCy - fromCy;
+      const offset = e.side === 'left' ? -32 : (e.side === 'right' ? 32 : 0);
+
+      let x1, y1, x2, y2;
+      const horizontal = Math.abs(dx) >= Math.abs(dy);
+      if (horizontal) {
+        // Anchor on left/right sides; offset shifts perpendicular (vertical)
+        if (dx > 0) { x1 = from.x + from.w; x2 = to.x; }
+        else        { x1 = from.x;          x2 = to.x + to.w; }
+        y1 = fromCy + offset;
+        y2 = toCy   + offset;
+      } else {
+        // Anchor on top/bottom sides; offset shifts perpendicular (horizontal)
+        if (dy > 0) { y1 = from.y + from.h; y2 = to.y; }
+        else        { y1 = from.y;          y2 = to.y + to.h; }
+        x1 = fromCx + offset;
+        x2 = toCx   + offset;
+      }
+
+      const labelX  = (x1 + x2) / 2 + (horizontal ? 0 : (e.side === 'left' ? -10 : (e.side === 'right' ? 10 : 0)));
+      const labelY  = (y1 + y2) / 2 + (horizontal ? -10 : 0);
+      const anchor  = (!horizontal && e.side === 'left')  ? 'end'
+                    : (!horizontal && e.side === 'right') ? 'start'
+                    : 'middle';
       const labelEl = e.label
         ? `<text class="dsvg-edge-label" x="${labelX}" y="${labelY}" text-anchor="${anchor}" dominant-baseline="middle">${escapeHTML(e.label)}</text>`
         : '';
+
+      // Optional `gate` field: render a dashed bar across the edge with the
+      // gate name in a checkpoint-style label. The gate replaces the regular
+      // arrow — the gate IS the connector between phases.
+      if (e.gate) {
+        const gateText = e.gate;
+        const gateBarReach = 90;          // dashed bar extent on each side
+        const gateGap = gateText.length * 9 + 22;
+        return `<g class="dsvg-edge dsvg-edge-gate-edge">` +
+          `<line x1="${labelX - gateBarReach - gateGap}" y1="${labelY}" x2="${labelX - gateGap}" y2="${labelY}" class="dsvg-gate-bar"/>` +
+          `<line x1="${labelX + gateGap}" y1="${labelY}" x2="${labelX + gateBarReach + gateGap}" y2="${labelY}" class="dsvg-gate-bar"/>` +
+          `<text class="dsvg-edge-gate" x="${labelX}" y="${labelY}" text-anchor="middle" dominant-baseline="middle">${escapeHTML(gateText)}</text>` +
+          `</g>`;
+      }
 
       return `<g class="dsvg-edge">` +
              `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" marker-end="url(#${markerId})"/>` +
@@ -1558,6 +1771,50 @@ window.pellicule = {
         nodesSvg +
       `</svg>` +
       pcap;
+  },
+
+  // ── Thread ──────────────────────────────────────────────────────────────
+  showThread(scene) {
+    this._hideAllRegions();
+    this._setText('thread-title',   scene.title);
+    this._setText('thread-caption', scene.caption);
+
+    const wrap = $('thread-panels');
+    wrap.innerHTML = '';
+    (scene.panels || []).forEach((p, i) => {
+      const card = document.createElement('div');
+      card.className = 'thread-panel reveal';
+      card.id = `thread-panel-${i}`;
+      card.innerHTML = this._renderThreadPanel(p);
+      wrap.appendChild(card);
+    });
+    this._activateRegion('thread-region');
+  },
+  hideThread() { this._hideAllRegions(); },
+
+  _renderThreadPanel(p) {
+    const sysClass  = `thread-system-${p.system || 'jira'}`;
+    const stageHtml = p.stage
+      ? `<span class="thread-stage">${escapeHTML(p.stage)}</span>`
+      : '';
+    const refHtml = p.ref
+      ? `<span class="thread-sep">·</span><span class="thread-ref">${escapeHTML(p.ref)}</span>`
+      : '';
+    const messages = (p.messages || []).map(m => {
+      const roleLabel = m.role === 'bot' ? '· bot' : (m.role === 'dev' ? '· dev' : '');
+      const roleClass = `thread-author-${m.role || 'dev'}`;
+      const roleSpan  = roleLabel ? `<span class="thread-author-role">${escapeHTML(roleLabel)}</span>` : '';
+      return `<div class="thread-message">
+        <div class="thread-author ${roleClass}">${escapeHTML(m.author || '')}${roleSpan}</div>
+        <div class="thread-body">${escapeHTML(m.body || '')}</div>
+      </div>`;
+    }).join('');
+    return `<div class="thread-header">
+      <span class="thread-system ${sysClass}">${escapeHTML(p.system || '')}</span>
+      ${refHtml}
+      ${stageHtml}
+    </div>
+    <div class="thread-messages">${messages}</div>`;
   },
 
   // ── Trace ───────────────────────────────────────────────────────────────
@@ -1641,6 +1898,12 @@ const _PITCH_REVEALS = {
   trace_turn_1:        ['trace-turn-1'],
   trace_turn_2:        ['trace-turn-2'],
   trace_caption:       ['trace-caption'],
+  // Thread
+  thread_title:        ['thread-title'],
+  thread_panel_0:      ['thread-panel-0'],
+  thread_panel_1:      ['thread-panel-1'],
+  thread_panel_2:      ['thread-panel-2'],
+  thread_caption:      ['thread-caption'],
 };
 
 const _origSetState = window.pellicule.setState.bind(window.pellicule);

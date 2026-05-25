@@ -32,6 +32,7 @@ const SCENE_MODULES = {
   'diagram-svg':  require('./scenes/diagram-svg'),
   'terminal-gif': require('./scenes/terminal-gif'),
   trace:          require('./scenes/trace'),
+  thread:         require('./scenes/thread'),
   stat:           require('./scenes/stat'),
   cta:            require('./scenes/cta'),
 };
@@ -46,9 +47,13 @@ const SCENE_MODULES = {
  * @param {string}   captureLogPath  - Optional path for live-response capture log
  * @param {string}   specPath        - Absolute path to the spec (used to resolve
  *                                     relative asset paths like gif/audio files)
+ * @param {Set}      selectedScenes  - Optional Set of scene indices to render.
+ *                                     If null, render all. Skipped scenes leave
+ *                                     no frames — the assembled MP4 contains
+ *                                     only the picked scenes back-to-back.
  * @returns {Promise<number>} Total frames written
  */
-async function generateFrames(spec, framesDir, fps = 30, onProgress = null, captureLogPath = null, specPath = null) {
+async function generateFrames(spec, framesDir, fps = 30, onProgress = null, captureLogPath = null, specPath = null, selectedScenes = null) {
   const { width = 1920, height = 1080 } = (spec.meta && spec.meta.resolution) || {};
   const mode = (spec.meta && spec.meta.mode) || 'api';  // 'api' | 'pitch'
 
@@ -95,6 +100,7 @@ async function generateFrames(spec, framesDir, fps = 30, onProgress = null, capt
 
     // Per-scene rendering loop
     for (let sceneIndex = 0; sceneIndex < (spec.scenes || []).length; sceneIndex++) {
+      if (selectedScenes && !selectedScenes.has(sceneIndex)) continue;
       const scene = spec.scenes[sceneIndex];
       const mod   = SCENE_MODULES[scene.type];
       if (!mod) {

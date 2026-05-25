@@ -9,7 +9,7 @@
  *     "type": "cta",
  *     "wordmark":  "Kitsoki",
  *     "tagline":   "Conversation engine with deterministic flow",
- *     "url":       "github.com/acronis/kitsoki",
+ *     "url":       "github.com/cyberfabric/Kitsoki",
  *     "hold":      180
  *   }
  */
