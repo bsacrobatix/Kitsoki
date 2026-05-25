@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/viz"
 )
 
 // Snapshot is the canonical, self-contained representation of a kitsoki session
@@ -44,22 +45,9 @@ type MermaidSnapshot struct {
 }
 
 // NodeRef identifies the AppDef entity that a Mermaid diagram node represents.
-//
-// TODO(runstatus-merge): after feat/runstatus-viz-nodemap merges into
-// feat/runstatus, replace this local definition with an alias to viz.NodeRef.
-// The integrator just needs: type NodeRef = viz.NodeRef
-// Both types have identical JSON tags and field names so the swap is
-// backward-compatible.
-type NodeRef struct {
-	// Kind is "state", "effect", "transition", or "world".
-	Kind string `json:"kind"`
-	// Ref is the AppDef-relative address:
-	//   "state"      → dotted StatePath (e.g. "bar.dark")
-	//   "effect"     → "<statePath>:<effectIndex>" (e.g. "bar.dark:0")
-	//   "transition" → "<statePath>:<intentName>:<branchIndex>"
-	//   "world"      → world variable name
-	Ref string `json:"ref"`
-}
+// Aliased to viz.NodeRef so the viz emitter and the snapshot consumers share
+// one type. See internal/viz/nodemap.go for the encoding of Ref strings.
+type NodeRef = viz.NodeRef
 
 // TraceEvent is one slog record from the JSONL trace file, parsed into a
 // typed shape. The well-known slog keys (time, level, msg, session_id, turn,
