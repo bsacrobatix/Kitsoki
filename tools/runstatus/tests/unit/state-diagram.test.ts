@@ -87,6 +87,21 @@ async function mountDiagram(overrides: {
   return wrapper;
 }
 
+// SVG variant with Mermaid 11's container-prefix on every g[id].
+// e.g. id="<containerId>-flowchart-<nodeId>-<n>"
+const MOCK_SVG_M11 = `
+<svg xmlns="http://www.w3.org/2000/svg" id="__MOCK__">
+  <g id="kitsoki-mermaid-1-flowchart-ST_root_active-1" class="node default">
+    <rect width="100" height="40" />
+    <text>active</text>
+  </g>
+  <g id="kitsoki-mermaid-1-flowchart-ST_root_done-2" class="node default">
+    <rect width="100" height="40" />
+    <text>done</text>
+  </g>
+</svg>
+`;
+
 // ---- Tests: render ---------------------------------------------------------
 
 describe("StateDiagram — render", () => {
@@ -151,6 +166,27 @@ describe("StateDiagram — .current class", () => {
     const doneG = wrapper.find('[id="flowchart-ST_root_done-2"]');
     expect(activeG.classes()).not.toContain("current");
     expect(doneG.classes()).toContain("current");
+
+    wrapper.unmount();
+  });
+});
+
+// ---- Tests: Mermaid 11 container-prefix id form ---------------------------
+
+describe("StateDiagram — Mermaid 11 container-prefix id extraction", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("applies .current and binds clicks when ids carry the container prefix", async () => {
+    _svg.value = MOCK_SVG_M11;
+    const wrapper = await mountDiagram({ currentStatePath: "root.active" });
+
+    const activeG = wrapper.find('[id="kitsoki-mermaid-1-flowchart-ST_root_active-1"]');
+    expect(activeG.exists()).toBe(true);
+    expect(activeG.classes()).toContain("current");
+
+    await activeG.trigger("click");
+    const emitted = wrapper.emitted("select") as [string, NodeRef][] | undefined;
+    expect(emitted![0]).toEqual(["ST_root_active", { kind: "state", ref: "root.active" }]);
 
     wrapper.unmount();
   });

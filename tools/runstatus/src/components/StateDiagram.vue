@@ -125,16 +125,17 @@ function attachNodeHandlers(): void {
 /**
  * Extract our stable node ID from the mermaid-assigned SVG id.
  *
- * Mermaid 10+ assigns SVG element ids in the form:
- *   "flowchart-<nodeId>-<number>"   e.g. "flowchart-ST_root_active-3"
- * or sometimes just the nodeId directly.
+ * Mermaid 11 assigns SVG element ids in the form:
+ *   "<containerId>-flowchart-<nodeId>-<number>"
+ *   e.g. "kitsoki-mermaid-1-flowchart-ST_root_active-3"
+ * Mermaid 10 omitted the container prefix:
+ *   "flowchart-<nodeId>-<number>"
  *
- * We strip the "flowchart-" prefix and the trailing "-<number>" suffix.
+ * We strip everything up to and including "flowchart-" and the trailing
+ * "-<number>" suffix.
  */
 function extractMermaidNodeId(svgId: string): string {
-  // Strip leading "flowchart-"
-  let s = svgId.replace(/^flowchart-/, "");
-  // Strip trailing "-<digits>"
+  let s = svgId.replace(/^.*?flowchart-/, "");
   s = s.replace(/-\d+$/, "");
   return s;
 }

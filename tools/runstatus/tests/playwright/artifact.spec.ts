@@ -87,13 +87,6 @@ test.describe("in-progress fixture", () => {
   });
 
   test("current state node has the 'current' CSS class in the diagram", async ({ page }) => {
-    // fixme: StateDiagram.extractMermaidNodeId strips "^flowchart-" but
-    // Mermaid 11 prefixes IDs with the render container ID
-    // (e.g. "kitsoki-mermaid-1-flowchart-ST_cloakroom-3") so the ID never
-    // matches the node_map key — g.current is never applied.
-    // Tracked in StateDiagram.vue extractMermaidNodeId().
-    test.fixme(true, "StateDiagram.extractMermaidNodeId does not handle Mermaid 11 diagramId-prefixed SVG element IDs; g.current is never set");
-
     await loadArtifact(page, IN_PROGRESS_SNAPSHOT);
 
     await page.locator(".state-diagram__svg-host svg").waitFor({ timeout: 8000 });
