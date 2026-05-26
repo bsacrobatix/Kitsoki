@@ -65,7 +65,14 @@ type FlowFixture struct {
 	// Keys are the handler name (e.g. "host.run", "host.workspace_manager.get").
 	// Each value declares the canned response. Presence of any host_handlers
 	// entry implicitly opts the fixture into the orchestrator-backed runner.
+	// Mutually exclusive with HostCassette.
 	HostHandlers map[string]HostStub `yaml:"host_handlers,omitempty"`
+
+	// HostCassette is the path to a host cassette file (kind: host_cassette).
+	// When set the testrunner installs a cassette dispatcher for every handler
+	// name referenced by the cassette's episodes. Mutually exclusive with
+	// HostHandlers; compatible with HostBindings.
+	HostCassette string `yaml:"host_cassette,omitempty"`
 
 	// HostBindings rebinds named ifaces to alternative handlers for
 	// this fixture only. Mirrors the production `imports.<alias>.
@@ -374,6 +381,11 @@ type orchRig struct {
 	sid      app.SessionID
 	clk      *clock.Fake
 	cleanup  func() error
+
+	// currentStatePath is updated by the turn loop before each RunIntent call
+	// so that cassette dispatchers can read the orchestrator's current state
+	// without a synchronous LoadJourney on every handler invocation.
+	currentStatePath app.StatePath
 }
 
 // buildOrchestratorRig constructs a fully wired orchestrator rig for one flow
@@ -382,7 +394,10 @@ type orchRig struct {
 // Host stubs from fixture.HostHandlers are registered in a host.Registry;
 // each stub closure respects Delay (using the fake clock's Sleep), InfraError,
 // Error, and Data fields in that priority order.
-func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machine, fixture *FlowFixture) (*orchRig, error) {
+//
+// filePath is the fixture file's absolute path; it is used to resolve
+// host_cassette: relative paths. Pass the fixture's filePath from runFlowFile.
+func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machine, fixture *FlowFixture, filePath string) (*orchRig, error) {
 	// Deterministic epoch.
 	clk := clock.NewFake(time.Unix(0, 0))
 
@@ -477,6 +492,69 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 		})
 	}
 
+	// cassette dispatcher: allocate a rig so the stateOf closure can read the
+	// current state path. The rig pointer is returned below; the closure holds
+	// a reference to &rig.currentStatePath which the turn loop updates before
+	// every RunIntent call. This avoids a synchronous LoadJourney per dispatch.
+	var rigPtr orchRig
+
+	// Wire host_cassette: when set.
+	if fixture.HostCassette != "" {
+		cassettePath := fixture.HostCassette
+		if !filepath.IsAbs(cassettePath) {
+			cassettePath = filepath.Join(filepath.Dir(filePath), cassettePath)
+		}
+		cas, casErr := LoadCassette(cassettePath)
+		if casErr != nil {
+			_ = st.Close()
+			return nil, fmt.Errorf("buildOrchestratorRig: load cassette: %w", casErr)
+		}
+
+		// KITSOKI_CASSETTE_STRICT: hard error when record mode is non-none.
+		if CassetteStrictRecording() && CassetteRecordMode(cas) != "none" {
+			_ = st.Close()
+			return nil, fmt.Errorf("buildOrchestratorRig: KITSOKI_CASSETTE_STRICT=1 but cassette record mode is %q", CassetteRecordMode(cas))
+		}
+
+		// stateOf reads the shared currentStatePath pointer updated by the turn loop.
+		stateOf := func() string {
+			return string(rigPtr.currentStatePath)
+		}
+
+		// recordSink appends to the cassette file when recording is active.
+		mode := CassetteRecordMode(cas)
+		var recordSink func(*CassetteEpisode)
+		if mode != "none" {
+			recordSink = func(ep *CassetteEpisode) {
+				_ = AppendEpisodeToFile(cas, ep)
+			}
+		}
+
+		// Collect unique handler names from the cassette's episodes.
+		seen := map[string]bool{}
+		for _, ep := range cas.Episodes {
+			h, ok := ep.Match["handler"].(string)
+			if !ok || h == "" {
+				continue
+			}
+			if seen[h] {
+				continue
+			}
+			seen[h] = true
+			handlerName := h
+			// Capture any existing (real) handler as fallback. Per proposal §3.1:
+			// when host_bindings: is set, builtins are pre-registered and act as
+			// the fallback for cassette misses. Without host_bindings: there are
+			// no pre-registered builtins, so fallback is nil (miss is a hard error).
+			var fallback host.Handler
+			if len(fixture.HostBindings) > 0 {
+				fallback, _ = reg.Get(handlerName)
+			}
+			casDispatcher := BuildCassetteDispatcher(cas, handlerName, stateOf, fallback, recordSink, clk)
+			reg.Replace(handlerName, casDispatcher)
+		}
+	}
+
 	// Use a no-op harness; the orchestrator path calls RunIntent directly
 	// for intent: turns and never falls through to the harness in normal use.
 	h := &noopHarness{}
@@ -496,15 +574,14 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 		return nil, fmt.Errorf("buildOrchestratorRig: new session: %w", err)
 	}
 
-	return &orchRig{
-		orch:     orch,
-		sched:    sched,
-		jobStore: js,
-		st:       st,
-		sid:      sid,
-		clk:      clk,
-		cleanup:  st.Close,
-	}, nil
+	rigPtr.orch = orch
+	rigPtr.sched = sched
+	rigPtr.jobStore = js
+	rigPtr.st = st
+	rigPtr.sid = sid
+	rigPtr.clk = clk
+	rigPtr.cleanup = st.Close
+	return &rigPtr, nil
 }
 
 // shouldUseOrchestrator reports whether the fixture should run through the
@@ -523,6 +600,9 @@ func shouldUseOrchestrator(fixture *FlowFixture) bool {
 		return *fixture.UseOrchestrator
 	}
 	if len(fixture.HostHandlers) > 0 {
+		return true
+	}
+	if fixture.HostCassette != "" {
 		return true
 	}
 	for _, t := range fixture.Turns {
@@ -624,6 +704,12 @@ func runFlowFile(ctx context.Context, def *app.AppDef, m machine.Machine, appPat
 		}
 		if fixture.TestKind != "flow" {
 			continue // skip non-flow docs
+		}
+
+		// host_cassette: and host_handlers: are mutually exclusive — both set
+		// is a load-time error to prevent ambiguous dispatch.
+		if fixture.HostCassette != "" && len(fixture.HostHandlers) > 0 {
+			return nil, fmt.Errorf("fixture in %q: host_cassette and host_handlers are mutually exclusive", filePath)
 		}
 
 		// Per-fixture host_bindings: rebuild def + machine for this
@@ -1039,7 +1125,7 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 	result := &FlowResult{File: filePath}
 
 	// Build the rig (store + scheduler + orchestrator).
-	rig, err := buildOrchestratorRig(ctx, def, m, fixture)
+	rig, err := buildOrchestratorRig(ctx, def, m, fixture, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("runOneFlowOrchestrator: %w", err)
 	}
@@ -1093,6 +1179,12 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 			if preJErr != nil {
 				return nil, fmt.Errorf("turn %d: load world for slot rendering: %w", i+1, preJErr)
 			}
+
+			// Update the shared state pointer so cassette dispatchers see the
+			// current state during this turn's RunIntent call. Background-job
+			// handlers dispatched during this turn read this value at invocation
+			// time; the turn loop updates it again before the next turn.
+			rig.currentStatePath = preJ.State
 
 			resolvedSlots := renderSlots(turn.Intent.Slots, preJ.World)
 			call = intent.IntentCall{

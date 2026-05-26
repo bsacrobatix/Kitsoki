@@ -191,7 +191,88 @@ in [`background-jobs/testing.md`](background-jobs/testing.md).
 
 ---
 
-## 3. Intent tests (Mode 1, pass-rate)
+## 3. Host cassettes
+
+`host_handlers:` gives each handler one canned envelope for the entire fixture.
+That is fine for single-dispatch arcs but breaks down once a fixture must drive
+a handler through multiple calls that each return a different response — for
+example, a 14-phase walk where `host.oracle.ask_with_mcp` is called once per
+phase and must return a different schema envelope each time. Cassettes solve
+this by recording a flat, ordered episode list across all handlers; the
+testrunner replays episodes in declared order, and any call that matches no
+remaining episode is an immediate hard failure.
+
+### Minimal example
+
+**`flows/cassettes/bugfix-happy.yaml`** — the cassette file:
+
+```yaml
+kind: host_cassette
+app_id: bugfix
+source_run: .bug-fix/ABR-429271-033
+generated_at: 2026-05-25T00:00:00Z
+match_on: [handler, phase, schema_name]
+
+episodes:
+  - id: phase_1_repro_oracle
+    match:
+      handler:     host.oracle.ask_with_mcp
+      phase:       phase_1
+      schema_name: 01-repro-report.schema.json
+    response:
+      data:
+        submitted: !include 01-repro-report.json
+
+  - id: phase_1_jira_create
+    match:
+      handler:   host.transport.post
+      kind:      create
+    response:
+      data: { comment_id: "8344778", posted: true }
+```
+
+**`flows/happy.yaml`** — the fixture that references it:
+
+```yaml
+test_kind: flow
+app: ../app.yaml
+initial_state: bootstrap
+host_cassette: cassettes/bugfix-happy.yaml
+
+turns:
+  - intent: { name: start, slots: { ticket: ABR-429271 } }
+    advance_clock: "200ms"
+    expect_state: phase_1.awaiting_oracle
+```
+
+### Key properties
+
+**`host_cassette:` and `host_handlers:` are mutually exclusive.** Setting both
+is a load-time error. `host_cassette:` is compatible with `host_bindings:` — an
+iface rebound to a real handler via `host_bindings:` provides the fallback on a
+cassette miss; without `host_bindings:`, a miss is `ErrCassetteMiss` and the
+fixture fails immediately.
+
+**Miss-fails-loudly.** A host call that matches no remaining episode is a hard
+fixture failure (`ErrCassetteMiss{handler, args, available_episode_ids}`). This
+is the load-bearing safety property: a workflow change that adds a new host call
+cannot silently route to idle or trigger a real side effect — it surfaces as an
+explicit miss instead of a misleading state mismatch.
+
+**Record mode.** `KITSOKI_CASSETTE_RECORD=new_episodes` downgrades a miss from
+a failure to an append: the dispatcher delegates to the fallback handler,
+captures the result, and appends a new episode to the cassette file.
+`KITSOKI_CASSETTE_RECORD=all` re-records every episode. Default is `none`.
+`KITSOKI_CASSETTE_STRICT=1` makes any non-`none` record value a hard error
+before any fixture runs — CI sets this to prevent accidental re-recording
+against live transports.
+
+For the complete cassette file format, matching rules, `!include` semantics,
+and `record_mode` details, see [`docs/cassettes.md`](cassettes.md).
+
+---
+
+## 4. Intent tests (Mode 1, pass-rate)
 
 Path: `<app-dir>/intents/*.yaml`. Each fixture lists a target intent
 and a set of natural-language phrasings that should map to it.
@@ -248,7 +329,7 @@ Default harness is `static` unless `ANTHROPIC_API_KEY` is set.
 
 ---
 
-## 4. Recordings
+## 5. Recordings
 
 A **recording** is the source of truth for a deterministic replay —
 a YAML lookup of `(state, input) → (intent, slots)` plus optional
@@ -269,7 +350,7 @@ The JSONL recording is one object per turn:
 
 ---
 
-## 5. Recording demo GIFs
+## 6. Recording demo GIFs
 
 `kitsoki record` replays a flow YAML through the state machine and
 encodes each state's view as an animated GIF — the same flow file
@@ -290,7 +371,7 @@ GIF bytes. No external dependencies (no VHS, no ttyd, no ffmpeg).
 
 ---
 
-## 6. Stubbing oracle calls
+## 7. Stubbing oracle calls
 
 Every `host.oracle.*` handler reads its claude subprocess from the context via
 `host.WithClaudeRunner`. Tests inject a `ClaudeRunner` function in-process so no
@@ -335,7 +416,7 @@ or an explicit environment variable.
 
 ---
 
-## 7. Replay tooling
+## 8. Replay tooling
 
 `kitsoki replay <session-id>` re-runs the `host.oracle.task` spans recorded
 in a session's event log. It is used for regression testing of code-writing
@@ -395,7 +476,7 @@ mode returns a structured error explaining what remains.
 
 ---
 
-## 8. CI recipe
+## 9. CI recipe
 
 ```sh
 go vet ./...                                    # fast static check

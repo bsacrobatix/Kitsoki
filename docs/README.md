@@ -25,6 +25,8 @@ orchestration), see [`prior-art.md`](prior-art.md).
    build, test, debug, add an intent / host / transport / subcommand.
 6. **[`testing.md`](testing.md)** — Mode 1 (intent pass-rate) and
    Mode 2 (deterministic flow) tests; recordings; demo capture.
+   **[`cassettes.md`](cassettes.md)** — host cassette file-format reference:
+   episode matching, `!include`, record mode, and CI safety.
 7. **[`hosts.md`](hosts.md)** — every built-in `host.*` handler with
    its input/output contract.
 8. **[`transports.md`](transports.md)** — TUI, Jira, Bitbucket;
