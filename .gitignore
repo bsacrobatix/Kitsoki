@@ -27,6 +27,9 @@ coverage.html
 # Session data (local only)
 ~/.kitsoki/
 
+# Local session summaries (per-checkout, not committed)
+.context/
+
 # Build output
 dist/
 
