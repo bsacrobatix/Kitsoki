@@ -536,9 +536,18 @@ episodes: []
 	})
 
 	t.Run("env_wins", func(t *testing.T) {
-		t.Setenv("KITSOKI_CASSETTE_RECORD", "all")
-		if CassetteRecordMode(cas) != "all" {
+		t.Setenv("KITSOKI_CASSETTE_RECORD", "none")
+		if CassetteRecordMode(cas) != "none" {
 			t.Error("env var should win over file-level record_mode")
+		}
+	})
+
+	t.Run("validate_rejects_unsupported", func(t *testing.T) {
+		if err := ValidateRecordMode("all"); err == nil {
+			t.Error("ValidateRecordMode should reject 'all'")
+		}
+		if err := ValidateRecordMode("new_episodes"); err != nil {
+			t.Errorf("ValidateRecordMode should accept 'new_episodes', got: %v", err)
 		}
 	})
 

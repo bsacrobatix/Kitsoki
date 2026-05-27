@@ -510,10 +510,17 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 			return nil, fmt.Errorf("buildOrchestratorRig: load cassette: %w", casErr)
 		}
 
-		// KITSOKI_CASSETTE_STRICT: hard error when record mode is non-none.
-		if CassetteStrictRecording() && CassetteRecordMode(cas) != "none" {
+		// Reject unsupported env-var record modes (file-level was validated in LoadCassette).
+		mode := CassetteRecordMode(cas)
+		if vErr := ValidateRecordMode(mode); vErr != nil {
 			_ = st.Close()
-			return nil, fmt.Errorf("buildOrchestratorRig: KITSOKI_CASSETTE_STRICT=1 but cassette record mode is %q", CassetteRecordMode(cas))
+			return nil, fmt.Errorf("buildOrchestratorRig: %w", vErr)
+		}
+
+		// KITSOKI_CASSETTE_STRICT: hard error when record mode is non-none.
+		if CassetteStrictRecording() && mode != "none" && mode != "" {
+			_ = st.Close()
+			return nil, fmt.Errorf("buildOrchestratorRig: KITSOKI_CASSETTE_STRICT=1 but cassette record mode is %q", mode)
 		}
 
 		// stateOf reads the shared currentStatePath pointer updated by the turn loop.
@@ -522,9 +529,8 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 		}
 
 		// recordSink appends to the cassette file when recording is active.
-		mode := CassetteRecordMode(cas)
 		var recordSink func(*CassetteEpisode)
-		if mode != "none" {
+		if mode != "none" && mode != "" {
 			recordSink = func(ep *CassetteEpisode) {
 				_ = AppendEpisodeToFile(cas, ep)
 			}
