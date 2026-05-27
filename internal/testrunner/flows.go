@@ -116,6 +116,16 @@ type FlowFixture struct {
 	// asserting that a fixture's walk never touched a transport / VCS
 	// op that belongs to a different pipeline.
 	ExpectNoHostCalls []string `yaml:"expect_no_host_calls,omitempty"`
+
+	// StrictCassetteCoverage, when true, fails the fixture if any cassette
+	// episode was never matched at least once after all turns complete.
+	// Only meaningful when host_cassette: is set.  Default false preserves
+	// backward compatibility — fixtures that reuse a shared cassette for a
+	// subset of a run (e.g. to detect accidental host calls) are not forced
+	// to consume every episode.
+	// When this flag is true, replay: any episodes that matched at least once
+	// are NOT flagged; only episodes with a zero match count are reported.
+	StrictCassetteCoverage bool `yaml:"strict_cassette_coverage,omitempty"`
 }
 
 // ExpectFile is one entry in a fixture-level expect_files assertion.
@@ -386,6 +396,13 @@ type orchRig struct {
 	// so that cassette dispatchers can read the orchestrator's current state
 	// without a synchronous LoadJourney on every handler invocation.
 	currentStatePath app.StatePath
+
+	// cassette holds the loaded host cassette when host_cassette: is set and
+	// strict_cassette_coverage: true is declared on the fixture.
+	// nil when the fixture uses host_handlers: or no strict-coverage flag.
+	// Retained so runOneFlowOrchestrator can check for unmatched (orphan)
+	// episodes after all turns complete.
+	cassette *Cassette
 }
 
 // buildOrchestratorRig constructs a fully wired orchestrator rig for one flow
@@ -559,6 +576,11 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 			casDispatcher := BuildCassetteDispatcher(cas, handlerName, stateOf, fallback, recordSink, clk)
 			reg.Replace(handlerName, casDispatcher)
 		}
+		// Retain the cassette for post-run orphan detection when
+		// strict_cassette_coverage: true is declared on the fixture.
+		if fixture.StrictCassetteCoverage {
+			rigPtr.cassette = cas
+		}
 	}
 
 	// Use a no-op harness; the orchestrator path calls RunIntent directly
@@ -587,6 +609,8 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 	rigPtr.sid = sid
 	rigPtr.clk = clk
 	rigPtr.cleanup = st.Close
+	// rigPtr.cassette is set inside the host_cassette: block above when
+	// fixture.StrictCassetteCoverage is true; nil otherwise.
 	return &rigPtr, nil
 }
 
@@ -1479,6 +1503,18 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 	// where the fixture lives.
 	if len(fixture.ExpectFiles) > 0 {
 		sessionFailures = append(sessionFailures, assertExpectFiles(filepath.Dir(filePath), fixture.ExpectFiles)...)
+	}
+	// Post-run cassette orphan check: when strict_cassette_coverage: true is
+	// declared, any episode that was never matched at least once is a phantom
+	// episode the test never exercised.  An unmatched episode indicates
+	// either a cassette that drifted out of sync with the app.yaml or a
+	// fixture that is missing turns to reach certain phases.
+	// replay: any episodes that matched at least once are NOT flagged.
+	if rig.cassette != nil {
+		if unmatched := rig.cassette.UnmatchedEpisodes(); len(unmatched) > 0 {
+			sessionFailures = append(sessionFailures,
+				fmt.Sprintf("unexpected remaining episodes: %v", unmatched))
+		}
 	}
 
 	allTurnsPassed := true

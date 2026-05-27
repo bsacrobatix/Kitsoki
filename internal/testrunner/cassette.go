@@ -53,6 +53,26 @@ type CassetteResponse struct {
 	InfraError string         `yaml:"infra_error,omitempty"`
 }
 
+// UnmatchedEpisodes returns the IDs of every episode that was never played
+// at least once. Episodes with replay: any that were matched at least once
+// are NOT considered unmatched — only episodes with a zero play count are
+// returned. The slice is ordered by episode position in the cassette.
+//
+// Callers use this to detect phantom / orphan episodes after a complete flow
+// run: any unmatched episode indicates either a cassette mismatch or a flow
+// fixture that did not exercise all expected paths.
+func (c *Cassette) UnmatchedEpisodes() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var ids []string
+	for _, ep := range c.Episodes {
+		if !ep.played {
+			ids = append(ids, ep.ID)
+		}
+	}
+	return ids
+}
+
 // ErrCassetteMiss is returned when no episode matches a handler call.
 type ErrCassetteMiss struct {
 	Handler           string
@@ -271,10 +291,12 @@ func BuildCassetteDispatcher(
 		cas.mu.Lock()
 		ep, err := MatchEpisode(handlerName, args, statePath, cas)
 		if err == nil {
-			// Mark played.
-			if ep.Replay != "any" {
-				ep.played = true
-			}
+			// Mark played (always — even replay: any episodes so that
+			// UnmatchedEpisodes can distinguish "never matched" from
+			// "matched at least once". MatchEpisode's skip condition is
+			// ep.played && ep.Replay != "any", so a replay: any episode
+			// remains available for re-matching even after played=true).
+			ep.played = true
 			// Capture values before releasing lock.
 			resp := ep.Response
 			delay := ep.Delay

@@ -616,6 +616,173 @@ func TestCassette_MutualExclusionWithHostHandlers(t *testing.T) {
 	t.Error("should have detected mutual exclusion")
 }
 
+// ─── UnmatchedEpisodes / orphan accounting ────────────────────────────────────
+
+// TestCassette_UnmatchedEpisodes_AllUnplayed verifies that an episode that was
+// never matched is returned by UnmatchedEpisodes.
+func TestCassette_UnmatchedEpisodes_AllUnplayed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	p := writeCassetteFile(t, dir, "cas.yaml", `
+kind: host_cassette
+app_id: test
+episodes:
+  - id: phantom
+    match:
+      handler: host.run
+      phase: phase_999_does_not_exist
+    response:
+      data: {ok: true}
+`)
+	cas, err := LoadCassette(p)
+	if err != nil {
+		t.Fatalf("LoadCassette: %v", err)
+	}
+
+	// No calls made — phantom episode should be unmatched.
+	unmatched := cas.UnmatchedEpisodes()
+	if len(unmatched) != 1 || unmatched[0] != "phantom" {
+		t.Errorf("expected [phantom] as unmatched, got %v", unmatched)
+	}
+}
+
+// TestCassette_UnmatchedEpisodes_PlayedIsNotOrphan verifies that a consume-once
+// episode that was matched at least once does NOT appear in UnmatchedEpisodes.
+func TestCassette_UnmatchedEpisodes_PlayedIsNotOrphan(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	p := writeCassetteFile(t, dir, "cas.yaml", `
+kind: host_cassette
+app_id: test
+episodes:
+  - id: ep1
+    match:
+      handler: host.run
+    response:
+      data: {n: 1}
+  - id: ep2
+    match:
+      handler: host.run
+    response:
+      data: {n: 2}
+`)
+	cas, err := LoadCassette(p)
+	if err != nil {
+		t.Fatalf("LoadCassette: %v", err)
+	}
+
+	// Play only ep1.
+	_, err = invokeDispatcher(t, cas, "host.run", nil, "", nil, nil)
+	if err != nil {
+		t.Fatalf("play ep1: %v", err)
+	}
+
+	// ep1 was played, ep2 was not.
+	unmatched := cas.UnmatchedEpisodes()
+	if len(unmatched) != 1 || unmatched[0] != "ep2" {
+		t.Errorf("expected [ep2] as unmatched, got %v", unmatched)
+	}
+}
+
+// TestCassette_UnmatchedEpisodes_ReplayAnyCountsAsPlayed verifies that a
+// replay: any episode matched at least once does NOT appear in UnmatchedEpisodes,
+// even though it remains available for further calls.
+func TestCassette_UnmatchedEpisodes_ReplayAnyCountsAsPlayed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	p := writeCassetteFile(t, dir, "cas.yaml", `
+kind: host_cassette
+app_id: test
+episodes:
+  - id: reusable
+    match:
+      handler: host.run
+    replay: any
+    response:
+      data: {result: always}
+  - id: phantom
+    match:
+      handler: host.oracle
+      phase: phase_999
+    response:
+      data: {ok: true}
+`)
+	cas, err := LoadCassette(p)
+	if err != nil {
+		t.Fatalf("LoadCassette: %v", err)
+	}
+
+	// Before any calls, both are unmatched.
+	unmatched := cas.UnmatchedEpisodes()
+	if len(unmatched) != 2 {
+		t.Fatalf("expected 2 unmatched before any calls, got %v", unmatched)
+	}
+
+	// Call reusable once — it should be marked played even though replay: any.
+	_, err = invokeDispatcher(t, cas, "host.run", nil, "", nil, nil)
+	if err != nil {
+		t.Fatalf("call reusable: %v", err)
+	}
+
+	// Only the phantom (never matched) should remain.
+	unmatched = cas.UnmatchedEpisodes()
+	if len(unmatched) != 1 || unmatched[0] != "phantom" {
+		t.Errorf("expected [phantom] as only unmatched, got %v", unmatched)
+	}
+
+	// Calling reusable again still works (replay: any reuse).
+	for i := 0; i < 3; i++ {
+		_, err = invokeDispatcher(t, cas, "host.run", nil, "", nil, nil)
+		if err != nil {
+			t.Fatalf("reuse call %d: %v", i+1, err)
+		}
+	}
+
+	// Still only phantom is unmatched.
+	unmatched = cas.UnmatchedEpisodes()
+	if len(unmatched) != 1 || unmatched[0] != "phantom" {
+		t.Errorf("after reuse calls: expected [phantom], got %v", unmatched)
+	}
+}
+
+// TestCassette_UnmatchedEpisodes_EmptyWhenAllPlayed verifies that
+// UnmatchedEpisodes returns nil when all episodes have been played.
+func TestCassette_UnmatchedEpisodes_EmptyWhenAllPlayed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	p := writeCassetteFile(t, dir, "cas.yaml", `
+kind: host_cassette
+app_id: test
+episodes:
+  - id: ep1
+    match:
+      handler: host.run
+    response:
+      data: {n: 1}
+  - id: ep2
+    match:
+      handler: host.run
+    response:
+      data: {n: 2}
+`)
+	cas, err := LoadCassette(p)
+	if err != nil {
+		t.Fatalf("LoadCassette: %v", err)
+	}
+
+	// Play both episodes.
+	for i := 0; i < 2; i++ {
+		if _, err = invokeDispatcher(t, cas, "host.run", nil, "", nil, nil); err != nil {
+			t.Fatalf("play episode %d: %v", i+1, err)
+		}
+	}
+
+	unmatched := cas.UnmatchedEpisodes()
+	if len(unmatched) != 0 {
+		t.Errorf("expected no unmatched episodes, got %v", unmatched)
+	}
+}
+
 // ─── AppendEpisodeToFile ──────────────────────────────────────────────────────
 
 func TestCassette_AppendEpisodeToFile(t *testing.T) {
