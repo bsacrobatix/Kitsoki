@@ -70,6 +70,9 @@ async function generateFrames(spec, framesDir, fps = 30, onProgress = null, capt
 
   let frameIndex = 0;
   const captureLog = [];
+  // Per-scene start frames so narration audio can be positioned at correct
+  // timestamps in the final MP4. Each entry: { sceneIndex, startFrame, type, narration }.
+  const sceneBoundaries = [];
 
   try {
     const page = await browser.newPage();
@@ -102,6 +105,12 @@ async function generateFrames(spec, framesDir, fps = 30, onProgress = null, capt
     for (let sceneIndex = 0; sceneIndex < (spec.scenes || []).length; sceneIndex++) {
       if (selectedScenes && !selectedScenes.has(sceneIndex)) continue;
       const scene = spec.scenes[sceneIndex];
+      sceneBoundaries.push({
+        sceneIndex,
+        startFrame: frameIndex,
+        type: scene.type,
+        narration: scene.narration || null,
+      });
       const mod   = SCENE_MODULES[scene.type];
       if (!mod) {
         throw new Error(
@@ -132,7 +141,7 @@ async function generateFrames(spec, framesDir, fps = 30, onProgress = null, capt
     console.log(`[pellicule] Capture log written: ${captureLogPath} (${captureLog.length} live scenes)`);
   }
 
-  return frameIndex;
+  return { frameCount: frameIndex, sceneBoundaries };
 }
 
 module.exports = { generateFrames };

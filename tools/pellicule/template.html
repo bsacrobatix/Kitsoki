@@ -724,9 +724,11 @@ body.mode-pitch #pitch-stage { display: flex; }
   display: block;
 }
 /* Single-panel diagrams use much larger node text so labels read at 1080p. */
-#diagramsvg-panels.diagramsvg-panels-single .dsvg-label      { font-size: 36px; }
-#diagramsvg-panels.diagramsvg-panels-single .dsvg-sub        { font-size: 22px; }
-#diagramsvg-panels.diagramsvg-panels-single .dsvg-edge-label { font-size: 22px; }
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-label      { font-size: 44px; }
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-sub        { font-size: 28px; }
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-line       { font-size: 26px; }
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-edge-label { font-size: 26px; }
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-edge-gate  { font-size: 26px; }
 #diagramsvg-panels.diagramsvg-panels-single .dsvg-node rect            { stroke-width: 2.5; }
 #diagramsvg-panels.diagramsvg-panels-single .dsvg-node.dsvg-style-primary   rect { stroke-width: 3; }
 #diagramsvg-panels.diagramsvg-panels-single .dsvg-node.dsvg-style-secondary rect { stroke-width: 3; }
@@ -1056,8 +1058,9 @@ body.mode-pitch #pitch-stage { display: flex; }
 #cta-tagline {
   font-size: 36px;
   color: #cdd9e5;
-  max-width: 1300px;
+  max-width: 1500px;
   line-height: 1.4;
+  white-space: nowrap;
 }
 #cta-url {
   font-family: 'JetBrains Mono', 'Courier New', monospace;
@@ -1679,9 +1682,9 @@ window.pellicule = {
       // (medium), and an optional `lines` array of extra small lines beneath.
       // Vertically centred as a group within the rect.
       const stack = [];
-      if (n.label) stack.push({ text: n.label, cls: 'dsvg-label', lh: 38 });
-      if (n.sub)   stack.push({ text: n.sub,   cls: 'dsvg-sub',   lh: 26 });
-      (n.lines || []).forEach(t => stack.push({ text: t, cls: 'dsvg-line', lh: 26 }));
+      if (n.label) stack.push({ text: n.label, cls: 'dsvg-label', lh: 50 });
+      if (n.sub)   stack.push({ text: n.sub,   cls: 'dsvg-sub',   lh: 34 });
+      (n.lines || []).forEach(t => stack.push({ text: t, cls: 'dsvg-line', lh: 32 }));
 
       const totalH = stack.reduce((s, l) => s + l.lh, 0);
       let y = cy - totalH / 2 + stack[0].lh / 2;

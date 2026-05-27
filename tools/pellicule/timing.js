@@ -80,4 +80,126 @@ const TIMING = {
   thread_hold:        300,  // 10 s — generous read time for two threads
 };
 
+/**
+ * Estimate the total frame count a scene will produce when rendered.
+ * Mirrors the actual reveal/hold sequence in scenes/*.js. Used by
+ * --list/--estimate (no rendering) and by --skip-render (to compute
+ * scene start frames without a render pass).
+ *
+ * NOTE: this MUST stay in lock-step with the per-scene render() logic.
+ * If a scene module changes its reveal sequence, update the matching
+ * branch here.
+ */
+function estimateScene(scene) {
+  const T = TIMING;
+  const hold = (k, custom) => (custom != null ? custom : T[k]);
+
+  switch (scene.type) {
+    case 'title':
+      return T.title_card;
+
+    case 'narrative': {
+      let f = T.narrative_eyebrow + T.narrative_body;
+      if (scene.lede) f += T.narrative_lede;
+      f += hold('narrative_hold', scene.hold);
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'diagram': {
+      let f = T.diagram_title;
+      const panels = (scene.panels || []).length;
+      for (let i = 0; i < panels; i++) f += T[`diagram_panel_${i}`] ?? 30;
+      if (scene.caption) f += T.diagram_caption;
+      f += hold('diagram_hold', scene.hold);
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'diagram-svg': {
+      let f = T.diagramsvg_title;
+      const panels = (scene.panels || []).length;
+      for (let i = 0; i < panels; i++) f += T[`diagramsvg_panel_${i}`] ?? 30;
+      if (scene.caption) f += T.diagramsvg_caption;
+      f += hold('diagramsvg_hold', scene.hold);
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'terminal-gif':
+      return T.termgif_frame + T.termgif_caption
+           + hold('termgif_hold', scene.hold) + T.inter_scene;
+
+    case 'trace': {
+      let f = T.trace_title;
+      const turns = (scene.turns || []).length;
+      for (let i = 0; i < turns; i++) f += T[`trace_turn_${i}`] ?? 45;
+      if (scene.caption) f += T.trace_caption;
+      f += hold('trace_hold', scene.hold);
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'thread': {
+      let f = T.thread_title;
+      const panels = (scene.panels || []).length;
+      for (let i = 0; i < panels; i++) f += T[`thread_panel_${i}`] ?? 40;
+      if (scene.caption) f += T.thread_caption;
+      f += hold('thread_hold', scene.hold);
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'stat': {
+      let f = T.stat_value + T.stat_label;
+      if (scene.detail) f += T.stat_detail;
+      f += hold('stat_hold', scene.hold);
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'cta':
+      return T.cta_wordmark + T.cta_tagline + T.cta_url
+           + hold('cta_hold', scene.hold);
+
+    case 'request':
+      // Request scenes vary widely; rough estimate
+      return T.scene_header + T.request_url + T.request_headers
+           + T.request_body
+           + T.sending_ticks * T.sending_per_tick
+           + T.response_status + T.response_headers + T.response_body
+           + T.response_annotation
+           + T.complete_hold + T.inter_scene;
+
+    default:
+      return 100;
+  }
+}
+
+/**
+ * Build a scene-boundary list (without rendering) so --list/--estimate and
+ * --skip-render can compute timestamps purely from the spec.
+ *
+ * @returns {object[]} [{ sceneIndex, startFrame, type, narration, durationFrames }]
+ */
+function estimateBoundaries(spec, selectedScenes = null) {
+  let frame = 0;
+  const out = [];
+  (spec.scenes || []).forEach((scene, i) => {
+    if (selectedScenes && !selectedScenes.has(i)) return;
+    const durationFrames = estimateScene(scene);
+    out.push({
+      sceneIndex: i,
+      startFrame: frame,
+      type: scene.type,
+      narration: scene.narration || null,
+      durationFrames,
+    });
+    frame += durationFrames;
+  });
+  return out;
+}
+
 module.exports = TIMING;
+module.exports.estimateScene = estimateScene;
+module.exports.estimateBoundaries = estimateBoundaries;

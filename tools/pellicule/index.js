@@ -22,14 +22,26 @@ const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
 
-const { generateFrames } = require('./renderer');
-const { framesToVideo }  = require('./assembler');
+const { generateFrames }    = require('./renderer');
+const { framesToVideo }     = require('./assembler');
+const { generateAll: generateNarration } = require('./narration');
+const { estimateBoundaries } = require('./timing');
+
+// Calibrated speech rate for default Edge TTS voice (en-AU-NatashaNeural at
+// rate +0%). Measured across the current pitch: 1.7-2.3 wps depending on
+// sentence breaks and word length. 1.85 catches real overruns without crying
+// wolf on every tight scene.
+const ESTIMATED_WPS = 1.85;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
 
-if (args.length < 2 || args.includes('--help') || args.includes('-h')) {
+// --list and --estimate only need the input spec (not an output path).
+const wantsList     = args.includes('--list') || args.includes('--estimate');
+const skipRender    = args.includes('--skip-render');
+
+if (((args.length < 2 && !wantsList) || args.length < 1) || args.includes('--help') || args.includes('-h')) {
   console.log([
     '',
     '  PELLICULE — Deterministic API Video Generator',
@@ -47,6 +59,13 @@ if (args.length < 2 || args.includes('--help') || args.includes('-h')) {
     '                               Spec: comma-separated indices and/or ranges,',
     '                               e.g.  --scenes 4     --scenes 0,3-5,7',
     '                               Selected scenes are still combined into one MP4.',
+    '    --list                     Print the scene index + duration table; no render.',
+    '    --estimate                 Like --list, plus narration audio-length estimates',
+    '                               and overrun warnings. Catches budget issues',
+    '                               BEFORE a full ~7-12min render.',
+    '    --skip-render              Skip the PNG-rendering step (reuse cached frames in',
+    '                               --frames-dir) and regenerate narration + mux only.',
+    '                               Iteration loop for narration text edits.',
     '',
     '  Examples:',
     '    node index.js examples/vp-5623-mock.demo.json out.mp4',
@@ -108,6 +127,73 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Estimate audio duration from word count, using the calibrated WPS for the
+ * default Edge TTS voice at default rate. Conservative (slightly slower than
+ * reality) so "fits" verdicts hold.
+ */
+function estimateAudioSeconds(text) {
+  if (!text) return 0;
+  const words = String(text).trim().split(/\s+/).filter(Boolean).length;
+  return words / ESTIMATED_WPS;
+}
+
+/**
+ * Print a scene-by-scene table from the spec, no render.
+ * If withAudio, include narration audio estimates and overrun warnings.
+ */
+function printSceneList(spec, fps, withAudio) {
+  const boundaries = estimateBoundaries(spec);
+  const total = boundaries.reduce((s, b) => s + b.durationFrames, 0);
+
+  console.log(`\n[pellicule] ${spec.scenes.length} scenes · est. ${(total / fps).toFixed(1)}s @ ${fps}fps · ${total} frames\n`);
+
+  const hdr = withAudio
+    ? '  #  type           start     dur    | narration                          audio    fit'
+    : '  #  type           start     dur    | narration';
+  console.log(hdr);
+  console.log('  ' + '─'.repeat(hdr.length - 2));
+
+  let warnings = 0;
+  boundaries.forEach(b => {
+    const idx   = String(b.sceneIndex).padStart(2);
+    const type  = b.type.padEnd(13);
+    const start = (b.startFrame / fps).toFixed(1).padStart(5) + 's';
+    const dur   = (b.durationFrames / fps).toFixed(1).padStart(5) + 's';
+
+    if (!withAudio) {
+      const narr = b.narration ? `"${b.narration.slice(0, 60)}${b.narration.length > 60 ? '…' : ''}"` : '—';
+      console.log(`  ${idx}  ${type}  ${start}  ${dur}  | ${narr}`);
+      return;
+    }
+
+    const sceneSec = b.durationFrames / fps;
+    if (!b.narration) {
+      console.log(`  ${idx}  ${type}  ${start}  ${dur}  | (none)`);
+      return;
+    }
+    const audioSec = estimateAudioSeconds(b.narration);
+    const margin = sceneSec - audioSec;
+    const fit = margin < 0
+      ? `✗ +${(-margin).toFixed(1)}s`
+      : margin < 0.6 ? `△ ${margin.toFixed(1)}s` : `✓ ${margin.toFixed(1)}s`;
+    if (margin < 0.6) warnings++;
+    const narr = `"${b.narration.slice(0, 36)}${b.narration.length > 36 ? '…' : ''}"`;
+    console.log(`  ${idx}  ${type}  ${start}  ${dur}  | ${narr.padEnd(38)}  ${audioSec.toFixed(1).padStart(4)}s   ${fit}`);
+  });
+
+  console.log('');
+  if (withAudio) {
+    console.log(`  ✓ comfortable (>0.6s margin)   △ tight (0-0.6s margin)   ✗ overrun (audio > scene)`);
+    if (warnings) {
+      console.log(`  ${warnings} scene(s) flagged — trim narration text or extend scene "hold" frames before rendering.`);
+    }
+  }
+  console.log('');
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -138,6 +224,13 @@ async function main() {
     console.log(`[pellicule] Context overrides: ${JSON.stringify(cliContext)}`);
   }
 
+  // ── --list / --estimate: print scene table and exit, no rendering ──
+  if (wantsList) {
+    const wantsAudioEstimate = args.includes('--estimate');
+    printSceneList(spec, fps, wantsAudioEstimate);
+    process.exit(0);
+  }
+
   // Set up frames directory
   let framesDir;
   let ownFramesDir = false;
@@ -164,28 +257,60 @@ async function main() {
   if (captureLogPath) console.log(`[pellicule] CaptureLog: ${captureLogPath}`);
   console.log('');
 
-  let frameCount;
-  try {
-    let lastLabel = '';
-    frameCount = await generateFrames(spec, framesDir, fps, (idx, _total, label) => {
-      if (label !== lastLabel) {
-        process.stdout.write(`\r[pellicule] Rendering: ${label.padEnd(24)}  frame ${idx}`);
-        lastLabel = label;
-      }
-    }, captureLogPath, absInput, selectedScenes);
-    process.stdout.write('\n');
-  } catch (err) {
-    console.error(`\n[pellicule] ERROR during rendering: ${err.message}`);
-    if (!keepFrames && ownFramesDir) fs.rmSync(framesDir, { recursive: true, force: true });
-    process.exit(1);
+  let frameCount, sceneBoundaries;
+  if (skipRender) {
+    // Use spec-derived timings; assume frames are already on disk in framesDir.
+    if (!fs.existsSync(framesDir) || fs.readdirSync(framesDir).filter(f => /^frame-\d+\.png$/.test(f)).length === 0) {
+      console.error(`[pellicule] ERROR: --skip-render needs cached frames in ${framesDir}. Re-run without --skip-render first (with --keep-frames + --frames-dir).`);
+      process.exit(1);
+    }
+    sceneBoundaries = require('./timing').estimateBoundaries(spec, selectedScenes);
+    frameCount = sceneBoundaries.reduce((s, b) => s + b.durationFrames, 0);
+    console.log(`[pellicule] --skip-render: reusing ${frameCount} cached frames (${(frameCount / fps).toFixed(1)}s) from ${framesDir}`);
+  } else {
+    try {
+      let lastLabel = '';
+      const result = await generateFrames(spec, framesDir, fps, (idx, _total, label) => {
+        if (label !== lastLabel) {
+          process.stdout.write(`\r[pellicule] Rendering: ${label.padEnd(24)}  frame ${idx}`);
+          lastLabel = label;
+        }
+      }, captureLogPath, absInput, selectedScenes);
+      frameCount      = result.frameCount;
+      sceneBoundaries = result.sceneBoundaries;
+      process.stdout.write('\n');
+    } catch (err) {
+      console.error(`\n[pellicule] ERROR during rendering: ${err.message}`);
+      if (!keepFrames && ownFramesDir) fs.rmSync(framesDir, { recursive: true, force: true });
+      process.exit(1);
+    }
+
+    console.log(`[pellicule] ${frameCount} frames rendered (${(frameCount / fps).toFixed(1)}s)`);
   }
 
-  console.log(`[pellicule] ${frameCount} frames rendered (${(frameCount / fps).toFixed(1)}s)`);
+  // ── Narration (optional, only if any scene has a `narration` field) ────
+  let audioSegments = null;
+  const hasNarration = sceneBoundaries.some(sb => sb.narration);
+  const audioDir = path.join(framesDir, 'audio');
+  if (hasNarration) {
+    console.log('[pellicule] Generating narration audio…');
+    try {
+      audioSegments = generateNarration(
+        sceneBoundaries, fps, frameCount,
+        (spec.meta && spec.meta.narration) || {},
+        audioDir,
+      );
+    } catch (err) {
+      console.error(`[pellicule] ERROR during narration: ${err.message}`);
+      if (!keepFrames && ownFramesDir) fs.rmSync(framesDir, { recursive: true, force: true });
+      process.exit(1);
+    }
+  }
 
-  // Assemble video
+  // Assemble video (with audio if generated)
   console.log('[pellicule] Assembling video with ffmpeg…');
   try {
-    framesToVideo(framesDir, path.resolve(outputPath), fps);
+    framesToVideo(framesDir, path.resolve(outputPath), fps, audioSegments);
   } catch (err) {
     console.error(`[pellicule] ERROR during assembly: ${err.message}`);
     if (!keepFrames && ownFramesDir) fs.rmSync(framesDir, { recursive: true, force: true });
