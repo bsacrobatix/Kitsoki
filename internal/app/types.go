@@ -675,6 +675,14 @@ type Effect struct {
 	// THE TIME the emit_intent effect fires (post all preceding effects
 	// in the same chain).
 	EmitSlots map[string]any `yaml:"slots,omitempty"`
+
+	// Effects holds inline sub-effects that fire as part of this effect's
+	// execution. Used inside on_complete: target: blocks to attach world
+	// mutations (set:, increment:) that should apply as the synthetic
+	// transition fires. Processed sequentially before the Target transition
+	// is dispatched. Validated like on_complete: children (no background:,
+	// no nested on_complete:).
+	Effects []Effect `yaml:"effects,omitempty"`
 }
 
 // ProposalKind declares a named proposal kind (§3).
