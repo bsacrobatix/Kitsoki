@@ -93,6 +93,13 @@ func LoadCassette(path string) (*Cassette, error) {
 		return nil, fmt.Errorf("cassette: %q: kind must be \"host_cassette\", got %q", abs, cas.Kind)
 	}
 
+	switch cas.RecordMode {
+	case "", "none", "new_episodes":
+		// ok
+	default:
+		return nil, fmt.Errorf("cassette: %q: record_mode %q is not supported; valid values are \"none\" or \"new_episodes\"", abs, cas.RecordMode)
+	}
+
 	if cas.PhaseFrom != "" {
 		re, reErr := regexp.Compile(cas.PhaseFrom)
 		if reErr != nil {
@@ -342,8 +349,10 @@ func synthesiseEpisode(handlerName string, args map[string]any, statePath string
 }
 
 // CassetteRecordMode returns the effective record mode. The environment variable
-// KITSOKI_CASSETTE_RECORD wins over the file-level field. Returns "none",
-// "new_episodes", or "all".
+// KITSOKI_CASSETTE_RECORD wins over the file-level field. Returns "none" or
+// "new_episodes". Any other value passed via the env var (e.g. "all") is
+// returned as-is so the caller can surface a clear error — LoadCassette
+// already rejects unsupported file-level values at parse time.
 func CassetteRecordMode(cas *Cassette) string {
 	if env := os.Getenv("KITSOKI_CASSETTE_RECORD"); env != "" {
 		return env
@@ -352,6 +361,18 @@ func CassetteRecordMode(cas *Cassette) string {
 		return cas.RecordMode
 	}
 	return "none"
+}
+
+// ValidateRecordMode reports whether mode is a supported effective record
+// mode. Used by the testrunner to surface a clear error when an env-var
+// override contains an unsupported value.
+func ValidateRecordMode(mode string) error {
+	switch mode {
+	case "", "none", "new_episodes":
+		return nil
+	default:
+		return fmt.Errorf("record_mode %q is not supported; valid values are \"none\" or \"new_episodes\"", mode)
+	}
 }
 
 // CassetteStrictRecording returns true when KITSOKI_CASSETTE_STRICT=1 is set.

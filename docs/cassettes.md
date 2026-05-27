@@ -7,7 +7,10 @@ can be shared across multiple fixtures; a host call that matches no remaining
 episode is an immediate hard fixture failure (`ErrCassetteMiss`).
 
 For the fixture-level `host_cassette:` field and a short worked example, see
-[`testing.md` §3](testing.md#3-host-cassettes).
+[`testing.md` §3](testing.md#3-host-cassettes). For an in-tree end-to-end
+example see `stories/frontier_event/flows/scout_and_pay_cassette.yaml` (a
+parallel of the sibling `scout_and_pay.yaml` fixture, with its `host_handlers:`
+block replaced by a `host_cassette:` reference).
 
 ---
 
@@ -79,7 +82,7 @@ episodes:
 | `source_run` | string | Path to the real run directory; provenance comment. |
 | `generated_at` | string | ISO-8601 timestamp; informational only. |
 | `match_on` | `[]string` | Default match keys. Not enforced by the matcher — each episode's `match:` map is authoritative. `match_on` is documentation for readers. |
-| `record_mode` | string | `none` \| `new_episodes` \| `all`. Overridden by `KITSOKI_CASSETTE_RECORD`. |
+| `record_mode` | string | `none` \| `new_episodes`. Overridden by `KITSOKI_CASSETTE_RECORD`. Any other value is rejected at load time. |
 | `phase_from` | string | Optional Go regex override for `phase` derivation (see §Matching). |
 
 ### Episode fields
@@ -167,12 +170,11 @@ KITSOKI_CASSETTE_RECORD=new_episodes kitsoki test flows app.yaml
 |---|---|
 | `none` (default) | Miss returns `ErrCassetteMiss` — hard fixture failure. |
 | `new_episodes` | Miss delegates to the fallback handler (real or stub), captures the result, appends a new episode to the cassette file, and returns the result. The fixture proceeds. |
-| `all` | Every episode is re-recorded on each invocation, not just misses. |
 
 The environment variable `KITSOKI_CASSETTE_RECORD` overrides the cassette
 file's `record_mode` field. This lets CI run with `record_mode: new_episodes`
 in the file during authoring without changing it before commit — just unset the
-env var.
+env var. Any value other than `none` or `new_episodes` is rejected.
 
 **CI safety — `KITSOKI_CASSETTE_STRICT=1`.** When set, any non-`none` effective
 record mode is a hard error before any fixture runs. CI sets this so an
@@ -185,8 +187,8 @@ silently re-record against production transports. The check runs in
 KITSOKI_CASSETTE_STRICT=1 kitsoki test flows testdata/apps/bugfix/app.yaml
 ```
 
-`KITSOKI_CASSETTE_STRICT` is the only implemented gate; the `--strict-recording`
-CLI flag described in the original proposal is not yet wired.
+`KITSOKI_CASSETTE_STRICT` is the only implemented gate — there is no separate
+`--strict-recording` CLI flag.
 
 ---
 
@@ -221,9 +223,17 @@ prints unchanged ids; `--json` emits a machine-readable diff
 (`{"added":[],"removed":[],"changed":[…]}`).
 
 `lint` checks for duplicate episode ids, missing `!include` files, and — when
-`--against-app` is supplied — episodes whose `match.handler` is not dispatched
-anywhere in the app's effect graph (orphans). Orphans fail the lint by default.
-`--strict` also fails on warnings.
+`--against-app` is supplied — episodes whose `match.handler` is not literally
+referenced by any `Invoke:` in the app's effect graph (orphans). Orphans fail
+the lint by default. `--strict` also fails on warnings.
+
+**Orphan check is iface-blind.** The walker compares episode handlers against
+literal `Invoke:` strings only. An app that dispatches through an iface name
+(e.g. `Invoke: iface.scout.run` bound to `default: host.run`) will flag a
+`host.run` episode as orphaned even though the call reaches it at runtime.
+Treat `--against-app` orphans as a hint, not a hard truth, for apps that use
+ifaces. The in-tree smoke test
+`stories/frontier_event/flows/scout_and_pay_cassette.yaml` exhibits this.
 
 ---
 

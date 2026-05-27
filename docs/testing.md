@@ -261,11 +261,10 @@ explicit miss instead of a misleading state mismatch.
 
 **Record mode.** `KITSOKI_CASSETTE_RECORD=new_episodes` downgrades a miss from
 a failure to an append: the dispatcher delegates to the fallback handler,
-captures the result, and appends a new episode to the cassette file.
-`KITSOKI_CASSETTE_RECORD=all` re-records every episode. Default is `none`.
-`KITSOKI_CASSETTE_STRICT=1` makes any non-`none` record value a hard error
-before any fixture runs — CI sets this to prevent accidental re-recording
-against live transports.
+captures the result, and appends a new episode to the cassette file. Default
+is `none`. `KITSOKI_CASSETTE_STRICT=1` makes any non-`none` record value a
+hard error before any fixture runs — CI sets this to prevent accidental
+re-recording against live transports.
 
 For the complete cassette file format, matching rules, `!include` semantics,
 and `record_mode` details, see [`docs/cassettes.md`](cassettes.md).
