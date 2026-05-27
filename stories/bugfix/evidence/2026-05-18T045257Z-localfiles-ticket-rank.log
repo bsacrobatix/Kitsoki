@@ -1,10 +1,33 @@
+=== Reproduction run captured 2026-05-20 ===
+
+Bug: 2026-05-18T045257Z-localfiles-ticket-rank-by-severity-and-recency
+Method: replaced internal/host/localfiles_ticket.go with the pre-fix
+version from commit dd9fa65 (the last commit before the severity/sort
+fix landed), ran the repro test, then restored the fixed file. The
+worktree was clean before and after.
+
+$ go test ./internal/host/ -run TestRepro_ -v
+
 === RUN   TestRepro_BugSummary_ProjectsSeverity
-    localfiles_ticket_repro_test.go:71: expected severity P0 in summary, got "" (full summary: map[string]interface {}{"assignee":"brad", "id":"2026-05-18T010000Z-a", "priority":"", "status":"open", "title":"Alpha", "url":""})
+    localfiles_ticket_repro_test.go:71: expected severity P0 in summary, got "" (full summary: map[string]interface {}{"assignee":"brad", "id":"2026-05-18T010000Z-a", "priority":"", "status":"open", "title":"Alpha", "type":"bug", "url":""})
 --- FAIL: TestRepro_BugSummary_ProjectsSeverity (0.00s)
 === RUN   TestRepro_ListAllBugs_OrdersBySeverityThenRecency
     localfiles_ticket_repro_test.go:118: ordering mismatch at index 0: want "2026-05-17T000000Z-new", got "2026-05-10T000000Z-old" (full order: [2026-05-10T000000Z-old 2026-05-12T000000Z-mid 2026-05-17T000000Z-new])
           defect: listAllBugs sorts by ID ASC; expected severity ASC, filed_at DESC
 --- FAIL: TestRepro_ListAllBugs_OrdersBySeverityThenRecency (0.00s)
 FAIL
-FAIL	kitsoki/internal/host	0.013s
+FAIL	kitsoki/internal/host	0.014s
 FAIL
+
+Defect 1 — bugSummary projects "priority" (always empty on disk) rather
+than "severity".  The summary keys returned to consumers include
+priority:"" and no severity key.
+
+Defect 2 — listAllBugs sorts by BugFile.ID ASC.  Because IDs are
+ISO-timestamp prefixed, this is effectively filed_at ASC; severity has
+zero weight in the comparator.
+
+Both failures match the two issues called out in the bug report.
+
+(On HEAD, with the fix from commit f6c1ad3 applied, the same tests
+PASS — confirming the test set is well-calibrated to the defect.)
