@@ -1,0 +1,24 @@
+app:
+  id: routing-partial-block
+  version: 0.1.0
+  # NOTE: routing.enabled false should survive the loader's default-fill;
+  # all other fields are omitted so WithDefaults backfills them.
+
+routing:
+  enabled: false
+
+root: start
+
+intents:
+  noop:
+    title: "Do nothing"
+
+states:
+  start:
+    description: "Start"
+    on:
+      noop:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true

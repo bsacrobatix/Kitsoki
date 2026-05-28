@@ -1,0 +1,69 @@
+# quit_at_review — operator quits at the review checkpoint. Proves
+# the quit arc routes through @exit:abandoned for the review room.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:   "TKT-T-005"
+  thread:      "TKT-T-005"
+  judge_mode:  "human"
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "" }
+  host.local:
+    data: { ok: true, log: "PASS", state: "success", passed: 1, failed: 0 }
+  host.local_files.ticket:
+    data:
+      ok: true
+      title: "Small task"
+      body:  "Do the thing."
+      url:   ""
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "Stub artifact."
+        scope:            "small."
+        acceptance_criteria: ["criterion one"]
+        affected_files:   ["x.go"]
+        confidence:       0.6
+        reasoning:        "stub."
+        status:           "passed"
+        tests_run:        { passed: 1, failed: 0, log: "PASS" }
+        nits:             []
+        blockers:         []
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "stub"
+
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: review_task_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: review_task_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: write_code_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: write_code_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: test_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: test_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: review_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: review_awaiting_reply
+  - intent: { name: quit, slots: {} }
+    expect_state: __exit__abandoned
+
+expect_terminal: true
+expect_no_errors: true

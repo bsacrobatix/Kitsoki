@@ -1,0 +1,26 @@
+app:
+  id: routing-dup-synonyms
+  version: 0.1.0
+  # Duplicate synonym entries — current behaviour is "accept silently"
+  # (semroute will dedupe at compile time per the proposal §4.1 spirit).
+  # This fixture pins the current behaviour so a future refactor that
+  # changes it surfaces as a test failure.
+
+root: start
+
+intents:
+  ford:
+    title: "Ford"
+    synonyms:
+      - wade
+      - wade
+
+states:
+  start:
+    description: "Start"
+    on:
+      ford:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true

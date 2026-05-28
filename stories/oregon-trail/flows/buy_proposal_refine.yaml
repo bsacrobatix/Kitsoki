@@ -1,0 +1,87 @@
+# buy_proposal_refine — phase D refine path, post-in-place semantics.
+#
+# refine_purchase used to bounce the player back to general_store.idle,
+# which meant they had to re-propose from scratch and lost the draft.
+# The fixed shape: refine_purchase self-stays in reviewing and merges
+# any supplied per-item slot into the existing proposal_* keys (omitted
+# slots keep their current value). proposal_refine_count is incremented
+# for diagnostics. The player sees the updated draft on the next render
+# and can accept or refine again.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: general_store.idle
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    banker
+  month:         april
+  money:         1600
+  oxen:          0
+  food_lbs:      0
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    100
+  narration:     false
+  local_price_pct: 100
+
+turns:
+
+  # Turn 1: propose a $120 basket — 6 oxen, 200 lbs food.
+  - intent:
+      name: propose_purchase
+      slots:
+        items:      "6 oxen, 200 lbs food"
+        total_cost: 120
+        oxen:       6
+        food:       200
+    expect_state: general_store.reviewing
+    expect_world:
+      proposal_items: "6 oxen, 200 lbs food"
+      proposal_total_cost: 120
+      proposal_oxen: 6
+      proposal_food: 200
+      proposal_refine_count: 0
+      # No mutation yet — still in reviewing.
+      money: 1600
+      oxen: 0
+      food_lbs: 0
+
+  # Turn 2: refine — bump oxen to 7, leave everything else alone. Stays
+  # in reviewing; only proposal_oxen changes; refine_count → 1.
+  - intent:
+      name: refine_purchase
+      slots:
+        feedback: "I want 7 oxen"
+        oxen:     7
+    expect_state: general_store.reviewing
+    expect_world:
+      proposal_oxen:         7
+      proposal_food:         200    # untouched.
+      proposal_total_cost:   120    # untouched.
+      proposal_refine_count: 1
+
+  # Turn 3: refine again — bump food to 300 AND total_cost to 140.
+  # Oxen stays at 7 from turn 2.
+  - intent:
+      name: refine_purchase
+      slots:
+        feedback:   "more food, raise the total"
+        food:       300
+        total_cost: 140
+    expect_state: general_store.reviewing
+    expect_world:
+      proposal_oxen:         7
+      proposal_food:         300
+      proposal_total_cost:   140
+      proposal_refine_count: 2
+
+  # Turn 4: accept. Per-item credit lands the final draft.
+  - intent: { name: accept_purchase }
+    expect_state: general_store.done
+    expect_world:
+      money:   1460   # 1600 - 140
+      oxen:    7
+      food_lbs: 300
+
+expect_no_errors: true

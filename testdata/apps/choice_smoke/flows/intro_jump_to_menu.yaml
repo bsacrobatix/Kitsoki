@@ -1,0 +1,12 @@
+# intro_jump_to_menu — picking "Jump to the feature menu" on the
+# intro screen routes to the power-user `menu` hub instead of starting
+# the linear walkthrough.
+test_kind: flow
+app: ../app.yaml
+initial_state: intro
+
+turns:
+  - intent: { name: goto_menu, slots: {} }
+    expect_state: menu
+
+expect_no_errors: true

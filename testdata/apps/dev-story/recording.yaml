@@ -1,0 +1,96 @@
+# Replay recording for the dev-story demo tape.
+# Hand-authored — deterministic mapping from free-text to structured intent.
+kind: recording
+app_id: dev-story
+app_version: 0.1.0
+generated_at: "2026-04-22T00:00:00Z"
+generator: "hand-authored (demo tape)"
+min_confidence: 1.00
+
+entries:
+  # ── Oracle detour (first turn — then back to main) ──────────────────────
+  # The Oracle Room is now persistent-chat shape:
+  #   main → oracle (list view, on_enter loads chat list)
+  #   oracle: ask_question → oracle_asking (auto-creates chat + runs turn)
+  #   oracle_asking → go_back → oracle
+  - state: main
+    input: "consult the oracle"
+    intent: { name: go_oracle, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: oracle
+    input: "how does the auth token refresh work"
+    intent:
+      name: ask_question
+      slots: { question: "how does the auth token refresh work" }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: oracle_asking
+    input: "go back"
+    intent: { name: go_back, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── Main navigation flow ───────────────────────────────────────────────
+  - state: main
+    input: "open workspace manager"
+    intent: { name: go_workspace_manager, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: workspace_manager
+    input: "enter my-api-project"
+    intent: { name: enter_workspace, slots: { name: my-api-project } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: workspace_loading
+    input: "enter workspace"
+    intent: { name: enter_workspace, slots: { name: my-api-project } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: workspace_room
+    input: "open terminal"
+    intent: { name: go_terminal, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── Terminal proposal lifecycle ─────────────────────────────────────────
+  - state: terminal_idle
+    input: "run git status"
+    intent: { name: propose, slots: { cmd: "git status" } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: terminal_reviewing
+    input: "refine with --short"
+    intent: { name: refine, slots: { feedback: "git status --short" } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: terminal_reviewing
+    input: "accept"
+    intent: { name: accept, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: terminal_executing
+    input: "accept"
+    intent: { name: accept, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: terminal_result
+    input: "check my inbox"
+    intent: { name: go_inbox, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: inbox
+    input: "home"
+    intent: { name: go_main, slots: {} }
+    confidence: 1.00
+    majority_of: 1

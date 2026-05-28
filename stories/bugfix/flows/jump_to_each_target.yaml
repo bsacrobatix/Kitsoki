@@ -1,0 +1,384 @@
+# jump_to_each_target — port of an upstream pipeline's jump_to.yaml
+# (provider-neutral).
+#
+# Per-phase jump_to ladders advance the pipeline forward to a later
+# room. Each scenario asserts:
+#   - the target state matches the slot alias
+#   - world.jump_to was set to the slot value
+#   - world.unsafe_jumps_made was incremented (audit)
+#
+# Coverage:
+#   1. reproducing → testing (alias `test`)
+#   2. reproducing → validating
+#   3. reproducing → done (alias `pr`)
+#   4. proposing  → testing
+#   5. proposing  → validating (alias `validate`)
+#   6. testing    → validating
+#   7. testing    → done (alias `pr`)
+#   8. validating → done
+#   9. unknown stage from reproducing → @exit:abandoned with reason set
+#
+# A regression that drops or reorders an arm must fail this flow.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: reproducing
+initial_world:
+  ticket_id:  "TKT-300"
+  thread:     "TKT-300"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: jump_to, slots: { stage: "test" } }
+    expect_state: testing
+    expect_world:
+      jump_to:           "test"
+      unsafe_jumps_made: 1
+
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: reproducing
+initial_world:
+  ticket_id:  "TKT-301"
+  thread:     "TKT-301"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: jump_to, slots: { stage: "validating" } }
+    expect_state: validating
+    expect_world:
+      jump_to:           "validating"
+      unsafe_jumps_made: 1
+
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: reproducing
+initial_world:
+  ticket_id:  "TKT-302"
+  thread:     "TKT-302"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: jump_to, slots: { stage: "pr" } }
+    expect_state: done
+    expect_world:
+      jump_to:           "pr"
+      unsafe_jumps_made: 1
+
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: proposing
+initial_world:
+  ticket_id:  "TKT-303"
+  thread:     "TKT-303"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: jump_to, slots: { stage: "testing" } }
+    expect_state: testing
+    expect_world:
+      jump_to:           "testing"
+      unsafe_jumps_made: 1
+
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: proposing
+initial_world:
+  ticket_id:  "TKT-304"
+  thread:     "TKT-304"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: jump_to, slots: { stage: "validate" } }
+    expect_state: validating
+    expect_world:
+      jump_to:           "validate"
+      unsafe_jumps_made: 1
+
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: testing
+initial_world:
+  ticket_id:  "TKT-305"
+  thread:     "TKT-305"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: jump_to, slots: { stage: "validating" } }
+    expect_state: validating
+    expect_world:
+      jump_to:           "validating"
+      unsafe_jumps_made: 1
+
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: testing
+initial_world:
+  ticket_id:  "TKT-306"
+  thread:     "TKT-306"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: jump_to, slots: { stage: "pr" } }
+    expect_state: done
+    expect_world:
+      jump_to:           "pr"
+      unsafe_jumps_made: 1
+
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: validating
+initial_world:
+  ticket_id:  "TKT-307"
+  thread:     "TKT-307"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: jump_to, slots: { stage: "done" } }
+    expect_state: done
+    expect_world:
+      jump_to:           "done"
+      unsafe_jumps_made: 1
+
+expect_no_errors: true
+
+---
+
+# Unknown jump_to target — falls through to @exit:abandoned with the
+# structured reason. This is the controlled fallback for an invalid
+# slot value (a regression that drops the default arm must fail this).
+
+test_kind: flow
+app: ../app.yaml
+initial_state: reproducing
+initial_world:
+  ticket_id:  "TKT-308"
+  thread:     "TKT-308"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: jump_to, slots: { stage: "atlantis" } }
+    expect_state: __exit__abandoned
+    expect_world:
+      abandon_reason: "jump_to_unknown_stage"
+      status:         "abandoned"
+
+expect_terminal: true
+expect_no_errors: true

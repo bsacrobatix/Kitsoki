@@ -1,0 +1,27 @@
+{% comment %}
+dev-story — app-wide base view. Mirrors stories/oregon-trail/views/base.pongo
+and follows the style-guide block convention (docs/story-style.md §2):
+
+  status   — top status line; dev-story's "ticket · workspace · branch · PR · inbox" readout
+  heading  — room title (default: state.description)
+  body     — main descriptive content (prose, kv, list, code)
+  choices  — action list (typed list element)
+  footer   — optional bottom matter; default empty
+
+When dev-story is imported under kitsoki-dev, this base IS the
+host base — sub-stories (bf, impl, pr, rev, cyp) inherit our block contract
+when their own `extends: "base"` is rewritten to this file by the imports
+mechanism. Standalone dev-story runs render the same chrome.
+
+The status bar uses the world keys the bf / pr / impl exits project up into
+dev-story's world (ticket_id, workdir, feature_branch, last_pr_url) plus the
+inbox subsystem's `inbox_unread`. Editing the bar touches one file.
+{% endcomment %}
+{% block status %}{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.workdir|default:"(no workspace)" }}  ·  {{ world.feature_branch|default:"(no branch)" }}  ·  {{ world.last_pr_url|default:"(no PR)" }}  ·  inbox {{ world.inbox_unread }}{% endblock %}
+
+{% block heading %}{{ state.description }}{% endblock %}
+
+{% block body %}{% endblock %}
+
+{% block choices %}{% endblock %}
+{% block footer %}{% endblock %}

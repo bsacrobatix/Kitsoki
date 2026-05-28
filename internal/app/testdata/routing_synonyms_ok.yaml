@@ -1,0 +1,39 @@
+app:
+  id: routing-synonyms-ok
+  version: 0.1.0
+
+root: start
+
+world:
+  done: { type: bool, default: false }
+
+intents:
+  ford:
+    title: "Ford the river"
+    examples: ["ford", "ford the river"]
+    synonyms:
+      - wade
+      - "walk it"
+      - "buy {items} for {total_cost}"
+  pick_profession:
+    title: "Pick a profession"
+    slots:
+      profession:
+        type: enum
+        values: [banker, carpenter, farmer]
+        synonyms:
+          banker:    ["rich guy", "money man"]
+          carpenter: ["builder", "woodworker"]
+          farmer:    ["farmhand", "agricultural"]
+
+states:
+  start:
+    description: "Start"
+    on:
+      ford:
+        - target: done
+      pick_profession:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true

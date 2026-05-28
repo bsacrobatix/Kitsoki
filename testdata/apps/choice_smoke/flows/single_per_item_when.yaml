@@ -1,0 +1,23 @@
+# single_per_item_when — exercises both branches of the per-item when
+# guard. When per_item_gate=false the "blocked" row is visible; when
+# true the "opened" row is visible. Flow tests are agnostic to which
+# row is rendered — they fire the underlying intent directly. The on:
+# arc fires regardless; we use this fixture to assert dispatch parity
+# for the EFFECT (slots.flag → world.per_item_flag). The commit arc
+# also seeds world.day and world.money so the next spoke's templated
+# labels resolve to deterministic numbers.
+test_kind: flow
+app: ../app.yaml
+initial_state: single_per_item_when
+initial_world:
+  per_item_gate: true
+
+turns:
+  - intent: { name: chose_gated, slots: { flag: opened } }
+    expect_state: single_templated
+    expect_world:
+      per_item_flag: opened
+      day:           2
+      money:         250
+
+expect_no_errors: true

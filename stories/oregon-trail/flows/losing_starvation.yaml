@@ -1,0 +1,38 @@
+# Phase C — starvation loss. Party runs out of food mid-leg and the
+# starvation guard on `traveling.continue` routes to ended_lost.
+#
+# Setup: start at leg_a_executing.traveling with food_lbs = 6 and
+# rations = filling (10 lbs/day). First continue consumes 10 lbs of
+# food but food is only 6 → food - 10 = -4 <= 0 → starvation arm fires.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: leg_a_executing.traveling
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    farmer
+  month:         april
+  money:         100
+  oxen:          3
+  food_lbs:      6
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    100
+  narration:     false
+  miles_traveled: 0
+  event_kind:    ""
+  rng_counter:   0
+  current_landmark: "Independence"
+
+turns:
+
+  # One continue — food (6) - ration cost (10) = -4 <= 0 → starvation.
+  - intent: { name: continue, slots: {} }
+    expect_state: ended_lost
+    expect_world:
+      food_lbs: 0
+      party_alive: 5   # starvation arm doesn't decrement; party dies whole
+
+expect_no_errors: true
+expect_terminal: true

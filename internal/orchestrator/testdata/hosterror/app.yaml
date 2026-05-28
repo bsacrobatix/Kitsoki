@@ -1,0 +1,46 @@
+# Tiny app used by TestOrchestrator_HostDispatchOnError. The `probe` state's
+# on_enter invokes host.fail (which always returns Result.Error != "") with
+# `on_error: probe_error` so the orchestrator should land in `probe_error`
+# instead of staying on `probe`.
+app:
+  id: hosterror
+  version: 0.1.0
+  title: "host on_error test app"
+
+hosts:
+  - host.fail
+
+world:
+  marker: { type: string, default: "" }
+
+root: idle
+
+intents:
+  ask:
+    title: "Ask"
+    description: "Trigger the probe."
+    examples: ["ask"]
+    priority: 10
+
+states:
+  idle:
+    description: "Idle"
+    view: "Idle. Marker: {{ world.marker }}"
+    on:
+      ask:
+        - target: probe
+
+  probe:
+    description: "Probe state"
+    view: "Probe. Marker: {{ world.marker }}"
+    on_enter:
+      - invoke: host.fail
+        with: {}
+        on_error: probe_error
+
+  probe_error:
+    description: "Error state"
+    view: "Error. Marker: {{ world.marker }}"
+    on_enter:
+      - set:
+          marker: "error_branch"

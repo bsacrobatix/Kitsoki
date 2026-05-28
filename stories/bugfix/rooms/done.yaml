@@ -1,0 +1,207 @@
+# done — phase 7 of the bugfix pipeline (close-out artifact + handoff).
+#
+# Produces the `done_artifact` (schemas/done_artifact.json): postmortem-
+# style summary carried into pr-refinement by parent stories. The
+# @exit:done.requires: [done_artifact] is enforced at load time —
+# the accept arc here must set done_artifact via effects.
+#
+# Single merged state — see rooms/reproducing.yaml for the design.
+
+states:
+
+  done:
+    description: "Build the run's close-out artifact; accept to hand off to pr-refinement."
+    # Flattened view (no extends/blocks chrome) — `choice:` cannot live
+    # inside a `blocks:` map. The base.pongo status line is inlined.
+    view:
+      - banner:
+          text:     "DONE"
+          subtitle: "Phase 7 / 7  ·  close-out artifact, hand off to pr-refinement"
+          color:    "#10B981"   # emerald — success
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
+      - kv:
+          pairs:
+            Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Summary: '{{ world.done_artifact.summary_title|default:"(pending)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.done_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "continue"
+              hint:   "post and hand off to pr-refinement"
+              intent: accept
+            - label:  "refine"
+              hint:   "re-draft the close-out with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to redo"
+                required:    false
+            - label:  "restart from reproducing"
+              hint:   "bounce back to phase 1 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: reproducing }
+            - label:  "restart from proposing"
+              hint:   "bounce back to phase 2 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: proposing }
+            - label:  "restart from implementing"
+              hint:   "bounce back to phase 3 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: implementing }
+            - label:  "restart from testing"
+              hint:   "bounce back to phase 4 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: testing }
+            - label:  "restart from validating"
+              hint:   "bounce back to phase 6 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: validating }
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, done_artifact, validate_artifact, llm_verdict, refine_feedback, cycle]
+    on_enter:
+      # `working_dir` pins the oracle to the bugfix worktree even though
+      # done's postmortem oracle mostly reads upstream artifact text —
+      # consistency across rooms means an operator never has to remember
+      # which oracle calls see which tree.
+      - invoke: host.oracle.decide
+        with:
+          agent: proposer
+          prompt_path: prompts/done_executing.md
+          schema: schemas/done_artifact.json
+          working_dir: "{{ world.workdir }}"
+          args:
+            ticket_id:        "{{ world.ticket_id }}"
+            ticket_title:     "{{ world.ticket_title }}"
+            workdir:          "{{ world.workdir }}"
+            validate_summary: "{{ world.validate_artifact.summary_markdown }}"
+            cycle:            "{{ world.cycle }}"
+            refine_feedback:  "{{ world.refine_feedback }}"
+        bind:
+          done_artifact: submitted
+        on_error: idle
+
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.decide
+        with:
+          agent: judge
+          prompt: prompts/judge_done.md
+          schema: schemas/judge_verdict.json
+          working_dir: "{{ world.workdir }}"
+          args:
+            ticket_id:       "{{ world.ticket_id }}"
+            artifact_title:  "{{ world.done_artifact.summary_title }}"
+            artifact_body:   "{{ world.done_artifact.summary_markdown }}"
+        bind:
+          llm_verdict: submitted
+
+      - when: |
+          world.judge_mode != 'human' &&
+          world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+          world.llm_verdict.verdict != 'uncertain' &&
+          world.llm_verdict.intent != 'uncertain'
+        emit_intent: "{{ world.llm_verdict.intent }}"
+        slots:
+          feedback: "{{ world.llm_verdict.reason }}"
+    on:
+      # accept fires @exit:done. @exit:done.requires: [done_artifact]
+      # is checked statically against the effects on this arc — we
+      # re-pin done_artifact (it was bound on_enter) so the requires
+      # gate sees an explicit set.
+      accept:
+        # Close out: post the artifact to the transport, transition the
+        # upstream ticket to resolved, then fire @exit:done.
+        # @exit:done.requires: [done_artifact] is checked statically
+        # against the effects on this arc — done_artifact is re-pinned
+        # below so the requires gate sees an explicit set.
+        - target: "@exit:done"
+          effects:
+            - invoke: iface.transport.post
+              with:
+                thread:   "{{ world.thread }}"
+                title:    "Bug-fix done: {{ world.ticket_id }}"
+                body:     "{{ world.done_artifact.summary_markdown }}"
+                phase_id: "done_{{ world.ticket_id }}"
+            - invoke: iface.ticket.transition
+              with:
+                id: "{{ world.ticket_id }}"
+                to: "resolved"
+            - set:
+                status:        "fixed"
+                done_artifact: "{{ world.done_artifact }}"
+
+      refine:
+        - when: "world.done_cycle >= world.done_budget"
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "done_cycle_budget_exhausted"
+                status:         "abandoned"
+        - target: done
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                done_cycle:      "{{ world.done_cycle + 1 }}"
+                cycle:           "{{ world.cycle + 1 }}"
+
+      restart_from:
+        - when: "slots.stage == 'reproducing'"
+          target: reproducing
+          effects:
+            - set:
+                restart_from_stage: "reproducing"
+                refine_feedback:    ""
+                reproducing_cycle:  0
+                cycle:              0
+        - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
+          target: proposing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
+                cycle:              0
+        - when: "slots.stage == 'implementing' || slots.stage == 'implement_review'"
+          target: implementing
+          effects:
+            - set:
+                restart_from_stage:  "{{ slots.stage }}"
+                refine_feedback:     ""
+                implementing_cycle:  0
+                cycle:               0
+        - when: "slots.stage == 'testing' || slots.stage == 'test'"
+          target: testing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                testing_cycle:      0
+                cycle:              0
+        - when: "slots.stage == 'validating' || slots.stage == 'validate'"
+          target: validating
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                validating_cycle:   0
+                cycle:              0
+        - target: validating
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'validating' }}"
+                refine_feedback:    ""
+                validating_cycle:   0
+                cycle:              0
+
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

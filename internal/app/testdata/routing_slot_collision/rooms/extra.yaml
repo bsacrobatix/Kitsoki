@@ -1,0 +1,21 @@
+# Same intent name `pick` — the synonyms on profession.slot.synonyms
+# must collide with the one in main.yaml rather than silently merging.
+intents:
+  pick:
+    title: "Pick another way"
+    slots:
+      profession:
+        type: enum
+        values: [banker, carpenter]
+        synonyms:
+          carpenter: ["builder"]
+
+states:
+  start:
+    description: "Start"
+    on:
+      pick:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true

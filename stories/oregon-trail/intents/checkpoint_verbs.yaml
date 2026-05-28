@@ -1,0 +1,71 @@
+# checkpoint_verbs — the three landmark-checkpoint verbs (continue / quit /
+# restart_from) must be distinguishable from each other and from
+# their period-flavored neighbours.
+#
+# Threshold-tightening note: this file was authored at min_pass_rate
+# 0.8. The intent was to drop it to 0.9 and add a per-fixture
+# min_confidence: 0.6 as a stricter low-confidence regression gate.
+# The runner today does NOT honour a per-fixture min_confidence (only
+# a top-level recording min_confidence at static-harness load time).
+# See internal/testrunner/intents.go IntentDefaults — adding a
+# MinConfidence field there is the future runner change that unblocks
+# tightening this file. Until then we leave the threshold at 0.8 so
+# regressions still surface via pass-rate alone.
+test_kind: intents
+app: oregon-trail
+state: leg_c_awaiting_reply           # Chimney Rock
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  - id: continue-canonical
+    intent: { name: continue, slots: {} }
+    inputs:
+      - "continue"
+      - "press on"
+      - "onward"
+      - "keep going"
+      - "we'll continue"
+
+  - id: quit-canonical
+    intent: { name: quit, slots: {} }
+    inputs:
+      - "quit"
+      - "abandon the journey"
+      - "give up"
+      - "we quit"
+      - "end the trip"
+
+  # Phase J wired restart_from's backing `on:` arm into the phase
+  # template (phases.yaml), so "restart from kearney" now resolves
+  # cleanly to restart_from { stage: kearney }. The fixture asserts
+  # the LLM-side enum extraction; the dedicated restart_from.yaml
+  # fixture pins the broader landmark-name vocabulary.
+  - id: restart-from-kearney
+    intent:
+      name: restart_from
+      slots:
+        stage: kearney
+    inputs:
+      - "restart from kearney"
+      - "go back to Fort Kearney"
+
+  - id: consult-guide
+    intent: { name: consult_guide, slots: {} }
+    inputs:
+      - "consult the guide"
+      - "ask the wagon master"
+      - "advice"
+      - "talk to the wagon master"
+
+  # Adversarial — bare "go" at a landmark could be continue or
+  # restart_from (without a stage). LLM should clarify rather than guess.
+  - id: bare-go
+    expect_failure:
+      any_of: [clarify, MISSING_SLOTS]
+    inputs:
+      - "go"
+      - "head out"

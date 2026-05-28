@@ -1,0 +1,18 @@
+# single_templated_slots — the widget would render the item's slot
+# value as `{{ world.money }}` and dispatch with the substituted
+# string. The flow runner fires the dispatched intent directly with
+# the pre-rendered string value (here "300") to mirror what the widget
+# would emit. Commit advances to single_param_string.
+test_kind: flow
+app: ../app.yaml
+initial_state: single_templated_slots
+initial_world:
+  money: 300
+
+turns:
+  - intent: { name: chose_templated_slot, slots: { money_amount: "300" } }
+    expect_state: single_param_string
+    expect_world:
+      templated_slot_value: "300"
+
+expect_no_errors: true

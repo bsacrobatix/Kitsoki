@@ -1,0 +1,16 @@
+app:
+  id: include-test
+  version: 0.1.0
+
+include: [rooms/*.yaml]
+
+root: room_a
+
+world:
+  counter: { type: int, default: 0 }
+
+intents:
+  go:
+    title: "Go"
+    description: "Move to another room."
+    examples: ["go to room b"]

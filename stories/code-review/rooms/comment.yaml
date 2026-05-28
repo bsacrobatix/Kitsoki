@@ -1,0 +1,93 @@
+# comment — draft and post the bulk of the review's commentary via
+# iface.vcs.pr_comment. The decision (approve / request changes) is
+# made in the next room (`decide`); `comment` is the prose-comment
+# step. No checkpoint inside the room — the operator delivers, then
+# moves to `decide` to record the binary decision.
+
+states:
+
+  comment_executing:
+    description: "Drafting the review comment."
+    # Choice-widget migration (§4 row 4). Although the draft body
+    # itself is composed by the LLM (not user prose), the operator's
+    # arc set is finite (proceed / refine / quit / look). Flattened
+    # the `extends: "base"` / `blocks:` shell because §4.5 forbids
+    # `choice:` inside `blocks:`.
+    view:
+      - kv:
+          pairs:
+            PR: "{{ world.pr_id }} — {{ world.pr_title }}"
+      - heading: "Draft"
+      - code: '{{ world.draft_comment|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              hint:   "post the comment and advance to decide"
+              intent: proceed
+            - label:  "refine"
+              hint:   "redraft the comment with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the review"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render the scene"
+              intent: look
+    relevant_world: [pr_id, pr_title, draft_comment, review_summary_artifact, cycle, refine_feedback]
+    on_enter:
+      # LLM drafts the comment body. The draft itself is a free-form
+      # string (no schema); the LLM may take cues from
+      # review_summary_artifact.blockers / nits.
+      - invoke: host.oracle.ask
+        with:
+          prompt: prompts/comment_executing.md
+          args:
+            pr_id:           "{{ world.pr_id }}"
+            pr_title:        "{{ world.pr_title }}"
+            review_summary:  "{{ world.review_summary_artifact.summary_markdown }}"
+            refine_feedback: "{{ world.refine_feedback }}"
+            cycle:           "{{ world.cycle }}"
+        bind:
+          draft_comment: stdout
+        on_error: review_pr_executing
+      # Post the comment via the vcs iface (approve / request_changes
+      # are NOT signalled here — the comment is body-only; the next
+      # room's iface.vcs.pr_comment call carries the binary decision).
+      - invoke: iface.vcs.pr_comment
+        with:
+          pr_id: "{{ world.pr_id }}"
+          body:  "{{ world.draft_comment }}"
+        on_error: review_pr_executing
+      - invoke: iface.transport.post
+        with:
+          thread:    "{{ world.thread }}"
+          title:     "Comment posted: PR {{ world.pr_id }}"
+          body:      "{{ world.draft_comment }}"
+          phase_id:  "comment_{{ world.pr_id }}_{{ world.cycle }}"
+      - invoke: host.inbox.add
+        with:
+          kind:    info
+          title:   "Comment posted: PR {{ world.pr_id }}"
+          thread:  "{{ world.thread }}"
+          state:   comment_executing
+          body:    "{{ world.draft_comment }}"
+    on:
+      proceed:
+        - target: decide_executing
+      refine:
+        - target: comment_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback }}"
+                cycle:           "{{ world.cycle + 1 }}"
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

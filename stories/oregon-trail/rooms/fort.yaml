@@ -1,0 +1,495 @@
+# fort — phase D refactor. Hosts the buy_supplies proposal at marked-up
+# fort prices (local_price_pct = 150). Mirrors general_store.yaml's
+# compound-state wizard lifecycle: idle (method picker) → describe / budget
+# / compose → reviewing → done.
+#
+# Reached from leg_b_awaiting_reply (Fort Kearney) and
+# leg_d_awaiting_reply (Fort Laramie). `leave_fort` routes back onto the
+# trail by inspecting world.current_landmark — same dispatch pattern as
+# the phase B fort stub, just now at the end of the proposal lifecycle.
+#
+# # Substates
+#
+#   idle       — method picker. Browse / budget / compose / leave.
+#   describe   — read-only: item prices and uses at fort markup.
+#   compose    — numeric-only form; total cost computed from counts ×
+#                world.local_price_pct / 100.
+#   reviewing  — draft in hand; accept / refine / cancel.
+#   done       — purchase applied; repeat or leave.
+#
+# Legacy free-text propose_purchase (8-field form via semroute) is kept
+# on idle so flow fixtures that dispatch propose_purchase directly still
+# route through reviewing.
+
+states:
+  fort:
+    type: compound
+    initial: idle
+    description: "Inside the fort ({{ world.current_landmark }}) — buy_supplies at marked-up prices."
+    relevant_world: [current_landmark, money, food_lbs, oxen, bullets, clothing_sets, spare_wheels, spare_axles, spare_tongues, local_price_pct, proposal_items, proposal_total_cost, proposal_refine_count]
+    on_enter:
+      # Fort markup: 150% of Independence prices.
+      - set:
+          local_price_pct: 150
+    states:
+
+      # ── idle: method picker. Pick how to draft a purchase, or leave.
+      # Free-text propose_purchase (semroute) still dispatches the legacy
+      # 8-field form straight to reviewing — flow fixtures rely on this.
+      idle:
+        description: "At the fort sutler ({{ world.current_landmark }}) — pick how to draft a purchase, or leave."
+        view:
+          - prose: "{{ world.current_landmark }} — supplies marked up 50%."
+          - code: "{% include \"partials/inventory.pongo\" %}"
+          - choice:
+              mode:   single
+              prompt: "How would you like to proceed?"
+              items:
+                - label:  "Browse what's on the shelves"
+                  hint:   "see each item with prices and uses (fort markup)"
+                  intent: browse_items
+                - label:  "Set a budget — let the sutler pick a basket"
+                  hint:   "you say how much; the sutler assembles the basket"
+                  intent: propose_budget
+                  param:
+                    slot:        total_cost
+                    type:        int
+                    placeholder: "e.g. 300"
+                    required:    true
+                - label:  "Compose item-by-item (numbers only)"
+                  hint:   "form with per-item counts; the sutler totals it at fort price"
+                  intent: open_compose
+                - label:  "Leave the fort"
+                  hint:   "put the post behind you and back on the trail"
+                  intent: leave_fort
+                - { label: "look", intent: look }
+        on:
+          browse_items:
+            - target: ../describe
+          open_compose:
+            - target: ../compose
+          propose_budget:
+            # Balanced kit at fort markup. Allocations rounded into
+            # whole-unit counts at the base prices, then total scaled by
+            # world.local_price_pct/100 (150% at a fort). Item counts
+            # themselves are not scaled — only the total cost.
+            - when: "int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)"
+              target: ../reviewing
+              effects:
+                - set:
+                    proposal_items: "Sutler's balanced kit"
+                    proposal_total_cost:   "{{ int(slots.total_cost) }}"
+                    proposal_refine_count: 0
+                    proposal_oxen:     "{{ int(int(slots.total_cost) * 30 / 100 / 40 / (world.local_price_pct / 100)) }}"
+                    proposal_food:     "{{ int(int(slots.total_cost) * 50 / 100 / 0.2 / (world.local_price_pct / 100)) }}"
+                    proposal_bullets:  "{{ int(int(slots.total_cost) * 10 / 100 / 2 / (world.local_price_pct / 100)) }}"
+                    proposal_clothing: 0
+                    proposal_wheels:   "{{ int(slots.total_cost) >= 150 ? 1 : 0 }}"
+                    proposal_axles:    "{{ int(slots.total_cost) >= 300 ? 1 : 0 }}"
+                    proposal_tongues:  0
+                - say: "The sutler scratches on the slate, slides it across. 'Balanced kit for ${{ slots.total_cost }} at fort price — proposed.'"
+            - default: true
+              target: .
+              guard_hint: "Budget must be a positive integer and within your cash on hand."
+              effects:
+                - say: "The sutler eyes the slate. 'That budget won't carry at fort prices, traveller.'"
+
+          propose_purchase:
+            # Auto-accept tiny baskets straight to done, per policy
+            # buy_supplies.auto_accept_if: $proposal.total_cost < 5.
+            - when: "int(slots.total_cost) < 5 && world.money >= int(slots.total_cost)"
+              target: ../done
+              effects:
+                - set:
+                    proposal_items: "{{ slots.items }}"
+                    proposal_total_cost: "{{ int(slots.total_cost) }}"
+                    proposal_refine_count: 0
+                    # Per-item counts; mirrors general_store.
+                    proposal_oxen:     "{{ int(slots.oxen ?? 0) }}"
+                    proposal_food:     "{{ int(slots.food ?? 0) }}"
+                    proposal_bullets:  "{{ int(slots.bullets ?? 0) }}"
+                    proposal_clothing: "{{ int(slots.clothing ?? 0) }}"
+                    proposal_wheels:   "{{ int(slots.wheels ?? 0) }}"
+                    proposal_axles:    "{{ int(slots.axles ?? 0) }}"
+                    proposal_tongues:  "{{ int(slots.tongues ?? 0) }}"
+                    money:         "{{ world.money - int(slots.total_cost) }}"
+                    oxen:          "{{ world.oxen + int(slots.oxen ?? 0) }}"
+                    food_lbs:      "{{ world.food_lbs + int(slots.food ?? 0) }}"
+                    bullets:       "{{ world.bullets + int(slots.bullets ?? 0) }}"
+                    clothing_sets: "{{ world.clothing_sets + int(slots.clothing ?? 0) }}"
+                    spare_wheels:  "{{ world.spare_wheels + int(slots.wheels ?? 0) }}"
+                    spare_axles:   "{{ world.spare_axles + int(slots.axles ?? 0) }}"
+                    spare_tongues: "{{ world.spare_tongues + int(slots.tongues ?? 0) }}"
+                - say: "The sutler grunts, tosses a tin onto the counter — {{ slots.items }} — and palms the ${{ slots.total_cost }}."
+            - when: "world.money >= int(slots.total_cost)"
+              target: ../reviewing
+              effects:
+                - set:
+                    proposal_items: "{{ slots.items }}"
+                    proposal_total_cost: "{{ int(slots.total_cost) }}"
+                    proposal_refine_count: 0
+                    proposal_oxen:     "{{ int(slots.oxen ?? 0) }}"
+                    proposal_food:     "{{ int(slots.food ?? 0) }}"
+                    proposal_bullets:  "{{ int(slots.bullets ?? 0) }}"
+                    proposal_clothing: "{{ int(slots.clothing ?? 0) }}"
+                    proposal_wheels:   "{{ int(slots.wheels ?? 0) }}"
+                    proposal_axles:    "{{ int(slots.axles ?? 0) }}"
+                    proposal_tongues:  "{{ int(slots.tongues ?? 0) }}"
+                - say: "The sutler chalks it on the board behind him. '{{ slots.items }}. Fort price — ${{ slots.total_cost }}. Take it or leave it.'"
+            - default: true
+              target: .
+              guard_hint: "Not enough cash at fort prices."
+              effects:
+                - say: "The sutler shrugs. 'You haven't got the coin, traveller.'"
+
+          leave_fort:
+            - when: "world.current_landmark == 'Fort Kearney'"
+              target: leg_c_executing
+              effects:
+                - set:
+                    proposal_items: ""
+                    proposal_total_cost: 0
+                    proposal_refine_count: 0
+                    proposal_oxen: 0
+                    proposal_food: 0
+                    proposal_bullets: 0
+                    proposal_clothing: 0
+                    proposal_wheels: 0
+                    proposal_axles: 0
+                    proposal_tongues: 0
+                - say: "Back on the trail, heading for Chimney Rock."
+            - when: "world.current_landmark == 'Fort Laramie'"
+              target: leg_e_executing
+              effects:
+                - set:
+                    proposal_items: ""
+                    proposal_total_cost: 0
+                    proposal_refine_count: 0
+                    proposal_oxen: 0
+                    proposal_food: 0
+                    proposal_bullets: 0
+                    proposal_clothing: 0
+                    proposal_wheels: 0
+                    proposal_axles: 0
+                    proposal_tongues: 0
+                - say: "Back on the trail, heading for South Pass."
+            - default: true
+              target: ended_lost
+              guard_hint: "Lost track of which fort we're in — ending the run."
+
+          look:
+            - target: .
+
+      # ── describe: educational read-only — item prices at fort markup.
+      describe:
+        description: "The sutler walks you through what's on the shelves."
+        view:
+          - heading: "Sutler's shelves at {{ world.current_landmark }}"
+          - kv:
+              pairs:
+                Oxen ($60/yoke at fort):                "≥ 2 to leave town; replace any lost on the trail."
+                Food ($0.30/lb at fort):                "~2 lbs/soul/day; top up between legs."
+                Bullets ($3.00/box of 20):              "for hunting; sutler charges 50% over Independence."
+                Clothing ($15/set at fort):             "burned through treating illness; carry extra."
+                Spare wheels / axles / tongues ($15):   "eaten by breakdown events on the rough trail."
+          - prose: >
+              The local price multiplier here is 150% — fort markup. If
+              you can wait for the next post, you might; otherwise the
+              sutler's the only game in town.
+          - choice:
+              mode:   single
+              prompt: "Now what?"
+              items:
+                - label:  "Set a budget"
+                  hint:   "you say how much; the sutler picks a basket"
+                  intent: propose_budget
+                  param:
+                    slot:        total_cost
+                    type:        int
+                    placeholder: "e.g. 300"
+                    required:    true
+                - label:  "Compose item-by-item (form)"
+                  intent: open_compose
+                - { label: "back",  intent: back }
+                - { label: "look",  intent: look }
+        on:
+          back:
+            - target: ../idle
+          open_compose:
+            - target: ../compose
+          propose_budget:
+            - when: "int(slots.total_cost) >= 1 && world.money >= int(slots.total_cost)"
+              target: ../reviewing
+              effects:
+                - set:
+                    proposal_items: "Sutler's balanced kit"
+                    proposal_total_cost:   "{{ int(slots.total_cost) }}"
+                    proposal_refine_count: 0
+                    proposal_oxen:     "{{ int(int(slots.total_cost) * 30 / 100 / 40 / (world.local_price_pct / 100)) }}"
+                    proposal_food:     "{{ int(int(slots.total_cost) * 50 / 100 / 0.2 / (world.local_price_pct / 100)) }}"
+                    proposal_bullets:  "{{ int(int(slots.total_cost) * 10 / 100 / 2 / (world.local_price_pct / 100)) }}"
+                    proposal_clothing: 0
+                    proposal_wheels:   "{{ int(slots.total_cost) >= 150 ? 1 : 0 }}"
+                    proposal_axles:    "{{ int(slots.total_cost) >= 300 ? 1 : 0 }}"
+                    proposal_tongues:  0
+                - say: "The sutler scratches on the slate. 'Balanced kit for ${{ slots.total_cost }} — proposed.'"
+            - default: true
+              target: .
+              guard_hint: "Budget must be positive and within your cash."
+              effects:
+                - say: "The sutler shakes his head — 'budget doesn't carry, traveller.'"
+          look:
+            - target: .
+
+      # ── compose: form mode, numeric only. Items label auto-computed.
+      compose:
+        description: "Compose a kit item-by-item at fort price (numbers only)."
+        view:
+          - code: "{% include \"partials/inventory.pongo\" %}"
+          - prose: >
+              Base prices: oxen $40/yoke, food $0.20/lb, bullets $2/box,
+              clothing $10/set, wheels/axles/tongues $10 each. Fort
+              markup is 150% — totals are scaled when the sutler tallies.
+          - choice:
+              mode:     form
+              prompt:   "Item counts"
+              intent:   propose_kit
+              template: "Buy oxen={oxen}, food={food} lbs, bullets={bullets}, clothing={clothing}, wheels={wheels}, axles={axles}, tongues={tongues}."
+              fields:
+                oxen:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "head ($60/yoke at fort)"
+                food:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "lbs ($0.30/lb at fort)"
+                bullets:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "boxes ($3/box of 20)"
+                clothing:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "sets ($15/set at fort)"
+                wheels:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "spare ($15 each at fort)"
+                axles:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "spare ($15 each at fort)"
+                tongues:
+                  type:        int
+                  placeholder: "0"
+                  default:     0
+                  unit:        "spare ($15 each at fort)"
+        on:
+          propose_kit:
+            # Compute total_cost from item counts × base prices × local
+            # price multiplier. Base prices: oxen $40/yoke, food $0.20/lb,
+            # bullets $2/box of 20, clothing $10/set, wheels/axles/tongues
+            # $10 each. world.local_price_pct is in % (150 at a fort), so
+            # divide by 100.
+            - when: "world.money >= int((int(slots.oxen ?? 0) * 40 + int(slots.food ?? 0) * 0.2 + int(slots.bullets ?? 0) * 2 + int(slots.clothing ?? 0) * 10 + int(slots.wheels ?? 0) * 10 + int(slots.axles ?? 0) * 10 + int(slots.tongues ?? 0) * 10) * world.local_price_pct / 100)"
+              target: ../reviewing
+              effects:
+                - set:
+                    # Human-readable items string from the numeric slots
+                    # so reviewing's prose has something to echo back.
+                    # Skips zero-count categories.
+                    proposal_items: '{{ (int(slots.oxen ?? 0) > 0 ? string(int(slots.oxen)) + " oxen, " : "") + (int(slots.food ?? 0) > 0 ? string(int(slots.food)) + " lbs food, " : "") + (int(slots.bullets ?? 0) > 0 ? string(int(slots.bullets)) + " bullets, " : "") + (int(slots.clothing ?? 0) > 0 ? string(int(slots.clothing)) + " clothing, " : "") + (int(slots.wheels ?? 0) > 0 ? string(int(slots.wheels)) + " wheels, " : "") + (int(slots.axles ?? 0) > 0 ? string(int(slots.axles)) + " axles, " : "") + (int(slots.tongues ?? 0) > 0 ? string(int(slots.tongues)) + " tongues" : "") }}'
+                    proposal_total_cost:   "{{ int((int(slots.oxen ?? 0) * 40 + int(slots.food ?? 0) * 0.2 + int(slots.bullets ?? 0) * 2 + int(slots.clothing ?? 0) * 10 + int(slots.wheels ?? 0) * 10 + int(slots.axles ?? 0) * 10 + int(slots.tongues ?? 0) * 10) * world.local_price_pct / 100) }}"
+                    proposal_refine_count: 0
+                    proposal_oxen:     "{{ int(slots.oxen ?? 0) }}"
+                    proposal_food:     "{{ int(slots.food ?? 0) }}"
+                    proposal_bullets:  "{{ int(slots.bullets ?? 0) }}"
+                    proposal_clothing: "{{ int(slots.clothing ?? 0) }}"
+                    proposal_wheels:   "{{ int(slots.wheels ?? 0) }}"
+                    proposal_axles:    "{{ int(slots.axles ?? 0) }}"
+                    proposal_tongues:  "{{ int(slots.tongues ?? 0) }}"
+                - say: "The sutler tallies the slate. 'Fort price comes to ${{ world.proposal_total_cost }} — take it or leave it.'"
+            - default: true
+              target: .
+              guard_hint: "Not enough cash for that kit at fort prices."
+              effects:
+                - say: "The sutler looks back at you. 'Haven't the coin for that, traveller.'"
+          back:
+            - target: ../idle
+          look:
+            - target: .
+
+      reviewing:
+        description: "The sutler reads the order back."
+        view:
+          - prose: >
+              The sutler at {{ world.current_landmark }} drags a thumb
+              across the chalk board, looks up at you over the
+              counter.
+          - prose: >
+              "{{ world.proposal_items }}. Fort price —
+              ${{ world.proposal_total_cost }}. You'd have
+              ${{ world.money - world.proposal_total_cost }} left,
+              and a long road ahead. Mark you'll not see them prices
+              again till the next post. Speak up — that the order?"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "accept_purchase"
+                  hint:   "take it"
+                  intent: accept_purchase
+                - label:  "refine_purchase"
+                  hint:   "change a line (free-text: type the new fields)"
+                  intent: refine_purchase
+                - label:  "cancel_purchase"
+                  hint:   "walk off"
+                  intent: cancel_purchase
+                - label:  "look"
+                  hint:   "read the board over"
+                  intent: look
+        relevant_world: [proposal_items, proposal_total_cost, money, proposal_refine_count, current_landmark]
+        on:
+          accept_purchase:
+            - target: ../done
+              effects:
+                - set:
+                    money:         "{{ world.money - world.proposal_total_cost }}"
+                    oxen:          "{{ world.oxen + world.proposal_oxen }}"
+                    food_lbs:      "{{ world.food_lbs + world.proposal_food }}"
+                    bullets:       "{{ world.bullets + world.proposal_bullets }}"
+                    clothing_sets: "{{ world.clothing_sets + world.proposal_clothing }}"
+                    spare_wheels:  "{{ world.spare_wheels + world.proposal_wheels }}"
+                    spare_axles:   "{{ world.spare_axles + world.proposal_axles }}"
+                    spare_tongues: "{{ world.spare_tongues + world.proposal_tongues }}"
+                - say: "The sutler swipes the coins off the counter and pushes the goods at you with the back of his hand. 'Done. {{ world.proposal_items }}. ${{ world.money }} left in your purse — and you'll need it before Oregon.'"
+          refine_purchase:
+            # Same shape as general_store.refine_purchase: self-stay in
+            # reviewing; any per-item slot supplied replaces that field;
+            # omitted slots keep their existing proposal_* value.
+            - target: ../reviewing
+              effects:
+                - set:
+                    proposal_items:        "{{ slots.items ?? world.proposal_items }}"
+                    proposal_total_cost:   "{{ int(slots.total_cost ?? world.proposal_total_cost) }}"
+                    proposal_oxen:         "{{ int(slots.oxen     ?? world.proposal_oxen) }}"
+                    proposal_food:         "{{ int(slots.food     ?? world.proposal_food) }}"
+                    proposal_bullets:      "{{ int(slots.bullets  ?? world.proposal_bullets) }}"
+                    proposal_clothing:     "{{ int(slots.clothing ?? world.proposal_clothing) }}"
+                    proposal_wheels:       "{{ int(slots.wheels   ?? world.proposal_wheels) }}"
+                    proposal_axles:        "{{ int(slots.axles    ?? world.proposal_axles) }}"
+                    proposal_tongues:      "{{ int(slots.tongues  ?? world.proposal_tongues) }}"
+                    proposal_refine_count: "{{ world.proposal_refine_count + 1 }}"
+                - say: "The sutler rubs out a line of chalk and writes the new one. 'That's the order then. Same fort price.' (revision {{ world.proposal_refine_count }})"
+          cancel_purchase:
+            - target: ../idle
+              effects:
+                - set:
+                    proposal_items: ""
+                    proposal_total_cost: 0
+                    proposal_refine_count: 0
+                    proposal_oxen: 0
+                    proposal_food: 0
+                    proposal_bullets: 0
+                    proposal_clothing: 0
+                    proposal_wheels: 0
+                    proposal_axles: 0
+                    proposal_tongues: 0
+                - say: "The sutler erases the board with a damp rag, scowls. 'Suit yourself.'"
+          look:
+            - target: .
+
+      done:
+        description: "Purchase complete at {{ world.current_landmark }}."
+        # Phase G: trail-diary post on a successful fort resupply.
+        # phase_id includes the landmark + basket so each distinct
+        # resupply at each fort gets its own diary entry.
+        on_enter:
+          - invoke: host.transport.post
+            with:
+              transport: tui
+              thread:    "{{ run.id }}"
+              phase_id:  "fort_done_{{ world.current_landmark }}_{{ world.proposal_items }}_{{ world.proposal_total_cost }}"
+              title:     "Resupplied at {{ world.current_landmark }}"
+              body:      "Bought {{ world.proposal_items }} from the sutler at {{ world.current_landmark }} for ${{ world.proposal_total_cost }}. ${{ world.money }} cash left, {{ world.food_lbs }} lbs food, {{ world.oxen }} oxen."
+        view:
+          - prose: >
+              The sutler pockets the coin, drops the goods on the
+              counter. "Pleasure doing business." He's already chalked
+              the next traveller's order on the board.
+          - kv:
+              pairs:
+                Cash left: "${{ world.money }}"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "repeat_purchase"
+                  hint:   "if you forgot something"
+                  intent: repeat_purchase
+                - label:  "leave_fort"
+                  hint:   "put the post behind you"
+                  intent: leave_fort
+                - label:  "look"
+                  hint:   "read the counter again"
+                  intent: look
+        relevant_world: [money, food_lbs, oxen, current_landmark]
+        on:
+          repeat_purchase:
+            - target: ../idle
+              effects:
+                - set:
+                    proposal_items: ""
+                    proposal_total_cost: 0
+                    proposal_refine_count: 0
+                    proposal_oxen: 0
+                    proposal_food: 0
+                    proposal_bullets: 0
+                    proposal_clothing: 0
+                    proposal_wheels: 0
+                    proposal_axles: 0
+                    proposal_tongues: 0
+                - say: "The sutler raises an eyebrow, doesn't look up. 'Something else?'"
+          leave_fort:
+            - when: "world.current_landmark == 'Fort Kearney'"
+              target: leg_c_executing
+              effects:
+                - set:
+                    proposal_items: ""
+                    proposal_total_cost: 0
+                    proposal_refine_count: 0
+                    proposal_oxen: 0
+                    proposal_food: 0
+                    proposal_bullets: 0
+                    proposal_clothing: 0
+                    proposal_wheels: 0
+                    proposal_axles: 0
+                    proposal_tongues: 0
+                - say: "Back on the trail, heading for Chimney Rock."
+            - when: "world.current_landmark == 'Fort Laramie'"
+              target: leg_e_executing
+              effects:
+                - set:
+                    proposal_items: ""
+                    proposal_total_cost: 0
+                    proposal_refine_count: 0
+                    proposal_oxen: 0
+                    proposal_food: 0
+                    proposal_bullets: 0
+                    proposal_clothing: 0
+                    proposal_wheels: 0
+                    proposal_axles: 0
+                    proposal_tongues: 0
+                - say: "Back on the trail, heading for South Pass."
+            - default: true
+              target: ended_lost
+              guard_hint: "Lost track of which fort we're in — ending the run."
+          look:
+            - target: .

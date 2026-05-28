@@ -1,0 +1,1312 @@
+# choice_smoke — canonical reference fixture for the choice widget.
+#
+# Layout: a LINEAR WALKTHROUGH. `intro` opens with prose, then every
+# spoke commits its demo intent and routes to the NEXT spoke in the
+# chain. After the final spoke the user lands on `complete`. A
+# `menu` state remains as a power-user "jump to feature" hub — every
+# spoke (including intro/complete) has a `goto_menu` arc so users can
+# break out of the chain and pick a specific feature for reference.
+#
+# Two simultaneous jobs:
+#   1. Comprehensive feature demo (interactive ./kitsoki run).
+#   2. Regression fixture (./kitsoki test flows — one flow per spoke,
+#      plus a full-walkthrough fixture that chains every commit).
+#
+# Each spoke's prose explains the feature in plain language so a future
+# author can land on (e.g.) form_enum and learn from prose alone what
+# an enum field is, how Space cycles values, and what the dispatched
+# slot looks like. Each spoke also tells the user which feature is
+# "Next up" so the linear progression is self-narrating.
+#
+# Seeding: a handful of spokes need world state populated before their
+# templated labels / per-item-when guards resolve usefully. In the
+# linear walkthrough we set those world keys as `effects:` on the arc
+# that ENTERS the spoke needing them, so the demo state has the world
+# it needs the moment the user lands on it. Flow tests that drive a
+# spoke in isolation continue to use `initial_world:`.
+app:
+  id: choice-smoke
+  version: 0.3.0
+  title: "Choice Widget Reference"
+  author: "Kitsoki sample"
+
+hosts:
+  - host.run
+
+# World keys, grouped by spoke. Every spoke writes through to its own
+# bucket so flow tests can assert dispatch parity per feature without
+# stepping on each other.
+world:
+  # ── Single-mode buckets ─────────────────────────────────────────────
+  picked_color:          { type: string, default: "" }
+  bare_choice:           { type: string, default: "" }
+  per_item_gate:         { type: bool,   default: false }
+  per_item_flag:         { type: string, default: "" }
+  templated_pick:        { type: string, default: "" }
+  templated_slot_value:  { type: string, default: "" }
+  hero_name:             { type: string, default: "" }
+  hero_age:              { type: int,    default: 0  }
+  hero_class:            { type: string, default: "" }
+  hero_class_cost:       { type: int,    default: 0  }
+
+  # State used by the single_templated and per_item_when spokes — a
+  # "world clock" / "shop" the templated labels read.
+  day:                   { type: int,    default: 1  }
+  money:                 { type: int,    default: 100 }
+
+  # ── Multi-mode buckets ──────────────────────────────────────────────
+  picked_traits:         { type: list,   default: [] }
+  picked_optional:       { type: list,   default: [] }
+  picked_all:            { type: list,   default: [] }
+  picked_gated:          { type: list,   default: [] }
+  picked_templated:      { type: list,   default: [] }
+
+  # ── Form-mode buckets ───────────────────────────────────────────────
+  form_name:             { type: string, default: "" }
+  form_count:            { type: int,    default: 0  }
+  form_active:           { type: string, default: "" }
+  form_ratio:            { type: float,  default: 0.0 }
+  form_method:           { type: string, default: "" }
+  form_note:             { type: string, default: "" }
+  form_required_value:   { type: string, default: "" }
+  form_bounded:          { type: int,    default: 0  }
+  form_gated_value:      { type: string, default: "" }
+  form_basic_color:      { type: string, default: "" }
+  form_basic_name:       { type: string, default: "" }
+  form_basic_count:      { type: int,    default: 0  }
+  form_readonly_total:   { type: int,    default: 0  }
+  show_secret_field:     { type: bool,   default: false }
+
+intents:
+  # ── Walkthrough navigation ──────────────────────────────────────────
+  begin:
+    description: "Start the linear walkthrough from intro."
+    priority: 90
+  restart:
+    description: "Restart the linear walkthrough from intro."
+    priority: 90
+  goto_menu:
+    description: "Open the feature menu (escape hatch from any spoke)."
+    priority: 50
+
+  # ── Menu jump intents (power-user direct jump from `menu`) ──────────
+  # One goto_<spoke> per demo. Each takes no slots; the menu wires
+  # literal targets via on:.
+  goto_intro:                  { description: "Jump to the intro state",              priority: 90 }
+  goto_complete:               { description: "Jump to the complete state",           priority: 90 }
+  goto_single_basic:           { description: "Open single_basic demo",               priority: 90 }
+  goto_single_no_slots:        { description: "Open single_no_slots demo",            priority: 90 }
+  goto_single_per_item_when:   { description: "Open single_per_item_when demo",       priority: 90 }
+  goto_single_templated:       { description: "Open single_templated demo",           priority: 90 }
+  goto_single_templated_slots: { description: "Open single_templated_slots demo",     priority: 90 }
+  goto_single_param_string:    { description: "Open single_param_string demo",        priority: 90 }
+  goto_single_param_int:       { description: "Open single_param_int demo",           priority: 90 }
+  goto_single_param_enum:      { description: "Open single_param_enum demo",          priority: 90 }
+  goto_multi_basic:            { description: "Open multi_basic demo",                priority: 90 }
+  goto_multi_min_zero:         { description: "Open multi_min_zero demo",             priority: 90 }
+  goto_multi_no_max:           { description: "Open multi_no_max demo",               priority: 90 }
+  goto_multi_per_item_when:    { description: "Open multi_per_item_when demo",        priority: 90 }
+  goto_multi_templated:        { description: "Open multi_templated demo",            priority: 90 }
+  goto_form_basic:             { description: "Open form_basic demo",                 priority: 90 }
+  goto_form_bool:              { description: "Open form_bool demo",                  priority: 90 }
+  goto_form_float:             { description: "Open form_float demo",                 priority: 90 }
+  goto_form_enum:              { description: "Open form_enum demo",                  priority: 90 }
+  goto_form_placeholder:       { description: "Open form_placeholder demo",           priority: 90 }
+  goto_form_required:          { description: "Open form_required demo",              priority: 90 }
+  goto_form_bounds:            { description: "Open form_bounds demo",                priority: 90 }
+  goto_form_per_field_when:    { description: "Open form_per_field_when demo",        priority: 90 }
+  goto_form_readonly_expr:     { description: "Open form_readonly_expr demo",         priority: 90 }
+
+  # ── Single-mode commit intents ──────────────────────────────────────
+  chose_color:
+    description: "Single-mode literal pick — color picker."
+    priority: 80
+    slots:
+      color: { type: enum, values: [red, green, blue], required: true }
+
+  chose_bare:
+    description: "Bare intent (no slots) — mirrors robbery pay/fight/flee."
+    priority: 80
+
+  chose_gated:
+    description: "Picked an item filtered by per-item when."
+    priority: 80
+    slots:
+      flag: { type: string, required: true }
+
+  chose_templated:
+    description: "Picked a literal item whose label/hint were templated."
+    priority: 80
+    slots:
+      day_label: { type: string, required: true }
+
+  chose_templated_slot:
+    description: "Picked an item with a templated slot value."
+    priority: 80
+    slots:
+      money_amount: { type: string, required: true }
+
+  set_hero_name:
+    description: "Single-item with a string param capturing a name."
+    priority: 80
+    slots:
+      name: { type: string, required: true }
+
+  set_hero_age:
+    description: "Single-item with an int param capturing an age."
+    priority: 80
+    slots:
+      age: { type: int, required: true }
+
+  set_hero_class:
+    description: "Single-item with an enum param capturing the class."
+    priority: 80
+    slots:
+      class: { type: enum, values: [warrior, mage, rogue], required: true }
+
+  # ── Multi-mode commit intents ───────────────────────────────────────
+  chose_traits:
+    description: "Multi-mode submission — 1..3 traits."
+    priority: 80
+    slots:
+      traits: { type: list, required: true }
+
+  chose_optional_extras:
+    description: "Multi-mode submission with min=0 (empty allowed)."
+    priority: 80
+    slots:
+      extras: { type: list }
+
+  chose_all_perks:
+    description: "Multi-mode submission with max unset (defaults to len(items))."
+    priority: 80
+    slots:
+      perks: { type: list, required: true }
+
+  chose_gated_traits:
+    description: "Multi-mode submission with per-item when filtering."
+    priority: 80
+    slots:
+      traits: { type: list, required: true }
+
+  chose_templated_traits:
+    description: "Multi-mode submission with templated labels/hints."
+    priority: 80
+    slots:
+      traits: { type: list, required: true }
+
+  # ── Form-mode commit intents ────────────────────────────────────────
+  submit_basic_form:
+    description: "Form-mode dispatch — readonly + string + int."
+    priority: 80
+    slots:
+      name:  { type: string, required: true }
+      count: { type: int,    required: true }
+
+  submit_bool_form:
+    description: "Form-mode dispatch — bool toggle."
+    priority: 80
+    slots:
+      active: { type: string, required: true }
+
+  submit_float_form:
+    description: "Form-mode dispatch — float with bounds."
+    priority: 80
+    slots:
+      ratio: { type: float, required: true }
+
+  submit_enum_form:
+    description: "Form-mode dispatch — enum field (Space cycles)."
+    priority: 80
+    slots:
+      method: { type: enum, values: [ford, caulk, ferry, wait], required: true }
+
+  submit_placeholder_form:
+    description: "Form-mode dispatch — placeholder demo."
+    priority: 80
+    slots:
+      note: { type: string }
+
+  submit_required_form:
+    description: "Form-mode dispatch — required field demo."
+    priority: 80
+    slots:
+      value: { type: string, required: true }
+
+  submit_bounds_form:
+    description: "Form-mode dispatch — int with min/max bounds."
+    priority: 80
+    slots:
+      bounded: { type: int, required: true }
+
+  submit_gated_form:
+    description: "Form-mode dispatch — field hidden by per-field when."
+    priority: 80
+    slots:
+      secret: { type: string }
+
+  submit_readonly_form:
+    description: "Form-mode dispatch — readonly expr field."
+    priority: 80
+    slots:
+      total: { type: int, required: true }
+
+  # ── Test rigging ─────────────────────────────────────────────────────
+  # Flow fixtures may still fire these explicitly to seed world keys
+  # mid-flow. The walkthrough's own seeding is performed via effects on
+  # the arcs entering spokes that need world state.
+  seed_day:
+    description: "Test rig — seed world.day from a slot."
+    priority: 10
+    slots:
+      value: { type: int, required: true }
+
+  seed_money:
+    description: "Test rig — seed world.money from a slot."
+    priority: 10
+    slots:
+      value: { type: int, required: true }
+
+  seed_show_secret_field:
+    description: "Test rig — flip world.show_secret_field to true."
+    priority: 10
+
+root: intro
+
+states:
+  # ═══════════════════════════════════════════════════════════════════
+  # INTRO — landing state for the linear walkthrough.
+  # ═══════════════════════════════════════════════════════════════════
+  intro:
+    description: "Reference walkthrough — introduction."
+    view:
+      - heading: "Choice widget reference walkthrough"
+      - prose: >
+          Welcome. This app is the canonical reference fixture for the
+          choice widget. The widget has three modes — single (Enter
+          dispatches one
+          intent per item), multi ([ ]/[x] checkboxes; Enter submits a
+          list), and form (mad-lib templates with typed fields; Enter
+          submits one intent with one slot per writable field).
+      - prose: >
+          The walkthrough below visits one feature per state in a
+          curated order — single-mode basics, then single-mode advanced
+          features (`when:`, templates, param), then multi mode, then
+          form mode. Each spoke explains itself in plain prose,
+          surfaces the relevant YAML, and ends with a commit intent
+          that AUTOMATICALLY advances you to the next feature.
+      - prose: >
+          Navigation. Press Enter on "Begin" to start. From any spoke
+          you can pick "Open the feature menu" (right-pane action) or
+          dispatch the `goto_menu` intent to jump to a feature picker
+          (`menu`); from `menu` you can re-enter the linear chain at
+          any spoke. The final spoke routes to `complete` with a
+          summary and a restart option.
+      - prose: >
+          Press Enter on "Begin" below to start the walkthrough.
+      - choice:
+          mode: single
+          prompt: "Ready?"
+          items:
+            - { label: "Begin",                                intent: begin }
+            - { label: "Jump straight to the feature menu",    intent: goto_menu }
+    on:
+      begin:           [ { target: single_basic } ]
+      goto_menu:       [ { target: menu } ]
+
+  # ═══════════════════════════════════════════════════════════════════
+  # SINGLE-MODE SPOKES (linear chain)
+  # ═══════════════════════════════════════════════════════════════════
+
+  # ── single_basic ────────────────────────────────────────────────────
+  single_basic:
+    description: "Single mode — 3 literal items dispatching the same intent."
+    view:
+      - heading: "Single — basic literal items"
+      - prose: >
+          Three items, each dispatching `chose_color` with a literal
+          `slots:` payload (`{ color: red }`, `{ color: green }`,
+          `{ color: blue }`). This is the simplest possible single-mode
+          picker — every option pre-binds its own value. Press up/down
+          to move the cursor, Enter to dispatch. Proposal §3.1.
+      - prose: >
+          What you'll see in the world delta: `picked_color` flips to
+          your choice. No `param:`, no templated slots, no `when:` —
+          this is the baseline against which every other single-mode
+          spoke is a delta.
+      - prose: >
+          Next up — `single_no_slots` (items with NO slots and NO
+          param). When you commit a colour here the walkthrough will
+          advance automatically.
+      - choice:
+          mode:   single
+          prompt: "Pick a hero color"
+          items:
+            - { label: "Red",   hint: "warm",  intent: chose_color, slots: { color: red } }
+            - { label: "Green", hint: "earth", intent: chose_color, slots: { color: green } }
+            - { label: "Blue",  hint: "cool",  intent: chose_color, slots: { color: blue } }
+    on:
+      chose_color:
+        - target: single_no_slots
+          effects:
+            - set: { picked_color: "{{ slots.color }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ── single_no_slots ─────────────────────────────────────────────────
+  single_no_slots:
+    description: "Single mode — items with NO slots and NO param."
+    view:
+      - heading: "Single — bare intent dispatch (no slots, no param)"
+      - prose: >
+          When an item has neither `slots:` nor `param:`, picking it
+          dispatches the intent with an empty slot map. This mirrors
+          the robbery encounter (`stories/robbery/app.yaml`) where
+          `pay` / `fight` / `flee` are all zero-slot intents — the
+          intent name itself encodes the choice.
+      - prose: >
+          Use this pattern when every option fully encodes its meaning
+          in the intent name. The on: arc fires; effects: capture
+          which option was chosen by inspecting the intent name in a
+          setter like `bare_choice: picked`. Press Enter on any row.
+      - prose: >
+          Next up — `single_per_item_when` (items filtered by a
+          per-item `when:` guard). Entering that spoke also seeds
+          `world.per_item_gate = true` via the arc effects so the
+          "opened" branch is what you'll see.
+      - choice:
+          mode:   single
+          prompt: "Take an action"
+          items:
+            - { label: "pay",   hint: "buy them off",            intent: chose_bare }
+            - { label: "fight", hint: "shoot it out",            intent: chose_bare }
+            - { label: "flee",  hint: "ride off without firing", intent: chose_bare }
+    on:
+      chose_bare:
+        - target: single_per_item_when
+          effects:
+            - set:
+                bare_choice:   "picked"
+                per_item_gate: true
+      goto_menu: [ { target: menu } ]
+
+  # ── single_per_item_when ────────────────────────────────────────────
+  single_per_item_when:
+    description: "Single mode — per-item when guards (hide / show / block hint)."
+    view:
+      - heading: "Single — per-item when guards"
+      - prose: >
+          The `when:` field on an item is an expr-lang boolean. When
+          it evaluates false, the loader / renderer DROPS that item
+          from the visible list. This is how robbery shows "pay" vs
+          "pay ✗ (not enough money)" — two items with mutually
+          exclusive `when:` expressions on the SAME intent, so exactly
+          one is visible at any time. Proposal §3.1, §4.4. See also
+          `multi_per_item_when` for the equivalent pattern in multi
+          mode.
+      - prose: >
+          This spoke gates two items on `world.per_item_gate`. The
+          previous spoke's commit arc set the flag to `true` so the
+          "opened" row is visible; the "blocked" row would replace it
+          if you arrived with the flag false.
+      - prose: >
+          Next up — `single_templated` (labels and hints with
+          `{{ world.x }}` substitutions). Entering that spoke seeds
+          `world.day` and `world.money` so the templated labels
+          resolve to real numbers.
+      - choice:
+          mode:   single
+          prompt: "Try an action"
+          items:
+            - label:  "Open the gate"
+              hint:   "(visible only when per_item_gate is true)"
+              intent: chose_gated
+              slots:  { flag: "opened" }
+              when:   "world.per_item_gate"
+            - label:  "✗ Open the gate — locked"
+              hint:   "blocked until per_item_gate flips"
+              intent: chose_gated
+              slots:  { flag: "blocked" }
+              when:   "!world.per_item_gate"
+            - label:  "Look around"
+              hint:   "always visible — no guard"
+              intent: chose_gated
+              slots:  { flag: "looked" }
+    on:
+      chose_gated:
+        - target: single_templated
+          effects:
+            - set:
+                per_item_flag: "{{ slots.flag }}"
+                day:           2
+                money:         250
+      goto_menu: [ { target: menu } ]
+
+  # ── single_templated ────────────────────────────────────────────────
+  single_templated:
+    description: "Single mode — labels and hints with {{ world.x }} substitutions."
+    view:
+      - heading: "Single — templated labels & hints"
+      - prose: >
+          Item `label:` and `hint:` strings go through pongo2 at
+          render time, so `{{ world.x }}` substitutions appear inline.
+          This is how robbery shows
+          "buy them off (${{ world.threat_level * 50 }})" — the ransom
+          amount updates as world state changes between renders.
+          Proposal §3.1.
+      - prose: >
+          The slot values dispatched here are LITERAL ("dawn", "noon",
+          "dusk") — only the display is templated. See
+          `single_templated_slots` for templated slot values. The
+          previous arc seeded `world.day` and `world.money` so the
+          day-of-week label resolves deterministically.
+      - prose: >
+          Next up — `single_templated_slots` (a `slots:` entry whose
+          VALUE is templated). Entering that spoke leaves `world.money`
+          in place so the templated slot value has something to
+          substitute.
+      - choice:
+          mode:   single
+          prompt: "Pick a time of day (current day = {{ world.day }})"
+          items:
+            - { label: "Dawn — day {{ world.day }}",   hint: "early start, low risk",     intent: chose_templated, slots: { day_label: "dawn" } }
+            - { label: "Noon — day {{ world.day }}",   hint: "hot, but safe",             intent: chose_templated, slots: { day_label: "noon" } }
+            - { label: "Dusk — day {{ world.day }}",   hint: "low light, ${{ world.money }} budget", intent: chose_templated, slots: { day_label: "dusk" } }
+    on:
+      chose_templated:
+        - target: single_templated_slots
+          effects:
+            - set:
+                templated_pick: "{{ slots.day_label }}"
+                money:          300
+      goto_menu: [ { target: menu } ]
+
+  # ── single_templated_slots ──────────────────────────────────────────
+  single_templated_slots:
+    description: "Single mode — slots: with a templated value."
+    view:
+      - heading: "Single — templated slot values"
+      - prose: >
+          A `slots:` entry whose value contains `{{ world.x }}` is
+          rendered through pongo at commit time — the dispatched slot
+          carries the SUBSTITUTED string. The loader's enum-membership
+          check skips templated values (proposal §4.4(2)) because the
+          concrete value is only knowable at submit time.
+      - prose: >
+          This is rarer than templated LABELS (see `single_templated`).
+          Use it when the value the user is committing to is itself a
+          world-derived constant — e.g. "spend my current balance,
+          whatever it is right now." The arc into this spoke seeded
+          `world.money = 300` so the dispatched slot equals 300 if you
+          pick "Spend all".
+      - prose: >
+          Next up — `single_param_string` (an item with a `param:`
+          that captures one free-form string slot at pick time).
+      - choice:
+          mode:   single
+          prompt: "Spend an amount (you have ${{ world.money }})"
+          items:
+            - label:  "Spend all (${{ world.money }})"
+              hint:   "templated slot value"
+              intent: chose_templated_slot
+              slots:  { money_amount: "{{ world.money }}" }
+            - label:  "Spend half (${{ world.money / 2 }})"
+              hint:   "templated slot value (half)"
+              intent: chose_templated_slot
+              slots:  { money_amount: "{{ world.money / 2 }}" }
+            - label:  "Spend nothing"
+              hint:   "literal slot value"
+              intent: chose_templated_slot
+              slots:  { money_amount: "0" }
+    on:
+      chose_templated_slot:
+        - target: single_param_string
+          effects:
+            - set: { templated_slot_value: "{{ slots.money_amount }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ── single_param_string ─────────────────────────────────────────────
+  single_param_string:
+    description: "Single mode — item with a string param (free-form name)."
+    view:
+      - heading: "Single — param (type: string)"
+      - prose: >
+          An item with a `param:` captures ONE free-form slot at pick
+          time. Press Enter on the row — the widget enters paramMode
+          with the configured `placeholder:`. Type your value, press
+          Enter again to commit; Esc cancels back to the picker. The
+          captured string becomes a slot on the dispatched intent.
+          Proposal §3.1, §8.
+      - prose: >
+          Use `param:` when ONE free-form slot suffices. For multiple
+          parameters, use form mode (see `form_basic`). The
+          `required: true` flag here means the widget refuses to
+          commit an empty buffer.
+      - prose: >
+          Next up — `single_param_int` (same shape, but the captured
+          buffer is coerced to an int at commit).
+      - choice:
+          mode:   single
+          prompt: "Name your hero"
+          items:
+            - label:  "Name the hero"
+              hint:   "type a name, then Enter"
+              intent: set_hero_name
+              param:
+                slot:        name
+                type:        string
+                placeholder: "e.g. Aria"
+                required:    true
+    on:
+      set_hero_name:
+        - target: single_param_int
+          effects:
+            - set: { hero_name: "{{ slots.name }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ── single_param_int ────────────────────────────────────────────────
+  single_param_int:
+    description: "Single mode — item with an int param."
+    view:
+      - heading: "Single — param (type: int)"
+      - prose: >
+          Same as `single_param_string` but the captured buffer is
+          coerced to an int at commit. Non-numeric input is rejected
+          at the widget layer (proposal §3.1). The dispatched slot
+          carries a real int — downstream effects can do arithmetic
+          on it without parsing.
+      - prose: >
+          Note: numeric bounds (`min:` / `max:`) are NOT supported on
+          `param:` — only on form fields. If you need a bounded int,
+          use form mode (see `form_bounds`).
+      - prose: >
+          Next up — `single_param_enum` (an inline cycle-on-Space
+          picker for a small enum).
+      - choice:
+          mode:   single
+          prompt: "Set the hero's age"
+          items:
+            - label:  "Set age"
+              hint:   "integer, e.g. 27"
+              intent: set_hero_age
+              param:
+                slot:        age
+                type:        int
+                placeholder: "e.g. 27"
+                required:    true
+    on:
+      set_hero_age:
+        - target: single_param_enum
+          effects:
+            - set: { hero_age: "{{ slots.age }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ── single_param_enum ───────────────────────────────────────────────
+  single_param_enum:
+    description: "Single mode — item with an enum param (Space cycles)."
+    view:
+      - heading: "Single — param (type: enum)"
+      - prose: >
+          With `param.type: enum` plus `values:`, the param mode
+          renders an inline cycle-on-Space picker — Space steps to the
+          next value, Enter commits. This is the param-mode equivalent
+          of form-mode enum fields (see `form_enum`). Proposal §3.1.
+      - prose: >
+          Use this when one item needs to be qualified with a small,
+          fixed set of choices (warrior/mage/rogue). For one-off enum
+          picks that don't share a row with other items, prefer a
+          plain top-level single-mode list (see `single_basic`).
+      - prose: >
+          Next up — `multi_basic` (the start of multi mode — Space
+          toggles items, Enter submits the whole selection as one
+          list-valued slot).
+      - choice:
+          mode:   single
+          prompt: "Pick the hero's class"
+          items:
+            - label:  "Set class"
+              hint:   "Space cycles warrior → mage → rogue"
+              intent: set_hero_class
+              param:
+                slot:     class
+                type:     enum
+                values:   [warrior, mage, rogue]
+                required: true
+    on:
+      set_hero_class:
+        - target: multi_basic
+          effects:
+            - set: { hero_class: "{{ slots.class }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ═══════════════════════════════════════════════════════════════════
+  # MULTI-MODE SPOKES (linear chain)
+  # ═══════════════════════════════════════════════════════════════════
+
+  # ── multi_basic ─────────────────────────────────────────────────────
+  multi_basic:
+    description: "Multi mode — min=1, max=3, hint column."
+    view:
+      - heading: "Multi — basic min/max bounds"
+      - prose: >
+          Multi mode renders [ ] / [x] checkboxes. Space toggles the
+          item under the cursor; Enter submits the WHOLE selection as
+          a single intent with one list-valued slot. `min:` and `max:`
+          bound the count — the widget refuses to submit a selection
+          smaller than `min:` or larger than `max:`. Proposal §3.2.
+      - prose: >
+          Bounds enforcement is WIDGET-ONLY — a flow test that fires
+          `chose_traits` with `traits: []` will succeed because the
+          orchestrator only checks `required:` and enum membership.
+          See the README "What this fixture does NOT cover" section.
+      - prose: >
+          Next up — `multi_min_zero` (multi-mode picker with `min: 0`
+          — an empty submission is valid).
+      - choice:
+          mode:   multi
+          prompt: "Pick 1–3 traits"
+          intent: chose_traits
+          slot:   traits
+          min:    1
+          max:    3
+          items:
+            - { value: brave,  label: "Brave",  hint: "ignores fear" }
+            - { value: kind,   label: "Kind",   hint: "heals on rest" }
+            - { value: clever, label: "Clever", hint: "+10% xp" }
+            - { value: tough,  label: "Tough",  hint: "+2 hp" }
+    on:
+      chose_traits:
+        - target: multi_min_zero
+          effects:
+            - set: { picked_traits: "{{ slots.traits }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ── multi_min_zero ──────────────────────────────────────────────────
+  multi_min_zero:
+    description: "Multi mode — min: 0 (empty list submits valid)."
+    view:
+      - heading: "Multi — min: 0 (empty allowed)"
+      - prose: >
+          With `min: 0`, submitting zero selections is valid — the
+          dispatched slot is an empty list. Use this when the
+          multi-pick is genuinely optional (e.g. "extra perks you'd
+          LIKE to pick, none required"). Proposal §3.2, §4.1.
+      - prose: >
+          Press Enter without toggling anything to confirm zero
+          selections. The dispatched slot is `extras: []`. Effects
+          read `slots.extras` and stash it into
+          `world.picked_optional`.
+      - prose: >
+          Next up — `multi_no_max` (multi-mode picker with `max:`
+          unset; defaults to len(visible items), so you can toggle
+          everything on).
+      - choice:
+          mode:   multi
+          prompt: "Pick zero or more extras"
+          intent: chose_optional_extras
+          slot:   extras
+          min:    0
+          max:    3
+          items:
+            - { value: hat,    label: "Hat" }
+            - { value: cloak,  label: "Cloak" }
+            - { value: boots,  label: "Boots" }
+    on:
+      chose_optional_extras:
+        - target: multi_no_max
+          effects:
+            - set: { picked_optional: "{{ slots.extras }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ── multi_no_max ────────────────────────────────────────────────────
+  multi_no_max:
+    description: "Multi mode — max: unset (defaults to len(visible items))."
+    view:
+      - heading: "Multi — max unset (defaults to all)"
+      - prose: >
+          When `max:` is omitted, the widget defaults it to the count
+          of visible items — i.e. you can toggle everything on. Use
+          this when there's no natural cap on selection size. The
+          loader still tracks `min:` (default 0) so you can pair
+          unbounded max with a required minimum. Proposal §3.2.
+      - prose: >
+          This spoke pairs `min: 1` with no `max:` — at least one
+          perk required, but no upper bound. Effects stash the whole
+          list into `world.picked_all`.
+      - prose: >
+          Next up — `multi_per_item_when` (multi-mode items hidden
+          until a world flag flips). The arc into the next spoke
+          seeds `world.day = 5` so the gated "rash" trait becomes
+          visible.
+      - choice:
+          mode:   multi
+          prompt: "Pick any perks (1+)"
+          intent: chose_all_perks
+          slot:   perks
+          min:    1
+          items:
+            - { value: regen,   label: "Regen",   hint: "+1 hp / turn" }
+            - { value: haste,   label: "Haste",   hint: "+1 action" }
+            - { value: shield,  label: "Shield",  hint: "+2 def" }
+            - { value: vision,  label: "Vision",  hint: "see traps" }
+    on:
+      chose_all_perks:
+        - target: multi_per_item_when
+          effects:
+            - set:
+                picked_all: "{{ slots.perks }}"
+                day:        5
+      goto_menu: [ { target: menu } ]
+
+  # ── multi_per_item_when ─────────────────────────────────────────────
+  multi_per_item_when:
+    description: "Multi mode — items hidden until a world flag flips."
+    view:
+      - heading: "Multi — per-item when guards"
+      - prose: >
+          Same `when:` pattern as `single_per_item_when`, but on a
+          multi-mode item: when the guard is false the row is HIDDEN
+          (not rendered, not toggleable). Use this to surface options
+          conditionally — e.g. a "rash" symptom only appears after
+          day 3 (proposal §3.2 example). Proposal §4.4.
+      - prose: >
+          This spoke gates the "rash" trait on `world.day > 3`. The
+          previous arc seeded `world.day = 5` so the gated row is
+          visible here. Effects stash the chosen list into
+          `world.picked_gated`.
+      - prose: >
+          Next up — `multi_templated` (labels and hints rendered
+          through pongo with `{{ world.x }}` substitutions; values
+          must remain literal).
+      - choice:
+          mode:   multi
+          prompt: "Pick symptoms (day = {{ world.day }})"
+          intent: chose_gated_traits
+          slot:   traits
+          min:    1
+          items:
+            - { value: fever,   label: "Fever",   hint: ">100.4°F" }
+            - { value: cough,   label: "Cough" }
+            - { value: fatigue, label: "Fatigue" }
+            - value: rash
+              label: "Rash"
+              hint:  "day > 3"
+              when:  "world.day > 3"
+    on:
+      chose_gated_traits:
+        - target: multi_templated
+          effects:
+            - set:
+                picked_gated: "{{ slots.traits }}"
+                day:          4
+                money:        80
+      goto_menu: [ { target: menu } ]
+
+  # ── multi_templated ─────────────────────────────────────────────────
+  multi_templated:
+    description: "Multi mode — labels and hints with templated values."
+    view:
+      - heading: "Multi — templated labels & hints"
+      - prose: >
+          Labels and hints in multi mode go through pongo just like
+          in single mode (see `single_templated`). The `value:` itself
+          must be a literal (proposal §4.4(5)) — templated values are
+          rejected at load time, because the widget materializes the
+          selection as a literal list and a templated value would
+          defeat downstream type checks.
+      - prose: >
+          This spoke renders each item with a templated hint pulling
+          `world.day` and `world.money`. The values committed are the
+          literal trait names. The previous arc seeded
+          `day = 4, money = 80` so the templated hints resolve.
+      - prose: >
+          Next up — `form_basic` (the start of form mode — a mad-lib
+          template with readonly + string + int fields, dispatching
+          one intent with one slot per writable field). The arc into
+          `form_basic` reuses the colour you picked back at
+          `single_basic` for the readonly field.
+      - choice:
+          mode:   multi
+          prompt: "Pick traits (day = {{ world.day }}, $ = {{ world.money }})"
+          intent: chose_templated_traits
+          slot:   traits
+          min:    1
+          items:
+            - { value: brave,  label: "Brave",  hint: "free on day {{ world.day }}" }
+            - { value: kind,   label: "Kind",   hint: "costs ${{ world.money / 4 }}" }
+            - { value: clever, label: "Clever", hint: "costs ${{ world.money / 2 }}" }
+    on:
+      chose_templated_traits:
+        - target: form_basic
+          effects:
+            - set: { picked_templated: "{{ slots.traits }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ═══════════════════════════════════════════════════════════════════
+  # FORM-MODE SPOKES (linear chain)
+  # ═══════════════════════════════════════════════════════════════════
+
+  # ── form_basic ──────────────────────────────────────────────────────
+  form_basic:
+    description: "Form mode — readonly + string + int fields."
+    view:
+      - heading: "Form — basic (readonly + string + int)"
+      - prose: >
+          Form mode renders a mad-lib `template:` with `{field}`
+          placeholders, each backed by an editable region. Tab cycles
+          fields; Enter submits one intent with one slot per writable
+          field. `readonly: true` fields display their `expr:` value
+          and are NOT submitted as slots (proposal §3.3).
+      - prose: >
+          This spoke has three fields: `color` (readonly, computed
+          from `world.picked_color` — whatever you picked at
+          `single_basic`), `name` (string, required), and `count`
+          (int, default 1). The committed intent is
+          `submit_basic_form` with slots `{name, count}` — `color` is
+          skipped at the widget but participates in the readonly
+          display.
+      - prose: >
+          Next up — `form_bool` (a `type: bool` field; Space toggles
+          true/false).
+      - choice:
+          mode:     form
+          prompt:   "Compose your hero"
+          intent:   submit_basic_form
+          template: "A {color} hero named {name} with {count} traits."
+          fields:
+            color:
+              type:     string
+              readonly: true
+              expr:     "world.picked_color"
+            name:
+              type:        string
+              placeholder: "type a name"
+              required:    true
+            count:
+              type:    int
+              default: 1
+              min:     1
+              max:     5
+    on:
+      submit_basic_form:
+        - target: form_bool
+          effects:
+            - set:
+                form_basic_color: "{{ world.picked_color }}"
+                form_basic_name:  "{{ slots.name }}"
+                form_basic_count: "{{ slots.count }}"
+      goto_menu: [ { target: menu } ]
+
+  # ── form_bool ───────────────────────────────────────────────────────
+  form_bool:
+    description: "Form mode — bool field (Space toggles)."
+    view:
+      - heading: "Form — bool field"
+      - prose: >
+          A `type: bool` field renders as a toggle. Space flips it
+          true/false. The dispatched slot carries the string "true"
+          or "false" (slot type coerces on the orchestrator side).
+          Use bool fields for flags inside a larger form — for a
+          single-question yes/no, prefer single mode with two items.
+      - prose: >
+          Note: there is no separate "checkbox" mode — multi mode
+          uses [ ]/[x] for LIST selection (proposal §3.2), while a
+          single bool inside a form is for in-template flags.
+      - prose: >
+          Next up — `form_float` (a `type: float` field with min/max
+          bounds enforced at the widget).
+      - choice:
+          mode:     form
+          prompt:   "Toggle the active flag"
+          intent:   submit_bool_form
+          template: "Hero active: {active}."
+          fields:
+            active:
+              type:    bool
+              default: false
+    on:
+      submit_bool_form:
+        - target: form_float
+          effects:
+            - set: { form_active: "{{ slots.active }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ── form_float ──────────────────────────────────────────────────────
+  form_float:
+    description: "Form mode — float field with min/max bounds."
+    view:
+      - heading: "Form — float field with bounds"
+      - prose: >
+          A `type: float` field accepts decimals. `min:` and `max:`
+          bound the accepted range — the widget refuses to commit a
+          value outside [min, max]. Bounds enforcement is widget-only;
+          a flow test can dispatch `submit_float_form` with any float
+          (the orchestrator validates only required + enum membership).
+      - prose: >
+          Use float fields for ratios, percentages, multipliers. For
+          counts (integer-valued), use `type: int` (see `form_bounds`).
+      - prose: >
+          Next up — `form_enum` (a `type: enum` field rendered as an
+          inline cycle-on-Space picker).
+      - choice:
+          mode:     form
+          prompt:   "Set the difficulty ratio"
+          intent:   submit_float_form
+          template: "Difficulty ratio: {ratio}."
+          fields:
+            ratio:
+              type:    float
+              default: 0.5
+              min:     0.0
+              max:     1.0
+    on:
+      submit_float_form:
+        - target: form_enum
+          effects:
+            - set: { form_ratio: "{{ slots.ratio }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ── form_enum ───────────────────────────────────────────────────────
+  form_enum:
+    description: "Form mode — enum field (Space cycles through values)."
+    view:
+      - heading: "Form — enum field (Space cycles)"
+      - prose: >
+          A `type: enum` field with `values:` renders as an inline
+          cycle-on-Space picker — Space steps to the next value, no
+          buffer editing. This is distinct from `type: string` with
+          `values:` (which doesn't exist on form fields anyway): enum
+          fields are picker-shaped, never typed-into. Proposal §3.3.
+      - prose: >
+          Use enum fields when the option set is small and known.
+          For a small enum in a single-item single-mode picker, see
+          `single_param_enum`.
+      - prose: >
+          Next up — `form_placeholder` (a string field with a
+          `placeholder:` shown while the buffer is empty).
+      - choice:
+          mode:     form
+          prompt:   "Cross the river"
+          intent:   submit_enum_form
+          template: "Cross by {method}."
+          fields:
+            method:
+              type:    enum
+              values:  [ford, caulk, ferry, wait]
+              default: ford
+    on:
+      submit_enum_form:
+        - target: form_placeholder
+          effects:
+            - set: { form_method: "{{ slots.method }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ── form_placeholder ────────────────────────────────────────────────
+  form_placeholder:
+    description: "Form mode — placeholder: shown when buffer is empty."
+    view:
+      - heading: "Form — placeholder demo"
+      - prose: >
+          When a field's buffer is empty, the widget renders the
+          `placeholder:` string in a dimmed style. Once you type, the
+          placeholder disappears and your buffer takes over. The
+          placeholder is presentational only — submitting with an
+          empty buffer dispatches an empty-string slot (unless
+          `required: true`, see `form_required`). Proposal §3.3.
+      - prose: >
+          Next up — `form_required` (the widget refuses to commit
+          when the buffer is empty; the orchestrator also enforces
+          `required:` at the slot level).
+      - choice:
+          mode:     form
+          prompt:   "Optional note"
+          intent:   submit_placeholder_form
+          template: "Note: {note}."
+          fields:
+            note:
+              type:        string
+              placeholder: "(optional — leave blank to skip)"
+    on:
+      submit_placeholder_form:
+        - target: form_required
+          effects:
+            - set: { form_note: "{{ slots.note }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ── form_required ───────────────────────────────────────────────────
+  form_required:
+    description: "Form mode — required: true field rejects empty submit."
+    view:
+      - heading: "Form — required field"
+      - prose: >
+          A `required: true` field refuses to commit when the buffer
+          is empty. The widget surfaces an inline error and keeps
+          focus on the field. Note: this enforcement is at the WIDGET
+          layer — a flow test that dispatches `submit_required_form`
+          with `value: ""` will reach the orchestrator, which itself
+          checks `required:` on the slot definition (the slot here is
+          also `required: true`, so the orchestrator-level rejection
+          gives `MISSING_SLOTS`). See the negative flow fixture.
+      - prose: >
+          Next up — `form_bounds` (an int field with `min:` / `max:`
+          enforced at the widget).
+      - choice:
+          mode:     form
+          prompt:   "Set a required value"
+          intent:   submit_required_form
+          template: "Value: {value}."
+          fields:
+            value:
+              type:        string
+              required:    true
+              placeholder: "must not be empty"
+    on:
+      submit_required_form:
+        - target: form_bounds
+          effects:
+            - set: { form_required_value: "{{ slots.value }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ── form_bounds ─────────────────────────────────────────────────────
+  form_bounds:
+    description: "Form mode — int field with min/max bounds."
+    view:
+      - heading: "Form — int min/max bounds"
+      - prose: >
+          A `type: int` field with `min:` / `max:` bounds rejects
+          out-of-range submissions at the widget. The dispatched slot
+          carries an int. Same caveat as `form_float`: bounds live in
+          the widget; flow tests can dispatch out-of-range ints
+          without seeing an orchestrator error.
+      - prose: >
+          Next up — `form_per_field_when` (a field hidden by a
+          per-field `when:`). Entering that spoke seeds
+          `world.show_secret_field = true` so the gated field is
+          visible.
+      - choice:
+          mode:     form
+          prompt:   "Pick a bounded value"
+          intent:   submit_bounds_form
+          template: "Bounded int: {bounded}."
+          fields:
+            bounded:
+              type:    int
+              default: 5
+              min:     1
+              max:     10
+    on:
+      submit_bounds_form:
+        - target: form_per_field_when
+          effects:
+            - set:
+                form_bounded:      "{{ slots.bounded }}"
+                show_secret_field: true
+      goto_menu: [ { target: menu } ]
+
+  # ── form_per_field_when ─────────────────────────────────────────────
+  form_per_field_when:
+    description: "Form mode — per-field when guard (field appears conditionally)."
+    view:
+      - heading: "Form — per-field when guard"
+      - prose: >
+          A field's `when:` is an expr-lang boolean that controls
+          whether the field renders at all. False → field is hidden
+          from the template and NOT submitted. True → field is
+          rendered and committed. Use this to surface optional form
+          fields based on world state. Proposal §4.4.
+      - prose: >
+          The `secret` field below is gated on
+          `world.show_secret_field`. The previous arc seeded the flag
+          to `true` so the field is visible here.
+      - prose: >
+          Next up — `form_readonly_expr` (a readonly field whose
+          `expr:` is a real arithmetic expression evaluated through
+          internal/expr).
+      - choice:
+          mode:     form
+          prompt:   "Compose conditionally"
+          intent:   submit_gated_form
+          template: "Hero {secret}."
+          fields:
+            secret:
+              type:        string
+              placeholder: "type a secret"
+              when:        "world.show_secret_field"
+    on:
+      submit_gated_form:
+        - target: form_readonly_expr
+          effects:
+            - set:
+                form_gated_value: "{{ slots.secret }}"
+                money:            100
+                day:              3
+      goto_menu: [ { target: menu } ]
+
+  # ── form_readonly_expr ──────────────────────────────────────────────
+  form_readonly_expr:
+    description: "Form mode — readonly field with a non-trivial expr:."
+    view:
+      - heading: "Form — readonly expr (arithmetic)"
+      - prose: >
+          A readonly field's `expr:` is evaluated through internal/expr
+          (NOT pongo2) and the result rendered into the field. The
+          expr env has `world.*` and `slots.*`; it does NOT currently
+          have live `form.*` — readonly fields don't recompute as
+          siblings change (a future enhancement). Proposal §3.3, §4.3.
+      - prose: >
+          This spoke's readonly `total` field computes
+          `world.money + world.day * 10`. The previous arc seeded
+          `money = 100, day = 3` so the value renders as 130.
+          The widget DOES submit the readonly value as a slot via the
+          on-commit env — see README "Subtleties".
+      - prose: >
+          This is the final feature in the walkthrough. Committing
+          here advances to the `complete` summary state.
+      - choice:
+          mode:     form
+          prompt:   "Submit your total"
+          intent:   submit_readonly_form
+          template: "Money + day-bonus = {total}."
+          fields:
+            total:
+              type:     int
+              readonly: true
+              expr:     "world.money + world.day * 10"
+    on:
+      submit_readonly_form:
+        - target: complete
+          effects:
+            - set: { form_readonly_total: "{{ slots.total }}" }
+      goto_menu: [ { target: menu } ]
+
+  # ═══════════════════════════════════════════════════════════════════
+  # COMPLETE — terminal state for the linear walkthrough.
+  # ═══════════════════════════════════════════════════════════════════
+  complete:
+    description: "Walkthrough complete."
+    view:
+      - heading: "Done — you've walked through every choice-widget feature."
+      - prose: >
+          You've now seen every YAML knob the v1 choice widget
+          supports — single mode (literal items, no-slot items,
+          per-item `when:`, templated labels, templated slots, all
+          three `param:` types), multi mode (`min:`/`max:` bounds,
+          empty allowed, unbounded max, per-item gates, templated
+          labels), and form mode (readonly+writable mix, bool,
+          float, enum, placeholder, required, int bounds, per-field
+          gate, readonly arithmetic expressions).
+      - prose: >
+          For the full reference matrix see this app's README
+          (`testdata/apps/choice_smoke/README.md`).  For the
+          author-facing cookbook see `docs/choice-widget.md`.
+      - prose: >
+          Pick "Restart" to walk through again, or "Open the feature
+          menu" to dip into any single spoke as a reference.
+      - choice:
+          mode: single
+          prompt: "What's next?"
+          items:
+            - { label: "Restart the walkthrough", intent: restart }
+            - { label: "Open the feature menu",   intent: goto_menu }
+    on:
+      restart:   [ { target: intro } ]
+      goto_menu: [ { target: menu } ]
+
+  # ═══════════════════════════════════════════════════════════════════
+  # MENU — power-user "jump to feature" hub.
+  # ═══════════════════════════════════════════════════════════════════
+  # Reachable from every spoke (including intro and complete) via the
+  # `goto_menu` arc. From here a user can land directly on any spoke
+  # to re-read its prose / re-exercise its widget. Items use the same
+  # `goto_<spoke>` intents the old hub did. The chain successor for
+  # each spoke is unchanged when jumped to from `menu` — picking
+  # `goto_multi_basic` here, then committing `chose_traits`, will still
+  # land you on `multi_min_zero`, the linear successor.
+  menu:
+    description: "Feature picker — pick any spoke to jump straight to it."
+    view:
+      - heading: "Choice widget — feature menu"
+      - prose: >
+          The walkthrough chain is the default UX (see `intro`). This
+          state is an escape hatch — pick any feature below to land
+          directly on its spoke. Each spoke STILL routes to its linear
+          successor on commit, so jumping in here and pressing Enter
+          will continue the chain from that point. To restart from
+          the top, pick `Back to the intro` below.
+      - prose: >
+          Group A (single mode) — ▸-cursor picker, Enter dispatches.
+          Group B (multi mode) — [ ] / [x] toggles, Space + Enter.
+          Group C (form mode)  — mad-lib template, Tab + Enter.
+      - choice:
+          mode:   single
+          prompt: "Pick a feature to demo"
+          items:
+            # Walkthrough entry points
+            - { label: "← Back to the intro",                 hint: "restart the linear walkthrough",                       intent: goto_intro }
+            - { label: "→ Jump to the complete summary",      hint: "land on the terminal state",                            intent: goto_complete }
+            # Single
+            - { label: "Single — basic literal items",        hint: "▸ cursor, Enter dispatches with literal slots",         intent: goto_single_basic }
+            - { label: "Single — no slots (bare intent)",     hint: "items with no slots: + no param: (mirrors robbery)",    intent: goto_single_no_slots }
+            - { label: "Single — per-item when guards",       hint: "items hidden / shown by `when:`",                       intent: goto_single_per_item_when }
+            - { label: "Single — templated labels & hints",   hint: "labels with {{ world.x }} substitution",                intent: goto_single_templated }
+            - { label: "Single — templated slot values",      hint: "slots: { x: '{{ world.y }}' } literal-but-rendered",    intent: goto_single_templated_slots }
+            - { label: "Single — param (string)",             hint: "free-form text capture (one-shot slot)",                intent: goto_single_param_string }
+            - { label: "Single — param (int)",                hint: "numeric capture, coerces to int",                       intent: goto_single_param_int }
+            - { label: "Single — param (enum)",               hint: "Space cycles a tiny enum picker",                       intent: goto_single_param_enum }
+            # Multi
+            - { label: "Multi — basic min/max bounds",        hint: "[ ]/[x] toggles, min=1 max=3",                          intent: goto_multi_basic }
+            - { label: "Multi — min: 0 (empty allowed)",      hint: "zero picks is a valid submit",                          intent: goto_multi_min_zero }
+            - { label: "Multi — max unset (defaults)",        hint: "max defaults to len(visible items)",                    intent: goto_multi_no_max }
+            - { label: "Multi — per-item when guards",        hint: "items hidden until a world flag flips",                 intent: goto_multi_per_item_when }
+            - { label: "Multi — templated labels & hints",    hint: "labels/hints render templated world values",            intent: goto_multi_templated }
+            # Form
+            - { label: "Form — basic (readonly+str+int)",     hint: "template:, fields:, readonly expr",                     intent: goto_form_basic }
+            - { label: "Form — bool field",                   hint: "Space toggles a bool field",                            intent: goto_form_bool }
+            - { label: "Form — float field with bounds",      hint: "min:/max: on a float type",                             intent: goto_form_float }
+            - { label: "Form — enum field (Space cycles)",    hint: "inline enum picker, Space cycles values",               intent: goto_form_enum }
+            - { label: "Form — placeholder demo",             hint: "placeholder: shown when buffer is empty",               intent: goto_form_placeholder }
+            - { label: "Form — required field",               hint: "Enter on empty buffer errors",                          intent: goto_form_required }
+            - { label: "Form — int min/max bounds",           hint: "out-of-bounds rejected at the widget",                  intent: goto_form_bounds }
+            - { label: "Form — per-field when guard",         hint: "field appears/disappears based on world flag",          intent: goto_form_per_field_when }
+            - { label: "Form — readonly expr (computed)",     hint: "readonly field computed from world arithmetic",         intent: goto_form_readonly_expr }
+    on:
+      goto_intro:                  [ { target: intro } ]
+      goto_complete:               [ { target: complete } ]
+      goto_single_basic:           [ { target: single_basic } ]
+      goto_single_no_slots:        [ { target: single_no_slots } ]
+      goto_single_per_item_when:   [ { target: single_per_item_when } ]
+      goto_single_templated:       [ { target: single_templated } ]
+      goto_single_templated_slots: [ { target: single_templated_slots } ]
+      goto_single_param_string:    [ { target: single_param_string } ]
+      goto_single_param_int:       [ { target: single_param_int } ]
+      goto_single_param_enum:      [ { target: single_param_enum } ]
+      goto_multi_basic:            [ { target: multi_basic } ]
+      goto_multi_min_zero:         [ { target: multi_min_zero } ]
+      goto_multi_no_max:           [ { target: multi_no_max } ]
+      goto_multi_per_item_when:    [ { target: multi_per_item_when } ]
+      goto_multi_templated:        [ { target: multi_templated } ]
+      goto_form_basic:             [ { target: form_basic } ]
+      goto_form_bool:              [ { target: form_bool } ]
+      goto_form_float:             [ { target: form_float } ]
+      goto_form_enum:              [ { target: form_enum } ]
+      goto_form_placeholder:       [ { target: form_placeholder } ]
+      goto_form_required:          [ { target: form_required } ]
+      goto_form_bounds:            [ { target: form_bounds } ]
+      goto_form_per_field_when:    [ { target: form_per_field_when } ]
+      goto_form_readonly_expr:     [ { target: form_readonly_expr } ]
+
+      # Test-rig intents — flow fixtures fire these directly to seed
+      # world keys before exercising templated / gated spokes when
+      # driving spokes in isolation. The walkthrough itself does its
+      # seeding via arc effects, so these are unused by the chain.
+      seed_day:
+        - target: .
+          effects:
+            - set: { day: "{{ slots.value }}" }
+      seed_money:
+        - target: .
+          effects:
+            - set: { money: "{{ slots.value }}" }
+      seed_show_secret_field:
+        - target: .
+          effects:
+            - set: { show_secret_field: true }

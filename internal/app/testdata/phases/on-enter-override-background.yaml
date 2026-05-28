@@ -1,0 +1,91 @@
+# Phase template + graph entry whose `on_enter:` override carries
+# `background: true`, an `on_complete:` chain, and a `target:` reference.
+# Exercises substEffect's copy-completeness: without it, the override would
+# silently degrade to a synchronous invoke with no continuation.
+
+app:
+  id: on-enter-override-background
+  version: 0.1.0
+  title: "on_enter override with background + on_complete + target"
+
+hosts:
+  - host.oracle.ask_with_mcp
+  - host.run
+  - host.transport.post
+
+world:
+  last_job_id:   { type: string, default: "" }
+  scr_artifact:  { type: string, default: "" }
+  scr_status:    { type: string, default: "" }
+  ticket:        { type: string, default: "" }
+
+intents:
+  done:
+    title: "Phase finished"
+    priority: 100
+  continue:
+    title: "Continue"
+    priority: 90
+  retry:
+    title: "Retry"
+    priority: 50
+
+root: phase_script_executing
+
+phase_templates:
+  reviewed_phase:
+    parameters:
+      id:    { type: string,  required: true }
+      title: { type: string,  required: true }
+    states:
+      "{id}_executing":
+        description: "Executing {{ tpl.title }}"
+        on_enter:
+          - invoke: host.oracle.ask_with_mcp
+            with:
+              prompt:        "default-prompt"
+            bind:
+              last_job_id: job_id
+            on_error: "{{ tpl.id }}_error"
+        on:
+          done:
+            - target: "{{ phase.next.continue }}"
+              default: true
+      "{id}_awaiting_reply":
+        description: "Awaiting reply for {{ tpl.title }}"
+      "{id}_error":
+        description: "Error in {{ tpl.title }}"
+        on:
+          retry:
+            - target: "{{ tpl.id }}_executing"
+
+phases:
+  template: reviewed_phase
+  graph:
+
+    # Overrides on_enter with a background script invocation that
+    # carries an on_complete: chain. The chain must end with a synthetic
+    # transition to the templated `_awaiting_reply` state via target:.
+    phase_script:
+      title: "Script phase"
+      next:
+        continue: terminated
+      on_enter:
+        - invoke: host.run
+          background: true
+          with:
+            cmd: "scripts/run-phase.sh {{ tpl.id }} {{ world.ticket }}"
+          bind:
+            last_job_id: job_id
+          on_error: "{{ tpl.id }}_error"
+          on_complete:
+            - set:
+                scr_status: "result.status"
+              bind:
+                scr_artifact: stdout
+            - target: "{{ tpl.id }}_awaiting_reply"
+
+states:
+  terminated:
+    terminal: true
+    description: "Done"

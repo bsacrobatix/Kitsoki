@@ -1,0 +1,12 @@
+app:
+  id: metamode-empty
+  version: 0.1.0
+
+root: foyer
+
+states:
+  foyer:
+    description: "Foyer"
+    view: "You are in the foyer."
+
+meta_modes: {}

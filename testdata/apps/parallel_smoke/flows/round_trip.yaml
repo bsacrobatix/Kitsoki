@@ -1,0 +1,43 @@
+# round_trip — exercises the parallel-state runtime end to end.
+#
+#   Turn 1: enter the parallel state.  Both regions enter their initial
+#           leaves; on_enter fires on parent + each region.
+#   Turn 2: tick the calendar.  Calendar advances; weather unchanged
+#           (first-region-wins; calendar has the binding).
+#   Turn 3: make it rain.  Weather flips to rain AND the cross-region
+#           `precip_heavy` emit lands the calendar in `soggy`.
+#   Turn 4: leave.  The parallel parent's `leave` binding fires; we
+#           drop back to the outer compound state.
+#
+# State paths in expect_state use the parallel encoding documented in
+# internal/machine/parallel.go: <parent>#<region_a_leaf>|<region_b_leaf>
+# with region leaves in alphabetical order.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: outside
+use_orchestrator: true
+
+turns:
+  - intent: { name: enter, slots: {} }
+    expect_state: "clock#clock.calendar.day1|clock.weather.dry"
+    expect_world:
+      entered_clock: true
+
+  - intent: { name: tick, slots: {} }
+    expect_state: "clock#clock.calendar.day2|clock.weather.dry"
+    expect_world:
+      calendar_state: day2
+      weather_state: dry
+
+  - intent: { name: make_it_rain, slots: {} }
+    expect_state: "clock#clock.calendar.soggy|clock.weather.rain"
+    expect_world:
+      weather_state: rain
+      calendar_state: soggy
+      saw_emit: true
+
+  - intent: { name: leave, slots: {} }
+    expect_state: outside
+
+expect_no_errors: true

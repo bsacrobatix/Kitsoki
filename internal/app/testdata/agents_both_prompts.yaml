@@ -1,0 +1,14 @@
+app:
+  id: agents-both
+  version: 0.1.0
+
+root: foyer
+
+states:
+  foyer:
+    view: "Foyer."
+
+agents:
+  story-author:
+    system_prompt: "inline"
+    system_prompt_path: "./agents/story.md"

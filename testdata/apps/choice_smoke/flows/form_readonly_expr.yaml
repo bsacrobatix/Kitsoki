@@ -1,0 +1,19 @@
+# form_readonly_expr — seed money + day so the readonly expr resolves
+# to money + day*10 = 100 + 3*10 = 130. The widget would render this
+# in the field and submit it as the `total` slot; the flow dispatches
+# the precomputed total directly to mirror the commit shape. Commit
+# advances to `complete` — the terminal state of the walkthrough.
+test_kind: flow
+app: ../app.yaml
+initial_state: form_readonly_expr
+initial_world:
+  money: 100
+  day:   3
+
+turns:
+  - intent: { name: submit_readonly_form, slots: { total: 130 } }
+    expect_state: complete
+    expect_world:
+      form_readonly_total: 130
+
+expect_no_errors: true

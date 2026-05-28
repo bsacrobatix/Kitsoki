@@ -1,0 +1,18 @@
+# single_per_item_when (gate false) — exercises the blocked branch.
+# The commit arc routes to single_templated and seeds day/money for
+# the next spoke's templated labels.
+test_kind: flow
+app: ../app.yaml
+initial_state: single_per_item_when
+initial_world:
+  per_item_gate: false
+
+turns:
+  - intent: { name: chose_gated, slots: { flag: blocked } }
+    expect_state: single_templated
+    expect_world:
+      per_item_flag: blocked
+      day:           2
+      money:         250
+
+expect_no_errors: true

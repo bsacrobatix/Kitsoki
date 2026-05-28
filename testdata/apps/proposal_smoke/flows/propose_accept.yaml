@@ -1,0 +1,21 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: terminal
+
+turns:
+  - intent:
+      name: propose
+      slots:
+        cmd: "echo hello"
+    expect_state: reviewing
+    expect_world:
+      stage: reviewing
+
+  - intent:
+      name: accept
+    expect_state: terminal
+    expect_world:
+      stage: done
+      last_exit_code: 0
+
+expect_no_errors: true

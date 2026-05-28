@@ -1,0 +1,565 @@
+# Oregon Trail — kitsoki port of the 1985 MECC Apple II classic.
+#
+# PHASE B SCOPE: intro + general_store + trail_leg phase template with
+# 7 leg instances (Independence → Willamette) + fort/river_crossing
+# stubs + ended_won/ended_lost terminals. Events are inert substates
+# (phase C); proposals are deferred to phase D.
+
+app:
+  id: oregon-trail
+  version: 0.1.0
+  title: "The Oregon Trail"
+  author: "MECC (original 1971/1985); ported to Kitsoki"
+  license: "Spec & rules public domain; this port CC0"
+
+# Host allow-list. Phase D wires host.run (for the river_strategy
+# proposal's background execute). Phase E adds host.jobs.answer_clarification
+# (built-in; resolves paused background jobs from the inbox).
+# Phase C/§9.6: narrated illness diagnosis uses host.oracle.decide
+# (typed JSON via submit tool; schema in mcp/illness.json).
+# Phase H: one-shot prose narration uses host.oracle.ask.
+# Phase F: trail_guide persistent chat uses host.oracle.converse.
+hosts:
+  - host.run
+  - host.jobs.answer_clarification
+  - host.oracle.decide
+  - host.oracle.ask
+  # Phase F — trail_guide persistent chat room.
+  - host.oracle.converse
+  - host.chat.resolve
+  - host.chat.list
+  - host.chat.transcript
+  - host.chat.create
+  - host.chat.fork
+  - host.chat.archive
+  - host.chat.rename
+  - host.chat.suggest_title
+  - host.chat.resolve_ref
+  # Phase G — trail-diary posts at landmark arrivals, event
+  # resolutions, deaths, win, and store/fort done states. The same
+  # state machine drives the TUI transcript and any future transport
+  # (Jira, Bitbucket); `phase_id:` per post enables de-dup on re-run.
+  - host.transport.post
+
+# World schema — every variable declared with type + default per §5 of
+# the proposal. Phase A reads only a small subset (intro setup +
+# general store inventory + money); the rest are declared up front so
+# later phases can reference them without re-touching app.yaml.
+world:
+  # ── Narration / mode flag ──────────────────────────────────────────
+  narration:        { type: bool,   default: false }
+
+  # ── Party identity (set in intro) ───────────────────────────────────
+  # party_names is the canonical CSV ("Adam,Beth,Carol,Daniel,Edith")
+  # that downstream rooms read (event_disease's illness_member picker,
+  # views, etc.). party_member_1..5 mirror the CSV split per position
+  # so intents can address a single seat (name_member { index, name }).
+  # party_size is the INITIAL size of the party (used to validate the
+  # 1-indexed seat in name_member and for the intro roster header);
+  # party_alive below tracks the CURRENT living-member count.
+  party_names:      { type: string, default: "" }
+  party_names_list: { type: list,   default: [] }
+  party_size:       { type: int,    default: 5 }
+  party_member_1:   { type: string, default: "" }
+  party_member_2:   { type: string, default: "" }
+  party_member_3:   { type: string, default: "" }
+  party_member_4:   { type: string, default: "" }
+  party_member_5:   { type: string, default: "" }
+  profession:       { type: enum,   values: [banker, carpenter, farmer] }
+  # Departure window (intro's pick_month slot) is still march–july — that's
+  # the historically plausible window for leaving Independence — but the
+  # world enum covers the full calendar so the game can roll through to
+  # autumn/winter and the month-driven mechanics (daylight, snowmelt,
+  # snow-blocked South Pass) have somewhere to land. Year ticks over on
+  # the december → january rollover in traveling.continue.
+  month:            { type: enum,   values: [march, april, may, june, july, august, september, october, november, december, january, february] }
+
+  # ── Economy & inventory (set in intro / general_store) ──────────────
+  # Starting money depends on profession; the intro sets it explicitly
+  # when start_journey fires. Default is the banker tier.
+  money:            { type: int,    default: 1600 }
+  oxen:             { type: int,    default: 0 }
+  food_lbs:         { type: int,    default: 0 }
+  bullets:          { type: int,    default: 0 }
+  clothing_sets:    { type: int,    default: 0 }
+  spare_wheels:     { type: int,    default: 0 }
+  spare_axles:      { type: int,    default: 0 }
+  spare_tongues:    { type: int,    default: 0 }
+
+  # Local-price multiplier (forts have markup). General store = 1; forts
+  # override on entry. Stored as int "percent" to avoid float in YAML.
+  local_price_pct:  { type: int,    default: 100 }
+
+  # ── Trail progression (phase B+) ────────────────────────────────────
+  pace:             { type: enum,   values: [steady, strenuous, grueling], default: steady }
+  rations:          { type: enum,   values: [filling, meager, bare_bones], default: filling }
+  day:              { type: int,    default: 1 }
+  year:             { type: int,    default: 1848 }
+  miles_traveled:   { type: int,    default: 0 }
+  current_landmark: { type: string, default: "Independence" }
+  at_fort:          { type: bool,   default: false }
+
+  # ── Party health (phase C+) ─────────────────────────────────────────
+  party_alive:      { type: int,    default: 5 }
+  health_avg:       { type: int,    default: 100 }
+
+  # ── Event roll state (phase C+) ─────────────────────────────────────
+  event_kind:       { type: string, default: "" }
+  illness_kind:     { type: string, default: "" }
+  # illness_severity / illness_treatment (§9.6) are filled by either
+  # the deterministic rng_last % 5 heuristic or, in narrated mode, by
+  # host.oracle.decide's typed-JSON submit payload. Both modes
+  # write the same world keys so downstream views / on_complete logic
+  # see one consistent shape.
+  illness_severity:  { type: int,    default: 0 }
+  illness_treatment: { type: string, default: "" }
+  # illness_member identifies WHO is sick — deterministically picked in
+  # event_disease.on_enter via split(party_names, ',')[rng_last %
+  # party_alive]. Cleared by every resolution branch (treat success,
+  # default-death, wait_out survive/die, move_on) so a quiet stretch of
+  # trail doesn't carry stale illness state. Surfaced via the trail-leg
+  # `_executing` / `_awaiting_reply` relevant_world so the TUI location
+  # indicator shows the current patient persistently while the illness
+  # is active.
+  illness_member:    { type: string, default: "" }
+  breakdown_part:   { type: string, default: "" }
+  weather_kind:     { type: string, default: "" }
+  encounter_kind:   { type: string, default: "" }
+  last_event:       { type: string, default: "" }
+  # Manual cycle counter shared across all event substates. Reset on
+  # entry to each event_* state by the on_enter setter; incremented on
+  # each retry intent (treat / repair). When it crosses the budget the
+  # default arm fires the failure transition. We use a single counter
+  # (not per-event) because only one event is active at a time.
+  current_event_attempts: { type: int, default: 0 }
+
+  # ── RNG state (phase B+, §6.2.1) ────────────────────────────────────
+  rng_seed:         { type: int,    default: 0 }
+  rng_counter:      { type: int,    default: 0 }
+  rng_last:         { type: int,    default: 0 }
+
+  # ── Job/proposal interop (phase D+) ─────────────────────────────────
+  last_job_id:      { type: string, default: "" }
+  river_outcome:    { type: string, default: "" }
+  last_hunt_target: { type: string, default: "" }
+
+  # ── Background-job interop (phase E) ────────────────────────────────
+  # Hunt result envelope (set by hunt.hunt_running.on_complete from
+  # last_job_result.stdout_json):
+  last_hunt_lbs:     { type: int,    default: 0 }
+  last_hunt_outcome: { type: string, default: "" }
+  # Number of bullets the player committed in hunt_idle.shoot. Read on
+  # hunt_running.on_complete to debit world.bullets.
+  pending_bullet_spend: { type: int, default: 0 }
+  # Number of days the player committed in rest_idle.rest. Read on
+  # rest_running.on_complete to advance world.day.
+  pending_rest_days:    { type: int, default: 0 }
+  # Inbox unread counter — bumped in narrated paths; flow fixtures
+  # assert via expect_inbox: which reads the runtime jobs.JobStore
+  # rather than this scalar, but the value is surfaced in the inbox
+  # view: text so the player sees a count.
+  inbox_unread:         { type: int, default: 0 }
+  # Originating state for inbox teleport-back (open_job /
+  # answer_clarification). Set on entry to any background-job-launching
+  # state; read on inbox to know where to teleport back to.
+  last_job_originating_state: { type: string, default: "" }
+
+  # ── Proposal draft slots (phase D) ──────────────────────────────────
+  # buy_supplies proposal is hand-rolled (see proposals.yaml header):
+  # the draft fields live in world for the duration of the lifecycle.
+  proposal_items:        { type: string, default: "" }
+  proposal_total_cost:   { type: int,    default: 0 }
+  proposal_refine_count: { type: int,    default: 0 }
+  # Per-item draft counts. propose_purchase populates these from
+  # optional slots so accept_purchase can credit each inventory key
+  # directly instead of relying on the coarse oxen/food cost-split
+  # fallback (which silently dropped wheels/axles/tongues/clothing/
+  # bullets). Cleared alongside the other proposal_* fields on
+  # cancel / leave / repeat / done-handoff.
+  proposal_oxen:         { type: int,    default: 0 }
+  proposal_food:         { type: int,    default: 0 }
+  proposal_bullets:      { type: int,    default: 0 }
+  proposal_clothing:     { type: int,    default: 0 }
+  proposal_wheels:       { type: int,    default: 0 }
+  proposal_axles:        { type: int,    default: 0 }
+  proposal_tongues:      { type: int,    default: 0 }
+
+  # river_strategy proposal draft (phase D).
+  crossing_method:       { type: enum,   values: [none, ford, caulk, ferry, wait], default: none }
+  crossing_confidence:   { type: int,    default: 0 }
+
+  # River-crossing context — depth/width set when entering river_crossing
+  # via approach_river from the previous leg's awaiting_reply.
+  river_depth_ft:        { type: int,    default: 0 }
+  river_width_ft:        { type: int,    default: 0 }
+
+  # ── Cycle counters for phase-level on_failure arc (phase D) ─────────
+  # Synthesized cycle_budgets need a declared world counter per phase ×
+  # arc (per phases.go applyCycleBudgets). Plus a manual one used by the
+  # give_up_leg intent on _awaiting_reply states (shares the name so the
+  # same exhaustion threshold applies regardless of where the failure
+  # was triggered from).
+  cycle__leg_a__on_failure: { type: int, default: 0 }
+  cycle__leg_b__on_failure: { type: int, default: 0 }
+  cycle__leg_c__on_failure: { type: int, default: 0 }
+  cycle__leg_d__on_failure: { type: int, default: 0 }
+  cycle__leg_e__on_failure: { type: int, default: 0 }
+  cycle__leg_f__on_failure: { type: int, default: 0 }
+  cycle__leg_g__on_failure: { type: int, default: 0 }
+
+  # ── Trail-guide chat state (phase F, §6.4) ──────────────────────────
+  wagon_chat_id:        { type: string, default: "" }
+  wagon_chat_title:     { type: string, default: "" }
+  wagon_chats_view:     { type: string, default: "" }
+  wagon_chat_count:     { type: int,    default: 0 }
+  wagon_chat_turns:     { type: int,    default: 0 }
+  wagon_question:       { type: string, default: "" }
+  wagon_answer:         { type: string, default: "" }
+  wagon_session_id:     { type: string, default: "" }
+
+  # ── Narrated-mode prose (phase H) ───────────────────────────────────
+  # Set by event_* substates' on_enter when world.narration is true via
+  # host.oracle.ask binding `stdout`. Read by the view template. Cleared
+  # by each event substate's continue/resolution arms so a quiet stretch
+  # of trail doesn't leave a stale prose line bleeding into the next
+  # event view.
+  last_event_prose:     { type: string, default: "" }
+  # Set by {leg_id}_awaiting_reply.on_enter when world.narration is
+  # true. Read by the leg's _awaiting_reply view. Cleared on continue
+  # so the next leg's arrival prose isn't shadowed by the previous
+  # leg's text if narration is somehow disabled mid-run.
+  last_landmark_prose:  { type: string, default: "" }
+
+  # ── Easter-egg bool exercising bool-type machinery (§2.2) ───────────
+  cloak_of_dust_on:     { type: bool,   default: false }
+
+  # ── world_clock parallel region witnesses (phase I, §9.4) ───────────
+  # Set by world_clock.calendar's `on: precip_heavy` / `on: snow_starts`
+  # bindings when the weather region transitions and emits.  These two
+  # bools are the assertion surface for flows/parallel_weather.yaml.
+  # Phase J may rewire them into trail_phases when world_clock becomes
+  # a peer region under a parallel root.
+  precip_observed:      { type: bool,   default: false }
+  snow_observed:        { type: bool,   default: false }
+
+# Root state.
+root: intro
+
+# Intent library lives in intents.yaml; rooms live in rooms/*.yaml;
+# the trail-leg phase template + 7 phase instances live in phases.yaml.
+include:
+  - intents.yaml
+  - phases.yaml
+  - proposals.yaml
+  - rooms/*.yaml
+
+# ── Story imports (see docs/imports.md) ───────────────────────────────
+# Three-layer composition demonstrates every section of the proposal:
+#
+#   oregon-trail  ──imports──>  frontier_event  ──imports──>  robbery
+#
+# - §3 schema: alias-prefixed namespacing, private worlds, per-exit
+#   projections.
+# - §6 intent re-export: oregon-trail exports `look` down into frontier_event;
+#   imports `scout` from frontier_event up into its own intent table.
+# - §7 exits with `requires:`: frontier_event's exits.member_lost requires
+#   encounter_kind + member_lost — the inner robbery's effects on @exit:killed
+#   satisfy both.
+# - §9 hosts: declared mode — every host the imported tree uses is enumerated
+#   in oregon-trail's own hosts: list above. The loader cross-checks at fold.
+# - §10 overrides: scouting state replaced with trail-flavoured prose;
+#   scout intent extended with extra examples; scout_brief.md replaced
+#   with the trail-narrator version.
+# - §11 host_interfaces: oregon-trail rebinds frontier_event's `narrator`
+#   directly, and the inner robbery's `narrator` via the alias-prefixed
+#   binding `bandits__narrator` (the §11.2 "bindings compose across
+#   layers" surface).
+# - §12 multi-layer composition with cycle detection.
+imports:
+  frontier:
+    source: ../../stories/frontier_event
+    entry: scouting
+
+    # Strict-allow-list mode (proposal §9): every host the imported tree
+    # uses must appear in oregon-trail's own `hosts:` block above. The
+    # loader cross-checks at fold; missing entries fail the load with a
+    # named host. host.run is already listed; iface handlers (after
+    # final resolution) are unioned implicitly by resolveAllInterfaces
+    # so they don't need to be enumerated here.
+    hosts: declared
+
+    # Read-in projection: oregon-trail's world → frontier_event's
+    # private world. Evaluated in oregon-trail's scope.
+    world_in:
+      party_money:    "{{ world.money }}"
+      party_alive:    "{{ world.party_alive }}"
+      threat_level:   "{{ world.miles_traveled < 500 ? 1 : (world.miles_traveled < 1200 ? 2 : 3) }}"
+      scouting_intel: "{{ world.current_landmark }} country — open prairie ahead."
+
+    # Exits collapse frontier_event's three exits onto a single oregon-trail
+    # state (robbery_aftermath), which routes back to the current leg via
+    # world.current_landmark.
+    exits:
+      resolved:
+        to: robbery_aftermath
+        set:
+          # On a peaceful outcome (paid or routed), if the inner robbery
+          # paid tribute, deduct it from oregon-trail's money. The world_out
+          # expression reads frontier_event's flat-world key
+          # (frontier__paid_amount), which itself was set by the inner
+          # robbery via frontier_event's bandits-import exits set:.
+          money:      "{{ world.money - world.frontier__paid_amount }}"
+          last_event: "bandit_resolved"
+      member_lost:
+        to: robbery_aftermath
+        set:
+          party_alive: "{{ world.party_alive - 1 }}"
+          last_event:  "bandit_killed_member"
+      fled:
+        to: robbery_aftermath
+        set:
+          last_event: "bandit_fled"
+
+    # host_bindings compose across layers (proposal §11.2): the
+    # `narrator` key rebinds frontier_event's own iface; the
+    # `bandits__narrator` key reaches DOWN through the alias chain
+    # to rebind the inner robbery's iface. Both happen at oregon-trail's
+    # fold time so the wrapper's intermediate "default" never sticks.
+    host_bindings:
+      narrator:           host.run
+      bandits__narrator:  host.run
+
+    # Intent surface composition (§6):
+    #   - export: oregon-trail's `look` becomes available inside the
+    #     frontier states under the prefixed name `frontier__look`.
+    #   - import: frontier_event's `scout` (declared in its exports.intents)
+    #     is lifted into oregon-trail's own intent table at the bare name
+    #     so the player can use it from outside the frontier scope.
+    intents:
+      export: [look]
+      import: [scout]
+
+    # Overrides patch frontier_event in three ways (§10):
+    #   - states.scouting: whole-state replacement with trail-era prose.
+    #   - intents.scout: extends the scout intent's example list.
+    #   - prompts: replaces frontier_event's scout_brief.md with a
+    #     trail-narrator version. The rewrite walks every Effect.With.prompt
+    #     in the child's state tree and substitutes the parent's file.
+    overrides:
+      states:
+        scouting:
+          description: "A scout rides ahead to look the trail over."
+          # Override block for frontier_event.scouting (an imported
+          # sub-story state). Authored as a typed view; resolves against
+          # the importer's per-app renderer at fold time, so `extends:
+          # "base"` would target oregon-trail's base.pongo even though
+          # the state itself lives in frontier_event. We use the plain
+          # element-array form to keep the override self-contained.
+          view:
+            - prose: "{{ world.scouting_intel }}"
+            - prose: "The scout reins beside the wagon."
+            - kv:
+                pairs:
+                  Party:        "{{ world.party_alive }} alive"
+                  Strongbox:    "${{ world.party_money }}"
+                  Threat ahead: "{{ world.threat_level }}/3"
+            - heading: "Actions"
+            - list:
+                items:
+                  - "scout"
+                  - "proceed"
+                  - "look"
+          relevant_world: [party_alive, party_money, threat_level, scouting_intel, scout_finding]
+          on_enter:
+            - invoke: iface.narrator.announce
+              with:
+                cmd:    "true # trail-flavoured scouting"
+                prompt: "prompts/scout_brief.md"
+          on:
+            scout:
+              - target: .
+                effects:
+                  - set:
+                      scout_finding: "Dust on the rise; riders in oilcloth, by the look of them."
+            proceed:
+              - target: bandits
+            look:
+              - target: .
+      intents:
+        scout:
+          title: "Send a scout up the trail"
+          description: "Send a scout ahead to look the trail over before the wagons press on."
+          examples:
+            - scout
+            - "send a scout"
+            - "send a rider up the trail"
+            - "look the road over"
+            - "what's ahead"
+          priority: 80
+      prompts:
+        # Map: child-relative path → parent-relative path. The loader
+        # validates the parent file exists and walks every with.prompt:
+        # in the child's state tree, swapping matches.
+        "prompts/scout_brief.md": "prompts/scout_brief_trail.md"
+
+# Named Claude agents — first-class personas applied to host.oracle.*
+# invocations via `with: { agent: <name> }`. Generalisation of the
+# back-compat off_path.persona shortcut: the same primitive now powers
+# the trail-guide chat voice, the party-namer voice, and (in a future
+# commit) the per-event narration voices. Engine path is generic; only
+# the prompts below change per app.
+agents:
+  frontier_guide:
+    system_prompt: |
+      You are a weathered frontier guide who has walked the Oregon Trail
+      many times. Speak in the spare, deliberate cadence of a Zane Grey or
+      Louis L'Amour narrator: short sentences, period-accurate vocabulary
+      (wagon, span of oxen, axle tree, prairie, the elephant, hardtack,
+      the Sioux, fording, alkali water), and the calm authority of someone
+      who has seen the country and the weather. Avoid modern idioms. When
+      useful, mention what real emigrants did in 1848-1850. Keep replies
+      under five sentences unless the question is genuinely complex.
+
+  wagon_master:
+    system_prompt: |
+      You are the wagon master of an 1848 Oregon-bound emigrant party.
+      Speak with practical, period-accurate brevity. Reference
+      19th-century emigrant lore where it helps: pace, fording strategy,
+      oxen care, river fords, dysentery prevention, fort prices, when
+      to caulk-and-float versus ford. Avoid modern idioms. Five
+      sentences maximum unless the question is genuinely complex.
+
+  party_namer:
+    system_prompt: |
+      You generate five-person Oregon Trail wagon-party names matching
+      a requested theme. You MUST call the validator's submit tool
+      with the schema's exact shape: {"names": [<5 distinct one-word
+      given names>]}. No prose before the tool call — submit is your
+      only response. Use one-word given names appropriate to the
+      theme; the first entry is the leader.
+
+  trail_narrator:
+    system_prompt: |
+      You narrate brief, period-accurate scenes from the 1848 Oregon Trail.
+      Third-person, present tense. Two to four sentences. Use emigrant-diary
+      vocabulary (axle tree, the flux, a span of oxen, the prairie, fording,
+      alkali, hardtack, the elephant). Avoid modern idioms. Convey weather,
+      terrain, mood — concrete sensory detail over exposition.
+
+  frontier_doctor:
+    system_prompt: |
+      You are an 1848 frontier physician examining a sick wagon-party member.
+      Diagnose based on the symptoms implied by the world state. You MUST
+      call the submit tool with exactly the schema's required fields:
+      illness (one of dysentery/cholera/typhoid/measles/exhaustion), severity
+      (1-5 integer), treatment (one of medicine/rest/fluids/none). No prose
+      before the tool call — submit is your only response.
+
+# Off-path escape hatch (§5.2).
+off_path:
+  trigger: "/freeform"
+  banner:  "*** off the trail — answers do not affect your journey ***"
+  return:  "/onpath"
+  # Persona now lives in the agents block (frontier_guide). Engine
+  # resolves OffPathDef.Agent at runtime and applies its system_prompt
+  # to every off-path oracle call, identical to the inline `persona:`
+  # shortcut but with the prompt text co-located with the other named
+  # agents.
+  agent: frontier_guide
+
+# Meta-mode side-conversations against named agents. Coexist with
+# off_path (the free-form oracle sidebar) — meta is the long-form
+# authoring / advisory conversation surface; off_path stays the
+# one-shot oracle dip.
+#
+#   /meta story   — improve / edit the Oregon Trail story directory
+#                   itself. The story-author builtin agent gets full
+#                   tool access against the app dir; the orchestrator
+#                   detects YAML / prompt edits via mtime walk and
+#                   hot-reloads the app. Use this to fix a guard,
+#                   tweak narration prose, retune snowmelt curves,
+#                   etc., from inside the running session.
+#
+#   /meta consult — talk to a frontier-era trail-master persona about
+#                   how to play. Does not edit files; pure advice. The
+#                   persistent chat is keyed by (oregon-trail, meta:consult,
+#                   state) so a conversation that started at the Kansas
+#                   River resumes there. The wagon_master agent is
+#                   reused from trail_guide so the same voice carries
+#                   across both surfaces.
+meta_modes:
+  story:
+    trigger: meta
+    label:   "improve the story"
+    banner:  "*** meta:story — editing the Oregon Trail story ***"
+    agent:   story-author
+    persist: true
+    return:
+      intent:  onpath
+      message: "back on the trail."
+  consult:
+    trigger: meta-consult
+    label:   "consult the wagon master"
+    banner:  "*** meta:consult — talking to the wagon master ***"
+    agent:   wagon_master
+    persist: true
+    return:
+      intent:  onpath
+      message: "back on the trail."
+
+# Checkpoint intents — merged into every {leg_id}_awaiting_reply state
+# by the phase-template expander (internal/app/phases.go:241). Per
+# proposal §6.2, this gives the player a constrained menu at every
+# landmark: continue, quit, restart_from, plus phase E/F stubs for
+# rest/hunt/consult_guide.
+checkpoint_intents:
+  continue:
+    description: "Press on toward the next landmark."
+    examples: [continue, go, "press on", "keep going", onward]
+    priority: 90
+
+  quit:
+    description: "Abandon the journey."
+    examples: [quit, abandon, "give up"]
+    priority: 15
+
+  restart_from:
+    description: "Return to a previously visited stretch of the trail."
+    examples:
+      - "go back to Fort Kearney"
+      - "restart from chimney"
+      - "return to Fort Laramie"
+    priority: 50
+    slots:
+      stage:
+        type: enum
+        values: [independence, kansas, kearney, chimney, laramie, south_pass, snake]
+        required: true
+        description: "Which landmark to restart from."
+        examples: [kearney, chimney, laramie, south_pass]
+        format_hint: "One of independence/kansas/kearney/chimney/laramie/south_pass/snake."
+        prompt: "Which landmark?"
+
+  rest:
+    description: "Make camp. (Phase B stub — wired in phase E.)"
+    examples: [rest, camp, sleep]
+    priority: 70
+
+  hunt:
+    description: "Hunt for meat. (Phase B stub — wired in phase E.)"
+    examples: [hunt, shoot, "kill game"]
+    priority: 70
+
+  consult_guide:
+    description: "Ask the wagon master for advice — opens the persistent trail_guide chat room."
+    examples: [advice, "ask the guide", "talk to wagon master"]
+    priority: 55
+
+  # Stage a bandit encounter on demand — wired in phases.yaml's
+  # _awaiting_reply on:face_robbery arm to enter the imported `bandits`
+  # sub-story. The encounter resolves via @exit:{paid,routed,killed,fled}
+  # which the importer maps to robbery_aftermath.
+  face_robbery:
+    description: "A bandit appears on the trail."
+    examples: [robbery, "bandits", "stranger approaches"]
+    priority: 25

@@ -1,0 +1,19 @@
+# single_param_enum (negative) — dispatching an invalid enum value
+# bypasses the widget's cycle picker (which only ever surfaces declared
+# values) and reaches the orchestrator. The slot is declared
+# `type: enum, values: [warrior, mage, rogue]` so an out-of-list value
+# is rejected with INVALID_SLOT_VALUE.
+test_kind: flow
+app: ../app.yaml
+initial_state: single_param_enum
+
+turns:
+  - intent: { name: set_hero_class, slots: { class: necromancer } }
+    expect_error:
+      code: INVALID_SLOT_VALUE
+    expect_state: single_param_enum
+    expect_world_unchanged: true
+
+expect_no_errors: false
+# Negative-path: rejection keeps the user in single_param_enum (the
+# walkthrough doesn't advance until a valid enum value commits).

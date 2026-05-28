@@ -1,0 +1,142 @@
+# rest_room — phase E. Same compound shape as hunt.yaml but simpler:
+# no clarification, no result envelope. A `rest { days }` intent kicks
+# off a short background sleep; on_complete advances world.day, restores
+# health_avg (capped at 100), and depletes food_lbs proportional to
+# party size.
+
+states:
+
+  rest_room:
+    type: compound
+    initial: rest_idle
+    description: "Make camp to rest the party."
+    relevant_world: [day, health_avg, food_lbs, party_alive, last_job_id, current_landmark]
+    states:
+
+      rest_idle:
+        description: "Choosing how many days to rest."
+        # Flattened from `extends: base + blocks` so the choice: widget
+        # can sit in the view. Single + param: captures the `days` slot
+        # via the inline mini-prompt.
+        view:
+          - prose: "Making camp at {{ world.current_landmark }}."
+          - kv:
+              pairs:
+                Health: "{{ world.health_avg }}"
+                Food:   "{{ world.food_lbs }} lbs"
+                Party:  "{{ world.party_alive }} alive"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "rest"
+                  hint:   "make camp for n days (≥ 1)"
+                  intent: rest
+                  param:
+                    slot:        days
+                    type:        int
+                    placeholder: "e.g. 3"
+                    required:    true
+                - label:  "look"
+                  intent: look
+        on:
+          rest:
+            - when: "int(slots.days) > 0"
+              target: ../rest_running
+              effects:
+                - set:
+                    # Stash the days here on world for the on_complete
+                    # arm to read. Reuses pending_bullet_spend's spot —
+                    # we use a dedicated key to keep the two rooms
+                    # independent.
+                    pending_rest_days: "{{ int(slots.days) }}"
+                - say: "Resting {{ slots.days }} day(s)."
+            - default: true
+              target: .
+              guard_hint: "Need at least 1 day to rest."
+          look:
+            - target: .
+
+      rest_running:
+        description: "Camp set; party resting."
+        view:
+          - prose: "Camp set near {{ world.current_landmark }}."
+          - kv:
+              pairs:
+                Job:     "{{ world.last_job_id }} (running)"
+                Resting: "{{ world.pending_rest_days }} day(s)"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "look"
+                  intent: look
+        on_enter:
+          - set:
+              last_job_originating_state: "rest_room.rest_running"
+          # Decorative short sleep — flow fixtures stub with delay:200ms.
+          - invoke: host.run
+            with:
+              cmd: "sleep 0.2"
+            background: true
+            bind: { last_job_id: job_id }
+            on_complete:
+              # Health restoration: +20/day, capped at 100.
+              # Food depletion: 5 lbs/day × party_alive.
+              # Day advances by N.
+              # Use separate set: blocks to avoid map-iter order
+              # dependencies (the Phase C plague_at_chimney flake
+              # documented this hazard).
+              - set:
+                  day: "{{ world.day + world.pending_rest_days }}"
+              - set:
+                  health_avg: "{{ world.health_avg + 20 * world.pending_rest_days <= 100 ? world.health_avg + 20 * world.pending_rest_days : 100 }}"
+              - set:
+                  food_lbs: "{{ world.food_lbs - 5 * world.pending_rest_days * world.party_alive }}"
+              - say: "The party rested {{ world.pending_rest_days }} day(s)."
+        on:
+          continue:
+            - target: ../rest_done
+              guard_hint: "Walk to rest_done; on_complete should have already settled the world."
+          look:
+            - target: .
+
+      rest_done:
+        description: "Camp broken; back on the trail."
+        view:
+          - prose: "Camp broken at {{ world.current_landmark }}."
+          - kv:
+              pairs:
+                Health: "{{ world.health_avg }}"
+                Food:   "{{ world.food_lbs }} lbs"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "continue"
+                  hint:   "return to the trail"
+                  intent: continue
+                - label:  "look"
+                  intent: look
+        relevant_world: [health_avg, food_lbs, day, current_landmark]
+        on:
+          continue:
+            - when: "world.current_landmark == 'Kansas River Crossing'"
+              target: leg_a_awaiting_reply
+            - when: "world.current_landmark == 'Fort Kearney'"
+              target: leg_b_awaiting_reply
+            - when: "world.current_landmark == 'Chimney Rock'"
+              target: leg_c_awaiting_reply
+            - when: "world.current_landmark == 'Fort Laramie'"
+              target: leg_d_awaiting_reply
+            - when: "world.current_landmark == 'South Pass'"
+              target: leg_e_awaiting_reply
+            - when: "world.current_landmark == 'Snake River Crossing'"
+              target: leg_f_awaiting_reply
+            - when: "world.current_landmark == 'Willamette Valley'"
+              target: leg_g_awaiting_reply
+            - default: true
+              target: leg_a_awaiting_reply
+              guard_hint: "Unknown landmark — returning to the first leg."
+          look:
+            - target: .

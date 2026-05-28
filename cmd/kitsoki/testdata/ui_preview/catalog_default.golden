@@ -1,0 +1,187 @@
+─── welcome ───
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  * kitsoki · cypilot                                                         ┃
+┃    v1.2.0 · by brad                                                          ┃
+┃                                                                              ┃
+┃    /help        list commands                                                ┃
+┃    /world       inspect current state                                        ┃
+┃    /quit        exit                                                         ┃
+┃                                                                              ┃
+┃    session sess_42… · state idle                                             ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+─── header ───
+
+ proposing · cypilot                                                            
+
+─── divider ───
+
+────────────────────────────────────────────────────────────────────────────────
+
+─── user turn ───
+
+> back to the proposal
+
+─── routing status (live frames) ───
+
+> use the backup branch instead
+  routing: deterministic…
+
+> use the backup branch instead
+  routing: synonyms…
+
+> use the backup branch instead
+  routing: slot-parser…
+
+> use the backup branch instead
+  routing: cache…
+
+> use the backup branch instead
+  routing: LLM…
+
+> use the backup branch instead
+  → in-room: pick_branch   (LLM · 0.84)   slots: {branch: "backup"}
+
+─── routing resolved ───
+
+  → in-room: pick_branch   (LLM · 0.84)   slots: {branch: "backup"}
+
+─── agent turn ───
+
+  Switched the candidate branch to `backup`. The CI run is queued; I'll print a
+  checkmark when it lands.
+
+─── system notice ───
+
+· session resumed · turn 4 · state proposing
+
+─── slash output ───
+
+(meta reload signal queued — next turn will refresh)
+
+─── queued echo ───
+
+↳ queued   use the backup branch instead
+↳ queued · 2 in queue   re-run CI when ready
+↳ queued · 3 in queue   then merge
+
+─── menu / actions ───
+
+  actions:
+  1. Open review
+  2. Request changes
+  3. Approve  (CI not yet green)
+
+─── inbox notification ───
+
+[!]  CI run for PR #4821 finished — 3 failures   (32s ago)
+
+─── background complete ───
+
+✓ review_pr · merged PR #4811 (chore: deps bump)
+
+─── trace block ───
+
+── routing trace ──
+  · deterministic miss   no exact menu match for `use the backup branch instead`
+  · synonyms      miss   0 synonym entries matched
+  · slot-parser   miss   no parser bound to current state
+  · cache         miss   cache key not present
+  ✓ LLM           hit   intent=pick_branch confidence=0.84 slots={branch:"backup"}
+
+─── footer (two-line) ───
+
+proposing · cypilot · 2 queued · 1 unread
+PR #4821 · CI: failing (3) · PLTFRM-90014
+
+─── status row ───
+
+proposing · cypilot · 2 queued · 1 unread                                 normal
+
+─── prompt (per mode) ───
+
+normal:     > _
+meta:       » _
+off-path:   # _
+slot-fill:  ? _
+awaiting:   … _
+
+─── world (dedicated view body) ───
+
+▾ session
+    id: "sess_42"
+  ▾ user
+      name: "brad"
+      role: "dev"
+  ▾ tickets [3]
+      [0]: PLTFRM-89912
+      [1]: PLTFRM-90001
+      [2]: PLTFRM-90014
+▸ flags
+▸ providers
+
+─── VIEW: chat (full composition) ───
+
+ proposing · cypilot                                                            
+
+────────────────────────────────────────────────────────────────────────────────
+
+· session resumed · turn 4 · state proposing
+
+> back to the proposal
+
+  → nav: back   (deterministic · 1.00)
+
+  Returned to the proposal review.
+
+> use the backup branch instead
+
+  → in-room: pick_branch   (LLM · 0.84)   slots: {branch: "backup"}
+
+  Switched the candidate branch to `backup`. The CI run is queued; I'll print a
+  checkmark when it lands.
+
+[!]  CI run for PR #4821 finished — 3 failures   (32s ago)
+
+✓ review_pr · merged PR #4811 (chore: deps bump)
+
+  actions:
+  1. Open review
+  2. Request changes
+  3. Approve  (CI not yet green)
+
+────────────────────────────────────────────────────────────────────────────────
+
+proposing · cypilot · 2 queued · 1 unread
+PR #4821 · CI: failing (3) · PLTFRM-90014
+
+> _
+
+─── VIEW: world (full composition) ───
+
+ world · cypilot                                                                
+────────────────────────────────────────────────────────────────────────────────
+▾ session
+    id: "sess_42"
+  ▾ user
+      name: "brad"
+      role: "dev"
+  ▾ tickets [3]
+      [0]: PLTFRM-89912
+      [1]: PLTFRM-90001
+      [2]: PLTFRM-90014
+▸ flags
+▸ providers
+────────────────────────────────────────────────────────────────────────────────
+view: world  ·  ↑/↓ navigate  ·  enter expand  ·  e edit  ·  q close
+
+─── VIEW: trace (full composition) ───
+
+── routing trace ──
+  · deterministic miss   no exact menu match for `use the backup branch instead`
+  · synonyms      miss   0 synonym entries matched
+  · slot-parser   miss   no parser bound to current state
+  · cache         miss   cache key not present
+  ✓ LLM           hit   intent=pick_branch confidence=0.84 slots={branch:"backup"}
+

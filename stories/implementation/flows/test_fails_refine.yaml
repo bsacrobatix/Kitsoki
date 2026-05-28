@@ -1,0 +1,113 @@
+# test_fails_refine — judge_mode=human; CI fails on the first test
+# pass. The operator refines back to write_code with the failure
+# feedback, then accepts on a clean re-run. Proves the test → refine
+# arc bounces to write_code_executing (not test_executing) and
+# carries refine_feedback.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:        "TKT-T-003"
+  ticket_title:    "Add /healthz endpoint"
+  thread:          "TKT-T-003"
+  workspace_id:    "ws-tkt-t-003"
+  workdir:         ".worktrees/tkt-t-003"
+  base_branch:     "main"
+  feature_branch:  "task/tkt-t-003-healthz"
+  judge_mode:      "human"
+  judge_confidence_threshold: 0.8
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "", url: "", pr_id: "" }
+  host.local:
+    # Single stub serves both the initial-fail and refined-pass calls;
+    # in a real run the second iface.ci.run_tests would return clean.
+    # The test-room's bind reads `log` + `state`; we test the refine
+    # arc by passing a flow-time `refine` intent with feedback.
+    data: { ok: true, log: "FAIL: TestHealthz (no handler registered)", state: "failure", passed: 0, failed: 1 }
+  host.local_files.ticket:
+    data:
+      ok: true
+      body: "Add /healthz handler returning 200 OK."
+      title: "Add /healthz endpoint"
+      url:  "issues/tasks/tkt-t-003.md"
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Add /healthz"
+        summary_markdown: "Adds the /healthz route + a handler that returns 200."
+        scope:            "Single route + handler + test."
+        acceptance_criteria: ["GET /healthz returns 200 OK."]
+        affected_files:   ["internal/server/healthz.go", "internal/server/healthz_test.go"]
+        confidence:       0.8
+        reasoning:        "Standard handler pattern; one route registration."
+        status:           "failed"
+        tests_run:        { passed: 0, failed: 1, log: "FAIL: TestHealthz" }
+        nits:             []
+        blockers:         []
+        verdict:    "fail"
+        intent:     "refine"
+        reason:     "Test failure; need handler registration."
+
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: review_task_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: review_task_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: write_code_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: write_code_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: test_executing
+    expect_world:
+      cycle: 0
+  - intent: { name: proceed, slots: {} }
+    expect_state: test_awaiting_reply
+
+  # Operator refines with the failing-test feedback. The arc:
+  #   target: write_code_executing
+  #   effects: set refine_feedback, cycle++
+  - intent:
+      name: refine
+      slots: { feedback: "TestHealthz fails — handler isn't registered. Add server.RegisterHealthz()." }
+    expect_state: write_code_executing
+    expect_world:
+      cycle:           1
+      refine_feedback: "TestHealthz fails — handler isn't registered. Add server.RegisterHealthz()."
+
+  # Re-execute write_code → test → accept. (The stub still returns the
+  # failing run; in a real flow the second call would return clean.
+  # For this test we exercise the arc plumbing, not the CI outcome.)
+  - intent: { name: proceed, slots: {} }
+    expect_state: write_code_awaiting_reply
+  - intent: { name: accept, slots: {} }
+    expect_state: test_executing
+    expect_world:
+      cycle:           0
+      refine_feedback: ""
+  - intent: { name: proceed, slots: {} }
+    expect_state: test_awaiting_reply
+
+  # User accepts the test result (operator vouches the underlying issue
+  # is fixed even though the stub still returns failure).
+  - intent: { name: accept, slots: {} }
+    expect_state: review_executing
+  - intent: { name: proceed, slots: {} }
+    expect_state: review_awaiting_reply
+
+  # Bail at review to keep the flow narrow.
+  - intent: { name: quit, slots: {} }
+    expect_state: __exit__abandoned
+
+expect_terminal: true
+expect_no_errors: true

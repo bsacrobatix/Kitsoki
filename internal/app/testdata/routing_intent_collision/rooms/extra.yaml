@@ -1,0 +1,17 @@
+# Same intent name as in main.yaml — must collide loudly. The fact that
+# only one side declares synonyms: must not silently merge them.
+intents:
+  ford:
+    title: "Ford (other side)"
+    synonyms:
+      - "walk across"
+
+states:
+  start:
+    description: "Start"
+    on:
+      ford:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true

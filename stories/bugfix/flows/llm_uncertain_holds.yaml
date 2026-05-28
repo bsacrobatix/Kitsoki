@@ -1,0 +1,102 @@
+# llm_uncertain_holds — judge_mode=llm with an uncertain verdict.
+# The LLM-judge fires from reproducing.on_enter and returns
+# `verdict: uncertain` + low confidence. Contract §6 step 4's
+# emit_intent guard requires `verdict != 'uncertain' && intent !=
+# 'uncertain' && confidence >= threshold`; an uncertain verdict
+# fails all three predicates, so the state holds at reproducing
+# with the verdict visible. This flow proves emit_intent doesn't
+# auto-fire on an uncertain verdict.
+#
+# Asserts:
+#   - the `when:` guard on the judge call fires even on uncertain
+#     verdicts (the guard is "judge_mode is llm-ish", not "verdict
+#     is confident")
+#   - world.llm_verdict.verdict ends up "uncertain"
+#   - the post-bind emit_intent dispatch does NOT advance the state
+#     (so the start turn settles at reproducing, not proposing)
+#   - quit lands at @exit:abandoned
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:        "TKT-004"
+  thread:          "TKT-004"
+  judge_mode:      "llm"
+  judge_confidence_threshold: 0.8
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "" }
+  host.local:
+    data: { ok: true, log: "" }
+  host.oracle.task:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        summary_title:    "Unclear reproduction"
+        summary_markdown: "The repro is intermittent; we cannot determine bug_verified=true from this run."
+        bug_verified:     false
+        involved_components: [{ name: "unknown" }]
+        verdict:    "uncertain"
+        intent:     "uncertain"
+        reason:     "Reproduction is intermittent and the involved component is unclear; defer to human."
+        confidence: 0.5
+
+  host.oracle.ask:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        summary_title:    "Unclear reproduction"
+        summary_markdown: "The repro is intermittent; we cannot determine bug_verified=true from this run."
+        bug_verified:     false
+        involved_components: [{ name: "unknown" }]
+        verdict:    "uncertain"
+        intent:     "uncertain"
+        reason:     "Reproduction is intermittent and the involved component is unclear; defer to human."
+        confidence: 0.5
+
+  host.oracle.decide:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        summary_title:    "Unclear reproduction"
+        summary_markdown: "The repro is intermittent; we cannot determine bug_verified=true from this run."
+        bug_verified:     false
+        involved_components: [{ name: "unknown" }]
+        verdict:    "uncertain"
+        intent:     "uncertain"
+        reason:     "Reproduction is intermittent and the involved component is unclear; defer to human."
+        confidence: 0.5
+
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: reproducing
+    expect_world:
+      llm_verdict:
+        summary_title:    "Unclear reproduction"
+        summary_markdown: "The repro is intermittent; we cannot determine bug_verified=true from this run."
+        bug_verified:     false
+        involved_components: [{ name: "unknown" }]
+        verdict:    "uncertain"
+        intent:     "uncertain"
+        reason:     "Reproduction is intermittent and the involved component is unclear; defer to human."
+        confidence: 0.5
+
+  # No auto-emit fires — the guard `verdict != 'uncertain'` rejects.
+  # The state holds at reproducing until an operator intervenes; we
+  # model "operator decides to quit" as the next turn.
+  - intent: { name: quit, slots: {} }
+    expect_state: __exit__abandoned
+
+expect_terminal: true
+expect_no_errors: true

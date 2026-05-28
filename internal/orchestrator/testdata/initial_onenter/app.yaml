@@ -1,0 +1,42 @@
+# Tiny app exercising Orchestrator.RunInitialOnEnter.
+# The root state `idle` declares on_enter that invokes host.probe and
+# binds the returned message into world.greeting. The test asserts
+# greeting is populated after RunInitialOnEnter — proof that the
+# initial state's on_enter chain fires for a freshly created session.
+app:
+  id: initial-onenter
+  version: 0.1.0
+  title: "initial on_enter test app"
+
+hosts:
+  - host.probe
+
+world:
+  greeting: { type: string, default: "" }
+  step:     { type: int,    default: 0 }
+
+root: idle
+
+intents:
+  go_forward:
+    title: "Go forward"
+    description: "Trigger a real transition to test the no-op guard."
+    examples: ["go", "forward"]
+    priority: 10
+
+states:
+  idle:
+    description: "Idle (initial state)"
+    view: "Idle. greeting={{ world.greeting }}"
+    on_enter:
+      - invoke: host.probe
+        with: {}
+        bind:
+          greeting: "message"
+    on:
+      go_forward:
+        - target: next
+
+  next:
+    description: "Next"
+    view: "Next."

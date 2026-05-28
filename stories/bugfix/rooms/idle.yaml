@@ -1,0 +1,171 @@
+# idle — entry room. Pipeline parked. The `start` intent boots the
+# pipeline; `quit` exits via @exit:abandoned.
+#
+# Wave 3 / Phase 4 adds the proposal §4.2 shortcut intents:
+#
+#   quick_fix     — bugfix_mode=quick; walk reproducing → proposing →
+#                   implementing → testing → done (skip reviewing +
+#                   validating). The mode flag drives the gate in
+#                   testing_awaiting_reply.accept.
+#   skip_to_pr    — jump straight into validating with
+#                   restart_from_stage="validate"; the operator (or a
+#                   parent story) signalled the change is trivial.
+#   full_pipeline — explicit default; sets bugfix_mode=full and starts
+#                   from reproducing. Identical to `start` but useful
+#                   for autonomous callers that want to be unambiguous.
+#
+# `start` keeps its Wave 1 behaviour (mode-agnostic; enters reproducing)
+# because most flows / tests rely on it; quick_fix/skip_to_pr/
+# full_pipeline are additive.
+
+states:
+
+  idle:
+    description: "Bug-fix pipeline parked. Waiting for start."
+    # Flattened view (no extends/blocks chrome) — `choice:` cannot live
+    # inside a `blocks:` map (typed metadata is lost through the
+    # inheritance pipeline; see docs/choice-widget.md §3.1). The
+    # status/heading the base.pongo used to render is now inlined as a
+    # prose status line + the kv body; the standalone-only border
+    # chrome is dropped.
+    view:
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
+      - kv:
+          pairs:
+            Ticket:    '{{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}'
+            Workspace: '{{ world.workspace_id|default:"(none)" }}'
+            Mode:      "{{ world.bugfix_mode }} bugfix"
+            Judge:     "{{ world.judge_mode }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "start"
+              hint:   "boot the full pipeline (mode-agnostic)"
+              intent: start
+            - label:  "full_pipeline"
+              hint:   "pin bugfix_mode=full and start"
+              intent: full_pipeline
+            - label:  "quick_fix"
+              hint:   "skip reviewing + validating"
+              intent: quick_fix
+            - label:  "skip_to_pr"
+              hint:   "jump straight to validating (fix in hand)"
+              intent: skip_to_pr
+            - label:  "change_ticket"
+              hint:   "exit to parent's ticket picker"
+              intent: change_ticket
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    relevant_world: [ticket_id, ticket_title, bugfix_mode, judge_mode, workspace_id, reproduction_artifact]
+    # Auto-start when entered fresh with a ticket loaded. The
+    # operator who lands here from dev-story's `go_bugfix` / `drive`
+    # / `tickets → pick → bugfix` chain has ALREADY chosen to start;
+    # forcing them to type `start` again was needless friction the
+    # dogfood loop made obvious. The guard excludes:
+    #   - ticket_id empty: nothing to work on (standalone bugfix
+    #     scenarios that start at idle without a ticket).
+    #   - reproduction_artifact already set: a restart_from has
+    #     bounced us back here mid-pipeline; the operator wants to
+    #     dwell, not auto-restart.
+    # Flow fixtures that seed initial_state=idle bypass on_enter
+    # entirely (seedInitialState writes events directly), so the
+    # `start_from_idle` / `quick_fix_from_idle` / `skip_to_pr_from_idle`
+    # contract tests still observe the parked state.
+    on_enter:
+      # Auto-setup + auto-start fire ONCE per session per ticket.
+      # `bf_autostart_attempted` (set as the last step below) gates
+      # all four effects — re-entry from an on_error bounce or a
+      # restart_from sees the flag true and skips the chain,
+      # leaving the operator in a clean parked idle state instead
+      # of looping or auto-firing a second pipeline kickoff.
+      #
+      # The pre-2026-05-18 09:20 version (no flag) made the dogfood
+      # walkthrough loop forever when `git worktree add` failed
+      # against a stale `.worktrees/<id>/` dir from a previous
+      # aborted run: idle → workspace.create fails → on_error: idle
+      # → idle.on_enter re-runs → start emit re-fires → repeat.
+      # The engine cap in enterRedirectState backstops this now,
+      # but breaking the YAML cycle here means the failure is
+      # reported once and the operator stays at idle to inspect.
+
+      # Step 1: derive workspace identity from ticket_id.
+      - when: "world.ticket_id != '' && world.workspace_id == '' && !world.bf_autostart_attempted"
+        set:
+          workspace_id:   "bf-{{ world.ticket_id }}"
+          feature_branch: "fix/{{ world.ticket_id }}"
+          workdir:        ".worktrees/bf-{{ world.ticket_id }}"
+
+      # Step 2: create the worktree on disk. `id:` pins the on-disk
+      # dir basename to `world.workspace_id` so the later
+      # `iface.workspace.sync` lookup (keyed on workspace_id) matches
+      # the directory worktreeCreate actually made. Without it,
+      # worktreeCreate would derive its dir from the branch name
+      # (`fix/<ticket>` → `fix-<ticket>`) while world.workspace_id is
+      # `bf-<ticket>`, so sync would silently fail and bounce the
+      # operator back to idle.
+      - when: "world.ticket_id != '' && world.feature_branch != '' && world.workdir != '' && !world.bf_autostart_attempted"
+        invoke: iface.workspace.create
+        with:
+          id:   "{{ world.workspace_id }}"
+          name: "{{ world.feature_branch }}"
+          base: "{{ world.base_branch }}"
+        on_error: idle
+
+      # Step 3: queue the auto-start emit. emit_intent is queued and
+      # dispatched after the effect chain completes, so the next
+      # effect (the flag set below) still runs first.
+      - when: "world.ticket_id != '' && !world.bf_autostart_attempted && (world.reproduction_artifact.summary_title == nil || world.reproduction_artifact.summary_title == '')"
+        emit_intent: start
+
+      # Step 4: pin "we tried once" so any subsequent re-entry to
+      # idle (on_error bounce, restart_from with stage=idle, etc.)
+      # sees the flag set and skips the whole chain above.
+      - when: "world.ticket_id != '' && !world.bf_autostart_attempted"
+        set:
+          bf_autostart_attempted: true
+    on:
+      start:
+        - target: reproducing
+      # Walk the full 7-room pipeline. Explicit alias for `start` that
+      # also pins bugfix_mode=full so a previously-set quick flag is
+      # cleared. Autonomous callers prefer this for unambiguity.
+      full_pipeline:
+        - target: reproducing
+          effects:
+            - set:
+                bugfix_mode: "full"
+      # Quick path. Sets bugfix_mode=quick which the testing_awaiting_reply
+      # accept arm reads to skip reviewing + validating, jumping to
+      # done_executing instead. Still walks reproducing → proposing →
+      # implementing → testing so the artifact chain has a body.
+      quick_fix:
+        - target: reproducing
+          effects:
+            - set:
+                bugfix_mode: "quick"
+      # Skip directly into validating; reproducing/proposing/
+      # implementing/testing/reviewing don't run. restart_from_stage gets
+      # the value "validate" for audit. Use when the operator already
+      # has the fix in hand and just wants to re-validate / open the PR.
+      skip_to_pr:
+        - target: validating
+          effects:
+            - set:
+                bugfix_mode:        "full"
+                restart_from_stage: "validate"
+                unsafe_jumps_made:  "{{ world.unsafe_jumps_made + 1 }}"
+      # Bail back to the parent's ticket picker without abandoning. The
+      # parent (dev-story) maps @exit:pick_ticket to its ticket_search
+      # room; from there the operator picks an id and `go_bugfix` re-
+      # enters this idle room with bf's world freshly projected.
+      change_ticket:
+        - target: "@exit:pick_ticket"
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

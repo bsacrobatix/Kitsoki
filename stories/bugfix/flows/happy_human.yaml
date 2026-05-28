@@ -1,0 +1,82 @@
+# happy_human — judge_mode=human, accept at every checkpoint → done.
+#
+# Each phase is a single merged state (no _executing / _awaiting_reply
+# split). on_enter binds the artifact; `accept` posts to transport AND
+# advances to the next phase — one keystroke per checkpoint.
+#
+# Non-oracle host calls (git, local, append_to_file, inbox.add) are
+# served by replay:any episodes in the cassette. Oracle calls
+# (host.oracle.task, host.oracle.ask, host.oracle.decide) are recorded
+# once against the real Claude CLI and replayed forever with full
+# oracle: metadata blocks so runstatus snapshots carry oracle trace events.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:        "TKT-001"
+  ticket_title:    "TUI hangs on ESC"
+  ticket_url:      "issues/bugs/2026-05-14-tui-hangs-on-esc.md"
+  thread:          "TKT-001"
+  workspace_id:    "ws-tkt-001"
+  workdir:         ".worktrees/tkt-001"
+  base_branch:     "main"
+  feature_branch:  "fix/tkt-001-tui-esc"
+  bugfix_mode:     "full"
+  judge_mode:      "human"
+  judge_confidence_threshold: 0.8
+
+host_cassette: ../cassettes/happy_human.cassette.yaml
+
+# host_bindings: bind the app's ifaces to their real default handlers.
+# This causes the testrunner to call host.RegisterBuiltins so that the
+# real host.oracle.* handlers are available as cassette-miss fallbacks
+# during KITSOKI_CASSETTE_RECORD=new_episodes recording runs. The
+# cassette's replay:any stubs still intercept non-oracle calls first,
+# so no real git/ci/transport side-effects occur during replay.
+host_bindings:
+  vcs:       host.git
+  ci:        host.local
+  workspace: host.git_worktree
+  transport: host.append_to_file
+
+turns:
+
+  # Idle → reproducing. on_enter runs host.oracle.task and binds
+  # the whole submitted: payload into world.reproduction_artifact.
+  - intent: { name: start, slots: {} }
+    expect_state: reproducing
+
+  # accept posts the reproduction artifact and advances to proposing.
+  - intent: { name: accept, slots: {} }
+    expect_state: proposing
+
+  # accept posts the proposal and advances to implementing.
+  - intent: { name: accept, slots: {} }
+    expect_state: implementing
+
+  # implementing has no checkpoint body; accept advances to testing.
+  - intent: { name: accept, slots: {} }
+    expect_state: testing
+
+  # accept posts the test review and advances (full mode → reviewing).
+  - intent: { name: accept, slots: {} }
+    expect_state: reviewing
+
+  # reviewing has no checkpoint body; accept advances to validating.
+  - intent: { name: accept, slots: {} }
+    expect_state: validating
+
+  # accept posts the validation artifact and advances to done.
+  - intent: { name: accept, slots: {} }
+    expect_state: done
+
+  # accept posts the close-out artifact and exits via @exit:done.
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+    expect_world:
+      status: "fixed"
+      cycle: 0
+
+expect_terminal: true
+expect_no_errors: true

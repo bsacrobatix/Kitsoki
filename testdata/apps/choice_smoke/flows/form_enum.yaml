@@ -1,0 +1,14 @@
+# form_enum — submit an enum value. The widget would render an inline
+# cycle-on-Space picker; the flow dispatches the chosen value
+# directly. Commit advances to form_placeholder.
+test_kind: flow
+app: ../app.yaml
+initial_state: form_enum
+
+turns:
+  - intent: { name: submit_enum_form, slots: { method: ford } }
+    expect_state: form_placeholder
+    expect_world:
+      form_method: ford
+
+expect_no_errors: true

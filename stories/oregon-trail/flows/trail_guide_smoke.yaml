@@ -1,0 +1,212 @@
+# trail_guide_smoke — phase F. Exercises the persistent chat room
+# (mode: conversational) end-to-end via stubbed host.chat.* +
+# host.oracle.converse handlers, with no live Claude calls.
+#
+# Scenario:
+#   1. Player is at Fort Kearney (leg_b_awaiting_reply). Fires
+#      `consult_guide` → trail_guide compound state. The wagon master
+#      room's initial substate (trail_guide_list) refreshes via
+#      host.chat.list. The stub returns count=0 + an empty rendered
+#      block (the player has no prior chats for this profession).
+#
+#   2. From the list, `ask_question { question }` transitions to
+#      trail_guide_active_new. on_enter chains:
+#        host.chat.create → host.oracle.converse → host.chat.suggest_title.
+#      The stubs return canned chat_id/answer/title. wagon_chat_turns
+#      bumps to 1.
+#
+#   3. Another ask_question stays in the active chat — routes to
+#      trail_guide_active (NOT _active_new, so the create only ever
+#      fired once). wagon_chat_turns bumps to 2.
+#
+#   4. Third ask_question — still trail_guide_active.
+#      wagon_chat_turns reaches 3. host.chat.suggest_title is invoked
+#      on every turn (the handler decides whether to actually rename
+#      based on whether the current title is a placeholder), so
+#      auto-titling has now had three chances to land. With the stub
+#      always returning a "polished" title the rename is idempotent.
+#
+#   5. `back` from trail_guide_active routes back to trail_guide_list
+#      (the room's own intra-room nav, not the stackless landmark
+#      teleport). Another `back` from the list teleports stackless to
+#      world.last_job_originating_state (set on entry to be
+#      leg_b_awaiting_reply).
+
+test_kind: flow
+app: ../app.yaml
+initial_state: leg_b_awaiting_reply
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    farmer
+  month:         june
+  money:         400
+  oxen:          4
+  food_lbs:      400
+  bullets:       200
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    90
+  narration:     false
+  current_landmark: "Fort Kearney"
+  miles_traveled: 202
+  day:           20
+
+host_handlers:
+
+  # list — empty on first call. The stub returns the same envelope on
+  # every call; the player only ever sees the list once in this
+  # fixture so we don't need a sequence of distinct rendered values.
+  host.chat.list:
+    data:
+      rendered: "(no chats yet — use 'ask \"...\"' to start one)"
+      chats:    []
+      count:    0
+
+  # create — returns a deterministic chat_id + a placeholder title so
+  # the subsequent suggest_title call has something to "improve on".
+  host.chat.create:
+    data:
+      chat_id: "stub-chat-id"
+      title:   "Question about the trail"
+      app_id:  "oregon-trail"
+      room:    "trail_guide"
+
+  # converse — minimal envelope. answer is the only field consumed by
+  # the state machine; session_id round-trip is decorative for the stub.
+  host.oracle.converse:
+    data:
+      answer:            "Stub wagon-master answer."
+      session_id:        "stub-session-id"
+      chat_id:           "stub-chat-id"
+      claude_session_id: "stub-session-id"
+      transcript_seq:    1
+
+  # suggest_title — always "succeeds" with a polished title. The
+  # state machine binds title back into wagon_chat_title, so a real
+  # run would see the title evolve from the placeholder to this one
+  # on the first turn (and stay this on subsequent turns because the
+  # handler's force=false flag would short-circuit).
+  host.chat.suggest_title:
+    data:
+      chat_id:        "stub-chat-id"
+      title:          "River strategy and crossings"
+      previous_title: "Question about the trail"
+      renamed:        true
+      skipped:        false
+
+  # rename / resolve_ref / archive / fork — declared so that any
+  # exploratory turn the test author adds doesn't blow up. None are
+  # invoked by the canonical turn sequence below.
+  host.chat.rename:
+    data:
+      chat_id: "stub-chat-id"
+      title:   "Stub-renamed"
+      renamed: true
+
+  host.chat.resolve_ref:
+    data:
+      chat_id: "stub-chat-id"
+      title:   "Stub chat"
+      kind:    "ulid"
+
+  host.chat.archive:
+    data:
+      chat_id:  "stub-chat-id"
+      archived: true
+
+  host.chat.fork:
+    data:
+      chat_id:        "stub-forked-id"
+      parent_chat_id: "stub-chat-id"
+      title:          "Stub fork"
+
+turns:
+
+  # Turn 1: at Fort Kearney's awaiting_reply, fire consult_guide.
+  # Stackless teleport into trail_guide.trail_guide_list. The on_enter
+  # chain on the compound's initial substate fires host.chat.list and
+  # binds rendered/count into world.
+  - intent: { name: consult_guide, slots: {} }
+    expect_state: trail_guide.trail_guide_list
+    expect_world:
+      wagon_chat_count: 0
+      wagon_chats_view: "(no chats yet — use 'ask \"...\"' to start one)"
+      last_job_originating_state: "leg_b_awaiting_reply"
+      current_landmark: "Fort Kearney"
+
+  # Turn 2: ask the wagon master a question. Transitions to
+  # trail_guide_active_new because the player is asking from the list
+  # (no chat_id yet). on_enter chains: host.chat.create →
+  # host.oracle.converse → host.chat.suggest_title. wagon_chat_turns hits 1.
+  #
+  # Also asserts the named-agent round-trip: HostDispatched for
+  # host.oracle.converse must carry args.agent == "wagon_master" so the
+  # engine threads the agent down to the handler (where it resolves to
+  # the agent's system_prompt and rides through to claude).
+  - intent:
+      name: ask_question
+      slots:
+        question: "what should I do at the next river"
+    expect_state: trail_guide.trail_guide_active_new
+    expect_world:
+      wagon_question:   "what should I do at the next river"
+      wagon_answer:     "Stub wagon-master answer."
+      wagon_chat_id:    "stub-chat-id"
+      wagon_chat_title: "River strategy and crossings"
+      wagon_chat_turns: 1
+    expect_events:
+      - kind: HostDispatched
+        effect:
+          namespace: host.oracle.converse
+          args:
+            chat_id:  "stub-chat-id"
+            question: "what should I do at the next river"
+            agent:    wagon_master
+
+  # Turn 3: ask again. Routes to trail_guide_active (NOT _active_new
+  # — the create only fires once per chat). on_enter re-fires
+  # host.oracle.converse + host.chat.suggest_title (which is a no-op
+  # rename on the now-polished title in a real run). wagon_chat_turns
+  # bumps to 2.
+  - intent:
+      name: ask_question
+      slots:
+        question: "what if the water rises"
+    expect_state: trail_guide.trail_guide_active
+    expect_world:
+      wagon_question:   "what if the water rises"
+      wagon_chat_id:    "stub-chat-id"
+      wagon_chat_turns: 2
+
+  # Turn 4: third ask. wagon_chat_turns reaches 3 — the proposal's
+  # "auto-title after 3 turns" milestone. Auto-titling is delegated
+  # to host.chat.suggest_title (the handler picks the moment); the
+  # stub keeps the rename idempotent.
+  - intent:
+      name: ask_question
+      slots:
+        question: "any other advice"
+    expect_state: trail_guide.trail_guide_active
+    expect_world:
+      wagon_question:   "any other advice"
+      wagon_chat_turns: 3
+      wagon_chat_title: "River strategy and crossings"
+
+  # Turn 5: `back` from active → list (intra-room nav).
+  - intent: { name: back, slots: {} }
+    expect_state: trail_guide.trail_guide_list
+
+  # Turn 6: `back` from list → stackless teleport to
+  # world.last_job_originating_state (leg_b_awaiting_reply). The
+  # player's wagon-trail state is exactly as it was on entry.
+  - intent: { name: back, slots: {} }
+    expect_state: leg_b_awaiting_reply
+    expect_world:
+      current_landmark: "Fort Kearney"
+      # The chat counters persist in world — they're a player-visible
+      # record of the conversation lifetime.
+      wagon_chat_id:    "stub-chat-id"
+      wagon_chat_turns: 3
+
+expect_no_errors: true

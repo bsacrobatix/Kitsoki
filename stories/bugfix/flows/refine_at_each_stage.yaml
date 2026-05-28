@@ -1,0 +1,212 @@
+# refine_at_each_stage — port of an upstream pipeline's refine.yaml.
+#
+# At each merged checkpoint room, `refine: <feedback>` self-transitions
+# back into the same room with refine_feedback set and the per-phase
+# cycle counter incremented. The self-transition does NOT re-run
+# on_enter (the engine's "newly entered" gate skips self-transitions),
+# but the effects chain still fires — which is what the regression
+# property tests.
+#
+# A regression that drops the `set: { refine_feedback }` effect or
+# fails to increment the right counter must fail this flow.
+#
+# Coverage: reproducing, proposing, testing, validating, done.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: reproducing
+initial_world:
+  ticket_id:  "TKT-700"
+  thread:     "TKT-700"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: refine, slots: { feedback: "please also check the /bc route" } }
+    expect_state: reproducing
+    expect_world:
+      refine_feedback:   "please also check the /bc route"
+      reproducing_cycle: 1
+      cycle:             1
+
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: proposing
+initial_world:
+  ticket_id:  "TKT-701"
+  thread:     "TKT-701"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: refine, slots: { feedback: "use a single transaction in the migration" } }
+    expect_state: proposing
+    expect_world:
+      refine_feedback: "use a single transaction in the migration"
+      proposing_cycle: 1
+
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: testing
+initial_world:
+  ticket_id:  "TKT-702"
+  thread:     "TKT-702"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: refine, slots: { feedback: "add a regression test for the null case" } }
+    expect_state: testing
+    expect_world:
+      refine_feedback: "add a regression test for the null case"
+      testing_cycle:   1
+
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: validating
+initial_world:
+  ticket_id:  "TKT-703"
+  thread:     "TKT-703"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: refine, slots: { feedback: "rerun against staging after redeploy" } }
+    expect_state: validating
+    expect_world:
+      refine_feedback:   "rerun against staging after redeploy"
+      validating_cycle:  1
+
+expect_no_errors: true
+
+---
+
+test_kind: flow
+app: ../app.yaml
+initial_state: done
+initial_world:
+  ticket_id:  "TKT-704"
+  thread:     "TKT-704"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted: { summary_title: "stub", summary_markdown: "stub" }
+
+turns:
+  - intent: { name: refine, slots: { feedback: "tighten the lessons section" } }
+    expect_state: done
+    expect_world:
+      refine_feedback: "tighten the lessons section"
+      done_cycle:      1
+
+expect_no_errors: true

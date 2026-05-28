@@ -1,0 +1,54 @@
+# pick_profession — casual phrasings observed in the live trace.
+#
+# State: intro. The trace logged "make me a banker" as a
+# DETERMINISTIC_MISS that the LLM routed correctly — locking it here
+# guarantees a regression in the LLM router (or its prompt) fails
+# `kitsoki test intents` loudly.
+#
+# The profession slot is enum [banker, carpenter, farmer] — out-of-
+# enum picks ("doctor", "soldier") must route to a validation error,
+# not silently pass.
+#
+# NOTE: per-fixture min_confidence not yet supported by the runner;
+# pass-rate is the only gate.
+test_kind: intents
+app: oregon-trail
+state: intro
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  - id: make-me-a-banker
+    intent:
+      name: pick_profession
+      slots: { profession: banker }
+    inputs:
+      - "make me a banker"
+      - "banker"
+      - "banker, please"
+
+  - id: ill-be-a-farmer
+    intent:
+      name: pick_profession
+      slots: { profession: farmer }
+    inputs:
+      - "i'll be a farmer"
+
+  - id: bare-carpenter
+    intent:
+      name: pick_profession
+      slots: { profession: carpenter }
+    inputs:
+      - "carpenter"
+
+  # Adversarial — "doctor" is not in the enum. The LLM must produce
+  # a slot-validation error (or fall through to UNKNOWN_INTENT)
+  # rather than picking a default profession.
+  - id: out-of-enum-doctor
+    expect_failure:
+      any_of: [clarify, SLOT_NOT_IN_ENUM, INVALID_SLOT_VALUE, MISSING_SLOTS, UNKNOWN_INTENT]
+    inputs:
+      - "i want to be a doctor"

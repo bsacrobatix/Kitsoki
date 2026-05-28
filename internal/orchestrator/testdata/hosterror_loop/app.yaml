@@ -1,0 +1,61 @@
+# Fixture for TestOrchestrator_OnErrorRedirect_DepthCapBreaksLoop.
+#
+# Two states (`a` and `b`) each invoke `host.fail` from on_enter with
+# on_error pointing at the other state.  host.fail ALWAYS returns
+# Result.Error, so once the chain enters `a` the orchestrator's
+# enterRedirectState recursion path is:
+#
+#   a.on_enter → host.fail → on_error: b
+#   b.on_enter → host.fail → on_error: a
+#   a.on_enter → host.fail → on_error: b
+#   …
+#
+# This is the SAME shape as the bf.idle dogfood loop that motivated the
+# `maxRedirectDepth` cap in `internal/orchestrator/orchestrator.go::enterRedirectState`:
+# the on_error target is a SIBLING state (not the prior state), so the
+# `target == prior` self-redirect guard doesn't catch it.  Without the
+# cap the test hangs forever; with the cap a HarnessError is emitted
+# and the session settles at the deepest resolved state.
+app:
+  id: hosterror-loop
+  version: 0.1.0
+  title: "host on_error mutual-redirect loop fixture"
+
+hosts:
+  - host.fail
+
+world:
+  marker: { type: string, default: "" }
+
+root: idle
+
+intents:
+  trigger:
+    title: "Trigger"
+    description: "Kick the loop off."
+    examples: ["trigger"]
+    priority: 10
+
+states:
+  idle:
+    description: "Idle"
+    view: "Idle."
+    on:
+      trigger:
+        - target: a
+
+  a:
+    description: "State A — fails to B"
+    view: "A. marker={{ world.marker }}"
+    on_enter:
+      - invoke: host.fail
+        with: {}
+        on_error: b
+
+  b:
+    description: "State B — fails to A"
+    view: "B. marker={{ world.marker }}"
+    on_enter:
+      - invoke: host.fail
+        with: {}
+        on_error: a

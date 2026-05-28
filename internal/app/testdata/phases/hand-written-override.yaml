@@ -1,0 +1,93 @@
+# Phase template expansion with a hand-written state that collides with one
+# of the template-generated names. The hand-written version must win; the
+# expander must silently skip the templated assignment for that one name
+# and continue expanding the rest of the phase.
+#
+# Use case: phase_a wants `phase_a_executing` and `phase_a_error`
+# template-generated, but needs `phase_a_awaiting_reply` hand-written to
+# route a checkpoint intent to a literal `terminated` target instead of
+# the template's `{{ phase.next.continue }}`-style indirection.
+
+app:
+  id: hand-written-override
+  version: 0.1.0
+  title: "hand-written override fixture"
+
+hosts:
+  - host.transport.post
+
+world:
+  transport: { type: string, default: "tui" }
+  thread:    { type: string, default: "" }
+
+intents:
+  done:
+    title: "Done"
+    priority: 100
+  continue:
+    title: "Continue"
+    priority: 90
+  custom:
+    title: "Custom (hand-written only)"
+    priority: 80
+  retry:
+    title: "Retry"
+    priority: 50
+
+root: phase_a_executing
+
+phase_templates:
+  reviewed_phase:
+    parameters:
+      id:    { type: string, required: true }
+      title: { type: string, required: true }
+    states:
+      "{id}_executing":
+        description: "Executing {{ tpl.title }}"
+        on:
+          done:
+            - target: "{{ tpl.id }}_awaiting_reply"
+              default: true
+      "{id}_awaiting_reply":
+        # This template body would normally be used, but phase_a hand-writes
+        # an override at the top level, so this body must be discarded for
+        # phase_a (and used for phase_b, which has no override).
+        description: "Templated awaiting reply for {{ tpl.title }}"
+        on:
+          continue:
+            - target: "{{ phase.next.continue }}"
+              default: true
+      "{id}_error":
+        description: "Error in {{ tpl.title }}"
+        on:
+          retry:
+            - target: "{{ tpl.id }}_executing"
+
+phases:
+  template: reviewed_phase
+  graph:
+
+    phase_a:
+      title: "Phase A"
+      next:
+        continue: phase_b
+
+    phase_b:
+      title: "Phase B"
+      next:
+        continue: terminated
+
+states:
+
+  # Hand-written override for phase_a_awaiting_reply. Routes `custom` to
+  # a literal `terminated` target — something the template doesn't model.
+  phase_a_awaiting_reply:
+    description: "Hand-written awaiting reply for Phase A"
+    on:
+      custom:
+        - target: terminated
+          default: true
+
+  terminated:
+    terminal: true
+    description: "All done"

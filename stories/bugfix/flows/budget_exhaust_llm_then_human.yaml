@@ -1,0 +1,81 @@
+# budget_exhaust_llm_then_human — judge_mode=llm_then_human with an LLM
+# verdict that keeps emitting `refine`. The L2 budget gate catches the
+# runaway and routes to @exit:abandoned at the (budget+1)-th cycle.
+#
+# Mirrors an upstream pipeline's cycle_budget_exhaust.yaml scenario 1,
+# but in the autonomous llm_then_human path. Proves that LLM-driven refines are
+# bounded by the same world.<phase>_budget as human-driven ones — a
+# misbehaving LLM cannot pin the pipeline forever.
+#
+# Pattern: world is pre-seeded with reproducing_cycle at the budget.
+# `start` enters reproducing; reproducing.on_enter binds the artifact,
+# then runs the judge (returns verdict=refine), then emit_intent fires
+# `refine`. The refine arc evaluates `reproducing_cycle >=
+# reproducing_budget` (3 >= 3) and routes to @exit:abandoned.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:                  "TKT-510"
+  thread:                     "TKT-510"
+  judge_mode:                 "llm_then_human"
+  judge_confidence_threshold: 0.8
+  reproducing_budget:         3
+  reproducing_cycle:          3
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        verdict:    "refine"
+        intent:     "refine"
+        reason:     "Need a deterministic reproducer."
+        confidence: 0.95
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        verdict:    "refine"
+        intent:     "refine"
+        reason:     "Need a deterministic reproducer."
+        confidence: 0.95
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        verdict:    "refine"
+        intent:     "refine"
+        reason:     "Need a deterministic reproducer."
+        confidence: 0.95
+
+turns:
+  # start enters reproducing; on_enter cascades artifact → judge → emit
+  # refine → budget gate (cycle 3 >= budget 3) → @exit:abandoned.
+  - intent: { name: start, slots: {} }
+    expect_state: __exit__abandoned
+    expect_world:
+      abandon_reason: "reproducing_cycle_budget_exhausted"
+
+expect_terminal: true
+expect_no_errors: true

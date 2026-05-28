@@ -1,0 +1,24 @@
+app:
+  id: routing-empty-block
+  version: 0.1.0
+  # An entirely empty routing: block should NOT be a parse error.
+  # UnmarshalYAML on RoutingConfig seeds defaults first, so the loader
+  # surfaces a non-nil *RoutingConfig with every field at its default.
+
+routing: {}
+
+root: start
+
+intents:
+  noop:
+    title: "Do nothing"
+
+states:
+  start:
+    description: "Start"
+    on:
+      noop:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true

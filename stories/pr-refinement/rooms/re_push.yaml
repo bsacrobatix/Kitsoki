@@ -1,0 +1,64 @@
+# re_push — commit + push the fix (or the resolve_comments follow-up)
+# and return to ci_monitoring. No checkpoint; the room is just the
+# mechanical commit + push step.
+
+states:
+
+  re_push:
+    description: "Committing + pushing the fix."
+    # Flattened view (choice-widget proposal §4.5).
+    view:
+      - kv:
+          pairs:
+            PR:                "{{ world.pr_id }} — {{ world.pr_title }}"
+            Workspace:         '{{ world.workdir|default:"(none)" }}'
+            "Feature branch":  '{{ world.feature_branch|default:"(none)" }}'
+            Cycle:             "{{ world.cycle }}"
+            Feedback:          '{{ world.refine_feedback|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              hint:   "return to ci_monitoring"
+              intent: proceed
+            - label:  "retry"
+              hint:   "re-run the commit + push"
+              intent: retry
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+    relevant_world: [pr_id, pr_title, workdir, feature_branch, cycle, refine_feedback]
+    on_enter:
+      # Commit + push. iface.vcs.commit binds sha; iface.vcs.push binds
+      # url (the post-push remote URL, usually the same PR URL).
+      - invoke: iface.vcs.commit
+        with:
+          workdir: "{{ world.workdir }}"
+          message: "Fix: {{ world.diagnose_artifact.summary_title ?? world.refine_feedback ?? 'pr-refinement push' }}"
+        on_error: ci_monitoring
+      - invoke: iface.vcs.push
+        with:
+          workdir: "{{ world.workdir }}"
+          remote:  "origin"
+        on_error: ci_monitoring
+      # Announce the push.
+      - invoke: iface.transport.post
+        with:
+          thread:    "{{ world.thread }}"
+          title:     "Re-pushed: PR {{ world.pr_id }}"
+          body:      "Re-pushed PR {{ world.pr_id }} after diagnose / resolve_comments cycle {{ world.cycle }}."
+          phase_id:  "re_push_{{ world.pr_id }}_{{ world.cycle }}"
+    on:
+      proceed:
+        - target: ci_monitoring
+          effects:
+            - set:
+                ci_attempts: 0
+                ci_state:    "pending"
+      retry:
+        - target: re_push
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

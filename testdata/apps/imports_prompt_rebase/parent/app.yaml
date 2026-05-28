@@ -1,0 +1,33 @@
+# Parent app that imports the child story for the prompt-rebase test.
+app:
+  id: imports-prompt-rebase-parent
+  version: 0.1.0
+
+hosts:
+  - host.oracle.ask
+
+world: {}
+
+root: main
+
+intents:
+  go_child:
+    description: "Drop into the child."
+    examples: ["child"]
+
+imports:
+  c:
+    source: ../child
+    entry: idle
+    hosts: declared
+    exits:
+      done:
+        to: main
+
+states:
+  main:
+    description: "Main."
+    view: "Main."
+    on:
+      go_child:
+        - target: c

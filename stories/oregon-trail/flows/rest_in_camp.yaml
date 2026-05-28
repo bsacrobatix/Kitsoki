@@ -1,0 +1,75 @@
+# rest_in_camp — phase E. Exercises the rest_room background-job
+# lifecycle: player chooses 3 days of rest, the background sleep
+# completes, on_complete restores health, advances day, debits food.
+#
+#   Turn 1 — leg_c_awaiting_reply.rest → rest_room.rest_idle.
+#   Turn 2 — rest with days: 3 → rest_room.rest_running.
+#            on_enter dispatches host.run (sleep 0.2 stub'd with delay
+#            200ms). advance_clock 500ms: handler completes,
+#            on_complete fires:
+#              - day += 3 (10 → 13)
+#              - health_avg += 20*3 = 60, +50 base = 100 (capped)
+#                actually base 50 + 60 = 110 → cap → 100
+#              - food_lbs -= 5*3*5 = 75 (1000 → 925)
+#   Turn 3 — continue → rest_room.rest_done.
+#   Turn 4 — continue → leg_c_awaiting_reply.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: leg_c_awaiting_reply
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    banker
+  month:         june
+  money:         300
+  oxen:          4
+  food_lbs:      1000
+  bullets:       100
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    50
+  narration:     false
+  current_landmark: "Chimney Rock"
+  miles_traveled: 250
+  day:           10
+
+host_handlers:
+  host.run:
+    data:
+      stdout: ""
+      exit_code: 0
+      ok: true
+    delay: "200ms"
+
+turns:
+
+  - intent: { name: rest, slots: {} }
+    expect_state: rest_room.rest_idle
+    expect_world:
+      current_landmark: "Chimney Rock"
+
+  # Commit to 3 days of rest. After advance_clock the on_complete
+  # fires: day 10→13, health 50→100 (capped from 50+60=110), food
+  # 1000→925 (5 lbs/day × 5 party × 3 days = 75).
+  - intent:
+      name: rest
+      slots: { days: 3 }
+    advance_clock: "500ms"
+    expect_state: rest_room.rest_running
+    expect_world:
+      pending_rest_days: 3
+      day:        13
+      health_avg: 100
+      food_lbs:   925
+    expect_inbox:
+      unread: 2
+      severities: ["info", "success"]
+
+  - intent: { name: continue, slots: {} }
+    expect_state: rest_room.rest_done
+
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_c_awaiting_reply
+
+expect_no_errors: true

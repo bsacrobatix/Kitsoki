@@ -1,0 +1,469 @@
+# Terminal Room — propose and run shell commands.
+# Implements the canonical proposal pattern via explicit states.
+# Lifecycle: terminal_idle → terminal_reviewing → terminal_executing → terminal_result
+# Also supports: cancel path, error path (host.run returning non-zero).
+
+states:
+  terminal_idle:
+    description: "Terminal Room — propose a shell command to run."
+    # Proposal §5.3 worked example — code element preserves the example
+    # block's monospace layout; kv rows align Workspace / Last result.
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Workspace:   "{{ world.current_workspace|default:\"(none)\" }}"
+                Last result: "{{ world.proposal_result|default:\"(none)\" }}"
+          - prose: "Propose a command to run, e.g.:"
+          - code: |
+              propose "list files in /tmp"
+              propose "git status"
+              propose "go test ./..."
+    relevant_world: [current_workspace, proposal_result, proposal_status]
+    relevant_slots: []
+    on:
+      propose:
+        - target: terminal_reviewing
+          effects:
+            - set:
+                proposal_cmd: "{{ slots.cmd }}"
+                proposal_status: "reviewing"
+                proposal_result: ""
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+          effects:
+            - set: { prev_state: "main" }
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  terminal_reviewing:
+    description: "Review the proposed command before executing."
+    # Flattened view: `choice:` is not allowed inside `blocks:`, so we
+    # drop the extends/blocks chrome and inline the body as sibling
+    # elements. The base.pongo `status` block (host clock / inbox) is
+    # lost — acceptable cost for the verdict-picker affordance.
+    # `refine` carries a free-form `feedback` slot via param.
+    view:
+      - heading: "Proposed command"
+      - code: "{{ world.proposal_cmd }}"
+      - prose: "Accept to run, refine with feedback, or cancel."
+      - choice:
+          mode: single
+          prompt: "How do you respond?"
+          items:
+            - { label: "accept", intent: accept, hint: "execute the proposed command" }
+            - label:  "refine"
+              hint:   "edit with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    true
+            - { label: "cancel", intent: cancel, hint: "discard the proposal" }
+    relevant_world: [proposal_cmd, proposal_status]
+    relevant_slots: []
+    on:
+      accept:
+        - target: terminal_executing
+          effects:
+            - set: { proposal_status: "executing" }
+
+      refine:
+        - target: terminal_reviewing
+          effects:
+            - set:
+                proposal_cmd: "{{ slots.feedback }}"
+                proposal_status: "reviewing"
+            - say: "Updated proposal: {{ slots.feedback }}"
+
+      cancel:
+        - target: terminal_idle
+          effects:
+            - set:
+                proposal_status: "cancelled"
+                proposal_cmd: ""
+            - say: "Command cancelled."
+
+      go_back:
+        - target: terminal_idle
+          effects:
+            - set: { proposal_status: "idle" }
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  terminal_executing:
+    description: "Running the command..."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Executing: "{{ world.proposal_cmd }}"
+          - prose: "[Running...]"
+    relevant_world: [proposal_cmd]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "{{ world.proposal_cmd }}"
+        bind:
+          proposal_result: "stdout"
+        on_error: terminal_error
+    on:
+      # After on_enter fires the host call, the user can navigate
+      # while waiting (or the result pops them to terminal_result).
+      go_back:
+        - target: terminal_idle
+          effects:
+            - set: { proposal_status: "cancelled" }
+
+      go_main:
+        - target: main
+
+      # Automatically progress once executing — in real flows, accept moves them forward.
+      accept:
+        - target: terminal_result
+          effects:
+            - set: { proposal_status: "reviewing_result" }
+
+      cancel:
+        - target: terminal_idle
+          effects:
+            - set:
+                proposal_status: "cancelled"
+                proposal_cmd: ""
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  terminal_result:
+    description: "Command result — review output and decide next step."
+    # Flattened view to allow inline `choice:` (see terminal_reviewing
+    # note). `propose another` carries a free-form `cmd` slot via param.
+    view:
+      - kv:
+          pairs:
+            Command: "{{ world.proposal_cmd }}"
+            Status:  "{{ world.proposal_status }}"
+      - heading: "Result"
+      - code: "{{ world.proposal_result }}"
+      - choice:
+          mode: single
+          prompt: "Next step"
+          items:
+            - label:  "propose another"
+              hint:   "draft a new command"
+              intent: propose
+              param:
+                slot:        cmd
+                type:        string
+                placeholder: "e.g. git status"
+                required:    true
+            - { label: "retry",   intent: retry,   hint: "rerun the same command" }
+            - { label: "go back", intent: go_back, hint: "return to the previous room" }
+    relevant_world: [proposal_cmd, proposal_result, proposal_status]
+    relevant_slots: []
+    on:
+      propose:
+        - target: terminal_reviewing
+          effects:
+            - set:
+                proposal_cmd: "{{ slots.cmd }}"
+                proposal_status: "reviewing"
+                proposal_result: ""
+
+      retry:
+        - target: terminal_executing
+          effects:
+            - set: { proposal_status: "executing" }
+
+      cancel:
+        - target: terminal_idle
+          effects:
+            - set:
+                proposal_status: "idle"
+                proposal_cmd: ""
+                proposal_result: ""
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  terminal_error:
+    description: "Command failed with an error."
+    # Flattened view (see terminal_reviewing). Four-way recovery picker:
+    # retry / refine (with `feedback` param) / fix (LLM repair) / cancel.
+    view:
+      - kv:
+          pairs:
+            Command: "{{ world.proposal_cmd }}"
+            Status:  "FAILED"
+            Error:   "{{ world.last_error }}"
+      - choice:
+          mode: single
+          prompt: "Recover"
+          items:
+            - { label: "retry", intent: retry, hint: "rerun the same command" }
+            - label:  "refine"
+              hint:   "edit with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    true
+            - { label: "fix",    intent: fix,    hint: "ask Claude to repair" }
+            - { label: "cancel", intent: cancel, hint: "discard and start over" }
+    relevant_world: [proposal_cmd, last_error]
+    relevant_slots: []
+    on:
+      retry:
+        - target: terminal_executing
+          effects:
+            - set: { proposal_status: "executing" }
+
+      refine:
+        - target: terminal_reviewing
+          effects:
+            - set:
+                proposal_cmd: "{{ slots.feedback }}"
+                proposal_status: "reviewing"
+        - default: true
+          target: terminal_reviewing
+          effects:
+            - set: { proposal_status: "reviewing" }
+
+      # Repair path — send the failed command, error, and stdout to
+      # Claude via a typed-JSON oracle call. The validator pins the
+      # response to {command, why}; binds replace proposal_cmd and
+      # proposal_explanation, then the user lands on terminal_reviewing.
+      fix:
+        - target: terminal_reviewing
+          effects:
+            - invoke: host.oracle.decide
+              with:
+                prompt: "prompts/shell_repair.md"
+                schema: "mcp/shell_repair.json"
+                args:
+                  failed_cmd:  "{{ world.proposal_cmd }}"
+                  last_error:  "{{ world.last_error }}"
+                  last_stdout: "{{ world.proposal_result }}"
+                  exit_code:   1
+              bind:
+                proposal_cmd:         "submitted.command"
+                proposal_explanation: "submitted.why"
+              on_error: terminal_error
+            - set: { proposal_status: "reviewing" }
+
+      cancel:
+        - target: terminal_idle
+          effects:
+            - set:
+                proposal_status: "cancelled"
+                proposal_cmd: ""
+                last_error: ""
+
+      propose:
+        - target: terminal_reviewing
+          effects:
+            - set:
+                proposal_cmd: "{{ slots.cmd }}"
+                proposal_status: "reviewing"
+
+      go_back:
+        - target: terminal_idle
+          effects:
+            - set:
+                proposal_status: "idle"
+                last_error: ""
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  # Background job terminal — propose and kick off a long-running command.
+  terminal_background:
+    description: "Terminal — propose a background command."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Workspace:           "{{ world.current_workspace|default:\"(none)\" }}"
+                Background running:  "{{ world.job_bg_running }}"
+                Last result:         "{{ world.job_bg_result|default:\"(none)\" }}"
+          - prose: "Propose a command to run in the background."
+    relevant_world: [current_workspace, job_bg_running, job_bg_result]
+    relevant_slots: []
+    on:
+      propose:
+        - target: terminal_bg_reviewing
+          effects:
+            - set:
+                proposal_cmd: "{{ slots.cmd }}"
+                proposal_status: "reviewing"
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  terminal_bg_reviewing:
+    description: "Review the background command before submitting."
+    # Flattened view (see terminal_reviewing). Background-submit verdict
+    # picker: accept / refine (with `feedback` param) / cancel.
+    view:
+      - heading: "Background command"
+      - code: "{{ world.proposal_cmd }}"
+      - prose: "Accept to submit as background job, or cancel."
+      - choice:
+          mode: single
+          prompt: "Submit as background job?"
+          items:
+            - { label: "accept", intent: accept, hint: "submit and run in background" }
+            - label:  "refine"
+              hint:   "edit with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    true
+            - { label: "cancel", intent: cancel, hint: "discard the proposal" }
+    relevant_world: [proposal_cmd]
+    relevant_slots: []
+    on:
+      accept:
+        - target: terminal_bg_submitted
+          effects:
+            - set:
+                proposal_status: "executing"
+                job_bg_running: true
+                job_bg_result: "[stub] Background job completed for: {{ world.proposal_cmd }}"
+
+      cancel:
+        - target: terminal_background
+          effects:
+            - set:
+                proposal_status: "cancelled"
+                proposal_cmd: ""
+
+      refine:
+        - target: terminal_bg_reviewing
+          effects:
+            - set: { proposal_cmd: "{{ slots.feedback }}" }
+
+      go_back:
+        - target: terminal_background
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  terminal_bg_submitted:
+    description: "Background job submitted — you have control back."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Background job submitted for: {{ world.proposal_cmd }}"
+          - prose: "The job is running in the background. You'll be notified when it completes."
+          - kv:
+              pairs:
+                Job running: "{{ world.job_bg_running }}"
+          - prose: "You can continue other work or check the inbox for results."
+    relevant_world: [proposal_cmd, job_bg_running]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo '{\"job_id\":\"job-001\",\"status\":\"running\",\"result\":\"Background job completed: exit 0\"}'"
+        bind:
+          job_bg_result: "stdout"
+        on_error: terminal_bg_error
+    on:
+      go_inbox:
+        - target: inbox
+          push_history: false
+          effects:
+            - set:
+                inbox_unread: 1
+                prev_state: "terminal_bg_submitted"
+
+      go_back:
+        - target: terminal_background
+
+      go_main:
+        - target: main
+
+      propose:
+        - target: terminal_bg_reviewing
+          effects:
+            - set:
+                proposal_cmd: "{{ slots.cmd }}"
+                proposal_status: "reviewing"
+
+  terminal_bg_error:
+    description: "Background job submission failed."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Error: "{{ world.last_error }}"
+          - prose: "Failed to submit background job."
+    relevant_world: [last_error]
+    relevant_slots: []
+    on:
+      retry:
+        - target: terminal_bg_submitted
+          effects:
+            - set: { job_bg_running: true }
+
+      cancel:
+        - target: terminal_background
+          effects:
+            - set:
+                proposal_status: "cancelled"
+                job_bg_running: false
+
+      go_back:
+        - target: terminal_background
+
+      go_main:
+        - target: main

@@ -1,0 +1,49 @@
+# handoff — enters the pr-refinement import compound. No checkpoint
+# of our own: the pr-refinement story owns the merge and its `merged`
+# / `abandoned` exits project back into our @exit:done / @exit:abandoned
+# via the imports block on app.yaml.
+#
+# This room exists only so the `review` room has a deterministic next
+# target after accept (`target: handoff`) before the import edge fires.
+# On entry we `say:` the handoff and immediately fire the `open` intent
+# against the `pr` compound, which enters at pr.open_pr per the
+# imports.pr.entry: open_pr clause.
+#
+# Flattened away from `extends: "base"` (choice-widget proposal §4.5 /
+# §8): a `choice:` element cannot live inside `blocks:`. The base.pongo
+# status line is inlined as the leading prose element.
+
+states:
+
+  handoff:
+    description: "Handing off to pr-refinement (opens the PR and runs the tail)."
+    view:
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.workdir|default:"(no workspace)" }}  ·  {{ world.feature_branch|default:"(no branch)" }}  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "Handing off to pr-refinement"
+      - kv:
+          pairs:
+            Ticket:     "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            "PR title": '{{ world.pr_title|default:"(none)" }}'
+            Workdir:    '{{ world.workdir|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "open",    intent: open,    hint: "enter the pr-refinement tail (opens the PR)" }
+            - { label: "proceed", intent: proceed, hint: "alias for open" }
+            - { label: "quit",    intent: quit,    hint: "abandon the pipeline" }
+            - { label: "look",    intent: look,    hint: "re-render" }
+    relevant_world: [ticket_id, ticket_title, pr_title, pr_body, workdir]
+    on:
+      # Dispatch into the `pr` import compound. The compound's entry
+      # state is pr.open_pr (per imports.pr.entry: open_pr). open_pr's
+      # on_enter fires iface.vcs.open_pr and the pr-refinement loop
+      # runs to merge or abandon, which projects back via the imports.
+      open:
+        - target: pr
+      proceed:
+        - target: pr
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

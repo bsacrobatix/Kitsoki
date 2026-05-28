@@ -1,0 +1,54 @@
+# happy_path — tests the full background job lifecycle using the orchestrator
+# path with host_handlers and advance_clock.
+#
+# The fixture:
+#   1. Declares a stub for host.run that returns { stdout: "hello", exit: 0 }
+#      after a 1-second (virtual) delay.
+#   2. Turn 1: fire 'enter' intent → transitions lobby→running; the on_enter:
+#      block dispatches the background job and binds last_job_id synchronously.
+#      advance_clock: "2s" moves virtual time forward 2s, unblocking the stub
+#      handler (delay=1s). The orchestrator's session listener fires
+#      handleJobTerminal, applies the on_complete effects, and posts a
+#      notification. All assertions run after the clock advance, so
+#      expect_world and expect_inbox see the post-completion state.
+#
+# To run:
+#   kitsoki test flows testdata/apps/background_jobs/app.yaml
+test_kind: flow
+app: ../app.yaml
+initial_state: lobby
+initial_world:
+  result: ""
+  last_job_id: ""
+
+host_handlers:
+  host.run:
+    data:
+      stdout: "hello"
+      exit: 0
+    delay: "1s"
+
+turns:
+  # Turn 1: fire the 'enter' intent → transitions to 'running'.
+  # The on_enter: block dispatches host.run as a background job and binds
+  # last_job_id synchronously. advance_clock: "2s" then moves virtual time
+  # past the 1s handler delay, letting the job complete and on_complete fire.
+  # All assertions (expect_state, expect_world, expect_inbox) run after the
+  # clock advance and the scheduler/listener drain.
+  - intent:
+      name: enter
+      slots: {}
+    advance_clock: "2s"
+    expect_state: running
+    expect_world:
+      result: "hello"
+    # TODO(P3-7): assert the on_complete say: text ("Job complete. Output: hello")
+    # appears in the session output.  The flow fixture expect_view_matches field
+    # checks the intent-turn's view (running-state render), but on_complete say:
+    # is emitted by the background listener path and does not flow into that view.
+    # A dedicated expect_say or expect_events assertion is needed to lock this in.
+    expect_inbox:
+      unread: 2
+      severities: ["info", "success"]
+
+expect_no_errors: true

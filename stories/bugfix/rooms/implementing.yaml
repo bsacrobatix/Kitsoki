@@ -1,0 +1,171 @@
+# implementing — phase 3 of the bugfix pipeline (apply the proposed fix).
+#
+# Runs an oracle that reads the propose_fix_artifact and APPLIES the
+# edits to the worktree, then commits whatever's dirty. `continue`
+# advances to testing for the run-and-review pass.
+#
+# Pre-2026-05-19 this room did NOT invoke an oracle — it ran
+# workspace.sync + vcs.commit + a misleading `say "Fix applied"` and
+# advanced. The actual edits were never made; testing.on_enter then
+# ran the repro tests against unchanged code and reported "Fix not
+# applied" every time. The user-visible symptom was a happy pipeline
+# that produced zero diff. The oracle invocation below is the missing
+# piece that makes implementing do its job.
+
+states:
+
+  implementing:
+    description: "Apply the proposed fix to the workspace; advance to testing."
+    # Flattened view (no extends/blocks chrome) — `choice:` cannot live
+    # inside a `blocks:` map. The base.pongo status line is inlined.
+    view:
+      - banner:
+          text:     "IMPLEMENTING"
+          subtitle: "Phase 3 / 7  ·  apply the proposed fix to the workspace"
+          color:    "#8B5CF6"   # violet — doing the work
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
+      - kv:
+          pairs:
+            Ticket:           "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Workspace:        '{{ world.workspace_id|default:"(none)" }} ({{ world.workdir|default:"(no path)" }})'
+            "Feature branch": '{{ world.feature_branch|default:"(none)" }}'
+            Applied:          '{{ world.implement_artifact.summary_title|default:"(pending — oracle has not returned yet)" }}'
+            Status:           '{% if world.implement_artifact.applied == false %}blocked{% elif world.implement_artifact.summary_title %}applied{% else %}(pending){% endif %}'
+            Files:            '{{ world.implement_artifact.files_changed|default:"(none recorded)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.implement_artifact.summary_markdown|default:"(no implementation body — oracle pending or failed)" }}'
+      - heading: "Blockers"
+        when:  "world.implement_artifact.blockers"
+      - code: |
+          {% for b in world.implement_artifact.blockers %}- {{ b }}
+          {% endfor %}
+        when: "world.implement_artifact.blockers"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "continue"
+              hint:   "advance to testing"
+              intent: accept
+            - label:  "restart from reproducing"
+              hint:   "bounce back to phase 1 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: reproducing }
+            - label:  "restart from proposing"
+              hint:   "bounce back to phase 2 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: proposing }
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    relevant_world: [ticket_id, ticket_title, workspace_id, workdir, feature_branch, propose_fix_artifact, implement_artifact]
+    on_enter:
+      # Self-heal the workspace before we touch it. bf.idle's auto-
+      # create only runs when `!bf_autostart_attempted`, so once that
+      # flag is pinned (which it is after the first attempt regardless
+      # of outcome), any session whose worktree dir later goes missing
+      # — process restart, manual `rm -rf`, a prior aborted create —
+      # would fail at sync below with `on_error: idle` and silently
+      # bounce. iface.workspace.create is idempotent (returns ok when
+      # the worktree is already registered at our path with our
+      # branch; reattaches an orphaned branch when the dir was
+      # deleted), so calling it here costs nothing in the happy case
+      # and rescues the bounce case.
+      - when: "world.workspace_id != '' && world.feature_branch != ''"
+        invoke: iface.workspace.create
+        with:
+          id:   "{{ world.workspace_id }}"
+          name: "{{ world.feature_branch }}"
+          base: "{{ world.base_branch }}"
+        on_error: idle
+      # The iface.workspace.sync + iface.vcs.commit are the workspace-
+      # side write seams (instance bindings: host.git_worktree / host.git
+      # in kitsoki-dev). Guarded on non-empty ids so dogfood walks
+      # without an isolated worktree degrade to a narrative-only beat
+      # instead of bouncing to idle via on_error.
+      - when: "world.workspace_id != ''"
+        invoke: iface.workspace.sync
+        with:
+          id: "{{ world.workspace_id }}"
+        on_error: idle
+
+      # Apply the proposed fix. The oracle runs with cwd=workdir
+      # (the bugfix worktree), reads the proposal artifact, and uses
+      # Edit/Write to make the actual code changes. Without this
+      # step the room is a no-op and testing observes "fix not
+      # applied". See the file header above for the regression
+      # history.
+      - when: "world.workdir != ''"
+        invoke: host.oracle.task
+        with:
+          agent: implementer
+          working_dir: "{{ world.workdir }}"
+          acceptance:
+            schema: schemas/implementing_artifact.json
+          context:
+            prompt: prompts/implementing_executing.md
+            args:
+              ticket_id:        "{{ world.ticket_id }}"
+              ticket_title:     "{{ world.ticket_title }}"
+              workdir:          "{{ world.workdir }}"
+              fix_description:  "{{ world.propose_fix_artifact.fix_description }}"
+              root_cause:       "{{ world.propose_fix_artifact.root_cause }}"
+              affected_files:   "{{ world.propose_fix_artifact.affected_files }}"
+              refine_feedback:  "{{ world.refine_feedback }}"
+              cycle:            "{{ world.cycle }}"
+        bind:
+          implement_artifact: submitted
+        on_error: idle
+
+      - when: "world.workdir != ''"
+        invoke: iface.vcs.commit
+        with:
+          workdir: "{{ world.workdir }}"
+          message: "{{ world.propose_fix_artifact.summary_title }}"
+          # Stage the oracle's files explicitly. `git commit -a`
+          # picks up modifications to tracked files but does NOT
+          # stage new files — so a `Write`-based edit (oracle
+          # creating a helper) would silently vanish without this
+          # explicit add. files_changed comes from the
+          # implementing artifact and is the oracle's record of
+          # everything it touched.
+          files: "{{ world.implement_artifact.files_changed }}"
+        on_error: idle
+
+      - say: "Fix applied — {{ world.implement_artifact.summary_title|default:world.propose_fix_artifact.summary_title }}"
+    on:
+      accept:
+        - target: testing
+
+      restart_from:
+        - when: "slots.stage == 'reproducing'"
+          target: reproducing
+          effects:
+            - set:
+                restart_from_stage: "reproducing"
+                refine_feedback:    ""
+                reproducing_cycle:  0
+                cycle:              0
+        - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
+          target: proposing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
+                cycle:              0
+        - target: proposing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
+                cycle:              0
+
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

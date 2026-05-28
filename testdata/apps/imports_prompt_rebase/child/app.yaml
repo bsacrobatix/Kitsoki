@@ -1,0 +1,45 @@
+# Child story for testing prompt-path rebase across imports.
+# The work_executing on_enter invokes host.oracle.ask with a
+# relative `prompt:` path; the parent's load should rewrite that
+# to an absolute path rooted at this child directory so the
+# runtime's resolvePromptPath (which joins against $KITSOKI_APP_DIR
+# at the parent level) still finds the file.
+app:
+  id: imports-prompt-rebase-child
+  version: 0.1.0
+
+hosts:
+  - host.oracle.ask
+
+world:
+  result: { type: string, default: "" }
+
+exits:
+  done:
+    description: "Work done."
+
+root: idle
+
+intents:
+  start_work:
+    description: "Begin the work."
+    examples: ["start"]
+
+states:
+  idle:
+    description: "Idle."
+    view: "Idle."
+    on:
+      start_work:
+        - target: work_executing
+
+  work_executing:
+    description: "Working."
+    view: "Working."
+    on_enter:
+      - invoke: host.oracle.ask
+        with:
+          prompt: prompts/work.md
+          schema: schemas/result.json
+        bind:
+          result: stdout

@@ -1,0 +1,47 @@
+# workspace_manager — list / create / switch workspaces. Dispatches
+# via iface.workspace.{list,create,sync}. Wave 2 ships a minimal
+# surface; a downstream `workspace-manager` CLI flavour rebinds the
+# iface to `host.workspace_manager` for the full feature set.
+
+states:
+
+  workspace_manager:
+    description: "Workspace manager — list / create / switch workspaces."
+    # Flattened view (no extends/blocks) — `choice:` cannot live inside a
+    # `blocks:` map (typed metadata is lost through the inheritance
+    # pipeline; see docs/choice-widget.md §3.1).
+    view:
+      - kv:
+          pairs:
+            "Current workspace": '{{ world.current_workspace|default:"(none)" }}'
+            Workdir:             '{{ world.workdir|default:"(none)" }}'
+            "Feature branch":    '{{ world.feature_branch|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              intent: proceed
+              hint:   "fetch the workspace list"
+            - { label: "go_back",  intent: go_back,  hint: "return to the previous room" }
+            - { label: "go_main",  intent: go_main,  hint: "back to the engineer's day landing" }
+            - { label: "go_inbox", intent: go_inbox, hint: "check the inbox" }
+            - { label: "look",     intent: look,     hint: "re-render" }
+    relevant_world: [current_workspace, workdir, feature_branch]
+    on_enter:
+      - invoke: iface.workspace.list
+        bind:
+          last_error: log
+        on_error: workspace_manager
+    on:
+      proceed:
+        - target: workspace_manager
+      go_back:
+        - target: "{{ world.prev_state }}"
+      go_main:
+        - target: main
+      go_inbox:
+        - target: inbox
+          push_history: false
+      look:
+        - target: .

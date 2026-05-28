@@ -1,0 +1,18 @@
+# form_enum (negative) — an out-of-list value reaches the orchestrator
+# and gets rejected with INVALID_SLOT_VALUE. The widget would never let
+# the user produce this value (Space cycles through the declared set);
+# this fixture proves the orchestrator-side guarantee anyway.
+test_kind: flow
+app: ../app.yaml
+initial_state: form_enum
+
+turns:
+  - intent: { name: submit_enum_form, slots: { method: hovercraft } }
+    expect_error:
+      code: INVALID_SLOT_VALUE
+    expect_state: form_enum
+    expect_world_unchanged: true
+
+expect_no_errors: false
+# Negative-path: rejection keeps the user in form_enum (the
+# walkthrough doesn't advance until a valid enum value commits).

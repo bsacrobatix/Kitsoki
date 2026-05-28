@@ -1,0 +1,543 @@
+# Replay recording for Oregon Trail — Mode 2 flow fixtures with input: turns
+# and Mode 1 static-harness pass-rate tests.
+#
+# Hand-authored bootstrap (per docs/testing.md §4); replace with a Mode-1
+# `--emit-recording` capture once enough flows exercise input: routing.
+#
+# Coverage: every verb used in flows/winning_deterministic.yaml (continue,
+# leave_store) plus one or two canonical phrasings per intent surface
+# referenced from the intents/ fixtures (so `static`-harness Mode 1 runs
+# have something to look up). The recording is scoped per-state because
+# the same input may carry different intents in different states (e.g.
+# "rest" at a checkpoint vs. mid-hunt).
+kind: recording
+app_id: oregon-trail
+app_version: 0.1.0-phase-i
+generated_at: "2026-05-12T00:00:00Z"
+generator: "hand-authored (phase I)"
+min_confidence: 1.00
+
+entries:
+
+  # ── general_store.idle ────────────────────────────────────────────────
+  - state: general_store.idle
+    input: "leave"
+    intent: { name: leave_store, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: general_store.idle
+    input: "leave the store"
+    intent: { name: leave_store, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: general_store.idle
+    input: "done shopping"
+    intent: { name: leave_store, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── leg_*_executing.traveling — continue is the dominant verb ─────────
+  - state: leg_a_executing.traveling
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_a_executing.traveling
+    input: "press on"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_b_executing.traveling
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_c_executing.traveling
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_d_executing.traveling
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_e_executing.traveling
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_f_executing.traveling
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_g_executing.traveling
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── leg_*_awaiting_reply — checkpoint verbs ───────────────────────────
+  - state: leg_a_awaiting_reply
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_b_awaiting_reply
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_b_awaiting_reply
+    input: "let's hold up here"
+    intent: { name: rest, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_c_awaiting_reply
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_c_awaiting_reply
+    input: "quit"
+    intent: { name: quit, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_c_awaiting_reply
+    input: "restart from kearney"
+    intent: { name: restart_from, slots: { stage: kearney } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_c_awaiting_reply
+    input: "consult the guide"
+    intent: { name: consult_guide, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_d_awaiting_reply
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_e_awaiting_reply
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_e_awaiting_reply
+    input: "go back to Fort Kearney"
+    intent: { name: restart_from, slots: { stage: kearney } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_f_awaiting_reply
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_g_awaiting_reply
+    input: "continue"
+    intent: { name: continue, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── river_crossing.shallow — propose_crossing with method slot ────────
+  # river_crossing rooms bind propose_crossing (the proposal lifecycle),
+  # not the bare ford/caulk/ferry verbs. Recording entries map the
+  # period-flavored verbs to propose_crossing with the appropriate
+  # method slot value.
+  - state: river_crossing.shallow
+    input: "ford the river"
+    intent: { name: propose_crossing, slots: { method: ford, confidence: 50 } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: river_crossing.shallow
+    input: "caulk the wagon"
+    intent: { name: propose_crossing, slots: { method: caulk, confidence: 50 } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: river_crossing.shallow
+    input: "take the ferry"
+    intent: { name: propose_crossing, slots: { method: ferry, confidence: 50 } }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── Live-trace lockdown (2026-05-13) ─────────────────────────────────
+  # Entries below were captured from a real OT session's /tmp/ot.log
+  # and pin the canonical (state, input) → (intent, slots) mapping so
+  # the static-harness Mode 1 runner exercises every fixture input
+  # (without these, fixtures show 0/0 runs and silently pass).
+  #
+  # Authoring conventions:
+  #   - "30 boxes bullets" → bullets: 600 (one box = 20 rounds).
+  #   - refine_purchase slot replacement semantics: the slot value
+  #     REPLACES the current value, not additive ("add 50 more bullets"
+  #     locks bullets: 50 — what the trace produced; future-proof if
+  #     the room's merge convention changes).
+  #   - Theme → name_party: LLM invents 5 names inline. The recording
+  #     row IS the canonical answer (Jackson 5 / Beatles / comedians
+  #     pinned below).
+  #   - ask_question: LLM strips the "ask " prefix and uses the
+  #     remaining text verbatim as the question slot.
+
+  # ── general_store.idle — structured-slot propose_purchase ─────────────
+  - state: general_store.idle
+    input: "i want 10 oxen, 2000 lbs food, 30 boxes bullets, 10 clothing, 4 wheels, 2 axles, 2 tongues"
+    intent:
+      name: propose_purchase
+      slots:
+        items: "10 oxen, 2000 lbs food, 30 boxes bullets, 10 clothing, 4 wheels, 2 axles, 2 tongues"
+        total_cost: 800
+        oxen: 10
+        food: 2000
+        bullets: 600
+        clothing: 10
+        wheels: 4
+        axles: 2
+        tongues: 2
+    confidence: 1.00
+    majority_of: 1
+
+  - state: general_store.idle
+    input: "purchase 10 oxen 2000lbs 30 boxes 10 sets 4 wheels 2 axles 2 tongues"
+    intent:
+      name: propose_purchase
+      slots:
+        items: "10 oxen, 2000 lbs food, 30 boxes bullets, 10 clothing sets, 4 spare wheels, 2 spare axles, 2 spare tongues"
+        total_cost: 800
+        oxen: 10
+        food: 2000
+        bullets: 600
+        clothing: 10
+        wheels: 4
+        axles: 2
+        tongues: 2
+    confidence: 1.00
+    majority_of: 1
+
+  - state: general_store.idle
+    input: "give me 6 oxen and 1500 lbs of food"
+    intent:
+      name: propose_purchase
+      slots:
+        items: "6 oxen, 1500 lbs food"
+        total_cost: 270
+        oxen: 6
+        food: 1500
+    confidence: 1.00
+    majority_of: 1
+
+  - state: general_store.idle
+    input: "a pound of hardtack"
+    intent:
+      name: propose_purchase
+      slots:
+        items: "1 lb food"
+        total_cost: 1
+        food: 1
+    confidence: 1.00
+    majority_of: 1
+
+  - state: general_store.idle
+    input: "buy salt"
+    intent:
+      name: propose_purchase
+      slots:
+        items: "salt"
+        total_cost: 1
+    confidence: 1.00
+    majority_of: 1
+
+  # ── general_store.reviewing — refine_purchase variants ────────────────
+  - state: general_store.reviewing
+    input: "actually give me 12 oxen"
+    intent:
+      name: refine_purchase
+      slots:
+        feedback: "actually give me 12 oxen"
+        oxen: 12
+    confidence: 1.00
+    majority_of: 1
+
+  - state: general_store.reviewing
+    input: "actually give me 12 draaft animalz"
+    intent:
+      name: refine_purchase
+      slots:
+        feedback: "actually give me 12 draaft animalz"
+        oxen: 12
+    confidence: 1.00
+    majority_of: 1
+
+  - state: general_store.reviewing
+    input: "I want 7 oxen not 6"
+    intent:
+      name: refine_purchase
+      slots:
+        feedback: "I want 7 oxen not 6"
+        oxen: 7
+    confidence: 1.00
+    majority_of: 1
+
+  - state: general_store.reviewing
+    input: "add 50 more bullets"
+    intent:
+      name: refine_purchase
+      slots:
+        feedback: "add 50 more bullets"
+        bullets: 50
+    confidence: 1.00
+    majority_of: 1
+
+  - state: general_store.reviewing
+    input: "actually 250 lbs of food"
+    intent:
+      name: refine_purchase
+      slots:
+        feedback: "actually 250 lbs of food"
+        food: 250
+    confidence: 1.00
+    majority_of: 1
+
+  - state: general_store.reviewing
+    input: "refine"
+    intent:
+      name: refine_purchase
+      slots:
+        feedback: ""
+    confidence: 1.00
+    majority_of: 1
+
+  # Adversarial: "less food" — no concrete replacement; route to
+  # refine_purchase WITHOUT the food slot, then the machine flags
+  # MISSING_SLOTS for an under-specified refinement. The fixture
+  # expects clarify / MISSING_SLOTS / UNKNOWN_INTENT.
+  - state: general_store.reviewing
+    input: "less food"
+    intent:
+      name: refine_purchase
+      slots:
+        feedback: "less food"
+    confidence: 0.40
+    majority_of: 1
+
+  # ── intro — pick_profession casual phrasings ──────────────────────────
+  - state: intro
+    input: "make me a banker"
+    intent:
+      name: pick_profession
+      slots: { profession: banker }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: intro
+    input: "banker"
+    intent:
+      name: pick_profession
+      slots: { profession: banker }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: intro
+    input: "banker, please"
+    intent:
+      name: pick_profession
+      slots: { profession: banker }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: intro
+    input: "i'll be a farmer"
+    intent:
+      name: pick_profession
+      slots: { profession: farmer }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: intro
+    input: "carpenter"
+    intent:
+      name: pick_profession
+      slots: { profession: carpenter }
+    confidence: 1.00
+    majority_of: 1
+
+  # Adversarial — "doctor" is not in the [banker, carpenter, farmer]
+  # enum. We route to pick_profession with the out-of-enum value so
+  # the machine produces a SLOT_NOT_IN_ENUM / INVALID_SLOT_VALUE error.
+  - state: intro
+    input: "i want to be a doctor"
+    intent:
+      name: pick_profession
+      slots: { profession: doctor }
+    confidence: 0.50
+    majority_of: 1
+
+  # ── intro — themed name_party (LLM invents names inline) ──────────────
+  # CANONICAL ANSWERS: these are what the live LLM produced in the
+  # /tmp/ot.log trace; future router prompts must produce the SAME 5
+  # names verbatim to keep the static fixture green. To re-baseline
+  # after a deliberate prompt change, regenerate the recording with
+  # --emit-recording.
+  - state: intro
+    input: "name the party after the jackson 5"
+    intent:
+      name: name_party
+      slots: { names: "Jackie, Tito, Jermaine, Marlon, Michael" }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: intro
+    input: "name the party after famous comedians"
+    intent:
+      name: name_party
+      slots: { names: "Richard, George, Joan, Robin, Eddie" }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: intro
+    input: "name the party after the beatles"
+    intent:
+      name: name_party
+      slots: { names: "John, Paul, George, Ringo, Pete" }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── intro — explicit-theme verb → generate_names (NOT name_party) ─────
+  - state: intro
+    input: "generate names from a western theme"
+    intent:
+      name: generate_names
+      slots: { theme: "western" }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: intro
+    input: "use star wars names"
+    intent:
+      name: generate_names
+      slots: { theme: "Star Wars" }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── leg_a_awaiting_reply — consult_guide phrasings ────────────────────
+  - state: leg_a_awaiting_reply
+    input: "consult guide"
+    intent: { name: consult_guide, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_a_awaiting_reply
+    input: "consult_guide"
+    intent: { name: consult_guide, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_a_awaiting_reply
+    input: "ask the wagon master"
+    intent: { name: consult_guide, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_a_awaiting_reply
+    input: "talk to the wagon master"
+    intent: { name: consult_guide, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: leg_a_awaiting_reply
+    input: "advice"
+    intent: { name: consult_guide, slots: {} }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── trail_guide.trail_guide_list — ask_question prefix-stripping ──────
+  - state: trail_guide.trail_guide_list
+    input: "ask what to do at the kansas river crossing"
+    intent:
+      name: ask_question
+      slots: { question: "what to do at the kansas river crossing" }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: trail_guide.trail_guide_list
+    input: "how do we ford in spring snowmelt"
+    intent:
+      name: ask_question
+      slots: { question: "how do we ford in spring snowmelt" }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: trail_guide.trail_guide_list
+    input: "what month should we leave"
+    intent:
+      name: ask_question
+      slots: { question: "what month should we leave" }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── river_crossing.shallow — bare-verb / colloquial variants ──────────
+  - state: river_crossing.shallow
+    input: "ford"
+    intent: { name: propose_crossing, slots: { method: ford, confidence: 50 } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: river_crossing.shallow
+    input: "let's ford it"
+    intent: { name: propose_crossing, slots: { method: ford, confidence: 50 } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: river_crossing.shallow
+    input: "can we cross via jet ferry?"
+    intent: { name: propose_crossing, slots: { method: ferry, confidence: 50 } }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── river_crossing.mid — caulk-and-float ──────────────────────────────
+  - state: river_crossing.mid
+    input: "caulk and float"
+    intent: { name: propose_crossing, slots: { method: caulk, confidence: 70 } }
+    confidence: 1.00
+    majority_of: 1
+
+  # ── river_crossing.deep — ferry / wait ────────────────────────────────
+  - state: river_crossing.deep
+    input: "ferry"
+    intent: { name: propose_crossing, slots: { method: ferry, confidence: 90 } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: river_crossing.deep
+    input: "hire a ferryman"
+    intent: { name: propose_crossing, slots: { method: ferry, confidence: 90 } }
+    confidence: 1.00
+    majority_of: 1
+
+  - state: river_crossing.deep
+    input: "wait for the water to drop"
+    intent: { name: propose_crossing, slots: { method: wait, confidence: 80 } }
+    confidence: 1.00
+    majority_of: 1

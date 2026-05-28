@@ -1,0 +1,125 @@
+# illness_twice — regression pin for the "second illness blocked by
+# stale cycle counter" bug. Before the fix, players who treated a
+# first illness and rolled into a second one later in the trail saw
+# current_event_attempts still at the value from the prior event;
+# treat's success guard (current_event_attempts < 2) would short-
+# circuit straight to the default arm (party_alive -= 1) without ever
+# letting the player actually treat. event_disease.on_enter now zeroes
+# the counter unconditionally so each fresh entry starts at 0.
+#
+# Setup
+# -----
+# We force two disease events back-to-back on leg_a by using
+# world_override on each continue turn (the same trick as
+# buy_then_breakdown). After the first treat succeeds we cycle back to
+# leg_a_executing.traveling; the second world_override re-pins the RNG
+# to land in the disease bucket again. The assertion that locks the
+# regression is on turn 4: even though we manually set
+# current_event_attempts=99 in world_override BEFORE the continue
+# fires, the post-on_enter snapshot reads 0 — i.e. event_disease's
+# on_enter wiped the stale value — and the third turn's treat success
+# guard (current_event_attempts < 2) passes cleanly.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: leg_a_executing.traveling
+initial_world:
+  party_names:    "You,Adam,Beth,Carol,Daniel"
+  profession:     banker
+  month:          april
+  year:           1848
+  money:          1200
+  oxen:           2
+  food_lbs:       500
+  bullets:        0
+  clothing_sets:  3
+  spare_wheels:   0
+  spare_axles:    0
+  spare_tongues:  0
+  pace:           steady
+  rations:        filling
+  party_alive:    5
+  health_avg:     90
+  narration:      false
+  miles_traveled: 0
+  rng_counter:    0
+  rng_last:       0
+  current_landmark: "Independence"
+  local_price_pct: 100
+  current_event_attempts: 0
+  day: 1
+
+turns:
+
+  # ── Turn 1: force the first disease event. rng_counter=60,
+  # miles_traveled=0 → (0 + 60) % 100 = 60 → [60, 75) event_disease
+  # bucket. event_disease.on_enter zeroes current_event_attempts and
+  # picks illness_kind from rng_last % 5 (= 0 → dysentery) plus
+  # illness_member from split(party_names, ",")[rng_last % party_alive]
+  # = [60 % 5] = [0] → "You".
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 0
+      rng_counter:    60
+    expect_state: leg_a_executing.event_disease
+    expect_world:
+      event_kind:             "disease"
+      illness_kind:            "dysentery"
+      illness_member:          "You"
+      illness_severity:        1            # rng_last % 5 + 1 = 1
+      current_event_attempts:  0
+      rng_last:                60
+
+  # ── Turn 2: treat the first illness. clothing_sets ≥ 1, food_lbs ≥
+  # 50, current_event_attempts < 2 → success arm. Clears every illness_*
+  # field and current_event_attempts to 0.
+  - intent: { name: treat, slots: {} }
+    expect_state: leg_a_executing.traveling
+    expect_world:
+      illness_kind:           ""
+      illness_member:         ""
+      illness_severity:       0
+      illness_treatment:      ""
+      clothing_sets:          2          # 3 - 1
+      food_lbs:               440        # 500 - 10 (continue) - 50 (treat)
+      health_avg:             100        # (90 - 10 on entry) + 20 = 100
+      current_event_attempts: 0
+      event_kind:             ""
+
+  # ── Turn 3: re-fire event_disease. The whole point of this fixture:
+  # we BUT-NOT-LIKE the bug shape by clobbering current_event_attempts
+  # to 99 via world_override before the continue runs. If on_enter
+  # didn't reset the counter, the post-snapshot would show 99 and the
+  # follow-up treat would skip straight to the default-death arm.
+  # rng_last 60 → illness_kind = dysentery (deterministic), member =
+  # "You" (rng_last % party_alive = 60 % 5 = 0 → first slot).
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 0
+      rng_counter:    60
+      current_event_attempts: 99       # ← stale value from a prior event
+    expect_state: leg_a_executing.event_disease
+    expect_world:
+      event_kind:             "disease"
+      illness_kind:            "dysentery"
+      illness_member:          "You"
+      illness_severity:        1
+      # The regression assertion. on_enter zeroed the counter even
+      # though world_override had pre-set it to 99.
+      current_event_attempts:  0
+
+  # ── Turn 4: treat the second illness. With the counter reset, the
+  # success guard (current_event_attempts < 2) passes; no party member
+  # dies; clothing_sets 2 → 1; illness_* fields clear. Pre-fix, this
+  # turn would have transitioned to traveling with party_alive 4.
+  - intent: { name: treat, slots: {} }
+    expect_state: leg_a_executing.traveling
+    expect_world:
+      illness_kind:           ""
+      illness_member:         ""
+      illness_severity:       0
+      party_alive:            5          # no death — treat succeeded
+      clothing_sets:          1
+      current_event_attempts: 0
+
+expect_no_errors: true

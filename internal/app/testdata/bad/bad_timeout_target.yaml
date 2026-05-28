@@ -1,0 +1,22 @@
+app:
+  id: test-bad-timeout-target
+  version: 0.1.0
+
+world: {}
+
+intents:
+  go:
+    title: "Go"
+
+root: waiting
+
+states:
+  waiting:
+    view: "Waiting."
+    timeout:
+      after: "10s"
+      # 'nonexistent_state' is NOT in states; should trigger an error.
+      target: nonexistent_state
+    on:
+      go:
+        - target: waiting

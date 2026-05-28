@@ -1,0 +1,102 @@
+# world_clock — the parallel-region wrapper closing gap §9.4.
+#
+# Two sibling regions evolve orthogonally:
+#
+#   - weather  (compound, initial: dry) cycles dry → rain → snow → dry on
+#     the `weather_advance` intent. Entering rain emits `precip_heavy`;
+#     entering snow emits `snow_starts`. Each transition's effects also
+#     advance world.day — the cleanest way to share a tick between the
+#     two regions given first-region-wins dispatch (a single intent name
+#     bound in both regions would land on calendar, not weather).
+#   - calendar (compound, initial: day_active) listens for the two
+#     emits and witnesses them in world.precip_observed /
+#     world.snow_observed. No direct intent surface — calendar reacts
+#     only to cross-region emits.
+#
+# Scope (intentional, lean — proposal §9.4 fallback):
+#   The parallel demo lives in flows/parallel_weather.yaml seeded directly
+#   into the `world_clock` state. Full integration with the trail rooms
+#   (world_clock becoming a true sibling of `trail_phases` under a
+#   parallel root) is a Phase J refactor — it requires reshuffling `root:`
+#   to be parallel, which has knock-on effects on every existing fixture.
+#   The witness world keys are declared in app.yaml so Phase J can read
+#   them when the region is promoted to a peer of `trail_phases`.
+#
+# Encoding (per §9.4 hand-off, internal/machine/parallel.go):
+#   "<parent>#<region_a_leaf>|<region_b_leaf>|..." with regions sorted
+#   alphabetically — so the initial encoding is
+#   "world_clock#world_clock.calendar.day_active|world_clock.weather.dry".
+
+states:
+
+  world_clock:
+    type: parallel
+    description: "Two orthogonal regions: weather + calendar."
+    view:
+      - heading: "── world_clock ──"
+    states:
+
+      # ── calendar region ───────────────────────────────────────────────
+      # No intent surface — pure emit-listener. The bindings live on the
+      # compound parent so the active leaf (day_active) inherits them
+      # via the ancestor-walk in findTransition (same pattern as the
+      # testdata/apps/parallel_smoke fixture).
+      calendar:
+        type: compound
+        initial: day_active
+        on:
+          precip_heavy:
+            - target: world_clock.calendar.day_active
+              effects:
+                - set: { precip_observed: true }
+          snow_starts:
+            - target: world_clock.calendar.day_active
+              effects:
+                - set: { snow_observed: true }
+        states:
+          day_active:
+            view:
+              - prose: "{{ world.month|upper }} {{ world.day }}, {{ world.year }}."
+
+      # ── weather region ────────────────────────────────────────────────
+      # dry → rain (emit precip_heavy) → snow (emit snow_starts) → dry.
+      # Each transition also bumps world.day so a step through the region
+      # advances the shared world clock (without requiring an
+      # intent on calendar — which would lose to calendar under
+      # first-region-wins).
+      weather:
+        type: compound
+        initial: dry
+        states:
+          dry:
+            view:
+              - prose: "Weather: dry."
+            on:
+              weather_advance:
+                - target: world_clock.weather.rain
+                  effects:
+                    - set:
+                        weather_kind: rain
+                        day: "{{ world.day + 1 }}"
+                    - emit: precip_heavy
+          rain:
+            view:
+              - prose: "Weather: rain."
+            on:
+              weather_advance:
+                - target: world_clock.weather.snow
+                  effects:
+                    - set:
+                        weather_kind: snow
+                        day: "{{ world.day + 1 }}"
+                    - emit: snow_starts
+          snow:
+            view:
+              - prose: "Weather: snow."
+            on:
+              weather_advance:
+                - target: world_clock.weather.dry
+                  effects:
+                    - set:
+                        weather_kind: dry
+                        day: "{{ world.day + 1 }}"

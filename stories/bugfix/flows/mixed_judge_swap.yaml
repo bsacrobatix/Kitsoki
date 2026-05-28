@@ -1,0 +1,136 @@
+# mixed_judge_swap — one YAML, both judge modes in a single run.
+#
+# Start: judge_mode=llm_then_human + confident verdict + threshold 0.8.
+# `start` enters reproducing; the cascade fires through every room with
+# a judge in on_enter until it hits one without (implementing, reviewing).
+# Net: start lands at implementing in one user turn.
+#
+# Mid-run: world_override flips judge_mode to "human" on the next
+# `accept`. The emit_intent gate (`world.judge_mode != 'human'`) closes,
+# so subsequent checkpoints hold for an operator instead of auto-firing.
+#
+# This proves a key polymorphism property of the bugfix story: the same
+# checkpoint state-graph drives both LLM-judged and operator-driven
+# operation, and the swap is hot — no restart, no state reload.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:                  "TKT-007"
+  ticket_title:               "Mid-flow judge swap demo"
+  thread:                     "TKT-007"
+  judge_mode:                 "llm_then_human"
+  judge_confidence_threshold: 0.8
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "" }
+  host.local:
+    data: { ok: true, log: "PASS", passed: 1, failed: 0 }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub artifact body for state-machine testing only."
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Fix the thing in a sufficiently detailed way that the LLM-judge will accept it."
+        root_cause:      "Off-by-one in the renderer somewhere fascinating."
+        affected_files:  ["x.go"]
+        confidence:      0.9
+        reasoning:       "Trace shows the off-by-one in the renderer; the fix is mechanical."
+        status:          "passed"
+        tests_run:       { passed: 1, failed: 0, log: "PASS" }
+        outcome:         "pass"
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need a regression test asserting on the exact width.", severity: "medium" }
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Looks good."
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub artifact body for state-machine testing only."
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Fix the thing in a sufficiently detailed way that the LLM-judge will accept it."
+        root_cause:      "Off-by-one in the renderer somewhere fascinating."
+        affected_files:  ["x.go"]
+        confidence:      0.9
+        reasoning:       "Trace shows the off-by-one in the renderer; the fix is mechanical."
+        status:          "passed"
+        tests_run:       { passed: 1, failed: 0, log: "PASS" }
+        outcome:         "pass"
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need a regression test asserting on the exact width.", severity: "medium" }
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Looks good."
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub artifact body for state-machine testing only."
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Fix the thing in a sufficiently detailed way that the LLM-judge will accept it."
+        root_cause:      "Off-by-one in the renderer somewhere fascinating."
+        affected_files:  ["x.go"]
+        confidence:      0.9
+        reasoning:       "Trace shows the off-by-one in the renderer; the fix is mechanical."
+        status:          "passed"
+        tests_run:       { passed: 1, failed: 0, log: "PASS" }
+        outcome:         "pass"
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need a regression test asserting on the exact width.", severity: "medium" }
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Looks good."
+
+turns:
+
+  # ── Phase A — judge_mode=llm_then_human; LLM auto-fires ─────────────
+  # start cascades reproducing → proposing → implementing. The cascade
+  # stops at implementing because it has no judge in on_enter (no
+  # emit_intent to fire).
+  - intent: { name: start, slots: {} }
+    expect_state: implementing
+
+  # ── Mid-flow swap — flip judge_mode to "human" before the next
+  # autonomous-capable room (testing) gets a chance to auto-fire.
+  - intent: { name: accept, slots: {} }
+    world_override:
+      judge_mode: "human"
+    expect_state: testing
+    expect_world:
+      judge_mode: "human"
+
+  # ── Phase B — judge_mode=human; operator drives ─────────────────────
+  # emit_intent's guard now fails (`judge_mode == 'human'`), so we
+  # must accept manually through every remaining checkpoint.
+  - intent: { name: accept, slots: {} }
+    expect_state: reviewing
+  - intent: { name: accept, slots: {} }
+    expect_state: validating
+  - intent: { name: accept, slots: {} }
+    expect_state: done
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+    expect_world:
+      judge_mode: "human"
+
+expect_terminal: true
+expect_no_errors: true

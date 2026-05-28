@@ -1,0 +1,78 @@
+# Phase C — disease event between Chimney Rock and Fort Laramie (leg_d).
+# Two failed `treat` attempts exhaust the manual cycle budget and the
+# party loses a member; the event resolves back to traveling.
+#
+# RNG setup:
+#   - Start at leg_d_executing.traveling with miles_traveled = 0 and
+#     rng_counter = 62. The traveling.continue guard
+#     (miles + rng_counter) % 100 = 62 lands in [60, 75) → disease arm.
+#   - The disease arm sets rng_last = 62, event_kind = "disease", and
+#     transitions to event_disease.
+#   - event_disease.on_enter picks illness_kind from rng_last % 5 = 2
+#     → typhoid, and bumps health_avg down by 10.
+#
+# Cycle budget exercise:
+#   - clothing_sets = 0 means `treat`'s success arm fails its guard;
+#     the no-supplies arm increments current_event_attempts.
+#   - After two such failures, the third `treat` lands on the default
+#     arm — party_alive -= 1, illness_kind cleared, back to traveling.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: leg_d_executing.traveling
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    banker
+  month:         june
+  money:         200
+  oxen:          4
+  food_lbs:      500
+  clothing_sets: 0           # forces treat to fail its supply check
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    80
+  narration:     false
+  miles_traveled: 0
+  rng_counter:   62
+  event_kind:    ""
+  current_landmark: "Chimney Rock"
+  current_event_attempts: 0
+
+turns:
+
+  # Turn 1: traveling.continue. Roll = (0 + 62) % 100 = 62 → disease arm.
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_d_executing.event_disease
+    expect_world:
+      event_kind: "disease"
+      rng_last:   62
+      illness_kind: "typhoid"   # rng_last % 5 == 2 → typhoid
+      health_avg: 70            # on_enter: -10
+      rng_counter: 63           # incremented by the disease arm
+
+  # Turn 2: first treat attempt — no clothing → no-supplies arm fires.
+  - intent: { name: treat, slots: {} }
+    expect_state: leg_d_executing.event_disease
+    expect_world:
+      current_event_attempts: 1
+      party_alive: 5
+
+  # Turn 3: second treat attempt — current_event_attempts becomes 2.
+  - intent: { name: treat, slots: {} }
+    expect_state: leg_d_executing.event_disease
+    expect_world:
+      current_event_attempts: 2
+      party_alive: 5
+
+  # Turn 4: third treat attempt — both retry arms fail, default fires:
+  # party_alive -= 1, return to traveling.
+  - intent: { name: treat, slots: {} }
+    expect_state: leg_d_executing.traveling
+    expect_world:
+      party_alive: 4
+      illness_kind: ""
+      event_kind: ""
+      current_event_attempts: 0
+
+expect_no_errors: true

@@ -1,0 +1,11 @@
+# intro_begin — pressing "Begin" on the intro screen starts the
+# walkthrough at single_basic.
+test_kind: flow
+app: ../app.yaml
+initial_state: intro
+
+turns:
+  - intent: { name: begin, slots: {} }
+    expect_state: single_basic
+
+expect_no_errors: true

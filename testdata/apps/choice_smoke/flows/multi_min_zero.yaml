@@ -1,0 +1,13 @@
+# multi_min_zero — submit an empty list (allowed because min: 0).
+# Commit advances to multi_no_max.
+test_kind: flow
+app: ../app.yaml
+initial_state: multi_min_zero
+
+turns:
+  - intent: { name: chose_optional_extras, slots: { extras: [] } }
+    expect_state: multi_no_max
+    expect_world:
+      picked_optional: []
+
+expect_no_errors: true

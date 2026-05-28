@@ -1,0 +1,103 @@
+# Oregon Trail — proposal kinds (phase D, §6.1 of the proposal).
+#
+# Declares two proposal kinds:
+#   - buy_supplies   : hosted by general_store and fort. Drafts a basket
+#                      (items + total_cost), auto-accepts cheap baskets,
+#                      asks confirmation for expensive ones. The execute
+#                      block is `host.run cmd: ["true"]` — a synchronous
+#                      no-op shell; the actual world mutation (debit money,
+#                      credit supplies) happens in the proposal-host room's
+#                      `accept_purchase` transition effects. See the
+#                      implementation note below.
+#   - river_strategy : hosted by river_crossing. Drafts a method
+#                      (ford/caulk/ferry/wait) and a confidence. Execute
+#                      runs as a background job (a short sleep, simulating
+#                      the time it takes to float across); the on_complete
+#                      chain reads the deterministic outcome from world
+#                      state (depth × oxen × miles % 100) and applies it.
+#
+# ── How proposal.execute actually wires world mutations (the load-
+#    bearing uncertainty called out in the Phase D scope):
+#
+#    The internal/proposal package declares ProposalKind / ProposalExecute
+#    / ProposalPolicy at the YAML layer and validates them at load time
+#    (loader.go §326+: background:true requires invoke:, on_complete:
+#    cannot nest background:true, invoke: respects the hosts: allow-list).
+#    It does NOT, however, drive the drafting → reviewing → executing →
+#    done lifecycle from the orchestrator (proposal/executor.go is only
+#    referenced from proposal_test.go). The testdata/apps/proposal_smoke
+#    app reproduces the lifecycle by hand using `set:` effects on plain
+#    states.
+#
+#    Phase D follows the proposal_smoke pattern: each proposal-host room
+#    (general_store, fort, river_crossing) is a compound state whose
+#    substates (idle/reviewing/executing/done) reproduce the proposal
+#    lifecycle declaratively. The proposal kinds below ARE authoritative
+#    for declared schema/draft/refine/execute/policy/views shape — they
+#    let `kitsoki viz` and any future proposal-runtime work pick them
+#    up unchanged — but the runtime mutations live in the hosting room's
+#    transition effects. Future phases (or a dedicated engine PR) can
+#    wire the proposal package into the orchestrator; the YAML doesn't
+#    change.
+#
+#    The synchronous `host.run cmd: ["true"]` execute is therefore
+#    decorative for buy_supplies: it documents what the hosted shell
+#    would have done. The background `host.run cmd: ["bash", "-c",
+#    "sleep 0.2; echo crossed"]` for river_strategy is similarly
+#    decorative for the spec; the actual background path in the room
+#    is invoked from the host's `executing.on_enter:` via the same
+#    cmd shape.
+
+proposals:
+
+  # ── buy_supplies ────────────────────────────────────────────────────
+  # Hosted by general_store (Independence prices, local_price_pct = 100)
+  # and by fort (marked-up, local_price_pct = 150). The same kind is
+  # used at both sites; the price multiplier lives in world state, not
+  # in the proposal.
+  buy_supplies:
+    schema:
+      items:      list
+      total_cost: int
+    draft:
+      prompt: "prompts/buy_draft.md"     # narrated mode only (phase H)
+    refine:
+      prompt: "prompts/buy_refine.md"
+    execute:
+      invoke: host.run
+      with:
+        cmd: "true"                       # decorative no-op (see header). String form
+                                          # because host.run's cmd: type-asserts to string;
+                                          # list-form falls through to "cmd is required"
+                                          # and lands terminal-status=failed.
+      on_success: back                    # return to host on done
+      repeatable: true                    # buy again from done
+    policy:
+      auto_accept_if: "$proposal.total_cost < 5"
+      require_confirm: false
+    views:
+      drafting:  "Drafting purchase: {{ $proposal.items }} for ${{ $proposal.total_cost }}."
+      reviewing: "Confirm purchase: {{ $proposal.items }} for ${{ $proposal.total_cost }}?"
+      executing: "Loading the wagon..."
+      done:      "{{ $proposal.items }} loaded. ${{ world.money }} remaining."
+
+  # ── river_strategy ──────────────────────────────────────────────────
+  # Hosted by river_crossing (compound). Always requires confirmation;
+  # the cross runs as a background job so water levels appear to flow
+  # under the wagon during the wait. The on_complete chain reads
+  # world.last_job_result and posts the outcome.
+  river_strategy:
+    schema:
+      method:     string         # ford / caulk / ferry / wait
+      confidence: int            # 0-100, narrated-mode hint
+    execute:
+      invoke: host.run
+      with:
+        cmd: "sleep 0.2; echo crossed"   # string form: host.run wraps with `bash -c`.
+      background: true
+      on_complete:
+        - set:
+            river_outcome: "{{ world.last_job_result.stdout }}"
+        - say: "{{ world.river_outcome }}"
+    policy:
+      require_confirm: true        # confirm regardless of cost

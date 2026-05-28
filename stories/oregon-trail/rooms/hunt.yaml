@@ -1,0 +1,235 @@
+# hunt — phase E. Background-job room; mirrors the river_crossing
+# pattern (idle → running → done) but the executing background job is
+# the hunt-expedition itself rather than a proposal-driven crossing.
+#
+# # Substate layout
+#
+#   hunt_idle    — player just entered; awaits a `shoot { bullets }` to
+#                  commit. Stores `pending_bullet_spend` for the
+#                  on_complete arm to decrement on success.
+#   hunt_running — background host.run is in flight. on_complete reads
+#                  world.last_job_result.stdout_json.{lbs,target,outcome}
+#                  and applies the hunt outcome (food capped at 100 lbs
+#                  per proposal §3, bullets debited).
+#   hunt_done    — result is visible. `continue` returns to the
+#                  originating _awaiting_reply leg using
+#                  world.current_landmark to pick the right one.
+#
+# # Background execute
+#
+# hunt_running.on_enter dispatches host.run with background: true. The
+# script command is decorative — the deterministic flow fixture stubs
+# the handler via host_handlers: with explicit `data:` for the JSON
+# envelope, so the cmd is only exercised in `kitsoki run` interactive
+# mode. The on_complete chain ONLY runs effects (no transition — same
+# pattern as river_crossing.executing); the state advance happens when
+# the player issues `continue` from hunt_done, which checks
+# world.last_hunt_outcome to know the job has finished.
+#
+# # Mid-flight clarification
+#
+# When the herd contains multiple species (deterministic chance based
+# on bullets spent), the handler calls host.RequestClarification with a
+# schema asking for the target species. The flow runner's HostStub
+# `request_clarification:` field exercises the real
+# host.RequestClarification API mid-stub; the player then fires
+# answer_clarification on `inbox` to resume the job. This is the same
+# round-trip that a future Go `hunt_expedition` handler (proposal §11.1)
+# would drive; the shell-script-with-stub path avoids the in-tree Go
+# file while still exercising the full clarification infrastructure.
+
+states:
+
+  hunt:
+    type: compound
+    initial: hunt_idle
+    description: "Hunting expedition."
+    relevant_world: [bullets, food_lbs, month, party_alive, last_job_id, last_hunt_lbs, last_hunt_target, last_hunt_outcome, pending_bullet_spend, current_landmark]
+    on_enter:
+      # Record the originating landmark for `continue` from hunt_done.
+      # Phase E uses world.last_job_originating_state to remember the
+      # _awaiting_reply that launched this expedition (for inbox open_job
+      # / answer_clarification round-trips). The look-up of the right
+      # leg's _awaiting_reply happens in hunt_done.continue's when arms.
+      - set:
+          last_hunt_lbs: 0
+          last_hunt_target: ""
+          last_hunt_outcome: ""
+          pending_bullet_spend: 0
+    states:
+
+      hunt_idle:
+        description: "Choosing how many bullets to spend."
+        view:
+          - prose: "Hunting near {{ world.current_landmark }} ({{ world.month|upper }})."
+          - kv:
+              pairs:
+                Bullets: "{{ world.bullets }}"
+                Food:    "{{ world.food_lbs }} lbs"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "shoot"
+                  hint:   "commit n bullets to the hunting party (1..{{ world.bullets }})"
+                  intent: shoot
+                  param:
+                    slot:        bullets
+                    type:        int
+                    placeholder: "e.g. 5"
+                    required:    true
+                - label:  "check_inbox"
+                  intent: check_inbox
+                - label:  "look"
+                  intent: look
+        relevant_world: [bullets, food_lbs, month, current_landmark]
+        on:
+          shoot:
+            - when: "int(slots.bullets) > 0 && int(slots.bullets) <= world.bullets"
+              target: ../hunt_running
+              effects:
+                - set:
+                    pending_bullet_spend: "{{ int(slots.bullets) }}"
+                - say: "Hunting party heads out with {{ slots.bullets }} bullets."
+            - default: true
+              target: .
+              guard_hint: "Need between 1 and {{ world.bullets }} bullets to hunt."
+              effects:
+                - say: "Can't spend {{ slots.bullets }} bullets — you only have {{ world.bullets }}."
+          check_inbox:
+            - target: inbox
+              push_history: false
+              effects:
+                - set:
+                    last_job_originating_state: "hunt.hunt_idle"
+          look:
+            - target: .
+
+      hunt_running:
+        description: "Hunting party is out."
+        view:
+          - prose: "The hunting party is out near {{ world.current_landmark }}."
+          - kv:
+              pairs:
+                Job:           "{{ world.last_job_id }} (running)"
+                Bullets spent: "{{ world.pending_bullet_spend }}"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "check_inbox"
+                  intent: check_inbox
+                - label:  "look"
+                  intent: look
+        relevant_world: [last_job_id, pending_bullet_spend, current_landmark, last_hunt_outcome]
+        on_enter:
+          # Record the originating state for inbox teleport-back.
+          - set:
+              last_job_originating_state: "hunt.hunt_running"
+          # Decorative cmd — the flow fixture stubs the handler with
+          # explicit Data so the script is never run during tests. The
+          # interactive `kitsoki run` path executes it; the script is
+          # under stories/oregon-trail/scripts/hunt.sh and emits a JSON
+          # envelope on its last line so stdout_json picks it up.
+          - invoke: host.run
+            with:
+              cmd: "echo '{\"lbs\":85,\"target\":\"bison\",\"outcome\":\"success\"}'"
+            background: true
+            bind: { last_job_id: job_id }
+            on_complete:
+              # Pull lbs/target/outcome out of the handler envelope.
+              # last_job_result.stdout_json is the parsed JSON from the
+              # last non-empty stdout line; both the inline cmd above
+              # and the flow stub return the same envelope shape.
+              # The bullets debit happens in the same set: but order
+              # doesn't matter here — pending_bullet_spend is the
+              # already-committed source, not derived from world.bullets
+              # before this update.
+              - set:
+                  last_hunt_lbs: "{{ int(world.last_job_result.stdout_json.lbs) }}"
+                  last_hunt_target: "{{ world.last_job_result.stdout_json.target }}"
+                  last_hunt_outcome: "{{ world.last_job_result.stdout_json.outcome }}"
+              # Food cap at 100 lbs per proposal §3 ("a hunting party
+              # can only carry back so much meat"). Implemented as
+              # min(food_lbs + lbs, 100) — done in a separate set:
+              # block so the read of food_lbs uses the pre-update
+              # value, not the new value from the previous set: line.
+              - set:
+                  food_lbs: "{{ world.food_lbs + world.last_hunt_lbs <= 100 ? world.food_lbs + world.last_hunt_lbs : 100 }}"
+                  bullets: "{{ world.bullets - world.pending_bullet_spend }}"
+              - say: "Brought back {{ world.last_hunt_lbs }} lbs of {{ world.last_hunt_target }} ({{ world.last_hunt_outcome }})."
+        on:
+          # answer_clarification: handled on inbox; the TUI teleports
+          # the user via the action_required notification. We also accept
+          # it here directly for fixtures that drive the round-trip
+          # without an inbox detour.
+          answer_clarification:
+            - target: .
+              effects:
+                - invoke: host.jobs.answer_clarification
+                  with:
+                    job_id: "{{ slots.job_id }}"
+                    answer: "{{ slots.answer }}"
+                - say: "Submitted target choice to the hunting party."
+          continue:
+            # Outcome already arrived; jump to hunt_done.
+            - when: "world.last_hunt_outcome != ''"
+              target: ../hunt_done
+            # Job still running — re-render.
+            - default: true
+              target: .
+              guard_hint: "Hunting party is still out — wait for them to return."
+          check_inbox:
+            - target: inbox
+              push_history: false
+              effects:
+                - set:
+                    last_job_originating_state: "hunt.hunt_running"
+          look:
+            - target: .
+
+      hunt_done:
+        description: "Hunting party returned."
+        # Per the proposal §5 hunt example — typed `prose` + `kv` for
+        # the random-outcome narration so the result table aligns
+        # regardless of the bag size.
+        view:
+          - prose: "Brought back {{ world.last_hunt_lbs }} lbs of {{ world.last_hunt_target }}."
+          - kv:
+              pairs:
+                Food on hand:      "{{ world.food_lbs }} lbs"
+                Bullets remaining: "{{ world.bullets }}"
+                Outcome:           "{{ world.last_hunt_outcome }}"
+          - choice:
+              mode: single
+              prompt: "Actions"
+              items:
+                - label:  "continue"
+                  hint:   "return to {{ world.current_landmark }}"
+                  intent: continue
+                - label:  "look"
+                  intent: look
+        relevant_world: [last_hunt_lbs, last_hunt_target, last_hunt_outcome, food_lbs, bullets, current_landmark]
+        on:
+          continue:
+            # Route back to the _awaiting_reply for the landmark that
+            # launched the hunt. Mirrors fort.leave_fort's pattern.
+            - when: "world.current_landmark == 'Kansas River Crossing'"
+              target: leg_a_awaiting_reply
+            - when: "world.current_landmark == 'Fort Kearney'"
+              target: leg_b_awaiting_reply
+            - when: "world.current_landmark == 'Chimney Rock'"
+              target: leg_c_awaiting_reply
+            - when: "world.current_landmark == 'Fort Laramie'"
+              target: leg_d_awaiting_reply
+            - when: "world.current_landmark == 'South Pass'"
+              target: leg_e_awaiting_reply
+            - when: "world.current_landmark == 'Snake River Crossing'"
+              target: leg_f_awaiting_reply
+            - when: "world.current_landmark == 'Willamette Valley'"
+              target: leg_g_awaiting_reply
+            - default: true
+              target: leg_a_awaiting_reply
+              guard_hint: "Unknown landmark — returning to the first leg."
+          look:
+            - target: .

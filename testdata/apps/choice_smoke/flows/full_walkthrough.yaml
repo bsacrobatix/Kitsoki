@@ -1,0 +1,142 @@
+# full_walkthrough — end-to-end fixture proving the linear chain is
+# contiguous. Starts on `intro`, dispatches the commit intent for
+# every spoke in canonical order, and ends on `complete`. Every arc
+# along the way also fires its effects (state seeding, world bucket
+# writes), so the final world snapshot captures the full set of
+# bucket writes performed by the chain.
+#
+# If you add or reorder a spoke in app.yaml, this fixture must be
+# updated to match — `expect_state` after each turn is the chain
+# successor declared on that spoke's commit `on:` arc.
+test_kind: flow
+app: ../app.yaml
+initial_state: intro
+
+turns:
+  # ── intro → single_basic ───────────────────────────────────────────
+  - intent: { name: begin, slots: {} }
+    expect_state: single_basic
+
+  # ── single_basic → single_no_slots ────────────────────────────────
+  - intent: { name: chose_color, slots: { color: red } }
+    expect_state: single_no_slots
+
+  # ── single_no_slots → single_per_item_when (per_item_gate flips) ──
+  - intent: { name: chose_bare, slots: {} }
+    expect_state: single_per_item_when
+
+  # ── single_per_item_when → single_templated (day/money seeded) ────
+  - intent: { name: chose_gated, slots: { flag: opened } }
+    expect_state: single_templated
+
+  # ── single_templated → single_templated_slots (money → 300) ───────
+  - intent: { name: chose_templated, slots: { day_label: noon } }
+    expect_state: single_templated_slots
+
+  # ── single_templated_slots → single_param_string ──────────────────
+  - intent: { name: chose_templated_slot, slots: { money_amount: "300" } }
+    expect_state: single_param_string
+
+  # ── single_param_string → single_param_int ────────────────────────
+  - intent: { name: set_hero_name, slots: { name: "Aria" } }
+    expect_state: single_param_int
+
+  # ── single_param_int → single_param_enum ──────────────────────────
+  - intent: { name: set_hero_age, slots: { age: 27 } }
+    expect_state: single_param_enum
+
+  # ── single_param_enum → multi_basic ───────────────────────────────
+  - intent: { name: set_hero_class, slots: { class: mage } }
+    expect_state: multi_basic
+
+  # ── multi_basic → multi_min_zero ──────────────────────────────────
+  - intent: { name: chose_traits, slots: { traits: [brave, clever] } }
+    expect_state: multi_min_zero
+
+  # ── multi_min_zero → multi_no_max ─────────────────────────────────
+  - intent: { name: chose_optional_extras, slots: { extras: [] } }
+    expect_state: multi_no_max
+
+  # ── multi_no_max → multi_per_item_when (day → 5) ──────────────────
+  - intent: { name: chose_all_perks, slots: { perks: [regen, haste, shield, vision] } }
+    expect_state: multi_per_item_when
+
+  # ── multi_per_item_when → multi_templated (day → 4, money → 80) ───
+  - intent: { name: chose_gated_traits, slots: { traits: [fever, rash] } }
+    expect_state: multi_templated
+
+  # ── multi_templated → form_basic ──────────────────────────────────
+  - intent: { name: chose_templated_traits, slots: { traits: [brave, kind] } }
+    expect_state: form_basic
+
+  # ── form_basic → form_bool (readonly color = picked_color = red) ──
+  - intent: { name: submit_basic_form, slots: { name: "Aria", count: 2 } }
+    expect_state: form_bool
+
+  # ── form_bool → form_float ────────────────────────────────────────
+  - intent: { name: submit_bool_form, slots: { active: "true" } }
+    expect_state: form_float
+
+  # ── form_float → form_enum ────────────────────────────────────────
+  - intent: { name: submit_float_form, slots: { ratio: 0.75 } }
+    expect_state: form_enum
+
+  # ── form_enum → form_placeholder ──────────────────────────────────
+  - intent: { name: submit_enum_form, slots: { method: ford } }
+    expect_state: form_placeholder
+
+  # ── form_placeholder → form_required ──────────────────────────────
+  - intent: { name: submit_placeholder_form, slots: { note: "hello" } }
+    expect_state: form_required
+
+  # ── form_required → form_bounds ───────────────────────────────────
+  - intent: { name: submit_required_form, slots: { value: "filled" } }
+    expect_state: form_bounds
+
+  # ── form_bounds → form_per_field_when (show_secret_field → true) ──
+  - intent: { name: submit_bounds_form, slots: { bounded: 7 } }
+    expect_state: form_per_field_when
+
+  # ── form_per_field_when → form_readonly_expr (money/day seeded) ──
+  - intent: { name: submit_gated_form, slots: { secret: "abracadabra" } }
+    expect_state: form_readonly_expr
+
+  # ── form_readonly_expr → complete (terminal state) ───────────────
+  - intent: { name: submit_readonly_form, slots: { total: 130 } }
+    expect_state: complete
+    expect_world:
+      # Single-mode buckets
+      picked_color:         red
+      bare_choice:          picked
+      per_item_gate:        true
+      per_item_flag:        opened
+      templated_pick:       noon
+      templated_slot_value: "300"
+      hero_name:            "Aria"
+      hero_age:             27
+      hero_class:           mage
+      # Multi-mode buckets
+      picked_traits:        [brave, clever]
+      picked_optional:      []
+      picked_all:           [regen, haste, shield, vision]
+      picked_gated:         [fever, rash]
+      picked_templated:     [brave, kind]
+      # Form-mode buckets
+      form_basic_color:     red
+      form_basic_name:      "Aria"
+      form_basic_count:     2
+      form_active:          "true"
+      form_ratio:           0.75
+      form_method:          ford
+      form_note:            "hello"
+      form_required_value:  "filled"
+      form_bounded:         7
+      form_gated_value:     "abracadabra"
+      form_readonly_total:  130
+      # World clock / shop — final values are whatever the last arc
+      # set them to (form_per_field_when commit set money=100, day=3).
+      money:                100
+      day:                  3
+      show_secret_field:    true
+
+expect_no_errors: true

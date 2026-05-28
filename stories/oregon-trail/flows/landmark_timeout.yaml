@@ -1,0 +1,53 @@
+# landmark_timeout — flips §9.5 from expect_error to a positive fixture.
+#
+# Seeds the session into leg_a_awaiting_reply (Kansas River Crossing).
+# The phase template adds `timeout: { after: "10d", target: "{{ phase.next.continue }}" }`
+# to every leg's _awaiting_reply state; the expander substitutes
+# phase.next.continue per leg, so leg_a's target is leg_b.
+#
+# A single clock-only turn pushes virtual time past 10 days; the
+# orchestrator's timeout dispatcher fires the synthetic transition, the
+# expander-rewritten target lands on leg_b_executing.traveling (via the
+# usual compound resolveInitial drill-down).
+#
+# Engine analogue: testdata/apps/timeout/flows/landmark_timeout.yaml.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: leg_a_awaiting_reply
+use_orchestrator: true
+initial_world:
+  narration:        false
+  current_landmark: "Independence"
+  miles_traveled:   102
+  day:              30
+  food_lbs:         300
+  oxen:             4
+  party_alive:      5
+  health_avg:       100
+  pace:             steady
+  rations:          filling
+  rng_counter:      0
+
+# host.transport.post fires from the awaiting_reply on_enter — stub it so
+# the orchestrator path doesn't drag a real transport handler in.
+host_handlers:
+  host.transport.post:
+    data: { ok: true }
+    delay: "0s"
+
+turns:
+  # Clock-only turn: advance past the 10-day deadline. The dispatcher
+  # fires the synthetic transition to leg_b (the substituted phase.next.continue).
+  #
+  # NOTE: the orchestrator's timeout dispatcher lands on the literal
+  # target path and does NOT run resolveInitial to drill into the
+  # compound substate's `initial:` — so the expect_state is the bare
+  # `leg_b_executing`, not `leg_b_executing.traveling`. This matches
+  # the engine-side fixture testdata/apps/timeout/flows/landmark_timeout.yaml
+  # which also targets an atomic state directly. Phase J may follow up
+  # with engine work to make Timeout: targets honour compound drill-down.
+  - advance_clock: "11d"
+    expect_state: leg_b_executing
+
+expect_no_errors: true

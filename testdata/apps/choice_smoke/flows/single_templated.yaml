@@ -1,0 +1,21 @@
+# single_templated — seeds world.day so the rendered labels resolve,
+# then dispatches with a literal day_label slot. The flow runner does
+# not assert on the rendered view text — the templated labels are a
+# render-time concern. The dispatch shape is the contract. The commit
+# arc also bumps world.money to 300 so single_templated_slots' "Spend
+# all" item resolves to 300 on the next hop.
+test_kind: flow
+app: ../app.yaml
+initial_state: single_templated
+initial_world:
+  day:   2
+  money: 250
+
+turns:
+  - intent: { name: chose_templated, slots: { day_label: noon } }
+    expect_state: single_templated_slots
+    expect_world:
+      templated_pick: noon
+      money:          300
+
+expect_no_errors: true

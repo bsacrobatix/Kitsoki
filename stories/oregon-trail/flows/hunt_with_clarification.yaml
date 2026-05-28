@@ -1,0 +1,172 @@
+# hunt_with_clarification — phase E. Exercises the full background-
+# hunt lifecycle plus mid-flight clarification:
+#
+#   1. Turn 1 — Player at leg_b_awaiting_reply (Fort Kearney) chooses
+#               `hunt`. State transitions to hunt.hunt_idle.
+#   2. Turn 2 — Player commits `shoot { bullets: 50 }`. State
+#               transitions to hunt.hunt_running; on_enter dispatches
+#               host.run as a background job with bind: last_job_id.
+#               The stub for host.run sets request_clarification, which
+#               causes the testrunner to call host.RequestClarification
+#               mid-handler and block until an answer arrives. After
+#               advance_clock: "300ms" the scheduler shows one
+#               action_required notification.
+#   3. Turn 3 — Player fires `answer_clarification` with `target: bison`.
+#               host.jobs.answer_clarification stores the answer; the
+#               handler unblocks and returns its stubbed data (lbs=85,
+#               target=bison, outcome=success). on_complete fires:
+#                 - last_hunt_lbs = 85
+#                 - last_hunt_target = "bison"
+#                 - last_hunt_outcome = "success"
+#                 - food_lbs += 85 (capped at 100; here goes 0→85)
+#                 - bullets -= 50 (200→150)
+#               Inbox shows three unread notifications: info (submit)
+#               + action_required (clarification, still unread because
+#               our YAML inbox state doesn't actually clear the engine
+#               notification ledger) + success (terminal). The runtime
+#               jobs.JobStore counts the action_required as read once
+#               the answer arrives — see internal/jobs/clarification.go.
+#   4. Turn 4 — Player fires `continue` from hunt.hunt_running; the
+#               outcome is now set so it transitions to hunt.hunt_done.
+#   5. Turn 5 — Player fires `continue` from hunt.hunt_done; routes
+#               back to leg_b_awaiting_reply via current_landmark.
+#
+# Note on host.run cmd: the YAML declares `cmd: "echo {...}"` for
+# interactive play. The stub here overrides that with its own Data
+# envelope (the `request_clarification` field on the stub determines
+# whether the handler pauses; the `data` envelope is returned post-
+# resume). So the cmd: literal is decorative under the testrunner.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: leg_b_awaiting_reply
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    banker
+  month:         june
+  money:         400
+  oxen:          4
+  food_lbs:      0
+  bullets:       200
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    90
+  narration:     false
+  current_landmark: "Fort Kearney"
+  miles_traveled: 202
+  day:           20
+
+host_handlers:
+  host.run:
+    # Mid-flight clarification: the testrunner calls
+    # host.RequestClarification with this prompt and blocks until an
+    # answer arrives via host.jobs.answer_clarification.
+    request_clarification: "Multiple species spotted — which one to target?"
+    # After the answer, the handler returns this Data envelope. The
+    # envelope shape matches what host.run's stdout_json would parse
+    # off the inline cmd: in hunt.yaml.
+    data:
+      stdout: '{"lbs":85,"target":"bison","outcome":"success"}'
+      stdout_json:
+        lbs: 85
+        target: "bison"
+        outcome: "success"
+      exit_code: 0
+      ok: true
+    delay: "10ms"
+
+turns:
+
+  # Turn 1: at Fort Kearney's awaiting_reply, fire `hunt` checkpoint.
+  - intent: { name: hunt, slots: {} }
+    expect_state: hunt.hunt_idle
+    expect_world:
+      bullets: 200
+      current_landmark: "Fort Kearney"
+
+  # Turn 2: shoot with 50 bullets. Transition to hunt.hunt_running;
+  # on_enter dispatches the background job. advance_clock past the
+  # 10ms stub delay so the handler reaches RequestClarification.
+  # The scheduler posts an action_required notification.
+  - intent:
+      name: shoot
+      slots: { bullets: 50 }
+    advance_clock: "200ms"
+    expect_state: hunt.hunt_running
+    expect_world:
+      pending_bullet_spend: 50
+      last_job_originating_state: "hunt.hunt_running"
+    expect_inbox:
+      needs_attention: 1
+      # info (job submitted) + action_required (clarification).
+      unread: 2
+      severities: ["action_required", "info"]
+
+  # Turn 3: answer the clarification. The hunt.hunt_running state has
+  # an `answer_clarification` arc that invokes
+  # host.jobs.answer_clarification directly (the inbox detour is also
+  # valid; we exercise the direct path here so the originating state
+  # doesn't change). After advance_clock the handler resumes, returns
+  # the Data envelope, and on_complete fires: food_lbs = 0 + 85 = 85
+  # (under the 100 cap), bullets = 200 - 50 = 150.
+  - intent:
+      name: answer_clarification
+      slots:
+        job_id: "{{ world.last_job_id }}"
+        answer: "bison"
+    advance_clock: "2s"
+    expect_state: hunt.hunt_running
+    # The host.run handler was awaiting_input before this turn; the
+    # answer unblocks it and it returns its stubbed Data envelope, so
+    # the job lands terminal=done during this turn's drain. Locking
+    # status=done catches the same regression class as
+    # river_ford_no_confidence: a list-form cmd: silently lands
+    # status=failed but on_complete still applies the stubbed Data so
+    # turn-4's expect_world above would still pass.
+    expect_jobs:
+      - namespace: host.run
+        status:    done
+
+  # Turn 4: drain — a tiny `look` after the resume lets the listener
+  # catch up with the terminal-event fanout that was deferred behind
+  # the answer_clarification foreground turn's session lock. Without
+  # this drain turn, the same on_complete fires (visible in the
+  # orchestrator log line "background job completed ... on_complete_count=3")
+  # but it arrives between turn-3 assertions and turn-5 RunIntent —
+  # outside the advanceAndWait drain window for turn 3.
+  # See internal/testrunner/flows.go advanceAndWait + WaitListenerIdle.
+  # The canonical clarification fixture
+  # (testdata/apps/background_jobs/flows/clarification.yaml) hits the
+  # same pre-existing race; this `look`-drain pattern is the workaround.
+  - intent: { name: look, slots: {} }
+    advance_clock: "1s"
+    expect_state: hunt.hunt_running
+    expect_world:
+      last_hunt_lbs: 85
+      last_hunt_target: "bison"
+      last_hunt_outcome: "success"
+      food_lbs: 85
+      bullets: 150
+    expect_inbox:
+      # The action_required notification is NOT auto-marked-read by the
+      # runtime on answer (see internal/orchestrator/clarification_test.go
+      # — the test there only asserts the answer flowed through and the
+      # job reached Done; the notification ledger keeps the
+      # action_required row unread). So we expect:
+      #   info (submit) + action_required (still unread) + success (terminal)
+      unread: 3
+      needs_attention: 1
+      severities: ["action_required", "info", "success"]
+
+  # Turn 5: continue from hunt_running — outcome is set, so the guard
+  # routes to hunt_done.
+  - intent: { name: continue, slots: {} }
+    expect_state: hunt.hunt_done
+
+  # Turn 6: continue from hunt_done — routes back to Fort Kearney's
+  # awaiting_reply via current_landmark lookup.
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_b_awaiting_reply
+
+expect_no_errors: true
