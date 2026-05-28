@@ -45,6 +45,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/expr"
@@ -2357,14 +2358,14 @@ func (m *machineImpl) AllowedIntents(cur app.StatePath, w world.World) []Allowed
 
 // ─── Event helpers ───────────────────────────────────────────────────────────
 
-var eventSeq int // package-level monotonic seq; tests reset this if needed
+var eventSeq atomic.Int64 // package-level monotonic seq; safe for concurrent use
 
 func newEvent(kind store.EventKind, payload map[string]any) store.Event {
 	b, _ := json.Marshal(payload)
-	eventSeq++
+	seq := eventSeq.Add(1)
 	return store.Event{
 		Kind:    kind,
-		Seq:     eventSeq,
+		Seq:     int(seq),
 		Payload: b,
 	}
 }

@@ -34,6 +34,7 @@ import (
 	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
 	kitsokimcp "kitsoki/internal/mcp"
+	"kitsoki/internal/oracle"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
 	"kitsoki/internal/tui"
@@ -280,6 +281,13 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			}
 			host.SetAgentRegistry(agentReg)
 
+			// Build oracle plugin registry from oracle_plugins: declarations.
+			oracleReg, oracleRegErr := oracle.BuildRegistryFromDef(def, h)
+			if oracleRegErr != nil {
+				return fmt.Errorf("build oracle registry: %w", oracleRegErr)
+			}
+			defer func() { _ = oracleReg.Close() }()
+
 			// Allocate the room-enter sink up-front so it can be
 			// passed into the orchestrator AND held by the rootModel.
 			// Bound to the tea.Program below via sink.Attach(p) after
@@ -298,6 +306,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				orchestrator.WithJournalWriter(jw),
 				orchestrator.WithJournalReader(jr),
 				orchestrator.WithRoomEnterSink(roomEnterSink),
+				orchestrator.WithOracleRegistry(oracleReg),
 			)
 
 			ctx := context.Background()

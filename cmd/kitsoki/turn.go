@@ -39,6 +39,7 @@ import (
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	"kitsoki/internal/machine"
+	"kitsoki/internal/oracle"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
 )
@@ -240,9 +241,19 @@ Examples:
 			}
 			chatAdapter := chathost.NewAdapter(chatStore)
 
+			// Build the oracle plugin registry from the app's oracle_plugins
+			// declarations. Wiring this lets rooms use external oracle transports
+			// (subprocess, mcp_http) via the oracle: field on effects.
+			oracleReg, oracleRegErr := oracle.BuildRegistryFromDef(def, h)
+			if oracleRegErr != nil {
+				return fmt.Errorf("build oracle registry: %w", oracleRegErr)
+			}
+			defer func() { _ = oracleReg.Close() }()
+
 			orch := orchestrator.New(def, m, s, h,
 				orchestrator.WithHostRegistry(hostReg),
 				orchestrator.WithChatStore(chatAdapter),
+				orchestrator.WithOracleRegistry(oracleReg),
 			)
 
 			result, err := orch.OneShot(cmd.Context(), orchestrator.OneShotInput{
@@ -354,10 +365,21 @@ func runTraceTurn(cmd *cobra.Command, appPath, tracePath, intentName string, slo
 		return infraError("validate hosts: %v", err)
 	}
 
+	// Build oracle registry for the trace path. The noRunHarness is used for
+	// intent routing; oracle.claude builtin wraps it too but oracle calls in the
+	// trace path are direct-intent (no LLM oracle), so the registry is wired for
+	// external transports declared in oracle_plugins:.
+	oracleReg, oracleRegErr := oracle.BuildRegistryFromDef(def, &noRunHarness{})
+	if oracleRegErr != nil {
+		return infraError("build oracle registry: %v", oracleRegErr)
+	}
+	defer func() { _ = oracleReg.Close() }()
+
 	orch := orchestrator.New(def, m, s, &noRunHarness{},
 		orchestrator.WithHostRegistry(hostReg),
 		orchestrator.WithEventSink(sink),
 		orchestrator.WithEventSinkAuthority(true),
+		orchestrator.WithOracleRegistry(oracleReg),
 	)
 
 	ctx := cmd.Context()

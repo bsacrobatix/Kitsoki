@@ -73,7 +73,9 @@ func TestLayer6_CloakOrchestratorProperty(t *testing.T) {
 	for seqIdx := 0; seqIdx < sequences; seqIdx++ {
 		seqIdx := seqIdx
 		t.Run("seq", func(t *testing.T) {
-			t.Parallel()
+			// Not parallel: pongo2's global template set is not thread-safe
+			// under concurrent writes from multiple goroutines. Running
+			// subtests sequentially avoids the race without losing coverage.
 			rng := rand.New(rand.NewSource(int64(seqIdx + 42)))
 			dir := t.TempDir()
 			tracePath := filepath.Join(dir, "seq.jsonl")

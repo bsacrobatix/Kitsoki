@@ -18,10 +18,12 @@ import (
 	"strings"
 )
 
-// knownB2Plugins is the set of plugin values that are fully supported in B-2.
-var knownB2Plugins = map[string]bool{
+// knownPlugins is the set of all plugin values supported (B-2 builtins + B-3 transports).
+var knownPlugins = map[string]bool{
 	"builtin.claude_cli": true,
 	"builtin.inprocess":  true,
+	"subprocess":         true,
+	"mcp_http":           true,
 }
 
 // resolveOraclePlugins validates and resolves all oracle plugin declarations.
@@ -50,16 +52,19 @@ func resolveOraclePlugins(def *AppDef, file string) []error {
 			addErr(fmt.Sprintf("oracle_plugins.%s: plugin: is required", name))
 			continue
 		}
-		if !knownB2Plugins[decl.Plugin] {
-			// B-3 stubs: recognise but mark as unsupported.
-			switch decl.Plugin {
-			case "subprocess", "mcp_http":
-				addErr(fmt.Sprintf("oracle_plugins.%s: plugin %q not yet supported in phase B-2 — coming in B-3", name, decl.Plugin))
-				continue
-			default:
-				addErr(fmt.Sprintf("oracle_plugins.%s: unknown plugin %q (supported in B-2: builtin.claude_cli, builtin.inprocess)", name, decl.Plugin))
-				continue
-			}
+		if !knownPlugins[decl.Plugin] {
+			addErr(fmt.Sprintf("oracle_plugins.%s: unknown plugin %q (supported: builtin.claude_cli, builtin.inprocess, subprocess, mcp_http)", name, decl.Plugin))
+			continue
+		}
+		// subprocess transport requires command:.
+		if decl.Plugin == "subprocess" && strings.TrimSpace(decl.Command) == "" {
+			addErr(fmt.Sprintf("oracle_plugins.%s: subprocess plugin requires command:", name))
+			continue
+		}
+		// mcp_http transport requires endpoint:.
+		if decl.Plugin == "mcp_http" && strings.TrimSpace(decl.Endpoint) == "" {
+			addErr(fmt.Sprintf("oracle_plugins.%s: mcp_http plugin requires endpoint:", name))
+			continue
 		}
 		// Interpolate ${VAR} in Env map.
 		for k, v := range decl.Env {

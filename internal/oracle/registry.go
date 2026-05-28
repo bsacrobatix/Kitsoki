@@ -5,15 +5,14 @@
 // app-load time from the `hosts:` YAML block and injected into the dispatch
 // context via host.WithOracleRegistry.
 //
-// Plugin values supported in B-2:
+// Supported plugin values (B-3):
 //
 //   - "builtin.claude_cli" — the default; resolves to the claude-CLI-backed
 //     oracle registered via RegisterBuiltinClaudeCLI.
-//   - "builtin.inprocess" — an in-process oracle registered programmatically
-//     via RegisterInProcess; used by tests that inject a stub AskFunc.
-//
-// B-3 will add "subprocess" (JSON-RPC over stdio) and "mcp_http"
-// (MCP-over-HTTP) transports; those stubs return an error in B-2.
+//   - "builtin.inprocess" — an in-process oracle registered programmatically;
+//     used by tests that inject a stub AskFunc.
+//   - "subprocess" — JSON-RPC 2.0 over stdio; see SubprocessOracle.
+//   - "mcp_http" — MCP-over-HTTP; see MCPHTTPOracle.
 package oracle
 
 import (
@@ -107,11 +106,11 @@ func (r *Registry) Close() error {
 const DefaultOracleName = "oracle.claude"
 
 // PluginNotSupportedError is returned when a plugin value is recognised but
-// not yet implemented in the current phase (B-3 stubs).
+// not yet fully constructed (e.g. builtin.inprocess requires programmatic injection).
 type PluginNotSupportedError struct {
 	Plugin string
 }
 
 func (e *PluginNotSupportedError) Error() string {
-	return fmt.Sprintf("oracle plugin %q not yet supported in phase B-2 — coming in B-3", e.Plugin)
+	return fmt.Sprintf("oracle plugin %q not constructable from YAML — B-3 transport, inject programmatically", e.Plugin)
 }

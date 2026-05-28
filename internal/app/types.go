@@ -130,14 +130,18 @@ type TurnNumber int64
 // Only `oracle.*` prefixed host entries are parsed as plugin declarations;
 // other host entries in `hosts:` are the flat string allow-list.
 //
-// Supported plugin values in B-2:
+// Supported plugin values (B-3):
 //   - "builtin.claude_cli" — the default; wraps the existing claude-CLI harness.
 //   - "builtin.inprocess"  — opt-in in-process oracle (used by tests / stubs).
-//
-// B-3 adds "subprocess" (JSON-RPC over stdio) and "mcp_http" (MCP-over-HTTP).
+//   - "subprocess"         — JSON-RPC 2.0 over stdio; requires command:.
+//   - "mcp_http"           — MCP-over-HTTP; requires endpoint:.
 type OraclePluginDecl struct {
 	// Plugin is the transport identifier (e.g. "builtin.claude_cli", "mcp_http").
 	Plugin string `yaml:"plugin"`
+	// Command is the subprocess binary path. Required for subprocess transport.
+	Command string `yaml:"command,omitempty"`
+	// Args is the subprocess argument list. Optional for subprocess transport.
+	Args []string `yaml:"args,omitempty"`
 	// Endpoint is used by mcp_http plugins; ignored by builtin transports.
 	Endpoint string `yaml:"endpoint,omitempty"`
 	// Tool is the MCP tool name on mcp_http plugins. Defaults to "ask".

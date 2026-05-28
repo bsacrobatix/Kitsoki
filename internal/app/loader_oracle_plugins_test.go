@@ -170,27 +170,90 @@ oracle_plugins:
 	}
 }
 
-// TestOraclePlugins_B3StubRejected verifies that B-3 transports (mcp_http,
-// subprocess) are rejected in B-2 with a helpful error.
-func TestOraclePlugins_B3StubRejected(t *testing.T) {
+// TestOraclePlugins_SubprocessMissingCommand verifies that a subprocess plugin
+// without a command: field is rejected.
+func TestOraclePlugins_SubprocessMissingCommand(t *testing.T) {
 	t.Parallel()
-	for _, plug := range []string{"mcp_http", "subprocess"} {
-		plug := plug
-		t.Run(plug, func(t *testing.T) {
-			t.Parallel()
-			yaml := minimalApp + `
+	yaml := minimalApp + `
 oracle_plugins:
   oracle.external:
-    plugin: ` + plug + `
+    plugin: subprocess
 `
-			_, err := app.LoadBytes([]byte(yaml))
-			if err == nil {
-				t.Fatalf("plugin %q: expected error, got nil", plug)
-			}
-			if !strings.Contains(err.Error(), "B-3") {
-				t.Errorf("plugin %q: error should mention B-3; got: %v", plug, err)
-			}
-		})
+	_, err := app.LoadBytes([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for subprocess without command, got nil")
+	}
+	if !strings.Contains(err.Error(), "command") {
+		t.Errorf("error should mention 'command'; got: %v", err)
+	}
+}
+
+// TestOraclePlugins_MCPHTTPMissingEndpoint verifies that a mcp_http plugin
+// without an endpoint: field is rejected.
+func TestOraclePlugins_MCPHTTPMissingEndpoint(t *testing.T) {
+	t.Parallel()
+	yaml := minimalApp + `
+oracle_plugins:
+  oracle.external:
+    plugin: mcp_http
+`
+	_, err := app.LoadBytes([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for mcp_http without endpoint, got nil")
+	}
+	if !strings.Contains(err.Error(), "endpoint") {
+		t.Errorf("error should mention 'endpoint'; got: %v", err)
+	}
+}
+
+// TestOraclePlugins_SubprocessAccepted verifies that a subprocess plugin with
+// command: is accepted by the loader.
+func TestOraclePlugins_SubprocessAccepted(t *testing.T) {
+	t.Parallel()
+	yaml := minimalApp + `
+oracle_plugins:
+  oracle.external:
+    plugin: subprocess
+    command: /usr/bin/my-oracle
+    args: ["--mode", "fast"]
+`
+	def, err := app.LoadBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	plug, ok := def.OraclePlugins["oracle.external"]
+	if !ok {
+		t.Fatal("oracle.external not found in OraclePlugins")
+	}
+	if plug.Command != "/usr/bin/my-oracle" {
+		t.Errorf("Command: got %q, want /usr/bin/my-oracle", plug.Command)
+	}
+}
+
+// TestOraclePlugins_MCPHTTPAccepted verifies that a mcp_http plugin with
+// endpoint: is accepted by the loader.
+func TestOraclePlugins_MCPHTTPAccepted(t *testing.T) {
+	t.Parallel()
+	yaml := minimalApp + `
+oracle_plugins:
+  oracle.external:
+    plugin: mcp_http
+    endpoint: "http://localhost:7301/mcp"
+    tool: ask
+`
+	def, err := app.LoadBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	plug, ok := def.OraclePlugins["oracle.external"]
+	if !ok {
+		t.Fatal("oracle.external not found in OraclePlugins")
+	}
+	if plug.Endpoint != "http://localhost:7301/mcp" {
+		t.Errorf("Endpoint: got %q, want http://localhost:7301/mcp", plug.Endpoint)
+	}
+	if plug.Tool != "ask" {
+		t.Errorf("Tool: got %q, want ask", plug.Tool)
 	}
 }
 
