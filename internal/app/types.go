@@ -126,6 +126,30 @@ type TurnNumber int64
 
 // ---- App-definition types (loaded from YAML) --------------------------------
 
+// OraclePluginDecl declares one oracle plugin entry in the `hosts:` block.
+// Only `oracle.*` prefixed host entries are parsed as plugin declarations;
+// other host entries in `hosts:` are the flat string allow-list.
+//
+// Supported plugin values in B-2:
+//   - "builtin.claude_cli" — the default; wraps the existing claude-CLI harness.
+//   - "builtin.inprocess"  — opt-in in-process oracle (used by tests / stubs).
+//
+// B-3 adds "subprocess" (JSON-RPC over stdio) and "mcp_http" (MCP-over-HTTP).
+type OraclePluginDecl struct {
+	// Plugin is the transport identifier (e.g. "builtin.claude_cli", "mcp_http").
+	Plugin string `yaml:"plugin"`
+	// Endpoint is used by mcp_http plugins; ignored by builtin transports.
+	Endpoint string `yaml:"endpoint,omitempty"`
+	// Tool is the MCP tool name on mcp_http plugins. Defaults to "ask".
+	Tool string `yaml:"tool,omitempty"`
+	// Env is a map of environment variable names → values (supports ${VAR}
+	// interpolation at plugin-init time). Used by subprocess transport.
+	Env map[string]string `yaml:"env,omitempty"`
+	// Headers is a map of HTTP header names → values (supports ${VAR}
+	// interpolation at plugin-init time). Used by mcp_http transport.
+	Headers map[string]string `yaml:"headers,omitempty"`
+}
+
 // AppDef is the top-level deserialized application definition.
 type AppDef struct {
 	App     AppMeta           `yaml:"app"`
@@ -136,6 +160,12 @@ type AppDef struct {
 	OffPath *OffPathDef       `yaml:"off_path,omitempty"`
 	// Hosts is the allow-list of host handler names this app may invoke (§2).
 	Hosts []string `yaml:"hosts,omitempty"`
+	// OraclePlugins declares oracle plugin configurations under the top-level
+	// `oracle_plugins:` YAML key (B-2 additive syntax). Keys are oracle alias
+	// names (e.g. "oracle.claude", "oracle.autofix_fixer"); values are plugin
+	// declarations. When absent or nil, the loader injects a default
+	// "oracle.claude" entry with plugin "builtin.claude_cli".
+	OraclePlugins map[string]*OraclePluginDecl `yaml:"oracle_plugins,omitempty"`
 	// Proposals declares named proposal kinds (§3).
 	Proposals map[string]*ProposalKind `yaml:"proposals,omitempty"`
 	// Include lists glob patterns for additional YAML files to merge (§9).
@@ -683,6 +713,13 @@ type Effect struct {
 	// is dispatched. Validated like on_complete: children (no background:,
 	// no nested on_complete:).
 	Effects []Effect `yaml:"effects,omitempty"`
+
+	// OraclePlugin names the oracle alias declared in `oracle_plugins:` that
+	// should handle this effect's oracle call (e.g. "oracle.autofix_fixer").
+	// Empty resolves to "oracle.claude" (the default). This field is populated
+	// when a room declares `oracle: oracle.<name>` on an effect (proposal §2
+	// "Shape"). When absent, the dispatcher resolves the default plugin.
+	OraclePlugin string `yaml:"oracle,omitempty"`
 }
 
 // ProposalKind declares a named proposal kind (§3).

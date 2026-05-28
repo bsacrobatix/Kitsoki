@@ -169,6 +169,13 @@ func LoadWithOverrides(path string, ifaceOverrides map[string]string) (*AppDef, 
 		return nil, errors.Join(exitErrs...)
 	}
 
+	// Resolve oracle plugin declarations from oracle_plugins: block. This
+	// validates plugin names, performs ${VAR} substitution in env/headers, and
+	// injects the default oracle.claude entry when absent (proposal §2 B-2).
+	if pluginErrs := resolveOraclePlugins(merged, path); len(pluginErrs) > 0 {
+		return nil, errors.Join(pluginErrs...)
+	}
+
 	// Now fully validate the merged definition.
 	_, validErrs := validateDef(merged, path)
 	if len(validErrs) > 0 {
@@ -644,6 +651,11 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 	// use Load(path) for file-backed apps.
 	if agentErrs := resolveAgentDecls(&def, file, ""); len(agentErrs) > 0 {
 		return nil, agentErrs
+	}
+
+	// Resolve oracle plugin declarations from oracle_plugins: block.
+	if pluginErrs := resolveOraclePlugins(&def, file); len(pluginErrs) > 0 {
+		return nil, pluginErrs
 	}
 
 	return validateDef(&def, file)

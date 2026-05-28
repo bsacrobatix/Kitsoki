@@ -27,6 +27,7 @@ import (
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
+	"kitsoki/internal/oracle"
 	"kitsoki/internal/render"
 	"kitsoki/internal/semroute"
 	"kitsoki/internal/store"
@@ -77,6 +78,13 @@ type Orchestrator struct {
 	// resume reads need methods (ListDrivesBySession, ListPTYForHost) that
 	// aren't on host.ChatStore. Optional; nil disables the surfacing.
 	chatsConcrete *chats.Store
+
+	// oracleRegistry holds the per-app oracle plugin registry (proposal §2 B-2).
+	// When non-nil, injected into the dispatch context via host.WithOracleRegistry
+	// so oracle handlers can route through Oracle.Ask. When nil, handlers fall
+	// through to their existing direct claude-CLI logic (backwards compat).
+	// Set via WithOracleRegistry.
+	oracleRegistry *oracle.Registry
 
 	// journalWriter is the durable journal writer (continue-mode §4.9 Rule 1).
 	// When nil, callers fall through to the legacy AppendEvents path.
@@ -308,6 +316,16 @@ func WithClock(c clock.Clock) Option {
 		if c != nil {
 			o.clk = c
 		}
+	}
+}
+
+// WithOracleRegistry wires an oracle.Registry into the orchestrator so the
+// dispatch context carries oracle plugin resolution. When nil (the default),
+// oracle handlers fall through to their existing direct claude-CLI logic.
+// For B-2: pass a registry built from the app's oracle_plugins declarations.
+func WithOracleRegistry(reg *oracle.Registry) Option {
+	return func(o *Orchestrator) {
+		o.oracleRegistry = reg
 	}
 }
 
@@ -1271,6 +1289,11 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	// the existing journal write.
 	if o.eventSink != nil {
 		ctx = host.WithOracleEventSink(ctx, o.eventSink)
+	}
+	// B-2: inject the oracle plugin registry so handlers can route through
+	// Oracle.Ask. When nil, handlers fall through to direct claude-CLI logic.
+	if o.oracleRegistry != nil {
+		ctx = host.WithOracleRegistry(ctx, o.oracleRegistry)
 	}
 	// OracleCallCtx carries session/turn/state for journal Entry metadata.
 	// Turn is not directly available here (it lives in the Turn() local), so
