@@ -16,17 +16,43 @@ package testrunner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/host"
+	"kitsoki/internal/oracle"
 	"kitsoki/internal/store"
 	"kitsoki/internal/world"
 )
+
+// testMemSink is an in-memory EventSink for test assertions.
+type testMemSink struct {
+	mu     sync.Mutex
+	events []store.Event
+}
+
+func newMemSink() *testMemSink { return &testMemSink{} }
+
+func (s *testMemSink) Append(ev store.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, ev)
+	return nil
+}
+
+func (s *testMemSink) History() store.History {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(store.History, len(s.events))
+	copy(out, s.events)
+	return out
+}
 
 // ─── §3.3.1: replay:any produces distinct call_ids ────────────────────────────
 
@@ -354,18 +380,108 @@ func requireAllEpisodesPlayed(t *testing.T, cas *Cassette) {
 
 // ─── §3.3.4: Episode response fails schema ────────────────────────────────────
 
-// TestCassettesDeterminism_EpisodeResponseFailsSchema is skipped pending
-// phase C+. Phase B shipped in-process schema validation via oracle.ValidateSubmission
-// (oracle_dispatch.go Dispatch path), but the legacy cassette dispatcher
-// (BuildCassetteDispatcher / buildCassetteDispatcherFull) does not route through
-// Dispatch — it bypasses the Oracle plugin interface.  Until the legacy
-// cassette dispatcher is migrated to the Oracle plugin path (phase C+), there
-// is no hook in the cassette replay path to assert in-process validation failure
-// on a cassette response.  The NewCassetteOracle + host.Dispatch path does
-// validate; that path is tested in internal/testrunner/oracle_conformance_test.go.
+// TestCassettesDeterminism_EpisodeResponseFailsSchema verifies that a cassette
+// whose recorded response fails the room's schema check produces an OracleError
+// event pointing at the cassette as the source (B-7 / finding 6).
+//
+// Uses NewCassetteOracle + host.Dispatch (the production Dispatch path) which
+// validates Submission against SchemaJSON. The legacy BuildCassetteDispatcher
+// path does not route through Dispatch and is not affected by this test.
 func TestCassettesDeterminism_EpisodeResponseFailsSchema(t *testing.T) {
-	t.Skipf("phase C+ deferral: legacy cassette dispatcher bypasses oracle.Dispatch schema validation; " +
-		"migrate to NewCassetteOracle+host.Dispatch to enable this test")
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// Episode whose oracle.response is {"wrong_field": true} — the schema below
+	// requires only {"result": string} with additionalProperties: false.
+	casPath := writeCassetteFile(t, dir, "schema_fail.yaml", `
+kind: host_cassette
+app_id: schema_test_app
+episodes:
+  - id: bad_schema_ep
+    match:
+      handler: oracle.test_fixer
+    response:
+      data: {ok: true}
+    oracle:
+      verb: ask
+      response: '{"wrong_field": true}'
+`)
+	cas, err := LoadCassette(casPath)
+	if err != nil {
+		t.Fatalf("LoadCassette: %v", err)
+	}
+
+	// Strict schema: only allows {result: string}, no additional properties.
+	schemaJSON := json.RawMessage(`{
+		"type": "object",
+		"properties": {"result": {"type": "string"}},
+		"required": ["result"],
+		"additionalProperties": false
+	}`)
+
+	// Create the cassetteOracle and register it in a registry.
+	co := NewCassetteOracle(cas, "oracle.test_fixer", func() string { return "test_state" }, nil)
+	defer co.Close()
+
+	reg := oracle.NewRegistry()
+	reg.Register("oracle.test_fixer", co)
+
+	// Set up a sink to capture events.
+	sink := newMemSink()
+	ctx := context.Background()
+	ctx = host.WithOracleRegistry(ctx, reg)
+	ctx = host.WithOracleEventSink(ctx, sink)
+	ctx = host.WithOracleCallCtx(ctx, host.OracleCallCtx{SessionID: "test-sess"})
+
+	// Dispatch through host.Dispatch with the strict schema.
+	dr := host.OracleDispatchRequest{
+		Req: oracle.AskRequest{
+			Verb:       "ask",
+			PromptText: "fix the bug",
+			SchemaJSON: schemaJSON,
+		},
+		PluginName: "oracle.test_fixer",
+		Verb:       "ask",
+	}
+	_, dispErr := host.Dispatch(ctx, dr)
+
+	// The dispatch MUST fail because the cassette response doesn't satisfy the schema.
+	if dispErr == nil {
+		t.Fatal("expected dispatch error due to schema violation, got nil")
+	}
+
+	// The error should be a schema_invalid AskError.
+	var ae *oracle.AskError
+	if !errors.As(dispErr, &ae) {
+		t.Fatalf("expected *oracle.AskError, got %T: %v", dispErr, dispErr)
+	}
+	if ae.Kind != "schema_invalid" {
+		t.Errorf("AskError.Kind: got %q, want schema_invalid", ae.Kind)
+	}
+
+	// The sink should contain OracleCalled + OracleError events (not OracleReturned).
+	events := sink.events
+	var calledCount, errorCount, returnedCount int
+	for _, ev := range events {
+		switch ev.Kind {
+		case store.OracleCalled:
+			calledCount++
+		case store.OracleReturned:
+			returnedCount++
+		case store.OracleError:
+			errorCount++
+		}
+	}
+	if calledCount != 1 {
+		t.Errorf("OracleCalled event count: got %d, want 1", calledCount)
+	}
+	if errorCount != 1 {
+		t.Errorf("OracleError event count: got %d, want 1", errorCount)
+	}
+	if returnedCount != 0 {
+		t.Errorf("OracleReturned event count: got %d, want 0 (should not appear on schema failure)", returnedCount)
+	}
 }
 
 // ─── §3.3.5: Oversize episode via !include ────────────────────────────────────

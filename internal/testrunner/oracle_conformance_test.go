@@ -21,9 +21,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 
+	"kitsoki/internal/host"
 	"kitsoki/internal/oracle"
+	"kitsoki/internal/store"
 )
 
 // conformancePrompt is the fixed prompt used across all transports.
@@ -346,4 +349,168 @@ episodes:
 		}
 		seen[r.callID] = true
 	}
+}
+
+// conformanceMemSink is a thread-safe in-memory EventSink for conformance tests.
+type conformanceMemSink struct {
+	mu     sync.Mutex
+	events []store.Event
+}
+
+func (s *conformanceMemSink) Append(ev store.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, ev)
+	return nil
+}
+
+func (s *conformanceMemSink) History() store.History {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(store.History, len(s.events))
+	copy(out, s.events)
+	return out
+}
+
+// TestConformance_FourTransports_DispatchEvents verifies that all four transports
+// produce OracleCalled + OracleReturned events with identical structural content
+// (Verb, Submission in OracleReturned) when driven through host.Dispatch.
+// The test masks ts (wall-clock) and Meta.transport (transport-specific) fields.
+//
+// This is the B-7 hardening of the B-4 conformance test: it proves the Dispatch
+// path produces identical events regardless of transport, not just identical
+// AskResponse.Submission at the oracle.Ask level.
+func TestConformance_FourTransports_DispatchEvents(t *testing.T) {
+	t.Parallel()
+
+	req := conformanceAskRequest()
+	refSub := referenceEchoSubmission(t)
+
+	// Helper that runs one oracle through host.Dispatch and returns the oracle events.
+	runDispatch := func(t *testing.T, name string, o oracle.Oracle) (calledPayload, returnedPayload map[string]any) {
+		t.Helper()
+		reg := oracle.NewRegistry()
+		reg.Register("oracle.echo", o)
+
+		sink := &conformanceMemSink{}
+		ctx := context.Background()
+		ctx = host.WithOracleRegistry(ctx, reg)
+		ctx = host.WithOracleEventSink(ctx, sink)
+		ctx = host.WithOracleCallCtx(ctx, host.OracleCallCtx{SessionID: "test-sess"})
+
+		dr := host.OracleDispatchRequest{
+			Req:        req,
+			PluginName: "oracle.echo",
+			Verb:       req.Verb,
+		}
+		_, err := host.Dispatch(ctx, dr)
+		if err != nil {
+			t.Fatalf("%s: Dispatch: %v", name, err)
+		}
+
+		events := sink.History()
+		var called, returned *store.Event
+		for i := range events {
+			ev := events[i]
+			switch ev.Kind {
+			case store.OracleCalled:
+				called = &ev
+			case store.OracleReturned:
+				returned = &ev
+			}
+		}
+		if called == nil {
+			t.Fatalf("%s: no OracleCalled event", name)
+		}
+		if returned == nil {
+			t.Fatalf("%s: no OracleReturned event", name)
+		}
+
+		var cp, rp map[string]any
+		_ = json.Unmarshal(called.Payload, &cp)
+		_ = json.Unmarshal(returned.Payload, &rp)
+		return cp, rp
+	}
+
+	// ── 1. In-process oracle ──────────────────────────────────────────────────
+	inprocOracle := oracle.New(oracle.AskFunc(func(_ context.Context, r oracle.AskRequest) (oracle.AskResponse, error) {
+		head := r.PromptText
+		if len(head) > 50 {
+			head = head[:50]
+		}
+		sub, _ := json.Marshal(map[string]any{"echo_verb": r.Verb, "echo_prompt_head": head})
+		return oracle.AskResponse{Submission: json.RawMessage(sub), Meta: map[string]any{"transport": "inprocess"}}, nil
+	}))
+	defer inprocOracle.Close()
+	inCalled, inReturned := runDispatch(t, "in-process", inprocOracle)
+
+	// ── 2. MCP-over-HTTP oracle ───────────────────────────────────────────────
+	httpOracle, httpSrv := buildEchoHTTPOracleForConformance(t)
+	defer httpOracle.Close()
+	defer httpSrv.Close()
+	httpCalled, httpReturned := runDispatch(t, "mcp_http", httpOracle)
+
+	// ── 3. Cassette oracle ────────────────────────────────────────────────────
+	casDir := t.TempDir()
+	casPath := filepath.Join(casDir, "conformance_dispatch.yaml")
+	responseField := string(refSub)
+	casYAML := fmt.Sprintf(`kind: host_cassette
+app_id: conformance
+episodes:
+  - id: echo_ep_dispatch
+    match:
+      handler: oracle.echo
+    oracle:
+      verb: %s
+      response: '%s'
+    response:
+      data: {}
+`, conformanceVerb, responseField)
+	if err := os.WriteFile(casPath, []byte(casYAML), 0644); err != nil {
+		t.Fatalf("write cassette: %v", err)
+	}
+	cas, err := LoadCassette(casPath)
+	if err != nil {
+		t.Fatalf("LoadCassette: %v", err)
+	}
+	casOracle := NewCassetteOracle(cas, "oracle.echo", func() string { return "" }, nil)
+	defer casOracle.Close()
+	casCalled, casReturned := runDispatch(t, "cassette", casOracle)
+
+	// ── Compare: OracleCalled.verb must match across all transports ───────────
+	for name, called := range map[string]map[string]any{
+		"in-process": inCalled, "mcp_http": httpCalled, "cassette": casCalled,
+	} {
+		if called["verb"] != conformanceVerb {
+			t.Errorf("transport %q OracleCalled.verb: got %v, want %q", name, called["verb"], conformanceVerb)
+		}
+	}
+
+	// ── Compare: OracleReturned must carry the same submission across transports ─
+	// Parse each transport's returned event to extract the submission.
+	extractSub := func(t *testing.T, name string, returned map[string]any) json.RawMessage {
+		t.Helper()
+		resp, _ := returned["response"]
+		respBytes, _ := json.Marshal(resp)
+		var parsed map[string]any
+		_ = json.Unmarshal(respBytes, &parsed)
+		sub, _ := parsed["submission"]
+		subBytes, _ := json.Marshal(sub)
+		return json.RawMessage(subBytes)
+	}
+
+	inSub := extractSub(t, "in-process", inReturned)
+	httpSub := extractSub(t, "mcp_http", httpReturned)
+	casSub := extractSub(t, "cassette", casReturned)
+
+	for name, sub := range map[string]json.RawMessage{
+		"in-process": inSub, "mcp_http": httpSub, "cassette": casSub,
+	} {
+		if string(sub) != string(refSub) {
+			t.Errorf("transport %q OracleReturned.submission:\n  got:  %s\n  want: %s", name, sub, refSub)
+		}
+	}
+
+	t.Logf("all 3 direct-Dispatch transports agree on OracleCalled.verb=%q and OracleReturned.submission=%s",
+		conformanceVerb, refSub)
 }

@@ -322,7 +322,7 @@ func WithClock(c clock.Clock) Option {
 // WithOracleRegistry wires an oracle.Registry into the orchestrator so the
 // dispatch context carries oracle plugin resolution. When nil (the default),
 // oracle handlers fall through to their existing direct claude-CLI logic.
-// For B-2: pass a registry built from the app's oracle_plugins declarations.
+// For B-2/B-7: pass a registry built from the app's hosts: declarations.
 func WithOracleRegistry(reg *oracle.Registry) Option {
 	return func(o *Orchestrator) {
 		o.oracleRegistry = reg
@@ -1346,7 +1346,17 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			"background":         hc.Background,
 		}, 0))
 
-		res, err := o.hosts.Invoke(ctx, hc.Namespace, invokeArgs)
+		// B-7: inject the oracle plugin alias into the context so the handler
+		// can route through host.Dispatch with the correct plugin. When
+		// OraclePlugin is empty the handler falls back to "oracle.claude" (the
+		// default). This is the production wiring that makes explicit `oracle:`
+		// effect fields take effect at runtime.
+		invokeCtx := ctx
+		if hc.OraclePlugin != "" {
+			invokeCtx = host.WithOraclePluginName(ctx, hc.OraclePlugin)
+		}
+
+		res, err := o.hosts.Invoke(invokeCtx, hc.Namespace, invokeArgs)
 		if err != nil {
 			// Infrastructure failure (e.g. handler not registered): record and move on.
 			w.Vars["last_error"] = err.Error()
@@ -2405,7 +2415,12 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			"rerender_fell_back": fellBack,
 			"background":         hc.Background,
 		}, 0))
-		res, err := o.hosts.Invoke(ctx, hc.Namespace, invokeArgs)
+		// B-7: inject oracle plugin alias for summary dispatch path.
+		invokeCtx2 := ctx
+		if hc.OraclePlugin != "" {
+			invokeCtx2 = host.WithOraclePluginName(ctx, hc.OraclePlugin)
+		}
+		res, err := o.hosts.Invoke(invokeCtx2, hc.Namespace, invokeArgs)
 		if err != nil {
 			summary.Error = err.Error()
 			summaries = append(summaries, summary)

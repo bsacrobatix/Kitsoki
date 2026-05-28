@@ -121,18 +121,18 @@ up to the point of an unknown kind that matters for state reconstruction.
 
 ### Oracle event kinds
 
-Every oracle call produces exactly two events: `oracle.called` and
-`oracle.returned` (or `oracle.error` on failure).  These events are **no-ops
+Every oracle call produces exactly two events: `oracle.call.start` and
+`oracle.call.complete` (or `oracle.call.error` on failure).  These events are **no-ops
 for replay** — `BuildJourney` ignores them — but they carry the full prompt and
 response for audit and the runstatus SPA.
 
-| Kind              | When written                                               |
-|-------------------|------------------------------------------------------------|
-| `oracle.called`   | After `Oracle.Ask` returns (so cassette `episode_id` / `match_idx` from `resp.Meta` are available). |
-| `oracle.returned` | After schema validation passes; carries `Submission` + `Meta`. |
-| `oracle.error`    | When `Oracle.Ask` returns an error, or schema validation fails, or a sub-event constraint fires. |
+| Kind                   | When written                                               |
+|------------------------|------------------------------------------------------------|
+| `oracle.call.start`    | After `Oracle.Ask` returns (so cassette `episode_id` / `match_idx` from `resp.Meta` are available). |
+| `oracle.call.complete` | After schema validation passes; carries `Submission` + `Meta`. |
+| `oracle.call.error`    | When `Oracle.Ask` returns an error, or schema validation fails, or a sub-event constraint fires. |
 
-**`oracle.called` payload fields:**
+**`oracle.call.start` payload fields:**
 
 | Field          | Type   | Description                                        |
 |----------------|--------|----------------------------------------------------|
@@ -143,7 +143,7 @@ response for audit and the runstatus SPA.
 | `system_prompt`| string | Effective system prompt (optional).                |
 | `input`        | object | Verb-specific input descriptor (e.g. `{schema_path}`). |
 
-**`oracle.returned` payload fields:**
+**`oracle.call.complete` payload fields:**
 
 | Field        | Type   | Description                                          |
 |--------------|--------|------------------------------------------------------|
@@ -154,7 +154,7 @@ response for audit and the runstatus SPA.
 | `response`   | object | Parsed `Submission` + any verb-specific fields.      |
 | `meta`       | object | Opaque oracle metadata (tokens, cost, transport, …). |
 
-**`oracle.error` payload fields:**
+**`oracle.call.error` payload fields:**
 
 | Field        | Type   | Description                                          |
 |--------------|--------|------------------------------------------------------|
@@ -189,17 +189,17 @@ per exchange (different `matchIdx` → different `call_id`).
 ### Sub-events (B-4)
 
 A plugin may populate `AskResponse.SubEvents` with plugin-internal events. These
-are appended verbatim to the JSONL between the `OracleCalled` and `OracleReturned`
+are appended verbatim to the JSONL between the `oracle.call.start` and `oracle.call.complete`
 lines with the following constraints (all enforced by kitsoki; violations produce
-`OracleError` instead of `OracleReturned` and no sub-events land):
+`oracle.call.error` instead of `oracle.call.complete` and no sub-events land):
 
 - **Namespace:** every sub-event `kind` must start with the dispatching oracle
   plugin name + `.` (e.g. `oracle.autofix_fixer.bash.called`).
-- **`call_id`:** every sub-event `call_id` must match the parent `OracleCalled.call_id`.
+- **`call_id`:** every sub-event `call_id` must match the parent `oracle.call.start` call_id.
 - **Size:** every sub-event is subject to the `PIPE_BUF` = 4096 byte line limit.
 - **Timestamp:** kitsoki re-stamps each sub-event `ts` at append time using its
   own monotonic clock. The plugin's claimed `ts` is discarded. This guarantees all
-  sub-event timestamps fall within `[OracleCalled.ts, OracleReturned.ts)`.
+  sub-event timestamps fall within `[oracle.call.start.ts, oracle.call.complete.ts)`.
 
 ---
 

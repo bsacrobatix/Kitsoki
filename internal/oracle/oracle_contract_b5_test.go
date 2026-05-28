@@ -26,6 +26,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -420,5 +422,116 @@ func TestB5_SubeventsNilVsEmpty(t *testing.T) {
 				t.Error("Submission: expected non-nil")
 			}
 		})
+	}
+}
+
+// ── §3.1: $ref story-load resolver (B-7) ──────────────────────────────────────
+
+// TestB7_SchemaRefs_AbsolutePath verifies that an absolute $ref path is
+// rejected by ValidateSchemaRefs at story-load time.
+func TestB7_SchemaRefs_AbsolutePath(t *testing.T) {
+	t.Parallel()
+	schema := json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"choice": { "$ref": "/etc/passwd" }
+		}
+	}`)
+	err := ValidateSchemaRefs(schema, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for absolute $ref path, got nil")
+	}
+	if !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("error should mention absolute path; got: %v", err)
+	}
+}
+
+// TestB7_SchemaRefs_OutOfTree verifies that a relative $ref that resolves
+// outside the story directory is rejected.
+func TestB7_SchemaRefs_OutOfTree(t *testing.T) {
+	t.Parallel()
+	schema := json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"x": { "$ref": "../../etc/passwd" }
+		}
+	}`)
+	err := ValidateSchemaRefs(schema, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for out-of-tree $ref, got nil")
+	}
+	if !strings.Contains(err.Error(), "outside") && !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("error should mention out-of-tree or not-exist; got: %v", err)
+	}
+}
+
+// TestB7_SchemaRefs_SiblingFileNotExist verifies that a relative $ref to a
+// sibling file that does not exist fails at story-load time.
+func TestB7_SchemaRefs_SiblingFileNotExist(t *testing.T) {
+	t.Parallel()
+	schema := json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"choice": { "$ref": "schemas/choice.json" }
+		}
+	}`)
+	dir := t.TempDir()
+	err := ValidateSchemaRefs(schema, dir)
+	if err == nil {
+		t.Fatal("expected error for missing sibling file, got nil")
+	}
+	if !strings.Contains(err.Error(), "choice.json") {
+		t.Errorf("error should mention the missing file; got: %v", err)
+	}
+}
+
+// TestB7_SchemaRefs_SiblingFileExists verifies that a valid relative $ref to
+// an existing sibling file passes ValidateSchemaRefs cleanly.
+func TestB7_SchemaRefs_SiblingFileExists(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	schemaDir := filepath.Join(dir, "schemas")
+	if err := os.MkdirAll(schemaDir, 0755); err != nil {
+		t.Fatalf("mkdir schemas: %v", err)
+	}
+	choiceSchemaPath := filepath.Join(schemaDir, "choice.json")
+	if err := os.WriteFile(choiceSchemaPath, []byte(`{"type":"string","enum":["a","b"]}`), 0644); err != nil {
+		t.Fatalf("write choice.json: %v", err)
+	}
+
+	schema := json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"choice": { "$ref": "schemas/choice.json" }
+		}
+	}`)
+
+	if err := ValidateSchemaRefs(schema, dir); err != nil {
+		t.Errorf("valid sibling $ref should pass, got: %v", err)
+	}
+}
+
+// TestB7_SchemaRefs_FragmentPassthrough verifies that fragment-only $refs
+// (#/$defs/foo) are not checked against the filesystem.
+func TestB7_SchemaRefs_FragmentPassthrough(t *testing.T) {
+	t.Parallel()
+	schema := json.RawMessage(`{
+		"$defs": { "item": {"type": "string"} },
+		"type": "object",
+		"properties": {
+			"x": { "$ref": "#/$defs/item" }
+		}
+	}`)
+	if err := ValidateSchemaRefs(schema, t.TempDir()); err != nil {
+		t.Errorf("fragment-only $ref should not trigger file check, got: %v", err)
+	}
+}
+
+// TestB7_SchemaRefs_NoRefs verifies that schemas without any $ref pass cleanly.
+func TestB7_SchemaRefs_NoRefs(t *testing.T) {
+	t.Parallel()
+	schema := json.RawMessage(`{"type": "object", "properties": {"x": {"type": "string"}}}`)
+	if err := ValidateSchemaRefs(schema, t.TempDir()); err != nil {
+		t.Errorf("no $refs should pass cleanly, got: %v", err)
 	}
 }

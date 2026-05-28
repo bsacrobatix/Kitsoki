@@ -206,6 +206,20 @@ func OracleExtractHandler(ctx context.Context, args map[string]any) (Result, err
 		return Result{Error: errMsg}, nil
 	}
 
+	// B-7: If an oracle plugin registry is wired in context, route through
+	// host.Dispatch. For extract the rendered "prompt" is the input text.
+	withArgs, _ := args["with"].(map[string]any)
+	var pluginSchemaJSON json.RawMessage
+	if ea.SchemaPath != "" {
+		pluginSchemaJSON = json.RawMessage(`"` + ea.SchemaPath + `"`)
+	}
+	if pluginRes, handled, pluginErr := TryDispatchVerb(ctx, "extract", ea.Input, "", ea.AgentName, "", withArgs, pluginSchemaJSON); handled {
+		if pluginErr != nil {
+			return Result{Error: pluginErr.Error()}, nil
+		}
+		return pluginRes, nil
+	}
+
 	bin, err := resolveOracleBin(ctx)
 	if err != nil {
 		// No claude binary — deterministic tiers can still function; LLM tier

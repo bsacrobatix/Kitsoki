@@ -149,6 +149,23 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		return Result{Error: "host.oracle.ask: prompt_path (or prompt) argument is required"}, nil
 	}
 
+	// B-7: If an oracle plugin registry is wired in context, route through
+	// host.Dispatch (the Oracle plugin interface) instead of the subprocess.
+	// This is the production wiring for the `oracle:` field on effects.
+	// Falls through transparently when no registry is present.
+	schemaArg, _ := args["schema"].(string)
+	var pluginSchemaJSON json.RawMessage
+	if strings.TrimSpace(schemaArg) != "" {
+		pluginSchemaJSON = json.RawMessage(`"` + strings.TrimSpace(schemaArg) + `"`) // pass schema path as hint
+	}
+	withArgs, _ := args["with"].(map[string]any)
+	if pluginRes, handled, pluginErr := TryDispatchVerb(ctx, "ask", rendered, "", agentNameFromArgs(args), "", withArgs, pluginSchemaJSON); handled {
+		if pluginErr != nil {
+			return Result{Error: pluginErr.Error()}, nil
+		}
+		return pluginRes, nil
+	}
+
 	// Choose template scope: prefer explicit `args:` map for new callers;
 	// fall back to full call-args for backward compatibility with rooms that
 	// pass vars at the top level.

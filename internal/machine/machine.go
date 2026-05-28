@@ -111,6 +111,11 @@ type HostInvocation struct {
 	// The orchestrator persists these alongside the job spec; the machine
 	// does not consume them.
 	OnComplete []app.Effect `json:"on_complete,omitempty"`
+	// OraclePlugin is the oracle alias (e.g. "oracle.autofix_fixer") declared
+	// on the effect via the `oracle:` field. Empty means resolve to the default
+	// "oracle.claude". Carried from app.Effect.OraclePlugin so the orchestrator
+	// can route through host.Dispatch with the correct plugin.
+	OraclePlugin string `json:"oracle_plugin,omitempty"`
 }
 
 // TurnResult is returned by Machine.Turn after a successful transition.
@@ -1433,15 +1438,16 @@ func (m *machineImpl) applyEffectsTraced(ctx context.Context, effects []app.Effe
 				rawWith[k] = v
 			}
 			hc := HostInvocation{
-				Namespace:  eff.Invoke,
-				Args:       resolvedArgs,
-				RawWith:    rawWith,
-				Env:        env,
-				Bind:       eff.Bind,
-				OnError:    eff.OnError,
-				EmitEvent:  eff.Emit,
-				Background: eff.Background,
-				OnComplete: eff.OnComplete,
+				Namespace:    eff.Invoke,
+				Args:         resolvedArgs,
+				RawWith:      rawWith,
+				Env:          env,
+				Bind:         eff.Bind,
+				OnError:      eff.OnError,
+				EmitEvent:    eff.Emit,
+				Background:   eff.Background,
+				OnComplete:   eff.OnComplete,
+				OraclePlugin: eff.OraclePlugin,
 			}
 			hostCalls = append(hostCalls, hc)
 			m.logger.DebugContext(ctx, trace.EvMachineEffectApplied,
@@ -1692,15 +1698,16 @@ func (m *machineImpl) applyEffects(effects []app.Effect, w world.World, env expr
 				rawWith[k] = v
 			}
 			hc := HostInvocation{
-				Namespace:  eff.Invoke,
-				Args:       resolvedArgs,
-				RawWith:    rawWith,
-				Env:        env,
-				Bind:       eff.Bind,
-				OnError:    eff.OnError,
-				EmitEvent:  eff.Emit,
-				Background: eff.Background,
-				OnComplete: eff.OnComplete,
+				Namespace:    eff.Invoke,
+				Args:         resolvedArgs,
+				RawWith:      rawWith,
+				Env:          env,
+				Bind:         eff.Bind,
+				OnError:      eff.OnError,
+				EmitEvent:    eff.Emit,
+				Background:   eff.Background,
+				OnComplete:   eff.OnComplete,
+				OraclePlugin: eff.OraclePlugin,
 			}
 			hostCalls = append(hostCalls, hc)
 			effectEvents = append(effectEvents, newEvent(store.HostInvoked, map[string]any{

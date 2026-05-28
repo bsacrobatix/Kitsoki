@@ -45,6 +45,7 @@ import (
 
 	"kitsoki/internal/oracle"
 	"kitsoki/internal/store"
+	"kitsoki/internal/world"
 )
 
 // oracleRegistryKey is the context key for an oracle.Registry injected by
@@ -76,6 +77,29 @@ var errNoRegistry = fmt.Errorf("oracle: no registry in context")
 // registry is wired. Used by handlers to decide whether to fall through.
 func IsNoRegistryError(err error) bool {
 	return err == errNoRegistry
+}
+
+// oraclePluginNameKey is the context key for the oracle plugin alias name
+// injected by the orchestrator just before invoking an oracle verb handler.
+// When non-empty, the handler should route through host.Dispatch with this
+// plugin name instead of its built-in subprocess logic.
+type oraclePluginNameKey struct{}
+
+// WithOraclePluginName returns a child context carrying the oracle plugin alias
+// name for the current handler invocation. Injected by the orchestrator when
+// the effect declares an explicit `oracle:` field.
+func WithOraclePluginName(ctx context.Context, name string) context.Context {
+	if name == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, oraclePluginNameKey{}, name)
+}
+
+// OraclePluginNameFromCtx returns the oracle plugin alias name previously
+// injected by WithOraclePluginName, or "" if none was injected.
+func OraclePluginNameFromCtx(ctx context.Context) string {
+	s, _ := ctx.Value(oraclePluginNameKey{}).(string)
+	return s
 }
 
 // OracleDispatchRequest carries everything the dispatcher needs to route one
@@ -134,6 +158,85 @@ const (
 // an internal store constant; the store package enforces this on Append anyway,
 // but we pre-validate to produce a clearer error message and prevent partial writes.
 const pipeBufLimit = 4096
+
+// TryDispatchVerb attempts to route an oracle verb call through the plugin
+// registry. It is the B-7 production wiring entry point called from each oracle
+// verb handler (ask, decide, extract, task, converse) after the prompt is
+// rendered.
+//
+// Returns:
+//
+//	(result, true, nil)   — plugin handled the call; result is ready to return.
+//	(result, true, err)   — plugin returned an error; caller should surface it.
+//	(zero,  false, nil)   — no registry in context; caller falls through to its
+//	                        existing subprocess / direct logic (backwards compat).
+//
+// The returned Result has the shape:
+//
+//	Data["submission"]  — parsed submission (any, may be nil when schema is nil)
+//	Data["exit_code"]   — 0
+//	Data["ok"]          — true
+//	Data["meta"]        — opaque oracle meta map
+//
+// This shape is intentionally compatible with existing bind: references that
+// use "submitted" (a common alias). Callers MAY add extra keys before returning.
+func TryDispatchVerb(ctx context.Context, verb, renderedPrompt, systemPrompt, agentName, model string, withArgs map[string]any, schemaJSON json.RawMessage) (Result, bool, error) {
+	reg := OracleRegistryFromCtx(ctx)
+	if reg == nil {
+		return Result{}, false, nil
+	}
+
+	pluginName := OraclePluginNameFromCtx(ctx)
+	oc := OracleCallCtxFrom(ctx)
+
+	dr := OracleDispatchRequest{
+		Req: oracle.AskRequest{
+			SessionID:  oc.SessionID,
+			TurnNumber: oc.Turn,
+			StatePath:  oc.StatePath,
+			Verb:       verb,
+			PromptText: renderedPrompt,
+			SchemaJSON: schemaJSON,
+			WithArgs:   withArgs,
+			World:      world.World{Vars: map[string]any{}}, // snapshot not available here; plugins use AskRequest.World for augmentation only
+			Deadline:   time.Now().Add(10 * time.Minute),    // generous default; context cancel is the hard cap
+		},
+		PluginName:   pluginName,
+		Verb:         verb,
+		Agent:        agentName,
+		Model:        model,
+		PromptText:   renderedPrompt,
+		SystemPrompt: systemPrompt,
+		InputDesc:    map[string]any{},
+	}
+	if schemaJSON != nil {
+		dr.InputDesc["schema_present"] = true
+	}
+
+	dispResult, dispErr := Dispatch(ctx, dr)
+	if dispErr != nil {
+		if IsNoRegistryError(dispErr) {
+			return Result{}, false, nil
+		}
+		return Result{Error: dispErr.Error()}, true, dispErr
+	}
+
+	// Parse Submission into a map for easy binding.
+	var parsed any
+	if dispResult.Submission != nil {
+		_ = json.Unmarshal(dispResult.Submission, &parsed)
+	}
+
+	// Inject world var binding key — callers use bind: {world_key: submission}.
+	data := map[string]any{
+		"submission": parsed,
+		"submitted":  parsed, // alias for backward compat with existing bind: references
+		"exit_code":  0,
+		"ok":         true,
+		"meta":       dispResult.Meta,
+	}
+	return Result{Data: data}, true, nil
+}
 
 // Dispatch routes an oracle call through the plugin registry. Returns
 // errNoRegistry when no registry is wired — callers should fall through to
@@ -377,20 +480,4 @@ func matchIdxFromMeta(meta map[string]any) int {
 		return int(v)
 	}
 	return 0
-}
-
-// appendSubEventsToSink writes a slice of store.Events to the EventSink in ctx.
-// Deprecated: B-2 implementation with no validation. Use appendSubEventsValidated
-// after validateSubEvents for B-4+ call sites.
-func appendSubEventsToSink(ctx context.Context, events []store.Event) {
-	if len(events) == 0 {
-		return
-	}
-	sink := EventSinkFromOracleCtx(ctx)
-	if sink == nil {
-		return
-	}
-	for _, e := range events {
-		_ = sink.Append(e)
-	}
 }

@@ -1,13 +1,16 @@
 # Kitsoki changes for external orchestration
 
-> **Phase A and Phase B complete (2026-05-28).** Both phases have been
-> implemented. This proposal is now historical; refer to the narrative docs:
+> **Phase A and Phase B complete (2026-05-28), production wiring landed (B-7).** Both phases
+> have been implemented and the Oracle plugin interface is wired into the production
+> effect-execution path. Stories with `oracle_plugins:` declarations and `oracle: <name>`
+> effects now route through the plugin registry end-to-end. This proposal is now
+> historical; refer to the narrative docs for the authoritative specification:
 >
 > - [`docs/trace-format.md`](../trace-format.md) — JSONL schema, event
->   vocabulary, `EventSink` contract, `call_id` derivation, oracle events,
->   replay guarantees.
+>   vocabulary (`oracle.call.start` / `oracle.call.complete` / `oracle.call.error`),
+>   `EventSink` contract, `call_id` derivation, oracle events, replay guarantees.
 > - [`docs/oracle-plugin.md`](../oracle-plugin.md) — Oracle plugin contract:
->   `hosts:` YAML reference, `AskRequest`/`AskResponse` wire types,
+>   `oracle_plugins:` YAML reference, `AskRequest`/`AskResponse` wire types,
 >   sub-events, schema validation, auth/secrets, transport examples.
 > - [`docs/cli/turn.md`](../cli/turn.md) — `kitsoki turn` flags and exit codes.
 > - [`docs/developer-guide.md`](../developer-guide.md) §6.1 — updated trace docs.

@@ -1,7 +1,6 @@
 // Package elements implements the per-element renderers and the dispatcher
 // that turns a typed app.View into a final string for the TUI transcript
-// (Phase D of the view-elements proposal in
-// docs/proposals/view-elements-proposal.md §4 / §7).
+// (Phase D of the view-elements design).
 //
 // # Pipeline
 //

@@ -101,6 +101,20 @@ func OracleDecideHandler(ctx context.Context, args map[string]any) (Result, erro
 		return Result{Error: errMsg}, nil
 	}
 
+	// B-7: If an oracle plugin registry is wired in context, route through
+	// host.Dispatch (the Oracle plugin interface) instead of the subprocess.
+	withArgs, _ := args["with"].(map[string]any)
+	var pluginSchemaJSON json.RawMessage
+	if strings.TrimSpace(schemaArg) != "" {
+		pluginSchemaJSON = json.RawMessage(`"` + strings.TrimSpace(schemaArg) + `"`)
+	}
+	if pluginRes, handled, pluginErr := TryDispatchVerb(ctx, "decide", rendered, "", agentNameFromArgs(args), "", withArgs, pluginSchemaJSON); handled {
+		if pluginErr != nil {
+			return Result{Error: pluginErr.Error()}, nil
+		}
+		return pluginRes, nil
+	}
+
 	// Resolve agent and validate tools.
 	agent, _ := resolveAgent(ctx, args)
 	if errMsg := rejectMutationTools(ctx, args, agent); errMsg != "" {

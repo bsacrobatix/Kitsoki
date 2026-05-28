@@ -169,6 +169,10 @@ type AppDef struct {
 	// names (e.g. "oracle.claude", "oracle.autofix_fixer"); values are plugin
 	// declarations. When absent or nil, the loader injects a default
 	// "oracle.claude" entry with plugin "builtin.claude_cli".
+	//
+	// Note: the proposal §2 named this block `hosts:` but that key conflicts
+	// with the existing AppDef.Hosts []string allow-list field. The YAML key
+	// `oracle_plugins:` is the stable authoring surface.
 	OraclePlugins map[string]*OraclePluginDecl `yaml:"oracle_plugins,omitempty"`
 	// Proposals declares named proposal kinds (§3).
 	Proposals map[string]*ProposalKind `yaml:"proposals,omitempty"`

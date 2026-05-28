@@ -5,7 +5,7 @@
 //  2. Perform single-pass ${VAR} substitution in each plugin's Env and Headers
 //     maps (proposal §2 resolution 4). Unset env vars are hard errors.
 //  3. Inject a default "oracle.claude" entry (plugin: builtin.claude_cli) when
-//     the story omits oracle_plugins entirely or omits oracle.claude specifically,
+//     the story omits oracle_plugins: entirely or omits oracle.claude specifically,
 //     so all existing stories run unchanged.
 //
 // The resolved declarations stay on def.OraclePlugins; the host.OracleRegistry

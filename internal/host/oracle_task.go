@@ -108,6 +108,22 @@ func OracleTaskHandler(ctx context.Context, args map[string]any) (Result, error)
 		return Result{Error: fmt.Sprintf("host.oracle.task: unknown agent %q — check the agents: block in app.yaml", agentName)}, nil
 	}
 
+	// B-7: If an oracle plugin registry is wired in context, route through
+	// host.Dispatch. For task the prompt is the context.prompt field.
+	withArgs, _ := args["with"].(map[string]any)
+	contextPromptForPlugin, _ := args["context"].(map[string]any)
+	taskPromptForPlugin := ""
+	if cp, ok := contextPromptForPlugin["prompt"].(string); ok {
+		taskPromptForPlugin = cp
+	}
+	// Try plugin dispatch before processing acceptance/tools (which subprocess needs).
+	if pluginRes, handled, pluginErr := TryDispatchVerb(ctx, "task", taskPromptForPlugin, "", agentName, "", withArgs, nil); handled {
+		if pluginErr != nil {
+			return Result{Error: pluginErr.Error()}, nil
+		}
+		return pluginRes, nil
+	}
+
 	// ── Acceptance block ──────────────────────────────────────────────────
 	acceptance, acceptErr := parseTaskAcceptance(args)
 	if acceptErr != "" {

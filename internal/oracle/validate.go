@@ -18,6 +18,8 @@ package oracle
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -143,6 +145,77 @@ func collectLeaves(verr *jsonschema.ValidationError, msgs *[]string) {
 	for _, cause := range verr.Causes {
 		collectLeaves(cause, msgs)
 	}
+}
+
+// ValidateSchemaRefs checks that all $ref values in schema are safe relative
+// paths within storyDir. This is the story-load-time enforcement described in
+// proposal §3.1: "out-of-tree references fail at story-load time, not at Ask time."
+//
+// Rules:
+//   - $ref with an absolute path → rejected.
+//   - $ref with ".." that resolves outside storyDir → rejected.
+//   - $ref with a relative path that does not exist within storyDir → rejected.
+//
+// Returns nil when schema has no $ref fields, or when all $refs are safe and
+// exist within storyDir. storyDir must be an absolute path.
+func ValidateSchemaRefs(schema json.RawMessage, storyDir string) error {
+	if len(schema) == 0 || storyDir == "" {
+		return nil
+	}
+	var schemaVal any
+	if err := json.Unmarshal(schema, &schemaVal); err != nil {
+		return nil // malformed schema is caught by ValidateSubmission
+	}
+	refs := collectRefs(schemaVal)
+	canonBase, err := filepath.Abs(storyDir)
+	if err != nil {
+		canonBase = filepath.Clean(storyDir)
+	}
+	for _, ref := range refs {
+		if filepath.IsAbs(ref) {
+			return fmt.Errorf("schema $ref %q must be relative to the story directory (absolute paths are not allowed)", ref)
+		}
+		// Allow fragment-only or URI $refs (e.g. "#/$defs/foo", "https://...").
+		// Only validate filesystem $refs: those that don't start with "#" or a
+		// URI scheme and contain a file path component.
+		if strings.HasPrefix(ref, "#") || strings.Contains(ref, "://") {
+			continue
+		}
+		// Resolve relative to storyDir.
+		resolved := filepath.Join(canonBase, ref)
+		// Check for out-of-tree traversal.
+		rel, relErr := filepath.Rel(canonBase, filepath.Clean(resolved))
+		if relErr != nil || strings.HasPrefix(rel, "..") {
+			return fmt.Errorf("schema $ref %q resolves outside the story directory", ref)
+		}
+		// Check that the file exists.
+		if _, statErr := os.Stat(resolved); statErr != nil {
+			return fmt.Errorf("schema $ref %q: referenced file does not exist: %v", ref, statErr)
+		}
+	}
+	return nil
+}
+
+// collectRefs walks a JSON value tree and collects all "$ref" string values.
+func collectRefs(v any) []string {
+	var refs []string
+	switch tv := v.(type) {
+	case map[string]any:
+		for k, child := range tv {
+			if k == "$ref" {
+				if s, ok := child.(string); ok {
+					refs = append(refs, s)
+				}
+			} else {
+				refs = append(refs, collectRefs(child)...)
+			}
+		}
+	case []any:
+		for _, item := range tv {
+			refs = append(refs, collectRefs(item)...)
+		}
+	}
+	return refs
 }
 
 // jsonPtr converts a slice of JSON Pointer tokens into a JSON Pointer string.

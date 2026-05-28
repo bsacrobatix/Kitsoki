@@ -83,6 +83,16 @@ func OracleConverseHandler(ctx context.Context, args map[string]any) (Result, er
 		return Result{Error: "host.oracle.converse: question argument is required"}, nil
 	}
 
+	// B-7: If an oracle plugin registry is wired in context, route through
+	// host.Dispatch. For converse the prompt is the question.
+	withArgs, _ := args["with"].(map[string]any)
+	if pluginRes, handled, pluginErr := TryDispatchVerb(ctx, "converse", question, "", agentNameFromArgs(args), "", withArgs, nil); handled {
+		if pluginErr != nil {
+			return Result{Error: pluginErr.Error()}, nil
+		}
+		return pluginRes, nil
+	}
+
 	permMode, _ := args["permission_mode"].(string)
 	if permMode == "" {
 		permMode = "bypassPermissions"
