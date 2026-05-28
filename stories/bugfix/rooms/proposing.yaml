@@ -1,0 +1,187 @@
+# proposing — phase 2 of the bugfix pipeline (fix proposal).
+#
+# Produces the `propose_fix_artifact` (schemas/proposing_artifact.json):
+# a concrete proposed fix with root-cause analysis and confidence.
+#
+# Single merged state — see rooms/reproducing.yaml for the design
+# rationale (no _executing / _awaiting_reply split).
+
+states:
+
+  proposing:
+    description: "Draft the fix proposal; review and advance to implementing."
+    # Flattened view (no extends/blocks chrome) — `choice:` cannot live
+    # inside a `blocks:` map. The base.pongo status line is inlined.
+    view:
+      - banner:
+          text:     "PROPOSING"
+          subtitle: "Phase 2 / 7  ·  draft the fix proposal for review"
+          color:    "#3B82F6"   # blue — thinking
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
+      - kv:
+          pairs:
+            Ticket:     "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Summary:    '{{ world.propose_fix_artifact.summary_title|default:"(pending)" }}'
+            Confidence: '{{ world.propose_fix_artifact.confidence|default:"(pending)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.propose_fix_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "continue"
+              hint:   "post the proposal and advance to implementing"
+              intent: accept
+            - label:  "refine"
+              hint:   "re-draft with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to redo"
+                required:    false
+            - label:  "restart from reproducing"
+              hint:   "bounce back to phase 1 (resets that phase's cycle)"
+              intent: restart_from
+              slots:  { stage: reproducing }
+            - label:  "restart"
+              hint:   "re-enter proposing fresh (resets cycle)"
+              intent: restart_from
+              slots:  { stage: proposing }
+            - label:  "jump to testing"
+              hint:   "skip ahead (audited)"
+              intent: jump_to
+              slots:  { stage: testing }
+            - label:  "jump to validating"
+              hint:   "skip ahead to validation (audited)"
+              intent: jump_to
+              slots:  { stage: validating }
+            - label:  "jump to done"
+              hint:   "skip to close-out (audited)"
+              intent: jump_to
+              slots:  { stage: done }
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, propose_fix_artifact, reproduction_artifact, llm_verdict, refine_feedback, cycle]
+    on_enter:
+      # `working_dir` pins the oracle subprocess to the bugfix worktree
+      # so greps/reads against the live tree land on the feature branch,
+      # not on main. See implementing.yaml header for the regression.
+      - invoke: host.oracle.decide
+        with:
+          agent: proposer
+          prompt_path: prompts/proposing_executing.md
+          schema: schemas/proposing_artifact.json
+          working_dir: "{{ world.workdir }}"
+          args:
+            ticket_id:             "{{ world.ticket_id }}"
+            ticket_title:          "{{ world.ticket_title }}"
+            workdir:               "{{ world.workdir }}"
+            reproduction_summary:  "{{ world.reproduction_artifact.summary_markdown }}"
+            refine_feedback:       "{{ world.refine_feedback }}"
+            cycle:                 "{{ world.cycle }}"
+        bind:
+          propose_fix_artifact: submitted
+        on_error: idle
+
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.decide
+        with:
+          agent: judge
+          prompt: prompts/judge_proposing.md
+          schema: schemas/judge_verdict.json
+          working_dir: "{{ world.workdir }}"
+          args:
+            ticket_id:       "{{ world.ticket_id }}"
+            artifact_title:  "{{ world.propose_fix_artifact.summary_title }}"
+            artifact_body:   "{{ world.propose_fix_artifact.summary_markdown }}"
+        bind:
+          llm_verdict: submitted
+
+      - when: |
+          world.judge_mode != 'human' &&
+          world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+          world.llm_verdict.verdict != 'uncertain' &&
+          world.llm_verdict.intent != 'uncertain'
+        emit_intent: "{{ world.llm_verdict.intent }}"
+        slots:
+          feedback: "{{ world.llm_verdict.reason }}"
+    on:
+      accept:
+        - target: implementing
+          effects:
+            - invoke: iface.transport.post
+              with:
+                thread:   "{{ world.thread }}"
+                title:    "Fix proposal: {{ world.ticket_id }}"
+                body:     "{{ world.propose_fix_artifact.summary_markdown }}"
+                phase_id: "proposing_{{ world.ticket_id }}_{{ world.cycle }}"
+            - set:
+                last_reply_author: "{{ slots.author ?? 'human' }}"
+                refine_feedback:   ""
+                cycle:             0
+
+      refine:
+        - when: "world.proposing_cycle >= world.proposing_budget"
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "proposing_cycle_budget_exhausted"
+                status:         "abandoned"
+        - target: proposing
+          effects:
+            - set:
+                refine_feedback:  "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                proposing_cycle:  "{{ world.proposing_cycle + 1 }}"
+                cycle:            "{{ world.cycle + 1 }}"
+
+      restart_from:
+        - when: "slots.stage == 'reproducing'"
+          target: reproducing
+          effects:
+            - set:
+                restart_from_stage: "reproducing"
+                refine_feedback:    ""
+                reproducing_cycle:  0
+                cycle:              0
+        - target: proposing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
+                cycle:              0
+
+      jump_to:
+        - when: "slots.stage == 'testing' || slots.stage == 'test'"
+          target: testing
+          effects:
+            - set:
+                jump_to:           "{{ slots.stage }}"
+                unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
+        - when: "slots.stage == 'validating' || slots.stage == 'validate'"
+          target: validating
+          effects:
+            - set:
+                jump_to:           "{{ slots.stage }}"
+                unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
+        - when: "slots.stage == 'done' || slots.stage == 'pr'"
+          target: done
+          effects:
+            - set:
+                jump_to:           "{{ slots.stage }}"
+                unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
+        - target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "jump_to_unknown_stage"
+                status:         "abandoned"
+
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

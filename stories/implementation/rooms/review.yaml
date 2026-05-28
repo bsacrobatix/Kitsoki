@@ -1,0 +1,185 @@
+# review — phase 4 of the implementation pipeline. LLM code-review of
+# the diff. Produces a `review_artifact` (schemas/review_artifact.json)
+# capturing nits, blockers, and an overall accept/refine recommendation.
+# This collapses bugfix's separate reviewing + security phases into
+# one — implementation tickets are by definition small enough that a
+# combined pass suffices.
+#
+# Flattened away from `extends: "base"` (choice-widget proposal §4.5 /
+# §8): a `choice:` element cannot live inside `blocks:`. The base.pongo
+# status line is inlined as the leading prose element. The optional
+# blockers section is folded into prose because the choice widget
+# requires a flat element list.
+
+states:
+
+  review_executing:
+    description: "Self-review of the diff (code-review pass)."
+    view:
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.workdir|default:"(no workspace)" }}  ·  {{ world.feature_branch|default:"(no branch)" }}  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "Self-review of the diff"
+      - kv:
+          pairs:
+            Ticket: "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Status: '{{ world.review_artifact.status|default:"(pending)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.review_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - heading: "Blockers"
+        when:  "world.review_artifact.blockers"
+      - code: |
+          {% for b in world.review_artifact.blockers %}- {{ b }}
+          {% endfor %}
+        when: "world.review_artifact.blockers"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "proceed", intent: proceed, hint: "deliver the review to the checkpoint" }
+            - label:  "restart_from"
+              intent: restart_from
+              hint:   "bounce back to review_task"
+              param:
+                slot:        stage
+                type:        string
+                placeholder: "e.g. review_task"
+            - { label: "quit", intent: quit, hint: "abandon the pipeline" }
+            - { label: "look", intent: look, hint: "re-render" }
+    relevant_world: [ticket_id, ticket_title, review_artifact, code_artifact, cycle]
+    on_enter:
+      - invoke: iface.vcs.diff
+        with:
+          workdir: "{{ world.workdir }}"
+        bind:
+          ci_log: diff
+        on_error: idle
+      - invoke: host.oracle.decide
+        with:
+          prompt: prompts/review_executing.md
+          schema: schemas/review_artifact.json
+          args:
+            ticket_id:    "{{ world.ticket_id }}"
+            ticket_title: "{{ world.ticket_title }}"
+            code_summary: "{{ world.code_artifact.summary_markdown }}"
+            diff:         "{{ world.ci_log }}"
+            cycle:        "{{ world.cycle }}"
+        bind:
+          review_artifact: submitted
+        on_error: idle
+    on:
+      proceed:
+        - target: review_awaiting_reply
+      restart_from:
+        - target: review_task_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'review_task' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
+
+  # Canonical §6 checkpoint shape.
+  review_awaiting_reply:
+    description: "Review posted; awaiting verdict."
+    view:
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.workdir|default:"(no workspace)" }}  ·  {{ world.feature_branch|default:"(no branch)" }}  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "Review — awaiting verdict"
+      - kv:
+          pairs:
+            Ticket:     "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Verdict:    '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+            Confidence: '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
+            Reason:     '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.review_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "accept", intent: accept, hint: "hand off to pr-refinement" }
+            - label:  "refine"
+              intent: refine
+              hint:   "bounce back to write_code with reviewer feedback"
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+            - label:  "restart_from"
+              intent: restart_from
+              hint:   "bounce back to review_task"
+              param:
+                slot:        stage
+                type:        string
+                placeholder: "e.g. review_task"
+            - { label: "quit", intent: quit, hint: "abandon the pipeline" }
+            - { label: "look", intent: look, hint: "re-render" }
+    relevant_world: [judge_mode, ticket_id, review_artifact, llm_verdict, cycle]
+    on_enter:
+      - invoke: iface.transport.post
+        with:
+          thread:    "{{ world.thread }}"
+          title:     "Review: {{ world.ticket_id }}"
+          body:      "{{ world.review_artifact.summary_markdown }}"
+          phase_id:  "review_{{ world.ticket_id }}_{{ world.cycle }}"
+      - invoke: host.inbox.add
+        with:
+          kind:    checkpoint
+          title:   "Review: {{ world.ticket_id }}"
+          thread:  "{{ world.thread }}"
+          state:   review_awaiting_reply
+          body:    "{{ world.review_artifact.summary_markdown }}"
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.decide
+        with:
+          prompt: prompts/judge_review.md
+          schema: schemas/judge_verdict.json
+          args:
+            ticket_id:       "{{ world.ticket_id }}"
+            artifact_title:  "{{ world.review_artifact.summary_title }}"
+            artifact_body:   "{{ world.review_artifact.summary_markdown }}"
+        bind:
+          llm_verdict: submitted
+      - when: |
+          world.judge_mode != 'human' &&
+          world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+          world.llm_verdict.verdict != 'uncertain' &&
+          world.llm_verdict.intent != 'uncertain'
+        emit_intent: "{{ world.llm_verdict.intent }}"
+        slots:
+          feedback: "{{ world.llm_verdict.reason }}"
+    on:
+      accept:
+        - target: handoff
+          effects:
+            - set:
+                last_reply_author: "{{ slots.author ?? 'human' }}"
+                refine_feedback:   ""
+                cycle:             0
+                # Synthesise the PR title + body from the code artifact
+                # for the pr-refinement handoff. world_in: at the import
+                # edge projects pr_title / pr_body into the pr child.
+                # Note: `set:` expressions support a single `{{ ... }}`
+                # interpolation (the expr compiler does NOT concat
+                # literal text with expressions). Use the artifact's
+                # title verbatim; downstream PR-tracking systems can
+                # prepend the ticket id if needed.
+                pr_title:          "{{ world.code_artifact.summary_title }}"
+                pr_body:           "{{ world.code_artifact.summary_markdown }}"
+      # Reviewer rejected: refine bounces to write_code with feedback.
+      refine:
+        - target: write_code_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                cycle:           "{{ world.cycle + 1 }}"
+      restart_from:
+        - target: review_task_executing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'review_task' }}"
+                cycle:              0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

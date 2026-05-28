@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title":   "test_artifact",
+  "description": "Test-run outcome summary. Produced by test_executing; judged at test_awaiting_reply.",
+  "type":    "object",
+  "required": ["summary_title", "summary_markdown", "status"],
+  "properties": {
+    "summary_title":    { "type": "string", "minLength": 4 },
+    "summary_markdown": { "type": "string", "minLength": 20 },
+    "status":           { "type": "string", "enum": ["passed", "failed", "blocked"] },
+    "tests_run": {
+      "type": "object",
+      "properties": {
+        "passed":  { "type": "integer", "minimum": 0 },
+        "failed":  { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "log":     { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "failing_checks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string" },
+          "severity":    { "type": "string", "enum": ["blocker", "major", "minor"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

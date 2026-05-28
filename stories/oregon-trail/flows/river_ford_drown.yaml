@@ -1,0 +1,83 @@
+# river_ford_drown — phase D river_strategy proposal with a drown
+# outcome. Enter river_crossing.deep (Snake River, 7 ft), propose ford,
+# accept, wait for the background job, and read the outcome.
+#
+# # Outcome math (deterministic): (depth * oxen + miles) % 100.
+#   depth_ft = 7, oxen = 4, miles = 250 (preserved on entry; outcome
+#   evaluates 7*4 + 250 = 278 → % 100 = 78 — but 78 is in
+#   [60, 85) → "swept_supplies", not drown. Bump oxen to force "drowned".
+#   With oxen = 9: 7*9 + 250 = 313 → % 100 = 13 → "crossed". Not it.
+#   With oxen = 9, miles = 26: 7*9 + 26 = 89 → % 100 = 89 → "drowned".
+#
+# Using oxen=9, miles=26 lands in the drowned bucket. We bump
+# party_alive to 5 (default) so the decrement is visible.
+#
+# # host_handlers
+#
+# We stub host.run to return immediately with a stdout "crossed" line,
+# but the outcome is computed from world state in on_complete, so the
+# stub's return value doesn't matter — only that it returns success and
+# fires on_complete. advance_clock: ensures the background job
+# completes before the next turn's expect_world.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: river_crossing.deep
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    banker
+  month:         june
+  money:         300
+  oxen:          9
+  food_lbs:      500
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    90
+  narration:     false
+  current_landmark: "Snake River Crossing"
+  miles_traveled: 26
+  river_depth_ft: 7
+  river_width_ft: 1000
+
+host_handlers:
+  host.run:
+    data:
+      stdout: "crossed\n"
+      exit_code: 0
+      ok: true
+    delay: 200ms
+
+turns:
+
+  # Turn 1: propose ford. Goes to river_crossing.reviewing.
+  - intent:
+      name: propose_crossing
+      slots:
+        method:     ford
+        confidence: 80
+    expect_state: river_crossing.reviewing
+    expect_world:
+      crossing_method: "ford"
+      crossing_confidence: 80
+
+  # Turn 2: accept. Transitions to river_crossing.executing; on_enter
+  # dispatches the background host.run. After advance_clock the
+  # on_complete runs, computing river_outcome = "drowned" from the
+  # 7*9+26 = 89 ≥ 85 bucket.
+  - intent: { name: accept_crossing }
+    advance_clock: 300ms
+    expect_state: river_crossing.executing
+    expect_world:
+      river_outcome: "drowned"
+
+  # Turn 3: continue. The drowned arm decrements party_alive and
+  # transitions back to the depth-appropriate substate (deep).
+  - intent: { name: continue }
+    expect_state: river_crossing.deep
+    expect_world:
+      party_alive: 4
+      river_outcome: ""
+      crossing_method: none
+
+expect_no_errors: true

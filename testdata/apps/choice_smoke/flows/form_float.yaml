@@ -1,0 +1,13 @@
+# form_float — submit a float within bounds [0.0, 1.0]. Commit
+# advances to form_enum.
+test_kind: flow
+app: ../app.yaml
+initial_state: form_float
+
+turns:
+  - intent: { name: submit_float_form, slots: { ratio: 0.75 } }
+    expect_state: form_enum
+    expect_world:
+      form_ratio: 0.75
+
+expect_no_errors: true

@@ -1,0 +1,85 @@
+# mode_switch_full_to_quick — start the pipeline in `full` mode, then
+# at the reproducing checkpoint the operator types `quick_fix` to flip
+# bugfix_mode to "quick". The remaining pipeline collapses (testing →
+# done, no reviewing/validating).
+#
+# This is the "controlled fallback" scenario: a switch mid-flow is
+# allowed and re-uses the same checkpoint vocabulary. There's no
+# rollback — the artifacts already produced (reproducing) are carried
+# forward; the SKIP is the rooms we don't enter, not the artifacts we
+# already have.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:  "TKT-430"
+  thread:     "TKT-430"
+  judge_mode: "human"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.git_worktree:   { data: { ok: true, log: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: reproducing
+    expect_world:
+      bugfix_mode: "full"
+
+  # Operator switches mode mid-flow. quick_fix at the checkpoint is a
+  # self-loop with the side-effect of flipping bugfix_mode; state holds
+  # at reproducing.
+  - intent: { name: quick_fix, slots: {} }
+    expect_state: reproducing
+    expect_world:
+      bugfix_mode: "quick"
+
+  # Continue: accept walks the pipeline; the quick gate fires at testing.
+  - intent: { name: accept, slots: {} }
+    expect_state: proposing
+  - intent: { name: accept, slots: {} }
+    expect_state: implementing
+  - intent: { name: accept, slots: {} }
+    expect_state: testing
+
+  # Quick-mode gate fires — go to done, skipping reviewing/validating.
+  - intent: { name: accept, slots: {} }
+    expect_state: done
+    expect_world:
+      bugfix_mode: "quick"
+
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+
+expect_terminal: true
+expect_no_errors: true

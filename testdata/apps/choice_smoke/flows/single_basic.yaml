@@ -1,0 +1,13 @@
+# single_basic — 3 literal items; pick red; world.picked_color flips
+# and the walkthrough advances to single_no_slots.
+test_kind: flow
+app: ../app.yaml
+initial_state: single_basic
+
+turns:
+  - intent: { name: chose_color, slots: { color: red } }
+    expect_state: single_no_slots
+    expect_world:
+      picked_color: red
+
+expect_no_errors: true

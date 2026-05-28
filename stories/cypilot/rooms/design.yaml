@@ -1,0 +1,165 @@
+# design — DESIGN draft + validate.
+#
+# Design doc.  parent_id is the validated PRD's id (NOT the ADR's — the
+# proposal's §3 sketch has DESIGN as a peer of ADR, both depending on
+# the PRD).  Accept advances to decomposition_executing.
+#
+# Views flattened from extends:"base" + blocks because choice-widget
+# proposal §4.5 / §8 forbids `choice:` inside blocks.
+
+states:
+
+  design_executing:
+    description: "Producing the DESIGN via cpt generate."
+    view:
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.feature_slug|default:"(no feature)" }} ({{ world.feature_index }}/{{ world.feature_count }})  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "{{ state.description }}"
+      - kv:
+          pairs:
+            "Parent PRD":   '{{ world.prd_artifact.id|default:"(unknown)" }}'
+            "Feature slug": "{{ world.feature_slug }}"
+            "DESIGN id":    '{{ world.design_artifact.id|default:"(pending)" }}'
+            "Validate ok":  "{{ world.validate_ok }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              hint:   "deliver the DESIGN to the checkpoint"
+              intent: proceed
+            - label:  "refine"
+              hint:   "re-run cpt generate with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              intent: look
+    relevant_world: [prd_artifact, feature_slug, design_artifact, validate_ok, validate_report, cycle]
+    on_enter:
+      - invoke: iface.artifact.create
+        with:
+          kind:      "design"
+          title:     "DESIGN for {{ world.ticket_title }}"
+          slug:      "{{ world.feature_slug }}"
+          parent_id: "{{ world.prd_artifact.id }}"
+          workdir:   "{{ world.workdir }}"
+        bind:
+          design_artifact: artifact
+        on_error: adr_awaiting_reply
+      - invoke: iface.artifact.validate
+        with:
+          id:      "{{ world.design_artifact.id }}"
+          mode:    "consistency"
+          workdir: "{{ world.workdir }}"
+        bind:
+          validate_ok:     ok
+          validate_report: report
+    on:
+      proceed:
+        - target: design_awaiting_reply
+      refine:
+        - target: design_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback }}"
+                cycle:           "{{ world.cycle + 1 }}"
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
+
+  design_awaiting_reply:
+    description: "DESIGN posted; awaiting validate verdict."
+    view:
+      - prose: '{{ world.ticket_id|default:"(no ticket)" }}  ·  {{ world.feature_slug|default:"(no feature)" }} ({{ world.feature_index }}/{{ world.feature_count }})  ·  cycle {{ world.cycle }}  ·  judge {{ world.judge_mode }}'
+      - heading: "{{ state.description }}"
+      - kv:
+          pairs:
+            Ticket:        "{{ world.ticket_id }}"
+            DESIGN:        '{{ world.design_artifact.summary_title|default:world.design_artifact.id|default:"(unknown)" }}'
+            "Validate ok": "{{ world.validate_ok }}"
+            Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+            Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
+            Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - heading: "Report"
+      - code: '{{ world.validate_report|default:"(no report)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "accept"
+              hint:   "advance to DECOMPOSITION"
+              intent: accept
+            - label:  "refine"
+              hint:   "bounce back to design_executing with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              intent: look
+    relevant_world: [judge_mode, ticket_id, design_artifact, validate_ok, validate_report, llm_verdict, cycle]
+    on_enter:
+      - invoke: iface.transport.post
+        with:
+          thread:   "{{ world.thread }}"
+          title:    "DESIGN artifact: {{ world.ticket_id }}"
+          body:     "{{ world.design_artifact.summary_markdown ?? world.validate_report }}"
+          phase_id: "design_{{ world.ticket_id }}_{{ world.cycle }}"
+      - invoke: host.inbox.add
+        with:
+          kind:   checkpoint
+          title:  "DESIGN artifact: {{ world.ticket_id }}"
+          thread: "{{ world.thread }}"
+          state:  design_awaiting_reply
+          body:   "{{ world.design_artifact.summary_markdown ?? world.validate_report }}"
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.decide
+        with:
+          agent: judge
+          prompt: prompts/judge_design.md
+          schema: schemas/judge_verdict.json
+          args:
+            ticket_id:       "{{ world.ticket_id }}"
+            artifact_id:     "{{ world.design_artifact.id }}"
+            validate_ok:     "{{ world.validate_ok }}"
+            validate_report: "{{ world.validate_report }}"
+        bind:
+          llm_verdict: submitted
+      - when: |
+          world.judge_mode != 'human' &&
+          world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+          world.llm_verdict.verdict != 'uncertain' &&
+          world.llm_verdict.intent != 'uncertain'
+        emit_intent: "{{ world.llm_verdict.intent }}"
+        slots:
+          feedback: "{{ world.llm_verdict.reason }}"
+    on:
+      accept:
+        - target: decomposition_executing
+          effects:
+            - set:
+                last_reply_author: "{{ slots.author ?? 'human' }}"
+                refine_feedback:   ""
+                cycle:             0
+      refine:
+        - target: design_executing
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                cycle:           "{{ world.cycle + 1 }}"
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

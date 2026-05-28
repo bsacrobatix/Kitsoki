@@ -1,0 +1,27 @@
+# observability — STUB. Wave 3 / Phase 6 wires log + metric queries
+# against a real observability provider.
+
+states:
+
+  observability:
+    description: "Observability — logs / metrics (Wave 3 stub)."
+    # Flattened view (no extends/blocks) — `choice:` cannot live inside a
+    # `blocks:` map (typed metadata is lost through the inheritance
+    # pipeline; see docs/choice-widget.md §3.1).
+    view:
+      - prose: "Observability (Wave 3 stub)."
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "go_back", intent: go_back, hint: "return to the previous room" }
+            - { label: "go_main", intent: go_main, hint: "back to the engineer's day landing" }
+            - { label: "look",    intent: look,    hint: "re-render" }
+    relevant_world: []
+    on:
+      go_back:
+        - target: "{{ world.prev_state }}"
+      go_main:
+        - target: main
+      look:
+        - target: .

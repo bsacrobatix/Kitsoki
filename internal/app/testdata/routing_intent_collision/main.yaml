@@ -1,0 +1,13 @@
+app:
+  id: routing-intent-collision
+  version: 0.1.0
+
+include: [rooms/*.yaml]
+
+root: start
+
+intents:
+  ford:
+    title: "Ford"
+    synonyms:
+      - wade

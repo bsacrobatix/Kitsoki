@@ -1,0 +1,22 @@
+# quit_at_idle — operator quits straight from idle without starting.
+# Proves the @exit:abandoned arc on the entry room.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:   "TKT-008"
+  judge_mode:  "human"
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true }
+  host.inbox.add:
+    data: { ok: true }
+
+turns:
+  - intent: { name: quit, slots: {} }
+    expect_state: __exit__abandoned
+
+expect_terminal: true
+expect_no_errors: true

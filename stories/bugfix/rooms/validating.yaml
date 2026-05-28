@@ -1,0 +1,296 @@
+# validating — phase 6 of the bugfix pipeline (full-environment validation).
+#
+# Produces the `validate_artifact` (schemas/validating_artifact.json):
+# the full-environment validation outcome (pass | fail_short | fail | infra_error).
+#
+# Single merged state — see rooms/reproducing.yaml for the design.
+#
+# # The accept arc is outcome-aware
+#
+# Pre-2026-05-19 the accept arc unconditionally posted the artifact and
+# advanced to done. A `fail_short` verdict (proposal correct, edits never
+# landed) was therefore broadcast as the success close-out, even though
+# the validator's own narrative said "control should return to
+# implementing." That happened to a real dogfood session — see the
+# trace in /tmp/kitsoki-dogfood-trace.jsonl around 2026-05-19 07:42 UTC.
+#
+# Post-fix the arc branches on `world.validate_artifact.outcome`:
+#
+#   pass        → post + advance to done (the success close-out)
+#   fail_short  → return to implementing — minor patch needed (no post;
+#                 a failure isn't a closing message)
+#   fail        → return to proposing — proposal needs re-draft (no post)
+#   infra_error → retry validation — environment problem (no post)
+#
+# Each non-pass arm bumps the relevant phase cycle so the existing
+# `_budget` guards bail the session out if the operator keeps cycling.
+# The `continue`-hint in the view renders per outcome so the operator
+# can see exactly where `continue` will land before pressing it.
+
+states:
+
+  validating:
+    description: "Validate the fix against the full environment; advance to done."
+    # Flattened view (no extends/blocks chrome) — `choice:` cannot live
+    # inside a `blocks:` map. The base.pongo status line is inlined.
+    view:
+      - banner:
+          text:     "VALIDATING"
+          subtitle: "Phase 6 / 7  ·  full-environment validation of the fix"
+          color:    "#F97316"   # orange — last gate before close-out
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
+      - kv:
+          pairs:
+            Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
+            Summary: '{{ world.validate_artifact.summary_title|default:"(pending)" }}'
+            Outcome: '{{ world.validate_artifact.outcome|default:"(pending)" }}'
+      - heading: "Artifact"
+      - code: '{{ world.validate_artifact.summary_markdown|default:"(pending — oracle has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "continue"
+              hint:   "post and advance to done"
+              intent: accept
+            - label:  "refine"
+              hint:   "re-validate with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to redo"
+                required:    false
+            - label:  "restart from reproducing"
+              hint:   "bounce back to phase 1 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: reproducing }
+            - label:  "restart from proposing"
+              hint:   "bounce back to phase 2 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: proposing }
+            - label:  "restart from implementing"
+              hint:   "bounce back to phase 3 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: implementing }
+            - label:  "restart from testing"
+              hint:   "bounce back to phase 4 (resets cycle)"
+              intent: restart_from
+              slots:  { stage: testing }
+            - label:  "jump to done"
+              hint:   "skip to close-out (audited)"
+              intent: jump_to
+              slots:  { stage: done }
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, validate_artifact, implement_review_artifact, ci_log, llm_verdict, refine_feedback, cycle]
+    on_enter:
+      # `target:` is intentionally absent — ciBuild treats target as a
+      # literal go-package-path arg appended to `go build ./...`. Pre-fix,
+      # passing `target: "default"` here produced
+      # `package default is not in std (.../toolchain@...)` on every run
+      # and the oracle then mistook this synthesised error for evidence
+      # the fix wasn't applied. See dogfood_smoke_test.go::
+      # TestValidatingBuild_NoSpuriousTargetArg for the lock-in.
+      - invoke: iface.ci.build
+        with:
+          workdir: "{{ world.workdir }}"
+        bind:
+          ci_log: log
+        on_error: idle
+
+      # `working_dir` pins the oracle subprocess (and its MCP filesystem
+      # tools) to the bugfix worktree. Without it the oracle reads from
+      # kitsoki's cwd (the main worktree) and confidently reports "fix
+      # not applied" when grepping for changes that landed on the
+      # feature branch. See implementing.yaml for the same pattern.
+      - invoke: host.oracle.task
+        with:
+          agent: validator
+          working_dir: "{{ world.workdir }}"
+          acceptance:
+            schema: schemas/validating_artifact.json
+          context:
+            prompt: prompts/validating_executing.md
+            args:
+              ticket_id:       "{{ world.ticket_id }}"
+              ticket_title:    "{{ world.ticket_title }}"
+              workdir:         "{{ world.workdir }}"
+              build_log:       "{{ world.ci_log }}"
+              review_body:     "{{ world.implement_review_artifact.summary_markdown }}"
+              refine_feedback: "{{ world.refine_feedback }}"
+              cycle:           "{{ world.cycle }}"
+        bind:
+          validate_artifact: submitted
+        on_error: idle
+
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.decide
+        with:
+          agent: judge
+          prompt: prompts/judge_validating.md
+          schema: schemas/judge_verdict.json
+          working_dir: "{{ world.workdir }}"
+          args:
+            ticket_id:       "{{ world.ticket_id }}"
+            artifact_title:  "{{ world.validate_artifact.summary_title }}"
+            artifact_body:   "{{ world.validate_artifact.summary_markdown }}"
+        bind:
+          llm_verdict: submitted
+
+      - when: |
+          world.judge_mode != 'human' &&
+          world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+          world.llm_verdict.verdict != 'uncertain' &&
+          world.llm_verdict.intent != 'uncertain'
+        emit_intent: "{{ world.llm_verdict.intent }}"
+        slots:
+          feedback: "{{ world.llm_verdict.reason }}"
+    on:
+      # accept routes by validate_artifact.outcome (see file header).
+      # Each non-pass arm bumps the relevant phase cycle and lets that
+      # phase's own _budget guard catch a runaway ping-pong. The pass
+      # arm is unchanged from the pre-fix behaviour.
+      accept:
+        # fail_short — implementation needs a minor patch.
+        - when: |
+            world.validate_artifact.outcome == 'fail_short' &&
+            world.implementing_cycle >= world.implementing_budget
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "implementing_cycle_budget_exhausted_after_validation"
+                status:         "abandoned"
+        - when: "world.validate_artifact.outcome == 'fail_short'"
+          target: implementing
+          effects:
+            - set:
+                refine_feedback:    "{{ world.validate_artifact.next_action_hint ?? world.validate_artifact.summary_markdown }}"
+                implementing_cycle: "{{ world.implementing_cycle + 1 }}"
+                cycle:              "{{ world.cycle + 1 }}"
+
+        # fail — proposal needs a re-draft.
+        - when: |
+            world.validate_artifact.outcome == 'fail' &&
+            world.proposing_cycle >= world.proposing_budget
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "proposing_cycle_budget_exhausted_after_validation"
+                status:         "abandoned"
+        - when: "world.validate_artifact.outcome == 'fail'"
+          target: proposing
+          effects:
+            - set:
+                refine_feedback:  "{{ world.validate_artifact.next_action_hint ?? world.validate_artifact.summary_markdown }}"
+                proposing_cycle:  "{{ world.proposing_cycle + 1 }}"
+                cycle:            "{{ world.cycle + 1 }}"
+
+        # infra_error — environment problem; retry validation.
+        - when: |
+            world.validate_artifact.outcome == 'infra_error' &&
+            world.validating_cycle >= world.validating_budget
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "validating_cycle_budget_exhausted_infra_error"
+                status:         "abandoned"
+        - when: "world.validate_artifact.outcome == 'infra_error'"
+          target: validating
+          effects:
+            - set:
+                refine_feedback:   "{{ world.validate_artifact.next_action_hint ?? world.validate_artifact.summary_markdown }}"
+                validating_cycle:  "{{ world.validating_cycle + 1 }}"
+                cycle:             "{{ world.cycle + 1 }}"
+
+        # pass — the success close-out. Also the fall-through for legacy
+        # artifacts that don't set `outcome`.
+        - target: done
+          effects:
+            - invoke: iface.transport.post
+              with:
+                thread:   "{{ world.thread }}"
+                title:    "Validation: {{ world.ticket_id }}"
+                body:     "{{ world.validate_artifact.summary_markdown }}"
+                phase_id: "validating_{{ world.ticket_id }}_{{ world.cycle }}"
+            - set:
+                last_reply_author: "{{ slots.author ?? 'human' }}"
+                refine_feedback:   ""
+                cycle:             0
+
+      refine:
+        - when: "world.validating_cycle >= world.validating_budget"
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "validating_cycle_budget_exhausted"
+                status:         "abandoned"
+        - target: validating
+          effects:
+            - set:
+                refine_feedback:   "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                validating_cycle:  "{{ world.validating_cycle + 1 }}"
+                cycle:             "{{ world.cycle + 1 }}"
+
+      restart_from:
+        - when: "slots.stage == 'reproducing'"
+          target: reproducing
+          effects:
+            - set:
+                restart_from_stage: "reproducing"
+                refine_feedback:    ""
+                reproducing_cycle:  0
+                cycle:              0
+        - when: "slots.stage == 'proposing' || slots.stage == 'propose_fix'"
+          target: proposing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
+                cycle:              0
+        - when: "slots.stage == 'implementing' || slots.stage == 'implement_review'"
+          target: implementing
+          effects:
+            - set:
+                restart_from_stage:  "{{ slots.stage }}"
+                refine_feedback:     ""
+                implementing_cycle:  0
+                cycle:               0
+        - when: "slots.stage == 'testing' || slots.stage == 'test'"
+          target: testing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage }}"
+                refine_feedback:    ""
+                testing_cycle:      0
+                cycle:              0
+        - target: proposing
+          effects:
+            - set:
+                restart_from_stage: "{{ slots.stage ?? 'proposing' }}"
+                refine_feedback:    ""
+                proposing_cycle:    0
+                cycle:              0
+
+      jump_to:
+        - when: "slots.stage == 'done' || slots.stage == 'pr'"
+          target: done
+          effects:
+            - set:
+                jump_to:           "{{ slots.stage }}"
+                unsafe_jumps_made: "{{ world.unsafe_jumps_made + 1 }}"
+        - target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "jump_to_unknown_stage"
+                status:         "abandoned"
+
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

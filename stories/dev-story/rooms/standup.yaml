@@ -1,0 +1,69 @@
+# standup — daily standup prep. Aggregates the day's commits / PRs /
+# tickets via iface.{vcs,ticket}.list_mine. Wave 2 ships the room
+# skeleton; the prompt + aggregator is filled in by Wave 3.
+
+states:
+
+  standup:
+    description: "Standup — what's on my plate today."
+    # Flattened view (no extends/blocks) — `choice:` cannot live inside a
+    # `blocks:` map (typed metadata is lost through the inheritance
+    # pipeline; see docs/choice-widget.md §3.1).
+    view:
+      - kv:
+          pairs:
+            "Picked ticket": '{{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}'
+            "Last PR url":   '{{ world.last_pr_url|default:"(none)" }}'
+      - heading: "Summary"
+      - code: '{{ world.standup_summary|default:"(empty — pick summarize_day to generate)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "summarize_day"
+              intent: summarize_day
+              hint:   "generate today's standup summary"
+            - { label: "go_back", intent: go_back, hint: "return to the previous room" }
+            - { label: "go_main", intent: go_main, hint: "back to the engineer's day landing" }
+            - { label: "look",    intent: look,    hint: "re-render" }
+    relevant_world: [ticket_id, ticket_title, last_pr_url, standup_summary]
+    on:
+      summarize_day:
+        - target: standup_summarizing
+      go_back:
+        - target: "{{ world.prev_state }}"
+      go_main:
+        - target: main
+      look:
+        - target: .
+
+  standup_summarizing:
+    description: "Generating standup summary."
+    # Flattened view (see above).
+    view:
+      - kv:
+          pairs:
+            Summary: '{{ world.standup_summary|default:"(pending — aggregator has not returned yet)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "go_back", intent: go_back, hint: "return to standup" }
+            - { label: "go_main", intent: go_main, hint: "back to the engineer's day landing" }
+            - { label: "look",    intent: look,    hint: "re-render" }
+    relevant_world: [standup_summary]
+    on_enter:
+      # Pull tickets assigned to me via iface.ticket.list_mine.
+      - invoke: iface.ticket.list_mine
+        with:
+          filter: "assignee=me"
+        bind:
+          standup_summary: tickets
+        on_error: standup
+    on:
+      go_back:
+        - target: standup
+      go_main:
+        - target: main
+      look:
+        - target: .

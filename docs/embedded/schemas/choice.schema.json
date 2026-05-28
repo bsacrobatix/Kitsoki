@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kitsoki.dev/schemas/view/choice.json",
+  "title": "Kitsoki choice view element",
+  "description": "Interactive picker / multi-select / mad-lib form element. See docs/choice-widget.md.",
+  "type": "object",
+  "required": ["mode"],
+  "properties": {
+    "mode": { "enum": ["single", "multi", "form"] }
+  },
+  "allOf": [
+    {
+      "if":   { "properties": { "mode": { "const": "single" } }, "required": ["mode"] },
+      "then": { "$ref": "#/$defs/single" }
+    },
+    {
+      "if":   { "properties": { "mode": { "const": "multi" } }, "required": ["mode"] },
+      "then": { "$ref": "#/$defs/multi" }
+    },
+    {
+      "if":   { "properties": { "mode": { "const": "form" } }, "required": ["mode"] },
+      "then": { "$ref": "#/$defs/form" }
+    }
+  ],
+  "$defs": {
+    "single": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "items"],
+      "properties": {
+        "mode":   { "const": "single" },
+        "prompt": { "type": "string" },
+        "when":   { "type": "string" },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/singleItem" }
+        }
+      }
+    },
+    "multi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "intent", "slot", "items"],
+      "properties": {
+        "mode":   { "const": "multi" },
+        "prompt": { "type": "string" },
+        "when":   { "type": "string" },
+        "intent": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "slot":   { "type": "string", "minLength": 1 },
+        "min":    { "type": "integer", "minimum": 0 },
+        "max":    { "type": "integer", "minimum": 1 },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/multiItem" }
+        }
+      }
+    },
+    "form": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "intent", "template", "fields"],
+      "properties": {
+        "mode":     { "const": "form" },
+        "prompt":   { "type": "string" },
+        "when":     { "type": "string" },
+        "intent":   { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "template": { "type": "string", "minLength": 1 },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/field" }
+        }
+      }
+    },
+    "singleItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "intent"],
+      "properties": {
+        "label":  { "type": "string", "minLength": 1 },
+        "hint":   { "type": "string" },
+        "intent": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "slots":  { "type": "object" },
+        "when":   { "type": "string" },
+        "param":  { "$ref": "#/$defs/param" }
+      }
+    },
+    "multiItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "hint":  { "type": "string" },
+        "when":  { "type": "string" }
+      }
+    },
+    "param": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slot", "type"],
+      "properties": {
+        "slot":        { "type": "string", "minLength": 1 },
+        "type":        { "enum": ["string", "int", "enum"] },
+        "placeholder": { "type": "string" },
+        "values":      { "type": "array", "items": { "type": "string" } },
+        "required":    { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if":   { "properties": { "type": { "const": "enum" } }, "required": ["type"] },
+          "then": { "required": ["values"] }
+        }
+      ]
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type":        { "enum": ["string", "int", "float", "bool", "enum"] },
+        "hint":        { "type": "string" },
+        "placeholder": { "type": "string" },
+        "unit":        { "type": "string" },
+        "values":      { "type": "array", "items": { "type": "string" } },
+        "default":     { "type": ["string", "number", "integer", "boolean"] },
+        "min":         { "type": ["string", "number", "integer", "boolean"] },
+        "max":         { "type": ["string", "number", "integer", "boolean"] },
+        "required":    { "type": "boolean" },
+        "readonly":    { "type": "boolean" },
+        "expr":        { "type": "string" },
+        "when":        { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if":   { "properties": { "type":     { "const": "enum" } }, "required": ["type"] },
+          "then": { "required":   ["values"] }
+        },
+        {
+          "if":   { "properties": { "readonly": { "const": true  } }, "required": ["readonly"] },
+          "then": { "required":   ["expr"] }
+        }
+      ]
+    }
+  }
+}

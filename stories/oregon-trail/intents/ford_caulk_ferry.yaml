@@ -1,0 +1,107 @@
+# ford_caulk_ferry — disambiguation of the three river-crossing verbs.
+#
+# Period-flavored phrasings the LLM is plausibly going to conflate with
+# generic "go across". In OT the verbs are slot values, not bare intents
+# — river_crossing.shallow binds `propose_crossing` with a `method:` enum
+# of [ford, caulk, ferry, wait]. The fixture asserts the LLM picks
+# propose_crossing with the right method slot.
+test_kind: intents
+app: oregon-trail
+state: river_crossing.shallow
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  - id: ford-canonical
+    intent: { name: propose_crossing, slots: { method: ford } }
+    inputs:
+      - "ford the river"
+      - "ford it"
+      - "drive across"
+      - "wade the wagon through"
+
+  - id: caulk-canonical
+    intent: { name: propose_crossing, slots: { method: caulk } }
+    inputs:
+      - "caulk the wagon"
+      - "seal the wagon and float across"
+      - "float it across"
+      - "caulk and float"
+
+  - id: ferry-canonical
+    intent: { name: propose_crossing, slots: { method: ferry } }
+    inputs:
+      - "take the ferry"
+      - "pay the ferryman"
+      - "use the ferry"
+      - "hire the ferry"
+
+  # Adversarial: ambiguous "cross the river" — should ideally clarify
+  # rather than guess. Bare verb `cross` isn't a declared intent; the
+  # LLM has to pick propose_crossing AND a method slot.
+  - id: cross-ambiguous
+    expect_failure:
+      any_of: [clarify, UNKNOWN_INTENT, MISSING_SLOTS]
+    inputs:
+      - "cross the river"
+      - "let's get to the other side"
+
+  # ── Bare-verb / colloquial variants from live OT trace ─────────────
+  # The trace had DETERMINISTIC_MISS for "ford", "ford it",
+  # "let's ford it", "propose ford" — locking them here.
+  - id: ford-bare-variants
+    intent: { name: propose_crossing, slots: { method: ford } }
+    inputs:
+      - "ford"
+      - "let's ford it"
+
+  # "jet ferry" — modern phrasing; LLM probably reads it as ferry.
+  - id: jet-ferry
+    intent: { name: propose_crossing, slots: { method: ferry } }
+    inputs:
+      - "can we cross via jet ferry?"
+
+---
+
+# ── mid: 3-5 ft. caulk is the recommended method here ─────────────────
+test_kind: intents
+app: oregon-trail
+state: river_crossing.mid
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  - id: caulk-and-float-mid
+    intent: { name: propose_crossing, slots: { method: caulk } }
+    inputs:
+      - "caulk and float"
+
+---
+
+# ── deep: 6+ ft. ferry / wait are the safe methods ────────────────────
+test_kind: intents
+app: oregon-trail
+state: river_crossing.deep
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  - id: ferry-bare-deep
+    intent: { name: propose_crossing, slots: { method: ferry } }
+    inputs:
+      - "ferry"
+      - "hire a ferryman"
+
+  - id: wait-for-water-drop
+    intent: { name: propose_crossing, slots: { method: wait } }
+    inputs:
+      - "wait for the water to drop"

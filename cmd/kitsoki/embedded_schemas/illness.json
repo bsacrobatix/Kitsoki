@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "illness_diagnosis",
+  "type": "object",
+  "required": ["illness", "severity", "treatment"],
+  "additionalProperties": false,
+  "properties": {
+    "illness": {
+      "type": "string",
+      "enum": ["dysentery", "cholera", "typhoid", "measles", "exhaustion"]
+    },
+    "severity": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "treatment": {
+      "type": "string",
+      "enum": ["medicine", "rest", "fluids", "none"]
+    }
+  }
+}

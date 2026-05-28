@@ -1,0 +1,62 @@
+# Compiled binary
+/kitsoki
+/fromflow
+/fromsession
+
+# Ephemeral render artifacts (viewable over VS Code remote tunnel)
+/.artifacts/
+
+# Test binaries and coverage
+*.test
+coverage.out
+coverage.html
+
+# Go workspace
+/vendor/
+
+# macOS
+.DS_Store
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code local state
+.claude/
+
+# Git worktrees (local checkouts of feature branches)
+.worktrees/
+
+# Session data (local only)
+~/.kitsoki/
+
+# Local session summaries (per-checkout, not committed)
+.context/
+
+# Build output
+dist/
+
+# Binary media — keep clone small; add with -f if a specific file is needed
+*.mp4
+*.png
+
+# Local working notes (kept on disk, not committed)
+/ideas.md
+
+# Generated visualisations from `kitsoki viz`
+*-viz.dot
+*-viz.mmd
+
+# Pellicule (video pipeline) — node deps and generated frames/output
+tools/pellicule/node_modules/
+tools/pellicule/*.mp4
+tools/pellicule/frames/
+
+# Run-status SPA — single-file HTML artifacts (built by `pnpm artifact …`
+# and by the Playwright artifact suite).
+.artifacts/
+tools/runstatus/test-results/
+tools/runstatus/playwright-report/
+tools/runstatus/node_modules/

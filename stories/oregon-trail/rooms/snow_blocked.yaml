@@ -1,0 +1,114 @@
+# snow_blocked — atomic state reached from leg_e_awaiting_reply.continue
+# when world.month lands in [october, november, december, january,
+# february]. The party tried to push into South Pass too late in the
+# season; the pass is choked with snow and impassable.
+#
+# wait_for_spring drains food and advances the calendar in chunks of
+# ~30 days, bouncing the player back into snow_blocked on each tick
+# until world.month is about to roll into april — at which point the
+# pass opens and the player is teleported back to leg_e_awaiting_reply
+# (where the normal `continue` will route into leg_f). If food runs
+# out before spring, the party starves out and the transition lands
+# in ended_lost instead.
+#
+# give_up unconditionally drops the player in ended_lost — the party
+# turned back east and never made the crossing.
+
+states:
+  snow_blocked:
+    description: "South Pass is snowed in — wait for spring or turn back."
+    relevant_world: [month, day, year, food_lbs, party_alive, oxen, health_avg]
+    # Flattened from `extends: base + blocks` to a sibling typed-element
+     # array so the choice: widget can live in the view (choice cannot
+     # live inside `blocks:`). The status chrome from base.pongo is
+     # lost; the data plane stays.
+    view:
+      - prose: "South Pass is choked with snow. The wagons cannot get through."
+      - kv:
+          pairs:
+            Month:  "{{ world.month|upper }} {{ world.year }}"
+            Food:   "{{ world.food_lbs }} lbs"
+            Party:  "{{ world.party_alive }} alive"
+            Health: "{{ world.health_avg }}"
+      - prose: >
+          You can wait out the winter (camp here while food lasts and
+          the months tick by, until April opens the pass) — or you
+          can turn back east and abandon the journey.
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "wait_for_spring"
+              hint:   "advance ~30 days; food drains, health drops 5/month"
+              intent: wait_for_spring
+            - label:  "give_up"
+              hint:   "turn back east; the journey ends"
+              intent: give_up
+            - label:  "look"
+              intent: look
+    on:
+      # ── wait_for_spring ──────────────────────────────────────────
+      # One "tick" = ~30 game-days of winter camp:
+      #   * food -120 lbs (5 souls × ~24 lbs/30d at winter sustainment,
+      #     deliberately rougher than the steady-state filling 10/day so
+      #     waiting out a long winter actually bites).
+      #   * day reset to 1 (calendar moves to the next month).
+      #   * year +1 on the december → january rollover.
+      #   * health -5 per month of winter exposure.
+      #
+      # Three landing arms in priority order:
+      #   1. food would drop ≤ 0 this tick → ended_lost (starvation).
+      #   2. current month is march — next tick is april → exit back to
+      #      leg_e_awaiting_reply so the normal `continue` arm can push
+      #      into leg_f (pass is open).
+      #   3. default → self-transition, advancing month + day + drain.
+      wait_for_spring:
+        - when: "world.food_lbs - 120 <= 0"
+          target: ended_lost
+          effects:
+            - set:
+                food_lbs: 0
+                day: "{{ world.day + 30 }}"
+            - say: "The food ran out before spring. The party starves in the snow."
+        - when: "world.month == 'march'"
+          target: leg_e_awaiting_reply
+          effects:
+            - set:
+                month: april
+                day: 1
+                food_lbs: "{{ world.food_lbs - 120 }}"
+                health_avg: "{{ world.health_avg - 5 }}"
+            - say: "Spring arrives. The pass is open."
+        - default: true
+          target: .
+          effects:
+            # year must be computed BEFORE month is written — map-
+            # iteration in a single set: block is order-non-deterministic
+            # (phases.yaml header), so if month landed first, year's
+            # `world.month == 'december'` read would see the post-update
+            # value and tick the year on every step. Two-stage set: keeps
+            # year/day/food/health on the original month snapshot, then
+            # the second block advances the month enum.
+            - set:
+                year: "{{ world.month == 'december' ? world.year + 1 : world.year }}"
+                day: 1
+                food_lbs: "{{ world.food_lbs - 120 }}"
+                health_avg: "{{ world.health_avg - 5 }}"
+            - set:
+                # Advance month: oct→nov→dec→jan→feb→mar.
+                # March → april is handled by the spring-exit arm above.
+                month: |
+                  {{ world.month == 'october' ? 'november' :
+                     (world.month == 'november' ? 'december' :
+                     (world.month == 'december' ? 'january' :
+                     (world.month == 'january' ? 'february' :
+                     (world.month == 'february' ? 'march' : world.month)))) }}
+            - say: "Another month of winter camp passes."
+
+      give_up:
+        - target: ended_lost
+          effects:
+            - say: "The party turns back east, defeated by the snow. The journey ends short of Oregon."
+
+      look:
+        - target: .

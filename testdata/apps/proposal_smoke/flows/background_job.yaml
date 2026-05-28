@@ -1,0 +1,21 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: terminal
+
+turns:
+  # Propose then cancel (simulates a workflow that doesn't need execute)
+  - intent:
+      name: propose
+      slots:
+        cmd: "ls /tmp"
+    expect_state: reviewing
+    expect_world:
+      stage: reviewing
+
+  - intent:
+      name: cancel
+    expect_state: terminal
+    expect_world:
+      stage: cancelled
+
+expect_no_errors: true

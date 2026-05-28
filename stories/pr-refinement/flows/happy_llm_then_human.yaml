@@ -1,0 +1,94 @@
+# happy_llm_then_human — judge_mode=llm_then_human. CI fails on the
+# first poll, the LLM-judge confidently fires `accept` on the
+# diagnose checkpoint, so the operator only sees the merge step.
+# Same emit_intent pattern as bugfix's happy_llm fixture.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:      "TKT-PR-004"
+  ticket_title:   "Off-by-one in renderer"
+  thread:         "TKT-PR-004"
+  workdir:        ".worktrees/tkt-pr-004"
+  base_branch:    "main"
+  feature_branch: "fix/tkt-pr-004-render"
+  pr_title:       "TKT-PR-004: Off-by-one in renderer"
+  pr_body:        "Closes TKT-PR-004."
+  judge_mode:     "llm_then_human"
+  judge_confidence_threshold: 0.8
+  merge_strategy: "squash"
+  pending_comments: 0
+  ci_log:         "FAIL: TestRender (off-by-one in width calc)"
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git:
+    data:
+      ok:    true
+      url:   "https://example/pr/145"
+      pr_id: "145"
+      state: "failure"
+      checks: "go-test"
+      comments: ""
+      sha:   "facefeed"
+  host.local:
+    data: { ok: true, state: "failure", checks: "go-test" }
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        # Diagnose artifact
+        summary_title:    "Off-by-one in renderer"
+        summary_markdown: "The renderer's width calc returns terminal-width-2 instead of terminal-width-1; fix is one line in foyer.go."
+        root_cause:       "Off-by-one in renderWidth()."
+        fix_description:  "Change `width - 2` to `width - 1` in foyer.go renderWidth()."
+        affected_files:   ["internal/tui/foyer.go"]
+        failing_checks:   ["go-test"]
+        confidence:       0.92
+        reasoning:        "Trace shows the off-by-one; same pattern as the TUI fix from last week."
+        # Judge fields piggy-backed on the same envelope; confidence is
+        # shared so a single value satisfies both schemas at 0.92 (>
+        # judge_confidence_threshold so the emit_intent auto-fires).
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Diagnosis is grounded and the fix targets the cause."
+
+turns:
+  - intent: { name: open, slots: {} }
+    expect_state: open_pr
+    expect_world:
+      pr_id: "145"
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: ci_monitoring
+
+  # proceed → diagnose_executing (ci_state=failure).
+  - intent: { name: proceed, slots: {} }
+    expect_state: diagnose_executing
+
+  # proceed → diagnose_awaiting_reply → (LLM-judge binds verdict with
+  # confidence 0.92) → emit_intent fires `accept` → re_push.
+  # The whole hop is one turn now that DispatchPostBindEmits lands.
+  - intent: { name: proceed, slots: {} }
+    expect_state: re_push
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: ci_monitoring
+
+  # Same ci-still-failure problem as ci_fails_diagnose — use merge_now
+  # to bypass.
+  - intent: { name: merge_now, slots: {} }
+    expect_state: merge_executing
+
+  # merge_awaiting_reply: LLM-judge auto-fires accept → @exit:merged.
+  - intent: { name: proceed, slots: {} }
+    expect_state: __exit__merged
+    expect_world:
+      status: "merged"
+
+expect_terminal: true
+expect_no_errors: true

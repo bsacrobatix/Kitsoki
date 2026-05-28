@@ -1,0 +1,90 @@
+# list_pending — fetch the list of PRs awaiting your review via
+# iface.vcs.pr_status (with a filter for "needs my review"). For the
+# inbox-trigger path, pr_id is already seeded in world from the
+# notification payload; the operator may type `pick_pr` directly to
+# jump to review_pr_executing.
+
+states:
+
+  list_pending:
+    description: "Listing PRs awaiting your review."
+    # Choice-widget migration (§4 row 4, dynamic-list case). The pending
+    # PR ids live in `world.pending_prs` as a free-form string blob the
+    # iface returns; static `choice:` items can't enumerate that list
+    # (no item-loop in YAML, and templated multi `value:` is disallowed
+    # by §3.6). The pragmatic shape: a `kv:` displays the list verbatim
+    # and the `pick_pr` row uses `param:` to capture the PR id at pick
+    # time. `proceed` is split into two mutually-exclusive rows so the
+    # disabled state shows *why* (cookbook §2.2). Flattened out of the
+    # `extends: "base"` / `blocks:` shell because §4.5 forbids `choice:`
+    # inside `blocks:`.
+    view:
+      - kv:
+          pairs:
+            Count:   "{{ world.pending_count }}"
+            Pending: '{{ world.pending_prs|default:"(none)" }}'
+            Picked:  '{{ world.pr_id|default:"(none)" }} {{ world.pr_title }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "pick a PR"
+              hint:   "type the PR id (e.g. PR-38) then Enter"
+              intent: pick_pr
+              param:
+                slot:        id
+                type:        string
+                placeholder: "e.g. PR-38"
+                required:    true
+            - label:  "proceed"
+              hint:   "advance with the already-picked PR"
+              intent: proceed
+              when:   "world.pr_id != ''"
+            - label:  "✗ proceed — pick a PR first"
+              hint:   "no PR id set"
+              intent: proceed
+              when:   "world.pr_id == ''"
+            - label:  "dismiss"
+              hint:   "drop the review request (wrong reviewer)"
+              intent: dismiss
+            - label:  "quit"
+              hint:   "abandon the review"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render the scene"
+              intent: look
+    relevant_world: [pending_count, pending_prs, pr_id, pr_title]
+    on_enter:
+      # Fetch the list. The default host.git binding doesn't actually
+      # filter (Wave 3 host handler is stubbed); a downstream parent
+      # rebinds iface.vcs.pr_status to a real GitHub list query.
+      - invoke: iface.vcs.pr_status
+        with:
+          pr_id: "*"
+        bind:
+          pending_prs: comments
+        on_error: idle
+    on:
+      pick_pr:
+        - target: review_pr_executing
+          effects:
+            - set:
+                pr_id:  "{{ slots.id }}"
+                thread: "{{ slots.id }}"
+      # If pr_id is already set (inbox-trigger flow), the operator can
+      # advance straight to review_pr_executing.
+      proceed:
+        - when: "world.pr_id != ''"
+          target: review_pr_executing
+        - default: true
+          target: list_pending
+          guard_hint: "Pick a PR first via `pick_pr id=<PR>`."
+      dismiss:
+        - target: "@exit:dismissed"
+          effects:
+            - set:
+                status: "dismissed"
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

@@ -1,0 +1,303 @@
+# pr-refinement — first-class PR-refinement pipeline.
+#
+# Wave 2 / Phase 2 of the dev-story / bugfix unify design.
+# pr-refinement is a story, not a library. The six visible rooms
+# (open_pr → ci_monitoring → diagnose → resolve_comments → re_push →
+# merge) collapse a pr-refine driver and the autonomous merge-monitor
+# loop into one provider-neutral state machine.
+#
+# # Standalone-runnable.
+#
+# An operator can drive pr-refinement directly against an arbitrary PR
+# via:
+#
+#   kitsoki run stories/pr-refinement/app.yaml \
+#       --warp scenarios/pr_142.yaml
+#
+# (scenarios/ examples come later; the `world:` keys below are the
+# warp-basis surface.)
+#
+# # Imported.
+#
+# The parent stories (bugfix, dev-story) import pr-refinement as the
+# shared tail. The handoff is one import edge:
+#
+#   imports:
+#     pr:
+#       source: ../pr-refinement
+#       entry: open_pr
+#       world_in:
+#         pr_title:       "{{ world.bf__done_artifact.pr_title }}"
+#         pr_body:        "{{ world.bf__done_artifact.summary_markdown }}"
+#         workdir:        "{{ world.workdir }}"
+#         feature_branch: "{{ world.feature_branch }}"
+#         base_branch:    "{{ world.base_branch }}"
+#         ticket_id:      "{{ world.ticket_id }}"
+#         thread:         "{{ world.thread }}"
+#       exits:
+#         merged:    { to: pr_done, set: { last_pr_url: "{{ world.pr__pr_url }}", status: "merged" }}
+#         abandoned: { to: main }
+#
+# # Judge polymorphism — same shape as stories/bugfix/.
+#
+# Both `diagnose_awaiting_reply` and `merge_awaiting_reply` follow the
+# canonical §6 checkpoint shape: post artifact + inbox mirror +
+# conditional LLM-judge + emit_intent auto-fire on confident verdict.
+# `world.judge_mode` selects who answers; `world.judge_confidence_threshold`
+# tunes the LLM auto-fire floor.
+#
+# # PR refinement owns the merge.
+#
+# Per proposal §10 question 6 (pragmatic reading) — pr-refinement's
+# `merge` room is the last room before `@exit:merged`. Parent stories
+# consume the `merged` exit and do not gate the merge themselves.
+
+app:
+  id: pr-refinement
+  version: 0.1.0
+  title: "PR refinement pipeline"
+  author: "Kitsoki"
+  license: "CC0"
+
+# Host allow-list. The four iface defaults below (vcs, ci, transport,
+# ticket) register implicitly through resolveAllInterfaces — every
+# `iface.<name>.<op>` site is union'd into hosts as `<binding>.<op>`
+# at load time. Bare `host.inbox.add` and `host.oracle.decide`
+# calls are listed explicitly because they are not wrapped by an iface.
+hosts:
+  - host.inbox.add
+  - host.oracle.decide
+
+# Persona table (oracle-split proposal §3.5).
+#
+# All LLM calls in pr-refinement are judgment calls — analysis
+# and inter-phase gates. No file-mutation oracles in this story.
+#
+#   diagnoser    decide   reads CI log, produces typed diagnosis artifact
+#   judge        decide   every awaiting_reply gate
+agents:
+  diagnoser:
+    system_prompt: "You are a CI failure analyst. Read the provided CI log and failing checks, identify the root cause, and produce a structured diagnosis artifact with a concrete fix proposal."
+    model: claude-sonnet-4-6
+    tools: []
+
+  judge:
+    system_prompt: "You are a quality gate. Evaluate the provided artifact against the stated criteria and emit a structured verdict: accept, refine, or uncertain."
+    model: claude-sonnet-4-6
+    tools: []
+
+# Four host_interfaces — same provider-neutral surfaces as bugfix
+# (contract §2). pr-refinement only really exercises vcs + ci +
+# transport; the ticket iface is declared so parent stories that
+# rebind a single set of providers get a transitive rebind for free.
+host_interfaces:
+
+  # 2.1 ticket — used for `merged` close-out (transition the upstream
+  # ticket to resolved). Not used during the loop itself.
+  ticket:
+    description: "Issue tracker abstraction (file / GitHub Issues / Jira)."
+    operations:
+      search:
+        input:  { query: string, limit: int }
+        output: { tickets: list }
+      get:
+        input:  { id: string }
+        output: { id: string, title: string, body: string, status: string,
+                  priority: string, assignee: string, url: string, comments: list }
+      comment:
+        input:  { id: string, body: string, thread: string }
+        output: { ok: bool, comment_id: string }
+      transition:
+        input:  { id: string, to: string }
+        output: { ok: bool }
+      list_mine:
+        input:  { filter: string }
+        output: { tickets: list }
+    default: host.local_files.ticket
+
+  # 2.2 vcs — open_pr, push, commit, diff, pr_status, pr_comment.
+  vcs:
+    description: "Branch / commit / PR abstraction (git / GitHub / Bitbucket)."
+    operations:
+      branch:
+        input:  { workdir: string, name: string, base: string }
+        output: { ok: bool, branch: string }
+      diff:
+        input:  { workdir: string }
+        output: { diff: string, files: list }
+      commit:
+        input:  { workdir: string, message: string, files: list }
+        output: { ok: bool, sha: string }
+      push:
+        input:  { workdir: string, remote: string }
+        output: { ok: bool, url: string }
+      open_pr:
+        input:  { workdir: string, title: string, body: string, base: string }
+        output: { ok: bool, url: string, pr_id: string }
+      pr_status:
+        input:  { pr_id: string }
+        output: { state: string, checks: list, comments: list }
+      pr_comment:
+        input:  { pr_id: string, body: string }
+        output: { ok: bool }
+      merge:
+        input:  { pr_id: string, strategy: string }
+        output: { ok: bool, sha: string }
+    default: host.git
+
+  # 2.3 ci — remote_status (for polling), run_tests (for local re-runs).
+  ci:
+    description: "Build/test runner (local make/go test, GitHub Actions, Jenkins)."
+    operations:
+      run_tests:
+        input:  { workdir: string, target: string }
+        output: { ok: bool, passed: int, failed: int, log: string, junit: string }
+      build:
+        input:  { workdir: string, target: string }
+        output: { ok: bool, log: string }
+      remote_status:
+        input:  { pr_id: string }
+        output: { state: string, checks: list }
+    default: host.local
+
+  # 2.5 transport — out-of-band channel for posting status updates.
+  transport:
+    description: "Out-of-band channel for posting proposals, checkpoints, status."
+    operations:
+      post:
+        input:  { thread: string, body: string }
+        output: { ok: bool, message_id: string }
+    default: host.append_to_file
+
+# World — pr-refinement's lingua franca. Inherits the bug-fix world keys
+# the upstream populated (ticket_id, workdir, feature_branch, base_branch)
+# plus the PR-specific keys driven by this story.
+world:
+  # ── Identity / inherited from upstream ─────────────────────────────
+  ticket_id:        { type: string, default: "" }
+  ticket_title:     { type: string, default: "" }
+  ticket_url:       { type: string, default: "" }
+  thread:           { type: string, default: "" }
+  allowed_authors:  { type: string, default: "" }
+
+  # ── Workspace / branches ──────────────────────────────────────────
+  workspace_id:     { type: string, default: "" }
+  workdir:          { type: string, default: "" }
+  base_branch:      { type: string, default: "main" }
+  feature_branch:   { type: string, default: "" }
+
+  # ── PR identity (open_pr populates pr_id / pr_url) ────────────────
+  pr_id:            { type: string, default: "" }
+  pr_url:           { type: string, default: "" }
+  pr_title:         { type: string, default: "" }
+  pr_body:          { type: string, default: "" }
+
+  # ── CI state ──────────────────────────────────────────────────────
+  ci_state:         { type: string, default: "" }    # pending | success | failure | error
+  ci_attempts:      { type: int,    default: 0 }     # number of polls
+  ci_log:           { type: string, default: "" }    # last build / failure log
+  ci_failed_checks: { type: string, default: "" }    # comma-separated list of failing checks
+
+  # ── Review comment state ──────────────────────────────────────────
+  pr_comments:      { type: string, default: "" }    # JSON-ish blob; iface.vcs.pr_status returns
+  pending_comments: { type: int,    default: 0 }     # count of unresolved review comments
+
+  # ── Pipeline control ──────────────────────────────────────────────
+  judge_mode:       { type: string, default: "human" }            # human | llm | llm_then_human
+  judge_confidence_threshold: { type: float, default: 0.8 }
+  cycle:            { type: int,    default: 0 }                   # diagnose / re-push retries
+  ci_poll_budget:   { type: int,    default: 5 }                   # max ci_monitoring loops
+  last_reply_author: { type: string, default: "" }
+  refine_feedback:   { type: string, default: "" }
+  merge_strategy:    { type: string, default: "squash" }           # squash | merge | rebase
+
+  # ── Diagnose artifact (schemas/diagnose_artifact.json) ────────────
+  # Populated by `diagnose_executing` when CI fails. The diagnose
+  # checkpoint (`diagnose_awaiting_reply`) is the LLM-judge-able room
+  # of this story — same shape as a bugfix `_awaiting_reply`.
+  diagnose_artifact: { type: object, default: {} }
+
+  # ── Judge state (set by judge harness, read by gate clauses) ──────
+  llm_verdict:      { type: object, default: {} }   # { intent, reason, confidence, verdict }
+
+  # ── Story-level "done" sink for standalone runs / parent handoff ──
+  status:           { type: string, default: "open" }  # open | merged | abandoned
+  merge_sha:        { type: string, default: "" }
+
+# Intent vocabulary.
+intents:
+  open:
+    description: "Open the PR (or treat an existing PR as opened)."
+    examples: [open, "open pr", "create pr"]
+    priority: 90
+  monitor:
+    description: "Poll CI / status."
+    examples: [monitor, "poll", "check ci", "watch"]
+    priority: 85
+  proceed:
+    description: "Advance the current room (after _executing)."
+    examples: [proceed, "next"]
+    priority: 80
+  retry:
+    description: "Re-run / re-push after a failure."
+    examples: [retry, "try again", "re-push"]
+    priority: 75
+  resolve:
+    description: "Resolve pending review comments."
+    examples: [resolve, "address comments"]
+    priority: 70
+  merge_now:
+    description: "Merge the PR."
+    examples: [merge, "merge now", "land it"]
+    priority: 65
+  accept:
+    description: "Accept the current checkpoint artifact; advance."
+    examples: [accept, "approve", "lgtm"]
+    priority: 80
+  refine:
+    description: "Re-execute the current checkpoint with feedback."
+    examples: [refine, "rework"]
+    priority: 70
+    slots:
+      # required: true so a synonym hit on "refine ..." forces a
+      # fall-through to the LLM router instead of auto-dispatching
+      # with empty slots. See bugfix/app.yaml's refine intent for the
+      # full rationale + the 2026-05-20 dogfood regression that
+      # motivated this.
+      feedback: { type: string, required: true }
+  quit:
+    description: "Abandon the PR-refinement pipeline."
+    examples: [quit, "abort", "bail"]
+    priority: 50
+  look:
+    description: "Re-render the current view."
+    examples: [look, "what now?"]
+    priority: 10
+
+# Intents exposed to importing parent stories. dev-story's
+# `intents.import: [open, monitor, retry, merge_now, accept, refine, quit]`
+# lifts these into the parent's bare intent table.
+exports:
+  intents: [open, monitor, proceed, retry, resolve, merge_now, accept, refine, quit, look]
+
+# Named return points. A parent story (bugfix, dev-story) maps each to
+# one of its own states. Standalone load synthesises `__exit__merged`
+# `__exit__abandoned` `__exit__pushback_resolved` terminals.
+exits:
+  merged:
+    description: "PR landed. Pipeline succeeded."
+    requires: [pr_url]
+  abandoned:
+    description: "User or LLM bailed."
+  pushback_resolved:
+    description: "Review pushback addressed; the parent may resume monitoring or treat as merged."
+
+# Root state — standalone runs land at `idle` and the operator types
+# `open` to fire `open_pr.on_enter`. Importers set `entry: open_pr`
+# to bypass idle and drill straight into the real entry room (whose
+# on_enter binds pr_id / pr_url and announces on the transport).
+root: idle
+
+# Rooms live in rooms/*.yaml. One file per visible room.
+include:
+  - rooms/*.yaml

@@ -1,0 +1,16 @@
+# form_bool — Space-toggle a bool field; dispatch with "true".
+# Note: the bool slot is declared `type: string` in intents: because
+# the orchestrator stringifies the dispatched bool — flow tests submit
+# the string form to match what the widget would emit. Commit advances
+# to form_float.
+test_kind: flow
+app: ../app.yaml
+initial_state: form_bool
+
+turns:
+  - intent: { name: submit_bool_form, slots: { active: "true" } }
+    expect_state: form_float
+    expect_world:
+      form_active: "true"
+
+expect_no_errors: true

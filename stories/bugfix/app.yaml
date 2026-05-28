@@ -1,0 +1,409 @@
+# bugfix — general-purpose, provider-neutral bug-fix pipeline.
+#
+# Wave 1 / Slice α of the dev-story / bugfix unify design: the 7
+# visible rooms (idle → reproducing → proposing → implementing →
+# testing → reviewing → validating → done) collapse a 14-phase
+# pipeline into one state machine. Each room has an `_executing` substate that drives
+# the LLM call producing the artifact, and (for checkpointed rooms) an
+# `_awaiting_reply` substate that posts the artifact, mirrors it to the local
+# inbox, optionally runs an LLM-judge, and waits for accept / refine /
+# restart_from / quit.
+#
+# # One YAML, three modes — judge polymorphism
+#
+# A single `world.judge_mode` flag selects who answers at every checkpoint:
+#
+#   human          — wait for an explicit human reply intent (no LLM call)
+#   llm            — run the LLM-judge; if confident, the LLM's reply is
+#                    captured into world.llm_verdict for an operator-driven
+#                    follow-up; if not confident, the state holds (operator
+#                    sweep). [strict mode for batch overnight runs]
+#   llm_then_human — run the LLM-judge; if confident, capture verdict; if not
+#                    confident, fall through to the human reply path.
+#                    [recommended autonomous default]
+#
+# The same YAML drives all three. Only one host call is gated by `when:` per
+# checkpoint — no fork in the state graph.
+#
+# # What is NOT here (Wave 2):
+#   - the pr-refinement tail import (the `@exit:done` hands off to a parent
+#     story that imports pr-refinement; standalone Wave 1 terminates here)
+#   - cycle budgets, `restart_from_stage` plumbing, `quick_fix` / `skip_to_pr`
+#     shortcut intents
+#   - actual provider implementations for ticket / vcs / ci / workspace —
+#     Slice β ships the handlers; this story references them by name only
+#   - automatic intent emission from a confident LLM verdict (the contract's
+#     `emit_intent:` effect is not yet supported by the runtime — see the
+#     final report; for now an authorised human / operator types the verdict's
+#     intent. The verdict text lives in world.llm_verdict.reason for review.)
+
+app:
+  id: bugfix
+  version: 0.1.0
+  title: "Bug-fix pipeline"
+  author: "Kitsoki"
+  license: "CC0"
+
+# Host allow-list. The six iface defaults below register implicitly through
+# resolveAllInterfaces — every `iface.<name>.<op>` site is union'd into hosts
+# as `<binding>.<op>` at load time. Bare host calls listed explicitly because
+# they are not wrapped by an iface.
+hosts:
+  - host.inbox.add
+  - host.oracle.ask
+  - host.oracle.decide
+  - host.oracle.task
+
+# Persona table (oracle-split proposal §3.5).
+#
+# Each persona declares the model, tool surface, and blast-radius
+# classification for one class of LLM work. The verb at every call site
+# is chosen to match the persona's declared surface:
+#
+#   ask     — read-only inspection; returns prose or typed JSON
+#   decide  — LLM reasoning verdict; schema mandatory; read-only tools
+#   task    — agentic; may mutate files; external_side_effect declared
+#
+# Personas used in this story:
+#
+#   reproducer       task    phase_1 (reproducing artifact)
+#   proposer         ask     phase_2 (fix proposal), phase_7 (close-out)
+#   implementer      task    phase_3 (applying the fix)
+#   test_author      task    phase_4 (testing + test-writing)
+#   validator        task    phase_6 (full-env validation)
+#   judge_<phase>    decide  every inter-phase gate
+agents:
+  reproducer:
+    system_prompt: "You are a bug reproduction analyst. Read the codebase, reproduce the reported bug, identify the affected components, and produce a structured reproduction artifact."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Bash]
+    external_side_effect: false
+
+  proposer:
+    system_prompt: "You are a senior engineer performing code analysis. Read the codebase, analyse the reproduction evidence, and produce a structured fix proposal or close-out summary."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Bash]
+    bash_profile: read-only
+
+  implementer:
+    system_prompt: "You are a software engineer applying a proposed fix. Read the proposal artifact, locate the affected files, and apply the minimal correct edit to fix the bug."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Edit, Write, Bash]
+    external_side_effect: false
+
+  test_author:
+    system_prompt: "You are a software engineer reviewing test coverage and authoring regression tests. Read the applied fix, run the tests, and produce a structured test-review artifact."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Edit, Write, Bash]
+    external_side_effect: false
+
+  validator:
+    system_prompt: "You are a validation engineer verifying a fix in a full environment. Build the project, run tests, check the fix applies, and produce a structured validation artifact."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Bash]
+    external_side_effect: false
+
+  judge:
+    system_prompt: "You are a quality gate. Evaluate the provided artifact against the stated criteria and emit a structured verdict: accept, refine, or uncertain."
+    model: claude-sonnet-4-6
+    tools: []
+
+# Six host_interfaces — the provider-neutral surfaces every parent story
+# binds to a concrete handler at import time. Operation names + I/O shapes
+# are fixed by the contract; only the `default:` may be rebound.
+host_interfaces:
+
+  # 2.1 ticket — issue tracker (file / GitHub Issues / Jira).
+  ticket:
+    description: "Issue tracker abstraction (file / GitHub Issues / Jira)."
+    operations:
+      search:
+        input:  { query: string, limit: int }
+        output: { tickets: list }
+      get:
+        input:  { id: string }
+        output: { id: string, title: string, body: string, status: string,
+                  priority: string, assignee: string, url: string, comments: list }
+      comment:
+        input:  { id: string, body: string, thread: string }
+        output: { ok: bool, comment_id: string }
+      transition:
+        input:  { id: string, to: string }
+        output: { ok: bool }
+      list_mine:
+        input:  { filter: string }
+        output: { tickets: list }
+    default: host.local_files.ticket
+
+  # 2.2 vcs — version control + PR host (git / GitHub / Bitbucket).
+  vcs:
+    description: "Branch / commit / PR abstraction (git / GitHub / Bitbucket)."
+    operations:
+      branch:
+        input:  { workdir: string, name: string, base: string }
+        output: { ok: bool, branch: string }
+      diff:
+        input:  { workdir: string }
+        output: { diff: string, files: list }
+      commit:
+        input:  { workdir: string, message: string, files: list }
+        output: { ok: bool, sha: string }
+      push:
+        input:  { workdir: string, remote: string }
+        output: { ok: bool, url: string }
+      open_pr:
+        input:  { workdir: string, title: string, body: string, base: string }
+        output: { ok: bool, url: string, pr_id: string }
+      pr_status:
+        input:  { pr_id: string }
+        output: { state: string, checks: list, comments: list }
+      pr_comment:
+        input:  { pr_id: string, body: string }
+        output: { ok: bool }
+    default: host.git
+
+  # 2.3 ci — build & test runner (local make / go test, GitHub Actions, Jenkins).
+  ci:
+    description: "Build/test runner (local make/go test, GitHub Actions, Jenkins)."
+    operations:
+      run_tests:
+        input:  { workdir: string, target: string }
+        output: { ok: bool, passed: int, failed: int, log: string, junit: string }
+      build:
+        input:  { workdir: string, target: string }
+        output: { ok: bool, log: string }
+      remote_status:
+        input:  { pr_id: string }
+        output: { state: string, checks: list }
+    default: host.local
+
+  # 2.4 workspace — per-task working tree (git worktree by default).
+  workspace:
+    description: "Working-copy manager. Local: git worktree."
+    operations:
+      list:
+        input:  {}
+        output: { workspaces: list }
+      get:
+        input:  { id: string }
+        output: { id: string, path: string, branch: string, dirty: bool }
+      create:
+        input:  { name: string, ticket_id: string, base: string }
+        output: { ok: bool, path: string }
+      sync:
+        input:  { id: string }
+        output: { ok: bool, log: string }
+    default: host.git_worktree
+
+  # 2.5 transport — out-of-band channel for checkpoint artifacts. For
+  # kitsoki-dev this is `host.append_to_file` (appends a comment block to the
+  # local bug file); a downstream Jira-backed parent story will rebind
+  # to `host.jira_comment`. host.stdout (no-op) is available for tests
+  # that don't care about the side effect.
+  transport:
+    description: "Out-of-band channel for posting proposals, checkpoints, status."
+    operations:
+      post:
+        input:  { thread: string, body: string }
+        output: { ok: bool, message_id: string }
+    default: host.append_to_file
+
+# World — Wave 1 keys (contract §4). Provider handlers populate these via
+# `bind:` projections inside rooms; checkpoint judges read them via
+# `relevant_world:`.
+world:
+  # ── Identity / ticket ──────────────────────────────────────────────────
+  ticket_id:        { type: string, default: "" }
+  ticket_title:     { type: string, default: "" }
+  ticket_status:    { type: string, default: "" }
+  ticket_url:       { type: string, default: "" }
+  thread:           { type: string, default: "" }
+  allowed_authors:  { type: string, default: "" }   # CSV — list not yet a first-class scalar type
+
+  # ── Workspace ─────────────────────────────────────────────────────────
+  workspace_id:     { type: string, default: "" }
+  workdir:          { type: string, default: "" }
+  # base_branch defaults to "main" so bf.idle's auto-create has a
+  # sane root for `git worktree add -b <feature_branch> <path> <base>`.
+  # Parent stories that work off a different long-lived branch
+  # (release/* etc.) override via world_in or by setting the key
+  # explicitly before transitioning into bf.
+  base_branch:      { type: string, default: "main" }
+  feature_branch:   { type: string, default: "" }
+
+  # ── Pipeline control ──────────────────────────────────────────────────
+  bugfix_mode:      { type: string, default: "full" }            # full | quick
+
+  # bf_autostart_attempted gates bf.idle's on_enter setup+autostart
+  # chain so it fires exactly once per session per ticket. Without
+  # this, an on_error bounce back to idle would re-fire the chain
+  # against a stale workspace (the loop the dogfood walkthrough hit
+  # on 2026-05-18 — see rooms/idle.yaml's on_enter comment).
+  bf_autostart_attempted: { type: bool, default: false }
+  judge_mode:       { type: string, default: "human" }           # human | llm | llm_then_human
+  judge_confidence_threshold: { type: float, default: 0.8 }
+
+  # Global cycle counter — tracks total refinements across the run. Per-phase
+  # counters (below) drive the L2 budget gates; this scalar is a coarse
+  # convenience for views / audit.
+  cycle:            { type: int,    default: 0 }
+
+  # ── L2 cycle budgets — per-checkpoint refine counters + budgets ──────
+  #
+  # Wave 3 / Phase 4 — port of an upstream bugfix pipeline's L2
+  # cycle-budget pattern.  Each checkpointed room maintains its own
+  # `<phase>_cycle` counter; when `refine` fires the counter
+  # increments and the room re-executes. When the counter hits
+  # `<phase>_budget` the refine arc redirects to `@exit:abandoned`
+  # with `abandon_reason: <phase>_cycle_budget_exhausted` — the
+  # operator gets one bail-out instead of an infinite loop.
+  #
+  # Budgets default to 3 (matches the upstream pipeline's L2 retry
+  # caps); operators can override per-session by setting
+  # `<phase>_budget` in initial_world.  `cycle_budget` is the
+  # documented global default — kept here for vocabulary parity but
+  # not currently used directly by any arc (each phase reads its own
+  # `_budget` key).
+  reproducing_cycle:    { type: int, default: 0 }
+  proposing_cycle:      { type: int, default: 0 }
+  implementing_cycle:   { type: int, default: 0 }
+  testing_cycle:        { type: int, default: 0 }
+  reviewing_cycle:      { type: int, default: 0 }
+  validating_cycle:     { type: int, default: 0 }
+  done_cycle:           { type: int, default: 0 }
+  cycle_budget:         { type: int, default: 3 }   # documented global default
+  reproducing_budget:   { type: int, default: 3 }
+  proposing_budget:     { type: int, default: 3 }
+  implementing_budget:  { type: int, default: 3 }
+  testing_budget:       { type: int, default: 3 }
+  reviewing_budget:     { type: int, default: 3 }
+  validating_budget:    { type: int, default: 3 }
+  done_budget:          { type: int, default: 3 }
+
+  # Audit counter — incremented every time a `jump_to` arc fires. A non-zero
+  # value at @exit:done means the pipeline skipped phases; parent stories /
+  # post-mortems read this to know that, e.g., the testing phase didn't run.
+  unsafe_jumps_made:   { type: int, default: 0 }
+
+  last_reply_author:   { type: string, default: "" }
+  refine_feedback:     { type: string, default: "" }
+  jump_to:             { type: string, default: "" }
+  restart_from_stage:  { type: string, default: "" }
+  abandon_reason:      { type: string, default: "" }
+
+  # ── Per-room artifacts (objects; each holds {summary_title, summary_markdown, …}) ─
+  reproduction_artifact:     { type: object, default: {} }
+  propose_fix_artifact:      { type: object, default: {} }
+  implement_artifact:        { type: object, default: {} }  # implementing oracle output (files_changed, applied, blockers)
+  implement_review_artifact: { type: object, default: {} }  # testing-room artifact (yes, the name predates the implement_artifact split)
+  validate_artifact:         { type: object, default: {} }
+  done_artifact:             { type: object, default: {} }
+
+  # ── Judge state ───────────────────────────────────────────────────────
+  llm_verdict:      { type: object, default: {} }   # { intent, reason, confidence, verdict }
+
+  # ── PR (populated by pr-refinement in Wave 2; held here for round-trip) ─
+  pr_id:            { type: string, default: "" }
+  pr_url:           { type: string, default: "" }
+  ci_state:         { type: string, default: "" }
+  ci_log:           { type: string, default: "" }  # last CI run log; scratch
+
+  # ── Story-level "done" sink for standalone runs ──────────────────────
+  status:           { type: string, default: "open" }
+
+# Intent vocabulary. Per-room arcs use these names. Slot shapes:
+#   refine.feedback          — operator note explaining what to redo
+#   restart_from.stage       — name of a prior room to re-enter
+#   quit                     — no slots
+intents:
+  start:
+    description: "Begin the pipeline from idle."
+    examples: [start, "begin", "kick off"]
+    priority: 90
+  accept:
+    description: "Accept the current room's artifact and advance to the next phase. Posts the artifact to the transport as a side-effect."
+    examples: ["continue", "proceed", "accept", "next", "deliver", "approve", "lgtm", "ship it", "ok"]
+    priority: 85
+  refine:
+    description: "Refine the current checkpoint; re-execute with feedback."
+    examples: [refine, "rework", "redo"]
+    priority: 70
+    slots:
+      # required: true so a synonym hit on the lead verb ("refine ...")
+      # forces the semantic router to fall through to the LLM router
+      # (via orchestrator.RequiresUnfilledSlot). Otherwise the
+      # bare-string matcher would auto-dispatch `refine` with empty
+      # slots, and the trailing free-form feedback the operator typed
+      # — "refine don't keep priority" — would be dropped on the
+      # floor. See the 2026-05-20 dogfood trace at
+      # /tmp/kitsoki-dogfood-trace.jsonl:859 for the regression.
+      feedback: { type: string, required: true }
+  restart_from:
+    description: "Restart from a named prior stage (resets that phase's cycle counter)."
+    examples: [restart_from, "restart"]
+    priority: 60
+    slots:
+      stage: { type: string, required: false }
+  jump_to:
+    description: "Jump forward to a later phase, skipping intermediate work. Increments world.unsafe_jumps_made."
+    examples: [jump_to, "jump"]
+    priority: 55
+    slots:
+      stage: { type: string, required: false }
+  # ── Interactive shortcuts (proposal §4.2). The three modes set
+  # world.bugfix_mode then advance directly into the appropriate _executing
+  # state. quick_fix collapses the pipeline to reproducing → proposing →
+  # implementing → testing → done (reviewing + validating skipped).
+  # skip_to_pr jumps straight into validating with restart_from_stage set
+  # so a parent (or post-validate review) can later wire back. ─────────
+  quick_fix:
+    description: "Shortcut from idle: walk reproducing → proposing → implementing → testing → done (skip reviewing + validating)."
+    examples: [quick_fix, "quick", "one shot"]
+    priority: 75
+  skip_to_pr:
+    description: "Shortcut from idle: skip reproducing/proposing/implementing/testing/reviewing, jump straight into validating."
+    examples: [skip_to_pr, "to pr", "skip ahead"]
+    priority: 75
+  full_pipeline:
+    description: "Default — walk all phases. Set bugfix_mode=full and start from reproducing."
+    examples: [full_pipeline, "full", "all phases"]
+    priority: 75
+  change_ticket:
+    description: "From idle: hand control back to the parent's ticket picker so the operator can choose a (different) ticket before starting."
+    examples: [change_ticket, "pick ticket", "find ticket", "tickets"]
+    priority: 65
+  quit:
+    description: "Abandon the pipeline."
+    examples: [quit, "abort", "bail"]
+    priority: 50
+  look:
+    description: "Re-render the current view."
+    examples: [look, "what now?"]
+    priority: 10
+
+# Intents exposed to importing parent stories. Wave 2 (dev-story hub)
+# `intents.import: [start, proceed, accept, refine, restart_from, quit]`
+# lifts these into the parent's bare intent table so an operator can
+# drive the imported pipeline without typing the `bf__` prefix.
+exports:
+  intents: [start, accept, refine, restart_from, jump_to, quick_fix, skip_to_pr, full_pipeline, change_ticket, quit, look]
+
+# Named return points. A parent story (dev-story / kitsoki-dev / cyber-devstory)
+# maps each to one of its own states. Standalone load synthesises
+# `__exit__done` and `__exit__abandoned` terminals.
+exits:
+  done:
+    description: "Pipeline succeeded; ready to hand off to pr-refinement."
+    requires: [done_artifact]
+  abandoned:
+    description: "User or LLM bailed."
+  pick_ticket:
+    description: "Operator wants to (re-)pick a ticket. Parent should route back to its ticket picker; no abandonment, no artifact required."
+
+# Root state — the operator-controlled entry point. Children fold this into
+# `bf` (or similar alias) and `entry: idle` enters here.
+root: idle
+
+# Rooms live in rooms/*.yaml. One file per visible room.
+include:
+  - rooms/*.yaml

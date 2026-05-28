@@ -1,0 +1,116 @@
+# pickup_to_bugfix — search for a ticket, pick it, dispatch into the
+# bugfix sub-story. Proves:
+#   - iface.ticket.search dispatch and the bind into ticket_results
+#   - pick_ticket sets ticket_id / thread
+#   - `go_bugfix` transitions into the `bf` import compound
+#   - bf's world_in: projects ticket_id / workdir / etc into bf__<key>
+#   - the operator can drive bf via prefixed intents (bf__start)
+
+test_kind: flow
+app: ../app.yaml
+initial_state: main
+initial_world:
+  workdir:        ".worktrees/tkt-100"
+  workspace_id:   "ws-100"
+  base_branch:    "main"
+  feature_branch: "fix/tkt-100"
+  judge_mode:     "human"
+
+host_handlers:
+  host.local_files.ticket:
+    data:
+      ok: true
+      tickets: "TKT-100: foo"
+  # bugfix's executing rooms call host.oracle.task / decide / ask + iface
+  # handlers; we provide bare stubs even though pickup_to_bugfix only
+  # walks INTO bf and stops at idle.
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git:
+    data: { ok: true, sha: "abc", diff: "", state: "success", url: "", pr_id: "" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.local:
+    data: { ok: true, state: "success", log: "" }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "Stub artifact body."
+        bug_verified:     true
+        root_cause:       "stub"
+        fix_description:  "stub fix"
+        affected_files:   []
+        confidence:       0.9
+        reasoning:        "stub"
+        verdict:          "pass"
+        intent:           "accept"
+        reason:           "stub"
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "Stub artifact body."
+        bug_verified:     true
+        root_cause:       "stub"
+        fix_description:  "stub fix"
+        affected_files:   []
+        confidence:       0.9
+        reasoning:        "stub"
+        verdict:          "pass"
+        intent:           "accept"
+        reason:           "stub"
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "Stub artifact body."
+        bug_verified:     true
+        root_cause:       "stub"
+        fix_description:  "stub fix"
+        affected_files:   []
+        confidence:       0.9
+        reasoning:        "stub"
+        verdict:          "pass"
+        intent:           "accept"
+        reason:           "stub"
+
+turns:
+  # main → ticket_search.
+  - intent: { name: go_ticket_search, slots: {} }
+    expect_state: ticket_search
+
+  # Run a search.
+  - intent: { name: search_tickets, slots: { query: "open" } }
+    expect_state: ticket_searching
+
+  # Pick a ticket.
+  - intent: { name: pick_ticket, slots: { id: "TKT-100" } }
+    expect_state: ticket_search
+    expect_world:
+      ticket_id: "TKT-100"
+      thread:    "TKT-100"
+
+  # Dispatch into the bf import compound. The transition enters bf at
+  # its `idle` entry state; world_in: setters fire and project the
+  # parent's ticket_id / workdir / etc into bf__<key>. bf.idle's
+  # on_enter auto-fires `start` when entered with a ticket loaded and
+  # no reproduction artifact yet, so we land at bf.reproducing
+  # directly (one turn instead of two).
+  - intent: { name: go_bugfix, slots: {} }
+    expect_state: bf.reproducing
+    expect_world:
+      bf__ticket_id:       "TKT-100"
+      bf__workdir:         ".worktrees/tkt-100"
+      bf__workspace_id:    "ws-100"
+      bf__feature_branch:  "fix/tkt-100"
+      bf__judge_mode:      "human"
+
+expect_no_errors: true

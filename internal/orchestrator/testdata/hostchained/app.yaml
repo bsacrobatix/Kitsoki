@@ -1,0 +1,100 @@
+# Tiny app used by TestOrchestrator_HostDispatchChained* tests.
+# Two invoke steps in `chained.on_enter:` — step 2 references step 1's bound
+# slot via a nested-map template (`with.payload.foo: "{{ world.step1_result.value }}"`)
+# so the orchestrator's rerenderHostArgs path must compose: step 1 binds
+# `step1_result`, step 2's `with.payload.foo` must reach the handler as the
+# bound value (post-bind), not the machine-time pre-bind nil.
+#
+# Three-step variant (`chained_bad.on_enter:`) intentionally includes a
+# broken nested template in step 3 (references an unknown world slot) so
+# the per-leaf fallback semantics can be exercised — the other leaves of
+# step 3's `with:` must still render correctly.
+app:
+  id: hostchained
+  version: 0.1.0
+  title: "chained on_enter test app"
+
+hosts:
+  - host.step1
+  - host.step2
+  - host.step3
+
+world:
+  step1_result: { type: object, default: {} }
+  step2_result: { type: object, default: {} }
+  # type_changer starts as a map (so `world.type_changer.field` returns
+  # nil at machine-time without error), then step 1 binds it to a string
+  # at dispatch-time — so `world.type_changer.field` errors at *dispatch*
+  # time only.  Used to exercise the per-leaf fallback that survives a
+  # dispatch-time render error after a successful machine-time resolve.
+  type_changer: { type: object, default: {} }
+
+root: idle
+
+intents:
+  go:
+    title: "Go"
+    description: "Trigger the chained state."
+    examples: ["go"]
+    priority: 10
+  go_bad:
+    title: "GoBad"
+    description: "Trigger the chained_bad state."
+    examples: ["go_bad"]
+    priority: 10
+
+states:
+  idle:
+    description: "Idle"
+    view: "Idle"
+    on:
+      go:
+        - target: chained
+      go_bad:
+        - target: chained_bad
+
+  chained:
+    description: "Two-step chained on_enter"
+    view: "Chained"
+    on_enter:
+      - invoke: host.step1
+        with:
+          seed: "S"
+        bind:
+          step1_result: "step1_result"
+      - invoke: host.step2
+        with:
+          payload:
+            foo: "{{ world.step1_result.value }}"
+            literal: "kept"
+
+  chained_bad:
+    description: "Three-step chained on_enter with one bad nested template"
+    view: "ChainedBad"
+    on_enter:
+      # Step 1 binds two slots:
+      #   - step1_result (a map) for the good leaf in step 3.
+      #   - type_changer (a string) — step 3 has a leaf
+      #     `{{ world.type_changer.field }}` which is valid at
+      #     machine time (type_changer is `{}` so `.field` returns nil)
+      #     but errors at *dispatch* time (now a string, so `.field`
+      #     fails type-check).  This triggers the per-leaf fallback
+      #     without breaking the machine-time up-front resolve.
+      - invoke: host.step1
+        with:
+          seed: "S"
+        bind:
+          step1_result: "step1_result"
+          type_changer: "type_changer"
+      - invoke: host.step2
+        with:
+          payload:
+            foo: "{{ world.step1_result.value }}"
+        bind:
+          step2_result: "step2_result"
+      - invoke: host.step3
+        with:
+          payload:
+            good:    "{{ world.step1_result.value }}"
+            bad:     "{{ world.type_changer.field }}"
+            literal: "kept"

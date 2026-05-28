@@ -1,0 +1,131 @@
+# proposal_smoke — smoke test app for the Proposal pattern (roadmap step 4).
+# Exercises the proposal lifecycle via regular state machine transitions.
+# The proposal $proposal world variable is manipulated via set: effects.
+
+app:
+  id: proposal-smoke
+  version: 0.1.0
+  title: "Proposal Smoke Test"
+
+hosts:
+  - host.run
+
+# Sidebar authoring conversation: /meta opens a chat with story-author
+# about this smoke app's YAML. Smallest viable declaration.
+meta_modes:
+  story:
+    trigger: meta
+    label: "improve the story"
+    banner: "*** meta:story — discussing proposal-smoke ***"
+    agent: story-author
+    persist: true
+    return:
+      intent: onpath
+      message: "back on the path."
+
+world:
+  last_exit_code: { type: int, default: 0 }
+  last_stdout:    { type: string, default: "" }
+  stage:          { type: string, default: "idle" }
+
+root: terminal
+
+intents:
+  propose:
+    title: "Propose a command"
+    description: "Draft a new shell command."
+    examples: ["run ls", "propose echo hello"]
+    priority: 100
+    slots:
+      cmd:
+        type: string
+        required: true
+        description: "Shell command to draft."
+
+  accept:
+    title: "Accept proposal"
+    description: "Accept and execute the proposed command."
+    examples: ["accept", "run it", "yes"]
+    priority: 90
+
+  cancel:
+    title: "Cancel"
+    description: "Cancel the current proposal."
+    examples: ["cancel"]
+    priority: 50
+
+  retry:
+    title: "Retry"
+    description: "Retry the last failed command."
+    examples: ["retry"]
+    priority: 85
+
+states:
+  terminal:
+    description: "Terminal Room — propose and run commands."
+    # Two-row single picker: propose carries a free-form `cmd` slot, so
+    # it gets a `param:` block; cancel is bare. The prose status line
+    # remains a sibling element so view chrome data is preserved.
+    view:
+      - prose: |
+          Terminal Room. Stage: {{ world.stage }}
+          Last exit code: {{ world.last_exit_code }}
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "propose"
+              hint:   "draft a shell command to run"
+              intent: propose
+              param:
+                slot:        cmd
+                type:        string
+                placeholder: "e.g. ls -la"
+                required:    true
+            - { label: "cancel", intent: cancel, hint: "reset to idle" }
+    on:
+      propose:
+        - target: reviewing
+          effects:
+            - set:
+                stage: "reviewing"
+
+      cancel:
+        - target: terminal
+          effects:
+            - set:
+                stage: "idle"
+
+  reviewing:
+    description: "Review the proposed command before executing."
+    # Verdict picker: accept / retry / cancel — the canonical
+    # three-option proposal-review pattern from docs/choice-widget.md
+    # §2.1. Zero-slot intents render as flat label/hint rows.
+    view:
+      - prose: "Reviewing proposal. Stage: {{ world.stage }}"
+      - choice:
+          mode: single
+          prompt: "How do you respond?"
+          items:
+            - { label: "accept", intent: accept, hint: "execute the proposed command" }
+            - { label: "retry",  intent: retry,  hint: "redraft from the same starting point" }
+            - { label: "cancel", intent: cancel, hint: "drop the proposal" }
+    on:
+      accept:
+        - target: terminal
+          effects:
+            - set:
+                stage: "done"
+                last_exit_code: 0
+
+      cancel:
+        - target: terminal
+          effects:
+            - set:
+                stage: "cancelled"
+
+      retry:
+        - target: reviewing
+          effects:
+            - set:
+                stage: "reviewing"

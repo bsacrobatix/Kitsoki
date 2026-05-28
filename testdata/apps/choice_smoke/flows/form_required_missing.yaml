@@ -1,0 +1,20 @@
+# form_required (negative) — empty slot reaches the orchestrator and
+# trips the `required: true` declaration on the intent's slot. The
+# error code is MISSING_SLOTS. The widget's own empty-buffer rejection
+# would prevent this in interactive use, but the orchestrator-side
+# guarantee holds regardless of surface.
+test_kind: flow
+app: ../app.yaml
+initial_state: form_required
+
+turns:
+  - intent: { name: submit_required_form, slots: { value: "" } }
+    expect_error:
+      code: MISSING_SLOTS
+      missing_slots: [value]
+    expect_state: form_required
+    expect_world_unchanged: true
+
+expect_no_errors: false
+# Negative-path: rejection keeps the user in form_required (the
+# walkthrough doesn't advance until a non-empty value commits).

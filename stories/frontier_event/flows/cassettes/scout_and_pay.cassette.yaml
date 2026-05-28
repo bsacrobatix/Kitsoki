@@ -1,0 +1,20 @@
+# Cassette for scout_and_pay.yaml — single host.run handler called
+# repeatedly across the scouting→bandits flow. Each call returns the
+# same envelope, so one episode with `replay: any` covers all calls.
+#
+# This is an in-tree smoke test for the cassette wiring. For an
+# example that demonstrates per-phase envelope sequencing (the
+# motivating use case), see the bugfix story's cassette scenarios.
+
+kind: host_cassette
+app_id: frontier-event
+generated_at: 2026-05-27T00:00:00Z
+match_on: [handler]
+
+episodes:
+  - id: host_run_any
+    match:
+      handler: host.run
+    response:
+      data: { ok: true, exit_code: 0, stdout: "" }
+    replay: any

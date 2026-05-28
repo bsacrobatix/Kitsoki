@@ -1,0 +1,121 @@
+# Three-phase pipeline using phase_templates + phases.graph (proposal §5).
+# Phase A auto-advances to B; phase B is a checkpoint that pauses for an
+# external reply; phase C is a checkpoint with a cycle budget on the
+# `on_failure` arc that loops back to A.
+#
+# This exercises:
+#   - state-name `{id}` substitution
+#   - body `{{ tpl.X }}` and `{{ phase.next.X }}` substitution
+#   - cycle_budgets synthesis (Increment + guard + fall-through)
+#   - checkpoint_intents merging into _awaiting_reply states
+
+app:
+  id: phases-fixture
+  version: 0.1.0
+  title: "phases test"
+
+hosts:
+  - host.transport.post
+
+world:
+  cycle__phase_c__on_failure: { type: int, default: 0 }
+  message_phase_a:            { type: string, default: "" }
+  message_phase_b:            { type: string, default: "" }
+  message_phase_c:            { type: string, default: "" }
+  transport:                  { type: string, default: "tui" }
+  thread:                     { type: string, default: "S-1" }
+
+intents:
+  done:
+    title: "Done"
+    description: "Phase finished its work."
+    priority: 100
+  continue:
+    title: "Continue"
+    description: "Approve and advance."
+    priority: 90
+  refine:
+    title: "Refine"
+    priority: 80
+  on_failure:
+    title: "Failure"
+    description: "Synthetic failure trigger."
+    priority: 50
+  retry:
+    title: "Retry"
+    priority: 40
+
+checkpoint_intents:
+  continue:
+    description: Approve this phase and advance.
+  refine:
+    description: Re-run this phase with feedback.
+
+root: phase_a_executing
+
+phase_templates:
+  reviewed_phase:
+    parameters:
+      id:    { type: string,  required: true }
+      title: { type: string,  required: true }
+      checkpoint:
+        type: boolean
+        required: false
+        default: false
+    states:
+      "{id}_executing":
+        description: "Executing {{ tpl.title }}"
+        view: "Phase {{ tpl.title }} running"
+        on:
+          done:
+            - target: "{{ tpl.id }}_awaiting_reply"
+              when: "tpl.checkpoint == true"
+              effects:
+                - invoke: host.transport.post
+                  with:
+                    transport: "{{ world.transport }}"
+                    thread:    "{{ world.thread }}"
+                    phase_id:  "{{ tpl.id }}"
+                    title:     "{{ tpl.title }}"
+                    body:      "phase {{ tpl.id }} done"
+            - target: "{{ phase.next.continue }}"
+              default: true
+      "{id}_awaiting_reply":
+        description: "Awaiting reply for {{ tpl.title }}"
+        view: "Awaiting reply on {{ tpl.title }}"
+      "{id}_error":
+        description: "Error in {{ tpl.title }}"
+        view: "Phase {{ tpl.title }} failed"
+        on:
+          retry:
+            - target: "{{ tpl.id }}_executing"
+
+phases:
+  template: reviewed_phase
+  graph:
+
+    phase_a:
+      title: "Phase A"
+      next:
+        continue: phase_b
+
+    phase_b:
+      title: "Phase B"
+      checkpoint: true
+      next:
+        continue: phase_c
+
+    phase_c:
+      title: "Phase C"
+      checkpoint: true
+      next:
+        continue:   terminated
+        on_failure: phase_a
+      cycle_budgets:
+        on_failure: 2
+
+states:
+  terminated:
+    terminal: true
+    description: "Done"
+    view: "Pipeline complete."

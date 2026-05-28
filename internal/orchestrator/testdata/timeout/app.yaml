@@ -1,0 +1,46 @@
+# timeout — minimal app exercising the Timeout: runtime (gap §9.5).
+#
+# Two leaf states:
+#   - waiting:  declares `timeout: { after: "10d", target: traveled }`. The
+#               wagon master gives up after 10 game-days.
+#   - traveled: terminal. Reached either by timeout or by the user's
+#               `continue` intent.
+#
+# A single `continue` intent fires the manual transition.  Flow fixtures
+# can either issue `continue` to exit normally (cancels the pending
+# timeout) or use `advance_clock` to fire the timeout.
+
+app:
+  id: timeout-demo
+  version: 0.1.0
+  title: "Timeout: runtime test"
+
+world:
+  visits: { type: int, default: 0 }
+
+intents:
+  continue:
+    title: "Continue"
+    description: "Manual departure."
+    examples: ["go", "continue"]
+
+root: waiting
+
+states:
+  waiting:
+    description: "Waiting for reply."
+    view: "Waiting..."
+    timeout:
+      after: "10d"
+      target: traveled
+    on_enter:
+      - increment:
+          visits: 1
+    on:
+      continue:
+        - target: traveled
+
+  traveled:
+    terminal: true
+    description: "Traveled onward."
+    view: "Traveled. visits={{ world.visits }}"

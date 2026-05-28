@@ -1,0 +1,113 @@
+# Jira Search Room — find tickets in Jira.
+
+states:
+  jira_search:
+    description: "Jira Search Room — search for tickets by query or JQL."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Current query: "{{ world.jira_query|default:\"(none)\" }}"
+                Results:       "{{ world.jira_results|default:\"(none)\" }}"
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - { label: "search jira",                 hint: "free text or JQL" }
+                - { label: "create workspace for ticket", hint: "open workspace on selected ticket" }
+                - { label: "go back",                     hint: "return to previous room" }
+    relevant_world: [jira_query, jira_results]
+    relevant_slots: []
+    on:
+      search_jira:
+        - target: jira_searching
+          effects:
+            - set: { jira_query: "{{ slots.query }}" }
+            - set: { jira_results: "" }
+
+      create_workspace_for_ticket:
+        - when: "world.jira_query != ''"
+          target: workspace_manager
+          effects:
+            - set: { prev_state: "jira_search" }
+        - default: true
+          target: jira_search
+          guard_hint: "Run a search first to find a ticket."
+          effects:
+            - set: { last_error: "No ticket selected. Search first." }
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+          effects:
+            - set: { prev_state: "main" }
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  jira_searching:
+    description: "Searching Jira..."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - heading: "Searching Jira for: {{ world.jira_query }}"
+          - prose: "[stub] Results: Found 3 tickets matching \"{{ world.jira_query }}\":"
+          - list:
+              items:
+                - { label: "PROJ-101", hint: "Implement auth refresh token rotation" }
+                - { label: "PROJ-102", hint: "Fix race condition in connection pool" }
+                - { label: "PROJ-103", hint: "Add unit tests for billing module" }
+    relevant_world: [jira_query]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo '{\"tickets\":[{\"id\":\"PROJ-101\",\"title\":\"Implement auth refresh\"},{\"id\":\"PROJ-102\",\"title\":\"Fix race condition\"},{\"id\":\"PROJ-103\",\"title\":\"Add unit tests\"}]}'"
+        bind:
+          jira_results: "stdout"
+        on_error: jira_search_error
+    on:
+      go_back:
+        - target: jira_search
+
+      create_workspace_for_ticket:
+        - target: workspace_manager
+          effects:
+            - set: { prev_state: "jira_search" }
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+      search_jira:
+        - target: jira_searching
+          effects:
+            - set: { jira_query: "{{ slots.query }}" }
+
+  jira_search_error:
+    description: "Jira search encountered an error."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Error: "{{ world.last_error }}"
+          - prose: "Press go back to return."
+    relevant_world: [last_error]
+    relevant_slots: []
+    on:
+      go_back:
+        - target: jira_search
+
+      go_main:
+        - target: main

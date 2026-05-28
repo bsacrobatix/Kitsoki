@@ -1,0 +1,114 @@
+# ci_fails_diagnose — judge_mode=human. CI returns failure on the
+# first poll; the operator walks through diagnose → re_push → CI
+# (which now passes) → merge. Proves the failure-path branching and
+# the diagnose checkpoint.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:      "TKT-PR-002"
+  ticket_title:   "Auth race condition"
+  thread:         "TKT-PR-002"
+  workdir:        ".worktrees/tkt-pr-002"
+  base_branch:    "main"
+  feature_branch: "fix/tkt-pr-002-auth"
+  pr_title:       "TKT-PR-002: Auth race condition"
+  pr_body:        "Closes TKT-PR-002."
+  judge_mode:     "human"
+  judge_confidence_threshold: 0.8
+  merge_strategy: "squash"
+  pending_comments: 0
+  # ci_log primed so the diagnose prompt has something to chew on.
+  ci_log:         "FAIL: TestAuth (race detected at auth.go:42)"
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  # All host.git stub calls return ok=true, but ci_monitoring's call to
+  # iface.vcs.pr_status returns state: "failure" — that's what drives
+  # the branch into diagnose_executing.
+  host.git:
+    data:
+      ok:    true
+      url:   "https://example/pr/143"
+      pr_id: "143"
+      state: "failure"
+      checks: "lint,go-test"
+      comments: ""
+      sha:   "feedface"
+  host.local:
+    data: { ok: true, state: "failure", checks: "lint,go-test" }
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        # Diagnose artifact body
+        summary_title:    "Race condition in TestAuth"
+        summary_markdown: "TestAuth races on the token cache; the fix serialises the read path through the cache mutex. Confirmed locally with `-race`."
+        root_cause:       "Concurrent read/write on the token cache without mutex."
+        fix_description:  "Wrap the cache read in the existing tokenCacheMu lock."
+        affected_files:   ["internal/auth/token_cache.go", "internal/auth/token_test.go"]
+        failing_checks:   ["lint", "go-test"]
+        confidence:       0.9
+        reasoning:        "The race-flag output points at the cache read in token.go:42; this code path is the only unsynchronised reader."
+        # Judge verdict fields piggy-backed (additionalProperties: true on
+        # the artifact schema means the judge_verdict schema's extra
+        # required keys live on the same envelope without conflict for
+        # the flow stub). NB: `confidence` is shared between the two
+        # schemas — one stub satisfies both.
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Diagnosis is concrete and the fix targets the root cause."
+
+turns:
+  # idle → open_pr → ci_monitoring.
+  - intent: { name: open, slots: {} }
+    expect_state: open_pr
+    expect_world:
+      pr_id:  "143"
+      pr_url: "https://example/pr/143"
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: ci_monitoring
+    expect_world:
+      ci_state: "failure"
+
+  # proceed branches to diagnose_executing because ci_state == "failure".
+  - intent: { name: proceed, slots: {} }
+    expect_state: diagnose_executing
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: diagnose_awaiting_reply
+
+  # Operator accepts the diagnosis → re_push.
+  - intent: { name: accept, slots: {} }
+    expect_state: re_push
+
+  # re_push.on_enter ran iface.vcs.{commit,push}. proceed → ci_monitoring
+  # again. The ci_state stays "failure" because the same stub fires;
+  # in a real run the second poll would return success because of the
+  # new commit. For the test we exercise the override path:
+  - intent: { name: proceed, slots: {} }
+    expect_state: ci_monitoring
+
+  # Operator uses merge_now to bypass the failing CI (vouching that the
+  # re_push fixed the underlying issue). This proves the operator
+  # override path; the normal happy path is the comments_round_trip
+  # fixture's ci_state-flips trick.
+  - intent: { name: merge_now, slots: {} }
+    expect_state: merge_executing
+
+  - intent: { name: proceed, slots: {} }
+    expect_state: merge_awaiting_reply
+
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__merged
+    expect_world:
+      status: "merged"
+      pr_url: "https://example/pr/143"
+
+expect_terminal: true
+expect_no_errors: true

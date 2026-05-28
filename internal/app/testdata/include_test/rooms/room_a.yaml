@@ -1,0 +1,7 @@
+states:
+  room_a:
+    description: "Room A"
+    view: "You are in room A."
+    on:
+      go:
+        - target: room_b

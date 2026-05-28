@@ -1,0 +1,106 @@
+# party_naming — phase J polish: exercises the three intents the
+# intro now exposes for the wagon roster:
+#
+#   1. name_party { names: CSV } — quick set-all
+#      Splits the CSV into party_member_1..5 (which start_journey
+#      guards on via party_member_1) and writes the canonical CSV
+#      into party_names for display / illness-victim selection.
+#
+#   2. name_member { index, name } — per-seat
+#      Updates one party_member_N key in place; the other four are
+#      left untouched (Effect.Set is a merge).
+#
+#   3. generate_names { theme } — theme-based, deterministic branch
+#      world.narration is false, so the hardcoded theme→CSV table
+#      fires. "Western" lands "Hank,Jesse,Mary,Ezra,Sarah" → split into
+#      the five per-seat keys.
+#
+# The narrated branch of generate_names (host.oracle.ask with
+# prompts/name_party.md) is intentionally NOT covered here — see
+# narrated_smoke.yaml for the round-trip pattern; a follow-up fixture
+# can layer a stubbed host.oracle.ask + narration:true on this state.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: intro_party_names
+initial_world:
+  narration:     false
+  party_names:   ""
+  party_size:    5
+
+turns:
+
+  # ── T1: name_party splits the CSV into the five seats.
+  - intent:
+      name: name_party
+      slots:
+        names: "Adam,Beth,Carol,Daniel,Edith"
+    expect_state: intro_party_names
+    expect_world:
+      party_names:    "Adam,Beth,Carol,Daniel,Edith"
+      party_member_1: "Adam"
+      party_member_2: "Beth"
+      party_member_3: "Carol"
+      party_member_4: "Daniel"
+      party_member_5: "Edith"
+
+  # ── T2: name_member updates only seat 3 in place.
+  # The other four party_member_* keys keep their T1 values
+  # (Effect.Set is a merge), so the roster reads:
+  #   Adam, Beth, Carol→Sarah, Daniel, Edith.
+  - intent:
+      name: name_member
+      slots:
+        index: 3
+        name:  "Sarah"
+    expect_state: intro_party_names
+    expect_world:
+      party_member_1: "Adam"
+      party_member_2: "Beth"
+      party_member_3: "Sarah"
+      party_member_4: "Daniel"
+      party_member_5: "Edith"
+
+  # ── T3: generate_names deterministic Western table.
+  # narration is false, so the default arm fires and the hasPrefix
+  # ladder hits the "west" branch.  The CSV (no spaces) round-trips
+  # straight into the five per-seat keys.
+  - intent:
+      name: generate_names
+      slots:
+        theme: "Western"
+    expect_state: intro_party_names
+    expect_world:
+      party_names:    "Hank,Jesse,Mary,Ezra,Sarah"
+      party_member_1: "Hank"
+      party_member_2: "Jesse"
+      party_member_3: "Mary"
+      party_member_4: "Ezra"
+      party_member_5: "Sarah"
+
+  # ── T4: generate_names default fallback.
+  # "klingon" doesn't match any of the four theme prefixes, so the
+  # ladder falls through to the default crew.
+  - intent:
+      name: generate_names
+      slots:
+        theme: "Klingon Empire"
+    expect_state: intro_party_names
+    expect_world:
+      party_names:    "Adam,Beth,Carol,Daniel,Edith"
+      party_member_1: "Adam"
+      party_member_5: "Edith"
+
+  # ── T5: out-of-range name_member is rejected via guard_hint
+  # without corrupting any seat (the default arm only `say`s).
+  - intent:
+      name: name_member
+      slots:
+        index: 9
+        name:  "Nobody"
+    expect_state: intro_party_names
+    expect_world:
+      party_member_1: "Adam"
+      party_member_5: "Edith"
+
+expect_no_errors: true

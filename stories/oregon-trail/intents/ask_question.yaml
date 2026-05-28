@@ -1,0 +1,47 @@
+# ask_question — wagon-master question-slot extraction.
+#
+# State: trail_guide.trail_guide_list. The live trace showed that
+# "ask what to do at the kansas river crossing" routes to
+# ask_question { question: "what to do at the kansas river crossing" }
+# — i.e. the LLM strips the "ask " prefix and uses the rest verbatim
+# as the question slot. Bare "how do we …" and "what month should we …"
+# without an explicit "ask" should ALSO route to ask_question (the
+# intent's priority is 85, higher than `look` etc., so any question-
+# shaped utterance lands here at the list state).
+#
+# We lock the exact question-string the trace produced for each input
+# so the static harness has a canonical answer. A future LLM router
+# regression that strips/preserves the input differently (e.g. drops
+# "the", capitalises) would fail here.
+#
+# NOTE: per-fixture min_confidence not yet supported by the runner.
+test_kind: intents
+app: oregon-trail
+state: trail_guide.trail_guide_list
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  - id: ask-prefix-stripped
+    intent:
+      name: ask_question
+      slots: { question: "what to do at the kansas river crossing" }
+    inputs:
+      - "ask what to do at the kansas river crossing"
+
+  - id: how-do-we-ford
+    intent:
+      name: ask_question
+      slots: { question: "how do we ford in spring snowmelt" }
+    inputs:
+      - "how do we ford in spring snowmelt"
+
+  - id: what-month-leave
+    intent:
+      name: ask_question
+      slots: { question: "what month should we leave" }
+    inputs:
+      - "what month should we leave"

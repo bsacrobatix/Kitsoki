@@ -1,0 +1,24 @@
+app:
+  id: routing-synonyms-nonenum
+  version: 0.1.0
+
+root: start
+
+intents:
+  buy:
+    title: "Buy something"
+    slots:
+      total_cost:
+        type: int
+        synonyms:
+          "120": ["120 bucks"]
+
+states:
+  start:
+    description: "Start"
+    on:
+      buy:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true

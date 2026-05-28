@@ -1,0 +1,42 @@
+# Tiny app exercising the self-redirect guard in enterRedirectState.
+# The `probe` state's on_enter invokes host.fail with `on_error: probe`
+# (target == owning state). Before the guard landed this looped: the
+# host call failed, the redirect re-entered `probe`, on_enter re-fired
+# the failing invoke, etc. The guard now keeps the session in `probe`
+# without re-running on_enter — exactly the behaviour the YAML author
+# meant by "if this fails, stay here."
+app:
+  id: hosterror-selfredirect
+  version: 0.1.0
+  title: "host on_error self-redirect test app"
+
+hosts:
+  - host.fail
+
+world:
+  invoke_count: { type: int, default: 0 }
+
+root: idle
+
+intents:
+  ask:
+    title: "Ask"
+    description: "Trigger the probe."
+    examples: ["ask"]
+    priority: 10
+
+states:
+  idle:
+    description: "Idle"
+    view: "Idle."
+    on:
+      ask:
+        - target: probe
+
+  probe:
+    description: "Probe state"
+    view: "Probe. invoke_count={{ world.invoke_count }}"
+    on_enter:
+      - invoke: host.fail
+        with: {}
+        on_error: probe

@@ -1,0 +1,57 @@
+# weather_by_month — pins the §8 month-biased weather_kind selection.
+#
+# Setup: leg_d_executing.traveling, miles_traveled=0, rng_counter=85.
+# The next `continue` roll is 85, which lands in the [85, 92) event
+# arm → weather. event_weather.on_enter runs with rng_last=85, so the
+# rng_last % 2 sub-selectors land predictably on the odd branch (fog).
+#
+# Contract pinned by this fixture (the december arc — winter): the
+# winter ternary fires unconditionally, no rng dependency, so the
+# kind is `snow` regardless of rng_last. Spring/summer/fall arcs
+# would set month=april/july/october and assert heavy_rain / fog /
+# fog respectively — kept out for now so the fixture stays compact
+# and the contract being asserted is "winter forces snow even when
+# the legacy rng_last%4 would have picked something else."
+#
+# Without the month-bias, weather_kind would be rng_last%4-keyed:
+# 85%4 = 1 → snow by coincidence in the legacy formula, so a more
+# discriminating winter arc would need rng_last in {86, 87, 89, 90}
+# to see the bias. december is still the safest discriminator
+# because it's the only month where ALL four legacy outcomes get
+# coerced to snow.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: leg_d_executing.traveling
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    banker
+  month:         december
+  money:         200
+  oxen:          4
+  food_lbs:      500
+  clothing_sets: 0
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    80
+  narration:     false
+  miles_traveled: 0
+  rng_counter:   85
+  event_kind:    ""
+  current_landmark: "Chimney Rock"
+  current_event_attempts: 0
+
+turns:
+
+  # Turn 1: traveling.continue. Roll = 85 → weather arm. rng_last is
+  # 85 going into event_weather.on_enter. month is december → winter
+  # ternary returns "snow" without consulting rng_last.
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_d_executing.event_weather
+    expect_world:
+      event_kind:   "weather"
+      rng_last:     85
+      weather_kind: "snow"
+
+expect_no_errors: true

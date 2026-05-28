@@ -1,0 +1,35 @@
+# consult_guide — period and modern phrasings that should reach the
+# wagon-master chat list from an _awaiting_reply state.
+#
+# State: leg_a_awaiting_reply (any _awaiting_reply works; we pick the
+# first leg). The phases-template _awaiting_reply.on.consult_guide arm
+# routes to trail_guide.trail_guide_list. The fixture pins the verb
+# vocabulary the trace exercised:
+#
+#   bare: "consult guide", "consult_guide"
+#   period: "ask the wagon master", "talk to the wagon master"
+#   modern: "advice"
+#
+# checkpoint_verbs.yaml also has a `consult-guide` fixture on
+# leg_c_awaiting_reply with similar phrasings — this file extends
+# coverage to leg_a so the very-first-checkpoint UX is locked too.
+#
+# NOTE: per-fixture min_confidence not yet supported by the runner.
+test_kind: intents
+app: oregon-trail
+state: leg_a_awaiting_reply
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  - id: consult-guide-canonical
+    intent: { name: consult_guide, slots: {} }
+    inputs:
+      - "consult guide"
+      - "consult_guide"
+      - "ask the wagon master"
+      - "talk to the wagon master"
+      - "advice"

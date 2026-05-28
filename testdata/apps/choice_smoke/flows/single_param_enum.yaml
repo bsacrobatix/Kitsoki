@@ -1,0 +1,15 @@
+# single_param_enum — captures one of [warrior, mage, rogue] via the
+# inline cycle-on-Space param picker. Slot validation enforces enum
+# membership; an invalid value would surface as INVALID_SLOT_VALUE.
+# Commit advances to multi_basic (start of multi-mode chain).
+test_kind: flow
+app: ../app.yaml
+initial_state: single_param_enum
+
+turns:
+  - intent: { name: set_hero_class, slots: { class: mage } }
+    expect_state: multi_basic
+    expect_world:
+      hero_class: mage
+
+expect_no_errors: true

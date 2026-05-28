@@ -1,0 +1,11 @@
+# complete_restart — the terminal `complete` state offers a restart
+# arc that returns to `intro` so the user can walk through again.
+test_kind: flow
+app: ../app.yaml
+initial_state: complete
+
+turns:
+  - intent: { name: restart, slots: {} }
+    expect_state: intro
+
+expect_no_errors: true

@@ -1,0 +1,40 @@
+# hub.yaml — exercises the feature-menu state (`menu`).
+# In the linear walkthrough the menu is the escape hatch / power-user
+# jump table — every spoke has a `goto_menu` arc back here, and the
+# menu has `goto_<spoke>` arcs forward into every spoke. This test
+# proves both directions wire up the way the user experiences them.
+test_kind: flow
+app: ../app.yaml
+initial_state: menu
+
+turns:
+  # Jump from the menu into a spoke.
+  - intent: { name: goto_single_basic, slots: {} }
+    expect_state: single_basic
+
+  # Spoke → menu via the goto_menu escape hatch.
+  - intent: { name: goto_menu, slots: {} }
+    expect_state: menu
+
+  # Jump to a different spoke and back again.
+  - intent: { name: goto_form_enum, slots: {} }
+    expect_state: form_enum
+
+  - intent: { name: goto_menu, slots: {} }
+    expect_state: menu
+
+  # The menu also has explicit goto_intro and goto_complete jump
+  # arcs so the user can hop to either walkthrough endpoint.
+  - intent: { name: goto_intro, slots: {} }
+    expect_state: intro
+
+  - intent: { name: goto_menu, slots: {} }
+    expect_state: menu
+
+  - intent: { name: goto_complete, slots: {} }
+    expect_state: complete
+
+  - intent: { name: goto_menu, slots: {} }
+    expect_state: menu
+
+expect_no_errors: true

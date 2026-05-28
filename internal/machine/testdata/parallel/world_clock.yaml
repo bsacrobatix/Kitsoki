@@ -1,0 +1,71 @@
+# world_clock.yaml — in-tree fixture mirroring the canonical Oregon Trail
+# parallel-region shape (proposal §5.1).  Lives alongside the machine
+# package so unit tests can drive viz / loader paths without dragging in
+# the full top-level testdata/apps/ tree.
+#
+# Two sibling regions live under the parallel parent `world_clock`:
+#
+#   - `weather`  (compound)  dry → rain on `make_it_rain`, emits `precip_heavy`.
+#   - `calendar` (compound)  reacts to `precip_heavy` by going soggy.
+#
+# The smoke flow at testdata/apps/parallel_smoke/ is the active assertion;
+# this YAML exists for /tmp/kitsoki viz testing and as a structurally-
+# accurate template for the Phase-H follow-up that ports world_clock into
+# stories/oregon-trail/rooms/.
+
+app:
+  id: world-clock-fixture
+  version: 0.1.0
+  title: "Parallel world_clock fixture"
+
+world:
+  weather_state:  { type: string, default: dry }
+  calendar_state: { type: string, default: day1 }
+
+intents:
+  enter:        { title: "Enter the clock" }
+  make_it_rain: { title: "Make it rain" }
+  precip_heavy: { title: "Cross-region weather event" }
+
+root: outside
+
+states:
+  outside:
+    view: "Outside the world clock."
+    on:
+      enter:
+        - target: world_clock
+
+  world_clock:
+    type: parallel
+    view: "World clock — header."
+    states:
+
+      calendar:
+        type: compound
+        initial: day1
+        states:
+          day1:
+            view: "Calendar: day 1."
+            on:
+              precip_heavy:
+                - target: ../soggy
+                  effects:
+                    - set: { calendar_state: soggy }
+          soggy:
+            view: "Calendar: soggy."
+
+      weather:
+        type: compound
+        initial: dry
+        states:
+          dry:
+            view: "Weather: dry."
+            on:
+              make_it_rain:
+                - target: ../rain
+                  effects:
+                    - set: { weather_state: rain }
+                    - emit: precip_heavy
+          rain:
+            view: "Weather: rain."

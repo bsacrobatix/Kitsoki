@@ -1,0 +1,196 @@
+# Workspace Manager Room — find or create workspaces.
+
+states:
+  workspace_manager:
+    description: "Workspace Manager Room — find or create project workspaces."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Current workspace: "{{ world.current_workspace|default:\"(none)\" }}"
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - { label: "list workspaces",  hint: "show all existing" }
+                - { label: "create workspace", hint: "start a new one" }
+                - { label: "enter workspace",  hint: "open by name" }
+                - { label: "go back",          hint: "return to previous room" }
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on:
+      list_workspaces:
+        - target: workspace_list
+          effects:
+            - set: { prev_state: "workspace_manager" }
+
+      create_workspace:
+        - target: workspace_creating
+          effects:
+            - set: { current_workspace: "{{ slots.name }}" }
+            - set: { prev_state: "workspace_manager" }
+
+      enter_workspace:
+        - target: workspace_loading
+          effects:
+            - set: { current_workspace: "{{ slots.name }}" }
+            - set: { prev_state: "workspace_manager" }
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+          effects:
+            - set: { prev_state: "main" }
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  workspace_list:
+    description: "Listing all available workspaces."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - heading: "Available workspaces"
+          # Each workspace is a list row with the metadata as a hint.
+          # Per the proposal — list is the canonical "two-column with
+          # alignment" element; the renderer picks the column widths.
+          - list:
+              items:
+                - { label: "my-api-project",  hint: "main branch, 2 repos, clean" }
+                - { label: "feature-auth-v2", hint: "feat/auth-v2 branch, 1 repo, dirty" }
+                - { label: "hotfix-billing",  hint: "hotfix/billing branch, 1 repo, clean" }
+          - prose: "[stub] 3 workspaces found. Enter a workspace name or go back."
+    relevant_world: []
+    relevant_slots: []
+    on:
+      enter_workspace:
+        - target: workspace_loading
+          effects:
+            - set: { current_workspace: "{{ slots.name }}" }
+
+      create_workspace:
+        - target: workspace_creating
+          effects:
+            - set: { current_workspace: "{{ slots.name }}" }
+
+      go_back:
+        - target: workspace_manager
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  workspace_creating:
+    description: "Creating a new workspace..."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Creating workspace: {{ world.current_workspace }}"
+          - kv:
+              pairs:
+                Root:   "/workspaces/{{ world.current_workspace }}"
+                Repos:  "1 repo initialized"
+                Branch: "main"
+          - prose: "[stub] Workspace created successfully! Entering workspace..."
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo '{\"id\":\"ws-001\",\"root_path\":\"/workspaces/my-project\",\"repos\":[{\"path\":\"/workspaces/my-project\",\"branch\":\"main\",\"dirty\":false}]}'"
+        bind:
+          workspace_root: "stdout"
+        on_error: workspace_error
+    on:
+      go_back:
+        - target: workspace_manager
+          effects:
+            - set: { current_workspace: "" }
+
+      go_terminal:
+        - target: workspace_room
+          effects:
+            - set: { prev_state: "workspace_manager" }
+
+      go_main:
+        - target: main
+          effects:
+            - set: { current_workspace: "" }
+            - set: { prev_state: "main" }
+
+      enter_workspace:
+        - target: workspace_room
+          effects:
+            - set: { prev_state: "workspace_manager" }
+
+  workspace_loading:
+    description: "Loading workspace..."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Loading workspace: {{ world.current_workspace }}"
+          - kv:
+              pairs:
+                Root:   "/workspaces/{{ world.current_workspace }}"
+                Repos:  "1 repo"
+                Branch: "main (clean)"
+          - prose: "[stub] You are now in the workspace."
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.workspace_manager.get
+        with:
+          workspace_id: "{{ world.current_workspace }}"
+        bind:
+          workspace_root: "root_path"
+        on_error: workspace_error
+    on:
+      go_terminal:
+        - target: workspace_room
+          effects:
+            - set: { prev_state: "workspace_manager" }
+
+      go_main:
+        - target: main
+          effects:
+            - set: { prev_state: "main" }
+
+      go_back:
+        - target: workspace_manager
+
+      enter_workspace:
+        - target: workspace_room
+          effects:
+            - set: { prev_state: "workspace_manager" }
+
+  workspace_error:
+    description: "Workspace operation failed."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Error: "{{ world.last_error }}"
+          - prose: "Go back to try again."
+    relevant_world: [last_error]
+    relevant_slots: []
+    on:
+      go_back:
+        - target: workspace_manager
+          effects:
+            - set: { current_workspace: "" }
+
+      go_main:
+        - target: main

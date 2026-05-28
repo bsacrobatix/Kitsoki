@@ -1,0 +1,20 @@
+app:
+  id: agents-inline
+  version: 0.1.0
+
+root: foyer
+
+states:
+  foyer:
+    description: "Foyer"
+    view: "You are in the foyer."
+
+agents:
+  story-author:
+    system_prompt: |
+      You are a YAML editor for the inline app.
+    model: claude-opus-4-7
+    tools:
+      - Edit
+      - Write
+      - Read

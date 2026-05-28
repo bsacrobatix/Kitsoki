@@ -1,0 +1,144 @@
+# merge — final merge once CI is green and review comments are resolved.
+# Two substates:
+#
+#   merge_executing       — calls iface.vcs.merge to land the PR; binds
+#                           merge_sha + sets status: "merged".
+#   merge_awaiting_reply  — canonical §6 checkpoint shape; the LLM-judge
+#                           gets a chance to bail on a borderline merge
+#                           (e.g. last-minute review comments). Accept
+#                           fires @exit:merged.
+#
+# This is the room that closes the loop. After @exit:merged the parent
+# story typically transitions to a `done` state and possibly closes the
+# upstream ticket via iface.ticket.transition.
+
+states:
+
+  merge_executing:
+    description: "Merging the PR; proceed to advance to close-out."
+    # Flattened view (choice-widget proposal §4.5).
+    view:
+      - kv:
+          pairs:
+            PR:        "{{ world.pr_id }} — {{ world.pr_title }}"
+            Strategy:  "{{ world.merge_strategy }}"
+            SHA:       '{{ world.merge_sha|default:"(pending)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "proceed"
+              hint:   "land the merge and advance to checkpoint"
+              intent: proceed
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+    relevant_world: [pr_id, pr_title, merge_strategy, merge_sha]
+    on_enter:
+      - invoke: iface.vcs.merge
+        with:
+          pr_id:    "{{ world.pr_id }}"
+          strategy: "{{ world.merge_strategy }}"
+        bind:
+          merge_sha: sha
+        on_error: ci_monitoring
+      - set:
+          status: "merged"
+    on:
+      proceed:
+        - target: merge_awaiting_reply
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
+
+  # Final checkpoint — canonical §6 shape. The LLM-judge here is
+  # specifically about "did the merge actually land cleanly?", with
+  # auto-fire on a high-confidence verdict. The accept arc is the
+  # @exit:merged arc that closes the pipeline.
+  merge_awaiting_reply:
+    description: "Merge landed; awaiting close-out."
+    # Flattened view (choice-widget proposal §4.5).
+    view:
+      - kv:
+          pairs:
+            PR:           "{{ world.pr_id }}"
+            "Merge SHA":  '{{ world.merge_sha|default:"(unknown)" }}'
+            "PR url":     '{{ world.pr_url|default:"(unknown)" }}'
+            Verdict:      '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
+            Confidence:   '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
+            Reason:       '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "accept"
+              hint:   "close out and exit merged"
+              intent: accept
+            - label:  "refine"
+              hint:   "back to ci_monitoring with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what needs another pass"
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+    relevant_world: [judge_mode, pr_id, pr_url, merge_sha, llm_verdict]
+    on_enter:
+      - invoke: iface.transport.post
+        with:
+          thread:    "{{ world.thread }}"
+          title:     "PR merged: {{ world.pr_id }}"
+          body:      "PR {{ world.pr_id }} merged at {{ world.merge_sha }} ({{ world.pr_url }})."
+          phase_id:  "merge_{{ world.pr_id }}"
+      - invoke: host.inbox.add
+        with:
+          kind:    checkpoint
+          title:   "PR merged: {{ world.pr_id }}"
+          thread:  "{{ world.thread }}"
+          state:   merge_awaiting_reply
+          body:    "PR {{ world.pr_id }} merged at {{ world.merge_sha }}."
+      - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
+        invoke: host.oracle.decide
+        with:
+          agent: judge
+          prompt: prompts/judge_merge.md
+          schema: schemas/judge_verdict.json
+          args:
+            pr_id:      "{{ world.pr_id }}"
+            merge_sha:  "{{ world.merge_sha }}"
+            pr_url:     "{{ world.pr_url }}"
+        bind:
+          llm_verdict: submitted
+      - when: |
+          world.judge_mode != 'human' &&
+          world.llm_verdict.confidence >= world.judge_confidence_threshold &&
+          world.llm_verdict.verdict != 'uncertain' &&
+          world.llm_verdict.intent != 'uncertain'
+        emit_intent: "{{ world.llm_verdict.intent }}"
+        slots:
+          feedback: "{{ world.llm_verdict.reason }}"
+    on:
+      accept:
+        # @exit:merged.requires: [pr_url] — must be set on this arc.
+        # pr_url was bound in open_pr.on_enter; we re-pin it here so the
+        # static check sees the requires: key on the @exit transition.
+        - target: "@exit:merged"
+          effects:
+            - set:
+                status: "merged"
+                pr_url: "{{ world.pr_url }}"
+      refine:
+        - target: ci_monitoring
+          effects:
+            - set:
+                refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                cycle:           "{{ world.cycle + 1 }}"
+                ci_state:        "pending"
+                ci_attempts:     0
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

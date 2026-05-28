@@ -1,0 +1,15 @@
+# multi_no_max — submit all four perks (max defaults to len(items)
+# when unset, so this is valid). The commit arc also seeds
+# world.day = 5 so the next spoke's "rash" gated row is visible.
+test_kind: flow
+app: ../app.yaml
+initial_state: multi_no_max
+
+turns:
+  - intent: { name: chose_all_perks, slots: { perks: [regen, haste, shield, vision] } }
+    expect_state: multi_per_item_when
+    expect_world:
+      picked_all: [regen, haste, shield, vision]
+      day:        5
+
+expect_no_errors: true

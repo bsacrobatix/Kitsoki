@@ -1,0 +1,13 @@
+# single_param_int — captures an int param. Commit advances to
+# single_param_enum.
+test_kind: flow
+app: ../app.yaml
+initial_state: single_param_int
+
+turns:
+  - intent: { name: set_hero_age, slots: { age: 27 } }
+    expect_state: single_param_enum
+    expect_world:
+      hero_age: 27
+
+expect_no_errors: true

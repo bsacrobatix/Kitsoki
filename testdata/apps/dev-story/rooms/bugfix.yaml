@@ -1,0 +1,210 @@
+# Bug Fix Room — reproduce, localize, fix, and verify a bug.
+
+states:
+  bugfix:
+    description: "Bug Fix Room — work through the reproduce-localize-fix-verify cycle."
+    # Flattened view: `choice:` is not allowed inside `blocks:`, so we
+    # drop the extends/blocks chrome and inline the body as sibling
+    # elements. The base.pongo status block is lost — acceptable cost
+    # for the lifecycle picker affordance.
+    view:
+      - kv:
+          pairs:
+            Workspace: "{{ world.current_workspace }}"
+      - prose: "Steps: reproduce → localize → apply fix → verify → open PR"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "reproduce bug", intent: reproduce_bug, hint: "failing test or repro script" }
+            - { label: "localize bug",  intent: localize_bug,  hint: "trace logs / code to root cause" }
+            - { label: "apply fix",     intent: apply_fix,     hint: "minimal change" }
+            - { label: "verify fix",    intent: verify_fix,    hint: "re-run repro + related tests" }
+            - { label: "open pr",       intent: open_pr,       hint: "hand off to PR room" }
+            - { label: "go back",       intent: go_back,       hint: "return to previous room" }
+    relevant_world: [current_workspace, proposal_result]
+    relevant_slots: []
+    on:
+      reproduce_bug:
+        - target: bugfix_reproducing
+
+      localize_bug:
+        - target: bugfix_localizing
+
+      apply_fix:
+        - target: bugfix_applying
+
+      verify_fix:
+        - target: bugfix_verifying
+
+      open_pr:
+        - target: pr_room
+          effects:
+            - set: { prev_state: "bugfix" }
+
+      go_back:
+        - target: "{{ world.prev_state }}"
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  bugfix_reproducing:
+    description: "Reproducing the bug..."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - heading: "Reproducing bug in workspace: {{ world.current_workspace }}"
+          - prose: "[stub] Running repro script..."
+          - code: |
+              FAIL: TestAuthRefresh (0.23s)
+                auth_test.go:45: expected status 200, got 401
+                auth_test.go:46: response body: {"error":"token_expired"}
+          - prose: "Bug reproduced. Proceed to localize root cause?"
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'FAIL: TestAuthRefresh - expected 200 got 401'"
+        bind:
+          proposal_result: "stdout"
+        on_error: bugfix_error
+    on:
+      localize_bug:
+        - target: bugfix_localizing
+
+      go_back:
+        - target: bugfix
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  bugfix_localizing:
+    description: "Localizing the root cause..."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - heading: "Root cause analysis"
+          - prose: "[stub] Tracing auth flow..."
+          - kv:
+              pairs:
+                "auth/token.go:123":   "Token.Validate() returns expired=true for tokens > 24h"
+                "auth/refresh.go:45":  "RefreshToken() not called before Validate()"
+          - prose: "→ Root cause: Token refresh is not triggered before validation in the request handler at api/auth_handler.go:78"
+          - prose: "Suggested fix: Call RefreshToken() in the middleware before route handlers."
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on:
+      apply_fix:
+        - target: bugfix_applying
+
+      go_back:
+        - target: bugfix
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  bugfix_applying:
+    description: "Applying the fix..."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - heading: "Applying fix to: {{ world.current_workspace }}"
+          - prose: "[stub] Change applied to api/auth_handler.go:78"
+          - code: |
+              + refreshErr := token.RefreshToken(ctx, r.Header.Get("Authorization"))
+              + if refreshErr != nil {
+              +     http.Error(w, "token refresh failed", http.StatusUnauthorized)
+              +     return
+              + }
+          - prose: "Fix applied. Verify next?"
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'Fix applied: auth_handler.go patched'"
+        on_error: bugfix_error
+    on:
+      verify_fix:
+        - target: bugfix_verifying
+
+      go_back:
+        - target: bugfix
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  bugfix_verifying:
+    description: "Verifying the fix..."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - heading: "Verifying fix in {{ world.current_workspace }}"
+          - code: |
+              [stub] Running: go test ./... -run TestAuth
+                ok  auth/token_test.go (0.15s)
+                ok  auth/refresh_test.go (0.18s)
+                ok  api/auth_handler_test.go (0.22s)
+                PASS: 3 suites, 12 tests
+          - prose: "Fix verified! Ready to open a PR."
+    relevant_world: [current_workspace]
+    relevant_slots: []
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "echo 'go test: PASS 3 suites 12 tests'"
+        on_error: bugfix_error
+    on:
+      open_pr:
+        - target: pr_room
+          effects:
+            - set: { prev_state: "bugfix" }
+
+      go_back:
+        - target: bugfix
+
+      go_main:
+        - target: main
+
+      go_inbox:
+        - target: inbox
+          push_history: false
+
+  bugfix_error:
+    description: "Bug fix operation failed."
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Error: "{{ world.last_error }}"
+    relevant_world: [last_error]
+    relevant_slots: []
+    on:
+      go_back:
+        - target: bugfix
+
+      go_main:
+        - target: main

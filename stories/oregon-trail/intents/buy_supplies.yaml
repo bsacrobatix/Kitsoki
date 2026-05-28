@@ -1,0 +1,112 @@
+# buy_supplies — `propose_purchase` mapping for free-form basket draft.
+#
+# Player phrasings like "load me up with 6 oxen and 2000 lbs of food"
+# should route to propose_purchase with both items captured in the
+# free-form items slot and a sensible total_cost.
+test_kind: intents
+app: oregon-trail
+state: general_store.idle
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  - id: oxen-and-food
+    intent: { name: propose_purchase, slots: {} }   # slots intentionally
+                                                     # loose — items + total
+                                                     # have wide phrasings.
+    inputs:
+      - "load me up with 6 oxen and 2000 lbs of food"
+      - "I want to buy 6 oxen and 2000 pounds of food"
+      - "give me half a dozen oxen and 2000 lbs of provisions"
+
+  - id: just-food
+    intent: { name: propose_purchase, slots: {} }
+    inputs:
+      - "buy 500 lbs of food"
+      - "I'd like 500 pounds of provisions"
+      - "stock up on 500 lbs food"
+
+  - id: bullets-and-clothing
+    intent: { name: propose_purchase, slots: {} }
+    inputs:
+      - "100 bullets and 2 sets of clothing"
+      - "I want a hundred bullets and a couple sets of clothes"
+
+  - id: leave-store-canonical
+    intent: { name: leave_store, slots: {} }
+    inputs:
+      - "leave"
+      - "leave the store"
+      - "done shopping"
+      - "head out"
+
+  # Adversarial — order without quantity should clarify on either slot.
+  - id: vague-purchase
+    expect_failure:
+      any_of: [clarify, MISSING_SLOTS]
+    inputs:
+      - "buy some food"
+      - "I want to buy stuff"
+
+  # ── Structured-slot patterns from live OT trace ────────────────────
+  # The LLM router converts "30 boxes bullets" → bullets: 600 (one
+  # "box" = 20 rounds). Locking that semantic here means a future
+  # prompt regression that drops the box→rounds conversion fails
+  # loudly. The fixture's slot match is partial (only the slots we
+  # spell out are checked) so we can pin each per-item slot
+  # independently.
+  - id: structured-full-basket
+    intent:
+      name: propose_purchase
+      slots:
+        oxen: 10
+        food: 2000
+        bullets: 600
+        clothing: 10
+        wheels: 4
+        axles: 2
+        tongues: 2
+    inputs:
+      - "i want 10 oxen, 2000 lbs food, 30 boxes bullets, 10 clothing, 4 wheels, 2 axles, 2 tongues"
+
+  - id: structured-full-no-commas
+    intent:
+      name: propose_purchase
+      slots:
+        oxen: 10
+        food: 2000
+        bullets: 600
+        clothing: 10
+        wheels: 4
+        axles: 2
+        tongues: 2
+    inputs:
+      - "purchase 10 oxen 2000lbs 30 boxes 10 sets 4 wheels 2 axles 2 tongues"
+
+  - id: structured-oxen-and-food
+    intent:
+      name: propose_purchase
+      slots: { oxen: 6, food: 1500 }
+    inputs:
+      - "give me 6 oxen and 1500 lbs of food"
+
+  # Tiny-basket / single-pound case — the proposal should still draft
+  # (downstream room may auto-accept on cost==1, but the fixture only
+  # asserts the routing).
+  - id: pound-of-hardtack
+    intent:
+      name: propose_purchase
+      slots: { food: 1 }
+    inputs:
+      - "a pound of hardtack"
+
+  # Ambiguous quantity — "buy salt" with no count. The LLM should
+  # either route to propose_purchase with low-confidence guesses or
+  # clarify. Accept either path: lock the verb's GENERAL family.
+  - id: salt-no-quantity
+    intent: { name: propose_purchase, slots: {} }
+    inputs:
+      - "buy salt"

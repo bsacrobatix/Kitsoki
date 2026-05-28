@@ -1,0 +1,78 @@
+# party_naming_narrated_agent — exercises the narrated branch of
+# generate_names (world.narration: true) and asserts that the
+# host.oracle.decide invocation threads the named `party_namer`
+# agent through to the handler via the top-level agents primitive.
+#
+# Sister fixture to party_naming.yaml, which covers the deterministic
+# branch. Together they cover both arms of the generate_names guard.
+#
+# The host.oracle.decide stub returns a canned typed roster the
+# way a real claude call (post-submit) would; the state machine binds
+# each name into party_member_1..5 directly via submitted.names[N]
+# indexed access (no comma split). The agent: arg on the with: block
+# is asserted via expect_events → HostDispatched.args.agent so a
+# future refactor that drops the agent: wiring fails this fixture
+# loudly.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: intro_party_names
+initial_world:
+  narration:     true
+  party_size:    5
+
+host_handlers:
+  # Canned typed-JSON roster — five names, schema-validated. Mirrors
+  # what the party_namer agent is instructed to produce via the submit()
+  # tool. The handler is stubbed; we don't actually exercise
+  # the validator round-trip here, just confirm the engine threads the
+  # agent: arg down AND binds each indexed name into its seat.
+  host.oracle.decide:
+    data:
+      stdout:    "named the party"
+      exit_code: 0
+      ok:        true
+      submitted:
+        names: [Luke, Leia, Han, Chewie, Yoda]
+
+turns:
+
+  # Single turn: generate_names { theme } → the narrated arm fires
+  # because world.narration is true. host.oracle.decide is
+  # invoked with the party_namer agent; binds populate party_member_*
+  # from submitted.names[0..4].
+  - intent:
+      name: generate_names
+      slots:
+        theme: "Star Wars"
+    expect_state: intro_party_names
+    expect_world:
+      party_member_1: "Luke"
+      party_member_2: "Leia"
+      party_member_3: "Han"
+      party_member_4: "Chewie"
+      party_member_5: "Yoda"
+      # Templated bind: party_names is the comma-joined roster, derived
+      # from result.submitted.names via the new {{ join(...) }} bind
+      # form. Keeps the legacy CSV consumers (phases.yaml illness pick,
+      # the start_journey guard) working from the narrated path.
+      party_names: "Luke,Leia,Han,Chewie,Yoda"
+    # HostDispatched carries the *post-rerender* args, so this asserts
+    # the engine resolved the templated `{{ slots.theme }}` AND kept
+    # the literal `agent: party_namer` on the way down to the handler.
+    # This is the primary load-bearing assertion of the fixture: it
+    # would fail if a future refactor dropped the agent: arg from
+    # intro.yaml's host.oracle.decide invocation, or if the
+    # engine stopped forwarding `agent:` into HostDispatched.args.
+    expect_events:
+      - kind: HostDispatched
+        effect:
+          namespace: host.oracle.decide
+          args:
+            prompt: "prompts/name_party.md"
+            schema: "mcp/party_names.json"
+            agent:  party_namer
+            args:
+              theme: "Star Wars"
+
+expect_no_errors: true

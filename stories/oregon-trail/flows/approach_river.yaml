@@ -1,0 +1,70 @@
+# approach_river — regression test for the phase-parameter river geometry.
+#
+# History: the original approach_river effect used an in-place ternary
+#   `{{ tpl.to_landmark == 'Kansas River Crossing' ? 2 : 7 }}`
+# to set river_depth_ft per leg. phases.go's substString regex only matches
+# bare `{{ tpl.X }}` / `{{ phase.next.X }}` — it does NOT walk into ternary
+# expressions inside a `{{ … }}` block. So `tpl.to_landmark` reached the
+# expr-lang runtime unbound and the entire transition crashed with an
+# orchestrator error on the user's first river crossing.
+#
+# Workaround: declared river_base_depth_ft and river_width_ft as
+# explicit phase parameters; approach_river references `{{ tpl.river_base_depth_ft }}`
+# (which the expander DOES substitute). This fixture pins the corrected
+# behaviour for leg_a (Kansas River — base 2, width 620) so the latent
+# bug can't return.
+#
+# Engine follow-up still open: phases.go::substString should walk into
+# ternaries / arbitrary expressions inside `{{ … }}` so authors aren't
+# forced to lift every branch into a phase parameter. When that fix
+# lands the workaround can be deleted; this fixture's assertions stay
+# the same.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: leg_a_awaiting_reply
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    banker
+  month:         june   # multiplier 1.00 → depth lands at base 2 (shallow).
+  money:         1600
+  oxen:          6
+  food_lbs:      1500
+  bullets:       50
+  clothing_sets: 3
+  spare_wheels:  2
+  spare_axles:   2
+  spare_tongues: 2
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    100
+  narration:     false
+  miles_traveled: 102
+  rng_counter:   0
+  event_kind:    ""
+  current_landmark: "Independence"
+  river_depth_ft:   0
+  river_width_ft:   0
+
+# host.transport.post fires from the awaiting_reply on_enter — stub it.
+host_handlers:
+  host.transport.post:
+    data: { ok: true }
+    delay: "0s"
+
+turns:
+
+  # approach_river: enters river_crossing. resolveInitial reads the OLD
+  # river_depth_ft (0, defaulted) and picks `shallow` before the effects
+  # apply the new depth. So expect_state is shallow regardless of the
+  # actual depth landing in this turn. The world_after assertions verify
+  # the depth/width DID land correctly.
+  - intent: { name: approach_river, slots: {} }
+    expect_state: river_crossing.shallow
+    expect_world:
+      current_landmark: "Kansas River Crossing"
+      river_depth_ft:   2      # base 2 × 100% (june) = 2 ft, shallow.
+      river_width_ft:   620
+
+expect_no_errors: true

@@ -1,0 +1,14 @@
+app:
+  id: metamode-no-agent
+  version: 0.1.0
+
+root: foyer
+
+states:
+  foyer:
+    description: "Foyer"
+    view: "You are in the foyer."
+
+meta_modes:
+  story:
+    trigger: meta

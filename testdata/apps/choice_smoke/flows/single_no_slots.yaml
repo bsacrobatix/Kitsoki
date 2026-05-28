@@ -1,0 +1,15 @@
+# single_no_slots — items with neither slots: nor param:; bare intent
+# fires. The arc into single_per_item_when also flips per_item_gate
+# to true (so the next spoke's gated row is visible).
+test_kind: flow
+app: ../app.yaml
+initial_state: single_no_slots
+
+turns:
+  - intent: { name: chose_bare, slots: {} }
+    expect_state: single_per_item_when
+    expect_world:
+      bare_choice:   picked
+      per_item_gate: true
+
+expect_no_errors: true

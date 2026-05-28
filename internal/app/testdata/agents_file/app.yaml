@@ -1,0 +1,16 @@
+app:
+  id: agents-file
+  version: 0.1.0
+
+root: foyer
+
+states:
+  foyer:
+    description: "Foyer"
+    view: "You are in the foyer."
+
+agents:
+  weather-bot:
+    system_prompt_path: "./prompts/weather.md"
+    tools:
+      - weather.forecast

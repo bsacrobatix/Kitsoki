@@ -1,0 +1,123 @@
+# `issues/` — kitsoki's self-tracker
+
+This directory is kitsoki's own bug + feature backlog, on disk, in
+plain Markdown. Each file is a YAML-frontmatter-headed `.md`; the
+format is documented inline below.
+
+The dogfood app (`stories/kitsoki-dev/`) reads this directory via
+`host.local_files.ticket`, so a bug filed here is immediately
+searchable + workable from `kitsoki run stories/kitsoki-dev/app.yaml`.
+
+## Layout
+
+```
+issues/
+├── bugs/                 — open / resolved / wontfix bug reports
+│   └── <ISO-utc>-<slug>.md
+└── features/             — PRD-track features (cypilot story consumes; Wave 3)
+    └── <ISO-utc>-<slug>.md
+```
+
+The ISO-utc + slug filename convention buys two things:
+
+1. **Sortable by filed-at** — `ls issues/bugs/` shows newest-last.
+2. **Stable across renames** — once a bug is filed, its filename
+   never changes; the `slug` is descriptive, not canonical.
+
+## Frontmatter schema
+
+```yaml
+---
+id:        <same as filename, sans .md>
+title:     "Short, present-tense summary"
+target:    kitsoki | story         # which artifact has the bug
+filed_at:  <RFC3339 UTC>
+status:    open | in_progress | resolved | wontfix
+severity:  P0 | P1 | P2 | P3       # P0 = blocks releases
+component: <short tag, e.g. tui, runtime, loader>
+kitsoki_rev: <short SHA at filing>
+trace_ref: ""                       # may be empty for hand-filed seeds
+external: {}                        # external tracker links (Jira id, GH issue)
+---
+```
+
+## Body
+
+The body is free-form Markdown — repro steps, expected vs actual,
+trace excerpts, design notes. The convention is one `## Body` heading
+introducing the prose; the dogfood pipeline doesn't enforce it but
+both the rendered TUI view and the LLM-judge prompts read the body
+contents wholesale.
+
+## Comment thread
+
+The dogfood transport (`host.append_to_file`, bound at
+`stories/kitsoki-dev/app.yaml`) appends `## Comment <RFC3339> by
+<author>` blocks at the bottom of the file when checkpoint artifacts
+fire. **The bug file IS the conversation log** — proposals, judge
+verdicts, operator acks, and the resolution decision all live in the
+same Markdown.
+
+A typical resolved-bug file:
+
+```
+---
+id: 2026-05-14T103205Z-tui-hangs-on-esc
+status: resolved
+resolved_at: 2026-05-14T15:00:00Z
+resolved_in_commit: abc123
+…
+---
+
+## Body
+Esc hangs the TUI…
+
+## Comment 2026-05-14T14:00:00Z by kitsoki
+**Reproduction artifact:** …confirmed; root cause is …
+
+## Comment 2026-05-14T14:02:13Z by llm-judge
+Verdict: pass (confidence 0.91); reason: …
+
+## Comment 2026-05-14T14:05:01Z by user
+accept
+
+…
+```
+
+## Workflow
+
+1. **File** — by hand for now (`cp issues/bugs/_template.md issues/bugs/<new>.md && $EDITOR …`).
+   `/meta kitsoki bug` and `/meta story bug` triggers compose a
+   bug-reporter agent that files into this directory.
+2. **Search** — `kitsoki run stories/kitsoki-dev/app.yaml`, then
+   `tickets` → `search open kitsoki bugs`. The local-files provider
+   scans `issues/bugs/*.md` and matches on title + body substring.
+3. **Work** — pick a ticket, type `bugfix`, walk the pipeline.
+4. **Close** — on `merge`, the bugfix→pr handoff fires
+   `iface.ticket.transition` with `to: resolved`, flipping the
+   frontmatter in place.
+
+See `stories/kitsoki-dev/README.md` for the full operator walkthrough
+(both supervised and `llm_then_human` autonomous variants).
+
+## Status: open seeds today
+
+Two real kitsoki bugs are filed here as the smoke-test seeds for the
+Phase 3 dogfood acceptance:
+
+| File | Bug | Status |
+|---|---|---|
+| `bugs/2026-05-14T103205Z-tui-view-render-before-bind.md` | Views render BEFORE binds; templates referencing post-bind world keys must default with `??` or the first frame shows pending. Not yet codified as a lint. | open |
+| `bugs/2026-05-14T120000Z-glamour-cap-prose-views.md` | Prose `view:` blocks are hand-wrapped at ~65 chars and don't expand past that on wide terminals because Glamour's `WithPreservedNewLines` caps reflow. | open |
+
+The story-bug variant of the same loop also has a seed under
+`stories/oregon-trail/issues/bugs/` so the dogfood's multi-glob
+`ticket_globs:` is exercised end-to-end.
+
+## Out of scope here
+
+- `features/` is empty (modulo a placeholder README). cypilot's
+  story consumes feature files; that lands in Wave 3 / Phase 5.
+- The `external:` frontmatter block is unused by the local-files
+  provider; it's reserved for the GitHub + Jira providers that will
+  ship in Waves 3+.

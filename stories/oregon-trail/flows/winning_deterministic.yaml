@@ -1,0 +1,126 @@
+# Phase C smoke flow — full Independence → Willamette traversal under
+# the new event-roll machinery, forced into the no-event default arms
+# by keeping miles_traveled + rng_counter low (< 60 mod 100) at every
+# `traveling.continue` decision point.
+#
+# How the no-event path is forced:
+#   - At the start of each leg, miles_traveled = 0 and rng_counter is
+#     wherever it left off. The arrival guard wins as soon as
+#     world_override sets miles_traveled >= distance_mi - step. Because
+#     the arrival arm carries no rng_counter increment, the counter
+#     stays effectively pinned across legs in this fixture.
+#   - Even if a roll were to fire, the lowest 60 buckets [0,60) hit the
+#     default arm — so as long as rng_counter < 60 we'd be safe; in
+#     this fixture it stays at 0 because every continue fires arrival.
+#
+# Replaces winning_deterministic_phase_b.yaml.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: general_store.idle
+initial_world:
+  party_names:   "John,Sarah,Tom,Mary,Anne"
+  profession:    banker
+  month:         april
+  money:         1000
+  oxen:          4
+  food_lbs:      400
+  pace:          steady
+  rations:       filling
+  party_alive:   5
+  health_avg:    100
+  narration:     false
+  miles_traveled: 0
+  event_kind:    ""
+  rng_counter:   0
+
+turns:
+
+  # ── Step 1 — leave the store. Transitions to leg_a_executing, which
+  # the orchestrator drills into via initial: → leg_a_executing.traveling.
+  - intent: { name: leave_store, slots: {} }
+    expect_state: leg_a_executing.traveling
+
+  # ── Step 2 — leg_a (Independence → Kansas River, 102 mi). Preload
+  # miles_traveled = 102 so steady-pace +14 push trips the arrival arm.
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 102
+    expect_state: leg_a_awaiting_reply
+    expect_world:
+      current_landmark: "Independence"
+
+  # ── Step 3 — leg_a awaiting → leg_b_executing.traveling.
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_b_executing.traveling
+    expect_world:
+      current_landmark: "Kansas River Crossing"
+      miles_traveled: 0
+      event_kind: ""
+
+  # ── Step 4 — leg_b (Kansas River → Fort Kearney, 202 mi).
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 202
+    expect_state: leg_b_awaiting_reply
+
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_c_executing.traveling
+    expect_world:
+      current_landmark: "Fort Kearney"
+
+  # ── Step 5 — leg_c (Fort Kearney → Chimney Rock, 250 mi).
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 250
+    expect_state: leg_c_awaiting_reply
+
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_d_executing.traveling
+    expect_world:
+      current_landmark: "Chimney Rock"
+
+  # ── Step 6 — leg_d (Chimney Rock → Fort Laramie, 86 mi).
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 86
+    expect_state: leg_d_awaiting_reply
+
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_e_executing.traveling
+    expect_world:
+      current_landmark: "Fort Laramie"
+
+  # ── Step 7 — leg_e (Fort Laramie → South Pass, 292 mi, mountain).
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 292
+    expect_state: leg_e_awaiting_reply
+
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_f_executing.traveling
+    expect_world:
+      current_landmark: "South Pass"
+
+  # ── Step 8 — leg_f (South Pass → Snake River, 250 mi).
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 250
+    expect_state: leg_f_awaiting_reply
+
+  - intent: { name: continue, slots: {} }
+    expect_state: leg_g_executing.traveling
+    expect_world:
+      current_landmark: "Snake River Crossing"
+
+  # ── Step 9 — leg_g (Snake River → Willamette Valley, 318 mi, mountain).
+  - intent: { name: continue, slots: {} }
+    world_override:
+      miles_traveled: 318
+    expect_state: leg_g_awaiting_reply
+
+  # ── Step 10 — final arc lands in ended_won (terminal).
+  - intent: { name: continue, slots: {} }
+    expect_state: ended_won
+
+expect_no_errors: true

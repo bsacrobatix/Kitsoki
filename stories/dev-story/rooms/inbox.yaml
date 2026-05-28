@@ -1,0 +1,69 @@
+# inbox — TUI inbox view. Reads the live inbox via internal/inbox (host
+# side); the room itself is just a navigation surface (Wave 2 doesn't
+# enumerate items inside the view — the runtime's inbox subsystem
+# manages the list).
+#
+# The dual-channel pattern (proposal §4.5) means every checkpoint in
+# bf / pr / impl also writes here via host.inbox.add. Standalone runs
+# see the count via world.inbox_unread (set by the host).
+#
+# Wave 3 / Phase 6 addition: `pick_review` is the routing entry for
+# "PR awaiting your review" notifications. The intent's slots
+# (pr_id, pr_title, pr_author) project a notification payload into
+# the `rev` import compound's world_in: via the parent world keys
+# (pr_id, pr_title, pr_author). Selecting `pick_review` then jumps
+# into the code-review story at its idle entry. The contract
+# appendix (W3.5) details the inbox→story routing.
+#
+# Choice-widget shape: the inbox subsystem itself owns the list of
+# notifications, so this room renders only the navigation actions as
+# a single-mode picker. `pick_review` uses `param:` to capture the
+# required pr_id slot; pr_title / pr_author are optional and fall
+# through to post-dispatch clarify when the operator wants them.
+
+states:
+
+  inbox:
+    description: "TUI inbox — unread checkpoints + notifications."
+    # Flattened view (no extends/blocks) — `choice:` cannot live inside a
+    # `blocks:` map (typed metadata is lost through the inheritance
+    # pipeline; see docs/choice-widget.md §3.1).
+    view:
+      - kv:
+          pairs:
+            Unread:                 "{{ world.inbox_unread }}"
+            "Pending review request": '{{ world.pr_id|default:"(none)" }} {{ world.pr_title }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "pick_review"
+              intent: pick_review
+              hint:   "route a review notification into code-review"
+              param:
+                slot:        pr_id
+                type:        string
+                placeholder: "PR id"
+                required:    true
+            - { label: "go_back", intent: go_back, hint: "return to the previous room" }
+            - { label: "go_main", intent: go_main, hint: "back to the engineer's day landing" }
+            - { label: "look",    intent: look,    hint: "re-render" }
+    relevant_world: [inbox_unread, pr_id, pr_title]
+    on:
+      # Pick a review-request notification. The slots project into the
+      # parent world, then `target: rev` enters the code-review import
+      # compound which sees the projected fields via its world_in:.
+      pick_review:
+        - target: rev
+          effects:
+            - set:
+                pr_id:     "{{ slots.pr_id }}"
+                pr_title:  "{{ slots.pr_title ?? '' }}"
+                pr_author: "{{ slots.pr_author ?? '' }}"
+                thread:    "{{ slots.pr_id }}"
+      go_back:
+        - target: "{{ world.prev_state }}"
+      go_main:
+        - target: main
+      look:
+        - target: .

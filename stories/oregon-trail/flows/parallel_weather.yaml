@@ -1,0 +1,59 @@
+# parallel_weather — flips §9.4 from expect_error to a positive emit fixture.
+#
+# Seeds the session directly into the `world_clock` parallel state and drives
+# `weather_advance` to step the weather region through dry → rain → snow:
+#
+#   - Turn 1: dry → rain. Effect emits `precip_heavy`, which the calendar
+#     region's parent-level binding picks up and sets world.precip_observed.
+#   - Turn 2: rain → snow. Effect emits `snow_starts`, calendar reacts with
+#     world.snow_observed.
+#   - Turn 3: snow → dry. No emit; both witnesses stay set from turns 1-2.
+#
+# State paths use the parallel encoding documented in internal/machine/
+# parallel.go: <parent>#<region_a_leaf>|<region_b_leaf>, regions sorted
+# alphabetically.
+#
+# Phase I scope (per oregon-trail-proposal §9.4 fallback): the world_clock
+# region is a *freestanding* top-level state. Full integration as a peer of
+# trail_phases under a parallel root is deferred to Phase J.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: "world_clock#world_clock.calendar.day_active|world_clock.weather.dry"
+initial_world:
+  narration: false
+  day: 10
+  weather_kind: ""
+  precip_observed: false
+  snow_observed: false
+
+turns:
+
+  # ── Turn 1 — dry → rain. precip_heavy emit lands in calendar's binding.
+  - intent: { name: weather_advance, slots: {} }
+    expect_state: "world_clock#world_clock.calendar.day_active|world_clock.weather.rain"
+    expect_world:
+      weather_kind: rain
+      precip_observed: true
+      snow_observed: false
+      day: 11
+
+  # ── Turn 2 — rain → snow. snow_starts emit lands in calendar.
+  - intent: { name: weather_advance, slots: {} }
+    expect_state: "world_clock#world_clock.calendar.day_active|world_clock.weather.snow"
+    expect_world:
+      weather_kind: snow
+      precip_observed: true
+      snow_observed: true
+      day: 12
+
+  # ── Turn 3 — snow → dry. No emit; calendar still ticks its own day.
+  - intent: { name: weather_advance, slots: {} }
+    expect_state: "world_clock#world_clock.calendar.day_active|world_clock.weather.dry"
+    expect_world:
+      weather_kind: dry
+      precip_observed: true
+      snow_observed: true
+      day: 13
+
+expect_no_errors: true

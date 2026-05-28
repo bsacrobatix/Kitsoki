@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "party_names",
+  "type": "object",
+  "required": ["names"],
+  "additionalProperties": false,
+  "properties": {
+    "names": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "maxLength": 24,
+        "pattern": "^[A-Za-z][A-Za-z'-]*$"
+      }
+    }
+  }
+}

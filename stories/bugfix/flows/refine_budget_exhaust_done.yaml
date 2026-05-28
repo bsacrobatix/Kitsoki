@@ -1,0 +1,60 @@
+# refine_budget_exhaust_done — done_cycle hits done_budget at the close-out
+# checkpoint; the operator can't refine the final artifact indefinitely.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: done
+initial_world:
+  ticket_id:     "TKT-140"
+  thread:        "TKT-140"
+  judge_mode:    "human"
+  done_budget:   2
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.git:
+    data: { ok: true, sha: "abc", diff: "" }
+  host.local:
+    data: { ok: true, log: "PASS", passed: 1, failed: 0 }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub done"
+        summary_markdown: "stub close-out"
+        lessons:
+          - { category: "stub", description: "Budget exhaust test for the done room.", severity: "low" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub done"
+        summary_markdown: "stub close-out"
+        lessons:
+          - { category: "stub", description: "Budget exhaust test for the done room.", severity: "low" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub done"
+        summary_markdown: "stub close-out"
+        lessons:
+          - { category: "stub", description: "Budget exhaust test for the done room.", severity: "low" }
+
+turns:
+  - intent: { name: refine, slots: { feedback: "exhaust check" } }
+    world_override:
+      done_cycle: 2
+    expect_state: __exit__abandoned
+    expect_world:
+      abandon_reason: "done_cycle_budget_exhausted"
+
+expect_terminal: true
+expect_no_errors: true

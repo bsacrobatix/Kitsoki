@@ -1,0 +1,92 @@
+# parallel_smoke — minimum-viable demo of `type: parallel` (proposal §9.4).
+#
+# Two sibling regions live under a parallel parent `clock`:
+#
+#   - `weather` (compound, initial: dry) flips to `rain` via `make_it_rain`.
+#     The dry→rain transition emits `precip_heavy`.
+#   - `calendar` (compound, initial: day1) ticks via `tick` AND reacts to
+#     the `precip_heavy` cross-region emit by jumping to `soggy`.
+#
+# The smoke flow exercises the round-trip:
+#   1. enter the parallel state from the outer compound,
+#   2. observe both region leaves entered,
+#   3. fire the weather intent, observe BOTH regions transition (emit roundtrip),
+#   4. leave via the parallel parent's own `leave` binding.
+
+app:
+  id: parallel-smoke
+  version: 0.1.0
+  title: "Parallel state smoke test"
+
+world:
+  emit_count:     { type: int,  default: 0 }
+  weather_state:  { type: string, default: dry }
+  calendar_state: { type: string, default: day1 }
+  saw_emit:       { type: bool, default: false }
+  entered_clock:  { type: bool, default: false }
+
+intents:
+  enter:        { title: "Enter the clock" }
+  tick:         { title: "Tick the calendar" }
+  make_it_rain: { title: "Make it rain" }
+  precip_heavy: { title: "Heavy precipitation event (cross-region)" }
+  leave:        { title: "Leave the clock" }
+
+root: outside
+
+states:
+  outside:
+    view: "You are outside the clock."
+    on:
+      enter:
+        - target: clock
+
+  clock:
+    type: parallel
+    view: "── clock ──"
+    on_enter:
+      - set: { entered_clock: true }
+    on:
+      leave:
+        - target: outside
+    states:
+
+      calendar:
+        type: compound
+        initial: day1
+        # precip_heavy lives on the compound parent so any active leaf
+        # (day1, day2) inherits the binding — the ancestor-walk in
+        # findTransition picks it up.
+        on:
+          precip_heavy:
+            - target: clock.calendar.soggy
+              effects:
+                - set: { saw_emit: true }
+                - set: { calendar_state: soggy }
+        states:
+          day1:
+            view: "Calendar: day 1."
+            on:
+              tick:
+                - target: ../day2
+                  effects:
+                    - set: { calendar_state: day2 }
+          day2:
+            view: "Calendar: day 2."
+          soggy:
+            view: "Calendar: soggy."
+
+      weather:
+        type: compound
+        initial: dry
+        states:
+          dry:
+            view: "Weather: dry."
+            on:
+              make_it_rain:
+                - target: ../rain
+                  effects:
+                    - set: { weather_state: rain }
+                    - emit: precip_heavy
+          rain:
+            view: "Weather: rain."

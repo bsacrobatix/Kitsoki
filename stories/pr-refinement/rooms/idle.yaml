@@ -1,0 +1,46 @@
+# idle — standalone-only entry. When a parent story imports
+# pr-refinement with `entry: open_pr`, this room is bypassed entirely
+# (the importer drills straight into `open_pr`).
+#
+# For standalone runs (`kitsoki run stories/pr-refinement/app.yaml`)
+# and for flow fixtures, the operator picks `open` to fire
+# `open_pr.on_enter` which actually opens the PR via the iface
+# bindings. Without this room, a flow fixture's initial-state seed
+# bypasses on_enter entirely (`seedInitialState` writes a
+# TransitionApplied event but does not re-run the target state's
+# on_enter chain), so the pr_id / pr_url bindings would never fire.
+
+states:
+
+  idle:
+    description: "pr-refinement parked. Waiting for open."
+    # Flattened view (choice-widget proposal §4.5 forbids `choice:`
+    # inside `blocks:`). The standalone path loses the `views/base.pongo`
+    # status-line chrome; importer hosts supply their own.
+    view:
+      - kv:
+          pairs:
+            Ticket:           '{{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}'
+            Workspace:        '{{ world.workdir|default:"(none)" }}'
+            "Feature branch": '{{ world.feature_branch|default:"(none)" }}'
+            Judge:            "{{ world.judge_mode }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "open"
+              hint:   "open the PR via iface.vcs.open_pr"
+              intent: open
+            - label:  "quit"
+              hint:   "abandon the pipeline"
+              intent: quit
+    relevant_world: [ticket_id, ticket_title, workdir, feature_branch, judge_mode]
+    on:
+      open:
+        - target: open_pr
+      proceed:
+        - target: open_pr
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

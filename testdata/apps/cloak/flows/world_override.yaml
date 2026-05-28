@@ -1,0 +1,21 @@
+# Exercises world_override (§7.19): mutate world before guard evaluation so
+# the test can skip the cloakroom→hang_cloak→foyer detour and jump straight
+# to the "wearing_cloak == false → bar.lit" outcome.
+test_kind: flow
+app: cloak-of-darkness
+initial_state: foyer
+initial_world:
+  wearing_cloak: true
+  disturbance: 0
+  message_rumpled: false
+
+turns:
+
+  - intent: { name: go, slots: { direction: south } }
+    world_override:
+      wearing_cloak: false
+    expect_state: bar.lit
+    expect_world:
+      wearing_cloak: false
+
+expect_no_errors: true

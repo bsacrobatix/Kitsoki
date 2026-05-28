@@ -1,0 +1,48 @@
+# restart_from — "go back to Fort Kearney" must route to restart_from
+# with stage: kearney, not the generic `go_back` or `quit`.
+#
+# Tests landmark-name → enum-slot disambiguation at a mid-trail
+# checkpoint.
+#
+# Phase J wires the backing `on: restart_from:` arm in the phase
+# template (phases.yaml _awaiting_reply.on.restart_from), mapping each
+# stage to the named leg's _executing state. The arm is what flips
+# this fixture from "expect_failure: INTENT_NOT_ALLOWED_IN_STATE" (the
+# Phase I shape, when only the checkpoint_intent declaration existed
+# without a transition) into a positive assertion of
+# intent: { name: restart_from, slots: { stage: kearney } }.
+#
+# Threshold-tightening note: kept at 0.8 because the runner today
+# does NOT honour a per-fixture min_confidence field. The future
+# runner change (IntentDefaults.MinConfidence in
+# internal/testrunner/intents.go) would let us pair a stricter
+# pass-rate with a confidence floor and surface low-confidence
+# regressions even when pass-rate stays high.
+test_kind: intents
+app: oregon-trail
+state: leg_e_awaiting_reply         # South Pass — well past Kearney
+defaults:
+  runs: 5
+  min_pass_rate: 0.8
+  temperature: 0.2
+
+fixtures:
+
+  - id: restart-from-kearney
+    intent:
+      name: restart_from
+      slots:
+        stage: kearney
+    inputs:
+      - "go back to Fort Kearney"
+      - "restart from kearney"
+      - "return to Fort Kearney"
+
+  # Adversarial — "go back" with no landmark should clarify, not pick
+  # a default stage.
+  - id: restart-bare
+    expect_failure:
+      any_of: [clarify, MISSING_SLOTS, UNKNOWN_INTENT, INTENT_NOT_ALLOWED_IN_STATE]
+    inputs:
+      - "go back"
+      - "restart"

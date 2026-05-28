@@ -1,0 +1,35 @@
+# loader_negative — DISABLED until the test runner gains expect_load_error support.
+#
+# Per proposal §13's testing strategy, this fixture is meant to assert
+# that the loader rejects an app that uses an undeclared world key in
+# `relevant_world:`. The intended shape would be:
+#
+#   test_kind: flow
+#   app: <inline app with relevant_world: [undeclared_key]>
+#   expect_load_error:
+#     contains: "undeclared world key"
+#
+# Current runner support (internal/testrunner/flows.go):
+#   - FlowFixture has no `expect_load_error` field.
+#   - The flow runner loads `app:` as a precondition to running fixtures;
+#     a load failure is propagated as a fatal RunFlows error, which
+#     aborts the entire run rather than failing a single fixture.
+#
+# Two follow-up options for Phase J or a future commit:
+#   1. Add ExpectLoadError to FlowFixture and have the runner load apps
+#      lazily per fixture (catching the load error and matching the
+#      pattern). This is the right long-term shape.
+#   2. Write Go-side tests in internal/app/loader_test.go that compile
+#      synthetic AppDef YAML with undeclared world keys and assert
+#      Loader rejection. Cheaper to land than (1).
+#
+# Until either lands, this fixture is parked with a non-`flow` test_kind
+# so the runner's filter at flows.go:425 skips it silently.
+
+test_kind: flow_disabled_pending_runner_support
+app: ../app.yaml
+initial_state: intro
+
+turns: []
+
+expect_no_errors: true

@@ -1,0 +1,983 @@
+# Oregon Trail — intent library.
+#
+# Every intent referenced by any room across the full game (phases A-G)
+# is declared here, so phase additions don't have to keep growing this
+# file. Phase A only uses a handful (name_party, pick_profession,
+# pick_month, start_journey, buy, leave_store) — the rest are declared
+# now so the matrix in proposal §2.1 is satisfied at the intent layer.
+#
+# Conventions, matching cloak/app.yaml and dev-story/app.yaml:
+#   - title, description, examples, priority on every intent.
+#   - Slots carry type, description, examples; non-trivial slots also
+#     carry format_hint and prompt for slot-filling dialogues (§3.4).
+#   - priority numbers cluster by family: gameplay-defining (90-100),
+#     navigation/secondary (60-89), incidental (10-59).
+
+intents:
+
+  # ── Intro setup ────────────────────────────────────────────────────
+  # name_party stays the quick "set them all from a CSV" entry point;
+  # the intro on:name_party arm now also splits the CSV into the five
+  # party_member_N keys so name_member / the roster view can address a
+  # single seat. name_member and generate_names are the new per-seat
+  # and theme-based alternatives.
+  name_party:
+    title: "Name the party"
+    description: "Set every party member's name in one comma-separated list."
+    examples:
+      - "name the party Adam, Beth, Carol, Daniel, Edith"
+      - "we're Adam, Beth, Carol, Daniel, Edith"
+      - "John,Sarah,Tom,Mary,Anne"
+    priority: 100
+    slots:
+      names:
+        type: string
+        required: true
+        description: "Comma-separated list of party member names, leader first."
+        examples:
+          - "Adam, Beth, Carol, Daniel, Edith"
+          - "John,Sarah,Tom,Mary,Anne"
+        format_hint: "Five names separated by commas; first is the leader."
+        prompt: "What are the five members of your wagon party? (comma-separated)"
+
+  name_member:
+    title: "Name a specific member"
+    description: "Set the Nth party member's name (1-indexed)."
+    examples:
+      - "name member 3 Carol"
+      - "the leader is Adam"
+      - "rename party member 2 to Sarah"
+    priority: 45
+    slots:
+      index:
+        type: int
+        required: true
+        description: "Position in the party, 1-indexed (1 = leader)."
+        examples: ["1", "2", "3"]
+        format_hint: "Integer 1 through party_size."
+        prompt: "Which party member (1-5)?"
+      name:
+        type: string
+        required: true
+        description: "The new name."
+        examples: ["Sarah", "Tom"]
+        format_hint: "A single given name."
+        prompt: "What's their name?"
+
+  generate_names:
+    title: "Generate party names from a theme"
+    description: "Auto-fill all party member names based on a theme (movie, era, mythology, ...)."
+    examples:
+      - "generate names Western"
+      - "name them all Star Wars"
+      - "Norse mythology names"
+      - "give us Lord of the Rings names"
+    # Phase-7 calibration: the recording's "use X names" / "generate
+    # X names" phrasings dominate. {theme} is a free-form string slot
+    # so the matcher captures whatever's between the literal anchors.
+    synonyms:
+      - "use {theme} names"
+      - "generate {theme} names"
+      - "generate names from a {theme} theme"
+      - "{theme} themed names"
+    priority: 40
+    slots:
+      theme:
+        type: string
+        required: true
+        description: "A short theme description (movie, era, mythology, etc.)."
+        examples: ["Western", "Star Wars", "Norse mythology", "Lord of the Rings"]
+        format_hint: "A short evocative phrase."
+        prompt: "What theme?"
+
+  pick_profession:
+    title: "Pick a profession"
+    description: "Choose the wagon leader's profession. This affects starting cash and final-score multiplier."
+    examples:
+      - "I am a banker"
+      - "we are farmers"
+      - "carpenter"
+    priority: 95
+    slots:
+      profession:
+        type: enum
+        values: [banker, carpenter, farmer]
+        required: true
+        description: "The leader's profession (banker = most cash, farmer = highest score multiplier)."
+        examples: ["banker", "carpenter", "farmer"]
+        format_hint: "One of banker, carpenter, farmer."
+        prompt: "What is your profession?"
+
+  pick_month:
+    title: "Pick a departure month"
+    description: "Choose when to leave Independence. Too early = mud; too late = snow at South Pass."
+    examples:
+      - "leave in march"
+      - "depart april"
+      - "may"
+    priority: 90
+    slots:
+      month:
+        type: enum
+        values: [march, april, may, june, july]
+        required: true
+        description: "Departure month."
+        examples: ["march", "april", "may", "june", "july"]
+        format_hint: "One of march/april/may/june/july."
+        prompt: "What month do you want to depart Independence?"
+
+  start_journey:
+    title: "Start the journey"
+    description: "Leave the intro and proceed to the general store at Independence."
+    examples: ["start", "let's go", "begin", "start the journey", "depart"]
+    # Higher than name_party (100) / pick_profession (95) / pick_month (90)
+    # so the menu sorts start_journey to the top of the primary list once
+    # its guard opens — cursor sits on index 0, Enter fires it. While the
+    # guard is closed start_journey is in the blocked sublist (rendered
+    # below the primaries) so this priority bump doesn't surface it as
+    # "selected" when it can't actually fire.
+    priority: 150
+
+  # ── General-store / fort: buy_supplies proposal (phase D) ───────────
+  # The flat `buy { item, quantity }` from phase A is replaced by the
+  # buy_supplies proposal lifecycle: propose_purchase drafts a basket,
+  # accept_purchase / refine_purchase / cancel_purchase drive review,
+  # and repeat_purchase loops back from the done substate.
+  propose_purchase:
+    title: "Draft a purchase"
+    description: "Sketch a basket of supplies and a total cost to put in front of Matt."
+    examples:
+      - "buy 2 oxen and 200 lbs of food"
+      - "propose 6 oxen, 300 lbs food, 1 set clothing"
+      - "I'd like to spend $120"
+    # Phase-4 template synonyms (semantic-routing proposal §4.3 / §5.2):
+    # the matcher captures the {items} and {total_cost} runs and hands
+    # each to its typed slot parser. The Phase-2 bare-string list above
+    # stays — it's still useful for the "Matcher.Match returns a 0.90
+    # whole-utterance hit" path on the verb-only phrasings.
+    synonyms:
+      - "buy {items} for {total_cost}"
+      - "purchase {items}"
+      - "spend {total_cost} on {items}"
+    priority: 100
+    slots:
+      items:
+        type: string
+        required: true
+        description: "A short freeform description of the basket (item names + counts)."
+        examples: ["6 oxen, 200 lbs food", "1 spare wheel", "300 bullets"]
+        format_hint: "Items separated by commas, with quantities."
+        prompt: "What do you want to buy?"
+      total_cost:
+        type: int
+        required: true
+        description: "Total dollar cost of the basket (already accounting for the local price multiplier)."
+        examples: ["1", "5", "120", "240"]
+        format_hint: "A positive integer (whole dollars). Use the local price multiplier."
+        prompt: "What's the total in dollars?"
+      # Optional per-item counts. When any of these are > 0 the
+      # accept_purchase effect credits each inventory key directly
+      # instead of falling back to the coarse oxen/food cost-split.
+      # The narrated-mode prompt (phase H) fills these from the
+      # structured basket; deterministic flows can pass them too.
+      oxen:
+        type: int
+        required: false
+        default: 0
+        description: "Number of yokes of oxen in the basket."
+        examples: ["1", "2", "4"]
+        format_hint: "A non-negative integer."
+        prompt: "How many oxen?"
+      food:
+        type: int
+        required: false
+        default: 0
+        description: "Pounds of food in the basket."
+        examples: ["50", "200", "400"]
+        format_hint: "A non-negative integer (pounds)."
+        prompt: "How many pounds of food?"
+      bullets:
+        type: int
+        required: false
+        default: 0
+        description: "Number of bullets (rounds, not boxes) in the basket."
+        examples: ["20", "100"]
+        format_hint: "A non-negative integer."
+        prompt: "How many bullets?"
+      clothing:
+        type: int
+        required: false
+        default: 0
+        description: "Number of clothing sets in the basket."
+        examples: ["1", "2", "10"]
+        format_hint: "A non-negative integer."
+        prompt: "How many sets of clothing?"
+      wheels:
+        type: int
+        required: false
+        default: 0
+        description: "Number of spare wagon wheels in the basket."
+        examples: ["1", "2", "4"]
+        format_hint: "A non-negative integer."
+        prompt: "How many spare wheels?"
+      axles:
+        type: int
+        required: false
+        default: 0
+        description: "Number of spare axles in the basket."
+        examples: ["1", "2"]
+        format_hint: "A non-negative integer."
+        prompt: "How many spare axles?"
+      tongues:
+        type: int
+        required: false
+        default: 0
+        description: "Number of spare wagon tongues in the basket."
+        examples: ["1", "2"]
+        format_hint: "A non-negative integer."
+        prompt: "How many spare tongues?"
+
+  accept_purchase:
+    title: "Accept the proposal"
+    description: "Confirm the current buy_supplies draft and load up the wagon."
+    examples: ["accept", "yes", "buy it", "confirm"]
+    priority: 90
+
+  refine_purchase:
+    title: "Refine the proposal"
+    description: "Tweak fields of the current draft. Any per-item slot you supply replaces that line in the existing basket; everything you omit stays. Self-stays in reviewing so you can read the new draft and accept or refine again."
+    examples:
+      - "refine"
+      - "I want 7 oxen not 6"
+      - "actually 250 lbs of food"
+      - "add 50 bullets"
+      - "make it 4 spare wheels and bump the cost to 400"
+    # Phase-7 calibration: terse refine phrasings observed in the
+    # recording. Specific to the reviewing state — only fires when
+    # propose_purchase has produced a draft to refine.
+    synonyms:
+      - "less food"
+      - "more food"
+      - "less bullets"
+      - "more bullets"
+      - "fewer oxen"
+      - "more oxen"
+    priority: 80
+    slots:
+      feedback:
+        type: string
+        required: false
+        default: ""
+        description: "Optional free-form note (logged for diagnostics; narrated-mode redraft will use it as a prompt hint in the future)."
+        examples: ["I want 7 oxen not 6", "cheaper"]
+        format_hint: "A short instruction for Matt."
+        prompt: "What do you want to change?"
+      items:
+        type: string
+        required: false
+        description: "Replacement description of the basket (free-form prose)."
+        examples: ["7 oxen, 1500 lbs food, 50 bullets, 2 clothing"]
+        format_hint: "A short comma-separated inventory."
+        prompt: "Describe the updated basket."
+      total_cost:
+        type: int
+        required: false
+        description: "Replacement total cost."
+        examples: ["200", "420"]
+        format_hint: "Integer dollar amount."
+        prompt: "Total cost?"
+      oxen:
+        type: int
+        required: false
+        description: "Replacement oxen count."
+        examples: ["6", "8"]
+        format_hint: "Integer; omit to leave the current value unchanged."
+        prompt: "Oxen?"
+      food:
+        type: int
+        required: false
+        description: "Replacement food (lbs)."
+        examples: ["1500", "2000"]
+        format_hint: "Integer pounds; omit to leave unchanged."
+        prompt: "Food (lbs)?"
+      bullets:
+        type: int
+        required: false
+        description: "Replacement bullet count."
+        examples: ["50", "100"]
+        format_hint: "Integer rounds; omit to leave unchanged."
+        prompt: "Bullets?"
+      clothing:
+        type: int
+        required: false
+        description: "Replacement clothing-set count."
+        examples: ["3", "5"]
+        format_hint: "Integer sets; omit to leave unchanged."
+        prompt: "Clothing sets?"
+      wheels:
+        type: int
+        required: false
+        description: "Replacement spare-wheel count."
+        examples: ["2", "4"]
+        format_hint: "Integer; omit to leave unchanged."
+        prompt: "Spare wheels?"
+      axles:
+        type: int
+        required: false
+        description: "Replacement spare-axle count."
+        examples: ["2", "3"]
+        format_hint: "Integer; omit to leave unchanged."
+        prompt: "Spare axles?"
+      tongues:
+        type: int
+        required: false
+        description: "Replacement spare-tongue count."
+        examples: ["1", "2"]
+        format_hint: "Integer; omit to leave unchanged."
+        prompt: "Spare tongues?"
+
+  cancel_purchase:
+    title: "Cancel the proposal"
+    description: "Walk away from the current draft and stay at the counter."
+    examples: ["cancel", "never mind", "drop it"]
+    priority: 50
+
+  repeat_purchase:
+    title: "Draft another purchase"
+    description: "From the post-purchase view, start a new buy_supplies draft."
+    examples: ["buy again", "another", "more shopping"]
+    priority: 70
+
+  leave_store:
+    title: "Leave the store"
+    description: "Finish outfitting and depart toward the trail."
+    examples: ["leave", "leave the store", "done shopping", "head out", "depart"]
+    priority: 80
+
+  leave_fort:
+    title: "Leave the fort"
+    description: "Walk out of the fort and back onto the trail."
+    examples: ["leave the fort", "leave", "out", "back to the trail"]
+    priority: 80
+
+  # ── River-crossing: river_strategy proposal (phase D) ───────────────
+  # The flat ford/caulk/ferry/wait verbs are kept for narrative clarity,
+  # but the canonical river-crossing path goes through the proposal
+  # lifecycle (propose_crossing → accept_crossing / refine_crossing).
+  propose_crossing:
+    title: "Draft a crossing strategy"
+    description: "Pick a method (ford/caulk/ferry/wait) and a confidence."
+    examples:
+      - "ford the river"
+      - "propose caulking with high confidence"
+      - "let's ferry"
+    # Phase-7 calibration synonyms (semantic-routing proposal §10).
+    # The earlier round (commit b26c31a) listed bare phrasings only;
+    # they routed the verb but left the required `method` slot empty,
+    # so production's RequiresUnfilledSlot guard kicked the turn to
+    # the LLM (issue H2). The fix replaces those bare entries with
+    # `{method}` templates: a single-capture template absorbs the
+    # user's text and the enum parser resolves it against
+    # slots.method.values + the slot-level synonyms map below.
+    # Single-word inputs ("ford", "caulk", "ferry", "wait") also
+    # land on `{method}` because the matcher only tries templates
+    # after bare-string fails — keeping a bare "ford" here would
+    # short-circuit the template and lose the slot fill.
+    synonyms:
+      - "{method}"
+      - "take the {method}"
+      - "{method} the river"
+      - "{method} the wagon"
+    priority: 100
+    slots:
+      method:
+        type: enum
+        values: [ford, caulk, ferry, wait]
+        required: true
+        description: "How to cross."
+        examples: ["ford", "caulk", "ferry", "wait"]
+        format_hint: "One of ford/caulk/ferry/wait."
+        prompt: "Ford, caulk, ferry, or wait?"
+        # Slot-level synonyms (Phase-7 calibration, issue H2) used by
+        # the enum parser when the `{method}` template captures
+        # phrasings that don't equal a canonical value. Each phrase
+        # here was observed in the recording and maps unambiguously
+        # to one of the four values.
+        synonyms:
+          caulk: ["caulk and float", "caulk the wagon", "seal and float"]
+          ferry: ["hire a ferryman", "take the ferry", "ferry across"]
+          wait: ["wait for the water to drop", "wait for water to drop", "hold off"]
+      confidence:
+        type: int
+        required: false
+        default: 50
+        description: "Confidence 0-100 (narrated-mode hint; deterministic-mode ignores)."
+        examples: ["10", "50", "90"]
+        format_hint: "Integer 0-100."
+        prompt: "How confident are you (0-100)?"
+
+  accept_crossing:
+    title: "Accept and cross"
+    description: "Confirm the river-crossing draft and launch the wagon."
+    examples: ["accept", "go", "do it", "cross"]
+    priority: 90
+
+  refine_crossing:
+    title: "Refine the crossing draft"
+    description: "Pick a different method or confidence — re-enters drafting."
+    examples: ["refine", "wait — let's caulk instead", "actually ferry"]
+    priority: 80
+
+  cancel_crossing:
+    title: "Cancel the crossing"
+    description: "Walk back from the riverbank to the prior landmark."
+    examples: ["cancel", "back away", "not yet"]
+    priority: 50
+
+  # ── Phase-level on_failure trigger (phase D) ────────────────────────
+  # Declared so the synthesized `_executing.on_failure:` arc has a
+  # registered intent name (loader.go requires every on: key to be a
+  # declared intent). Not user-facing — the visible verb is give_up_leg
+  # on _awaiting_reply, which manually manages the same counter.
+  on_failure:
+    title: "Phase failure (internal)"
+    description: "Synthetic intent used by the cycle_budgets:on_failure arc on each leg's _executing state. Not user-facing."
+    examples: []
+    hidden: true
+    priority: 1
+
+  give_up_leg:
+    title: "Give up on this leg"
+    description: "Retreat from this landmark back to the previous one (counts against the on_failure cycle budget)."
+    examples: ["give up", "give up on this leg", "retreat", "fall back"]
+    priority: 30
+
+  # ── Trail steady-state verbs (phase B/C) ───────────────────────────
+  continue:
+    title: "Continue on the trail"
+    description: "Press on toward the next landmark."
+    examples: ["continue", "go", "press on", "keep going", "onward"]
+    priority: 90
+
+  set_pace:
+    title: "Set the pace"
+    description: "Change the travelling pace. Faster wears out the party; slower eats more food per mile."
+    examples: ["set pace to grueling", "slow down to steady", "pace strenuous"]
+    priority: 75
+    slots:
+      pace:
+        type: enum
+        values: [steady, strenuous, grueling]
+        required: true
+        description: "Travelling pace."
+        examples: ["steady", "strenuous", "grueling"]
+        format_hint: "One of steady, strenuous, grueling."
+        prompt: "What pace?"
+
+  set_rations:
+    title: "Set rations"
+    description: "Change how much the party eats per day."
+    examples: ["set rations meager", "ration filling", "eat bare bones"]
+    priority: 75
+    slots:
+      rations:
+        type: enum
+        values: [filling, meager, bare_bones]
+        required: true
+        description: "Daily food rationing level."
+        examples: ["filling", "meager", "bare_bones"]
+        format_hint: "One of filling, meager, bare_bones."
+        prompt: "How much should the party eat?"
+
+  # ── Hunting (phase E background-job) ───────────────────────────────
+  hunt:
+    title: "Hunt for game"
+    description: "Send a hunting party out to bring back meat. Costs bullets; result depends on terrain and luck."
+    examples: ["hunt", "go hunting", "shoot game", "look for meat"]
+    priority: 70
+
+  shoot:
+    title: "Shoot"
+    description: "Fire a specific number of bullets at game during a hunt."
+    examples: ["shoot 5 bullets", "fire 3 shots"]
+    priority: 65
+    slots:
+      bullets:
+        type: int
+        required: true
+        description: "How many bullets to expend on this shot."
+        examples: ["1", "5", "10"]
+        format_hint: "A positive integer."
+        prompt: "How many bullets?"
+
+  # ── Resting (phase E background-job) ────────────────────────────────
+  rest:
+    title: "Rest the party"
+    description: "Make camp for a number of days to recover health."
+    examples: ["rest", "camp", "rest 3 days", "make camp for a week"]
+    # Phase-7 calibration: "hold up" is the dominant alternative to
+    # "rest" in pre-checkpoint phrasings.
+    synonyms:
+      - "hold up"
+      - "hold up here"
+      - "let's hold up"
+      - "stop here"
+    priority: 70
+    slots:
+      days:
+        type: int
+        required: false
+        default: 1
+        description: "How many game-days to rest. Defaults to 1."
+        examples: ["1", "3", "7"]
+        format_hint: "A positive integer; 1-14 is sensible."
+        prompt: "How many days?"
+
+  # ── Inbox + background-job clarification (phase E) ──────────────────
+  # answer_clarification resolves a paused background job. The intent
+  # is wired on the inbox state (canonical landing for action_required
+  # notifications) and on hunt.hunt_running (direct-answer path for
+  # fixtures that skip the inbox detour).
+  answer_clarification:
+    title: "Answer a clarification request"
+    description: "Provide an answer to a mid-flight background-job question (e.g. which species to hunt)."
+    examples:
+      - "target bison"
+      - "answer with elk"
+      - "shoot the deer"
+    priority: 85
+    slots:
+      job_id:
+        type: string
+        required: true
+        description: "ID of the job awaiting clarification (see inbox notification)."
+        examples: ["01HG..."]
+        format_hint: "A job ULID — fixtures pass {{ world.last_job_id }}."
+        prompt: "Which job needs your answer?"
+      answer:
+        type: string
+        required: true
+        description: "The answer to submit. For hunt clarification, the target species."
+        examples: ["bison", "elk", "deer"]
+        format_hint: "A short string; for hunt: bison / elk / deer."
+        prompt: "What is your answer?"
+
+  check_inbox:
+    title: "Check the inbox"
+    description: "Open the notification inbox to see pending background-job results."
+    examples: ["inbox", "check inbox", "notifications", "messages"]
+    priority: 40
+
+  open_job:
+    title: "Open a job notification"
+    description: "From inbox: teleport back to the room that launched the job."
+    examples:
+      - "open job"
+      - "open the last hunt"
+    priority: 35
+    slots:
+      job_id:
+        type: string
+        required: true
+        description: "The job ID to open (fixtures pass {{ world.last_job_id }})."
+        examples: ["01HG..."]
+        format_hint: "A job ULID."
+        prompt: "Which job?"
+
+  # ── River crossing (phase D) ────────────────────────────────────────
+  ford:
+    title: "Ford the river"
+    description: "Drive the wagon directly through the river. Free; risky in deep water."
+    examples: ["ford", "ford the river", "drive across"]
+    priority: 90
+
+  caulk:
+    title: "Caulk the wagon"
+    description: "Seal the wagon and float it across. Free; vulnerable to currents."
+    examples: ["caulk", "caulk the wagon", "float across", "seal and float"]
+    priority: 90
+
+  ferry:
+    title: "Take the ferry"
+    description: "Pay a ferryman to carry the wagon across. Safe; costs cash; may have a queue."
+    examples: ["take the ferry", "use the ferry", "pay the ferryman", "ferry across"]
+    priority: 90
+
+  wait:
+    title: "Wait at the river"
+    description: "Camp on this bank and wait for water levels to drop."
+    examples: ["wait", "wait for water to drop", "camp here", "delay crossing"]
+    priority: 60
+
+  # ── Event-resolution verbs (phase C) ────────────────────────────────
+  treat:
+    title: "Treat the sick"
+    description: "Use clothing and food to treat an ill party member. Cycle-budgeted (§7)."
+    examples: ["treat", "treat the sick", "tend the patient", "doctor the ill"]
+    priority: 90
+
+  repair:
+    title: "Repair the wagon"
+    description: "Use a spare part to repair a wagon breakdown."
+    examples: ["repair", "fix the wagon", "replace the axle", "swap the wheel"]
+    priority: 90
+
+  wait_out:
+    title: "Wait it out"
+    description: "Sit tight until the current event passes (storm, illness, encounter)."
+    examples: ["wait it out", "ride it out", "wait", "hold up"]
+    # 75 (vs push_on / move_on at 70) so the menu sort puts wait_out
+    # FIRST in event substates — the actions pane and the view both
+    # default to the safer shelter-and-wait option. Without the bump
+    # the alphabetical tie-breaker put push_on at the cursor while the
+    # view text listed wait_out first; player pressed Enter and got
+    # the brave-but-costly action they didn't expect.
+    priority: 75
+
+  move_on:
+    title: "Move on"
+    description: "Push past the current event without resolving it."
+    examples: ["move on", "press on anyway", "ignore and continue", "keep going"]
+    priority: 70
+
+  # ── Trade encounters (phase C) ──────────────────────────────────────
+  accept_trade:
+    title: "Accept the trade"
+    description: "Agree to the trade offered by the encountered party."
+    examples: ["accept", "accept the trade", "trade with them", "yes deal"]
+    priority: 80
+
+  decline_trade:
+    title: "Decline the trade"
+    description: "Refuse the trade and move on."
+    examples: ["decline", "no trade", "refuse", "no thanks"]
+    priority: 80
+
+  # ── Event-resolution: weather ───────────────────────────────────────
+  push_on:
+    title: "Push on"
+    description: "Push through bad weather, accepting the toll on the party."
+    examples: ["push on", "push through", "go on anyway", "press through the storm"]
+    priority: 70
+
+  # ── Error-state recovery (phase D+ on_failure) ──────────────────────
+  retry:
+    title: "Retry"
+    description: "Try the failed leg again from its starting landmark."
+    examples: ["retry", "try again", "go back and try"]
+    priority: 50
+
+  # ── Universals ──────────────────────────────────────────────────────
+  look:
+    title: "Look around"
+    description: "Re-render the current location and status."
+    examples: ["look", "look around", "where am I", "status"]
+    priority: 20
+
+  quit:
+    title: "Quit the journey"
+    description: "Abandon the trip. The journey ends here."
+    examples: ["quit", "abandon", "give up", "end the trip"]
+    priority: 15
+
+  # ── Checkpoint verbs (§6.2; merged at landmarks in phase B) ─────────
+  restart_from:
+    title: "Restart from a landmark"
+    description: "Teleport back to a previously visited landmark, keeping current supplies and party state."
+    examples:
+      - "go back to Fort Kearney"
+      - "restart from chimney"
+      - "return to Fort Laramie"
+    # Phase-7 calibration: template forms capture which landmark.
+    # Each template's {stage} slot is parsed via the enum value list
+    # so e.g. "go back to fort kearney" → stage=kearney via the enum
+    # parser's stem-set containment rule.
+    synonyms:
+      - "restart from {stage}"
+      - "go back to {stage}"
+      - "return to {stage}"
+    priority: 50
+    slots:
+      stage:
+        type: enum
+        values: [independence, kansas, kearney, chimney, laramie, south_pass, snake]
+        required: true
+        description: "Which landmark to teleport back to."
+        examples: ["kearney", "chimney", "laramie", "south_pass"]
+        format_hint: "One of independence/kansas/kearney/chimney/laramie/south_pass/snake."
+        prompt: "Which landmark?"
+
+  consult_guide:
+    title: "Consult the wagon master"
+    description: "Open a persistent chat with the trail guide for advice. Chats are scoped by profession."
+    examples: ["consult guide", "ask the wagon master", "advice", "talk to the guide"]
+    priority: 55
+
+  # ── trail_guide chat-management (phase F) ───────────────────────────
+  # ask_question is the canonical "talk to the wagon master" verb;
+  # open_chat / rename_chat / archive_chat / fork_chat are chat-list
+  # management on trail_guide_list. `back` is the global return-to-trail
+  # verb, declared below in the universals.
+  ask_question:
+    title: "Ask the wagon master a question"
+    description: "Send a question to the wagon master in a chat. From the list, starts a fresh chat; from an active chat, continues it."
+    examples:
+      - "what should I do at the next river"
+      - "ask: should we push on or rest"
+      - "any advice for South Pass"
+    priority: 85
+    slots:
+      question:
+        type: string
+        required: true
+        description: "The free-form question for the wagon master."
+        examples:
+          - "what should I do at the next river"
+          - "should we push on or rest"
+        format_hint: "A short free-form question."
+        prompt: "What do you want to ask?"
+
+  open_chat:
+    title: "Open a wagon-master chat"
+    description: "Resume an existing wagon-master chat by list position or chat ID."
+    examples: ["open 1", "open chat abc", "select 2"]
+    priority: 80
+    slots:
+      chat_id:
+        type: string
+        required: true
+        description: "Chat list-position, ULID prefix, or full chat ULID."
+        examples: ["1", "01HG...", "2"]
+        format_hint: "A list position (1, 2, …) or chat ID."
+        prompt: "Which chat?"
+
+  rename_chat:
+    title: "Rename a wagon-master chat"
+    description: "Change the title of an existing wagon-master chat."
+    examples:
+      - "rename 1 \"river strategy\""
+      - "title chat 2 oregon-pass-plan"
+    priority: 75
+    slots:
+      chat_id:
+        type: string
+        required: true
+        description: "Chat to rename (list position or ULID)."
+        examples: ["1", "01HG..."]
+        format_hint: "List position or chat ID."
+        prompt: "Which chat?"
+      title:
+        type: string
+        required: true
+        description: "New title for the chat."
+        examples: ["river strategy", "south pass plan"]
+        format_hint: "A short string."
+        prompt: "What's the new title?"
+
+  archive_chat:
+    title: "Archive a wagon-master chat"
+    description: "Hide a wagon-master chat from the list."
+    examples: ["archive 1", "remove chat 2", "forget that conversation"]
+    priority: 70
+    slots:
+      chat_id:
+        type: string
+        required: true
+        description: "Chat to archive (list position or ULID)."
+        examples: ["1", "01HG..."]
+        format_hint: "List position or chat ID."
+        prompt: "Which chat?"
+
+  fork_chat:
+    title: "Fork a wagon-master chat"
+    description: "Branch a wagon-master chat into a what-if scenario, starting from its current state."
+    examples:
+      - "fork 1 \"what if we ferry\""
+      - "branch chat 2 \"alternate plan\""
+    priority: 70
+    slots:
+      chat_id:
+        type: string
+        required: true
+        description: "Chat to fork (list position or ULID)."
+        examples: ["1", "01HG..."]
+        format_hint: "List position or chat ID."
+        prompt: "Which chat to fork?"
+      title:
+        type: string
+        required: true
+        description: "Title for the new (forked) chat."
+        examples: ["what if we ferry", "alternate plan"]
+        format_hint: "A short string."
+        prompt: "What's the fork's title?"
+
+  back:
+    title: "Go back"
+    description: "Return to the previous room (stackless — used by trail_guide and inbox)."
+    examples: ["back", "return", "go back"]
+    priority: 25
+
+  edit_step:
+    title: "Edit a setup step"
+    description: "Jump back to an earlier intro-wizard step (profession, month, or names) from the summary screen."
+    examples: ["change profession", "edit month", "rename party"]
+    priority: 30
+    slots:
+      step:
+        type: enum
+        required: true
+        values: [profession, month, names]
+        description: "Which wizard step to return to."
+        examples: ["profession", "month", "names"]
+        format_hint: "One of: profession, month, names."
+        prompt: "Which step do you want to change?"
+
+  begin_setup:
+    title: "Begin setup"
+    description: "Start the intro wizard from the welcome screen."
+    examples: ["begin", "start setup", "let's go"]
+    priority: 80
+
+  browse_items:
+    title: "Browse what's on the shelves"
+    description: "Read Matt's item-by-item descriptions before drafting a purchase."
+    examples: ["browse", "what's available", "describe items", "look around"]
+    priority: 40
+
+  open_compose:
+    title: "Open the compose form"
+    description: "Enter the item-by-item compose form for the general store."
+    examples: ["compose", "compose form", "item-by-item"]
+    priority: 35
+
+  propose_budget:
+    title: "Propose a purchase by total budget"
+    description: "Tell Matt how much you want to spend; he assembles a balanced kit."
+    examples:
+      - "spend $200"
+      - "spend 120"
+      - "spend two hundred dollars"
+    synonyms:
+      - "spend {total_cost}"
+      - "${total_cost}"
+    priority: 80
+    slots:
+      total_cost:
+        type: int
+        required: true
+        description: "Total dollar budget. Matt picks the basket."
+        examples: ["120", "200", "300"]
+        format_hint: "A positive integer (whole dollars)."
+        prompt: "How much do you want to spend?"
+
+  propose_kit:
+    title: "Compose a kit item-by-item"
+    description: "Compose a purchase from per-item counts only — no free-text description. Total cost is computed from the counts × local prices."
+    examples:
+      - "buy 4 oxen, 1500 lbs food, 50 bullets"
+    priority: 70
+    slots:
+      oxen:
+        type: int
+        required: false
+        description: "Number of oxen ($40/yoke at the Independence store)."
+        examples: ["0", "2", "4"]
+        format_hint: "Non-negative integer."
+        prompt: "Oxen?"
+      food:
+        type: int
+        required: false
+        description: "Pounds of food ($0.20/lb)."
+        examples: ["0", "500", "1500"]
+        format_hint: "Non-negative integer."
+        prompt: "Food (lbs)?"
+      bullets:
+        type: int
+        required: false
+        description: "Boxes of bullets ($2.00/box of 20)."
+        examples: ["0", "20", "100"]
+        format_hint: "Non-negative integer."
+        prompt: "Bullets (boxes)?"
+      clothing:
+        type: int
+        required: false
+        description: "Sets of clothing ($10/set)."
+        examples: ["0", "2", "5"]
+        format_hint: "Non-negative integer."
+        prompt: "Clothing (sets)?"
+      wheels:
+        type: int
+        required: false
+        description: "Spare wheels ($10 each)."
+        examples: ["0", "1", "2"]
+        format_hint: "Non-negative integer."
+        prompt: "Spare wheels?"
+      axles:
+        type: int
+        required: false
+        description: "Spare axles ($10 each)."
+        examples: ["0", "1", "2"]
+        format_hint: "Non-negative integer."
+        prompt: "Spare axles?"
+      tongues:
+        type: int
+        required: false
+        description: "Spare tongues ($10 each)."
+        examples: ["0", "1", "2"]
+        format_hint: "Non-negative integer."
+        prompt: "Spare tongues?"
+
+  enter_fort:
+    title: "Enter the fort"
+    description: "Pull into the fort at this landmark to resupply (forts have marked-up prices)."
+    examples: ["enter the fort", "go into the fort", "resupply at the fort"]
+    priority: 75
+
+  # ── snow-blocked pass (snow_blocked room) ───────────────────────────
+  # Routed to by leg_e_awaiting_reply.continue when world.month lands in
+  # the late-autumn/winter band (oct–feb). The party can wait it out
+  # (advances time + drains food until april) or turn back east.
+  wait_for_spring:
+    title: "Wait out the winter"
+    description: "Make winter camp and wait until spring opens South Pass. Burns food while you wait."
+    examples: ["wait for spring", "wait out the winter", "winter camp", "wait it out"]
+    priority: 70
+
+  give_up:
+    title: "Turn back east"
+    description: "Abandon the crossing and head back east. The journey ends here."
+    examples: ["give up", "turn back", "go home", "abandon the pass"]
+    priority: 20
+
+  approach_river:
+    title: "Approach the river"
+    description: "Walk down to the riverbank and assess the crossing options."
+    examples: ["approach the river", "go to the river", "scout the crossing"]
+    priority: 75
+
+  # ── world_clock parallel region (phase I, §9.4) ─────────────────────
+  # weather_advance drives the weather region (dry → rain → snow → dry).
+  # precip_heavy and snow_starts are internal cross-region emits — they
+  # are not user-facing verbs but must be declared so the loader accepts
+  # the calendar region's `on:` bindings (engine treats any state-level
+  # `on:` key as an intent name).
+  weather_advance:
+    title: "Advance the weather"
+    description: "Tick the weather region (dry → rain → snow → dry)."
+    examples: ["advance weather", "tick", "next weather"]
+    hidden: true
+    priority: 5
+
+  precip_heavy:
+    title: "Heavy precipitation (cross-region emit)"
+    description: "Synthetic emit fired by the weather region on entering rain. Calendar reacts."
+    examples: []
+    hidden: true
+    priority: 1
+
+  snow_starts:
+    title: "Snow starts (cross-region emit)"
+    description: "Synthetic emit fired by the weather region on entering snow."
+    examples: []
+    hidden: true
+    priority: 1

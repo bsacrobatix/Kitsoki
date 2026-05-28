@@ -1,0 +1,17 @@
+app:
+  id: routing-slot-collision
+  version: 0.1.0
+
+include: [rooms/*.yaml]
+
+root: start
+
+intents:
+  pick:
+    title: "Pick a profession"
+    slots:
+      profession:
+        type: enum
+        values: [banker, carpenter]
+        synonyms:
+          banker: ["rich guy"]

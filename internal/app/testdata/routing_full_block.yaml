@@ -1,0 +1,31 @@
+app:
+  id: routing-full-block
+  version: 0.1.0
+
+routing:
+  enabled: true
+  semantic_high_bar: 0.85
+  semantic_mid_bar: 0.55
+  cache_enabled: false
+  cache_max_age: "7d"
+  stopwords_extra: ["yall", "wagon"]
+  cache_cap: 500
+  cache_trim_fraction: 0.25
+  revalidate_strikes: 5
+  confidence_decay: true
+
+root: start
+
+intents:
+  noop:
+    title: "Do nothing"
+
+states:
+  start:
+    description: "Start"
+    on:
+      noop:
+        - target: done
+  done:
+    description: "Done"
+    terminal: true

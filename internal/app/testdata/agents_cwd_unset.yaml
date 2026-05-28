@@ -1,0 +1,14 @@
+app:
+  id: agents-cwd-unset
+  version: 0.1.0
+
+root: foyer
+
+states:
+  foyer:
+    view: "Foyer."
+
+agents:
+  engineer:
+    system_prompt: "you are an engineer"
+    cwd: "${KITSOKI_AGENTS_TEST_UNSET}"

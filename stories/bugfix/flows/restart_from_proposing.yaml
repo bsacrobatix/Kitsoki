@@ -1,0 +1,116 @@
+# restart_from_proposing — operator types `restart_from stage=reproducing`
+# at the proposing checkpoint. Wave 1 lands the intent on the previous
+# room with restart_from_stage set in world; Wave 2 wires the full jump
+# table. Until then the operator can `restart_from` and then `accept`
+# back through manually.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:   "TKT-010"
+  thread:      "TKT-010"
+  judge_mode:  "human"
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "" }
+  host.git:
+    data: { ok: true, sha: "abc", diff: "" }
+  host.local:
+    data: { ok: true, log: "PASS", passed: 1, failed: 0 }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Fix the thing in a sufficiently detailed way."
+        root_cause:      "Off-by-one in a fascinating place."
+        affected_files:  ["x.go"]
+        confidence:      0.85
+        reasoning:       "Restart-from test; the actual proposal contents don't matter much."
+        status:          "passed"
+        tests_run:       { passed: 1, failed: 0, log: "PASS" }
+        outcome:         "pass"
+        lessons:
+          - { category: "stub", description: "restart_from regression test.", severity: "low" }
+
+  host.oracle.ask:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Fix the thing in a sufficiently detailed way."
+        root_cause:      "Off-by-one in a fascinating place."
+        affected_files:  ["x.go"]
+        confidence:      0.85
+        reasoning:       "Restart-from test; the actual proposal contents don't matter much."
+        status:          "passed"
+        tests_run:       { passed: 1, failed: 0, log: "PASS" }
+        outcome:         "pass"
+        lessons:
+          - { category: "stub", description: "restart_from regression test.", severity: "low" }
+
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Stub"
+        summary_markdown: "stub"
+        bug_verified:     true
+        involved_components: [{ name: "x" }]
+        fix_description: "Fix the thing in a sufficiently detailed way."
+        root_cause:      "Off-by-one in a fascinating place."
+        affected_files:  ["x.go"]
+        confidence:      0.85
+        reasoning:       "Restart-from test; the actual proposal contents don't matter much."
+        status:          "passed"
+        tests_run:       { passed: 1, failed: 0, log: "PASS" }
+        outcome:         "pass"
+        lessons:
+          - { category: "stub", description: "restart_from regression test.", severity: "low" }
+
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: reproducing
+  - intent: { name: accept, slots: {} }
+    expect_state: proposing
+
+  # Operator restarts from reproducing. The proposing room's
+  # restart_from arc targets reproducing and sets restart_from_stage.
+  - intent:
+      name: restart_from
+      slots: { stage: "reproducing" }
+    expect_state: reproducing
+    expect_world:
+      restart_from_stage: "reproducing"
+      cycle:              0
+
+  # Walk back through the pipeline to confirm no state is corrupted.
+  - intent: { name: accept, slots: {} }
+    expect_state: proposing
+  - intent: { name: accept, slots: {} }
+    expect_state: implementing
+  - intent: { name: accept, slots: {} }
+    expect_state: testing
+  - intent: { name: accept, slots: {} }
+    expect_state: reviewing
+  - intent: { name: accept, slots: {} }
+    expect_state: validating
+  - intent: { name: accept, slots: {} }
+    expect_state: done
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+
+expect_terminal: true
+expect_no_errors: true
