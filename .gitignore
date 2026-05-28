@@ -3,6 +3,9 @@
 /fromflow
 /fromsession
 
+# Ephemeral render artifacts (viewable over VS Code remote tunnel)
+/.artifacts/
+
 # Test binaries and coverage
 *.test
 coverage.out

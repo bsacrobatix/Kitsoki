@@ -38,19 +38,29 @@ cd tools/pellicule
 node index.js ../../demo/my-pitch.json --estimate
 
 # 2. Iterate on a single scene — ~30s
-node index.js ../../demo/my-pitch.json /tmp/pitch-scene.mp4 --scenes 5
+node index.js ../../demo/my-pitch.json ../../.artifacts/pitch-scene.mp4 --scenes 5
 
-# 3. Iterate on narration text only — ~10s (reuses cached frames)
-node index.js ../../demo/my-pitch.json out.mp4 \
-  --frames-dir /tmp/pitch-frames \
+# 3. Render a section for review — one merged MP4, ~30s per scene in the range
+#    --scenes accepts comma-separated indices and/or N-M ranges; all selected
+#    scenes are concatenated into one output file.
+#    Add --no-gaps to suppress the 0.8s blank between scenes — useful for
+#    progressive sequences that should feel like one continuous diagram.
+node index.js ../../demo/my-pitch.json ../../.artifacts/pitch-section.mp4 --scenes 7-10 --no-gaps
+node index.js ../../demo/my-pitch.json ../../.artifacts/pitch-section.mp4 --scenes 0,3-5,7
+
+# 4. Iterate on narration text only — ~10s (reuses cached frames)
+node index.js ../../demo/my-pitch.json ../../.artifacts/pitch-out.mp4 \
+  --frames-dir ../../.artifacts/pitch-frames \
   --keep-frames \
   --skip-render
 
-# 4. Final full render — 7–12 min
+# 5. Final full render — 7–12 min
 node index.js ../../demo/my-pitch.json ../../demo/my-pitch-output.mp4
 ```
 
 **Always run `--estimate` first.** It catches narration overruns (the #1 cause of wasted full renders) and prints scene start times so you don't have to count.
+
+**Use `--scenes N-M` for section review.** When iterating on a multi-scene sequence (e.g. a progressive graph build-up), render the whole range into one merged MP4 rather than separate files. The reviewer can watch the sequence in one clip without clicking between videos.
 
 ## Scene types
 
@@ -110,7 +120,7 @@ When narration overruns, two fixes:
 
 If you only change narration text:
 ```sh
-node index.js spec.json out.mp4 --frames-dir /tmp/cache --keep-frames --skip-render
+node index.js spec.json ../../.artifacts/pitch-out.mp4 --frames-dir ../../.artifacts/pitch-frames --keep-frames --skip-render
 ```
 This regenerates audio + remuxes onto cached frames — ~10s instead of 7min.
 
@@ -137,10 +147,10 @@ For single-panel diagrams: SVG is hard-capped at 680px height. Title (40px) + ca
 
 ### The `--scenes` flag rewrites the output file
 
-`--scenes 4` overwrites the output MP4 with **only** scene 4 (and its narration). When iterating on a single scene, always send output to `/tmp/pitch-test.mp4`:
+`--scenes 4` overwrites the output MP4 with **only** scene 4 (and its narration). When iterating on a single scene, always send output to `.artifacts/`:
 
 ```sh
-node index.js spec.json /tmp/pitch-test.mp4 --scenes 4
+node index.js spec.json ../../.artifacts/pitch-test.mp4 --scenes 4
 ```
 
 ### Edge label overflow on diagrams
@@ -203,8 +213,9 @@ Determinism comes from: (1) viewport size fixed at 1920×1080, (2) timing in fra
 1. `node index.js ../../demo/my-pitch.json --list` — see what scenes exist.
 2. Make your edit to the spec.
 3. `node index.js ../../demo/my-pitch.json --estimate` — verify the change doesn't blow a budget.
-4. `node index.js ../../demo/my-pitch.json /tmp/test.mp4 --scenes N` — visual check on just the changed scene (~30s).
-5. Once happy, run the full render.
+4. `node index.js ../../demo/my-pitch.json ../../.artifacts/pitch-test.mp4 --scenes N` — visual check on a single scene (~30s).
+5. `node index.js ../../demo/my-pitch.json ../../.artifacts/pitch-section.mp4 --scenes N-M --no-gaps` — seamless section review; `--no-gaps` removes the 0.8s blank between scenes so progressive sequences feel like one diagram.
+6. Once happy, run the full render.
 
 Don't full-render to "see if it works."
 

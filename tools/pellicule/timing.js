@@ -90,9 +90,26 @@ const TIMING = {
  * If a scene module changes its reveal sequence, update the matching
  * branch here.
  */
-function estimateScene(scene) {
+function estimateScene(scene, opts = {}) {
   const T = TIMING;
   const hold = (k, custom) => (custom != null ? custom : T[k]);
+
+  // --no-gaps: setState reveals fire without capturing frames; only explicit
+  // hold() calls produce frames. title uses ctx.hold directly so is unchanged.
+  if (opts.noGaps) {
+    switch (scene.type) {
+      case 'title':        return T.title_card;
+      case 'narrative':    return hold('narrative_hold',   scene.hold);
+      case 'diagram':      return hold('diagram_hold',     scene.hold);
+      case 'diagram-svg':  return hold('diagramsvg_hold',  scene.hold);
+      case 'terminal-gif': return hold('termgif_hold',     scene.hold);
+      case 'trace':        return hold('trace_hold',       scene.hold);
+      case 'thread':       return hold('thread_hold',      scene.hold);
+      case 'stat':         return hold('stat_hold',        scene.hold);
+      case 'cta':          return hold('cta_hold',         scene.hold);
+      default:             return 100;
+    }
+  }
 
   switch (scene.type) {
     case 'title':
@@ -182,12 +199,12 @@ function estimateScene(scene) {
  *
  * @returns {object[]} [{ sceneIndex, startFrame, type, narration, durationFrames }]
  */
-function estimateBoundaries(spec, selectedScenes = null) {
+function estimateBoundaries(spec, selectedScenes = null, opts = {}) {
   let frame = 0;
   const out = [];
   (spec.scenes || []).forEach((scene, i) => {
     if (selectedScenes && !selectedScenes.has(i)) return;
-    const durationFrames = estimateScene(scene);
+    const durationFrames = estimateScene(scene, opts);
     out.push({
       sceneIndex: i,
       startFrame: frame,

@@ -522,6 +522,8 @@ body.mode-pitch #pitch-stage { display: flex; }
   transition: opacity 320ms ease-out, transform 320ms ease-out;
 }
 .reveal.shown { opacity: 1; transform: translateY(0); }
+/* --no-gaps mode: suppress fade-in so scenes cut hard with no blank frames */
+body.instant .reveal { transition: none !important; }
 
 /* ── Narrative ───────────────────────────────────────────────────────────── */
 #narrative-region { gap: 36px; max-width: 1500px; margin: 0 auto; text-align: center; }
@@ -760,6 +762,7 @@ body.mode-pitch #pitch-stage { display: flex; }
   max-width: 1500px;
   line-height: 1.4;
   margin: 0 auto;
+  min-height: 101px; /* reserve 2-line height so single-line captions don't shift the diagram */
 }
 
 /* SVG content styles */
@@ -821,12 +824,27 @@ body.mode-pitch #pitch-stage { display: flex; }
   stroke-width: 7px;
   stroke-linejoin: round;
 }
+.dsvg-edge-gate.dsvg-highlighted {
+  fill: #ffab70;
+  font-size: 22px;
+  font-weight: 900;
+}
+#diagramsvg-panels.diagramsvg-panels-single .dsvg-edge-gate.dsvg-highlighted {
+  font-size: 32px;
+  font-weight: 900;
+}
 .dsvg-gate-bar {
   stroke: #f0883e;
   stroke-width: 2;
   stroke-dasharray: 5 4;
   fill: none;
 }
+.dsvg-gate-bar.dsvg-highlighted {
+  stroke: #ffab70;
+  stroke-width: 3.5;
+  stroke-dasharray: 6 3;
+}
+.dsvg-node.dsvg-style-primary .dsvg-label { fill: #79c0ff; }
 
 /* ── Trace ───────────────────────────────────────────────────────────────── */
 #trace-region { gap: 32px; max-width: 1500px; width: 100%; }
@@ -1745,12 +1763,17 @@ window.pellicule = {
       // arrow — the gate IS the connector between phases.
       if (e.gate) {
         const gateText = e.gate;
-        const gateBarReach = 90;          // dashed bar extent on each side
-        const gateGap = gateText.length * 9 + 22;
+        // Highlighted gates use a larger font; widen the text gap and shorten
+        // bars to match, keeping the gate's vertical position unchanged.
+        const gateBarReach = e.highlighted ? 75 : 90;
+        const gateGap = e.highlighted
+          ? gateText.length * 11 + 27
+          : gateText.length * 9  + 22;
+        const hl = e.highlighted ? ' dsvg-highlighted' : '';
         return `<g class="dsvg-edge dsvg-edge-gate-edge">` +
-          `<line x1="${labelX - gateBarReach - gateGap}" y1="${labelY}" x2="${labelX - gateGap}" y2="${labelY}" class="dsvg-gate-bar"/>` +
-          `<line x1="${labelX + gateGap}" y1="${labelY}" x2="${labelX + gateBarReach + gateGap}" y2="${labelY}" class="dsvg-gate-bar"/>` +
-          `<text class="dsvg-edge-gate" x="${labelX}" y="${labelY}" text-anchor="middle" dominant-baseline="middle">${escapeHTML(gateText)}</text>` +
+          `<line x1="${labelX - gateBarReach - gateGap}" y1="${labelY}" x2="${labelX - gateGap}" y2="${labelY}" class="dsvg-gate-bar${hl}"/>` +
+          `<line x1="${labelX + gateGap}" y1="${labelY}" x2="${labelX + gateBarReach + gateGap}" y2="${labelY}" class="dsvg-gate-bar${hl}"/>` +
+          `<text class="dsvg-edge-gate${hl}" x="${labelX}" y="${labelY}" text-anchor="middle" dominant-baseline="middle">${escapeHTML(gateText)}</text>` +
           `</g>`;
       }
 

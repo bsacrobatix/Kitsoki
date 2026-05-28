@@ -53,7 +53,7 @@ const SCENE_MODULES = {
  *                                     only the picked scenes back-to-back.
  * @returns {Promise<number>} Total frames written
  */
-async function generateFrames(spec, framesDir, fps = 30, onProgress = null, captureLogPath = null, specPath = null, selectedScenes = null) {
+async function generateFrames(spec, framesDir, fps = 30, onProgress = null, captureLogPath = null, specPath = null, selectedScenes = null, noGaps = false) {
   const { width = 1920, height = 1080 } = (spec.meta && spec.meta.resolution) || {};
   const mode = (spec.meta && spec.meta.mode) || 'api';  // 'api' | 'pitch'
 
@@ -85,6 +85,10 @@ async function generateFrames(spec, framesDir, fps = 30, onProgress = null, capt
       window.pellicule.setMode(m);
     }, spec.meta || {}, mode);
 
+    if (noGaps) {
+      await page.evaluate(() => document.body.classList.add('instant'));
+    }
+
     const framePath = n => path.join(framesDir, `frame-${String(n).padStart(6, '0')}.png`);
 
     const hold = async (n, label = '') => {
@@ -100,6 +104,15 @@ async function generateFrames(spec, framesDir, fps = 30, onProgress = null, capt
       const frames = TIMING[stepName] ?? 20;
       await hold(frames, stepName);
     };
+
+    // --no-gaps: setState still fires DOM updates (so all .reveal elements get
+    // .shown before any frames are captured) but skips the reveal-animation
+    // hold frames. Only the scene's explicit hold() calls capture frames, by
+    // which point the full scene is visible. Combined with body.instant (no
+    // CSS fade), scenes cut hard with complete content, no blank frames.
+    const sceneSetState = noGaps
+      ? async stepName => { await page.evaluate(s => window.pellicule.setState(s), stepName); }
+      : setState;
 
     // Per-scene rendering loop
     for (let sceneIndex = 0; sceneIndex < (spec.scenes || []).length; sceneIndex++) {
@@ -119,10 +132,24 @@ async function generateFrames(spec, framesDir, fps = 30, onProgress = null, capt
         );
       }
 
+      // scene.seamless: per-scene equivalent of --no-gaps (skip inter_scene,
+      // suppress reveal animations). body.instant is toggled around each such
+      // scene so transitions elsewhere in the video are unaffected.
+      const isSeamless = noGaps || scene.seamless;
+      if (!noGaps && scene.seamless) {
+        await page.evaluate(() => document.body.classList.add('instant'));
+      }
+
+      const sceneHold = isSeamless
+        ? async (n, label) => { if (label !== 'inter_scene') await hold(n, label); }
+        : hold;
+      const sceneStateSet = isSeamless
+        ? async stepName => { await page.evaluate(s => window.pellicule.setState(s), stepName); }
+        : setState;
       const ctx = {
         sceneIndex,
         specPath: specPath || process.cwd(),
-        hold, setState,
+        hold: sceneHold, setState: sceneStateSet,
         frameIndex: () => frameIndex,
         onProgress,
         requestContext,
@@ -130,6 +157,10 @@ async function generateFrames(spec, framesDir, fps = 30, onProgress = null, capt
       };
 
       await mod.render(page, scene, ctx);
+
+      if (!noGaps && scene.seamless) {
+        await page.evaluate(() => document.body.classList.remove('instant'));
+      }
     }
 
   } finally {

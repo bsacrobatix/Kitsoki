@@ -40,6 +40,7 @@ const args = process.argv.slice(2);
 // --list and --estimate only need the input spec (not an output path).
 const wantsList     = args.includes('--list') || args.includes('--estimate');
 const skipRender    = args.includes('--skip-render');
+const noGaps        = args.includes('--no-gaps');
 
 if (((args.length < 2 && !wantsList) || args.length < 1) || args.includes('--help') || args.includes('-h')) {
   console.log([
@@ -66,6 +67,9 @@ if (((args.length < 2 && !wantsList) || args.length < 1) || args.includes('--hel
     '    --skip-render              Skip the PNG-rendering step (reuse cached frames in',
     '                               --frames-dir) and regenerate narration + mux only.',
     '                               Iteration loop for narration text edits.',
+    '    --no-gaps                  Suppress the 0.8s blank inter-scene gap. Use with',
+    '                               --scenes N-M to review a multi-scene sequence as a',
+    '                               seamless clip (e.g. a progressive graph build-up).',
     '',
     '  Examples:',
     '    node index.js examples/vp-5623-mock.demo.json out.mp4',
@@ -144,8 +148,8 @@ function estimateAudioSeconds(text) {
  * Print a scene-by-scene table from the spec, no render.
  * If withAudio, include narration audio estimates and overrun warnings.
  */
-function printSceneList(spec, fps, withAudio) {
-  const boundaries = estimateBoundaries(spec);
+function printSceneList(spec, fps, withAudio, opts = {}) {
+  const boundaries = estimateBoundaries(spec, null, opts);
   const total = boundaries.reduce((s, b) => s + b.durationFrames, 0);
 
   console.log(`\n[pellicule] ${spec.scenes.length} scenes · est. ${(total / fps).toFixed(1)}s @ ${fps}fps · ${total} frames\n`);
@@ -227,7 +231,7 @@ async function main() {
   // ── --list / --estimate: print scene table and exit, no rendering ──
   if (wantsList) {
     const wantsAudioEstimate = args.includes('--estimate');
-    printSceneList(spec, fps, wantsAudioEstimate);
+    printSceneList(spec, fps, wantsAudioEstimate, { noGaps });
     process.exit(0);
   }
 
@@ -264,7 +268,7 @@ async function main() {
       console.error(`[pellicule] ERROR: --skip-render needs cached frames in ${framesDir}. Re-run without --skip-render first (with --keep-frames + --frames-dir).`);
       process.exit(1);
     }
-    sceneBoundaries = require('./timing').estimateBoundaries(spec, selectedScenes);
+    sceneBoundaries = require('./timing').estimateBoundaries(spec, selectedScenes, { noGaps });
     frameCount = sceneBoundaries.reduce((s, b) => s + b.durationFrames, 0);
     console.log(`[pellicule] --skip-render: reusing ${frameCount} cached frames (${(frameCount / fps).toFixed(1)}s) from ${framesDir}`);
   } else {
@@ -275,7 +279,7 @@ async function main() {
           process.stdout.write(`\r[pellicule] Rendering: ${label.padEnd(24)}  frame ${idx}`);
           lastLabel = label;
         }
-      }, captureLogPath, absInput, selectedScenes);
+      }, captureLogPath, absInput, selectedScenes, noGaps);
       frameCount      = result.frameCount;
       sceneBoundaries = result.sceneBoundaries;
       process.stdout.write('\n');
