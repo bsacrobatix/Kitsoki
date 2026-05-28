@@ -355,20 +355,6 @@ func emitDecideJournal(ctx context.Context, callID string, callStart time.Time, 
 		}
 	}
 
-	appendOracleCallJournal(ctx, callStart, 0, OracleCallBody{
-		CallID:       callID,
-		Verb:         "decide",
-		Agent:        agentName,
-		Model:        model,
-		DurationMS:   durationMS,
-		SystemPrompt: systemPrompt,
-		Prompt:       prompt,
-		Input:        marshalInput(inputDesc),
-		Response:     marshalResponse(responseDesc),
-		Error:        res.Error,
-	})
-
-	// Wave 3-oracle: parallel write OracleReturned / OracleError to JSONL sink.
 	callEnd := time.Now()
 	if res.Error != "" {
 		appendOracleErrorEvent(ctx, callEnd, callID, OracleErrorPayload{

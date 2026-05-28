@@ -278,3 +278,35 @@ oracle_plugins:
 			plug.Headers["Authorization"], "Bearer bearer-xyz")
 	}
 }
+
+// TestOraclePlugins_EnvVarWithLiteralDollarInValue pins the single-pass
+// substitution rule (proposal §2 resolution 4):
+// When a resolved env var VALUE itself contains "${", that literal "${" is
+// NOT re-expanded.  The test sets OUTER_VAR to a value containing "${inner}"
+// and verifies the expanded result still contains the literal "${inner}".
+// Not parallel because t.Setenv and t.Parallel cannot coexist.
+func TestOraclePlugins_EnvVarWithLiteralDollarInValue(t *testing.T) {
+	// The env var value itself contains a literal "${" — single-pass means
+	// this should pass through verbatim after the outer substitution.
+	t.Setenv("OUTER_ORACLE_VAR_B5", "prefix_${inner_not_a_var}_suffix")
+	yaml := minimalApp + `
+oracle_plugins:
+  oracle.claude:
+    plugin: builtin.claude_cli
+    env:
+      API_KEY: "${OUTER_ORACLE_VAR_B5}"
+`
+	def, err := app.LoadBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	plug := def.OraclePlugins["oracle.claude"]
+	want := "prefix_${inner_not_a_var}_suffix"
+	if plug.Env["API_KEY"] != want {
+		t.Errorf("env.API_KEY: got %q, want %q", plug.Env["API_KEY"], want)
+	}
+	// The literal "${inner_not_a_var}" must be preserved verbatim (single-pass).
+	if !strings.Contains(plug.Env["API_KEY"], "${inner_not_a_var}") {
+		t.Errorf("literal ${ was re-expanded or stripped; got: %q", plug.Env["API_KEY"])
+	}
+}

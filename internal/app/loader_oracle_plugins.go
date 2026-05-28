@@ -101,26 +101,44 @@ func resolveOraclePlugins(def *AppDef, file string) []error {
 // expandEnvVar performs a single-pass ${VAR} substitution in s.
 // Returns (expanded, "") on success.
 // Returns ("", "VAR") when any ${VAR} token references an unset env var.
-// Per proposal §2 resolution 4: substitution is single-pass; literal ${
-// values that remain after expansion pass through verbatim.
+//
+// Single-pass means the scanner moves strictly left-to-right through the
+// original string.  When a ${VAR} token is expanded, the replacement value is
+// written to the output buffer but the scanner does NOT re-scan it — any ${
+// sequences inside a replacement value pass through verbatim.  This prevents
+// injection attacks and matches the documented §2 resolution 4 contract.
 func expandEnvVar(s string) (expanded, missing string) {
-	result := s
-	for {
-		start := strings.Index(result, "${")
-		if start < 0 {
+	var buf strings.Builder
+	i := 0
+	for i < len(s) {
+		// Find the next "${"
+		idx := strings.Index(s[i:], "${")
+		if idx < 0 {
+			// No more tokens; copy remainder verbatim.
+			buf.WriteString(s[i:])
 			break
 		}
-		end := strings.Index(result[start:], "}")
+		// Copy everything before this token verbatim.
+		buf.WriteString(s[i : i+idx])
+		i += idx + 2 // skip past "${"
+
+		// Find the matching closing "}"
+		end := strings.Index(s[i:], "}")
 		if end < 0 {
-			break // no closing brace — treat as literal
+			// No closing brace; treat "${" and the rest as literal.
+			buf.WriteString("${")
+			// Continue scanning — i already points past "${"
+			continue
 		}
-		end += start
-		varName := result[start+2 : end]
+		varName := s[i : i+end]
+		i += end + 1 // skip past varName + "}"
+
 		val, ok := os.LookupEnv(varName)
 		if !ok {
 			return "", varName
 		}
-		result = result[:start] + val + result[end+1:]
+		// Write the replacement value verbatim (NOT re-scanned).
+		buf.WriteString(val)
 	}
-	return result, ""
+	return buf.String(), ""
 }

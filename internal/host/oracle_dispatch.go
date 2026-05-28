@@ -193,18 +193,6 @@ func Dispatch(ctx context.Context, dr OracleDispatchRequest) (OracleDispatchResu
 			DurationMS: durationMS,
 			Error:      askErr.Error(),
 		})
-		// Also write to journal (belt-and-braces until B-5 deletes oracle_journal).
-		appendOracleCallJournal(ctx, callStart, 0, OracleCallBody{
-			CallID:       callID,
-			Verb:         dr.Verb,
-			Agent:        dr.Agent,
-			Model:        dr.Model,
-			DurationMS:   durationMS,
-			SystemPrompt: dr.SystemPrompt,
-			Prompt:       dr.PromptText,
-			Input:        marshalInput(dr.InputDesc),
-			Error:        askErr.Error(),
-		})
 		return OracleDispatchResult{}, askErr
 	}
 
@@ -219,17 +207,6 @@ func Dispatch(ctx context.Context, dr OracleDispatchRequest) (OracleDispatchResu
 				Agent:      dr.Agent,
 				DurationMS: durationMS,
 				Error:      subErr.Error(),
-			})
-			appendOracleCallJournal(ctx, callStart, 0, OracleCallBody{
-				CallID:       callID,
-				Verb:         dr.Verb,
-				Agent:        dr.Agent,
-				Model:        dr.Model,
-				DurationMS:   durationMS,
-				SystemPrompt: dr.SystemPrompt,
-				Prompt:       dr.PromptText,
-				Input:        marshalInput(dr.InputDesc),
-				Error:        subErr.Error(),
 			})
 			return OracleDispatchResult{}, subErr
 		}
@@ -248,17 +225,6 @@ func Dispatch(ctx context.Context, dr OracleDispatchRequest) (OracleDispatchResu
 			Agent:      dr.Agent,
 			DurationMS: durationMS,
 			Error:      validErr.Error(),
-		})
-		appendOracleCallJournal(ctx, callStart, 0, OracleCallBody{
-			CallID:       callID,
-			Verb:         dr.Verb,
-			Agent:        dr.Agent,
-			Model:        dr.Model,
-			DurationMS:   durationMS,
-			SystemPrompt: dr.SystemPrompt,
-			Prompt:       dr.PromptText,
-			Input:        marshalInput(dr.InputDesc),
-			Error:        validErr.Error(),
 		})
 		return OracleDispatchResult{}, validErr
 	}
@@ -282,18 +248,6 @@ func Dispatch(ctx context.Context, dr OracleDispatchRequest) (OracleDispatchResu
 		DurationMS: durationMS,
 		Response:   marshalResponse(responseDesc),
 		Meta:       resp.Meta,
-	})
-
-	appendOracleCallJournal(ctx, callStart, 0, OracleCallBody{
-		CallID:       callID,
-		Verb:         dr.Verb,
-		Agent:        dr.Agent,
-		Model:        dr.Model,
-		DurationMS:   durationMS,
-		SystemPrompt: dr.SystemPrompt,
-		Prompt:       dr.PromptText,
-		Input:        marshalInput(dr.InputDesc),
-		Response:     marshalResponse(responseDesc),
 	})
 
 	return OracleDispatchResult{

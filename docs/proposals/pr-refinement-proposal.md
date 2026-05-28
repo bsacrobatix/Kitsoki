@@ -1,16 +1,18 @@
 # Kitsoki changes for external orchestration
 
-> **Phase A complete (2026-05-28).** §1 (Trace-as-state), §1.3
-> (Runstatus alignment), §3 (Reconciliation with host-cassette work),
-> and §5 Phase A (JSONL sink, sqlite removal) have been implemented and
-> are documented in:
+> **Phase A and Phase B complete (2026-05-28).** Both phases have been
+> implemented. This proposal is now historical; refer to the narrative docs:
+>
 > - [`docs/trace-format.md`](../trace-format.md) — JSONL schema, event
->   vocabulary, `EventSink` contract, `call_id` derivation, replay guarantees.
+>   vocabulary, `EventSink` contract, `call_id` derivation, oracle events,
+>   replay guarantees.
+> - [`docs/oracle-plugin.md`](../oracle-plugin.md) — Oracle plugin contract:
+>   `hosts:` YAML reference, `AskRequest`/`AskResponse` wire types,
+>   sub-events, schema validation, auth/secrets, transport examples.
 > - [`docs/cli/turn.md`](../cli/turn.md) — `kitsoki turn` flags and exit codes.
 > - [`docs/developer-guide.md`](../developer-guide.md) §6.1 — updated trace docs.
 >
-> Only §2 (Oracle plugin contract) / Phase B remains. The sections below
-> cover that remaining work exclusively.
+> The sections below are retained as historical record only.
 
 ---
 

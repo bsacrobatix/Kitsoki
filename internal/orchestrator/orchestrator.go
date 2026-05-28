@@ -1279,11 +1279,6 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	// once per dispatch (cheap — translation is tag-equivalent).
 	ctx = host.WithAgents(ctx, agentsForContext(o.def))
 
-	// Inject journal writer and oracle call context so oracle handlers can
-	// write KindOracleCall journal entries without importing the orchestrator.
-	if o.journalWriter != nil {
-		ctx = host.WithOracleJournalWriter(ctx, o.journalWriter)
-	}
 	// Wave 3-oracle: inject the EventSink so oracle handlers can parallel-write
 	// OracleCalled / OracleReturned / OracleError events to the JSONL alongside
 	// the existing journal write.

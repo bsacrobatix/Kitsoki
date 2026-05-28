@@ -324,25 +324,6 @@ func OracleTaskHandler(ctx context.Context, args map[string]any) (Result, error)
 				"task_trace_id", taskTraceID,
 				"error", exhaustedErr,
 			)
-			appendOracleCallJournal(ctx, callStart, 0, OracleCallBody{
-				CallID:       callID,
-				Verb:         "task",
-				Agent:        agentName,
-				Model:        agent.Model,
-				TaskTraceID:  taskTraceID,
-				DurationMS:   exhaustedDurationMS,
-				SystemPrompt: taskSystemPrompt,
-				Prompt:       contextPrompt,
-				Input: marshalInput(map[string]any{
-					"instructions": contextPrompt,
-					"files_in":     filesChanged,
-				}),
-				Response: marshalResponse(map[string]any{
-					"text": lastStdout,
-				}),
-				Error: exhaustedErr,
-			})
-			// Wave 3-oracle: parallel write OracleError to JSONL sink.
 			appendOracleErrorEvent(ctx, time.Now(), callID, OracleErrorPayload{
 				Verb:       "task",
 				Agent:      agentName,
@@ -391,25 +372,6 @@ func OracleTaskHandler(ctx context.Context, args map[string]any) (Result, error)
 		"initial_state_hash", initialHash,
 	)
 
-	appendOracleCallJournal(ctx, callStart, 0, OracleCallBody{
-		CallID:       callID,
-		Verb:         "task",
-		Agent:        agentName,
-		Model:        agent.Model,
-		TaskTraceID:  taskTraceID,
-		DurationMS:   taskDurationMS,
-		SystemPrompt: taskSystemPrompt,
-		Prompt:       contextPrompt,
-		Input: marshalInput(map[string]any{
-			"instructions": contextPrompt,
-			"files_in":     filesChanged,
-		}),
-		Response: marshalResponse(map[string]any{
-			"text": lastStdout,
-		}),
-	})
-
-	// Wave 3-oracle: parallel write OracleReturned to JSONL sink.
 	appendOracleReturnedEvent(ctx, time.Now(), callID, OracleReturnedPayload{
 		Verb:       "task",
 		Agent:      agentName,

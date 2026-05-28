@@ -119,6 +119,53 @@ round-trip — `BuildJourney` ignores them; the JSONL reader passes them through
 unchanged. A trace written by a newer kitsoki still loads under an older one
 up to the point of an unknown kind that matters for state reconstruction.
 
+### Oracle event kinds
+
+Every oracle call produces exactly two events: `oracle.called` and
+`oracle.returned` (or `oracle.error` on failure).  These events are **no-ops
+for replay** — `BuildJourney` ignores them — but they carry the full prompt and
+response for audit and the runstatus SPA.
+
+| Kind              | When written                                               |
+|-------------------|------------------------------------------------------------|
+| `oracle.called`   | After `Oracle.Ask` returns (so cassette `episode_id` / `match_idx` from `resp.Meta` are available). |
+| `oracle.returned` | After schema validation passes; carries `Submission` + `Meta`. |
+| `oracle.error`    | When `Oracle.Ask` returns an error, or schema validation fails, or a sub-event constraint fires. |
+
+**`oracle.called` payload fields:**
+
+| Field          | Type   | Description                                        |
+|----------------|--------|----------------------------------------------------|
+| `verb`         | string | Oracle verb: `ask`, `decide`, `extract`, `task`, `converse`. |
+| `agent`        | string | Agent name (optional).                             |
+| `model`        | string | Model name (optional).                             |
+| `prompt`       | string | Fully rendered prompt text.                        |
+| `system_prompt`| string | Effective system prompt (optional).                |
+| `input`        | object | Verb-specific input descriptor (e.g. `{schema_path}`). |
+
+**`oracle.returned` payload fields:**
+
+| Field        | Type   | Description                                          |
+|--------------|--------|------------------------------------------------------|
+| `verb`       | string | Oracle verb.                                         |
+| `agent`      | string | Agent name (optional).                               |
+| `model`      | string | Model name (optional).                               |
+| `duration_ms`| int    | Round-trip duration in milliseconds.                 |
+| `response`   | object | Parsed `Submission` + any verb-specific fields.      |
+| `meta`       | object | Opaque oracle metadata (tokens, cost, transport, …). |
+
+**`oracle.error` payload fields:**
+
+| Field        | Type   | Description                                          |
+|--------------|--------|------------------------------------------------------|
+| `verb`       | string | Oracle verb.                                         |
+| `agent`      | string | Agent name (optional).                               |
+| `duration_ms`| int    | Duration before the error.                           |
+| `error`      | string | Human-readable error message; kind is in `AskError.Kind`. |
+
+For the full oracle plugin contract (transports, lifecycle, auth/secrets, and
+sub-events), see [`docs/oracle-plugin.md`](oracle-plugin.md).
+
 ---
 
 ## 5. `call_id` derivation

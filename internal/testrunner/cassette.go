@@ -593,11 +593,10 @@ func buildCassetteDispatcherFull(
 	}
 }
 
-// The SQLite oracle journal write for cassette replay was removed in B-4.
-// OracleCalled / OracleReturned events flow to the JSONL sink only.
-// The oracle journal is scheduled for full deletion in B-5.
+// The SQLite oracle journal (oracle_journal.go) was deleted in B-5.
+// OracleCalled / OracleReturned events flow to the JSONL EventSink only.
 // BuildCassetteDispatcherWithJournal retains its jw parameter for API
-// backwards compat but the write is now a no-op.
+// backwards compat; the journal write path is gone.
 
 // writeCassetteOracleEvents writes an OracleCalled + OracleReturned (or
 // OracleError) event pair to sink for a cassette episode replay (legacy dispatcher

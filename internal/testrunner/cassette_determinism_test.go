@@ -355,15 +355,17 @@ func requireAllEpisodesPlayed(t *testing.T, cas *Cassette) {
 // ─── §3.3.4: Episode response fails schema ────────────────────────────────────
 
 // TestCassettesDeterminism_EpisodeResponseFailsSchema is skipped pending
-// phase B. The structural blocker is that schema validation is currently
-// performed inside the MCP validator-server (the claude-CLI subprocess),
-// not in kitsoki. The phase B Oracle plugin contract (§2) moves validation
-// in-process to internal/oracle, where kitsoki validates AskResponse.Submission
-// against AskRequest.SchemaJSON before binding to world. Until that interface
-// exists, a "cassette response fails schema" test has no in-process validation
-// hook to exercise.
+// phase C+. Phase B shipped in-process schema validation via oracle.ValidateSubmission
+// (oracle_dispatch.go Dispatch path), but the legacy cassette dispatcher
+// (BuildCassetteDispatcher / buildCassetteDispatcherFull) does not route through
+// Dispatch — it bypasses the Oracle plugin interface.  Until the legacy
+// cassette dispatcher is migrated to the Oracle plugin path (phase C+), there
+// is no hook in the cassette replay path to assert in-process validation failure
+// on a cassette response.  The NewCassetteOracle + host.Dispatch path does
+// validate; that path is tested in internal/testrunner/oracle_conformance_test.go.
 func TestCassettesDeterminism_EpisodeResponseFailsSchema(t *testing.T) {
-	t.Skipf("phase B structural blocker: schema validation moves in-process with the Oracle plugin contract (§2/§2.1); until internal/oracle.Ask validates Submission against SchemaJSON, there is no hook in the cassette replay path to assert validation failure")
+	t.Skipf("phase C+ deferral: legacy cassette dispatcher bypasses oracle.Dispatch schema validation; " +
+		"migrate to NewCassetteOracle+host.Dispatch to enable this test")
 }
 
 // ─── §3.3.5: Oversize episode via !include ────────────────────────────────────

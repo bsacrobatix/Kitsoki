@@ -232,11 +232,6 @@ func OracleExtractHandler(ctx context.Context, args map[string]any) (Result, err
 	agentName := agentNameFromArgs(args)
 	agent, _ := resolveAgent(ctx, map[string]any{"agent": agentName})
 
-	// Build input descriptor.
-	inputDesc := map[string]any{
-		"schema": ea.SchemaPath,
-	}
-
 	// Build response descriptor.
 	var responseDesc map[string]any
 	if res.Data != nil {
@@ -266,20 +261,6 @@ func OracleExtractHandler(ctx context.Context, args map[string]any) (Result, err
 	}
 	slog.InfoContext(ctx, "oracle.extract.complete", slogAttrs...)
 
-	appendOracleCallJournal(ctx, callStart, 0, OracleCallBody{
-		CallID:       callID,
-		Verb:         "extract",
-		Agent:        agentName,
-		Model:        agent.Model,
-		DurationMS:   durationMS,
-		SystemPrompt: effectiveSystemPrompt(map[string]any{}, agent),
-		Prompt:       ea.Input,
-		Input:        marshalInput(inputDesc),
-		Response:     marshalResponse(responseDesc),
-		Error:        errStr,
-	})
-
-	// Wave 3-oracle: parallel write OracleReturned / OracleError to JSONL sink.
 	callEnd := time.Now()
 	if errStr != "" {
 		appendOracleErrorEvent(ctx, callEnd, callID, OracleErrorPayload{

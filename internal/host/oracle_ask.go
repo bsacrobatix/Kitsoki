@@ -320,18 +320,6 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 			"duration_ms", durationMS,
 			"error", errMsg,
 		)
-		appendOracleCallJournal(ctx, callStart, 0, OracleCallBody{
-			CallID:       callID,
-			Verb:         "ask",
-			Agent:        agentNameFromArgs(args),
-			Model:        agent.Model,
-			DurationMS:   durationMS,
-			SystemPrompt: systemPrompt,
-			Prompt:       rendered,
-			Input:        marshalInput(map[string]any{}),
-			Error:        errMsg,
-		})
-		// Wave 3-oracle: parallel write OracleError to JSONL sink.
 		appendOracleErrorEvent(ctx, callEnd, callID, OracleErrorPayload{
 			Verb:       "ask",
 			Agent:      agentNameFromArgs(args),
@@ -383,20 +371,6 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		responseDesc["intent"] = submitted
 	}
 	callEnd := time.Now()
-	appendOracleCallJournal(ctx, callStart, 0, OracleCallBody{
-		CallID:       callID,
-		Verb:         "ask",
-		Agent:        agentNameFromArgs(args),
-		Model:        agent.Model,
-		DurationMS:   durationMS,
-		SystemPrompt: systemPrompt,
-		Prompt:       rendered,
-		Input:        marshalInput(inputDesc),
-		Response:     marshalResponse(responseDesc),
-		Error:        errMsg,
-	})
-
-	// Wave 3-oracle: parallel write OracleReturned to JSONL sink.
 	appendOracleReturnedEvent(ctx, callEnd, callID, OracleReturnedPayload{
 		Verb:       "ask",
 		Agent:      agentNameFromArgs(args),
