@@ -38,9 +38,9 @@ If no files match, tell the user "no session summaries yet — hook hasn't fired
 
 ## Step 2 — delegate to Haiku
 
-**Do NOT read the session files into the main session's context.** Launch an Agent with `model: "haiku"` and have it do the reading + summarising. The whole point of the skill is to keep that bulk out of the calling context.
+**Do NOT read the session files into the main session's context.** Launch the `kitsoki-session-digest` subagent (defined at `.claude/agents/kitsoki-session-digest.md`, pinned to `model: haiku`) and have it do the reading + summarising. The whole point of the skill is to keep that bulk out of the calling context.
 
-Use the `general-purpose` subagent. Prompt template:
+Prompt template:
 
 > You are catching another Claude session up on recent work in the kitsoki repo. Read the following session-summary files and produce a digest. Each file is one prior Claude session's running summary, written by a Stop hook.
 >
