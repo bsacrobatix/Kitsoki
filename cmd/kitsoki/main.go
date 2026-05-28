@@ -99,6 +99,16 @@ func main() {
 		if IsTempFail(err) {
 			os.Exit(EX_TEMPFAIL)
 		}
+		// kitsoki turn --trace exit codes:
+		//   0: accepted, 1: rejected, 2: terminal, 3: infra error.
+		// For exit 0–2 the outcome is self-describing (JSONL events on stdout).
+		// For exit 3 (infra) print the message to stderr so the driver can log it.
+		if code, ok := IsTurnExitError(err); ok {
+			if code == turnExitInfraError {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			}
+			os.Exit(code)
+		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -512,6 +522,18 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					}
 				}
 
+				// Wave 3-entry: wire JSONL sink for resumed TUI session.
+				// Use "tui:<session_id>" as the virtual transport:thread key so
+				// each session gets a stable, unique, human-readable trace path.
+				tuiTracePath := store.DefaultTracePath(def.App.ID, "tui", string(sid))
+				if mkErr := os.MkdirAll(filepath.Dir(tuiTracePath), 0o755); mkErr == nil {
+					if tuiSink, sinkErr := store.OpenJSONL(tuiTracePath); sinkErr == nil {
+						orch.SetEventSink(tuiSink)
+						defer func() { _ = tuiSink.Close() }()
+					}
+					// Failure to open is non-fatal: events still land in SQLite.
+				}
+
 				// Rehydrate the session via AttachSession (journal read path §4.5).
 				bundle, attachErr := orch.AttachSession(sid)
 				if attachErr != nil {
@@ -609,6 +631,19 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			sid, err = orch.NewSession(ctx)
 			if err != nil {
 				return fmt.Errorf("create session: %w", err)
+			}
+
+			// Wave 3-entry: wire JSONL sink for fresh TUI session now that
+			// the session ID is known.
+			{
+				freshTracePath := store.DefaultTracePath(def.App.ID, "tui", string(sid))
+				if mkErr := os.MkdirAll(filepath.Dir(freshTracePath), 0o755); mkErr == nil {
+					if freshSink, sinkErr := store.OpenJSONL(freshTracePath); sinkErr == nil {
+						orch.SetEventSink(freshSink)
+						defer func() { _ = freshSink.Close() }()
+					}
+					// Failure to open is non-fatal: events still land in SQLite.
+				}
 			}
 
 			// Fire the initial state's on_enter chain BEFORE rendering

@@ -1669,7 +1669,9 @@ func seedInitialState(ctx context.Context, rig *orchRig, def *app.AppDef, fixtur
 		})
 	}
 
-	if err := rig.st.AppendEvents(rig.sid, events); err != nil {
+	// Persist seed events via StoreSinkAdapter (wave-2a seam).
+	sink := store.NewStoreSinkAdapter(rig.st, rig.sid)
+	if err := sink.AppendBatch(events); err != nil {
 		return err
 	}
 
@@ -1732,7 +1734,9 @@ func injectWorldOverride(ctx context.Context, rig *orchRig, overrides map[string
 			}),
 		})
 	}
-	return rig.st.AppendEvents(rig.sid, events)
+	// Persist world-override events via StoreSinkAdapter (wave-2a seam).
+	sink := store.NewStoreSinkAdapter(rig.st, rig.sid)
+	return sink.AppendBatch(events)
 }
 
 // waitForJobsParked blocks until every currently-running job goroutine has
@@ -2115,7 +2119,7 @@ var _ harness.Harness = (*noopHarness)(nil)
 func countHostDispatchedMatching(actual []store.Event, handler string, args map[string]any) int {
 	count := 0
 	for _, ev := range actual {
-		if string(ev.Kind) != "HostDispatched" || ev.Payload == nil {
+		if ev.Kind != store.HostDispatched || ev.Payload == nil {
 			continue
 		}
 		var payload map[string]any
@@ -2182,7 +2186,7 @@ func assertNoHostCalls(actual []store.Event, handlers []string) []string {
 	}
 	var failures []string
 	for _, ev := range actual {
-		if string(ev.Kind) != "HostDispatched" || ev.Payload == nil {
+		if ev.Kind != store.HostDispatched || ev.Payload == nil {
 			continue
 		}
 		var payload map[string]any

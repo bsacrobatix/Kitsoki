@@ -124,6 +124,15 @@ func OracleConverseHandler(ctx context.Context, args map[string]any) (Result, er
 		}, nil
 	}
 
+	// Wave 3-oracle: write OracleCalled to the JSONL sink at dispatch time.
+	appendOracleCalledEvent(ctx, callStart, callID, OracleCalledPayload{
+		Verb:         "converse",
+		Agent:        agentNameFromArgs(args),
+		Model:        agent.Model,
+		Prompt:       question,
+		SystemPrompt: systemPrompt,
+	})
+
 	cliArgs := []string{
 		"-p",
 		"--session-id", sessionID,
@@ -220,6 +229,25 @@ func emitConverseJournal(ctx context.Context, callID string, callStart time.Time
 		Response:     marshalResponse(responseDesc),
 		Error:        errMsg,
 	})
+
+	// Wave 3-oracle: parallel write OracleReturned / OracleError to JSONL sink.
+	callEnd := time.Now()
+	if errMsg != "" {
+		appendOracleErrorEvent(ctx, callEnd, callID, OracleErrorPayload{
+			Verb:       "converse",
+			Agent:      agentName,
+			DurationMS: durationMS,
+			Error:      errMsg,
+		})
+	} else {
+		appendOracleReturnedEvent(ctx, callEnd, callID, OracleReturnedPayload{
+			Verb:       "converse",
+			Agent:      agentName,
+			Model:      model,
+			DurationMS: durationMS,
+			Response:   marshalResponse(responseDesc),
+		})
+	}
 }
 
 // runConverseWithChat executes a chat-aware converse turn: appends user/assistant
@@ -254,6 +282,15 @@ func runConverseWithChat(ctx context.Context, cs ChatStore, chatID, question, pe
 func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, workingDir, systemPrompt, model, permMode string, tools []string) (Result, error) {
 	callID := newUUID()
 	callStart := time.Now()
+
+	// Wave 3-oracle: write OracleCalled to the JSONL sink at dispatch time.
+	appendOracleCalledEvent(ctx, callStart, callID, OracleCalledPayload{
+		Verb:         "converse",
+		Agent:        "",
+		Model:        model,
+		Prompt:       question,
+		SystemPrompt: systemPrompt,
+	})
 
 	chat, err := cs.Get(ctx, chatID)
 	if err != nil {

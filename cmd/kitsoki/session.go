@@ -764,6 +764,7 @@ func sessionContinueCmd() *cobra.Command {
 		harnessType   string
 		claudeModel   string
 		recordingPath string
+		tracePath     string // --trace override; "" = use default JSONL path when key is known
 	)
 	cmd := &cobra.Command{
 		Use:   "continue",
@@ -885,9 +886,42 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 				}
 			}
 
+			// Wave 3-entry: open (or create) a JSONL trace for this session.
+			// Resolution: use --trace if provided; otherwise derive the default
+			// path from (app.ID, transport, thread) when --key is set.
+			// When only --id is provided we have no transport:thread to key the
+			// path, so we fall back to SQLite-only event writes for that session.
+			var jsonlSink *store.JSONLSink
+			resolvedTracePath := tracePath
+			if resolvedTracePath == "" && key != "" {
+				transport, thread, kErr := parseExternalKey(key)
+				if kErr == nil {
+					resolvedTracePath = store.DefaultTracePath(def.App.ID, transport, thread)
+				}
+			}
+			if resolvedTracePath != "" {
+				if mkErr := os.MkdirAll(filepath.Dir(resolvedTracePath), 0o755); mkErr == nil {
+					if sink, sinkErr := store.OpenJSONL(resolvedTracePath); sinkErr == nil {
+						jsonlSink = sink
+						defer func() { _ = jsonlSink.Close() }()
+					} else {
+						fmt.Fprintf(cmd.ErrOrStderr(),
+							"warning: open JSONL trace %q failed (%v); falling back to SQLite-only writes\n",
+							resolvedTracePath, sinkErr)
+					}
+				} else {
+					fmt.Fprintf(cmd.ErrOrStderr(),
+						"warning: create trace dir for %q failed (%v); falling back to SQLite-only writes\n",
+						resolvedTracePath, mkErr)
+				}
+			}
+
 			orchOpts := []orchestrator.Option{
 				orchestrator.WithHostRegistry(hostReg),
 				orchestrator.WithTransportRegistry(transportReg),
+			}
+			if jsonlSink != nil {
+				orchOpts = append(orchOpts, orchestrator.WithEventSink(jsonlSink))
 			}
 			if chatStoreOpt != nil {
 				orchOpts = append(orchOpts, chatStoreOpt)
@@ -1018,6 +1052,8 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 	cmd.Flags().StringVar(&harnessType, "harness", "", "harness for --raw: claude|live|replay (default auto)")
 	cmd.Flags().StringVar(&claudeModel, "claude-model", "", "model passed to claude -p --model")
 	cmd.Flags().StringVar(&recordingPath, "recording", "", "recording YAML for --harness replay")
+	cmd.Flags().StringVar(&tracePath, "trace", "",
+		"JSONL trace file for event writes; default: ~/.kitsoki/sessions/<app>/<sha8>-<slug>.jsonl (derived from --key)")
 	_ = cmd.MarkFlagRequired("app")
 	return cmd
 }

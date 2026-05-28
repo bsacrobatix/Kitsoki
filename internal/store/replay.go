@@ -109,7 +109,7 @@ func BuildJourney(def *app.AppDef, initialState app.StatePath, initialWorld worl
 		case ValidationFailed, GuardRejected:
 			// Failed intents: state and world are unchanged. Skip.
 
-		case TurnStarted, TurnEnded:
+		case TurnStarted, UserInputReceived, TurnEnded:
 			// Orchestrator-level bookkeeping. No state/world change.
 
 		case LLMCalled, LLMToolCall:

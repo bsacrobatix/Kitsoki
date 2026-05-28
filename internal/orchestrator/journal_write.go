@@ -1,7 +1,12 @@
 // Package orchestrator — dual-write helpers for continue-mode §4.9 Rule 1.
 //
-// Every site that calls store.AppendEvents is migrated to
-// store.AppendEventsAndJournal.  This file contains:
+// Wave 2a: every site that previously called store.AppendEventsAndJournal is
+// migrated to appendEventsAndJournal, which routes event writes through an
+// EventSink (store.NewStoreSinkAdapter for the wave-2a SQLite backend) and
+// journal writes through appendJournal (journalWriter, if wired).  This file
+// contains:
+//   - appendEventsAndJournal: the wave-2a write helper; replaces direct
+//     o.store.AppendEventsAndJournal call sites.
 //   - journalEntriesForEvents: walks a []store.Event and returns the matching
 //     []journal.Entry batch (world.patch, state.transition, host.*, typed).
 //   - standalone journal-write helpers for post-commit / no-events paths
@@ -17,6 +22,44 @@ import (
 	"kitsoki/internal/store"
 	"kitsoki/internal/world"
 )
+
+// appendEventsAndJournal is the wave-2a replacement for every
+// o.store.AppendEventsAndJournal call site.  Event writes go through a
+// StoreSinkAdapter (wrapping the SQLite store) via AppendBatch; journal
+// writes go through o.appendJournal (the journalWriter, if wired).
+//
+// Wave 3-entry dual-write: when o.eventSink is non-nil (e.g. a *store.JSONLSink
+// wired via WithEventSink), events are appended to BOTH the JSONL sink AND the
+// SQLite store.  This keeps the SQLite store current so other subcommands
+// (session show, session list, attach-session resume) continue to work against
+// it until phase B removes SQLite event storage entirely.  The JSONL sink is
+// the authoritative future path; the SQLite write is the backward-compat bridge.
+//
+// Journal writes proceed through o.appendJournal as before.
+//
+// When o.store is nil AND o.eventSink is nil (nil-store test scaffolds),
+// the call is a no-op.
+func (o *Orchestrator) appendEventsAndJournal(sid app.SessionID, events []store.Event, jEntries []journal.Entry) error {
+	if o.eventSink != nil {
+		// JSONL dual-write path: append each event to the JSONL sink.
+		// The SQLite write follows below so all subcommands stay consistent.
+		for _, ev := range events {
+			if err := o.eventSink.Append(ev); err != nil {
+				return err
+			}
+		}
+	}
+	if o.store != nil {
+		adapter := store.NewStoreSinkAdapter(o.store, sid)
+		if err := adapter.AppendBatch(events); err != nil {
+			return err
+		}
+	}
+	for _, e := range jEntries {
+		o.appendJournal(e)
+	}
+	return nil
+}
 
 // journalEntriesForEvents builds the journal.Entry batch that accompanies a
 // []store.Event batch being written via AppendEventsAndJournal.

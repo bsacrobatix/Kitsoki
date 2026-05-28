@@ -61,8 +61,7 @@ func main() {
 				captureErr = fmt.Errorf("load history: %w", err)
 				return captureErr
 			}
-			snap, err := runstatus.FromHistory(hist, def, string(sid),
-				runstatus.WithOracleJournal(st.DB()))
+			snap, err := runstatus.FromHistory(hist, def, string(sid))
 			if err != nil {
 				captureErr = fmt.Errorf("build snapshot: %w", err)
 				return captureErr

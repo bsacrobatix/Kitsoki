@@ -441,8 +441,7 @@ func (r *sqliteReader) LatestCheckpoint(sid app.SessionID, doc DocID) (Entry, bo
 
 // LoadOracleCallEntries returns all KindOracleCall journal entries for sid as
 // a slice of Entry values (including timestamps). Entries are ordered by
-// (turn, seq). This is used by FromHistory to synthesise oracle trace events
-// from journal data when WithOracleJournal is supplied.
+// (turn, seq).
 func LoadOracleCallEntries(db *sql.DB, sid app.SessionID) ([]Entry, error) {
 	rows, err := db.Query(
 		`SELECT ts, turn, seq, body_json FROM journal

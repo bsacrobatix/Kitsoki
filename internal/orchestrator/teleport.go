@@ -121,7 +121,7 @@ func (o *Orchestrator) Teleport(ctx context.Context, sid app.SessionID, target i
 	// Pre-world is journey.World (before slot merge); post-world is the merged w.
 	tpJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), events,
 		journey.World, w, view, target.State, "")
-	if appendErr := o.store.AppendEventsAndJournal(sid, events, tpJEntries); appendErr != nil {
+	if appendErr := o.appendEventsAndJournal(sid, events, tpJEntries); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator.Teleport: append events: %w", appendErr)
 	}
 

@@ -1,10 +1,10 @@
 {
   "session": {
-    "session_id": "b3af09d9-4ee7-462e-938a-67e768767e00",
+    "session_id": "ec88d8b1-196d-470c-911e-1244a3b3478f",
     "app_id": "bugfix",
     "current_state": "__exit__done",
     "turn": 8,
-    "started_at": "2026-05-28T05:58:23.618758Z",
+    "started_at": "2026-05-28T09:45:47.927269Z",
     "terminal": true
   },
   "app": {
@@ -879,7 +879,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 },
                 {
                   "When": "",
@@ -898,7 +899,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 },
                 {
                   "When": "",
@@ -917,7 +919,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -991,7 +994,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -1028,7 +1032,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -1068,7 +1073,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -1106,7 +1112,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -1144,7 +1151,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -1182,7 +1190,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -1220,7 +1229,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -1258,7 +1268,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -1304,7 +1315,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'",
@@ -1332,7 +1344,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.judge_mode != 'human' \u0026\u0026\nworld.llm_verdict.confidence \u003e= world.judge_confidence_threshold \u0026\u0026\nworld.llm_verdict.verdict != 'uncertain' \u0026\u0026\nworld.llm_verdict.intent != 'uncertain'\n",
@@ -1350,7 +1363,8 @@
             "EmitIntent": "{{ world.llm_verdict.intent }}",
             "EmitSlots": {
               "feedback": "{{ world.llm_verdict.reason }}"
-            }
+            },
+            "Effects": null
           }
         ],
         "Intents": null,
@@ -1617,7 +1631,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -1672,7 +1687,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -1729,7 +1745,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -1782,7 +1799,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.ticket_id != '' \u0026\u0026 world.feature_branch != '' \u0026\u0026 world.workdir != '' \u0026\u0026 !world.bf_autostart_attempted",
@@ -1802,7 +1820,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.ticket_id != '' \u0026\u0026 !world.bf_autostart_attempted \u0026\u0026 (world.reproduction_artifact.summary_title == nil || world.reproduction_artifact.summary_title == '')",
@@ -1818,7 +1837,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "start",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.ticket_id != '' \u0026\u0026 !world.bf_autostart_attempted",
@@ -1836,7 +1856,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           }
         ],
         "Intents": null,
@@ -2238,7 +2259,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -2276,7 +2298,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -2314,7 +2337,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -2349,7 +2373,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.workspace_id != ''",
@@ -2367,7 +2392,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.workdir != ''",
@@ -2404,7 +2430,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.workdir != ''",
@@ -2424,7 +2451,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "",
@@ -2440,7 +2468,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           }
         ],
         "Intents": null,
@@ -2816,7 +2845,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 },
                 {
                   "When": "",
@@ -2836,7 +2866,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -2874,7 +2905,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -2910,7 +2942,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -2946,7 +2979,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -2982,7 +3016,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3056,7 +3091,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3093,7 +3129,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3133,7 +3170,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3171,7 +3209,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3217,7 +3256,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'",
@@ -3245,7 +3285,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.judge_mode != 'human' \u0026\u0026\nworld.llm_verdict.confidence \u003e= world.judge_confidence_threshold \u0026\u0026\nworld.llm_verdict.verdict != 'uncertain' \u0026\u0026\nworld.llm_verdict.intent != 'uncertain'\n",
@@ -3263,7 +3304,8 @@
             "EmitIntent": "{{ world.llm_verdict.intent }}",
             "EmitSlots": {
               "feedback": "{{ world.llm_verdict.reason }}"
-            }
+            },
+            "Effects": null
           }
         ],
         "Intents": null,
@@ -3624,7 +3666,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 },
                 {
                   "When": "",
@@ -3644,7 +3687,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3681,7 +3725,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3719,7 +3764,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3755,7 +3801,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3791,7 +3838,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3827,7 +3875,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3882,7 +3931,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3938,7 +3988,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -3975,7 +4026,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -4015,7 +4067,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -4054,7 +4107,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -4103,7 +4157,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'",
@@ -4131,7 +4186,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.judge_mode != 'human' \u0026\u0026\nworld.llm_verdict.confidence \u003e= world.judge_confidence_threshold \u0026\u0026\nworld.llm_verdict.verdict != 'uncertain' \u0026\u0026\nworld.llm_verdict.intent != 'uncertain'\n",
@@ -4149,7 +4205,8 @@
             "EmitIntent": "{{ world.llm_verdict.intent }}",
             "EmitSlots": {
               "feedback": "{{ world.llm_verdict.reason }}"
-            }
+            },
+            "Effects": null
           }
         ],
         "Intents": null,
@@ -4537,7 +4594,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -4575,7 +4633,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -4613,7 +4672,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -4651,7 +4711,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -4689,7 +4750,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -4724,7 +4786,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "",
@@ -4740,7 +4803,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           }
         ],
         "Intents": null,
@@ -5111,7 +5175,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5148,7 +5213,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5186,7 +5252,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 },
                 {
                   "When": "",
@@ -5206,7 +5273,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5244,7 +5312,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 },
                 {
                   "When": "",
@@ -5264,7 +5333,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5302,7 +5372,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5338,7 +5409,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5374,7 +5446,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5448,7 +5521,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5485,7 +5559,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5525,7 +5600,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5563,7 +5639,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5601,7 +5678,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5639,7 +5717,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -5674,7 +5753,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "",
@@ -5710,7 +5790,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'",
@@ -5738,7 +5819,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.judge_mode != 'human' \u0026\u0026\nworld.llm_verdict.confidence \u003e= world.judge_confidence_threshold \u0026\u0026\nworld.llm_verdict.verdict != 'uncertain' \u0026\u0026\nworld.llm_verdict.intent != 'uncertain'\n",
@@ -5756,7 +5838,8 @@
             "EmitIntent": "{{ world.llm_verdict.intent }}",
             "EmitSlots": {
               "feedback": "{{ world.llm_verdict.reason }}"
-            }
+            },
+            "Effects": null
           }
         ],
         "Intents": null,
@@ -6136,7 +6219,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6173,7 +6257,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6209,7 +6294,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6246,7 +6332,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6282,7 +6369,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6319,7 +6407,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6357,7 +6446,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 },
                 {
                   "When": "",
@@ -6377,7 +6467,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6415,7 +6506,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6451,7 +6543,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6525,7 +6618,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6562,7 +6656,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6602,7 +6697,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6640,7 +6736,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6678,7 +6775,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6716,7 +6814,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6754,7 +6853,8 @@
                   "OnComplete": null,
                   "Target": "",
                   "EmitIntent": "",
-                  "EmitSlots": null
+                  "EmitSlots": null,
+                  "Effects": null
                 }
               ],
               "GuardHint": "",
@@ -6789,7 +6889,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "",
@@ -6825,7 +6926,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'",
@@ -6853,7 +6955,8 @@
             "OnComplete": null,
             "Target": "",
             "EmitIntent": "",
-            "EmitSlots": null
+            "EmitSlots": null,
+            "Effects": null
           },
           {
             "When": "world.judge_mode != 'human' \u0026\u0026\nworld.llm_verdict.confidence \u003e= world.judge_confidence_threshold \u0026\u0026\nworld.llm_verdict.verdict != 'uncertain' \u0026\u0026\nworld.llm_verdict.intent != 'uncertain'\n",
@@ -6871,7 +6974,8 @@
             "EmitIntent": "{{ world.llm_verdict.intent }}",
             "EmitSlots": {
               "feedback": "{{ world.llm_verdict.reason }}"
-            }
+            },
+            "Effects": null
           }
         ],
         "Intents": null,
@@ -6904,14 +7008,14 @@
       "host.oracle.ask",
       "host.oracle.decide",
       "host.oracle.task",
-      "host.git_worktree.create",
-      "host.git_worktree.sync",
-      "host.git.commit",
       "host.append_to_file.post",
       "host.git.diff",
       "host.local.run_tests",
       "host.local.build",
-      "host.local_files.ticket.transition"
+      "host.local_files.ticket.transition",
+      "host.git_worktree.create",
+      "host.git_worktree.sync",
+      "host.git.commit"
     ],
     "Proposals": null,
     "Include": [
@@ -7330,10 +7434,10 @@
     },
     "ImportWrappers": null,
     "LoadedManifests": [
-      "/home/cloud-user/code/kitsoki/.worktrees/runstatus/stories/bugfix/app.yaml"
+      "/home/cloud-user/code/kitsoki/.worktrees/control-inversion/stories/bugfix/app.yaml"
     ],
     "Routing": null,
-    "BaseDir": "/home/cloud-user/code/kitsoki/.worktrees/runstatus/stories/bugfix"
+    "BaseDir": "/home/cloud-user/code/kitsoki/.worktrees/control-inversion/stories/bugfix"
   },
   "mermaid": {
     "source": "%% Bug-fix pipeline\n%% kitsoki viz --flowchart --detail states\nflowchart LR\n\n  Start([\"\u003cb\u003eStart\u003c/b\u003e\"]):::input\n\n  subgraph SG___exit__abandoned[\"\u003cb\u003e__exit__abandoned\u003c/b\u003e — Exit: abandoned\"]\n    direction LR\n    ST___exit__abandoned[/\"__exit__abandoned\"/]:::room\n  end\n\n  subgraph SG___exit__done[\"\u003cb\u003e__exit__done\u003c/b\u003e — Exit: done\"]\n    direction LR\n    ST___exit__done[/\"__exit__done\"/]:::room\n  end\n\n  subgraph SG___exit__pick_ticket[\"\u003cb\u003e__exit__pick_ticket\u003c/b\u003e — Exit: pick_ticket\"]\n    direction LR\n    ST___exit__pick_ticket[/\"__exit__pick_ticket\"/]:::room\n  end\n\n  subgraph SG_done[\"\u003cb\u003ephase 3 · done\u003c/b\u003e — Build the run's close-out artifact; accept to hand off to pr-refinement.\"]\n    direction LR\n    ST_done[/\"done\"/]:::room\n  end\n\n  subgraph SG_idle[\"\u003cb\u003ephase 0 · idle\u003c/b\u003e — Bug-fix pipeline parked. Waiting for start.\"]\n    direction LR\n    ST_idle[/\"idle\"/]:::room\n  end\n\n  subgraph SG_implementing[\"\u003cb\u003ephase 6 · implementing\u003c/b\u003e — Apply the proposed fix to the workspace; advance to testing.\"]\n    direction LR\n    ST_implementing[/\"implementing\"/]:::room\n  end\n\n  subgraph SG_proposing[\"\u003cb\u003ephase 4 · proposing\u003c/b\u003e — Draft the fix proposal; review and advance to implementing.\"]\n    direction LR\n    ST_proposing[/\"proposing\"/]:::room\n  end\n\n  subgraph SG_reproducing[\"\u003cb\u003ephase 1 · reproducing\u003c/b\u003e — Reproduce the bug; produce the reproduction artifact for review.\"]\n    direction LR\n    ST_reproducing[/\"reproducing\"/]:::room\n  end\n\n  subgraph SG_reviewing[\"\u003cb\u003ephase 7 · reviewing\u003c/b\u003e — Self-review the diff (code + security); advance to validating.\"]\n    direction LR\n    ST_reviewing[/\"reviewing\"/]:::room\n  end\n\n  subgraph SG_testing[\"\u003cb\u003ephase 5 · testing\u003c/b\u003e — Run + review tests for the applied fix; advance to reviewing (or done in quick mode).\"]\n    direction LR\n    ST_testing[/\"testing\"/]:::room\n  end\n\n  subgraph SG_validating[\"\u003cb\u003ephase 2 · validating\u003c/b\u003e — Validate the fix against the full environment; advance to done.\"]\n    direction LR\n    ST_validating[/\"validating\"/]:::room\n  end\n\n  Start --\u003e ST_idle\n\n  ST_done -- \"quit\" --\u003e ST___exit__abandoned\n  ST_done -- \"refine [world.done_cycle \u0026gt;= …]\" --\u003e ST___exit__abandoned\n  ST_done -- \"accept\" --\u003e ST___exit__done\n  ST_done -- \"look\" --\u003e ST_done\n  ST_done -- \"refine\" --\u003e ST_done\n  ST_done -- \"restart_from [slots.stage == 'impl…]\" --\u003e ST_implementing\n  ST_done -- \"restart_from [slots.stage == 'prop…]\" --\u003e ST_proposing\n  ST_done -- \"restart_from [slots.stage == 'repr…]\" --\u003e ST_reproducing\n  ST_done -- \"restart_from [slots.stage == 'test…]\" --\u003e ST_testing\n  ST_done -- \"restart_from\" --\u003e ST_validating\n  ST_done -- \"restart_from [slots.stage == 'vali…]\" --\u003e ST_validating\n  ST_idle -- \"quit\" --\u003e ST___exit__abandoned\n  ST_idle -- \"change_ticket\" --\u003e ST___exit__pick_ticket\n  ST_idle -- \"look\" --\u003e ST_idle\n  ST_idle -- \"full_pipeline\" --\u003e ST_reproducing\n  ST_idle -- \"quick_fix\" --\u003e ST_reproducing\n  ST_idle -- \"start\" --\u003e ST_reproducing\n  ST_idle -- \"skip_to_pr\" --\u003e ST_validating\n  ST_implementing -- \"quit\" --\u003e ST___exit__abandoned\n  ST_implementing -- \"look\" --\u003e ST_implementing\n  ST_implementing -- \"restart_from\" --\u003e ST_proposing\n  ST_implementing -- \"restart_from [slots.stage == 'prop…]\" --\u003e ST_proposing\n  ST_implementing -- \"restart_from [slots.stage == 'repr…]\" --\u003e ST_reproducing\n  ST_implementing -- \"accept\" --\u003e ST_testing\n  ST_proposing -- \"jump_to\" --\u003e ST___exit__abandoned\n  ST_proposing -- \"quit\" --\u003e ST___exit__abandoned\n  ST_proposing -- \"refine [world.proposing_cycl…]\" --\u003e ST___exit__abandoned\n  ST_proposing -- \"jump_to [slots.stage == 'done…]\" --\u003e ST_done\n  ST_proposing -- \"accept\" --\u003e ST_implementing\n  ST_proposing -- \"look\" --\u003e ST_proposing\n  ST_proposing -- \"refine\" --\u003e ST_proposing\n  ST_proposing -- \"restart_from\" --\u003e ST_proposing\n  ST_proposing -- \"restart_from [slots.stage == 'repr…]\" --\u003e ST_reproducing\n  ST_proposing -- \"jump_to [slots.stage == 'test…]\" --\u003e ST_testing\n  ST_proposing -- \"jump_to [slots.stage == 'vali…]\" --\u003e ST_validating\n  ST_reproducing -- \"jump_to\" --\u003e ST___exit__abandoned\n  ST_reproducing -- \"quit\" --\u003e ST___exit__abandoned\n  ST_reproducing -- \"refine [world.reproducing_cy…]\" --\u003e ST___exit__abandoned\n  ST_reproducing -- \"jump_to [slots.stage == 'done…]\" --\u003e ST_done\n  ST_reproducing -- \"accept\" --\u003e ST_proposing\n  ST_reproducing -- \"full_pipeline\" --\u003e ST_reproducing\n  ST_reproducing -- \"look\" --\u003e ST_reproducing\n  ST_reproducing -- \"quick_fix\" --\u003e ST_reproducing\n  ST_reproducing -- \"refine\" --\u003e ST_reproducing\n  ST_reproducing -- \"restart_from\" --\u003e ST_reproducing\n  ST_reproducing -- \"jump_to [slots.stage == 'test…]\" --\u003e ST_testing\n  ST_reproducing -- \"jump_to [slots.stage == 'vali…]\" --\u003e ST_validating\n  ST_reproducing -- \"skip_to_pr\" --\u003e ST_validating\n  ST_reviewing -- \"quit\" --\u003e ST___exit__abandoned\n  ST_reviewing -- \"restart_from [slots.stage == 'impl…]\" --\u003e ST_implementing\n  ST_reviewing -- \"restart_from\" --\u003e ST_proposing\n  ST_reviewing -- \"restart_from [slots.stage == 'prop…]\" --\u003e ST_proposing\n  ST_reviewing -- \"restart_from [slots.stage == 'repr…]\" --\u003e ST_reproducing\n  ST_reviewing -- \"look\" --\u003e ST_reviewing\n  ST_reviewing -- \"restart_from [slots.stage == 'test…]\" --\u003e ST_testing\n  ST_reviewing -- \"accept\" --\u003e ST_validating\n  ST_testing -- \"accept [(world.implement_rev…]\" --\u003e ST___exit__abandoned\n  ST_testing -- \"jump_to\" --\u003e ST___exit__abandoned\n  ST_testing -- \"quit\" --\u003e ST___exit__abandoned\n  ST_testing -- \"refine [world.testing_cycle …]\" --\u003e ST___exit__abandoned\n  ST_testing -- \"accept [world.bugfix_mode ==…]\" --\u003e ST_done\n  ST_testing -- \"jump_to [slots.stage == 'done…]\" --\u003e ST_done\n  ST_testing -- \"accept [world.implement_revi…]\" --\u003e ST_implementing\n  ST_testing -- \"restart_from [slots.stage == 'impl…]\" --\u003e ST_implementing\n  ST_testing -- \"restart_from\" --\u003e ST_proposing\n  ST_testing -- \"restart_from [slots.stage == 'prop…]\" --\u003e ST_proposing\n  ST_testing -- \"restart_from [slots.stage == 'repr…]\" --\u003e ST_reproducing\n  ST_testing -- \"accept\" --\u003e ST_reviewing\n  ST_testing -- \"look\" --\u003e ST_testing\n  ST_testing -- \"refine\" --\u003e ST_testing\n  ST_testing -- \"jump_to [slots.stage == 'vali…]\" --\u003e ST_validating\n  ST_validating -- \"accept [world.validate_artif…]\" --\u003e ST___exit__abandoned\n  ST_validating -- \"jump_to\" --\u003e ST___exit__abandoned\n  ST_validating -- \"quit\" --\u003e ST___exit__abandoned\n  ST_validating -- \"refine [world.validating_cyc…]\" --\u003e ST___exit__abandoned\n  ST_validating -- \"accept\" --\u003e ST_done\n  ST_validating -- \"jump_to [slots.stage == 'done…]\" --\u003e ST_done\n  ST_validating -- \"accept [world.validate_artif…]\" --\u003e ST_implementing\n  ST_validating -- \"restart_from [slots.stage == 'impl…]\" --\u003e ST_implementing\n  ST_validating -- \"accept [world.validate_artif…]\" --\u003e ST_proposing\n  ST_validating -- \"restart_from\" --\u003e ST_proposing\n  ST_validating -- \"restart_from [slots.stage == 'prop…]\" --\u003e ST_proposing\n  ST_validating -- \"restart_from [slots.stage == 'repr…]\" --\u003e ST_reproducing\n  ST_validating -- \"restart_from [slots.stage == 'test…]\" --\u003e ST_testing\n  ST_validating -- \"accept [world.validate_artif…]\" --\u003e ST_validating\n  ST_validating -- \"look\" --\u003e ST_validating\n  ST_validating -- \"refine\" --\u003e ST_validating\n\n  classDef input  fill:#eef,stroke:#446,stroke-width:1.5px\n  classDef room   fill:#fff,stroke:#357,stroke-width:1.5px\n  classDef work   fill:#f7f7fa,stroke:#888\n  classDef llm    fill:#f0e6ff,stroke:#6a3eb5,stroke-width:2px,color:#3a2270\n  classDef shell  fill:#fef6e4,stroke:#a85,stroke-width:1.5px\n  classDef store  fill:#eef5fb,stroke:#369,stroke-width:1px\n  classDef cache  fill:#fff6e0,stroke:#a86,stroke-width:1.5px\n  classDef err    fill:#fff5f5,stroke:#c66,stroke-width:1px,stroke-dasharray:4 3\n  classDef next   fill:#e8f5e9,stroke:#272,stroke-width:1.5px\n  classDef note   fill:#fffbe6,stroke:#a90,stroke-width:1px,stroke-dasharray:2 2,color:#553\n",
@@ -7386,7 +7490,7 @@
   },
   "events": [
     {
-      "time": "2026-05-28T05:58:23.618758Z",
+      "time": "2026-05-28T09:45:47.927269Z",
       "level": "INFO",
       "msg": "machine.transition",
       "session_id": "",
@@ -7399,137 +7503,7 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.618758Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "",
-      "attrs": {
-        "set": {
-          "ticket_id": "TKT-001"
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.618758Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "",
-      "attrs": {
-        "set": {
-          "ticket_url": "issues/bugs/2026-05-14-tui-hangs-on-esc.md"
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.618758Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "",
-      "attrs": {
-        "set": {
-          "thread": "TKT-001"
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.618758Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "",
-      "attrs": {
-        "set": {
-          "workspace_id": "ws-tkt-001"
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.618758Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "",
-      "attrs": {
-        "set": {
-          "workdir": ".worktrees/tkt-001"
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.618758Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "",
-      "attrs": {
-        "set": {
-          "feature_branch": "fix/tkt-001-tui-esc"
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.618758Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "",
-      "attrs": {
-        "set": {
-          "judge_confidence_threshold": 0.8
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.618758Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "",
-      "attrs": {
-        "set": {
-          "ticket_title": "TUI hangs on ESC"
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.618758Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "",
-      "attrs": {
-        "set": {
-          "base_branch": "main"
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.618758Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "",
-      "attrs": {
-        "set": {
-          "bugfix_mode": "full"
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.618758Z",
+      "time": "2026-05-28T09:45:47.927269Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
@@ -7542,53 +7516,137 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.619678Z",
+      "time": "2026-05-28T09:45:47.927269Z",
       "level": "INFO",
-      "msg": "oracle.task.start",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "reproducing",
-      "attrs": {
-        "agent": "reproducer",
-        "call_id": "4f933c38df706535",
-        "model": "claude-sonnet-4-6",
-        "prompt_preview": "# Reproducing a bug — produce the reproduction artifact\n\nYou are reproducing bug **TKT-001** — *TUI hangs on ESC* against\nthe working tree at `.worktrees/tkt-001`.\n\nYour job is to produce evidence — a",
-        "verb": "task"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.619679Z",
-      "level": "INFO",
-      "msg": "oracle.task.complete",
-      "session_id": "",
-      "turn": 0,
-      "state_path": "reproducing",
-      "attrs": {
-        "agent": "reproducer",
-        "call_id": "4f933c38df706535",
-        "duration_ms": 85929,
-        "model": "claude-sonnet-4-6",
-        "prompt": "# Reproducing a bug — produce the reproduction artifact\n\nYou are reproducing bug **TKT-001** — *TUI hangs on ESC* against\nthe working tree at `.worktrees/tkt-001`.\n\nYour job is to produce evidence — a deterministic reproduction (a test, a\nscript, a recorded sequence) — that the bug is real, plus the components /\nmodules / services implicated.\n\n\n\n## Constraints\n\n- Do not fabricate evidence. `bug_verified` is `true` only when a\n  deterministic reproduction artifact was actually produced (test file on\n  disk, recorded shell session, screen capture).\n- `involved_components[*].name` must be a real component / module / service\n  in the codebase; phantom components corrupt downstream context.\n- `summary_markdown` is what a human reviewer will read in the checkpoint\n  inbox — write it for them, not for yourself.\n\n## Output\n\nSubmit a `reproduction_artifact` (see `schemas/reproducing_artifact.json`):\n\n- `summary_title` — one line, the bug title with verification status.\n- `summary_markdown` — markdown reviewers see; at minimum: what is broken,\n  how you reproduced it, where the evidence lives, what services are\n  implicated.\n- `bug_verified` — true only with an actual reproduction artifact.\n- `steps` — ordered, executable.\n- `expected_outcome`, `actual_outcome` — concise factual statements.\n- `evidence_paths` — files written this turn.\n- `involved_components` — at least one `{ name, reason }`.\n",
-        "response": {
-          "text": "Bug verified and artifact submitted. Here's the summary:\n\n**TKT-001: ESC silently swallowed during in-flight LLM turn** — confirmed.\n\n**Root cause:** `routeKey()` in `internal/tui/tui.go:1251` guards the ESC→menu transition to `ModeOnPath | ModeOffPath` only. When `mode == ModeAwaitingLLM`, ESC falls through to `m.prompt.Update(msg)`, and the `bubbles/textarea` widget has no ESC binding, so the key is dropped without any feedback.\n\n**Evidence:** `internal/tui/tkt001_esc_repro_test.go` — both tests pass. The reproduction test (`TestTKT001_EscSilentlySwallowedDuringInFlight`) confirms all three bug conditions: mode stays `ModeAwaitingLLM`, transcript is unchanged, and `inFlightCancel` is never called. The positive control (`TestTKT001_ControlEscFromOnPathOpensMenu`) verifies ESC still works correctly from `ModeOnPath`.\n\n**Fix direction:** Add a `ModeAwaitingLLM` branch to the ESC handler — either call `inFlightCancel` directly and emit a hint, or open the system menu (consistent with the existing Ctrl+C cancel path)."
-        },
-        "system_prompt": "You are a bug reproduction analyst. Read the codebase, reproduce the reported bug, identify the affected components, and produce a structured reproduction artifact.",
-        "verb": "task"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.619929Z",
-      "level": "INFO",
-      "msg": "turn.input",
+      "msg": "world.update",
       "session_id": "",
       "turn": 0,
       "state_path": "",
       "attrs": {
-        "input": "[intent] start"
+        "set": {
+          "judge_confidence_threshold": 0.8
+        }
       }
     },
     {
-      "time": "2026-05-28T05:58:23.619929Z",
+      "time": "2026-05-28T09:45:47.927269Z",
+      "level": "INFO",
+      "msg": "world.update",
+      "session_id": "",
+      "turn": 0,
+      "state_path": "",
+      "attrs": {
+        "set": {
+          "thread": "TKT-001"
+        }
+      }
+    },
+    {
+      "time": "2026-05-28T09:45:47.927269Z",
+      "level": "INFO",
+      "msg": "world.update",
+      "session_id": "",
+      "turn": 0,
+      "state_path": "",
+      "attrs": {
+        "set": {
+          "workspace_id": "ws-tkt-001"
+        }
+      }
+    },
+    {
+      "time": "2026-05-28T09:45:47.927269Z",
+      "level": "INFO",
+      "msg": "world.update",
+      "session_id": "",
+      "turn": 0,
+      "state_path": "",
+      "attrs": {
+        "set": {
+          "feature_branch": "fix/tkt-001-tui-esc"
+        }
+      }
+    },
+    {
+      "time": "2026-05-28T09:45:47.927269Z",
+      "level": "INFO",
+      "msg": "world.update",
+      "session_id": "",
+      "turn": 0,
+      "state_path": "",
+      "attrs": {
+        "set": {
+          "ticket_id": "TKT-001"
+        }
+      }
+    },
+    {
+      "time": "2026-05-28T09:45:47.927269Z",
+      "level": "INFO",
+      "msg": "world.update",
+      "session_id": "",
+      "turn": 0,
+      "state_path": "",
+      "attrs": {
+        "set": {
+          "ticket_title": "TUI hangs on ESC"
+        }
+      }
+    },
+    {
+      "time": "2026-05-28T09:45:47.927269Z",
+      "level": "INFO",
+      "msg": "world.update",
+      "session_id": "",
+      "turn": 0,
+      "state_path": "",
+      "attrs": {
+        "set": {
+          "ticket_url": "issues/bugs/2026-05-14-tui-hangs-on-esc.md"
+        }
+      }
+    },
+    {
+      "time": "2026-05-28T09:45:47.927269Z",
+      "level": "INFO",
+      "msg": "world.update",
+      "session_id": "",
+      "turn": 0,
+      "state_path": "",
+      "attrs": {
+        "set": {
+          "workdir": ".worktrees/tkt-001"
+        }
+      }
+    },
+    {
+      "time": "2026-05-28T09:45:47.927269Z",
+      "level": "INFO",
+      "msg": "world.update",
+      "session_id": "",
+      "turn": 0,
+      "state_path": "",
+      "attrs": {
+        "set": {
+          "base_branch": "main"
+        }
+      }
+    },
+    {
+      "time": "2026-05-28T09:45:47.927269Z",
+      "level": "INFO",
+      "msg": "world.update",
+      "session_id": "",
+      "turn": 0,
+      "state_path": "",
+      "attrs": {
+        "set": {
+          "bugfix_mode": "full"
+        }
+      }
+    },
+    {
+      "time": "2026-05-28T09:45:47.928512Z",
       "level": "INFO",
       "msg": "turn.start",
       "session_id": "",
@@ -7601,7 +7659,7 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.619929Z",
+      "time": "2026-05-28T09:45:47.928512Z",
       "level": "INFO",
       "msg": "machine.transition",
       "session_id": "",
@@ -7615,7 +7673,7 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.619929Z",
+      "time": "2026-05-28T09:45:47.928512Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
@@ -7644,7 +7702,7 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.619929Z",
+      "time": "2026-05-28T09:45:47.928512Z",
       "level": "INFO",
       "msg": "machine.state_exited",
       "session_id": "",
@@ -7655,23 +7713,23 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.619929Z",
+      "time": "2026-05-28T09:45:47.928512Z",
       "level": "INFO",
       "msg": "machine.state_entered",
       "session_id": "",
       "turn": 1,
-      "state_path": "reproducing",
+      "state_path": "",
       "attrs": {
         "state": "reproducing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.619929Z",
+      "time": "2026-05-28T09:45:47.928512Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 1,
-      "state_path": "reproducing",
+      "state_path": "",
       "attrs": {
         "args": {
           "acceptance": {
@@ -7696,96 +7754,35 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.619929Z",
+      "time": "2026-05-28T09:45:47.928512Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 1,
-      "state_path": "reproducing",
+      "state_path": "",
       "attrs": {
         "namespace": "host.oracle.task"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.619929Z",
+      "time": "2026-05-28T09:45:47.928512Z",
       "level": "INFO",
       "msg": "turn.end",
       "session_id": "",
       "turn": 1,
-      "state_path": "reproducing",
+      "state_path": "",
       "attrs": {
         "outcome": "transitioned",
         "to": "reproducing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.622333Z",
-      "level": "INFO",
-      "msg": "oracle.decide.start",
-      "session_id": "",
-      "turn": 1,
-      "state_path": "reproducing",
-      "attrs": {
-        "agent": "proposer",
-        "call_id": "19348ad937170a5c",
-        "model": "claude-sonnet-4-6",
-        "prompt_preview": "# Proposing a fix — produce the fix-proposal artifact\n\nYou are proposing a fix for **TKT-001** — *TUI hangs on ESC*\nagainst `.worktrees/tkt-001`.\n\nYou have a reproduction artifact from the previous ro",
-        "verb": "decide"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.622334Z",
-      "level": "INFO",
-      "msg": "oracle.decide.complete",
-      "session_id": "",
-      "turn": 1,
-      "state_path": "reproducing",
-      "attrs": {
-        "agent": "proposer",
-        "call_id": "19348ad937170a5c",
-        "duration_ms": 88858,
-        "model": "claude-sonnet-4-6",
-        "prompt": "# Proposing a fix — produce the fix-proposal artifact\n\nYou are proposing a fix for **TKT-001** — *TUI hangs on ESC*\nagainst `.worktrees/tkt-001`.\n\nYou have a reproduction artifact from the previous room:\n\n\u003e ## Bug: ESC silently discarded while TUI is in `ModeAwaitingLLM`\n\n### What is broken\n\nWhen a user presses **ESC while an LLM turn is in flight** (spinner active, mode = `ModeAwaitingLLM`), the keypress is silently discarded. The system menu does not open, no transcript feedback is shown, and the in-flight turn is not cancelled. From the user's perspective, the TUI appears completely frozen and unresponsive.\n\n### Root cause\n\nIn `internal/tui/tui.go` around line 1251, `routeKey()` guards the ESC→menu transition to `ModeOnPath | ModeOffPath` only:\n\n```go\nif msg.Type == tea.KeyEsc {\n    if m.mode == ModeOnPath || m.mode == ModeOffPath {\n        m.mode = ModeMenu\n        m.menuSystem.Open()\n        return m, nil\n    }\n}\n```\n\nWhen `m.mode == ModeAwaitingLLM`, this guard is skipped entirely. The key then falls through to `m.prompt.Update(msg)`, which passes it to the `charmbracelet/bubbles/textarea` widget — a widget that has no ESC binding, so it is silently dropped.\n\nCtrl+C is handled correctly for `ModeAwaitingLLM` (calls `inFlightCancel`), but ESC is not.\n\n### Reproduction\n\nA deterministic Go test was written and is on disk at:\n\n```\ninternal/tui/tkt001_esc_repro_test.go\n```\n\nThe test has two cases:\n\n**`TestTKT001_EscSilentlySwallowedDuringInFlight`** — proves the bug. Calls `SimulateSlowHarnessTurnStart` to put the model into `ModeAwaitingLLM` (with a no-op cancel func wired), then sends `tea.KeyEsc`. All three \"BUG\" assertions pass:\n1. Mode remains `ModeAwaitingLLM` — menu never opened.\n2. Transcript content unchanged — no \"press Ctrl+C\" or similar hint was appended.\n3. `HasInFlightCancel` is still `true` — `inFlightCancel` was never called; the turn was not cancelled.\n\n**`TestTKT001_ControlEscFromOnPathOpensMenu`** — positive control. ESC from `ModeOnPath` correctly transitions to `ModeMenu`. Passes, confirming test helpers are sound.\n\nRun: `cd internal/tui \u0026\u0026 go test -v -run TestTKT001 .`\n\nOutput:\n```\n--- PASS: TestTKT001_EscSilentlySwallowedDuringInFlight (0.01s)\n--- PASS: TestTKT001_ControlEscFromOnPathOpensMenu (0.01s)\n```\n\n### Fix direction\n\nAdd a `ModeAwaitingLLM` branch to the ESC handler in `routeKey()`. At minimum, show the user a hint (\"turn in flight — use Ctrl+C to cancel\") or call `inFlightCancel` directly and transition mode. The queue-clear branch just above the menu guard is a useful model for the fix pattern.\n\n\n\n## Constraints\n\n- `fix_description` must be concrete — not \"fix the bug\". Describe the\n  edit in enough detail that another engineer could implement it without\n  rereading the ticket.\n- `root_cause` must explain *why* the bug happens, not *what* the bug is.\n  Cite the offending file / line where possible.\n- `affected_files` must be real, relative paths in the repo (no leading\n  slash; must have an extension). At least one.\n- `confidence` is your own estimate in [0.0, 1.0]; under 0.3 is rejected\n  downstream.\n- `reasoning` is the chain from evidence → cause → fix.\n\n## Output\n\nSubmit a `propose_fix_artifact` (see `schemas/proposing_artifact.json`).\nThe `summary_markdown` field is what a human reviewer reads at the\ncheckpoint — write it for them: bug, cause, fix, files, confidence.\n",
-        "response": {
-          "intent": {
-            "affected_files": [
-              "internal/tui/tui.go"
-            ],
-            "alternative_approaches": [
-              "Show a transcript hint only (append '(turn in flight — press Ctrl+C to cancel)' via blocks.New and return without mode change). Cheaper, zero risk of turnOutcomeMsg interaction, but leaves the user unable to reach the menu until the turn completes — does not fully resolve the 'frozen TUI' UX complaint.",
-              "Cancel the turn but stay in ModeAwaitingLLM and append a hint. Unblocks the turn but still leaves the user unable to open the menu — similar to what Ctrl+C does today, redundant with an existing binding."
-            ],
-            "confidence": 0.95,
-            "fix_description": "In `internal/tui/tui.go` inside the `routeKey()` function, extend the existing ESC guard block (currently at line 1251) with a new `ModeAwaitingLLM` branch placed immediately after the `ModeOnPath | ModeOffPath` branch. The new branch must: (1) call `m.inFlightCancel()` if it is non-nil, to cancel the in-flight turn; (2) set `m.mode = ModeMenu`; (3) call `m.menuSystem.Open()`; (4) return `m, nil`. Also remove or update the stale comment on lines 1247–1250 that claims ESC \"deliberately does not fire during ModeAwaitingLLM\".",
-            "reasoning": "The reproduction test `tkt001_esc_repro_test.go` directly confirms three observable symptoms of the bug: mode unchanged, transcript unchanged, and `inFlightCancel` not called. The guard at `tui.go:1252` is the unique decision point — there is no other ESC handler that could rescue the key after this guard. The Ctrl+C handler at line 1187 shows the exact call sequence needed (`inFlightCancel()` then early return); the ESC→menu handler above it shows the mode/menu transition. The fix combines both patterns. The only non-trivial concern is `turnOutcomeMsg` arriving while `ModeMenu` is active; however, Ctrl+C today already triggers cancel while the mode is NOT yet `ModeMenu`, and the outcome handler at line 2138 already guards `m.inFlightCancel != nil` before acting — so the new path does not introduce a novel race. Confidence 0.95 (not 1.0 because `turnOutcomeMsg`-in-menu interaction is not covered by the existing test suite and would need a follow-up test or manual review).",
-            "root_cause": "The ESC key handler in `routeKey()` (`internal/tui/tui.go:1252`) only transitions to `ModeMenu` when `m.mode` is `ModeOnPath` or `ModeOffPath`. In `ModeAwaitingLLM` the condition is false, so execution falls through to `m.prompt.Update(msg)`, which delegates to the `charmbracelet/bubbles/textarea` widget. That widget has no ESC binding, so the keystroke is silently consumed. No cancel, no menu, no user feedback.",
-            "summary_markdown": "## Bug\n\nWhen a user presses **ESC while an LLM turn is in flight** (`ModeAwaitingLLM`, spinner active), the keypress is silently discarded. No system menu opens, no transcript hint is shown, and the in-flight turn is not cancelled. The TUI appears completely frozen.\n\n## Root Cause\n\n`routeKey()` in `internal/tui/tui.go:1251` gates the ESC→menu transition on `ModeOnPath | ModeOffPath` only:\n\n```go\nif msg.Type == tea.KeyEsc {\n    if m.mode == ModeOnPath || m.mode == ModeOffPath {\n        m.mode = ModeMenu\n        m.menuSystem.Open()\n        return m, nil\n    }\n}\n```\n\nWhen `m.mode == ModeAwaitingLLM` the guard is not entered, the key falls through to `m.prompt.Update(msg)` (the `charmbracelet/bubbles/textarea` widget), which has no ESC binding and silently drops it.\n\nCtrl+C is handled correctly at line 1187 — it calls `m.inFlightCancel()` and returns — but ESC has no equivalent branch for this mode.\n\n## Fix\n\nAdd a `ModeAwaitingLLM` case immediately inside the existing ESC block at `tui.go:1252`. The branch should (a) call `m.inFlightCancel()` if non-nil, (b) transition to `ModeMenu`, and (c) call `m.menuSystem.Open()`. This mirrors what Ctrl+C does for cancellation, and what the existing ESC branch does for menu entry:\n\n```go\nif msg.Type == tea.KeyEsc {\n    if m.mode == ModeOnPath || m.mode == ModeOffPath {\n        m.mode = ModeMenu\n        m.menuSystem.Open()\n        return m, nil\n    }\n    // NEW: ESC during an in-flight turn cancels the turn and opens the menu.\n    if m.mode == ModeAwaitingLLM {\n        if m.inFlightCancel != nil {\n            m.inFlightCancel()\n        }\n        m.mode = ModeMenu\n        m.menuSystem.Open()\n        return m, nil\n    }\n}\n```\n\nThe comment on the existing guard (\"It deliberately does not fire during ModeAwaitingLLM — Ctrl+C cancels the turn first\") should be removed or updated, as this constraint is lifted by the fix.\n\n## Files\n\n- `internal/tui/tui.go` — the only change site (lines 1247–1257)\n\n## Verification\n\nThe existing reproduction test at `internal/tui/tkt001_esc_repro_test.go` fully covers the fix. After the patch, `TestTKT001_EscSilentlySwallowedDuringInFlight`'s three `assert.*` calls will all fail (proving correct behaviour), while the positive-control test `TestTKT001_ControlEscFromOnPathOpensMenu` must continue to pass.\n\n## Confidence: 0.95\n\nThe ESC guard condition is the sole code path involved; the fix is a direct extension of the existing guard pattern. The only uncertainty is how `turnOutcomeMsg` arrives while `ModeMenu` is active — but the menu mode is already exercised by the positive-control test and by normal interactive use, so no new edge case is introduced.",
-            "summary_title": "TKT-001: ESC silently discarded during ModeAwaitingLLM — routeKey guard too narrow"
-          },
-          "text": "Fix proposal submitted. \n\nThe patch is a single-site, 6-line change: extend the `ModeOnPath | ModeOffPath` ESC guard in `routeKey()` (`tui.go:1252`) with a new `ModeAwaitingLLM` branch that calls `m.inFlightCancel()`, sets `m.mode = ModeMenu`, and calls `m.menuSystem.Open()`. The existing repro test fully covers it — after the fix, the three \"BUG\" assertions in `TestTKT001_EscSilentlySwallowedDuringInFlight` will all fail (proving correct behaviour), while the positive-control test stays green. Confidence 0.95."
-        },
-        "system_prompt": "You are a senior engineer performing code analysis. Read the codebase, analyse the reproduction evidence, and produce a structured fix proposal or close-out summary.",
-        "verb": "decide"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.623123Z",
-      "level": "INFO",
-      "msg": "turn.input",
-      "session_id": "",
-      "turn": 1,
-      "state_path": "reproducing",
-      "attrs": {
-        "input": "[intent] accept"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "turn.start",
       "session_id": "",
       "turn": 2,
-      "state_path": "reproducing",
+      "state_path": "",
       "attrs": {
         "direct": true,
         "input": "[intent] accept",
@@ -7793,12 +7790,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "machine.transition",
       "session_id": "",
       "turn": 2,
-      "state_path": "reproducing",
+      "state_path": "",
       "attrs": {
         "from": "reproducing",
         "intent": "accept",
@@ -7807,12 +7804,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 2,
-      "state_path": "reproducing",
+      "state_path": "",
       "attrs": {
         "args": {
           "body": null,
@@ -7825,25 +7822,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 2,
-      "state_path": "reproducing",
-      "attrs": {
-        "set": {
-          "cycle": 0
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.623123Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 2,
-      "state_path": "reproducing",
+      "state_path": "",
       "attrs": {
         "set": {
           "last_reply_author": "human"
@@ -7851,12 +7835,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 2,
-      "state_path": "reproducing",
+      "state_path": "",
       "attrs": {
         "set": {
           "refine_feedback": ""
@@ -7864,12 +7848,25 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
+      "level": "INFO",
+      "msg": "world.update",
+      "session_id": "",
+      "turn": 2,
+      "state_path": "",
+      "attrs": {
+        "set": {
+          "cycle": 0
+        }
+      }
+    },
+    {
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 2,
-      "state_path": "reproducing",
+      "state_path": "",
       "attrs": {
         "args": {
           "agent": "proposer",
@@ -7890,34 +7887,34 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "machine.state_exited",
       "session_id": "",
       "turn": 2,
-      "state_path": "reproducing",
+      "state_path": "",
       "attrs": {
         "state": "reproducing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "machine.state_entered",
       "session_id": "",
       "turn": 2,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "state": "proposing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 2,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "args": {
           "body": null,
@@ -7931,12 +7928,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 2,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "data": {
           "message_id": "msg-1",
@@ -7946,12 +7943,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 2,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "args": {
           "agent": "proposer",
@@ -7973,12 +7970,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 2,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "set": {
           "propose_fix_artifact": {
@@ -7996,12 +7993,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 2,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "data": {
           "submitted": {
@@ -8020,70 +8017,24 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.623123Z",
+      "time": "2026-05-28T09:45:47.93068Z",
       "level": "INFO",
       "msg": "turn.end",
       "session_id": "",
       "turn": 2,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "outcome": "transitioned",
         "to": "proposing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625501Z",
-      "level": "INFO",
-      "msg": "oracle.task.start",
-      "session_id": "",
-      "turn": 2,
-      "state_path": "proposing",
-      "attrs": {
-        "agent": "implementer",
-        "call_id": "371b27cd15312244",
-        "model": "claude-sonnet-4-6",
-        "prompt_preview": "# Implementing the fix — apply edits to the worktree\n\nYou are implementing the fix for **TKT-001** — *TUI hangs on ESC*\ninside the worktree at `.worktrees/tkt-001`.\n\nThe proposing room produced this p",
-        "verb": "task"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.625502Z",
-      "level": "INFO",
-      "msg": "oracle.task.complete",
-      "session_id": "",
-      "turn": 2,
-      "state_path": "proposing",
-      "attrs": {
-        "agent": "implementer",
-        "call_id": "371b27cd15312244",
-        "duration_ms": 66787,
-        "model": "claude-sonnet-4-6",
-        "prompt": "# Implementing the fix — apply edits to the worktree\n\nYou are implementing the fix for **TKT-001** — *TUI hangs on ESC*\ninside the worktree at `.worktrees/tkt-001`.\n\nThe proposing room produced this proposal:\n\n\u003e In `internal/tui/tui.go` inside the `routeKey()` function, extend the existing ESC guard block (currently at line 1251) with a new `ModeAwaitingLLM` branch placed immediately after the `ModeOnPath | ModeOffPath` branch. The new branch must: (1) call `m.inFlightCancel()` if it is non-nil, to cancel the in-flight turn; (2) set `m.mode = ModeMenu`; (3) call `m.menuSystem.Open()`; (4) return `m, nil`. Also remove or update the stale comment on lines 1247–1250 that claims ESC \"deliberately does not fire during ModeAwaitingLLM\".\n\n**Root cause:** The ESC key handler in `routeKey()` (`internal/tui/tui.go:1252`) only transitions to `ModeMenu` when `m.mode` is `ModeOnPath` or `ModeOffPath`. In `ModeAwaitingLLM` the condition is false, so execution falls through to `m.prompt.Update(msg)`, which delegates to the `charmbracelet/bubbles/textarea` widget. That widget has no ESC binding, so the keystroke is silently consumed. No cancel, no menu, no user feedback.\n\n**Affected files:** \u003c[]interface {} Value\u003e\n\n\n\n## What to do\n\nMake the edits described in the proposal. You are running with cwd set to\nthe worktree (`.worktrees/tkt-001`), so file paths in the proposal's\n`affected_files` are valid relative paths you can hand straight to\nthe `Read` and `Edit` (or `Write`) tools.\n\nYou MUST actually modify the files. The downstream `testing` room will\nre-run the repro tests against this worktree's HEAD — if you don't make\nthe edits, those tests will still fail and the pipeline will reject the\nwork.\n\n## Constraints\n\n- Stay inside the worktree. Do not edit `.git` metadata or any path\n  outside `.worktrees/tkt-001`.\n- Touch only the files in `affected_files`. If you genuinely need to\n  edit something outside that list, add it to `files_changed` in the\n  artifact so the reviewer sees the scope.\n- Don't run `git commit` yourself — the pipeline does that after you\n  return. Just leave the worktree dirty with your edits staged or\n  unstaged; the commit step picks up everything.\n- Don't run `go test` either — the next room runs CI.\n\n## Output\n\nSubmit an `implementing_artifact` (see `schemas/implementing_artifact.json`).\nRequired fields:\n- `summary_title`: one-line description of what you applied.\n- `summary_markdown`: human-readable diff narrative (what changed, where,\n  why each edit). This is what a human reviewer reads at the testing\n  checkpoint.\n- `files_changed`: every path you actually edited (or attempted to edit).\n- `applied`: `true` if every required edit was made, `false` if you hit a\n  blocker. When `false`, populate `blockers` with the reason.\n",
-        "response": {
-          "text": "Fix applied and artifact submitted. The edit adds a `ModeAwaitingLLM` branch to the ESC guard in `routeKey()` (`internal/tui/tui.go:1251`) that cancels the in-flight turn via `m.inFlightCancel()` and opens the menu — matching the behavior that already existed for `ModeOnPath`/`ModeOffPath`. The pipeline's testing room will now run the repro tests against the patched code."
-        },
-        "system_prompt": "You are a software engineer applying a proposed fix. Read the proposal artifact, locate the affected files, and apply the minimal correct edit to fix the bug.",
-        "verb": "task"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.625885Z",
-      "level": "INFO",
-      "msg": "turn.input",
-      "session_id": "",
-      "turn": 2,
-      "state_path": "proposing",
-      "attrs": {
-        "input": "[intent] accept"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "turn.start",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "direct": true,
         "input": "[intent] accept",
@@ -8091,12 +8042,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "machine.transition",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "from": "proposing",
         "intent": "accept",
@@ -8105,12 +8056,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "args": {
           "body": "## Bug\n\nWhen a user presses **ESC while an LLM turn is in flight** (`ModeAwaitingLLM`, spinner active), the keypress is silently discarded. No system menu opens, no transcript hint is shown, and the in-flight turn is not cancelled. The TUI appears completely frozen.\n\n## Root Cause\n\n`routeKey()` in `internal/tui/tui.go:1251` gates the ESC→menu transition on `ModeOnPath | ModeOffPath` only. When `m.mode == ModeAwaitingLLM` the guard is not entered, the key falls through to the `charmbracelet/bubbles/textarea` widget, which silently drops it.\n\n## Fix\n\nAdd a `ModeAwaitingLLM` branch inside the existing ESC block at `tui.go:1252` that calls `m.inFlightCancel()`, transitions to `ModeMenu`, and calls `m.menuSystem.Open()`.\n\n## Files\n\n- `internal/tui/tui.go` — the only change site (lines 1247-1257)\n\n## Confidence: 0.95",
@@ -8123,12 +8074,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "set": {
           "last_reply_author": "human"
@@ -8136,12 +8087,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "set": {
           "refine_feedback": ""
@@ -8149,12 +8100,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "set": {
           "cycle": 0
@@ -8162,12 +8113,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "args": {
           "base": "main",
@@ -8179,12 +8130,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "args": {
           "id": "ws-tkt-001"
@@ -8194,12 +8145,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "args": {
           "acceptance": {
@@ -8228,12 +8179,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "args": {
           "files": null,
@@ -8245,45 +8196,45 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "say": "Fix applied — TKT-001: ESC silently discarded during ModeAwaitingLLM — routeKey guard too narrow"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "machine.state_exited",
       "session_id": "",
       "turn": 3,
-      "state_path": "proposing",
+      "state_path": "",
       "attrs": {
         "state": "proposing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "machine.state_entered",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "state": "implementing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "args": {
           "body": "## Bug\n\nWhen a user presses **ESC while an LLM turn is in flight** (`ModeAwaitingLLM`, spinner active), the keypress is silently discarded. No system menu opens, no transcript hint is shown, and the in-flight turn is not cancelled. The TUI appears completely frozen.\n\n## Root Cause\n\n`routeKey()` in `internal/tui/tui.go:1251` gates the ESC→menu transition on `ModeOnPath | ModeOffPath` only. When `m.mode == ModeAwaitingLLM` the guard is not entered, the key falls through to the `charmbracelet/bubbles/textarea` widget, which silently drops it.\n\n## Fix\n\nAdd a `ModeAwaitingLLM` branch inside the existing ESC block at `tui.go:1252` that calls `m.inFlightCancel()`, transitions to `ModeMenu`, and calls `m.menuSystem.Open()`.\n\n## Files\n\n- `internal/tui/tui.go` — the only change site (lines 1247-1257)\n\n## Confidence: 0.95",
@@ -8297,12 +8248,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "data": {
           "message_id": "msg-1",
@@ -8312,12 +8263,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "args": {
           "base": "main",
@@ -8330,12 +8281,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "data": {
           "log": "synced",
@@ -8345,12 +8296,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "args": {
           "id": "ws-tkt-001"
@@ -8361,12 +8312,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "data": {
           "log": "synced",
@@ -8376,12 +8327,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "args": {
           "acceptance": {
@@ -8411,23 +8362,23 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "namespace": "host.oracle.task"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "args": {
           "files": null,
@@ -8440,12 +8391,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "data": {
           "diff": "diff --git a/x b/x\n",
@@ -8457,70 +8408,24 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.625885Z",
+      "time": "2026-05-28T09:45:47.933703Z",
       "level": "INFO",
       "msg": "turn.end",
       "session_id": "",
       "turn": 3,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "outcome": "transitioned",
         "to": "implementing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628411Z",
-      "level": "INFO",
-      "msg": "oracle.task.start",
-      "session_id": "",
-      "turn": 3,
-      "state_path": "implementing",
-      "attrs": {
-        "agent": "test_author",
-        "call_id": "b5c8f4783037e788",
-        "model": "claude-sonnet-4-6",
-        "prompt_preview": "# Reviewing tests \u0026 implementation — produce the testing artifact\n\nYou are reviewing the implementation of the fix for **TKT-001** —\n*TUI hangs on ESC*.\n\nThe proposed fix was:\n\n\u003e ## Bug\n\nWhen a user p",
-        "verb": "task"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.628412Z",
-      "level": "INFO",
-      "msg": "oracle.task.complete",
-      "session_id": "",
-      "turn": 3,
-      "state_path": "implementing",
-      "attrs": {
-        "agent": "test_author",
-        "call_id": "b5c8f4783037e788",
-        "duration_ms": 134264,
-        "model": "claude-sonnet-4-6",
-        "prompt": "# Reviewing tests \u0026 implementation — produce the testing artifact\n\nYou are reviewing the implementation of the fix for **TKT-001** —\n*TUI hangs on ESC*.\n\nThe proposed fix was:\n\n\u003e ## Bug\n\nWhen a user presses **ESC while an LLM turn is in flight** (`ModeAwaitingLLM`, spinner active), the keypress is silently discarded. No system menu opens, no transcript hint is shown, and the in-flight turn is not cancelled. The TUI appears completely frozen.\n\n## Root Cause\n\n`routeKey()` in `internal/tui/tui.go:1251` gates the ESC→menu transition on `ModeOnPath | ModeOffPath` only:\n\n```go\nif msg.Type == tea.KeyEsc {\n    if m.mode == ModeOnPath || m.mode == ModeOffPath {\n        m.mode = ModeMenu\n        m.menuSystem.Open()\n        return m, nil\n    }\n}\n```\n\nWhen `m.mode == ModeAwaitingLLM` the guard is not entered, the key falls through to `m.prompt.Update(msg)` (the `charmbracelet/bubbles/textarea` widget), which has no ESC binding and silently drops it.\n\nCtrl+C is handled correctly at line 1187 — it calls `m.inFlightCancel()` and returns — but ESC has no equivalent branch for this mode.\n\n## Fix\n\nAdd a `ModeAwaitingLLM` case immediately inside the existing ESC block at `tui.go:1252`. The branch should (a) call `m.inFlightCancel()` if non-nil, (b) transition to `ModeMenu`, and (c) call `m.menuSystem.Open()`. This mirrors what Ctrl+C does for cancellation, and what the existing ESC branch does for menu entry:\n\n```go\nif msg.Type == tea.KeyEsc {\n    if m.mode == ModeOnPath || m.mode == ModeOffPath {\n        m.mode = ModeMenu\n        m.menuSystem.Open()\n        return m, nil\n    }\n    // NEW: ESC during an in-flight turn cancels the turn and opens the menu.\n    if m.mode == ModeAwaitingLLM {\n        if m.inFlightCancel != nil {\n            m.inFlightCancel()\n        }\n        m.mode = ModeMenu\n        m.menuSystem.Open()\n        return m, nil\n    }\n}\n```\n\nThe comment on the existing guard (\"It deliberately does not fire during ModeAwaitingLLM — Ctrl+C cancels the turn first\") should be removed or updated, as this constraint is lifted by the fix.\n\n## Files\n\n- `internal/tui/tui.go` — the only change site (lines 1247–1257)\n\n## Verification\n\nThe existing reproduction test at `internal/tui/tkt001_esc_repro_test.go` fully covers the fix. After the patch, `TestTKT001_EscSilentlySwallowedDuringInFlight`'s three `assert.*` calls will all fail (proving correct behaviour), while the positive-control test `TestTKT001_ControlEscFromOnPathOpensMenu` must continue to pass.\n\n## Confidence: 0.95\n\nThe ESC guard condition is the sole code path involved; the fix is a direct extension of the existing guard pattern. The only uncertainty is how `turnOutcomeMsg` arrives while `ModeMenu` is active — but the menu mode is already exercised by the positive-control test and by normal interactive use, so no new edge case is introduced.\n\nThe CI / test run produced:\n\n```\nPASS: 12 tests\n```\n\n\n\n## Constraints\n\n- `status` must be `passed` only if the tests actually ran and the bug\n  reproduction now produces the expected outcome. `blocked` is for\n  unrunnable suites (compile error, missing dependency); `failed` is for\n  ran-but-broken.\n- `tests_added` must list new / modified test files. Reuse existing tests\n  where possible; only add fresh ones if no existing test covers the bug.\n- `blockers` are review-grade objections that must be fixed before the\n  PR can advance.\n\n## Output\n\nSubmit an `implement_review_artifact` (see `schemas/testing_artifact.json`).\nThe `summary_markdown` should walk the reviewer through tests-added,\ntests-run results, and any blockers in plain prose.\n",
-        "response": {
-          "text": "Artifact submitted. Here's what the review found:\n\n**Status: `failed`** — 3 blockers.\n\n### What the tests actually show\n\nThe reproduction test (`TestTKT001_EscBannerDismiss_BlocksEventLoop`) ran and **passed** — meaning it confirmed the bug is present. But this test is structured as a bug-reproduction test: it asserts `elapsed \u003e= 150ms`, which is true only *while the bug exists*. After a correct fix the assertion would flip to a failure.\n\n### Why the proposal is wrong in three ways\n\n1. **Fix not applied.** `tui.go:1251` still reads `ModeOnPath || ModeOffPath` — the `ModeAwaitingLLM` case from the proposal was never committed.\n\n2. **Wrong fix for the actual bug.** The actual bug is at `tui.go:1324`: `m.jobStore.MarkNotificationRead(ctx, n.ID)` is called **synchronously inside `Update()`**, blocking the event loop for the full SQLite write duration. The proposed guard change at line 1251 would make ESC return early before reaching the banner handler — hiding the blocking call as a side effect, but never fixing the root cause. The correct fix is to move the `MarkNotificationRead` call into a `tea.Cmd` closure, matching `handleInboxItemSelected` at line 1080-1085.\n\n3. **Wrong bug description and test names.** The proposal describes \"ESC silently discarded, no menu opens\" and cites two tests that don't exist (`TestTKT001_EscSilentlySwallowedDuringInFlight`, `TestTKT001_ControlEscFromOnPathOpensMenu`). The actual bug is the event-loop block; the actual test is `TestTKT001_EscBannerDismiss_BlocksEventLoop`."
-        },
-        "system_prompt": "You are a software engineer reviewing test coverage and authoring regression tests. Read the applied fix, run the tests, and produce a structured test-review artifact.",
-        "verb": "task"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.628974Z",
-      "level": "INFO",
-      "msg": "turn.input",
-      "session_id": "",
-      "turn": 3,
-      "state_path": "implementing",
-      "attrs": {
-        "input": "[intent] accept"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "turn.start",
       "session_id": "",
       "turn": 4,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "direct": true,
         "input": "[intent] accept",
@@ -8528,12 +8433,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "machine.transition",
       "session_id": "",
       "turn": 4,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "from": "implementing",
         "intent": "accept",
@@ -8542,12 +8447,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 4,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "args": {
           "workdir": ".worktrees/tkt-001"
@@ -8557,12 +8462,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 4,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "args": {
           "acceptance": {
@@ -8588,34 +8493,34 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "machine.state_exited",
       "session_id": "",
       "turn": 4,
-      "state_path": "implementing",
+      "state_path": "",
       "attrs": {
         "state": "implementing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "machine.state_entered",
       "session_id": "",
       "turn": 4,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "state": "testing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 4,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "args": {
           "workdir": ".worktrees/tkt-001"
@@ -8626,12 +8531,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 4,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "set": {
           "ci_log": "PASS: 12 tests"
@@ -8639,12 +8544,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 4,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "data": {
           "failed": 0,
@@ -8656,12 +8561,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 4,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "args": {
           "acceptance": {
@@ -8688,46 +8593,35 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 4,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "namespace": "host.oracle.task"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.628974Z",
+      "time": "2026-05-28T09:45:47.936879Z",
       "level": "INFO",
       "msg": "turn.end",
       "session_id": "",
       "turn": 4,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "outcome": "transitioned",
         "to": "testing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
-      "level": "INFO",
-      "msg": "turn.input",
-      "session_id": "",
-      "turn": 4,
-      "state_path": "testing",
-      "attrs": {
-        "input": "[intent] accept"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "turn.start",
       "session_id": "",
       "turn": 5,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "direct": true,
         "input": "[intent] accept",
@@ -8735,12 +8629,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "machine.transition",
       "session_id": "",
       "turn": 5,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "from": "testing",
         "intent": "accept",
@@ -8749,12 +8643,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 5,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "args": {
           "body": null,
@@ -8767,12 +8661,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 5,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "set": {
           "last_reply_author": "human"
@@ -8780,12 +8674,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 5,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "set": {
           "refine_feedback": ""
@@ -8793,12 +8687,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 5,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "set": {
           "cycle": 0
@@ -8806,12 +8700,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 5,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "args": {
           "workdir": ".worktrees/tkt-001"
@@ -8821,45 +8715,45 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 5,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "say": "Review pass complete — diff pending."
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "machine.state_exited",
       "session_id": "",
       "turn": 5,
-      "state_path": "testing",
+      "state_path": "",
       "attrs": {
         "state": "testing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "machine.state_entered",
       "session_id": "",
       "turn": 5,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "state": "reviewing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 5,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "args": {
           "body": null,
@@ -8873,12 +8767,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 5,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "data": {
           "message_id": "msg-1",
@@ -8888,12 +8782,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 5,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "args": {
           "workdir": ".worktrees/tkt-001"
@@ -8904,12 +8798,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 5,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "set": {
           "ci_log": "diff --git a/x b/x\n"
@@ -8917,12 +8811,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 5,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "data": {
           "diff": "diff --git a/x b/x\n",
@@ -8934,70 +8828,24 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.632117Z",
+      "time": "2026-05-28T09:45:47.93983Z",
       "level": "INFO",
       "msg": "turn.end",
       "session_id": "",
       "turn": 5,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "outcome": "transitioned",
         "to": "reviewing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.634711Z",
-      "level": "INFO",
-      "msg": "oracle.task.start",
-      "session_id": "",
-      "turn": 5,
-      "state_path": "reviewing",
-      "attrs": {
-        "agent": "validator",
-        "call_id": "a8c263a13b302cd2",
-        "model": "claude-sonnet-4-6",
-        "prompt_preview": "# Validating the fix",
-        "verb": "task"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.634712Z",
-      "level": "INFO",
-      "msg": "oracle.task.complete",
-      "session_id": "",
-      "turn": 5,
-      "state_path": "reviewing",
-      "attrs": {
-        "agent": "validator",
-        "call_id": "a8c263a13b302cd2",
-        "duration_ms": 45000,
-        "model": "claude-sonnet-4-6",
-        "prompt": "# Validating the fix",
-        "response": {
-          "text": "Validation artifact submitted. Fix confirmed."
-        },
-        "system_prompt": "You are a software engineer validating that a bug fix is correct.",
-        "verb": "task"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.635194Z",
-      "level": "INFO",
-      "msg": "turn.input",
-      "session_id": "",
-      "turn": 5,
-      "state_path": "reviewing",
-      "attrs": {
-        "input": "[intent] accept"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "turn.start",
       "session_id": "",
       "turn": 6,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "direct": true,
         "input": "[intent] accept",
@@ -9005,12 +8853,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "machine.transition",
       "session_id": "",
       "turn": 6,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "from": "reviewing",
         "intent": "accept",
@@ -9019,12 +8867,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 6,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "args": {
           "workdir": ".worktrees/tkt-001"
@@ -9034,12 +8882,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 6,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "args": {
           "acceptance": {
@@ -9065,34 +8913,34 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "machine.state_exited",
       "session_id": "",
       "turn": 6,
-      "state_path": "reviewing",
+      "state_path": "",
       "attrs": {
         "state": "reviewing"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "machine.state_entered",
       "session_id": "",
       "turn": 6,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "state": "validating"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 6,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "args": {
           "workdir": ".worktrees/tkt-001"
@@ -9103,12 +8951,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 6,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "set": {
           "ci_log": "PASS: 12 tests"
@@ -9116,12 +8964,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 6,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "data": {
           "failed": 0,
@@ -9133,12 +8981,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 6,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "args": {
           "acceptance": {
@@ -9165,12 +9013,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 6,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "set": {
           "validate_artifact": {
@@ -9185,12 +9033,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 6,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "data": {
           "submitted": {
@@ -9206,70 +9054,24 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.635194Z",
+      "time": "2026-05-28T09:45:47.942855Z",
       "level": "INFO",
       "msg": "turn.end",
       "session_id": "",
       "turn": 6,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "outcome": "transitioned",
         "to": "validating"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638399Z",
-      "level": "INFO",
-      "msg": "oracle.decide.start",
-      "session_id": "",
-      "turn": 6,
-      "state_path": "validating",
-      "attrs": {
-        "agent": "proposer",
-        "call_id": "96b9de3b382d480f",
-        "model": "claude-sonnet-4-6",
-        "prompt_preview": "# Done — produce the close-out artifact",
-        "verb": "decide"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.6384Z",
-      "level": "INFO",
-      "msg": "oracle.decide.complete",
-      "session_id": "",
-      "turn": 6,
-      "state_path": "validating",
-      "attrs": {
-        "agent": "proposer",
-        "call_id": "96b9de3b382d480f",
-        "duration_ms": 91234,
-        "model": "claude-sonnet-4-6",
-        "prompt": "# Done — produce the close-out artifact",
-        "response": {
-          "text": "Done artifact submitted."
-        },
-        "system_prompt": "You are a senior engineer performing code analysis. Read the codebase, analyse the reproduction evidence, and produce a structured fix proposal or close-out summary.",
-        "verb": "decide"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.638982Z",
-      "level": "INFO",
-      "msg": "turn.input",
-      "session_id": "",
-      "turn": 6,
-      "state_path": "validating",
-      "attrs": {
-        "input": "[intent] accept"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "turn.start",
       "session_id": "",
       "turn": 7,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "direct": true,
         "input": "[intent] accept",
@@ -9277,12 +9079,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "machine.transition",
       "session_id": "",
       "turn": 7,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "from": "validating",
         "intent": "accept",
@@ -9291,12 +9093,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 7,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "args": {
           "body": "## Validation result\n\nThe fix at `tui.go:1337-1341` was confirmed present and correct. The synchronous `MarkNotificationRead` call is replaced with a `tea.Cmd` closure. The reproduction test `TestTKT001_EscBannerDismiss_BlocksEventLoop` now FAILS (asserting elapsed \u003e= 150ms when `Update()` returns in microseconds) — confirming the fix eliminated the blocking call.\n\n## Build\n\nAll 216 tests pass. No compilation errors.\n\n## Evidence\n\nThe async `tea.Cmd` pattern at the fix site matches `handleInboxItemSelected` at `tui.go:1080-1085`. The fix site, root cause, and test all agree.\n\n## Outcome: pass\n\nReady to advance to done.",
@@ -9309,25 +9111,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 7,
-      "state_path": "validating",
-      "attrs": {
-        "set": {
-          "last_reply_author": "human"
-        }
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.638982Z",
-      "level": "INFO",
-      "msg": "world.update",
-      "session_id": "",
-      "turn": 7,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "set": {
           "refine_feedback": ""
@@ -9335,12 +9124,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 7,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "set": {
           "cycle": 0
@@ -9348,12 +9137,25 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
+      "level": "INFO",
+      "msg": "world.update",
+      "session_id": "",
+      "turn": 7,
+      "state_path": "",
+      "attrs": {
+        "set": {
+          "last_reply_author": "human"
+        }
+      }
+    },
+    {
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 7,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "args": {
           "agent": "proposer",
@@ -9374,34 +9176,34 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "machine.state_exited",
       "session_id": "",
       "turn": 7,
-      "state_path": "validating",
+      "state_path": "",
       "attrs": {
         "state": "validating"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "machine.state_entered",
       "session_id": "",
       "turn": 7,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "state": "done"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 7,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "args": {
           "body": "## Validation result\n\nThe fix at `tui.go:1337-1341` was confirmed present and correct. The synchronous `MarkNotificationRead` call is replaced with a `tea.Cmd` closure. The reproduction test `TestTKT001_EscBannerDismiss_BlocksEventLoop` now FAILS (asserting elapsed \u003e= 150ms when `Update()` returns in microseconds) — confirming the fix eliminated the blocking call.\n\n## Build\n\nAll 216 tests pass. No compilation errors.\n\n## Evidence\n\nThe async `tea.Cmd` pattern at the fix site matches `handleInboxItemSelected` at `tui.go:1080-1085`. The fix site, root cause, and test all agree.\n\n## Outcome: pass\n\nReady to advance to done.",
@@ -9415,12 +9217,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 7,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "data": {
           "message_id": "msg-1",
@@ -9430,12 +9232,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 7,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "args": {
           "agent": "proposer",
@@ -9457,12 +9259,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 7,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "set": {
           "done_artifact": {
@@ -9497,12 +9299,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 7,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "data": {
           "submitted": {
@@ -9538,35 +9340,24 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.638982Z",
+      "time": "2026-05-28T09:45:47.947209Z",
       "level": "INFO",
       "msg": "turn.end",
       "session_id": "",
       "turn": 7,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "outcome": "transitioned",
         "to": "done"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
-      "level": "INFO",
-      "msg": "turn.input",
-      "session_id": "",
-      "turn": 7,
-      "state_path": "done",
-      "attrs": {
-        "input": "[intent] accept"
-      }
-    },
-    {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "turn.start",
       "session_id": "",
       "turn": 8,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "direct": true,
         "input": "[intent] accept",
@@ -9574,12 +9365,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "machine.transition",
       "session_id": "",
       "turn": 8,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "from": "done",
         "intent": "accept",
@@ -9588,12 +9379,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 8,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "args": {
           "body": "## Bug\n\nThe ESC key handler in `ModeAwaitingLLM` (`tui.go`) dismissed the `action_required` notification banner by calling `m.jobStore.MarkNotificationRead(ctx, n.ID)` **synchronously** inside Bubble Tea's `Update()` function. Because Bubble Tea's event loop is single-threaded and `Update()` must return before the next message can be processed, any slow SQLite write stalled the entire TUI for its full duration. The user experience was an apparent hang: keystrokes queued up and the interface became unresponsive until the write completed.\n\n## Fix\n\n`tui.go:1337-1341` - the synchronous call is replaced with a `tea.Cmd` closure that runs outside the event-loop frame. `Update()` now returns immediately, the DB write executes concurrently, and the result re-enters the model via the normal message path.\n\n## Regression guard\n\n`TestTKT001_EscBannerDismiss_BlocksEventLoop` (`internal/tui/tkt001_esc_hang_repro_test.go`) holds the SQLite connection open via `BeginTx` for the duration of the ESC press, then asserts `Update()` returns in \u003c 10 ms.\n\n## Cycle cost\n\n0 refinement cycles — root cause, fix site, and test strategy were unambiguous from the reproduction evidence. No rework.\n\n## Next-time guidance\n\nFor any future Bubble Tea handler that touches I/O: default to `tea.Cmd`. The `BeginTx`-as-lock test technique is reusable anywhere a Go function must be proven non-blocking against a real SQLite handle.",
@@ -9606,12 +9397,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "harness.called",
       "session_id": "",
       "turn": 8,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "args": {
           "id": "TKT-001",
@@ -9622,12 +9413,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 8,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "set": {
           "status": "fixed"
@@ -9635,12 +9426,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "world.update",
       "session_id": "",
       "turn": 8,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "set": {
           "done_artifact": {
@@ -9675,34 +9466,34 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "machine.state_exited",
       "session_id": "",
       "turn": 8,
-      "state_path": "done",
+      "state_path": "",
       "attrs": {
         "state": "done"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "machine.state_entered",
       "session_id": "",
       "turn": 8,
-      "state_path": "__exit__done",
+      "state_path": "",
       "attrs": {
         "state": "__exit__done"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 8,
-      "state_path": "__exit__done",
+      "state_path": "",
       "attrs": {
         "args": {
           "body": "## Bug\n\nThe ESC key handler in `ModeAwaitingLLM` (`tui.go`) dismissed the `action_required` notification banner by calling `m.jobStore.MarkNotificationRead(ctx, n.ID)` **synchronously** inside Bubble Tea's `Update()` function. Because Bubble Tea's event loop is single-threaded and `Update()` must return before the next message can be processed, any slow SQLite write stalled the entire TUI for its full duration. The user experience was an apparent hang: keystrokes queued up and the interface became unresponsive until the write completed.\n\n## Fix\n\n`tui.go:1337-1341` - the synchronous call is replaced with a `tea.Cmd` closure that runs outside the event-loop frame. `Update()` now returns immediately, the DB write executes concurrently, and the result re-enters the model via the normal message path.\n\n## Regression guard\n\n`TestTKT001_EscBannerDismiss_BlocksEventLoop` (`internal/tui/tkt001_esc_hang_repro_test.go`) holds the SQLite connection open via `BeginTx` for the duration of the ESC press, then asserts `Update()` returns in \u003c 10 ms.\n\n## Cycle cost\n\n0 refinement cycles — root cause, fix site, and test strategy were unambiguous from the reproduction evidence. No rework.\n\n## Next-time guidance\n\nFor any future Bubble Tea handler that touches I/O: default to `tea.Cmd`. The `BeginTx`-as-lock test technique is reusable anywhere a Go function must be proven non-blocking against a real SQLite handle.",
@@ -9716,12 +9507,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 8,
-      "state_path": "__exit__done",
+      "state_path": "",
       "attrs": {
         "data": {
           "message_id": "msg-1",
@@ -9731,12 +9522,12 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "harness.dispatched",
       "session_id": "",
       "turn": 8,
-      "state_path": "__exit__done",
+      "state_path": "",
       "attrs": {
         "args": {
           "id": "TKT-001",
@@ -9748,24 +9539,24 @@
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "harness.returned",
       "session_id": "",
       "turn": 8,
-      "state_path": "__exit__done",
+      "state_path": "",
       "attrs": {
         "error": "ticket.transition: TKT-001 not found",
         "namespace": "host.local_files.ticket.transition"
       }
     },
     {
-      "time": "2026-05-28T05:58:23.641619Z",
+      "time": "2026-05-28T09:45:47.950278Z",
       "level": "INFO",
       "msg": "turn.end",
       "session_id": "",
       "turn": 8,
-      "state_path": "__exit__done",
+      "state_path": "",
       "attrs": {
         "outcome": "transitioned",
         "to": "__exit__done"

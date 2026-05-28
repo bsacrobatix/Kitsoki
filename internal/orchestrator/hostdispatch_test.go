@@ -417,9 +417,9 @@ func (p *chatStoreProbe) Dequeue(_ context.Context, _ string) (*host.ChatDrive, 
 func (p *chatStoreProbe) ClaimDrive(_ context.Context, _ string) (*host.ChatDrive, error) {
 	return nil, host.ErrDriveNotFound
 }
-func (p *chatStoreProbe) MarkDriveDone(_ context.Context, _ string, _ int) error    { return nil }
-func (p *chatStoreProbe) MarkDriveFailed(_ context.Context, _, _ string) error      { return nil }
-func (p *chatStoreProbe) MarkDriveDismissed(_ context.Context, _ string) error      { return nil }
+func (p *chatStoreProbe) MarkDriveDone(_ context.Context, _ string, _ int) error { return nil }
+func (p *chatStoreProbe) MarkDriveFailed(_ context.Context, _, _ string) error   { return nil }
+func (p *chatStoreProbe) MarkDriveDismissed(_ context.Context, _ string) error   { return nil }
 func (p *chatStoreProbe) GetDrive(_ context.Context, _ string) (*host.ChatDrive, error) {
 	return nil, host.ErrDriveNotFound
 }

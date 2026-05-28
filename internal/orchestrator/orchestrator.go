@@ -5,7 +5,6 @@ package orchestrator
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,6 +99,16 @@ type Orchestrator struct {
 	// in-memory dispatcher.
 	timeouts *timeoutDispatcher
 
+	// eventSink, when non-nil, receives event writes for every turn.
+	// Set via WithEventSink.  Wave 3-entry seam: kitsoki turn --trace wires a
+	// *store.JSONLSink here so events are appended to the JSONL file.
+	// When sinkIsAuthority is true, loadJourney reads from eventSink.History()
+	// rather than o.store.LoadHistory — this is the pure-JSONL path used by
+	// kitsoki turn --trace.  When sinkIsAuthority is false (dual-write mode for
+	// session continue / TUI), SQLite remains the read source.
+	eventSink       store.EventSink
+	sinkIsAuthority bool // true → JSONL is the sole source of truth for loadJourney
+
 	// pending tracks in-flight clarifications keyed by session ID.
 	mu      sync.Mutex
 	pending map[app.SessionID]*pendingClarify
@@ -174,14 +183,13 @@ func New(def *app.AppDef, m machine.Machine, s store.Store, h harness.Harness, o
 	for _, opt := range opts {
 		opt(o)
 	}
-	// Construct the timeout dispatcher.  Persistence is enabled iff the
-	// orchestrator has a store with a *sql.DB attached (the production case);
-	// pure-memory test rigs default to in-memory tracking.
-	var db *sql.DB
-	if s != nil {
-		db = s.DB()
-	}
-	td, tdErr := newTimeoutDispatcher(o.clk, db, o.logger)
+	// Construct the timeout dispatcher. Phase A: orchestrator no longer owns a
+	// *sql.DB; the timeout dispatcher runs in-memory only (no cross-restart
+	// persistence). Timeouts are re-armed via ArmTimeoutForInitialState on the
+	// session-continue and TUI paths. The *sql.DB path in timeout.go is kept
+	// for phase B when a non-sqlite seam replaces it; for now db=nil means
+	// the dispatcher simply does not persist entries across restarts.
+	td, tdErr := newTimeoutDispatcher(o.clk, nil, o.logger)
 	if tdErr != nil {
 		// A schema failure is recoverable: log and proceed with no Timeout
 		// support.  Apps that don't use Timeout: still work.
@@ -290,6 +298,49 @@ func WithClock(c clock.Clock) Option {
 	}
 }
 
+// WithEventSink wires a store.EventSink that receives every event appended
+// during a turn.  When set, appendEventsAndJournal routes writes to this sink
+// instead of constructing a StoreSinkAdapter over the SQLite store; loadJourney
+// reads history from sink.History() instead of o.store.LoadHistory.
+//
+// Wave 3-entry: used by kitsoki turn --trace and (for new sessions) by
+// session continue / the TUI, where the sink is a *store.JSONLSink backed by
+// the default JSONL path.  The SQLite store (o.store) may still be non-nil for
+// subcommands that need it for session metadata (external_keys, locks, etc.);
+// only the event-write and event-read paths are redirected.
+// WithEventSink wires a store.EventSink that receives every event appended
+// during a turn.  When set, events are written to the sink in addition to
+// the SQLite store (dual-write).  loadJourney still reads from SQLite so
+// existing subcommands (session show, attach-session) keep working.
+//
+// To make the JSONL sink the sole authority for loadJourney (pure-JSONL mode,
+// used by kitsoki turn --trace), pass WithEventSinkAuthority(true) as well.
+func WithEventSink(s store.EventSink) Option {
+	return func(o *Orchestrator) {
+		o.eventSink = s
+	}
+}
+
+// WithEventSinkAuthority, when true, instructs loadJourney to read history
+// from the eventSink rather than from SQLite.  Set this for the pure-JSONL
+// path (kitsoki turn --trace) where the JSONL file is the sole trace and the
+// in-memory store has no prior events.  Leave false (the default) for the
+// dual-write path (session continue, TUI) where SQLite is still the read source.
+func WithEventSinkAuthority(auth bool) Option {
+	return func(o *Orchestrator) {
+		o.sinkIsAuthority = auth
+	}
+}
+
+// SetEventSink installs an EventSink after the orchestrator has been
+// constructed.  Safe to call before the first turn; not safe to call
+// concurrently with a running turn.  Used by the TUI run path where the
+// session ID (needed to compute the default trace path) is not known until
+// after orchestrator construction.
+func (o *Orchestrator) SetEventSink(s store.EventSink) {
+	o.eventSink = s
+}
+
 // NewSession opens a session in the store and returns its ID.
 // If a background-job scheduler is configured, it also spawns a per-session
 // listener goroutine that forwards terminal JobEvents to handleJobTerminal.
@@ -373,7 +424,7 @@ func (o *Orchestrator) RunInitialOnEnter(ctx context.Context, sid app.SessionID)
 		events[i].Turn = 0
 	}
 	jEntries := journalEntriesForEvents(sid, 0, time.Now(), events, journey.World, newWorld, "", resolved, "")
-	if appendErr := o.store.AppendEventsAndJournal(sid, events, jEntries); appendErr != nil {
+	if appendErr := o.appendEventsAndJournal(sid, events, jEntries); appendErr != nil {
 		return fmt.Errorf("orchestrator: RunInitialOnEnter: append events: %w", appendErr)
 	}
 	return nil
@@ -631,6 +682,21 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		RecentTurns:    recent,
 	}
 
+	// UserInputReceived is emitted at the moment input arrives, with the turn
+	// number it belongs to (same as the TurnStarted that follows). This replaces
+	// the exporter-side synthesised turn.input row.
+	var inputEvent store.Event
+	if input != "" {
+		inputPayload, _ := json.Marshal(map[string]any{"input": input})
+		inputEvent = store.Event{
+			Kind:      store.UserInputReceived,
+			Turn:      turnNum,
+			Ts:        time.Now(),
+			StatePath: journey.State,
+			Payload:   inputPayload,
+		}
+	}
+
 	// Append TurnStarted event.
 	startEvent := newOrchestratorEvent(store.TurnStarted, map[string]any{
 		"turn":  int64(turnNum),
@@ -793,11 +859,17 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 				"code":    string(ve.Code),
 			}, turnNum)
 			failureEvents = append(failureEvents, endEvent)
+			if inputEvent.Kind != "" {
+				failureEvents = append([]store.Event{inputEvent}, failureEvents...)
+			}
+			// Finding 2.1: fall back to InitialState when journey.State is "" (e.g. new
+			// session whose AppDef.Root didn't parse) so every event has non-empty state_path.
+			stampStatePath(failureEvents, journey.State, o.InitialState())
 
 			// Site 1: dual-write journal entries for the rejection turn.
 			jEntries := journalEntriesForEvents(sid, turnNum, time.Now(), failureEvents,
 				journey.World, journey.World, "", journey.State, input)
-			if appendErr := o.store.AppendEventsAndJournal(sid, failureEvents, jEntries); appendErr != nil {
+			if appendErr := o.appendEventsAndJournal(sid, failureEvents, jEntries); appendErr != nil {
 				return nil, fmt.Errorf("orchestrator: append failure events: %w", appendErr)
 			}
 
@@ -900,16 +972,22 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		"to":      string(result.NewState),
 	}, turnNum)
 	successEvents = append(successEvents, endEvent)
+	if inputEvent.Kind != "" {
+		successEvents = append([]store.Event{inputEvent}, successEvents...)
+	}
 
 	// Stamp turn number on all events.
 	for i := range successEvents {
 		successEvents[i].Turn = turnNum
 	}
+	// Stamp state_path on events that don't already have one.
+	// Finding 2.1: fall back to InitialState when journey.State is "" so every event has non-empty state_path.
+	stampStatePath(successEvents, journey.State, o.InitialState())
 
 	// Site 2: dual-write journal entries for the success turn.
 	jEntries := journalEntriesForEvents(sid, turnNum, time.Now(), successEvents,
 		journey.World, result.World, result.View, result.NewState, input)
-	if appendErr := o.store.AppendEventsAndJournal(sid, successEvents, jEntries); appendErr != nil {
+	if appendErr := o.appendEventsAndJournal(sid, successEvents, jEntries); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator: append events: %w", appendErr)
 	}
 
@@ -1165,6 +1243,12 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	// write KindOracleCall journal entries without importing the orchestrator.
 	if o.journalWriter != nil {
 		ctx = host.WithOracleJournalWriter(ctx, o.journalWriter)
+	}
+	// Wave 3-oracle: inject the EventSink so oracle handlers can parallel-write
+	// OracleCalled / OracleReturned / OracleError events to the JSONL alongside
+	// the existing journal write.
+	if o.eventSink != nil {
+		ctx = host.WithOracleEventSink(ctx, o.eventSink)
 	}
 	// OracleCallCtx carries session/turn/state for journal Entry metadata.
 	// Turn is not directly available here (it lives in the Turn() local), so
@@ -1893,6 +1977,22 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 		result.Events[i].Turn = turnNum
 	}
 
+	// Finding 2.6: emit UserInputReceived for --intent mode (SubmitDirect) too.
+	// The Turn() path already emits it; SubmitDirect must also emit it so every
+	// entry point produces a universal UserInputReceived event in the trace.
+	// Payload uses intent + input so the SPA renders a user-input chip regardless
+	// of the entry point used.
+	sdInputPayload, _ := json.Marshal(map[string]any{
+		"input":  userInput,
+		"intent": intentName,
+	})
+	sdInputEvent := store.Event{
+		Kind:      store.UserInputReceived,
+		Turn:      turnNum,
+		StatePath: journey.State,
+		Payload:   sdInputPayload,
+	}
+
 	if result.ValidationError != nil {
 		ve := result.ValidationError
 		if ve.Code == intent.ErrMissingSlots {
@@ -1954,7 +2054,7 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 			"input":  recordedInput,
 			"direct": true,
 		}, turnNum)
-		failureEvents := append([]store.Event{startEvent}, result.Events...)
+		failureEvents := append([]store.Event{sdInputEvent, startEvent}, result.Events...)
 		endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
 			"outcome": "rejected",
 			"code":    string(ve.Code),
@@ -1963,10 +2063,11 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 		for i := range failureEvents {
 			failureEvents[i].Turn = turnNum
 		}
+		stampStatePath(failureEvents, journey.State, o.InitialState())
 		// Site 5: dual-write journal entries for the SubmitDirect rejection turn.
 		sdFailJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), failureEvents,
 			journey.World, journey.World, "", journey.State, journalUserInput)
-		if appendErr := o.store.AppendEventsAndJournal(sid, failureEvents, sdFailJEntries); appendErr != nil {
+		if appendErr := o.appendEventsAndJournal(sid, failureEvents, sdFailJEntries); appendErr != nil {
 			return nil, fmt.Errorf("orchestrator: SubmitDirect: append failure events: %w", appendErr)
 		}
 		allowedNames := make([]string, 0)
@@ -2023,7 +2124,7 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 		harnessErrMsg = o.settlePostBindEmits(ctx, sid, &result, tl, 0)
 	}
 
-	successEvents := append([]store.Event{startEvent}, result.Events...)
+	successEvents := append([]store.Event{sdInputEvent, startEvent}, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
 		"outcome": "transitioned",
 		"to":      string(result.NewState),
@@ -2032,11 +2133,12 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 	for i := range successEvents {
 		successEvents[i].Turn = turnNum
 	}
+	stampStatePath(successEvents, journey.State, o.InitialState())
 
 	// Site 6: dual-write journal entries for the SubmitDirect success turn.
 	sdSuccJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), successEvents,
 		journey.World, result.World, result.View, result.NewState, successJournalUserInput)
-	if appendErr := o.store.AppendEventsAndJournal(sid, successEvents, sdSuccJEntries); appendErr != nil {
+	if appendErr := o.appendEventsAndJournal(sid, successEvents, sdSuccJEntries); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator: SubmitDirect: append events: %w", appendErr)
 	}
 
@@ -2544,7 +2646,7 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 	}
 	ctJEntries = append([]journal.Entry{clarifyAnsweredEntry}, ctJEntries...)
 
-	if appendErr := o.store.AppendEventsAndJournal(sid, successEvents, ctJEntries); appendErr != nil {
+	if appendErr := o.appendEventsAndJournal(sid, successEvents, ctJEntries); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator: append continue events: %w", appendErr)
 	}
 
@@ -2670,10 +2772,29 @@ func (o *Orchestrator) RenderState(state app.StatePath, w world.World) (string, 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 // loadJourney reconstructs the current state and world from the store.
+//
+// Wave 3-entry: when o.eventSink is non-nil AND o.store is nil (the pure-JSONL
+// path used by kitsoki turn --trace), history is read from o.eventSink.History().
+// When both o.eventSink and o.store are set (the dual-write path used by
+// session continue and the TUI), SQLite remains the read source for backward-
+// compat with session show, attach-session, etc.  The JSONL sink is the
+// write path in both cases; this read preference keeps existing subcommands
+// working until phase B removes SQLite event storage.
 func (o *Orchestrator) loadJourney(sid app.SessionID) (*store.JourneyState, error) {
 	// Determine initial state and world from app defaults.
 	initialState := o.InitialState()
 	initialWorld := o.InitialWorld()
+
+	if o.eventSink != nil && o.sinkIsAuthority {
+		// Pure-JSONL path (kitsoki turn --trace): JSONL is authoritative.
+		// Read history from the in-memory slice kept by JSONLSink.
+		history := o.eventSink.History()
+		js, err := store.BuildJourney(o.def, initialState, initialWorld, history)
+		if err != nil {
+			return nil, fmt.Errorf("build journey (jsonl): %w", err)
+		}
+		return js, nil
+	}
 
 	// Try to load from the latest snapshot first.
 	snap, hasSnap, err := o.store.LatestSnapshot(sid)
@@ -2809,6 +2930,26 @@ func newOrchestratorEvent(kind store.EventKind, payload map[string]any, turn app
 		Kind:    kind,
 		Turn:    turn,
 		Payload: b,
+	}
+}
+
+// stampStatePath sets StatePath on every event in evs that does not already
+// have one set. Called before appendEventsAndJournal so the on-disk JSONL
+// records the active state without exporter-side back-fill.
+//
+// Finding 2.1: when state is "" (rejection before a journey is fully built,
+// e.g. when AppDef.Root is not a valid string), fall back to fallback. Pass
+// o.InitialState() as fallback to ensure every event carries a non-empty
+// state_path on disk.
+func stampStatePath(evs []store.Event, state, fallback app.StatePath) {
+	effective := state
+	if effective == "" {
+		effective = fallback
+	}
+	for i := range evs {
+		if evs[i].StatePath == "" {
+			evs[i].StatePath = effective
+		}
 	}
 }
 

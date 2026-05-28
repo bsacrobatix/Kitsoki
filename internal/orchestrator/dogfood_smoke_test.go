@@ -142,8 +142,8 @@ func copyTree(src, dst string) error {
 var dogfoodArtifact = map[string]any{
 	"summary_title":    "Stub artifact",
 	"summary_markdown": "# Stub artifact body\n\nCanned payload for the dogfood smoke test.\n",
-	"bug_verified":    true,
-	"steps":           []string{"step A", "step B"},
+	"bug_verified":     true,
+	"steps":            []string{"step A", "step B"},
 	"involved_components": []map[string]any{
 		{"name": "internal/orchestrator", "reason": "lives here"},
 	},
@@ -161,9 +161,9 @@ var dogfoodArtifact = map[string]any{
 	"lessons":          []map[string]any{},
 	// Verdict-shaped keys so judge branches (when llm_then_human) are
 	// also covered if a future change flips judge_mode.
-	"verdict":    "accept",
-	"intent":     "accept",
-	"reason":     "stub verdict",
+	"verdict": "accept",
+	"intent":  "accept",
+	"reason":  "stub verdict",
 }
 
 // newSmokeOrchestrator builds an orchestrator pinned to the temp-repo
@@ -239,11 +239,11 @@ func seedDogfoodWorld(ticketID string) map[string]any {
 		"core__ticket_type":  "bug",
 		"core__thread":       threadPath,
 
-		"judge_mode":                       "human",
-		"judge_confidence_threshold":       0.8,
-		"core__judge_mode":                 "human",
-		"core__judge_confidence_threshold": 0.8,
-		"core__bf__judge_mode":             "human",
+		"judge_mode":                           "human",
+		"judge_confidence_threshold":           0.8,
+		"core__judge_mode":                     "human",
+		"core__judge_confidence_threshold":     0.8,
+		"core__bf__judge_mode":                 "human",
 		"core__bf__judge_confidence_threshold": 0.8,
 
 		// auto_accept_on_post was removed when the bugfix story
@@ -453,9 +453,9 @@ func TestDogfoodSmoke_StaleWorktreeRecoversOrFailsCleanly(t *testing.T) {
 	// future patch makes it idempotent), or core.main (the redirect
 	// bounced through @exit:abandoned) are acceptable.
 	acceptable := map[app.StatePath]bool{
-		"core.bf.idle":                   true,
-		"core.bf.reproducing":  true,
-		"core.main":                      true,
+		"core.bf.idle":        true,
+		"core.bf.reproducing": true,
+		"core.main":           true,
 	}
 	require.True(t, acceptable[journey.State],
 		"session must settle at a coherent resting place after stale-worktree failure; got %q (acceptable: %v)", journey.State, acceptable)
@@ -703,13 +703,13 @@ func TestDogfoodSmoke_FullBugfixPipeline(t *testing.T) {
 
 	// Drive every accept boundary. Pre-fix any of these could have
 	// silently bounced to idle; post-fix they must all advance.
-	step("kickoff",      "core__go_bugfix",  "core.bf.reproducing")
-	step("reproducing",  "core__bf__accept", "core.bf.proposing")
-	step("proposing",    "core__bf__accept", "core.bf.implementing")
+	step("kickoff", "core__go_bugfix", "core.bf.reproducing")
+	step("reproducing", "core__bf__accept", "core.bf.proposing")
+	step("proposing", "core__bf__accept", "core.bf.implementing")
 	step("implementing", "core__bf__accept", "core.bf.testing")
-	step("testing",      "core__bf__accept", "core.bf.reviewing")
-	step("reviewing",    "core__bf__accept", "core.bf.validating")
-	step("validating",   "core__bf__accept", "core.bf.done")
+	step("testing", "core__bf__accept", "core.bf.reviewing")
+	step("reviewing", "core__bf__accept", "core.bf.validating")
+	step("validating", "core__bf__accept", "core.bf.done")
 }
 
 // TestDogfoodSmoke_FullImplementationPipeline drives the implementation
@@ -767,16 +767,16 @@ func TestDogfoodSmoke_FullImplementationPipeline(t *testing.T) {
 		cancel()
 	}
 
-	step("kickoff",            "core__go_implementation", "core.impl.idle")
-	step("idle → review_task", "core__impl__start",       "core.impl.review_task_executing")
-	step("review_task → wait", "core__impl__proceed",     "core.impl.review_task_awaiting_reply")
-	step("review_task → write", "core__impl__accept",     "core.impl.write_code_executing")
-	step("write → wait",       "core__impl__proceed",     "core.impl.write_code_awaiting_reply")
-	step("write → test",       "core__impl__accept",      "core.impl.test_executing")
-	step("test → wait",        "core__impl__proceed",     "core.impl.test_awaiting_reply")
-	step("test → review",      "core__impl__accept",      "core.impl.review_executing")
-	step("review → wait",      "core__impl__proceed",     "core.impl.review_awaiting_reply")
-	step("review → handoff",   "core__impl__accept",      "core.impl.handoff")
+	step("kickoff", "core__go_implementation", "core.impl.idle")
+	step("idle → review_task", "core__impl__start", "core.impl.review_task_executing")
+	step("review_task → wait", "core__impl__proceed", "core.impl.review_task_awaiting_reply")
+	step("review_task → write", "core__impl__accept", "core.impl.write_code_executing")
+	step("write → wait", "core__impl__proceed", "core.impl.write_code_awaiting_reply")
+	step("write → test", "core__impl__accept", "core.impl.test_executing")
+	step("test → wait", "core__impl__proceed", "core.impl.test_awaiting_reply")
+	step("test → review", "core__impl__accept", "core.impl.review_executing")
+	step("review → wait", "core__impl__proceed", "core.impl.review_awaiting_reply")
+	step("review → handoff", "core__impl__accept", "core.impl.handoff")
 }
 
 // TestDogfoodSmoke_ImplementingActuallyEditsFiles is the regression
@@ -905,9 +905,9 @@ func TestDogfoodSmoke_ImplementingActuallyEditsFiles(t *testing.T) {
 		require.NoError(t, tErr)
 		cancel()
 	}
-	step("kickoff",     "core__go_bugfix",  "core.bf.reproducing")
+	step("kickoff", "core__go_bugfix", "core.bf.reproducing")
 	step("reproducing", "core__bf__accept", "core.bf.proposing")
-	step("proposing",   "core__bf__accept", "core.bf.implementing")
+	step("proposing", "core__bf__accept", "core.bf.implementing")
 
 	// 1. The marker file must be committed on the feature branch.
 	workdir := filepath.Join(repoRoot, ".worktrees", "bf-"+ticketID)

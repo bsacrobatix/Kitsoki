@@ -206,7 +206,7 @@ func (o *Orchestrator) RerunOnEnter(ctx context.Context, sid app.SessionID) (*Tu
 
 	jEntries := journalEntriesForEvents(sid, turnNum, time.Now(), successEvents,
 		journey.World, currentWorld, view, currentState, "")
-	if appendErr := o.store.AppendEventsAndJournal(sid, successEvents, jEntries); appendErr != nil {
+	if appendErr := o.appendEventsAndJournal(sid, successEvents, jEntries); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator.RerunOnEnter: append events: %w", appendErr)
 	}
 

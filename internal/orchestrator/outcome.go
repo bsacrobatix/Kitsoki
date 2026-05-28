@@ -72,8 +72,8 @@ type TurnOutcome struct {
 	// to decide whether to use AppendTurnTyped (lipgloss reflow on
 	// resize) or fall back to AppendTurn with View (Glamour at
 	// width-time).
-	TypedView *app.View          `json:"-"`
-	RenderEnv expr.Env           `json:"-"`
+	TypedView *app.View           `json:"-"`
+	RenderEnv expr.Env            `json:"-"`
 	Renderer  *render.AppRenderer `json:"-"`
 	// NewState is the state after the turn (unchanged on Clarify/Rejected guard-fail).
 	NewState app.StatePath

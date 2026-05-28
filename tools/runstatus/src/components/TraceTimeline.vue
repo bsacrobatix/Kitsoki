@@ -461,8 +461,9 @@ const filteredEvents = computed<AnnotatedEvent[]>(() => {
   for (let i = 0; i < props.events.length; i++) {
     const event = props.events[i]!;
 
-    // turn.input is always visible regardless of the "turn" chip state —
-    // it carries the user's raw message text that triggered the next turn.
+    // turn.input (UserInputReceived) is always visible regardless of the "turn"
+    // chip state — it carries the user's raw message text for the turn.
+    // This is a real event written by the orchestrator, not a synthesized row.
     if (event.msg === "turn.input") {
       if (selectedLevels.size > 0 && !selectedLevels.has(event.level)) continue;
       if (selectedStatePath.value !== null && event.state_path !== selectedStatePath.value) continue;
@@ -608,11 +609,16 @@ const groupedTurns = computed<TurnGroup[]>(() => {
   // LEFT panel's per-state event lanes.
   const map = new Map<string, AnnotatedEvent[]>();
 
-  // turn.input events are deferred: they carry turn=N-1 (fromhistory places them
-  // at the end of the previous turn) but the user wants them LAST within the
-  // phase — after the machine work in turn N that they triggered.  We move them
-  // into the (state_path, N) group if it already exists; otherwise fall back to
-  // (state_path, N-1) so they are never silently dropped.
+  // turn.input (UserInputReceived) events are now real events written by the
+  // orchestrator at the moment user input arrives, with the SAME turn number as
+  // the TurnStarted that follows. The UI defers them to appear after the machine
+  // work in the same turn group (so the input chip renders at the logical "top"
+  // of the response thread, where the user's message appears before the engine's
+  // reaction — a presentation convention, not a data correction).
+  //
+  // Note: the old comment "fromhistory places them at the end of the previous
+  // turn" is stale and has been removed. The event's turn number is correct as
+  // written; the deferral here is purely a display ordering preference.
   const deferredTurnInputs: AnnotatedEvent[] = [];
 
   for (const ae of filteredEvents.value) {
@@ -626,14 +632,13 @@ const groupedTurns = computed<TurnGroup[]>(() => {
     map.set(key, arr);
   }
 
-  // Now resolve deferred turn.input events.
+  // Resolve deferred turn.input events: place them in the same (state_path,turn)
+  // group as their peers, appended last so they render after the machine work.
   for (const ae of deferredTurnInputs) {
-    const nextKey = `${ae.event.state_path}:${ae.event.turn + 1}`;
-    const origKey = `${ae.event.state_path}:${ae.event.turn}`;
-    const target = map.has(nextKey) ? nextKey : origKey;
-    const arr = map.get(target) ?? [];
+    const key = `${ae.event.state_path}:${ae.event.turn}`;
+    const arr = map.get(key) ?? [];
     arr.push(ae);
-    map.set(target, arr);
+    map.set(key, arr);
   }
 
   return [...map.entries()]

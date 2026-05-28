@@ -255,6 +255,16 @@ func OracleDecideHandler(ctx context.Context, args map[string]any) (Result, erro
 		"schema_path": schemaArg,
 	}
 
+	// Wave 3-oracle: write OracleCalled to the JSONL sink at dispatch time.
+	appendOracleCalledEvent(ctx, callStart, callID, OracleCalledPayload{
+		Verb:         "decide",
+		Agent:        agentNameFromArgs(args),
+		Model:        agent.Model,
+		Prompt:       rendered,
+		SystemPrompt: systemPrompt,
+		Input:        marshalInput(decideInputDesc),
+	})
+
 	// If a validator block is present, run the retry loop. Otherwise use
 	// OracleStreamer for the single-shot streaming path.
 	if validatorBlockPresent {
@@ -357,6 +367,25 @@ func emitDecideJournal(ctx context.Context, callID string, callStart time.Time, 
 		Response:     marshalResponse(responseDesc),
 		Error:        res.Error,
 	})
+
+	// Wave 3-oracle: parallel write OracleReturned / OracleError to JSONL sink.
+	callEnd := time.Now()
+	if res.Error != "" {
+		appendOracleErrorEvent(ctx, callEnd, callID, OracleErrorPayload{
+			Verb:       "decide",
+			Agent:      agentName,
+			DurationMS: durationMS,
+			Error:      res.Error,
+		})
+	} else {
+		appendOracleReturnedEvent(ctx, callEnd, callID, OracleReturnedPayload{
+			Verb:       "decide",
+			Agent:      agentName,
+			Model:      model,
+			DurationMS: durationMS,
+			Response:   marshalResponse(responseDesc),
+		})
+	}
 }
 
 // resolveDecidePrompt renders the prompt for a decide call. Accepts either

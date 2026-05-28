@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,10 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	_ "modernc.org/sqlite"
-
 	"kitsoki/internal/app"
-	"kitsoki/internal/journal"
 	"kitsoki/internal/runstatus"
 )
 
@@ -131,12 +127,11 @@ func TestExportStatus_WriteFile(t *testing.T) {
 	err := runExportFromTrace(
 		filepath.Join("testdata", "export_status", "cloak_run.jsonl"),
 		cloakAppYAML,
-		"",    // currentState: derived
-		"",    // sessionID: derived
-		"",    // startedAt: derived
+		"", // currentState: derived
+		"", // sessionID: derived
+		"", // startedAt: derived
 		outPath,
 		false, // withMermaid: false — keep original behaviour for this test
-		"",    // journalPath: none
 	)
 	require.NoError(t, err, "runExportFromTrace must succeed")
 
@@ -175,12 +170,11 @@ func TestExportStatus_WithMermaid(t *testing.T) {
 	err := runExportFromTrace(
 		filepath.Join("testdata", "export_status", "cloak_run.jsonl"),
 		cloakAppYAML,
-		"",   // currentState: derived
-		"",   // sessionID: derived
-		"",   // startedAt: derived
+		"", // currentState: derived
+		"", // sessionID: derived
+		"", // startedAt: derived
 		outPath,
 		true, // withMermaid: true
-		"",   // journalPath: none
 	)
 	require.NoError(t, err, "runExportFromTrace with --with-mermaid must succeed")
 
@@ -193,134 +187,6 @@ func TestExportStatus_WithMermaid(t *testing.T) {
 	assert.NotEmpty(t, snap.Mermaid.Source, "Mermaid.Source must be non-empty when --with-mermaid=true")
 	require.NotNil(t, snap.Mermaid.NodeMap, "Mermaid.NodeMap must not be nil when --with-mermaid=true")
 	assert.Greater(t, len(snap.Mermaid.NodeMap), 0, "Mermaid.NodeMap must have at least one entry")
-}
-
-// TestExportStatus_JournalMerge asserts that mergeJournalIntoEvents correctly
-// enriches oracle.*.complete trace events with full payload from the journal.
-//
-// The test stubs an in-memory SQLite journal with one KindOracleCall entry
-// plus one KindTaskTool entry, then builds a minimal JSONL trace with the
-// corresponding lean slog record, runs the merge, and asserts the resulting
-// event has full attrs.
-//
-// Runtime budget: <20 ms (in-memory SQLite, no real LLM calls).
-func TestExportStatus_JournalMerge(t *testing.T) {
-	t.Parallel()
-
-	// ── Build journal DB ──────────────────────────────────────────────────
-	dbPath := filepath.Join(t.TempDir(), "journal.db")
-	db, err := sql.Open("sqlite", dbPath)
-	require.NoError(t, err, "open journal DB")
-	db.SetMaxOpenConns(1)
-	_, err = db.Exec(`
-CREATE TABLE IF NOT EXISTS journal (
-    session_id   TEXT    NOT NULL,
-    turn         INTEGER NOT NULL,
-    seq          INTEGER NOT NULL,
-    ts           INTEGER NOT NULL,
-    kind         TEXT    NOT NULL,
-    doc          TEXT,
-    doc_version  INTEGER,
-    body_json    TEXT    NOT NULL,
-    PRIMARY KEY (session_id, turn, seq)
-) STRICT;`)
-	require.NoError(t, err, "create journal table")
-
-	jw, err := journal.NewSQLiteWriter(db)
-	require.NoError(t, err, "create journal writer")
-
-	sessionID := "sess-merge-test-001"
-	callID := "call-test-abc-123"
-
-	// Write a KindOracleCall entry.
-	oracleCallBody := map[string]any{
-		"call_id":       callID,
-		"verb":          "decide",
-		"agent":         "test-agent",
-		"model":         "claude-3-5-sonnet",
-		"duration_ms":   int64(500),
-		"system_prompt": "You decide things.",
-		"prompt":        "Which way should we go?",
-		"input": map[string]any{
-			"schema_path": "schemas/direction.json",
-		},
-		"response": map[string]any{
-			"json":     map[string]any{"direction": "north"},
-			"decision": "north",
-		},
-	}
-	oracleBodyJSON, _ := json.Marshal(oracleCallBody)
-	err = jw.Append(journal.Entry{
-		Ts:      time.Now(),
-		Session: app.SessionID(sessionID),
-		Turn:    1,
-		Seq:     1,
-		Kind:    journal.KindOracleCall,
-		Body:    oracleBodyJSON,
-	})
-	require.NoError(t, err, "write KindOracleCall entry")
-
-	// Write a KindTaskTool entry for the same session (verifies no interference).
-	taskToolBody := map[string]any{
-		"tool":          "Read",
-		"input_preview": "prompts/decide.md",
-		"seq":           1,
-	}
-	taskToolJSON, _ := json.Marshal(taskToolBody)
-	err = jw.Append(journal.Entry{
-		Ts:      time.Now(),
-		Session: app.SessionID(sessionID),
-		Turn:    1,
-		Seq:     2,
-		Kind:    journal.KindTaskTool,
-		Body:    taskToolJSON,
-	})
-	require.NoError(t, err, "write KindTaskTool entry")
-	require.NoError(t, db.Close(), "close journal DB")
-
-	// ── Build trace events ────────────────────────────────────────────────
-	// Simulate one lean oracle.decide.complete slog record with a call_id.
-	events := []runstatus.TraceEvent{
-		{
-			Time:      time.Now(),
-			Level:     "INFO",
-			Msg:       "oracle.decide.complete",
-			SessionID: sessionID,
-			Turn:      1,
-			Attrs: map[string]any{
-				"call_id":     callID,
-				"model":       "claude-3-5-sonnet",
-				"duration_ms": float64(500),
-			},
-		},
-		{
-			// An unrelated event — must NOT be modified.
-			Time:  time.Now(),
-			Level: "DEBUG",
-			Msg:   "turn.start",
-			Attrs: map[string]any{"input": "go north"},
-		},
-	}
-
-	// ── Run merge ─────────────────────────────────────────────────────────
-	err = mergeJournalIntoEvents(dbPath, sessionID, events)
-	require.NoError(t, err, "mergeJournalIntoEvents must succeed")
-
-	// ── Assert oracle event is enriched ──────────────────────────────────
-	oracleEvent := events[0]
-	assert.Equal(t, "oracle.decide.complete", oracleEvent.Msg)
-	assert.Equal(t, callID, oracleEvent.Attrs["call_id"], "call_id must be preserved")
-	assert.Equal(t, "claude-3-5-sonnet", oracleEvent.Attrs["model"], "model must be preserved (lean slog wins)")
-	assert.Equal(t, "You decide things.", oracleEvent.Attrs["system_prompt"], "system_prompt must be merged from journal")
-	assert.Equal(t, "Which way should we go?", oracleEvent.Attrs["prompt"], "prompt must be merged from journal")
-	assert.Equal(t, "test-agent", oracleEvent.Attrs["agent"], "agent must be merged from journal")
-	assert.NotNil(t, oracleEvent.Attrs["input"], "input must be merged from journal")
-	assert.NotNil(t, oracleEvent.Attrs["response"], "response must be merged from journal")
-
-	// The unrelated turn.start event must be untouched.
-	otherEvent := events[1]
-	assert.Equal(t, "turn.start", otherEvent.Msg)
-	assert.Nil(t, otherEvent.Attrs["system_prompt"], "unrelated event must not gain system_prompt")
 }
 
 // TestAggregateTaskDetails verifies that aggregateTaskDetails correctly

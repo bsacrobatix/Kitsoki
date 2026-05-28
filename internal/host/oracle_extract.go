@@ -216,6 +216,13 @@ func OracleExtractHandler(ctx context.Context, args map[string]any) (Result, err
 	callID := newUUID()
 	callStart := time.Now()
 
+	// Wave 3-oracle: write OracleCalled to the JSONL sink at dispatch time.
+	appendOracleCalledEvent(ctx, callStart, callID, OracleCalledPayload{
+		Verb:  "extract",
+		Agent: agentNameFromArgs(args),
+		Input: marshalInput(map[string]any{"schema": ea.SchemaPath, "input": ea.Input}),
+	})
+
 	res, runErr := runExtract(ctx, ea, bin, args)
 	durationMS := time.Since(callStart).Milliseconds()
 
@@ -271,6 +278,25 @@ func OracleExtractHandler(ctx context.Context, args map[string]any) (Result, err
 		Response:     marshalResponse(responseDesc),
 		Error:        errStr,
 	})
+
+	// Wave 3-oracle: parallel write OracleReturned / OracleError to JSONL sink.
+	callEnd := time.Now()
+	if errStr != "" {
+		appendOracleErrorEvent(ctx, callEnd, callID, OracleErrorPayload{
+			Verb:       "extract",
+			Agent:      agentName,
+			DurationMS: durationMS,
+			Error:      errStr,
+		})
+	} else {
+		appendOracleReturnedEvent(ctx, callEnd, callID, OracleReturnedPayload{
+			Verb:       "extract",
+			Agent:      agentName,
+			Model:      agent.Model,
+			DurationMS: durationMS,
+			Response:   marshalResponse(responseDesc),
+		})
+	}
 
 	return res, runErr
 }

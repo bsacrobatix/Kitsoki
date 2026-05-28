@@ -2,7 +2,6 @@ package testrunner
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	"kitsoki/internal/clock"
 	"kitsoki/internal/host"
 	"kitsoki/internal/journal"
+	"kitsoki/internal/store"
 )
 
 // Cassette is one host-cassette file (kind: host_cassette).
@@ -36,16 +36,23 @@ type Cassette struct {
 	path       string
 	phaseRegex *regexp.Regexp
 	mu         sync.Mutex
+
+	// episodeMatchCounts tracks the number of times each episode has been
+	// matched so far (keyed by episode ID). For replay:any episodes this
+	// is the running matchIdx counter; for normal episodes it is capped at 1.
+	// Protected by mu. Seeded from prior trace history via SeedMatchCountsFromHistory
+	// so post-resume matches produce collision-free call_ids (§3.3.2).
+	episodeMatchCounts map[string]int
 }
 
 // CassetteEpisode is one episode entry in a cassette.
 type CassetteEpisode struct {
-	ID       string            `yaml:"id"`
-	Match    map[string]any    `yaml:"match"`
-	Response CassetteResponse  `yaml:"response,omitempty"`
-	Delay    string            `yaml:"delay,omitempty"`
-	Replay   string            `yaml:"replay,omitempty"`
-	Oracle   *EpisodeOracle    `yaml:"oracle,omitempty"` // present for host.oracle.* episodes
+	ID       string           `yaml:"id"`
+	Match    map[string]any   `yaml:"match"`
+	Response CassetteResponse `yaml:"response,omitempty"`
+	Delay    string           `yaml:"delay,omitempty"`
+	Replay   string           `yaml:"replay,omitempty"`
+	Oracle   *EpisodeOracle   `yaml:"oracle,omitempty"` // present for host.oracle.* episodes
 
 	played bool
 }
@@ -66,7 +73,7 @@ type CassetteEpisode struct {
 // cannot deserialize YAML flow mappings into []byte. The dispatcher marshals
 // it to json.RawMessage before writing journal entries.
 type EpisodeOracle struct {
-	Verb           string  `yaml:"verb"`                      // ask | decide | extract | task | converse
+	Verb           string  `yaml:"verb"` // ask | decide | extract | task | converse
 	Agent          string  `yaml:"agent,omitempty"`
 	Model          string  `yaml:"model,omitempty"`
 	Turn           int64   `yaml:"turn,omitempty"`
@@ -80,14 +87,6 @@ type EpisodeOracle struct {
 	Response       string  `yaml:"response,omitempty"`
 	Error          string  `yaml:"error,omitempty"`
 	CallID         string  `yaml:"call_id,omitempty"` // advisory; recomputed on every load
-}
-
-// derivedCallID returns the deterministic call_id for the episode per §7:
-//
-//	sha256("oracle-call:" + appID + ":" + episodeID)[:16]
-func derivedCallID(appID, episodeID string) string {
-	h := sha256.Sum256([]byte("oracle-call:" + appID + ":" + episodeID))
-	return fmt.Sprintf("%x", h[:8]) // 8 bytes → 16 hex chars
 }
 
 // CassetteResponse is the canned response for an episode.
@@ -172,14 +171,15 @@ func LoadCassette(path string) (*Cassette, error) {
 		cas.phaseRegex = re
 	}
 
-	// §6.3: replay:any + oracle: is forbidden — writing the same KindOracleCall
-	// row on every invocation would produce duplicate journal entries.
-	for i, ep := range cas.Episodes {
-		if ep.Replay == "any" && ep.Oracle != nil {
-			return nil, fmt.Errorf("cassette: %q: episode %q: replay:any is forbidden with oracle: block (§6.3)", abs, ep.ID)
-		}
-		_ = i
-	}
+	// §6.3 constraint (now relaxed): replay:any + oracle: was previously forbidden
+	// because re-invoking the same episode would produce duplicate journal rows in
+	// the SQLite oracle journal. With oracle events written to the JSONL event sink
+	// (wave 3-oracle / phase A), each match produces a distinct OracleCalled/
+	// OracleReturned pair with a unique call_id (different matchIdx) and the same
+	// episode_id. The constraint is lifted: replay:any + oracle: is now legal and
+	// means "this oracle exchange is replayable N times, each producing a fresh
+	// event pair." (Finding 2.10 / proposal §3.1 "§6.3 constraint goes away".)
+	_ = cas.Episodes // no validation against replay:any + oracle: any more
 
 	cas.path = abs
 	return &cas, nil
@@ -213,7 +213,29 @@ func resolveIncludes(data []byte, baseDir string) ([]byte, error) {
 			continue
 		}
 		prefix := m[1] + m[2]
-		incPath := filepath.Join(baseDir, strings.TrimSpace(m[3]))
+		rawIncPath := strings.TrimSpace(m[3])
+
+		// Reject absolute paths unconditionally.
+		if filepath.IsAbs(rawIncPath) {
+			return nil, fmt.Errorf("!include %q: absolute paths are not allowed", rawIncPath)
+		}
+
+		// Resolve relative to baseDir, then verify the resolved path stays within baseDir.
+		incPath := filepath.Join(baseDir, rawIncPath)
+
+		// Use filepath.EvalSymlinks on baseDir to canonicalise it (in case baseDir
+		// itself is a symlink); then check the resolved incPath is under that dir.
+		canonBase, evalErr := filepath.EvalSymlinks(baseDir)
+		if evalErr != nil {
+			// baseDir might not exist yet in some edge cases; fall back to clean path.
+			canonBase = filepath.Clean(baseDir)
+		}
+		canonInc := filepath.Clean(incPath)
+		rel, relErr := filepath.Rel(canonBase, canonInc)
+		if relErr != nil || strings.HasPrefix(rel, "..") {
+			return nil, fmt.Errorf("!include %q: path resolves outside the cassette directory", rawIncPath)
+		}
+
 		raw, readErr := os.ReadFile(incPath)
 		if readErr != nil {
 			return nil, fmt.Errorf("!include %q: %w", incPath, readErr)
@@ -271,6 +293,33 @@ func episodeIDs(eps []*CassetteEpisode) []string {
 		ids[i] = e.ID
 	}
 	return ids
+}
+
+// SeedMatchCountsFromHistory initialises the per-episode match counters from a
+// prior trace history. It scans OracleCalled events that carry an episode_id
+// field (written by writeCassetteOracleEvents) and sets each episode's counter
+// to max(match_idx)+1 so that the first post-resume match produces a fresh
+// matchIdx that does not collide with any pre-resume call_id (§3.3.2).
+//
+// This must be called before the cassette dispatcher processes any events.
+// Callers that hold a prior store.History (e.g. after reloading a JSONL trace)
+// should call this once immediately after LoadCassette.
+func (c *Cassette) SeedMatchCountsFromHistory(hist store.History) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.episodeMatchCounts == nil {
+		c.episodeMatchCounts = make(map[string]int)
+	}
+	for _, ev := range hist {
+		if ev.Kind != store.OracleCalled || ev.EpisodeID == "" {
+			continue
+		}
+		// match_idx is the index of this match; next must be at least match_idx+1.
+		next := ev.MatchIdx + 1
+		if next > c.episodeMatchCounts[ev.EpisodeID] {
+			c.episodeMatchCounts[ev.EpisodeID] = next
+		}
+	}
 }
 
 // MatchEpisode finds the first unplayed episode that matches (handler, args,
@@ -367,6 +416,11 @@ type CassetteDispatcherOpts struct {
 	// SessionID is needed to write journal entries on replay. The dispatcher
 	// reads it from the oracle context in ctx when empty.
 	SessionID app.SessionID
+
+	// EventSink, when non-nil, receives OracleCalled / OracleReturned /
+	// OracleError events on replay (wave 3-oracle parallel write). This is the
+	// JSONL-side write alongside the existing journal write.
+	EventSink store.EventSink
 }
 
 // OracleJournalLookup is the function type used by the cassette dispatcher in
@@ -390,7 +444,7 @@ func BuildCassetteDispatcher(
 	recordSink func(ep *CassetteEpisode),
 	clk clock.Clock,
 ) host.Handler {
-	return buildCassetteDispatcherFull(cas, handlerName, stateOf, fallback, recordSink, clk, nil, nil)
+	return buildCassetteDispatcherFull(cas, handlerName, stateOf, fallback, recordSink, clk, nil, nil, nil)
 }
 
 // BuildCassetteDispatcherWithJournal is the journal-aware variant of
@@ -408,7 +462,28 @@ func BuildCassetteDispatcherWithJournal(
 	jw journal.Writer,
 	journalLookup OracleJournalLookup,
 ) host.Handler {
-	return buildCassetteDispatcherFull(cas, handlerName, stateOf, fallback, recordSink, clk, jw, journalLookup)
+	return buildCassetteDispatcherFull(cas, handlerName, stateOf, fallback, recordSink, clk, jw, journalLookup, nil)
+}
+
+// BuildCassetteDispatcherWithSink is the EventSink-aware variant of
+// BuildCassetteDispatcher. sink receives OracleCalled / OracleReturned /
+// OracleError events on replay (wave 3-oracle parallel write). When priorHist
+// is non-nil, SeedMatchCountsFromHistory is called first so that post-resume
+// matches produce collision-free call_ids (§3.3.2).
+func BuildCassetteDispatcherWithSink(
+	cas *Cassette,
+	handlerName string,
+	stateOf func() string,
+	fallback host.Handler,
+	recordSink func(ep *CassetteEpisode),
+	clk clock.Clock,
+	sink store.EventSink,
+	priorHist store.History,
+) host.Handler {
+	if priorHist != nil {
+		cas.SeedMatchCountsFromHistory(priorHist)
+	}
+	return buildCassetteDispatcherFull(cas, handlerName, stateOf, fallback, recordSink, clk, nil, nil, sink)
 }
 
 func buildCassetteDispatcherFull(
@@ -420,6 +495,7 @@ func buildCassetteDispatcherFull(
 	clk clock.Clock,
 	jw journal.Writer,
 	journalLookup OracleJournalLookup,
+	eventSink store.EventSink,
 ) host.Handler {
 	return func(ctx context.Context, args map[string]any) (host.Result, error) {
 		statePath := stateOf()
@@ -431,6 +507,14 @@ func buildCassetteDispatcherFull(
 			// so UnmatchedEpisodes doesn't count them as orphans, while still
 			// being re-matchable (MatchEpisode skips only when played && not any).
 			ep.played = true
+			// Allocate and advance the per-episode match counter atomically under mu.
+			// This is the matchIdx used in call_id derivation (§3.1): for replay:any
+			// episodes each match gets a distinct idx; normal episodes always get 0.
+			if cas.episodeMatchCounts == nil {
+				cas.episodeMatchCounts = make(map[string]int)
+			}
+			matchIdx := cas.episodeMatchCounts[ep.ID]
+			cas.episodeMatchCounts[ep.ID] = matchIdx + 1
 			// Capture values before releasing lock.
 			resp := ep.Response
 			delay := ep.Delay
@@ -449,6 +533,13 @@ func buildCassetteDispatcherFull(
 			// Phase 2: write KindOracleCall journal entry when oracle: block present.
 			if oracleBlock != nil && jw != nil {
 				writeOracleJournalEntry(ctx, jw, cas, epID, oracleBlock)
+			}
+			// Wave 3-oracle: parallel write OracleCalled+OracleReturned to JSONL sink.
+			// matchIdx is threaded through so the emitted OracleCalled event carries
+			// episode_id and match_idx; on post-resume reload these are used by
+			// SeedMatchCountsFromHistory to restore the counter (§3.3.2).
+			if oracleBlock != nil && eventSink != nil {
+				writeCassetteOracleEvents(ctx, eventSink, cas, epID, matchIdx, oracleBlock)
 			}
 
 			if resp.InfraError != "" {
@@ -492,7 +583,7 @@ func buildCassetteDispatcherFull(
 				verb := strings.TrimPrefix(handlerName, "host.oracle.")
 				if body, ok := journalLookup(ctx, verb); ok {
 					// Compute the deterministic call_id for this episode.
-					detCallID := derivedCallID(cas.AppID, synth.ID)
+					detCallID := host.DeriveCallID(cas.AppID, synth.ID)
 					synth.Oracle = oracleBodyToEpisode(body, detCallID)
 					synth.Oracle.Turn = int64(host.OracleCallCtxFrom(ctx).Turn)
 				}
@@ -513,7 +604,7 @@ func buildCassetteDispatcherFull(
 // standard host.OracleCallCtxFrom helper so the entry lands in the correct
 // session's journal row.
 func writeOracleJournalEntry(ctx context.Context, jw journal.Writer, cas *Cassette, epID string, o *EpisodeOracle) {
-	callID := derivedCallID(cas.AppID, epID)
+	callID := host.DeriveCallID(cas.AppID, epID)
 	oc := host.OracleCallCtxFrom(ctx)
 
 	// Marshal Input (any) to json.RawMessage for the journal entry.
@@ -559,6 +650,103 @@ func writeOracleJournalEntry(ctx context.Context, jw journal.Writer, cas *Casset
 		Body:    json.RawMessage(raw),
 	}
 	_ = jw.Append(e)
+}
+
+// writeCassetteOracleEvents writes an OracleCalled + OracleReturned (or
+// OracleError) event pair to sink for a cassette episode replay. This is the
+// wave 3-oracle parallel write: the journal write (writeOracleJournalEntry) and
+// the JSONL sink write both happen in the same code path.
+//
+// call_id is derived deterministically as:
+//
+//	sha256("oracle-call:" + appID + ":" + episodeID + ":" + matchIdx)[:16]
+//
+// using host.DeriveCallID. matchIdx is the 0-based match counter allocated by
+// buildCassetteDispatcherFull atomically under cas.mu. For replay:any episodes
+// each call gets a distinct matchIdx so the call_id differs per match even
+// though the episode body is identical (§3.1). episode_id and match_idx are
+// written as top-level fields on the OracleCalled event so that post-resume
+// SeedMatchCountsFromHistory can reconstruct the counters (§3.3.2).
+func writeCassetteOracleEvents(ctx context.Context, sink store.EventSink, cas *Cassette, epID string, matchIdx int, o *EpisodeOracle) {
+	callID := host.DeriveCallID(cas.AppID, fmt.Sprintf("%s:%d", epID, matchIdx))
+	oc := host.OracleCallCtxFrom(ctx)
+	now := time.Now()
+
+	// Build input raw from the oracle block (best-effort).
+	var inputRaw json.RawMessage
+	if o.Input != nil {
+		if b, merr := json.Marshal(o.Input); merr == nil {
+			inputRaw = json.RawMessage(b)
+		}
+	}
+
+	// OracleCalled: use now as dispatch time (cassette replay is instantaneous).
+	calledPayload := host.OracleCalledPayload{
+		Verb:         o.Verb,
+		Agent:        o.Agent,
+		Model:        o.Model,
+		Prompt:       o.Prompt,
+		SystemPrompt: o.SystemPrompt,
+		Input:        inputRaw,
+	}
+	calledRaw, err := json.Marshal(calledPayload)
+	if err == nil {
+		calledEv := store.Event{
+			Turn:      oc.Turn,
+			Ts:        now,
+			Kind:      store.OracleCalled,
+			StatePath: oc.StatePath,
+			Payload:   json.RawMessage(calledRaw),
+			CallID:    callID,
+			EpisodeID: epID,
+			MatchIdx:  matchIdx,
+		}
+		_ = sink.Append(calledEv)
+	}
+
+	// OracleReturned or OracleError: use now (slightly after) as response time.
+	returnedAt := time.Now()
+	if o.Error != "" {
+		errPayload := host.OracleErrorPayload{
+			Verb:       o.Verb,
+			Agent:      o.Agent,
+			DurationMS: o.DurationMs,
+			Error:      o.Error,
+		}
+		errRaw, merr := json.Marshal(errPayload)
+		if merr == nil {
+			errEv := store.Event{
+				Turn:      oc.Turn,
+				Ts:        returnedAt,
+				Kind:      store.OracleError,
+				StatePath: oc.StatePath,
+				Payload:   json.RawMessage(errRaw),
+				CallID:    callID,
+			}
+			_ = sink.Append(errEv)
+		}
+	} else {
+		responseRaw := json.RawMessage(marshalOracleResponseString(o.Response))
+		retPayload := host.OracleReturnedPayload{
+			Verb:       o.Verb,
+			Agent:      o.Agent,
+			Model:      o.Model,
+			DurationMS: o.DurationMs,
+			Response:   responseRaw,
+		}
+		retRaw, merr := json.Marshal(retPayload)
+		if merr == nil {
+			retEv := store.Event{
+				Turn:      oc.Turn,
+				Ts:        returnedAt,
+				Kind:      store.OracleReturned,
+				StatePath: oc.StatePath,
+				Payload:   json.RawMessage(retRaw),
+				CallID:    callID,
+			}
+			_ = sink.Append(retEv)
+		}
+	}
 }
 
 // marshalOracleResponseString converts the response string from an

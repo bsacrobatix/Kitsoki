@@ -310,7 +310,7 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 		// Site 3: dual-write journal entries for the RunIntent rejection turn.
 		riFailJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), failureEvents,
 			journey.World, journey.World, "", journey.State, intentName)
-		if appendErr := o.store.AppendEventsAndJournal(sid, failureEvents, riFailJEntries); appendErr != nil {
+		if appendErr := o.appendEventsAndJournal(sid, failureEvents, riFailJEntries); appendErr != nil {
 			return nil, fmt.Errorf("orchestrator: RunIntent: append failure events: %w", appendErr)
 		}
 		newAllowed := allowedNamesFromMachine(o.machine, journey.State, journey.World)
@@ -361,7 +361,7 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 	// Site 4: dual-write journal entries for the RunIntent success turn.
 	riSuccJEntries := journalEntriesForEvents(sid, turnNum, time.Now(), successEvents,
 		journey.World, result.World, result.View, result.NewState, intentName)
-	if appendErr := o.store.AppendEventsAndJournal(sid, successEvents, riSuccJEntries); appendErr != nil {
+	if appendErr := o.appendEventsAndJournal(sid, successEvents, riSuccJEntries); appendErr != nil {
 		return nil, fmt.Errorf("orchestrator: RunIntent: append events: %w", appendErr)
 	}
 

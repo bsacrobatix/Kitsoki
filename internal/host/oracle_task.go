@@ -152,6 +152,15 @@ func OracleTaskHandler(ctx context.Context, args map[string]any) (Result, error)
 	callStart := time.Now()
 	taskSystemPrompt := effectiveSystemPrompt(args, agent)
 
+	// Wave 3-oracle: write OracleCalled to the JSONL sink at dispatch time.
+	appendOracleCalledEvent(ctx, callStart, callID, OracleCalledPayload{
+		Verb:         "task",
+		Agent:        agentName,
+		Model:        agent.Model,
+		Prompt:       contextPrompt,
+		SystemPrompt: taskSystemPrompt,
+	})
+
 	slog.InfoContext(ctx, "task.start",
 		"agent", agentName,
 		"working_dir", workingDir,
@@ -333,6 +342,13 @@ func OracleTaskHandler(ctx context.Context, args map[string]any) (Result, error)
 				}),
 				Error: exhaustedErr,
 			})
+			// Wave 3-oracle: parallel write OracleError to JSONL sink.
+			appendOracleErrorEvent(ctx, time.Now(), callID, OracleErrorPayload{
+				Verb:       "task",
+				Agent:      agentName,
+				DurationMS: exhaustedDurationMS,
+				Error:      exhaustedErr,
+			})
 			return Result{
 				Error: exhaustedErr,
 				Data: map[string]any{
@@ -391,6 +407,15 @@ func OracleTaskHandler(ctx context.Context, args map[string]any) (Result, error)
 		Response: marshalResponse(map[string]any{
 			"text": lastStdout,
 		}),
+	})
+
+	// Wave 3-oracle: parallel write OracleReturned to JSONL sink.
+	appendOracleReturnedEvent(ctx, time.Now(), callID, OracleReturnedPayload{
+		Verb:       "task",
+		Agent:      agentName,
+		Model:      agent.Model,
+		DurationMS: taskDurationMS,
+		Response:   marshalResponse(map[string]any{"text": lastStdout}),
 	})
 
 	return Result{

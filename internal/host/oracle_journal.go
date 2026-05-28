@@ -29,6 +29,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/journal"
+	"kitsoki/internal/store"
 )
 
 // ── String field cap ─────────────────────────────────────────────────────────
@@ -160,6 +161,143 @@ func appendOracleCallJournal(ctx context.Context, ts time.Time, seq int, body Or
 		Body:    json.RawMessage(raw),
 	}
 	_ = jw.Append(e)
+}
+
+// ── EventSink context plumbing ────────────────────────────────────────────────
+
+// oracleEventSinkKey is the context key for a store.EventSink injected into
+// oracle handler calls for the parallel JSONL write (wave 3-oracle).
+type oracleEventSinkKey struct{}
+
+// WithOracleEventSink returns a child context carrying sink. Oracle handlers
+// call EventSinkFromOracleCtx to retrieve it. Nil is a safe no-op.
+func WithOracleEventSink(ctx context.Context, sink store.EventSink) context.Context {
+	if sink == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, oracleEventSinkKey{}, sink)
+}
+
+// EventSinkFromOracleCtx returns the store.EventSink previously injected with
+// WithOracleEventSink, or nil if none was injected.
+func EventSinkFromOracleCtx(ctx context.Context) store.EventSink {
+	s, _ := ctx.Value(oracleEventSinkKey{}).(store.EventSink)
+	return s
+}
+
+// ── OracleCalled / OracleReturned / OracleError parallel writes ───────────────
+
+// OracleCalledPayload is the payload written to OracleCalled events.
+// The verb identifies which oracle verb dispatched the call (ask, decide,
+// extract, task, converse). The call_id is a deterministic identifier that
+// pairs this event with the matching OracleReturned or OracleError event.
+// Replay treats OracleCalled as a no-op.
+type OracleCalledPayload struct {
+	Verb         string          `json:"verb"`
+	Agent        string          `json:"agent,omitempty"`
+	Model        string          `json:"model,omitempty"`
+	Prompt       string          `json:"prompt,omitempty"`
+	SystemPrompt string          `json:"system_prompt,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+}
+
+// OracleReturnedPayload is the payload written to OracleReturned events.
+// Meta is opaque (tokens, cost, model — varies by oracle transport).
+// Replay treats OracleReturned as a no-op.
+type OracleReturnedPayload struct {
+	Verb       string          `json:"verb"`
+	Agent      string          `json:"agent,omitempty"`
+	Model      string          `json:"model,omitempty"`
+	DurationMS int64           `json:"duration_ms"`
+	Response   json.RawMessage `json:"response,omitempty"`
+	Meta       map[string]any  `json:"meta,omitempty"`
+}
+
+// OracleErrorPayload is the payload written to OracleError events.
+// Replay treats OracleError as a no-op.
+type OracleErrorPayload struct {
+	Verb       string `json:"verb"`
+	Agent      string `json:"agent,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
+	Error      string `json:"error"`
+}
+
+// appendOracleCalledEvent appends an OracleCalled event to the EventSink in
+// ctx (if any). callID and ts are the deterministic call identifier and the
+// dispatch timestamp respectively. oc carries the session/turn/state.
+// The journal write is separate (appendOracleCallJournal); this is the
+// parallel JSONL-side write.
+func appendOracleCalledEvent(ctx context.Context, ts time.Time, callID string, payload OracleCalledPayload) {
+	sink := EventSinkFromOracleCtx(ctx)
+	if sink == nil {
+		return
+	}
+	oc := OracleCallCtxFrom(ctx)
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return // best-effort; marshal failure is not a reason to abort the call
+	}
+
+	ev := store.Event{
+		Turn:      oc.Turn,
+		Ts:        ts,
+		Kind:      store.OracleCalled,
+		StatePath: oc.StatePath,
+		Payload:   json.RawMessage(raw),
+		CallID:    callID,
+	}
+	_ = sink.Append(ev)
+}
+
+// appendOracleReturnedEvent appends an OracleReturned event to the EventSink
+// in ctx (if any). ts is the response timestamp (real, not fudged).
+func appendOracleReturnedEvent(ctx context.Context, ts time.Time, callID string, payload OracleReturnedPayload) {
+	sink := EventSinkFromOracleCtx(ctx)
+	if sink == nil {
+		return
+	}
+	oc := OracleCallCtxFrom(ctx)
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	ev := store.Event{
+		Turn:      oc.Turn,
+		Ts:        ts,
+		Kind:      store.OracleReturned,
+		StatePath: oc.StatePath,
+		Payload:   json.RawMessage(raw),
+		CallID:    callID,
+	}
+	_ = sink.Append(ev)
+}
+
+// appendOracleErrorEvent appends an OracleError event to the EventSink in
+// ctx (if any). ts is the error timestamp.
+func appendOracleErrorEvent(ctx context.Context, ts time.Time, callID string, payload OracleErrorPayload) {
+	sink := EventSinkFromOracleCtx(ctx)
+	if sink == nil {
+		return
+	}
+	oc := OracleCallCtxFrom(ctx)
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	ev := store.Event{
+		Turn:      oc.Turn,
+		Ts:        ts,
+		Kind:      store.OracleError,
+		StatePath: oc.StatePath,
+		Payload:   json.RawMessage(raw),
+		CallID:    callID,
+	}
+	_ = sink.Append(ev)
 }
 
 // marshalInput marshals the verb-specific input descriptor to JSON, returning

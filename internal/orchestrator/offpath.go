@@ -245,5 +245,5 @@ func (o *Orchestrator) appendOffPathEvents(sid app.SessionID, events []store.Eve
 	emptyWorld := world.World{Vars: map[string]any{}}
 	opJEntries := journalEntriesForEvents(sid, offTurn, time.Now(), events,
 		emptyWorld, emptyWorld, "", "", "")
-	return o.store.AppendEventsAndJournal(sid, events, opJEntries)
+	return o.appendEventsAndJournal(sid, events, opJEntries)
 }

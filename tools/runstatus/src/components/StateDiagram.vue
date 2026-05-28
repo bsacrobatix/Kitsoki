@@ -262,8 +262,9 @@ const eventLaneByPhase = computed<Map<string, PhaseEventBox[]>>(() => {
 
   const result = new Map<string, PhaseEventBox[]>();
 
-  // turn.input events are deferred (same logic as TraceTimeline's groupedTurns):
-  // they must appear last in the phase lane, after the machine work they triggered.
+  // turn.input (UserInputReceived) events: a real event written by the orchestrator
+  // at input-receive time, not a synthesized row. Deferred here so user-input boxes
+  // appear last in the phase lane (presentation ordering; the event's turn is correct).
   const deferredTurnInputs: Array<{ i: number; phaseId: string; box: PhaseEventBox }> = [];
 
   for (let i = 0; i < events.length; i++) {
@@ -319,7 +320,7 @@ const eventLaneByPhase = computed<Map<string, PhaseEventBox[]>>(() => {
     }
   }
 
-  // Append deferred turn.input boxes last in each phase lane.
+  // Append deferred turn.input boxes last in each phase lane (display ordering).
   for (const { phaseId, box } of deferredTurnInputs) {
     const arr = result.get(phaseId) ?? [];
     arr.push(box);

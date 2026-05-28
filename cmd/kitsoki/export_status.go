@@ -13,7 +13,6 @@ package main
 
 import (
 	"bufio"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -21,10 +20,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	_ "modernc.org/sqlite" // SQLite driver for journal open
 
 	"kitsoki/internal/app"
-	"kitsoki/internal/journal"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/viz"
 )
@@ -38,7 +35,6 @@ func exportStatusCmd() *cobra.Command {
 		startedAt    string
 		outPath      string
 		withMermaid  bool
-		journalPath  string
 	)
 
 	cmd := &cobra.Command{
@@ -64,7 +60,7 @@ Live-mode export (reads the in-process ring buffer):
 
 			// ── --from-trace mode ─────────────────────────────────────────
 			if fromTrace != "" {
-				return runExportFromTrace(fromTrace, appPath, currentState, sessionID, startedAt, outPath, withMermaid, journalPath)
+				return runExportFromTrace(fromTrace, appPath, currentState, sessionID, startedAt, outPath, withMermaid)
 			}
 
 			// ── Live mode stub ────────────────────────────────────────────
@@ -85,14 +81,13 @@ Live-mode export (reads the in-process ring buffer):
 	cmd.Flags().StringVar(&startedAt, "started-at", "", "override session start time (RFC3339, e.g. 2026-05-25T10:00:00Z)")
 	cmd.Flags().StringVarP(&outPath, "out", "o", "", "output file path (required)")
 	cmd.Flags().BoolVar(&withMermaid, "with-mermaid", true, "populate mermaid.source and mermaid.node_map (default true when --from-trace is used)")
-	cmd.Flags().StringVar(&journalPath, "journal", "", "path to kitsoki SQLite journal DB; when supplied, oracle events are enriched with full prompt/response detail")
 
 	return cmd
 }
 
 // runExportFromTrace reads a JSONL trace and an app.yaml, synthesises a
 // Snapshot, and writes it as indented JSON to outPath.
-func runExportFromTrace(tracePath, appPath, currentStateFlag, sessionIDFlag, startedAtFlag, outPath string, withMermaid bool, journalPath string) error {
+func runExportFromTrace(tracePath, appPath, currentStateFlag, sessionIDFlag, startedAtFlag, outPath string, withMermaid bool) error {
 	if appPath == "" {
 		return fmt.Errorf("--app is required with --from-trace")
 	}
@@ -113,19 +108,6 @@ func runExportFromTrace(tracePath, appPath, currentStateFlag, sessionIDFlag, sta
 
 	// ── Synthesise SessionHeader ──────────────────────────────────────────
 	header := synthesiseSessionHeader(def, events, sessionIDFlag, currentStateFlag, startedAtFlag)
-
-	// ── Journal merge (optional) ──────────────────────────────────────────
-	// When --journal is supplied, load all oracle.call entries from the SQLite
-	// journal and merge their full payloads into oracle.<verb>.complete events.
-	if journalPath != "" {
-		if mergeErr := mergeJournalIntoEvents(journalPath, header.SessionID, events); mergeErr != nil {
-			// Non-fatal: degrade gracefully; log and continue.
-			fmt.Fprintf(os.Stderr, "export-status: journal merge failed (continuing without prompt/response detail): %v\n", mergeErr)
-		}
-	} else {
-		// Inform the user when no journal is wired so the omission is visible.
-		fmt.Fprintln(os.Stderr, "export-status: journal not available; oracle events will lack prompt/response detail")
-	}
 
 	// ── Task tool_calls / files_changed aggregation ───────────────────────
 	// Scan the trace for task.tool and task.end events and attach them as
@@ -292,56 +274,6 @@ func isStateTerminal(def *app.AppDef, statePath string) bool {
 	compiled := app.Compile(def)
 	s, ok := compiled.LookupState(app.StatePath(statePath))
 	return ok && s != nil && s.Terminal
-}
-
-// ── Journal merge helpers ─────────────────────────────────────────────────────
-
-// mergeJournalIntoEvents opens the SQLite journal at journalPath, loads all
-// oracle.call entries for sessionID, and enriches matching trace events with
-// the full prompt/response payload.
-//
-// Correlation key: oracle.<verb>.complete slog events carry a `call_id` attr
-// that matches the `call_id` field in the KindOracleCall journal body. When
-// the call_id is found in both places, the full journal payload is merged into
-// the event's Attrs map.
-//
-// If the journal is unavailable or contains no matching entries, the function
-// returns without modifying the events (best-effort enrichment).
-func mergeJournalIntoEvents(journalPath, sessionID string, events []runstatus.TraceEvent) error {
-	if journalPath == "" || sessionID == "" {
-		return nil
-	}
-
-	db, err := sql.Open("sqlite", journalPath+"?mode=ro")
-	if err != nil {
-		return fmt.Errorf("open journal %q: %w", journalPath, err)
-	}
-	defer func() { _ = db.Close() }()
-
-	oracleCalls, err := journal.LoadOracleCalls(db, app.SessionID(sessionID))
-	if err != nil {
-		return fmt.Errorf("load oracle calls: %w", err)
-	}
-	if len(oracleCalls) == 0 {
-		return nil
-	}
-
-	for i := range events {
-		if !runstatus.IsOracleCompleteMsg(events[i].Msg) {
-			continue
-		}
-		callID, _ := events[i].Attrs["call_id"].(string)
-		if callID == "" {
-			continue
-		}
-		body, ok := oracleCalls[callID]
-		if !ok {
-			continue
-		}
-		// Merge the full journal payload into the event's Attrs.
-		runstatus.MergeOracleBodyIntoAttrs(events[i].Attrs, body)
-	}
-	return nil
 }
 
 // taskTraceWindow accumulates task.tool and task.end data keyed by task_trace_id.

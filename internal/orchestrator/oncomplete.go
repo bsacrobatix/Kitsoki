@@ -314,7 +314,7 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 	jcNow := time.Now()
 	jcJEntries := journalEntriesForEvents(sid, turnNum, jcNow, turnEvents,
 		journey.World, w, "", currentState, "")
-	if appendErr := o.store.AppendEventsAndJournal(sid, turnEvents, jcJEntries); appendErr != nil {
+	if appendErr := o.appendEventsAndJournal(sid, turnEvents, jcJEntries); appendErr != nil {
 		return fmt.Errorf("handleJobTerminal: append events: %w", appendErr)
 	}
 

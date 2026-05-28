@@ -156,7 +156,7 @@ turns:
       wagon_chat_title: "River strategy and crossings"
       wagon_chat_turns: 1
     expect_events:
-      - kind: HostDispatched
+      - kind: harness.dispatched
         effect:
           namespace: host.oracle.converse
           args:

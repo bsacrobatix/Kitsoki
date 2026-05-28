@@ -4,14 +4,14 @@
 //
 // What this test proves end-to-end:
 //
-//	1. The runner reloads the app via app.LoadWithOverrides when a
-//	   fixture declares host_bindings:, so iface.<x> resolves to the
-//	   overridden binding for THAT fixture only.
-//	2. With cyp__transport: host.artifacts_dir, every cypilot
-//	   _awaiting_reply.on_enter that calls iface.transport.post lands
-//	   real bytes on disk via the production host.artifacts_dir
-//	   handler (not a stub).
-//	3. The expect_files: assertion fires against those real files.
+//  1. The runner reloads the app via app.LoadWithOverrides when a
+//     fixture declares host_bindings:, so iface.<x> resolves to the
+//     overridden binding for THAT fixture only.
+//  2. With cyp__transport: host.artifacts_dir, every cypilot
+//     _awaiting_reply.on_enter that calls iface.transport.post lands
+//     real bytes on disk via the production host.artifacts_dir
+//     handler (not a stub).
+//  3. The expect_files: assertion fires against those real files.
 //
 // The handler reads its target directory from KITSOKI_ARTIFACTS_ROOT
 // (with cwd/.artifacts as fallback); the test sets it to t.TempDir()
@@ -38,6 +38,9 @@ import (
 )
 
 func TestRunFlows_HostBindings_ArtifactsDirEndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("TestRunFlows_HostBindings_ArtifactsDirEndToEnd: skipped under -short (full story run)")
+	}
 	artifactsRoot := t.TempDir()
 	t.Setenv("KITSOKI_ARTIFACTS_ROOT", artifactsRoot)
 

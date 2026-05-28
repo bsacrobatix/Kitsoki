@@ -180,8 +180,9 @@ func (srv *Server) handleTransition(
 		result.Events[i].Turn = nextTurn
 	}
 
-	// 8. Persist events.
-	if err := srv.s.AppendEvents(sessionID, result.Events); err != nil {
+	// 8. Persist events via StoreSinkAdapter (wave-2a seam).
+	sink := store.NewStoreSinkAdapter(srv.s, sessionID)
+	if err := sink.AppendBatch(result.Events); err != nil {
 		return nil, nil, fmt.Errorf("mcp: append events: %w", err)
 	}
 

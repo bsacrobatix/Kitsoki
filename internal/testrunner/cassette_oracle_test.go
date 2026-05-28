@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -182,16 +181,18 @@ episodes:
 	}
 }
 
-// TestEpisodeOracle_ReplayAnyForbidden verifies that replay:any + oracle: is
-// rejected at load time per §6.3.
-func TestEpisodeOracle_ReplayAnyForbidden(t *testing.T) {
+// TestEpisodeOracle_ReplayAnyAllowed verifies that replay:any + oracle: is now
+// ALLOWED after the §6.3 constraint was relaxed (finding 2.10 / phase A).
+// Each match produces a distinct OracleCalled/OracleReturned pair with a unique
+// call_id (different matchIdx), so multiple matches don't collide in the trace.
+func TestEpisodeOracle_ReplayAnyAllowed(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	p := writeCassetteFile(t, dir, "bad_oracle.yaml", `
+	p := writeCassetteFile(t, dir, "replay_any_oracle.yaml", `
 kind: host_cassette
 app_id: testapp
 episodes:
-  - id: bad
+  - id: replay_any_ep
     match:
       handler: host.oracle.ask
     replay: any
@@ -199,13 +200,16 @@ episodes:
       data: {ok: true}
     oracle:
       verb: ask
+      agent: test
+      prompt: test prompt
+      response: "ok"
 `)
-	_, err := LoadCassette(p)
-	if err == nil {
-		t.Fatal("expected error for replay:any + oracle:, got nil")
+	cas, err := LoadCassette(p)
+	if err != nil {
+		t.Fatalf("replay:any + oracle: must be allowed after §6.3 relaxation; got error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "replay:any") {
-		t.Errorf("error should mention replay:any, got: %v", err)
+	if len(cas.Episodes) == 0 {
+		t.Fatal("expected one episode")
 	}
 }
 
@@ -213,23 +217,23 @@ episodes:
 func TestEpisodeOracle_DerivedCallID(t *testing.T) {
 	t.Parallel()
 
-	id1 := derivedCallID("bugfix", "phase_1_repro_oracle")
-	id2 := derivedCallID("bugfix", "phase_1_repro_oracle")
+	id1 := host.DeriveCallID("bugfix", "phase_1_repro_oracle")
+	id2 := host.DeriveCallID("bugfix", "phase_1_repro_oracle")
 	if id1 != id2 {
-		t.Errorf("derivedCallID: not stable: %q vs %q", id1, id2)
+		t.Errorf("DeriveCallID: not stable: %q vs %q", id1, id2)
 	}
 	if len(id1) != 16 {
-		t.Errorf("derivedCallID: expected 16 hex chars, got %d: %q", len(id1), id1)
+		t.Errorf("DeriveCallID: expected 16 hex chars, got %d: %q", len(id1), id1)
 	}
 
 	// Different app or episode → different call_id.
-	id3 := derivedCallID("other_app", "phase_1_repro_oracle")
+	id3 := host.DeriveCallID("other_app", "phase_1_repro_oracle")
 	if id1 == id3 {
-		t.Errorf("derivedCallID: same id for different app: %q", id1)
+		t.Errorf("DeriveCallID: same id for different app: %q", id1)
 	}
-	id4 := derivedCallID("bugfix", "phase_2_oracle")
+	id4 := host.DeriveCallID("bugfix", "phase_2_oracle")
 	if id1 == id4 {
-		t.Errorf("derivedCallID: same id for different episode: %q", id1)
+		t.Errorf("DeriveCallID: same id for different episode: %q", id1)
 	}
 }
 
@@ -336,7 +340,7 @@ episodes:
 	}
 
 	// Assert a KindOracleCall entry landed in the SQLite journal keyed by call_id.
-	expectedCallID := derivedCallID("myapp", "phase_1_oracle")
+	expectedCallID := host.DeriveCallID("myapp", "phase_1_oracle")
 	rows, err := loadOracleCallRows(st.DB(), string(sid))
 	if err != nil {
 		t.Fatalf("load oracle call rows: %v", err)

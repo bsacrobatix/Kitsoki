@@ -282,6 +282,17 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 	callStart := time.Now()
 	systemPrompt := effectiveSystemPrompt(args, agent)
 
+	// Wave 3-oracle: write OracleCalled to the JSONL sink (if wired) at
+	// dispatch time, before the subprocess is started.
+	appendOracleCalledEvent(ctx, callStart, callID, OracleCalledPayload{
+		Verb:         "ask",
+		Agent:        agentNameFromArgs(args),
+		Model:        agent.Model,
+		Prompt:       rendered,
+		SystemPrompt: systemPrompt,
+		Input:        marshalInput(map[string]any{}),
+	})
+
 	cr, _, runErr := OracleStreamer{
 		Bin:        bin,
 		CLIArgs:    cliArgs,
@@ -300,6 +311,7 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		if s := strings.TrimSpace(cr.Stderr); s != "" {
 			errMsg = fmt.Sprintf("%s\nstderr: %s", errMsg, s)
 		}
+		callEnd := time.Now()
 		// Emit lean slog + journal before returning
 		slog.InfoContext(ctx, "oracle.ask.complete",
 			"call_id", callID,
@@ -318,6 +330,13 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 			Prompt:       rendered,
 			Input:        marshalInput(map[string]any{}),
 			Error:        errMsg,
+		})
+		// Wave 3-oracle: parallel write OracleError to JSONL sink.
+		appendOracleErrorEvent(ctx, callEnd, callID, OracleErrorPayload{
+			Verb:       "ask",
+			Agent:      agentNameFromArgs(args),
+			DurationMS: durationMS,
+			Error:      errMsg,
 		})
 		return Result{Error: errMsg}, nil
 	}
@@ -363,6 +382,7 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 	if submitted != nil {
 		responseDesc["intent"] = submitted
 	}
+	callEnd := time.Now()
 	appendOracleCallJournal(ctx, callStart, 0, OracleCallBody{
 		CallID:       callID,
 		Verb:         "ask",
@@ -374,6 +394,15 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		Input:        marshalInput(inputDesc),
 		Response:     marshalResponse(responseDesc),
 		Error:        errMsg,
+	})
+
+	// Wave 3-oracle: parallel write OracleReturned to JSONL sink.
+	appendOracleReturnedEvent(ctx, callEnd, callID, OracleReturnedPayload{
+		Verb:       "ask",
+		Agent:      agentNameFromArgs(args),
+		Model:      agent.Model,
+		DurationMS: durationMS,
+		Response:   marshalResponse(responseDesc),
 	})
 
 	res := Result{Data: data}

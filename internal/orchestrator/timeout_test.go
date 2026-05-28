@@ -109,10 +109,10 @@ func TestTimeout_CancelledOnExit(t *testing.T) {
 	require.Equal(t, app.StatePath("traveled"), j.State)
 }
 
-// ── TestTimeout_PersistsAcrossOrchestratorRestart verifies that a pending
-// entry is reloaded from the SQLite-backed store when a new orchestrator
-// opens the same session. ─────────────────────────────────────────────────
-func TestTimeout_PersistsAcrossOrchestratorRestart(t *testing.T) {
+// ── TestTimeout_NoPersistenceAcrossRestart verifies that phase A in-memory-only
+// timeout behaviour: a pending timeout is NOT preserved when a new orchestrator
+// instance is created. Phase B will add a non-sqlite persistence seam.
+func TestTimeout_NoPersistenceAcrossRestart(t *testing.T) {
 	t.Parallel()
 	def, err := app.Load("testdata/timeout/app.yaml")
 	require.NoError(t, err)
@@ -131,28 +131,16 @@ func TestTimeout_PersistsAcrossOrchestratorRestart(t *testing.T) {
 	require.NoError(t, err)
 	_, err = orch1.Teleport(ctx, sid, inbox.TeleportTarget{State: "waiting"})
 	require.NoError(t, err)
-	require.NotEmpty(t, orch1.TimeoutPendingStates(sid))
+	require.NotEmpty(t, orch1.TimeoutPendingStates(sid), "orch1 must have pending timeout")
 
-	// Drop orch1 on the floor (simulating a crash).  Stopping its in-memory
-	// dispatcher leaves the persisted row intact, mirroring what the OS sees
-	// when the orchestrator process exits.
+	// Drop orch1 (simulating a process restart).
 	orch1.ShutdownTimeoutsForTest()
 
-	// A fresh orchestrator opens the same SQLite-backed store: it must
-	// rearm the timeout from the persisted row.
+	// Phase A: a new orchestrator has NO pending timeouts because persistence
+	// was removed. Phase B will add a non-sqlite seam to restore them.
 	orch2 := orchestrator.New(def, m, s, h, orchestrator.WithClock(clk))
-	require.NotEmpty(t, orch2.TimeoutPendingStates(sid),
-		"new orchestrator should have rearmed the persisted timeout")
-
-	// Advance past the deadline.  The rearmed timer must fire.
-	clk.Advance(11 * 24 * time.Hour)
-	require.Eventually(t, func() bool {
-		j, lerr := orch2.LoadJourney(sid)
-		if lerr != nil {
-			return false
-		}
-		return j.State == app.StatePath("traveled")
-	}, 2*time.Second, 5*time.Millisecond)
+	require.Empty(t, orch2.TimeoutPendingStates(sid),
+		"phase A: timeout must NOT persist across orchestrator restart (in-memory only; phase B adds persistence)")
 }
 
 // ── TestTimeout_EmitsTimeoutFiredEvent verifies the synthetic turn carries

@@ -65,7 +65,7 @@ turns:
     # intro.yaml's host.oracle.decide invocation, or if the
     # engine stopped forwarding `agent:` into HostDispatched.args.
     expect_events:
-      - kind: HostDispatched
+      - kind: harness.dispatched
         effect:
           namespace: host.oracle.decide
           args:

@@ -22,6 +22,19 @@ type Snapshot struct {
 	App     *app.AppDef     `json:"app"`
 	Mermaid MermaidSnapshot `json:"mermaid"`
 	Events  []TraceEvent    `json:"events"`
+
+	// RawLines holds the original JSONL bytes for each event in Events, one
+	// entry per event, in the same order. RawLines[i] is the raw marshalled line
+	// (without trailing newline) that would appear on disk for Events[i].
+	//
+	// Purpose: the Layer 7 byte-equality test (proposal §1.3.7) asserts that
+	// joinLines(snap.RawLines) equals the original JSONL event section of the
+	// trace file. This field is not serialised (no json tag) — it exists only
+	// for test-side byte-equality assertions and for the SPA's "view raw" feature.
+	//
+	// Finding 2.5: previous tests only asserted len(Events)==len(hist) and
+	// per-field equality; this field closes the byte-equality gap.
+	RawLines [][]byte `json:"-"`
 }
 
 // SessionHeader carries the session-level metadata shown in the UI header.
@@ -57,12 +70,12 @@ type NodeRef = viz.NodeRef
 // UnmarshalJSON implements the "known fields promoted, rest into Attrs" logic.
 // When marshalling back to JSON all fields are emitted normally.
 type TraceEvent struct {
-	Time       time.Time      `json:"time"`
-	Level      string         `json:"level"`
-	Msg        string         `json:"msg"`
-	SessionID  string         `json:"session_id"`
-	Turn       int            `json:"turn"`
-	StatePath  string         `json:"state_path"`
+	Time      time.Time `json:"time"`
+	Level     string    `json:"level"`
+	Msg       string    `json:"msg"`
+	SessionID string    `json:"session_id"`
+	Turn      int       `json:"turn"`
+	StatePath string    `json:"state_path"`
 	// ParentTurn is non-zero for off-path event batches: it holds the
 	// foreground turn that was active when the off-path interaction occurred.
 	// The trace UI uses this to render off-path groups as sub-items of their

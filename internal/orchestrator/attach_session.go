@@ -122,11 +122,11 @@ func WithJournalReader(r journal.Reader) Option {
 // transcriptKinds is the set of journal entry kinds that are relevant for
 // transcript rehydration.  Only these are included in ResumeBundle.TranscriptEntries.
 var transcriptKinds = map[string]struct{}{
-	journal.KindViewRendered:    {},
-	journal.KindOffPathQuestion: {},
-	journal.KindOffPathAnswer:   {},
+	journal.KindViewRendered:      {},
+	journal.KindOffPathQuestion:   {},
+	journal.KindOffPathAnswer:     {},
 	journal.KindDisambigPresented: {},
-	journal.KindDisambigChosen:  {},
+	journal.KindDisambigChosen:    {},
 }
 
 // AttachSession rebuilds the full session state from persisted data and
@@ -320,10 +320,10 @@ func (o *Orchestrator) AttachSession(sid app.SessionID) (*ResumeBundle, error) {
 
 // clarifyRequestedBody is the JSON shape of a clarify.requested entry body.
 type clarifyRequestedBody struct {
-	Origin     string         `json:"origin"`
-	Intent     string         `json:"intent"`
-	SlotsSoFar map[string]any `json:"slots_so_far"`
-	SlotsNeeded []string      `json:"slots_needed"`
+	Origin      string         `json:"origin"`
+	Intent      string         `json:"intent"`
+	SlotsSoFar  map[string]any `json:"slots_so_far"`
+	SlotsNeeded []string       `json:"slots_needed"`
 }
 
 // viewRenderedBody is the JSON shape of a view.rendered entry body.
