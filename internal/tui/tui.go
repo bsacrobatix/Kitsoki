@@ -4006,20 +4006,23 @@ func (m RootModel) View() string {
 	}
 	parts = append(parts, r.StatusRow(footerFrameworkLine(m), modeLabel(m.mode)))
 
-	// Trim trailing newlines from each part before joining. Every
-	// lipgloss.Render output ends with "\n", and JoinVertical
-	// inserts another "\n" between parts — without this trim the
-	// live region renders 2× as many rows as it visibly contains,
-	// which makes Bubble Tea's "clear-then-redraw" logic move the
-	// cursor too far up on the next paint and overwrite scrollback
-	// rows. (Symptom: status row "awaiting" appearing on the same
-	// terminal line as the last bullet of the agent body above.)
-	for i := range parts {
-		// Trim only trailing newlines, preserving intentional embedded newlines
-		// in parts like promptLine (indicator\n + prompt).
-		parts[i] = strings.TrimRight(parts[i], "\n")
+	// Assemble the final view by joining parts with explicit newlines.
+	// We use simple string concatenation instead of JoinVertical to avoid
+	// padding issues that could cause horizontal alignment of multi-line
+	// parts like promptLine (which contains indicator\n + prompt).
+	// Trim trailing newlines from each part to prevent double-spacing.
+	var output strings.Builder
+	for _, part := range parts {
+		trimmed := strings.TrimRight(part, "\n")
+		if trimmed == "" {
+			continue
+		}
+		if output.Len() > 0 {
+			output.WriteString("\n")
+		}
+		output.WriteString(trimmed)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return output.String()
 }
 
 // promptPrefix returns the styled mode-specific prompt prefix.
