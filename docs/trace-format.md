@@ -143,12 +143,16 @@ mode or from the cassette via `!include` in replay mode (see
 | `verb`         | string | Oracle verb: `ask`, `decide`, `extract`, `task`, `converse`. |
 | `agent`        | string | Agent name (optional).                             |
 | `model`        | string | Model name (optional).                             |
+| `prompt_file`  | string | Relative path (from the trace dir) to the rendered prompt sidecar when the prompt exceeds ~1KB and a prompts dir is configured; omitted otherwise. |
 | `input`        | object | Verb-specific input descriptor (e.g. `{schema_path}`). |
 
 > The prompt is intentionally **not** included in this payload — it would
-> push many lines past the 4096-byte `PIPE_BUF` atomic-write limit. The
-> rendered prompt lives on `oracle.AskRequest.PromptText` (live) or in the
-> cassette `!include`d file (replay).
+> push many lines past the 4096-byte `PIPE_BUF` atomic-write limit.
+> Recover the rendered prompt from one of three places: `oracle.AskRequest.PromptText`
+> (live), the cassette `!include`d file (replay), or — for large prompts written
+> by a sink configured via `host.WithOraclePromptsDir` — the on-disk sidecar at
+> `{trace_dir}/oracle-prompts/{call_id}.txt` referenced by the event's
+> `prompt_file` field.
 
 **`oracle.call.complete` payload fields:**
 

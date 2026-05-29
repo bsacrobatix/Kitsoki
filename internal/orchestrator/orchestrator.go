@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,6 +117,10 @@ type Orchestrator struct {
 	// session continue / TUI), SQLite remains the read source.
 	eventSink       store.EventSink
 	sinkIsAuthority bool // true → JSONL is the sole source of truth for loadJourney
+	// oracleEventSinkOnly, when true, indicates that eventSink is for oracle
+	// events only (buffered during host dispatch, flushed after main turn events).
+	// Used in testrunner for in-memory oracle event tracing.
+	oracleEventSinkOnly bool
 
 	// pending tracks in-flight clarifications keyed by session ID.
 	mu      sync.Mutex
@@ -370,6 +375,15 @@ func WithEventSinkAuthority(auth bool) Option {
 // after orchestrator construction.
 func (o *Orchestrator) SetEventSink(s store.EventSink) {
 	o.eventSink = s
+}
+
+// SetOracleEventSinkOnly marks the EventSink as oracle-events-only. When true,
+// the EventSink receives only oracle events (buffered during host dispatch),
+// not main turn events. Main events go via the store directly. The oracle
+// events are flushed after main events are written to avoid seq collisions.
+// Used in testrunner for in-memory oracle event tracing.
+func (o *Orchestrator) SetOracleEventSinkOnly(onlyOracle bool) {
+	o.oracleEventSinkOnly = onlyOracle
 }
 
 // NewSession opens a session in the store and returns its ID.
@@ -1284,6 +1298,12 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	// the existing journal write.
 	if o.eventSink != nil {
 		ctx = host.WithOracleEventSink(ctx, o.eventSink)
+		// Also inject the prompts directory so large prompts are stored separately
+		// to stay under PIPE_BUF. Extract it from the JSONLSink path.
+		if jl, ok := o.eventSink.(*store.JSONLSink); ok {
+			promptsDir := filepath.Join(filepath.Dir(jl.Path), "oracle-prompts")
+			ctx = host.WithOraclePromptsDir(ctx, promptsDir)
+		}
 	}
 	// B-2: inject the oracle plugin registry so handlers can route through
 	// Oracle.Ask. When nil, handlers fall through to direct claude-CLI logic.

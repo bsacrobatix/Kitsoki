@@ -15,14 +15,20 @@ Where `<verb>` is one of: `decide`, `extract`, `ask`, `task`, `converse`.
 
 ### oracle.\<verb\>.start attrs
 
-| Key    | Type   | Notes                                      |
-|--------|--------|--------------------------------------------|
-| verb   | string | one of the five verbs above                |
-| model  | string | e.g. `"claude-3-sonnet"`                   |
-| agent  | string | agent name, e.g. `"reproducing_specialist"`|
+| Key          | Type   | Notes                                                                          |
+|--------------|--------|--------------------------------------------------------------------------------|
+| verb         | string | one of the five verbs above                                                    |
+| model        | string | e.g. `"claude-3-sonnet"`                                                       |
+| agent        | string | agent name, e.g. `"reproducing_specialist"`                                    |
+| prompt_file? | string | Relative path (from the trace dir) to the on-disk prompt sidecar at `oracle-prompts/<call_id>.txt`. Present when the rendered prompt is large (>1KB) and a prompts dir is configured; omitted otherwise. |
+| input?       | object | Verb-specific input descriptor (e.g. `{schema_path}`).                         |
 
 Purpose: give the UI early visibility that an LLM call is in flight before the
-(potentially long) response arrives.
+(potentially long) response arrives. The rendered prompt itself is **not**
+embedded in this event — it would push many lines past the 4096-byte `PIPE_BUF`
+atomic-write limit. To recover the prompt, read `prompt_file` (if present) or
+the cassette `!include`d file in replay mode. See
+[../../../docs/trace-format.md §Oracle event kinds](../../../docs/trace-format.md#oracle-event-kinds).
 
 ---
 
@@ -42,9 +48,15 @@ All keys below are present on every `.complete` event unless marked `?`
 | prompt_tokens   | number | Tokens in the rendered prompt (input side)                    |
 | response_tokens | number | Tokens in the model response (output side)                    |
 | cost_usd?       | number | Estimated USD cost; omit if unavailable                       |
-| system_prompt   | string | Full text of the system prompt sent to the model. Cap: 64KB. If truncated, append the marker ` [TRUNCATED]` at the end. |
-| prompt          | string | Full text of the user prompt sent to the model. Cap: 64KB. If truncated, append ` [TRUNCATED]`. |
 | error?          | string | If the call failed, the error message. Other response fields are absent when error is present. |
+
+> The rendered prompt and system prompt are **not** carried on `.complete`
+> events — they exceed the 4096-byte `PIPE_BUF` atomic-write limit. The
+> matching `.start` event carries a `prompt_file` reference to the on-disk
+> sidecar at `{trace_dir}/oracle-prompts/{call_id}.txt` for large prompts;
+> small prompts can be recovered from the cassette `!include` in replay mode
+> or from `oracle.AskRequest.PromptText` in live mode. See
+> [../../../docs/trace-format.md §Oracle event kinds](../../../docs/trace-format.md#oracle-event-kinds).
 
 ### input object
 
@@ -131,14 +143,17 @@ diff so the UI can render an inline diff view.
 
 | Field                      | Cap    | Truncation marker |
 |----------------------------|--------|-------------------|
-| system_prompt              | 64 KB  | ` [TRUNCATED]`    |
-| prompt                     | 64 KB  | ` [TRUNCATED]`    |
 | response.text              | 64 KB  | ` [TRUNCATED]`    |
 | tool_calls[].result        | 2 KB   | ` [TRUNCATED]`    |
 | files_changed[].diff       | 64 KB  | ` [TRUNCATED]`    |
 
 When a string is truncated, the last bytes are replaced by ` [TRUNCATED]` so
 the field remains valid UTF-8 and the UI can display a truncation notice.
+
+The rendered `prompt` and `system_prompt` are **not** transported on the event
+at all (so no cap applies on the wire); they live in the on-disk sidecar
+referenced by the `.start` event's `prompt_file` field. The sidecar file
+itself is not size-capped by kitsoki.
 
 ---
 
@@ -155,8 +170,6 @@ the field remains valid UTF-8 and the UI can display a truncation notice.
   "prompt_tokens": 512,
   "response_tokens": 18,
   "cost_usd": 0.0009,
-  "system_prompt": "You are a strategy router for the bugfix pipeline...",
-  "prompt": "The user reported: 'race condition in worker pool on shutdown'. Choose the best next step.",
   "input": {
     "choices": [
       { "id": "reproduce_locally", "description": "Attempt to reproduce the bug in a local workspace." },
@@ -180,8 +193,6 @@ the field remains valid UTF-8 and the UI can display a truncation notice.
   "duration_ms": 620,
   "prompt_tokens": 380,
   "response_tokens": 45,
-  "system_prompt": "Extract structured fields from the user message according to the schema.",
-  "prompt": "User message: 'BUG-4711: Race condition in worker pool on shutdown. Severity: high.'",
   "input": {
     "schema": {
       "type": "object",
@@ -210,8 +221,6 @@ the field remains valid UTF-8 and the UI can display a truncation notice.
   "duration_ms": 510,
   "prompt_tokens": 420,
   "response_tokens": 24,
-  "system_prompt": "You are the intent router for the bugfix pipeline idle state. Classify the user message into one of the registered intents and extract any slots.",
-  "prompt": "User: start BUG-4711",
   "input": {
     "instructions": "Classify the user message into one of: start, quit, restart_from, quick."
   },
@@ -234,8 +243,6 @@ the field remains valid UTF-8 and the UI can display a truncation notice.
   "prompt_tokens": 2400,
   "response_tokens": 1820,
   "cost_usd": 0.018,
-  "system_prompt": "You are the reproducing specialist agent...",
-  "prompt": "Reproduce BUG-4711: race condition in worker pool on shutdown. Workspace: /workspace/BUG-4711.",
   "input": {
     "instructions": "Reproduce the reported bug. Write a failing test that demonstrates the race. Run the test to confirm it fails.",
     "files_in": ["workerpool/dispatcher.go", "workerpool/worker.go"]
@@ -281,8 +288,6 @@ the field remains valid UTF-8 and the UI can display a truncation notice.
   "duration_ms": 3200,
   "prompt_tokens": 680,
   "response_tokens": 142,
-  "system_prompt": "You are a clarification agent. Ask the user targeted questions to resolve ambiguity before the fix is proposed.",
-  "prompt": "We need to clarify the expected shutdown behaviour before proposing a fix.",
   "input": {
     "messages": [
       { "role": "assistant", "content": "Should Dispatcher.Shutdown() wait for in-flight tasks to complete, or cancel them immediately?" },
@@ -311,8 +316,6 @@ are omitted entirely:
   "duration_ms": 1200,
   "prompt_tokens": 2400,
   "response_tokens": 0,
-  "system_prompt": "...",
-  "prompt": "...",
   "input": { "instructions": "..." },
   "error": "context deadline exceeded after 1200ms"
 }

@@ -656,6 +656,7 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 	if rig.journalWriter != nil {
 		orchOpts = append(orchOpts, orchestrator.WithJournalWriter(rig.journalWriter))
 	}
+
 	orch := orchestrator.New(def, m, st, h, orchOpts...)
 
 	sid, err := orch.NewSession(ctx)
@@ -663,6 +664,12 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 		_ = st.Close()
 		return nil, fmt.Errorf("buildOrchestratorRig: new session: %w", err)
 	}
+
+	// Wire the EventSink for oracle events only. Oracle handlers buffer events during
+	// host dispatch; they're flushed after main turn events are written to avoid
+	// seq collisions in the store.
+	orch.SetEventSink(store.NewStoreSinkAdapter(st, sid))
+	orch.SetOracleEventSinkOnly(true)
 
 	rig.orch = orch
 	rig.sched = sched
