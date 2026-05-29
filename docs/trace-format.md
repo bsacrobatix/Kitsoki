@@ -92,7 +92,7 @@ All kinds use the dotted form the SPA subsystem chip logic already consumes.
 | `turn.end`                   | At the end of every user turn.                              |
 | `oracle.ask.start`           | Immediately before the LLM harness is invoked.              |
 | `oracle.tool_call`           | When the LLM produces a tool call result.                   |
-| `oracle.call.start`          | When an oracle verb is dispatched (full prompt in payload). |
+| `oracle.call.start`          | When an oracle verb is dispatched (verb/agent/model metadata only; prompt is not embedded, see §Oracle event kinds). |
 | `oracle.call.complete`       | When the oracle verb response lands (full response).        |
 | `oracle.call.error`          | When the oracle verb returns an error.                      |
 | `oracle.off_path.question`   | User asks a free-form off-path question. Replay no-op.      |

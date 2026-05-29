@@ -294,14 +294,18 @@ func Dispatch(ctx context.Context, dr OracleDispatchRequest) (OracleDispatchResu
 	// are available. For all transports this is functionally equivalent to
 	// writing before: OracleCalled is a no-op for replay, and the event pair
 	// is what the runstatus SPA consumes (ordered by ts, not by write sequence).
-	// Omit Prompt and SystemPrompt from the event to stay under PIPE_BUF (4096 bytes).
-	// The full prompt is available in the AskRequest context (live mode) or
-	// cassette via !include (replay mode), ensuring deterministic replay.
+	// Store large prompts in separate files to stay under PIPE_BUF (4096 bytes).
+	// The full prompt is available in:
+	// - The oracle.AskRequest.PromptText (live mode)
+	// - Separate prompt file (referenced via prompt_file field)
+	// - Cassette via !include (replay mode)
+	promptFile, _ := storePromptIfLarge(ctx, callID, dr.PromptText)
 	appendOracleCalledEventWithEpisode(ctx, callStart, callID, episodeID, matchIdx, OracleCalledPayload{
-		Verb:  dr.Verb,
-		Agent: dr.Agent,
-		Model: dr.Model,
-		Input: marshalInput(dr.InputDesc),
+		Verb:       dr.Verb,
+		Agent:      dr.Agent,
+		Model:      dr.Model,
+		PromptFile: promptFile,
+		Input:      marshalInput(dr.InputDesc),
 	})
 
 	if askErr != nil {

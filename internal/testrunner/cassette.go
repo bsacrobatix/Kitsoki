@@ -626,11 +626,14 @@ func writeCassetteOracleEvents(ctx context.Context, sink store.EventSink, cas *C
 	}
 
 	// OracleCalled: use now as dispatch time (cassette replay is instantaneous).
+	// If the prompt is large, store it separately and set PromptFile.
+	promptFile, _ := host.StorePromptIfLargeForTest(ctx, o.CallID, o.Prompt)
 	calledPayload := host.OracleCalledPayload{
-		Verb:   o.Verb,
-		Agent:  o.Agent,
-		Model:  o.Model,
-		Input:  inputRaw,
+		Verb:       o.Verb,
+		Agent:      o.Agent,
+		Model:      o.Model,
+		PromptFile: promptFile,
+		Input:      inputRaw,
 	}
 	calledRaw, err := json.Marshal(calledPayload)
 	if err == nil {

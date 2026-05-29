@@ -21,11 +21,37 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/store"
 )
+
+// ── Oracle prompts directory context ──────────────────────────────────────────
+
+// oraclePromptsDir is the context key for the directory where large prompts
+// are stored (e.g., {trace_dir}/oracle-prompts/). If set, large prompts
+// (>1KB) are written to separate files to keep JSONL lines under PIPE_BUF.
+type oraclePromptsDirKey struct{}
+
+// WithOraclePromptsDir returns a child context carrying the directory where
+// large prompts should be stored. Pass "" to disable separate prompt storage.
+func WithOraclePromptsDir(ctx context.Context, dir string) context.Context {
+	if dir == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, oraclePromptsDirKey{}, dir)
+}
+
+// OraclePromptsDirFromCtx returns the oracle prompts directory from context,
+// or "" if none was set.
+func OraclePromptsDirFromCtx(ctx context.Context) string {
+	dir, _ := ctx.Value(oraclePromptsDirKey{}).(string)
+	return dir
+}
 
 // ── Oracle call context ───────────────────────────────────────────────────────
 
@@ -83,17 +109,19 @@ func EventSinkFromOracleCtx(ctx context.Context) store.EventSink {
 // pairs this event with the matching OracleReturned or OracleError event.
 // Replay treats OracleCalled as a no-op.
 //
-// NOTE: Prompt and SystemPrompt are omitted from the event to keep the JSONL
-// line under PIPE_BUF (4096 bytes). The full prompt is available in:
+// NOTE: Large prompts are stored in separate files to keep the JSONL line
+// under PIPE_BUF (4096 bytes). When PromptFile is set, the full prompt is
+// in that external file. The prompt is available in:
 // - The oracle.AskRequest.PromptText (live mode)
-// - The cassette via !include (replay mode)
+// - The cassette via !include or separate prompt file (replay mode)
 // This ensures deterministic replay while staying under atomic write limits.
 // See oracle_dispatch.go appendOracleCalledEventWithEpisode for details.
 type OracleCalledPayload struct {
-	Verb  string          `json:"verb"`
-	Agent string          `json:"agent,omitempty"`
-	Model string          `json:"model,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Verb       string          `json:"verb"`
+	Agent      string          `json:"agent,omitempty"`
+	Model      string          `json:"model,omitempty"`
+	PromptFile string          `json:"prompt_file,omitempty"` // Path to external prompt file if large
+	Input      json.RawMessage `json:"input,omitempty"`
 }
 
 // OracleReturnedPayload is the payload written to OracleReturned events.
@@ -248,4 +276,64 @@ func marshalInput(v any) json.RawMessage {
 // returning nil on error.
 func marshalResponse(v any) json.RawMessage {
 	return marshalInput(v) // same logic
+}
+
+// StorePromptIfLargeForTest is exported for cassette tests.
+// See storePromptIfLarge for details.
+func StorePromptIfLargeForTest(ctx context.Context, callID string, prompt string) (string, error) {
+	return storePromptIfLarge(ctx, callID, prompt)
+}
+
+// storePromptIfLarge writes the prompt to a separate file if it's large (>1KB),
+// returning the file reference for the PromptFile field, or "" if the prompt
+// was small or storage is not configured. Large prompts are stored in
+// {promptsDir}/{callID}.txt to keep JSONL lines under PIPE_BUF.
+//
+// Returns: (promptFileRef, error). On error, returns ("", err) and the event
+// should still be written (prompt unavailable in UI, but execution continues).
+func storePromptIfLarge(ctx context.Context, callID string, prompt string) (string, error) {
+	const largeThreshold = 1024 // 1KB
+
+	if len(prompt) <= largeThreshold {
+		return "", nil // Small enough to include inline in future; not implemented yet
+	}
+
+	promptsDir := OraclePromptsDirFromCtx(ctx)
+	if promptsDir == "" {
+		return "", nil // Storage not configured; skip
+	}
+
+	// Ensure prompts directory exists.
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		return "", fmt.Errorf("storePromptIfLarge: mkdir %q: %w", promptsDir, err)
+	}
+
+	// Write prompt to {promptsDir}/{callID}.txt.
+	promptPath := filepath.Join(promptsDir, callID+".txt")
+	if err := os.WriteFile(promptPath, []byte(prompt), 0o644); err != nil {
+		return "", fmt.Errorf("storePromptIfLarge: write %q: %w", promptPath, err)
+	}
+
+	// Return relative path for portability (relative to trace dir).
+	return filepath.Join("oracle-prompts", callID+".txt"), nil
+}
+
+// promptForEvent returns the prompt string to include in the OracleCalled event.
+// If the prompt is large and storage is configured, stores it separately and
+// returns "". Otherwise returns the full prompt (for small prompts stored inline
+// in future versions).
+func promptForEvent(ctx context.Context, callID string, prompt string) string {
+	const largeThreshold = 1024
+
+	if len(prompt) <= largeThreshold {
+		return prompt // Small; include inline
+	}
+
+	promptsDir := OraclePromptsDirFromCtx(ctx)
+	if promptsDir == "" {
+		return prompt // Storage not configured; include inline (may exceed PIPE_BUF)
+	}
+
+	// Large prompt with storage configured; don't include in event
+	return ""
 }
