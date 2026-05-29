@@ -36,7 +36,7 @@ Consequences you must internalise:
 ## 2. Commands at a glance
 
 ```
-kitsoki run     <app.yaml>  [--harness ...] [--trace ...] [--warp <basis>]  # interactive TUI session
+kitsoki run     <app.yaml>  [--harness ...] [--warp <basis>]  # interactive TUI session (auto-traces)
 kitsoki serve   <app.yaml>  [--db ...]                      # MCP server on stdio
 kitsoki viz     <app.yaml>  [--out ...]                     # emit Graphviz DOT
 kitsoki trace   <file.jsonl>                                # pretty-print a JSONL trace
@@ -58,6 +58,12 @@ without playing through the intro. See `docs/imports.md`
 
 Every subcommand supports `--help`. Flags shown below are the ones you will
 actually reach for.
+
+Every `kitsoki run` invocation writes a JSONL trace automatically to the
+nearest `.kitsoki/sessions/` folder (walking up from cwd, falling back to
+cwd) named `<utc-timestamp>-<app-id>.jsonl`. There is no `--trace` flag
+on `kitsoki run` — tracing is unconditional. `kitsoki turn --trace
+<path>` still takes an explicit path.
 
 ## 3. Picking a harness (this is the most common stumble)
 
@@ -110,11 +116,21 @@ kitsoki run testdata/apps/cloak/app.yaml \
 ### 4.3 Iterate on an app with full tracing
 
 ```sh
-kitsoki run myapp.yaml --trace /tmp/myapp.jsonl --trace-pretty -
+kitsoki run myapp.yaml
 ```
 
-`--trace` writes JSONL. `--trace-pretty` writes human-readable trace; `-`
-means stderr. Replay the JSONL later with `kitsoki trace /tmp/myapp.jsonl`.
+That's it — every run writes a full JSONL trace to the nearest
+`.kitsoki/sessions/<utc-timestamp>-<app-id>.jsonl` automatically. There
+is no flag to set; tracing is on by default. Pretty-print the latest
+trace with:
+
+```sh
+kitsoki trace .kitsoki/sessions/<utc-timestamp>-myapp.jsonl
+```
+
+or read it directly with `jq '.kind, .state_path' <file>`. For a
+one-shot headless turn, `kitsoki turn --trace <path>` writes to a path
+of your choosing.
 
 ### 4.4 CI: deterministic flow tests (every PR)
 
@@ -154,10 +170,11 @@ dot -Tpng <appid>-viz.dot -o graph.png
 | `--recording <path>`       | Recording file. Required for `--harness replay`.         |
 | `--record <path>`       | JSONL output for `--harness recording`.                  |
 | `--db <path>`           | SQLite session DB (default `$XDG_DATA_HOME/kitsoki/`).     |
-| `--trace <path>`        | JSONL trace. `-` = stderr.                               |
-| `--trace-pretty <path>` | Human-readable trace in parallel. `-` = stderr.          |
-| `--trace-level <lvl>`   | `debug \| info \| warn \| error` (default: debug).       |
-| `--trace-redact`        | Redact API keys in trace output (default: true).         |
+
+`kitsoki run` does not take a `--trace` flag — every run writes a JSONL
+trace to the nearest `.kitsoki/sessions/<utc-timestamp>-<app-id>.jsonl`
+unconditionally. `kitsoki turn --trace <path>` is the entry point that
+takes an explicit path.
 
 ## 6. Understanding trace output
 

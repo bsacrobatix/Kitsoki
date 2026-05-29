@@ -35,6 +35,7 @@ import (
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
 	"kitsoki/internal/transport"
+	"kitsoki/internal/world"
 )
 
 // EX_TEMPFAIL is the BSD/sysexits.h "temporary failure" exit code that
@@ -806,7 +807,24 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 
 			sid, err := resolveSessionID(ctx, s, key, idFlag)
 			if err != nil {
-				return err
+				// If key lookup failed and --trace is provided, try JSONL recovery.
+				// This supports the Jenkins/Jira workflow where SQLite is deleted/unavailable
+				// but the JSONL trace is saved (e.g., in a Jira ticket) and restored later.
+				if key != "" && tracePath != "" && errors.Is(err, store.ErrSessionNotFound) {
+					// Session not in SQLite, but JSONL trace exists.
+					// Recover state from JSONL and create a new session.
+					if newSID, recoverErr := recoverSessionFromJSONL(ctx, tracePath, def, s, key); recoverErr == nil {
+						sid = newSID
+						fmt.Fprintf(cmd.ErrOrStderr(),
+							"note: recovered session from JSONL trace (session %s)\n",
+							sid)
+					} else {
+						// JSONL recovery failed; return original error
+						return err
+					}
+				} else {
+					return err
+				}
 			}
 
 			slotVals, err := decodeJSONFlag(slotsFlag, "slots")
@@ -1262,9 +1280,70 @@ func resolveSessionID(ctx context.Context, s store.Store, key, idFlag string) (a
 	}
 	sid, err := s.LookupByKey(ctx, transport, thread)
 	if errors.Is(err, store.ErrSessionNotFound) {
-		return "", fmt.Errorf("no session bound to %s", key)
+		return "", store.ErrSessionNotFound // Return the original error for recovery logic to detect
 	}
 	return sid, err
+}
+
+// recoverSessionFromJSONL recovers a session from a JSONL trace when SQLite is unavailable.
+// This supports the Jenkins/Jira workflow where the trace is saved externally but the
+// session database is deleted or never exists on the recovery host.
+//
+// Flow:
+//  1. Read and verify the JSONL trace
+//  2. Create a new session in SQLite
+//  3. Append the recovered events to the new session
+//  4. Bind the external key to the new session
+//  5. Return the new session ID
+//
+// Note: The recovered events are appended with their original turn/seq numbers.
+// LoadHistory will replay from the latest snapshot or from turn 0 if no snapshot.
+// The recovered state is implicit in the event sequence.
+func recoverSessionFromJSONL(ctx context.Context, tracePath string, def *app.AppDef,
+	s store.Store, key string) (app.SessionID, error) {
+
+	// Open and read the JSONL trace.
+	jsonlStore, err := store.OpenJSONL(tracePath)
+	if err != nil {
+		return "", fmt.Errorf("open JSONL trace %q: %w", tracePath, err)
+	}
+	defer func() { _ = jsonlStore.Close() }()
+
+	history := jsonlStore.History()
+	if len(history) == 0 {
+		return "", fmt.Errorf("JSONL trace %q is empty; cannot recover session", tracePath)
+	}
+
+	// Verify the trace can be replayed by rebuilding the journey.
+	rootState := app.StatePath(def.Root.(string))
+	_, err = store.BuildJourney(def, rootState, world.New(), history)
+	if err != nil {
+		return "", fmt.Errorf("rebuild journey from JSONL trace: %w", err)
+	}
+
+	// Create a new session in SQLite.
+	newSID, err := s.CreateSession(ctx, def)
+	if err != nil {
+		return "", fmt.Errorf("create session for recovery: %w", err)
+	}
+
+	// Append all recovered events to the new session.
+	// The events maintain their original turn/seq structure, which is safe
+	// because they're being appended to a different session (unique by session_id).
+	if err := s.AppendEvents(newSID, history); err != nil {
+		return "", fmt.Errorf("append recovered events to session: %w", err)
+	}
+
+	// Bind the external key to the new session.
+	transport, thread, err := parseExternalKey(key)
+	if err != nil {
+		return "", err
+	}
+	if err := s.BindExternalKey(ctx, newSID, transport, thread); err != nil {
+		return "", fmt.Errorf("bind external key to recovered session: %w", err)
+	}
+
+	return newSID, nil
 }
 
 // publishAppDir sets KITSOKI_APP_DIR so host handlers can resolve relative paths.

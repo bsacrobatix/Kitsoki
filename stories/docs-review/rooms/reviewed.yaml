@@ -12,7 +12,7 @@ states:
             "Commit":     "{{ world.commit_sha }}"
             "Mode":       '{{ world.review_mode|default:"recent" }}'
             "Decision":   '{{ world.verdict.decision|default:"(missing)" }}'
-            "Confidence": '{% if world.verdict.confidence != nil %}{{ int(world.verdict.confidence * 100) }}%{% else %}(n/a){% endif %}'
+            "Confidence": '{{ world.verdict.confidence|default:"(n/a)" }}'
             "Artifact":   '{{ world.artifact_path|default:"(not written)" }}'
       - heading: "Summary"
       - prose: '{{ world.verdict.summary|default:"(no summary)" }}'

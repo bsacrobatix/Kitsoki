@@ -520,6 +520,33 @@ See [`transports.md`](transports.md) for the implementations.
 
 ---
 
+## host.artifacts_dir
+
+Local-file transport: writes one file per `thread:` under an artifacts
+root, complementing `host.append_to_file` (which concatenates all
+artifacts into a single bug file). Demo and first-party stories rebind
+the transport interface to this handler via `host_bindings` so each
+phase artifact lands in its own file under `.artifacts/`, ready for
+`expect_files:` regex asserts in flow tests.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `thread` | string | yes | Path-safe filename under the artifacts root. A bare name with no extension and no path separator gets `.md` appended; a name that already has an extension (e.g. `.json`) is left alone, and a name with a path separator is honoured as-is. |
+| `body` | string | yes | Message body. Maps and slices are pretty-printed as JSON (same coercion as `host.transport.post`). |
+| `artifacts_root` | string | no | Override the root. Falls back to `$KITSOKI_ARTIFACTS_ROOT`, then `cwd + "/.artifacts"`. |
+| `title` | string | no | Rendered as a `### <title>` header at the top of the chunk. |
+| `phase_id` | string | no | Inlined at the foot as `_phase: <id>_`. |
+| `author` | string | no | Currently informational. |
+| `mode` | string | no | `append` (default) — separator + new chunk appended to an existing file. `replace` — overwrites. |
+
+Returns: `{ ok, path, message_id }`. `path` is the absolute file path
+written; `message_id` is `<basename-without-ext>#<append-counter>` for
+parity with `host.append_to_file`.
+
+Implementation: [`internal/host/artifacts_dir_transport.go`](../internal/host/artifacts_dir_transport.go).
+
+---
+
 ## host.workspace_manager.get
 
 Shells out to a `workspace-manager` CLI and parses the JSON output
