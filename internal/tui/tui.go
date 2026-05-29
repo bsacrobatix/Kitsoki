@@ -3954,11 +3954,7 @@ func (m RootModel) View() string {
 		// glyph signals "this Enter queues" without changing the
 		// prompt's value semantics.
 		m.prompt.SetPromptFunc(promptPrefixCols, func(int) string { return "↳ " })
-		// Keep indicator and prompt separate to prevent rendering issues.
-		// JoinVertical will handle spacing correctly without embedded newlines.
-		promptLine = lipgloss.JoinVertical(lipgloss.Left,
-			indicator,
-			m.prompt.View())
+		promptLine = indicator + "\n" + m.prompt.View()
 	case ModeMeta:
 		if m.metaMode.inFlight {
 			promptLine = prefix + m.spinner.View() + " " +
@@ -4019,6 +4015,8 @@ func (m RootModel) View() string {
 	// rows. (Symptom: status row "awaiting" appearing on the same
 	// terminal line as the last bullet of the agent body above.)
 	for i := range parts {
+		// Trim only trailing newlines, preserving intentional embedded newlines
+		// in parts like promptLine (indicator\n + prompt).
 		parts[i] = strings.TrimRight(parts[i], "\n")
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
