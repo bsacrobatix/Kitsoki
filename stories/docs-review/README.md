@@ -38,19 +38,42 @@ idle ── start ──▶ reviewing ── done ──────▶ reviewed
                      └── on_error (host.* fails) ──▶ review_failed
 ```
 
-When `decision == needs_update`, `reviewed.on_enter` auto-emits
-`fix_docs` and the run threads through `fixing` — a write-capable
-`docs_writer` oracle (Read/Edit/Write/Grep/Glob/Bash) that takes the
-verdict's `stale_docs[]` listing as its worklist and applies the
-corresponding doc edits **uncommitted** in the working tree. The
-operator runs `git diff` and stages/commits the changes themselves; the
-story owns no workspace plumbing. `up_to_date` verdicts terminate at
-`reviewed` as before.
+## Two-phase flow: Review → Fix
+
+**Review phase** (`idle` → `reviewing` → `reviewed`): The `docs_reviewer`
+agent audits docs against code and emits a verdict with decision ∈
+{`needs_update`, `up_to_date`}, stale doc listings, and rationale.
+
+**Fix phase** (conditionally `reviewed` → `fixing` → `fixed`): If
+decision is `needs_update`, the `reviewed.on_enter` handler auto-emits
+`fix_docs`, routing to `fixing`. The `docs_writer` agent takes the
+`stale_docs[]` listing as its worklist and applies targeted edits to
+bring cited doc sections back in sync. **Changes are left uncommitted**
+in the working tree — the operator reviews with `git diff`, then stages
+and commits themselves. The story owns no workspace plumbing (no
+auto-commit, no branch creation). `up_to_date` verdicts terminate at
+`reviewed` (no fix phase).
 
 `idle.on_enter` probes the operator's context with `host.run` so the
 working directory and detected `repo_root` are shown before they hit
 `start` — useful for confirming you're auditing the tree you think you
 are.
+
+## Two agents
+
+The story uses two distinct Opus agents with different tool sets:
+
+- **`docs_reviewer`** (read-only): reads the entire repo/docs and
+  emits a verdict. Tools: `Read`, `Grep`, `Glob`, `Bash` (read-only
+  profile). `Edit` and `Write` are rejected at both load time and call
+  time. Used by `host.oracle.decide` in the `reviewing` room.
+
+- **`docs_writer`** (write-capable): takes the verdict's `stale_docs[]`
+  worklist and applies targeted edits to bring cited doc sections back
+  in sync. Tools: `Read`, `Grep`, `Glob`, `Edit`, `Write`, `Bash`
+  (read-only profile). Used by `host.oracle.task` in the `fixing` room.
+  **Does not commit** — changes sit uncommitted in the working tree for
+  the operator to review and stage.
 
 `reviewing.on_enter` chains:
 
@@ -62,8 +85,8 @@ are.
    under the read-only profile; `Edit`/`Write` rejected at both load
    time and call time) returns a `docs_review_verdict`. Binds the
    full verdict object **and** a scalar `verdict_decision = submitted.decision`.
-3. `host.artifacts_dir` — write the verdict map (auto-pretty-printed
-   as JSON) to `.artifacts/docs-review-<sha>.md`.
+3. `host.artifacts_dir` — write the verdict map as JSON to
+   `.artifacts/docs-review-<mode>-<sha>.json`.
 4. Two conditional `emit_intent:` effects (see "The pre-bind emit
    trap" below):
    - `emit_intent: done` `when: world.verdict_decision != ''` →
@@ -115,7 +138,8 @@ Interactively:
 kitsoki run stories/docs-review/app.yaml
 ```
 
-The verdict lands at `.artifacts/docs-review-<sha>.md`.
+The verdict lands at `.artifacts/docs-review-recent-<sha>.json` (or
+`-baseline-` if baseline mode is used).
 
 > **Note on `kitsoki turn`**: `OneShot` runs `machine.Turn` + the host
 > dispatcher but **not** `settlePostBindEmits`. The host calls run,
@@ -126,10 +150,10 @@ The verdict lands at `.artifacts/docs-review-<sha>.md`.
 > artifact directly:
 >
 > ```sh
-> rm -f .artifacts/docs-review-$(git rev-parse HEAD).md
+> rm -f .artifacts/docs-review-recent-$(git rev-parse HEAD).json
 > kitsoki turn stories/docs-review/app.yaml \
 >   --state idle --intent start --world '{}' >/dev/null
-> awk '/^{$/,/^}$/' .artifacts/docs-review-$(git rev-parse HEAD).md \
+> jq . .artifacts/docs-review-recent-$(git rev-parse HEAD).json \
 >   | kitsoki mcp-validator \
 >       --schema stories/docs-review/schemas/docs_review_verdict.json \
 >       --validate-once
