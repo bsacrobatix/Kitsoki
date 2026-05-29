@@ -53,6 +53,11 @@ states:
               intent: look
     relevant_world: [commit_sha, verdict, fix_artifact]
     on_enter:
+      # Live progress breadcrumb — fires BEFORE the (slow) docs_writer
+      # oracle call so the operator sees what's happening during the wait
+      # rather than a silent screen. See
+      # docs/proposals/execution-modes-and-gate-deciders.md.
+      - say: 'Applying documentation fixes — handing {{ world.verdict.stale_docs|length }} cited section(s) to the docs writer…'
       # 1. Hand the verdict to the docs writer. Renders a couple of
       # listing strings up-front so the prompt can show the worklist
       # without re-encoding the whole verdict as YAML/JSON twice.

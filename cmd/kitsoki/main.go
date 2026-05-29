@@ -137,6 +137,7 @@ func runCmd() *cobra.Command {
 		continueKey      string
 		noImplicitResume bool
 		warpBasisPath    string
+		execModeFlag     string
 	)
 
 	cmd := &cobra.Command{
@@ -295,8 +296,21 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			// meta-mode stream sink.
 			roomEnterSink := tui.NewRoomEnterSink()
 
+			// Resolve the execution mode (execution-modes proposal). The
+			// TUI defaults to staged so multi-way decision gates pause for
+			// the operator rather than auto-advancing silently.
+			var execMode orchestrator.ExecutionMode
+			switch execModeFlag {
+			case "staged":
+				execMode = orchestrator.ExecStaged
+			case "one-shot", "oneshot":
+				execMode = orchestrator.ExecOneShot
+			default:
+				return fmt.Errorf("--mode %q is invalid (want \"staged\" or \"one-shot\")", execModeFlag)
+			}
+
 			// Build orchestrator.
-			orch := orchestrator.New(def, m, s, h,
+			runOpts := []orchestrator.Option{
 				orchestrator.WithLogger(logger),
 				orchestrator.WithHostRegistry(hostReg),
 				orchestrator.WithScheduler(jobScheduler),
@@ -307,7 +321,14 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				orchestrator.WithJournalReader(jr),
 				orchestrator.WithRoomEnterSink(roomEnterSink),
 				orchestrator.WithOracleRegistry(oracleReg),
-			)
+				orchestrator.WithExecutionMode(execMode),
+			}
+			if d := def.Decider; d != nil {
+				runOpts = append(runOpts, orchestrator.WithDecider(orchestrator.DeciderConfig{
+					Agent: d.Agent, Schema: d.Schema, Prompt: d.Prompt, Threshold: d.Threshold,
+				}))
+			}
+			orch := orchestrator.New(def, m, s, h, runOpts...)
 
 			ctx := context.Background()
 
@@ -746,6 +767,8 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 	cmd.Flags().BoolVar(&noImplicitResume, "no-implicit-resume", false,
 		"always start a fresh session even if exactly one active session exists for this app")
 
+	cmd.Flags().StringVar(&execModeFlag, "mode", "staged",
+		`execution mode: "staged" (stop at each decision gate for the operator) or "one-shot" (auto-advance, LLM/default deciders)`)
 	cmd.Flags().StringVar(&warpBasisPath, "warp", "",
 		"path to a warp-basis YAML (state + world overrides); applied as the first action after session create. Same file the TUI's /warp file:<path> loads. See stories/oregon-trail/scenarios/ for examples.")
 

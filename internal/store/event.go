@@ -90,6 +90,17 @@ const (
 	// post-bind half-bound limbo case to operators.
 	HarnessError EventKind = "harness.error"
 
+	// GateDecided is appended when the engine resolves an intent gate — the
+	// set of advancing intents available at the end of a room/phase's turn
+	// (see docs/proposals/execution-modes-and-gate-deciders.md). Payload
+	// carries {"state": <path>, "available_intents": [<string>],
+	// "decider": "human"|"llm"|"default", "chosen_intent": <string>,
+	// "bailed_to_human": <bool>}. Replay treats it as a no-op — the
+	// accompanying TransitionApplied events (if any) are authoritative for
+	// state; GateDecided records *why* the turn advanced or stopped so the
+	// TUI/runstatus can explain a one-shot auto-advance or a staged stop.
+	GateDecided EventKind = "machine.gate_decided"
+
 	// OracleCalled is appended at the moment an oracle verb is dispatched.
 	// Payload carries the full prompt, with-args, schema-ref, deadline,
 	// call_id, and verb. Replay treats this as a no-op — state reconstruction

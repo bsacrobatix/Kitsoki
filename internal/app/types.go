@@ -197,6 +197,11 @@ type AppDef struct {
 	CheckpointIntents map[string]Intent `yaml:"checkpoint_intents,omitempty"`
 	// MetaModes declares named off-path concerns (meta-mode proposal §2).
 	MetaModes map[string]*MetaModeDef `yaml:"meta_modes,omitempty"`
+
+	// Decider configures the engine-driven LLM decider used to resolve
+	// one-shot (or decider:llm) decision gates without per-room judge
+	// wiring (execution-modes proposal §3.2). Optional; nil disables it.
+	Decider *DeciderSpec `yaml:"decider,omitempty"`
 	// Agents declares named per-context agents (meta-mode proposal §2.1).
 	// Generalises OffPathDef.Persona / OffPathDef.Agent into a top-level
 	// primitive any host.oracle.* call site can reference by name. Bound
@@ -533,6 +538,24 @@ type VarDef struct {
 type WorldSchema map[string]VarDef
 
 // State is a node in the directed graph. It may be atomic, compound, or parallel.
+// DeciderSpec is the app-level configuration for the engine-driven LLM
+// decider (execution-modes proposal §3.2). The engine invokes `agent` via
+// host.oracle.decide at any decision gate that owes an autonomous decision,
+// passing the gate's candidate intents; the agent submits {intent, confidence,
+// reason} validated against `schema`.
+type DeciderSpec struct {
+	// Agent is the judge agent name (must be declared in agents:). Required.
+	Agent string `yaml:"agent"`
+	// Schema is the path to the decision schema (intent/confidence/reason).
+	// Required — host.oracle.decide rejects an empty schema.
+	Schema string `yaml:"schema"`
+	// Prompt is an optional decision-prompt template path; when empty the
+	// engine synthesises a prompt from the gate's candidate intents.
+	Prompt string `yaml:"prompt,omitempty"`
+	// Threshold is the confidence floor for auto-firing (default 0.8).
+	Threshold float64 `yaml:"threshold,omitempty"`
+}
+
 type State struct {
 	// Type is "atomic" (default), "compound", or "parallel".
 	Type string `yaml:"type,omitempty"`
@@ -551,6 +574,13 @@ type State struct {
 	View View `yaml:"view,omitempty"`
 	// Terminal marks end states.
 	Terminal bool `yaml:"terminal,omitempty"`
+	// Decider pins how this room's intent gate is resolved, overriding the
+	// run's execution mode (the "mix" — see
+	// docs/proposals/execution-modes-and-gate-deciders.md). "" = follow the
+	// run mode; "human" = always stop at a multi-way gate for an operator,
+	// even in one-shot; "llm" = always auto-advance (let the emit fire),
+	// even in staged. Validated at load time.
+	Decider string `yaml:"decider,omitempty"`
 	// Initial is the initial child state for compound states; supports expr interpolation.
 	Initial string `yaml:"initial,omitempty"`
 	// States holds nested child states (compound/parallel).

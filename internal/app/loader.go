@@ -730,6 +730,21 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	}
 	validateStates(file, "", def.States, globalIntents, def.Intents, nil, worldKeys, allStatePaths, stateOnKeys, allowedHosts, declaredAgents, &errs)
 
+	// Validate the engine-driven decider config (execution-modes proposal).
+	if d := def.Decider; d != nil {
+		if strings.TrimSpace(d.Agent) == "" {
+			errs = append(errs, fmt.Errorf("%s: decider.agent is required", file))
+		} else if _, ok := declaredAgents[d.Agent]; !ok && len(declaredAgents) > 0 {
+			errs = append(errs, fmt.Errorf("%s: decider.agent %q is not declared in agents:", file, d.Agent))
+		}
+		if strings.TrimSpace(d.Schema) == "" {
+			errs = append(errs, fmt.Errorf("%s: decider.schema is required", file))
+		}
+		if d.Threshold < 0 || d.Threshold > 1 {
+			errs = append(errs, fmt.Errorf("%s: decider.threshold %.2f out of range [0,1]", file, d.Threshold))
+		}
+	}
+
 	// ── 7a. Semantic-routing schema checks (semantic-routing proposal Phase 0).
 	// Validates Intent.Synonyms / Slot.Synonyms / AppDef.Routing against the
 	// rules in proposal §4 and §6. Errors here share the same shape as the
@@ -1057,6 +1072,13 @@ func validateStates(
 			}
 			validateAgentRef(file, fmt.Sprintf("state %q on_enter[%d]", statePath, i), eff, declaredAgents, errs)
 			validateBackgroundEffect(file, fmt.Sprintf("state %q on_enter[%d]", statePath, i), statePath, eff, allowedHosts, declaredAgents, allPaths, stateOnKeys, errs)
+		}
+
+		// Validate the gate decider override (execution-modes proposal).
+		switch s.Decider {
+		case "", "human", "llm":
+		default:
+			addErr(fmt.Sprintf("state %q: decider %q is invalid (want \"\", \"human\", or \"llm\")", statePath, s.Decider))
 		}
 
 		// Validate Timeout: parse the duration and resolve the target.

@@ -54,6 +54,10 @@ states:
               hint:   "re-render"
               intent: look
     relevant_world: [commit_sha, verdict, fix_artifact, artifact_path]
+    on_enter:
+      # Live progress breadcrumb closing out the one-shot chain. See
+      # docs/proposals/execution-modes-and-gate-deciders.md.
+      - say: 'Docs patched — {{ world.fix_artifact.files_changed|length|default:"0" }} file(s) changed (uncommitted; review with `git diff`).'
     on:
       review_again:
         - target: reviewing

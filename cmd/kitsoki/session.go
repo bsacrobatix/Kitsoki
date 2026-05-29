@@ -766,6 +766,7 @@ func sessionContinueCmd() *cobra.Command {
 		claudeModel   string
 		recordingPath string
 		tracePath     string // --trace override; "" = use default JSONL path when key is known
+		execModeFlag  string
 	)
 	cmd := &cobra.Command{
 		Use:   "continue",
@@ -959,6 +960,24 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 			if jobStoreOpt != nil {
 				orchOpts = append(orchOpts, jobStoreOpt)
 			}
+			// Execution mode (execution-modes proposal). Defaults to
+			// one-shot here — like `kitsoki turn` — so the scripted drive
+			// path (and the debugging skill's session continue --intent)
+			// keeps walking pipelines. Pass --mode staged to pause at
+			// decision gates.
+			switch execModeFlag {
+			case "", "one-shot", "oneshot":
+				// one-shot is the orchestrator zero value; no option needed.
+			case "staged":
+				orchOpts = append(orchOpts, orchestrator.WithExecutionMode(orchestrator.ExecStaged))
+			default:
+				return fmt.Errorf("--mode %q is invalid (want \"staged\" or \"one-shot\")", execModeFlag)
+			}
+			if d := def.Decider; d != nil {
+				orchOpts = append(orchOpts, orchestrator.WithDecider(orchestrator.DeciderConfig{
+					Agent: d.Agent, Schema: d.Schema, Prompt: d.Prompt, Threshold: d.Threshold,
+				}))
+			}
 			orch := orchestrator.New(def, m, s, h, orchOpts...)
 
 			// NewSession spawns the per-session terminal-event listener for
@@ -1067,6 +1086,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 	cmd.Flags().StringVar(&intentName, "intent", "", "intent name to dispatch directly (no LLM)")
 	cmd.Flags().StringVar(&slotsFlag, "slots", "", "intent slots as JSON or @file. With --intent: full slot set passed to SubmitDirect. With --raw: supplemental slots merged into the harness-resolved intent (existing keys are preserved).")
 	cmd.Flags().StringVar(&rawText, "raw", "", "raw inbound reply body, routed through the harness")
+	cmd.Flags().StringVar(&execModeFlag, "mode", "one-shot", `execution mode: "one-shot" (auto-advance, default) or "staged" (stop at decision gates)`)
 	cmd.Flags().StringVar(&harnessType, "harness", "", "harness for --raw: claude|live|replay (default auto)")
 	cmd.Flags().StringVar(&claudeModel, "claude-model", "", "model passed to claude -p --model")
 	cmd.Flags().StringVar(&recordingPath, "recording", "", "recording YAML for --harness replay")

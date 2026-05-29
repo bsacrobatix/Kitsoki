@@ -118,6 +118,18 @@ type Orchestrator struct {
 	eventSink       store.EventSink
 	sinkIsAuthority bool // true → JSONL is the sole source of truth for loadJourney
 
+	// decider, when non-nil, is the engine-driven LLM decider config used to
+	// resolve one-shot (or decider:llm) decision gates. nil disables it.
+	decider *DeciderConfig
+
+	// execMode is the run's execution mode (execution-modes proposal).
+	// The zero value (ExecOneShot) preserves the historical behaviour:
+	// synthetic emit_intent chains auto-advance through every gate within a
+	// turn. ExecStaged makes a multi-way decision gate end the turn so a
+	// human decides. Set via WithExecutionMode; the `run` TUI defaults to
+	// staged while `kitsoki turn` / tests stay one-shot.
+	execMode ExecutionMode
+
 	// pending tracks in-flight clarifications keyed by session ID.
 	mu      sync.Mutex
 	pending map[app.SessionID]*pendingClarify
@@ -227,8 +239,40 @@ func New(def *app.AppDef, m machine.Machine, s store.Store, h harness.Harness, o
 	return o
 }
 
+// ExecutionMode selects how the engine resolves intent gates — the set of
+// advancing intents available at the end of a room/phase's turn. See
+// docs/proposals/execution-modes-and-gate-deciders.md.
+type ExecutionMode int
+
+const (
+	// ExecOneShot advances autonomously: synthetic emit_intent chains run
+	// through every gate within a turn (the historical behaviour, and the
+	// zero value so existing callers/tests are unaffected). A multi-way gate
+	// with no firing emit still rests, as before.
+	ExecOneShot ExecutionMode = iota
+	// ExecStaged ends the turn at a multi-way decision gate so a human picks
+	// the next intent. Single-intent rooms still auto-advance.
+	ExecStaged
+)
+
+// staged reports whether the run-level mode is staged.
+func (m ExecutionMode) staged() bool { return m == ExecStaged }
+
+// String renders the mode for flags/trace.
+func (m ExecutionMode) String() string {
+	if m == ExecStaged {
+		return "staged"
+	}
+	return "one-shot"
+}
+
 // Option is a functional option for Orchestrator.
 type Option func(*Orchestrator)
+
+// WithExecutionMode sets the run's execution mode (one-shot vs staged).
+func WithExecutionMode(mode ExecutionMode) Option {
+	return func(o *Orchestrator) { o.execMode = mode }
+}
 
 // WithLogger sets the logger used for structured tracing.
 func WithLogger(l *slog.Logger) Option {
@@ -985,6 +1029,9 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	var harnessErrMsg string
 	if hostRedirect == "" && result.ValidationError == nil {
 		harnessErrMsg = o.settlePostBindEmits(ctx, sid, &result, tl, 0)
+		if harnessErrMsg == "" {
+			o.resolveAutoGate(ctx, sid, &result, tl, 0)
+		}
 	}
 
 	// Safety net: if no path along the way set result.View (machine.Turn
@@ -1158,7 +1205,20 @@ func (o *Orchestrator) settlePostBindEmits(ctx context.Context, sid app.SessionI
 		return msg
 	}
 
-	emState, emWorld, emHostCalls, emSay, emEvents, emErr := o.machine.DispatchPostBindEmits(ctx, res.NewState, res.World)
+	// When a live sink is wired, stream each synthetic hop's say-text as a
+	// per-room progress breadcrumb so a one-shot chain narrates what it's
+	// doing instead of jumping silently to the final room. The say is then
+	// NOT prepended to the final view (it already streamed) — see the
+	// `streamed` guard on the renders below.
+	streamed := o.roomEnterSink != nil
+	var onEnter func(state string, say string)
+	if streamed {
+		onEnter = func(state string, say string) {
+			o.roomEnterSink.OnRoomEnter(app.StatePath(state), say)
+		}
+	}
+
+	emState, emWorld, emHostCalls, emSay, emEvents, emErr := o.machine.DispatchPostBindEmits(ctx, res.NewState, res.World, o.execMode.staged(), onEnter)
 	if emErr != nil {
 		msg := emErr.Error()
 		if tl != nil {
@@ -1208,7 +1268,7 @@ func (o *Orchestrator) settlePostBindEmits(ctx context.Context, sid app.SessionI
 				slog.Warn("orchestrator.render_after_bind_failed",
 					"state", string(res.NewState), "err", rErr.Error())
 			} else if v != "" {
-				if emSay != "" {
+				if emSay != "" && !streamed {
 					res.View = emSay + "\n\n" + v
 				} else {
 					res.View = v
@@ -1227,7 +1287,7 @@ func (o *Orchestrator) settlePostBindEmits(ctx context.Context, sid app.SessionI
 		slog.Warn("orchestrator.render_after_bind_failed",
 			"state", string(res.NewState), "err", rErr.Error())
 	} else if v != "" {
-		if emSay != "" {
+		if emSay != "" && !streamed {
 			res.View = emSay + "\n\n" + v
 		} else {
 			res.View = v
@@ -2180,6 +2240,9 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 	var harnessErrMsg string
 	if hostRedirect == "" && result.ValidationError == nil {
 		harnessErrMsg = o.settlePostBindEmits(ctx, sid, &result, tl, 0)
+		if harnessErrMsg == "" {
+			o.resolveAutoGate(ctx, sid, &result, tl, 0)
+		}
 	}
 
 	successEvents := append([]store.Event{sdInputEvent, startEvent}, result.Events...)

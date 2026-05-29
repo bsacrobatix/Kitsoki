@@ -346,6 +346,9 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 	var harnessErrMsg string
 	if hostRedirect == "" && result.ValidationError == nil {
 		harnessErrMsg = o.settlePostBindEmits(ctx, sid, &result, tl, 0)
+		if harnessErrMsg == "" {
+			o.resolveAutoGate(ctx, sid, &result, tl, 0)
+		}
 	}
 
 	successEvents := append([]store.Event{startEvent}, result.Events...)

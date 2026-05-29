@@ -151,6 +151,12 @@ type TurnResult struct {
 type Machine interface {
 	Turn(ctx context.Context, cur app.StatePath, w world.World, call intent.IntentCall) (TurnResult, error)
 	AllowedIntents(cur app.StatePath, w world.World) []AllowedIntent
+	// DecisionCandidates returns the intents an LLM/human decider may choose
+	// between at a gate (firable, advancing, non-exit, non-self). See the impl.
+	DecisionCandidates(cur app.StatePath, w world.World) []AllowedIntent
+	// IsDecisionGate reports whether the state is a multi-way decision gate
+	// (has a forward intent that is not an auto-emit target). See isDecisionGate.
+	IsDecisionGate(cur app.StatePath, w world.World) bool
 	Validate(cur app.StatePath, w world.World, call intent.IntentCall) ValidationResult
 	// RenderState recomputes the view for the given state path and world snapshot.
 	// Used by the orchestrator to refresh the view after host-call bindings land
@@ -223,7 +229,19 @@ type Machine interface {
 	// When the state has no emit_intent: effects (or none whose guard
 	// passes), returns the inputs unchanged with empty event/hostCall
 	// slices — callers can guard on len(events) before doing anything.
-	DispatchPostBindEmits(ctx context.Context, state app.StatePath, w world.World) (app.StatePath, world.World, []HostInvocation, string, []store.Event, error)
+	//
+	// When `staged` is true, the synthetic chain STOPS before firing any
+	// emit at a state that is a multi-way decision gate (>1 advancing
+	// intent currently available) — a phase boundary ends the turn so a
+	// human can decide. A GateDecided event records the stop. In one-shot
+	// mode (staged=false) the chain advances exactly as before. See
+	// docs/proposals/execution-modes-and-gate-deciders.md.
+	//
+	// onEnter, when non-nil, is fired once per synthetic hop with the room
+	// entered and that hop's say-text, so callers can stream per-room
+	// progress breadcrumbs live during a one-shot chain. Pass nil to
+	// disable (the say-text is still returned merged in the string result).
+	DispatchPostBindEmits(ctx context.Context, state app.StatePath, w world.World, staged bool, onEnter onRoomEnterFn) (app.StatePath, world.World, []HostInvocation, string, []store.Event, error)
 
 	// ResolveInitialLeaf descends a compound state to its initial leaf,
 	// recursively. For non-compound states (or unknown paths) it returns
@@ -855,7 +873,13 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 	//     externally-initiated turn. Depth-capped at EmitIntentMaxDepth.
 	finalState := resolvedTarget
 	if len(emits) > 0 {
-		ds, dw, dhc, dssb, devs, derr := m.dispatchEmittedIntents(ctx, finalState, newWorld, emits, env, 0)
+		// staged=false: pre-bind emit chains on the Turn path stay one-shot
+		// in this slice. The staged gate-stop lives in the post-bind path
+		// (DispatchPostBindEmits), which is where the docs-review / bugfix
+		// decision emits actually fire (they gate on host-bound world keys).
+		// Threading the run mode through Machine.Turn is deferred — see
+		// docs/proposals/execution-modes-and-gate-deciders.md §6.
+		ds, dw, dhc, dssb, devs, derr := m.dispatchEmittedIntents(ctx, finalState, newWorld, emits, env, 0, false, nil)
 		if derr != nil {
 			return TurnResult{}, derr
 		}
@@ -959,7 +983,16 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 // Depth is bounded by EmitIntentMaxDepth — exceeding it surfaces an
 // error trace event (trace.EvIntentEmitDepthCap) and returns an error
 // so the surrounding Turn fails loud rather than looping silently.
-func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState string, w world.World, emits []emittedIntent, parentEnv expr.Env, depth int) (string, world.World, []HostInvocation, string, []store.Event, error) {
+// onRoomEnterFn, when non-nil, is invoked once per synthetic hop with the
+// room just entered and the say-text that hop produced (transition say +
+// the entered room's on_enter say). It is the seam the orchestrator uses to
+// stream per-room progress breadcrumbs LIVE during a one-shot chain instead
+// of merging all say into one blob prepended to the final view. Fired
+// synchronously; implementations MUST NOT block (the TUI sink fans out via
+// tea.Program.Send). See docs/proposals/execution-modes-and-gate-deciders.md.
+type onRoomEnterFn func(state string, say string)
+
+func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState string, w world.World, emits []emittedIntent, parentEnv expr.Env, depth int, staged bool, onEnter onRoomEnterFn) (string, world.World, []HostInvocation, string, []store.Event, error) {
 	if depth >= EmitIntentMaxDepth {
 		m.logger.DebugContext(ctx, trace.EvIntentEmitDepthCap,
 			slog.Int("depth", depth),
@@ -968,11 +1001,48 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 		return "", world.World{}, nil, "", nil, fmt.Errorf("emit_intent: dispatch exceeded max depth (%d) at state %q — likely a cyclic emit chain", EmitIntentMaxDepth, curState)
 	}
 
+	// Gate check: a phase boundary ends the turn. If the chain has reached
+	// a multi-way decision gate that owes a human decision (staged mode, or
+	// a `decider: human` pin), stop BEFORE firing this state's emits —
+	// drop them, rest here, and record why. One-shot mode (and `decider:
+	// llm` pins) skip this and advance as before. See
+	// docs/proposals/execution-modes-and-gate-deciders.md.
+	if m.isStagedGate(ctx, curState, w, staged) {
+		m.logger.DebugContext(ctx, trace.EvIntentEmitted,
+			slog.String("state", curState),
+			slog.String("kind", "staged_gate_stop"),
+			slog.Int("depth", depth),
+		)
+		gateEv := newEvent(store.GateDecided, map[string]any{
+			"state":             curState,
+			"available_intents": m.allowedIntentNames(app.StatePath(curState)),
+			"decider":           "human",
+			"chosen_intent":     "",
+			"bailed_to_human":   true,
+		})
+		return curState, w, nil, "", []store.Event{gateEv}, nil
+	}
+
 	state := curState
 	newWorld := w
 	var hostCalls []HostInvocation
 	var saySB strings.Builder
 	var events []store.Event
+
+	// Record an auto-advance through a real decision gate: when a guarded
+	// emit_intent (a conditional default) fires at a state that IS a decision
+	// gate, the engine just made the decision deterministically. Recording it
+	// keeps the "every decision is a labeled datapoint" invariant. Trivial
+	// single-intent / non-gate advances are NOT recorded (no decision existed).
+	if len(emits) > 0 && m.isDecisionGate(ctx, curState, w) {
+		events = append(events, newEvent(store.GateDecided, map[string]any{
+			"state":             curState,
+			"available_intents": m.allowedIntentNames(app.StatePath(curState)),
+			"decider":           "default",
+			"chosen_intent":     emits[0].Name,
+			"bailed_to_human":   false,
+		}))
+	}
 
 	for _, emit := range emits {
 		// Build the dispatch env so guards / templates in the
@@ -1064,11 +1134,16 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 		}
 		newWorld = nw2
 		hostCalls = append(hostCalls, hc2...)
+		// hopSay accumulates the say-text for THIS hop only (transition say
+		// + the entered room's on_enter say) so onEnter can stream it as one
+		// per-room breadcrumb. The recursion below streams its own hops.
+		var hopSay strings.Builder
 		if sb2.Len() > 0 {
 			if saySB.Len() > 0 {
 				saySB.WriteString("\n")
 			}
 			saySB.WriteString(sb2.String())
+			hopSay.WriteString(sb2.String())
 		}
 
 		// Fire on_enter of newly-entered ancestors. Mirror Turn's logic.
@@ -1092,10 +1167,19 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 						saySB.WriteString("\n")
 					}
 					saySB.WriteString(sb3.String())
+					if hopSay.Len() > 0 {
+						hopSay.WriteString("\n")
+					}
+					hopSay.WriteString(sb3.String())
 				}
 				ev2 = append(ev2, ev3...)
 				enterEmits = append(enterEmits, em3...)
 			}
+		}
+
+		// Stream this hop's say live as a per-room breadcrumb.
+		if onEnter != nil && hopSay.Len() > 0 {
+			onEnter(resolvedTarget, hopSay.String())
 		}
 
 		// Build event sequence for this synthetic transition.
@@ -1127,7 +1211,7 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 		state = resolvedTarget
 
 		if len(chainedEmits) > 0 {
-			subState, subWorld, subHC, subSay, subEvs, subErr := m.dispatchEmittedIntents(ctx, state, newWorld, chainedEmits, parentEnv, depth+1)
+			subState, subWorld, subHC, subSay, subEvs, subErr := m.dispatchEmittedIntents(ctx, state, newWorld, chainedEmits, parentEnv, depth+1, staged, onEnter)
 			if subErr != nil {
 				return "", world.World{}, nil, "", nil, subErr
 			}
@@ -1728,7 +1812,7 @@ func (m *machineImpl) applyEffects(effects []app.Effect, w world.World, env expr
 // emit_intent: (with its optional When: guard), evaluates the guard
 // against the post-bind world and dispatches the synthetic intent via
 // the shared dispatchEmittedIntents pipeline.
-func (m *machineImpl) DispatchPostBindEmits(ctx context.Context, state app.StatePath, w world.World) (app.StatePath, world.World, []HostInvocation, string, []store.Event, error) {
+func (m *machineImpl) DispatchPostBindEmits(ctx context.Context, state app.StatePath, w world.World, staged bool, onEnter onRoomEnterFn) (app.StatePath, world.World, []HostInvocation, string, []store.Event, error) {
 	if par := parseParallel(string(state)); par.IsParallel {
 		// Parallel-encoded paths can't host emit_intent dispatch
 		// (parallel.go's region semantics ride a separate event-bus
@@ -1820,11 +1904,142 @@ func (m *machineImpl) DispatchPostBindEmits(ctx context.Context, state app.State
 		return state, w, nil, "", nil, nil
 	}
 
-	finalState, finalWorld, hostCalls, sayText, events, derr := m.dispatchEmittedIntents(ctx, string(state), w, emits, env, 0)
+	finalState, finalWorld, hostCalls, sayText, events, derr := m.dispatchEmittedIntents(ctx, string(state), w, emits, env, 0, staged, onEnter)
 	if derr != nil {
 		return state, w, nil, "", nil, derr
 	}
 	return app.StatePath(finalState), finalWorld, hostCalls, sayText, events, nil
+}
+
+// isDecisionGate reports whether `state` represents a genuine branch the
+// operator must choose between — as opposed to deterministic outcome
+// routing the engine resolves on its own.
+//
+// The rule: a state is a decision gate when it has at least one currently-
+// available forward intent (arm advances to a different, non-`@exit` state)
+// that is NOT itself the target of one of the state's `emit_intent:`
+// auto-advances. Such an intent is reachable ONLY by operator/decider
+// input, so leaving it to auto-advance would silently make a choice.
+//
+// Worked examples (docs-review):
+//   - reviewing: forward intents {done, no_submit} are BOTH emit_intent
+//     targets (success/failure outcome routing) → not a gate → auto-advance.
+//   - reviewed:  forward intents {fix_docs, review_again}; only fix_docs is
+//     an emit target, review_again is operator-only → gate → staged stops.
+//   - fixing:    forward {fix_done} is an emit target → not a gate.
+//
+// A templated emit name (e.g. `emit_intent: "{{ world.verdict.intent }}"`,
+// the bugfix LLM-judge shape) matches no static intent, so every real
+// forward intent stays "operator-only" → the *_awaiting_reply room is a
+// gate. That is correct: in staged mode a human decides; in one-shot mode
+// this check is skipped and the templated emit fires.
+func (m *machineImpl) isDecisionGate(ctx context.Context, state string, w world.World) bool {
+	cs, ok := m.states[state]
+	if !ok || cs.s == nil {
+		return false
+	}
+	emitTargets := make(map[string]struct{}, len(cs.s.OnEnter))
+	for _, eff := range cs.s.OnEnter {
+		if n := strings.TrimSpace(eff.EmitIntent); n != "" {
+			emitTargets[n] = struct{}{}
+		}
+	}
+	env := expr.Env{Slots: map[string]any{}, World: w.Vars, Event: map[string]any{}}
+	for _, name := range m.allowedIntentNames(app.StatePath(state)) {
+		if _, isEmit := emitTargets[name]; isEmit {
+			continue // auto-advance outcome, not an operator choice
+		}
+		tr, path, _, err := m.findTransitionTraced(ctx, state, name, env)
+		if err != nil || tr == nil {
+			continue // guard failed / errored → not available this turn
+		}
+		raw := strings.TrimSpace(tr.tr.Target)
+		// Exit escapes (quit-style) are not forward branches. `@exit:<name>`
+		// is rewritten to the synthesised terminal `__exit__<name>` at load
+		// time, so match both the raw and rewritten forms.
+		if strings.HasPrefix(raw, "@exit") || strings.HasPrefix(raw, "__exit__") {
+			continue
+		}
+		if strings.Contains(raw, "{{") {
+			if rendered, rerr := expr.Render(raw, env); rerr == nil {
+				raw = strings.TrimSpace(rendered)
+			}
+			// On render failure, fall through and treat as forward
+			// (conservative: prefer stopping over auto-advancing through
+			// an unresolved target).
+		}
+		if resolveTarget(path, raw) == state {
+			continue // self / recycle (look), not a branch choice
+		}
+		return true // operator-only forward intent exists → decision gate
+	}
+	return false
+}
+
+// IsDecisionGate is the exported wrapper around isDecisionGate, used by the
+// orchestrator's engine decider to detect a gate post-settle.
+func (m *machineImpl) IsDecisionGate(cur app.StatePath, w world.World) bool {
+	return m.isDecisionGate(context.Background(), string(cur), w)
+}
+
+// isStagedGate reports whether the synthetic emit chain should STOP at
+// `state` because a human decision is owed. It stops when the state is a
+// decision gate (isDecisionGate) AND either staged mode is active or the
+// state pins `decider: human`. A `decider: llm` pin forces auto-advance
+// (the emit fires) even in staged mode — the "mix" override.
+func (m *machineImpl) isStagedGate(ctx context.Context, state string, w world.World, staged bool) bool {
+	decider := ""
+	if cs, ok := m.states[state]; ok && cs.s != nil {
+		decider = strings.TrimSpace(cs.s.Decider)
+	}
+	switch decider {
+	case "human":
+		return m.isDecisionGate(ctx, state, w)
+	case "llm":
+		return false
+	}
+	return staged && m.isDecisionGate(ctx, state, w)
+}
+
+// DecisionCandidates returns the intents a decider may choose between at a
+// gate: those currently available (a firable arm) whose target advances to a
+// different, non-`@exit` state. Self-loops (look) and exit escapes (quit) are
+// excluded; unlike isDecisionGate this INCLUDES emit-target intents, because
+// when an LLM decider runs (one-shot, the conditional-default emit did not
+// fire) the author's intended action is itself a legitimate choice. Metadata
+// (title/description/examples) rides along so the engine can build a decision
+// prompt from the state machine's own vocabulary.
+func (m *machineImpl) DecisionCandidates(cur app.StatePath, w world.World) []AllowedIntent {
+	ctx := context.Background()
+	env := expr.Env{Slots: map[string]any{}, World: w.Vars, Event: map[string]any{}}
+	var out []AllowedIntent
+	for _, name := range m.allowedIntentNames(cur) {
+		tr, path, _, err := m.findTransitionTraced(ctx, string(cur), name, env)
+		if err != nil || tr == nil {
+			continue
+		}
+		raw := strings.TrimSpace(tr.tr.Target)
+		if strings.HasPrefix(raw, "@exit") || strings.HasPrefix(raw, "__exit__") {
+			continue
+		}
+		if strings.Contains(raw, "{{") {
+			if rendered, rerr := expr.Render(raw, env); rerr == nil {
+				raw = strings.TrimSpace(rendered)
+			}
+		}
+		if resolveTarget(path, raw) == string(cur) {
+			continue
+		}
+		intentDef, _ := m.lookupIntent(cur, name)
+		out = append(out, AllowedIntent{
+			Name:        name,
+			Title:       intentDef.Title,
+			Description: intentDef.Description,
+			Examples:    intentDef.Examples,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // RenderState renders the view for a state+world snapshot. Used by the
@@ -1966,7 +2181,10 @@ func (m *machineImpl) RunEffectsAndState(ctx context.Context, state app.StatePat
 	finalState := string(state)
 	sayOut := saySB.String()
 	if len(emits) > 0 && finalState != "" {
-		ds, dw, dhc, dsay, devs, derr := m.dispatchEmittedIntents(ctx, finalState, newWorld, emits, env, 0)
+		// staged=false: see the Turn-path note above. RunEffectsAndState
+		// drives synthetic / timeout / on_complete turns that are one-shot
+		// by nature in this slice.
+		ds, dw, dhc, dsay, devs, derr := m.dispatchEmittedIntents(ctx, finalState, newWorld, emits, env, 0, false, nil)
 		if derr != nil {
 			return state, newWorld, hostCalls, sayOut, evts, derr
 		}

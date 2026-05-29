@@ -63,6 +63,13 @@ type FlowFixture struct {
 	InitialWorld map[string]any `yaml:"initial_world,omitempty"`
 	Turns        []FlowTurn     `yaml:"turns"`
 
+	// Mode selects the orchestrator's execution mode for this fixture
+	// (execution-modes proposal): "" / "one-shot" (default — synthetic
+	// emit chains auto-advance through gates) or "staged" (a multi-way
+	// decision gate ends the turn). Only meaningful on the
+	// orchestrator-backed runner.
+	Mode string `yaml:"mode,omitempty"`
+
 	// HostHandlers declares stub host.* handlers used by this flow.
 	// Keys are the handler name (e.g. "host.run", "host.workspace_manager.get").
 	// Each value declares the canned response. Presence of any host_handlers
@@ -665,6 +672,17 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 	// can write KindOracleCall entries during record-mode live calls.
 	if rig.journalWriter != nil {
 		orchOpts = append(orchOpts, orchestrator.WithJournalWriter(rig.journalWriter))
+	}
+
+	// Execution mode (execution-modes proposal). Default one-shot preserves
+	// every existing fixture; a fixture opts into staged with `mode: staged`.
+	switch fixture.Mode {
+	case "", "one-shot", "oneshot":
+		// one-shot is the zero value; no option needed.
+	case "staged":
+		orchOpts = append(orchOpts, orchestrator.WithExecutionMode(orchestrator.ExecStaged))
+	default:
+		return nil, fmt.Errorf("buildOrchestratorRig: invalid mode %q (want \"staged\" or \"one-shot\")", fixture.Mode)
 	}
 
 	orch := orchestrator.New(def, m, st, h, orchOpts...)
