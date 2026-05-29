@@ -168,6 +168,12 @@ func (m *transcriptModel) queue(body string) {
 	if w := m.queueWrapWidth(); w > 0 {
 		body = ansi.Hardwrap(body, w, true)
 	}
+	// DEBUG: Warn if queue indicator leaks to scrollback
+	if strings.Contains(body, "⏳") {
+		slog.Warn("BUG: Queue indicator queued to scrollback (should only appear in View)",
+			"caller", "transcript.queue",
+			"sample", truncate(body, 60))
+	}
 	m.pending = append(m.pending, body)
 }
 
