@@ -99,7 +99,8 @@ type SQLiteTimeoutStore struct {
 
 // NewSQLiteTimeoutStore opens (or creates) the timeouts table in db and
 // returns a ready-to-use TimeoutStore.  db must already be open; this call
-// only adds the table if it does not yet exist.
+// only adds the table if it does not yet exist. If an old schema exists,
+// it is migrated to the current schema.
 func NewSQLiteTimeoutStore(db *sql.DB) (*SQLiteTimeoutStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("host.NewSQLiteTimeoutStore: db must not be nil")
@@ -107,6 +108,24 @@ func NewSQLiteTimeoutStore(db *sql.DB) (*SQLiteTimeoutStore, error) {
 	if _, err := db.Exec(timeoutsTableDDL); err != nil {
 		return nil, fmt.Errorf("host.NewSQLiteTimeoutStore: create table: %w", err)
 	}
+
+	// Check if table exists and has the correct schema. If an old table exists
+	// without fire_at column, drop and recreate it.
+	var count int
+	err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('timeouts') WHERE name = 'fire_at'`).Scan(&count)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("host.NewSQLiteTimeoutStore: schema check: %w", err)
+	}
+	if count == 0 {
+		// Column doesn't exist; drop and recreate the table with the correct schema
+		if _, err := db.Exec(`DROP TABLE IF EXISTS timeouts`); err != nil {
+			return nil, fmt.Errorf("host.NewSQLiteTimeoutStore: drop old table: %w", err)
+		}
+		if _, err := db.Exec(timeoutsTableDDL); err != nil {
+			return nil, fmt.Errorf("host.NewSQLiteTimeoutStore: recreate table: %w", err)
+		}
+	}
+
 	return &SQLiteTimeoutStore{db: db}, nil
 }
 

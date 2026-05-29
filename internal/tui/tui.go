@@ -3954,7 +3954,11 @@ func (m RootModel) View() string {
 		// glyph signals "this Enter queues" without changing the
 		// prompt's value semantics.
 		m.prompt.SetPromptFunc(promptPrefixCols, func(int) string { return "↳ " })
-		promptLine = indicator + "\n" + m.prompt.View()
+		// Keep indicator and prompt separate to prevent rendering issues.
+		// JoinVertical will handle spacing correctly without embedded newlines.
+		promptLine = lipgloss.JoinVertical(lipgloss.Left,
+			indicator,
+			m.prompt.View())
 	case ModeMeta:
 		if m.metaMode.inFlight {
 			promptLine = prefix + m.spinner.View() + " " +

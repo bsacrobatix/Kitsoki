@@ -118,10 +118,12 @@ the bug file as both ticket and conversation log.
 
 Lands at the engineer's-day landing room. From there: `tickets` to
 search `issues/bugs/`, `pick <id>` to pick a bug, `bugfix` to walk
-the supervised 8-room pipeline (reproduce → propose → implement →
-test → review → validate → done → PR refinement → merge). Every
-checkpoint appends a `## Comment <iso> by <author>` block to the bug
-file, so the file itself is the conversation log + audit trail.
+the supervised 8-room pipeline (idle → reproducing → proposing →
+implementing → testing → reviewing → validating → done). PR
+refinement is a separate story under `stories/pr-refinement/`.
+Every checkpoint appends a `## Comment <iso> by <author>` block to
+the bug file, so the file itself is the conversation log + audit
+trail.
 
 Autonomous variant (LLM-judge auto-fires confident verdicts, bails
 to human only on uncertainty):
@@ -153,6 +155,10 @@ schema. The dogfood multi-glob covers both kitsoki-self bugs
 | **[`docs/developer-guide.md`](docs/developer-guide.md)** | For contributors: build, test, debug, add features. |
 | **[`docs/testing.md`](docs/testing.md)** | Mode 1 (intent pass-rate) and Mode 2 (deterministic flow) tests. |
 | **[`docs/hosts.md`](docs/hosts.md)** | Every built-in `host.*` handler with input/output contracts. |
+| **[`docs/oracle-plugin.md`](docs/oracle-plugin.md)** | Oracle plugin contract: `oracle_plugins:`, `host.oracle.<verb>` effects, subprocess / MCP-over-HTTP transports, schema validation. |
+| **[`docs/oracle-cli.md`](docs/oracle-cli.md)** | The five-verb `host.oracle.*` surface. |
+| **[`docs/trace-format.md`](docs/trace-format.md)** | The JSONL trace schema — event vocabulary, `EventSink` contract, `call_id` derivation. The trace is the session's authoritative state. |
+| **[`docs/cassettes.md`](docs/cassettes.md)** | Host cassette file-format reference: episode matching, `!include`, record mode, CI safety. |
 | **[`docs/transports.md`](docs/transports.md)** | TUI / Jira / Bitbucket transports; sessions keyed by external thread. |
 | **[`docs/background-jobs/`](docs/background-jobs/README.md)** | Long-running handlers, notifications, clarifications. |
 | **[`docs/embedded/llm-guide.md`](docs/embedded/llm-guide.md)** | Operator manual aimed at an LLM driving kitsoki. Also `kitsoki docs llm-guide`. |
@@ -165,14 +171,24 @@ schema. The dogfood multi-glob covers both kitsoki-self bugs
 
 ```
 kitsoki/
-├── cmd/kitsoki/           CLI: run, serve, viz, trace, replay, test,
-│                          record, session, chat, inspect, turn, render,
-│                          mcp-validator, docs, version
+├── cmd/kitsoki/           CLI: run, serve, viz, trace, replay,
+│                          replay-routing, test, record, session, chat,
+│                          inspect, turn, render, docs, bug, cassette,
+│                          extract, journal, oracle, oracle-serve,
+│                          migrate-oracle, mcp-bash, mcp-validator,
+│                          export-status, ui, version
 ├── internal/              platform packages — see docs/architecture.md
 ├── docs/                  narrative documentation
 ├── docs/embedded/         CLI-embedded reference docs (//go:embed)
-├── testdata/apps/         example apps: cloak, dev-story,
-│                          background_jobs, proposal_smoke
+├── stories/               first-party story state machines (kitsoki-dev,
+│                          bugfix, pr-refinement, docs-review, code-review,
+│                          dev-story, oregon-trail, …)
+├── tools/                 first-party companion tooling (runstatus SPA,
+│                          pellicule video pipeline, loopy, …)
+├── testdata/apps/         example apps: background_jobs, choice_smoke,
+│                          cloak, dev-story, imports_prompt_rebase,
+│                          imports_smoke, parallel_smoke, proposal_smoke,
+│                          timeout
 ├── demo/                  VHS tapes and recorded GIFs
 ├── ideas.md               working notes / backlog
 └── README.md              you are here
@@ -220,13 +236,28 @@ PoC. The core platform is stable: orchestrator, state machine, harness
 abstraction, persistent SQLite store, MCP server, multi-transport
 output, background jobs with mid-flight clarifications, persistent
 chat threads, virtual clock, deterministic flow tests, intent
-pass-rate tests, hot-reload edit mode in the TUI. All four example
-apps under `testdata/apps/` have green flow tests; `go test ./...`
-finishes in under 10 seconds.
+pass-rate tests, hot-reload edit mode in the TUI. Example apps under
+`testdata/apps/` have green flow tests; `go test ./...` finishes in
+under 10 seconds.
 
-The current frontier is multi-transport sessions driven from external
-orchestrators (Jira, Bitbucket); see
-[`docs/proposals/bugfix-room-proposal.md`](docs/proposals/bugfix-room-proposal.md).
+Recent frontier work:
+
+- **Oracle plugin system** (`docs/oracle-plugin.md`,
+  `docs/oracle-cli.md`) — pluggable oracle transports declared under
+  `oracle_plugins:`, dispatched through `host.oracle.<verb>` effects
+  with schema validation, subprocess / MCP-over-HTTP transports, and
+  a registry/dispatch seam audited end-to-end.
+- **JSONL trace as authoritative state**
+  (`docs/trace-format.md`) — the unified event log (`oracle.call.start`
+  / `.complete` / `.error`, `EventSink`, deterministic `call_id`) is
+  now the session's source of truth, with replay guarantees layered
+  on top.
+- **`runstatus` inspection UI** (`tools/runstatus/`) — Vue 3 SPA +
+  Playwright fixtures for inspecting live and recorded sessions
+  against the JSONL trace.
+- **`docs-review` story** (`stories/docs-review/`) — meta-story that
+  audits the docs against the code at HEAD and writes back surgical
+  fixes.
 
 ## License
 

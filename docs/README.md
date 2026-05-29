@@ -65,6 +65,15 @@ orchestration), see [`prior-art.md`](prior-art.md).
     progressive determinism applied to real workflows. Start with
     [`case-studies/bug-fix.md`](case-studies/bug-fix.md): how a
     prompt-driven agent loop became the seven-room `bugfix` pipeline.
+16. **Per-story READMEs** — each story under `stories/` ships its own
+    authoritative reference. Notable ones:
+    [`../stories/kitsoki-dev/README.md`](../stories/kitsoki-dev/README.md)
+    (dogfood operator walkthrough),
+    [`../stories/bugfix/README.md`](../stories/bugfix/README.md)
+    (the 8-room bugfix pipeline),
+    [`../stories/pr-refinement/README.md`](../stories/pr-refinement/README.md),
+    [`../stories/docs-review/README.md`](../stories/docs-review/README.md)
+    (the meta-story that audits these docs against the code at HEAD).
 
 ## Reference (embedded in the binary)
 

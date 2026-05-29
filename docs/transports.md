@@ -224,7 +224,6 @@ external driver.
 - Session store: [`internal/store/`](../internal/store/) and
   [`internal/store/external_keys.go`](../internal/store/external_keys.go).
 - The `loop.py` external driver lives in a separate repo and is the
-  reference inbound poller; check the bug-fix-room proposal in
-  [`docs/proposals/bugfix-room-proposal.md`](proposals/bugfix-room-proposal.md)
-  for the full design.
+  reference inbound poller; for the live bug-fix flow design see
+  [`../stories/bugfix/README.md`](../stories/bugfix/README.md).
 - CLI reference: `kitsoki session --help`, `kitsoki chat --help`.

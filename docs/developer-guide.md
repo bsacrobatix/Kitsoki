@@ -13,6 +13,13 @@ kitsoki/
 ├── cmd/kitsoki/           single CLI entrypoint, one Go file per subcommand
 ├── internal/              all platform packages (see architecture.md §3)
 ├── docs/                  this directory — narrative documentation
+├── stories/               first-party story state machines (kitsoki-dev,
+│                          bugfix, pr-refinement, docs-review, …); each
+│                          ships its own README.md
+├── tools/                 first-party companion tooling — `runstatus/`
+│                          (Vue 3 SPA + Playwright for inspecting live and
+│                          recorded sessions), `pellicule/` (deterministic
+│                          video pipeline), `loopy/`, …
 ├── testdata/apps/         runnable example apps (cloak, dev-story, …)
 ├── demo/                  VHS tapes and recorded GIFs
 ├── ideas.md               working notes / backlog
