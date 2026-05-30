@@ -112,12 +112,6 @@ func (srv *Server) Run(ctx context.Context) error {
 
 // Serve starts the MCP server on a custom r/w pair (for testing).
 func (srv *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
-	t := &mcpsdk.InMemoryTransport{} // type assertion — we wrap manually below
-	_ = t
-	// For stdio-like custom streams, use the StdioTransport's underlying ioConn
-	// approach. We achieve this via a pipe-based InMemoryTransport.
-	// In practice, callers use Run for production and Connect (via InMemoryTransports)
-	// for testing.
 	return fmt.Errorf("mcp: Serve(r, w) not directly supported; use Run or Connect")
 }
 

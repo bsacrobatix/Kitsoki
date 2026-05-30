@@ -2484,9 +2484,7 @@ func stateEnterPathsAware(oldPath, newPath string) []string {
 		if leaf == par.Root || leaf == "" {
 			continue
 		}
-		for _, p := range stateEnterPaths(par.Root, leaf) {
-			out = append(out, p)
-		}
+		out = append(out, stateEnterPaths(par.Root, leaf)...)
 	}
 	return out
 }

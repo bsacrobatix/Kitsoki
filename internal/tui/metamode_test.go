@@ -624,7 +624,7 @@ func TestMetaMode_TurnSendsContext(t *testing.T) {
 
 	m, _ = typeString(m, "what state am I in?")
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = processCommands(m, cmd, 10)
+	processCommands(m, cmd, 10)
 
 	got := oracle.gotInput.UserMessage
 	require.Contains(t, got, "[context]\n",
@@ -700,7 +700,7 @@ func TestMetaMode_TurnIncludesTracePath(t *testing.T) {
 
 	m, _ = typeString(m, "what's happened so far?")
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = processCommands(m, cmd, 10)
+	processCommands(m, cmd, 10)
 
 	// The oracle should have received the trace_file: line in the
 	// preamble, pointing at exactly the configured path.
@@ -757,7 +757,7 @@ func TestMetaMode_TurnUsesExternalTraceFile(t *testing.T) {
 	require.Equal(t, tuipkg.ModeMeta, extractMode(t, m))
 	m, _ = typeString(m, "anything?")
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = processCommands(m, cmd, 10)
+	processCommands(m, cmd, 10)
 
 	require.Contains(t, oracle.gotInput.UserMessage, "trace_file: "+tracePath+"\n",
 		"oracle should see the external trace path in the preamble")

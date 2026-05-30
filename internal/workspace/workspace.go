@@ -80,27 +80,65 @@ func (w *Workspace) Validate() error {
 
 // ToMap converts the workspace to a map[string]any for world-state storage.
 func (w *Workspace) ToMap() map[string]any {
-	b, _ := json.Marshal(w)
-	var m map[string]any
-	_ = json.Unmarshal(b, &m)
+	repos := make([]any, len(w.Repos))
+	for i, r := range w.Repos {
+		repos[i] = map[string]any{
+			"path":   r.Path,
+			"branch": r.Branch,
+			"dirty":  r.Dirty,
+		}
+	}
+	m := map[string]any{
+		"id":        w.ID,
+		"root_path": w.RootPath,
+		"repos":     repos,
+	}
+	// Optional fields (omitempty in the JSON tags).
+	if w.IssueID != "" {
+		m["issue_id"] = w.IssueID
+	}
+	if len(w.PRIDs) > 0 {
+		prIDs := make([]any, len(w.PRIDs))
+		for i, id := range w.PRIDs {
+			prIDs[i] = id
+		}
+		m["pr_ids"] = prIDs
+	}
 	return m
 }
 
 // FromMap reconstructs a Workspace from a world-state map.
 // Returns nil if the map is nil or malformed.
 func FromMap(raw any) *Workspace {
-	if raw == nil {
+	m, ok := raw.(map[string]any)
+	if !ok || m == nil {
 		return nil
 	}
-	b, err := json.Marshal(raw)
-	if err != nil {
-		return nil
+	w := &Workspace{}
+	w.ID, _ = m["id"].(string)
+	w.RootPath, _ = m["root_path"].(string)
+	w.IssueID, _ = m["issue_id"].(string)
+	if repos, ok := m["repos"].([]any); ok {
+		for _, item := range repos {
+			re, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			r := Repo{}
+			r.Path, _ = re["path"].(string)
+			r.Branch, _ = re["branch"].(string)
+			r.Dirty, _ = re["dirty"].(bool)
+			w.Repos = append(w.Repos, r)
+		}
 	}
-	var w Workspace
-	if err := json.Unmarshal(b, &w); err != nil {
-		return nil
+	if prIDs, ok := m["pr_ids"].([]any); ok {
+		for _, item := range prIDs {
+			if s, ok := item.(string); ok {
+				w.PRIDs = append(w.PRIDs, s)
+			}
+		}
 	}
-	return &w
+	return w
 }
 
 // Load fetches the workspace via host.workspace_manager.get and stores it in world.

@@ -135,6 +135,11 @@ func newTranscriptModel(width, height int) transcriptModel {
 		glamour.WithPreservedNewLines(),
 	)
 	if err != nil {
+		// Markdown formatting is degraded: Render() will fall back to
+		// emitting raw text (see renderMarkdown's nil-renderer guard).
+		// Surface it so operators know why the transcript looks plain.
+		slog.Warn("transcript: glamour renderer init failed; markdown formatting disabled",
+			"err", err)
 		renderer = nil
 	}
 

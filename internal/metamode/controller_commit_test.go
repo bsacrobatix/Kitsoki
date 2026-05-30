@@ -283,7 +283,6 @@ func TestController_Send_DirectEdit_NoGitRepoSkipsCleanly(t *testing.T) {
 // CommitSHA is empty and CommitError describes the load failure.
 func TestController_Send_DirectEdit_BrokenYAMLBlocksCommit(t *testing.T) {
 	dir, appFile := initStoryRepo(t)
-	initialHead := headSHA(t, dir)
 
 	// Seed the valid manifest in place of initStoryRepo's seed so the
 	// initial-commit pre-state is well-formed; the oracle stub will
@@ -300,7 +299,7 @@ func TestController_Send_DirectEdit_BrokenYAMLBlocksCommit(t *testing.T) {
 	}
 	runGit("add", "app.yaml")
 	runGit("commit", "--amend", "--no-edit")
-	initialHead = headSHA(t, dir)
+	initialHead := headSHA(t, dir)
 
 	c, _, _ := newTestController(t)
 	c.Oracle = oracleFunc(func(ctx context.Context, in AskInput) (AskOutput, error) {

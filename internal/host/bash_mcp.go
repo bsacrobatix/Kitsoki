@@ -390,8 +390,7 @@ func RunBashMCPServerFromConfig(ctx context.Context, configPath string, stdin io
 		return fmt.Errorf("mcp-bash: parse profile config: %w", err)
 	}
 
-	var profile *BashProfile
-	profile = &BashProfile{
+	profile := &BashProfile{
 		Kind:       BashProfileKind(cfg.ProfileKind),
 		Commands:   cfg.Commands,
 		ScratchDir: cfg.ScratchDir,

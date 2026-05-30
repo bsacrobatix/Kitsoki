@@ -85,7 +85,6 @@ func BuildRegistry(plugins map[string]*PluginDecl, h harness.Harness) (*Registry
 		}
 
 		var o Oracle
-		var err error
 
 		switch decl.Plugin {
 		case "builtin.claude_cli":
@@ -122,9 +121,6 @@ func BuildRegistry(plugins map[string]*PluginDecl, h harness.Harness) (*Registry
 			return nil, fmt.Errorf("oracle: BuildRegistry: unknown plugin type %q for %q", decl.Plugin, name)
 		}
 
-		if err != nil {
-			return nil, fmt.Errorf("oracle: BuildRegistry: init plugin %q: %w", name, err)
-		}
 		reg.Register(name, o)
 	}
 

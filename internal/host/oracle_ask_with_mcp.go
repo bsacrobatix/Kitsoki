@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -35,6 +36,11 @@ import (
 // auto-attached validator. Set in tests; in production callers may also
 // set it if `kitsoki` is not the running binary's name.
 const kitsokiBinaryEnv = "KITSOKI_BIN"
+
+// postCmdArgKeyRe constrains post_cmd_args keys so each renders to exactly one
+// `--<Key>` argv slot in the validator subprocess. A key with spaces (or other
+// metacharacters) would otherwise create stray argv slots.
+var postCmdArgKeyRe = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 // validatorOptions bundles the optional validator configuration plumbed
 // through from a `validator:` sub-block on the YAML `with:` map. All
@@ -158,6 +164,9 @@ func parseValidatorOptions(args map[string]any) (validatorOptions, string) {
 			val, ok := argsMap[k].(string)
 			if !ok {
 				return validatorOptions{}, fmt.Sprintf("validator.post_cmd_args[%q]: must be a string (got %T)", k, argsMap[k])
+			}
+			if !postCmdArgKeyRe.MatchString(k) {
+				return validatorOptions{}, fmt.Sprintf("validator.post_cmd_args[%q]: key must match %s", k, postCmdArgKeyRe.String())
 			}
 			opts.PostCmdArgs = append(opts.PostCmdArgs, postCmdKV{Key: k, Value: val})
 		}

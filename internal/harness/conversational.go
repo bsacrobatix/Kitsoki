@@ -86,7 +86,7 @@ func (h *ConversationalHarness) RunConversational(ctx context.Context, in Conver
 	// Stub: reflect the query back with tool list.
 	// A production implementation would call the LLM here.
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("**Oracle Response** (stub mode)\n\n"))
+	sb.WriteString("**Oracle Response** (stub mode)\n\n")
 	sb.WriteString(fmt.Sprintf("Your question: %s\n\n", in.UserText))
 	sb.WriteString("Available read-only tools:\n")
 	for _, t := range h.tools {

@@ -209,7 +209,7 @@ func lookupIntentByPath(def *app.AppDef, state app.StatePath, intentName string)
 	states := def.States
 	var s *app.State
 	for _, part := range strings.Split(path, ".") {
-		s, _ = states[part]
+		s = states[part]
 		if s == nil {
 			break
 		}

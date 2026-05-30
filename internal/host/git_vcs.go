@@ -107,12 +107,16 @@ func gitDiff(ctx context.Context, workdir string, _ map[string]any) (Result, err
 	if code != 0 {
 		return Result{Error: fmt.Sprintf("git.diff: %s", strings.TrimSpace(stderr))}, nil
 	}
-	// Also surface the list of changed files for `bind:` ergonomics.
-	filesOut, _, _, _ := cliExec(ctx, workdir, "git", "diff", "--name-only")
+	// Also surface the list of changed files for `bind:` ergonomics. This is
+	// a best-effort convenience: if `--name-only` fails (exec error or
+	// non-zero exit) we degrade to an empty file list rather than failing the
+	// whole call, since the patch content above is the authoritative result.
 	var files []any
-	for _, ln := range strings.Split(strings.TrimSpace(filesOut), "\n") {
-		if ln != "" {
-			files = append(files, ln)
+	if filesOut, _, fcode, ferr := cliExec(ctx, workdir, "git", "diff", "--name-only"); ferr == nil && fcode == 0 {
+		for _, ln := range strings.Split(strings.TrimSpace(filesOut), "\n") {
+			if ln != "" {
+				files = append(files, ln)
+			}
 		}
 	}
 	return Result{Data: map[string]any{"diff": stdout, "files": files}}, nil

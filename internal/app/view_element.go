@@ -354,7 +354,7 @@ func (r *rawListItemYAML) UnmarshalYAML(data []byte) error {
 	if strings.TrimSpace(obj.Label) == "" {
 		return fmt.Errorf("list item: label is required")
 	}
-	r.resolved = ListItem{Label: obj.Label, Hint: obj.Hint, When: obj.When}
+	r.resolved = ListItem(obj)
 	return nil
 }
 
@@ -516,7 +516,7 @@ func (e ViewElement) validate() error {
 		return nil
 	case "banner":
 		if strings.TrimSpace(e.Source) == "" {
-			return fmt.Errorf("banner requires a non-empty text:")
+			return fmt.Errorf("banner requires a non-empty text")
 		}
 		return nil
 	case "choice":

@@ -735,7 +735,7 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 		if strings.TrimSpace(d.Agent) == "" {
 			errs = append(errs, fmt.Errorf("%s: decider.agent is required", file))
 		} else if _, ok := declaredAgents[d.Agent]; !ok && len(declaredAgents) > 0 {
-			errs = append(errs, fmt.Errorf("%s: decider.agent %q is not declared in agents:", file, d.Agent))
+			errs = append(errs, fmt.Errorf("%s: decider.agent %q is not declared in agents", file, d.Agent))
 		}
 		if strings.TrimSpace(d.Schema) == "" {
 			errs = append(errs, fmt.Errorf("%s: decider.schema is required", file))

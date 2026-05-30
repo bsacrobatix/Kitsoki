@@ -490,11 +490,11 @@ episodes:
 	// Parse each transport's returned event to extract the submission.
 	extractSub := func(t *testing.T, name string, returned map[string]any) json.RawMessage {
 		t.Helper()
-		resp, _ := returned["response"]
+		resp := returned["response"]
 		respBytes, _ := json.Marshal(resp)
 		var parsed map[string]any
 		_ = json.Unmarshal(respBytes, &parsed)
-		sub, _ := parsed["submission"]
+		sub := parsed["submission"]
 		subBytes, _ := json.Marshal(sub)
 		return json.RawMessage(subBytes)
 	}

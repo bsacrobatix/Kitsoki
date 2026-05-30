@@ -1450,7 +1450,7 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 				TurnNumber: preJ.Turn,
 			}
 		} else {
-			return nil, fmt.Errorf("turn %d: turn requires one of intent:, input:, or advance_clock:", i+1)
+			return nil, fmt.Errorf("turn %d: turn requires one of intent:, input:, or advance_clock", i+1)
 		}
 
 		if turnErr != nil {

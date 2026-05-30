@@ -20,10 +20,10 @@ func TestDefaultTracePath_Shape(t *testing.T) {
 
 	// The filename is <sha8>-<slug>.jsonl.
 	base := filepath.Base(path)
-	// sha8 is 8 hex chars; slug is "jira-PLTFRM-12345"
-	if !strings.HasPrefix(base, "jira") {
-		// base begins with sha8, then '-', then slug
-		// At minimum it must contain the slug fragment.
+	// sha8 is 8 hex chars; slug is "jira-PLTFRM-12345". The filename leads
+	// with the sha8, so it must NOT begin with the slug's "jira" prefix.
+	if strings.HasPrefix(base, "jira") {
+		t.Errorf("filename should begin with the sha8, not the slug, got %q", base)
 	}
 
 	// slug replaces ':' with '-'

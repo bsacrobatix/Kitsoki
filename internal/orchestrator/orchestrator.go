@@ -2701,13 +2701,14 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 		// last successful outcome. Re-emitting them here would be a no-op at
 		// best and risk shadowing in-progress widget focus at worst.
 		return &TurnOutcome{
-			Mode:         ModeRejected,
-			NewState:     journey.State,
-			Events:       result.Events,
-			GuardHint:    ve.GuardHint,
-			ErrorCode:    ve.Code,
-			ErrorMessage: ve.Message,
-			TurnNumber:   turnNum,
+			Mode:           ModeRejected,
+			NewState:       journey.State,
+			Events:         result.Events,
+			GuardHint:      ve.GuardHint,
+			ErrorCode:      ve.Code,
+			ErrorMessage:   ve.Message,
+			AllowedIntents: allowedNames,
+			TurnNumber:     turnNum,
 		}, nil
 	}
 

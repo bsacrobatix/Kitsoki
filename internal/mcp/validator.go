@@ -44,6 +44,11 @@ const postCmdStderrCap = 2000
 // otherwise leak into the LLM's context as noise.
 var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
+// postCmdArgKeyRe constrains post-cmd-arg keys so they render to exactly one
+// `--<Key>` argv slot. A key with spaces (or other metacharacters) would
+// otherwise create stray argv slots in the post-cmd subprocess.
+var postCmdArgKeyRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+
 // ValidatorServer is the MCP-protocol surface of the schema validator.
 type ValidatorServer struct {
 	mcpSrv *mcpsdk.Server
@@ -176,6 +181,15 @@ func NewValidatorServer(cfg ValidatorConfig) (*ValidatorServer, error) {
 	compiled, err := compiler.Compile("validator-schema.json")
 	if err != nil {
 		return nil, fmt.Errorf("mcp.NewValidatorServer: compile schema: %w", err)
+	}
+
+	// Validate post-cmd arg keys at parse time so a key with spaces (or other
+	// metacharacters) can't smuggle stray argv slots into the subprocess via
+	// the `--<Key> <Value>` rendering in runPostCmd.
+	for _, kv := range cfg.PostCmdArgs {
+		if !postCmdArgKeyRe.MatchString(kv.Key) {
+			return nil, fmt.Errorf("mcp.NewValidatorServer: invalid post-cmd-arg key %q: must match %s", kv.Key, postCmdArgKeyRe.String())
+		}
 	}
 
 	toolName := cfg.ToolName

@@ -161,8 +161,7 @@ func runExtractSuggestSynonym(cmd *cobra.Command, sessionID, callID, dbPath stri
 // scanExtractCalls walks the journal for sid and collects all matched
 // host.oracle.extract invoked+returned pairs.
 func scanExtractCalls(jr journal.Reader, sid app.SessionID) ([]journalExtractCall, error) {
-	var pending map[string]journalExtractCall
-	pending = make(map[string]journalExtractCall)
+	pending := make(map[string]journalExtractCall)
 	var results []journalExtractCall
 
 	for e := range jr.ReplayTyped(sid) {
