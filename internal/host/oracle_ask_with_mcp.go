@@ -727,25 +727,12 @@ func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, 
 	}
 
 	// Materialize mcp_servers (if any) into a temp config file.
-	var mcpConfigPath string
 	if len(mcpServers) > 0 {
-		mcpConfig := map[string]any{"mcpServers": mcpServers}
-		mcpBytes, mErr := json.Marshal(mcpConfig)
-		if mErr != nil {
-			return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: marshal mcp_servers: %v", mErr)}, nil
+		mcpConfigPath, cleanup, cfgErr := writeMCPConfigTempfile(mcpServers, "kitsoki-mcp")
+		if cfgErr != nil {
+			return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: %v", cfgErr)}, nil
 		}
-		f, fErr := os.CreateTemp("", "kitsoki-mcp-*.json")
-		if fErr != nil {
-			return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: create mcp config tempfile: %v", fErr)}, nil
-		}
-		if _, wErr := f.Write(mcpBytes); wErr != nil {
-			_ = f.Close()
-			_ = os.Remove(f.Name())
-			return Result{Error: fmt.Sprintf("host.oracle.ask_with_mcp: write mcp config: %v", wErr)}, nil
-		}
-		_ = f.Close()
-		mcpConfigPath = f.Name()
-		defer os.Remove(mcpConfigPath)
+		defer cleanup()
 		cliArgs = append(cliArgs, "--mcp-config", mcpConfigPath)
 	}
 

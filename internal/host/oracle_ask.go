@@ -188,16 +188,9 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 	// Bash gate: if Bash is in the effective tool list, the agent must declare
 	// a BashProfile. When no profile is set we deny the call rather than
 	// silently allowing unrestricted Bash.
-	hasBash := false
-	for _, t := range tools {
-		if t == "Bash" {
-			hasBash = true
-			break
-		}
-	}
-	if hasBash && agent.BashProfile == nil {
-		return Result{Error: "host.oracle.ask: Bash is in the tool list but the agent declares no bash_profile; " +
-			"set bash_profile: read-only, commands, or sandboxed-write on the agent declaration"}, nil
+	hasBash, bashErrMsg := validateBashProfile("host.oracle.ask", tools, agent)
+	if bashErrMsg != "" {
+		return Result{Error: bashErrMsg}, nil
 	}
 
 	bin, err := resolveOracleBin(ctx)
@@ -220,16 +213,7 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		tools = rewriteToolsForBashMCP(tools)
 	}
 
-	cliArgs := []string{
-		"-p",
-		"--permission-mode", "bypassPermissions",
-	}
-	if sp := effectiveSystemPrompt(args, agent); strings.TrimSpace(sp) != "" {
-		cliArgs = append(cliArgs, "--append-system-prompt", sp)
-	}
-	if strings.TrimSpace(agent.Model) != "" {
-		cliArgs = append(cliArgs, "--model", agent.Model)
-	}
+	cliArgs := buildBaseCLIArgs(args, agent)
 	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 
 	// Build the MCP servers map. When Bash is in use we attach the kitsoki-bash
@@ -273,25 +257,12 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		mcpServers["validator"] = validatorEntry
 	}
 
-	var mcpConfigPath string
 	if len(mcpServers) > 0 {
-		mcpConfig := map[string]any{"mcpServers": mcpServers}
-		mcpBytes, mErr := json.Marshal(mcpConfig)
-		if mErr != nil {
-			return Result{Error: fmt.Sprintf("host.oracle.ask: marshal mcp config: %v", mErr)}, nil
+		mcpConfigPath, cleanup, cfgErr := writeMCPConfigTempfile(mcpServers, "kitsoki-ask-mcp")
+		if cfgErr != nil {
+			return Result{Error: fmt.Sprintf("host.oracle.ask: %v", cfgErr)}, nil
 		}
-		f, fErr := os.CreateTemp("", "kitsoki-ask-mcp-*.json")
-		if fErr != nil {
-			return Result{Error: fmt.Sprintf("host.oracle.ask: create mcp config tempfile: %v", fErr)}, nil
-		}
-		if _, wErr := f.Write(mcpBytes); wErr != nil {
-			_ = f.Close()
-			_ = os.Remove(f.Name())
-			return Result{Error: fmt.Sprintf("host.oracle.ask: write mcp config: %v", wErr)}, nil
-		}
-		_ = f.Close()
-		mcpConfigPath = f.Name()
-		defer os.Remove(mcpConfigPath)
+		defer cleanup()
 		cliArgs = append(cliArgs, "--mcp-config", mcpConfigPath)
 	}
 
@@ -303,10 +274,10 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 	// SystemPrompt are omitted from the event to stay under PIPE_BUF (4096 bytes).
 	// The full prompt is available in AskRequest context (live) or cassette (replay).
 	appendOracleCalledEvent(ctx, callStart, callID, OracleCalledPayload{
-		Verb:         "ask",
-		Agent:        agentNameFromArgs(args),
-		Model:        agent.Model,
-		Input:        marshalInput(map[string]any{}),
+		Verb:  "ask",
+		Agent: agentNameFromArgs(args),
+		Model: agent.Model,
+		Input: marshalInput(map[string]any{}),
 	})
 
 	cr, _, runErr := OracleStreamer{

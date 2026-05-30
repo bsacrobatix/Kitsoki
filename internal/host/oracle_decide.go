@@ -35,9 +35,7 @@ import (
 	"strings"
 	"time"
 
-	"kitsoki/internal/expr"
 	kitsokimcp "kitsoki/internal/mcp"
-	"kitsoki/internal/render"
 	"kitsoki/internal/render/sourcecolor"
 )
 
@@ -130,31 +128,15 @@ func OracleDecideHandler(ctx context.Context, args map[string]any) (Result, erro
 	workingDir = appendDefaultCwd(workingDir, agent)
 
 	// Build base CLI args.
-	cliArgs := []string{
-		"-p",
-		"--permission-mode", "bypassPermissions",
-	}
-	if sp := effectiveSystemPrompt(args, agent); strings.TrimSpace(sp) != "" {
-		cliArgs = append(cliArgs, "--append-system-prompt", sp)
-	}
-	if strings.TrimSpace(agent.Model) != "" {
-		cliArgs = append(cliArgs, "--model", agent.Model)
-	}
+	cliArgs := buildBaseCLIArgs(args, agent)
 
 	// Resolve effective tools and apply Bash MCP rewrite if Bash is present.
 	// For decide calls, Bash must have a BashProfile (enforced by the loader;
 	// the runtime check below is a safety net).
 	tools := effectiveTools(ctx, args, agent)
-	hasBash := false
-	for _, t := range tools {
-		if t == "Bash" {
-			hasBash = true
-			break
-		}
-	}
-	if hasBash && agent.BashProfile == nil {
-		return Result{Error: "host.oracle.decide: Bash is in the tool list but the agent declares no bash_profile; " +
-			"set bash_profile: read-only, commands, or sandboxed-write on the agent declaration"}, nil
+	hasBash, bashErrMsg := validateBashProfile("host.oracle.decide", tools, agent)
+	if bashErrMsg != "" {
+		return Result{Error: bashErrMsg}, nil
 	}
 	if hasBash {
 		tools = rewriteToolsForBashMCP(tools)
@@ -237,25 +219,12 @@ func OracleDecideHandler(ctx context.Context, args map[string]any) (Result, erro
 	}
 
 	// Materialize mcp_servers into a temp config file.
-	var mcpConfigPath string
 	if len(mcpServers) > 0 {
-		mcpConfig := map[string]any{"mcpServers": mcpServers}
-		mcpBytes, mErr := json.Marshal(mcpConfig)
-		if mErr != nil {
-			return Result{Error: fmt.Sprintf("host.oracle.decide: marshal mcp_servers: %v", mErr)}, nil
+		mcpConfigPath, cleanup, cfgErr := writeMCPConfigTempfile(mcpServers, "kitsoki-decide-mcp")
+		if cfgErr != nil {
+			return Result{Error: fmt.Sprintf("host.oracle.decide: %v", cfgErr)}, nil
 		}
-		f, fErr := os.CreateTemp("", "kitsoki-decide-mcp-*.json")
-		if fErr != nil {
-			return Result{Error: fmt.Sprintf("host.oracle.decide: create mcp config tempfile: %v", fErr)}, nil
-		}
-		if _, wErr := f.Write(mcpBytes); wErr != nil {
-			_ = f.Close()
-			_ = os.Remove(f.Name())
-			return Result{Error: fmt.Sprintf("host.oracle.decide: write mcp config: %v", wErr)}, nil
-		}
-		_ = f.Close()
-		mcpConfigPath = f.Name()
-		defer os.Remove(mcpConfigPath)
+		defer cleanup()
 		cliArgs = append(cliArgs, "--mcp-config", mcpConfigPath)
 	}
 
@@ -271,10 +240,10 @@ func OracleDecideHandler(ctx context.Context, args map[string]any) (Result, erro
 
 	// Wave 3-oracle: write OracleCalled to the JSONL sink at dispatch time.
 	appendOracleCalledEvent(ctx, callStart, callID, OracleCalledPayload{
-		Verb:         "decide",
-		Agent:        agentNameFromArgs(args),
-		Model:        agent.Model,
-		Input:        marshalInput(decideInputDesc),
+		Verb:  "decide",
+		Agent: agentNameFromArgs(args),
+		Model: agent.Model,
+		Input: marshalInput(decideInputDesc),
 	})
 
 	// If a validator block is present, run the retry loop. Otherwise use
@@ -419,18 +388,11 @@ func resolveDecidePrompt(_ context.Context, args map[string]any) (string, string
 	if templateArgs == nil {
 		templateArgs = args
 	}
-	rendered, err := renderDecidePrompt(raw, templateArgs)
+	rendered, err := renderAndStripPrompt(raw, templateArgs)
 	if err != nil {
 		return "", fmt.Sprintf("host.oracle.decide: render prompt: %v", err)
 	}
-	rendered = sourcecolor.Strip(rendered)
 	return rendered, ""
-}
-
-// renderDecidePrompt renders the prompt template with the given args using
-// the same pongo2 renderer as the other oracle handlers.
-func renderDecidePrompt(tmpl string, args map[string]any) (string, error) {
-	return render.Pongo(tmpl, expr.Env{Args: args})
 }
 
 // rejectMutationTools checks that neither per-call tools nor agent tools contain

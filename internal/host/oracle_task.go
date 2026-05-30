@@ -44,10 +44,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"kitsoki/internal/expr"
-	"kitsoki/internal/render"
-	"kitsoki/internal/render/sourcecolor"
 )
 
 // kitsokiSessionIDKey is the context key for the KITSOKI_SESSION_ID value.
@@ -172,9 +168,9 @@ func OracleTaskHandler(ctx context.Context, args map[string]any) (Result, error)
 	// PIPE_BUF (4096 bytes). The full prompt is available in AskRequest context
 	// (live) or cassette (replay).
 	appendOracleCalledEvent(ctx, callStart, callID, OracleCalledPayload{
-		Verb:         "task",
-		Agent:        agentName,
-		Model:        agent.Model,
+		Verb:  "task",
+		Agent: agentName,
+		Model: agent.Model,
 	})
 
 	slog.InfoContext(ctx, "task.start",
@@ -186,16 +182,7 @@ func OracleTaskHandler(ctx context.Context, args map[string]any) (Result, error)
 	)
 
 	// ── Build CLI args ────────────────────────────────────────────────────
-	baseCLIArgs := []string{
-		"-p",
-		"--permission-mode", "bypassPermissions",
-	}
-	if sp := effectiveSystemPrompt(args, agent); strings.TrimSpace(sp) != "" {
-		baseCLIArgs = append(baseCLIArgs, "--append-system-prompt", sp)
-	}
-	if strings.TrimSpace(agent.Model) != "" {
-		baseCLIArgs = append(baseCLIArgs, "--model", agent.Model)
-	}
+	baseCLIArgs := buildBaseCLIArgs(args, agent)
 	if len(tools) > 0 {
 		baseCLIArgs = appendAllowedToolsFlag(baseCLIArgs, tools)
 	}
@@ -492,11 +479,11 @@ func resolveTaskContextPrompt(args map[string]any) (string, string) {
 			templateArgs[k] = v
 		}
 	}
-	result, renderErr := render.Pongo(rendered, expr.Env{Args: templateArgs})
+	result, renderErr := renderAndStripPrompt(rendered, templateArgs)
 	if renderErr != nil {
 		return "", fmt.Sprintf("render context.prompt: %v", renderErr)
 	}
-	return sourcecolor.Strip(result), ""
+	return result, ""
 }
 
 // attachTaskValidator prepares the output file for capturing the submitted
@@ -540,23 +527,14 @@ func buildTaskValidatorMCPConfigWithState(acceptance taskAcceptanceOptions, outp
 		"validator": validatorEntry,
 	}
 
-	// Write a temp JSON MCP config file.
-	cfg := map[string]any{"mcpServers": mcpServers}
-	data, jsonErr := marshalJSON(cfg)
-	if jsonErr != nil {
-		return "", nil, fmt.Errorf("marshal MCP config: %w", jsonErr)
+	// Write a temp JSON MCP config file. The caller owns removal of the
+	// returned path (it tracks mcpConfigPath across the state-file rebuild),
+	// so we discard the cleanup func here.
+	path, _, cfgErr := writeMCPConfigTempfile(mcpServers, "kitsoki-task-mcp")
+	if cfgErr != nil {
+		return "", nil, fmt.Errorf("MCP config: %w", cfgErr)
 	}
-	f, fErr := os.CreateTemp("", "kitsoki-task-mcp-*.json")
-	if fErr != nil {
-		return "", nil, fmt.Errorf("create MCP config: %w", fErr)
-	}
-	if _, wErr := f.Write(data); wErr != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", nil, fmt.Errorf("write MCP config: %w", wErr)
-	}
-	f.Close()
-	return f.Name(), validatorEntry, nil
+	return path, validatorEntry, nil
 }
 
 // readSubmittedPayload reads the submitted JSON from the validator output file.
@@ -570,7 +548,7 @@ func readSubmittedPayload(outputFile string) (any, error) {
 		return nil, fmt.Errorf("empty or missing")
 	}
 	var v any
-	if jsonErr := unmarshalJSON(data, &v); jsonErr != nil {
+	if jsonErr := json.Unmarshal(data, &v); jsonErr != nil {
 		return nil, jsonErr
 	}
 	return v, nil
@@ -582,16 +560,6 @@ func readSubmittedPayload(outputFile string) (any, error) {
 // Kept as a shim so export_test.go's ExtractSessionIDExport continues to work.
 func extractSessionID(ctx context.Context) string {
 	return kitsokiSessionIDFromCtx(ctx)
-}
-
-// marshalJSON marshals v to JSON.
-func marshalJSON(v any) ([]byte, error) {
-	return json.Marshal(v)
-}
-
-// unmarshalJSON unmarshals JSON data into v.
-func unmarshalJSON(data []byte, v any) error {
-	return json.Unmarshal(data, v)
 }
 
 // resolveTaskWorkingDir resolves a working_dir path; expands relative paths

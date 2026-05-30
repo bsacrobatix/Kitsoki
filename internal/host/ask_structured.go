@@ -77,24 +77,11 @@ func AskStructured(ctx context.Context, opts AskStructuredOptions) (json.RawMess
 		return nil, fmt.Errorf("host.ask_structured: build validator entry: %w", err)
 	}
 
-	mcpConfig := map[string]any{"mcpServers": map[string]any{"validator": validatorEntry}}
-	mcpBytes, err := json.Marshal(mcpConfig)
-	if err != nil {
-		return nil, fmt.Errorf("host.ask_structured: marshal mcp config: %w", err)
+	cfgPath, cfgCleanup, cfgErr := writeMCPConfigTempfile(map[string]any{"validator": validatorEntry}, "kitsoki-ask-mcp")
+	if cfgErr != nil {
+		return nil, fmt.Errorf("host.ask_structured: %w", cfgErr)
 	}
-	cfgFile, err := os.CreateTemp("", "kitsoki-ask-mcp-*.json")
-	if err != nil {
-		return nil, fmt.Errorf("host.ask_structured: create mcp config tempfile: %w", err)
-	}
-	cfgPath := cfgFile.Name()
-	defer os.Remove(cfgPath)
-	if _, err := cfgFile.Write(mcpBytes); err != nil {
-		_ = cfgFile.Close()
-		return nil, fmt.Errorf("host.ask_structured: write mcp config: %w", err)
-	}
-	if err := cfgFile.Close(); err != nil {
-		return nil, fmt.Errorf("host.ask_structured: close mcp config: %w", err)
-	}
+	defer cfgCleanup()
 
 	cliArgs := []string{
 		"-p",

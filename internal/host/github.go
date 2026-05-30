@@ -52,7 +52,7 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 	if op == "" {
 		return Result{Error: "host.gh.ticket: op argument is required"}, nil
 	}
-	if !ghCLIAvailable(ctx) {
+	if !ghAvailable(ctx) {
 		return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
 	}
 	switch op {
@@ -69,15 +69,6 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 	default:
 		return Result{Error: fmt.Sprintf("host.gh.ticket: unknown op %q", op)}, nil
 	}
-}
-
-// ghCLIAvailable probes `gh --version` through the package cliExec seam.
-// Returns true iff the binary exists, runs, and exits 0.  Matches the
-// availability pattern in git_vcs.go::ghAvailable but in a workdir-agnostic
-// form (ticket ops do not have a natural workdir argument).
-func ghCLIAvailable(ctx context.Context) bool {
-	_, _, code, err := cliExec(ctx, "", "gh", "--version")
-	return err == nil && code == 0
 }
 
 // repoFlag returns `["--repo", v]` when args["repo"] is a non-empty string,

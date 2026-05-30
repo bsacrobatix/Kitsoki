@@ -587,20 +587,11 @@ func tryLLMResolver(ctx context.Context, ea ExtractArgs, lc *ExtractLLMConfig, b
 	if vErr != nil {
 		return nil, "", false, fmt.Errorf("extract.llm: build validator MCP server: %w", vErr)
 	}
-	mcpConfig := map[string]any{"mcpServers": map[string]any{"validator": validatorEntry}}
-	mcpBytes, _ := json.Marshal(mcpConfig)
-	mcpFile, mcpErr := os.CreateTemp("", "kitsoki-extract-mcp-*.json")
-	if mcpErr != nil {
-		return nil, "", false, fmt.Errorf("extract.llm: create mcp config tempfile: %w", mcpErr)
+	mcpConfigPath, mcpCleanup, mcpCfgErr := writeMCPConfigTempfile(map[string]any{"validator": validatorEntry}, "kitsoki-extract-mcp")
+	if mcpCfgErr != nil {
+		return nil, "", false, fmt.Errorf("extract.llm: %w", mcpCfgErr)
 	}
-	if _, wErr := mcpFile.Write(mcpBytes); wErr != nil {
-		_ = mcpFile.Close()
-		_ = os.Remove(mcpFile.Name())
-		return nil, "", false, fmt.Errorf("extract.llm: write mcp config: %w", wErr)
-	}
-	_ = mcpFile.Close()
-	mcpConfigPath := mcpFile.Name()
-	defer func() { _ = os.Remove(mcpConfigPath) }()
+	defer mcpCleanup()
 
 	fullCLIArgs := append(append([]string{}, cliArgs...), "--mcp-config", mcpConfigPath)
 

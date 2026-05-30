@@ -252,14 +252,16 @@ func gitPush(ctx context.Context, workdir string, args map[string]any) (Result, 
 
 // ghAvailable reports whether the `gh` binary is on PATH.  A negative
 // answer turns the four PR ops into a clean domain error so the YAML
-// `on_error:` arc fires instead of crashing.
-func ghAvailable(ctx context.Context, workdir string) bool {
-	_, _, code, err := cliExec(ctx, workdir, "gh", "--version")
+// `on_error:` arc fires instead of crashing.  The `gh --version` probe is
+// workdir-agnostic, so no workdir argument is taken; this is the single
+// availability probe shared by both the git_vcs PR ops and the gh.ticket ops.
+func ghAvailable(ctx context.Context) bool {
+	_, _, code, err := cliExec(ctx, "", "gh", "--version")
 	return err == nil && code == 0
 }
 
 func ghOpenPR(ctx context.Context, workdir string, args map[string]any) (Result, error) {
-	if !ghAvailable(ctx, workdir) {
+	if !ghAvailable(ctx) {
 		return Result{Error: "git.open_pr: gh CLI not available — install github.com/cli/cli"}, nil
 	}
 	title, _ := args["title"].(string)
@@ -290,7 +292,7 @@ func ghOpenPR(ctx context.Context, workdir string, args map[string]any) (Result,
 }
 
 func ghPRStatus(ctx context.Context, workdir string, args map[string]any) (Result, error) {
-	if !ghAvailable(ctx, workdir) {
+	if !ghAvailable(ctx) {
 		return Result{Error: "git.pr_status: gh CLI not available"}, nil
 	}
 	prID, _ := args["pr_id"].(string)
@@ -315,7 +317,7 @@ func ghPRStatus(ctx context.Context, workdir string, args map[string]any) (Resul
 }
 
 func ghPRComment(ctx context.Context, workdir string, args map[string]any) (Result, error) {
-	if !ghAvailable(ctx, workdir) {
+	if !ghAvailable(ctx) {
 		return Result{Error: "git.pr_comment: gh CLI not available"}, nil
 	}
 	prID, _ := args["pr_id"].(string)
