@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/host"
@@ -434,29 +433,4 @@ func loadOracleCallRows(db *sql.DB, sessionID string) ([]string, error) {
 		out = append(out, s)
 	}
 	return out, rows.Err()
-}
-
-// invokeDispatcherWithJournal is like invokeDispatcher but threads in a
-// journal writer and lookup function (for oracle replay/record tests).
-func invokeDispatcherWithJournal(
-	t *testing.T,
-	cas *Cassette,
-	handler string,
-	args map[string]any,
-	statePath string,
-	fallback host.Handler,
-	recordSink func(*CassetteEpisode),
-	jw journal.Writer,
-	journalLookup OracleJournalLookup,
-) (host.Result, error) {
-	t.Helper()
-	clk := newFakeClock()
-	stateOf := func() string { return statePath }
-	dispatch := BuildCassetteDispatcherWithJournal(cas, handler, stateOf, fallback, recordSink, clk, jw, journalLookup)
-	ctx := host.WithOracleCallCtx(context.Background(), host.OracleCallCtx{
-		SessionID: app.SessionID(fmt.Sprintf("sid-%d", time.Now().UnixNano())),
-		Turn:      1,
-		StatePath: app.StatePath(statePath),
-	})
-	return dispatch(ctx, args)
 }

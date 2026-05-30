@@ -415,11 +415,10 @@ func TestDispatch_SubEvents_NamespaceViolation(t *testing.T) {
 // mismatched CallID causes OracleError.
 func TestDispatch_SubEvents_CallIDMismatch(t *testing.T) {
 	t.Parallel()
-	const parentCallID = "call-dispatch-001"
 
 	badSub := store.Event{
 		Kind:   store.EventKind("oracle.claude.step"),
-		CallID: "wrong-call-id", // must equal parentCallID
+		CallID: "wrong-call-id", // must equal the parent call_id
 	}
 	o := oracle.New(oracle.AskFunc(func(_ context.Context, _ oracle.AskRequest) (oracle.AskResponse, error) {
 		return oracle.AskResponse{

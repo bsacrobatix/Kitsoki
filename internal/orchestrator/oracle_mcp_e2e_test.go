@@ -50,10 +50,6 @@ func TestStoryOracle_MCPHTTPEndToEnd(t *testing.T) {
 			Method  string          `json:"method"`
 			Params  json.RawMessage `json:"params"`
 		}
-		type mcpToolParams struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		}
 		type mcpContentItem struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
