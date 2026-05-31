@@ -292,8 +292,9 @@ func (r *sqliteReader) LoadDocument(sid app.SessionID, doc DocID) (json.RawMessa
 
 // ReplayFrom returns an iterator over patch entries for (sid, doc) where
 // DocVersion >= from, ordered by (turn, seq). The query streams rows lazily.
-func (r *sqliteReader) ReplayFrom(sid app.SessionID, doc DocID, from Version) iter.Seq[Entry] {
-	return func(yield func(Entry) bool) {
+func (r *sqliteReader) ReplayFrom(sid app.SessionID, doc DocID, from Version) (iter.Seq[Entry], func() error) {
+	var capturedErr error
+	seq := func(yield func(Entry) bool) {
 		rows, err := r.db.Query(
 			`SELECT turn, seq, ts, kind, doc, doc_version, body_json
 			 FROM journal
@@ -303,7 +304,7 @@ func (r *sqliteReader) ReplayFrom(sid app.SessionID, doc DocID, from Version) it
 			string(sid), string(doc), int64(from),
 		)
 		if err != nil {
-			// Iterators can't return errors; callers should check for anomalies.
+			capturedErr = fmt.Errorf("journal.ReplayFrom: query: %w", err)
 			return
 		}
 		defer rows.Close()
@@ -319,6 +320,7 @@ func (r *sqliteReader) ReplayFrom(sid app.SessionID, doc DocID, from Version) it
 				body    string
 			)
 			if err := rows.Scan(&turnN, &seq, &tsMicro, &kind, &docStr, &docVer, &body); err != nil {
+				capturedErr = fmt.Errorf("journal.ReplayFrom: scan: %w", err)
 				return
 			}
 			e := Entry{
@@ -339,7 +341,11 @@ func (r *sqliteReader) ReplayFrom(sid app.SessionID, doc DocID, from Version) it
 				return
 			}
 		}
+		if err := rows.Err(); err != nil {
+			capturedErr = fmt.Errorf("journal.ReplayFrom: rows: %w", err)
+		}
 	}
+	return seq, func() error { return capturedErr }
 }
 
 // replayTypedSQL is the query for ReplayTyped: excludes the four patch kinds
@@ -359,10 +365,12 @@ ORDER BY turn ASC, seq ASC`
 
 // ReplayTyped returns an iterator over all typed (non-patch, non-checkpoint)
 // entries for sid, ordered by (turn, seq). Rows are streamed lazily.
-func (r *sqliteReader) ReplayTyped(sid app.SessionID) iter.Seq[Entry] {
-	return func(yield func(Entry) bool) {
+func (r *sqliteReader) ReplayTyped(sid app.SessionID) (iter.Seq[Entry], func() error) {
+	var capturedErr error
+	seq := func(yield func(Entry) bool) {
 		rows, err := r.db.Query(replayTypedSQL, string(sid))
 		if err != nil {
+			capturedErr = fmt.Errorf("journal.ReplayTyped: query: %w", err)
 			return
 		}
 		defer rows.Close()
@@ -378,6 +386,7 @@ func (r *sqliteReader) ReplayTyped(sid app.SessionID) iter.Seq[Entry] {
 				body    string
 			)
 			if err := rows.Scan(&turnN, &seq, &tsMicro, &kind, &docStr, &docVer, &body); err != nil {
+				capturedErr = fmt.Errorf("journal.ReplayTyped: scan: %w", err)
 				return
 			}
 			e := Entry{
@@ -398,12 +407,17 @@ func (r *sqliteReader) ReplayTyped(sid app.SessionID) iter.Seq[Entry] {
 				return
 			}
 		}
+		if err := rows.Err(); err != nil {
+			capturedErr = fmt.Errorf("journal.ReplayTyped: rows: %w", err)
+		}
 	}
+	return seq, func() error { return capturedErr }
 }
 
 // LatestCheckpoint returns the most recent checkpoint entry for (sid, doc).
-// Returns a zero Entry and false if no checkpoint exists.
-func (r *sqliteReader) LatestCheckpoint(sid app.SessionID, doc DocID) (Entry, bool) {
+// Returns (Entry{}, false, nil) if no checkpoint exists, and a non-nil error
+// (kept distinct from "not found") on a query/scan failure.
+func (r *sqliteReader) LatestCheckpoint(sid app.SessionID, doc DocID) (Entry, bool, error) {
 	var (
 		turnN   int64
 		seq     int
@@ -422,10 +436,10 @@ func (r *sqliteReader) LatestCheckpoint(sid app.SessionID, doc DocID) (Entry, bo
 		string(sid), string(doc),
 	).Scan(&turnN, &seq, &tsMicro, &kind, &docVer, &body)
 	if err == sql.ErrNoRows {
-		return Entry{}, false
+		return Entry{}, false, nil
 	}
 	if err != nil {
-		return Entry{}, false
+		return Entry{}, false, fmt.Errorf("journal.LatestCheckpoint: %w", err)
 	}
 	return Entry{
 		Ts:         time.UnixMicro(tsMicro),
@@ -436,7 +450,7 @@ func (r *sqliteReader) LatestCheckpoint(sid app.SessionID, doc DocID) (Entry, bo
 		Doc:        doc,
 		DocVersion: Version(docVer),
 		Body:       json.RawMessage(body),
-	}, true
+	}, true, nil
 }
 
 // LoadOracleCallEntries returns all KindOracleCall journal entries for sid as

@@ -164,7 +164,8 @@ func scanExtractCalls(jr journal.Reader, sid app.SessionID) ([]journalExtractCal
 	pending := make(map[string]journalExtractCall)
 	var results []journalExtractCall
 
-	for e := range jr.ReplayTyped(sid) {
+	typedSeq, typedErr := jr.ReplayTyped(sid)
+	for e := range typedSeq {
 		switch e.Kind {
 		case journal.KindHostInvoked:
 			var body map[string]any
@@ -223,6 +224,9 @@ func scanExtractCalls(jr journal.Reader, sid app.SessionID) ([]journalExtractCal
 			results = append(results, call)
 			delete(pending, matchKey)
 		}
+	}
+	if err := typedErr(); err != nil {
+		return nil, err
 	}
 	return results, nil
 }

@@ -170,7 +170,8 @@ func (o *Orchestrator) AttachSession(sid app.SessionID) (*ResumeBundle, error) {
 		latestViewText     string
 	)
 
-	for e := range o.journalReader.ReplayTyped(sid) {
+	typedSeq, typedErr := o.journalReader.ReplayTyped(sid)
+	for e := range typedSeq {
 		switch e.Kind {
 		case journal.KindClarifyRequested:
 			var body clarifyRequestedBody
@@ -204,6 +205,12 @@ func (o *Orchestrator) AttachSession(sid app.SessionID) (*ResumeBundle, error) {
 			}
 		}
 	}
+	if err := typedErr(); err != nil {
+		// A truncated typed-entry stream means the rehydrated transcript and
+		// pending-clarify state are incomplete — surface it rather than
+		// resuming the session from a partial replay.
+		return nil, fmt.Errorf("orchestrator.AttachSession: replay typed entries: %w", err)
+	}
 
 	// ── 3. Populate pending clarify (rehydrates o.pending[sid]) ───────────────
 	if pendingClarifyBody != nil {
@@ -231,10 +238,14 @@ func (o *Orchestrator) AttachSession(sid app.SessionID) (*ResumeBundle, error) {
 		if !isChatsDoc(doc) {
 			continue
 		}
-		for e := range o.journalReader.ReplayFrom(sid, doc, 0) {
+		chatsSeq, chatsErr := o.journalReader.ReplayFrom(sid, doc, 0)
+		for e := range chatsSeq {
 			if e.Kind == journal.KindChatsAppend {
 				transcriptEntries = append(transcriptEntries, e)
 			}
+		}
+		if err := chatsErr(); err != nil {
+			return nil, fmt.Errorf("orchestrator.AttachSession: replay chats doc %q: %w", doc, err)
 		}
 	}
 	sortByTs(transcriptEntries)
