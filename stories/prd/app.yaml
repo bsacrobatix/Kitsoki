@@ -10,6 +10,7 @@
 #
 #   idle ── start ──▶ clarifying ── submit_answers / skip ──▶ drafting
 #                         │  (decide → only-new questions)        │  (task → PRD.md)
+#                         ├─ answer n=… ─▶ clarifying (self)      │
 #                         ├─ regenerate ─▶ clarifying (cycle++)   ├─ accept ─▶ @exit:done
 #                         └─ quit ─▶ @exit:abandoned              ├─ refine ─▶ drafting (budget→abandoned)
 #                              ▲                                  ├─ clarify ─▶ clarifying (another round)
@@ -92,7 +93,8 @@ world:
 
   # ── clarification (accumulates across rounds — see rooms/clarifying.yaml) ─
   clarifications:        { type: object, default: {} }  # decide result for THIS round: { questions: [{id, question, why}] }
-  clarification_answers: { type: string, default: "" }  # operator's free-text replies for THIS round
+  clarification_answers: { type: string, default: "" }  # operator's replies for THIS round — accumulates one line per answered question (see rooms/clarifying.yaml `answer`)
+  answered_count:        { type: int,    default: 0 }   # how many questions answered THIS round (drives the "Answered so far (N/total)" readout); reset on every new round
   clarification_log:     { type: string, default: "" }  # growing transcript of every prior round's Q&A
 
   # ── draft + refine ──────────────────────────────────────────────────
@@ -129,15 +131,28 @@ intents:
     description: "Done discussing — distill the idea and move on to clarifying questions."
     examples: ["ready", "i'm ready", "build the prd", "draft it", "let's go", "done discussing", "start"]
     priority: 90
+  answer:
+    description: "Answer ONE clarifying question by its number; stays on the clarifying screen so you can answer the rest one at a time."
+    examples: ["number 3 our enterprise tenants", "1) developers on the platform team", "for question 2, time-to-first-PRD under 10 min", "q4 no hard deadline"]
+    priority: 75
+    slots:
+      # Both required → the semantic router falls through to the LLM
+      # router, which pulls the question number AND the free-text reply
+      # out of a line like "number 3 blah blah". A choice-form param can
+      # only fill one slot, so this intent is driven by typed free text
+      # (the clarifying view carries a prose hint), not a menu selection.
+      n:    { type: int,    required: true }   # which question (1-based, as shown in the list)
+      text: { type: string, required: true }   # the answer
   submit_answers:
-    description: "Submit answers to this round's clarification questions and advance to drafting."
-    examples: ["submit", "here are my answers", "done answering", "answers"]
+    description: "Done answering this round — advance to drafting with the answers gathered so far."
+    examples: ["submit", "done answering", "that's all", "draft it now", "here are my answers"]
     priority: 80
     slots:
-      # required: true forces the semantic router to fall through to the
-      # LLM router so the operator's trailing free-text answer blob is
-      # captured rather than dropped (same rationale as bugfix.refine).
-      answers: { type: string, required: true }
+      # Optional now: the normal flow accumulates answers one-by-one via
+      # `answer`, so `submit` needs no payload. A pasted blob is still
+      # honoured when present (it overrides the accumulated answers — see
+      # rooms/clarifying.yaml).
+      answers: { type: string, required: false }
   skip:
     description: "Skip answering this round; draft with what we have."
     examples: [skip, "no more questions", "just draft", "go ahead"]
@@ -179,7 +194,7 @@ intents:
 
 # Intents lifted into a parent story's table when prd is imported.
 exports:
-  intents: [discuss, start, submit_answers, skip, regenerate, accept, refine, clarify, restart_from, quit, look]
+  intents: [discuss, start, answer, submit_answers, skip, regenerate, accept, refine, clarify, restart_from, quit, look]
 
 # Named return points. Standalone load synthesises __exit__done /
 # __exit__abandoned terminals.

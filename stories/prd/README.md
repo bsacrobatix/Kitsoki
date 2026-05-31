@@ -23,7 +23,8 @@ kitsoki run stories/prd/app.yaml
 ```
 idle  ── start ──▶  clarifying  ── submit_answers / skip ──▶  drafting
  │  (discovery chat)     │  (decide → only-new questions)        │  (task → PRD.md)
- │  ◀─ discuss (self)    ├─ regenerate ─▶ clarifying (cycle++)   ├─ accept ─▶ @exit:done
+ │  ◀─ discuss (self)    │  ◀─ answer n=… (self, one at a time)
+ │                       ├─ regenerate ─▶ clarifying (cycle++)   ├─ accept ─▶ @exit:done
  │                       └─ quit ─▶ @exit:abandoned              ├─ refine ─▶ drafting (budget→abandoned)
  │                            ▲                                  ├─ clarify ─▶ clarifying  ◀── another Q&A round
  │                            └──────────── clarify ─────────────┤
@@ -62,7 +63,7 @@ terminals so `kitsoki run` and `kitsoki test flows` terminate cleanly.
 | Room | On enter | Checkpoint? | On `accept` / advance |
 |---|---|---|---|
 | `idle` (conversational) | `host.chat.resolve` (get-or-create) opens the discovery chat; `interviewer` (`host.oracle.converse`) replies per `discuss` turn | no — `discuss` self-loops the conversation | `clarifying` (via `start`, which distills the chat into `world.idea`) |
-| `clarifying` | `analyst` (`host.oracle.decide`) → `clarifications` | no — operator answers | `drafting` (via `submit_answers` or `skip`) |
+| `clarifying` | `analyst` (`host.oracle.decide`) → `clarifications` | no — operator answers questions one at a time (`answer n=…`) | `drafting` (via `submit_answers` or `skip`) |
 | `drafting` | `author` (`host.oracle.task`) writes the PRD → `prd_artifact`; optional `judge` | yes — `prd_artifact` | `@exit:done` (via `accept`) |
 
 ### World contract
@@ -82,7 +83,8 @@ loads standalone for tests. Parent stories project the intake keys via
 | `workdir` | string | Where upstream lives + the PRD is written; pins each oracle's `working_dir`. | `"."` |
 | `output_path` | string | PRD filename, relative to `workdir`. | `"PRD.md"` |
 | `clarifications` | object | This round's `decide` result: `{ questions: [{id, question, why}] }`. | `{}` |
-| `clarification_answers` | string | The operator's free-text replies for this round. | `""` |
+| `clarification_answers` | string | This round's replies, accumulated one `Qn: …` line per answered question (newest last). | `""` |
+| `answered_count` | int | Questions answered this round; drives the "Answered so far (N/total)" readout. Reset on every new round. | `0` |
 | `clarification_log` | string | Growing transcript of every prior round's Q&A (see below). | `""` |
 | `prd_artifact` | object | `task` result: `{ title, summary_markdown, file_path, confidence, needs_clarification, follow_up_questions }`. | `{}` |
 | `refine_feedback` | string | Operator note carried into the next draft / question round. | `""` |
@@ -104,7 +106,8 @@ loads standalone for tests. Parent stories project the intake keys via
 |---|---|---|
 | `discuss` | `message` (req) | Send a free-text message in the idea-discovery conversation (self-loops `idle`). |
 | `start` | — | From `idle`: distill the conversation into `world.idea` and advance to `clarifying`. |
-| `submit_answers` | `answers` (req) | Append this round's Q&A to `clarification_log`, increment `clarifying_cycle`, advance to `drafting`. |
+| `answer` | `n` (req, int) · `text` (req) | Answer ONE question by its number; self-loops `clarifying` (does NOT regenerate). Appends a `Qn: …` line to `clarification_answers` and bumps `answered_count`. |
+| `submit_answers` | (opt) `answers` | Advance to `drafting` on the answers gathered so far; appends the round to `clarification_log` and increments `clarifying_cycle`. A pasted `answers` blob overrides the accumulated replies. |
 | `skip` | — | Draft with what we have (no answers this round; no log append). |
 | `regenerate` | (opt) `feedback` | Re-ask this round's questions (self-transition; re-fires the analyst). `clarifying_cycle >= clarifying_budget` → `@exit:abandoned`. |
 | `accept` | — | From `drafting`: finish via `@exit:done` (re-pins `prd_artifact`, sets `status=done`). |
@@ -151,7 +154,7 @@ overwriting it. The append is a string concat done in the
 ```
 ── Round N ──
 Questions: {compact sorted-key JSON of world.clarifications}
-Answers:   {operator's reply blob}
+Answers:   {this round's accumulated "Qn: …" replies}
 
 {prior clarification_log}
 ```
@@ -209,9 +212,12 @@ From the original design note (now retired), resolved as implemented:
 2. **Idea capture** — a conversational discovery chat (`oracle.converse`),
    not a form: a free-form pitch is awkward to type into one input field,
    so the operator talks it through and `start` distills it. **Clarification
-   capture** stays a structured numbered *list* with a single free-text
-   answer blob via `submit_answers` — the list step the original request
-   explicitly asked for.
+   capture** is a structured numbered *list* the operator answers one at a
+   time by number (`answer n=…`, e.g. "number 3 …"); the screen tracks which
+   are answered and `submit_answers` advances on the accumulated replies (a
+   pasted blob still overrides). Driven by typed free text rather than a menu
+   selection because a choice-form param can fill only one slot, not the
+   `n`+`text` pair.
 3. **Upstream ingestion** — passed as `upstream_paths`; the `analyst` /
    `author` agents read them via `Read`/`Grep`, so their reads land as
    `oracle.tool_call` trace events (serving the "what files were used" ask).

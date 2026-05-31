@@ -1,0 +1,67 @@
+# answer_one_by_one — answer clarifying questions one at a time, by number,
+# then submit with no payload. Proves:
+#   - `answer` is a self-transition (stays in clarifying, does NOT regenerate),
+#   - each reply APPENDS a "Qn: …" line to clarification_answers (newest last)
+#     and bumps answered_count,
+#   - questions may be answered out of order (q3 before q1),
+#   - submit_answers with no slot advances using the ACCUMULATED answers.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: clarifying
+initial_world:
+  idea:        "A CLI for X"
+  workdir:     "."
+  output_path: "PRD.md"
+  judge_mode:  "human"
+  clarifications:
+    questions:
+      - { id: "q1", question: "Who is the primary user?", why: "scopes the persona" }
+      - { id: "q2", question: "What is the single most important success metric?", why: "defines done" }
+      - { id: "q3", question: "What is explicitly out of scope?", why: "bounds the work" }
+
+host_handlers:
+  # In case the harness fires clarifying's on_enter on initial entry, hand
+  # back the same three questions so the seeded list is stable.
+  host.oracle.decide:
+    data:
+      ok: true
+      submitted:
+        questions:
+          - { id: "q1", question: "Who is the primary user?", why: "scopes the persona" }
+          - { id: "q2", question: "What is the single most important success metric?", why: "defines done" }
+          - { id: "q3", question: "What is explicitly out of scope?", why: "bounds the work" }
+  host.oracle.task:
+    data:
+      ok: true
+      submitted:
+        title:               "PRD: Example CLI"
+        summary_markdown:    "## PRD: Example CLI\n\nA sufficiently long summary body to satisfy the schema minimum length for the prd_artifact summary_markdown field, covering problem, users, goals, and metrics."
+        file_path:           "PRD.md"
+        confidence:          0.84
+        needs_clarification: false
+        follow_up_questions: []
+
+turns:
+  # Answer question 3 first — out of order is fine.
+  - intent: { name: answer, slots: { n: 3, text: "internal tooling is out of scope" } }
+    expect_state: clarifying
+    expect_world:
+      answered_count:        1
+      clarification_answers: "Q3: internal tooling is out of scope\n"
+
+  # Then question 1. The new line appends below the first.
+  - intent: { name: answer, slots: { n: 1, text: "platform developers" } }
+    expect_state: clarifying
+    expect_world:
+      answered_count:        2
+      clarification_answers: "Q3: internal tooling is out of scope\nQ1: platform developers\n"
+
+  # Done — submit with NO payload advances on the accumulated answers.
+  - intent: { name: submit_answers, slots: {} }
+    expect_state: drafting
+    expect_world:
+      clarifying_cycle:      1
+      clarification_answers: "Q3: internal tooling is out of scope\nQ1: platform developers\n"
+
+expect_no_errors: true
