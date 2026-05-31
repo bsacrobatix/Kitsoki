@@ -396,7 +396,10 @@ func (o *Orchestrator) tryTurnCache(ctx context.Context, sid app.SessionID, inpu
 	// the machine.Turn under the session lock so the event log gets
 	// the canonical pair of TurnStarted+TurnEnded entries.
 	_ = result
-	outcome, err := o.SubmitDirectFromInput(ctx, sid, verdict.Intent, slots, input)
+	outcome, err := o.SubmitDirectRouted(ctx, sid, verdict.Intent, slots, input, RouteProvenance{
+		Source:     "turncache",
+		Confidence: verdict.Confidence,
+	})
 	if err != nil {
 		return nil, false, err
 	}

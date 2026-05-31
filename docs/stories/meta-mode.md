@@ -256,11 +256,25 @@ validation (the injection step runs before `validateMetaModes`).
 Trigger uniqueness is per-group, so `story.bug` and `kitsoki.bug`
 (both trigger `bug`) coexist.
 
-The single-token `/meta bug` and `/meta self` triggers from prior
-versions are gone — no aliases, no deprecation period. There was
-no user base to preserve, so the clean break is cheaper than
-carrying compatibility shims. Use `/meta story bug` /
-`/meta kitsoki bug` and `/meta kitsoki edit` instead.
+**Bare verbs resolve to the story group.** A single-token
+`/meta <verb>` (`/meta bug`, `/meta ask`, `/meta edit`) is NOT a
+group lookup — there is no group named `bug`. The TUI resolver
+(`resolveMetaName` → `metaVerbKey`) maps the bare verb to the
+matching grouped builtin, **preferring the `story` group**, so
+`/meta bug` ≡ `/meta story bug`, `/meta ask` ≡ `/meta story ask`,
+`/meta edit` ≡ `/meta story edit`. This keeps the common,
+story-targeting verbs one token short while leaving the keys
+grouped — the grouping is what lets a story declare an `ask` /
+`bug` intent without colliding with these triggers (see the
+intent-collision check in `validateMetaModes`; a flat,
+un-namespaced builtin trigger would not be free to coexist with a
+same-named intent). Engine-targeting stays explicit: there is no
+bare `/meta` shortcut into `kitsoki.*` — type `/meta kitsoki bug`
+/ `/meta kitsoki edit`. Bare `/meta` (no verb) likewise resolves
+the `story` group's default verb.
+
+The `/meta self` single-token trigger from prior versions is gone
+(use `/meta kitsoki edit`).
 
 ---
 

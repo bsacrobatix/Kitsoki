@@ -246,6 +246,51 @@ func TestMatch_SynonymInsideLongerUtterance(t *testing.T) {
 	}
 }
 
+// TestMatch_BareSynonymRejectsLargePaste is the dogfood regression: a
+// pasted bug report that merely CONTAINS a one-word synonym ("cancel",
+// an example/synonym of quit) somewhere in a wall of prose must NOT
+// bare-match that intent. In the field this short-circuited a clarifying
+// room straight to the quit intent → @exit → "game over", because the
+// user had pasted the choice footer "… Esc cancel …". The whole-utterance
+// guard (bareMaxUncoveredDefault) rejects it; the input then falls
+// through to the LLM router. Without the guard this returns quit@0.90.
+func TestMatch_BareSynonymRejectsLargePaste(t *testing.T) {
+	t.Parallel()
+	def := mkApp(t, map[string]app.Intent{
+		"quit": {Synonyms: []string{"cancel", "quit", "abort", "bail"}},
+		"look": {Synonyms: []string{"look"}},
+	})
+	m := mustCompile(t, def)
+
+	paste := "when we resume a session the kitsoki header is shown again " +
+		"and it is highlighted as model output move enter pick tab esc cancel " +
+		strings.Repeat("filler prose describing the rendering defect in detail ", 8)
+
+	v := mustMatch(t, m, "clarifying", []string{"quit", "look"}, paste)
+	if v.Confidence != 0 {
+		t.Errorf("large paste containing 'cancel' should NOT bare-match; got intent=%q confidence=%v",
+			v.Intent, v.Confidence)
+	}
+}
+
+// TestMatch_BareSynonymShortStillMatches guards against over-correction:
+// the whole-utterance bound must not break the common case where the
+// synonym is (nearly) the entire utterance.
+func TestMatch_BareSynonymShortStillMatches(t *testing.T) {
+	t.Parallel()
+	def := mkApp(t, map[string]app.Intent{
+		"quit": {Synonyms: []string{"cancel", "quit"}},
+	})
+	m := mustCompile(t, def)
+	for _, in := range []string{"cancel", "please cancel that", "ok cancel"} {
+		v := mustMatch(t, m, "clarifying", []string{"quit"}, in)
+		if v.Intent != "quit" || v.Confidence != ConfidenceWholeSynonym {
+			t.Errorf("Match(%q): want quit@%v, got intent=%q conf=%v",
+				in, ConfidenceWholeSynonym, v.Intent, v.Confidence)
+		}
+	}
+}
+
 // TestMatch_TwoIntentsShareSynonym pins the shared-synonym tie: when "leave" matches
 // both leave_store and cancel_purchase, the verdict carries
 // Confidence=0.50 + the candidate list.

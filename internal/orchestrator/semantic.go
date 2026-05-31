@@ -299,12 +299,18 @@ func (o *Orchestrator) TrySemantic(ctx context.Context, sid app.SessionID, input
 		// only record when the matcher surfaced a pattern + kind —
 		// both are populated for every non-tie hit by semroute.
 		o.recordSynonymHit(ctx, verdict)
-		// Use SubmitDirectFromInput so the original user text — not a
+		// Use SubmitDirectRouted so the original user text — not a
 		// "[direct] intent=…" marker — survives onto the TurnStarted
-		// audit record and the view.rendered journal entry. Operators
-		// reading inspect.LastTurns[].Input and replay-from-journal both
-		// need the verbatim text.
-		outcome, err := o.SubmitDirectFromInput(ctx, sid, verdict.Intent, slots, input)
+		// audit record and the view.rendered journal entry, AND so the
+		// trace records WHY this intent fired (tier + match reason +
+		// confidence). Operators reading inspect.LastTurns[].Input,
+		// replay-from-journal, and anyone diagnosing an unexpected
+		// transition all need this. See RouteProvenance.
+		outcome, err := o.SubmitDirectRouted(ctx, sid, verdict.Intent, slots, input, RouteProvenance{
+			Source:     "semantic",
+			MatchType:  verdict.MatchReason,
+			Confidence: verdict.Confidence,
+		})
 		if err != nil {
 			return nil, false, err
 		}

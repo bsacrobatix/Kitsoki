@@ -290,9 +290,16 @@ func TestBugCreateCmd_KitsokiTarget(t *testing.T) {
 }
 
 // TestBugCreateCmd_KitsokiTargetMissingRoot covers the error path
-// when neither --target-dir nor $KITSOKI_REPO is set.
+// when neither --target-dir nor $KITSOKI_REPO is set AND the repo can't
+// be auto-resolved. The root command now resolves the repo via
+// kitrepo.Resolve (env → ~/.kitsoki/repo → go.mod auto-detect), so this
+// test isolates HOME (no saved location) and chdirs to an empty temp dir
+// (no kitsoki go.mod ancestor) to reproduce the genuinely-unresolvable
+// case.
 func TestBugCreateCmd_KitsokiTargetMissingRoot(t *testing.T) {
 	t.Setenv("KITSOKI_REPO", "")
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
 	root := newRootCmd()
 	root.SetArgs([]string{
 		"bug", "create",
@@ -305,7 +312,8 @@ func TestBugCreateCmd_KitsokiTargetMissingRoot(t *testing.T) {
 	root.SetErr(&out)
 	err := root.Execute()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "--target-dir or $KITSOKI_REPO")
+	require.Contains(t, err.Error(), "--target-dir")
+	require.Contains(t, err.Error(), "$KITSOKI_REPO")
 }
 
 // TestBugCreateCmd_StoryOnlyFlagsWarnOnKitsoki asserts that

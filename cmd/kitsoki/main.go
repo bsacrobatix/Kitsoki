@@ -32,6 +32,7 @@ import (
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
+	"kitsoki/internal/kitrepo"
 	"kitsoki/internal/machine"
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/oracle"
@@ -61,6 +62,24 @@ Embedded documentation (ships inside this binary):
   kitsoki docs all         print every topic, concatenated
 
 See docs/ in the repo for the narrative documentation.`,
+		// Resolve the kitsoki source repo once per invocation and export it
+		// into the environment so every downstream consumer — the
+		// kitsoki.* meta-mode injection gate, expandMetaCwd, the
+		// kitsoki-engineer/explainer/bug-reporter agents' DefaultCwd, and
+		// the `kitsoki bug create --target kitsoki` subprocess the agent
+		// spawns — keeps reading $KITSOKI_REPO unchanged. kitrepo.Resolve
+		// remembers the location under ~/.kitsoki/repo, so after the first
+		// run from a dev checkout the engine-targeting features work from
+		// any directory without the operator setting the env var. Runs for
+		// every subcommand (no child overrides PersistentPreRun).
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if os.Getenv(kitrepo.EnvVar) == "" {
+				if repo := kitrepo.Resolve(); repo != "" {
+					_ = os.Setenv(kitrepo.EnvVar, repo)
+				}
+			}
+			return nil
+		},
 	}
 
 	root.AddCommand(versionCmd())

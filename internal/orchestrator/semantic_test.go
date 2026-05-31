@@ -17,6 +17,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"encoding/json"
 	"sync/atomic"
 	"testing"
 
@@ -150,6 +151,75 @@ func TestSemantic_SynonymResolvesWithoutHarness(t *testing.T) {
 	require.Equal(t, app.StatePath("ended"), out.NewState)
 	require.EqualValues(t, 0, h.calls.Load(),
 		"harness must NOT be called when semantic routing resolves the turn")
+}
+
+// TestSemantic_RouteProvenanceRecordedInTrace pins the trace-detail fix:
+// a semantic-routed turn must stamp WHY the intent fired onto the
+// persisted TurnStarted event (routed_by + match_type + confidence), not
+// just a bare `direct: true`. This is the gap that made a dogfood
+// game-over inscrutable — a paste routed to `quit` via the semantic tier
+// with no recorded provenance. Without RouteProvenance.stampOn the
+// TurnStarted payload carries no routed_by key and this fails.
+func TestSemantic_RouteProvenanceRecordedInTrace(t *testing.T) {
+	t.Parallel()
+	const appYAML = `
+app:
+  id: semroute-prov
+  version: 0.1.0
+world: {}
+routing:
+  enabled: true
+intents:
+  go_north:
+    title: "Go north"
+    synonyms: ["head north"]
+root: start
+states:
+  start:
+    view: "compass"
+    on:
+      go_north:
+        - target: ended
+  ended:
+    terminal: true
+    view: "done"
+`
+	def, err := app.LoadBytes([]byte(appYAML))
+	require.NoError(t, err)
+	m, err := machine.New(def)
+	require.NoError(t, err)
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	h := &countingHarness{fall: staticHarness{intentName: "go_north"}}
+	orch := orchestrator.New(def, m, s, h)
+	ctx := context.Background()
+	sid, err := orch.NewSession(ctx)
+	require.NoError(t, err)
+
+	_, err = orch.Turn(ctx, sid, "let's head north now")
+	require.NoError(t, err)
+	require.EqualValues(t, 0, h.calls.Load(), "semantic tier must resolve without the harness")
+
+	history, err := s.LoadHistory(sid)
+	require.NoError(t, err)
+
+	var found bool
+	for _, ev := range history {
+		if ev.Kind != store.TurnStarted {
+			continue
+		}
+		var p map[string]any
+		require.NoError(t, json.Unmarshal(ev.Payload, &p))
+		if p["routed_by"] == nil {
+			continue
+		}
+		found = true
+		require.Equal(t, "semantic", p["routed_by"], "TurnStarted must record the resolving tier")
+		require.Equal(t, "synonym:head north", p["match_type"], "TurnStarted must record the match reason")
+		require.InDelta(t, 0.90, p["confidence"], 0.0001, "TurnStarted must record the routing confidence")
+	}
+	require.True(t, found, "a TurnStarted event carrying routing provenance must appear in the trace")
 }
 
 // TestSemantic_DisabledFallsThroughToHarness — same input, but with

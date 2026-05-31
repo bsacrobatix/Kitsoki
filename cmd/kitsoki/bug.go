@@ -362,7 +362,10 @@ func normaliseTarget(target string) (string, error) {
 // `--target-dir` flag always wins; otherwise:
 //
 //   - story:   $PWD
-//   - kitsoki: $KITSOKI_REPO (errors if unset)
+//   - kitsoki: $KITSOKI_REPO (the root command resolves this via
+//     kitrepo.Resolve — env, then ~/.kitsoki/repo, then go.mod
+//     auto-detect — and exports it before this runs; errors only when
+//     the repo can't be resolved at all).
 func resolveTargetRoot(target, targetDir string) (string, error) {
 	if targetDir != "" {
 		return targetDir, nil
@@ -377,7 +380,7 @@ func resolveTargetRoot(target, targetDir string) (string, error) {
 	case "kitsoki":
 		repo := strings.TrimSpace(os.Getenv("KITSOKI_REPO"))
 		if repo == "" {
-			return "", fmt.Errorf("--target kitsoki requires --target-dir or $KITSOKI_REPO")
+			return "", fmt.Errorf("--target kitsoki: kitsoki repo not found — run once from a kitsoki checkout to save it under ~/.kitsoki/repo, or pass --target-dir / set $KITSOKI_REPO")
 		}
 		return repo, nil
 	default:

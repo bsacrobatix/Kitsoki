@@ -1329,7 +1329,56 @@ func (o *Orchestrator) settlePostBindEmits(ctx context.Context, sid app.SessionI
 // user's original text should call [SubmitDirectFromInput] instead so the
 // recorded input survives into inspect.LastTurns and any replay path.
 func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any) (*TurnOutcome, error) {
-	return o.submitDirect(ctx, sid, intentName, slots, "")
+	return o.submitDirect(ctx, sid, intentName, slots, "", RouteProvenance{})
+}
+
+// RouteProvenance records HOW an intent was resolved before a direct
+// submission — the missing "why" on the audit trail. The auto-routing
+// tiers (deterministic / semantic / turncache) submit an intent without
+// an LLM call and previously left only a bare `direct: true` on the
+// TurnStarted event, so a reader of the persisted session trace could
+// not tell why (say) `quit` fired. Carrying the source, the human-
+// readable match reason, and the confidence onto the journal event lets
+// the trace explain a transition like "a stray 'cancel' token in a paste
+// routed to quit via the semantic tier at 0.90". The zero value (empty
+// Source) records nothing extra — used by genuinely caller-chosen direct
+// submissions (CLI --intent, programmatic) where there is no routing to
+// explain.
+type RouteProvenance struct {
+	// Source is the routing tier: "deterministic", "semantic",
+	// "turncache", "llm", etc. Empty means "not routed" (omit).
+	Source string
+	// MatchType is the tier-specific reason, e.g. "display" / "example"
+	// for the deterministic tier or "synonym:cancel" / "example:…" for
+	// the semantic tier. Optional.
+	MatchType string
+	// Confidence is the routing confidence band (0 when not applicable).
+	Confidence float64
+}
+
+// stampOn writes the non-empty provenance fields onto a TurnStarted
+// payload map. A zero-value provenance adds nothing, so the event shape
+// is unchanged for genuinely caller-chosen direct submissions.
+func (p RouteProvenance) stampOn(payload map[string]any) {
+	if p.Source == "" {
+		return
+	}
+	payload["routed_by"] = p.Source
+	if p.MatchType != "" {
+		payload["match_type"] = p.MatchType
+	}
+	if p.Confidence > 0 {
+		payload["confidence"] = p.Confidence
+	}
+}
+
+// SubmitDirectRouted is [SubmitDirectFromInput] plus routing provenance:
+// the resolving tier stamps how the intent was chosen onto the
+// TurnStarted journal event so the persisted trace explains the
+// transition. Internal routing tiers call this; external callers that
+// have no routing to explain use [SubmitDirect] / [SubmitDirectFromInput].
+func (o *Orchestrator) SubmitDirectRouted(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any, userInput string, prov RouteProvenance) (*TurnOutcome, error) {
+	return o.submitDirect(ctx, sid, intentName, slots, userInput, prov)
 }
 
 // SubmitDirectFromInput is identical to [SubmitDirect] except it records
@@ -1342,13 +1391,13 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 // Pass userInput="" to fall back to the synthetic marker (equivalent to
 // calling SubmitDirect).
 func (o *Orchestrator) SubmitDirectFromInput(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any, userInput string) (*TurnOutcome, error) {
-	return o.submitDirect(ctx, sid, intentName, slots, userInput)
+	return o.submitDirect(ctx, sid, intentName, slots, userInput, RouteProvenance{})
 }
 
 // submitDirect is the shared implementation behind [SubmitDirect] and
 // [SubmitDirectFromInput]. userInput is recorded verbatim on TurnStarted
 // when non-empty; when empty we fall back to "[direct] intent=<name>".
-func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any, userInput string) (*TurnOutcome, error) {
+func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any, userInput string, prov RouteProvenance) (*TurnOutcome, error) {
 	// Serialise against handleJobTerminal — see Turn for rationale.
 	sessMu := o.sessionLock(sid)
 	sessMu.Lock()
@@ -1452,11 +1501,13 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 		if journalUserInput == "" {
 			journalUserInput = intentName
 		}
-		startEvent := newOrchestratorEvent(store.TurnStarted, map[string]any{
+		startPayload := map[string]any{
 			"turn":   int64(turnNum),
 			"input":  recordedInput,
 			"direct": true,
-		}, turnNum)
+		}
+		prov.stampOn(startPayload)
+		startEvent := newOrchestratorEvent(store.TurnStarted, startPayload, turnNum)
 		failureEvents := append([]store.Event{sdInputEvent, startEvent}, result.Events...)
 		endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
 			"outcome": "rejected",
@@ -1501,11 +1552,13 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 	if successJournalUserInput == "" {
 		successJournalUserInput = intentName
 	}
-	startEvent := newOrchestratorEvent(store.TurnStarted, map[string]any{
+	successStartPayload := map[string]any{
 		"turn":   int64(turnNum),
 		"input":  successRecordedInput,
 		"direct": true,
-	}, turnNum)
+	}
+	prov.stampOn(successStartPayload)
+	startEvent := newOrchestratorEvent(store.TurnStarted, successStartPayload, turnNum)
 
 	// Stamp the foreground turn on ctx so oracle.call.* events fired by the
 	// on_enter chain and the post-bind emit recursion carry the real turn (not

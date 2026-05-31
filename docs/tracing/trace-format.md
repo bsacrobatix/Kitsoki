@@ -79,6 +79,25 @@ Every non-header line has this shape:
 - `machine.state_entered` carries the state being **entered** (the TO state).
 - All other events carry the active state at the moment they were written.
 
+**`turn.start` payload — routing provenance.** A turn whose intent was
+resolved by a non-LLM tier (so no `oracle.call.*` events appear) carries
+`"direct": true` plus the provenance of HOW the intent was chosen. Without
+this, a transition like `intent=quit → @exit` is inscrutable in the trace —
+exactly the dogfood failure that motivated these fields (a pasted bug
+report containing a stray `cancel` token routed to `quit` via the semantic
+tier and ended the session, with the trace showing only `direct: true`).
+
+| Payload key  | Type    | When present | Meaning                                                            |
+|--------------|---------|--------------|--------------------------------------------------------------------|
+| `direct`     | bool    | direct submits | The intent was submitted without the LLM router (menu pick, CLI `--intent`, or a routing tier). |
+| `routed_by`  | string  | tier-routed  | The resolving tier: `deterministic`, `semantic`, `turncache`, `disambiguation`. Absent for genuinely caller-chosen submits (menu pick / `--intent`) where there is no routing to explain. |
+| `match_type` | string  | optional     | Tier-specific reason: `display`/`example` (deterministic) or `synonym:<text>`/`example:<text>` (semantic). |
+| `confidence` | float   | optional     | Routing confidence band (e.g. `0.90` for a semantic synonym hit). Omitted when not applicable. |
+
+These are written by `RouteProvenance.stampOn` in
+`internal/orchestrator/orchestrator.go`; see `RouteProvenance` for the
+source-of-truth field docs.
+
 ---
 
 ## 4. EventKind vocabulary
@@ -156,7 +175,7 @@ payloads remain inline.
 | `duration_ms`| int    | Round-trip duration in milliseconds.                 |
 | `response`   | object | Parsed `Submission` + any verb-specific fields. Omitted when `response_file` is set (large responses). |
 | `response_file` | string | Relative path (from the trace dir) to the response sidecar when the response exceeds ~1KB and a prompts dir is configured; omitted otherwise. |
-| `meta`       | object | Opaque oracle metadata (tokens, cost, transport, …). |
+| `meta`       | object | Opaque oracle metadata. For the claude-CLI transport: `{ "usage": { "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", … }, "cost_usd": <float> }`, captured per invocation from the stream-json `result` event. Omitted when no usage was reported (e.g. a test stub). Plugin transports may carry their own meta (cassette `episode_id` / `match_idx`, …). |
 
 **`oracle.call.error` payload fields:**
 

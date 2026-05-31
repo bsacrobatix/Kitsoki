@@ -300,6 +300,48 @@ func TestMetaMode_EnterViaSlash_NamedMode(t *testing.T) {
 	require.Contains(t, extractTranscript(t, m), "*** story.bug ***")
 }
 
+// TestMetaMode_EnterViaSlash_BareVerb dispatches `/meta bug` — a bare
+// VERB, not a group. "bug" is not a group name, so the only way this
+// resolves is the bare-verb path in resolveMetaName, which maps the verb
+// to the matching grouped builtin (preferring the story group). This is
+// the dogfood fix: `/meta bug` must Just Work in every app without the
+// operator typing `/meta story bug`. Without the bare-verb resolution
+// this surfaces "unknown mode" and stays ModeOnPath.
+func TestMetaMode_EnterViaSlash_BareVerb(t *testing.T) {
+	modes := map[string]*app.MetaModeDef{
+		"story.edit": {Group: "story", Trigger: "edit", Default: true, Banner: "*** story.edit ***", Agent: "story-author"},
+		"story.bug":  {Group: "story", Trigger: "bug", Banner: "*** story.bug ***", Agent: "story-bug-reporter"},
+	}
+	m, store, _ := buildMetaModeModel(t, modes, "noted")
+
+	m = runTurnBlocking(t, m, "/meta bug")
+	require.Equal(t, tuipkg.ModeMeta, extractMode(t, m),
+		"bare `/meta bug` must enter meta mode")
+	require.NotNil(t, store.chat)
+	require.Equal(t, "meta:story.bug", store.chat.room,
+		"bare `/meta bug` should resolve the story.bug builtin")
+	require.Contains(t, extractTranscript(t, m), "*** story.bug ***")
+}
+
+// TestMetaMode_BareVerbPrefersStoryGroup asserts that when a verb exists
+// in BOTH the story and kitsoki groups, a bare `/meta bug` targets the
+// running story (story.bug), not the engine (kitsoki.bug) — the
+// story-by-default rule. Engine-targeting stays explicit via
+// `/meta kitsoki bug`.
+func TestMetaMode_BareVerbPrefersStoryGroup(t *testing.T) {
+	modes := map[string]*app.MetaModeDef{
+		"story.bug":   {Group: "story", Trigger: "bug", Banner: "*** story.bug ***", Agent: "story-bug-reporter"},
+		"kitsoki.bug": {Group: "kitsoki", Trigger: "bug", Banner: "*** kitsoki.bug ***", Agent: "story-bug-reporter"},
+	}
+	m, store, _ := buildMetaModeModel(t, modes, "noted")
+
+	m = runTurnBlocking(t, m, "/meta bug")
+	require.Equal(t, tuipkg.ModeMeta, extractMode(t, m))
+	require.NotNil(t, store.chat)
+	require.Equal(t, "meta:story.bug", store.chat.room,
+		"bare `/meta bug` must prefer the story group over kitsoki")
+}
+
 // TestMetaMode_UnknownMode asserts /meta nonexistent stays in ModeOnPath
 // and surfaces the error in the transcript.
 func TestMetaMode_UnknownMode(t *testing.T) {

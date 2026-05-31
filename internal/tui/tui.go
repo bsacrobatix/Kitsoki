@@ -329,6 +329,13 @@ type RootModel struct {
 	// once non-empty it tracks the on-path top-level segment, or
 	// metaRoomKey while a /meta overlay owns the pane.
 	activeRoom app.StatePath
+
+	// resumed is set by the resume options (WithResumedJourney /
+	// WithResumedTranscript) so construction can suppress start-of-session
+	// boilerplate — chiefly the welcome banner, which is already in the
+	// prior session's scrollback and otherwise re-appears mid-transcript
+	// (inheriting the preceding agent body's styling) on --continue.
+	resumed bool
 }
 
 const recentBackgroundCap = 8
@@ -475,6 +482,7 @@ func WithRoutingObserver(obs *RoutingObserver) RootModelOption {
 // is initial plumbing only.
 func WithResumedJourney(state app.StatePath, w world.World, turn app.TurnNumber) RootModelOption {
 	return func(m *RootModel) {
+		m.resumed = true
 		m.currentState = state
 		computedMenu := orchestrator.ComputeMenu(m.orch.AppDef(), m.orch.Machine(), state, w)
 		m.menu, _ = m.menu.Update(menuItemsChanged{items: computedMenu.Primary, blocked: computedMenu.Blocked})
@@ -499,6 +507,7 @@ func WithResumedJourney(state app.StatePath, w world.World, turn app.TurnNumber)
 // an empty initialView string to avoid duplicating the last view.rendered row.
 func WithResumedTranscript(entries []journal.Entry) RootModelOption {
 	return func(m *RootModel) {
+		m.resumed = true
 		if len(entries) == 0 {
 			return
 		}
@@ -561,9 +570,15 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	}
 
 	// Print a Claude-Code-style welcome banner into scrollback once
-	// at startup. It scrolls off naturally as content grows.
-	if welcome := buildWelcome(orch, sid, appPath, m.currentTheme(), defaultWidth); welcome != "" {
-		m.transcript.pending = append(m.transcript.pending, welcome)
+	// at startup. It scrolls off naturally as content grows. Suppressed
+	// on resume (--continue): the banner is start-of-session boilerplate
+	// already in the prior session's scrollback, and re-emitting it AFTER
+	// the reconstructed transcript drops a mis-styled box (it picks up the
+	// trailing agent body's background) into the middle of the history.
+	if !m.resumed {
+		if welcome := buildWelcome(orch, sid, appPath, m.currentTheme(), defaultWidth); welcome != "" {
+			m.transcript.pending = append(m.transcript.pending, welcome)
+		}
 	}
 
 	// Show initial view in transcript. When the root state's view is a
@@ -740,6 +755,20 @@ func pickDefaultMetaMode(def *app.AppDef, names []string) string {
 	}
 	if len(groupKeys) > 0 {
 		sort.Strings(groupKeys)
+		// Prefer the story group so bare `/meta` targets the running
+		// story (engine-targeting via `/meta kitsoki …` is explicit);
+		// otherwise fall back to the lex-first group. Without this the
+		// lex-first builtin group is `kitsoki` (< `story`), so bare
+		// `/meta` would open the engine editor whenever $KITSOKI_REPO is
+		// set — surprising and contrary to the story-by-default rule.
+		if story := groups[defaultMetaGroup]; story != nil {
+			if story.defaultKey != "" {
+				return story.defaultKey
+			}
+			if story.anyKey != "" {
+				return story.anyKey
+			}
+		}
 		first := groups[groupKeys[0]]
 		if first.defaultKey != "" {
 			return first.defaultKey
@@ -1626,7 +1655,7 @@ func (m RootModel) dispatchInput(input string) (tea.Model, tea.Cmd) {
 			blocks.SourceDeterministic, 0, "",
 		)
 		m.transcript.FinalizeLive(settled)
-		return startAsyncTurn(m, input, asyncSubmitDirectFromInput(orch, sid, intent, slots, input), pendingDeterministic)
+		return startAsyncTurn(m, input, asyncSubmitDirectFromInput(orch, sid, intent, slots, input, orchestrator.RouteProvenance{Source: "deterministic"}), pendingDeterministic)
 	}
 
 	// No deterministic match — advance the live routing block to
@@ -1667,10 +1696,12 @@ func asyncSubmitDirect(orch *orchestrator.Orchestrator, sid app.SessionID, inten
 
 // asyncSubmitDirectFromInput is asyncSubmitDirect's user-input-preserving
 // variant: the deterministic match has the user's original text, so we
-// thread it through onto the TurnStarted audit record.
-func asyncSubmitDirectFromInput(orch *orchestrator.Orchestrator, sid app.SessionID, intent string, slots map[string]any, userInput string) func(context.Context) (*orchestrator.TurnOutcome, error) {
+// thread it through onto the TurnStarted audit record. prov records which
+// surface resolved the intent (deterministic menu match, disambiguation
+// pick, …) so the persisted trace explains the transition.
+func asyncSubmitDirectFromInput(orch *orchestrator.Orchestrator, sid app.SessionID, intent string, slots map[string]any, userInput string, prov orchestrator.RouteProvenance) func(context.Context) (*orchestrator.TurnOutcome, error) {
 	return func(ctx context.Context) (*orchestrator.TurnOutcome, error) {
-		return orch.SubmitDirectFromInput(ctx, sid, intent, slots, userInput)
+		return orch.SubmitDirectRouted(ctx, sid, intent, slots, userInput, prov)
 	}
 }
 
@@ -2473,7 +2504,45 @@ func (m RootModel) resolveMetaName(args []string) string {
 			return key
 		}
 	}
+	// Bare verb: `candidate` is not a group, but a grouped mode may use
+	// it as its TRIGGER — `/meta bug`, `/meta ask`, `/meta edit`. These
+	// are engine builtins keyed `story.bug` / `kitsoki.bug` etc.; the
+	// grouping exists to avoid the trigger colliding with a story's
+	// intent of the same name (see validateMetaModes), so the verbs are
+	// not flat keys and need this lookup. Resolve to the matching verb,
+	// preferring the story group so a bare `/meta <verb>` targets the
+	// RUNNING STORY by default; engine-targeted variants are reached
+	// explicitly via `/meta kitsoki <verb>`.
+	if key := metaVerbKey(def, candidate); key != "" {
+		return key
+	}
 	return candidate
+}
+
+// defaultMetaGroup is the meta-mode group that bare `/meta` and bare
+// `/meta <verb>` resolve into by default — the story-targeting builtins.
+// Engine-targeting (`kitsoki.*`) is always explicit (`/meta kitsoki …`).
+const defaultMetaGroup = "story"
+
+// metaVerbKey resolves a bare verb (the trigger of a grouped meta mode)
+// to a MetaModes key, preferring [defaultMetaGroup] so bare `/meta bug`
+// targets the running story. Returns "" when no mode declares trigger.
+// Iterates in lex order so the non-story fallback is deterministic.
+func metaVerbKey(def *app.AppDef, trigger string) string {
+	var fallback string
+	for _, name := range sortedMetaModeNames(def) {
+		m := def.MetaModes[name]
+		if m == nil || m.Trigger != trigger {
+			continue
+		}
+		if m.Group == defaultMetaGroup {
+			return name
+		}
+		if fallback == "" {
+			fallback = name
+		}
+	}
+	return fallback
 }
 
 // handleMetaList kicks off a transcript-inline listing of this app's
@@ -3699,7 +3768,7 @@ func (m RootModel) handleDisambiguationChoice(msg disambiguationChoiceMsg) (tea.
 		label = chosen.Intent
 	}
 	return startAsyncTurn(m, label,
-		asyncSubmitDirectFromInput(m.orch, m.sid, chosen.Intent, map[string]any{}, label),
+		asyncSubmitDirectFromInput(m.orch, m.sid, chosen.Intent, map[string]any{}, label, orchestrator.RouteProvenance{Source: "disambiguation"}),
 		pendingDeterministic,
 	)
 }

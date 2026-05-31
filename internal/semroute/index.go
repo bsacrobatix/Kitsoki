@@ -123,6 +123,11 @@ type compiledIndex struct {
 	// build this index. Match tokenises input with the same extras
 	// so input bags align with synonym bags.
 	stopExtras []string
+	// bareMaxUncovered bounds how many input content stems may fall
+	// OUTSIDE a matched bare-string synonym and still count as a
+	// "whole-utterance" hit (see [bareMaxUncoveredDefault] and the
+	// guard in matchBare). 0 disables the guard.
+	bareMaxUncovered int
 	// templates groups every successfully compiled template synonym
 	// by owning intent id. Order within each slice mirrors the
 	// declaration order from YAML, which is what the most-specific-
@@ -239,13 +244,14 @@ func Compile(def *app.AppDef) (*Matcher, error) {
 
 	return &Matcher{
 		idx: &compiledIndex{
-			entries:         entries,
-			byStem:          byStem,
-			ac:              ac,
-			stemDict:        stemDict,
-			stopExtras:      stopExtras,
-			templates:       templates,
-			templateIntents: templateIntents,
+			entries:          entries,
+			byStem:           byStem,
+			ac:               ac,
+			stemDict:         stemDict,
+			stopExtras:       stopExtras,
+			templates:        templates,
+			templateIntents:  templateIntents,
+			bareMaxUncovered: bareMaxUncoveredDefault,
 		},
 	}, nil
 }

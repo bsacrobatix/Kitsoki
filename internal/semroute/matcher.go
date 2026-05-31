@@ -92,6 +92,20 @@ func (m *Matcher) Match(ctx context.Context, statePath string, allowed []string,
 	return m.matchTemplates(allow, input)
 }
 
+// bareMaxUncoveredDefault bounds how many input content stems may fall
+// outside a matched bare-string synonym and still count as a
+// "whole-utterance" hit. The bare-string tier deliberately fires when a
+// synonym is a SUBSET of the input ("wade across" → ford via the synonym
+// "wade"), but without a bound a one-word synonym wins on an arbitrarily
+// long paste that merely happens to contain it. That is exactly the
+// dogfood game-over this guards: a pasted bug report containing the
+// choice footer "Esc cancel" routed to the quit intent (synonym
+// "cancel") at 0.90 and exited the session. 6 comfortably clears every
+// legitimate superset in the corpus (max 1-2 uncovered stems) while
+// rejecting prose pastes (tens-to-hundreds of uncovered stems), which
+// then fall through to the LLM router — the safe path.
+const bareMaxUncoveredDefault = 6
+
 // matchBare runs the Phase-2 bare-string subset check. Returns the
 // Verdict (and ok=true) when at least one allowed intent matched or
 // when a tie was produced; returns ok=false to signal "no bare-string
@@ -175,6 +189,14 @@ func (m *Matcher) matchBare(allow map[string]struct{}, input string) (Verdict, b
 			}
 		}
 		if !subsetOf(entry.stemSet, inputSet) {
+			continue
+		}
+		// Whole-utterance guard. The synonym's stems are a subset of the
+		// input bag (checked above), so the number of input content stems
+		// the synonym does NOT cover is exactly len(inputSet)-len(stemSet).
+		// Reject when that exceeds the bound: a stray synonym token buried
+		// in a long paste is not a command. See bareMaxUncoveredDefault.
+		if maxUncov := m.idx.bareMaxUncovered; maxUncov > 0 && len(inputSet)-len(entry.stemSet) > maxUncov {
 			continue
 		}
 		if _, exists := matched[entry.Intent]; exists {
