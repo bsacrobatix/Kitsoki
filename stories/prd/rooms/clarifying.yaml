@@ -30,9 +30,10 @@ states:
             "Prior rounds": "{{ world.clarifying_cycle }}"
       - heading: "Questions for you"
       - code: |
-          {% for q in world.clarifications.questions %}{{ forloop.Counter }}. {{ q.question }}
-             why: {{ q.why|default:"(no rationale given)" }}
-          {% empty %}(none — nothing material left to ask; type skip to draft){% endfor %}
+          {% for q in world.clarifications.questions %}{{ forloop.Counter }}. {{ q.question|wordwrap:115 }}
+             why: {{ q.why|default:"(no rationale given)"|wordwrap:110 }}
+          {% if not forloop.Last %}
+          {% endif %}{% empty %}(none — nothing material left to ask; type skip to draft){% endfor %}
       - choice:
           mode: single
           prompt: "Actions"
