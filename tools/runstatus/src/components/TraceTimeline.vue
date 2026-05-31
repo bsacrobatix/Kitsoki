@@ -140,6 +140,11 @@
                     class="trace-timeline__incomplete"
                     title="Call did not complete or its completion was not recorded"
                   >incomplete</span>
+                  <span
+                    v-if="row.oracle && oracleCostStr(row.oracle.merged)"
+                    class="trace-timeline__cost"
+                    title="Estimated cost for this oracle call (meta.cost_usd)"
+                  >{{ oracleCostStr(row.oracle.merged) }}</span>
                   <span class="trace-timeline__level" :data-level="row.event.level">{{ row.event.level }}</span>
                   <span class="trace-timeline__time">{{ formatTime(row.event.time) }}</span>
                   <button
@@ -193,7 +198,14 @@ import type { TraceEvent } from "../types.js";
 import EventDetail from "./EventDetail.vue";
 import WorldDiffViewer from "./WorldDiffViewer.vue";
 import { parseDiagram } from "../diagram/parse.js";
-import { fmtMs } from "./oracle/lib.js";
+import { fmtMs, fmtCost, readOracleUsage } from "./oracle/lib.js";
+
+// Cost string for a merged oracle row, shown inline next to the duration in the
+// collapsed timeline row. Reads the canonical attrs.meta.cost_usd (with the
+// legacy flat fallback). Returns "" when no cost was recorded, so the span hides.
+function oracleCostStr(merged: TraceEvent): string {
+  return fmtCost(readOracleUsage(merged.attrs).costUsd);
+}
 
 // ---- props & emits ----------------------------------------------------------
 
@@ -1417,6 +1429,17 @@ watch(
   border: 1px solid #7c2d12;
   border-radius: 3px;
   background: #1a0f08;
+}
+
+.trace-timeline__cost {
+  color: #a3e635;
+  font-size: 0.7rem;
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid #3f6212;
+  border-radius: 3px;
+  background: #1a2e05;
 }
 
 .trace-timeline__incomplete {

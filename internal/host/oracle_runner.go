@@ -35,6 +35,18 @@ type ClaudeRun struct {
 	// re-parsing Stdout so they see the full stream including tool_use
 	// and tool_result blocks that runClaudeStreamJSON discards from Stdout.
 	RawEvents []json.RawMessage
+	// Usage is the token-usage object from the terminal `result` event
+	// (input_tokens, output_tokens, cache_read_input_tokens,
+	// cache_creation_input_tokens, …) reported by the claude CLI. It is
+	// nil when the run produced no result event carrying usage — e.g. a
+	// plain-text test stub, or a run that errored before completion. The
+	// transport also stashes this into the per-call usage box (see
+	// recordOracleUsage) so OracleReturned events surface per-invocation
+	// tokens without every verb handler threading a ClaudeRun through its
+	// (sometimes deep) call tree.
+	Usage map[string]any
+	// CostUSD is the result event's total_cost_usd (0 when absent).
+	CostUSD float64
 }
 
 // ClaudeRunner runs the claude binary one-shot and returns its
@@ -59,16 +71,23 @@ func ClaudeRunnerFromContext(ctx context.Context) ClaudeRunner {
 	return r
 }
 
-// runClaudeOneShot dispatches a claude one-shot call. When a
-// ClaudeRunner is installed in ctx (test setup) the stub is invoked
-// in-process. Otherwise the real exec path runClaudeOneShotReal forks
-// the binary as before.
+// runClaudeOneShot dispatches a claude "one-shot" call.
 //
-// The trailing-newline trim on Stdout is enforced here, not in the
-// runner implementations. The ClaudeRun.Stdout field is documented to
-// have its trailing newline trimmed; the real exec path (and any
-// stub) might naively return raw output. Enforce the contract at the
-// dispatcher so callers (and downstream code that splits on \n) never
+// "stream-json everywhere": rather than ask the CLI for buffered --output-format
+// text (which carries NO token usage and emits no live events), this path now
+// runs the call as stream-json — capturing per-invocation token usage and
+// teeing progress events to slog / any installed StreamSink — while still
+// returning the assistant's final reply as ClaudeRun.Stdout. The one exception
+// is an explicit --output-format json request (the envelope contract used by
+// ask_with_mcp's stdout_json binding): that stays buffered so the caller still
+// receives the full result envelope to unmarshal, and usage is extracted from
+// the envelope instead.
+//
+// When a ClaudeRunner is installed in ctx (test setup) the stub is invoked
+// in-process by whichever underlying runner this dispatches to.
+//
+// The trailing-newline trim on Stdout is enforced here, not in the runner
+// implementations, so callers (and downstream code that splits on \n) never
 // see drift between exec and stubbed paths.
 //
 // The optional sessionID, when non-empty, is injected as KITSOKI_SESSION_ID
@@ -80,17 +99,102 @@ func runClaudeOneShot(ctx context.Context, bin string, cliArgs []string, stdin, 
 	if len(sessionID) > 0 {
 		sid = sessionID[0]
 	}
-	var (
-		cr  ClaudeRun
-		err error
-	)
-	if r := ClaudeRunnerFromContext(ctx); r != nil {
-		cr, err = r(ctx, cliArgs, stdin, workingDir)
-	} else {
-		cr, err = runClaudeOneShotReal(ctx, bin, cliArgs, stdin, workingDir, sid)
+
+	// Explicit --output-format json: preserve the buffered envelope contract.
+	if requestedOutputFormat(cliArgs) == "json" {
+		var (
+			cr  ClaudeRun
+			err error
+		)
+		if r := ClaudeRunnerFromContext(ctx); r != nil {
+			cr, err = r(ctx, cliArgs, stdin, workingDir)
+		} else {
+			cr, err = runClaudeOneShotReal(ctx, bin, cliArgs, stdin, workingDir, sid)
+		}
+		cr.Stdout = strings.TrimRight(cr.Stdout, "\n")
+		// The envelope carries usage + cost; surface them like the stream path.
+		if usage, cost := parseEnvelopeUsage(cr.Stdout); usage != nil || cost != 0 {
+			cr.Usage = usage
+			cr.CostUSD = cost
+			recordOracleUsage(ctx, usage, cost)
+		}
+		return cr, err
 	}
+
+	// Everything else (text / stream-json / unset) runs as stream-json so the
+	// call captures usage and emits live events. runClaudeStreamJSON honours the
+	// same ClaudeRunner stub and applies its own trailing-newline trim; we trim
+	// again here (idempotent) to keep the contract obvious at the dispatcher.
+	cr, _, err := runClaudeStreamJSON(ctx, bin, forceStreamJSONArgs(cliArgs), stdin, workingDir, sid)
 	cr.Stdout = strings.TrimRight(cr.Stdout, "\n")
 	return cr, err
+}
+
+// requestedOutputFormat returns the value of the --output-format flag in
+// cliArgs (handling both "--output-format x" and "--output-format=x"), or ""
+// when the flag is absent.
+func requestedOutputFormat(cliArgs []string) string {
+	for i, a := range cliArgs {
+		if a == "--output-format" {
+			if i+1 < len(cliArgs) {
+				return cliArgs[i+1]
+			}
+			return ""
+		}
+		if v, ok := strings.CutPrefix(a, "--output-format="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// forceStreamJSONArgs returns a copy of cliArgs with the output format pinned
+// to stream-json and --verbose present (claude requires --verbose alongside
+// --output-format stream-json in -p mode). Any existing --output-format value
+// is rewritten; if none is present one is appended.
+func forceStreamJSONArgs(cliArgs []string) []string {
+	out := make([]string, 0, len(cliArgs)+3)
+	hasFormat, hasVerbose := false, false
+	for i := 0; i < len(cliArgs); i++ {
+		a := cliArgs[i]
+		switch {
+		case a == "--output-format":
+			hasFormat = true
+			out = append(out, "--output-format", "stream-json")
+			i++ // skip the old value
+		case strings.HasPrefix(a, "--output-format="):
+			hasFormat = true
+			out = append(out, "--output-format=stream-json")
+		default:
+			if a == "--verbose" {
+				hasVerbose = true
+			}
+			out = append(out, a)
+		}
+	}
+	if !hasFormat {
+		out = append(out, "--output-format", "stream-json")
+	}
+	if !hasVerbose {
+		out = append(out, "--verbose")
+	}
+	return out
+}
+
+// parseEnvelopeUsage extracts the token-usage object and total_cost_usd from a
+// buffered --output-format json result envelope. Returns (nil, 0) when stdout
+// is not a parseable result envelope (e.g. a plain-text test stub).
+func parseEnvelopeUsage(stdout string) (map[string]any, float64) {
+	if strings.TrimSpace(stdout) == "" {
+		return nil, 0
+	}
+	var env map[string]any
+	if json.Unmarshal([]byte(stdout), &env) != nil {
+		return nil, 0
+	}
+	usage, _ := env["usage"].(map[string]any)
+	cost, _ := env["total_cost_usd"].(float64)
+	return usage, cost
 }
 
 // runClaudeOneShotReal executes the claude CLI with the given args, prompt
@@ -183,7 +287,7 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		if err != nil {
 			return cr, "", err
 		}
-		reply, parsedSID, rawEvs := parseStreamJSONOutput(ctx, cr.Stdout)
+		reply, parsedSID, rawEvs, usage, cost := parseStreamJSONOutput(ctx, cr.Stdout)
 		if strings.TrimSpace(reply) == "" {
 			// Fallback: stub emitted plain text. Honor the legacy
 			// buffered-text contract so the existing fake-claude
@@ -192,6 +296,9 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		}
 		cr.Stdout = reply
 		cr.RawEvents = rawEvs
+		cr.Usage = usage
+		cr.CostUSD = cost
+		recordOracleUsage(ctx, usage, cost)
 		return cr, parsedSID, nil
 	}
 
@@ -226,6 +333,8 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		sawAnyJSON    bool
 		rawLines      strings.Builder
 		rawEvents     []json.RawMessage
+		resultUsage   map[string]any
+		resultCost    float64
 	)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -251,8 +360,15 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		if text != "" {
 			assembledText.WriteString(text)
 		}
-		if isResult && resultText != "" {
-			finalResult = resultText
+		if isResult {
+			if resultText != "" {
+				finalResult = resultText
+			}
+			// The terminal result event carries the authoritative
+			// cumulative token usage + cost for the whole turn.
+			if u, cost := resultEventUsage(ev); u != nil || cost != 0 {
+				resultUsage, resultCost = u, cost
+			}
 		}
 		if sid != "" && parsedSID == "" {
 			parsedSID = sid
@@ -265,7 +381,8 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 
 	waitErr := cmd.Wait()
 
-	cr := ClaudeRun{Stderr: se.String(), RawEvents: rawEvents}
+	cr := ClaudeRun{Stderr: se.String(), RawEvents: rawEvents, Usage: resultUsage, CostUSD: resultCost}
+	recordOracleUsage(ctx, resultUsage, resultCost)
 	if waitErr != nil {
 		if ctx.Err() != nil {
 			return ClaudeRun{}, parsedSID, ctx.Err()
@@ -333,6 +450,12 @@ func emitStreamEvent(ctx context.Context, ev map[string]any) {
 			if cost, ok := ev["total_cost_usd"].(float64); ok {
 				out.CostUSD = cost
 			}
+			if usage, _ := ev["usage"].(map[string]any); usage != nil {
+				out.InputTokens = usageInt(usage, "input_tokens")
+				out.OutputTokens = usageInt(usage, "output_tokens")
+				out.CacheReadTokens = usageInt(usage, "cache_read_input_tokens")
+				out.CacheCreationTokens = usageInt(usage, "cache_creation_input_tokens")
+			}
 		}
 		sink.OnStreamEvent(ctx, out)
 	}
@@ -359,8 +482,30 @@ func emitStreamEvent(ctx context.Context, ev map[string]any) {
 		if sessionID != "" {
 			attrs = append(attrs, "session_id", sessionID)
 		}
+		if usage, _ := ev["usage"].(map[string]any); usage != nil {
+			attrs = append(attrs,
+				"input_tokens", usageInt(usage, "input_tokens"),
+				"output_tokens", usageInt(usage, "output_tokens"),
+				"cache_read_input_tokens", usageInt(usage, "cache_read_input_tokens"),
+				"cache_creation_input_tokens", usageInt(usage, "cache_creation_input_tokens"),
+			)
+		}
 	}
 	slog.InfoContext(ctx, "metamode.oracle.event", attrs...)
+}
+
+// usageInt reads a token-count field from a claude usage object. JSON numbers
+// unmarshal as float64; this rounds to the nearest int. Returns 0 when the key
+// is absent or not numeric.
+func usageInt(usage map[string]any, key string) int {
+	switch v := usage[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return 0
+	}
 }
 
 // classifyStreamEvent extracts the bits the caller and the logger need
@@ -425,6 +570,17 @@ func classifyStreamEvent(ev map[string]any) (text, tool string, isResult bool, r
 		}
 	}
 	return text, tool, isResult, resultText, sessionID
+}
+
+// resultEventUsage extracts the token-usage object and total_cost_usd from a
+// terminal `result` event. The usage object is claude's cumulative per-turn
+// total (input_tokens, output_tokens, cache_read_input_tokens,
+// cache_creation_input_tokens, …). Returns (nil, 0) for non-result events or
+// events that carry no usage. Best-effort and defensive.
+func resultEventUsage(ev map[string]any) (map[string]any, float64) {
+	usage, _ := ev["usage"].(map[string]any)
+	cost, _ := ev["total_cost_usd"].(float64)
+	return usage, cost
 }
 
 // toolUseArgsPreview extracts a short, human-readable summary of a
@@ -534,8 +690,10 @@ func onelinePreview(s string, n int) string {
 // parseStreamJSONOutput parses a possibly-buffered chunk of stream-json
 // output (one event per line) without forking a subprocess. Used by
 // the test-stub fallback in runClaudeStreamJSON. Returns the reply
-// text, the session ID from system.init, and all parsed raw events.
-func parseStreamJSONOutput(ctx context.Context, raw string) (reply, sessionID string, rawEvents []json.RawMessage) {
+// text, the session ID from system.init, all parsed raw events, and the
+// token usage + cost from the terminal result event (nil/0 when the
+// chunk carries no result usage, e.g. a plain-text stub).
+func parseStreamJSONOutput(ctx context.Context, raw string) (reply, sessionID string, rawEvents []json.RawMessage, usage map[string]any, cost float64) {
 	var assembled strings.Builder
 	var finalResult string
 	scanner := bufio.NewScanner(strings.NewReader(raw))
@@ -555,8 +713,13 @@ func parseStreamJSONOutput(ctx context.Context, raw string) (reply, sessionID st
 		if text != "" {
 			assembled.WriteString(text)
 		}
-		if isResult && resultText != "" {
-			finalResult = resultText
+		if isResult {
+			if resultText != "" {
+				finalResult = resultText
+			}
+			if u, c := resultEventUsage(ev); u != nil || c != 0 {
+				usage, cost = u, c
+			}
 		}
 		if sid != "" && sessionID == "" {
 			sessionID = sid
@@ -566,7 +729,7 @@ func parseStreamJSONOutput(ctx context.Context, raw string) (reply, sessionID st
 	if strings.TrimSpace(reply) == "" {
 		reply = assembled.String()
 	}
-	return reply, sessionID, rawEvents
+	return reply, sessionID, rawEvents, usage, cost
 }
 
 // claudeExitErrorMessage builds the Result.Error string for a non-zero

@@ -1,7 +1,8 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import type { AppDef, MermaidSnapshot, TraceEvent } from "../types.js";
 import type { DataSource } from "../data/source.js";
+import { readOracleUsage } from "../components/oracle/lib.js";
 
 export const useRunStore = defineStore("run", () => {
   // ---- state ----
@@ -19,6 +20,27 @@ export const useRunStore = defineStore("run", () => {
   // scroll the first matching row into view (so re-clicking the same room
   // scrolls again).
   const highlightTick = ref<number>(0);
+
+  // Aggregate token usage + cost across every oracle.call.complete event in the
+  // run. Reads the canonical transport meta via readOracleUsage. `present` is
+  // false when no call carried any usage (so the UI can hide the chip).
+  const usageTotals = computed(() => {
+    let promptTokens = 0;
+    let responseTokens = 0;
+    let costUsd = 0;
+    let calls = 0;
+    let present = false;
+    for (const e of events.value) {
+      if (e.msg !== "oracle.call.complete") continue;
+      const u = readOracleUsage(e.attrs);
+      if (u.promptTokens || u.responseTokens || u.costUsd) present = true;
+      promptTokens += u.promptTokens ?? 0;
+      responseTokens += u.responseTokens ?? 0;
+      costUsd += u.costUsd ?? 0;
+      calls += 1;
+    }
+    return { promptTokens, responseTokens, costUsd, calls, present };
+  });
 
   // ---- internal ----
   let _unsubscribe: (() => void) | null = null;
@@ -90,6 +112,7 @@ export const useRunStore = defineStore("run", () => {
     loading,
     highlightedStatePaths,
     highlightTick,
+    usageTotals,
     // actions
     hydrate,
     teardown,

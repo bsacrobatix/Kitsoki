@@ -258,4 +258,72 @@ test.describe("bugfix fixture", () => {
       "Expected to find a non-empty prompt/response pane in at least one oracle row body"
     ).toBe(true);
   });
+
+  test("topbar shows the run-level token+cost total", async ({ page }) => {
+    await load(page);
+    const usage = page.locator(".run-view__usage");
+    await expect(usage).toBeVisible({ timeout: 5000 });
+    const text = await usage.innerText();
+    // Σ <n> tok · $<cost> — the bugfix snapshot carries injected usage meta.
+    expect(text).toMatch(/Σ\s+[\d,]+\s+tok/);
+    expect(text).toMatch(/\$\d/);
+  });
+
+  test("collapsed oracle rows show cost inline next to the duration", async ({ page }) => {
+    await load(page);
+    await page.waitForSelector(".trace-timeline__row", { timeout: 8000 });
+
+    // Cost chips render on the collapsed row (no expansion needed), next to the
+    // duration chip. The bugfix snapshot carries injected cost_usd on every call.
+    const costs = page.locator(".trace-timeline__cost");
+    await expect(costs.first()).toBeVisible({ timeout: 5000 });
+    expect(await costs.count(), "expected a cost chip on each oracle row").toBeGreaterThan(0);
+    expect(await costs.first().innerText()).toMatch(/\$\d/);
+  });
+
+  test("oracle.complete header surfaces in/out token + cost stats", async ({ page }) => {
+    await load(page);
+    await page.waitForSelector(".trace-timeline__row", { timeout: 8000 });
+
+    const oracleRow = page.locator(".trace-timeline__row", {
+      has: page.locator(".trace-timeline__msg").filter({ hasText: /^oracle\.[a-z]+$/ }),
+    }).first();
+    await expect(oracleRow).toBeVisible({ timeout: 5000 });
+    await oracleRow.click();
+
+    const rowBody = oracleRow.locator(".trace-timeline__row-body");
+    await expect(rowBody).toBeVisible({ timeout: 3000 });
+
+    // Usage stats are read from the canonical attrs.meta.usage shape.
+    const stats = await rowBody.locator(".oracle-detail__stat").allTextContents();
+    const joined = stats.join(" ");
+    expect(joined, "expected an in:<tokens> stat").toMatch(/in:[\d,]+/);
+    expect(joined, "expected an out:<tokens> stat").toMatch(/out:[\d,]+/);
+    expect(joined, "expected a $cost stat").toMatch(/\$\d/);
+  });
+
+  test("expanded oracle detail shows the per-type token breakdown table", async ({ page }) => {
+    await load(page);
+    await page.waitForSelector(".trace-timeline__row", { timeout: 8000 });
+
+    const oracleRow = page.locator(".trace-timeline__row", {
+      has: page.locator(".trace-timeline__msg").filter({ hasText: /^oracle\.[a-z]+$/ }),
+    }).first();
+    await expect(oracleRow).toBeVisible({ timeout: 5000 });
+    await oracleRow.click();
+
+    const table = oracleRow.locator(".trace-timeline__row-body .oracle-detail__usage");
+    await expect(table).toBeVisible({ timeout: 3000 });
+
+    // Each token type is a labelled row with a numeric count, plus total + cost.
+    const labels = await table.locator(".oracle-detail__usage-label").allTextContents();
+    expect(labels).toContain("Output");
+    expect(labels).toContain("Total tokens");
+    expect(labels).toContain("Total cost");
+    // The total-tokens cell carries a formatted number; the cost cell a $value.
+    const total = await table.locator(".oracle-detail__usage-total .oracle-detail__usage-num").innerText();
+    expect(total).toMatch(/[\d,]+/);
+    const cost = await table.locator(".oracle-detail__usage-cost .oracle-detail__usage-num").innerText();
+    expect(cost).toMatch(/\$\d/);
+  });
 });

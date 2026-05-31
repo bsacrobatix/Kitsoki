@@ -44,11 +44,38 @@ All keys below are present on every `.complete` event unless marked `?`
 | agent           | string | Agent name, e.g. `"reproducing_specialist"`                   |
 | model           | string | LLM model identifier, e.g. `"claude-3-sonnet"`                |
 | duration_ms     | number | Wall-clock ms from call start to response received            |
-| prompt_tokens   | number | Tokens in the rendered prompt (input side)                    |
-| response_tokens | number | Tokens in the model response (output side)                    |
-| cost_usd?       | number | Estimated USD cost; omit if unavailable                       |
+| meta?           | object | Opaque transport metadata — **token usage + cost live here** (see below). |
+| prompt_tokens   | number | *(legacy alias)* Tokens in the rendered prompt (input side)   |
+| response_tokens | number | *(legacy alias)* Tokens in the model response (output side)   |
+| cost_usd?       | number | *(legacy alias)* Estimated USD cost; omit if unavailable      |
 | response        | object | The parsed model response (any shape depends on the verb and schema). |
 | error?          | string | If the call failed, the error message. Other response fields are absent when error is present. |
+
+### meta object — token usage + cost (canonical)
+
+The live transport records per-call token usage and cost under the opaque
+`meta` object, which varies by transport. For the claude-CLI transport (and the
+cassette-replay path, which mirrors it) the shape is:
+
+```jsonc
+"meta": {
+  "transport": "claude-cli",          // or "cassette"
+  "usage": {                          // raw claude-CLI usage object
+    "input_tokens":                1200,
+    "output_tokens":               345,
+    "cache_read_input_tokens":     900,  // prompt tokens served from cache
+    "cache_creation_input_tokens": 50    // prompt tokens written to cache
+  },
+  "cost_usd": 0.0123                  // total_cost_usd reported by the CLI
+}
+```
+
+The runstatus UI reads usage from `meta.usage` (`input_tokens` → prompt,
+`output_tokens` → response, `cache_read_input_tokens` → the `cache:` stat) and
+cost from `meta.cost_usd`. The flat top-level `prompt_tokens` /
+`response_tokens` / `cost_usd` fields are a **legacy alias** the UI still falls
+back to when no `meta` is present (older synthetic fixtures use them); new
+producers should emit `meta`.
 
 ### input object
 

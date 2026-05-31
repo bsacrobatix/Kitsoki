@@ -46,10 +46,16 @@ states:
       - prose: "Say **ready** when it's clear enough and I'll move on to focused questions, or **quit** to abandon."
     relevant_world: [workdir, output_path, idea, idea_message, idea_answer, idea_chat_title, idea_turns]
     on_enter:
-      # Create the discovery chat once (skipped on the `discuss` self-
-      # transition). No kickoff converse — the greeting is the static
+      # Get-or-create the discovery chat, keyed by (prd, idle, workdir).
+      # MUST be `host.chat.resolve` (get-or-create), NOT `host.chat.create`
+      # (unconditional INSERT): on_enter can re-fire — e.g. `/reload`'s
+      # RerunOnEnter, or a future re-entry — and `create` would spawn a
+      # fresh EMPTY chat each time, orphaning the conversation so far while
+      # leaving idea_turns/idea_message intact. The next `start` would then
+      # distill an empty chat. resolve returns the SAME chat, so the thread
+      # survives a reload. No kickoff converse — the greeting is the static
       # prose in the view, so no LLM call fires until the operator speaks.
-      - invoke: host.chat.create
+      - invoke: host.chat.resolve
         with:
           app:       "prd"
           room:      "idle"

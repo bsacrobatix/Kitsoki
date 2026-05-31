@@ -34,6 +34,13 @@ type StreamEvent struct {
 	SessionID string  // claude session id (system.init / result events)
 	IsResult  bool    // true on the terminal result event
 	CostUSD   float64 // result events only (0 otherwise)
+	// Token usage from the terminal result event (all 0 on non-result
+	// events). InputTokens / OutputTokens are the turn's prompt/response
+	// totals; the Cache* fields break out prompt-cache reads vs. writes.
+	InputTokens         int
+	OutputTokens        int
+	CacheReadTokens     int
+	CacheCreationTokens int
 }
 
 // StreamSink receives streamed events from oracle calls. Implementations

@@ -149,9 +149,13 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		// OraclePlugin is empty the handler falls back to "oracle.claude" (the
 		// default). This is the production wiring that makes explicit `oracle:`
 		// effect fields take effect at runtime.
-		invokeCtx := ctx
+		// Install a fresh per-call usage box so the claude CLI transport can
+		// record token usage that appendOracleReturnedEvent surfaces on the
+		// OracleReturned event's Meta. One box per host call keeps usage from
+		// leaking between calls in the same on_enter block.
+		invokeCtx := host.WithOracleUsageBox(ctx)
 		if hc.OraclePlugin != "" {
-			invokeCtx = host.WithOraclePluginName(ctx, hc.OraclePlugin)
+			invokeCtx = host.WithOraclePluginName(invokeCtx, hc.OraclePlugin)
 		}
 
 		res, err := o.hosts.Invoke(invokeCtx, hc.Namespace, invokeArgs)

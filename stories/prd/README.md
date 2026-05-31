@@ -61,7 +61,7 @@ terminals so `kitsoki run` and `kitsoki test flows` terminate cleanly.
 
 | Room | On enter | Checkpoint? | On `accept` / advance |
 |---|---|---|---|
-| `idle` (conversational) | `host.chat.create` + `interviewer` (`host.oracle.converse`) opens the discovery chat | no — `discuss` self-loops the conversation | `clarifying` (via `start`, which distills the chat into `world.idea`) |
+| `idle` (conversational) | `host.chat.resolve` (get-or-create) opens the discovery chat; `interviewer` (`host.oracle.converse`) replies per `discuss` turn | no — `discuss` self-loops the conversation | `clarifying` (via `start`, which distills the chat into `world.idea`) |
 | `clarifying` | `analyst` (`host.oracle.decide`) → `clarifications` | no — operator answers | `drafting` (via `submit_answers` or `skip`) |
 | `drafting` | `author` (`host.oracle.task`) writes the PRD → `prd_artifact`; optional `judge` | yes — `prd_artifact` | `@exit:done` (via `accept`) |
 
@@ -118,7 +118,7 @@ loads standalone for tests. Parent stories project the intake keys via
 
 | Handler | Used by | File |
 |---|---|---|
-| `host.chat.create` | `idle` (creates the discovery chat) | `internal/host/chat_handlers.go` |
+| `host.chat.resolve` | `idle` (get-or-create the discovery chat; idempotent across `on_enter` re-fires) | `internal/host/chat_handlers.go` |
 | `host.oracle.converse` | `idle` (interviewer discovery chat + distill) | `internal/host/oracle_converse.go` |
 | `host.oracle.decide` | `clarifying` (analyst), `drafting` (judge) | `internal/host/oracle_decide.go` |
 | `host.oracle.task` | `drafting` (author, writes the PRD) | `internal/host/oracle_task.go` |

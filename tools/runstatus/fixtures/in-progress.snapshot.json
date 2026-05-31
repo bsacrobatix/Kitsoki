@@ -1471,7 +1471,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 42,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 900,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 450
+          },
+          "cost_usd": 0.003488
+        }
       }
     },
     {
@@ -1543,7 +1553,17 @@
         "slots": {
           "direction": "west"
         },
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 954,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 686,
+            "cache_creation_input_tokens": 76
+          },
+          "cost_usd": 0.001517
+        }
       }
     },
     {
@@ -1621,7 +1641,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 35,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1008,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 725,
+            "cache_creation_input_tokens": 80
+          },
+          "cost_usd": 0.001577
+        }
       }
     },
     {
@@ -1690,7 +1720,17 @@
         "intent": "hang_cloak",
         "model": "claude-3-sonnet",
         "response_tokens": 18,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1062,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 764,
+            "cache_creation_input_tokens": 84
+          },
+          "cost_usd": 0.001636
+        }
       }
     },
     {
@@ -1772,7 +1812,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 38,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1116,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 803,
+            "cache_creation_input_tokens": 89
+          },
+          "cost_usd": 0.001697
+        }
       }
     },
     {
@@ -1841,7 +1891,17 @@
         "intent": "wear_cloak",
         "model": "claude-3-sonnet",
         "response_tokens": 18,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1170,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 842,
+            "cache_creation_input_tokens": 93
+          },
+          "cost_usd": 0.001756
+        }
       }
     },
     {
@@ -1923,7 +1983,17 @@
         "intent": "hang_cloak",
         "model": "claude-3-sonnet",
         "response_tokens": 18,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1224,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 881,
+            "cache_creation_input_tokens": 97
+          },
+          "cost_usd": 0.001816
+        }
       }
     },
     {
@@ -2008,7 +2078,17 @@
         "slots": {
           "direction": "east"
         },
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1278,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 920,
+            "cache_creation_input_tokens": 102
+          },
+          "cost_usd": 0.001877
+        }
       }
     },
     {

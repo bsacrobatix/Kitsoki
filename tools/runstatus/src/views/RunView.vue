@@ -13,6 +13,13 @@
           {{ store.terminal ? 'done' : 'live' }}
         </span>
         <code class="run-view__current-state">{{ store.currentStatePath }}</code>
+        <span
+          v-if="store.usageTotals.present"
+          class="run-view__usage"
+          :title="`${store.usageTotals.calls} oracle calls · in ${fmtTokens(store.usageTotals.promptTokens)} / out ${fmtTokens(store.usageTotals.responseTokens)} tokens`"
+        >
+          Σ {{ fmtTokens(store.usageTotals.promptTokens + store.usageTotals.responseTokens) }} tok<template v-if="fmtCost(store.usageTotals.costUsd)"> · {{ fmtCost(store.usageTotals.costUsd) }}</template>
+        </span>
       </div>
 
       <!-- Main panels -->
@@ -70,6 +77,7 @@ import { useRunStore } from "../stores/run.js";
 import { createDataSource } from "../data/source.js";
 import StateDiagram from "../components/StateDiagram.vue";
 import TraceTimeline from "../components/TraceTimeline.vue";
+import { fmtTokens, fmtCost } from "../components/oracle/lib.js";
 import type { NodeRef } from "../types.js";
 
 const props = defineProps<{ sessionId: string }>();
@@ -214,6 +222,18 @@ function onEventSelect(index: number): void {
   font-family: ui-monospace, monospace;
   font-size: 0.775rem;
   color: #7dd3fc;
+}
+
+.run-view__usage {
+  margin-left: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: #a3e635;
+  background: #1a2e05;
+  border: 1px solid #3f6212;
+  border-radius: 4px;
+  padding: 0.1rem 0.45rem;
+  white-space: nowrap;
 }
 
 /* ---- Panels ---- */

@@ -7646,7 +7646,17 @@
         "response": {
           "text": "Bug verified and artifact submitted. Here's the summary:\n\n**TKT-001: ESC silently swallowed during in-flight LLM turn** — confirmed.\n\n**Root cause:** `routeKey()` in `internal/tui/tui.go:1251` guards the ESC→menu transition to `ModeOnPath | ModeOffPath` only. When `mode == ModeAwaitingLLM`, ESC falls through to `m.prompt.Update(msg)`, and the `bubbles/textarea` widget has no ESC binding, so the key is dropped without any feedback.\n\n**Evidence:** `internal/tui/tkt001_esc_repro_test.go` — both tests pass. The reproduction test (`TestTKT001_EscSilentlySwallowedDuringInFlight`) confirms all three bug conditions: mode stays `ModeAwaitingLLM`, transcript is unchanged, and `inFlightCancel` is never called. The positive control (`TestTKT001_ControlEscFromOnPathOpensMenu`) verifies ESC still works correctly from `ModeOnPath`.\n\n**Fix direction:** Add a `ModeAwaitingLLM` branch to the ESC handler — either call `inFlightCancel` directly and emit a hint, or open the system menu (consistent with the existing Ctrl+C cancel path)."
         },
-        "verb": "task"
+        "verb": "task",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 4200,
+            "output_tokens": 257,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 2100
+          },
+          "cost_usd": 0.01803
+        }
       }
     },
     {
@@ -7849,7 +7859,17 @@
           },
           "text": "Fix proposal submitted. \n\nThe patch is a single-site, 6-line change: extend the `ModeOnPath | ModeOffPath` ESC guard in `routeKey()` (`tui.go:1252`) with a new `ModeAwaitingLLM` branch that calls `m.inFlightCancel()`, sets `m.mode = ModeMenu`, and calls `m.menuSystem.Open()`. The existing repro test fully covers it — after the fix, the three \"BUG\" assertions in `TestTKT001_EscSilentlySwallowedDuringInFlight` will all fail (proving correct behaviour), while the positive-control test stays green. Confidence 0.95."
         },
-        "verb": "decide"
+        "verb": "decide",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 689,
+            "output_tokens": 129,
+            "cache_read_input_tokens": 496,
+            "cache_creation_input_tokens": 55
+          },
+          "cost_usd": 0.002704
+        }
       }
     },
     {
@@ -8158,7 +8178,17 @@
         "response": {
           "text": "Fix applied and artifact submitted. The edit adds a `ModeAwaitingLLM` branch to the ESC guard in `routeKey()` (`internal/tui/tui.go:1251`) that cancels the in-flight turn via `m.inFlightCancel()` and opens the menu — matching the behavior that already existed for `ModeOnPath`/`ModeOffPath`. The pipeline's testing room will now run the repro tests against the patched code."
         },
-        "verb": "task"
+        "verb": "task",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 4704,
+            "output_tokens": 93,
+            "cache_read_input_tokens": 3386,
+            "cache_creation_input_tokens": 376
+          },
+          "cost_usd": 0.006647
+        }
       }
     },
     {
@@ -8606,7 +8636,17 @@
         "response": {
           "text": "Artifact submitted. Here's what the review found:\n\n**Status: `failed`** — 3 blockers.\n\n### What the tests actually show\n\nThe reproduction test (`TestTKT001_EscBannerDismiss_BlocksEventLoop`) ran and **passed** — meaning it confirmed the bug is present. But this test is structured as a bug-reproduction test: it asserts `elapsed \u003e= 150ms`, which is true only *while the bug exists*. After a correct fix the assertion would flip to a failure.\n\n### Why the proposal is wrong in three ways\n\n1. **Fix not applied.** `tui.go:1251` still reads `ModeOnPath || ModeOffPath` — the `ModeAwaitingLLM` case from the proposal was never committed.\n\n2. **Wrong fix for the actual bug.** The actual bug is at `tui.go:1324`: `m.jobStore.MarkNotificationRead(ctx, n.ID)` is called **synchronously inside `Update()`**, blocking the event loop for the full SQLite write duration. The proposed guard change at line 1251 would make ESC return early before reaching the banner handler — hiding the blocking call as a side effect, but never fixing the root cause. The correct fix is to move the `MarkNotificationRead` call into a `tea.Cmd` closure, matching `handleInboxItemSelected` at line 1080-1085.\n\n3. **Wrong bug description and test names.** The proposal describes \"ESC silently discarded, no menu opens\" and cites two tests that don't exist (`TestTKT001_EscSilentlySwallowedDuringInFlight`, `TestTKT001_ControlEscFromOnPathOpensMenu`). The actual bug is the event-loop block; the actual test is `TestTKT001_EscBannerDismiss_BlocksEventLoop`."
         },
-        "verb": "task"
+        "verb": "task",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 4956,
+            "output_tokens": 381,
+            "cache_read_input_tokens": 3568,
+            "cache_creation_input_tokens": 396
+          },
+          "cost_usd": 0.011246
+        }
       }
     },
     {
@@ -9107,7 +9147,17 @@
         "response": {
           "text": "Validation artifact submitted. Fix confirmed."
         },
-        "verb": "task"
+        "verb": "task",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 5208,
+            "output_tokens": 11,
+            "cache_read_input_tokens": 3749,
+            "cache_creation_input_tokens": 416
+          },
+          "cost_usd": 0.005979
+        }
       }
     },
     {
@@ -9390,7 +9440,17 @@
         "response": {
           "text": "Done artifact submitted."
         },
-        "verb": "decide"
+        "verb": "decide",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 845,
+            "output_tokens": 8,
+            "cache_read_input_tokens": 608,
+            "cache_creation_input_tokens": 67
+          },
+          "cost_usd": 0.001064
+        }
       }
     },
     {

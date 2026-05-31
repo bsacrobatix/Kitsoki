@@ -524,9 +524,48 @@ through the same lock:
 - **Teleport.** `Orchestrator.Teleport` jumps to a target state without
   going through a transition — used by inbox notifications and the
   Oracle Room banner. Pushes the source state onto the history stack.
-- **Hot reload.** When the watched `app.yaml` changes mid-session, the
-  orchestrator re-validates, swaps in the new `AppDef`, and rebinds the
-  current state if it still exists.
+- **Hot reload.** When the watched `app.yaml` changes mid-session — or
+  the operator types `/reload` — the orchestrator re-validates, swaps in
+  the new `AppDef`, rebinds the current state if it still exists, and
+  **re-fires that state's `on_enter` chain** (`RerunOnEnter`) so view,
+  prompt, and on-enter edits take effect without a restart.
+
+### `on_enter` must be idempotent
+
+`on_enter` is **not** a once-per-lifetime hook. The same chain re-fires
+whenever a room is (re-)entered, and that happens more often than authors
+expect:
+
+- **`/reload` / hot reload** — `RerunOnEnter` replays the current room's
+  `on_enter` against the live world.
+- **Self-re-entry** — a transition with an explicit `target: <thisRoom>`
+  (vs `target: .`) counts as a re-entry and re-runs `on_enter` (the
+  `isReEntry` rule the bugfix `refine:` arcs rely on).
+- **`on_error:` sibling redirects** — entering the redirect target runs
+  its `on_enter` (see [§ `on_error` redirects](#on_error-redirects-and-the-recursion-cap)).
+
+So any side-effecting `invoke:` in `on_enter` runs **two-or-more times**
+over a session. If it isn't idempotent it will silently corrupt state —
+the canonical failure is a chat room whose `on_enter` calls
+`host.chat.create` (an unconditional INSERT): a `/reload` mid-conversation
+spawns a *fresh empty chat*, orphaning the thread while the world counters
+survive, so the next distill step talks to an empty chat. **Reload should
+always be safe; that is the author's contract to uphold, not the engine's.**
+
+Make `on_enter` idempotent with one of:
+
+- **Get-or-create host verbs.** Prefer `host.chat.resolve` (returns the
+  existing chat keyed by `app/room/scope_key`, or creates one) over
+  `host.chat.create`; `host.git_worktree` returns the existing worktree
+  rather than erroring. Reserve the unconditional `create` for dedicated
+  "start a *new* one" states (e.g. dev-story's `oracle_*_new` rooms).
+- **Guard the invoke.** Gate a one-time side effect on its own absence —
+  `when: "world.idea_chat_id == ''"` — so the replay is a no-op. (This is
+  the `bf_autostart_attempted` flag pattern.)
+- **Keep content-producing LLM calls out of `on_enter`.** A kickoff
+  `converse` that *generates* an intro is both wasteful and clobbers prior
+  output on replay; put the prompt in static `prose:` and let the
+  transition effect (the `discuss` self-loop) own the only LLM call.
 
 ---
 

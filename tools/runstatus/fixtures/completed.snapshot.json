@@ -1471,7 +1471,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 42,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 900,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 450
+          },
+          "cost_usd": 0.003488
+        }
       }
     },
     {
@@ -1543,7 +1553,17 @@
         "slots": {
           "direction": "west"
         },
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 954,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 686,
+            "cache_creation_input_tokens": 76
+          },
+          "cost_usd": 0.001517
+        }
       }
     },
     {
@@ -1621,7 +1641,17 @@
         "intent": "hang_cloak",
         "model": "claude-3-sonnet",
         "response_tokens": 18,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1008,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 725,
+            "cache_creation_input_tokens": 80
+          },
+          "cost_usd": 0.001577
+        }
       }
     },
     {
@@ -1736,7 +1766,17 @@
         "slots": {
           "direction": "east"
         },
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1062,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 764,
+            "cache_creation_input_tokens": 84
+          },
+          "cost_usd": 0.001636
+        }
       }
     },
     {
@@ -1817,7 +1857,17 @@
         "slots": {
           "direction": "south"
         },
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1116,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 803,
+            "cache_creation_input_tokens": 89
+          },
+          "cost_usd": 0.001697
+        }
       }
     },
     {
@@ -1895,7 +1945,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 40,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1170,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 842,
+            "cache_creation_input_tokens": 93
+          },
+          "cost_usd": 0.001756
+        }
       }
     },
     {
@@ -1964,7 +2024,17 @@
         "intent": "read_message",
         "model": "claude-3-sonnet",
         "response_tokens": 22,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1224,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 881,
+            "cache_creation_input_tokens": 97
+          },
+          "cost_usd": 0.001816
+        }
       }
     },
     {
@@ -2055,7 +2125,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 38,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1278,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 920,
+            "cache_creation_input_tokens": 102
+          },
+          "cost_usd": 0.001877
+        }
       }
     },
     {
@@ -2127,7 +2207,17 @@
         "slots": {
           "direction": "west"
         },
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1332,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 959,
+            "cache_creation_input_tokens": 106
+          },
+          "cost_usd": 0.001936
+        }
       }
     },
     {
@@ -2196,7 +2286,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 38,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1386,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 997,
+            "cache_creation_input_tokens": 110
+          },
+          "cost_usd": 0.001999
+        }
       }
     },
     {
@@ -2265,7 +2365,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 32,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1440,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1036,
+            "cache_creation_input_tokens": 115
+          },
+          "cost_usd": 0.002059
+        }
       }
     },
     {
@@ -2334,7 +2444,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 30,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1494,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1075,
+            "cache_creation_input_tokens": 119
+          },
+          "cost_usd": 0.002119
+        }
       }
     },
     {
@@ -2403,7 +2523,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 40,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -2472,7 +2602,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 42,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -2541,7 +2681,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 43,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -2610,7 +2760,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 36,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -2679,7 +2839,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 40,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -2748,7 +2918,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 33,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -2817,7 +2997,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 40,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -2886,7 +3076,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 40,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -2955,7 +3155,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 40,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -3024,7 +3234,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 40,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -3093,7 +3313,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 40,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -3162,7 +3392,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 40,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {
@@ -3231,7 +3471,17 @@
         "intent": "look",
         "model": "claude-3-sonnet",
         "response_tokens": 40,
-        "verb": "ask"
+        "verb": "ask",
+        "meta": {
+          "transport": "claude-cli",
+          "usage": {
+            "input_tokens": 1548,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 1114,
+            "cache_creation_input_tokens": 123
+          },
+          "cost_usd": 0.002178
+        }
       }
     },
     {

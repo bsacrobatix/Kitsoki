@@ -14,11 +14,18 @@ all: in-progress completed edge-cases bugfix oracle-rich oracle-with-separate-pr
 # bugfix: drive stories/bugfix/flows/happy_human.yaml through the REAL
 # orchestrator (in-memory store, host stubs from the flow) and dump the
 # resulting event log as a snapshot. Event names + ordering match production.
+# inject_usage.py backfills plausible token-usage meta (input/output/cache
+# tokens + cost) onto the oracle.call.complete events of cassette-replay
+# snapshots, which were recorded without usage. Live traces carry real usage;
+# this is synthetic fixture data so the runstatus UI has something to render.
+INJECT := python3 $(REPO_ROOT)/tools/runstatus/fixtures/inject_usage.py
+
 bugfix:
 	go run $(REPO_ROOT)/tools/runstatus/fixtures/cmd/fromflow \
 		--app  $(REPO_ROOT)/stories/bugfix/app.yaml \
 		--flow $(REPO_ROOT)/stories/bugfix/flows/happy_human.yaml \
 		-o $(OUT)/bugfix.snapshot.json
+	$(INJECT) $(OUT)/bugfix.snapshot.json
 
 in-progress:
 	go run $(REPO_ROOT)/cmd/kitsoki export-status \
@@ -26,18 +33,21 @@ in-progress:
 		--app $(APP) \
 		--current-state cloakroom \
 		-o $(OUT)/in-progress.snapshot.json
+	$(INJECT) $(OUT)/in-progress.snapshot.json
 
 completed:
 	go run $(REPO_ROOT)/cmd/kitsoki export-status \
 		--from-trace $(SRC)/completed.jsonl \
 		--app $(APP) \
 		-o $(OUT)/completed.snapshot.json
+	$(INJECT) $(OUT)/completed.snapshot.json
 
 edge-cases:
 	go run $(REPO_ROOT)/cmd/kitsoki export-status \
 		--from-trace $(SRC)/edge-cases.jsonl \
 		--app $(APP) \
 		-o $(OUT)/edge-cases.snapshot.json
+	$(INJECT) $(OUT)/edge-cases.snapshot.json
 
 # oracle-rich: self-contained Python generator; no Go toolchain required.
 # Reads bugfix.snapshot.json for the app/mermaid blocks and emits

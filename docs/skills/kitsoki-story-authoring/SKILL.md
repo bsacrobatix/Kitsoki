@@ -535,6 +535,14 @@ The renderer / runtime traps — invisible until a user hits them:
   (idle's auto-create with the `bf_autostart_attempted` flag is the
   template). When you do use `on_error:`, ensure the destination view
   surfaces `world.last_error` somewhere.
+- **Non-idempotent `on_enter:` side effects.** `on_enter` re-fires on
+  `/reload` (`RerunOnEnter`), on explicit self-target re-entry, and on
+  `on_error:` redirects — so any `invoke:` there runs 2+ times per
+  session. A `host.chat.create` (unconditional INSERT) in `on_enter`
+  spawns a *fresh empty chat* on every `/reload`, orphaning the
+  conversation; use `host.chat.resolve` (get-or-create) instead, or guard
+  the invoke with `when: "world.<id_key> == ''"`. **Reload must always be
+  safe.** See [state-machine.md §"`on_enter` must be idempotent"](../../stories/state-machine.md#on_enter-must-be-idempotent).
 - **Happy-path test that only checks `next_state`.** Rooms can advance
   while running a no-op `on_enter:`. Assert the side effects: `git show
   --name-only HEAD` after a commit, `stat` after a workspace.create,

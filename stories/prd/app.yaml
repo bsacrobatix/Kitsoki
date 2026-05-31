@@ -41,7 +41,7 @@ hosts:
   - host.oracle.converse
   - host.oracle.decide
   - host.oracle.task
-  - host.chat.create
+  - host.chat.resolve   # get-or-create the discovery chat; idempotent across on_enter re-fires (e.g. /reload). NOT host.chat.create — see rooms/idle.yaml.
 
 # Persona table — names a model + tool surface per step so the trace
 # attributes model + token usage to each step.

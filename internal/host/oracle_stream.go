@@ -5,10 +5,11 @@
 // (invariant 3) is upheld by construction rather
 // than by per-handler discipline:
 //
-//   - When a StreamSink is in ctx, --output-format stream-json is used and
-//     events are teed to the sink in real time.
-//   - When no sink is present (one-shot CLI, tests), the output format falls
-//     back to "text" unless the caller has explicitly set output_format: text.
+//   - Every call uses --output-format stream-json ("stream-json everywhere"),
+//     so it captures per-invocation token usage and emits live events.
+//   - Events are teed to a StreamSink in real time when one is in ctx (the TUI
+//     wires one per turn); otherwise they go to slog only. There is no separate
+//     buffered-text path.
 //   - All five verbs produce a ClaudeRun; handlers extract what they need
 //     (text, submitted JSON, etc.) from it using existing parsing helpers.
 //
@@ -65,15 +66,15 @@ type OracleStreamer struct {
 	SessionID string
 }
 
-// Run dispatches the claude invocation via the appropriate output format.
-// When a StreamSink is installed in ctx, it uses runClaudeStreamJSON and
-// tees events to the sink. Otherwise it uses runClaudeOneShot (buffered
-// text). Both paths honour the ClaudeRunner stub from ctx so tests don't
-// need real subprocess forks.
+// Run dispatches the claude invocation. "stream-json everywhere": every oracle
+// call runs as --output-format stream-json so it captures per-invocation token
+// usage and emits live progress events — to slog always, and to a StreamSink
+// when one is installed in ctx (the TUI wires one per turn). There is no longer
+// a separate buffered-text path; the no-sink case simply has no sink to tee to.
+// The ClaudeRunner stub from ctx is honoured so tests don't fork subprocesses.
 //
-// Returns (run, sessionID, error). sessionID is only populated on the
-// stream-json path (from the system.init event); it is empty on the
-// buffered-text path.
+// Returns (run, sessionID, error). sessionID is populated from the stream's
+// system.init / result event (empty when the run produced no session id).
 // checkCLIArgs asserts that no element of CLIArgs that is not preceded by a
 // flag name starts without '-'. Flag values (e.g. the "bypassPermissions" in
 // "--permission-mode bypassPermissions") are exempt because they immediately
@@ -102,20 +103,11 @@ func (s OracleStreamer) checkCLIArgs(ctx context.Context) {
 
 func (s OracleStreamer) Run(ctx context.Context) (ClaudeRun, string, error) {
 	s.checkCLIArgs(ctx)
-	args := append(s.CLIArgs, "--output-format")
-
-	if StreamSinkFrom(ctx) != nil {
-		// Streaming path: append stream-json + --verbose (required by claude
-		// in -p mode alongside --output-format stream-json).
-		args = append(args, "stream-json", "--verbose")
-		cr, sessionID, err := runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
-		return cr, sessionID, err
-	}
-
-	// Buffered path: append text output format and run one-shot.
-	// Pass sessionID so the subprocess inherits KITSOKI_SESSION_ID even
-	// on the buffered path (e.g. one-shot CLI invocations).
-	args = append(args, "text")
-	cr, err := runClaudeOneShot(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
-	return cr, "", err
+	// stream-json + --verbose (claude requires --verbose alongside
+	// --output-format stream-json in -p mode). emitStreamEvent tees to a sink
+	// only when one is installed, so the no-sink case still streams to slog and
+	// captures usage. sessionID is threaded so the subprocess inherits
+	// KITSOKI_SESSION_ID.
+	args := append(s.CLIArgs, "--output-format", "stream-json", "--verbose")
+	return runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
 }

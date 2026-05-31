@@ -626,8 +626,15 @@ Returns: `{ rendered, messages, latest_seq, title }`.
 
 ### host.chat.create
 
-Explicitly create a new chat. Use `host.chat.resolve` instead unless
-you want a guaranteed-new row.
+Explicitly create a new chat — an unconditional INSERT that returns a
+fresh row every call. **Do not call this from an `on_enter:` chain that
+means "create the chat once":** `on_enter` re-fires on `/reload`, on
+self-re-entry, and on `on_error:` redirects, so `create` would spawn a
+new empty chat each time and orphan the conversation (see
+[state-machine.md §"`on_enter` must be idempotent"](../stories/state-machine.md#on_enter-must-be-idempotent)).
+Use `host.chat.resolve` (get-or-create) there. Reserve `create` for a
+dedicated "start a *new* chat" action where a guaranteed-new row is the
+intent.
 
 ### host.chat.fork
 

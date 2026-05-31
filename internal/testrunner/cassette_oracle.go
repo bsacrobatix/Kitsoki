@@ -189,11 +189,22 @@ func (o *cassetteOracle) Ask(_ context.Context, req oracle.AskRequest) (oracle.A
 		if oracleBlock.DurationMs > 0 {
 			meta["duration_ms"] = oracleBlock.DurationMs
 		}
-		if oracleBlock.PromptTokens > 0 {
-			meta["prompt_tokens"] = oracleBlock.PromptTokens
+		// Token usage rides in the canonical opaque-meta shape the live
+		// claude-CLI transport emits (meta.usage.{input,output}_tokens +
+		// meta.cost_usd), so cassette-replay traces and real traces render
+		// identically in the runstatus UI. See ORACLE_ATTRS.md.
+		if oracleBlock.PromptTokens > 0 || oracleBlock.ResponseTokens > 0 {
+			usage := map[string]any{}
+			if oracleBlock.PromptTokens > 0 {
+				usage["input_tokens"] = oracleBlock.PromptTokens
+			}
+			if oracleBlock.ResponseTokens > 0 {
+				usage["output_tokens"] = oracleBlock.ResponseTokens
+			}
+			meta["usage"] = usage
 		}
-		if oracleBlock.ResponseTokens > 0 {
-			meta["response_tokens"] = oracleBlock.ResponseTokens
+		if oracleBlock.CostUSD > 0 {
+			meta["cost_usd"] = oracleBlock.CostUSD
 		}
 	}
 

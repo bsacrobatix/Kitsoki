@@ -13,11 +13,47 @@
       <span v-if="responseTokens !== undefined" class="oracle-detail__stat oracle-detail__stat--tokens">
         out:{{ fmtTokens(responseTokens) }}
       </span>
+      <span
+        v-if="cacheReadTokens"
+        class="oracle-detail__stat oracle-detail__stat--tokens"
+        title="Prompt tokens served from the cache (cache_read_input_tokens)"
+      >
+        cache:{{ fmtTokens(cacheReadTokens) }}
+      </span>
       <span v-if="costStr" class="oracle-detail__stat oracle-detail__stat--cost">{{ costStr }}</span>
     </div>
 
     <!-- Error banner -->
     <div v-if="errorMsg" class="oracle-detail__error">{{ errorMsg }}</div>
+
+    <!-- Token usage breakdown: per-type counts straight from the trace's
+         meta.usage object, plus the total cost the CLI reported. Per-type cost
+         is not recorded (the CLI returns a single total_cost_usd), so only the
+         total is shown — the UI never fabricates a per-type split. -->
+    <table v-if="usageRows.length" class="oracle-detail__usage">
+      <thead>
+        <tr>
+          <th class="oracle-detail__usage-th">Token usage</th>
+          <th class="oracle-detail__usage-th oracle-detail__usage-th--num">tokens</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="r in usageRows" :key="r.label" :title="r.hint">
+          <td class="oracle-detail__usage-label">{{ r.label }}</td>
+          <td class="oracle-detail__usage-num">{{ fmtTokens(r.tokens) }}</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr class="oracle-detail__usage-total">
+          <td class="oracle-detail__usage-label">Total tokens</td>
+          <td class="oracle-detail__usage-num">{{ fmtTokens(totalTokens) }}</td>
+        </tr>
+        <tr v-if="costStr" class="oracle-detail__usage-cost">
+          <td class="oracle-detail__usage-label">Total cost</td>
+          <td class="oracle-detail__usage-num">{{ costStr }}</td>
+        </tr>
+      </tfoot>
+    </table>
 
     <!-- Per-verb body -->
     <DecideDetail  v-if="verb === 'decide'"  :event="event" />
@@ -36,7 +72,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { TraceEvent } from "../../types.js";
-import { fmtMs, fmtTokens, fmtCost, prettyJson } from "./lib.js";
+import { fmtMs, fmtTokens, fmtCost, prettyJson, readOracleUsage } from "./lib.js";
 import DecideDetail from "./DecideDetail.vue";
 import ExtractDetail from "./ExtractDetail.vue";
 import AskDetail from "./AskDetail.vue";
@@ -59,9 +95,33 @@ const verb = computed(() => {
 const agent    = computed(() => String(attrs.value.agent ?? ""));
 const model    = computed(() => String(attrs.value.model ?? ""));
 const durationMs     = computed(() => attrs.value.duration_ms as number | undefined);
-const promptTokens   = computed(() => attrs.value.prompt_tokens as number | undefined);
-const responseTokens = computed(() => attrs.value.response_tokens as number | undefined);
-const costStr  = computed(() => fmtCost(attrs.value.cost_usd));
+// Token usage + cost come from the canonical opaque transport meta
+// (attrs.meta.usage / attrs.meta.cost_usd), with a fallback to the legacy flat
+// fields so synthetic fixtures still render. See readOracleUsage.
+const usage          = computed(() => readOracleUsage(attrs.value));
+const promptTokens   = computed(() => usage.value.promptTokens);
+const responseTokens = computed(() => usage.value.responseTokens);
+const cacheReadTokens = computed(() => usage.value.cacheReadTokens);
+const costStr  = computed(() => fmtCost(usage.value.costUsd));
+
+// Per-type token rows for the expanded breakdown table. claude reports the
+// input categories disjointly: `input_tokens` is fresh (uncached) input, while
+// cache read / cache write are billed separately — so they sum to the full
+// input side. Only rows the trace actually carries are shown.
+const usageRows = computed(() => {
+  const u = usage.value;
+  const rows: { label: string; tokens: number; hint: string }[] = [];
+  if (u.promptTokens !== undefined)
+    rows.push({ label: "Input (uncached)", tokens: u.promptTokens, hint: "input_tokens — fresh prompt tokens billed at full rate" });
+  if (u.cacheReadTokens)
+    rows.push({ label: "Cache read", tokens: u.cacheReadTokens, hint: "cache_read_input_tokens — prompt tokens served from the cache" });
+  if (u.cacheCreationTokens)
+    rows.push({ label: "Cache write", tokens: u.cacheCreationTokens, hint: "cache_creation_input_tokens — prompt tokens written to the cache" });
+  if (u.responseTokens !== undefined)
+    rows.push({ label: "Output", tokens: u.responseTokens, hint: "output_tokens — tokens generated in the response" });
+  return rows;
+});
+const totalTokens = computed(() => usageRows.value.reduce((sum, r) => sum + r.tokens, 0));
 const errorMsg = computed(() => typeof attrs.value.error === "string" ? attrs.value.error : null);
 
 const verbBadgeClass = computed(() => {
@@ -108,6 +168,57 @@ const verbBadgeClass = computed(() => {
 .verb--task    { background: #450a0a; color: #fca5a5; border: 1px solid #991b1b; }
 .verb--converse { background: #083344; color: #67e8f9; border: 1px solid #0891b2; }
 .verb--other   { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+
+.oracle-detail__usage {
+  border-collapse: collapse;
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  align-self: flex-start;
+  min-width: 16rem;
+  background: #080f1a;
+  border: 1px solid #1e293b;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.oracle-detail__usage-th {
+  text-align: left;
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid #1e293b;
+}
+
+.oracle-detail__usage-th--num {
+  text-align: right;
+}
+
+.oracle-detail__usage-label {
+  color: #94a3b8;
+  padding: 0.18rem 0.6rem;
+}
+
+.oracle-detail__usage-num {
+  color: #cbd5e1;
+  text-align: right;
+  padding: 0.18rem 0.6rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.oracle-detail__usage-total td {
+  border-top: 1px solid #1e293b;
+  color: #e2e8f0;
+  font-weight: 600;
+  padding-top: 0.28rem;
+}
+
+.oracle-detail__usage-cost td {
+  color: #a3e635;
+  font-weight: 600;
+}
 
 .oracle-detail__meta {
   color: #94a3b8;

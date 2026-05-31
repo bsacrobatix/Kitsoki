@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"kitsoki/internal/app"
@@ -77,6 +78,82 @@ func WithOracleCallCtx(ctx context.Context, oc OracleCallCtx) context.Context {
 func OracleCallCtxFrom(ctx context.Context) OracleCallCtx {
 	oc, _ := ctx.Value(oracleCallCtxKey{}).(OracleCallCtx)
 	return oc
+}
+
+// ── Oracle usage box ──────────────────────────────────────────────────────────
+
+// oracleUsageBox accumulates the token usage reported by the claude CLI
+// transport (runClaudeStreamJSON, or the buffered json envelope path) during a
+// single oracle host call. The transport records the result event's usage here
+// via recordOracleUsage; appendOracleReturnedEvent reads it via oracleUsageMeta
+// so the OracleReturned event carries per-invocation tokens without every verb
+// handler threading a ClaudeRun through its (sometimes deep) call tree.
+//
+// The orchestrator installs one fresh box per host-call dispatch. Last write
+// wins, so a validator retry loop surfaces the final round's usage. The mutex
+// guards the subprocess-reader goroutine vs. the handler; in practice the
+// handler reads only after the claude call has returned.
+type oracleUsageBox struct {
+	mu    sync.Mutex
+	usage map[string]any
+	cost  float64
+}
+
+type oracleUsageBoxKey struct{}
+
+// WithOracleUsageBox returns a child context carrying a fresh, empty usage box.
+// Install one per oracle host call so usage doesn't leak between calls.
+func WithOracleUsageBox(ctx context.Context) context.Context {
+	return context.WithValue(ctx, oracleUsageBoxKey{}, &oracleUsageBox{})
+}
+
+func oracleUsageBoxFrom(ctx context.Context) *oracleUsageBox {
+	b, _ := ctx.Value(oracleUsageBoxKey{}).(*oracleUsageBox)
+	return b
+}
+
+// recordOracleUsage stores token usage + cost into the box in ctx, if one is
+// installed. No-op when no box is present (e.g. direct unit-test calls) or when
+// there's nothing to record, so the transport can call it unconditionally.
+func recordOracleUsage(ctx context.Context, usage map[string]any, cost float64) {
+	if usage == nil && cost == 0 {
+		return
+	}
+	b := oracleUsageBoxFrom(ctx)
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	if usage != nil {
+		b.usage = usage
+	}
+	if cost != 0 {
+		b.cost = cost
+	}
+	b.mu.Unlock()
+}
+
+// oracleUsageMeta builds the OracleReturned.Meta map from the usage box in ctx,
+// or returns nil when no usage was recorded (so Meta stays omitempty). The
+// shape is {"usage": {…claude usage object…}, "cost_usd": <float>}.
+func oracleUsageMeta(ctx context.Context) map[string]any {
+	b := oracleUsageBoxFrom(ctx)
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.usage == nil && b.cost == 0 {
+		return nil
+	}
+	meta := map[string]any{}
+	if b.usage != nil {
+		meta["usage"] = b.usage
+	}
+	if b.cost != 0 {
+		meta["cost_usd"] = b.cost
+	}
+	return meta
 }
 
 // ── EventSink context plumbing ────────────────────────────────────────────────
@@ -214,6 +291,13 @@ func appendOracleReturnedEvent(ctx context.Context, ts time.Time, callID string,
 		return
 	}
 	oc := OracleCallCtxFrom(ctx)
+
+	// Default Meta from the per-call usage box (token usage + cost captured by
+	// the claude CLI transport). A handler that already set Meta explicitly
+	// (e.g. the plugin dispatch path, which carries the plugin's own meta) wins.
+	if payload.Meta == nil {
+		payload.Meta = oracleUsageMeta(ctx)
+	}
 
 	// Store large responses in separate files to keep JSONL lines under PIPE_BUF.
 	if len(payload.Response) > 0 {

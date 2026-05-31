@@ -12,8 +12,8 @@ initial_world:
   judge_mode:  "human"
 
 host_handlers:
-  host.chat.create:
-    data: { ok: true, chat_id: "chat-1", title: "PRD idea discovery" }
+  host.chat.resolve:
+    data: { ok: true, chat_id: "chat-1", title: "PRD idea discovery", is_new: true }
   host.oracle.converse:
     data: { ok: true, answer: "A CLI for X that helps developers do Y.", chat_id: "chat-1", claude_session_id: "sess-1" }
   host.oracle.decide:

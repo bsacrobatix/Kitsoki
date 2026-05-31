@@ -190,6 +190,7 @@ Two existing tests show the patterns:
 | Implementing crashes after a process restart | `bf_autostart_attempted=true` pinned but workspace gone | World has the flag; `git worktree list` doesn't show the dir |
 | Commit fails with `git.commit: ` (empty message) | git's "nothing to commit" goes to **stdout**, not stderr; lenient-mode checks missed it | Check `gitCommit` in `internal/host/git_vcs.go` reads both streams |
 | Worktree create says "already exists" but you can't find it | Path-comparison bug: relative vs absolute | `git worktree list --porcelain` always emits absolute; handlers must `filepath.Abs` or match by basename |
+| Conversation "lost its state" / analyst forgot everything after a `/reload` | `on_enter` re-fired on reload and a non-idempotent `host.chat.create` spawned a fresh empty chat, overwriting the bound `*_chat_id` while world counters survived | Grep the trace for a `turn.end` with `outcome:"reloaded"`, then a `host.chat.create` (not `resolve`) firing right after and a new `chat_id` in `world.update`. Fix: use `host.chat.resolve` in `on_enter`. See state-machine.md §"`on_enter` must be idempotent". |
 
 ## A note on `on_error: idle` as an anti-pattern
 
