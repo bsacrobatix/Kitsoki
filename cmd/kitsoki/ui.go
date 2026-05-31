@@ -1,14 +1,13 @@
 // ui.go — implements `kitsoki ui preview`, the renderer-only design
-// playground for the single-pane chat TUI described in
-// docs/proposals/single-pane-tui.md.
+// playground for the single-pane chat TUI. See docs/tui/README.md.
 //
-// The subcommand exists for three reasons (proposal §"Phase 0"):
+// The subcommand exists for three reasons:
 //
 //  1. Design iteration without spinning up the state machine — tweak a
 //     block template, run `kitsoki ui preview --block menu`, see the diff.
 //  2. Golden tests — output is byte-stable given the same width + theme +
 //     fixture, so the renderer can be pinned against regressions.
-//  3. Documentation — paste preview output into proposals/docs without
+//  3. Documentation — paste preview output into docs without
 //     hand-drawing ASCII.
 //
 // It is intentionally renderer-only: no orchestrator, no machine, no
@@ -40,7 +39,7 @@ func uiCmd() *cobra.Command {
 TUI. They are renderer-only — no app loading, no state machine, no MCP —
 so they can run anywhere a Go binary can.
 
-See docs/proposals/single-pane-tui.md §"Phase 0" for the motivation.`,
+See docs/tui/README.md for the single-pane TUI architecture.`,
 	}
 	cmd.AddCommand(uiPreviewCmd())
 	return cmd

@@ -8,9 +8,7 @@ system primarily through `/commands`, mirroring Claude Code / Codex /
 Gemini CLI. Typed view-elements + pongo2 remain the per-block rendering
 pipeline.
 
-The design of record is [`../proposals/single-pane-tui.md`](../proposals/single-pane-tui.md);
-some surfaces described there are still mid-migration from the older
-multi-pane UI. This page describes the architecture as it stands in
+This page describes the architecture as it stands in
 `internal/tui/` and `internal/render/`. *Audience: contributors working
 on the UI, and authors who want to understand how their views reach the
 screen.*

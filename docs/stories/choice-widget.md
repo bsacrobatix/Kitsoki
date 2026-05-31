@@ -9,8 +9,6 @@ Companion documents:
   reference and TUI keymap tables.
 - [`docs/stories/story-style.md`](story-style.md) §3.6 — prescriptive prompt /
   label / hint conventions.
-- [`docs/proposals/choice-widget-proposal.md`](../proposals/choice-widget-proposal.md)
-  — the design spec (rationale, dispatch parity, migration map).
 - [`testdata/apps/choice_smoke/`](../testdata/apps/choice_smoke/) — the
   canonical 23-spoke fixture; every snippet below has a matching
   spoke that runs end-to-end.
@@ -542,8 +540,8 @@ view:
 # RIGHT — choice is a sibling.
 view:
   - choice: { ... }
-  # (extends/elements coexistence is not implemented yet — see
-  # docs/proposals/choice-widget-proposal.md §8 for the workaround.)
+  # (extends/elements coexistence is not implemented yet — put the
+  # extends: on the wrapping view and the choice: as a sibling element.)
 ```
 
 ### 3.2 Readonly form fields ARE submitted when the intent declares them
@@ -690,5 +688,4 @@ left blank).
   drops you on the walkthrough, or pick a specific spoke from the
   feature menu.
 - **Style guidance** — [`docs/stories/story-style.md`](story-style.md) §3.6.
-- **Design rationale** —
-  [`docs/proposals/choice-widget-proposal.md`](../proposals/choice-widget-proposal.md).
+- **Schema reference** — [`docs/embedded/app-schema.md`](../embedded/app-schema.md).

@@ -1,8 +1,8 @@
 # pr-refinement — first-class PR refinement pipeline
 
-A reusable kitsoki story implementing the Wave 2 / Phase 2 scope of
-`docs/proposals/dev-story-bugfix-unify-proposal.md` §4.3. Per the
-proposal, pr-refinement is **its own story** — not a library, not an
+A reusable kitsoki story implementing the PR-refinement pipeline from
+the [bug-fix case study](../../docs/case-studies/bug-fix.md). Per that
+design, pr-refinement is **its own story** — not a library, not an
 `include:` directory. It has its own `app.yaml`, its own rooms, its
 own flows, and runs standalone.
 
@@ -191,8 +191,8 @@ stories/pr-refinement/
 
 ## See also
 
-- [`docs/proposals/dev-story-bugfix-unify-proposal.md`](../../docs/proposals/dev-story-bugfix-unify-proposal.md)
-  — the full design (§4.3 — pr-refinement as first-class story).
+- [`docs/case-studies/bug-fix.md`](../../docs/case-studies/bug-fix.md)
+  — the full design (pr-refinement as first-class story).
 - [`docs/proposals/notes/dev-story-implementation-contract.md`](../../docs/proposals/notes/dev-story-implementation-contract.md)
   — the contract (Wave 2 appendix at the bottom).
 - [`docs/stories/imports.md`](../../docs/stories/imports.md) — imports authoring

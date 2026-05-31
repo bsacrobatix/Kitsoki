@@ -1,7 +1,7 @@
 # cypilot — SDLC waterfall (PRD → ADR/DESIGN → DECOMPOSITION → FEATURE → CODE)
 #
-# Wave 3 / Phase 5 of the dev-story unify proposal
-# (docs/proposals/dev-story-bugfix-unify-proposal.md §3, §5.5, §6.4).
+# The cypilot pipeline from the bug-fix case study
+# (docs/case-studies/bug-fix.md).
 #
 # This story wraps cypilot's three workflows (`cypilot-generate`,
 # `cypilot-plan`, `cypilot-analyze`) as a kitsoki state machine.  The seven

@@ -19,7 +19,7 @@
 # would normally require a host_bindings: override at the app level;
 # instead the fixture stubs both handlers and the assertion is purely
 # call-count-based. A real .artifacts/ write needs the bindings
-# rewrite — that's still in design and noted in docs/proposals/cake.md.
+# rewrite — that's still deferred (needs a host.git submodule_update op).
 
 test_kind: flow
 app: ../app.yaml

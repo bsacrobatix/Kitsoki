@@ -1,5 +1,5 @@
-# choice_smoke — canonical reference fixture for the choice-widget proposal
-# (docs/proposals/choice-widget-proposal.md).
+# choice_smoke — canonical reference fixture for the choice widget
+# (docs/stories/choice-widget.md).
 #
 # Layout: a LINEAR WALKTHROUGH. `intro` opens with prose, then every
 # spoke commits its demo intent and routes to the NEXT spoke in the
@@ -284,7 +284,7 @@ states:
       - heading: "Choice widget reference walkthrough"
       - prose: >
           Welcome. This app is the canonical reference fixture for the
-          choice-widget proposal (docs/proposals/choice-widget-proposal.md).
+          choice widget (docs/stories/choice-widget.md).
           The widget has three modes — single (Enter dispatches one
           intent per item), multi ([ ]/[x] checkboxes; Enter submits a
           list), and form (mad-lib templates with typed fields; Enter
@@ -1198,7 +1198,7 @@ states:
       - prose: >
           For the full reference matrix see this app's README
           (`testdata/apps/choice_smoke/README.md`). For the underlying
-          spec see `docs/proposals/choice-widget-proposal.md`.
+          spec see `docs/stories/choice-widget.md`.
       - prose: >
           Pick "Restart" to walk through again, or "Open the feature
           menu" to dip into any single spoke as a reference.

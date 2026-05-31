@@ -6,8 +6,8 @@ edit. That's the style guide in one sentence.
 
 The gold standard is [`stories/oregon-trail/`](../stories/oregon-trail/).
 [`stories/robbery/`](../stories/robbery/) shows the same shape in a
-small sub-story. The new typed-element form is specified in
-[`proposals/view-elements-proposal.md`](../proposals/view-elements-proposal.md).
+small sub-story. The typed-element schema reference lives in
+[`embedded/app-schema.md`](../embedded/app-schema.md).
 
 ---
 

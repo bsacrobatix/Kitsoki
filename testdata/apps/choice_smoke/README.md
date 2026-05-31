@@ -1,9 +1,9 @@
 # choice_smoke — canonical reference fixture for the choice widget
 
 This app is the canonical reference for the
-[choice-widget proposal](../../../docs/proposals/choice-widget-proposal.md).
-Every feature in §3 (per-mode YAML shape), §4 (validation rules), §7
-(coexistence), and §8 (limitations) of the proposal has a dedicated
+[choice widget](../../../docs/stories/choice-widget.md).
+Every feature in the per-mode YAML shape, validation rules,
+coexistence, and limitations of the widget has a dedicated
 demo state ("spoke") here. Each spoke is also a regression test: every
 spoke gets at least one flow fixture under `flows/` so
 `./kitsoki test flows testdata/apps/choice_smoke/app.yaml` exercises

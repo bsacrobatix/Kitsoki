@@ -1,7 +1,7 @@
 # bugfix — general-purpose, provider-neutral bug-fix pipeline
 
-A reusable kitsoki story implementing the Wave 1 / Slice α scope of
-`docs/proposals/dev-story-bugfix-unify-proposal.md`. The seven visible
+A reusable kitsoki story implementing the bug-fix pipeline described in
+the [bug-fix case study](../../docs/case-studies/bug-fix.md). The seven visible
 rooms (`idle → reproducing → proposing → implementing → testing →
 reviewing → validating → done`) collapse the cyber-repo's 14-phase
 autonomous pipeline into one state machine while keeping every
@@ -349,7 +349,7 @@ stories/bugfix/
 
 ## See also
 
-- [`docs/proposals/dev-story-bugfix-unify-proposal.md`](../../docs/proposals/dev-story-bugfix-unify-proposal.md)
+- [`docs/case-studies/bug-fix.md`](../../docs/case-studies/bug-fix.md)
   — the full design.
 - [`docs/proposals/notes/dev-story-implementation-contract.md`](../../docs/proposals/notes/dev-story-implementation-contract.md)
   — Slice α / β / γ contract.

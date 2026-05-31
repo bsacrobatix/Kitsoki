@@ -1,6 +1,7 @@
 # Dev-story / bugfix unify — implementation contract (Wave 1)
 
-Companion to `docs/proposals/dev-story-bugfix-unify-proposal.md`. Defines the
+Companion to the dev-story / bugfix unify work, which has since shipped
+and is documented in `docs/case-studies/bug-fix.md`. Defines the
 exact shared shapes that Phase 1 (bugfix skeleton + judge polymorphism +
 foundational providers + judge harness) must agree on so multiple authors can
 work in parallel without drifting. **All Wave 1 agents read this first.**

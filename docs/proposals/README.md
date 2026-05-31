@@ -3,6 +3,12 @@
 Design documents for kitsoki features that are **partially or not
 yet implemented**.
 
+New proposals start from a template in
+[`templates/`](templates/) — pick `story`, `runtime`, `tui`, or
+`tracing` for a focused change, or `epic` for one that spans several.
+The [`proposal-authoring`](../skills/proposal-authoring/SKILL.md) skill
+drives picking a template and decomposing a large change into slices.
+
 ## What lives here
 
 - Proposals for features that haven't shipped: rationale, schema
@@ -56,7 +62,11 @@ thought.
 
 - [`ai-collaboration-proposal.md`](ai-collaboration-proposal.md) —
   two remaining AI-collaborator surfaces (`kitsoki drive`,
-  per-state `loading_view`). Most of v1 shipped.
+  per-state `loading_view`). The other three v1 surfaces shipped
+  and are documented in `docs/architecture/developer-guide.md` §6.
+- [`auto-advance-states-proposal.md`](auto-advance-states-proposal.md) —
+  auto-fire `done` after `on_enter` chains complete, with `wait: true`
+  to opt out. Nothing implemented yet.
 - [`bug-sync-proposal.md`](bug-sync-proposal.md) — `kitsoki bug
   sync` pushes local bug files to GitHub / Jira. Format support
   shipped with the bug-filing CLI (see [`docs/stories/bugs.md`](../stories/bugs.md));
@@ -67,17 +77,32 @@ thought.
   `docs/architecture/hosts.md` for the user-facing surface); D/E/F/G partial
   or deferred; H not started. The status table at the top of the
   proposal is the source of truth for what's wired today.
+- [`continue-mode-proposal.md`](continue-mode-proposal.md) — durable
+  sessions via a unified trace journal (`kitsoki run --continue`).
+  Phase A + Wave 2 shipped (`internal/journal/`, `--continue`, session
+  verbs); Wave 3 dual-write mostly landed, with the metamode proposal
+  ledger entries and `recovery_state` still TODO.
+- [`execution-modes-and-gate-deciders.md`](execution-modes-and-gate-deciders.md) —
+  one-shot / staged execution modes; intent gates resolved by a
+  per-state decider. Engine core, CLI/flow surface, and docs-review
+  migration shipped; pre-bind staging and the bugfix-story migration
+  remain (§8).
+- [`prd-design.md`](prd-design.md) — a standalone PRD-authoring
+  operator story (`stories/prd/`). Early draft; untracked work in
+  progress.
+- [`runstatus-proposal.md`](runstatus-proposal.md) — Vue 3 web UI
+  for inspecting a run: clickable state diagram + trace timeline +
+  detail drawer. Phase 1 (artifact mode) ~90% shipped; the single-file
+  HTML export, timeline virtualization, and live JSON-RPC + SSE mode
+  remain.
+- [`runstatus-trace-fidelity.md`](runstatus-trace-fidelity.md) —
+  make the bugfix trace canonical (`oracle.call.*`, a distinct
+  `machine.say` kind, `turn.input`) and rewire runstatus so each
+  meaningful aspect renders once per column. Producer half shipped
+  and documented in `docs/tracing/trace-format.md`; the runstatus
+  consumer rewrite and fixture migration remain.
 - [`semantic-routing-proposal.md`](semantic-routing-proposal.md) —
   v1 shipped. The trimmed proposal keeps only open questions and
   the Oregon Trail calibration history. The user-facing reference
   for the shipped surface lives at
-  [`../semantic-routing.md`](../architecture/semantic-routing.md).
-- [`single-pane-tui.md`](single-pane-tui.md) — replace the
-  multi-pane mouse-driven TUI with a Claude Code-style single-pane
-  chat + slash commands, keeping typed-view + pongo2 rendering.
-  Nothing implemented yet.
-- [`runstatus-proposal.md`](runstatus-proposal.md) — Vue 3 web UI
-  for inspecting a run: clickable state diagram + trace timeline +
-  detail drawer surfacing exact YAML / prompts / host I/O. Two
-  modes: self-contained HTML artifact and live (JSON-RPC + SSE
-  folded into `kitsoki oracle serve`). Nothing implemented yet.
+  [`../architecture/semantic-routing.md`](../architecture/semantic-routing.md).

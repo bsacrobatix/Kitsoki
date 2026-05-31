@@ -135,8 +135,8 @@ to human only on uncertainty):
 
 See **[`stories/kitsoki-dev/README.md`](stories/kitsoki-dev/README.md)**
 for the full operator walkthrough, the
-**[`docs/proposals/dev-story-bugfix-unify-proposal.md`](docs/proposals/dev-story-bugfix-unify-proposal.md)**
-proposal for the architecture, and
+**[`docs/case-studies/bug-fix.md`](docs/case-studies/bug-fix.md)**
+case study for the architecture, and
 **[`issues/README.md`](issues/README.md)** for the on-disk bug
 schema. The dogfood multi-glob covers both kitsoki-self bugs
 (`issues/bugs/*.md`) and per-story bugs

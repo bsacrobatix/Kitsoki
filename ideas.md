@@ -19,7 +19,7 @@
 
 - ticket/pr/etc... providers that support bitbucket jira github or file mode for testing/dev match our existing bugfix artifact write pattern — bitbucket + jira + tui done; github TBD
 - voice/setting theming and localization — different languages and oregon trail could be in space (typed-elements + pongo2 foundation in place across demo apps)
-- file story bug or kitsoki bug with a similar interface/pattern, if kitsoki is local write to file (we are in dev mode and stories + kitsoki source are local) — story bug done via `/meta bug`; kitsoki target in proposal (`docs/proposals/bug-format-proposal.md`)
+- file story bug or kitsoki bug with a similar interface/pattern, if kitsoki is local write to file (we are in dev mode and stories + kitsoki source are local) — story bug done via `/meta bug`; kitsoki target documented in `docs/stories/bugs.md`
 - add world display to TUI — apps can specify what state is shown in the panel, make it like the actions panel — `relevant_world` pins to location indicator today; not yet a full panel
 - background jobs on VMs, dispatch and track, survive intermittent connectivity (dev laptop to VM w/ VPN and closed lid issues) — local background jobs done; VM/remote survival TODO
 - recording captures git commits and LLM interactions so it's possible to do a deterministic replay, graceful call to LLM if it's a new/changed call that needs a real response to be recorded — LLM interactions captured; git commits TBD

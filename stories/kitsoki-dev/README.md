@@ -1,7 +1,7 @@
 # kitsoki-dev — the dogfood instance
 
-Wave 2 / Phase 3 of the
-[dev-story-bugfix-unify-proposal](../../docs/proposals/dev-story-bugfix-unify-proposal.md).
+The dogfood instance described in the
+[bug-fix case study](../../docs/case-studies/bug-fix.md).
 This is the PoC milestone (★): **kitsoki working on kitsoki through
 its own UI**, with the bug file as both ticket and conversation log.
 
@@ -136,8 +136,8 @@ the handler's `<root>` resolves to `pwd` and finds
 
 ## Manual walkthrough (the on-disk smoke)
 
-This is the loop that proves Phase 3's acceptance per
-[proposal §5.4](../../docs/proposals/dev-story-bugfix-unify-proposal.md#54-the-closed-loop-dogfood-walkthrough-the-poc):
+This is the loop that proves the dogfood acceptance per the
+[bug-fix case study](../../docs/case-studies/bug-fix.md):
 a kitsoki bug filed in one session is fixed via the dogfood
 instance in a second session, the diff lands as a real commit, the
 file's `status:` is `resolved`.
@@ -398,9 +398,9 @@ needed.
 
 ## See also
 
-- [`../../docs/proposals/dev-story-bugfix-unify-proposal.md`](../../docs/proposals/dev-story-bugfix-unify-proposal.md)
-  §5.2 (kitsoki-dev shape), §5.4 (closed-loop walkthrough),
-  §8 Phase 3 (acceptance).
+- [`../../docs/case-studies/bug-fix.md`](../../docs/case-studies/bug-fix.md)
+  — the dogfood case study (kitsoki-dev shape, closed-loop
+  walkthrough, acceptance).
 - [`../../docs/proposals/notes/dev-story-implementation-contract.md`](../../docs/proposals/notes/dev-story-implementation-contract.md)
   Wave 2 / Phase 3 appendix.
 - [`../dev-story/README.md`](../dev-story/README.md) — the hub this

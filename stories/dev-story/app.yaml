@@ -1,5 +1,5 @@
-# dev-story — engineer's-day hub. Wave 2 / Phase 2 of the
-# dev-story-bugfix-unify proposal (§5.1).
+# dev-story — engineer's-day hub. See docs/case-studies/bug-fix.md and
+# docs/stories/imports.md.
 #
 # This is the GENERAL-PURPOSE app: it imports the bugfix and
 # pr-refinement sub-stories and routes between them via the

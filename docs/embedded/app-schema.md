@@ -376,8 +376,7 @@ prefix the loader uses for other view-element errors.
 - **No `choice` inside `blocks:` (extends-form views).** Typed
   metadata is lost through `AppRenderer.RenderExtended`. Workaround:
   put the `extends:` at the wrapping view and the `choice:` as a
-  sibling element in the same `view:`, not inside a block. (See
-  §Limitations in [`docs/proposals/choice-widget-proposal.md`](../proposals/choice-widget-proposal.md).)
+  sibling element in the same `view:`, not inside a block.
 - **Mode is fixed per element.** No blending. Use two states.
 - **`param:` captures exactly one slot.** Use `form` mode for ≥2.
 - **`form` fields are flat scalars only.** Lists and maps need
@@ -393,8 +392,6 @@ prefix the loader uses for other view-element errors.
   fires if the intent is dispatched some other way (flow test, menu).
   For true gating, also guard the transition `when:`.
 
-Full design rationale: [`docs/proposals/choice-widget-proposal.md`](../proposals/choice-widget-proposal.md)
-(§3 YAML shapes, §4 authoritative shape, §8 limitations).
 Author-facing cookbook: [`docs/stories/choice-widget.md`](../stories/choice-widget.md).
 Story-style guidance: [`docs/stories/story-style.md`](../stories/story-style.md) §3.6.
 

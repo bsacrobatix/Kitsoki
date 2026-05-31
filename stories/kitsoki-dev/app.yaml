@@ -1,7 +1,6 @@
 # kitsoki-dev — the dogfood instance.
 #
-# Wave 2 / Phase 3 of the dev-story-bugfix-unify proposal (§5.2). This is
-# the PoC milestone (★): kitsoki working on kitsoki through its own UI,
+# The dogfood PoC milestone (★): kitsoki working on kitsoki through its own UI,
 # with the bug file as both ticket and conversation log.
 #
 # Composition is one import edge: dev-story (general-purpose hub) is
@@ -24,7 +23,7 @@
 # # ticket_globs — multi-glob coverage
 #
 # The local-files ticket provider scans `<repo_root>/issues/bugs/*.md`
-# for files matching the `bug-format-proposal.md` §2 frontmatter schema.
+# for files matching the bug frontmatter schema (docs/stories/bugs.md).
 # The `ticket_globs:` world key documents the FULL set of paths a
 # future multi-glob provider scan will cover:
 #

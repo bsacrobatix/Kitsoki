@@ -1,7 +1,8 @@
 # implementation — small-task pipeline
 
-Wave 3 / Phase 6 of `docs/proposals/dev-story-bugfix-unify-proposal.md`
-(§4.3). A lighter-weight sibling to `stories/bugfix/` for tickets of
+The implementation pipeline from the [bug-fix case
+study](../../docs/case-studies/bug-fix.md). A lighter-weight sibling to
+`stories/bugfix/` for tickets of
 type `task` — no reproduction, no separate security-review pass. Five
 visible rooms plus a `handoff` that drills into the `pr-refinement`
 import:
@@ -52,7 +53,7 @@ code-write room rather than the local checkpoint.
 
 ## See also
 
-- [`docs/proposals/dev-story-bugfix-unify-proposal.md`](../../docs/proposals/dev-story-bugfix-unify-proposal.md)
+- [`docs/case-studies/bug-fix.md`](../../docs/case-studies/bug-fix.md)
 - [`docs/proposals/notes/dev-story-implementation-contract.md`](../../docs/proposals/notes/dev-story-implementation-contract.md)
 - [`stories/bugfix/`](../bugfix/) — the heavier sibling with reproduction.
 - [`stories/pr-refinement/`](../pr-refinement/) — the shared tail.

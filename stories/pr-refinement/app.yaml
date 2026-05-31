@@ -1,7 +1,7 @@
 # pr-refinement — first-class PR-refinement pipeline.
 #
-# Wave 2 / Phase 2 (see docs/proposals/dev-story-bugfix-unify-proposal.md
-# §4.3 — pr-refinement is a story, not a library). The six visible rooms
+# PR-refinement pipeline (see docs/case-studies/bug-fix.md —
+# pr-refinement is a story, not a library). The six visible rooms
 # (open_pr → ci_monitoring → diagnose → resolve_comments → re_push →
 # merge) collapse cyber-repo's `tools/loopy/pr-refine.py` and the
 # autonomous merge-monitor loop into one provider-neutral state machine.

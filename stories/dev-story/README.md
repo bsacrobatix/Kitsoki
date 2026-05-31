@@ -169,8 +169,8 @@ Flow fixtures that exercise those imports carry `host.oracle.decide:` and
 
 ## See also
 
-- [`docs/proposals/dev-story-bugfix-unify-proposal.md`](../../docs/proposals/dev-story-bugfix-unify-proposal.md)
-  §5.1 — the design.
+- [`docs/case-studies/bug-fix.md`](../../docs/case-studies/bug-fix.md)
+  — the design.
 - [`docs/proposals/notes/dev-story-implementation-contract.md`](../../docs/proposals/notes/dev-story-implementation-contract.md)
   — Wave 1 + Wave 2 contracts.
 - [`docs/stories/imports.md`](../../docs/stories/imports.md) — imports authoring

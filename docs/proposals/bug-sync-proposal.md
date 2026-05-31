@@ -6,9 +6,10 @@ command lands as an additive write to a new frontmatter block,
 without breaking any existing file. The format is the contract;
 this proposal is the command that consumes it.
 
-**Source.** Distilled from §4 of the (now-deleted)
-`bug-format-proposal.md`. Everything else in that proposal shipped
-(Phases A/B/C); only the remote-sync sketch remained in design,
+**Source.** Distilled from §4 of the now-shipped bug-format work
+(the format itself is documented in [`docs/stories/bugs.md`](../stories/bugs.md)).
+Everything else shipped (the bug-filing CLI); only the remote-sync
+sketch remained in design,
 and it lives here so the planning record stays current rather than
 graveyarded.
 

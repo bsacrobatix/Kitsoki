@@ -2,8 +2,8 @@
 
 This directory is kitsoki's own bug + feature backlog, on disk, in
 plain Markdown. Each file is a YAML-frontmatter-headed `.md` per the
-`bug-format-proposal.md` schema (Phase A — landing in a parallel
-worktree; the format itself is documented inline below).
+bug format documented inline below (and in
+[`docs/stories/bugs.md`](../docs/stories/bugs.md)).
 
 The dogfood app (`stories/kitsoki-dev/`) reads this directory via
 `host.local_files.ticket`, so a bug filed here is immediately
@@ -25,7 +25,7 @@ The ISO-utc + slug filename convention buys two things:
 2. **Stable across renames** — once a bug is filed, its filename
    never changes; the `slug` is descriptive, not canonical.
 
-## Frontmatter schema (per `bug-format-proposal.md` §2)
+## Frontmatter schema (see also `docs/stories/bugs.md`)
 
 ```yaml
 ---
@@ -88,9 +88,8 @@ accept
 ## Workflow
 
 1. **File** — by hand for now (`cp issues/bugs/_template.md issues/bugs/<new>.md && $EDITOR …`).
-   Phase A of `bug-format-proposal.md` lands a `kitsoki bug create`
-   CLI that emits a properly-formed file from a TUI prompt; once that
-   merges, `/meta kitsoki bug` and `/meta story bug` triggers
+   the `kitsoki bug create` CLI emits a properly-formed file from a
+   TUI prompt, and `/meta kitsoki bug` and `/meta story bug` triggers
    compose a bug-reporter agent that calls `kitsoki bug create`
    itself.
 2. **Search** — `kitsoki run stories/kitsoki-dev/app.yaml`, then

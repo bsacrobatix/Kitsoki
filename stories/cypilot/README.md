@@ -1,9 +1,8 @@
 # cypilot — SDLC waterfall story (PRD → ADR/DESIGN → DECOMPOSITION → FEATURE → CODE)
 
 A kitsoki story that wraps cypilot's three workflows (`cypilot-generate`,
-`cypilot-plan`, `cypilot-analyze`) as a state machine.  Wave 3 / Phase 5
-of the [dev-story unify proposal](../../docs/proposals/dev-story-bugfix-unify-proposal.md)
-(§3, §5.5, §6.4).
+`cypilot-plan`, `cypilot-analyze`) as a state machine.  The cypilot
+pipeline from the [bug-fix case study](../../docs/case-studies/bug-fix.md).
 
 > **Interim home.** This story lives in kitsoki for fast iteration; per
 > proposal §5.5 / Phase 8 it migrates to the cypilot upstream repo once
@@ -226,8 +225,8 @@ for the full adapter behaviour.
 
 ## See also
 
-- [`docs/proposals/dev-story-bugfix-unify-proposal.md`](../../docs/proposals/dev-story-bugfix-unify-proposal.md)
-  §§ 3, 5.5, 6.4 — the full cypilot story design.
+- [`docs/case-studies/bug-fix.md`](../../docs/case-studies/bug-fix.md)
+  — the full cypilot story design.
 - [`docs/proposals/notes/dev-story-implementation-contract.md`](../../docs/proposals/notes/dev-story-implementation-contract.md)
   Wave 3 / Phase 5 section — handler names, world keys, op schemas.
 - [`stories/bugfix/`](../bugfix/) — the canonical judge-polymorphism /

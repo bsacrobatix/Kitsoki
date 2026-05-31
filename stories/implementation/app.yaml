@@ -1,5 +1,4 @@
-# implementation — small-task pipeline (Wave 3 / Phase 6 of the
-# dev-story-bugfix-unify proposal §4.3).
+# implementation — small-task pipeline. See docs/case-studies/bug-fix.md.
 #
 # Triggered when a ticket's type is `task` (a small, well-scoped piece of
 # work; not a bug, not a feature_prd). The pipeline is **lighter than
