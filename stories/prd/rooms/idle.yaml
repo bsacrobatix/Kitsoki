@@ -39,12 +39,6 @@ states:
           pairs:
             Output: "{{ world.workdir }}/{{ world.output_path }}"
             Turns:  "{{ world.idea_turns }}"
-      - heading: "You"
-        when: "world.idea_message"
-      - prose: '{{ world.idea_message }}'
-        when: "world.idea_message"
-      - heading: "Analyst"
-        when: "world.idea_answer"
       - prose: '{{ world.idea_answer }}'
         when: "world.idea_answer"
       # Verb hint — kept on every turn so the semantic router reliably catches
