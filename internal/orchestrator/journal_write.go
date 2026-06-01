@@ -15,13 +15,16 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/intent"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/store"
+	"kitsoki/internal/trace"
 	"kitsoki/internal/world"
 )
 
@@ -61,6 +64,69 @@ func (o *Orchestrator) appendEventsAndJournal(sid app.SessionID, events []store.
 		o.appendJournal(e)
 	}
 	return nil
+}
+
+// journalTurnError records a turn that aborted because o.machine.Turn
+// returned an error — e.g. an effect's `set:` / `when:` expression failed
+// to compile or evaluate. Such a fault used to propagate to the caller
+// with NO trace written: the session JSONL kept only the last good turn,
+// so a TUI bounce-to-idle was impossible to diagnose from the trace.
+//
+// It writes a self-contained TurnStarted → MachineError → TurnEnded
+// (outcome:"error") store-event sequence so the failure shows up in the
+// session trace exactly where it happened, and mirrors the error to the
+// slog trace logger (the KITSOKI_TRACE_FILE sink). Best-effort: a sink
+// append failure is logged, never returned — the original machine error
+// must still propagate to the caller unchanged.
+func (o *Orchestrator) journalTurnError(
+	ctx context.Context,
+	tl *trace.TurnLogger,
+	sid app.SessionID,
+	turnNum app.TurnNumber,
+	state app.StatePath,
+	call intent.IntentCall,
+	w world.World,
+	cause error,
+) {
+	if tl != nil {
+		tl.Warn(ctx, trace.EvTurnError,
+			slog.String("intent", call.Intent),
+			slog.String("state", string(state)),
+			slog.String("error", cause.Error()),
+		)
+	}
+
+	errEvents := []store.Event{
+		newOrchestratorEvent(store.TurnStarted, map[string]any{
+			"turn":  int64(turnNum),
+			"input": "[intent] " + call.Intent,
+		}, turnNum),
+		newOrchestratorEvent(store.MachineError, map[string]any{
+			"intent": call.Intent,
+			"slots":  slotsToMap(call.Slots),
+			"state":  string(state),
+			"error":  cause.Error(),
+		}, turnNum),
+		newOrchestratorEvent(store.TurnEnded, map[string]any{
+			"outcome": "error",
+			"error":   cause.Error(),
+		}, turnNum),
+	}
+	for i := range errEvents {
+		errEvents[i].Turn = turnNum
+	}
+	stampStatePathPerEvent(errEvents)
+	stampStatePath(errEvents, state, o.InitialState())
+
+	jEntries := journalEntriesForEvents(sid, turnNum, time.Now(), errEvents,
+		w, w, "", state, call.Intent)
+	if appendErr := o.appendEventsAndJournal(sid, errEvents, jEntries); appendErr != nil {
+		o.logger.WarnContext(ctx, "orchestrator: failed to journal turn error",
+			slog.String("session_id", string(sid)),
+			slog.String("append_error", appendErr.Error()),
+			slog.String("cause", cause.Error()),
+		)
+	}
 }
 
 // journalEntriesForEvents builds the journal.Entry batch that accompanies a

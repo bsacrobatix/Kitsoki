@@ -175,6 +175,21 @@ type RootModel struct {
 	// back to the buffered "agent is thinking…" UX.
 	metaStreamSink *MetaStreamSink
 
+	// metaStreamPending holds a pure-narration ("thinking") assistant
+	// message that has streamed in but not yet been committed to the
+	// transcript. A text-only assistant message is ambiguous while the
+	// stream is live: it is either intermediate narration (more model
+	// activity follows) or the model's FINAL answer (the terminal
+	// `result` event follows). handleMetaStreamEvent defers each such
+	// message by one event — flushing it as thinking the moment further
+	// model activity proves it was intermediate, and DROPPING it when
+	// `result` arrives first. Dropping is the point: the room (on-path)
+	// or metaSendDone's AppendSystem (meta) presents the final answer,
+	// so streaming it here too would duplicate it as muted thinking.
+	// Always cleared at turn boundaries so it can never leak across
+	// turns if the `result` stream event is lost to backpressure.
+	metaStreamPending string
+
 	// initialTypedView carries the typed-view payload for the very
 	// first frame so NewRootModel can paint via AppendSystemTyped (the
 	// typed-element-aware path) instead of AppendSystem (which re-runs
@@ -1727,6 +1742,10 @@ func startAsyncTurn(
 	m.inFlightCancel = cancel
 	m.mode = ModeAwaitingLLM
 	m.pendingKind = kind
+	// Fresh turn: never carry a deferred thought from a prior turn (the
+	// previous turn's `result` event may have been dropped to
+	// backpressure before it could clear the buffer).
+	m.metaStreamPending = ""
 
 	cmd := func() tea.Msg {
 		out, err := run(ctx)
@@ -2172,6 +2191,10 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 	if m.mode == ModeAwaitingLLM {
 		m.mode = ModeOnPath
 	}
+	// Turn finished: drop any deferred final-answer thought so it can't
+	// leak into a later turn's thinking. The room presents the response
+	// in the view it renders below.
+	m.metaStreamPending = ""
 
 	prevState := string(m.currentState)
 
@@ -3028,35 +3051,70 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 	switch ev.Type {
 	case "assistant":
 		if ev.Tool != "" {
-			// Tool use: separate styling, leading blank line for
-			// breathing room (handled inside AppendMetaToolUse).
-			args := ev.Preview
-			if r := []rune(args); len(r) > 80 {
-				args = string(r[:80]) + "…"
+			// A thought paired with a tool call is unambiguously
+			// intermediate — a tool round-trip still follows, so it is
+			// never the final answer. Any earlier deferred thought is
+			// therefore also intermediate; flush it, then render this
+			// one in full plus the compact tool breadcrumb. Render the
+			// thought first so it reads above the action it explains.
+			m = m.flushPendingThought()
+			if ev.Text != "" {
+				// Narration / "thinking" prose, in full — the transcript
+				// word-wraps it. Tight (no leading blank line) so
+				// consecutive thoughts read as one paragraph.
+				m.transcript.AppendMetaThinking(ev.Text)
 			}
-			m.transcript.AppendMetaToolUse(ev.Tool, args)
-			return m
-		}
-		if ev.Preview != "" {
-			// Narration / "thinking" prose. Tight (no leading
-			// blank line) so consecutive thoughts read as one
-			// paragraph.
-			m.transcript.AppendMetaThinking(ev.Preview)
+			// Tool use: compact one-line args breadcrumb (Preview is
+			// already clipped upstream), separate styling, leading blank
+			// line for breathing room (inside AppendMetaToolUse).
+			m.transcript.AppendMetaToolUse(ev.Tool, ev.Preview)
+		} else if ev.Text != "" {
+			// Pure narration with no tool call. Ambiguous until the next
+			// event: intermediate thought (flush) or final answer (drop
+			// on `result`). A previously deferred thought is now proven
+			// intermediate — this fresh assistant message followed it —
+			// so flush that one, then defer this one in its place.
+			m = m.flushPendingThought()
+			m.metaStreamPending = ev.Text
 		}
 	case "system":
 		if ev.Subtype == "api_retry" {
+			// A retry means more model output follows; any held thought
+			// was intermediate.
+			m = m.flushPendingThought()
 			m.transcript.AppendMetaSystemNotice("(retrying claude request…)")
 		}
-	case "user", "result":
-		// Skipped — tool_result content is too noisy, and result
-		// would duplicate the assistant reply already appended via
-		// metaSendDoneMsg.
+	case "user":
+		// tool_result: noisy content we don't render, but its arrival
+		// proves any deferred thought preceded more work — flush it.
+		m = m.flushPendingThought()
+	case "result":
+		// Terminal event: a deferred thought was the model's FINAL
+		// answer. DROP it — the room (on-path) or metaSendDone's
+		// AppendSystem (meta) presents the final reply, so echoing it
+		// here as thinking would duplicate it.
+		m.metaStreamPending = ""
+	}
+	return m
+}
+
+// flushPendingThought commits any deferred pure-narration message to the
+// transcript as "thinking" and clears the buffer. A no-op when nothing
+// is pending. See metaStreamPending for why narration is deferred.
+func (m RootModel) flushPendingThought() RootModel {
+	if m.metaStreamPending != "" {
+		m.transcript.AppendMetaThinking(m.metaStreamPending)
+		m.metaStreamPending = ""
 	}
 	return m
 }
 
 func (m RootModel) handleMetaSendDone(msg metaSendDoneMsg) (tea.Model, tea.Cmd) {
 	m.metaMode.inFlight = false
+	// Turn finished: drop any thought still deferred (it was the final
+	// answer, surfaced below via AppendSystem) so it can't leak into the
+	// next turn's thinking if the `result` stream event was lost.
+	m.metaStreamPending = ""
 
 	if msg.err != nil {
 		if errors.Is(msg.err, metamode.ErrChatBusy) {

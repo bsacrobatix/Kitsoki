@@ -45,6 +45,12 @@ const (
 	EvTurnStepped   = "turn.stepped"
 	EvTurnPersisted = "turn.persisted"
 	EvTurnDone      = "turn.done"
+	// EvTurnError fires when a turn aborts because machine.Turn itself
+	// returned an error (e.g. an effect's set/when expression failed to
+	// compile or evaluate). It guarantees the failure is recorded in the
+	// trace — the orchestrator also journals a store.MachineError event so
+	// the persisted session trace has a row for the failed turn.
+	EvTurnError = "turn.error"
 
 	// Harness.
 	EvHarnessRequest        = "harness.request"
@@ -248,6 +254,13 @@ func (t *TurnLogger) Debug(ctx context.Context, msg string, args ...any) {
 // Info emits an info event.
 func (t *TurnLogger) Info(ctx context.Context, msg string, args ...any) {
 	t.l.InfoContext(ctx, msg, args...)
+}
+
+// Warn emits a warning event. Used for turn-fatal faults (e.g. a turn
+// that aborted because an effect expression failed to compile) that must
+// surface in the trace at a level callers don't suppress.
+func (t *TurnLogger) Warn(ctx context.Context, msg string, args ...any) {
+	t.l.WarnContext(ctx, msg, args...)
 }
 
 // Enabled returns whether debug-level logging is enabled (for cheap guard).

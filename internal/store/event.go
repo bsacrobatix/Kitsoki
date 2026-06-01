@@ -100,6 +100,18 @@ const (
 	// post-bind half-bound limbo case to operators.
 	HarnessError EventKind = "harness.error"
 
+	// MachineError is appended when machine.Turn itself fails — e.g. an
+	// effect's `set:` / `when:` expression does not compile or evaluate, so
+	// the turn aborts before any transition is applied. Distinct from
+	// ValidationFailed (a cleanly *rejected* intent) and HarnessError (an
+	// orchestrator-side dispatch-loop failure): MachineError is a turn-fatal
+	// fault in the state machine itself. Without it an aborted turn leaves
+	// NO row in the session trace, making a bounce-to-idle impossible to
+	// diagnose from the trace alone. Payload carries
+	// {"intent", "slots", "state", "error"}. Replay treats it as a no-op —
+	// no world or state change occurred.
+	MachineError EventKind = "machine.error"
+
 	// GateDecided is appended when the engine resolves an intent gate — the
 	// set of advancing intents available at the end of a room/phase's turn,
 	// and which decider (human/llm/default) resolved it. Payload

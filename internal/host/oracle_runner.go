@@ -355,8 +355,7 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		sawAnyJSON = true
 		rawEvents = append(rawEvents, json.RawMessage(trimmed))
 		emitStreamEvent(ctx, ev)
-		text, tool, isResult, resultText, sid := classifyStreamEvent(ev)
-		_ = tool
+		text, _, _, isResult, resultText, sid := classifyStreamEvent(ev)
 		if text != "" {
 			assembledText.WriteString(text)
 		}
@@ -427,22 +426,32 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 func emitStreamEvent(ctx context.Context, ev map[string]any) {
 	evType, _ := ev["type"].(string)
 	subtype, _ := ev["subtype"].(string)
-	text, tool, isResult, resultText, sessionID := classifyStreamEvent(ev)
+	text, tool, toolArgs, isResult, resultText, sessionID := classifyStreamEvent(ev)
 
-	preview := text
-	if isResult && resultText != "" {
-		preview = resultText
+	// preview is the compact, single-line value for the slog trace and
+	// the tool-use breadcrumb: tool args when this is a tool_use event,
+	// otherwise a clipped peek at the narration / result text. Full
+	// content blocks would dwarf the log.
+	previewSrc := toolArgs
+	if previewSrc == "" {
+		previewSrc = text
 	}
-	preview = onelinePreview(preview, 120)
+	if isResult && resultText != "" {
+		previewSrc = resultText
+	}
+	preview := onelinePreview(previewSrc, 120)
 
 	// Tee to the TUI sink, if any. Mirrors the slog attrs below in
 	// structured form so the consumer doesn't have to re-parse strings.
 	if sink := StreamSinkFrom(ctx); sink != nil {
 		out := StreamEvent{
-			Type:      evType,
-			Subtype:   subtype,
-			Tool:      tool,
-			Preview:   preview,
+			Type:    evType,
+			Subtype: subtype,
+			Tool:    tool,
+			Preview: preview,
+			// Full narration prose, untruncated — the transcript word-
+			// wraps it. Cutting it mid-sentence was the truncation bug.
+			Text:      text,
 			SessionID: sessionID,
 			IsResult:  isResult,
 		}
@@ -509,11 +518,20 @@ func usageInt(usage map[string]any, key string) int {
 }
 
 // classifyStreamEvent extracts the bits the caller and the logger need
-// from one parsed event: any text content, any tool_use tool name,
+// from one parsed event: the assistant narration prose (text), any
+// tool_use tool name plus a compact preview of its args (toolArgs),
 // whether this is the terminal `result` event, the `result.result`
 // field text, and any session_id surfaced by the event. Best-effort and
 // defensive — unknown shapes return zero values.
-func classifyStreamEvent(ev map[string]any) (text, tool string, isResult bool, resultText, sessionID string) {
+//
+// text is the FULL narration, joined across every text block and never
+// truncated — a single assistant message commonly carries a thought
+// AND a tool call, and the thought must survive intact for the
+// transcript. toolArgs is kept separate (and compact) so the two never
+// clobber each other. When a message has no prose but does carry a
+// tool_result (a "user" event), its content backfills text so the slog
+// trace and reply-assembly fallback still see something.
+func classifyStreamEvent(ev map[string]any) (text, tool, toolArgs string, isResult bool, resultText, sessionID string) {
 	evType, _ := ev["type"].(string)
 	if sid, _ := ev["session_id"].(string); sid != "" {
 		sessionID = sid
@@ -524,36 +542,35 @@ func classifyStreamEvent(ev map[string]any) (text, tool string, isResult bool, r
 	case "assistant", "user":
 		msg, _ := ev["message"].(map[string]any)
 		contentRaw, _ := msg["content"].([]any)
-		var firstText, firstTool string
+		var texts []string
+		var firstTool, firstResult string
 		for _, c := range contentRaw {
 			block, _ := c.(map[string]any)
 			btype, _ := block["type"].(string)
 			switch btype {
 			case "text":
-				if t, _ := block["text"].(string); t != "" && firstText == "" {
-					firstText = t
+				if t, _ := block["text"].(string); t != "" {
+					texts = append(texts, t)
 				}
 			case "tool_use":
 				if n, _ := block["name"].(string); n != "" && firstTool == "" {
 					firstTool = n
-					if firstText == "" {
-						input, _ := block["input"].(map[string]any)
-						firstText = toolUseArgsPreview(n, input)
-					}
+					input, _ := block["input"].(map[string]any)
+					toolArgs = toolUseArgsPreview(n, input)
 				}
 			case "tool_result":
-				if firstText == "" {
+				if firstResult == "" {
 					// tool_result content can be a string or a list of
 					// {type:text,text:…} blocks. Surface a short preview
 					// either way.
 					switch v := block["content"].(type) {
 					case string:
-						firstText = v
+						firstResult = v
 					case []any:
 						for _, sub := range v {
 							sb, _ := sub.(map[string]any)
 							if t, _ := sb["text"].(string); t != "" {
-								firstText = t
+								firstResult = t
 								break
 							}
 						}
@@ -561,7 +578,12 @@ func classifyStreamEvent(ev map[string]any) (text, tool string, isResult bool, r
 				}
 			}
 		}
-		text = firstText
+		text = strings.Join(texts, "\n")
+		if text == "" {
+			// No narration prose — fall back to the tool_result content
+			// so "user" events still carry a preview for the trace.
+			text = firstResult
+		}
 		tool = firstTool
 	case "result":
 		isResult = true
@@ -569,7 +591,7 @@ func classifyStreamEvent(ev map[string]any) (text, tool string, isResult bool, r
 			resultText = r
 		}
 	}
-	return text, tool, isResult, resultText, sessionID
+	return text, tool, toolArgs, isResult, resultText, sessionID
 }
 
 // resultEventUsage extracts the token-usage object and total_cost_usd from a
@@ -709,7 +731,7 @@ func parseStreamJSONOutput(ctx context.Context, raw string) (reply, sessionID st
 		}
 		rawEvents = append(rawEvents, json.RawMessage(line))
 		emitStreamEvent(ctx, ev)
-		text, _, isResult, resultText, sid := classifyStreamEvent(ev)
+		text, _, _, isResult, resultText, sid := classifyStreamEvent(ev)
 		if text != "" {
 			assembled.WriteString(text)
 		}

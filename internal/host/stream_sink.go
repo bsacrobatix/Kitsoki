@@ -27,11 +27,22 @@ import "context"
 // Mirrors the shape of the slog "metamode.oracle.event" record so a
 // reader of either signal sees the same payload.
 type StreamEvent struct {
-	Type      string  // "system" | "assistant" | "user" | "result" | etc.
-	Subtype   string  // "init" | "api_retry" | "success" | "" | …
-	Tool      string  // tool name for assistant tool_use events
-	Preview   string  // one-line preview (≤120 chars, single line)
-	SessionID string  // claude session id (system.init / result events)
+	Type    string // "system" | "assistant" | "user" | "result" | etc.
+	Subtype string // "init" | "api_retry" | "success" | "" | …
+	Tool    string // tool name for assistant tool_use events
+	// Preview is a compact, single-line peek (≤120 runes) used by the
+	// slog trace and the tool-use breadcrumb (tool args, e.g.
+	// "prompt.md"). It is deliberately clipped — never render it as
+	// narration prose; use Text for that.
+	Preview string
+	// Text is the FULL assistant narration / "thinking" prose for this
+	// event, untruncated and with newlines preserved. Consumers that
+	// show reasoning to the user (the transcript pane) must render this,
+	// not Preview — clipping a thought mid-sentence is a visible bug.
+	// Empty for tool-only assistant events, system events, and the
+	// terminal result event.
+	Text      string
+	SessionID string // claude session id (system.init / result events)
 	IsResult  bool    // true on the terminal result event
 	CostUSD   float64 // result events only (0 otherwise)
 	// Token usage from the terminal result event (all 0 on non-result

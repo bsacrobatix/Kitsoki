@@ -243,6 +243,7 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 
 	result, machineErr := o.machine.Turn(ctx, journey.State, journey.World, call)
 	if machineErr != nil {
+		o.journalTurnError(ctx, tl, sid, turnNum, journey.State, call, journey.World, machineErr)
 		return nil, fmt.Errorf("orchestrator: RunIntent: machine.Turn: %w", machineErr)
 	}
 

@@ -908,6 +908,7 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	// 5. Run the machine.
 	result, machineErr := o.machine.Turn(ctx, journey.State, journey.World, call)
 	if machineErr != nil {
+		o.journalTurnError(ctx, tl, sid, turnNum, journey.State, call, journey.World, machineErr)
 		return nil, fmt.Errorf("orchestrator: machine.Turn: %w", machineErr)
 	}
 
@@ -1450,6 +1451,7 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 
 	result, machineErr := o.machine.Turn(ctx, journey.State, journey.World, call)
 	if machineErr != nil {
+		o.journalTurnError(ctx, tl, sid, turnNum, journey.State, call, journey.World, machineErr)
 		return nil, fmt.Errorf("orchestrator: SubmitDirect: machine.Turn: %w", machineErr)
 	}
 
@@ -1896,6 +1898,7 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 
 	result, machineErr := o.machine.Turn(ctx, journey.State, journey.World, call)
 	if machineErr != nil {
+		o.journalTurnError(ctx, tl, sid, turnNum, journey.State, call, journey.World, machineErr)
 		return nil, fmt.Errorf("orchestrator: machine.Turn (continue): %w", machineErr)
 	}
 

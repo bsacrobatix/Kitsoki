@@ -144,6 +144,13 @@ func BuildJourney(def *app.AppDef, initialState app.StatePath, initialWorld worl
 			// HarnessError surfaces the why-the-state-stopped story for
 			// operators reading the journal.
 
+		case MachineError:
+			// Annotation-only event recording a turn that aborted because
+			// machine.Turn returned an error (e.g. a non-compiling effect
+			// expression). No transition fired, so there is nothing to
+			// re-apply; the event exists purely so the trace records why
+			// the turn produced no state change.
+
 		default:
 			// Forward-compatible: silently ignore unknown event kinds.
 		}
