@@ -12,7 +12,7 @@ initial_state: clarifying
 initial_world:
   idea:        "A CLI for X"
   workdir:     "."
-  output_path: "PRD.md"
+  output_path: ".artifacts/prd.md"
   judge_mode:  "human"
   clarifications:
     questions:
@@ -31,16 +31,9 @@ host_handlers:
           - { id: "q1", question: "Who is the primary user?", why: "scopes the persona" }
           - { id: "q2", question: "What is the single most important success metric?", why: "defines done" }
           - { id: "q3", question: "What is explicitly out of scope?", why: "bounds the work" }
-  host.oracle.task:
-    data:
-      ok: true
-      submitted:
-        title:               "PRD: Example CLI"
-        summary_markdown:    "## PRD: Example CLI\n\nA sufficiently long summary body to satisfy the schema minimum length for the prd_artifact summary_markdown field, covering problem, users, goals, and metrics."
-        file_path:           "PRD.md"
-        confidence:          0.84
-        needs_clarification: false
-        follow_up_questions: []
+  # Entering brief (after submit_answers) writes the brief artifact.
+  host.artifacts_dir:
+    data: { ok: true, path: ".artifacts/prd_brief.md", message_id: "prd_brief#1" }
 
 turns:
   # Answer question 3 first — out of order is fine.
@@ -57,9 +50,11 @@ turns:
       answered_count:        2
       clarification_answers: "Q3: internal tooling is out of scope\nQ1: platform developers\n"
 
-  # Done — submit with NO payload advances on the accumulated answers.
+  # Done — submit with NO payload advances on the accumulated answers,
+  # now landing at the brief review (the confirm-gated step before
+  # references + drafting).
   - intent: { name: submit_answers, slots: {} }
-    expect_state: drafting
+    expect_state: brief
     expect_world:
       clarifying_cycle:      1
       clarification_answers: "Q3: internal tooling is out of scope\nQ1: platform developers\n"

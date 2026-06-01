@@ -1,14 +1,24 @@
-# happy_path — idle → clarifying → drafting → @exit:done.
+# happy_path — idle → clarifying → brief → references → drafting → @exit:done.
 #
-# Intent-only (no LLM). The clarifying/drafting on_enter oracle calls are
-# served by stub host_handlers below. judge_mode=human so no judge runs.
+# Intent-only (no LLM). The clarifying/references on_enter oracle calls
+# are served by the same stubbed host.oracle.decide; the brief/references
+# artifact writes by stubbed host.artifacts_dir. judge_mode=human so no
+# judge runs.
+#
+# Note on the shared decide stub: clarifying binds the whole `submitted`
+# into world.clarifications (it reads `.questions`) and references binds
+# the whole `submitted` into world.references (it reads `.items`). This
+# flow stubs the questions shape, so references just sees an empty
+# `.items` — a valid "no references found" state — which is fine because
+# this flow does not assert references CONTENT (see brief_references_path
+# for that). It asserts the end-to-end graph reaches @exit:done.
 
 test_kind: flow
 app: ../app.yaml
 initial_state: idle
 initial_world:
   workdir:     "."
-  output_path: "PRD.md"
+  output_path: ".artifacts/prd.md"
   judge_mode:  "human"
 
 host_handlers:
@@ -23,13 +33,15 @@ host_handlers:
         questions:
           - { id: "q1", question: "Who is the primary user?", why: "scopes the persona" }
           - { id: "q2", question: "What is the single most important success metric?", why: "defines done" }
+  host.artifacts_dir:
+    data: { ok: true, path: ".artifacts/prd_brief.md", message_id: "prd_brief#1" }
   host.oracle.task:
     data:
       ok: true
       submitted:
         title:               "PRD: Example CLI"
         summary_markdown:    "## PRD: Example CLI\n\nA sufficiently long summary body to satisfy the schema minimum length for the prd_artifact summary_markdown field, covering problem, users, goals, and metrics."
-        file_path:           "PRD.md"
+        file_path:           ".artifacts/prd.md"
         confidence:          0.84
         needs_clarification: false
         follow_up_questions: []
@@ -50,13 +62,29 @@ turns:
     expect_world:
       idea: "A CLI for X that helps developers do Y."
 
-  # Answer the questions → drafting. The round is appended to the
-  # transcript and clarifying_cycle increments.
+  # Answer the questions → brief. The round is appended to the transcript
+  # and clarifying_cycle increments. Entering brief writes the brief
+  # artifact (stubbed host.artifacts_dir).
   - intent: { name: submit_answers, slots: { answers: "1) developers 2) time-to-first-success" } }
-    expect_state: drafting
+    expect_state: brief
     expect_world:
       clarifying_cycle:      1
       clarification_answers: "1) developers 2) time-to-first-success"
+    expect_host_calls:
+      - handler: host.artifacts_dir
+        args: { thread: "prd_brief" }
+
+  # Confirm the brief → references. Entering references runs the
+  # researcher (stubbed decide) and writes the references artifact.
+  - intent: { name: confirm, slots: {} }
+    expect_state: references
+    expect_host_calls:
+      - handler: host.artifacts_dir
+        args: { thread: "prd_references" }
+
+  # Confirm the references → drafting (writes the PRD via stubbed task).
+  - intent: { name: confirm, slots: {} }
+    expect_state: drafting
 
   # Accept the draft → @exit:done. requires: [prd_artifact] is satisfied
   # by the re-pin on the accept arc.

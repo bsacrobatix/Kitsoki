@@ -7,7 +7,7 @@ initial_state: drafting
 initial_world:
   idea:            "A CLI for X"
   workdir:         "."
-  output_path:     "PRD.md"
+  output_path:     ".artifacts/prd.md"
   judge_mode:      "human"
   drafting_cycle:  5
   drafting_budget: 5
@@ -19,7 +19,7 @@ host_handlers:
       submitted:
         title:               "PRD: Example CLI"
         summary_markdown:    "## PRD: Example CLI\n\nA sufficiently long summary body to satisfy the schema minimum length for the prd_artifact summary_markdown field, covering problem, users, goals, and metrics."
-        file_path:           "PRD.md"
+        file_path:           ".artifacts/prd.md"
         confidence:          0.84
         needs_clarification: false
         follow_up_questions: []

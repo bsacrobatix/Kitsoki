@@ -6,26 +6,33 @@
 # to stories/bugfix/ and stories/dev-story/; the novelty is the *document*
 # artifact and the multi-round clarification transcript.
 #
-# Graph (three rooms, two exits):
+# Graph (five rooms, two exits):
 #
-#   idle ── start ──▶ clarifying ── submit_answers / skip ──▶ drafting
-#                         │  (decide → only-new questions)        │  (task → PRD.md)
-#                         ├─ answer n=… ─▶ clarifying (self)      │
-#                         ├─ regenerate ─▶ clarifying (cycle++)   ├─ accept ─▶ @exit:done
-#                         └─ quit ─▶ @exit:abandoned              ├─ refine ─▶ drafting (budget→abandoned)
-#                              ▲                                  ├─ clarify ─▶ clarifying (another round)
-#                              └────────────── clarify ──────────┤
-#                                                                ├─ restart_from ─▶ idle | clarifying
-#                                                                └─ quit ─▶ @exit:abandoned
+#   idle ─start─▶ clarifying ─submit_answers/skip─▶ brief ─confirm─▶ references ─confirm─▶ drafting
+#     │ (chat)        │ (decide → questions)          │ (.artifacts/    │ (decide →           │ (task → .artifacts/prd.md)
+#     │ ◀─discuss     │ ◀─answer n=… (self)           │  prd_brief.md)  │  doc references)    │
+#     │               ├─regenerate ─▶ clarifying      ├─confirm         ├─confirm             ├─accept ─▶ @exit:done
+#     │               └─quit ─▶ @exit:abandoned       ├─restart_from    ├─regenerate (budget) ├─refine ─▶ drafting (budget→abandoned)
+#     │                    ▲                           └─quit            ├─restart_from        ├─clarify ─▶ clarifying (another round)
+#     │                    └──────────────────────────── clarify ───────┴─────────────────────┤
+#     └─quit ─▶ @exit:abandoned                                                                ├─ restart_from ─▶ idle | clarifying
+#                                                                                              └─ quit ─▶ @exit:abandoned
 #
-# drafting is the checkpoint room — same shape as every bugfix phase. The
-# clarify arc closes a multi-round clarification loop: each round *appends*
-# to world.clarification_log rather than overwriting it (see
+# brief + references are confirm-gated review rooms inserted before the
+# PRD is written. brief is DETERMINISTIC — it composes world.idea (idle)
+# and world.clarification_log (clarifying) into .artifacts/prd_brief.md
+# (no oracle call) and gates on confirm. references runs the `researcher`
+# (decide, docs-only) → a curated reference list, also written to
+# .artifacts, that the author reads when drafting. drafting is the
+# checkpoint room — same shape as every bugfix phase. The clarify arc
+# closes a multi-round clarification loop: each round *appends* to
+# world.clarification_log rather than overwriting it (see
 # rooms/clarifying.yaml). clarifying_budget caps the number of rounds.
 #
-# No host / engine / widget changes — everything composes existing
-# mechanisms (choice forms, host.oracle.*, the cycle-budget refine loop,
-# named agents, tracing). See README.md for the full contract + design.
+# No engine / widget changes — everything composes existing mechanisms
+# (choice forms, host.oracle.*, host.artifacts_dir, the cycle-budget
+# refine loop, named agents, tracing). See README.md for the full
+# contract + design.
 
 app:
   id: prd
@@ -35,20 +42,23 @@ app:
   license: "CC0"
 
 # Host allow-list. The intake room is a conversation (converse + a
-# persistent chat); clarifying/drafting use decide/task. v1 does not post
-# the finished PRD anywhere out-of-band (optional, trivial to add as an
-# effect on the accept arc later).
+# persistent chat); clarifying/references use decide, drafting uses task.
+# brief + references persist their artifacts via host.artifacts_dir. v1
+# does not post the finished PRD anywhere out-of-band (optional, trivial
+# to add as an effect on the accept arc later).
 hosts:
   - host.oracle.converse
   - host.oracle.decide
   - host.oracle.task
-  - host.chat.resolve   # get-or-create the discovery chat; idempotent across on_enter re-fires (e.g. /reload). NOT host.chat.create — see rooms/idle.yaml.
+  - host.chat.resolve     # get-or-create the discovery chat; idempotent across on_enter re-fires (e.g. /reload). NOT host.chat.create — see rooms/idle.yaml.
+  - host.artifacts_dir    # write the brief + reference-list artifacts under the operator's {{ workdir }}/.artifacts — see rooms/brief.yaml, rooms/references.yaml.
 
 # Persona table — names a model + tool surface per step so the trace
 # attributes model + token usage to each step.
 #
 #   interviewer — converse; read-only; runs the idea-discovery chat.
 #   analyst     — decide;   read-only; generates the clarifying questions.
+#   researcher  — decide;   read-only; curates the doc reference list.
 #   author      — task;     may write the PRD to disk; produces prd_artifact.
 #   judge       — decide;    no tools; the optional auto-advance gate.
 agents:
@@ -64,8 +74,14 @@ agents:
     tools: [Read, Grep, Glob]
     external_side_effect: false
 
+  researcher:
+    system_prompt: "You are a product analyst curating the reference materials for a PRD. Read the idea and the clarification transcript, then search the working directory's DOCUMENTATION — requirement docs, specs, design notes, READMEs, ADRs — for prior art, constraints, and standards the PRD must honour. This is a PRD, not an implementation: do NOT cite source code. For each reference give the path, the specific section(s) that matter, and a one-line rationale. Prefer a short, high-signal list over an exhaustive dump."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob]
+    external_side_effect: false
+
   author:
-    system_prompt: "You are a product manager authoring a PRD. Read the idea, the upstream docs, and the clarification transcript, then write a complete, well-structured PRD markdown document to disk."
+    system_prompt: "You are a product manager authoring a PRD. Read the idea, the upstream docs, the clarification transcript, and the curated reference list, then write a complete, well-structured PRD markdown document to disk."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Write, Edit]
     external_side_effect: false
@@ -81,7 +97,11 @@ world:
   idea:            { type: string, default: "" }   # the distilled pitch (set when discovery ends)
   upstream_paths:  { type: string, default: "" }   # space/comma-separated files or dirs
   workdir:         { type: string, default: "." }  # where upstream lives + PRD is written
-  output_path:     { type: string, default: "PRD.md" }
+  # The final PRD lands in .artifacts/ alongside its inputs (prd_brief.md,
+  # prd_references.md) rather than dumped in the workdir root — the brief
+  # room's on_enter creates .artifacts before drafting runs, so the author's
+  # Write succeeds. Relative to workdir.
+  output_path:     { type: string, default: ".artifacts/prd.md" }
 
   # ── discovery chat (idle room) ───────────────────────────────────────
   idea_chat_id:    { type: string, default: "" }   # persistent chat thread for the discovery conversation
@@ -97,6 +117,14 @@ world:
   answered_count:        { type: int,    default: 0 }   # how many questions answered THIS round (drives the "Answered so far (N/total)" readout); reset on every new round
   answered_ids:          { type: string, default: "" }  # which question numbers are answered THIS round, as a "|n|"-delimited set (e.g. "|1||3|") — drives removing answered questions from the live list; reset alongside answered_count
   clarification_log:     { type: string, default: "" }  # growing transcript of every prior round's Q&A
+
+  # ── brief + references (review rooms before drafting) ────────────────
+  brief_path:       { type: string, default: "" }   # path the brief artifact was written to (.artifacts/prd_brief.md)
+  references:       { type: object, default: {} }   # researcher result: { items: [{ path, sections, rationale }] }
+  references_path:  { type: string, default: "" }   # path the reference-list artifact was written to (.artifacts/prd_references.md)
+  references_cycle: { type: int,    default: 0 }    # references re-search rounds consumed; caps via references_budget
+  references_budget: { type: int,   default: 3 }    # max references regenerations before regenerate abandons
+  references_revise: { type: bool,  default: false } # true on a `refine` (revise the current list in place); false on a fresh `regenerate` search — steers prompts/references.md
 
   # ── draft + refine ──────────────────────────────────────────────────
   prd_artifact:    { type: object, default: {} }   # task result: { title, summary_markdown, file_path, confidence, needs_clarification, follow_up_questions }
@@ -145,7 +173,7 @@ intents:
       n:    { type: int,    required: true }   # which question (1-based, as shown in the list)
       text: { type: string, required: true }   # the answer
   submit_answers:
-    description: "Done answering this round — advance to drafting with the answers gathered so far."
+    description: "Done answering this round — advance to the brief review with the answers gathered so far."
     examples: ["submit", "done answering", "that's all", "draft it now", "here are my answers"]
     priority: 80
     slots:
@@ -155,12 +183,16 @@ intents:
       # rooms/clarifying.yaml).
       answers: { type: string, required: false }
   skip:
-    description: "Skip answering this round; draft with what we have."
+    description: "Skip answering this round; move on to the brief with what we have."
     examples: [skip, "no more questions", "just draft", "go ahead"]
     priority: 60
+  confirm:
+    description: "Confirm the current review step (the brief, or the reference list) and move on to the next phase."
+    examples: ["confirm", "proceed", "yes proceed", "looks right", "the brief is good", "references look good", "continue to the next step"]
+    priority: 82
   regenerate:
-    description: "Re-generate this round's clarification questions (optionally with feedback)."
-    examples: [regenerate, "different questions", "ask again", "redo questions"]
+    description: "Re-generate the current step's machine output (clarification questions, or the reference list), optionally with feedback."
+    examples: [regenerate, "different questions", "ask again", "redo questions", "search again", "redo the references", "find different references"]
     priority: 65
     slots:
       feedback: { type: string, required: false }
@@ -169,14 +201,14 @@ intents:
     examples: ["accept", "approve", "looks good", "lgtm", "ship it", "done"]
     priority: 85
   refine:
-    description: "Refine the PRD draft with feedback; re-draft with the same inputs."
-    examples: [refine, rework, redo, revise]
+    description: "Refine with feedback, building on the current artifact (NOT a fresh start): in drafting, re-draft the PRD with the same inputs; in references, revise the current reference list — keep what applies and add/drop/re-scope per the instruction."
+    examples: [refine, rework, redo, revise, "add a reference", "drop that doc", "also cite", "re-scope that section"]
     priority: 70
     slots:
       feedback: { type: string, required: true }
   clarify:
-    description: "Run another round of clarification questions, then re-draft with more to work from."
-    examples: [clarify, "more questions", "ask me more", "need more input"]
+    description: "Go back for another round of clarification questions, KEEPING the answers so far — the analyst refines/combines the prior questions and asks only what's still missing (does NOT discard the record; that's restart_from clarifying)."
+    examples: [clarify, "more questions", "ask me more", "need more input", "refine the questions", "tweak the questions"]
     priority: 68
   restart_from:
     description: "Restart from an earlier stage: idle (re-pitch, wipes the clarification log) or clarifying (re-question)."
@@ -195,7 +227,7 @@ intents:
 
 # Intents lifted into a parent story's table when prd is imported.
 exports:
-  intents: [discuss, start, answer, submit_answers, skip, regenerate, accept, refine, clarify, restart_from, quit, look]
+  intents: [discuss, start, answer, submit_answers, skip, confirm, regenerate, accept, refine, clarify, restart_from, quit, look]
 
 # Named return points. Standalone load synthesises __exit__done /
 # __exit__abandoned terminals.

@@ -20,10 +20,17 @@ Every prior clarification round, newest first:
 
 {{ args.clarification_log }}
 
-**Ask only genuinely new questions.** Do not re-ask anything the
-transcript above already resolved. If nothing material remains, return
-an empty `questions` list — that is the correct, expected answer when
-the picture is clear enough to draft.
+**Build on the record — do not start over.** The operator chose to refine
+the questions while keeping their answers, so treat the transcript above
+as settled input:
+
+- Do **not** re-ask anything it already resolved.
+- Where the prior answers make two earlier questions collapse into one, or
+  let you sharpen a vague question into a precise one, **combine or refine**
+  rather than duplicate.
+- Add **only the genuinely-new** questions the latest answers opened up.
+- If nothing material remains, return an empty `questions` list — that is
+  the correct, expected answer when the picture is clear enough to draft.
 {% endif %}
 
 {% if args.follow_up %}## Follow-ups the draft author requested

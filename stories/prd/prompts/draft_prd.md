@@ -23,6 +23,17 @@ authoritative input — honour them:
 {{ args.clarification_log }}
 {% endif %}
 
+{% if args.references.items %}## Reference materials
+
+The operator confirmed these existing documents as the prior art and
+constraints this PRD must build on. **Read each cited path/section before
+writing** (use `Read`/`Grep`), fold their requirements in, and do not
+contradict them:
+
+{% for r in args.references.items %}- **{{ r.path }}**{% if r.sections %} (§{{ r.sections }}){% endif %} — {{ r.rationale }}
+{% endfor %}
+{% endif %}
+
 {% if args.refine_feedback %}## ⚠ Operator refinement directive (cycle {{ args.cycle }})
 
 This is a refine cycle — the previous draft was rejected. The feedback
@@ -43,7 +54,8 @@ the failure mode this guards against.
 ## What to write
 
 1. Write the full PRD as markdown to **`{{ args.output_path }}`** (relative
-   to the working directory) using `Write`. A solid PRD covers: problem &
+   to the working directory) using `Write` — create the enclosing
+   directory first if it does not exist. A solid PRD covers: problem &
    context, target users, goals & non-goals, requirements (functional and
    non-functional), success metrics, and open questions.
 2. Write for a reader who has not seen the idea or the transcript.

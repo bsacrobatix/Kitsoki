@@ -27,11 +27,13 @@ states:
           subtitle: "Generate the PRD markdown and review"
           color:    "#8B5CF6"   # violet — synthesis
       - prose: "cycle {{ world.cycle }} · draft attempt {{ world.drafting_cycle }} · clarify rounds {{ world.clarifying_cycle }} · judge {{ world.judge_mode }}"
+      # The written PRD is the deliverable — surface its path on its own
+      # prominent line (the summary below is a digest; the full doc is the file).
+      - prose: 'PRD written to  {{ world.prd_artifact.file_path|default:"(drafting — writes .artifacts/prd.md)" }}'
       - kv:
           pairs:
             Title:      '{{ world.prd_artifact.title|default:"(pending)" }}'
             Confidence: '{{ world.prd_artifact.confidence|default:"(pending)" }}'
-            File:       '{{ world.prd_artifact.file_path|default:"(pending)" }}'
       - prose: "⚠ The author flagged that more input is needed — see the follow-ups below, then use clarify."
         when:  "world.prd_artifact.needs_clarification"
       - code: |
@@ -88,6 +90,10 @@ states:
               idea:              "{{ world.idea }}"
               upstream_paths:    "{{ world.upstream_paths }}"
               clarification_log: "{{ world.clarification_log }}"
+              # The curated reference list from the references room, spliced
+              # as compact JSON. The author reads each cited path/section
+              # before writing (see prompts/draft_prd.md).
+              references:        "{{ world.references }}"
               output_path:       "{{ world.output_path }}"
               workdir:           "{{ world.workdir }}"
               refine_feedback:   "{{ world.refine_feedback }}"

@@ -1,8 +1,15 @@
 # multi_round_clarify — drafting —clarify→ clarifying —submit_answers→
-# drafting, twice. Proves the clarification transcript ACCUMULATES rather
-# than overwrites: clarifying_cycle reaches 2 (it is NOT reset when
-# clarify re-enters clarifying), and each submit appends a fresh round to
-# world.clarification_log.
+# brief —confirm→ references —confirm→ drafting, twice. Proves the
+# clarification transcript ACCUMULATES rather than overwrites:
+# clarifying_cycle reaches 2 (it is NOT reset when clarify re-enters
+# clarifying), and each submit appends a fresh round to
+# world.clarification_log. The brief + references rooms sit on the path
+# back to drafting; passing through them does not disturb the transcript.
+#
+# The shared host.oracle.decide stub returns the questions shape; the
+# references room binds it into world.references and reads only `.items`
+# (empty here), so the transcript stays clean (clarifications carry just
+# `questions`). This flow does not assert references content.
 
 test_kind: flow
 app: ../app.yaml
@@ -10,7 +17,7 @@ initial_state: drafting
 initial_world:
   idea:        "A CLI for X"
   workdir:     "."
-  output_path: "PRD.md"
+  output_path: ".artifacts/prd.md"
   judge_mode:  "human"
 
 host_handlers:
@@ -20,7 +27,7 @@ host_handlers:
       submitted:
         title:               "PRD: Example CLI"
         summary_markdown:    "## PRD: Example CLI\n\nA sufficiently long summary body to satisfy the schema minimum length for the prd_artifact summary_markdown field, covering problem, users, goals, and metrics."
-        file_path:           "PRD.md"
+        file_path:           ".artifacts/prd.md"
         confidence:          0.84
         needs_clarification: true
         follow_up_questions: ["What is the scope boundary?"]
@@ -30,23 +37,30 @@ host_handlers:
       submitted:
         questions:
           - { id: "q1", question: "What is the scope boundary?", why: "scopes the work" }
+  host.artifacts_dir:
+    data: { ok: true, path: ".artifacts/prd_brief.md", message_id: "prd_brief#1" }
 
 turns:
-  # Round 1.
+  # Round 1: clarify → clarifying → submit → brief, then confirm through
+  # references back to drafting for the next round.
   - intent: { name: clarify, slots: {} }
     expect_state: clarifying
   - intent: { name: submit_answers, slots: { answers: "round one answers" } }
-    expect_state: drafting
+    expect_state: brief
     expect_world:
       clarifying_cycle:      1
       clarification_answers: "round one answers"
+  - intent: { name: confirm, slots: {} }
+    expect_state: references
+  - intent: { name: confirm, slots: {} }
+    expect_state: drafting
 
   # Round 2 — clarifying_cycle is preserved across the clarify re-entry,
   # so submitting again advances it to 2 (accumulation, not reset).
   - intent: { name: clarify, slots: {} }
     expect_state: clarifying
   - intent: { name: submit_answers, slots: { answers: "round two answers" } }
-    expect_state: drafting
+    expect_state: brief
     expect_world:
       clarifying_cycle:      2
       clarification_answers: "round two answers"

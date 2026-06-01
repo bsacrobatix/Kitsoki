@@ -15,7 +15,7 @@ state: idle
 
 world:
   workdir:        "/home/cloud-user/code/hyperspot"
-  output_path:    "PRD.md"
+  output_path:    ".artifacts/prd.md"
   # The idea is gathered in the discovery conversation. Optionally pre-set
   # upstream_paths (space/comma-separated) so the analyst/author read
   # existing requirement docs without you having to mention them in chat.
