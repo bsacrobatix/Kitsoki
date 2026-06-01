@@ -124,6 +124,27 @@ persona table pattern — one named agent per role, declared in `agents:` — is
 documented with worked examples in `stories/bugfix/AGENT-BRIEF.md` and
 `stories/bugfix/README.md`.
 
+### Hermetic isolation from the operator's Claude Code config
+
+The oracle execs the local `claude` CLI, so a story's agents would otherwise
+inherit whatever the operator has installed under `~/.claude` — including
+**enabled plugins** (and their skills and named agents). Any globally-enabled
+plugin can then hijack a story's agent: the model, handed a task that resembles
+the plugin's domain, adopts the plugin's persona and workflow instead of the
+story's `--append-system-prompt`. (Observed: with BMAD-METHOD enabled, the `prd`
+story's `interviewer` role-played BMAD's "John" PM agent — deprecation notice,
+self-chosen output path, its own pick-one menu — none of which the story asked
+for.)
+
+To prevent this, every oracle CLI invocation pins
+`--setting-sources project,local`, which **omits the `user` source** where
+`enabledPlugins` lives. A story's agents are therefore defined only by their own
+`--append-system-prompt` / `--model` / `--allowedTools` flags plus the
+`project`/`local` config of the `working_dir`. Auth is unaffected
+(OAuth/credentials are read from the keychain, not from a setting source). The
+flag is applied at every construction site via `appendSettingSourcesFlag`
+(`internal/host/agents.go`) and locked by `oracle_setting_sources_test.go`.
+
 ---
 
 ## host.oracle.ask

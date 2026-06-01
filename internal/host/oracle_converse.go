@@ -146,6 +146,7 @@ func OracleConverseHandler(ctx context.Context, args map[string]any) (Result, er
 		"--session-id", sessionID,
 		"--permission-mode", permMode,
 	}
+	cliArgs = appendSettingSourcesFlag(cliArgs)
 	if strings.TrimSpace(systemPrompt) != "" {
 		cliArgs = append(cliArgs, "--append-system-prompt", systemPrompt)
 	}
@@ -318,6 +319,7 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 		"-p",
 		"--permission-mode", permMode,
 	}
+	cliArgs = appendSettingSourcesFlag(cliArgs)
 	if firstTurn {
 		cliArgs = append(cliArgs, "--session-id", claudeSID)
 	} else {

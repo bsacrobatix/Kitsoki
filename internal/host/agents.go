@@ -184,6 +184,32 @@ func appendAllowedToolsFlag(cliArgs []string, tools []string) []string {
 	return append(cliArgs, "--allowedTools", strings.Join(tools, ","))
 }
 
+// oracleSettingSources is the --setting-sources value applied to every oracle
+// subagent invocation. It deliberately OMITS the "user" source so a story's
+// agents never inherit the operator's user-global Claude Code configuration —
+// enabledPlugins, custom agents, and skills installed under ~/.claude.
+//
+// Without this isolation, the exec'd `claude` CLI loads ~/.claude/settings.json
+// by default, and any globally-enabled plugin can hijack a story's agent. The
+// observed failure: with BMAD-METHOD enabled (enabledPlugins in user settings),
+// the prd story's `interviewer` agent stopped following its --append-system-prompt
+// and instead role-played BMAD's "John" PM persona — announcing a deprecation
+// notice, picking its own output path, and presenting its own pick-one menu.
+//
+// Dropping "user" keeps "project" and "local" so the working_dir's own .claude
+// config still applies, and leaves auth untouched (OAuth/credentials are read
+// from the keychain, not from a setting source). A story's agents are therefore
+// defined by its own --append-system-prompt / --model / --allowedTools flags.
+const oracleSettingSources = "project,local"
+
+// appendSettingSourcesFlag pins --setting-sources to the hermetic source set so
+// oracle subagents are isolated from the operator's user-global plugins/skills.
+// Applied at every claude-CLI construction site (ask/decide/task via
+// buildBaseCLIArgs, both converse paths, and ask_structured).
+func appendSettingSourcesFlag(cliArgs []string) []string {
+	return append(cliArgs, "--setting-sources", oracleSettingSources)
+}
+
 // appendDefaultCwd returns workingDir if non-empty, otherwise returns
 // agent.DefaultCwd. Implements the per-call working_dir wins rule.
 func appendDefaultCwd(workingDir string, agent Agent) string {

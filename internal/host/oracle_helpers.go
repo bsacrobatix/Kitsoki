@@ -101,6 +101,7 @@ func buildBaseCLIArgs(args map[string]any, agent Agent) []string {
 		"-p",
 		"--permission-mode", "bypassPermissions",
 	}
+	cliArgs = appendSettingSourcesFlag(cliArgs)
 	if sp := effectiveSystemPrompt(args, agent); strings.TrimSpace(sp) != "" {
 		cliArgs = append(cliArgs, "--append-system-prompt", sp)
 	}

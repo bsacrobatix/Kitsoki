@@ -89,6 +89,7 @@ func AskStructured(ctx context.Context, opts AskStructuredOptions) (json.RawMess
 		"--permission-mode", "bypassPermissions",
 		"--mcp-config", cfgPath,
 	}
+	cliArgs = appendSettingSourcesFlag(cliArgs)
 	if strings.TrimSpace(opts.Model) != "" {
 		cliArgs = append(cliArgs, "--model", opts.Model)
 	}
