@@ -153,34 +153,6 @@ describe("TraceTimeline — filters", () => {
     wrapper.unmount();
   });
 
-  it("filters by level when a level chip is activated", async () => {
-    const eventsWithLevels: TraceEvent[] = [
-      makeEvent({ msg: "host.invoked",  turn: 1, level: "info" }),
-      makeEvent({ msg: "host.invoked",  turn: 1, level: "warn", time: "2026-01-01T00:00:02Z" }),
-      makeEvent({ msg: "host.returned", turn: 1, level: "error", time: "2026-01-01T00:00:03Z" }),
-    ];
-
-    const wrapper = mount(TraceTimeline, {
-      props: { events: eventsWithLevels, selectedEventIndex: null },
-      attachTo: document.body,
-    });
-    await flushPromises();
-
-    // All 3 are "host" subsystem — visible by default.
-    expect(wrapper.findAll(".trace-timeline__row").length).toBe(3);
-
-    // Click the "warn" level chip to activate it.
-    const levelChips = wrapper.findAll(".trace-timeline__chip");
-    const warnChip = levelChips.find((c) => c.text() === "warn");
-    expect(warnChip).toBeDefined();
-    await warnChip!.trigger("click");
-
-    // Only the warn event should be visible.
-    expect(wrapper.findAll(".trace-timeline__row").length).toBe(1);
-
-    wrapper.unmount();
-  });
-
   it("shows clear button when filters are active, resets on click", async () => {
     const wrapper = mount(TraceTimeline, {
       props: { events: EVENTS, selectedEventIndex: null },

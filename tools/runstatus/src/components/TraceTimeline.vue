@@ -14,18 +14,6 @@
         >{{ sys }}</button>
       </div>
 
-      <!-- Level chips -->
-      <div class="trace-timeline__filter-group">
-        <span class="trace-timeline__filter-label">Level:</span>
-        <button
-          v-for="lvl in availableLevels"
-          :key="lvl"
-          class="trace-timeline__chip"
-          :class="{ active: selectedLevels.has(lvl) }"
-          @click="toggleLevel(lvl)"
-        >{{ lvl }}</button>
-      </div>
-
       <!-- State path single-select -->
       <div class="trace-timeline__filter-group">
         <span class="trace-timeline__filter-label">State:</span>
@@ -145,7 +133,6 @@
                     class="trace-timeline__cost"
                     title="Estimated cost for this oracle call (meta.cost_usd)"
                   >{{ oracleCostStr(row.oracle.merged) }}</span>
-                  <span class="trace-timeline__level" :data-level="row.event.level">{{ row.event.level }}</span>
                   <span class="trace-timeline__time">{{ formatTime(row.event.time) }}</span>
                   <button
                     class="trace-timeline__expand-btn"
@@ -254,7 +241,6 @@ const WINDOW_OVERSCAN = 20; // extra rows above/below visible window
 // "turn" (turn.start / turn.end) is off by default — the group headers already
 // convey turn boundaries; these rows add noise without new information.
 const selectedSubsystems = reactive(new Set<Subsystem>(ALL_SUBSYSTEMS.filter((s) => s !== "turn")));
-const selectedLevels = reactive(new Set<string>());
 const selectedStatePath = ref<string | null>(null);
 const collapsedTurns = reactive(new Set<string>());
 const collapsedPhases = reactive(new Set<string>());
@@ -293,13 +279,6 @@ function formatTime(iso: string): string {
 
 // ---- derived ----------------------------------------------------------------
 
-// All available levels in the event stream.
-const availableLevels = computed(() => {
-  const s = new Set<string>();
-  for (const e of props.events) s.add(e.level);
-  return [...s].sort();
-});
-
 // All available state paths.
 const availableStatePaths = computed(() => {
   const s = new Set<string>();
@@ -315,9 +294,8 @@ const hasActiveFilters = computed(() => {
   const defaultSysSelected = ALL_SUBSYSTEMS.every(
     (s) => selectedSubsystems.has(s) || DEFAULT_OFF_SUBSYSTEMS.has(s)
   );
-  const noLevelFilter = selectedLevels.size === 0;
   const noStateFilter = selectedStatePath.value === null;
-  return !defaultSysSelected || !noLevelFilter || !noStateFilter;
+  return !defaultSysSelected || !noStateFilter;
 });
 
 // Filtered + annotated events (preserving original index).
@@ -503,7 +481,6 @@ const filteredEvents = computed<AnnotatedEvent[]>(() => {
     // chip state — it carries the user's raw message text for the turn.
     // This is a real event written by the orchestrator, not a synthesized row.
     if (event.msg === "turn.input") {
-      if (selectedLevels.size > 0 && !selectedLevels.has(event.level)) continue;
       if (selectedStatePath.value !== null && event.state_path !== selectedStatePath.value) continue;
       out.push({ index: i, event, subsystem: "turn" });
       continue;
@@ -520,7 +497,6 @@ const filteredEvents = computed<AnnotatedEvent[]>(() => {
       if (harnessData.suppressedIndices.has(i)) continue;
       // Apply normal level/state filters; gate on "host" chip.
       if (!selectedSubsystems.has("host")) continue;
-      if (selectedLevels.size > 0 && !selectedLevels.has(event.level)) continue;
       if (selectedStatePath.value !== null && event.state_path !== selectedStatePath.value) continue;
       // called rows: attach merged data and surface as a host-subsystem row.
       const harnessCall = harnessData.mergeByCalledIndex.get(i);
@@ -531,7 +507,6 @@ const filteredEvents = computed<AnnotatedEvent[]>(() => {
     const subsystem = subsystemFromMsg(event.msg);
 
     if (!selectedSubsystems.has(subsystem)) continue;
-    if (selectedLevels.size > 0 && !selectedLevels.has(event.level)) continue;
     if (selectedStatePath.value !== null && event.state_path !== selectedStatePath.value) continue;
 
     // machine.transition / machine.state_exited / machine.state_entered are all
@@ -929,14 +904,6 @@ function toggleSubsystem(sys: Subsystem): void {
   }
 }
 
-function toggleLevel(lvl: string): void {
-  if (selectedLevels.has(lvl)) {
-    selectedLevels.delete(lvl);
-  } else {
-    selectedLevels.add(lvl);
-  }
-}
-
 function onStatePathChange(e: Event): void {
   const val = (e.target as HTMLSelectElement).value;
   selectedStatePath.value = val === "" ? null : val;
@@ -950,7 +917,6 @@ function clearFilters(): void {
       selectedSubsystems.add(s);
     }
   });
-  selectedLevels.clear();
   selectedStatePath.value = null;
 }
 
@@ -1402,16 +1368,6 @@ watch(
   margin-left: 0.35rem;
   vertical-align: middle;
 }
-
-.trace-timeline__level {
-  color: #64748b;
-  font-size: 0.7rem;
-  min-width: 2.5rem;
-  text-align: right;
-}
-.trace-timeline__level[data-level="warn"]  { color: #fbbf24; }
-.trace-timeline__level[data-level="error"] { color: #f87171; }
-.trace-timeline__level[data-level="debug"] { color: #475569; }
 
 .trace-timeline__time {
   color: #475569;

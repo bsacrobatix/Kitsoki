@@ -222,15 +222,6 @@ test.describe("completed fixture", () => {
 // ════════════════════════════════════════════════════════════════════════════════
 
 test.describe("edge-cases fixture", () => {
-  test("error-level event shows distinct color indicator in timeline", async ({ page }) => {
-    await loadArtifact(page, EDGE_CASES_SNAPSHOT);
-    await page.waitForSelector(".trace-timeline__row", { timeout: 8000 });
-
-    // The timeline renders level with data-level="ERROR" attribute.
-    const errorLevel = page.locator('.trace-timeline__level[data-level="ERROR"]');
-    await expect(errorLevel.first()).toBeVisible({ timeout: 3000 });
-  });
-
   test("off-path event is visible in the timeline", async ({ page }) => {
     await loadArtifact(page, EDGE_CASES_SNAPSHOT);
     await page.waitForSelector(".trace-timeline__row", { timeout: 8000 });
