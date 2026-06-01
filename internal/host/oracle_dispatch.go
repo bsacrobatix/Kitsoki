@@ -101,6 +101,34 @@ func OraclePluginNameFromCtx(ctx context.Context) string {
 	return s
 }
 
+// localLLMFallbackKey is the context key for the local-model validation-reject
+// fallback flag (step 4). When present and true, a schema_invalid rejection of
+// a local_llm backend's Submission triggers a single re-dispatch of the SAME
+// call to oracle.claude under the same call_id. Set only by TryDispatchVerb,
+// and only when the resolved plugin is a builtin.local_llm transport — every
+// other transport (external MCP plugins, the claude CLI itself) leaves it unset
+// and stays on the hard-fail path so a genuine schema regression is not papered
+// over.
+type localLLMFallbackKey struct{}
+
+// WithLocalLLMFallback returns a child context that marks the current oracle
+// call as eligible for the local-model → oracle.claude validation-reject
+// fallback. originalPlugin is the alias that was resolved to a local_llm
+// backend; it is recorded in the substitution provenance on the closing event.
+func WithLocalLLMFallback(ctx context.Context, originalPlugin string) context.Context {
+	if originalPlugin == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, localLLMFallbackKey{}, originalPlugin)
+}
+
+// localLLMFallbackFrom returns the original plugin alias recorded by
+// WithLocalLLMFallback, or "" when the fallback is not enabled for this call.
+func localLLMFallbackFrom(ctx context.Context) string {
+	s, _ := ctx.Value(localLLMFallbackKey{}).(string)
+	return s
+}
+
 // OracleDispatchRequest carries everything the dispatcher needs to route one
 // oracle call through the plugin interface.
 type OracleDispatchRequest struct {
@@ -196,6 +224,14 @@ func TryDispatchVerb(ctx context.Context, verb, renderedPrompt, systemPrompt, ag
 	}
 
 	oc := OracleCallCtxFrom(ctx)
+
+	// Step 4: when the resolved plugin is a local-model backend, mark this call
+	// eligible for the validation-reject fallback to oracle.claude. Dispatch
+	// itself only knows the alias name (dr.PluginName), not its transport type,
+	// so the eligibility decision is taken here where the registry is in hand.
+	if reg.IsLocalLLM(pluginName) {
+		ctx = WithLocalLLMFallback(ctx, pluginName)
+	}
 
 	dr := OracleDispatchRequest{
 		Req: oracle.AskRequest{
@@ -345,6 +381,16 @@ func Dispatch(ctx context.Context, dr OracleDispatchRequest) (OracleDispatchResu
 
 	// Validate submission against schema (kitsoki is validation authority).
 	if validErr := oracle.ValidateSubmission(dr.Req.SchemaJSON, resp.Submission); validErr != nil {
+		// Step 4: local-model validation-reject fallback. When the schema
+		// rejection comes from a local_llm backend AND this call was marked
+		// eligible (WithLocalLLMFallback, set at TryDispatchVerb resolution),
+		// re-dispatch the SAME call exactly once to oracle.claude under the
+		// SAME call_id — best-effort small models fail soft, the deterministic
+		// claude path is the guarantee. The current OracleError emit is SKIPPED
+		// on the fallback branch so only ONE closing event is written per call.
+		if origPlugin := localLLMFallbackFrom(ctx); origPlugin != "" && isSchemaInvalid(validErr) {
+			return dispatchFallbackToClaude(ctx, reg, dr, callID, origPlugin)
+		}
 		callEnd := time.Now()
 		appendOracleErrorEvent(ctx, callEnd, callID, OracleErrorPayload{
 			Verb:       dr.Verb,
@@ -380,6 +426,111 @@ func Dispatch(ctx context.Context, dr OracleDispatchRequest) (OracleDispatchResu
 		Submission: resp.Submission,
 		Meta:       resp.Meta,
 		DurationMS: durationMS,
+	}, nil
+}
+
+// isSchemaInvalid reports whether err is an *oracle.AskError with
+// Kind=="schema_invalid". Only schema rejections are eligible for the
+// local-model fallback; transport/deadline errors are not (a local model that
+// is down should not silently fan out to claude).
+func isSchemaInvalid(err error) bool {
+	ae, ok := err.(*oracle.AskError)
+	return ok && ae.Kind == "schema_invalid"
+}
+
+// dispatchFallbackToClaude re-dispatches a schema_invalid local-model call to
+// oracle.claude exactly once, reusing the same call_id so the whole exchange
+// stays a single oracle.call.* pair (OracleCalled was already written before
+// Ask). On fallback success it writes the single closing OracleReturned with a
+// substitution provenance map + Meta["fallback_of"]; on fallback failure it
+// writes the single closing OracleError carrying the same substitution map and
+// returns the fallback's error. There is no same-backend retry and no second
+// hop — claude either satisfies the schema or the call fails hard.
+func dispatchFallbackToClaude(ctx context.Context, reg *oracle.Registry, dr OracleDispatchRequest, callID, origPlugin string) (OracleDispatchResult, error) {
+	substitution := map[string]any{
+		"reason":          "schema_invalid",
+		"original_plugin": origPlugin,
+		"fallback_plugin": oracle.DefaultOracleName,
+	}
+
+	plug2, err := reg.Resolve(oracle.DefaultOracleName)
+	if err != nil {
+		callEnd := time.Now()
+		appendOracleErrorEvent(ctx, callEnd, callID, OracleErrorPayload{
+			Verb:         dr.Verb,
+			Agent:        dr.Agent,
+			Error:        fmt.Errorf("local_llm fallback: %w", err).Error(),
+			Substitution: substitution,
+		})
+		return OracleDispatchResult{}, err
+	}
+
+	// Re-dispatch the SAME request under the default oracle, keeping the same
+	// call_id (one oracle.call.* pair across both Ask attempts).
+	dr2 := dr
+	dr2.PluginName = oracle.DefaultOracleName
+	dr2.Req.CallID = callID
+
+	fbStart := time.Now()
+	resp2, askErr2 := plug2.Ask(ctx, dr2.Req)
+	fbDuration := time.Since(fbStart).Milliseconds()
+
+	if askErr2 != nil {
+		callEnd := time.Now()
+		appendOracleErrorEvent(ctx, callEnd, callID, OracleErrorPayload{
+			Verb:         dr.Verb,
+			Agent:        dr.Agent,
+			DurationMS:   fbDuration,
+			Error:        askErr2.Error(),
+			Substitution: substitution,
+		})
+		return OracleDispatchResult{}, askErr2
+	}
+
+	if validErr := oracle.ValidateSubmission(dr2.Req.SchemaJSON, resp2.Submission); validErr != nil {
+		callEnd := time.Now()
+		appendOracleErrorEvent(ctx, callEnd, callID, OracleErrorPayload{
+			Verb:         dr.Verb,
+			Agent:        dr.Agent,
+			DurationMS:   fbDuration,
+			Error:        validErr.Error(),
+			Substitution: substitution,
+		})
+		return OracleDispatchResult{}, validErr
+	}
+
+	// Fallback succeeded: tag the meta so consumers can see the substituted
+	// backend, then write the single closing OracleReturned.
+	meta := resp2.Meta
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["fallback_of"] = origPlugin
+
+	callEnd := time.Now()
+	responseDesc := map[string]any{}
+	if resp2.Submission != nil {
+		var parsed any
+		if json.Unmarshal(resp2.Submission, &parsed) == nil {
+			responseDesc["submission"] = parsed
+		}
+	}
+	responseDesc["meta"] = meta
+
+	appendOracleReturnedEvent(ctx, callEnd, callID, OracleReturnedPayload{
+		Verb:         dr.Verb,
+		Agent:        dr.Agent,
+		Model:        dr.Model,
+		DurationMS:   fbDuration,
+		Response:     marshalResponse(responseDesc),
+		Meta:         meta,
+		Substitution: substitution,
+	})
+
+	return OracleDispatchResult{
+		Submission: resp2.Submission,
+		Meta:       meta,
+		DurationMS: fbDuration,
 	}, nil
 }
 

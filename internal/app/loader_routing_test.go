@@ -176,6 +176,7 @@ func TestRouting_NoRoutingBlock(t *testing.T) {
 	require.InDelta(t, 0.10, d.CacheTrimFraction, 1e-9, "DefaultRoutingConfig.CacheTrimFraction")
 	require.Equal(t, 3, d.RevalidateStrikes, "DefaultRoutingConfig.RevalidateStrikes")
 	require.False(t, d.ConfidenceDecay, "DefaultRoutingConfig.ConfidenceDecay")
+	require.False(t, d.ExtractLLMOnNoMatch, "DefaultRoutingConfig.ExtractLLMOnNoMatch must default off (opt-in)")
 }
 
 // TestRouting_EmptyBlockGetsDefaults pins the documented behaviour for
@@ -246,6 +247,7 @@ func TestRouting_FullBlockRoundTrip(t *testing.T) {
 		{"CacheTrimFraction", 0.25, r.CacheTrimFraction},
 		{"RevalidateStrikes", 5, r.RevalidateStrikes},
 		{"ConfidenceDecay", true, r.ConfidenceDecay},
+		{"ExtractLLMOnNoMatch", true, r.ExtractLLMOnNoMatch},
 	}
 	for _, tc := range tests {
 		tc := tc

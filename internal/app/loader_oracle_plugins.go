@@ -27,6 +27,7 @@ var knownPlugins = map[string]bool{
 	"builtin.inprocess":  true,
 	"subprocess":         true,
 	"mcp_http":           true,
+	"builtin.local_llm":  true,
 }
 
 // resolveOraclePlugins validates and resolves all oracle plugin declarations.
@@ -56,7 +57,7 @@ func resolveOraclePlugins(def *AppDef, file string) []error {
 			continue
 		}
 		if !knownPlugins[decl.Plugin] {
-			addErr(fmt.Sprintf("oracle_plugins.%s: unknown plugin %q (supported: builtin.claude_cli, builtin.inprocess, subprocess, mcp_http)", name, decl.Plugin))
+			addErr(fmt.Sprintf("oracle_plugins.%s: unknown plugin %q (supported: builtin.claude_cli, builtin.inprocess, subprocess, mcp_http, builtin.local_llm)", name, decl.Plugin))
 			continue
 		}
 		// subprocess transport requires command:.
@@ -67,6 +68,12 @@ func resolveOraclePlugins(def *AppDef, file string) []error {
 		// mcp_http transport requires endpoint:.
 		if decl.Plugin == "mcp_http" && strings.TrimSpace(decl.Endpoint) == "" {
 			addErr(fmt.Sprintf("oracle_plugins.%s: mcp_http plugin requires endpoint:", name))
+			continue
+		}
+		// builtin.local_llm requires either model: (managed sidecar) or
+		// endpoint: (bring-your-own-server).
+		if decl.Plugin == "builtin.local_llm" && strings.TrimSpace(decl.Model) == "" && strings.TrimSpace(decl.Endpoint) == "" {
+			addErr(fmt.Sprintf("oracle_plugins.%s: builtin.local_llm plugin requires model: or endpoint:", name))
 			continue
 		}
 		// Interpolate ${VAR} in Env map.

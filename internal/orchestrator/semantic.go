@@ -88,6 +88,21 @@ func (o *Orchestrator) routingEnabled() bool {
 	return o.def.Routing.Enabled
 }
 
+// extractLLMOnNoMatch reports whether the app opted the semantic router into
+// invoking the host.oracle.extract LLM tier on a no_match (RoutingConfig.
+// ExtractLLMOnNoMatch). Default false: a nil Routing block leaves it off, and
+// DefaultRoutingConfig does not set it. The point of the opt-in is to back that
+// LLM tier with a cheap local model (oracle: oracle.local) so an unrouted turn
+// gets a schema-bounded, offline routing attempt before the main-turn LLM. The
+// deterministic tiers always run first; this only changes what happens AFTER a
+// deterministic no_match.
+func (o *Orchestrator) extractLLMOnNoMatch() bool {
+	if o.def == nil || o.def.Routing == nil {
+		return false
+	}
+	return o.def.Routing.ExtractLLMOnNoMatch
+}
+
 // RequiresUnfilledSlot returns true when the intent definition (looked
 // up via [lookupIntentByPath]) declares ≥1 required slot that the
 // supplied prefill map does not cover. Used by [TrySemantic] to
@@ -232,7 +247,24 @@ func (o *Orchestrator) TrySemantic(ctx context.Context, sid app.SessionID, input
 
 	verdict := extractRes.Verdict
 	if extractRes.ResolvedBy == host.ResolvedByNoMatch() {
-		// No hit from the extract tier — fall through to LLM.
+		// No hit from the deterministic extract tiers (synonyms /
+		// slot_template). When the app opted into ExtractLLMOnNoMatch the
+		// intent is to let the extract LLM tier — backed by a cheap local
+		// model via oracle: oracle.local — take a schema-bounded routing
+		// attempt before the main-turn LLM. The free-form-verdict →
+		// semroute.Verdict confidence-band mapping is uncalibrated (proposal
+		// Open Question 4), so we do not fabricate a verdict here yet: the
+		// flag is honoured as a breadcrumb so the chosen path is auditable,
+		// and the turn falls through to the LLM exactly as before. Wiring the
+		// actual local-model routing call lands with the verdict-mapping
+		// calibration. Default-off apps emit the standard miss.
+		if o.extractLLMOnNoMatch() {
+			tl.Debug(ctx, trace.EvTurnSemanticMiss,
+				slog.String("input", input),
+				slog.String("note", "extract_llm_on_no_match: opted in (verdict mapping pending calibration; falling through to LLM)"),
+			)
+			return nil, false, nil
+		}
 		tl.Debug(ctx, trace.EvTurnSemanticMiss,
 			slog.String("input", input),
 		)

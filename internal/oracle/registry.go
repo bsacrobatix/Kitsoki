@@ -70,6 +70,24 @@ func (r *Registry) Resolve(name string) (Oracle, error) {
 	return nil, fmt.Errorf("oracle registry: no oracle registered for %q (and no default %q fallback)", name, DefaultOracleName)
 }
 
+// IsLocalLLM reports whether the alias name resolves to a *LocalLLMOracle
+// backend. The host dispatcher uses this to decide whether a schema_invalid
+// validation rejection is eligible for the local-model → oracle.claude
+// fallback (step 4): only local-model backends fail soft, every other
+// transport (external MCP plugins, the claude CLI itself) fails hard so a
+// genuine schema regression is not silently papered over.
+//
+// Resolution mirrors Resolve: an empty or absent alias falls back to the
+// default oracle, which is never a local_llm, so the common case returns false.
+func (r *Registry) IsLocalLLM(name string) bool {
+	o, err := r.Resolve(name)
+	if err != nil {
+		return false
+	}
+	_, ok := o.(*LocalLLMOracle)
+	return ok
+}
+
 // Close closes all registered oracles. Errors are collected and joined.
 // Intended for session shutdown.
 func (r *Registry) Close() error {

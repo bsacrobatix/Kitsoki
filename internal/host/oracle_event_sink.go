@@ -238,6 +238,16 @@ type OracleReturnedPayload struct {
 	Response     json.RawMessage `json:"response,omitempty"`
 	ResponseFile string          `json:"response_file,omitempty"` // Path to external response file if large
 	Meta         map[string]any  `json:"meta,omitempty"`
+	// Substitution records that the closing event belongs to a call whose
+	// originally-resolved backend was substituted at runtime. Today the only
+	// substitution is the local-model → oracle.claude validation-reject
+	// fallback (step 4): when a builtin.local_llm backend returns a
+	// schema_invalid Submission, the SAME call is re-dispatched once to
+	// oracle.claude under the same call_id, and this field is set to
+	// {reason, original_plugin, fallback_plugin} so the trace explains why a
+	// local-model call's response actually came from claude. Omitted (nil) on
+	// every normal call, so the field is backward compatible.
+	Substitution map[string]any `json:"substitution,omitempty"`
 }
 
 // OracleErrorPayload is the payload written to OracleError events.
@@ -247,6 +257,13 @@ type OracleErrorPayload struct {
 	Agent      string `json:"agent,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
 	Error      string `json:"error"`
+	// Substitution mirrors OracleReturnedPayload.Substitution: when the
+	// local-model → oracle.claude validation-reject fallback (step 4) was
+	// attempted but the fallback ALSO failed, the closing OracleError carries
+	// the same {reason, original_plugin, fallback_plugin} provenance so the
+	// trace shows that a substitution was tried before the call failed.
+	// Omitted (nil) on every normal error.
+	Substitution map[string]any `json:"substitution,omitempty"`
 }
 
 // ── JSONL append helpers ───────────────────────────────────────────────────────

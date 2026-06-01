@@ -11,7 +11,8 @@ EMBED_INDEX   := internal/runstatus/web/assets/index.html
 SPA_SOURCES   := $(shell find $(RUNSTATUS_DIR)/src $(RUNSTATUS_DIR)/index.html \
 	$(RUNSTATUS_DIR)/package.json $(RUNSTATUS_DIR)/vite.config.ts 2>/dev/null)
 
-.PHONY: all build install uninstall test vet fmt tidy clean web web-clean e2e-docker
+.PHONY: all build install uninstall test vet fmt tidy clean web web-clean e2e-docker \
+	fetch-models fetch-llama-server
 
 all: build
 
@@ -66,3 +67,17 @@ clean:
 # flow suites. See test/e2e/ for details.
 e2e-docker:
 	./test/e2e/run.sh
+
+# fetch-models / fetch-llama-server pre-warm the local-model oracle cache for
+# offline/CI use: they run the SAME fetch-and-verify path managed mode runs
+# lazily on the first oracle.local call (internal/oracle/server.Fetcher), just
+# ahead of time. Artifacts land in ~/.cache/kitsoki (or $KITSOKI_CACHE_DIR) and
+# are gitignored — nothing binary is committed. endpoint: mode needs neither.
+# MODEL overrides the model id (default: the proposal's Qwen2.5-1.5B default).
+MODEL ?=
+
+fetch-models:
+	go run ./tools/oracle-fetch -model "$(MODEL)"
+
+fetch-llama-server:
+	go run ./tools/oracle-fetch -binary

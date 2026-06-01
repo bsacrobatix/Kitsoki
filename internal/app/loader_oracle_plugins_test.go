@@ -7,6 +7,8 @@ package app_test
 // LoadBytes calls resolveOraclePlugins as part of its pipeline.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -255,6 +257,167 @@ oracle_plugins:
 	if plug.Tool != "ask" {
 		t.Errorf("Tool: got %q, want ask", plug.Tool)
 	}
+}
+
+// TestOraclePlugins_LocalLLMModelAccepted verifies that a builtin.local_llm
+// plugin with model: (and the grammar/port/server_bin fields) is accepted and
+// the fields are threaded onto the decl.
+func TestOraclePlugins_LocalLLMModelAccepted(t *testing.T) {
+	t.Parallel()
+	yaml := minimalApp + `
+oracle_plugins:
+  oracle.local:
+    plugin: builtin.local_llm
+    model: qwen2.5-1.5b
+    grammar: true
+    port: 8081
+    server_bin: /opt/llama-server
+`
+	def, err := app.LoadBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	plug, ok := def.OraclePlugins["oracle.local"]
+	if !ok {
+		t.Fatal("oracle.local not found in OraclePlugins")
+	}
+	if plug.Model != "qwen2.5-1.5b" {
+		t.Errorf("Model: got %q, want qwen2.5-1.5b", plug.Model)
+	}
+	if !plug.Grammar {
+		t.Error("Grammar: got false, want true")
+	}
+	if plug.Port != 8081 {
+		t.Errorf("Port: got %d, want 8081", plug.Port)
+	}
+	if plug.ServerBin != "/opt/llama-server" {
+		t.Errorf("ServerBin: got %q, want /opt/llama-server", plug.ServerBin)
+	}
+}
+
+// TestOraclePlugins_LocalLLMEndpointAccepted verifies that a builtin.local_llm
+// plugin with only endpoint: (bring-your-own-server) is accepted.
+func TestOraclePlugins_LocalLLMEndpointAccepted(t *testing.T) {
+	t.Parallel()
+	yaml := minimalApp + `
+oracle_plugins:
+  oracle.local:
+    plugin: builtin.local_llm
+    endpoint: "http://127.0.0.1:8081"
+`
+	def, err := app.LoadBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	if _, ok := def.OraclePlugins["oracle.local"]; !ok {
+		t.Fatal("oracle.local not found in OraclePlugins")
+	}
+}
+
+// TestOraclePlugins_LocalLLMMissingModelAndEndpoint verifies that a
+// builtin.local_llm plugin with neither model: nor endpoint: is rejected.
+func TestOraclePlugins_LocalLLMMissingModelAndEndpoint(t *testing.T) {
+	t.Parallel()
+	yaml := minimalApp + `
+oracle_plugins:
+  oracle.local:
+    plugin: builtin.local_llm
+`
+	_, err := app.LoadBytes([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for builtin.local_llm without model or endpoint, got nil")
+	}
+	if !strings.Contains(err.Error(), "model") || !strings.Contains(err.Error(), "endpoint") {
+		t.Errorf("error should mention 'model' or 'endpoint'; got: %v", err)
+	}
+}
+
+// TestOraclePlugins_LocalLLMGrammarInSubsetSchema verifies that a grammar:true
+// local_llm decide effect pointed at an in-subset schema loads cleanly.
+func TestOraclePlugins_LocalLLMGrammarInSubsetSchema(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	schemaPath := filepath.Join(dir, "verdict.json")
+	const inSubset = `{
+  "type": "object",
+  "properties": {
+    "intent": {"type": "string"},
+    "confidence": {"type": "number"},
+    "reason": {"type": "string"}
+  },
+  "required": ["intent"]
+}`
+	if err := os.WriteFile(schemaPath, []byte(inSubset), 0o600); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+	yaml := localLLMGrammarApp(schemaPath)
+	if _, err := app.LoadBytes([]byte(yaml)); err != nil {
+		t.Fatalf("LoadBytes: in-subset schema should load cleanly, got: %v", err)
+	}
+}
+
+// TestOraclePlugins_LocalLLMGrammarOutOfSubsetSchema verifies that a
+// grammar:true local_llm decide effect pointed at an OUT-of-subset schema
+// (uses $ref) fails load with a message naming the plugin, schema, and the
+// offending construct.
+func TestOraclePlugins_LocalLLMGrammarOutOfSubsetSchema(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	schemaPath := filepath.Join(dir, "verdict.json")
+	const outOfSubset = `{
+  "type": "object",
+  "properties": {
+    "intent": {"$ref": "#/$defs/intent"}
+  }
+}`
+	if err := os.WriteFile(schemaPath, []byte(outOfSubset), 0o600); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+	yaml := localLLMGrammarApp(schemaPath)
+	_, err := app.LoadBytes([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected load error for out-of-subset grammar schema, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "oracle.local") {
+		t.Errorf("error should name the plugin alias; got: %v", err)
+	}
+	if !strings.Contains(msg, "grammar subset") {
+		t.Errorf("error should mention the grammar subset; got: %v", err)
+	}
+	if !strings.Contains(msg, "$ref") {
+		t.Errorf("error should name the offending construct $ref; got: %v", err)
+	}
+}
+
+// localLLMGrammarApp builds a minimal app with a grammar:true local_llm plugin
+// and a single decide effect referencing the given absolute schema path.
+func localLLMGrammarApp(schemaPath string) string {
+	return `
+app:
+  id: test-local-llm-grammar
+  version: 0.1.0
+hosts: [host.oracle.decide]
+agents:
+  judge:
+    system_prompt: "You are a judge."
+root: idle
+oracle_plugins:
+  oracle.local:
+    plugin: builtin.local_llm
+    model: qwen2.5-1.5b
+    grammar: true
+states:
+  idle:
+    on_enter:
+      - invoke: host.oracle.decide
+        oracle: oracle.local
+        with:
+          agent: judge
+          schema: ` + schemaPath + `
+          prompt_text: "decide"
+    terminal: true
+`
 }
 
 // TestOraclePlugins_HeadersSubstitution verifies ${VAR} in headers.

@@ -136,6 +136,8 @@ type TurnNumber int64
 //   - "builtin.inprocess"  — opt-in in-process oracle (used by tests / stubs).
 //   - "subprocess"         — JSON-RPC 2.0 over stdio; requires command:.
 //   - "mcp_http"           — MCP-over-HTTP; requires endpoint:.
+//   - "builtin.local_llm"  — local llama.cpp sidecar (OpenAI HTTP); requires
+//     either model: (managed sidecar) or endpoint: (bring-your-own-server).
 type OraclePluginDecl struct {
 	// Plugin is the transport identifier (e.g. "builtin.claude_cli", "mcp_http").
 	Plugin string `yaml:"plugin"`
@@ -153,6 +155,21 @@ type OraclePluginDecl struct {
 	// Headers is a map of HTTP header names → values (supports ${VAR}
 	// interpolation at plugin-init time). Used by mcp_http transport.
 	Headers map[string]string `yaml:"headers,omitempty"`
+	// Model is the GGUF model id the local-model sidecar should serve. Used by
+	// the builtin.local_llm transport in managed mode (when endpoint: is empty).
+	Model string `yaml:"model,omitempty"`
+	// Grammar enables best-effort grammar/json_schema constraint on the local
+	// model's first decode (builtin.local_llm only). Schemas outside the
+	// translatable subset are silently left unconstrained; ValidateSubmission
+	// remains the sole authority on shape.
+	Grammar bool `yaml:"grammar,omitempty"`
+	// Port is the TCP port the managed local-model sidecar binds on 127.0.0.1.
+	// Used by builtin.local_llm in managed mode; ignored in endpoint mode.
+	Port int `yaml:"port,omitempty"`
+	// ServerBin overrides the llama-server binary path for the managed
+	// local-model sidecar (builtin.local_llm only). Empty fetches/uses the
+	// cached default.
+	ServerBin string `yaml:"server_bin,omitempty"`
 }
 
 // AppDef is the top-level deserialized application definition.
@@ -327,6 +344,16 @@ type RoutingConfig struct {
 	// ConfidenceDecay halves the effective CacheMaxAge for rows whose
 	// originating LLM verdict had confidence < 0.7. Default off.
 	ConfidenceDecay bool `yaml:"confidence_decay,omitempty"`
+	// ExtractLLMOnNoMatch, when true, lets the deterministic semantic
+	// router (TrySemantic) invoke the host.oracle.extract LLM tier on a
+	// no_match before falling through to the main-turn LLM. The point is
+	// to back that LLM tier with a cheap local model (oracle: oracle.local)
+	// so routing stays offline and schema-bounded. Default off — the
+	// deterministic tiers always run first, and this is strictly opt-in
+	// because the extract LLM call adds a model round-trip on every
+	// otherwise-unrouted turn. See docs/architecture/semantic-routing.md
+	// and docs/architecture/oracle-plugin.md "Local model backend".
+	ExtractLLMOnNoMatch bool `yaml:"extract_llm_on_no_match,omitempty"`
 }
 
 // DefaultRoutingConfig returns the all-defaults RoutingConfig used when

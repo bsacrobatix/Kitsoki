@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"kitsoki/internal/agents"
+	"kitsoki/internal/oracle/grammar"
 
 	goyaml "github.com/goccy/go-yaml"
 )
@@ -792,6 +793,13 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	// required; task + external_side_effect:false + WebFetch/WebSearch → error.
 	validateOracleVerbCrossChecks(file, def, &errs)
 
+	// ── 9e. grammar-subset check for builtin.local_llm grammar:true effects.
+	// Every decide effect whose `oracle:` alias resolves to a builtin.local_llm
+	// plugin with grammar: true must point at a schema inside llama.cpp's
+	// translatable grammar subset; otherwise grammar would silently fail open at
+	// runtime. Reject out-of-subset schemas at load time.
+	validateLocalLLMGrammarSubset(file, def, &errs)
+
 	// ── 10. proposal execute effect validation ────────────────────────────────
 	// ProposalExecute.Background and ProposalExecute.OnComplete are not covered
 	// by validateStates (proposals live outside the state tree).  Apply the same
@@ -1523,6 +1531,78 @@ func checkOracleEffect(file, loc string, eff Effect, agents map[string]*AgentDec
 			}
 		}
 	}
+}
+
+// validateLocalLLMGrammarSubset enforces, at load time, that every decide
+// effect whose `oracle:` alias resolves to a builtin.local_llm plugin with
+// grammar: true points at a schema inside llama.cpp's translatable grammar
+// subset. Without this, an out-of-subset schema would fail open silently at
+// runtime (llama.cpp decodes unconstrained yet returns 200), defeating the
+// predictability the grammar tier exists to buy.
+//
+// Scope: the check covers the decide verb only — its schema is a string path in
+// the effect's with.schema. extract (with.schema_path) and ask source differently
+// and are deferred as a follow-up. An empty `oracle:` alias resolves to
+// oracle.claude (not local_llm) and is unaffected. Schema paths resolve relative
+// to def.BaseDir (matching the runtime app-dir resolution); absolute paths are
+// read as-is. A schema that cannot be read is reported here too, since the gate
+// cannot vouch for a schema it never saw.
+func validateLocalLLMGrammarSubset(file string, def *AppDef, errs *[]error) {
+	if def == nil || len(def.OraclePlugins) == 0 {
+		return
+	}
+	// Collect aliases that are builtin.local_llm with grammar: true.
+	grammarLocalLLM := make(map[string]bool)
+	for alias, decl := range def.OraclePlugins {
+		if decl != nil && decl.Plugin == "builtin.local_llm" && decl.Grammar {
+			grammarLocalLLM[alias] = true
+		}
+	}
+	if len(grammarLocalLLM) == 0 {
+		return
+	}
+
+	addErr := func(msg string) {
+		*errs = append(*errs, &ValidationError{File: file, Message: msg})
+	}
+
+	walkAllEffects(def.States, func(loc string, eff Effect) {
+		if eff.Invoke != "host.oracle.decide" {
+			return
+		}
+		if !grammarLocalLLM[eff.OraclePlugin] {
+			return
+		}
+		schemaPath, _ := eff.With["schema"].(string)
+		schemaPath = strings.TrimSpace(schemaPath)
+		if schemaPath == "" {
+			// Missing schema is reported by the decide handler's own contract;
+			// the grammar gate has nothing to inspect.
+			return
+		}
+		if strings.Contains(schemaPath, "{{") {
+			// Templated schema path — cannot resolve statically; skip.
+			return
+		}
+		resolved := schemaPath
+		if !filepath.IsAbs(resolved) && def.BaseDir != "" {
+			resolved = filepath.Join(def.BaseDir, resolved)
+		}
+		raw, readErr := os.ReadFile(resolved)
+		if readErr != nil {
+			addErr(fmt.Sprintf(
+				"%s: oracle %q is builtin.local_llm with grammar: true but its decide schema %q could not be read: %v",
+				loc, eff.OraclePlugin, schemaPath, readErr,
+			))
+			return
+		}
+		if subErr := grammar.SubsetOK(raw); subErr != nil {
+			addErr(fmt.Sprintf(
+				"%s: oracle %q is builtin.local_llm with grammar: true but its decide schema %q is outside the llama.cpp grammar subset: %v",
+				loc, eff.OraclePlugin, schemaPath, subErr,
+			))
+		}
+	})
 }
 
 // metaEnvVarRE matches `$NAME` and `${NAME}` tokens in a cwd: string.

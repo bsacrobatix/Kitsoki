@@ -17,6 +17,8 @@
 //     implementation lives in internal/testrunner); returns an error here.
 //   - "subprocess"         — NewSubprocess(command, args, env).
 //   - "mcp_http"           — NewMCPHTTP(endpoint, tool, headers).
+//   - "builtin.local_llm"  — NewLocalLLM(model, port, server_bin, grammar,
+//     endpoint, env); requires either model: or endpoint:.
 
 package oracle
 
@@ -37,6 +39,11 @@ type PluginDecl struct {
 	Tool     string
 	Env      map[string]string
 	Headers  map[string]string
+	// Model/Grammar/Port/ServerBin configure the builtin.local_llm transport.
+	Model     string
+	Grammar   bool
+	Port      int
+	ServerBin string
 }
 
 // BuildRegistryFromDef constructs a Registry from an *app.AppDef's oracle_plugins
@@ -57,13 +64,17 @@ func BuildRegistryFromDef(def *app.AppDef, h harness.Harness) (*Registry, error)
 			continue
 		}
 		decls[name] = &PluginDecl{
-			Plugin:   appDecl.Plugin,
-			Command:  appDecl.Command,
-			Args:     appDecl.Args,
-			Endpoint: appDecl.Endpoint,
-			Tool:     appDecl.Tool,
-			Env:      appDecl.Env,
-			Headers:  appDecl.Headers,
+			Plugin:    appDecl.Plugin,
+			Command:   appDecl.Command,
+			Args:      appDecl.Args,
+			Endpoint:  appDecl.Endpoint,
+			Tool:      appDecl.Tool,
+			Env:       appDecl.Env,
+			Headers:   appDecl.Headers,
+			Model:     appDecl.Model,
+			Grammar:   appDecl.Grammar,
+			Port:      appDecl.Port,
+			ServerBin: appDecl.ServerBin,
 		}
 	}
 	return BuildRegistry(decls, h)
@@ -116,6 +127,14 @@ func BuildRegistry(plugins map[string]*PluginDecl, h harness.Harness) (*Registry
 				return nil, fmt.Errorf("oracle: BuildRegistry: mcp_http plugin %q missing endpoint", name)
 			}
 			o = NewMCPHTTP(decl.Endpoint, decl.Tool, decl.Headers)
+
+		case "builtin.local_llm":
+			// Managed mode needs a model to fetch/serve; endpoint mode talks to
+			// an already-running server. One of the two must be set.
+			if decl.Model == "" && decl.Endpoint == "" {
+				return nil, fmt.Errorf("oracle: BuildRegistry: builtin.local_llm plugin %q requires either model: or endpoint:", name)
+			}
+			o = NewLocalLLM(decl.Model, decl.Port, decl.ServerBin, decl.Grammar, decl.Endpoint, decl.Env)
 
 		default:
 			return nil, fmt.Errorf("oracle: BuildRegistry: unknown plugin type %q for %q", decl.Plugin, name)

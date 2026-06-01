@@ -65,3 +65,11 @@ tools/runstatus/node_modules/
 # staged into the embed dir. Keep only the .gitkeep placeholder so the
 # //go:embed pattern matches on a fresh checkout.
 internal/runstatus/web/assets/index.html
+
+# Local-model oracle cache: the llama-server binary and *.gguf weights fetched
+# on first use (or pre-warmed via `make fetch-models` / `fetch-llama-server`).
+# The real cache lives at ~/.cache/kitsoki (or $KITSOKI_CACHE_DIR); this in-repo
+# dir is only a documented prewarm target. Never commit binaries/weights — keep
+# only the .gitkeep placeholder.
+internal/oracle/server/cache/*
+!internal/oracle/server/cache/.gitkeep

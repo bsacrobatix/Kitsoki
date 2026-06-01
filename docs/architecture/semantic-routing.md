@@ -193,12 +193,42 @@ app:
     revalidate_strikes: 3       # cache-row eviction threshold
     confidence_decay: false     # halve max_age for low-confidence rows
     stopwords_extra:  ["yall", "y'all", "wagon"]
+    extract_llm_on_no_match: false  # default false; see §2.1
 ```
 
 A nil `routing:` block means "use defaults" (see
 `app.DefaultRoutingConfig`). Set `enabled: false` to disable the
 routing tiers entirely and fall straight back to the
 deterministic-or-LLM behaviour kitsoki shipped before §10 Phase 7.
+
+### 2.1 LLM-tier backend and `extract_llm_on_no_match`
+
+The LLM tier (the last tier in §1) resolves through the oracle
+dispatch path, so it can be backed by **any** declared `oracle_plugins:`
+entry — not only the default `oracle.claude`. The natural choice for
+routing is the cheap, offline, schema-bounded `builtin.local_llm`
+backend (`oracle: oracle.local`): see
+[oracle-plugin.md §9 "Local model backend"](oracle-plugin.md#9-local-model-backend).
+Backing the routing LLM tier with a local model keeps routing working
+on a plane / in an air-gapped CI box and avoids consuming a Claude
+session for a decision that fires on nearly every turn.
+
+`extract_llm_on_no_match` (default **false**) is the opt-in that lets
+the *deterministic* router (`TrySemantic`) reach for that LLM tier on a
+**no_match** before falling through to the main-turn LLM. The
+deterministic tiers (synonyms, slot_template) always run first; this
+only changes what happens *after* a deterministic miss, and it is
+strictly opt-in because the extra extract-LLM call adds a model
+round-trip on every otherwise-unrouted turn.
+
+> **Status.** The config field is honoured and recorded today (an
+> opted-in no_match is traced distinctly), but the free-form-verdict →
+> `semroute.Verdict` confidence-band mapping is uncalibrated, so an
+> opted-in app still falls through to the main-turn LLM for now. Wiring
+> the actual local-model routing call lands with that calibration
+> (proposal Open Question 4). Backing the LLM tier of the *extract verb*
+> with `oracle.local` (via the effect's `oracle:` alias) needs no flag
+> and works today.
 
 ## 3. Growing the synonym library
 

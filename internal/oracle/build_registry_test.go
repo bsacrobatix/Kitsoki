@@ -125,6 +125,75 @@ func TestBuildRegistry_MCPHTTPMissingEndpoint(t *testing.T) {
 	}
 }
 
+// TestBuildRegistry_LocalLLMModel verifies that a builtin.local_llm declaration
+// with model: constructs a LocalLLMOracle (managed mode).
+func TestBuildRegistry_LocalLLMModel(t *testing.T) {
+	t.Parallel()
+
+	decls := map[string]*PluginDecl{
+		"oracle.local": {
+			Plugin:  "builtin.local_llm",
+			Model:   "qwen2.5-1.5b",
+			Port:    8081,
+			Grammar: true,
+		},
+	}
+	reg, err := BuildRegistry(decls, nil)
+	if err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+	defer reg.Close()
+
+	o, resolveErr := reg.Resolve("oracle.local")
+	if resolveErr != nil {
+		t.Fatalf("Resolve oracle.local: %v", resolveErr)
+	}
+	if _, ok := o.(*LocalLLMOracle); !ok {
+		t.Errorf("expected *LocalLLMOracle, got %T", o)
+	}
+}
+
+// TestBuildRegistry_LocalLLMEndpoint verifies that a builtin.local_llm
+// declaration with only endpoint: (bring-your-own-server) constructs a
+// LocalLLMOracle.
+func TestBuildRegistry_LocalLLMEndpoint(t *testing.T) {
+	t.Parallel()
+
+	decls := map[string]*PluginDecl{
+		"oracle.local": {
+			Plugin:   "builtin.local_llm",
+			Endpoint: "http://127.0.0.1:8081",
+		},
+	}
+	reg, err := BuildRegistry(decls, nil)
+	if err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+	defer reg.Close()
+
+	o, resolveErr := reg.Resolve("oracle.local")
+	if resolveErr != nil {
+		t.Fatalf("Resolve oracle.local: %v", resolveErr)
+	}
+	if _, ok := o.(*LocalLLMOracle); !ok {
+		t.Errorf("expected *LocalLLMOracle, got %T", o)
+	}
+}
+
+// TestBuildRegistry_LocalLLMMissingModelAndEndpoint verifies that a
+// builtin.local_llm declaration with neither model: nor endpoint: fails.
+func TestBuildRegistry_LocalLLMMissingModelAndEndpoint(t *testing.T) {
+	t.Parallel()
+
+	decls := map[string]*PluginDecl{
+		"oracle.local": {Plugin: "builtin.local_llm"},
+	}
+	_, err := BuildRegistry(decls, nil)
+	if err == nil {
+		t.Fatal("expected error for builtin.local_llm without model or endpoint, got nil")
+	}
+}
+
 // TestBuildRegistry_UnknownPlugin verifies that an unknown plugin type fails.
 func TestBuildRegistry_UnknownPlugin(t *testing.T) {
 	t.Parallel()

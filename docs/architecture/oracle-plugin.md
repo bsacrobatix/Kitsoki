@@ -41,7 +41,7 @@ oracle_plugins:
 
 ### Supported plugin types
 
-The `plugin:` value must be one of the four names below; any other value fails
+The `plugin:` value must be one of the five names below; any other value fails
 at story-load time.
 
 | Plugin type           | Required fields | When to use                                                 |
@@ -50,6 +50,7 @@ at story-load time.
 | `builtin.inprocess`   | _(none)_        | Compiled-in Go oracle. Declared in YAML but the `Oracle` impl must be injected in code via `RegisterInProcess` before dispatch; tests and deterministic stubs. |
 | `subprocess`          | `command:`      | External binary speaking JSON-RPC 2.0 over stdio.           |
 | `mcp_http`            | `endpoint:`     | Long-running HTTP service exposing an `ask` MCP tool.       |
+| `builtin.local_llm`   | `model:` **or** `endpoint:` | Cheap, offline, schema-bounded backend for routing and small `decide` gates — a local llama.cpp server over OpenAI HTTP. See [§9 Local model backend](#9-local-model-backend). |
 
 > The **cassette** transport (pre-recorded, deterministic replay) is a fourth
 > conformance transport but is *not* declarable via `oracle_plugins:`. It is
@@ -190,6 +191,7 @@ Kitsoki is the **validation authority**.  Plugins are dumb pipes.
 | `builtin.*`   | In-process; `Close()` on orchestrator shutdown.               |
 | `subprocess`  | Spawned on first Ask; reused for the session; `Close()` kills it. Crash → respawn on next Ask; trace records the crash as `OracleError`. |
 | `mcp_http`    | No kitsoki-owned lifecycle; plugin is a service. Kitsoki opens a client per session, closes it on session end. |
+| `builtin.local_llm` | **Managed (`model:`)**: a llama.cpp sidecar is fetched-on-first-use and spawned lazily on the first Ask, shared across calls, and terminated on `Close()` (SIGTERM, then SIGKILL after a grace window). **Endpoint (`endpoint:`)**: attaches to an already-running server; never fetches, spawns, or kills. |
 | `cassette`    | In-process; deterministic replay; no external process.        |
 
 **Deadline** is a soft cap (`AskRequest.Deadline`).  Kitsoki enforces a hard
@@ -210,7 +212,7 @@ not retroactively rewritten.
 | `deadline_exceeded`             | Context deadline exceeded.                            |
 | `sub_event_namespace_violation` | Sub-event Kind outside plugin namespace.              |
 | `sub_event_call_id_mismatch`    | Sub-event call_id ≠ parent call_id.                   |
-| `transport_error`               | HTTP/TLS/dial error on `mcp_http` transport.          |
+| `transport_error`               | HTTP/TLS/dial error on `mcp_http` or `builtin.local_llm` transport (4xx, missing/empty choices, unparseable body). |
 
 ---
 
@@ -258,6 +260,156 @@ episodes:
     response:
       data: {}
 ```
+
+---
+
+## 9. Local model backend
+
+`builtin.local_llm` is an opt-in, additive backend for the **small,
+high-frequency** decisions — semantic-routing's LLM tier and schema-bounded
+`decide` gates — where the `claude` default is heavier than the job needs.
+It is one `Oracle` behind the same `Ask` contract as every other transport, so
+any verb can target it with no handler change; `oracle.claude`
+(`builtin.claude_cli`) stays the injected default and the backend for every
+call that does not name `oracle.local`.
+
+It speaks **OpenAI-compatible HTTP** (`POST /v1/chat/completions`) to a local
+[llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server`. One
+`oracle_plugins:` entry:
+
+```yaml
+oracle_plugins:
+  oracle.local:
+    plugin: builtin.local_llm
+    model: qwen2.5-1.5b-instruct   # managed mode: fetched-on-first-use, spawns a sidecar
+    grammar: true                  # best-effort schema → grammar constraint (see below)
+    # port: 8080                   # optional; managed sidecar bind port
+    # server_bin: /path/to/llama-server  # optional; skip the binary fetch
+    # endpoint: http://127.0.0.1:8080     # endpoint mode: attach to a running server, never spawn
+```
+
+A decl must set **either** `model:` (managed mode) **or** `endpoint:`
+(attach mode), or story load fails fast with
+`requires model: or endpoint:`.
+
+### Grammar is best-effort, `ValidateSubmission` is the guarantee
+
+When `grammar: true` and the call carries a JSON Schema, the backend asks
+llama.cpp to constrain decoding to that schema
+(`response_format: {type: "json_schema", …}`), which strongly biases the model
+toward a schema-valid answer on the first try and collapses the
+validate-and-retry loop **for schemas inside llama.cpp's supported grammar
+subset** (flat objects, scalar fields, enums, simple typed arrays;
+`stories/pr-refinement/schemas/judge_verdict.json` is comfortably inside it).
+
+This is a *bias*, not a guarantee, for two reasons the design handles rather
+than assumes away:
+
+- **Fail-open.** If llama.cpp cannot translate the schema it logs the error,
+  generates **unconstrained**, and returns **HTTP 200** — there is no
+  server-side rejection.
+- **Out-of-subset constructs.** llama.cpp's json-schema-to-grammar omits
+  `$ref`/`$defs`, `uniqueItems`, `not`, `if`/`then`/`else`,
+  `dependentSchemas`, `contains`, and `anyOf`/`oneOf` alongside sibling
+  `properties`/`type`; `pattern` only works anchored `^…$`.
+
+So `ValidateSubmission` (the schema check kitsoki already runs on every
+oracle answer — see [§5](#5-schema-validation-locus)) is the **only**
+structural guarantee here, not a backstop. `AskResponse.Meta["grammar"]`
+records whether the constraint was *actually* applied (false on a fail-open
+response), so a run is auditable in runstatus.
+
+### Load-time schema-subset check
+
+To keep authors from hitting a silent fail-open at runtime, a `decide` effect
+whose `oracle:` alias resolves to a `grammar: true` `builtin.local_llm` plugin
+has its `with.schema` checked against the supported subset **at story load**.
+A schema using an unsupported construct fails fast with a message naming the
+plugin, the schema, and the offending construct. (Initial scope: the `decide`
+verb, whose schema is a `with.schema` path. `extract`/`ask` source their
+schemas differently and are a follow-up; templated schema paths are skipped
+because they cannot be resolved statically.)
+
+### Validation-reject fallback to `oracle.claude`
+
+When `ValidateSubmission` rejects a local-model `Submission` (a fail-open
+output, or a schema the grammar could not fully express), retrying the *same*
+local backend would reproduce the deterministic failure. Instead the verb
+handler **falls back to `oracle.claude` for that one call**, exactly once, no
+same-backend retry. The fallback reuses the **same `call_id`**, so it is one
+`oracle.call.*` pair, and the substitution is recorded inline:
+
+- on fallback **success**, the `OracleReturned` payload carries
+  `Meta["fallback_of"] = "<original plugin>"` plus a `substitution` object
+  `{reason: "schema_invalid", original_plugin, fallback_plugin: "oracle.claude"}`;
+- on fallback **failure**, the `OracleError` payload carries the same
+  `substitution` object.
+
+The fallback fires **only** for `builtin.local_llm` backends. External plugins
+(`subprocess`, `mcp_http`) still fail hard on `schema_invalid` — they are not
+silently substituted.
+
+### Sidecar lifecycle and acquisition (managed mode)
+
+In managed mode the sidecar is **zero-touch**: on the first `oracle.local`
+call kitsoki fetches the pinned `llama-server` release archive for the host
+platform and the model's GGUF weights into a cache dir
+(`~/.cache/kitsoki/{bin,models}`, overridable via `KITSOKI_CACHE_DIR`),
+sha256-verifying each against a baked pin before use, then spawns `llama-server`
+bound to `127.0.0.1` and health-gates on `GET /health` before the first POST.
+The release archive is extracted into one per-release directory (the binary plus
+its bundled `libggml*`/`libllama*` shared libraries, SONAME symlinks preserved),
+and the server is launched with that directory on `LD_LIBRARY_PATH`. The first
+fetch logs an explicit `downloading <artifact> …` disclosure so a multi-GB
+download is never silent. Nothing binary is committed or bundled into the release.
+
+**Older-glibc Linux (RHEL/Rocky 9, etc.).** The upstream `llama-server` Linux
+build needs a newer C++ runtime (`GLIBCXX_3.4.30`, GCC 12) than these distros
+ship (they cap at `3.4.29`). The fetcher probes the system `libstdc++` and, only
+when it is too old, also fetches a sha-pinned compatible `libstdc++` (conda-forge
+`libstdcxx-ng`) into the same per-release directory so it resolves ahead of the
+system copy via `LD_LIBRARY_PATH`. On a sufficiently new system, and on macOS
+(which links its own C++ runtime), this step is skipped. This keeps the
+zero-touch promise on enterprise Linux without any manual `sudo`/toolchain
+install. Verified end-to-end on a glibc-2.34 box (cold fetch of all three
+artifacts → spawn → grammar-constrained `decide` → schema-valid verdict → warm
+run reuses the cache with no re-download).
+
+**Opt-in / no surprise downloads.** The whole subsystem is dormant unless a story
+*both* declares a `builtin.local_llm` plugin *and* routes a call to it; a default
+app on `oracle.claude` never constructs the plugin, never spawns, and never
+touches the cache or network. The download is strictly lazy — it happens only
+inside an `Ask` already dispatched to a managed `oracle.local`, so declaring the
+plugin without routing to it fetches nothing.
+
+`llama-server` serves a single decode slot sequentially by default, so the
+sidecar launches with `--parallel N`; routing fires on nearly every turn, so
+an under-provisioned slot count is the likely source of stacked latency.
+
+To pre-warm the cache for offline/CI boxes — running the *same* fetch-and-verify
+path ahead of time so no turn hits a runtime download — use the make targets:
+
+```
+make fetch-llama-server          # fetch the llama-server binary
+make fetch-models                # fetch the default model's weights
+make fetch-models MODEL=<id>     # fetch a specific model
+```
+
+`endpoint:` mode bypasses all fetching, spawning, and the make targets: it
+attaches to a server you already run and never owns its lifecycle.
+
+The `linux/amd64` pins (llama.cpp release + default Qwen2.5-1.5B GGUF + the
+libstdc++ shim) are filled and proven; `darwin/arm64` is still a TODO placeholder
+(its archive sha must be verified on Apple Silicon), so managed mode on Apple
+Silicon currently fails loudly — use `endpoint:` mode there meanwhile.
+
+**Measured throughput** (10-core CPU Rocky/RHEL 9.4 VM, Qwen2.5-1.5B Q4_K_M,
+`--parallel 4`): generation ~6.9 tok/s, prompt ~56 tok/s, weights load ~2-3s; a
+cold managed `decide` (~1.1 GB download + load + decode) ~24-28s, a warm one
+~12-13s. **Calibration note:** llama.cpp grammar constrains JSON *shape*, not
+numeric *range*, so a small model may emit e.g. `confidence: 95` for a `0..1`
+field — the decide prompt should state field scales, and any out-of-range output
+is caught by `ValidateSubmission`, which trips the `oracle.claude` fallback.
 
 ---
 
