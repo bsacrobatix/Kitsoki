@@ -20,6 +20,7 @@ package store
 //	GuardRejected:     noted, state/world unchanged.
 //	TurnStarted:       noted (used by orchestrator, not machine core).
 //	TurnEnded:         noted.
+//	StorySnapshot/StoryChanged: noted — embedded story source, no fold effect.
 //	All other kinds:   silently ignored (forward-compatible with future kinds).
 
 import (
@@ -150,6 +151,13 @@ func BuildJourney(def *app.AppDef, initialState app.StatePath, initialWorld worl
 			// expression). No transition fired, so there is nothing to
 			// re-apply; the event exists purely so the trace records why
 			// the turn produced no state change.
+
+		case StorySnapshot, StoryChanged:
+			// The embedded story source (base snapshot + diffs). These make
+			// the trace self-contained for re-compilation and branching, but
+			// they do not mutate world or state — the journey fold ignores
+			// them. The story is consumed by StoryAtTurn + app.LoadFromFiles
+			// when reconstructing the machine, not here.
 
 		default:
 			// Forward-compatible: silently ignore unknown event kinds.

@@ -16,11 +16,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+
+	"kitsoki/internal/testrunner"
 )
 
 // ─── Style helpers (NO_COLOR aware) ──────────────────────────────────────────
@@ -235,6 +238,95 @@ For ad-hoc field extraction, jq works equally well:
 			return prettyPrint(r, cmd.OutOrStdout())
 		},
 	}
+
+	cmd.AddCommand(traceToFlowCmd())
+	return cmd
+}
+
+// traceToFlowCmd implements `kitsoki trace to-flow`: convert a recorded JSONL
+// session trace into a replayable deterministic flow fixture (+ host cassette).
+func traceToFlowCmd() *cobra.Command {
+	var (
+		outPath       string
+		recordingPath string
+		appPath       string
+		appID         string
+		initialState  string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "to-flow <trace.jsonl>",
+		Short: "Convert a recorded session trace into a replayable flow fixture",
+		Long: `Convert a recorded JSONL session trace into a deterministic flow fixture.
+
+Each machine.transition in the trace becomes one flow turn (intent name +
+resolved slots, verbatim, in order). Each recorded host.* call becomes one
+host-cassette episode, in trace order, matched on handler — so per-call-varying
+oracle/host responses (e.g. five distinct host.oracle.converse replies) replay
+in sequence.
+
+No expect_state / expect_world is emitted on the turns: a trace recorded against
+an older version of a story may route differently against the current one;
+strict expectations would hard-fail replay on the first divergence. The fixture
+is a faithful re-drive of the recorded intents.
+
+The flow is written to --out; the cassette (when the trace has host calls) is
+written next to it (default <out-basename>.cassette.yaml) and referenced from
+the fixture's host_cassette: field. Use --recording to override the cassette
+path.
+
+Replay the result with:
+  kitsoki test flows <app.yaml> --flows <out> --trace-out <fresh-trace.jsonl>`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tracePath := args[0]
+			if outPath == "" {
+				return fmt.Errorf("--out is required")
+			}
+			if appPath == "" {
+				return fmt.Errorf("--app is required (written into the fixture's app: field)")
+			}
+
+			casPath := recordingPath
+			if casPath == "" {
+				casPath = strings.TrimSuffix(outPath, ".yaml") + ".cassette.yaml"
+			}
+
+			casRef := casPath
+			if filepath.Dir(casPath) == filepath.Dir(outPath) {
+				casRef = filepath.Base(casPath)
+			}
+
+			res, err := testrunner.ConvertTraceToFlow(tracePath, testrunner.ConvertOptions{
+				AppPath:      appPath,
+				CassettePath: casRef,
+				AppID:        appID,
+				InitialState: initialState,
+			})
+			if err != nil {
+				return err
+			}
+
+			if err := os.WriteFile(outPath, res.FlowYAML, 0o644); err != nil {
+				return fmt.Errorf("write flow %q: %w", outPath, err)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "wrote flow fixture %s (%d turns)\n", outPath, res.NumTurns)
+
+			if res.CassetteYAML != nil {
+				if err := os.WriteFile(casPath, res.CassetteYAML, 0o644); err != nil {
+					return fmt.Errorf("write cassette %q: %w", casPath, err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "wrote host cassette %s (%d episodes)\n", casPath, res.NumEpisodes)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&outPath, "out", "", "output path for the generated flow fixture (required)")
+	cmd.Flags().StringVar(&recordingPath, "recording", "", "output path for the generated host cassette (default: <out>.cassette.yaml)")
+	cmd.Flags().StringVar(&appPath, "app", "", "value for the fixture's app: field, e.g. ../app.yaml (required)")
+	cmd.Flags().StringVar(&appID, "app-id", "", "value for the cassette's app_id: field (default: from-trace)")
+	cmd.Flags().StringVar(&initialState, "initial-state", "", "override the derived initial state")
 
 	return cmd
 }

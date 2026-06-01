@@ -373,6 +373,81 @@ func TestRunIntent_EmitsTurnInputAndIntentAccepted(t *testing.T) {
 	require.NotEmpty(t, string(accepted.StatePath))
 }
 
+// TestRunIntentWithInput_StampsOperatorText verifies that when a displayInput is
+// supplied (the trace→flow converter threading the operator's original words),
+// the emitted turn.input (UserInputReceived) and turn.start (TurnStarted) events
+// record that real text instead of the synthetic "[intent] <name>" string —
+// while the intent still drives the transition. This is the replay-side half of
+// the trace-fidelity fix.
+func TestRunIntentWithInput_StampsOperatorText(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	tracePath := filepath.Join(dir, "trace_display_input.jsonl")
+
+	def, err := app.Load("../../testdata/apps/cloak/app.yaml")
+	require.NoError(t, err)
+
+	m, err := machine.New(def)
+	require.NoError(t, err)
+
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	sink, err := store.OpenJSONL(tracePath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sink.Close() })
+
+	hostReg := host.NewRegistry()
+	host.RegisterBuiltins(hostReg)
+
+	orch := orchestrator.New(def, m, s, noopHarness{},
+		orchestrator.WithHostRegistry(hostReg),
+		orchestrator.WithEventSink(sink),
+		orchestrator.WithEventSinkAuthority(true),
+	)
+	ctx := context.Background()
+
+	sid, err := orch.NewSession(ctx)
+	require.NoError(t, err)
+
+	const operatorWords = "they're an analyst at a cyber security research firm"
+	out, err := orch.RunIntentWithInput(ctx, sid, "go", map[string]any{"direction": "west"}, operatorWords)
+	require.NoError(t, err)
+	require.Equal(t, orchestrator.ModeTransitioned, out.Mode,
+		"intent must still drive the transition deterministically")
+
+	hist := sink.History()
+
+	var input, start *store.Event
+	for i := range hist {
+		switch hist[i].Kind {
+		case store.UserInputReceived:
+			ev := hist[i]
+			input = &ev
+		case store.TurnStarted:
+			ev := hist[i]
+			start = &ev
+		}
+	}
+	require.NotNil(t, input, "must emit a turn.input event")
+	require.NotNil(t, start, "must emit a turn.start event")
+
+	// turn.input.input must be the operator's real words, NOT "[intent] go".
+	var inputPayload map[string]any
+	require.NoError(t, json.Unmarshal(input.Payload, &inputPayload))
+	require.Equal(t, operatorWords, inputPayload["input"],
+		"turn.input must record the operator's real words, not the synthetic marker")
+	require.Equal(t, "go", inputPayload["intent"],
+		"intent must still be recorded — routing is unaffected")
+
+	// turn.start mirrors the same input string.
+	var startPayload map[string]any
+	require.NoError(t, json.Unmarshal(start.Payload, &startPayload))
+	require.Equal(t, operatorWords, startPayload["input"],
+		"turn.start must mirror the operator's real words")
+}
+
 // TestStatePathNonEmpty_RunIntent_Rejected verifies every event written during
 // a rejected RunIntent turn (INTENT_NOT_ALLOWED) has a non-empty state_path.
 func TestStatePathNonEmpty_RunIntent_Rejected(t *testing.T) {

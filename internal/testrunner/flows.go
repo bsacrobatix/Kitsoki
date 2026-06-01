@@ -210,6 +210,16 @@ type FlowTurn struct {
 	Intent *FlowIntent `yaml:"intent,omitempty"`
 	Input  string      `yaml:"input,omitempty"`
 
+	// DisplayInput, when set on an intent: turn, overrides the synthetic
+	// "[intent] <name>" string the RunIntent path stamps onto the emitted
+	// turn.input / turn.start events with the operator's actual free-text
+	// utterance. It does NOT affect routing — intent + slots still drive the
+	// transition deterministically; only the recorded input STRING changes. Set
+	// by the trace→flow converter (fromtrace.go) so a reconstructed trace's user
+	// bubbles read the operator's real words. Empty preserves the synthetic
+	// default, leaving existing fixtures and tests unaffected.
+	DisplayInput string `yaml:"display_input,omitempty"`
+
 	// WorldOverride mutates world before guard evaluation on this turn.
 	// Lets fixtures probe arcs that would otherwise require a long preceding
 	// flow (e.g. the L2 cycle-budget feedback arcs).
@@ -1451,7 +1461,7 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 				}
 			}
 
-			outcome, turnErr = rig.orch.RunIntent(ctx, rig.sid, call.Intent, map[string]any(call.Slots))
+			outcome, turnErr = rig.orch.RunIntentWithInput(ctx, rig.sid, call.Intent, map[string]any(call.Slots), turn.DisplayInput)
 		} else if turn.Input != "" {
 			// input: turns in the orchestrator path require a recording to resolve the
 			// intent. For now we return an error — the orchestrator path is only used

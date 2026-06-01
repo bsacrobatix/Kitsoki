@@ -68,7 +68,24 @@ const (
 	// OffPathAnswer is appended when the oracle returns a reply to an
 	// off-path question. Replay treats it as a no-op.
 	OffPathAnswer EventKind = "oracle.off_path.answer"
-	// TurnEnded is appended at the end of every user turn.
+	// TurnEnded is appended at the end of every user turn. Payload carries
+	// {"outcome", "to"} and, on a successful transition, "view": the rendered
+	// operator-facing room view (the deterministic narration the operator saw
+	// at the end of the turn — banner/prose/kv/headings/questions, expanded
+	// from the room's view template against world state). Recording it here
+	// makes the trace self-contained: the view templates can change mid-run
+	// and run-to-run and are NOT pinned to a git sha, so the rendered
+	// narration cannot be reconstructed after the fact from the story files —
+	// it must be captured at render time. Exactly one view per turn, which is
+	// why it rides turn.end rather than its own event. Omitted when empty
+	// (rejected turns, background turns). Replay ignores the payload.
+	//
+	// The recorded view has presentation ANSI stripped (the room's lipgloss
+	// banner/heading colour, which lipgloss only emits to a colour terminal)
+	// so the bytes are deterministic regardless of the color profile the
+	// session ran under. The zero-width source-color sentinels (which mark
+	// LLM- vs template-generated spans) are NOT ANSI and are preserved, so a
+	// consumer can still re-paint provenance. See orchestrator.recordedView.
 	TurnEnded EventKind = "turn.end"
 	// StateExited is appended when the machine leaves a state (compound or leaf).
 	StateExited EventKind = "machine.state_exited"
@@ -139,6 +156,45 @@ const (
 	// returns an error. Payload carries the error string, call_id, verb.
 	// Replay no-op.
 	OracleError EventKind = "oracle.call.error"
+
+	// StorySnapshot is the base snapshot of the *effective story* — every
+	// file the loader touches to build the running machine (manifests +
+	// views + prompts + scripts + fixtures under the story tree and any
+	// imported sibling trees). It is appended exactly once per session, at
+	// session start (turn 0), as the first event after the header.
+	//
+	// Recording the story IN the trace is what makes a trace a
+	// self-contained, deterministic replay: the story files on disk can be
+	// edited mid-run (/reload, /meta) and after the session ends, and are
+	// not guaranteed to be pinned to a git sha — so a replay that re-reads
+	// disk no longer reproduces what happened, and you cannot rewind to a
+	// turn and branch onto a new path because the story effective at that
+	// turn is gone. With the story embedded, replay reconstructs the
+	// AppDef from the trace (materialise the files to a temp dir + app.Load).
+	//
+	// Payload (see storySnapshotPayload in story.go): {"app_id", "entry",
+	// "hash", "files"} where `files` maps a path-relative-to-capture-root to
+	// the base64 of the file's raw bytes (base64 sidesteps the JSONL
+	// NFC/NUL/CRLF write constraints and is byte-faithful), `entry` is the
+	// root manifest path relative to the same capture root, and `hash` is
+	// the sha256 over the canonical sorted file map. Replay folds it as a
+	// no-op (state/world unchanged); the story is consumed only when
+	// reconstructing the machine, not when folding the journey.
+	StorySnapshot EventKind = "session.story"
+
+	// StoryChanged is a diff against the previous story state, appended
+	// whenever the effective story's hash changes mid-run — i.e. after a
+	// /reload or a /meta edit (both funnel through orchestrator.Reload).
+	// Recording the change in the trace (rather than relying on a git sha)
+	// is required because /reload picks up *uncommitted* edits a sha cannot
+	// name. Reconstruction = the latest StorySnapshot then every StoryChanged
+	// up to the target turn, applied in order.
+	//
+	// Payload (see storyChangedPayload in story.go): {"hash", "prev_hash",
+	// "changed", "removed"} where `changed` maps relpath → base64 of the new
+	// bytes (added or modified files) and `removed` lists deleted relpaths.
+	// Replay folds it as a no-op.
+	StoryChanged EventKind = "story.changed"
 )
 
 // Event is one row in the append-only event log.

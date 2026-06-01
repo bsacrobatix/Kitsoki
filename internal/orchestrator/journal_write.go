@@ -337,10 +337,12 @@ func journalEntriesForEvents(
 		entries = append(entries, e)
 	}
 
-	// Emit view.rendered on TurnEnded.
+	// Emit view.rendered on TurnEnded. The view is recorded with presentation
+	// ANSI stripped (sentinels preserved) so the journal entry is deterministic
+	// across color profiles — see recordedView.
 	if hasTurnEnded {
 		vrBody, _ := json.Marshal(map[string]any{
-			"view_text":  viewText,
+			"view_text":  recordedView(viewText),
 			"state_path": string(currentStatePath),
 			"user_input": userInput,
 		})

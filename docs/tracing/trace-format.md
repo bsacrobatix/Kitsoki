@@ -98,6 +98,81 @@ These are written by `RouteProvenance.stampOn` in
 `internal/orchestrator/orchestrator.go`; see `RouteProvenance` for the
 source-of-truth field docs.
 
+**`turn.end` payload — recorded room narration.** On a successful transition,
+`turn.end` carries the rendered operator-facing room view in `view` alongside
+`outcome` and `to`:
+
+| Payload key | Type   | When present        | Meaning                                                                 |
+|-------------|--------|---------------------|-------------------------------------------------------------------------|
+| `outcome`   | string | always              | `transitioned`, `rejected`, …                                           |
+| `to`        | string | transitioned        | Destination state path.                                                 |
+| `view`      | string | transitioned, non-empty | The room's `view:` template expanded against world state at the end of the turn — the deterministic narration the operator saw (banner / prose / kv / headings / the questions a clarify room poses). |
+
+The view is recorded **in the trace** rather than reconstructed later because
+the story's view templates can change mid-run (meta-mode edits) and run-to-run,
+and are not guaranteed to be pinned to a git sha — so the rendered narration is
+not recoverable from the story files after the fact. It is captured at render
+time. There is exactly one rendered view per turn, which is why it rides
+`turn.end` rather than a dedicated event (contrast `machine.say`, which can fire
+several times per turn and so warranted its own kind). Omitted when empty
+(rejected turns, background/scheduler turns). Written by `transitionedTurnEnd`
+in `internal/orchestrator/orchestrator.go`. Replay ignores the payload.
+
+**`session.story` / `story.changed` — the embedded effective story.** Where
+`turn.end` records the rendered *narration*, these two events record the story
+*source* — every file the loader touches to build the running machine
+(manifests + views + prompts + scripts + fixtures under the story tree and any
+imported sibling trees). This is what makes a trace a self-contained,
+deterministic replay: the story on disk can be edited mid-run (`/reload`,
+`/meta`) or after the session, so a replay that re-reads disk no longer
+reproduces what happened — and you cannot rewind to a turn and *branch* onto a
+new path, because the story effective at that turn is gone. With the source
+embedded, replay reconstructs the `AppDef` from the trace
+(`store.StoryAtTurn` → `app.LoadFromFiles`: materialise the files to a temp dir
+and re-run `app.Load`); see `kitsoki turn --trace <trace>` with no `--app`.
+
+- **`session.story`** is the base snapshot, appended exactly once per session
+  at start (turn 0). Payload: `{"app_id", "entry", "hash", "files"}`.
+- **`story.changed`** is a diff against the prior story state, appended whenever
+  the effective story's content hash drifts (a `/reload` or `/meta` edit; both
+  funnel through `orchestrator.Reload`). Recording the change *in the trace*
+  (rather than a git sha) is required because `/reload` picks up *uncommitted*
+  edits a sha cannot name. Payload: `{"hash", "prev_hash", "changed",
+  "removed"}`. Reconstruction at a turn = the latest `session.story` with
+  `Turn ≤ target`, then every `story.changed` up to the target turn applied in
+  order (overlay `changed`, drop `removed`).
+
+| Payload key | Type   | Event           | Meaning                                                                 |
+|-------------|--------|-----------------|-------------------------------------------------------------------------|
+| `app_id`    | string | session.story   | The app id (`app.id`).                                                   |
+| `entry`     | string | session.story   | Root manifest path, relative to the capture root — hand to the loader.   |
+| `hash`      | string | both            | sha256 (hex) over the canonical sorted file map (raw bytes).             |
+| `files`     | object | session.story   | `relpath → base64(raw bytes)` for every captured file.                   |
+| `prev_hash` | string | story.changed   | The hash this diff applies on top of.                                    |
+| `changed`   | object | story.changed   | `relpath → base64(raw bytes)` for added/modified files.                  |
+| `removed`   | array  | story.changed   | Deleted relpaths.                                                        |
+
+Two wire-format details:
+
+- **File paths are keyed relative to the *capture root*** — the common ancestor
+  of the story's `BaseDir`, every imported manifest's directory, and any prompt
+  shared/overlay dirs. Keying relative to the common ancestor preserves the
+  relative layout that `import: ../sibling/app.yaml` depends on, while staying
+  portable (no absolute machine paths). `entry` is keyed the same way.
+- **File contents are base64-encoded.** The JSONL sink rejects non-NFC strings,
+  NUL bytes, and CRLF (see §6), any of which a prompt/fixture file may
+  legitimately contain. Base64 sidesteps those write-time constraints and is
+  byte-faithful; the `hash` is computed over the raw bytes.
+
+These events are written ONLY to the JSONL trace (never the legacy SQLite event
+log): self-containment is a property of the trace replay reads, and the JSONL
+sink continues per-turn `seq` numbering across appends, so a snapshot rides
+turn 0 alongside the initial `on_enter` events and a diff rides the latest turn
+without the one-batch-per-turn collision the SQLite store enforces. Written by
+`Orchestrator.RecordEffectiveStory`
+(`internal/orchestrator/story_record.go`); the capture/reconstruct helpers live
+in `internal/store/story.go`. Replay folds both as no-ops.
+
 ---
 
 ## 4. EventKind vocabulary
@@ -106,6 +181,8 @@ All kinds use the dotted form the SPA subsystem chip logic already consumes.
 
 | Kind                         | When written                                                 |
 |------------------------------|--------------------------------------------------------------|
+| `session.story`              | Once per session at start (turn 0): base snapshot of the effective story. Replay no-op. |
+| `story.changed`              | When the effective story's hash drifts (`/reload`, `/meta`): a diff. Replay no-op. |
 | `turn.start`                 | At the start of every user turn.                            |
 | `turn.input`                 | When user input is received (before harness is called).     |
 | `turn.end`                   | At the end of every user turn.                              |
@@ -336,6 +413,77 @@ The trace is lossless and replay is deterministic:
 7. **Exporter pass-through:** `FromHistory` emits `Snapshot.Events` as the JSONL
    lines parsed into `TraceEvent` values — no exporter-side synthesis, no
    back-fill, no timestamp fudging.
+8. **Self-contained story:** the trace carries the entire effective story
+   (`session.story` at start; `story.changed` for each mid-run `/reload` /
+   `/meta` edit). Replay reconstructs the `AppDef` from the trace
+   (`store.StoryAtTurn` → `app.LoadFromFiles`) rather than re-reading disk, so a
+   trace replays — and can be rewound and branched — deterministically even
+   after the story files on disk change or are removed (`kitsoki turn --trace`
+   with no `--app`).
 
 These guarantees are enforced by a 7-layer determinism test suite
 (`internal/store/`, `internal/orchestrator/`, `internal/testrunner/`).
+
+---
+
+## 11. `kitsoki trace to-flow` — trace → replayable flow fixture
+
+A recorded session trace can be converted into a deterministic flow fixture
+(plus a host cassette) so the session can be re-driven through the engine
+without an LLM. This is how a session recorded by an older binary is replayed
+through a freshly-built one so the new trace carries fields the old one lacked
+(e.g. `turn.end.view`).
+
+```
+kitsoki trace to-flow <trace.jsonl> --app ../app.yaml --out <flow.yaml> \
+  [--recording <cassette.yaml>] [--app-id <id>] [--initial-state <state>]
+```
+
+Then replay and capture a fresh trace:
+
+```
+kitsoki test flows <app.yaml> --flows <flow.yaml> --trace-out <fresh.jsonl>
+```
+
+(`--trace-out` wires `testrunner.FlowOptions.TracePath`, fixing the run's
+authoritative JSONL sink to a known path. Point `--flows` at the single
+generated fixture so its trace isn't clobbered by sibling fixtures.)
+
+### Mapping
+
+| Trace                          | Fixture                                                        |
+|--------------------------------|----------------------------------------------------------------|
+| First `machine.transition` `from` | `initial_state` (override with `--initial-state`).          |
+| (none — empty by default)      | `initial_world: {}` — the app's world schema defaults + room `on_enter` effects repopulate it on replay. |
+| Each `machine.transition`      | One `turns:` entry `{intent: {name, slots}}`, **slots verbatim** (string values such as `n: "1"` are preserved), in order. Transitions with an empty `intent` (e.g. synthetic timeouts) are skipped — they are not re-drivable. |
+| Each `harness.returned` whose `namespace` starts with `host.` | One cassette episode, in trace order, `match: {handler: <namespace>}`, `response.data = <returned data>`. |
+
+### Why a cassette, not `host_handlers:`
+
+A session's host/oracle responses vary per call (e.g. `host.oracle.converse`
+returns a different reply each of five invocations). `host_handlers:` declares
+**one** response per handler name and so cannot reproduce a varying session. The
+cassette's episodes are consumed first-unplayed-match-by-handler
+(`MatchEpisode`) and the generated episodes are **not** `replay:any`, so the
+i-th call to a handler consumes the i-th matching episode — exact ordered
+replay of per-call-varying responses.
+
+### Story-drift policy (no expectations emitted)
+
+The converter deliberately emits **no** `expect_state` / `expect_world` on the
+turns. A trace recorded against an earlier version of a story may route
+differently against the current story (rooms added/removed on the path); strict
+expectations would hard-fail replay on the first divergence and hide the rest of
+the reconstruction. The generated flow is a faithful re-drive of the recorded
+*intents*, not an assertion of the old path.
+
+A consequence worth knowing: if the current story routes a turn into a room that
+did **not** exist when the trace was recorded, that room's `on_enter` may invoke
+a host handler the trace never recorded — so the cassette has no episode for it.
+With no fallback handler the call is a hard cassette miss and the room's
+`on_error:` arc fires (typically bouncing back toward idle). This is expected
+drift surfaced honestly by replay, not an engine fault: the trace simply does
+not contain a response for a handler the new path needs.
+
+The transform lives in `internal/testrunner/fromtrace.go`
+(`ConvertTraceToFlow`); the CLI is `cmd/kitsoki/trace.go` (`traceToFlowCmd`).

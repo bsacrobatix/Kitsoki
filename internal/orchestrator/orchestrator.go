@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/app"
@@ -1102,10 +1103,8 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	}
 
 	successEvents := append(prefix, result.Events...)
-	endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
-		"outcome": "transitioned",
-		"to":      string(result.NewState),
-	}, turnNum)
+	endEvent := newOrchestratorEvent(store.TurnEnded,
+		transitionedTurnEnd(result.NewState, result.View), turnNum)
 	successEvents = append(successEvents, endEvent)
 	if inputEvent.Kind != "" {
 		successEvents = append([]store.Event{inputEvent}, successEvents...)
@@ -1623,10 +1622,8 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 	}
 
 	successEvents := append([]store.Event{sdInputEvent, startEvent}, result.Events...)
-	endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
-		"outcome": "transitioned",
-		"to":      string(result.NewState),
-	}, turnNum)
+	endEvent := newOrchestratorEvent(store.TurnEnded,
+		transitionedTurnEnd(result.NewState, result.View), turnNum)
 	successEvents = append(successEvents, endEvent)
 	for i := range successEvents {
 		successEvents[i].Turn = turnNum
@@ -1982,10 +1979,8 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 	}, turnNum)
 
 	successEvents := append([]store.Event{startEvent}, result.Events...)
-	endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
-		"outcome": "transitioned",
-		"to":      string(result.NewState),
-	}, turnNum)
+	endEvent := newOrchestratorEvent(store.TurnEnded,
+		transitionedTurnEnd(result.NewState, result.View), turnNum)
 	successEvents = append(successEvents, endEvent)
 
 	for i := range successEvents {
@@ -2299,6 +2294,40 @@ func newOrchestratorEvent(kind store.EventKind, payload map[string]any, turn app
 		Turn:    turn,
 		Payload: b,
 	}
+}
+
+// transitionedTurnEnd builds the turn.end payload for a successful transition.
+// It records the rendered operator-facing view ("view") alongside the outcome
+// and destination state, so the trace carries the deterministic room narration
+// the operator saw — see the store.TurnEnded doc for why this must live in the
+// trace rather than be reconstructed from the (mutable, un-pinned) story files.
+// The view is omitted when empty so rejected/background turns stay lean.
+//
+// Presentation ANSI is stripped before recording: the view's lipgloss element
+// styling (banner/heading colour) is emitted only when stdout is a colour
+// terminal, so leaving it in would make the same session record different bytes
+// in a TTY vs. headless — a non-deterministic trace. The zero-width
+// source-color sentinels are NOT ANSI and survive the strip, so the recorded
+// narration stays deterministic AND keeps its LLM/template provenance for
+// consumers to re-style. See recordedView.
+func transitionedTurnEnd(to app.StatePath, view string) map[string]any {
+	p := map[string]any{
+		"outcome": "transitioned",
+		"to":      string(to),
+	}
+	if v := recordedView(view); v != "" {
+		p["view"] = v
+	}
+	return p
+}
+
+// recordedView normalises a rendered view for the trace: it strips presentation
+// ANSI (terminal-profile-dependent, hence non-deterministic) while preserving
+// the source-color sentinels. Both trace recording boundaries — turn.end.view
+// and the journal's view.rendered entry — funnel through here so the recorded
+// narration is identical regardless of the color profile it was rendered under.
+func recordedView(view string) string {
+	return ansi.Strip(view)
 }
 
 // stampStatePathPerEvent pre-stamps StateExited and StateEntered events with

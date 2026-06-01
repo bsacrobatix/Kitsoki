@@ -219,6 +219,22 @@ func (o *Orchestrator) SetLogger(l *slog.Logger) {
 // If you are writing user-facing conversation handling, use Turn instead so the
 // LLM harness participates in routing.
 func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any) (*TurnOutcome, error) {
+	return o.RunIntentWithInput(ctx, sid, intentName, slots, "")
+}
+
+// RunIntentWithInput is RunIntent with an optional displayInput override for the
+// recorded user-input string. When displayInput is non-empty, the emitted
+// turn.input (store.UserInputReceived) and turn.start (store.TurnStarted) events
+// record displayInput instead of the synthetic "[intent] <name>" string. This is
+// purely cosmetic for the recorded trace: the intent name + slots still drive the
+// transition deterministically (no LLM routing). When displayInput is empty the
+// behaviour is identical to RunIntent — the synthetic "[intent] <name>" string is
+// used — so existing fixtures and callers are unaffected.
+//
+// The trace→flow converter (internal/testrunner/fromtrace.go) sets displayInput
+// from the original session's turn.input payload so a reconstructed trace shows
+// the operator's real words in the user bubble rather than "[intent] answer".
+func (o *Orchestrator) RunIntentWithInput(ctx context.Context, sid app.SessionID, intentName string, slots map[string]any, displayInput string) (*TurnOutcome, error) {
 	// Serialise against handleJobTerminal — see Turn for rationale.
 	sessMu := o.sessionLock(sid)
 	sessMu.Lock()
@@ -252,10 +268,20 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 		result.Events[i].Turn = turnNum
 	}
 
+	// The recorded user-input string. Defaults to the synthetic "[intent] <name>"
+	// marker, but when the caller supplies displayInput (the trace→flow converter
+	// threading the operator's original utterance) that real text is recorded
+	// instead. Routing is unaffected either way — intentName + slots drive the
+	// transition; only the emitted turn.input / turn.start string changes.
+	inputStr := fmt.Sprintf("[intent] %s", intentName)
+	if displayInput != "" {
+		inputStr = displayInput
+	}
+
 	// Build a minimal prefix event (no LLMToolCall since no harness was involved).
 	startEvent := newOrchestratorEvent(store.TurnStarted, map[string]any{
 		"turn":   int64(turnNum),
-		"input":  fmt.Sprintf("[intent] %s", intentName),
+		"input":  inputStr,
 		"direct": true,
 	}, turnNum)
 
@@ -264,7 +290,7 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 	// flow-driven trace carries the same user-input row a live session would.
 	// Payload uses the unified {input, intent} shape SubmitDirect emits.
 	riInputPayload, _ := json.Marshal(map[string]any{
-		"input":  fmt.Sprintf("[intent] %s", intentName),
+		"input":  inputStr,
 		"intent": intentName,
 	})
 	inputEvent := store.Event{
@@ -393,10 +419,8 @@ func (o *Orchestrator) RunIntent(ctx context.Context, sid app.SessionID, intentN
 	}, turnNum)
 
 	successEvents := append([]store.Event{inputEvent, startEvent, acceptedEvent}, result.Events...)
-	endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
-		"outcome": "transitioned",
-		"to":      string(result.NewState),
-	}, turnNum)
+	endEvent := newOrchestratorEvent(store.TurnEnded,
+		transitionedTurnEnd(result.NewState, result.View), turnNum)
 	successEvents = append(successEvents, endEvent)
 	for i := range successEvents {
 		successEvents[i].Turn = turnNum

@@ -559,6 +559,13 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					return fmt.Errorf("attach session %s: %w", sid, attachErr)
 				}
 
+				// Reconcile the story into the (appended-to) trace: backfill a
+				// base snapshot for an older trace that lacks one, or record a
+				// diff if the on-disk story drifted since the prior session.
+				if err := orch.RecordEffectiveStory(ctx, sid); err != nil {
+					return fmt.Errorf("record effective story (resume): %w", err)
+				}
+
 				// Use the journal's last view.rendered as the initial TUI frame.
 				// Fall back to RenderState only when no journal entry exists yet
 				// (e.g. session created before journal writes were enabled).
@@ -672,6 +679,13 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					}
 					// Failure to open is non-fatal: events still land in SQLite.
 				}
+			}
+
+			// Record the effective story as the first event after the header,
+			// before any turn-0 on_enter events — so the trace self-describes
+			// the story it replays against (see store.StorySnapshot).
+			if err := orch.RecordEffectiveStory(ctx, sid); err != nil {
+				return fmt.Errorf("record effective story: %w", err)
 			}
 
 			// Fire the initial state's on_enter chain BEFORE rendering

@@ -3193,6 +3193,13 @@ func (m RootModel) handleReloadSlash() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Record the story change into the trace so the replay stays
+	// self-contained even after a hot-reload (see store.StoryChanged).
+	if recErr := m.orch.RecordEffectiveStory(context.Background(), m.sid); recErr != nil {
+		m.transcript.AppendError("/reload",
+			fmt.Sprintf("reloaded, but recording the story change failed: %v", recErr))
+	}
+
 	// Refresh the menu, location, and prompt placeholder against the
 	// post-reload world so they reflect any new/removed intents or
 	// menu labels declared in the freshly loaded definition.
@@ -3239,6 +3246,12 @@ func (m RootModel) reloadOrchestratorAfterMetaWithFiles(changed []string) (tea.M
 		m.transcript.AppendError("(meta)",
 			"applied to disk but reload failed: "+err.Error())
 		return m, nil
+	}
+	// Record the meta edit into the trace so the replay stays self-contained
+	// (the edit may be uncommitted, so a git sha can't name it).
+	if recErr := m.orch.RecordEffectiveStory(context.Background(), m.sid); recErr != nil {
+		m.transcript.AppendError("(meta)",
+			"reloaded, but recording the story change failed: "+recErr.Error())
 	}
 	w := m.orch.CurrentWorld(m.sid)
 	computed := orchestrator.ComputeMenu(m.orch.AppDef(), m.orch.Machine(), m.currentState, w)

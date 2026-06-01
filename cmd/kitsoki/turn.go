@@ -282,7 +282,7 @@ Examples:
 	cmd.Flags().StringVar(&intentName, "intent", "", "intent name to invoke directly (both modes)")
 
 	// Trace-backed persistent turn flags.
-	cmd.Flags().StringVar(&appFlag, "app", "", "path to app.yaml (trace-backed turn; use positional arg for stateless probe)")
+	cmd.Flags().StringVar(&appFlag, "app", "", "path to app.yaml (trace-backed turn; omit with --trace to reconstruct the story from the trace itself; use positional arg for stateless probe)")
 	cmd.Flags().StringVar(&traceFlag, "trace", "", "JSONL trace file (trace-backed turn; required with --app)")
 	cmd.Flags().StringArrayVar(&slotPairs, "slot", nil, "slot key=value (repeatable; trace-backed turn)")
 
@@ -302,9 +302,6 @@ Examples:
 //	2 — terminal state reached
 //	3 — infrastructure error (missing app file, malformed slot, open failure, …)
 func runTraceTurn(cmd *cobra.Command, appPath, tracePath, intentName string, slotPairs []string) error {
-	if appPath == "" {
-		return infraError("--app is required with --trace")
-	}
 	if tracePath == "" {
 		return infraError("--trace is required (use --app with --trace)")
 	}
@@ -322,11 +319,6 @@ func runTraceTurn(cmd *cobra.Command, appPath, tracePath, intentName string, slo
 		slots[pair[:idx]] = pair[idx+1:]
 	}
 
-	def, err := loadAppWithEnv(appPath)
-	if err != nil {
-		return infraError("%v", err)
-	}
-
 	// Ensure the trace directory exists.
 	if dir := filepath.Dir(tracePath); dir != "" && dir != "." {
 		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
@@ -340,6 +332,37 @@ func runTraceTurn(cmd *cobra.Command, appPath, tracePath, intentName string, slo
 		return infraError("open trace %q: %v", tracePath, err)
 	}
 	defer func() { _ = sink.Close() }()
+
+	// Resolve the story. With --app, load from disk (the original path). Without
+	// --app, reconstruct the effective story FROM the trace itself — the trace
+	// is self-contained, so a continued turn no longer depends on the story
+	// files still being on disk or unchanged (see store.StoryAtTurn /
+	// app.LoadFromFiles, and store.StorySnapshot for why this is deterministic).
+	var def *app.AppDef
+	if appPath != "" {
+		def, err = loadAppWithEnv(appPath)
+		if err != nil {
+			return infraError("%v", err)
+		}
+	} else {
+		history := sink.History()
+		latestTurn := app.TurnNumber(0)
+		for _, ev := range history {
+			if ev.Turn > latestTurn {
+				latestTurn = ev.Turn
+			}
+		}
+		files, entry, atErr := store.StoryAtTurn(history, latestTurn)
+		if atErr != nil {
+			return infraError("reconstruct story from trace: %v (provide --app if the trace predates story snapshots)", atErr)
+		}
+		var cleanup func()
+		def, cleanup, err = app.LoadFromFiles(files, entry)
+		if err != nil {
+			return infraError("load story from trace: %v", err)
+		}
+		defer cleanup()
+	}
 
 	m, err := machine.New(def)
 	if err != nil {
@@ -384,14 +407,22 @@ func runTraceTurn(cmd *cobra.Command, appPath, tracePath, intentName string, slo
 		ctx = context.Background()
 	}
 
-	// Capture the event count before the turn so we can echo only the new events.
-	histBefore := len(sink.History())
-
 	// Create a session in the in-memory store (needed for orchestrator plumbing).
 	sid, err := orch.NewSession(ctx)
 	if err != nil {
 		return infraError("new session: %v", err)
 	}
+
+	// Record the effective story (base snapshot on a fresh trace; diff if the
+	// on-disk story drifted from what the trace already carries). Skipped when
+	// the story was reconstructed from the trace — its hash already matches.
+	if err := orch.RecordEffectiveStory(ctx, sid); err != nil {
+		return infraError("record effective story: %v", err)
+	}
+
+	// Capture the event count after the snapshot so we echo only the turn's
+	// events, not the (large) story snapshot.
+	histBefore := len(sink.History())
 
 	// Run one direct-intent turn against the JSONL-backed session.
 	outcome, err := orch.SubmitDirect(ctx, sid, intentName, slots)

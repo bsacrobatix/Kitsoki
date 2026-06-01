@@ -1001,6 +1001,13 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 			// dropped on the floor.
 			orch.EnsureSessionListener(sid)
 
+			// Record the effective story into the trace (base snapshot on a
+			// fresh session; diff if the on-disk story drifted from what the
+			// trace already carries) so the session trace stays self-contained.
+			if recErr := orch.RecordEffectiveStory(ctx, sid); recErr != nil {
+				return fmt.Errorf("record effective story: %w", recErr)
+			}
+
 			var outcome *orchestrator.TurnOutcome
 			lockErr := s.WithWriterLock(ctx, sid, func() error {
 				var inner error
