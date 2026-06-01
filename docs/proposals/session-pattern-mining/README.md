@@ -37,6 +37,45 @@ later let a default decider take it over.
 4. As the story runs, recorded decisions become the dataset to fit a default
    decider and climb the ladder.
 
+## Brief → existing-story enrichment map (real-data run, 3 contributors)
+
+The 3-contributor brief (`.artifacts/session-mining/BRIEF.md`, gitignored) ranks
+patterns we *already have pipelines for*. So the actionable output is usually not
+"build a new story" but "**install the gate the brief surfaced**" — most rooms today
+model a fork only as a generic `accept / refine / restart` checkpoint, not as the
+named, recorded decision the moat is built on.
+
+| Brief pattern (priority) | Verdict | Closest existing story | Action |
+|---|---|---|---|
+| `implement-from-spec` (0.71) | BUILD (judgment) | `implementation` + `dev-story` + `cypilot` | **enrich** |
+| `fan-out-agents-and-reconcile` (0.67) | BUILD (judgment) | — none — | **gap → new story** |
+| `explore-codebase` (0.54) | BUILD NOW | off-path/meta read-only agent only | enrich (`oracle`/meta room) |
+| `verify-by-running` (0.51) | BUILD NOW | `bugfix.validating`, `implementation.test` | **enrich** |
+| `debug-from-error-or-trace` (0.50) | LATER | `bugfix.reproducing` | enrich (later) |
+| `build-compile-fix-loop` / `fix-failing-tests` | LATER | `bugfix.testing`, `implementation.test` | already modeled |
+| `commit-or-pr` (0.24) | SOLVED | `pr-refinement`, `code-review` | leave as-is |
+
+Three concrete enrichments and one gap (decision deferred — captured here, not yet built):
+
+1. **`implement-from-spec` → `implementation/review_task`.** Add a `host.oracle.decide`
+   gate that classifies the incoming spec before `write_code`: *complete enough to
+   one-shot vs needs a clarification round*, and *engine-level feature vs app-level
+   YAML*. The "needs clarification" half is already solved in `prd` — the enrichment
+   is partly wiring `prd`'s clarify loop in front of `implementation`. (The brief's
+   7-gate count is itself a signal to consolidate.)
+2. **`verify-by-running` → the verify step.** `implementation/test.yaml` only runs
+   `iface.ci.run_tests`; it never decides *how* to verify. Add a modality decider —
+   *trace live-tail vs flow test vs manual TUI interaction* — matching the existing
+   `/run` + `/verify` skills. High pain, 77% mechanical, crisp.
+3. **`debug-from-error-or-trace` → `bugfix/reproducing`** (later): the *flaky-vs-real*
+   and *trace-vs-rerun* forks.
+
+**Gap:** `fan-out-agents-and-reconcile` (3/3 contributors, also the strongest novel
+signal from the 6-agent run) has no story, yet ranks second. Its gates —
+*file-disjoint partitioning vs collision*, *merge partial vs wait serial*, *stale WIP
+vs committed* — are exactly the reconcile decisions kitsoki should record, and tie to
+the orchestrator. Candidate for a **new story**, not an enrichment.
+
 ## Reference-run findings
 
 Full scored registry: [`pattern-catalog.yaml`](pattern-catalog.yaml). Top story
@@ -61,6 +100,9 @@ sample beyond biggest-by-size, and run the open-coding pass as a measured experi
 
 ## Next steps
 
-- Draft `fix-failing-tests` as a real story to prove the pattern→story→gate handoff.
+- Enrich `implementation/review_task` with the spec-triage gate (highest-priority
+  enrichment; see the map above).
+- Enrich the verify step with the verification-modality gate.
+- Draft a proposal for a new `fan-out-agents-and-reconcile` story (the one real gap).
 - Add `overlay-js` / `overlay-python` so non-Go contributors' reports stay clean.
 - Broaden + recency-stratify the session sample for a deeper run.

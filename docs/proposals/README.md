@@ -87,6 +87,11 @@ thought.
   per-state decider. Engine core, CLI/flow surface, and docs-review
   migration shipped; pre-bind staging and the bugfix-story migration
   remain (§8).
+- [`local-model-oracle.md`](local-model-oracle.md) — a `builtin.local_llm`
+  oracle plugin that drives a local llama.cpp `llama-server` sidecar over
+  OpenAI-compatible HTTP, with grammar-forced schema-valid output, for
+  routing and small `decide` verdicts. Nothing implemented yet; spike (§0)
+  required before committing.
 - [`prd-design.md`](prd-design.md) — a standalone PRD-authoring
   operator story (`stories/prd/`). Early draft; untracked work in
   progress.

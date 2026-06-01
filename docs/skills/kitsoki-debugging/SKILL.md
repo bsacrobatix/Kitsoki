@@ -181,6 +181,26 @@ Two existing tests show the patterns:
 - `TestDogfoodSmoke_ContinueFromProposingReachesImplementing` — pruned-worktree shape (dir + registration gone).
 - `TestDogfoodSmoke_ProposingAccept_RegisteredWorktreeDirtyTree` — registered-worktree + dirty unrelated file shape (the trickier production case where path-comparison bugs hide).
 
+## Step 5 — hand the user a warp to verify, not a vague proposal
+
+When the diagnosis is done and you've confirmed the fix against current code, **do not** close with a hand-wavy "want me to change X?" or "you could re-answer that question." The user lost their place in a multi-turn session; an abstract proposal makes them reconstruct it by hand. Instead, **reconstruct their exact state from the trace and hand them a runnable warp** so they resume in one command and verify the fix live.
+
+A "warp basis" is a small YAML (`state:` + `world:`) that `kitsoki run --warp <file>` applies at session boot. It teleports a **fresh** session straight into a primed mid-flow state. Crucially, `Teleport` (`internal/orchestrator/teleport.go`) only **re-renders the view — it does NOT fire `on_enter`**, so any expensive `on_enter:` chain (analyst/decide/task LLM calls) is skipped and your seeded world is *not* overwritten. That's exactly what you want for "drop me back where I was, with the corrected state."
+
+Recipe:
+
+1. **Pull the real world from the trace.** Every `world.update` event carries a `set:` payload; replay them to reconstruct the accumulated world (idea, the `decide` result object, the operator's answers, counters). `harness.returned` events hold the host-call `data` (e.g. the analyst's `clarifications`). Strip oracle sentinel markers (`⁣⁡…`) from any LLM-authored text.
+2. **Seed the *expected* (post-fix) values**, not the buggy ones the trace captured. The whole point is to encode the state the user *should* have had. (E.g. if a missing effect left `answered_ids` empty, write `answered_ids: "|1|"` in the warp.)
+3. **Write it to `.context/<name>.yaml` by default** — `.context/` is gitignored, so a one-off "recreate my session" warp stays ephemeral and doesn't clutter the repo. **Only** write to `stories/<app>/scenarios/<name>.yaml` (git-tracked) when the warp is meant to be *reusable* — a demo scenario or a regression-test basis others should run. When unsure, default to `.context/`; it's trivial to promote later with `git mv`. Canonical fields either way: `name`, `description`, `state`, `world`. Nested objects/lists are fine (`World map[string]any`). The loader is `goyaml.Strict()`, so only those top-level keys are allowed.
+4. **Verify it before handing it over.** `kitsoki turn <app> --state <warp-state> --intent look --world @<world.json>` renders the destination view with NO `on_enter` — the Teleport-equivalent. Assert the fix is visible in `view_rendered` (e.g. the answered question dropped from the list). Convert the warp's `world:` block to the `--world` JSON with a one-liner: `python3 -c "import yaml,json;json.dump(yaml.safe_load(open('.context/x.yaml'))['world'],open('/tmp/w.json','w'))"`.
+5. **Give the user the one-liner:**
+
+   ```sh
+   kitsoki run stories/<app>/app.yaml --warp .context/<name>.yaml
+   ```
+
+A warp doubles as a regression artifact: the same file is a flow-fixture-shaped basis (`initial_state`/`initial_world` are accepted aliases), so it can seed a smoke test later — which is exactly the kind of warp worth promoting from `.context/` into `stories/<app>/scenarios/`. See `stories/oregon-trail/scenarios/*.yaml` for the committed/reusable format.
+
 ## Patterns that hide bugs (and how to expose them)
 
 | Symptom in TUI | Underlying cause | How to confirm |

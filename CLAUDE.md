@@ -1,3 +1,5 @@
+!!!DO NOT CHECK OUT ANY BRANCH OTHER THAN MAIN IN THE ROOT FOLDER - ALWAYS USE A WORKTREE FOR BRANCHES!!!
+
 make your worktrees in the project root folder .worktrees
 
 Project skills live at `docs/skills/<name>/SKILL.md` and are exposed to Claude Code by symlinking into `~/.claude/skills/<name>` (Claude Code does not auto-discover skills under `docs/`). When adding a new skill under `docs/skills/`, also create the symlink so it appears in the available-skills list:
