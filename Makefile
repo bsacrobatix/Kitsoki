@@ -11,7 +11,7 @@ EMBED_INDEX   := internal/runstatus/web/assets/index.html
 SPA_SOURCES   := $(shell find $(RUNSTATUS_DIR)/src $(RUNSTATUS_DIR)/index.html \
 	$(RUNSTATUS_DIR)/package.json $(RUNSTATUS_DIR)/vite.config.ts 2>/dev/null)
 
-.PHONY: all build install uninstall test vet fmt tidy clean web web-clean
+.PHONY: all build install uninstall test vet fmt tidy clean web web-clean e2e-docker
 
 all: build
 
@@ -60,3 +60,9 @@ tidy:
 
 clean:
 	rm -f $(BINARY)
+
+# e2e-docker builds a faithful image (make install: Go + Node + pnpm) and runs
+# the in-container smoke suite, verifying runtime system deps + deterministic
+# flow suites. See test/e2e/ for details.
+e2e-docker:
+	./test/e2e/run.sh
