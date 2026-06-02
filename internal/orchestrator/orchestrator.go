@@ -1973,9 +1973,11 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 	}
 
 	startEvent := newOrchestratorEvent(store.TurnStarted, map[string]any{
-		"turn":    int64(turnNum),
-		"input":   fmt.Sprintf("[clarify-continue] intent=%s", call.Intent),
-		"clarify": true,
+		"turn":       int64(turnNum),
+		"input":      fmt.Sprintf("[clarify-continue] intent=%s", call.Intent),
+		"clarify":    true,
+		"routed_by":  "slot-fill",
+		"match_type": "clarify-continue",
 	}, turnNum)
 
 	successEvents := append([]store.Event{startEvent}, result.Events...)

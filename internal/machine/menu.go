@@ -76,6 +76,14 @@ type MenuView struct {
 func (m *machineImpl) Menu(state app.StatePath, w world.World) MenuView {
 	allowed := m.AllowedIntents(state, w)
 
+	// Build a label override map from the state's typed choice view.
+	// When a choice item carries an explicit label for an intent that
+	// expands to a placeholder row (required free-form slot, no enum),
+	// the machine-generated display "capture_idea <idea:string>" doesn't
+	// match what the user sees and types — the view label ("capture") does.
+	// Overriding the Display makes deterministic routing work without LLM.
+	viewLabels := m.viewLabelsForState(state)
+
 	menu := MenuView{}
 	for _, ai := range allowed {
 		if ai.Hidden {
@@ -84,15 +92,25 @@ func (m *machineImpl) Menu(state app.StatePath, w world.World) MenuView {
 
 		intentDef, hasIntentDef := m.lookupIntent(state, ai.Name)
 		if !hasIntentDef {
+			display := ai.Name
+			if l, ok := viewLabels[ai.Name]; ok {
+				display = l
+			}
 			menu.Primary = append(menu.Primary, MenuEntry{
 				Intent:  ai.Name,
-				Display: ai.Name,
+				Display: display,
 				Primary: true,
 			})
 			continue
 		}
 
 		entries := m.expandIntent(ai.Name, intentDef, state, w)
+		// Override Display with the view label for single placeholder rows
+		// (required free-form slots, no enum expansion). Don't override
+		// enum-expanded rows — each carries a specific value in its Display.
+		if l, ok := viewLabels[ai.Name]; ok && len(entries) == 1 && len(entries[0].MissingSlots) > 0 {
+			entries[0].Display = l
+		}
 		for _, e := range entries {
 			if e.Primary {
 				menu.Primary = append(menu.Primary, e)
@@ -285,6 +303,48 @@ func (m *machineImpl) expandIntent(name string, intentDef app.Intent, state app.
 type menuSlotEntry struct {
 	name string
 	def  app.Slot
+}
+
+// viewLabelsForState returns a map of intent name → author label from the
+// state's typed choice view elements. Used to override the machine-generated
+// placeholder Display ("capture_idea <idea:string>") with the label the user
+// actually sees and types ("capture").
+//
+// Only static labels are returned — items whose label contains "{{" are
+// template expressions that evaluate to dynamic text at render time and
+// would not match user-typed input.
+//
+// The first occurrence per intent wins; blocked variants like
+// "✗ drive — …" appear after the available form in author YAML so
+// the override is always the user-typeable label.
+func (m *machineImpl) viewLabelsForState(state app.StatePath) map[string]string {
+	cs, ok := m.states[string(state)]
+	if !ok || cs == nil || cs.s == nil {
+		return nil
+	}
+	labels := make(map[string]string)
+	for _, elem := range cs.s.View.Elements {
+		if elem.Kind != "choice" {
+			continue
+		}
+		for _, item := range elem.ChoiceItems {
+			if item.Intent == "" || item.Label == "" {
+				continue
+			}
+			if _, exists := labels[item.Intent]; exists {
+				continue
+			}
+			// Skip labels that contain template expressions.
+			if strings.Contains(item.Label, "{{") {
+				continue
+			}
+			labels[item.Intent] = item.Label
+		}
+	}
+	if len(labels) == 0 {
+		return nil
+	}
+	return labels
 }
 
 // formatPlaceholderRow builds a display string for a no-enum intent:

@@ -183,6 +183,10 @@ func (p *routingPipeline) resolveFromProvenance(routedBy, matchType string, conf
 	case "turncache":
 		tier = TierTurncache
 		detail = "cache"
+	case "slot-fill":
+		// Slot-fill continuations are deterministic — no LLM routing involved.
+		tier = TierDeterministic
+		detail = "slot-fill"
 	case "llm":
 		tier = TierLLM
 		detail = matchType // the local-model backend, e.g. oracle.local
