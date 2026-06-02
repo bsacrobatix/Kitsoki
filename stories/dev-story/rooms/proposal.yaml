@@ -12,6 +12,7 @@
 states:
 
   proposal:
+    mode: conversational
     description: "Ad hoc proposal room — capture and structure an idea without a ticket."
     relevant_world: [proposal_idea, proposal_file]
     view:
@@ -26,20 +27,10 @@ states:
             - label:  "capture"
               intent: capture_idea
               hint:   "describe your idea — oracle will draft a proposal"
-              param:
-                slot:        idea
-                type:        string
-                placeholder: "what's your idea?"
-                required:    true
             - label: "refine"
               intent: refine_idea
               hint:   "give feedback to improve the draft"
               when:   "available('refine_idea')"
-              param:
-                slot:        feedback
-                type:        string
-                placeholder: "what needs changing?"
-                required:    true
             - label: "✗ refine — {{ blocked_reason('refine_idea') }}"
               intent: refine_idea
               when:   "!available('refine_idea')"
@@ -50,7 +41,7 @@ states:
         - target: proposal_drafting
           effects:
             - set:
-                proposal_idea:  "{{ slots.idea }}"
+                proposal_idea:  "{{ slots.message }}"
                 proposal_draft: ""
                 proposal_file:  ""
       refine_idea:
@@ -58,7 +49,7 @@ states:
           target: proposal_drafting
           effects:
             - set:
-                proposal_idea: "{{ world.proposal_idea }}\n\nOperator feedback: {{ slots.feedback }}"
+                proposal_idea: "{{ world.proposal_idea }}\n\nOperator feedback: {{ slots.message }}"
                 proposal_file: ""
         - default: true
           target: proposal
@@ -80,6 +71,10 @@ states:
           mode: single
           prompt: "Actions"
           items:
+            - label: "save"
+              intent: save_proposal
+              hint: "write draft to docs/proposals/"
+              when: "world.proposal_draft != '' && world.proposal_file == ''"
             - { label: "go_back", intent: go_back, hint: "return to proposal" }
             - { label: "look",    intent: look,    hint: "re-render" }
     on_enter:
@@ -103,6 +98,22 @@ states:
           proposal_file: stdout
         on_error: proposal
     on:
+      save_proposal:
+        - when: "world.proposal_draft != ''"
+          target: .
+          effects:
+            - invoke: host.run
+              with:
+                cmd: python3
+                args:
+                  - "stories/dev-story/scripts/save_proposal.py"
+                  - "{{ world.proposal_idea }}"
+                  - "{{ world.proposal_draft }}"
+              bind:
+                proposal_file: stdout
+              on_error: proposal
+        - default: true
+          target: .
       go_back:
         - target: proposal
       look:
