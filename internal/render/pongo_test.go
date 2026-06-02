@@ -1,6 +1,9 @@
 package render
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -569,6 +572,135 @@ func TestPongo_SliceOfMapIndexAccess(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPongo_ReferenceFilter guards the built-in `reference` filter — the
+// primitive for embedding external material (a spec, a report) into a prompt
+// verbatim with line numbers and a citable source attribution. It pins: the
+// `<reference src=… lines=… sha256=…>` header, the right-aligned 1-based gutter,
+// a verbatim body (template delimiters in the content are NOT re-parsed), the
+// trailing-newline handling, and the nil/missing degrade-to-no-op.
+func TestPongo_ReferenceFilter(t *testing.T) {
+	env := makeEnv()
+	env.Args["doc"] = "alpha\nbeta\ngamma"
+	env.Args["withtmpl"] = "use {{ x }} and {% if y %}z{% endif %}"
+	env.Args["trailing"] = "one\ntwo\n"
+
+	t.Run("header_gutter_and_span", func(t *testing.T) {
+		out, err := Pongo(`{{ args.doc|reference:"spec.md" }}`, env)
+		if err != nil {
+			t.Fatalf("render error: %v", err)
+		}
+		want := "<reference src=\"spec.md\" lines=\"1-3\" sha256=\"" +
+			refHash8("alpha\nbeta\ngamma") + "\">\n" +
+			"1 | alpha\n2 | beta\n3 | gamma\n" +
+			"</reference>"
+		if out != want {
+			t.Fatalf("reference output mismatch:\n got %q\nwant %q", out, want)
+		}
+	})
+
+	t.Run("content_is_verbatim_not_reparsed", func(t *testing.T) {
+		// The killer property: a referenced doc containing pongo2 delimiters
+		// must come through untouched — the filter input is data, not a
+		// sub-template (contrast {% include %}).
+		out, err := Pongo(`{{ args.withtmpl|reference:"x.md" }}`, env)
+		if err != nil {
+			t.Fatalf("render error: %v", err)
+		}
+		if !strings.Contains(out, "1 | use {{ x }} and {% if y %}z{% endif %}") {
+			t.Fatalf("template delimiters in content were not emitted verbatim:\n%s", out)
+		}
+	})
+
+	t.Run("right_aligned_gutter_at_width", func(t *testing.T) {
+		// 12 lines → 2-digit width → single-digit numbers get a leading space.
+		var sb strings.Builder
+		for i := 1; i <= 12; i++ {
+			fmt.Fprintf(&sb, "line%d\n", i)
+		}
+		env.Args["big"] = sb.String()
+		out, err := Pongo(`{{ args.big|reference:"big.md" }}`, env)
+		if err != nil {
+			t.Fatalf("render error: %v", err)
+		}
+		if !strings.Contains(out, "\n 1 | line1\n") {
+			t.Fatalf("line 1 should be right-aligned to width 2 (` 1 | `):\n%s", out)
+		}
+		if !strings.Contains(out, "\n12 | line12\n") {
+			t.Fatalf("line 12 should align with the 2-digit gutter:\n%s", out)
+		}
+		if !strings.Contains(out, `lines="1-12"`) {
+			t.Fatalf("span should be 1-12:\n%s", out)
+		}
+	})
+
+	t.Run("trailing_newline_no_phantom_line", func(t *testing.T) {
+		out, err := Pongo(`{{ args.trailing|reference:"t.md" }}`, env)
+		if err != nil {
+			t.Fatalf("render error: %v", err)
+		}
+		if !strings.Contains(out, `lines="1-2"`) {
+			t.Fatalf("a trailing newline must not add a phantom 3rd line:\n%s", out)
+		}
+		if strings.Contains(out, "3 | ") {
+			t.Fatalf("unexpected phantom line 3:\n%s", out)
+		}
+	})
+
+	t.Run("missing_value_is_noop", func(t *testing.T) {
+		// A typo'd / missing variable must NOT wrap an empty <reference> around
+		// nothing — it degrades to no-op like |reverse.
+		out, err := Pongo(`[{{ args.nope|reference:"x.md" }}]`, env)
+		if err != nil {
+			t.Fatalf("render error: %v", err)
+		}
+		if out != "[]" {
+			t.Fatalf("missing value should be a no-op, got %q", out)
+		}
+	})
+}
+
+// TestPongo_ReferenceFilter_BackendAgnostic is the load-bearing guarantee behind
+// making `reference` a globally-registered filter rather than a search-path tag:
+// it must render identically on the inline render.Pongo path (CLI one-shots,
+// meta/off-path agents, tests) AND on the AppRenderer/overlay path — the latter
+// being the only place the @story/@shared loader exists. A filter is part of the
+// engine, so both paths pick it up with no wiring; this test fails if a future
+// change ties it to a renderer that some backends don't inject.
+func TestPongo_ReferenceFilter_BackendAgnostic(t *testing.T) {
+	env := expr.Env{Args: map[string]any{"doc": "x\ny"}}
+	const src = `{{ args.doc|reference:"a.md" }}`
+
+	inline, err := Pongo(src, env)
+	if err != nil {
+		t.Fatalf("inline render.Pongo error: %v", err)
+	}
+
+	// Build a prompt renderer (the AppRenderer path) over a throwaway story
+	// root and render the same inline string through it.
+	pr, err := NewPromptRenderer(PromptPath{Story: t.TempDir()}, true)
+	if err != nil {
+		t.Fatalf("NewPromptRenderer: %v", err)
+	}
+	viaRenderer, err := pr.Render(src, env)
+	if err != nil {
+		t.Fatalf("AppRenderer.Render error: %v", err)
+	}
+
+	if inline != viaRenderer {
+		t.Fatalf("reference filter must render identically on both paths:\n inline:   %q\n renderer: %q", inline, viaRenderer)
+	}
+	if !strings.Contains(inline, `<reference src="a.md" lines="1-2"`) {
+		t.Fatalf("unexpected reference output: %q", inline)
+	}
+}
+
+// refHash8 mirrors filterReference's content pin (first 8 hex of the sha256) so
+// the test can assert the exact header without hard-coding a magic digest.
+func refHash8(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])[:8]
 }
 
 func TestToContext_KeysExposed(t *testing.T) {

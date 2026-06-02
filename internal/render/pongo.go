@@ -1,7 +1,10 @@
 package render
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/flosch/pongo2/v6"
@@ -89,6 +92,77 @@ func init() {
 	// open at the cut; for sentinel-free input it is byte-identical to the
 	// built-in. See internal/render/sourcecolor.Truncate.
 	_ = pongo2.ReplaceFilter("truncatechars", filterTruncatechars)
+
+	// `reference` renders its input as a line-numbered, attributed
+	// `<reference>` block — the built-in primitive for embedding external
+	// material (a spec, a report, a coding standard) into a prompt verbatim,
+	// with a citable source label and a content hash. Registered globally
+	// (not per-TemplateSet) so it works identically on the inline render.Pongo
+	// path AND the AppRenderer/overlay path, with no @-namespace resolution and
+	// no file read — see filterReference and docs/stories/prompts.md.
+	_ = pongo2.RegisterFilter("reference", filterReference)
+}
+
+// filterReference renders the input content as a line-numbered, attributed
+// reference block — the built-in way to embed external material (a spec, a
+// report, a coding standard) into a prompt verbatim, so the LLM can cite it by
+// line and a reader of the recorded prompt can walk the citation back to the
+// source. See docs/stories/prompts.md (Embedding reference material).
+//
+// Input is the content; the single param is a free-form source LABEL. Output is
+//
+//	<reference src="LABEL" lines="1-N" sha256="XXXXXXXX">
+//	   1 | <line 1>
+//	   …
+//	   N | <line N>
+//	</reference>
+//
+// Line numbers are 1-based and right-aligned to the width of N, so a whole-file
+// input yields absolute numbers that line up with a report's line citations. The
+// sha256 is the first 8 hex of the content digest — a scannable pin that lets a
+// later reader confirm the embedded bytes against the source.
+//
+// The content is emitted VERBATIM: unlike {% include %}, the filter never
+// re-parses its input as a template, so material containing `{{ }}` / `{% %}` is
+// safe. A nil / missing input passes through unchanged (no block) — matching the
+// reverse filter's degrade-to-no-op convention — so a typo'd variable doesn't
+// wrap an empty reference around nothing.
+//
+// It resolves nothing and reads no file: it is a pure function of (content,
+// label), which is exactly what makes it work on the inline render.Pongo path
+// and the AppRenderer path alike, under any oracle backend.
+func filterReference(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+	if in == nil || in.IsNil() {
+		return in, nil
+	}
+	content := in.String()
+	label := param.String()
+
+	sum := sha256.Sum256([]byte(content))
+	hash := hex.EncodeToString(sum[:])[:8]
+
+	// A trailing newline (the usual shape of a read file) would otherwise
+	// split into a phantom empty final line; trim exactly one so the line
+	// count and gutter reflect the real lines. Empty content yields no body
+	// lines and a "0-0" span rather than one blank numbered line.
+	var lines []string
+	if content != "" {
+		lines = strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	}
+	n := len(lines)
+	span := "0-0"
+	if n > 0 {
+		span = "1-" + strconv.Itoa(n)
+	}
+	width := len(strconv.Itoa(n))
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "<reference src=%q lines=%q sha256=%q>\n", label, span, hash)
+	for i, line := range lines {
+		fmt.Fprintf(&b, "%*d | %s\n", width, i+1, line)
+	}
+	b.WriteString("</reference>")
+	return pongo2.AsValue(b.String()), nil
 }
 
 // filterTruncatechars is the source-color-aware replacement for pongo2's

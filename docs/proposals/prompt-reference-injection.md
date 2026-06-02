@@ -1,8 +1,17 @@
 # Runtime: `reference` filter — line-number any embedded content, get attribution back
 
-**Status:** Draft v2. Nothing implemented yet.
+**Status:** Core implemented (filter + tests + author docs). Remaining: adopt in a
+real story, optional structured trace field. See Tasks.
 **Kind:**   runtime
 **Epic:**   — standalone
+
+> **Landed:** the `reference` filter (`internal/render/pongo.go` `filterReference`,
+> registered globally in `init()`), unit + backend-agnostic tests
+> (`internal/render/pongo_test.go`), and author docs folded into
+> `docs/stories/prompts.md` § Embedding reference material and the
+> `kitsoki-story-authoring` SKILL. What's left is adoption in a real story and the
+> optional structured `references:` trace field — the rest of this doc is the
+> spec for those follow-ons; delete it once a story adopts the filter.
 
 <!--
   Companion to docs/stories/prompts.md (prompt extension). That doc covers how a
@@ -201,19 +210,20 @@ every existing prompt and cassette renders byte-identically. No migration.
 
 ```
 ## 1. Engine
-- [ ] 1.1 pongo2.RegisterFilter("reference", filterReference) in pongo.go init()
-- [ ] 1.2 filterReference: split lines, right-aligned numbered gutter, sha256, attribution wrapper
-- [ ] 1.3 Non-string input → pass through unchanged (reverse-style no-op); bound allocation
+- [x] 1.1 pongo2.RegisterFilter("reference", filterReference) in pongo.go init()
+- [x] 1.2 filterReference: split lines, right-aligned numbered gutter, sha256, attribution wrapper
+- [x] 1.3 Nil / missing input → pass through unchanged (reverse-style no-op)
+- [ ] 1.5 (optional) structured `references: [{src, sha256, lines}]` provenance on the oracle-call event
 
 ## 2. Verification
-- [ ] 2.1 Unit: numbers lines 1..N with correct right-aligned gutter; lines= span + sha256 correct
-- [ ] 2.2 Unit: content containing `{{ }}` / `{% %}` is emitted verbatim (filter input is not re-parsed)
-- [ ] 2.3 Unit: filter works on the INLINE render.Pongo path (no AppRenderer) — the backend-agnostic guarantee
-- [ ] 2.4 Flow fixture: a story prompt that references arg content renders deterministically (no LLM)
+- [x] 2.1 Unit: numbers lines 1..N with correct right-aligned gutter; lines= span + sha256 correct
+- [x] 2.2 Unit: content containing `{{ }}` / `{% %}` is emitted verbatim (filter input is not re-parsed)
+- [x] 2.3 Unit: filter renders identically on the inline render.Pongo path AND the AppRenderer path (backend-agnostic guarantee)
+- [ ] 2.4 Flow fixture: a story prompt that references arg content renders deterministically (no LLM) — lands with adoption
 
 ## 3. Adopt + document
 - [ ] 3.1 Adopt in one real story prompt (content via a recorded host read or an arg)
-- [ ] 3.2 Fold into docs/stories/prompts.md + kitsoki-story-authoring SKILL; delete this proposal
+- [x] 3.2 Fold into docs/stories/prompts.md + kitsoki-story-authoring SKILL (delete this proposal once 3.1 lands)
 ```
 
 ## Verification

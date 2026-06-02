@@ -453,6 +453,14 @@ by **specializing that block in an overlay** (`--prompt-overlay` or the
 `overrides.prompts` (above) is the whole-file *swap* — reach for it only when
 you mean to replace a prompt wholesale, not extend it.
 
+**Embedding a document as evidence.** To inline external material (a spec, a
+report) the LLM should read and cite — line-numbered, with traceable
+attribution — pipe its content through the built-in `reference` filter:
+`{{ args.spec | reference:"api-spec.md" }}`. Unlike `{% include %}` it embeds the
+content **verbatim** (no re-parsing) and resolves no path, so it works in any
+render context. Bring the bytes in via a host file-read or a passed arg. See
+[`docs/stories/prompts.md`](../../stories/prompts.md) § Embedding reference material.
+
 ## 8. Phase templates (compressing repeated rooms)
 
 When a story repeats the same shape (execute → post → await reply →

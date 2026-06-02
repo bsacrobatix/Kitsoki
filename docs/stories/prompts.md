@@ -157,10 +157,60 @@ post-include) the LLM saw. When an overlay is in effect, the `ask` / `decide` /
   turns "this provisional default was never specialized here" into a labeled,
   queryable datapoint the improvement loop can rank.
 
+## Embedding reference material — the `reference` filter
+
+`{% include %}` pulls in another *template* and renders it. To embed an external
+*document* as evidence — a spec, a report, a coding standard the LLM should read
+and cite — use the built-in **`reference` filter**. It takes the content as its
+input and a source label as its parameter, line-numbers the content, and wraps it
+in an attribution block:
+
+```pongo
+{{ args.spec | reference:"api-spec.md" }}
+```
+
+renders to:
+
+```
+<reference src="api-spec.md" lines="1-87" sha256="9f2a1c4b">
+ 1 | # API spec
+ 2 |
+ 3 | Every request carries a bearer token in `Authorization`.
+ …
+87 | // end
+</reference>
+```
+
+Why a filter, not a tag with a path:
+
+- **It resolves nothing.** The content is a value you already have — a literal, a
+  `{{ args.x }}` / `{{ world.x }}`, or the bytes of a recorded host file-read.
+  Because it reads no file and uses no `@story`/`@shared` search path, it works in
+  *every* render context — the inline path (CLI one-shots, meta / off-path agents)
+  as well as the overlay/`AppRenderer` path — under any oracle backend.
+- **The body is verbatim.** Unlike `{% include %}`, the filter never re-parses its
+  input as a template, so a document containing `{{ … }}` / `{% … %}` is embedded
+  untouched.
+- **Line numbers are absolute when you pass a whole file.** They start at line 1
+  of the content given, right-aligned to the width of the last line, so a report
+  that cites "`api-spec.md` line 54" lands on the right text. Don't pass a slice
+  unless your citations are relative to it.
+- **The attribution is traceable.** The `src` label and `sha256` (first 8 hex of
+  the content digest) ride in the rendered prompt bytes the oracle-call event
+  already records — so a reader of the trace can recover what the model saw and
+  confirm it against the source. When the content came from a host file-read, that
+  read is its own recorded host call, and the hash ties the two together.
+
+A nil / missing input degrades to a no-op (no empty block), so a typo'd variable
+fails visibly empty rather than wrapping a `<reference>` around nothing.
+
 ## Recipes
 
 - **Add project context to a story** — overlay a prompt, `{% extends "@story/…" %}`,
   fill the `spec_project_context` hole. Run with `--prompt-overlay`.
+- **Embed a document as cited evidence** — bring its bytes into a `{{ args.x }}`
+  (a host file-read or a passed arg) and `{{ args.x | reference:"<source>" }}` to
+  inline it line-numbered with traceable attribution.
 - **Share a rubric fragment across prompts** — put it under a `shared:` dir,
   `{% include "@shared/rubric.md" %}` from each prompt that needs it.
 - **Override one block, inherit the rest** — overlay extends the base and
