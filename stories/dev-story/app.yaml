@@ -57,6 +57,7 @@ app:
 hosts:
   - host.inbox.add
   - host.oracle.ask
+  - host.run
 
 # Persona table (oracle-split proposal §3.5).
 #
@@ -217,6 +218,7 @@ world:
   # ── Ad hoc proposal ───────────────────────────────────────────────
   proposal_idea:       { type: string, default: "" }
   proposal_draft:      { type: string, default: "" }
+  proposal_file:       { type: string, default: "" }
 
   # ── PR handoff (lifted from `pr` import's exits.merged.set) ───────
   last_pr_url:         { type: string, default: "" }

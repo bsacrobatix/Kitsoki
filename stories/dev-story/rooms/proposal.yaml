@@ -5,20 +5,20 @@
 # formatted proposal draft. They can iterate via `refine_idea` until
 # satisfied, then return to main or navigate elsewhere.
 #
-# No file is written here — the draft lives in world.proposal_draft for
-# the session. The operator can copy it into an issue file manually or
-# use a future `save` intent (Wave N) to write it to issues/features/.
+# After drafting, the content is written to docs/proposals/<slug>.md and
+# world.proposal_file holds the path. On refine, the file is overwritten
+# with the updated draft.
 
 states:
 
   proposal:
     description: "Ad hoc proposal room — capture and structure an idea without a ticket."
-    relevant_world: [proposal_idea, proposal_draft]
+    relevant_world: [proposal_idea, proposal_file]
     view:
       - prose: "Describe your idea and the oracle will structure it into a proposal draft."
-        when: "world.proposal_draft == ''"
-      - prose: "{{ world.proposal_draft }}"
-        when: "world.proposal_draft != ''"
+        when: "world.proposal_file == ''"
+      - prose: "Draft saved to `{{ world.proposal_file }}`."
+        when: "world.proposal_file != ''"
       - choice:
           mode: single
           prompt: "Actions"
@@ -52,11 +52,14 @@ states:
             - set:
                 proposal_idea:  "{{ slots.idea }}"
                 proposal_draft: ""
+                proposal_file:  ""
       refine_idea:
         - when: "world.proposal_draft != ''"
           target: proposal_drafting
           effects:
-            - set: { proposal_idea: "{{ world.proposal_idea }}\n\nOperator feedback: {{ slots.feedback }}" }
+            - set:
+                proposal_idea: "{{ world.proposal_idea }}\n\nOperator feedback: {{ slots.feedback }}"
+                proposal_file: ""
         - default: true
           target: proposal
           guard_hint: "draft a proposal first — describe your idea with `capture`"
@@ -67,12 +70,12 @@ states:
 
   proposal_drafting:
     description: "Structuring the idea into a proposal draft via oracle."
-    relevant_world: [proposal_idea, proposal_draft]
+    relevant_world: [proposal_idea, proposal_draft, proposal_file]
     view:
       - kv:
           pairs:
-            Idea:  "{{ world.proposal_idea }}"
-            Draft: '{{ world.proposal_draft|default:"(pending — oracle structuring your idea)" }}'
+            Idea: "{{ world.proposal_idea }}"
+            File: '{{ world.proposal_file|default:"(pending — oracle structuring your idea)" }}'
       - choice:
           mode: single
           prompt: "Actions"
@@ -88,6 +91,16 @@ states:
             idea:           "{{ world.proposal_idea }}"
         bind:
           proposal_draft: stdout
+        on_error: proposal
+      - invoke: host.run
+        with:
+          cmd: python3
+          args:
+            - "stories/dev-story/scripts/save_proposal.py"
+            - "{{ world.proposal_idea }}"
+            - "{{ world.proposal_draft }}"
+        bind:
+          proposal_file: stdout
         on_error: proposal
     on:
       go_back:
