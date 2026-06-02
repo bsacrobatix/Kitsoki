@@ -24,12 +24,15 @@ states:
     # from views/base.pongo; the data plane is preserved as
     # sibling typed elements.
     view:
+      - prose: "{{ world.last_error }}"
+        when: "world.last_error != ''"
       - prose: >
           You drive tickets through their pipeline from here. Pick a
           ticket first, then drive it. Bug tickets route through the
           bugfix pipeline; feature tickets route through the
           implementation pipeline — the ticket's type chooses, you
           don't pick the pipeline yourself.
+        when: "world.last_error == ''"
       # The `drive` / `pr` rows use the two-rows-same-intent pattern
       # (cookbook §2.2) so the operator sees *why* an action is
       # unavailable. The per-item `when:` guards mirror what the
@@ -70,6 +73,7 @@ states:
         - target: ticket_search
           effects:
             - set: { prev_state: "main" }
+            - set: { last_error: "" }
       go_workspace_manager:
         - target: workspace_manager
           effects:
@@ -119,16 +123,37 @@ states:
       drive:
         - when: "world.ticket_id != '' && world.ticket_type == 'bug'"
           target: bf
+          effects:
+            - set: { last_error: "" }
         - when: "world.ticket_id != '' && world.ticket_type == 'feature'"
           target: impl
+          effects:
+            - set: { last_error: "" }
         - when: "world.ticket_id != '' && world.ticket_type == 'epic'"
           target: cyp
+          effects:
+            - set: { last_error: "" }
         - when: "world.ticket_id == ''"
           target: main
           guard_hint: "Pick a ticket first — type `tickets`."
+          effects:
+            - set:
+                last_error: |
+                  No ticket selected — pick one before entering the pipeline.
+
+                  Suggestions:
+                  - `tickets` — search and pick a ticket
+                  - `workspaces` — resume an in-progress workspace
         - default: true
           target: main
           guard_hint: "Ticket has no type set — re-pick from `tickets` so its type is recorded."
+          effects:
+            - set:
+                last_error: |
+                  The picked ticket has no type — the pipeline router can't determine which pipeline to use.
+
+                  Suggestions:
+                  - `tickets` — re-search and re-pick the ticket (type is recorded at pick time)
 
       # Escape hatches — same destinations as drive, but with
       # explicit names some flows / scenarios reference. All three
@@ -136,21 +161,51 @@ states:
       go_bugfix:
         - when: "world.ticket_id != ''"
           target: bf
+          effects:
+            - set: { last_error: "" }
         - default: true
           target: main
           guard_hint: "Pick a ticket first — type `tickets`."
+          effects:
+            - set:
+                last_error: |
+                  No ticket selected — pick one before entering the bugfix pipeline.
+
+                  Suggestions:
+                  - `tickets` — search and pick a ticket
+                  - `workspaces` — resume an in-progress workspace
       go_implementation:
         - when: "world.ticket_id != ''"
           target: impl
+          effects:
+            - set: { last_error: "" }
         - default: true
           target: main
           guard_hint: "Pick a ticket first — type `tickets`."
+          effects:
+            - set:
+                last_error: |
+                  No ticket selected — pick one before entering the implementation pipeline.
+
+                  Suggestions:
+                  - `tickets` — search and pick a ticket
+                  - `workspaces` — resume an in-progress workspace
       go_cypilot:
         - when: "world.ticket_id != ''"
           target: cyp
+          effects:
+            - set: { last_error: "" }
         - default: true
           target: main
           guard_hint: "Pick a ticket first — type `tickets`."
+          effects:
+            - set:
+                last_error: |
+                  No ticket selected — pick one before entering the cypilot pipeline.
+
+                  Suggestions:
+                  - `tickets` — search and pick a ticket
+                  - `workspaces` — resume an in-progress workspace
 
       # PR refinement needs an open PR (or at least a feature branch
       # that's been pushed); blocking it from a cold main is the
@@ -158,9 +213,18 @@ states:
       go_pr_refinement:
         - when: "world.last_pr_url != '' || world.feature_branch != ''"
           target: pr
+          effects:
+            - set: { last_error: "" }
         - default: true
           target: main
           guard_hint: "No open PR yet — drive a ticket through the pipeline first."
+          effects:
+            - set:
+                last_error: |
+                  No open PR yet — you need an active workspace with a pushed branch.
+
+                  Suggestions:
+                  - Pick a bug or feature ticket and `drive` it through the pipeline to the PR stage
 
       go_code_review_story:
         - target: rev
