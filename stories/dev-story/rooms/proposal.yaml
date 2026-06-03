@@ -31,6 +31,8 @@ states:
     description: "Describe the change you want to propose — talk it through; I'll help shape it."
     view:
       - heading: "Proposal discovery"
+      - prose: 'Seeded from your ideas backlog: **{{ world.proposal_seed_idea }}** — talk it through to sharpen it, then say **ready**.'
+        when: "world.proposal_seed_idea != ''"
       - prose: "Two ways to start, whichever fits your idea:\n\n- **Point me at a doc** that already captures it — say `see docs/…` and I'll read it.\n- **Describe it free-form** — just type the change you want to propose for kitsoki, in your own words.\n\nEither way, I'll ask focused questions to sharpen the problem, why kitsoki fits, and how an operator would use it."
         when: "world.proposal_idea_turns == 0"
       - prose: "Discovery in progress — keep sharpening the idea with me."
@@ -41,8 +43,8 @@ states:
             Turns:         "{{ world.proposal_idea_turns }}"
       - prose: '{{ world.proposal_idea_answer }}'
         when: "world.proposal_idea_answer"
-      - prose: "Say **ready** when it's clear enough and I'll move on to the brief, or **quit** to drop it."
-    relevant_world: [proposal_existing_paths, proposal_idea, proposal_idea_message, proposal_idea_answer, proposal_chat_id, proposal_chat_title, proposal_idea_turns]
+      - prose: "Say **ready** when it's clear enough and I'll move on to the brief, **start over** to discard this idea and begin a fresh discovery, or **quit** to drop it."
+    relevant_world: [proposal_existing_paths, proposal_idea, proposal_idea_message, proposal_idea_answer, proposal_chat_id, proposal_chat_title, proposal_idea_turns, proposal_seed_idea]
     on_enter:
       # Get-or-create the discovery chat. resolve (not create) so a /reload
       # re-fire returns the SAME thread rather than spawning a fresh empty
@@ -96,7 +98,11 @@ states:
                 chat_id:     "{{ world.proposal_chat_id }}"
                 agent:       proposal_interviewer
                 working_dir: "."
-                question:    "The discovery conversation is complete. Write a single, crisp problem/idea statement (1-4 sentences) capturing what this proposal should be about, synthesising everything we discussed. Output ONLY that statement — no preamble, no questions."
+                # Fold in the seed idea (when this proposal was started from an
+                # ideas-backlog candidate) so even a no-discussion "ready" still
+                # distills a real statement. with: args are expr-lang — a ternary
+                # builds the prefix; no pongo filters here.
+                question:    "{{ world.proposal_seed_idea != '' ? 'The starting idea, picked from the ideas backlog, was: ' + world.proposal_seed_idea + '. ' : '' }}The discovery conversation is complete. Write a single, crisp problem/idea statement (1-4 sentences) capturing what this proposal should be about, synthesising everything we discussed. Output ONLY that statement — no preamble, no questions."
               bind:
                 proposal_idea: "answer"
             # Name the proposal — an interpretive decision, so oracle.decide
@@ -131,12 +137,44 @@ states:
                 proposal_slug:      "stdout_json.slug"
                 proposal_workspace: "stdout_json.workspace"
               on_error: proposal
+            # Seed consumed — clear it so a future ad hoc `idea` entry doesn't
+            # re-show the backlog-candidate banner. (Runs after the converse
+            # above, which read it.)
+            - set:
+                proposal_seed_idea: ""
+
+      # Start over: discard this discovery thread and begin a fresh one
+      # without leaving the room (vs quit, which bails to main, or starting a
+      # whole new session). Archives the current chat FIRST — reading the live
+      # proposal_chat_id before the resets clear it — so on_enter's resolve
+      # mints a NEW thread instead of returning this one (Resolve skips
+      # archived rows; same mechanism as /meta new). Then clears the discovery
+      # progress and re-enters `proposal` with a FULL target (not `.`) so
+      # on_enter re-fires and resolves the fresh chat. The seed idea is
+      # cleared too — "start over" means a blank slate, not a redo of the
+      # same backlog candidate, so the seeded banner doesn't reappear.
+      restart:
+        - target: proposal
+          effects:
+            - invoke: host.chat.archive
+              with:
+                chat_id: "{{ world.proposal_chat_id }}"
+              on_error: proposal
+            - set:
+                proposal_chat_id:        ""
+                proposal_idea:           ""
+                proposal_idea_message:   ""
+                proposal_idea_answer:    ""
+                proposal_existing_paths: ""
+                proposal_seed_idea:      ""
+                proposal_idea_turns:     0
 
       quit:
         - target: main
           effects:
             - set:
-                last_error: "proposal abandoned at intake"
-                prev_state: "main"
+                last_error:         "proposal abandoned at intake"
+                prev_state:         "main"
+                proposal_seed_idea: ""
       look:
         - target: .
