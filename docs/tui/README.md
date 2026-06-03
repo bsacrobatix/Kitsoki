@@ -132,13 +132,23 @@ orchestrator via `SetIDELink` so per-turn `host.ide.*` dispatch and the
 `⧉ ide: <name> ✓` chip through the footer pongo2 template (not a hand-rolled
 string) — so the operator always sees that the editor is listening.
 
-**Ambient selection.** Before each oracle-bearing turn, if connected, the TUI
-reads the editor's live selection via `host.ide.get_selection` and threads it
-onto the turn ctx (`host.WithIDEAmbient`; see `internal/host/ide_ambient.go`),
-then appends exactly one settled transcript line —
-`⧉ Selected N lines from <file>` — as the operator's source of truth for what
-rode the turn. This is the same affordance Claude Code gives. The selection is
-read at submit, and the echo reflects the exact range read.
+**Ambient editor context.** Before each oracle-bearing turn, if connected, the
+TUI reads the operator's live editor context and threads it onto the turn ctx
+(`host.WithIDEAmbient`; see `internal/host/ide_ambient.go`), then appends exactly
+one settled transcript line as the operator's source of truth for what rode the
+turn. Two layers, in priority order:
+
+- **Selection** (`host.ide.get_selection`): highlighted text wins. Echo:
+  `⧉ Selected N lines from <file>`.
+- **Active open file** (`host.ide.get_open_editors`): with nothing highlighted,
+  the focused file's *path* rides (no file read — the agent reads it with its
+  own tools if needed) so "reference the open doc" works without selecting.
+  Echo: `⧉ Editor open on <file>`. Focus is the editor flagged active, or the
+  sole open editor; several editors with none active is ambiguous and rides
+  nothing.
+
+This is the same affordance Claude Code gives. Context is read at submit, and
+the echo reflects exactly what rode the turn.
 
 **Inject on change only.** A selection feeds the turn (and prints the echo)
 only when it differs from the one that last rode a turn. A selection the

@@ -186,6 +186,82 @@ func TestSelectionEcho_AppearsOncePerTurn(t *testing.T) {
 	})
 }
 
+// TestActiveEditor_RidesWhenNoSelection covers the no-selection fallback: with
+// nothing highlighted, the focused open file rides the turn (path only) so
+// "reference the open doc" works without selecting. Selection still wins when
+// present, ambiguous focus rides nothing, and the deny list applies.
+func TestActiveEditor_RidesWhenNoSelection(t *testing.T) {
+	t.Parallel()
+	orch, sid := setupCloak(t)
+	const doc = "/home/cloud-user/code/kitsoki/docs/notes.md"
+
+	t.Run("active open file rides when nothing selected", func(t *testing.T) {
+		rm, _ := tuipkg.ExtractRootModel(buildModel(t, orch, sid))
+		fake := tuipkg.NewFakeIDELink("VS Code", "/ws", 1)
+		// No selection set → getCurrentSelection is not-connected → fall back.
+		fake.SetOpenEditors([]map[string]any{
+			{"file": doc, "active": true},
+			{"file": "/home/cloud-user/code/kitsoki/main.go", "active": false},
+		})
+		tuipkg.SetIDELinkForTest(&rm, fake)
+
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		amb := tuipkg.PendingIDEAmbientForTest(rm)
+		require.Equal(t, doc, amb.File)
+		require.Empty(t, amb.Selection, "file-only fallback carries no selection text")
+		require.Contains(t, tuipkg.GetTranscriptContent(rm), "⧉ Editor open on "+doc)
+	})
+
+	t.Run("single open editor rides even when not flagged active", func(t *testing.T) {
+		rm, _ := tuipkg.ExtractRootModel(buildModel(t, orch, sid))
+		fake := tuipkg.NewFakeIDELink("VS Code", "/ws", 1)
+		fake.SetOpenEditors([]map[string]any{{"file": doc, "active": false}})
+		tuipkg.SetIDELinkForTest(&rm, fake)
+
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		require.Equal(t, doc, tuipkg.PendingIDEAmbientForTest(rm).File)
+	})
+
+	t.Run("selection wins over open file", func(t *testing.T) {
+		rm, _ := tuipkg.ExtractRootModel(buildModel(t, orch, sid))
+		fake := tuipkg.NewFakeIDELink("VS Code", "/ws", 1)
+		fake.SetSelection("/a/sel.go", "picked", nil)
+		fake.SetOpenEditors([]map[string]any{{"file": "/a/other.go", "active": true}})
+		tuipkg.SetIDELinkForTest(&rm, fake)
+
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		amb := tuipkg.PendingIDEAmbientForTest(rm)
+		require.Equal(t, "/a/sel.go", amb.File)
+		require.Equal(t, "picked", amb.Selection)
+	})
+
+	t.Run("ambiguous focus rides nothing", func(t *testing.T) {
+		rm, _ := tuipkg.ExtractRootModel(buildModel(t, orch, sid))
+		fake := tuipkg.NewFakeIDELink("VS Code", "/ws", 1)
+		fake.SetOpenEditors([]map[string]any{
+			{"file": "/a/one.go", "active": false},
+			{"file": "/a/two.go", "active": false},
+		})
+		tuipkg.SetIDELinkForTest(&rm, fake)
+
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		require.Empty(t, tuipkg.PendingIDEAmbientForTest(rm).File,
+			"several editors, none active — focus is ambiguous, ride nothing")
+		require.NotContains(t, tuipkg.GetTranscriptContent(rm), "⧉ Editor open")
+	})
+
+	t.Run("deny-ruled active file rides nothing", func(t *testing.T) {
+		rm, _ := tuipkg.ExtractRootModel(buildModel(t, orch, sid))
+		fake := tuipkg.NewFakeIDELink("VS Code", "/ws", 1)
+		fake.SetOpenEditors([]map[string]any{{"file": "/secrets/x.env", "active": true}})
+		tuipkg.SetIDELinkForTest(&rm, fake)
+		tuipkg.SetIDEDenyForTest(&rm, []string{"*.env"})
+
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		require.Empty(t, tuipkg.PendingIDEAmbientForTest(rm).File)
+	})
+}
+
 // TestSelectionEcho_InjectsOnlyOnChange asserts a selection feeds the turn (and
 // echoes) only when it differs from the one that last rode a turn: a held
 // selection must not silently re-shape every follow-up, a changed selection

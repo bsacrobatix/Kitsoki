@@ -190,26 +190,33 @@ func (m RootModel) ideConnected() bool {
 	return m.ideLink != nil && m.ideLink.Connected()
 }
 
-// captureIDEAmbient reads the active editor selection at turn-submit and, when
-// present, not deny-ruled, and changed since the last turn it rode, stashes it
-// on the model (pendingIDEAmbient) for injection onto the turn ctx and appends
-// exactly one `⧉ Selected N lines from <file>` echo via the settled-line path.
-// It is a no-op (clears the pending value, emits nothing) when the link is off,
-// the selection is empty, the active file matches the deny list, or the live
-// selection is identical to the one that already rode a prior turn — so a turn
-// with no *new* editor context behaves exactly as a turn with no editor.
-// Returns the updated model.
+// captureIDEAmbient reads the operator's live editor context at turn-submit and,
+// when present, not deny-ruled, and changed since the last turn it rode, stashes
+// it on the model (pendingIDEAmbient) for injection onto the turn ctx and
+// appends exactly one settled-line echo. It is a no-op (clears the pending
+// value, emits nothing) when the link is off, there is no usable context, the
+// active file matches the deny list, or the context is identical to the one
+// that already rode a prior turn — so a turn with no *new* editor context
+// behaves exactly as a turn with no editor. Returns the updated model.
 //
-// Inject-on-change keeps a held selection from silently re-shaping every
-// follow-up turn: only a fresh selection feeds the prompt and prints an echo.
+// Two layers of context, in priority order: the active *selection* (highlighted
+// text) wins; with nothing selected it falls back to the *active open file* so
+// "reference the open doc" works without highlighting (the model gets the path
+// and can read it with its own tools). Inject-on-change keeps held context from
+// silently re-shaping every follow-up turn: only fresh context feeds the prompt
+// and prints an echo.
 func (m RootModel) captureIDEAmbient() RootModel {
 	m.pendingIDEAmbient = host.IDEAmbient{}
 
 	cand := m.readIDESelection()
+	if cand.File == "" {
+		// No selection — fall back to the focused open file (path only).
+		cand = m.readActiveEditor()
+	}
 	switch {
 	case cand.File == "":
-		// No usable selection (off, empty, error, or deny-ruled). Reset the
-		// change-tracker so re-selecting the same range later counts as new.
+		// No usable editor context (off, empty, error, or deny-ruled). Reset
+		// the change-tracker so the same context later counts as new.
 		m.lastIDEAmbient = host.IDEAmbient{}
 		return m
 	case cand == m.lastIDEAmbient:
@@ -218,16 +225,98 @@ func (m RootModel) captureIDEAmbient() RootModel {
 	default:
 		m.pendingIDEAmbient = cand
 		m.lastIDEAmbient = cand
-		// Exactly one settled line per turn carrying a *new* selection.
-		// Rendered through the inline-routing settled-line path as a clean
-		// system line (ideSelectionEcho) so it reads `⧉ Selected N lines from
-		// <file>` with no routing decoration — the echo is the operator's
-		// source of truth for what rode the turn.
+		// Exactly one settled line per turn carrying *new* editor context,
+		// rendered through the inline-routing settled-line path as a clean
+		// system line (ideSelectionEcho) with no routing decoration — the echo
+		// is the operator's source of truth for what rode the turn.
 		ir := m.newInlineRouter()
-		echo := fmt.Sprintf("⧉ Selected %d %s from %s", cand.Lines, pluralLines(cand.Lines), cand.File)
-		m.transcript.AppendBlock(ir.ideSelectionEcho(echo))
+		m.transcript.AppendBlock(ir.ideSelectionEcho(ideAmbientEcho(cand)))
 		return m
 	}
+}
+
+// ideAmbientEcho renders the settled-line echo for what rode the turn: the
+// selection line count when text is highlighted, else the focused open file.
+func ideAmbientEcho(a host.IDEAmbient) string {
+	if a.Selection != "" {
+		return fmt.Sprintf("⧉ Selected %d %s from %s", a.Lines, pluralLines(a.Lines), a.File)
+	}
+	return fmt.Sprintf("⧉ Editor open on %s", a.File)
+}
+
+// readActiveEditor reads the operator's focused open file via the slice-1
+// host.ide.get_open_editors handler and returns it as a selection-less
+// IDEAmbient (File set, Selection empty), or the zero value when the link is
+// off, no editor is active, or the active file is deny-ruled. This is the
+// no-selection fallback so the open document still feeds the turn — path only,
+// no file read (the agent reads it with its own tools if it needs the body).
+func (m RootModel) readActiveEditor() host.IDEAmbient {
+	if !m.ideConnected() {
+		return host.IDEAmbient{}
+	}
+	ctx := host.WithIDELink(context.Background(), m.ideLink)
+	res, err := host.IDEGetOpenEditorsHandler(ctx, nil)
+	if err != nil || res.Data == nil {
+		return host.IDEAmbient{}
+	}
+	if connected, _ := res.Data["connected"].(bool); !connected {
+		return host.IDEAmbient{}
+	}
+	editors, _ := res.Data["editors"].([]any)
+	file := activeEditorFile(editors)
+	if strings.TrimSpace(file) == "" || m.ideFileDenied(file) {
+		return host.IDEAmbient{}
+	}
+	return host.IDEAmbient{File: file}
+}
+
+// activeEditorFile returns the path of the editor flagged active; when none is
+// flagged but exactly one editor is open it returns that one (the common
+// single-doc case). It returns "" when the focus is ambiguous (several editors,
+// none active) rather than guess. Editor item fields are read defensively
+// (file/path/uri, active/isActive) since the wire shape varies by editor.
+func activeEditorFile(editors []any) string {
+	var paths []string
+	for _, e := range editors {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		p := editorFilePath(m)
+		if p == "" {
+			continue
+		}
+		if isActiveEditor(m) {
+			return p
+		}
+		paths = append(paths, p)
+	}
+	if len(paths) == 1 {
+		return paths[0]
+	}
+	return ""
+}
+
+// editorFilePath extracts a filesystem path from an open-editor item, trying the
+// common key names and stripping a file:// scheme so the echo and prompt show a
+// plain path.
+func editorFilePath(m map[string]any) string {
+	for _, k := range []string{"file", "path", "fsPath", "uri"} {
+		if s, ok := m[k].(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimPrefix(s, "file://")
+		}
+	}
+	return ""
+}
+
+// isActiveEditor reports whether an open-editor item is the focused tab.
+func isActiveEditor(m map[string]any) bool {
+	for _, k := range []string{"active", "isActive"} {
+		if b, ok := m[k].(bool); ok && b {
+			return true
+		}
+	}
+	return false
 }
 
 // readIDESelection reads the active editor selection through the slice-1

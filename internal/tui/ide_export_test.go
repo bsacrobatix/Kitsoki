@@ -55,6 +55,21 @@ func (f *FakeIDELink) SetSelection(file, text string, rangeObj map[string]any) {
 	f.toolResults["getCurrentSelection"] = env
 }
 
+// SetOpenEditors cans the getOpenEditors MCP result so readActiveEditor sees the
+// given editors. Each entry is an open-editor item (e.g. {"file":…,"active":…}).
+func (f *FakeIDELink) SetOpenEditors(editors []map[string]any) {
+	list := make([]any, len(editors))
+	for i, e := range editors {
+		list[i] = e
+	}
+	inner, _ := json.Marshal(map[string]any{"editors": list})
+	env, _ := json.Marshal(map[string]any{
+		"content": []map[string]any{{"type": "text", "text": string(inner)}},
+		"isError": false,
+	})
+	f.toolResults["getOpenEditors"] = env
+}
+
 func (f *FakeIDELink) CallTool(_ context.Context, tool string, _ map[string]any) (json.RawMessage, error) {
 	if raw, ok := f.toolResults[tool]; ok {
 		return raw, nil

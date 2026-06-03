@@ -54,12 +54,23 @@ func TestIDEAmbientPreamble(t *testing.T) {
 			"no ambient on ctx must render no preamble")
 	})
 
-	t.Run("absent when selection empty", func(t *testing.T) {
+	t.Run("absent when no file at all", func(t *testing.T) {
 		t.Parallel()
-		// File set but no selected text — nothing to inject.
-		ctx := host.WithIDEAmbient(context.Background(), host.IDEAmbient{File: "/x.go"})
+		// Empty ambient (no file) — nothing to inject.
+		ctx := host.WithIDEAmbient(context.Background(), host.IDEAmbient{Selection: "x"})
 		assert.Empty(t, host.IDEAmbientPreamble(ctx),
-			"a file with no selection must render no preamble")
+			"ambient with no file must render no preamble")
+	})
+
+	t.Run("renders file-only block when a file is focused but nothing selected", func(t *testing.T) {
+		t.Parallel()
+		ctx := host.WithIDEAmbient(context.Background(), host.IDEAmbient{File: "/x/doc.md"})
+		got := host.IDEAmbientPreamble(ctx)
+		assert.Contains(t, got, "## Active editor (via /ide)")
+		assert.Contains(t, got, "/x/doc.md")
+		assert.Contains(t, got, "no text selected")
+		assert.NotContains(t, got, "## Active editor selection",
+			"file-only must not use the selection header")
 	})
 
 	t.Run("renders header, file, range and selection", func(t *testing.T) {

@@ -108,6 +108,10 @@ func mergeIDEAmbient(ctx context.Context, templateArgs map[string]any) map[strin
 // is unmistakable in a rendered prompt (and greppable in a recorded trace).
 const ideAmbientPreambleHeader = "## Active editor selection (via /ide)"
 
+// ideAmbientPreambleHeaderFile marks the lighter no-selection variant: the
+// operator has a file focused but nothing highlighted, so only the path rides.
+const ideAmbientPreambleHeaderFile = "## Active editor (via /ide)"
+
 // IDEAmbientPreamble renders the standardized editor-selection block that is
 // appended to an operator-facing oracle prompt (ask / ask_with_mcp / converse)
 // whenever a selection rode the turn — the "always injected when /ide is
@@ -121,8 +125,17 @@ const ideAmbientPreambleHeader = "## Active editor selection (via /ide)"
 // code as trailing context.
 func IDEAmbientPreamble(ctx context.Context) string {
 	amb, ok := IDEAmbientFromCtx(ctx)
-	if !ok || strings.TrimSpace(amb.File) == "" || amb.Selection == "" {
+	if !ok || strings.TrimSpace(amb.File) == "" {
 		return ""
+	}
+	if amb.Selection == "" {
+		// No-selection variant: the operator has a file focused but nothing
+		// highlighted. Inject the path only (no file read) so a request like
+		// "reference the open doc" knows which document and can read it.
+		return "\n\n" + ideAmbientPreambleHeaderFile + "\n\n" +
+			fmt.Sprintf("The operator currently has `%s` open and focused in their editor, "+
+				"with no text selected. Treat it as the document they are referring to; "+
+				"read it with your tools if you need its contents.", amb.File)
 	}
 	var sb strings.Builder
 	sb.WriteString("\n\n")
