@@ -1,120 +1,120 @@
-# proposal — ad hoc idea capture and proposal drafting.
+# proposal — proposal-authoring intake. A discovery conversation.
 #
-# The operator arrives here without a ticket. They describe their idea
-# via `capture_idea` (free-form text); oracle structures it into a
-# formatted proposal draft. They can iterate via `refine_idea` until
-# satisfied, then return to main or navigate elsewhere.
+# Entry room of the proposal pipeline (reached from main via go_idea).
+# A free-form idea is awkward to type into one field, so intake is a chat:
+# the operator talks, the `proposal_interviewer` replies and helps sharpen
+# the idea (problem / why-kitsoki / usage / which layer), and
+# `begin_proposal` distills the conversation into world.proposal_idea, mints
+# a slug + per-session workspace, and advances to the brief.
 #
-# After drafting, the content is written to docs/proposals/<slug>.md and
-# world.proposal_file holds the path. On refine, the file is overwritten
-# with the updated draft.
+# mode: conversational, no `choice:` selector — the operator is dropped
+# straight into the conversation and just types (the prd/idle.yaml shape).
+# Free text routes through the LLM router; the closing prose names
+# `ready` / `quit` so the semantic router catches those verbs.
+#
+# on_enter ONLY get-or-creates the persistent chat (host.chat.resolve, NOT
+# host.chat.create — resolve is idempotent across on_enter re-fires like
+# /reload; create would orphan the conversation each reload). The greeting
+# is the static prose in the view, so no LLM call fires until the operator
+# speaks. The `discuss` self-loop uses `target: .` so on_enter does NOT
+# re-fire (which would re-create the chat); the converse lives in the arc.
 
 states:
 
   proposal:
     mode: conversational
-    description: "Ad hoc proposal room — capture and structure an idea without a ticket."
-    relevant_world: [proposal_idea, proposal_file]
+    description: "Describe the change you want to propose — talk it through; I'll help shape it."
     view:
-      - prose: "Describe your idea and the oracle will structure it into a proposal draft."
-        when: "world.proposal_file == ''"
-      - prose: "Draft saved to `{{ world.proposal_file }}`."
-        when: "world.proposal_file != ''"
-      - choice:
-          mode: single
-          prompt: "Actions"
-          items:
-            - label:  "capture"
-              intent: capture_idea
-              hint:   "describe your idea — oracle will draft a proposal"
-            - label: "refine"
-              intent: refine_idea
-              hint:   "give feedback to improve the draft"
-              when:   "available('refine_idea')"
-            - label: "✗ refine — {{ blocked_reason('refine_idea') }}"
-              intent: refine_idea
-              when:   "!available('refine_idea')"
-            - { label: "go_main", intent: go_main, hint: "return to the engineer's day landing" }
-            - { label: "look",    intent: look,    hint: "re-render" }
-    on:
-      capture_idea:
-        - target: proposal_drafting
-          effects:
-            - set:
-                proposal_idea:  "{{ slots.idea }}"
-                proposal_draft: ""
-                proposal_file:  ""
-      refine_idea:
-        - when: "world.proposal_draft != ''"
-          target: proposal_drafting
-          effects:
-            - set:
-                proposal_idea: "{{ world.proposal_idea }}\n\nOperator feedback: {{ slots.feedback }}"
-                proposal_file: ""
-        - default: true
-          target: proposal
-          guard_hint: "draft a proposal first — describe your idea with `capture`"
-      go_main:
-        - target: main
-      look:
-        - target: .
-
-  proposal_drafting:
-    description: "Structuring the idea into a proposal draft via oracle."
-    relevant_world: [proposal_idea, proposal_draft, proposal_file]
-    view:
+      - heading: "Proposal discovery"
+      - prose: "Two ways to start, whichever fits your idea:\n\n- **Point me at a doc** that already captures it — say `see docs/…` and I'll read it.\n- **Describe it free-form** — just type the change you want to propose for kitsoki, in your own words.\n\nEither way, I'll ask focused questions to sharpen the problem, why kitsoki fits, and how an operator would use it."
+        when: "world.proposal_idea_turns == 0"
+      - prose: "Discovery in progress — keep sharpening the idea with me."
+        when: "world.proposal_idea_turns > 0"
       - kv:
           pairs:
-            Idea: "{{ world.proposal_idea }}"
-            File: '{{ world.proposal_file|default:"(pending — oracle structuring your idea)" }}'
-      - choice:
-          mode: single
-          prompt: "Actions"
-          items:
-            - label: "save"
-              intent: save_proposal
-              hint: "write draft to docs/proposals/"
-              when: "world.proposal_draft != '' && world.proposal_file == ''"
-            - { label: "go_back", intent: go_back, hint: "return to proposal" }
-            - { label: "look",    intent: look,    hint: "re-render" }
+            Existing docs: '{{ world.proposal_existing_paths|default:"(none — say `see docs/…` to point me at some)" }}'
+            Turns:         "{{ world.proposal_idea_turns }}"
+      - prose: '{{ world.proposal_idea_answer }}'
+        when: "world.proposal_idea_answer"
+      - prose: "Say **ready** when it's clear enough and I'll move on to the brief, or **quit** to drop it."
+    relevant_world: [proposal_existing_paths, proposal_idea, proposal_idea_message, proposal_idea_answer, proposal_chat_id, proposal_chat_title, proposal_idea_turns]
     on_enter:
-      - invoke: host.oracle.ask
+      # Get-or-create the discovery chat. resolve (not create) so a /reload
+      # re-fire returns the SAME thread rather than spawning a fresh empty
+      # one. scope_key keeps one discovery thread per session.
+      - invoke: host.chat.resolve
         with:
-          agent: oracle_qa
-          prompt: prompts/proposal_draft.md
-          args:
-            idea:           "{{ world.proposal_idea }}"
+          app:       "dev-story"
+          room:      "proposal"
+          scope_key: "proposal"
+          title:     "Proposal idea discovery"
         bind:
-          proposal_draft: stdout
-        on_error: proposal
-      - invoke: host.run
-        with:
-          cmd: python3
-          args:
-            - "stories/dev-story/scripts/save_proposal.py"
-            - "{{ world.proposal_idea }}"
-            - "{{ world.proposal_draft }}"
-        bind:
-          proposal_file: stdout
-        on_error: proposal
+          proposal_chat_id:    "chat_id"
+          proposal_chat_title: "title"
     on:
-      save_proposal:
-        - when: "world.proposal_draft != ''"
-          target: .
+      # Self-loop. `target: .` skips on_enter (so the chat is not re-created);
+      # the converse call below is the only LLM call. idea_answer is cleared
+      # up front so a failure doesn't pair a stale reply with the new message.
+      discuss:
+        - target: .
           effects:
+            - set:
+                proposal_idea_message: "{{ slots.message }}"
+                proposal_idea_answer:  ""
+            - increment: { proposal_idea_turns: 1 }
+            - invoke: host.oracle.converse
+              with:
+                chat_id:     "{{ world.proposal_chat_id }}"
+                agent:       proposal_interviewer
+                working_dir: "."
+                question:    "{{ slots.message }}"
+              bind:
+                proposal_idea_answer: "answer"
+                proposal_chat_id:     "chat_id"
+
+      # Record the docs the operator pointed at (read by the scout /
+      # researcher / author downstream). Stays on the chat screen.
+      capture_existing:
+        - target: .
+          effects:
+            - set:
+                proposal_existing_paths: "{{ slots.paths }}"
+
+      # Distill the conversation into a crisp idea, mint a slug + workspace,
+      # and advance to the brief. The slugify host.run is deterministic so a
+      # flow fixture can stub it by id (`slugify`).
+      begin_proposal:
+        - target: proposal_brief
+          effects:
+            - invoke: host.oracle.converse
+              with:
+                chat_id:     "{{ world.proposal_chat_id }}"
+                agent:       proposal_interviewer
+                working_dir: "."
+                question:    "The discovery conversation is complete. Write a single, crisp problem/idea statement (1-4 sentences) capturing what this proposal should be about, synthesising everything we discussed. Output ONLY that statement — no preamble, no questions."
+              bind:
+                proposal_idea: "answer"
+            # slugify prints JSON; bind BOTH slug + workspace from it. (A
+            # `set: proposal_workspace` in this same list would be evaluated
+            # against the pre-invoke snapshot and miss the just-bound slug —
+            # so derive both via binds instead.)
             - invoke: host.run
+              id: slugify
               with:
                 cmd: python3
                 args:
-                  - "stories/dev-story/scripts/save_proposal.py"
+                  - "stories/dev-story/scripts/proposal_slug.py"
                   - "{{ world.proposal_idea }}"
-                  - "{{ world.proposal_draft }}"
               bind:
-                proposal_file: stdout
+                proposal_slug:      "stdout_json.slug"
+                proposal_workspace: "stdout_json.workspace"
               on_error: proposal
-        - default: true
-          target: .
-      go_back:
-        - target: proposal
+
+      quit:
+        - target: main
+          effects:
+            - set:
+                last_error: "proposal abandoned at intake"
+                prev_state: "main"
       look:
         - target: .
