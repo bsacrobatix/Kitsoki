@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,7 +38,7 @@ const digestTrace = `{"turn":0,"kind":"session.story","payload":{"app_id":"x"}}
 
 func TestDigestTurns(t *testing.T) {
 	var buf bytes.Buffer
-	require.NoError(t, digestTurns(strings.NewReader(digestTrace), &buf))
+	require.NoError(t, digestTurns(strings.NewReader(digestTrace), &buf, 0))
 	out := buf.String()
 
 	assert.NotContains(t, out, "T0", "bookkeeping-only turn 0 is suppressed")
@@ -54,10 +57,66 @@ func TestDigestTurns_SurfacesErrors(t *testing.T) {
 {"turn":1,"kind":"machine.error","state_path":"implementing","payload":{"error":"git.commit: nothing to commit"}}
 `
 	var buf bytes.Buffer
-	require.NoError(t, digestTurns(strings.NewReader(tr), &buf))
+	require.NoError(t, digestTurns(strings.NewReader(tr), &buf, 0))
 	out := buf.String()
 	assert.Contains(t, out, "on_error → idle")
 	assert.Contains(t, out, "git.commit: nothing to commit")
+}
+
+func TestDigestTurns_FocusShowsFullPrompt(t *testing.T) {
+	// A long prompt that the default (truncated) view would cut off.
+	long := "do the thing\\n\\n## Active editor selection (via /ide)\\n\\n" + strings.Repeat("x", 400)
+	tr := `{"turn":1,"kind":"turn.start","payload":{"input":"a"}}
+{"turn":2,"kind":"turn.start","state_path":"chat","payload":{"input":"do the thing","routed_by":"default"}}
+{"turn":2,"kind":"oracle.call.start","payload":{"verb":"converse","prompt":"` + long + `"}}
+`
+	var buf bytes.Buffer
+	require.NoError(t, digestTurns(strings.NewReader(tr), &buf, 2))
+	out := buf.String()
+	assert.Contains(t, out, "T2", "focused turn is shown")
+	assert.NotContains(t, out, "T1", "other turns are omitted when focused")
+	assert.Contains(t, out, strings.Repeat("x", 400), "focused view prints the prompt in full (no truncation)")
+}
+
+func TestResolveTraceArg(t *testing.T) {
+	root := t.TempDir()
+	mk := func(app, name string, mod time.Time) string {
+		dir := filepath.Join(root, app)
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		p := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(p, []byte("{}\n"), 0o644))
+		require.NoError(t, os.Chtimes(p, mod, mod))
+		return p
+	}
+	base := time.Now().Add(-time.Hour)
+	mk("appA", "1111-old.jsonl", base)
+	newest := mk("kitsoki-dev", "7ca57b33-tui-x.jsonl", base.Add(time.Minute))
+
+	t.Run("stdin passthrough", func(t *testing.T) {
+		got, err := resolveTraceArg(root, "-", "")
+		require.NoError(t, err)
+		assert.Equal(t, "-", got)
+	})
+	t.Run("explicit path wins", func(t *testing.T) {
+		got, err := resolveTraceArg(root, newest, "")
+		require.NoError(t, err)
+		assert.Equal(t, newest, got)
+	})
+	t.Run("substring matches by filename", func(t *testing.T) {
+		got, err := resolveTraceArg(root, "7ca57b33", "")
+		require.NoError(t, err)
+		assert.Equal(t, newest, got)
+	})
+	t.Run("app filter restricts the search", func(t *testing.T) {
+		got, err := resolveTraceArg(root, "", "appA")
+		require.NoError(t, err)
+		assert.Contains(t, got, "appA")
+	})
+	t.Run("no match is a clear error", func(t *testing.T) {
+		_, err := resolveTraceArg(root, "nope-nothing", "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no session trace found")
+	})
 }
 
 // TestPrettyPrintStructure feeds the canned JSONL and checks the output structure.

@@ -11,7 +11,7 @@ The TUI hides almost everything useful behind `on_error: idle` arcs. When the us
 
 You have five primary tools, in order of cost:
 
-1. **`kitsoki trace --turns <session.jsonl>`** — a compact per-turn digest of a real session: input → which routing tier resolved it (and why) → host calls → the **prompt each oracle verb dispatched** → editor context → on_error redirects → errors → outcome. This is the "what actually happened to my turn" view; it collapses a grep+jq loop into one command. **Use first to read a user's session.** (Sessions live at `~/.kitsoki/sessions/<app>/*.jsonl`.)
+1. **`kitsoki trace --turns [--app <app>]`** — a compact per-turn digest of a real session: input → which routing tier resolved it (and why) → host calls → the **prompt each oracle verb dispatched** → editor context → on_error redirects → errors → outcome. This is the "what actually happened to my turn" view; it collapses a grep+jq loop into one command. **Use first to read a user's session.** No path needed — it resolves the newest session under `~/.kitsoki/sessions/` (filter with `--app kitsoki-dev`, or pass a session-id substring). Add `--turn <n>` to focus one turn and print its dispatched prompt **in full**.
 2. **`kitsoki turn`** — one-shot a turn against the real repo, dump host calls + errors as JSON. Cheap, repeatable, runs against the actual on-disk state. **Use to reproduce in isolation.**
 3. **Raw trace JSONL** (`kitsoki trace <file>` or `jq`) — every `machine.transition`, `host.on_error.redirect`, `machine.effect.applied`, `oracle.call.start`, `ide.context_captured`. **Use to confirm the digest and dig into a specific event.**
 4. **Go tests under `internal/orchestrator/dogfood_smoke_test.go`** — `t.TempDir()` + real `git init` + real host registry, oracle stubbed. **Use to lock in regressions.**
@@ -27,17 +27,19 @@ You have five primary tools, in order of cost:
 The single source of truth for *what the model actually saw* is the **dispatched prompt**, recorded as `oracle.call.start` (`payload.prompt`). If context you expected (an editor selection, a world value, a prior answer) isn't in that prompt, it never reached the model — regardless of what the host verbs returned upstream.
 
 ```sh
-# The per-turn story — start here:
-kitsoki trace --turns ~/.kitsoki/sessions/<app>/<id>.jsonl
+# The per-turn story — start here (newest kitsoki-dev session, no path needed):
+kitsoki trace --turns --app kitsoki-dev
 
-# The exact prompt a verb dispatched (truncated in the digest; full here):
-jq -r 'select(.kind=="oracle.call.start") | .payload.prompt' <session>.jsonl
+# Focus one turn and see the FULL prompt the model received:
+kitsoki trace --turn 3 --app kitsoki-dev
 
-# WHY an input routed where it did (the routing provenance):
-jq -c 'select(.kind=="turn.start") | {input:.payload.input, routed_by:.payload.routed_by, match_type:.payload.match_type}' <session>.jsonl
+# A specific session by id prefix:
+kitsoki trace --turns 7ca57b33
 
-# Editor context the TUI captured at submit (connected? what rode? why not?):
-jq -c 'select(.kind=="ide.context_captured") | .payload' <session>.jsonl
+# Raw jq, when you need a field the digest doesn't surface:
+jq -r 'select(.kind=="oracle.call.start") | .payload.prompt' <session>.jsonl          # exact prompt
+jq -c 'select(.kind=="turn.start") | {input:.payload.input, routed_by:.payload.routed_by, match_type:.payload.match_type}' <session>.jsonl   # why it routed
+jq -c 'select(.kind=="ide.context_captured") | .payload' <session>.jsonl              # editor context
 ```
 
 Provenance vocabulary on `turn.start`: `routed_by` ∈ {`deterministic`, `semantic`, `llm`, `default`, `turncache`}; `match_type` names the synonym/template or `free_text` for the default-intent tier. A `routed_by: "default"` means free text fell through to the room's `default_intent` sink (see semantic-routing.md §1.5). If an input you expected to converse instead shows `routed_by: "deterministic"` to `look`, that's a routing miss, not a prompt bug.

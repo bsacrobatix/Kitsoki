@@ -30,6 +30,42 @@ and contributors alike.*
   derived, and the replay determinism guarantees. Read this to
   understand what "the trace is the state" actually means.
 
+## Inspecting a session after the fact
+
+Every `kitsoki run` / session writes its trace to
+`~/.kitsoki/sessions/<app>/<id>.jsonl` automatically. `kitsoki trace`
+reads one back — and resolves the file for you, so you rarely type a
+path:
+
+| You run | It shows |
+|---|---|
+| `kitsoki trace` | the raw event stream of the **newest** session |
+| `kitsoki trace --app kitsoki-dev` | …restricted to that app |
+| `kitsoki trace <id-substring>` | the newest session whose filename matches |
+| `kitsoki trace <path>` / `-` | that exact file / stdin |
+
+Two views:
+
+- **Default** — one colour-coded line per `store.Event`.
+- **`--turns`** — a compact per-**turn** digest: the operator input,
+  which routing tier resolved it and **why** (`routed_by` /
+  `match_type`), the host calls fired, the **prompt each oracle verb
+  dispatched** (the source of truth for what the model actually saw),
+  editor context (`ide.context_captured`), `on_error` redirects,
+  errors, and the outcome. `--turn <n>` focuses one turn and prints its
+  prompt **in full**.
+
+The digest is the fastest way to answer *"what actually happened to my
+turn?"* — especially the class of bug where a turn **runs cleanly but
+does the wrong thing** (context never reached the prompt, free text
+mis-routed). For diagnosing those, see
+[`../skills/kitsoki-debugging/SKILL.md`](../skills/kitsoki-debugging/SKILL.md).
+
+```sh
+kitsoki trace --turns --app kitsoki-dev     # the per-turn story of the latest run
+kitsoki trace --turn 3 --app kitsoki-dev    # turn 3, full dispatched prompt
+```
+
 ## Testing a story
 
 - **[`testing.md`](testing.md)** — the two test modes:

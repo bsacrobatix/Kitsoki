@@ -62,6 +62,20 @@ func DefaultTracePath(app, transport, thread string) string {
 	return filepath.Join(home, ".kitsoki", "sessions", appSlug, sha8+"-"+slug+".jsonl")
 }
 
+// SessionsDir returns the root under which DefaultTracePath writes per-session
+// JSONL traces: ~/.kitsoki/sessions (or $TMPDIR/.kitsoki/sessions when no home
+// directory is available, matching DefaultTracePath's fallback). Each app gets
+// a subdirectory. Tools that discover or resolve sessions after the fact (e.g.
+// `kitsoki trace --app … --latest`) anchor here so the location stays in one
+// place.
+func SessionsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.TempDir()
+	}
+	return filepath.Join(home, ".kitsoki", "sessions")
+}
+
 // DefaultRunTracePath returns the repo-anchored JSONL trace path for a one-shot
 // `kitsoki run` session. It walks upward from cwd looking for an existing
 // .kitsoki/ directory or a .kitsoki-root marker file (the same signal

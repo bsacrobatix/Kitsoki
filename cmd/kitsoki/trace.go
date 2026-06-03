@@ -15,16 +15,73 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/store"
 	"kitsoki/internal/testrunner"
 )
+
+// resolveTraceArg resolves the trace source for `kitsoki trace`, so the operator
+// never has to hand-find a JSONL path. Precedence:
+//
+//	"-"                       → stdin
+//	an existing file path     → that file
+//	a non-empty substring     → newest *.jsonl under root whose basename
+//	                            contains it (e.g. a session-id prefix)
+//	"" (no positional)        → newest *.jsonl under root
+//
+// appFilter, when non-empty, restricts the search to the <app> subdirectory
+// (e.g. "kitsoki-dev"). root is normally store.SessionsDir(); it is a parameter
+// so the resolver is testable against a temp tree.
+func resolveTraceArg(root, arg, appFilter string) (string, error) {
+	if arg == "-" {
+		return "-", nil
+	}
+	if arg != "" {
+		if fi, err := os.Stat(arg); err == nil && !fi.IsDir() {
+			return arg, nil // explicit path wins
+		}
+	}
+
+	searchDir := root
+	if appFilter != "" {
+		searchDir = filepath.Join(root, appFilter)
+	}
+	type cand struct {
+		path string
+		mod  time.Time
+	}
+	var cands []cand
+	_ = filepath.WalkDir(searchDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".jsonl") {
+			return nil
+		}
+		if arg != "" && !strings.Contains(filepath.Base(p), arg) {
+			return nil
+		}
+		if info, e := d.Info(); e == nil {
+			cands = append(cands, cand{p, info.ModTime()})
+		}
+		return nil
+	})
+	if len(cands) == 0 {
+		hint := "no session trace found under " + searchDir
+		if arg != "" {
+			hint += fmt.Sprintf(" matching %q", arg)
+		}
+		return "", fmt.Errorf("%s (pass an explicit path, or run a session first)", hint)
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].mod.After(cands[j].mod) })
+	return cands[0].path, nil
+}
 
 // ─── Style helpers (NO_COLOR aware) ──────────────────────────────────────────
 
@@ -225,7 +282,7 @@ type digestTurn struct {
 // the model saw — truncated), any editor context captured, on_error redirects,
 // errors, and the outcome. This is the "what actually happened to my turn" view
 // you otherwise reconstruct by hand with grep+jq.
-func digestTurns(r io.Reader, w io.Writer) error {
+func digestTurns(r io.Reader, w io.Writer, focusTurn int) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 1<<20), 64<<20)
 
@@ -277,7 +334,9 @@ func digestTurns(r io.Reader, w io.Writer) error {
 				d.hostCalls = appendUniq(d.hostCalls, ns)
 			}
 		case rec.Kind == "oracle.call.start":
-			d.prompts = append(d.prompts, str(p["verb"])+": "+truncate1(str(p["prompt"]), 160))
+			// Store the full prompt; truncation is a render-time concern so
+			// --turn focus can show it whole.
+			d.prompts = append(d.prompts, str(p["verb"])+": "+str(p["prompt"]))
 		case rec.Kind == "ide.context_captured":
 			d.ide = fmtIDECapture(p)
 		case rec.Kind == "host.on_error.redirect":
@@ -295,20 +354,29 @@ func digestTurns(r io.Reader, w io.Writer) error {
 		return err
 	}
 
+	matched := false
 	for _, n := range order {
+		if focusTurn > 0 && int(n) != focusTurn {
+			continue
+		}
 		d := byTurn[n]
 		// Skip bookkeeping-only turns (e.g. turn 0's story snapshot) that carry
-		// no input, host call, prompt, outcome, or error.
-		if d.input == "" && d.intent == "" && len(d.hostCalls) == 0 &&
+		// no input, host call, prompt, outcome, or error — unless explicitly
+		// focused.
+		if focusTurn == 0 && d.input == "" && d.intent == "" && len(d.hostCalls) == 0 &&
 			len(d.prompts) == 0 && d.outcome == "" && len(d.errors) == 0 {
 			continue
 		}
-		renderDigestTurn(w, d)
+		renderDigestTurn(w, d, focusTurn > 0)
+		matched = true
+	}
+	if focusTurn > 0 && !matched {
+		fmt.Fprintf(w, "no turn %d in this trace\n", focusTurn)
 	}
 	return nil
 }
 
-func renderDigestTurn(w io.Writer, d *digestTurn) {
+func renderDigestTurn(w io.Writer, d *digestTurn, full bool) {
 	hdr := fmt.Sprintf("T%d", d.num)
 	if d.state != "" {
 		hdr += "  " + d.state
@@ -335,7 +403,17 @@ func renderDigestTurn(w io.Writer, d *digestTurn) {
 		fmt.Fprintf(w, "  host   %s\n", hc)
 	}
 	for _, pr := range d.prompts {
-		fmt.Fprintf(w, "  prompt %s\n", pr)
+		if full {
+			// Full prompt, verb header then the body indented so multi-line
+			// prompts (the model's actual input) stay readable.
+			verb, body, _ := strings.Cut(pr, ": ")
+			fmt.Fprintf(w, "  prompt %s:\n", verb)
+			for _, ln := range strings.Split(body, "\n") {
+				fmt.Fprintf(w, "    %s\n", ln)
+			}
+		} else {
+			fmt.Fprintf(w, "  prompt %s\n", truncate1(pr, 160))
+		}
 	}
 	for _, rd := range d.redirects {
 		fmt.Fprintf(w, "  %s\n", styleFor("on_error → "+rd, colorErr))
@@ -396,50 +474,78 @@ func appendUniq(xs []string, s string) []string {
 
 func traceCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "trace [path]",
-		Short: "Pretty-print an EventSink JSONL trace file",
-		Long: `Pretty-print an EventSink JSONL trace file produced by 'kitsoki run'
-or 'kitsoki turn --trace <path>'.
+		Use:   "trace [path | session-id-substring]",
+		Short: "Inspect an EventSink JSONL session trace",
+		Long: `Inspect an EventSink JSONL trace produced by 'kitsoki run', a session, or
+'kitsoki turn --trace <path>'.
 
-Each line is one store.Event encoded as:
-  {"turn":<n>,"seq":<n>,"ts":"<RFC3339Nano>","kind":"<dotted>","state_path":"<path>","payload":{...}}
+SOURCE RESOLUTION — you rarely need a full path. The argument is resolved as:
+  (none)                  newest session under ~/.kitsoki/sessions
+  --app <id>              ...restricted to that app's subdirectory
+  <substring>             newest session whose filename contains it (e.g. an id)
+  <path>                  that exact file
+  -                       stdin
 
-If path is '-', reads from stdin.
+VIEWS:
+  (default)   the raw event stream, one line per store.Event, colour-coded.
+  --turns     a compact per-TURN digest: operator input, which routing tier
+              resolved it (and WHY — routed_by/match_type), the host calls
+              fired, the PROMPT each oracle verb dispatched (the source of
+              truth for what the model actually saw), editor context
+              (ide.context_captured), on_error redirects, errors, and the
+              outcome. Use this first when a turn RAN but did the wrong thing
+              (context didn't reach the prompt, input mis-routed, silent no-op).
+  --turn <n>  focus a single turn and print its prompts in FULL (implies --turns).
 
---turns prints a compact per-turn DIGEST instead of the raw event stream: for
-each turn it shows the operator input, which routing tier resolved it (and why),
-the host calls fired, the PROMPT each oracle verb dispatched (the source of
-truth for what the model actually saw), any editor context captured
-(ide.context_captured), on_error redirects, errors, and the outcome. This is
-the "what actually happened to my turn" view — use it first when a turn ran but
-did the wrong thing (selection didn't reach the prompt, input mis-routed, …).
-
-For ad-hoc field extraction, jq works equally well:
-  jq 'select(.kind=="machine.state_entered") | .state_path' trace.jsonl`,
+EXAMPLES:
+  kitsoki trace --turns --app kitsoki-dev      # newest kitsoki-dev session, digested
+  kitsoki trace --turns 7ca57b33               # a specific session by id prefix
+  kitsoki trace --turn 3 --app kitsoki-dev     # turn 3 with the full dispatched prompt
+  kitsoki trace                                # raw stream of the newest session
+  jq 'select(.kind=="oracle.call.start").payload.prompt' <file>   # ad-hoc`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return fmt.Errorf("provide a trace file path or '-' for stdin")
+			arg := ""
+			if len(args) == 1 {
+				arg = args[0]
+			}
+			appFilter, _ := cmd.Flags().GetString("app")
+			path, err := resolveTraceArg(store.SessionsDir(), arg, appFilter)
+			if err != nil {
+				return err
 			}
 
 			var r io.Reader
-			if args[0] == "-" {
+			if path == "-" {
 				r = os.Stdin
 			} else {
-				f, err := os.Open(args[0])
+				f, err := os.Open(path)
 				if err != nil {
 					return fmt.Errorf("open trace file: %w", err)
 				}
 				defer func() { _ = f.Close() }()
 				r = f
+				if path != arg {
+					// We resolved a path the operator didn't type verbatim —
+					// name it (on stderr, so piping stdout stays clean).
+					fmt.Fprintf(cmd.ErrOrStderr(), "# %s\n", path)
+				}
 			}
-			if byTurn, _ := cmd.Flags().GetBool("turns"); byTurn {
-				return digestTurns(r, cmd.OutOrStdout())
+
+			focus, _ := cmd.Flags().GetInt("turn")
+			byTurn, _ := cmd.Flags().GetBool("turns")
+			if focus > 0 {
+				byTurn = true
+			}
+			if byTurn {
+				return digestTurns(r, cmd.OutOrStdout(), focus)
 			}
 			return prettyPrint(r, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().Bool("turns", false, "print a compact per-turn digest (input → route → prompt → outcome) instead of the raw event stream")
+	cmd.Flags().Int("turn", 0, "focus a single turn number and print its dispatched prompts in full (implies --turns)")
+	cmd.Flags().String("app", "", "restrict session resolution to this app's subdirectory (e.g. kitsoki-dev)")
 
 	cmd.AddCommand(traceToFlowCmd())
 	return cmd
