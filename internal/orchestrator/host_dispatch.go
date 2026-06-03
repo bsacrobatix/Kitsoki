@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"path/filepath"
+	"slices"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/expr"
@@ -210,7 +212,15 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		// a follow-up subprocess (e.g.
 		// `party_names: "{{ join(result.submitted.names, ',') }}"`).
 		bindEnv, hasBindEnv := hc.Env.(expr.Env)
-		for wkey, dkey := range hc.Bind {
+		// Iterate bind keys in sorted order, NOT raw Go map order: map
+		// iteration is randomized, so two live runs with identical results
+		// would otherwise emit these EffectApplied events in different
+		// orders (non-deterministic trace) and a template `bind:` that reads
+		// a sibling key bound in the same block would render differently per
+		// run. Sorting makes both emission order and intra-block reads
+		// deterministic. Replay is unaffected (it consumes the recorded log).
+		for _, wkey := range slices.Sorted(maps.Keys(hc.Bind)) {
+			dkey := hc.Bind[wkey]
 			var (
 				val any
 				ok  bool
@@ -597,7 +607,10 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 		}
 		summaries = append(summaries, summary)
 
-		for wkey, dkey := range hc.Bind {
+		// Sorted, not raw map order — see the determinism note on the bind
+		// loop in dispatchHostCalls above.
+		for _, wkey := range slices.Sorted(maps.Keys(hc.Bind)) {
+			dkey := hc.Bind[wkey]
 			if res.Data == nil {
 				continue
 			}
