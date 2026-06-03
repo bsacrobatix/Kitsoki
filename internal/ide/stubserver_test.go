@@ -275,17 +275,44 @@ func (s *stubServer) toolResult(name string, override map[string]any) map[string
 }
 
 // cannedToolPayload returns the default structured result for each host.ide.*
-// tool, mirroring the result shapes the host verb mapping (§4) expects.
+// tool.
+//
+// FIDELITY (this is load-bearing — a divergence here is what let /ide ship
+// broken): these are the shapes a REAL editor (VS Code / Cursor / Windsurf over
+// the Claude Code IDE MCP) actually returns, NOT a convenient invention. The
+// earlier stub returned {file,…}/{editors:[{file,active}]} — shapes nothing real
+// produces — so the handlers and the stub agreed by sharing the same wrong guess
+// and the e2e proved nothing. The shapes below were captured from a live editor
+// (getOpenEditors: TabGroups `tabs` with `fileName`/`uri`/`isActive`;
+// getCurrentSelection: `filePath` + a `selection` with {line,character}). The
+// host handlers must NORMALISE these to {file,text,range}/{editors}; the e2e
+// asserts the normalised result, so it now tests real parsing. The `ide_live`
+// build-tagged test re-captures these from a running editor and flags drift.
 func cannedToolPayload(name string) map[string]any {
 	switch name {
 	case "getDiagnostics":
-		return map[string]any{"diagnostics": []map[string]any{{
-			"file": "/abs/file.go", "severity": "error", "message": "undefined: x", "source": "compiler",
+		return map[string]any{"uri": "file:///abs/file.go", "diagnostics": []map[string]any{{
+			"message": "undefined: x", "severity": "error", "source": "compiler",
+			"range": map[string]any{
+				"start": map[string]any{"line": 4, "character": 2},
+				"end":   map[string]any{"line": 4, "character": 8},
+			},
 		}}}
 	case "getCurrentSelection":
-		return map[string]any{"file": "/abs/file.go", "text": "selected text", "range": map[string]any{"start": 1, "end": 2}}
+		return map[string]any{
+			"filePath": "/abs/file.go",
+			"text":     "selected text",
+			"selection": map[string]any{
+				"start": map[string]any{"line": 1, "character": 0},
+				"end":   map[string]any{"line": 2, "character": 3},
+			},
+		}
 	case "getOpenEditors":
-		return map[string]any{"editors": []map[string]any{{"file": "/abs/file.go", "active": true}}}
+		return map[string]any{"tabs": []map[string]any{{
+			"uri": "file:///abs/file.go", "fileName": "/abs/file.go",
+			"isActive": true, "isGroupActive": true, "isDirty": false,
+			"label": "file.go", "languageId": "go",
+		}}}
 	case "openFile":
 		return map[string]any{"ok": true}
 	case "openDiff":
