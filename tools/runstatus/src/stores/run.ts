@@ -1,8 +1,23 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import type { AppDef, MermaidSnapshot, TraceEvent } from "../types.js";
+import type {
+  AppDef,
+  MermaidSnapshot,
+  TraceEvent,
+  TurnResult,
+  IntentInfo,
+  View,
+} from "../types.js";
 import type { DataSource } from "../data/source.js";
 import { readOracleUsage } from "../components/oracle/lib.js";
+
+/** One entry of the conversational transcript shown beside the trace. */
+export interface TranscriptEntry {
+  role: "user" | "agent";
+  text: string;
+  /** The agent's typed view for this turn (when the result carried one). */
+  typedView?: View;
+}
 
 export const useRunStore = defineStore("run", () => {
   // ---- state ----
@@ -13,6 +28,16 @@ export const useRunStore = defineStore("run", () => {
   const selectedEventIndex = ref<number | null>(null);
   const terminal = ref<boolean>(false);
   const loading = ref<boolean>(false);
+
+  // ---- conversational / write-side state ----
+  // transcript is the ordered user↔agent exchange driven by the write RPCs.
+  const transcript = ref<TranscriptEntry[]>([]);
+  // currentView is the latest TurnResult (the current room's view + menu).
+  const currentView = ref<TurnResult | null>(null);
+  // allowedIntents is the enriched per-intent menu of the current room.
+  const allowedIntents = computed<IntentInfo[]>(
+    () => currentView.value?.intents ?? []
+  );
   // Set of state_path values that should be highlighted in the timeline.
   // Driven by clicks on diagram rooms/phases.  Empty = no highlight.
   const highlightedStatePaths = ref<string[]>([]);
@@ -44,6 +69,11 @@ export const useRunStore = defineStore("run", () => {
 
   // ---- internal ----
   let _unsubscribe: (() => void) | null = null;
+  // True once any machine.state_entered event has been observed. Until then we
+  // fall back to a raw state_path; after, only state_entered events move the
+  // current state (turn.end is stamped with the turn's STARTING state, so it
+  // must never overwrite the landed state).
+  let _seenStateEntered = false;
 
   // ---- actions ----
 
@@ -73,16 +103,118 @@ export const useRunStore = defineStore("run", () => {
     // Subscribe for live updates.
     _unsubscribe = source.subscribe(sessionId, (e: TraceEvent) => {
       events.value.push(e);
-      if (e.state_path) {
-        currentStatePath.value = e.state_path;
-      }
+      applyStatePath(e);
     });
+  }
+
+  /**
+   * Derive currentStatePath from a trace event, preferring the LANDED state.
+   *
+   * machine.state_entered carries the TO state (the state the turn landed in),
+   * so it is authoritative. turn.end is stamped with the turn's STARTING state,
+   * so blindly taking e.state_path off every event would rewind the current
+   * state to where the turn began. Once we've seen any state_entered we only
+   * trust state_entered; before that (e.g. a trace that opens mid-stream) we
+   * fall back to any non-empty state_path so the UI isn't left blank.
+   */
+  function applyStatePath(e: TraceEvent): void {
+    if (e.msg === "machine.state_entered") {
+      _seenStateEntered = true;
+      if (e.state_path) currentStatePath.value = e.state_path;
+      return;
+    }
+    if (!_seenStateEntered && e.state_path) {
+      currentStatePath.value = e.state_path;
+    }
   }
 
   /** Stop the live subscription. */
   function teardown(): void {
     _unsubscribe?.();
     _unsubscribe = null;
+    _seenStateEntered = false;
+  }
+
+  // ---- write-side actions ----
+
+  /**
+   * Apply a TurnResult to the store: record it as currentView, sync the landed
+   * state / terminal flags, and push an agent transcript entry built from the
+   * result's pre-rendered view (carrying typed_view for richer rendering).
+   *
+   * On mode "rejected" / "clarify" the engine reports the SAME (un-advanced)
+   * state; we still mirror it. We do NOT touch currentStatePath off a rejected
+   * turn's state if it would rewind — the result.state IS the current state in
+   * every mode, so it is always safe to mirror.
+   */
+  function applyTurnResult(result: TurnResult): void {
+    currentView.value = result;
+    if (result.state) currentStatePath.value = result.state;
+    terminal.value = result.mode === "completed";
+    const text = agentText(result);
+    const hasElements = (result.typed_view?.Elements?.length ?? 0) > 0;
+    // Skip a content-less agent turn (e.g. a terminal transition whose target
+    // renders no view) so the transcript doesn't trail an empty bubble.
+    if (text || hasElements) {
+      transcript.value.push({
+        role: "agent",
+        text,
+        typedView: result.typed_view,
+      });
+    }
+  }
+
+  /**
+   * Load the current room without advancing the session, seed currentView, and
+   * push the opening agent transcript entry. Call once after hydrate for a live
+   * session so the conversation pane shows the room the session is sitting in.
+   */
+  async function loadInitialView(
+    source: DataSource,
+    sessionId: string
+  ): Promise<void> {
+    const result = await source.view(sessionId);
+    currentView.value = result;
+    if (result.state) currentStatePath.value = result.state;
+    terminal.value = result.mode === "completed";
+    transcript.value.push({
+      role: "agent",
+      text: agentText(result),
+      typedView: result.typed_view,
+    });
+  }
+
+  /**
+   * Submit an explicit intent (+ slots): push a user transcript entry, advance
+   * the session, and apply the resulting view.
+   */
+  async function submitIntent(
+    source: DataSource,
+    sessionId: string,
+    intent: string,
+    slots: Record<string, unknown> = {}
+  ): Promise<TurnResult> {
+    transcript.value.push({ role: "user", text: userText(intent, slots) });
+    const result = await source.submit(sessionId, intent, slots);
+    applyTurnResult(result);
+    return result;
+  }
+
+  /**
+   * Send free text as a turn. intentName, when given, is the menu intent the UI
+   * bound its input box to (used only to label the user transcript entry); the
+   * raw text is what the interpreter receives.
+   */
+  async function sendText(
+    source: DataSource,
+    sessionId: string,
+    text: string,
+    _intentName?: string
+  ): Promise<TurnResult> {
+    transcript.value.push({ role: "user", text });
+    const result = await source.sendTurn(sessionId, text);
+    applyTurnResult(result);
+    return result;
   }
 
   /** Set the selected event by index (drives inline row highlight). */
@@ -101,6 +233,36 @@ export const useRunStore = defineStore("run", () => {
     highlightTick.value += 1;
   }
 
+  // ---- transcript text derivation ----
+
+  /**
+   * Build the agent transcript text for a TurnResult. Prefers the pre-rendered
+   * `view`; on a rejection / clarification with no view, falls back to the
+   * structured reason so the operator sees why the turn didn't advance.
+   */
+  function agentText(result: TurnResult): string {
+    if (result.view) return result.view;
+    if (result.mode === "rejected") {
+      return result.error_message || result.guard_hint || "(rejected)";
+    }
+    if (result.mode === "clarify") {
+      const prompts = (result.slots_needed ?? [])
+        .map((s) => s.Prompt || s.Name)
+        .filter(Boolean);
+      return prompts.length > 0 ? prompts.join("\n") : "(more input needed)";
+    }
+    return "";
+  }
+
+  /** Build the user transcript text for a submitted intent. */
+  function userText(intent: string, slots: Record<string, unknown>): string {
+    const values = Object.values(slots).filter(
+      (v) => typeof v === "string" && v.trim() !== ""
+    );
+    if (values.length > 0) return values.join(" ");
+    return intent;
+  }
+
   return {
     // state
     appDef,
@@ -113,11 +275,17 @@ export const useRunStore = defineStore("run", () => {
     highlightedStatePaths,
     highlightTick,
     usageTotals,
+    transcript,
+    currentView,
+    allowedIntents,
     // actions
     hydrate,
     teardown,
     selectEvent,
     clearSelection,
     setHighlightedStatePaths,
+    loadInitialView,
+    submitIntent,
+    sendText,
   };
 });

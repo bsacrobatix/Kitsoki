@@ -80,3 +80,4 @@ internal/runstatus/web/assets/index.html
 # only the .gitkeep placeholder.
 internal/oracle/server/cache/*
 !internal/oracle/server/cache/.gitkeep
+bin/

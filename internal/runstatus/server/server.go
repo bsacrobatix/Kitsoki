@@ -49,6 +49,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -65,12 +66,12 @@ import (
 // appended events. localhost debug tool; 500ms is responsive without busy-spin.
 const defaultPollInterval = 500 * time.Millisecond
 
-// Server answers the runstatus live contract for one JSONL trace + app def.
+// Server answers the runstatus live contract for one [Source].
 // It is safe for concurrent use.
 type Server struct {
-	tracePath string
-	def       *app.AppDef
-	poll      time.Duration
+	src    Source
+	driver Driver // nil for read-only surfaces (status serve)
+	poll   time.Duration
 
 	mu     sync.Mutex
 	subs   map[string]*subscription
@@ -97,14 +98,29 @@ func WithPollInterval(d time.Duration) Option {
 	}
 }
 
+// WithDriver attaches the write side: with it set, the session.turn / submit /
+// continue / offpath RPCs advance the live session. Without it the surface is
+// read-only. `kitsoki web` sets it; `kitsoki status serve` does not.
+func WithDriver(d Driver) Option {
+	return func(s *Server) { s.driver = d }
+}
+
 // New builds a Server that serves the run recorded in the JSONL trace at
-// tracePath, interpreted against def.
+// tracePath, interpreted against def — the read-only `kitsoki status serve`
+// path.
 func New(tracePath string, def *app.AppDef, opts ...Option) *Server {
+	return NewWithSource(&traceFileSource{path: tracePath, def: def}, opts...)
+}
+
+// NewWithSource builds a Server backed by an arbitrary [Source]. `kitsoki
+// status serve` uses [New] (a read-only trace file); `kitsoki web` uses this
+// with a live in-process [LiveSession] so the same SPA, RPC, and SSE surface
+// observes a running session.
+func NewWithSource(src Source, opts ...Option) *Server {
 	s := &Server{
-		tracePath: tracePath,
-		def:       def,
-		poll:      defaultPollInterval,
-		subs:      make(map[string]*subscription),
+		src:  src,
+		poll: defaultPollInterval,
+		subs: make(map[string]*subscription),
 	}
 	for _, o := range opts {
 		o(s)
@@ -112,22 +128,36 @@ func New(tracePath string, def *app.AppDef, opts ...Option) *Server {
 	return s
 }
 
-// Handler returns the HTTP handler for the runstatus surface.
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/rpc", s.handleRPC)
-	mux.HandleFunc("/rpc/events", s.handleEvents)
-	mux.HandleFunc("/", s.handleIndex)
-	return mux
+// Source supplies the runstatus surface with a view of one session. The server
+// is source-agnostic: it never reads a file or an event sink directly. Two
+// implementations exist — the read-only trace-file tailer behind [New], and the
+// live in-process [LiveSession] behind `kitsoki web`. Implementations MUST be
+// safe for concurrent use: the SSE poller and the RPC handlers call them from
+// many goroutines at once.
+type Source interface {
+	// Snapshot returns the full session state now: header, diagram, and events.
+	Snapshot() (runstatus.Snapshot, error)
+	// Events returns just the trace events known so far. It is the cheap path
+	// the SSE poller hits every tick, avoiding a diagram re-render per poll.
+	Events() ([]runstatus.TraceEvent, error)
+	// AppDef returns the static app definition without building a Snapshot.
+	AppDef() *app.AppDef
 }
 
-// ── Trace reads ─────────────────────────────────────────────────────────────
+// traceFileSource is the read-only [Source] behind `kitsoki status serve`: it
+// re-reads and re-parses the JSONL trace file on each call, so a growing file
+// (a live run appending to it) is reflected on the next poll. A not-yet-created
+// file is treated as an empty run rather than an error, so the UI can connect
+// before the first event is written.
+type traceFileSource struct {
+	path string
+	def  *app.AppDef
+}
 
-// readEvents parses the trace file into TraceEvents (with task detail
-// aggregated). A not-yet-created trace (the run hasn't written anything) is
-// treated as empty rather than an error, so the UI can connect first.
-func (s *Server) readEvents() ([]runstatus.TraceEvent, error) {
-	f, err := os.Open(s.tracePath)
+func (t *traceFileSource) AppDef() *app.AppDef { return t.def }
+
+func (t *traceFileSource) Events() ([]runstatus.TraceEvent, error) {
+	f, err := os.Open(t.path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -144,16 +174,24 @@ func (s *Server) readEvents() ([]runstatus.TraceEvent, error) {
 	return events, nil
 }
 
-// snapshot builds the full Snapshot (header + diagram + events) for the trace.
-func (s *Server) snapshot() (runstatus.Snapshot, error) {
-	events, err := s.readEvents()
+func (t *traceFileSource) Snapshot() (runstatus.Snapshot, error) {
+	events, err := t.Events()
 	if err != nil {
 		return runstatus.Snapshot{}, err
 	}
-	// AggregateTaskDetails already ran in readEvents; SnapshotFromTrace re-runs
-	// it (idempotent — it never overwrites existing detail) and renders the
+	// AggregateTaskDetails already ran in Events; SnapshotFromTrace re-runs it
+	// (idempotent — it never overwrites existing detail) and renders the
 	// diagram + header.
-	return runstatus.SnapshotFromTrace(s.def, events, runstatus.HeaderOverrides{}, true), nil
+	return runstatus.SnapshotFromTrace(t.def, events, runstatus.HeaderOverrides{}, true), nil
+}
+
+// Handler returns the HTTP handler for the runstatus surface.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rpc", s.handleRPC)
+	mux.HandleFunc("/rpc/events", s.handleEvents)
+	mux.HandleFunc("/", s.handleIndex)
+	return mux
 }
 
 // ── Static SPA ────────────────────────────────────────────────────────────
@@ -199,6 +237,10 @@ const (
 	codeParseError    = -32700
 	codeMethodMissing = -32601
 	codeServerError   = -32000
+	// codeReadOnly is returned for a write RPC (turn/submit/continue/offpath)
+	// when the surface has no live session Driver — i.e. `kitsoki status serve`,
+	// which only observes a recorded trace.
+	codeReadOnly = -32001
 )
 
 func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
@@ -212,7 +254,7 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, rerr := s.dispatch(req.Method, req.Params)
+	result, rerr := s.dispatch(r.Context(), req.Method, req.Params)
 	resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
 	if rerr != nil {
 		resp.Error = rerr
@@ -229,14 +271,18 @@ func writeRPC(w http.ResponseWriter, resp rpcResponse) {
 
 // dispatch routes a JSON-RPC method to its handler. It returns either a result
 // value or a *rpcError (never both). session_id params are accepted but
-// ignored — this server serves the single configured trace.
-func (s *Server) dispatch(method string, params map[string]any) (any, *rpcError) {
+// ignored — this server serves the single configured session.
+//
+// The read methods (sessions.list / session.*) answer from the [Source]. The
+// write methods (session.turn / submit / continue / offpath) advance the live
+// session through the [Driver]; they return codeReadOnly when no Driver is set.
+func (s *Server) dispatch(ctx context.Context, method string, params map[string]any) (any, *rpcError) {
 	if params == nil {
 		params = map[string]any{}
 	}
 	switch method {
 	case "runstatus.sessions.list":
-		snap, err := s.snapshot()
+		snap, err := s.src.Snapshot()
 		if err != nil {
 			return nil, serverErr(err)
 		}
@@ -248,24 +294,24 @@ func (s *Server) dispatch(method string, params map[string]any) (any, *rpcError)
 		return []runstatus.SessionHeader{snap.Session}, nil
 
 	case "runstatus.session.get":
-		snap, err := s.snapshot()
+		snap, err := s.src.Snapshot()
 		if err != nil {
 			return nil, serverErr(err)
 		}
 		return snap.Session, nil
 
 	case "runstatus.session.app":
-		return s.def, nil
+		return s.src.AppDef(), nil
 
 	case "runstatus.session.mermaid":
-		snap, err := s.snapshot()
+		snap, err := s.src.Snapshot()
 		if err != nil {
 			return nil, serverErr(err)
 		}
 		return snap.Mermaid, nil
 
 	case "runstatus.session.trace":
-		snap, err := s.snapshot()
+		snap, err := s.src.Snapshot()
 		if err != nil {
 			return nil, serverErr(err)
 		}
@@ -279,9 +325,76 @@ func (s *Server) dispatch(method string, params map[string]any) (any, *rpcError)
 		s.unsubscribe(id)
 		return map[string]any{"ok": true}, nil
 
+	case "runstatus.session.view":
+		// Read of the live session's CURRENT room (render + menu) without
+		// advancing it. Requires a Driver (a live session); the read-only
+		// trace surface has none, so it returns codeReadOnly like the write
+		// RPCs — there is no in-process session to query.
+		if s.driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		out, err := s.driver.View(ctx)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return newTurnResult(out, s.driver), nil
+
+	// ── Write methods (live session only) ─────────────────────────────────
+	case "runstatus.session.turn":
+		if s.driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		input, _ := params["input"].(string)
+		out, err := s.driver.Turn(ctx, input)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return newTurnResult(out, s.driver), nil
+
+	case "runstatus.session.submit":
+		if s.driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		name, _ := params["intent"].(string)
+		if name == "" {
+			return nil, &rpcError{Code: codeServerError, Message: "session.submit: missing 'intent'"}
+		}
+		slots, _ := params["slots"].(map[string]any)
+		out, err := s.driver.SubmitDirect(ctx, name, slots)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return newTurnResult(out, s.driver), nil
+
+	case "runstatus.session.continue":
+		if s.driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		slots, _ := params["slots"].(map[string]any)
+		out, err := s.driver.ContinueTurn(ctx, slots)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return newTurnResult(out, s.driver), nil
+
+	case "runstatus.session.offpath":
+		if s.driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		input, _ := params["input"].(string)
+		answer, err := s.driver.AskOffPath(ctx, input)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return map[string]any{"answer": answer}, nil
+
 	default:
 		return nil, &rpcError{Code: codeMethodMissing, Message: "unknown method: " + method}
 	}
+}
+
+func readOnlyErr(method string) *rpcError {
+	return &rpcError{Code: codeReadOnly, Message: method + ": this surface is read-only (no live session)"}
 }
 
 func serverErr(err error) *rpcError {
@@ -335,7 +448,7 @@ func intParam(params map[string]any, key string) (int, bool) {
 func (s *Server) subscribe() (map[string]any, *rpcError) {
 	// Seed sent with the current event count so the stream carries only events
 	// appended after subscribe; the initial load comes from session.trace.
-	events, err := s.readEvents()
+	events, err := s.src.Events()
 	if err != nil {
 		return nil, serverErr(err)
 	}
@@ -398,7 +511,7 @@ func (s *Server) streamNew(w http.ResponseWriter, flusher http.Flusher, sub *sub
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
 
-	events, err := s.readEvents()
+	events, err := s.src.Events()
 	if err != nil || len(events) <= sub.sent {
 		return
 	}

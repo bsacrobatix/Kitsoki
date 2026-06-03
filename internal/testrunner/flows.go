@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -522,68 +521,9 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 			reg.Register("host.jobs.answer_clarification", host.AnswerClarificationHandler)
 		}
 	}
-	for name, stub := range fixture.HostHandlers {
-		stub := stub // capture for closure
-		// Replace (not Register) so a stub overwrites any builtin
-		// previously registered. With host_bindings: this is the
-		// expected path — pre-registered builtins + a few stubs on
-		// top. Without host_bindings: there are no builtins so
-		// Replace behaves identically to Register.
-		reg.Replace(name, func(hctx context.Context, args map[string]any) (host.Result, error) {
-			// 1. Simulated delay using the fake clock injected by the scheduler.
-			if stub.Delay != "" {
-				d, parseErr := app.ParseDuration(stub.Delay)
-				if parseErr != nil {
-					return host.Result{}, fmt.Errorf("stub %q: parse delay: %w", name, parseErr)
-				}
-				if d > 0 {
-					host.ClockFromContext(hctx).Sleep(d)
-				}
-			}
-			// 2. Mid-flight clarification: pause until the user answers.
-			if stub.RequestClarification != "" {
-				_, cErr := host.RequestClarification(hctx, jobs.ClarificationSchema{
-					Prompt: stub.RequestClarification,
-					Fields: map[string]string{"answer": "string"},
-				})
-				if cErr != nil {
-					return host.Result{Error: cErr.Error()}, nil
-				}
-			}
-			// 3a. Per-call envelope (HostStub.ByCall) — when set, the stub
-			// dispatches on args["call"] (the author-assigned invoke `id:`)
-			// and returns the matching envelope. Tried before ByOp so a call
-			// site is addressable even under a prefix-fallback handler. Falls
-			// through to the top-level Data/Error when no key matches.
-			if len(stub.ByCall) > 0 {
-				call, _ := args["call"].(string)
-				if env, ok := stub.ByCall[call]; ok {
-					if env.InfraError != "" {
-						return host.Result{}, errors.New(env.InfraError)
-					}
-					return host.Result{Data: env.Data, Error: env.Error}, nil
-				}
-			}
-			// 3b. Per-op envelope (HostStub.ByOp) — when set, the stub
-			// dispatches on args["op"] and returns the matching envelope.
-			// Falls through to the top-level Data/Error when no key matches.
-			if len(stub.ByOp) > 0 {
-				op, _ := args["op"].(string)
-				if env, ok := stub.ByOp[op]; ok {
-					if env.InfraError != "" {
-						return host.Result{}, errors.New(env.InfraError)
-					}
-					return host.Result{Data: env.Data, Error: env.Error}, nil
-				}
-			}
-			// 4. Infrastructure error (indistinguishable from a real failure).
-			if stub.InfraError != "" {
-				return host.Result{}, errors.New(stub.InfraError)
-			}
-			// 5. Domain-level error or success.
-			return host.Result{Data: stub.Data, Error: stub.Error}, nil
-		})
-	}
+	// Register host_handlers: stubs via the shared registration path so the
+	// flow-test runner and `kitsoki web --flow` resolve a stub identically.
+	RegisterHostStubs(reg, fixture.HostHandlers)
 
 	// Allocate the rig pointer early so the cassette dispatcher's stateOf closure
 	// can hold a reference to &rig.currentStatePath that the turn loop updates

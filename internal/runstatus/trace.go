@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/store"
 	"kitsoki/internal/viz"
 )
 
@@ -98,18 +99,27 @@ func SnapshotFromTrace(def *app.AppDef, events []TraceEvent, ov HeaderOverrides,
 //   - Terminal: whether CurrentState is a terminal state in def.
 func SessionHeaderFromTrace(def *app.AppDef, events []TraceEvent, ov HeaderOverrides) SessionHeader {
 	var (
-		sessionID    string
-		currentState string
-		maxTurn      int
-		startedAt    time.Time
+		sessionID   string
+		lastEntered string // state_path of the most recent state_entered event
+		lastAny     string // most recent non-empty state_path (any event)
+		maxTurn     int
+		startedAt   time.Time
 	)
 
+	enteredMsg := string(store.StateEntered)
 	for _, ev := range events {
 		if sessionID == "" && ev.SessionID != "" {
 			sessionID = ev.SessionID
 		}
+		// A state_entered event is authoritative for the current state; other
+		// events (notably turn.end, stamped with the turn's STARTING state)
+		// carry whatever was active when written and must not mask it. Prefer
+		// the last state_entered, falling back to the last non-empty state_path.
+		if ev.Msg == enteredMsg && ev.StatePath != "" {
+			lastEntered = ev.StatePath
+		}
 		if ev.StatePath != "" {
-			currentState = ev.StatePath
+			lastAny = ev.StatePath
 		}
 		if ev.Turn > maxTurn {
 			maxTurn = ev.Turn
@@ -117,6 +127,11 @@ func SessionHeaderFromTrace(def *app.AppDef, events []TraceEvent, ov HeaderOverr
 		if !ev.Time.IsZero() && (startedAt.IsZero() || ev.Time.Before(startedAt)) {
 			startedAt = ev.Time
 		}
+	}
+
+	currentState := lastEntered
+	if currentState == "" {
+		currentState = lastAny
 	}
 
 	if ov.SessionID != "" {

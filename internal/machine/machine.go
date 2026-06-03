@@ -138,6 +138,13 @@ type Machine interface {
 	// (has a forward intent that is not an auto-emit target). See isDecisionGate.
 	IsDecisionGate(cur app.StatePath, w world.World) bool
 	Validate(cur app.StatePath, w world.World, call intent.IntentCall) ValidationResult
+	// LookupIntent resolves an intent definition by name scoped to the given
+	// state (state-local intents shadow the global library; parallel-encoded
+	// paths probe each region leaf). Read-only callers (e.g. the runstatus web
+	// surface, which needs each allowed intent's slot schema to tell the
+	// browser which input box to bind) use it without re-deriving the
+	// state→intent resolution rules.
+	LookupIntent(cur app.StatePath, name string) (app.Intent, bool)
 	// RenderState recomputes the view for the given state path and world snapshot.
 	// Used by the orchestrator to refresh the view after host-call bindings land
 	// so the user sees the updated world on the same turn.
@@ -570,6 +577,13 @@ func isAllowed(name string, allowed []string) bool {
 		}
 	}
 	return false
+}
+
+// LookupIntent is the exported wrapper over lookupIntent for read-only callers
+// (the runstatus web surface) that need an allowed intent's resolved slot
+// schema. It applies the same state-local-shadows-global resolution.
+func (m *machineImpl) LookupIntent(cur app.StatePath, name string) (app.Intent, bool) {
+	return m.lookupIntent(cur, name)
 }
 
 // lookupIntent looks up an intent definition by name scoped to the given state.

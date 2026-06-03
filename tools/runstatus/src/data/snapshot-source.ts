@@ -4,6 +4,7 @@ import type {
   MermaidSnapshot,
   TraceEvent,
   Snapshot,
+  TurnResult,
 } from "../types.js";
 import type { DataSource, TraceCursor } from "./source.js";
 
@@ -75,5 +76,44 @@ export class SnapshotSource implements DataSource {
   /** No-op: snapshot data is static. */
   subscribe(_sessionId: string, _onEvent: (e: TraceEvent) => void): () => void {
     return () => undefined;
+  }
+
+  // ── Write/read RPCs ────────────────────────────────────────────────────
+  //
+  // A snapshot is a frozen, read-only trace artifact: there is no live session
+  // to advance or query. Every write/read RPC rejects so callers fail loudly
+  // rather than silently no-op against stale data.
+
+  private readOnly(method: string): never {
+    throw new Error(
+      `SnapshotSource: ${method} is unavailable — a snapshot is a read-only artifact (no live session)`
+    );
+  }
+
+  view(_sessionId: string): Promise<TurnResult> {
+    return this.readOnly("view");
+  }
+
+  submit(
+    _sessionId: string,
+    _intent: string,
+    _slots?: Record<string, unknown>
+  ): Promise<TurnResult> {
+    return this.readOnly("submit");
+  }
+
+  sendTurn(_sessionId: string, _input: string): Promise<TurnResult> {
+    return this.readOnly("sendTurn");
+  }
+
+  continueTurn(
+    _sessionId: string,
+    _slots: Record<string, unknown>
+  ): Promise<TurnResult> {
+    return this.readOnly("continueTurn");
+  }
+
+  offpath(_sessionId: string, _input: string): Promise<{ answer: string }> {
+    return this.readOnly("offpath");
   }
 }

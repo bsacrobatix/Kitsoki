@@ -905,6 +905,16 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	}, turnNum)
 
 	// 3. Call harness.
+	//
+	// A free-text turn requires an interpreter (the harness) to classify the
+	// utterance into an intent. In a no-harness posture — e.g. the deterministic
+	// `kitsoki web --flow` UI, where the operator drives by submitting explicit
+	// intents (SubmitDirect) — there is no interpreter, so a free-text turn is
+	// unsupported. Surface that as a clean error instead of dereferencing a nil
+	// harness and panicking the RPC handler.
+	if o.harness == nil {
+		return nil, fmt.Errorf("free-text turn requires an interpreter harness; none is configured (submit an explicit intent instead)")
+	}
 	harnessStart := time.Now()
 	params, err := o.harness.RunTurn(ctx, in)
 	harnessDur := time.Since(harnessStart)
@@ -2209,6 +2219,73 @@ func (o *Orchestrator) LoadJourney(sid app.SessionID) (*store.JourneyState, erro
 // LoadJourney.
 func (o *Orchestrator) RenderState(state app.StatePath, w world.World) (string, error) {
 	return o.machine.RenderState(state, w)
+}
+
+// LookupIntent resolves an intent definition by name scoped to the given state.
+// Read-only wrapper over machine.LookupIntent for callers (the runstatus web
+// surface) that need each allowed intent's slot schema without importing the
+// machine package directly.
+func (o *Orchestrator) LookupIntent(state app.StatePath, name string) (app.Intent, bool) {
+	return o.machine.LookupIntent(state, name)
+}
+
+// CurrentView reconstructs the current state/world for a session and returns a
+// read-only TurnOutcome describing it — the "what does the room look like right
+// now" frame the browser asks for on load (runstatus.session.view) without
+// advancing the session. It never mutates state, world, or the trace.
+//
+// Mode is always ModeTransitioned. When the session sits at the initial state
+// the typed view is surfaced via InitialViewTyped (matching the first frame
+// `kitsoki web` paints); otherwise the text is rendered via RenderState and the
+// typed view is best-effort (RenderStateTyped, which returns a nil TypedView for
+// non-element-array view shapes — acceptable per the contract). AllowedIntents
+// is the menu for the current state.
+func (o *Orchestrator) CurrentView(_ context.Context, sid app.SessionID) (*TurnOutcome, error) {
+	j, err := o.loadJourney(sid)
+	if err != nil {
+		return nil, fmt.Errorf("current view: load journey: %w", err)
+	}
+
+	allowed := o.machine.AllowedIntents(j.State, j.World)
+	allowedNames := make([]string, 0, len(allowed))
+	for _, ai := range allowed {
+		allowedNames = append(allowedNames, ai.Name)
+	}
+
+	out := &TurnOutcome{
+		Mode:           ModeTransitioned,
+		NewState:       j.State,
+		AllowedIntents: allowedNames,
+		TurnNumber:     j.Turn,
+	}
+
+	// We deliberately populate ONLY the rendered text View, never TypedView.
+	// TypedView carries the raw view template (element Sources hold unevaluated
+	// `{{ … }}` pongo); the TUI renders it with RenderEnv+Renderer at display
+	// time, but the browser cannot evaluate pongo — so shipping the raw typed
+	// view leaks `{{ world.x }}` literals into the page. The rendered text (the
+	// FIRST return of InitialViewTyped / RenderStateTyped) is already correct
+	// and is exactly what the turn path (SubmitDirect/Turn) sends, so the web
+	// surface stays consistent: rendered text only. See tools/runstatus/CLAUDE.md
+	// — the render must be correct at the source, never patched in the UI.
+	if j.State == o.InitialState() {
+		text, _, _, _, verr := o.InitialViewTyped(j.World)
+		if verr != nil {
+			return nil, fmt.Errorf("current view: initial view: %w", verr)
+		}
+		out.View = text
+		return out, nil
+	}
+
+	// Arbitrary (non-initial) state: rendered text.
+	if text, _, _, _, verr := o.machine.RenderStateTyped(j.State, j.World); verr == nil {
+		out.View = text
+	} else if text, rerr := o.machine.RenderState(j.State, j.World); rerr == nil {
+		out.View = text
+	} else {
+		return nil, fmt.Errorf("current view: render state %q: %w", j.State, rerr)
+	}
+	return out, nil
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

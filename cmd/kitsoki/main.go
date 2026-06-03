@@ -23,19 +23,12 @@ import (
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 
-	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
-	"kitsoki/internal/chathost"
-	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
-	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
-	"kitsoki/internal/jobs"
-	"kitsoki/internal/journal"
 	"kitsoki/internal/kitrepo"
 	"kitsoki/internal/machine"
 	kitsokimcp "kitsoki/internal/mcp"
-	"kitsoki/internal/oracle"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
 	"kitsoki/internal/tui"
@@ -109,6 +102,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(cassetteCmd())
 	root.AddCommand(exportStatusCmd())
 	root.AddCommand(statusCmd())
+	root.AddCommand(webCmd())
 
 	return root
 }
@@ -228,95 +222,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			if dbPath == "" {
 				dbPath = defaultDBPath()
 			}
-
-			// Open store.
 			if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 				return fmt.Errorf("create db directory: %w", err)
 			}
-			s, err := store.Open(dbPath)
-			if err != nil {
-				return fmt.Errorf("open store: %w", err)
-			}
-			defer func() { _ = s.Close() }()
-
-			// Build the journal writer (continue-mode §4.9 Rule 1).
-			// Shares the same *sql.DB so dual-write transactions are possible.
-			// Built before job/chat stores so it can be passed to them.
-			jw, err := journal.NewSQLiteWriter(s.DB())
-			if err != nil {
-				return fmt.Errorf("open journal writer: %w", err)
-			}
-
-			// Build the journal reader (symmetric to the writer; used by the
-			// AttachSession resume path §4.5).  Shares the same *sql.DB.
-			jr, err := journal.NewSQLiteReader(s.DB())
-			if err != nil {
-				return fmt.Errorf("open journal reader: %w", err)
-			}
-
-			// Build the job store and scheduler.  The job store shares the
-			// same *sql.DB as the session store so we stay at one SQLite file.
-			jobStore, err := jobs.NewJobStore(s.DB(), jobs.WithJobJournalWriter(jw))
-			if err != nil {
-				return fmt.Errorf("open job store: %w", err)
-			}
-			jobScheduler := jobs.NewScheduler(jobStore)
-			// Slice-1: scheduler and job store are now wired into the orchestrator
-			// via WithScheduler / WithJobStore options below.
-
-			// Build the chat store.  Shares the same *sql.DB so we keep one SQLite
-			// file for all persistence.
-			rawChatStore, err := chats.NewStore(s.DB(), chats.WithJournalWriter(jw))
-			if err != nil {
-				return fmt.Errorf("open chat store: %w", err)
-			}
-			chatStoreAdapter := chathost.NewAdapter(rawChatStore)
-
-			// Build machine.
-			logger := slog.Default()
-			m, err := machine.New(def, machine.WithMachineLogger(logger))
-			if err != nil {
-				return fmt.Errorf("build machine: %w", err)
-			}
-
-			// Build harness.
-			h, err := buildHarness(harnessType, claudeModel, recordingPath, recordPath, def)
-			if err != nil {
-				return fmt.Errorf("build harness: %w", err)
-			}
-			defer func() { _ = h.Close() }()
-			setHarnessLogger(h, logger)
-
-			// Build host registry (built-in handlers + allow-list check).
-			hostReg := host.NewRegistry()
-			host.RegisterBuiltins(hostReg)
-			if err := hostReg.ValidateAllowList(def.Hosts); err != nil {
-				return fmt.Errorf("validate hosts: %w", err)
-			}
-
-			// Build the agents registry (builtins + AppDef overrides) and
-			// install it process-wide so handlers honoring `agent:` (today
-			// host.oracle.ask_with_mcp; WS-A8 adds room/bg-job sites) can
-			// resolve names without rebuilding the registry per call.
-			agentReg, err := agents.BuildRegistry(def.AgentSpecs())
-			if err != nil {
-				return fmt.Errorf("build agents registry: %w", err)
-			}
-			host.SetAgentRegistry(agentReg)
-
-			// Build oracle plugin registry from oracle_plugins: declarations.
-			oracleReg, oracleRegErr := oracle.BuildRegistryFromDef(def, h)
-			if oracleRegErr != nil {
-				return fmt.Errorf("build oracle registry: %w", oracleRegErr)
-			}
-			defer func() { _ = oracleReg.Close() }()
-
-			// Allocate the room-enter sink up-front so it can be
-			// passed into the orchestrator AND held by the rootModel.
-			// Bound to the tea.Program below via sink.Attach(p) after
-			// tea.NewProgram exists. Same lifecycle pattern as the
-			// meta-mode stream sink.
-			roomEnterSink := tui.NewRoomEnterSink()
 
 			// Resolve the execution mode (execution-modes proposal). The
 			// TUI defaults to staged so multi-way decision gates pause for
@@ -331,36 +239,35 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				return fmt.Errorf("--mode %q is invalid (want \"staged\" or \"one-shot\")", execModeFlag)
 			}
 
-			// Build orchestrator.
-			runOpts := []orchestrator.Option{
-				orchestrator.WithLogger(logger),
-				orchestrator.WithHostRegistry(hostReg),
-				orchestrator.WithScheduler(jobScheduler),
-				orchestrator.WithJobStore(jobStore),
-				orchestrator.WithChatStore(chatStoreAdapter),
-				orchestrator.WithChatsConcrete(rawChatStore),
-				orchestrator.WithJournalWriter(jw),
-				orchestrator.WithJournalReader(jr),
-				orchestrator.WithRoomEnterSink(roomEnterSink),
-				orchestrator.WithOracleRegistry(oracleReg),
-				orchestrator.WithExecutionMode(execMode),
-			}
-			if promptOverlay != "" {
-				runOpts = append(runOpts, orchestrator.WithPromptOverlay(promptOverlay))
-			}
-			if d := def.Decider; d != nil {
-				runOpts = append(runOpts, orchestrator.WithDecider(orchestrator.DeciderConfig{
-					Agent: d.Agent, Schema: d.Schema, Prompt: d.Prompt, Threshold: d.Threshold,
-				}))
-			}
-			orch := orchestrator.New(def, m, s, h, runOpts...)
+			// Allocate the room-enter sink up-front so it can be passed into the
+			// orchestrator AND held by the rootModel. Bound to the tea.Program
+			// below via sink.Attach(p) after tea.NewProgram exists.
+			roomEnterSink := tui.NewRoomEnterSink()
 
-			// Fail fast at startup if any story prompt's {% extends %} /
-			// {% include %} / @import reference is unresolvable or malformed,
-			// rather than surfacing only when that oracle effect first fires.
-			if perr := orchestrator.PromptValidationError(orch.ValidatePromptExtensions()); perr != nil {
-				return perr
+			// ── Orchestrator construction (shared with `kitsoki web`) ───────
+			rt, err := buildSessionRuntime(runtimeConfig{
+				AppPath:       appPath,
+				Def:           def,
+				DBPath:        dbPath,
+				ExecMode:      execMode,
+				HarnessType:   harnessType,
+				ClaudeModel:   claudeModel,
+				RecordingPath: recordingPath,
+				RecordPath:    recordPath,
+				PromptOverlay: promptOverlay,
+				RoomEnterSink: roomEnterSink,
+			})
+			if err != nil {
+				return err
 			}
+			defer rt.Close()
+
+			// Re-bind the locals the rest of runCmd's TUI / resume code uses.
+			s := rt.Store
+			jw := rt.Journal
+			jobStore := rt.JobStore
+			rawChatStore := rt.ChatStore
+			orch := rt.Orch
 
 			ctx := context.Background()
 

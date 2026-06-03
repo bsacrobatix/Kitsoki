@@ -103,10 +103,11 @@ func ToTraceEvent(ev store.Event) TraceEvent {
 // safe for concurrent reads; see [Snapshot] for the shared-map caveat.
 func FromHistory(hist store.History, def *app.AppDef, sessionID string) (Snapshot, error) {
 	var (
-		currentState string
-		lastTurn     int
-		terminal     bool
-		started      time.Time
+		lastEntered string // state_path of the most recent state_entered event
+		lastAny     string // most recent non-empty state_path (any event)
+		lastTurn    int
+		terminal    bool
+		started     time.Time
 	)
 
 	events := make([]TraceEvent, 0, len(hist))
@@ -118,14 +119,24 @@ func FromHistory(hist store.History, def *app.AppDef, sessionID string) (Snapsho
 
 		te := ToTraceEvent(ev)
 
-		// Track current state for SessionHeader.
+		// Track current state for SessionHeader. A state_entered event is
+		// authoritative; other events merely carry the state that was active
+		// when they were written — notably turn.end is stamped with the turn's
+		// STARTING state, so after a transition it must not mask the entered
+		// state. Hence: prefer the last state_entered, fall back to the last
+		// non-empty state_path (covers traces with no state_entered event).
 		if ev.Kind == store.StateEntered {
-			if sp, ok := te.Attrs["state"].(string); ok {
-				currentState = sp
+			switch {
+			case te.StatePath != "":
+				lastEntered = te.StatePath
+			default:
+				if sp, ok := te.Attrs["state"].(string); ok {
+					lastEntered = sp
+				}
 			}
 		}
 		if te.StatePath != "" {
-			currentState = te.StatePath
+			lastAny = te.StatePath
 		}
 
 		if te.Turn > lastTurn {
@@ -145,6 +156,10 @@ func FromHistory(hist store.History, def *app.AppDef, sessionID string) (Snapsho
 		}
 	}
 
+	currentState := lastEntered
+	if currentState == "" {
+		currentState = lastAny
+	}
 	if currentState != "" {
 		if st, ok := app.Compile(def).LookupState(app.StatePath(strings.ReplaceAll(currentState, "/", "."))); ok && st != nil && st.Terminal {
 			terminal = true

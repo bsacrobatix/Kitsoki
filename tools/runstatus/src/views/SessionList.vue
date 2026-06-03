@@ -16,6 +16,7 @@
             <th>Turn</th>
             <th>Started</th>
             <th>Status</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -23,7 +24,7 @@
             v-for="s in sessions"
             :key="s.session_id"
             class="session-list__row"
-            @click="navigateTo(s.session_id)"
+            @click="navigateTo(s)"
           >
             <td><code>{{ s.session_id }}</code></td>
             <td>{{ s.app_id }}</td>
@@ -34,6 +35,17 @@
               <span :class="s.terminal ? 'session-list__badge--done' : 'session-list__badge--live'">
                 {{ s.terminal ? 'done' : 'live' }}
               </span>
+            </td>
+            <td class="session-list__actions" @click.stop>
+              <router-link
+                v-if="!s.terminal"
+                class="session-list__link"
+                :to="`/s/${s.session_id}/chat`"
+              >Drive (chat)</router-link>
+              <router-link
+                class="session-list__link session-list__link--muted"
+                :to="`/s/${s.session_id}`"
+              >Observe</router-link>
             </td>
           </tr>
         </tbody>
@@ -59,9 +71,10 @@ onMounted(async () => {
     const list = await src.listSessions();
     sessions.value = list;
 
-    // Auto-navigate when exactly one session.
+    // Auto-navigate when exactly one session. Live sessions land on the
+    // interactive chat surface; terminal ones open the read-only observer.
     if (list.length === 1 && list[0]) {
-      router.push("/s/" + list[0].session_id);
+      navigateTo(list[0]);
       return;
     }
   } catch (e) {
@@ -71,8 +84,9 @@ onMounted(async () => {
   }
 });
 
-function navigateTo(sessionId: string): void {
-  router.push("/s/" + sessionId);
+function navigateTo(s: SessionHeader): void {
+  // Live sessions are drivable -> interactive chat; terminal -> observer.
+  router.push(s.terminal ? "/s/" + s.session_id : `/s/${s.session_id}/chat`);
 }
 
 function formatDate(iso: string): string {
@@ -156,6 +170,28 @@ function formatDate(iso: string): string {
 .session-list__badge--done {
   background: #1e293b;
   color: #64748b;
+}
+
+.session-list__actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.session-list__link {
+  color: #60a5fa;
+  text-decoration: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-left: 0.75rem;
+}
+
+.session-list__link:hover {
+  text-decoration: underline;
+}
+
+.session-list__link--muted {
+  color: #94a3b8;
+  font-weight: 400;
 }
 
 code {
