@@ -87,6 +87,11 @@ thought.
   per-state decider. Engine core, CLI/flow surface, and docs-review
   migration shipped; pre-bind staging and the bugfix-story migration
   remain (§8).
+- [`idempotent-on-enter.md`](idempotent-on-enter.md) — an opt-in `once:`
+  flag on `invoke:` effects so the engine skips an on_enter host call whose
+  `bind:` target is already populated — making `/reload` (and re-entry)
+  idempotent without per-room `when:` guards. Nothing implemented yet;
+  generalizes the hand-guards now in `stories/dev-story/rooms/proposal_*.yaml`.
 - [`local-model-oracle.md`](local-model-oracle.md) — a `builtin.local_llm`
   oracle plugin that drives a local llama.cpp `llama-server` sidecar over
   OpenAI-compatible HTTP, with grammar-forced schema-valid output, for
