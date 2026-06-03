@@ -58,7 +58,7 @@ host_handlers:
   # checkpoints (and through pr's analogous chain when the flow
   # reaches that compound).
   host.oracle.decide:
-    data:
+    data: &oracle_stub
       ok: true
       submitted:
         summary_title:    "Autonomous regression artifact"
@@ -79,6 +79,13 @@ host_handlers:
         verdict:    "pass"
         intent:     "accept"      # BARE name — proves the fix
         reason:     "Confident; advance autonomously."
+
+  # host.oracle.task — bf reproducing/implementing/testing/validating
+  # rooms generate their artifact via the `task` verb (judge steps use
+  # `decide`). Same stub payload as decide (shared anchor); the artifact
+  # schema's additionalProperties tolerates the judge fields.
+  host.oracle.task:
+    data: *oracle_stub
 
 turns:
   # core.main → core.bf.implementing in one user turn.

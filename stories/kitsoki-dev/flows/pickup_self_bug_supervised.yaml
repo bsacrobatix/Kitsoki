@@ -98,7 +98,7 @@ host_handlers:
   # are NOT invoked in judge_mode=human (the `when:` clause skips
   # them) so the verdict fields are inert here.
   host.oracle.decide:
-    data:
+    data: &oracle_stub
       ok: true
       stdout: ""
       submitted:
@@ -138,6 +138,13 @@ host_handlers:
         intent:     "accept"
         reason:     "Stub artifact passes the schema; accept advances."
         confidence_pct: 90
+
+  # host.oracle.task — bf reproducing/implementing/testing/validating
+  # rooms generate their artifact via the `task` verb (judge steps use
+  # `decide`). Same stub payload as decide (shared anchor); the artifact
+  # schema's additionalProperties tolerates the judge fields.
+  host.oracle.task:
+    data: *oracle_stub
 
 turns:
   # core.main → core.bf.reproducing (dispatch into the bugfix sub-story
