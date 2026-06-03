@@ -1,7 +1,9 @@
 # TUI: Browser UI for Kitsoki (Feature-Parity with the TUI)
 
-**Status:** Draft v3. **Phases 1–4 shipped** — the interactive web UI is
-complete and demonstrated. `kitsoki web <app.yaml>` serves an interactive chat
+**Status:** Draft v3. **Phases 1–4 shipped + documented** — the interactive web
+UI is complete; full reference lives in **[`docs/tui/web-ui.md`](../tui/web-ui.md)**.
+This proposal now only tracks the remaining design items (meta-mode, composer
+free-text routing, deeper runtime unification); delete it once those land. `kitsoki web <app.yaml>` serves an interactive chat
 surface (room render + live trace + state diagram) backed by a live
 orchestrator, driveable by the **same** deterministic machinery as the rest of
 kitsoki (flow `host_handlers`, host cassettes, warps, recordings) via a shared
@@ -222,8 +224,10 @@ apply here — there is no shared terminal. The bar for this surface is:
           `.artifacts/web-chat/` (`prd-chat.webm`, `00..07-*.png`). Verified
           scene-by-scene visually; fixed 3 defects found that way (invisible
           initial card, raw-template leak, trailing empty bubble) + markdown.
-- [ ] 4.3 Move shipped content to docs/tui/web-ui.md; cross-link
-          docs/tui/README.md; trim/delete this proposal. (Pending.)
+- [x] 4.3 Narrative doc written: **`docs/tui/web-ui.md`** (full reference);
+          cross-linked from `docs/tui/README.md` and
+          `docs/tracing/run-status-ui.md`. Remaining: trim/delete this proposal
+          once the last design items below land.
 ```
 
 ## What we lose, honestly

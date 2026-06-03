@@ -13,6 +13,10 @@ This page describes the architecture as it stands in
 on the UI, and authors who want to understand how their views reach the
 screen.*
 
+> Prefer a browser? The same app can be driven interactively over HTTP with
+> [`kitsoki web`](web-ui.md) — a chat-style surface beside a live trace and
+> state diagram. It shares the orchestrator with this TUI.
+
 ---
 
 ## Blocks: the unit of rendering
