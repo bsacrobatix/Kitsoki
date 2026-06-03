@@ -12,6 +12,7 @@ import (
 
 	"kitsoki/internal/host"
 	"kitsoki/internal/ide"
+	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/tui/blocks"
 )
 
@@ -208,31 +209,63 @@ func (m RootModel) ideConnected() bool {
 func (m RootModel) captureIDEAmbient() RootModel {
 	m.pendingIDEAmbient = host.IDEAmbient{}
 
-	cand := m.readIDESelection()
-	if cand.File == "" {
-		// No selection — fall back to the focused open file (path only).
-		cand = m.readActiveEditor()
-	}
-	switch {
-	case cand.File == "":
-		// No usable editor context (off, empty, error, or deny-ruled). Reset
-		// the change-tracker so the same context later counts as new.
+	// Link off: nothing IDE about this turn — reset the tracker and record
+	// nothing (a "not connected" event every turn would be pure noise).
+	if !m.ideConnected() {
 		m.lastIDEAmbient = host.IDEAmbient{}
 		return m
+	}
+
+	cand, source, reason := m.readIDEContext()
+	injected := false
+	switch {
+	case cand.File == "":
+		// Connected but no usable context (nothing selected, no clear active
+		// file, or deny-ruled). Reset the change-tracker; `reason` says why.
+		m.lastIDEAmbient = host.IDEAmbient{}
 	case cand == m.lastIDEAmbient:
 		// Unchanged since it last rode a turn — don't re-inject or re-echo.
-		return m
 	default:
 		m.pendingIDEAmbient = cand
 		m.lastIDEAmbient = cand
+		injected = true
 		// Exactly one settled line per turn carrying *new* editor context,
 		// rendered through the inline-routing settled-line path as a clean
 		// system line (ideSelectionEcho) with no routing decoration — the echo
 		// is the operator's source of truth for what rode the turn.
 		ir := m.newInlineRouter()
 		m.transcript.AppendBlock(ir.ideSelectionEcho(ideAmbientEcho(cand)))
-		return m
 	}
+
+	// Record the capture in the session trace (always, while connected) so
+	// what the editor link surfaced for this turn — including when nothing
+	// rode — is auditable like any other decision input. Best-effort.
+	m.orch.RecordIDEContext(context.Background(), m.sid, orchestrator.IDECaptureRecord{
+		Connected: true,
+		Source:    source,
+		File:      cand.File,
+		Lines:     cand.Lines,
+		Range:     cand.Range,
+		Injected:  injected,
+		Reason:    reason,
+	})
+	return m
+}
+
+// readIDEContext resolves the editor context for this turn in priority order:
+// a live selection wins; with nothing highlighted it falls back to the focused
+// open file (path only). Returns the ambient plus a source tag
+// ("selection" | "active_editor" | "none") and, when nothing usable was found,
+// a reason for the trace.
+func (m RootModel) readIDEContext() (host.IDEAmbient, string, string) {
+	if sel := m.readIDESelection(); sel.File != "" {
+		return sel, "selection", ""
+	}
+	amb, reason := m.readActiveEditor()
+	if amb.File != "" {
+		return amb, "active_editor", ""
+	}
+	return host.IDEAmbient{}, "none", reason
 }
 
 // ideAmbientEcho renders the settled-line echo for what rode the turn: the
@@ -246,36 +279,42 @@ func ideAmbientEcho(a host.IDEAmbient) string {
 
 // readActiveEditor reads the operator's focused open file via the slice-1
 // host.ide.get_open_editors handler and returns it as a selection-less
-// IDEAmbient (File set, Selection empty), or the zero value when the link is
-// off, no editor is active, or the active file is deny-ruled. This is the
-// no-selection fallback so the open document still feeds the turn — path only,
-// no file read (the agent reads it with its own tools if it needs the body).
-func (m RootModel) readActiveEditor() host.IDEAmbient {
+// IDEAmbient (File set, Selection empty) plus an empty reason; or the zero
+// value with a reason ("not_connected" | "no_open_editors" | "ambiguous_focus"
+// | "deny_ruled") describing why nothing usable was found, for the trace. This
+// is the no-selection fallback so the open document still feeds the turn — path
+// only, no file read (the agent reads it with its own tools if it needs the
+// body).
+func (m RootModel) readActiveEditor() (host.IDEAmbient, string) {
 	if !m.ideConnected() {
-		return host.IDEAmbient{}
+		return host.IDEAmbient{}, "not_connected"
 	}
 	ctx := host.WithIDELink(context.Background(), m.ideLink)
 	res, err := host.IDEGetOpenEditorsHandler(ctx, nil)
 	if err != nil || res.Data == nil {
-		return host.IDEAmbient{}
+		return host.IDEAmbient{}, "not_connected"
 	}
 	if connected, _ := res.Data["connected"].(bool); !connected {
-		return host.IDEAmbient{}
+		return host.IDEAmbient{}, "not_connected"
 	}
 	editors, _ := res.Data["editors"].([]any)
-	file := activeEditorFile(editors)
-	if strings.TrimSpace(file) == "" || m.ideFileDenied(file) {
-		return host.IDEAmbient{}
+	file, reason := activeEditorFile(editors)
+	if file == "" {
+		return host.IDEAmbient{}, reason
 	}
-	return host.IDEAmbient{File: file}
+	if m.ideFileDenied(file) {
+		return host.IDEAmbient{}, "deny_ruled"
+	}
+	return host.IDEAmbient{File: file}, ""
 }
 
 // activeEditorFile returns the path of the editor flagged active; when none is
 // flagged but exactly one editor is open it returns that one (the common
-// single-doc case). It returns "" when the focus is ambiguous (several editors,
-// none active) rather than guess. Editor item fields are read defensively
-// (file/path/uri, active/isActive) since the wire shape varies by editor.
-func activeEditorFile(editors []any) string {
+// single-doc case). The second return is a reason when no path is chosen:
+// "no_open_editors" or "ambiguous_focus" (several editors, none active — we
+// don't guess). Editor item fields are read defensively (file/path/uri,
+// active/isActive) since the wire shape varies by editor.
+func activeEditorFile(editors []any) (string, string) {
 	var paths []string
 	for _, e := range editors {
 		m, ok := e.(map[string]any)
@@ -287,14 +326,18 @@ func activeEditorFile(editors []any) string {
 			continue
 		}
 		if isActiveEditor(m) {
-			return p
+			return p, ""
 		}
 		paths = append(paths, p)
 	}
-	if len(paths) == 1 {
-		return paths[0]
+	switch len(paths) {
+	case 0:
+		return "", "no_open_editors"
+	case 1:
+		return paths[0], ""
+	default:
+		return "", "ambiguous_focus"
 	}
-	return ""
 }
 
 // editorFilePath extracts a filesystem path from an open-editor item, trying the

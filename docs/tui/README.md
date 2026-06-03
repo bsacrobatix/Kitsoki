@@ -150,6 +150,15 @@ turn. Two layers, in priority order:
 This is the same affordance Claude Code gives. Context is read at submit, and
 the echo reflects exactly what rode the turn.
 
+**Recorded in the trace.** Every connected turn writes an
+`ide.context_captured` event to the session trace via the orchestrator
+(`RecordIDEContext`), carrying `{connected, source, file, lines, range,
+injected, reason}` — `source` is `selection` / `active_editor` / `none`, and
+`reason` (e.g. `ambiguous_focus`, `no_open_editors`, `deny_ruled`) explains why
+nothing rode when `source: none`. So "the link was connected but the model
+didn't see my doc" is diagnosable from the trace alone. No selection or
+diagnostic *text* is recorded — only the path, counts, and provenance.
+
 **Inject on change only.** A selection feeds the turn (and prints the echo)
 only when it differs from the one that last rode a turn. A selection the
 operator holds across several turns is injected once, not silently re-shaping

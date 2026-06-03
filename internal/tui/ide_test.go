@@ -1,14 +1,112 @@
 package tui_test
 
 import (
+	"context"
+	"encoding/json"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/app"
+	"kitsoki/internal/harness"
+	"kitsoki/internal/machine"
+	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/store"
 	tuipkg "kitsoki/internal/tui"
 )
+
+// recordingCloakModel builds a cloak RootModel whose orchestrator writes to a
+// JSONL eventSink, so a test can read back the ide.context_captured events the
+// ambient capture records.
+func recordingCloakModel(t *testing.T) (tuipkg.RootModel, *store.JSONLSink) {
+	t.Helper()
+	def, err := app.Load("../../testdata/apps/cloak/app.yaml")
+	require.NoError(t, err)
+	mach, err := machine.New(def)
+	require.NoError(t, err)
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	sink, err := store.OpenJSONL(filepath.Join(t.TempDir(), "trace.jsonl"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sink.Close() })
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
+	require.NoError(t, err)
+
+	orch := orchestrator.New(def, mach, s, h, orchestrator.WithEventSink(sink))
+	sid, err := orch.NewSession(context.Background())
+	require.NoError(t, err)
+	rm, _ := tuipkg.ExtractRootModel(buildModel(t, orch, sid))
+	return rm, sink
+}
+
+func idePayloadsFromSink(t *testing.T, sink *store.JSONLSink) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, ev := range sink.History() {
+		if ev.Kind != store.IDEContextCaptured {
+			continue
+		}
+		var p map[string]any
+		require.NoError(t, json.Unmarshal(ev.Payload, &p))
+		out = append(out, p)
+	}
+	return out
+}
+
+// TestIDECapture_RecordedInTrace: a connected ambient capture is recorded as an
+// ide.context_captured event — both when an editor file rides the turn and when
+// nothing usable is found (so a "connected but nothing rode" report is
+// diagnosable from the trace).
+func TestIDECapture_RecordedInTrace(t *testing.T) {
+	t.Parallel()
+	const doc = "/home/cloud-user/code/kitsoki/docs/notes.md"
+
+	t.Run("active file ride is recorded", func(t *testing.T) {
+		rm, sink := recordingCloakModel(t)
+		fake := tuipkg.NewFakeIDELink("VS Code", "/ws", 1)
+		fake.SetOpenEditors([]map[string]any{{"file": doc, "active": true}})
+		tuipkg.SetIDELinkForTest(&rm, fake)
+
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+
+		recs := idePayloadsFromSink(t, sink)
+		require.Len(t, recs, 1)
+		require.Equal(t, "active_editor", recs[0]["source"])
+		require.Equal(t, doc, recs[0]["file"])
+		require.Equal(t, true, recs[0]["injected"])
+		require.Equal(t, true, recs[0]["connected"])
+	})
+
+	t.Run("ambiguous focus records source none + reason", func(t *testing.T) {
+		rm, sink := recordingCloakModel(t)
+		fake := tuipkg.NewFakeIDELink("VS Code", "/ws", 1)
+		fake.SetOpenEditors([]map[string]any{
+			{"file": "/a/one.go", "active": false},
+			{"file": "/a/two.go", "active": false},
+		})
+		tuipkg.SetIDELinkForTest(&rm, fake)
+
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+
+		recs := idePayloadsFromSink(t, sink)
+		require.Len(t, recs, 1)
+		require.Equal(t, "none", recs[0]["source"])
+		require.Equal(t, false, recs[0]["injected"])
+		require.Equal(t, "ambiguous_focus", recs[0]["reason"])
+	})
+
+	t.Run("disconnected records nothing", func(t *testing.T) {
+		rm, sink := recordingCloakModel(t)
+		// No link set → not connected.
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		require.Empty(t, idePayloadsFromSink(t, sink),
+			"a disconnected turn must not write an ide.context_captured event")
+	})
+}
 
 // TestIDEStatus_OffWhenDisconnected asserts /ide status reports the off state
 // when no link is connected, and renders no footer chip.
