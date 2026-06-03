@@ -11,7 +11,10 @@ EMBED_INDEX   := internal/runstatus/web/assets/index.html
 SPA_SOURCES   := $(shell find $(RUNSTATUS_DIR)/src $(RUNSTATUS_DIR)/index.html \
 	$(RUNSTATUS_DIR)/package.json $(RUNSTATUS_DIR)/vite.config.ts 2>/dev/null)
 
-.PHONY: all build install uninstall test vet fmt tidy clean web web-clean e2e-docker \
+# Every shipped story whose deterministic flow suite `make test` exercises.
+STORY_APPS := $(wildcard stories/*/app.yaml)
+
+.PHONY: all build install uninstall test test-flows vet fmt tidy clean web web-clean e2e-docker \
 	fetch-models fetch-llama-server
 
 all: build
@@ -47,8 +50,21 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 web-clean:
 	rm -f $(EMBED_INDEX)
 
-test:
+# test runs the Go unit tests AND the Mode-2 deterministic story flow suites
+# (no LLM, no cost). The flow suites guard the shipped stories under stories/,
+# which `go test ./...` does not touch.
+test: test-flows
 	go test ./...
+
+# test-flows replays every story's flow fixtures against a scratch binary built
+# from the working tree (plain `go build` — no SPA embed needed), so it tracks
+# local edits rather than a stale $(INSTALLDIR) copy. Fails if any story fails.
+test-flows:
+	@go build -o ./.kitsoki-flows $(PKG)
+	@rc=0; for app in $(STORY_APPS); do \
+		printf '\n-- flows: %s\n' "$$app"; \
+		./.kitsoki-flows test flows "$$app" || rc=1; \
+	done; rm -f ./.kitsoki-flows; exit $$rc
 
 vet:
 	go vet ./...

@@ -2,6 +2,7 @@
 /kitsoki
 /fromflow
 /fromsession
+/.kitsoki-flows   # scratch binary built by `make test-flows`
 
 # Ephemeral render artifacts (viewable over VS Code remote tunnel)
 /.artifacts/
