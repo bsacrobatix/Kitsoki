@@ -315,10 +315,10 @@ type RootModel struct {
 	//                       authoritative record)
 	//   - routingTraceOpen / routingTraceTurn (overlay state)
 
-	// actionsAuto, when true, auto-prints the room's /actions block at
+	// actionsAuto, when true, auto-prints the room's /intents block at
 	// the end of every successful turn — single-pane-tui proposal
-	// §"/actions auto on|off". Toggled by `/actions auto on` /
-	// `/actions auto off`. Persists for the session. The default is
+	// §"/intents auto on|off". Toggled by `/intents auto on` /
+	// `/intents auto off`. Persists for the session. The default is
 	// off; rooms may later declare an override in YAML.
 	actionsAuto bool
 
@@ -377,6 +377,14 @@ type RootModel struct {
 	// off, the selection was empty, or the active file is deny-ruled.
 	// Cleared every submit so it never leaks across turns.
 	pendingIDEAmbient host.IDEAmbient
+
+	// lastIDEAmbient is the selection that most recently rode a turn, used to
+	// inject only on change: a selection the operator holds across several
+	// turns must not silently re-shape every follow-up. captureIDEAmbient
+	// skips injection + echo when the live selection equals this, and resets
+	// it to zero whenever there is no usable selection (off / empty / denied)
+	// so that re-selecting the same range later counts as new.
+	lastIDEAmbient host.IDEAmbient
 
 	// ideDeny is the kitsoki-side deny list gating ambient selection
 	// attach: when the active file matches any of these patterns the
@@ -1507,7 +1515,7 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Single-pane redesign (phase 4): numeric quick-select is gone.
 		// Numbers are normal text in the prompt — "1.5" or "10 tickets"
 		// no longer trip the menu hotkey. Action selection moves to
-		// /actions <n> (already wired in phase 1) and synonym/intent
+		// /intents <n> (already wired in phase 1) and synonym/intent
 		// names (semantic routing handles the rest).
 	}
 
@@ -1878,7 +1886,7 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		next.transcript.AppendBlock(body)
 		return next, cmd
 
-	case "/actions":
+	case "/intents":
 		body, next, cmd := ActionsCommand{}.Run(m, parts[1:])
 		if body != "" {
 			next.transcript.AppendBlock(body)
@@ -2355,7 +2363,7 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 		// Update location.
 		m = m.updateLocation(out)
 
-		// Auto-print the actions block at end of turn when /actions
+		// Auto-print the intents block at end of turn when /intents
 		// auto on was issued. The block follows the agent body so the
 		// user sees: their input → resolution → result → next-step
 		// actions, in scrollback-friendly order.
@@ -4014,7 +4022,7 @@ func (m RootModel) resize() RootModel {
 
 	// Single-pane redesign (phase 3): the menu + inbox right column
 	// is gone — transcript fills the full terminal width. menu.go /
-	// inbox.go are still imported because /actions and /inbox read
+	// inbox.go are still imported because /intents and /inbox read
 	// from them, but their View() output is no longer composed into
 	// the screen.
 	transcriptWidth := m.width
@@ -4045,7 +4053,7 @@ func (m RootModel) resize() RootModel {
 	// World-view sub-model tracks the full pane.
 	m.worldView.SetSize(transcriptWidth, totalHeight)
 
-	// menu / inbox sub-models are kept for the /actions and /inbox
+	// menu / inbox sub-models are kept for the /intents and /inbox
 	// commands but no longer painted. We still size them so any
 	// future inline rendering pulls coherent widths.
 	m.menu.width = transcriptWidth

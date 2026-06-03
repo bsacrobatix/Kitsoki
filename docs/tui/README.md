@@ -140,6 +140,12 @@ then appends exactly one settled transcript line —
 rode the turn. This is the same affordance Claude Code gives. The selection is
 read at submit, and the echo reflects the exact range read.
 
+**Inject on change only.** A selection feeds the turn (and prints the echo)
+only when it differs from the one that last rode a turn. A selection the
+operator holds across several turns is injected once, not silently re-shaping
+every follow-up; a changed selection rides again, and deselecting resets the
+tracker so re-selecting the same range later counts as new.
+
 The selection then reaches the model **two ways**:
 
 - **Always-on (no opt-in).** The operator-facing oracle verbs — `host.oracle.ask`,

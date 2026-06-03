@@ -191,61 +191,78 @@ func (m RootModel) ideConnected() bool {
 }
 
 // captureIDEAmbient reads the active editor selection at turn-submit and, when
-// present and not deny-ruled, stashes it on the model (pendingIDEAmbient) for
-// injection onto the turn ctx and appends exactly one
-// `⧉ Selected N lines from <file>` echo via the settled-line path. It is a
-// no-op (clears the pending value, emits nothing) when the link is off, the
-// selection is empty, or the active file matches the deny list — so a turn with
-// no usable editor context behaves exactly as before. Returns the updated
-// model.
+// present, not deny-ruled, and changed since the last turn it rode, stashes it
+// on the model (pendingIDEAmbient) for injection onto the turn ctx and appends
+// exactly one `⧉ Selected N lines from <file>` echo via the settled-line path.
+// It is a no-op (clears the pending value, emits nothing) when the link is off,
+// the selection is empty, the active file matches the deny list, or the live
+// selection is identical to the one that already rode a prior turn — so a turn
+// with no *new* editor context behaves exactly as a turn with no editor.
+// Returns the updated model.
 //
-// The selection is read through the slice-1 host.ide.get_selection handler with
-// the link injected, so kitsoki has one selection-parsing path. The handler
-// returns the typed not-connected/empty result rather than an error, so this
-// never fails a turn.
+// Inject-on-change keeps a held selection from silently re-shaping every
+// follow-up turn: only a fresh selection feeds the prompt and prints an echo.
 func (m RootModel) captureIDEAmbient() RootModel {
 	m.pendingIDEAmbient = host.IDEAmbient{}
-	if !m.ideConnected() {
+
+	cand := m.readIDESelection()
+	switch {
+	case cand.File == "":
+		// No usable selection (off, empty, error, or deny-ruled). Reset the
+		// change-tracker so re-selecting the same range later counts as new.
+		m.lastIDEAmbient = host.IDEAmbient{}
+		return m
+	case cand == m.lastIDEAmbient:
+		// Unchanged since it last rode a turn — don't re-inject or re-echo.
+		return m
+	default:
+		m.pendingIDEAmbient = cand
+		m.lastIDEAmbient = cand
+		// Exactly one settled line per turn carrying a *new* selection.
+		// Rendered through the inline-routing settled-line path as a clean
+		// system line (ideSelectionEcho) so it reads `⧉ Selected N lines from
+		// <file>` with no routing decoration — the echo is the operator's
+		// source of truth for what rode the turn.
+		ir := m.newInlineRouter()
+		echo := fmt.Sprintf("⧉ Selected %d %s from %s", cand.Lines, pluralLines(cand.Lines), cand.File)
+		m.transcript.AppendBlock(ir.ideSelectionEcho(echo))
 		return m
 	}
+}
 
+// readIDESelection reads the active editor selection through the slice-1
+// host.ide.get_selection handler (one selection-parsing path) and returns it as
+// an IDEAmbient, or the zero value when there is no usable selection: the link
+// is off, the handler reports not-connected, nothing is selected, or the active
+// file is deny-ruled (parity with Claude Code's Read deny-rule suppression).
+// The handler returns the typed not-connected/empty result rather than an
+// error, so this never fails a turn.
+func (m RootModel) readIDESelection() host.IDEAmbient {
+	if !m.ideConnected() {
+		return host.IDEAmbient{}
+	}
 	ctx := host.WithIDELink(context.Background(), m.ideLink)
 	res, err := host.IDEGetSelectionHandler(ctx, nil)
 	if err != nil || res.Data == nil {
-		return m
+		return host.IDEAmbient{}
 	}
 	if connected, _ := res.Data["connected"].(bool); !connected {
-		return m
+		return host.IDEAmbient{}
 	}
 	file, _ := res.Data["file"].(string)
 	text, _ := res.Data["text"].(string)
 	if strings.TrimSpace(file) == "" || text == "" {
-		// No active selection — nothing rides the turn, no echo.
-		return m
+		return host.IDEAmbient{}
 	}
 	if m.ideFileDenied(file) {
-		// Deny-ruled file: attach nothing, echo nothing (parity with
-		// Claude Code's Read deny-rule suppression).
-		return m
+		return host.IDEAmbient{}
 	}
-
-	lines := selectionLineCount(text)
-	m.pendingIDEAmbient = host.IDEAmbient{
+	return host.IDEAmbient{
 		File:      file,
 		Selection: text,
-		Lines:     lines,
+		Lines:     selectionLineCount(text),
 		Range:     ideRangeLabel(res.Data["range"]),
 	}
-
-	// Exactly one settled line per turn carrying a selection. Rendered
-	// through the inline-routing settled-line path as a clean system line
-	// (ideSelectionEcho) so it reads `⧉ Selected N lines from <file>` with
-	// no routing decoration — the echo is the operator's source of truth
-	// for what rode the turn.
-	ir := m.newInlineRouter()
-	echo := fmt.Sprintf("⧉ Selected %d %s from %s", lines, pluralLines(lines), file)
-	m.transcript.AppendBlock(ir.ideSelectionEcho(echo))
-	return m
 }
 
 // ideFileDenied reports whether path matches any deny-list pattern. Each

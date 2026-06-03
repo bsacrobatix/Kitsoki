@@ -185,3 +185,69 @@ func TestSelectionEcho_AppearsOncePerTurn(t *testing.T) {
 		require.Empty(t, tuipkg.PendingIDEAmbientForTest(rm).File)
 	})
 }
+
+// TestSelectionEcho_InjectsOnlyOnChange asserts a selection feeds the turn (and
+// echoes) only when it differs from the one that last rode a turn: a held
+// selection must not silently re-shape every follow-up, a changed selection
+// rides again, and a deselect resets the tracker so reselecting the same range
+// counts as new.
+func TestSelectionEcho_InjectsOnlyOnChange(t *testing.T) {
+	t.Parallel()
+	orch, sid := setupCloak(t)
+	const file = "/home/cloud-user/code/kitsoki/internal/foo/x.go"
+
+	t.Run("unchanged selection rides only the first turn", func(t *testing.T) {
+		rm, _ := tuipkg.ExtractRootModel(buildModel(t, orch, sid))
+		fake := tuipkg.NewFakeIDELink("VS Code", "/ws", 1)
+		fake.SetSelection(file, "line one\nline two", nil)
+		tuipkg.SetIDELinkForTest(&rm, fake)
+
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		require.Equal(t, file, tuipkg.PendingIDEAmbientForTest(rm).File)
+		require.Equal(t, 1, strings.Count(tuipkg.GetTranscriptContent(rm), "⧉ Selected"))
+
+		// Same selection on the next turn — no inject, no second echo.
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		require.Empty(t, tuipkg.PendingIDEAmbientForTest(rm).File,
+			"unchanged selection must not ride a follow-up turn")
+		require.Equal(t, 1, strings.Count(tuipkg.GetTranscriptContent(rm), "⧉ Selected"),
+			"unchanged selection must not echo again")
+	})
+
+	t.Run("changed selection rides again", func(t *testing.T) {
+		rm, _ := tuipkg.ExtractRootModel(buildModel(t, orch, sid))
+		fake := tuipkg.NewFakeIDELink("VS Code", "/ws", 1)
+		fake.SetSelection(file, "first", nil)
+		tuipkg.SetIDELinkForTest(&rm, fake)
+
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		require.Equal(t, "first", tuipkg.PendingIDEAmbientForTest(rm).Selection)
+
+		fake.SetSelection(file, "second different selection", nil)
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		require.Equal(t, "second different selection", tuipkg.PendingIDEAmbientForTest(rm).Selection,
+			"a changed selection must ride the turn")
+		require.Equal(t, 2, strings.Count(tuipkg.GetTranscriptContent(rm), "⧉ Selected"))
+	})
+
+	t.Run("deselect then reselect same range rides again", func(t *testing.T) {
+		rm, _ := tuipkg.ExtractRootModel(buildModel(t, orch, sid))
+		fake := tuipkg.NewFakeIDELink("VS Code", "/ws", 1)
+		fake.SetSelection(file, "same", nil)
+		tuipkg.SetIDELinkForTest(&rm, fake)
+
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		require.Equal(t, "same", tuipkg.PendingIDEAmbientForTest(rm).Selection)
+
+		// Deselect: an empty selection resets the change-tracker.
+		fake.SetSelection(file, "", nil)
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		require.Empty(t, tuipkg.PendingIDEAmbientForTest(rm).File)
+
+		// Reselect the identical range — counts as new again.
+		fake.SetSelection(file, "same", nil)
+		rm = tuipkg.CaptureIDEAmbientForTest(rm)
+		require.Equal(t, "same", tuipkg.PendingIDEAmbientForTest(rm).Selection,
+			"reselecting after a deselect must ride again")
+	})
+}
