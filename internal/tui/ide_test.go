@@ -24,6 +24,27 @@ func TestIDEStatus_OffWhenDisconnected(t *testing.T) {
 	require.Contains(t, content, "off", "status should report off when disconnected; got %q", content)
 }
 
+// TestIDEBare_DoesNotPanic is the regression guard for the bare `/ide` crash:
+// with empty args the dispatcher took the `sub == ""` branch and sliced
+// args[1:] on the empty slice, panicking "slice bounds out of range [1:0]".
+// Bare /ide must instead route to connect (here: a disconnected fake whose
+// discovery finds nothing, so it reports "no editor found").
+func TestIDEBare_DoesNotPanic(t *testing.T) {
+	t.Parallel()
+	orch, sid := setupCloak(t)
+	rm, _ := tuipkg.ExtractRootModel(buildModel(t, orch, sid))
+
+	// A closed fake is disconnected and its Candidates() returns nothing, so
+	// the connect path is deterministic and hits no real lock files.
+	fake := tuipkg.NewFakeIDELink("VS Code", "/ws", 1)
+	_ = fake.Close()
+	tuipkg.SetIDELinkForTest(&rm, fake)
+
+	rm = tuipkg.HandleIDESlashForTest(rm, nil)
+	require.Contains(t, tuipkg.GetTranscriptContent(rm), "no editor found",
+		"bare /ide should route to connect, not panic")
+}
+
 // TestIDEStatus_ReportsConnectedDetails asserts /ide status surfaces the
 // editor name, workspace, and port from the live link.
 func TestIDEStatus_ReportsConnectedDetails(t *testing.T) {

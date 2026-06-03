@@ -57,12 +57,14 @@ func (m RootModel) handleIDESlash(args []string) (tea.Model, tea.Cmd) {
 	}
 	switch sub {
 	case "":
-		// Bare /ide: connect if off, else show status.
+		// Bare /ide: connect if off, else show status. There is no args[0]
+		// here (sub == "" only when args is empty), so pass no connect args —
+		// slicing args[1:] on the empty slice would panic ([1:0]).
 		if m.ideConnected() {
 			m.transcript.AppendBlock(m.renderIDEStatusBlock())
 			return m, nil
 		}
-		return m.ideConnect(args[1:])
+		return m.ideConnect(nil)
 	case "connect":
 		return m.ideConnect(args[1:])
 	case "disconnect":
