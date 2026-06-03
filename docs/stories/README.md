@@ -14,6 +14,11 @@ way, see [`../architecture/concept.md`](../architecture/concept.md).)
 
 ## The model
 
+- **[`architecture.md`](architecture.md)** — the front door: a single
+  end-to-end walk through rooms, phases, intents, turns, room hooks,
+  views, and how the oracle plugs into intent routing and the oracle
+  rooms (`/meta`, off-path). Start here for the whole shape, then
+  follow the cross-links into the deep dives below.
 - **[`state-machine.md`](state-machine.md)** — the complete vocabulary:
   rooms, phases, states, intents, slots, world, guards, transitions,
   effects, and the orchestrator's turn loop. The reference you will
