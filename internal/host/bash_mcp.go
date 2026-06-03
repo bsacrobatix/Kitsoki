@@ -242,6 +242,13 @@ func (s *BashMCPServer) execCommand(ctx context.Context, command string) (*mcpsd
 	if len(extraEnv) > 0 {
 		env = append(env, extraEnv...)
 	}
+	// IDE auto-connect scrub (shared decision #1) — when kitsoki holds the one
+	// IDE link, a bash_mcp child must not open its own socket to the editor.
+	// Outermost wrap, gated on a connected link in ctx; no-op otherwise so the
+	// child env is byte-identical to today on every headless/flow path.
+	if l := IDELinkFromContext(ctx); l != nil && l.Connected() {
+		env = envScrubIDE(env)
+	}
 	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer

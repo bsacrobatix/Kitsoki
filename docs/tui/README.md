@@ -67,6 +67,7 @@ room-switch commands. Notable families:
 | `/trace` | `commands_trace.go` | The routing pipeline trace for recent turns |
 | `/inbox` | `commands_inbox.go` | Inline notification list |
 | `/jump` | `commands_jump.go` | Navigate to background-completion events |
+| `/ide [connect\|disconnect\|status]` | `commands_ide.go` | Connect/disconnect the live editor link; ambient selection rides each turn |
 
 ## Observers: engine events → transcript
 
@@ -101,6 +102,56 @@ an in-flight LLM call.
   agent conversation rendered into the same pane with a distinct theme
   accent; you enter with `/meta …` and return with `/meta done`. See
   [`../stories/meta-mode.md`](../stories/meta-mode.md) for authoring.
+
+## Editor awareness: `/ide`
+
+`/ide` connects the TUI to a running VS Code (or Cursor/Windsurf) instance
+over the same lock-file + MCP-over-WebSocket mechanism Claude Code uses, so
+the editor becomes an always-on context source the operator can see. The
+link substrate (discovery, auth, the ws client, `host.ide.*`) is the runtime
+layer — [`../hosts.md`](../hosts.md#hostide--editor-awareness) and
+[`../transports.md`](../transports.md#7-the-ide-link); this is the operator
+surface on top, in `commands_ide.go`.
+
+**Commands.**
+
+| Command | Does |
+|---|---|
+| `/ide` | Connect if off, else show status (convenience alias). |
+| `/ide connect [n]` | Discover + connect. When several lock files match cwd it prints a picker; re-run `/ide connect <n>` to choose. Reports IDE name + workspace. |
+| `/ide disconnect` | Close the link. This also stops the oracle env-scrub (the scrub is gated on a connected link) and flips the footer chip off. |
+| `/ide status` | One block: connected?, IDE name, workspace, port. |
+
+The command is dispatched inline in `handleSlashCommand` like `/help`; the
+dial is async (an `ideConnectDoneMsg` carries the result back), and on
+success the `*ide.Link` is held on `RootModel` and pushed onto the
+orchestrator via `SetIDELink` so per-turn `host.ide.*` dispatch and the
+`world.ide.connected` gate resolve it.
+
+**Footer indicator.** While connected, a typed footer element renders an
+`⧉ ide: <name> ✓` chip through the footer pongo2 template (not a hand-rolled
+string) — so the operator always sees that the editor is listening.
+
+**Ambient selection.** Before each oracle-bearing turn, if connected, the TUI
+reads the editor's live selection via `host.ide.get_selection` and threads it
+onto the turn as `args.ide` (`{{ args.ide.file }}` / `{{ args.ide.selection }}`
+in a prompt; see `internal/host/ide_ambient.go`), then appends exactly one
+settled transcript line — `⧉ Selected N lines from <file>` — as the operator's
+source of truth for what rode the turn. This is the same affordance Claude
+Code gives. The selection is read at submit, and the echo reflects the exact
+range read.
+
+**Deny list.** Because kitsoki cannot read Claude Code's own `Read`
+deny-rules and must not assume parity, ambient attach is gated on an explicit,
+local deny list (`WithIDEDenyList`, `filepath.Match` globs against the
+absolute path and base name; default empty). A deny-ruled file attaches
+nothing and emits no echo.
+
+**What we accept.** Ambient injection means the selection silently shapes
+prompts — context the operator didn't type. The `⧉` echo is the mitigation
+(always visible); `/ide disconnect` and the deny list are the escape hatches.
+No auto-connect in v1 — `/ide` is explicit so the operator opts into ambient
+injection knowingly.
 
 ## TUI as a transport
 

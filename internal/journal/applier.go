@@ -188,7 +188,7 @@ func coerceVar(typ string, v any) any {
 			// JSON doesn't produce float64 for bools, but guard anyway.
 			return x != 0
 		}
-	// "string", "object", "array" — pass through as-is.
+		// "string", "object", "array" — pass through as-is.
 	}
 	return v
 }

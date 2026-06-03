@@ -157,6 +157,16 @@ const (
 	// Replay no-op.
 	OracleError EventKind = "oracle.call.error"
 
+	// IDEContextCaptured records one host.ide.get_* pull whose result feeds a
+	// decision. Payload carries {verb, request, response_digest, port,
+	// workspace}: the IDE provenance (which workspace/port served it) plus a
+	// sha256-prefix digest of the response — never the raw selection/diagnostic
+	// text (selection-privacy lean). The raw request/response is already on
+	// HostInvoked/HostReturned; this entry pins the editor input behind a
+	// decision so it is auditable without re-opening the socket. Replay no-op.
+	// Mirrors journal.KindIDEContextCaptured (same dotted string).
+	IDEContextCaptured EventKind = "ide.context_captured"
+
 	// StorySnapshot is the base snapshot of the *effective story* — every
 	// file the loader touches to build the running machine (manifests +
 	// views + prompts + scripts + fixtures under the story tree and any

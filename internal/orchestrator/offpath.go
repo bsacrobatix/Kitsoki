@@ -110,6 +110,9 @@ func (o *Orchestrator) AskOffPath(ctx context.Context, sid app.SessionID, questi
 	// resolved agent) without having to import the app package.
 	ctx = host.WithAgents(ctx, agentsForContext(o.def))
 	ctx = host.WithPromptRenderer(ctx, o.promptRenderer)
+	// Inject the live IDE link (nil-safe) so the off-path oracle subprocess
+	// engages the same env-scrub gate as the main dispatch path.
+	ctx = host.WithIDELink(ctx, o.currentIDELink())
 
 	// Always log the question first — even if the call below fails, the
 	// trace shows the user spoke off-path.

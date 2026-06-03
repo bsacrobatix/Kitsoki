@@ -42,7 +42,7 @@ type StreamEvent struct {
 	// Empty for tool-only assistant events, system events, and the
 	// terminal result event.
 	Text      string
-	SessionID string // claude session id (system.init / result events)
+	SessionID string  // claude session id (system.init / result events)
 	IsResult  bool    // true on the terminal result event
 	CostUSD   float64 // result events only (0 otherwise)
 	// Token usage from the terminal result event (all 0 on non-result

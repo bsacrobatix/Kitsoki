@@ -190,14 +190,14 @@ func stripANSI(s string) string {
 // RenderingTestScenario defines a controlled test scenario for View() rendering.
 // Use it to set up specific states and verify rendering output.
 type RenderingTestScenario struct {
-	Mode             Mode
-	LiveLineContent  string
-	PromptContent    string
-	InputQueueDepth  int
-	BannerContent    string
-	FooterContent    string
-	ThemeVariant     string // "dark" or "light" for testing theme sensitivity
-	TerminalWidth    int    // simulate different terminal widths
+	Mode            Mode
+	LiveLineContent string
+	PromptContent   string
+	InputQueueDepth int
+	BannerContent   string
+	FooterContent   string
+	ThemeVariant    string // "dark" or "light" for testing theme sensitivity
+	TerminalWidth   int    // simulate different terminal widths
 }
 
 // DefaultScenario returns a basic scenario for testing.

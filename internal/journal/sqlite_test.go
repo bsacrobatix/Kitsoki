@@ -784,4 +784,3 @@ func TestSQLite_LatestCheckpoint_ErrorVsNotFound(t *testing.T) {
 		}
 	})
 }
-

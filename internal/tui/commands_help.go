@@ -44,6 +44,10 @@ func (HelpCommand) Run(m RootModel, _ []string) (string, RootModel, tea.Cmd) {
 			{"/jump [<n>]", "jump to a recent background-completion (0-indexed, newest first)"},
 		}},
 		{"system", []row{
+			{"/ide", "connect to the editor (or show status if connected)"},
+			{"/ide connect [<n>]", "discover + connect; <n> picks among matching lock files"},
+			{"/ide disconnect", "close the editor link; stop ambient selection capture"},
+			{"/ide status", "show connection: editor, workspace, port"},
 			{"/warp <state>", "developer teleport to a state"},
 			{"/reload", "reload app.yaml from disk and re-fire on_enter"},
 			{"/quit, /q", "exit kitsoki"},

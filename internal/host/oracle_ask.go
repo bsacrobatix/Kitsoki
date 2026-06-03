@@ -112,6 +112,7 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		if templateArgs == nil {
 			templateArgs = args
 		}
+		templateArgs = mergeIDEAmbient(ctx, templateArgs)
 		r, tmplErr := renderPromptBytes(ctx, string(raw), templateArgs)
 		if tmplErr != nil {
 			return Result{Error: fmt.Sprintf("host.oracle.ask: render prompt %q: %v", resolved, tmplErr)}, nil
@@ -131,6 +132,7 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 				if templateArgs == nil {
 					templateArgs = args
 				}
+				templateArgs = mergeIDEAmbient(ctx, templateArgs)
 				r, tmplErr := renderPromptBytes(ctx, string(raw), templateArgs)
 				if tmplErr != nil {
 					return Result{Error: fmt.Sprintf("host.oracle.ask: render prompt %q: %v", resolved, tmplErr)}, nil

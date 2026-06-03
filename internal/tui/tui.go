@@ -356,6 +356,36 @@ type RootModel struct {
 	// prior session's scrollback and otherwise re-appears mid-transcript
 	// (inheriting the preceding agent body's styling) on --continue.
 	resumed bool
+
+	// ideLink is the process-lifetime IDE connection the `/ide` command
+	// starts and stops. nil until the first `/ide connect` succeeds; once
+	// non-nil it is the same handle pushed onto the orchestrator via
+	// SetIDELink so per-turn host.ide.* dispatch resolves it. The TUI also
+	// reads it directly at turn-submit to capture the active selection as
+	// ambient context (handleSubmit → captureIDEAmbient). Held as the
+	// host.IDELink interface plus the lifecycle methods the command needs
+	// (Candidates/ConnectLock/Close); *ide.Link is the production value, and
+	// tests inject an in-memory fake so the footer + ambient-capture paths
+	// can be exercised without a real socket. The orchestrator only needs
+	// the host.IDELink subset. See docs/tui/README.md ("Editor awareness: /ide").
+	ideLink ideLinkHandle
+
+	// pendingIDEAmbient is the editor selection captured at the current
+	// turn's submit (read-at-submit, slice 2 open question #2), waiting to
+	// be injected onto the turn ctx in startAsyncTurn so the oracle prompt
+	// scope exposes it as `args.ide`. Zero (empty File) when the link is
+	// off, the selection was empty, or the active file is deny-ruled.
+	// Cleared every submit so it never leaks across turns.
+	pendingIDEAmbient host.IDEAmbient
+
+	// ideDeny is the kitsoki-side deny list gating ambient selection
+	// attach: when the active file matches any of these patterns the
+	// selection is NOT attached to the turn and no `⧉ Selected …` echo is
+	// emitted. kitsoki cannot read Claude Code's own Read deny-rules and
+	// must not assume parity, so this is an explicit, minimal local
+	// setting (default empty — nothing denied). Patterns are matched with
+	// path/filepath.Match against both the absolute path and its base name.
+	ideDeny []string
 }
 
 const recentBackgroundCap = 8
@@ -391,6 +421,17 @@ func WithJobStore(js *jobs.JobStore) RootModelOption {
 // else.
 func WithChatStore(cs *chats.Store) RootModelOption {
 	return func(m *RootModel) { m.chatStore = cs }
+}
+
+// WithIDEDenyList seeds the kitsoki-side deny list that gates ambient editor
+// selection attach (the `/ide` slice). When the active file matches any pattern
+// the selection never rides a turn and no `⧉ Selected …` echo is emitted.
+// kitsoki cannot read Claude Code's own Read deny-rules and must not assume
+// parity, so the list is explicit and local; the default (option omitted) is
+// empty — nothing denied. Patterns are filepath.Match globs tried against both
+// the absolute path and the base name (so "*.env" and "/secrets/*" both work).
+func WithIDEDenyList(patterns []string) RootModelOption {
+	return func(m *RootModel) { m.ideDeny = patterns }
 }
 
 // WithMetaController injects a pre-built *metamode.Controller into the
@@ -963,6 +1004,9 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case metaDoneDoneMsg:
 		return m.handleMetaDoneDone(msg)
+
+	case ideConnectDoneMsg:
+		return m.handleIDEConnectDone(msg)
 
 	case MetaStreamMsg:
 		// Route to the shared handler. Its own in-flight gate
@@ -1650,6 +1694,14 @@ func (m RootModel) dispatchInput(input string) (tea.Model, tea.Cmd) {
 
 	m.lastInput = input
 
+	// Ambient editor context: when the IDE link is connected, read the
+	// active selection NOW (read-at-submit) and stash it for injection onto
+	// the turn ctx in startAsyncTurn. The `⧉ Selected N lines from <file>`
+	// echo is appended here so the operator sees exactly what rode the turn
+	// (the echo is the source of truth, slice 2 open question #2). A
+	// deny-ruled file attaches nothing and emits no echo.
+	m = m.captureIDEAmbient()
+
 	// Live in-place routing block: starts at the deterministic phase
 	// and is replaced by UpdateLive / FinalizeLive as the pipeline
 	// progresses. routingObserver translates orchestrator slog
@@ -1751,6 +1803,10 @@ func startAsyncTurn(
 	if m.metaStreamSink != nil {
 		ctx = host.WithStreamSink(ctx, m.metaStreamSink)
 	}
+	// Ambient editor context captured at submit (captureIDEAmbient). A
+	// no-op (empty File) leaves the prompt scope byte-identical to a turn
+	// with no editor; otherwise the oracle handlers expose it as args.ide.
+	ctx = host.WithIDEAmbient(ctx, m.pendingIDEAmbient)
 	m.inFlightCancel = cancel
 	m.mode = ModeAwaitingLLM
 	m.pendingKind = kind
@@ -1876,6 +1932,9 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "/world":
 		return m.openWorldView()
+
+	case "/ide":
+		return m.handleIDESlash(parts[1:])
 
 	case "/inbox":
 		// Single-pane redesign: print the inbox inline as a chat
@@ -4284,7 +4343,43 @@ func footerFrameworkLine(m RootModel) string {
 	if badge := m.inboxBadge(); badge != "" {
 		parts = append(parts, badge)
 	}
+	if chip := ideFooterChip(m); chip != "" {
+		parts = append(parts, chip)
+	}
 	return strings.Join(parts, " · ")
+}
+
+// ideFooterChipTemplate is the pongo2 source for the IDE footer indicator.
+// Rendered only when connected so the chip is hidden/off otherwise — no
+// hand-rolled string concatenation builds the operator-visible text.
+const ideFooterChipTemplate = `{% if args.ide.connected %}⧉ ide: {{ args.ide.name }} ✓{% endif %}`
+
+// ideFooterChip renders the footer's IDE indicator through the footer pongo2
+// template against the live link state. Returns "" (hidden) when no editor is
+// connected. The decorative footer never bubbles a template error to the user —
+// a render failure degrades to no chip, matching footerStoryLine.
+func ideFooterChip(m RootModel) string {
+	connected := m.ideConnected()
+	name := ""
+	if connected {
+		name = displayIDEName(m.ideLink.IDEName())
+	}
+	env := expr.Env{
+		Slots: map[string]any{},
+		World: map[string]any{},
+		Event: map[string]any{},
+		Args: map[string]any{
+			"ide": map[string]any{
+				"connected": connected,
+				"name":      name,
+			},
+		},
+	}
+	out, err := render.Pongo(ideFooterChipTemplate, env)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // footerStoryLine evaluates the active room's State.Footer pongo2

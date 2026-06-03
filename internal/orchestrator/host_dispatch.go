@@ -66,6 +66,15 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	// files through the story's overlay → story search path. nil is safe
 	// (handlers use the legacy path).
 	ctx = host.WithPromptRenderer(ctx, o.promptRenderer)
+	// Inject the live IDE link so host.ide.* handlers resolve the editor and the
+	// oracle env-scrub gate engages. nil is safe (not-connected result, no
+	// scrub). The `world.ide.connected` gate is seeded once per turn in
+	// loadJourney (the single seam every room runs through, including rooms with
+	// no host calls), so it is NOT written here; re-seed against this dispatch's
+	// world in case a redirect/post-bind recursion handed us a freshly-rebuilt
+	// world without it.
+	ctx = host.WithIDELink(ctx, o.currentIDELink())
+	o.seedIDEConnected(w)
 
 	// Wave 3-oracle: inject the EventSink so oracle handlers can parallel-write
 	// OracleCalled / OracleReturned / OracleError events to the JSONL alongside
@@ -547,6 +556,11 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	// files through the story's overlay → story search path. nil is safe
 	// (handlers use the legacy path).
 	ctx = host.WithPromptRenderer(ctx, o.promptRenderer)
+	// Inject the live IDE link (nil-safe). The `world.ide.connected` gate is
+	// seeded per turn in loadJourney; re-seed against this dispatch's world (see
+	// the note in dispatchHostCalls).
+	ctx = host.WithIDELink(ctx, o.currentIDELink())
+	o.seedIDEConnected(w)
 
 	summaries := make([]HostCallSummary, 0, len(calls))
 	var events []store.Event

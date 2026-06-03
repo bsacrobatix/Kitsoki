@@ -219,7 +219,62 @@ external driver.
 
 ---
 
-## 7. Pointers
+## 7. The IDE link
+
+The transports in §1–§6 are **output-only**: kitsoki posts a message onto
+an external surface. The **IDE link** is a different shape of transport —
+**connection-oriented and inbound-capable**. It is the first long-lived
+client in an engine that is otherwise all stateless subprocesses (the
+oracle execs `claude` per call; the Bash MCP server is per-call). It does
+not implement the `Transport` interface; it is documented here because it
+is the engine's second class of external surface, and the one a story
+*pulls from* rather than posts to.
+
+**What it connects to.** A running VS Code (or compatible: Cursor,
+Windsurf) exposes an MCP server over a loopback WebSocket and advertises it
+by writing `~/.claude/ide/<port>.lock`
+(`{pid, workspaceFolders, ideName, transport:"ws", authToken}`). This is the
+exact mechanism Claude Code's own `/ide` uses. kitsoki is a **client** of
+that server — it never writes its own lock file.
+
+**Discovery + auth.** Pick the lock file by `$CLAUDE_CODE_SSE_PORT` if set,
+else the one whose `workspaceFolders` is the longest prefix of kitsoki's
+cwd (a `/ide` picker breaks ties). Dial `ws://127.0.0.1:<port>` with header
+`x-claude-code-ide-authorization: <authToken>` (a mismatch is closed `1008`),
+run the MCP `initialize` handshake, and map the advertised tools to the
+`host.ide.*` verbs.
+
+**Lifecycle + concurrency.** The link exposes `Connect`/`Close`/`Status`.
+MCP-over-ws is bidirectional JSON-RPC over one shared socket, so a single
+read-pump goroutine demultiplexes inbound frames to in-flight calls via a
+pending-request map; each call blocks on its own channel bound to the call's
+`ctx` (a turn cancel/timeout unblocks it); a dropped socket fails in-flight
+calls with the typed not-connected result and the next call single-flights a
+reconnect against the freshest matching lock. No background heartbeat in v1.
+
+**Owned, routed, recorded.** Because kitsoki holds the one link, it scrubs
+the oracle subprocess environment at every exec site when connected — it
+unsets `CLAUDE_CODE_SSE_PORT` and sets `CLAUDE_CODE_AUTO_CONNECT_IDE=false`
+so the inner `claude` does not *also* connect to the editor behind kitsoki's
+back (which would pull selections and open diffs that the orchestration
+layer never sees, routes, or records). IDE context reaches the inner
+`claude` as prompt context, not via a second socket.
+
+**Determinism.** Discovery, dial, and every `host.ide.*` RPC are
+deterministic I/O recorded as ordinary host calls
+(`host.invoked`/`host.returned`) and stubbable by per-invoke id in flow
+fixtures — replay never opens a socket. The only interpretive moment is when
+captured editor context lands in an oracle prompt, recorded as
+`ide.context_captured` (see [`hosts.md`](hosts.md#hostide--editor-awareness)).
+
+- The verbs and not-connected contract: [`hosts.md`](hosts.md#hostide--editor-awareness).
+- The `/ide` command, footer indicator, and ambient selection echo: [`tui/README.md`](tui/README.md).
+- The verified wire contract: `.context/claude-code-ide-interface.md`.
+- Source: [`internal/ide/`](../internal/ide/), handlers in [`internal/host/ide_handlers.go`](../internal/host/ide_handlers.go).
+
+---
+
+## 8. Pointers
 
 - Source: [`internal/transport/`](../internal/transport/).
 - Session store: [`internal/store/`](../internal/store/) and

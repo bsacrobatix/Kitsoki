@@ -62,6 +62,7 @@ carrier handler when the op name is dispatched from `with:` args.
 | [`host.chat.suggest_title`](#hostchatsuggest_title) | Ask Claude to propose a title from the transcript. |
 | [`host.chat.resolve_ref`](#hostchatresolve_ref) | Resolve a chat reference (id, alias, or "current") to a chat row. |
 | [`host.chat.drive`](#hostchatdrive) | Enqueue a turn against a chat; optionally `await` completion. |
+| [`host.ide.*`](#hostide--editor-awareness) | Editor awareness over the live IDE link: diagnostics, selection, open editors, open file/diff. |
 
 Every handler must be present in the app's top-level `hosts:`
 allow-list to be invokable.
@@ -144,6 +145,21 @@ To prevent this, every oracle CLI invocation pins
 (OAuth/credentials are read from the keychain, not from a setting source). The
 flag is applied at every construction site via `appendSettingSourcesFlag`
 (`internal/host/agents.go`) and locked by `oracle_setting_sources_test.go`.
+
+A second isolation concern is the **IDE**. The same inherited environment means
+that when kitsoki runs inside a VS Code integrated terminal, the inner `claude`
+sees `CLAUDE_CODE_SSE_PORT` and would silently connect to the editor's MCP
+server — pulling the operator's selection and opening diffs that the
+orchestration layer never sees, routes, or records. So when kitsoki itself holds
+an IDE link (see [`host.ide.*`](#hostide--editor-awareness) and
+[`transports.md`](transports.md#7-the-ide-link)), a shared env helper
+(`envScrubIDE`) is applied at **every** oracle exec site — `runClaudeOneShotReal`
+and `runClaudeStreamJSON` in `oracle_runner.go`, and the Bash MCP exec — unsetting
+`CLAUDE_CODE_SSE_PORT` and setting `CLAUDE_CODE_AUTO_CONNECT_IDE=false` (the inner
+`claude` also rediscovers a link by scanning `~/.claude/ide/*.lock`, so unsetting
+the port alone is not enough). When no link is held the helper is a byte-identical
+no-op. kitsoki owns the one IDE link; the oracle subprocess receives editor
+context as prompt context, not via a second socket.
 
 ---
 
@@ -801,6 +817,46 @@ effects:
     bind:
       summary: result_text
 ```
+
+---
+
+## host.ide.* — editor awareness
+
+Editor awareness over the **IDE link** — a long-lived MCP-over-WebSocket
+client to a running VS Code (or compatible) instance, opened by the operator
+with `/ide`. Architecturally the link is the engine's first persistent client
+and a new, inbound-capable class of transport; its discovery/auth/lifecycle
+and the env-isolation rationale live in
+[`transports.md`](transports.md#7-the-ide-link) and the Hermetic-isolation
+section above. The five verbs and their arg/result tables are the user-facing
+reference in [`hosts.md`](../hosts.md#hostide--editor-awareness):
+`get_diagnostics`, `get_selection`, `get_open_editors`, `open_file`,
+`open_diff`.
+
+The architecture-relevant invariants:
+
+- **Not-connected is a value.** Each handler resolves the link from ctx
+  (`IDELinkFromContext`, the same context-plumbing pattern as
+  `WithPromptRenderer`). No link / dropped socket → a typed
+  `{connected:false, …}` Result and a nil error, so a story branches on one
+  field and runs unchanged headless. Only genuine infra errors surface as Go
+  errors. `host.ide.*` participates in the allow-list like any namespace.
+- **Deterministic I/O, recorded.** The RPCs are ordinary host calls
+  (`host.invoked`/`host.returned`), stubbable by per-invoke id, replayable
+  without a socket. The one interpretive moment — captured editor context
+  entering an oracle prompt — is recorded as the `ide.context_captured`
+  journal event (verb, request, workspace/port, and a sha256 digest of the
+  response, not the raw text). Emitted by the read verbs only.
+- **`world.ide.connected`.** Seeded once per turn (nested `World["ide"]
+  ["connected"]`) so any room can gate on editor availability; ephemeral live
+  state, recomputed each turn rather than journaled.
+- **open_diff is non-blocking in v1.** It surfaces a diff tab for human
+  review and returns `{ok}`; it does not write the file or suspend the turn.
+  Verdict capture (accept/reject) needs a turn-suspend gate the engine lacks
+  today and is a deferred follow-up.
+
+Source: [`internal/ide/`](../../internal/ide/) (client) and
+[`internal/host/ide_handlers.go`](../../internal/host/ide_handlers.go).
 
 ---
 

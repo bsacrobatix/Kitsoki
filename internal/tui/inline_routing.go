@@ -44,6 +44,17 @@ func (ir inlineRouter) settledLine(kind, intent string, source blocks.RoutingSou
 	})
 }
 
+// ideSelectionEcho renders the one-per-turn ambient editor-context echo
+// (`⧉ Selected N lines from <file>`) as a clean settled system line. It uses
+// the same Renderer the routing settled lines do, but the SystemNotice style
+// (muted, no routing decoration) so the line reads exactly as the operator
+// expects — the echo is the source of truth for what selection rode the turn
+// (slice 2). Kept beside settledLine because it is the same "settled line for a
+// path that bypasses the routing pipeline" idiom.
+func (ir inlineRouter) ideSelectionEcho(text string) string {
+	return ir.r.SystemNotice(text)
+}
+
 // provenanceFromEvents reads the RouteProvenance stamped on the TurnStarted
 // event: routed_by (the tier), match_type (tier detail — for the LLM tier the
 // backend plugin name), and confidence. Zero values when none was recorded

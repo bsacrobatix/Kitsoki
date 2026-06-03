@@ -1,15 +1,17 @@
 // sessions.go — /sessions slash-command family.
 //
 // /sessions list  — print a numbered list of active chat_pty_sessions
-//                   rows on this host (chats with claude alive in
-//                   tmux right now, attached or background).
+//
+//	rows on this host (chats with claude alive in
+//	tmux right now, attached or background).
 //
 // /sessions attach <N>
-//                — re-attach to the Nth row from the most recent
-//                   /sessions list output. No chat IDs typed. The TUI
-//                   suspends, the user lands in the live
-//                   `claude --resume` pane; Ctrl-B then d returns
-//                   them to kitsoki.
+//
+//	— re-attach to the Nth row from the most recent
+//	   /sessions list output. No chat IDs typed. The TUI
+//	   suspends, the user lands in the live
+//	   `claude --resume` pane; Ctrl-B then d returns
+//	   them to kitsoki.
 //
 // The numbering is cached on RootModel between list and attach so
 // the user can `list`, eyeball, `attach 3` with no typing of opaque

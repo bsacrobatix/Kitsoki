@@ -199,6 +199,73 @@ type Orchestrator struct {
 	cacheSweepOnce sync.Once
 	appHashOnce    sync.Once
 	appHashValue   string
+
+	// ideLink is the process-lifetime IDE connection (an *ide.Link, held as the
+	// host.IDELink interface so orchestrator never imports internal/ide). It is
+	// injected into the host-dispatch ctx via host.WithIDELink so host.ide.*
+	// handlers can resolve the live editor, and its Connected() status seeds the
+	// `ide.connected` world key each turn. nil is the default and is safe:
+	// host.ide.* handlers then return the typed not-connected Result and the
+	// oracle env-scrub gate stays off (headless / flow tests are byte-identical
+	// to before). Set by the TUI (slice 2) via SetIDELink once it owns a Link.
+	//
+	// ideMu guards ideLink: the TUI mutates it from its bubbletea Update loop
+	// (on /ide connect|disconnect) while the per-turn dispatch path reads it on
+	// a different goroutine. The interface value is swapped under the lock; the
+	// *ide.Link it points at has its own internal locking for the live socket.
+	ideMu   sync.RWMutex
+	ideLink host.IDELink
+}
+
+// SetIDELink installs the process IDE connection so host.ide.* handlers resolve
+// the live editor and the `ide.connected` world key reflects its status. Pass
+// nil to detach (e.g. on /ide disconnect); nil is safe everywhere. Slice 2's
+// TUI calls this with its *ide.Link. Safe to call concurrently with in-flight
+// turns (the swap is guarded by ideMu).
+func (o *Orchestrator) SetIDELink(l host.IDELink) {
+	o.ideMu.Lock()
+	defer o.ideMu.Unlock()
+	o.ideLink = l
+}
+
+// currentIDELink returns the installed IDE link under the read lock. Used by
+// every reader of ideLink (host dispatch, off-path dispatch, seedIDEConnected)
+// so a concurrent SetIDELink can never race the interface value. Returns nil
+// when none is installed (the headless / flow-test default).
+func (o *Orchestrator) currentIDELink() host.IDELink {
+	o.ideMu.RLock()
+	defer o.ideMu.RUnlock()
+	return o.ideLink
+}
+
+// seedIDEConnected reflects the live IDE link's connectivity into the world as
+// a NESTED `ide.connected` gate so stories and views can branch on
+// `world.ide.connected` (expr-lang resolves that path as
+// World["ide"]["connected"], never a flat "ide.connected" key — a flat dotted
+// key is unreachable from the expression engine).
+//
+// This is deliberately EPHEMERAL liveness, not a journaled effect: it is
+// recomputed every turn in loadJourney (after BuildJourney rebuilds the world
+// from the event log) so a mid-session connect/disconnect is always visible,
+// and it is never emitted as an EffectApplied event — so it is not carried into
+// the journaled world or any snapshot built from it (the reconstructed world
+// never contains `ide`; we re-seed it fresh each load). Recomputing live
+// liveness is the correct model here: a stale "connected" pinned from a prior
+// turn would lie about the editor's current state.
+//
+// It merges into any existing `ide` map (e.g. the ambient selection map other
+// code may place there) rather than clobbering it.
+func (o *Orchestrator) seedIDEConnected(w world.World) {
+	if w.Vars == nil {
+		return
+	}
+	l := o.currentIDELink()
+	connected := l != nil && l.Connected()
+	if existing, ok := w.Vars["ide"].(map[string]any); ok {
+		existing["connected"] = connected
+		return
+	}
+	w.Vars["ide"] = map[string]any{"connected": connected}
 }
 
 // New creates an Orchestrator.
@@ -2158,6 +2225,7 @@ func (o *Orchestrator) loadJourney(sid app.SessionID) (*store.JourneyState, erro
 		if err != nil {
 			return nil, fmt.Errorf("build journey (jsonl): %w", err)
 		}
+		o.seedIDEConnected(js.World)
 		return js, nil
 	}
 
@@ -2186,6 +2254,7 @@ func (o *Orchestrator) loadJourney(sid app.SessionID) (*store.JourneyState, erro
 	if err != nil {
 		return nil, fmt.Errorf("build journey: %w", err)
 	}
+	o.seedIDEConnected(js.World)
 
 	return js, nil
 }

@@ -189,11 +189,11 @@ func TestPromptPrefixPerMode(t *testing.T) {
 	rm, _ := tuipkg.ExtractRootModel(m)
 
 	cases := map[tuipkg.Mode]string{
-		tuipkg.ModeOnPath:         "> ",
-		tuipkg.ModeMeta:           "» ",
-		tuipkg.ModeOffPath:        "# ",
-		tuipkg.ModeSlotFilling:    "? ",
-		tuipkg.ModeAwaitingLLM:    "… ",
+		tuipkg.ModeOnPath:      "> ",
+		tuipkg.ModeMeta:        "» ",
+		tuipkg.ModeOffPath:     "# ",
+		tuipkg.ModeSlotFilling: "? ",
+		tuipkg.ModeAwaitingLLM: "… ",
 	}
 	for mode, want := range cases {
 		tuipkg.SetModeForTest(&rm, mode)

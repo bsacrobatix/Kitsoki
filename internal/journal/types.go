@@ -191,6 +191,31 @@ const KindTaskAcceptanceAttempt = "task.acceptance.attempt"
 // "external_side_effect".
 const KindTaskEnd = "task.end"
 
+// ---- IDE link tracing -------------------------------------------------------
+
+// KindIDEContextCaptured records one host.ide.get_* pull whose result feeds a
+// decision (lands toward an oracle prompt or a world slot). It is the labeled
+// datapoint that makes "the room decided X because the editor showed Y"
+// reconstructable from the trace alone. The raw host.ide.* request/response is
+// already covered by host.invoked/host.returned; this entry pins the IDE
+// provenance (which workspace/port served it) and a digest of the response so
+// the decision's editor inputs are auditable without re-opening the socket.
+//
+// Body shape:
+//
+//	{verb, request, response_digest, port, workspace}
+//
+// verb            — the host.ide.* verb ("get_diagnostics" | "get_selection" | "get_open_editors")
+// request         — the args map sent to the tool
+// response_digest — a short stable digest of the response (sha256 hex prefix of the
+//
+//	canonical JSON; NOT the raw selection text — keeps secrets/PII
+//	out of the trace per the selection-privacy lean)
+//
+// port            — link.Port()
+// workspace       — link.Workspace()
+const KindIDEContextCaptured = "ide.context_captured"
+
 // ---- Predicate helpers ------------------------------------------------------
 
 // patchKinds is the set of patch-entry kind values.

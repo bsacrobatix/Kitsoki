@@ -267,6 +267,15 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.oracle.decide", OracleDecideHandler)
 	r.Register("host.oracle.task", OracleTaskHandler)
 	r.Register("host.oracle.converse", OracleConverseHandler)
+
+	// IDE link (host.ide.*) — editor awareness over the MCP-over-ws Link.
+	// Resolve the link from ctx; a nil/disconnected link returns the typed
+	// not-connected Result (data.connected==false), never a Go error.
+	r.Register("host.ide.get_diagnostics", IDEGetDiagnosticsHandler)
+	r.Register("host.ide.get_selection", IDEGetSelectionHandler)
+	r.Register("host.ide.get_open_editors", IDEGetOpenEditorsHandler)
+	r.Register("host.ide.open_file", IDEOpenFileHandler)
+	r.Register("host.ide.open_diff", IDEOpenDiffHandler)
 }
 
 // OracleExtractHandler is implemented in oracle_extract.go.

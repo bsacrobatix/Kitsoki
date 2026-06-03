@@ -117,4 +117,3 @@ func (m RootModel) maybeAutoActions() string {
 	}
 	return renderActionsBlock(m)
 }
-

@@ -18,11 +18,11 @@ func TestJoinVerticalWithMixedLineCounts(t *testing.T) {
 	t.Parallel()
 
 	// Simulate the parts that appear in ModeAwaitingLLM
-	routingStatus := "  → nav: back   (deterministic · 1.00)"           // 1 line
+	routingStatus := "  → nav: back   (deterministic · 1.00)"         // 1 line
 	divider := "────────────────────────────────────────────────────" // 1 line
-	indicator := "⏳ ⠋ thinking…  ·  queue: 0  ·  Enter · Esc"        // 1 line
-	prompt := "↳ test input"                                            // 1 line
-	promptLine := indicator + "\n" + prompt                             // 2 lines
+	indicator := "⏳ ⠋ thinking…  ·  queue: 0  ·  Enter · Esc"         // 1 line
+	prompt := "↳ test input"                                          // 1 line
+	promptLine := indicator + "\n" + prompt                           // 2 lines
 
 	parts := []string{routingStatus, divider, promptLine}
 
@@ -110,7 +110,7 @@ func TestPromptLineEmbeddedNewlines(t *testing.T) {
 func TestJoinVerticalPaddingWidth(t *testing.T) {
 	t.Parallel()
 
-	short := "short"             // 5 chars
+	short := "short"                                                   // 5 chars
 	long := "this is a very long line that should determine max width" // 58 chars
 	parts := []string{short, long}
 

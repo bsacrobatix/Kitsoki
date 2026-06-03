@@ -136,9 +136,9 @@ func OracleConverseHandler(ctx context.Context, args map[string]any) (Result, er
 
 	// Wave 3-oracle: write OracleCalled to the JSONL sink at dispatch time.
 	appendOracleCalledEvent(ctx, callStart, callID, question, OracleCalledPayload{
-		Verb:         "converse",
-		Agent:        agentNameFromArgs(args),
-		Model:        agent.Model,
+		Verb:  "converse",
+		Agent: agentNameFromArgs(args),
+		Model: agent.Model,
 	})
 
 	cliArgs := []string{
@@ -280,9 +280,9 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 
 	// Wave 3-oracle: write OracleCalled to the JSONL sink at dispatch time.
 	appendOracleCalledEvent(ctx, callStart, callID, question, OracleCalledPayload{
-		Verb:         "converse",
-		Agent:        "",
-		Model:        model,
+		Verb:  "converse",
+		Agent: "",
+		Model: model,
 	})
 
 	chat, err := cs.Get(ctx, chatID)

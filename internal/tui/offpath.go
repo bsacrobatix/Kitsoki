@@ -218,4 +218,3 @@ func (m RootModel) handleOffPathReply(msg offPathReplyMsg) (tea.Model, tea.Cmd) 
 	m.transcript.AppendOffPathAnswer("", answer)
 	return m, nil
 }
-

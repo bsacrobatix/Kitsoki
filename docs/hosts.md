@@ -62,6 +62,11 @@ carrier handler when the op name is dispatched from `with:` args.
 | [`host.chat.suggest_title`](#hostchatsuggest_title) | Ask Claude to propose a title from the transcript. |
 | [`host.chat.resolve_ref`](#hostchatresolve_ref) | Resolve a chat reference (id, alias, or "current") to a chat row. |
 | [`host.chat.drive`](#hostchatdrive) | Enqueue a turn against a chat; optionally `await` completion. |
+| [`host.ide.get_diagnostics`](#hostide--editor-awareness) | Language-server diagnostics from the connected editor. Read-only. |
+| [`host.ide.get_selection`](#hostide--editor-awareness) | The editor's live selection + active file path. Read-only. |
+| [`host.ide.get_open_editors`](#hostide--editor-awareness) | List of open editor tabs. Read-only. |
+| [`host.ide.open_file`](#hostide--editor-awareness) | Reveal a file (and optional range) in the editor. |
+| [`host.ide.open_diff`](#hostide--editor-awareness) | Open a native diff tab for human review (non-blocking; does not write). |
 
 Every handler must be present in the app's top-level `hosts:`
 allow-list to be invokable.
@@ -720,6 +725,149 @@ effects:
     bind:
       summary: result_text
 ```
+
+---
+
+## host.ide.* — editor awareness
+
+Editor awareness over a live MCP-over-WebSocket connection to a running
+VS Code (or compatible) instance — the **IDE link**. The link is opened
+by the operator with `/ide` (see [`tui/README.md`](tui/README.md)) and
+held for the session; these host calls rent its capabilities to stories.
+The link itself (discovery, auth, the ws client) is documented as a
+connection-oriented transport in [`transports.md`](transports.md#7-the-ide-link).
+
+The verbs mirror the editor extension's own MCP tool names in kitsoki
+style. The client and handlers live in
+[`internal/ide/`](../internal/ide/) and
+[`internal/host/ide_handlers.go`](../internal/host/ide_handlers.go).
+
+### Not-connected is a value, not an error
+
+Every `host.ide.*` call resolves the link from context. When **no link is
+connected** — none was opened, the operator ran `/ide disconnect`, or the
+socket dropped — the handler returns a typed **not-connected `Result`**
+(`data.connected == false`, with each verb's normal output slot
+present-but-empty) and **no Go error**. So a story branches on one field
+rather than special-casing infra errors, and a story that uses
+`host.ide.*` runs unchanged headless (flow fixtures, `kitsoki turn`) or
+when the operator simply hasn't connected:
+
+```yaml
+- when: "world.diag.connected and world.diag.diagnostics"
+  to: triage_lints
+- else:
+  to: run_linter_fallback     # editor not connected → fall back to a real linter
+```
+
+Only a genuine infra failure (a non-connection error from the link)
+surfaces as a Go error / `on_error:` arc.
+
+### get_diagnostics
+
+Maps to the editor's `getDiagnostics`. Language-server errors/warnings
+(the Problems panel), optionally scoped to a file. Read-only.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `path` | string | no | Scope diagnostics to one file. Omit for the whole workspace. |
+
+Returns: `{ connected, diagnostics }` — `diagnostics` is a list of
+`{file, range, severity, message, source}` (empty `[]` when not connected).
+
+### get_selection
+
+Maps to `getCurrentSelection` (the **live** selection, not
+`getLatestSelection`). Read-only. This is the call the TUI makes per turn
+to ride the operator's selection into the prompt as ambient context.
+
+Returns: `{ connected, file, text, range }` (empty strings / null when not
+connected).
+
+### get_open_editors
+
+Maps to `getOpenEditors`. Read-only.
+
+Returns: `{ connected, editors }` — `editors` is a list of `{file, active}`
+(empty `[]` when not connected).
+
+### open_file
+
+Maps to `openFile`. Side effect: editor focus only — it reveals a file (and
+optional range); it does not read or write the file.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `path` | string | yes | File to reveal. |
+| `range` | map | no | Editor range object to select/scroll to. |
+
+Returns: `{ connected, ok }`.
+
+### open_diff
+
+Maps to `openDiff`. Opens a native side-by-side diff tab in the editor for
+human review. **In v1 this is non-blocking**: it acknowledges the call and
+returns `{ok:true}` immediately. It does **not** write the file and does
+**not** suspend the turn — the operator's accept/reject happens out-of-band
+in the editor and is **not** captured as a value (verdict capture needs a
+turn-suspend gate the engine lacks today; it is a deferred follow-up). File
+mutation still belongs to effects / `host.run` / `host.oracle.task`.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `path` | string | yes | File the proposed change applies to. |
+| `new_text` | string | yes | The proposed new content to diff against the current file. |
+| `title` | string | no | Diff tab title. |
+
+Returns: `{ connected, ok }`.
+
+> **Wire-key caveat.** The `getDiagnostics` `path→uri` key and the
+> `openDiff` argument shape are not yet verified against a live editor
+> (marked `TODO(schema)` in the handlers). The plumbing, result shapes, and
+> not-connected behavior are fully tested against a faithful stub MCP
+> server; those two wire keys want a one-time manual capture against real
+> VS Code to pin.
+
+### Recording — `ide.context_captured`
+
+Every **read** verb (`get_diagnostics`, `get_selection`,
+`get_open_editors`) that returns from a connected link records one
+`ide.context_captured` journal event: the verb, the request args, the
+serving `workspace`/`port`, and a `sha256` digest of the raw response (the
+digest, not the raw selection/diagnostic text — selection-privacy). This is
+the labeled datapoint that makes "the room decided X *because* the editor
+showed Y" reconstructable from the trace alone. `open_file` / `open_diff`
+are side-effect-only and record nothing. Emission is best-effort: a missing
+event sink (headless / flow tests) is a silent no-op, never a reason to fail
+the call.
+
+### The `world.ide.connected` gate
+
+While a link is held, the orchestrator seeds `world.ide.connected` (a
+nested key — `World["ide"]["connected"]`) once per turn so any room can gate
+on editor availability with `when: world.ide.connected`, even rooms that
+make no `host.ide.*` call. It is **ephemeral live state**, recomputed each
+turn rather than journaled, so a mid-session connect/disconnect is always
+reflected and replay never pins a stale value.
+
+### Example — diagnostics with an availability fallback
+
+```yaml
+hosts:
+  - host.ide.get_diagnostics
+  - host.local            # the real-linter fallback
+
+# in a room's on_enter:
+effects:
+  - invoke: host.ide.get_diagnostics
+    with:
+      path: "{{ world.changed_file }}"
+    bind:
+      diag: ""            # binds the whole {connected, diagnostics} map
+```
+
+Then branch on `world.diag.connected`: use the editor's already-computed
+diagnostics when present, else fall back to running a linter via `host.local`.
 
 ---
 

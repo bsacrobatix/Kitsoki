@@ -75,7 +75,6 @@ func SetTranscriptSizeForTest(m *RootModel, width, height int) {
 	m.transcript.vp.GotoBottom()
 }
 
-
 // PreserveLeadingIndent exposes the internal leading-indent preprocessor.
 func PreserveLeadingIndent(s string) string { return preserveLeadingIndent(s) }
 

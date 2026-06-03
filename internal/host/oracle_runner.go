@@ -217,6 +217,13 @@ func runClaudeOneShotReal(ctx context.Context, bin string, cliArgs []string, std
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Dir = workingDir
 	cmd.Env = envWithSessionID(envWithKitsokiBinOnPath(os.Environ()), sessionID)
+	// When kitsoki holds the one IDE link, scrub the auto-connect signals so the
+	// inner claude doesn't open its own socket (shared decision #1). No-op (env
+	// untouched) when no link is connected. Outermost wrap so it sees the
+	// port-bearing entry to drop.
+	if l := IDELinkFromContext(ctx); l != nil && l.Connected() {
+		cmd.Env = envScrubIDE(cmd.Env)
+	}
 
 	var so, se strings.Builder
 	cmd.Stdout = &so
@@ -306,6 +313,12 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Dir = workingDir
 	cmd.Env = envWithSessionID(envWithKitsokiBinOnPath(os.Environ()), sid)
+	// IDE auto-connect scrub (shared decision #1) — outermost wrap, gated on a
+	// connected link in ctx; no-op otherwise so the env is byte-identical to
+	// today on every headless/flow path.
+	if l := IDELinkFromContext(ctx); l != nil && l.Connected() {
+		cmd.Env = envScrubIDE(cmd.Env)
+	}
 
 	stdoutPipe, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
