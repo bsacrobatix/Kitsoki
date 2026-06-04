@@ -97,6 +97,12 @@ thought.
   OpenAI-compatible HTTP, with grammar-forced schema-valid output, for
   routing and small `decide` verdicts. Nothing implemented yet; spike (§0)
   required before committing.
+- [`oracle-contract-eval.md`](oracle-contract-eval.md) — schema-conformance
+  linting of cassette/flow mocks (Layer 1, offline) plus a per-call-site
+  correctness eval (Layer 2, gated): `{input, expected}` datasets scored as a
+  correctness % across backends (Claude vs free llama.cpp), so a call site can
+  be routed to the cheap backend with evidence. Produces the measurement
+  `local-model-oracle.md` consumes. Nothing implemented yet.
 - [`oracle-off-ramp.md`](oracle-off-ramp.md) — a per-room
   `oracle_off_ramp:` opt-in: when free text maps to no declared intent,
   hand the turn to an oracle `converse` answer instead of rejecting, with
