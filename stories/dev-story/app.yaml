@@ -517,6 +517,10 @@ intents:
     priority: 78
     slots:
       paths: { type: string, required: true, description: "Space/comma-separated files or dirs." }
+  restart:
+    description: "Discard this discovery thread and begin a fresh one without leaving the room."
+    examples: ["start over", "restart", "scrap this and start fresh", "begin again", "new idea instead"]
+    priority: 76
   confirm:
     description: "Confirm the current review step (brief, completeness, references) and move on."
     examples: ["confirm", "proceed", "looks right", "the brief is good", "continue to the next step"]
