@@ -71,6 +71,13 @@ var (
 			Foreground(colorWarning).
 			Italic(true)
 
+	// warningStyle renders a non-fatal warning — something didn't take, but
+	// the session is fine. Amber (not error-red) so the user reads it as
+	// "heads up", not "everything broke".
+	warningStyle = lipgloss.NewStyle().
+			Foreground(colorWarning).
+			Italic(true)
+
 	// clarificationStyle renders a soft "I didn't catch that" prompt. It is
 	// deliberately muted (gray, not warning-amber) — the user didn't fail,
 	// the router did, and the next line is the recovery menu.

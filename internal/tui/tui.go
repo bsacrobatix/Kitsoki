@@ -3278,8 +3278,9 @@ func (m RootModel) handleReloadSlash() (tea.Model, tea.Cmd) {
 
 	res, err := m.orch.Reload(m.appPath, m.currentState)
 	if err != nil {
-		m.transcript.AppendError("/reload",
-			fmt.Sprintf("reload failed: %v", err))
+		m.transcript.AppendWarning("/reload",
+			fmt.Sprintf("Attempting to reload the story failed due to syntax errors — "+
+				"keeping the previous version running. Fix the file and reload again.\n  %v", err))
 		return m, nil
 	}
 
@@ -3333,8 +3334,10 @@ func asyncRerunOnEnter(orch *orchestrator.Orchestrator, sid app.SessionID) func(
 func (m RootModel) reloadOrchestratorAfterMetaWithFiles(changed []string) (tea.Model, tea.Cmd) {
 	res, err := m.orch.Reload(m.appPath, m.currentState)
 	if err != nil {
-		m.transcript.AppendError("(meta)",
-			"applied to disk but reload failed: "+err.Error())
+		m.transcript.AppendWarning("(meta)",
+			"Attempting to reload the story failed due to syntax errors — "+
+				"your edit is saved, but I'm keeping the previous version running. "+
+				"Fix the file and reload again.\n  "+err.Error())
 		return m, nil
 	}
 	// Record the meta edit into the trace so the replay stays self-contained

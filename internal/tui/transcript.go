@@ -1004,6 +1004,22 @@ func (m *transcriptModel) AppendError(userInput, msg string) {
 	m.queue(body)
 }
 
+// AppendWarning appends a non-fatal warning: something didn't take
+// (e.g. a story edit failed to reload), but the session keeps running on
+// its previous state. Styled amber with a ⚠ prefix so it reads as a
+// heads-up rather than the error-red of a hard failure. Mirrors
+// AppendError's header handling for a consistent "> input" anchor.
+func (m *transcriptModel) AppendWarning(userInput, msg string) {
+	body := warningStyle.Render("⚠ " + msg)
+	entry := transcriptEntry{body: body}
+	if userInput != "" {
+		entry.header = "> " + userInput
+		m.queue(turnHeaderStyle.Render(entry.header))
+	}
+	m.entries = append(m.entries, entry)
+	m.queue(body)
+}
+
 // AppendGuardHint appends a guard-failure hint. The leading arrow softens
 // the older "[blocked]" prefix: a guard refusal is information, not an
 // alarm — the user picked a valid intent and the world said "not now",
