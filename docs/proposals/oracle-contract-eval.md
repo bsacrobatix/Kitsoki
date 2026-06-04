@@ -2,7 +2,8 @@
 
 **Status:** Draft v1. Nothing implemented yet.
 **Kind:**   tracing
-**Epic:**   — standalone (consumed by `docs/proposals/local-model-oracle.md`)
+**Epic:**   — standalone (consumed by `docs/proposals/local-model-oracle.md`;
+            hosts the conformance check for `docs/proposals/oracle-capability-model.md`)
 
 ## Why
 
@@ -58,6 +59,18 @@ Two layers, both hung off the existing `kitsoki cassette` command
 
 A call site that scores high on the free backend is a candidate for
 `local-model-oracle` to route there with evidence.
+
+- **Layer 1b — effect/toolbox conformance (free, CI-default).** The
+  [capability-model epic](oracle-capability-model.md) gives every oracle a
+  declared `effect` class + toolbox (recorded on the host event by its slice
+  1). This layer is the *audit* half of that contract: `kitsoki cassette lint
+  --app` also checks that an episode's **recorded tool uses never exceeded its
+  toolbox / declared effect** — a `read`-class call that recorded a `Write`, or
+  a tool outside its box, fails the lint. It's the offline, trace-level proof
+  that the slice-2 tool allowlist and slice-3 sandbox actually held (or that a
+  cassette predates them and needs re-recording). Pure schema check has a
+  natural sibling here: schema conformance says the *output* was well-formed;
+  effect conformance says the *behavior* stayed in the box.
 
 ## Impact
 
@@ -164,6 +177,10 @@ behavior preserved); the schema check is opt-in via `--app`.
           mocks are schema-checked under `kitsoki test flows`
 - [ ] 1.3 Mutation test: a broken stub shape fails lint
 - [ ] 1.4 Backfill: lint the proposal-flow stubs I just wrote; fix any drift
+
+## 1b. Effect/toolbox conformance (free) — deps: capability-model slice 1
+- [ ] 1b.1 cassette lint --app also checks recorded tool uses ⊆ toolbox and ≤ declared effect
+- [ ] 1b.2 Mutation test: a recorded out-of-box tool use (read-class call that wrote) fails lint
 
 ## 2. Eval dataset format + comparators
 - [ ] 2.1 `kind: oracle_eval` loader (call, agent, examples, fixtures, comparator)

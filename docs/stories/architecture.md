@@ -80,19 +80,28 @@ just these enforced mechanically:
 
 ## 2. Rooms and states (the nodes)
 
-The two words are not synonyms, and the difference matters once a story
-grows beyond flat rooms.
+### A room is *where you are*
 
-**State** is the primitive. `type State` is *"a node in the directed
-graph"* (`internal/app/types.go`), and it **nests** — a compound or
-parallel state holds child states in its own `states:` map. So "state"
-names a node at *any* level of the tree.
+Start with the word a reader already has an intuition for. A **room** is
+a location in the story — the place the user currently stands. It is what
+the TUI's location indicator shows as "where you are", and it owns the
+per-location chrome: its `Footer`, `Theme`, and `Transcript`. A room has
+a `view:` (what the user sees here), an `on:` map (the intents bound at
+this location), and an `on_enter:` chain (what runs when you arrive). Move
+between rooms by taking an intent; a story is a graph of rooms wired by
+transitions. For most of this document, "room" is all you need.
 
-**Room** is the operator-facing name for a **top-level** state — the unit
-the TUI's location indicator shows as "where you are", and the one that
-owns the per-location chrome. The struct says so directly: `Footer`,
-`Theme`, and `Transcript` are each *"only meaningful on top-level (room)
-states; nested states must leave it empty"*. So:
+### A state is the primitive a room is built from
+
+Under the hood there is no separate "room" type — a room is a **state**,
+and `State` is the real primitive. `type State` is *"a node in the
+directed graph"* (`internal/app/types.go`), and it **nests**: a compound
+or parallel state holds child states in its own `states:` map. So "state"
+names a node at *any* level of the tree, while "room" names one
+particular *use* of a state — a top-level one the operator can land on.
+The struct draws the line directly: `Footer`, `Theme`, and `Transcript`
+are each *"only meaningful on top-level (room) states; nested states must
+leave it empty"*.
 
 > **Every room is a state; not every state is a room.** A room is a
 > top-level state. The atomic children inside a compound/parallel room
@@ -106,7 +115,8 @@ then the compound parent is the room and its children are sub-states.
 **Phase** is a third, related word: a *repeated* room (§10) — one
 template instantiated several times in a pipeline.
 
-A state comes in three flavours (`State.Type`, `internal/app/types.go`):
+A state — whether it surfaces as a whole room or as a child inside one —
+comes in three flavours (`State.Type`, `internal/app/types.go`):
 
 - **Atomic** — a leaf. Has a `view:`, an `on:` intent map, and an
   `on_enter:` effect list.

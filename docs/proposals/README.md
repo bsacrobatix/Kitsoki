@@ -82,12 +82,35 @@ thought.
   - [`qa-agent-skill.md`](qa-agent-skill.md) (tooling) — the `story-qa`
     subagent: persona + scenario → drive loop → scored UX rubric +
     report + screenshots + bug list.
-- [`effect-taxonomy.md`](effect-taxonomy.md) — one effect taxonomy
-  (`effect: pure | read | write | external` + an orthogonal `deterministic`
-  bit) shared by host calls **and** agents, replacing the overloaded
-  `external_side_effect` boolean. Converse read-only enforcement, task replay
-  mode, and future trace-replay/caching all derive from it; adds a load-time
-  hard-fail for a read-only call holding a mutator. Nothing implemented yet.
+- [`oracle-capability-model.md`](oracle-capability-model.md) — **epic.**
+  One capability model governing **every** oracle (decide / ask / converse /
+  task), unifying three ad-hoc restrictions and an overloaded boolean. Four
+  cooperating layers — **toolbox** (a named, reusable tool grant) → **effect
+  class** (`pure | read | write | external` + `deterministic`) → **layered
+  enforcement** (tool allowlist for pure/read; OS sandbox for write/external) →
+  **conformance** (the trace proves the box held). Nothing implemented yet;
+  decomposed into three runtime slices + a conformance check:
+  - [`effect-taxonomy.md`](effect-taxonomy.md) (runtime) — the classification
+    substrate: `effect`/`deterministic` on host calls **and** agents, replacing
+    `external_side_effect`; a load-time hard-fail for a read-only call holding a
+    mutator. (Modelled on Acronis DTS's `deterministic_behavior` enum.)
+  - [`toolbox-and-enforcement.md`](toolbox-and-enforcement.md) (runtime) —
+    named `toolboxes:` + `tools_add:`; one effect-derived tool-layer policy for
+    all four oracle kinds, collapsing the `mutationTools` deny, the converse
+    read-only branch, and task's unrestricted spawn into one path.
+  - [`task-fs-sandbox.md`](task-fs-sandbox.md) (runtime) — the kernel boundary
+    beneath the tools: `sandbox:` (bwrap/Landlock) confines the write/external
+    tiers so no tool — Write, Bash, python, sed — escapes the workspace; engine
+    validates + persists the diff. PoC proven on this host.
+  - conformance check folded into
+    [`oracle-contract-eval.md`](oracle-contract-eval.md) (§Layer 1b) — offline
+    lint that recorded tool uses never exceeded the declared toolbox/effect.
+- [`artifact-format.md`](artifact-format.md) — a schema-verified
+  markdown-with-frontmatter artifact format with **lossless** round-trip via
+  `yaml.Node`, consolidating three hand-rolled artifact writers
+  (`localfiles_ticket.go`, `cypilot_artifacts.go`, `append_file_transport.go`)
+  that today reorder frontmatter and skip validation. Supports markdown as
+  block-scalar fields (data-primary docs). Nothing implemented yet; no new deps.
 - [`auto-advance-states-proposal.md`](auto-advance-states-proposal.md) —
   auto-fire `done` after `on_enter` chains complete, with `wait: true`
   to opt out. Nothing implemented yet.
@@ -111,13 +134,6 @@ thought.
   per-state decider. Engine core, CLI/flow surface, and docs-review
   migration shipped; pre-bind staging and the bugfix-story migration
   remain (§8).
-- [`task-fs-sandbox.md`](task-fs-sandbox.md) — confine a `task` agent's
-  writes at the **OS level** (`sandbox:` → bubblewrap/Landlock: repo read-only,
-  one workspace read-write), so NO tool — Write, Bash, python, sed — can write
-  outside its declared output; the engine then validates + persists the
-  workspace diff, with out-of-allowlist persists gated by an `oracle.decide`.
-  Nothing implemented yet; PoC proven on this host. Fixes the proposal_author
-  YOLO (it implemented `web.go` instead of just proposing it) at the kernel.
 - [`idempotent-on-enter.md`](idempotent-on-enter.md) — an opt-in `once:`
   flag on `invoke:` effects so the engine skips an on_enter host call whose
   `bind:` target is already populated — making `/reload` (and re-entry)
@@ -181,3 +197,12 @@ thought.
   - [`view-proofing-tooling.md`](view-proofing-tooling.md) (tui) —
     `kitsoki view` + lint catalog + cross-env golden/property tests +
     authoring-skill wiring.
+- [`work-decomposition.md`](work-decomposition.md) — **story.** A new
+  `stories/decompose/` sub-story imported into dev-story: hand it an accepted
+  proposal (or epic + children) and an interactive discovery conversation
+  distils scope, an `oracle.decide` emits a brief manifest the MCP submit
+  validator structurally enforces, a deterministic `host.run` renders + lints
+  it to `decomposition.yaml` (acyclic DAG, coverage), an adversarial
+  `oracle.decide` judges feasibility + completeness, and a coordination board
+  dispatches each brief into the `impl` import one at a time with a human gate.
+  Nothing implemented yet.

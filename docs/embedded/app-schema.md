@@ -446,6 +446,7 @@ Fields (any subset):
 | `with`        | Arguments for `invoke`                                               |
 | `bind`        | `{ world_key: result_key }` — copy host result into world            |
 | `on_error`    | Transition target if host invoke errors; sets `$host_error`          |
+| `once`        | `true` → skip the `invoke` on re-entry when every `bind:` target is already set (non-empty); makes on_enter host calls idempotent across `/reload`, self-transitions, and `on_error:`. Requires a non-empty `bind:`. Clear the bind target to re-run. |
 | `emit`        | Broadcast named event to parallel regions                            |
 | `background`  | `true` → dispatch `invoke` as a background job (see §Background jobs) |
 | `on_complete` | Effect list fired when the background job terminates (see §Background jobs) |

@@ -559,9 +559,56 @@ Make `on_enter` idempotent with one of:
   `host.chat.create`; `host.git_worktree` returns the existing worktree
   rather than erroring. Reserve the unconditional `create` for dedicated
   "start a *new* one" states (e.g. dev-story's `oracle_*_new` rooms).
-- **Guard the invoke.** Gate a one-time side effect on its own absence —
-  `when: "world.idea_chat_id == ''"` — so the replay is a no-op. (This is
-  the `bf_autostart_attempted` flag pattern.)
+- **`once: true` on the invoke (preferred for expensive/non-idempotent
+  calls).** Set `once: true` on an `invoke:` effect and the engine skips it
+  whenever **every** one of its `bind:` target world keys is already set
+  (non-empty) — the bind target *is* the cache, and re-entry re-renders from
+  it instead of recomputing. To force a re-run, clear the bind target (which
+  re-run intents already do via `set: { key: "" }` / `{}`). One word replaces
+  the hand-guard *and* the discipline to remember it:
+
+  ```yaml
+  on_enter:
+    - invoke: host.oracle.decide       # the expensive call
+      once: true                       # skip while proposal_brief_decision is set
+      bind: { proposal_brief_decision: submitted }
+  on:
+    recheck:                           # force a re-run by clearing the cache
+      - target: .
+        effects:
+          - set: { proposal_brief_decision: {} }
+  ```
+
+  A value counts as **unset** when it is `nil`, empty string `""`, empty map
+  `{}`, or empty slice `[]`; anything else is set. `once: true` requires a
+  non-empty `bind:` (load error otherwise — there is nothing to cache). The
+  skip is recorded on the existing `EffectApplied` event with
+  `skipped: "cached"` so a trace shows the elision and why; the *original*
+  call that filled the cache is still recorded as before. It is
+  entry-kind-agnostic — the same check protects `/reload`, self-transitions,
+  and `on_error` re-entry.
+
+  **Decide-then-write pairs** (a `decide` that binds an object, then an
+  `artifacts_dir` write that binds the path) each key off their **own** bind.
+  After a real run both are set, so both skip on reload; on first entry both
+  are empty, so both run. A re-run intent must therefore clear **every**
+  `once:` invoke's own bind — clearing only the path leaves the upstream
+  `decide`'s `once:` armed and it would wrongly skip. (`stories/dev-story/
+  rooms/proposal_*.yaml` is the worked reference: its `refine`/`regenerate`
+  and `clarify` arcs clear both the object and the path; the `refine` arc on
+  references additionally snapshots the current list into `_prev` before
+  clearing, because the researcher needs the prior list as input.)
+
+  Note: **scalar `int`/`bool` binds are ambiguous** under this rule — a real
+  `0` or `false` reads as "set". `once:` is intended for object/string/path
+  binds; guard scalars by hand with `when:` instead (next bullet).
+
+- **Guard the invoke by hand (the manual / scalar fallback).** Gate a
+  one-time side effect on its own absence — `when: "world.idea_chat_id == ''"`
+  — so the replay is a no-op. (This is the `bf_autostart_attempted` flag
+  pattern.) Use this when `once:` doesn't fit: a scalar bind, a guard keyed
+  off a *different* key than the bind, or any condition richer than
+  "bind target empty".
 - **Keep content-producing LLM calls out of `on_enter`.** A kickoff
   `converse` that *generates* an intro is both wasteful and clobbers prior
   output on replay; put the prompt in static `prose:` and let the
