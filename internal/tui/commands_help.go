@@ -27,8 +27,9 @@ func (HelpCommand) Run(m RootModel, _ []string) (string, RootModel, tea.Cmd) {
 	sections := []section{
 		{"chat blocks", []row{
 			{"/help", "this list"},
-			{"/actions [<n>]", "print available actions; <n> dispatches by index"},
-			{"/actions auto on|off", "auto-print actions after each turn"},
+			{"/ideas <text>", "jot an idea to ideas.md without interrupting the conversation"},
+			{"/intents [<n>]", "print available intents; <n> dispatches by index"},
+			{"/intents auto on|off", "auto-print intents after each turn"},
 			{"/inbox [<n>]", "list recent notifications; <n> opens one"},
 			{"/trace", "print the last turn's routing trace"},
 			{"/viz", "export the state diagram to a DOT file"},

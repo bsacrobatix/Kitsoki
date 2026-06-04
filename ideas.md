@@ -79,3 +79,21 @@
 - identify field as secret - do not log/trace/etc... (needs to be individually provided - exception to deterministic replay) - extensive testing/verification
 - full abstraction of jira/github/local issues as CLI/mcp and use it instead of writing md to disk and just reading the md - can do file as the starting point but make sure the interface is full and correct compared to jira/github real issues
 - kitsoki turn needs to publish to trace
+- make a kitsoki mcp so claude code (and others) can start and interact with stories directly with excellent fidelity, including generating screenshots for consumption
+- make the user provided text a different color/bg like templated vs LLM in views
+- add templating for CLAUDE.md and other agent-specific stuff so that when the agent runs in the sandboxed workdir, it can have CLAUDE.md, but the repo only has AGENTS.md (thin @AGENTS.md wrapper gitignored and generated on the fly where relevant)
+- add AskUserQuestion support in kitsoki so claude code can ask questions into kitsoki - try to use the existing input form mechanism extend it if necessary
+- oregon trail with progressive LLM and environment script usage to demonstrate kitsoki and to use as a use and development tutorial
+    - use real cities' climate fetched via some API.
+    - substitute other treks like a himalayas trek or crossing the silk road
+    - adding LLM responses into scenes
+    - meta and offpath for help and free-form conversation
+    - routing basics
+    - video, slides and guided tutorial in the web ui (guided tutorial mode is a CRITICAL FEATURE!)
+- bailout oracle standardization
+    - when you finish a bailout, try to improve the story to handle the case or create an improvement request (bug or feature from user is improvement request)
+- model escalation
+    - if the oracle call produces an unsatisfactory result, story author or user defines escalation chain to try until good result.  keep track of good (no escalation) and bad (escalated) calls for each story site - make it robust to story changes so data timeline remains consistent
+- take a claude skill/agent and produce a story using progressive determinism
+- user input text different bg-color in chat to highlight (also in templated view outputs)
+- full meta mode for UI in conjunction w/ vue hot reload in dev
