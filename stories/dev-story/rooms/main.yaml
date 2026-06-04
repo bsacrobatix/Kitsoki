@@ -1,7 +1,10 @@
-# main — engineer's-day landing. Oregon-trail-shaped: a narrative
-# situation report up top, a Status block, a live "tickets in your
-# queue" list pulled via iface.ticket.list_mine on enter, then a
-# Choose block whose items appear/grey-out via available() /
+# main — engineer's-day landing. Free-form-first: a short prose
+# invitation to "say what you want", then a discoverable catalog of
+# action verbs grouped under headings. The operator types natural
+# language (or a short verb) and the semantic router dispatches it
+# against the bound `on:` arcs — there is no arrow-key picker. The
+# catalog rows are pure documentation of the routable vocabulary; the
+# `drive` / `pr` rows still appear/grey-out via available() /
 # blocked_reason() guards on the bound intents.
 #
 # Pipeline routing: `drive` is the one intent the operator picks
@@ -17,57 +20,81 @@ states:
     description: "dev-story — Independence, Missouri for the engineer's day."
     relevant_world: [ticket_id, ticket_title, ticket_type, last_pr_url, status, inbox_unread, workdir, feature_branch]
 
-    # Flattened view (no extends/blocks) — `choice:` cannot live
-    # inside a `blocks:` map (typed metadata is lost through the
-    # inheritance pipeline; see docs/stories/choice-widget.md §3.1). The
-    # standalone path loses the inherited status / heading chrome
-    # from views/base.pongo; the data plane is preserved as
-    # sibling typed elements.
+    # Free-form-first landing. Per docs/stories/choice-widget.md §1, a
+    # hub whose actions are orthogonal navigation (not a ranked choice)
+    # converts AWAY from the `choice:` picker: the primary affordance is
+    # "say what you want" routed by the semantic router, and the action
+    # vocabulary is shown as a discoverable catalog (heading + list)
+    # rather than an arrow-key menu. This foregrounds the intent routing
+    # that is the whole point of the flagship hub — every label below is
+    # just one phrase the router already understands (see each intent's
+    # `examples:` in app.yaml); operators are free to type a full
+    # sentence instead.
+    #
+    # Flattened view (no extends/blocks) deliberately retained: the
+    # base.pongo status line is the pipeline read-out (ticket · PR · ci ·
+    # cycle · judge), which is noise on the hub landing where no pipeline
+    # is active.
     view:
       - prose: "{{ world.last_error }}"
         when: "world.last_error != ''"
       - prose: >
-          You drive tickets through their pipeline from here. Pick a
-          ticket first, then drive it. Bug tickets route through the
-          bugfix pipeline; feature tickets route through the
-          implementation pipeline — the ticket's type chooses, you
-          don't pick the pipeline yourself.
+          Say what you want to do, in your own words — name a ticket,
+          describe a bug, resume a workspace, ask a question. The router
+          reads your intent and drops you into the right room, pipeline,
+          or story. There's no menu to arrow through; just type.
         when: "world.last_error == ''"
-      # The `drive` / `pr` rows use the two-rows-same-intent pattern
+      - prose: >
+          Try: "fix the login crash", "pick TKT-014 and drive it",
+          "resume my auth workspace", "review PR-38", "what should I work
+          on?", or "ask claude how imports resolve". Or use one of the
+          short verbs below.
+        when: "world.last_error == ''"
+
+      - heading: "Work a ticket"
+      # The `drive` / `pr` rows use the two-rows-same-label pattern
       # (cookbook §2.2) so the operator sees *why* an action is
       # unavailable. The per-item `when:` guards mirror what the
-      # underlying `on:` arcs already enforce — the dispatch result
-      # stays in sync with the affordability hint.
-      - choice:
-          mode: single
-          prompt: "Actions"
+      # underlying `on:` arcs already enforce.
+      - list:
           items:
-            - { label: "tickets",    intent: go_ticket_search,     hint: "search for a ticket to pick" }
-            - { label: "workspaces", intent: go_workspace_manager, hint: "resume a workspace you already started" }
+            - { label: "tickets",    hint: "search and pick a ticket — \"find auth bugs\", \"sprint tickets\"" }
             - label: "drive"
-              intent: drive
-              hint:   "push the picked ticket through its pipeline"
-              when:   "available('drive')"
+              hint:  "push the picked ticket through its pipeline"
+              when:  "available('drive')"
             - label: "✗ drive — {{ blocked_reason('drive') }}"
-              intent: drive
-              when:   "!available('drive')"
+              when:  "!available('drive')"
+            - { label: "workspaces", hint: "resume a workspace you already started" }
             - label: "pr"
-              intent: go_pr_refinement
-              hint:   "hand the picked workspace's PR to pr-refinement"
-              when:   "available('go_pr_refinement')"
+              hint:  "hand the picked workspace's PR to pr-refinement"
+              when:  "available('go_pr_refinement')"
             - label: "✗ pr — {{ blocked_reason('go_pr_refinement') }}"
-              intent: go_pr_refinement
-              when:   "!available('go_pr_refinement')"
-            - { label: "idea",           intent: go_idea,          hint: "draft an ad hoc proposal — no ticket needed" }
-            - { label: "code review",    intent: go_code_review,   hint: "review a teammate's PR" }
-            - { label: "inbox",          intent: go_inbox,         hint: "read notifications ({{ world.inbox_unread }} unread)" }
-            - { label: "oracle",         intent: go_oracle,        hint: "ask the LLM a one-shot question" }
-            - { label: "standup",        intent: go_standup,       hint: "prep today's standup summary" }
-            - { label: "deploy",         intent: go_deploy,        hint: "stub (Wave 3)" }
-            - { label: "observability",  intent: go_observability, hint: "stub (Wave 3)" }
-            - { label: "incident",       intent: go_incident,      hint: "stub (Wave 3)" }
-            - { label: "docs",           intent: go_docs,          hint: "stub (Wave 3)" }
-            - { label: "look",           intent: look,             hint: "re-render the room" }
+              when:  "!available('go_pr_refinement')"
+
+      - heading: "Propose & plan"
+      - list:
+          items:
+            - { label: "idea",  hint: "draft an ad hoc proposal — no ticket needed" }
+            - { label: "ideas", hint: "reconcile the backlog / pick something to propose" }
+
+      - heading: "Review & report"
+      - list:
+          items:
+            - { label: "code review", hint: "review a teammate's PR" }
+            - { label: "standup",     hint: "prep today's standup summary" }
+            - { label: "inbox",       hint: "read notifications ({{ world.inbox_unread }} unread)" }
+            - { label: "oracle",      hint: "ask the LLM a one-shot question" }
+
+      - heading: "Ops (Wave 3 stubs)"
+      - list:
+          items:
+            - { label: "deploy",        hint: "stub (Wave 3)" }
+            - { label: "observability", hint: "stub (Wave 3)" }
+            - { label: "incident",      hint: "stub (Wave 3)" }
+            - { label: "docs",          hint: "stub (Wave 3)" }
+
+      - prose: "Type a request or any verb above. `look` re-renders; `back` / `main` navigate."
+        when: "world.last_error == ''"
 
     on:
       go_ticket_search:
@@ -95,7 +122,12 @@ states:
       go_idea:
         - target: proposal
           effects:
+            - set: { prev_state: "main", proposal_seed_idea: "" }
+      go_ideas:
+        - target: ideas
+          effects:
             - set: { prev_state: "main" }
+            - set: { last_error: "" }
       go_code_review:
         - target: code_review
           effects:

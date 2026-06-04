@@ -69,7 +69,14 @@ hosts:
   - host.oracle.decide
   - host.oracle.task
   - host.chat.resolve
+  # `restart` in rooms/proposal.yaml archives the discovery chat so on_enter's
+  # resolve mints a fresh thread (same as /meta new).
+  - host.chat.archive
   - host.artifacts_dir
+  # The merged discovery+brief room auto-opens the editable 001-brief.md in
+  # the operator's editor on first scaffold (degrades to just the path when no
+  # /ide link is live — open_file returns ok:false, never an error).
+  - host.ide.open_file
 
 # Persona table (oracle-split proposal §3.5).
 #
@@ -93,6 +100,21 @@ agents:
     system_prompt: "You are a kitsoki maintainer running a discovery conversation to develop a raw idea into something a *proposal* can be written from. kitsoki is a deterministic-state-machine PoC for LLM workflows. Ask one focused question at a time and help the operator sharpen: the problem, why kitsoki is the right tool, how an operator would use the change, and which layer it touches (story / runtime / tui / tracing). When pointed at existing docs or code, read them. Keep each reply to a sentence or two plus at most one question."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
+    external_side_effect: false
+
+  # The every-turn brief distiller. As the discovery conversation unfolds, this
+  # task agent folds the newest exchange into 001-brief.md so the brief on disk
+  # always reflects the current understanding (the "discovery produces a valid
+  # brief" half of the room — the operator-edits-it-themselves half needs no
+  # agent). It has Write/Edit, so — exactly like proposal_author — the prompt
+  # AND this system prompt hard-forbid touching anything but the brief: a task
+  # agent with Write will otherwise YOLO-implement the idea. working_dir is the
+  # per-session workspace, not the repo, but that is NOT a write jail — the
+  # constraint is the instruction.
+  proposal_brief_writer:
+    system_prompt: "You maintain a single proposal BRIEF markdown file from a live discovery conversation. You write EXACTLY ONE file — the brief at the given path — and nothing else. You MUST NOT implement the idea or touch any source code, test, config, story YAML, or other repository file; doing so is a hard failure. Each turn you read the brief as it stands and fold in the newest exchange, filling the Why / What changes / Impact / Why-kitsoki / How-it's-used spine where you now have signal and leaving honest `<…>` placeholders where you don't. Keep it skim-in-two-minutes and never invent decisions the operator hasn't made."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Write, Edit]
     external_side_effect: false
 
   proposal_namer:
@@ -126,9 +148,25 @@ agents:
     external_side_effect: false
 
   proposal_author:
-    system_prompt: "You are a kitsoki maintainer authoring a proposal. Classify the change kind (story / runtime / tui / tracing / epic), copy the matching template under docs/proposals/templates/, and fill it — the Why / What changes / Impact spine first, then only the kind-specific sections that apply — grounding every claim in the cited references. Write the proposal markdown to disk."
+    # ⛔ This agent AUTHORS A PROPOSAL DOCUMENT — it must NEVER implement the
+    # idea. The hard rule is repeated in prompts/proposal_draft.md. It has
+    # Write/Edit ONLY to produce the proposal markdown (working_dir is not a
+    # write jail — the constraint is the instruction, so it is emphatic).
+    system_prompt: "You are a kitsoki maintainer authoring a PROPOSAL DOCUMENT — a design write-up, NOT an implementation. You write exactly ONE file: the proposal markdown at the given output path (or, when amending, the named existing proposal). You MUST NOT implement the idea: do NOT create, edit, or modify any source code, test, config, story YAML, or any other repository file. Reading the codebase (Read/Grep/Glob) to ground the proposal is expected; writing anything other than the single proposal markdown is a hard failure. Classify the change kind, copy the matching template under docs/proposals/templates/, and fill the Why / What changes / Impact spine, grounding every claim in the cited references."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Write, Edit]
+    external_side_effect: false
+
+  # ── Ideas reviewer (rooms/ideas.yaml) ─────────────────────────────
+  # Reconciles the hand-maintained ideas backlog against shipped work. READ-ONLY:
+  # it only PROPOSES section moves (the deterministic ideas_reconcile.py script
+  # does the rewrite). Bash under the read-only profile is for `git log` /
+  # `git show` (the proven combo used by stories/bugfix + stories/docs-review).
+  ideas_reviewer:
+    system_prompt: "You are a kitsoki maintainer reconciling a hand-maintained ideas backlog against work that has actually shipped. Read the backlog file, scan the commit history (git log — read-only Bash), the proposals (docs/proposals/), and the docs (docs/) for concrete evidence that an item has shipped or partially shipped. Be conservative: only propose a section move when you can cite real evidence (a commit, a proposal, a doc); leave ambiguous items alone. Also surface a few high-value items still in the Ideas section worth proposing next. You PROPOSE moves only — you never edit the backlog yourself."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Bash]
+    bash_profile: read-only
     external_side_effect: false
 
 # Six host_interfaces — same provider-neutral surfaces declared by the
@@ -309,6 +347,7 @@ world:
 
   # references (004-references.json)
   proposal_references:        { type: object, default: {} } # { items: [{ path, sections, rationale }] }
+  proposal_references_prev:   { type: object, default: {} } # refine snapshot: the list the researcher revises in place (proposal_references is cleared to re-arm its once:)
   proposal_references_path:   { type: string, default: "" }
   proposal_references_revise: { type: bool,   default: false } # true on `refine` (revise current list), false on a fresh `regenerate`
 
@@ -325,6 +364,18 @@ world:
   proposal_references_budget: { type: int, default: 3 }
   proposal_draft_cycle:       { type: int, default: 0 }
   proposal_draft_budget:      { type: int, default: 5 }
+
+  # ── Ideas reviewer (rooms/ideas.yaml) ─────────────────────────────
+  # The backlog reconciler: reads world.ideas_path, the commit history, and the
+  # docs, proposes section moves (ideas_review), and rewrites the file
+  # deterministically on `apply`. `pick` seeds proposal_seed_idea (consumed by
+  # the proposal intake) so a blocked author flows straight into authoring.
+  ideas_path:            { type: string, default: "ideas.md" } # backlog file (repo-relative); per-story files work by overriding this
+  ideas_review:          { type: object, default: {} }          # decide report: { reclassifications: [...], candidates: [...], summary }
+  ideas_review_path:     { type: string, default: "" }          # path the report JSON was written to (fed to the reconcile script)
+  ideas_review_feedback: { type: string, default: "" }          # optional operator steering for a re-scan
+  ideas_apply_result:    { type: object, default: {} }          # reconcile script result: { moved, not_found, sections }
+  proposal_seed_idea:    { type: string, default: "" }          # candidate text handed from the ideas room into the proposal intake
 
   # ── PR handoff (lifted from `pr` import's exits.merged.set) ───────
   last_pr_url:         { type: string, default: "" }
@@ -365,7 +416,7 @@ intents:
     priority: 20
   go_oracle:
     description: "Open the Oracle room for Q&A."
-    examples: [oracle, "ask claude"]
+    examples: [oracle, "ask claude", "ask a question", "i have a question", "ask claude how X works"]
     priority: 18
   go_ticket_search:
     description: "Open ticket search (provider-neutral)."
@@ -373,7 +424,7 @@ intents:
     priority: 40
   go_workspace_manager:
     description: "Open workspace manager."
-    examples: [workspaces, "workspace manager", "list workspaces"]
+    examples: [workspaces, "workspace manager", "list workspaces", "resume", "resume my workspace", "continue where I left off", "pick up where I left off"]
     priority: 30
   go_standup:
     description: "Prep for standup."
@@ -387,6 +438,10 @@ intents:
     description: "Review a teammate's PR."
     examples: ["code review", "review prs"]
     priority: 33
+  go_ideas:
+    description: "Open the ideas reviewer — reconcile the backlog and pick something to propose."
+    examples: ["ideas", "review ideas", "idea backlog", "reconcile ideas", "what should I work on", "writer's block"]
+    priority: 31
   go_deploy:
     description: "Open the deploy room."
     examples: [deploy, "ship it"]
@@ -448,7 +503,7 @@ intents:
     priority: 65
   drive:
     description: "Drive the picked ticket through its pipeline. Routes by ticket_type: bug → bf, feature → impl, epic → cyp."
-    examples: ["drive", "go", "work on it", "push", "start"]
+    examples: ["drive", "go", "work on it", "push", "start", "drive it", "run the pipeline", "take it through", "drive the ticket"]
     priority: 60
   go_bugfix:
     description: "Hand off to the bugfix sub-story for the picked ticket."
@@ -508,9 +563,13 @@ intents:
       # router so the operator's free-text message is captured whole.
       message: { type: string, required: true }
   begin_proposal:
-    description: "Done discussing — distill the idea and move on to the brief."
-    examples: ["ready", "draft it", "let's go", "done discussing", "write the proposal"]
+    description: "Run the brief quality check — if the brief passes, advance; otherwise show what's missing."
+    examples: ["ready", "check the brief", "review it", "is it good?", "done discussing", "let's go"]
     priority: 90
+  advance_brief:
+    description: "Internal: fired by the brief check when the brief passes review, to leave discovery."
+    examples: []
+    priority: 1
   capture_existing:
     description: "Point the proposal pipeline at existing docs to read."
     examples: ["see docs/foo.md", "based on the auth spec", "read these docs"]
@@ -563,6 +622,18 @@ intents:
     description: "Create a new proposal despite the detected overlap (recorded for audit)."
     examples: ["new anyway", "ignore the overlap", "still create new"]
     priority: 58
+
+  # ── Ideas reviewer vocabulary (rooms/ideas.yaml) ──────────────────
+  apply:
+    description: "Apply the proposed ideas-backlog section moves — rewrite the file."
+    examples: ["apply", "apply the moves", "update the backlog", "make the changes"]
+    priority: 64
+  pick:
+    description: "Start a proposal from one of the suggested ideas candidates."
+    examples: ["pick 1", "pick candidate 2", "start on 1", "propose 2"]
+    priority: 88
+    slots:
+      n: { type: int, required: true, description: "1-based index into the displayed candidates list." }
 
   # Standup / generic ack
   summarize_day:
