@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,7 +24,7 @@ func TestHelpCommandLists(t *testing.T) {
 		"room switches",
 		"system",
 		"/help",
-		"/actions",
+		"/intents",
 		"/world",
 		"/meta",
 		"/quit",
@@ -33,7 +35,7 @@ func TestHelpCommandLists(t *testing.T) {
 	}
 }
 
-// TestActionsAutoToggle exercises /actions auto on|off.
+// TestActionsAutoToggle exercises /intents auto on|off.
 func TestActionsAutoToggle(t *testing.T) {
 	t.Parallel()
 	m := RootModel{}
@@ -43,7 +45,7 @@ func TestActionsAutoToggle(t *testing.T) {
 	if !next.actionsAuto {
 		t.Errorf("actionsAuto should be true after `auto on`")
 	}
-	if !strings.Contains(body, "actions auto on") {
+	if !strings.Contains(body, "intents auto on") {
 		t.Errorf("expected confirmation line, got %q", body)
 	}
 
@@ -51,8 +53,66 @@ func TestActionsAutoToggle(t *testing.T) {
 	if next.actionsAuto {
 		t.Errorf("actionsAuto should be false after `auto off`")
 	}
-	if !strings.Contains(body, "actions auto off") {
+	if !strings.Contains(body, "intents auto off") {
 		t.Errorf("expected confirmation line, got %q", body)
+	}
+}
+
+// TestIdeasCommandAppends verifies /ideas appends a bullet line to the
+// configured file, preserves prior content, and reports usage when given
+// no text. It writes to a temp file (not the repo's ideas.md) via the
+// ideasFilePath override, so it cannot run in parallel.
+func TestIdeasCommandAppends(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ideas.md")
+	if err := os.WriteFile(path, []byte("## Ideas\n- existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := ideasPathOverride
+	ideasPathOverride = path
+	defer func() { ideasPathOverride = orig }()
+
+	m := RootModel{}
+	m.transcript = newTranscriptModel(80, 24)
+
+	// Empty args → usage, no write.
+	body, _, _ := IdeasCommand{}.Run(m, nil)
+	if !strings.Contains(body, "usage") {
+		t.Errorf("expected usage line for empty /ideas, got %q", body)
+	}
+
+	body, _, _ = IdeasCommand{}.Run(m, []string{"build", "a", "widget"})
+	if !strings.Contains(body, "jotted to") {
+		t.Errorf("expected confirmation line, got %q", body)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "## Ideas\n- existing\n- build a widget\n"; string(got) != want {
+		t.Errorf("file contents = %q, want %q", got, want)
+	}
+}
+
+// TestAppendIdeaLineMissingNewline confirms a bullet is placed on its own
+// line even when the existing file lacks a trailing newline.
+func TestAppendIdeaLineMissingNewline(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "ideas.md")
+	if err := os.WriteFile(path, []byte("- existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendIdeaLine(path, "new one"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "- existing\n- new one\n"; string(got) != want {
+		t.Errorf("file contents = %q, want %q", got, want)
 	}
 }
 

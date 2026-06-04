@@ -342,7 +342,7 @@ func (m *transcriptModel) FinalizeLive(body string) {
 
 // AppendBlock appends a pre-rendered styled multi-line body verbatim —
 // no Markdown pipeline, no extra styling. Used by slash commands that
-// render their own output (e.g. /help, /actions) via internal/tui/blocks.
+// render their own output (e.g. /help, /intents) via internal/tui/blocks.
 func (m *transcriptModel) AppendBlock(body string) {
 	if body == "" {
 		return

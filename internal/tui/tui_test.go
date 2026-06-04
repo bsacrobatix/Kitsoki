@@ -689,8 +689,8 @@ func extractRoot(t *testing.T, m tea.Model) tuipkg.RootModel {
 
 // TestTUIMenuExpandedGoSouth verifies that the TUI's menu contains "go south"
 // (not bare "go") in the foyer, and that dispatching it via the post-phase-4
-// /actions <n> command advances the journey to bar.dark. Numeric quick-select
-// was removed in phase 4; the equivalent surface is /actions <n>.
+// /intents <n> command advances the journey to bar.dark. Numeric quick-select
+// was removed in phase 4; the equivalent surface is /intents <n>.
 func TestTUIMenuExpandedGoSouth(t *testing.T) {
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
@@ -709,9 +709,9 @@ func TestTUIMenuExpandedGoSouth(t *testing.T) {
 	}
 	require.GreaterOrEqual(t, goSouthIdx, 0, "go south should be in the primary menu")
 
-	// Dispatch via /actions <n>. Indices are 1-based in the rendered
+	// Dispatch via /intents <n>. Indices are 1-based in the rendered
 	// block; goSouthIdx is 0-based so add 1.
-	cmd := "/actions " + strconv.Itoa(goSouthIdx+1)
+	cmd := "/intents " + strconv.Itoa(goSouthIdx+1)
 	tuipkg.SetPromptValue(&rm, cmd)
 	m = processCommands(rm, func() tea.Msg {
 		return tea.KeyMsg{Type: tea.KeyEnter}
