@@ -4,7 +4,18 @@
     <template v-else>
       <!-- Top bar -->
       <div class="run-view__topbar">
-        <router-link to="/" class="run-view__back">← Sessions</router-link>
+        <span class="run-view__breadcrumb" data-testid="breadcrumb">
+          <router-link to="/" class="run-view__back">Stories</router-link>
+          <span class="run-view__crumb-sep">/</span>
+          <span class="run-view__crumb-current">{{ storyTitle }}</span>
+        </span>
+        <router-link
+          v-if="!store.terminal"
+          :to="`/s/${sessionId}/chat`"
+          class="run-view__drive"
+          data-testid="drive-link"
+          title="Drive this session — submit turns and choose intents"
+        >Drive (chat) ↗</router-link>
         <span class="run-view__session-id">{{ sessionId }}</span>
         <span
           class="run-view__state-badge"
@@ -20,6 +31,26 @@
         >
           Σ {{ fmtTokens(store.usageTotals.promptTokens + store.usageTotals.responseTokens) }} tok<template v-if="fmtCost(store.usageTotals.costUsd)"> · {{ fmtCost(store.usageTotals.costUsd) }}</template>
         </span>
+        <button
+          class="run-view__reload"
+          :class="{ 'run-view__reload--pushed': !store.usageTotals.present }"
+          data-testid="reload-button"
+          :disabled="reloading"
+          :title="'Reload the story definition in place (mirrors the TUI /reload)'"
+          @click="onReload"
+        >
+          {{ reloading ? "Reloading…" : "↻ Reload" }}
+        </button>
+      </div>
+
+      <!-- Reload warning: shown when the current state was removed by the edit,
+           mirroring the TUI /reload's "re-render only" notice. -->
+      <div
+        v-if="reloadWarning"
+        class="run-view__reload-warning"
+        data-testid="reload-warning"
+      >
+        {{ reloadWarning }}
       </div>
 
       <!-- Main panels -->
@@ -72,9 +103,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRunStore } from "../stores/run.js";
 import { createDataSource } from "../data/source.js";
+import { LiveSource } from "../data/live-source.js";
 import StateDiagram from "../components/StateDiagram.vue";
 import TraceTimeline from "../components/TraceTimeline.vue";
 import { fmtTokens, fmtCost } from "../components/oracle/lib.js";
@@ -82,6 +114,40 @@ import type { NodeRef } from "../types.js";
 
 const props = defineProps<{ sessionId: string }>();
 const store = useRunStore();
+
+// Breadcrumb label: the loaded story's title (falls back to its id, then to a
+// generic label before the app definition has hydrated).
+const storyTitle = computed<string>(
+  () => store.appDef?.name || store.appDef?.id || "Session"
+);
+
+// ── Reload (in-place story hot-reload, mirroring the TUI /reload) ───────────
+//
+// The reload RPC takes an explicit session_id, so we drive it through a direct
+// LiveSource rather than the snapshot-capable DataSource (which has no
+// reloadSession). On prev_state_exists:false the engine could not re-enter the
+// session's current state because the edit removed it, so it stays put — we
+// surface the same notice the TUI prints. On true the normal SSE-driven trace
+// refresh repaints the view, so there is nothing extra to do here.
+const source = new LiveSource("/");
+const reloading = ref(false);
+const reloadWarning = ref<string | null>(null);
+
+async function onReload(): Promise<void> {
+  if (reloading.value) return;
+  reloading.value = true;
+  reloadWarning.value = null;
+  try {
+    const res = await source.reloadSession(props.sessionId);
+    if (!res.prev_state_exists) {
+      reloadWarning.value = "current state removed; staying put";
+    }
+  } catch (e) {
+    reloadWarning.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    reloading.value = false;
+  }
+}
 
 const panelsEl = ref<HTMLElement | null>(null);
 const splitPct = ref(50); // diagram gets this % of panel width
@@ -185,6 +251,13 @@ function onEventSelect(index: number): void {
   font-size: 0.8125rem;
 }
 
+.run-view__breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+}
+
 .run-view__back {
   color: #60a5fa;
   text-decoration: none;
@@ -192,6 +265,71 @@ function onEventSelect(index: number): void {
 
 .run-view__back:hover {
   text-decoration: underline;
+}
+
+.run-view__crumb-sep {
+  color: #475569;
+}
+
+.run-view__crumb-current {
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+/* The primary next-action from the read-only observer: jump to the chat surface
+   to actually drive the live session. Styled as an accent pill so it reads as a
+   call-to-action, not just another breadcrumb. */
+.run-view__drive {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 4px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.run-view__drive:hover {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: #60a5fa;
+}
+
+.run-view__reload {
+  background: transparent;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  border-radius: 4px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* When the usage chip is absent it can't push the reload button right, so the
+   button takes over the auto margin to stay flush right. */
+.run-view__reload--pushed {
+  margin-left: auto;
+}
+
+.run-view__reload:hover:not(:disabled) {
+  background: #1e293b;
+  border-color: #475569;
+}
+
+.run-view__reload:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.run-view__reload-warning {
+  flex-shrink: 0;
+  padding: 0.35rem 1rem;
+  background: #3a2d0e;
+  border-bottom: 1px solid #fbbf24;
+  color: #fde68a;
+  font-size: 0.775rem;
 }
 
 .run-view__session-id {

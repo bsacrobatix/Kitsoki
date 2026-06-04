@@ -187,6 +187,131 @@ describe("LiveSource", () => {
     expect(unsubCall).toBeDefined();
   });
 
+  it("view calls runstatus.session.view", async () => {
+    fetchMock.mockResolvedValueOnce(
+      rpcOk({ mode: "transitioned", state: "idle", turn_number: 1 })
+    );
+    const src = new LiveSource("/");
+    const result = await src.view("s1");
+    expect(result.state).toBe("idle");
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string };
+    expect(body.method).toBe("runstatus.session.view");
+  });
+
+  it("submit calls runstatus.session.submit with intent + slots", async () => {
+    fetchMock.mockResolvedValueOnce(
+      rpcOk({ mode: "transitioned", state: "idle", turn_number: 2 })
+    );
+    const src = new LiveSource("/");
+    await src.submit("s1", "discuss", { message: "hello" });
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string; params: { intent: string; slots: Record<string, unknown> } };
+    expect(body.method).toBe("runstatus.session.submit");
+    expect(body.params.intent).toBe("discuss");
+    expect(body.params.slots).toEqual({ message: "hello" });
+  });
+
+  it("submit defaults slots to {} when omitted", async () => {
+    fetchMock.mockResolvedValueOnce(
+      rpcOk({ mode: "transitioned", state: "clarifying", turn_number: 2 })
+    );
+    const src = new LiveSource("/");
+    await src.submit("s1", "start");
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { params: { slots: Record<string, unknown> } };
+    expect(body.params.slots).toEqual({});
+  });
+
+  it("sendTurn calls runstatus.session.turn with input", async () => {
+    fetchMock.mockResolvedValueOnce(
+      rpcOk({ mode: "transitioned", state: "idle", turn_number: 2 })
+    );
+    const src = new LiveSource("/");
+    await src.sendTurn("s1", "build me a thing");
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string; params: { input: string } };
+    expect(body.method).toBe("runstatus.session.turn");
+    expect(body.params.input).toBe("build me a thing");
+  });
+
+  it("continueTurn calls runstatus.session.continue with slots", async () => {
+    fetchMock.mockResolvedValueOnce(
+      rpcOk({ mode: "transitioned", state: "brief", turn_number: 3 })
+    );
+    const src = new LiveSource("/");
+    await src.continueTurn("s1", { n: 2, text: "two" });
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string; params: { slots: Record<string, unknown> } };
+    expect(body.method).toBe("runstatus.session.continue");
+    expect(body.params.slots).toEqual({ n: 2, text: "two" });
+  });
+
+  it("offpath calls runstatus.session.offpath and returns the answer", async () => {
+    fetchMock.mockResolvedValueOnce(rpcOk({ answer: "42" }));
+    const src = new LiveSource("/");
+    const out = await src.offpath("s1", "what is the meaning?");
+    expect(out.answer).toBe("42");
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string; params: { input: string } };
+    expect(body.method).toBe("runstatus.session.offpath");
+    expect(body.params.input).toBe("what is the meaning?");
+  });
+
+  it("listStories calls runstatus.stories.list", async () => {
+    fetchMock.mockResolvedValueOnce(
+      rpcOk([{ path: "/a/app.yaml", app_id: "a", title: "A", active_sessions: [] }])
+    );
+    const src = new LiveSource("/");
+    const stories = await src.listStories();
+    expect(stories[0]!.path).toBe("/a/app.yaml");
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string };
+    expect(body.method).toBe("runstatus.stories.list");
+  });
+
+  it("rescanStories calls runstatus.stories.rescan", async () => {
+    fetchMock.mockResolvedValueOnce(rpcOk([]));
+    const src = new LiveSource("/");
+    await src.rescanStories();
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string };
+    expect(body.method).toBe("runstatus.stories.rescan");
+  });
+
+  it("newSession calls runstatus.session.new with story_path and returns the id", async () => {
+    fetchMock.mockResolvedValueOnce(rpcOk({ session_id: "sess-new" }));
+    const src = new LiveSource("/");
+    const id = await src.newSession("/abs/story/app.yaml");
+    expect(id).toBe("sess-new");
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string; params: { story_path: string } };
+    expect(body.method).toBe("runstatus.session.new");
+    expect(body.params.story_path).toBe("/abs/story/app.yaml");
+  });
+
+  it("reloadSession calls runstatus.session.reload and returns prev_state_exists", async () => {
+    fetchMock.mockResolvedValueOnce(rpcOk({ ok: true, prev_state_exists: false }));
+    const src = new LiveSource("/");
+    const res = await src.reloadSession("s1");
+    expect(res.ok).toBe(true);
+    expect(res.prev_state_exists).toBe(false);
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string; params: { session_id: string } };
+    expect(body.method).toBe("runstatus.session.reload");
+    expect(body.params.session_id).toBe("s1");
+  });
+
   it("reconnect with backfill: delivers backfill events, no duplicates", async () => {
     vi.useFakeTimers();
 

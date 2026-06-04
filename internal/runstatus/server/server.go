@@ -23,17 +23,34 @@
 //
 // # JSON-RPC methods (POST /rpc)
 //
+//	runstatus.stories.list       {}                                  → []StoryHeader
+//	runstatus.stories.rescan     {}                                  → []StoryHeader
+//	runstatus.session.new        {story_path}                        → {session_id}
+//	runstatus.session.reload     {session_id}                        → {ok, prev_state_exists}
 //	runstatus.sessions.list      {}                                  → []SessionHeader
 //	runstatus.session.get        {session_id}                        → SessionHeader
 //	runstatus.session.app        {session_id}                        → AppDef
 //	runstatus.session.mermaid    {session_id, detail?}               → {source, node_map}
 //	runstatus.session.trace      {session_id, since_turn?, until_turn?, limit?}
 //	                                                                 → {events, last_turn}
+//	runstatus.session.view       {session_id}                        → turnResult
+//	runstatus.session.turn       {session_id, input}                 → turnResult
+//	runstatus.session.submit     {session_id, intent, slots?}        → turnResult
+//	runstatus.session.continue   {session_id, slots?}               → turnResult
+//	runstatus.session.offpath    {session_id, input}                 → {answer}
 //	runstatus.session.subscribe  {session_id}                        → {subscription_id}
 //	runstatus.session.unsubscribe {subscription_id}                  → {ok: true}
 //
-// v1 serves a single trace (one session). session_id params are accepted but
-// the one trace is always served; sessions.list returns 0–1 entries.
+// # Session routing
+//
+// The server is session-routing: every session-routed RPC carries a session_id
+// that the [SessionProvider] resolves to one live session's [Source] / [Driver].
+// `kitsoki web` builds the server with [NewMulti] over a registry that owns many
+// sessions and the discovered story catalogue (stories.* / session.new/reload).
+// `kitsoki status serve` builds it with [New] / [NewWithSource] over a single
+// [Source]: the session_id param is accepted but every read resolves to the one
+// session, sessions.list returns 0–1 entries, and the lifecycle RPCs report
+// codeReadOnly (there is no orchestrator behind a trace file).
 //
 // # Streaming
 //
@@ -51,6 +68,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -66,66 +84,102 @@ import (
 // appended events. localhost debug tool; 500ms is responsive without busy-spin.
 const defaultPollInterval = 500 * time.Millisecond
 
-// Server answers the runstatus live contract for one [Source].
-// It is safe for concurrent use.
+// Server answers the runstatus live contract by routing every RPC to the right
+// session via a [SessionProvider]. It is safe for concurrent use.
 type Server struct {
-	src    Source
-	driver Driver // nil for read-only surfaces (status serve)
-	poll   time.Duration
+	provider SessionProvider
+	poll     time.Duration
 
 	mu     sync.Mutex
 	subs   map[string]*subscription
 	nextID int
 }
 
-// subscription tracks one SSE stream slot. sent is the number of events
-// already delivered, so reconnects resume rather than replay.
+// subscription tracks one SSE stream slot. sent is the number of events already
+// delivered, so reconnects resume rather than replay. sessionID is the session
+// the stream follows, captured from the subscribe params: each poll re-resolves
+// the live [Source] for that session through the provider, so a session created
+// or reloaded after subscribe is still observed.
 type subscription struct {
-	id   string
-	mu   sync.Mutex
-	sent int
+	id        string
+	sessionID string
+	mu        sync.Mutex
+	sent      int
 }
 
-// Option configures a Server.
-type Option func(*Server)
+// Option configures a Server. A few options (WithDriver) only apply when the
+// server is built from a single [Source] via [New] / [NewWithSource]: they tune
+// the single-entry adapter. [NewMulti] takes a provider that already owns its
+// drivers, so those options are no-ops there.
+type Option func(*serverConfig)
+
+// serverConfig collects the options before the Server is built. The single-entry
+// constructors fold driver into the adapter; NewMulti ignores it.
+type serverConfig struct {
+	poll   time.Duration
+	driver Driver
+}
 
 // WithPollInterval overrides the SSE trace-poll interval.
 func WithPollInterval(d time.Duration) Option {
-	return func(s *Server) {
+	return func(c *serverConfig) {
 		if d > 0 {
-			s.poll = d
+			c.poll = d
 		}
 	}
 }
 
-// WithDriver attaches the write side: with it set, the session.turn / submit /
-// continue / offpath RPCs advance the live session. Without it the surface is
-// read-only. `kitsoki web` sets it; `kitsoki status serve` does not.
+// WithDriver attaches the write side to a single-source server: with it set, the
+// session.turn / submit / continue / offpath RPCs advance the live session.
+// Without it that single surface is read-only. `kitsoki web`'s legacy single
+// session set it; `kitsoki status serve` does not. It has no effect on a
+// [NewMulti] server — there each entry carries its own [Driver].
 func WithDriver(d Driver) Option {
-	return func(s *Server) { s.driver = d }
+	return func(c *serverConfig) { c.driver = d }
 }
 
 // New builds a Server that serves the run recorded in the JSONL trace at
 // tracePath, interpreted against def — the read-only `kitsoki status serve`
-// path.
+// path. The lifecycle RPCs (stories.*, session.new/reload) report
+// [codeReadOnly]: there is no orchestrator behind a trace file.
 func New(tracePath string, def *app.AppDef, opts ...Option) *Server {
 	return NewWithSource(&traceFileSource{path: tracePath, def: def}, opts...)
 }
 
-// NewWithSource builds a Server backed by an arbitrary [Source]. `kitsoki
-// status serve` uses [New] (a read-only trace file); `kitsoki web` uses this
-// with a live in-process [LiveSession] so the same SPA, RPC, and SSE surface
-// observes a running session.
+// NewWithSource builds a Server backed by a single [Source], wrapped in a
+// one-entry [SessionProvider] so the routing dispatch path serves it like any
+// other session. `kitsoki status serve` uses [New] (a read-only trace file);
+// the legacy single-session `kitsoki web` used this with a live in-process
+// [LiveSession]. The session_id param is accepted but every routed read/write
+// resolves to the single entry. The lifecycle RPCs report [codeReadOnly].
 func NewWithSource(src Source, opts ...Option) *Server {
-	s := &Server{
-		src:  src,
-		poll: defaultPollInterval,
-		subs: make(map[string]*subscription),
-	}
+	cfg := newConfig(opts)
+	provider := &singleEntryProvider{entry: Entry{Source: src, Driver: cfg.driver}}
+	return newServer(provider, cfg)
+}
+
+// NewMulti builds a session-routing Server that dispatches every RPC to the
+// session the provider resolves from the session_id param, and exposes the
+// stories.* / session.new / session.reload lifecycle the SPA home screen drives.
+// `kitsoki web` uses this with the SessionRegistry.
+func NewMulti(provider SessionProvider, opts ...Option) *Server {
+	return newServer(provider, newConfig(opts))
+}
+
+func newConfig(opts []Option) serverConfig {
+	cfg := serverConfig{poll: defaultPollInterval}
 	for _, o := range opts {
-		o(s)
+		o(&cfg)
 	}
-	return s
+	return cfg
+}
+
+func newServer(provider SessionProvider, cfg serverConfig) *Server {
+	return &Server{
+		provider: provider,
+		poll:     cfg.poll,
+		subs:     make(map[string]*subscription),
+	}
 }
 
 // Source supplies the runstatus surface with a view of one session. The server
@@ -237,10 +291,14 @@ const (
 	codeParseError    = -32700
 	codeMethodMissing = -32601
 	codeServerError   = -32000
-	// codeReadOnly is returned for a write RPC (turn/submit/continue/offpath)
-	// when the surface has no live session Driver — i.e. `kitsoki status serve`,
-	// which only observes a recorded trace.
+	// codeReadOnly is returned for a write RPC (turn/submit/continue/offpath) or
+	// a lifecycle RPC (stories.*, session.new/reload) when the surface has no
+	// live session Driver / no registry — i.e. `kitsoki status serve`, which only
+	// observes a recorded trace.
 	codeReadOnly = -32001
+	// codeNotFound is returned when a session-routed RPC carries a session_id
+	// the provider does not know (an expired or never-existing session).
+	codeNotFound = -32002
 )
 
 func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
@@ -270,55 +328,107 @@ func writeRPC(w http.ResponseWriter, resp rpcResponse) {
 }
 
 // dispatch routes a JSON-RPC method to its handler. It returns either a result
-// value or a *rpcError (never both). session_id params are accepted but
-// ignored — this server serves the single configured session.
+// value or a *rpcError (never both).
 //
-// The read methods (sessions.list / session.*) answer from the [Source]. The
-// write methods (session.turn / submit / continue / offpath) advance the live
-// session through the [Driver]; they return codeReadOnly when no Driver is set.
+// Three families:
+//
+//   - Provider-level: sessions.list / stories.* / session.new / session.reload
+//     act on the whole [SessionProvider] (the registry), not one session.
+//   - Session-routed reads (session.get/app/mermaid/trace/view): resolve the
+//     entry by the session_id param, then read its [Source] (or [Driver] for
+//     view).
+//   - Session-routed writes (session.turn/submit/continue/offpath): resolve the
+//     entry, then advance its [Driver]; codeReadOnly when the entry has none.
+//
+// A session-routed RPC with an unknown session_id returns codeNotFound rather
+// than nil-derefing. subscribe/unsubscribe manage SSE slots and resolve their
+// session per poll, not here.
 func (s *Server) dispatch(ctx context.Context, method string, params map[string]any) (any, *rpcError) {
 	if params == nil {
 		params = map[string]any{}
 	}
 	switch method {
+	// ── Provider-level (registry) ──────────────────────────────────────────
 	case "runstatus.sessions.list":
-		snap, err := s.src.Snapshot()
-		if err != nil {
-			return nil, serverErr(err)
-		}
-		// 0 entries until the run has emitted at least one event; else the one
-		// session this trace records.
-		if len(snap.Events) == 0 {
-			return []runstatus.SessionHeader{}, nil
-		}
-		return []runstatus.SessionHeader{snap.Session}, nil
+		return s.provider.List(), nil
 
+	case "runstatus.stories.list":
+		return s.provider.ListStories(), nil
+
+	case "runstatus.stories.rescan":
+		stories, err := s.provider.Rescan()
+		if err != nil {
+			return nil, lifecycleErr(err)
+		}
+		return stories, nil
+
+	case "runstatus.session.new":
+		storyPath, _ := params["story_path"].(string)
+		if storyPath == "" {
+			return nil, &rpcError{Code: codeServerError, Message: "session.new: missing 'story_path'"}
+		}
+		sid, err := s.provider.NewSession(ctx, storyPath)
+		if err != nil {
+			// An invalid story is surfaced as a structured error so the UI can
+			// show it before navigating (decided lean).
+			return nil, lifecycleErr(err)
+		}
+		return map[string]any{"session_id": sid}, nil
+
+	case "runstatus.session.reload":
+		sid, rerr := sessionIDParam(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		prevStateExists, err := s.provider.Reload(ctx, sid)
+		if err != nil {
+			return nil, lifecycleErr(err)
+		}
+		return map[string]any{"ok": true, "prev_state_exists": prevStateExists}, nil
+
+	// ── Session-routed reads ───────────────────────────────────────────────
 	case "runstatus.session.get":
-		snap, err := s.src.Snapshot()
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		snap, err := entry.Source.Snapshot()
 		if err != nil {
 			return nil, serverErr(err)
 		}
 		return snap.Session, nil
 
 	case "runstatus.session.app":
-		return s.src.AppDef(), nil
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		return entry.Source.AppDef(), nil
 
 	case "runstatus.session.mermaid":
-		snap, err := s.src.Snapshot()
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		snap, err := entry.Source.Snapshot()
 		if err != nil {
 			return nil, serverErr(err)
 		}
 		return snap.Mermaid, nil
 
 	case "runstatus.session.trace":
-		snap, err := s.src.Snapshot()
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		snap, err := entry.Source.Snapshot()
 		if err != nil {
 			return nil, serverErr(err)
 		}
 		return filterTrace(snap, params), nil
 
 	case "runstatus.session.subscribe":
-		return s.subscribe()
+		return s.subscribe(params)
 
 	case "runstatus.session.unsubscribe":
 		id, _ := params["subscription_id"].(string)
@@ -327,32 +437,44 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 
 	case "runstatus.session.view":
 		// Read of the live session's CURRENT room (render + menu) without
-		// advancing it. Requires a Driver (a live session); the read-only
-		// trace surface has none, so it returns codeReadOnly like the write
-		// RPCs — there is no in-process session to query.
-		if s.driver == nil {
+		// advancing it. Requires a Driver (a live session); a read-only entry
+		// has none, so it returns codeReadOnly like the write RPCs — there is no
+		// in-process session to query.
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
 			return nil, readOnlyErr(method)
 		}
-		out, err := s.driver.View(ctx)
+		out, err := entry.Driver.View(ctx)
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		return newTurnResult(out, s.driver), nil
+		return newTurnResult(out, entry.Driver), nil
 
-	// ── Write methods (live session only) ─────────────────────────────────
+	// ── Session-routed writes (live session only) ──────────────────────────
 	case "runstatus.session.turn":
-		if s.driver == nil {
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
 			return nil, readOnlyErr(method)
 		}
 		input, _ := params["input"].(string)
-		out, err := s.driver.Turn(ctx, input)
+		out, err := entry.Driver.Turn(ctx, input)
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		return newTurnResult(out, s.driver), nil
+		return newTurnResult(out, entry.Driver), nil
 
 	case "runstatus.session.submit":
-		if s.driver == nil {
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
 			return nil, readOnlyErr(method)
 		}
 		name, _ := params["intent"].(string)
@@ -360,29 +482,37 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			return nil, &rpcError{Code: codeServerError, Message: "session.submit: missing 'intent'"}
 		}
 		slots, _ := params["slots"].(map[string]any)
-		out, err := s.driver.SubmitDirect(ctx, name, slots)
+		out, err := entry.Driver.SubmitDirect(ctx, name, slots)
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		return newTurnResult(out, s.driver), nil
+		return newTurnResult(out, entry.Driver), nil
 
 	case "runstatus.session.continue":
-		if s.driver == nil {
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
 			return nil, readOnlyErr(method)
 		}
 		slots, _ := params["slots"].(map[string]any)
-		out, err := s.driver.ContinueTurn(ctx, slots)
+		out, err := entry.Driver.ContinueTurn(ctx, slots)
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		return newTurnResult(out, s.driver), nil
+		return newTurnResult(out, entry.Driver), nil
 
 	case "runstatus.session.offpath":
-		if s.driver == nil {
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
 			return nil, readOnlyErr(method)
 		}
 		input, _ := params["input"].(string)
-		answer, err := s.driver.AskOffPath(ctx, input)
+		answer, err := entry.Driver.AskOffPath(ctx, input)
 		if err != nil {
 			return nil, serverErr(err)
 		}
@@ -393,9 +523,50 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 	}
 }
 
+// resolve looks up the entry for the session_id param, returning a structured
+// not-found error for an unknown id so a session-routed RPC never nil-derefs.
+// The single-entry adapter resolves any id (including the empty string the
+// read-only tests pass) to its one session; the multi-session registry returns
+// ok=false for an empty or unknown id, which becomes codeNotFound.
+func (s *Server) resolve(params map[string]any) (Entry, *rpcError) {
+	sid, _ := params["session_id"].(string)
+	entry, ok := s.provider.Get(sid)
+	if !ok {
+		return Entry{}, &rpcError{Code: codeNotFound, Message: "unknown session_id: " + sid}
+	}
+	return entry, nil
+}
+
+// sessionIDParam reads the required session_id param for a lifecycle RPC
+// (session.reload) where there is no single-entry fallback — a missing id is a
+// malformed request.
+func sessionIDParam(params map[string]any) (string, *rpcError) {
+	sid, _ := params["session_id"].(string)
+	if sid == "" {
+		return "", &rpcError{Code: codeServerError, Message: "missing 'session_id'"}
+	}
+	return sid, nil
+}
+
+// lifecycleErr maps a provider lifecycle error to an rpcError: the read-only
+// sentinel becomes codeReadOnly (matching the write-RPC gate), anything else a
+// generic server error (e.g. an invalid story on session.new).
+func lifecycleErr(err error) *rpcError {
+	if errors.Is(err, errReadOnlySurface) {
+		return &rpcError{Code: codeReadOnly, Message: err.Error()}
+	}
+	return serverErr(err)
+}
+
 func readOnlyErr(method string) *rpcError {
 	return &rpcError{Code: codeReadOnly, Message: method + ": this surface is read-only (no live session)"}
 }
+
+// errReadOnlySurface is returned by [singleEntryProvider]'s lifecycle methods
+// (NewSession / Reload / Rescan): a single trace-file / legacy surface has no
+// orchestrator to start, reload, or rediscover stories. dispatch maps it to
+// [codeReadOnly] so the UI sees the same gate as the write RPCs.
+var errReadOnlySurface = errors.New("unsupported on read-only surface (no session registry)")
 
 func serverErr(err error) *rpcError {
 	return &rpcError{Code: codeServerError, Message: err.Error()}
@@ -445,17 +616,25 @@ func intParam(params map[string]any, key string) (int, bool) {
 
 // ── Subscriptions + SSE ─────────────────────────────────────────────────────
 
-func (s *Server) subscribe() (map[string]any, *rpcError) {
+func (s *Server) subscribe(params map[string]any) (map[string]any, *rpcError) {
+	// Bind the subscription to the session it follows; each poll re-resolves the
+	// live Source for this id (so a session reloaded after subscribe is still
+	// observed). The single-entry adapter ignores the id.
+	sid, _ := params["session_id"].(string)
+	entry, ok := s.provider.Get(sid)
+	if !ok {
+		return nil, &rpcError{Code: codeNotFound, Message: "unknown session_id: " + sid}
+	}
 	// Seed sent with the current event count so the stream carries only events
 	// appended after subscribe; the initial load comes from session.trace.
-	events, err := s.src.Events()
+	events, err := entry.Source.Events()
 	if err != nil {
 		return nil, serverErr(err)
 	}
 	s.mu.Lock()
 	s.nextID++
 	id := fmt.Sprintf("sub-%d", s.nextID)
-	s.subs[id] = &subscription{id: id, sent: len(events)}
+	s.subs[id] = &subscription{id: id, sessionID: sid, sent: len(events)}
 	s.mu.Unlock()
 	return map[string]any{"subscription_id": id}, nil
 }
@@ -505,13 +684,19 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // streamNew emits a runstatus.event notification for every event appended to
-// the trace since the subscription's last delivery, then advances the
-// watermark.
+// the subscription's session since its last delivery, then advances the
+// watermark. The session's live [Source] is resolved per tick through the
+// provider, so a session created or reloaded after subscribe is still followed;
+// if the session has gone (unknown id) the tick is a no-op.
 func (s *Server) streamNew(w http.ResponseWriter, flusher http.Flusher, sub *subscription) {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
 
-	events, err := s.src.Events()
+	entry, ok := s.provider.Get(sub.sessionID)
+	if !ok {
+		return
+	}
+	events, err := entry.Source.Events()
 	if err != nil || len(events) <= sub.sent {
 		return
 	}

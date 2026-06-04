@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from "vue-router";
-import SessionList from "./views/SessionList.vue";
+import HomeView from "./views/HomeView.vue";
 import RunView from "./views/RunView.vue";
 import InteractiveView from "./views/InteractiveView.vue";
 
@@ -7,7 +7,10 @@ const router = createRouter({
   // Hash history: works fine for both live and file:// artifact mode.
   history: createWebHashHistory(),
   routes: [
-    { path: "/", component: SessionList },
+    // The home screen is the multi-story browser + live-session list. (The old
+    // single-session SessionList is subsumed by HomeView's active-sessions
+    // section.)
+    { path: "/", component: HomeView },
     { path: "/s/:sessionId", component: RunView, props: true },
     { path: "/s/:sessionId/chat", component: InteractiveView, props: true },
   ],

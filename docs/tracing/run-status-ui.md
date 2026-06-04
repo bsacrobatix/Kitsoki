@@ -17,7 +17,7 @@ produces artifacts and serves the live UI on its own.
 
 This page covers the **read-only** viewer. For an **interactive** browser
 surface — drive a live session by chat, beside this same trace and diagram —
-see [the web UI](../tui/web-ui.md) (`kitsoki web`), built on the same SPA and
+see [the web UI](../web/README.md) (`kitsoki web`), built on the same SPA and
 RPC/SSE contract plus a write layer.
 
 There are two ways to view a run, from one bundle.

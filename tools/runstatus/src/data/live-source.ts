@@ -9,6 +9,27 @@ import type { DataSource, TraceCursor } from "./source.js";
 import { JsonRpcClient } from "../transport/jsonrpc.js";
 
 /**
+ * StoryHeader is one discovered story as the home-screen browser renders it.
+ * It mirrors `server.StoryHeader` (internal/runstatus/server/provider.go):
+ *
+ *   - path is the ABSOLUTE path to the story's app.yaml — the canonical key
+ *     session.new takes; app_id is display-only.
+ *   - active_sessions lists the ids of live sessions started from this story.
+ */
+export interface StoryHeader {
+  path: string;
+  app_id: string;
+  title: string;
+  active_sessions: string[];
+}
+
+/** Result of runstatus.session.reload — mirrors Orchestrator.Reload semantics. */
+export interface ReloadResult {
+  ok: boolean;
+  prev_state_exists: boolean;
+}
+
+/**
  * DataSource backed by the kitsoki HTTP JSON-RPC + SSE endpoint.
  */
 export class LiveSource implements DataSource {
@@ -113,6 +134,47 @@ export class LiveSource implements DataSource {
     return this.client.post<{ answer: string }>("runstatus.session.offpath", {
       session_id: sessionId,
       input,
+    });
+  }
+
+  // ── Multi-story lifecycle RPCs ───────────────────────────────────────────
+  //
+  // These drive the home screen (story browser + live-session list +
+  // new-session) and the per-session Reload action. They are session-agnostic
+  // (stories.*/session.new) or take an explicit session_id (session.reload)
+  // rather than relying on a single in-process session.
+
+  /** List the discovered story catalogue. */
+  listStories(): Promise<StoryHeader[]> {
+    return this.client.post<StoryHeader[]>("runstatus.stories.list", {});
+  }
+
+  /** Re-scan the configured story directories and return the fresh catalogue. */
+  rescanStories(): Promise<StoryHeader[]> {
+    return this.client.post<StoryHeader[]>("runstatus.stories.rescan", {});
+  }
+
+  /**
+   * Start a new session from a story's app.yaml path. Returns the new
+   * session id; the server fails fast with a structured error on an invalid
+   * story so the UI can surface it before navigating.
+   */
+  newSession(storyPath: string): Promise<string> {
+    return this.client
+      .post<{ session_id: string }>("runstatus.session.new", {
+        story_path: storyPath,
+      })
+      .then((r) => r.session_id);
+  }
+
+  /**
+   * Reload a session's story definition in place, mirroring the TUI /reload.
+   * `prev_state_exists:false` means the session's current state was removed by
+   * the edit, so the engine stays put rather than advancing.
+   */
+  reloadSession(sessionId: string): Promise<ReloadResult> {
+    return this.client.post<ReloadResult>("runstatus.session.reload", {
+      session_id: sessionId,
     });
   }
 }

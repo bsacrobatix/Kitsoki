@@ -1,18 +1,24 @@
-// web.go — implements `kitsoki web`, the interactive browser surface.
+// web.go — implements `kitsoki web`, the multi-story interactive browser surface.
 //
 // Where `kitsoki status serve` is a read-only observer that tails a JSONL
-// trace another process writes, `kitsoki web` hosts a LIVE orchestrator in the
-// same process and serves the runstatus SPA/RPC/SSE surface against it. This is
-// option A of docs/proposals/web-ui.md: one process, one orchestrator, reusing
-// the runstatus read plumbing for observation. The read side lets the browser
-// observe the live session render and trace; the write RPCs let the browser
-// DRIVE the session (turn / submit / continue / offpath) and read the current
-// room (session.view).
+// trace another process writes, `kitsoki web` hosts LIVE orchestrators in the
+// same process and serves the runstatus SPA/RPC/SSE surface against them. This
+// is the multi-story evolution of docs/proposals/web-ui.md: one process serves
+// a story browser (the SPA home screen), and the operator starts as many live
+// sessions as they like — each its own in-process orchestrator. The read side
+// lets the browser observe a session render and trace; the write RPCs let the
+// browser DRIVE it (turn / submit / continue / offpath) and read the current
+// room (session.view); the lifecycle RPCs (stories.list/rescan, session.new/
+// reload) let the home screen discover stories and spin sessions up.
 //
-// Construction is shared with `kitsoki run` via buildSessionRuntime
-// (runtime.go); web.go layers the live posture choices on top: a fresh session
-// every launch, an optional deterministic --flow / --host-cassette posture (no
-// LLM — intents are submitted explicitly), and the HTTP server.
+// web.go no longer takes a positional <app.yaml>; it starts story-less. It
+// resolves the story directories (flags > .kitsoki.yaml > ./stories), builds a
+// SessionRegistry over a session-invariant runtimeBase (so the deterministic
+// --flow / --host-cassette no-LLM posture applies to EVERY session a Playwright
+// demo opens), seeds the catalogue with a rescan, and serves the
+// session-routing server (server.NewMulti). Per-session construction —
+// buildSessionRuntime, NewSession, on_enter, Reload — lives in the registry
+// (registry.go / runtime.go), not here.
 package main
 
 import (
@@ -29,13 +35,10 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/spf13/cobra"
 
-	"kitsoki/internal/app"
-	"kitsoki/internal/inbox"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus/server"
-	"kitsoki/internal/store"
 	"kitsoki/internal/testrunner"
-	"kitsoki/internal/tui"
+	"kitsoki/internal/webconfig"
 )
 
 func webCmd() *cobra.Command {
@@ -49,41 +52,46 @@ func webCmd() *cobra.Command {
 		execModeFlag  string
 		flowPath      string
 		hostCassette  string
-		warpBasisPath string
+		configPath    string
+		storyDirs     []string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "web <app.yaml>",
-		Short: "Serve an interactive browser UI for an app (live session)",
-		Long: `Load an app definition, start a live session in-process, and serve the
-runstatus web UI over HTTP against it.
+		Use:   "web",
+		Short: "Serve the multi-story interactive browser UI (live sessions)",
+		Long: `Discover stories and serve the runstatus web UI over HTTP. The home screen
+lists the discovered stories and any live sessions; the operator starts a fresh
+session from a story or opens an existing one.
 
 Unlike 'kitsoki status serve' — which tails a JSONL trace another process
-writes, read-only — 'kitsoki web' hosts the orchestrator itself, so the browser
-observes a session running in this process. A fresh session is started on each
-launch.
+writes, read-only — 'kitsoki web' hosts the orchestrators itself, so the browser
+observes (and drives) sessions running in this process. Sessions are in-memory
+only and die with the process.
 
-  kitsoki web testdata/apps/cloak/app.yaml
-  kitsoki web myapp.yaml --addr 127.0.0.1:7777 --harness claude
+Story directories resolve with the precedence flags > .kitsoki.yaml > ./stories:
 
-Deterministic (no-LLM) posture for UI development and Playwright tests:
+  kitsoki web                              # walk ./stories (or .kitsoki.yaml's story_dirs)
+  kitsoki web --stories-dir stories --stories-dir testdata/apps
+  kitsoki web --config ./my-kitsoki.yaml --addr 127.0.0.1:7777
 
-  kitsoki web stories/prd/app.yaml --flow stories/prd/flows/happy_path.yaml
+Deterministic (no-LLM) posture for UI development and Playwright tests — applies
+to EVERY session started from the home screen:
 
-With --flow, the flow fixture's host_handlers stubs back every host.* call and
-the harness is nil — the browser drives the session by submitting intents
-(runstatus.session.submit) exactly as the flow's turns specify, with no LLM.
+  kitsoki web --stories-dir stories/prd --flow stories/prd/flows/happy_path.yaml
+
+With --flow, the flow fixture's host_handlers stub back every host.* call and
+the harness is nil — the browser drives each session by submitting intents
+(runstatus.session.submit) explicitly, with no LLM. --host-cassette backs host.*
+calls from a recorded cassette and is combinable with --flow.
 
 The runstatus SPA must be bundled into the binary (run 'make build', which runs
 'pnpm build' under tools/runstatus/); otherwise the page reports the UI as
 unbuilt. Assumes a trusted localhost / internal network; there is no
 authentication.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			appPath := args[0]
-
 			// Resolve the execution mode (execution-modes proposal). Staged by
-			// default, matching the TUI.
+			// default, matching the TUI. Applies to every session.
 			var execMode orchestrator.ExecutionMode
 			switch execModeFlag {
 			case "staged":
@@ -95,6 +103,9 @@ authentication.`,
 			}
 
 			// ── Load the flow fixture (deterministic posture) if requested ──
+			// The fixture / FlowFilePath go into runtimeBase, so EVERY session
+			// the registry spins up inherits the nil-harness, cassette/stub
+			// posture — the no-LLM end-to-end Playwright demo depends on this.
 			var (
 				fixture      *testrunner.FlowFixture
 				flowFilePath string
@@ -114,10 +125,6 @@ authentication.`,
 					return fmt.Errorf("parse --flow %q: %w", flowPath, uerr)
 				}
 				fixture = &f
-				// The flow's `app:` is relative to the flow file. Prefer the
-				// explicit <app.yaml> arg; fall back to the flow's app: only
-				// when the arg resolves to the same file conceptually. We use
-				// the arg as authoritative here (the caller supplied it).
 			} else if hostCassette != "" {
 				// --host-cassette without --flow: a minimal deterministic
 				// fixture carrying only the cassette, so the nil-harness posture
@@ -137,11 +144,6 @@ authentication.`,
 				}
 			}
 
-			def, err := loadAppWithEnv(appPath)
-			if err != nil {
-				return err
-			}
-
 			if dbPath == "" {
 				dbPath = defaultDBPath()
 			}
@@ -149,10 +151,15 @@ authentication.`,
 				return fmt.Errorf("create db directory: %w", err)
 			}
 
-			// ── Orchestrator construction (shared with `kitsoki run`) ───────
-			rt, err := buildSessionRuntime(runtimeConfig{
-				AppPath:       appPath,
-				Def:           def,
+			// ── Story discovery config (flags > .kitsoki.yaml > ./stories) ──
+			cfg, err := webconfig.Load(configPath)
+			if err != nil {
+				return err
+			}
+			dirs := webconfig.Resolve(storyDirs, cfg)
+
+			// ── Session-invariant construction posture every session inherits ──
+			base := runtimeBase{
 				DBPath:        dbPath,
 				ExecMode:      execMode,
 				HarnessType:   harnessType,
@@ -161,100 +168,18 @@ authentication.`,
 				RecordPath:    recordPath,
 				Flow:          fixture,
 				FlowFilePath:  flowFilePath,
-			})
+			}
+
+			// ── Registry + initial story catalogue ──────────────────────────
+			registry := NewRegistry(cfg, dirs, base)
+			defer registry.Close()
+			stories, err := registry.Rescan()
 			if err != nil {
-				return err
-			}
-			defer rt.Close()
-			orch := rt.Orch
-
-			ctx := context.Background()
-
-			// ── Fresh session + live event sink ────────────────────────────
-			sid, err := orch.NewSession(ctx)
-			if err != nil {
-				return fmt.Errorf("create session: %w", err)
+				return fmt.Errorf("discover stories: %w", err)
 			}
 
-			tracePath := store.DefaultTracePath(def.App.ID, "web", string(sid))
-			if mkErr := os.MkdirAll(filepath.Dir(tracePath), 0o755); mkErr != nil {
-				return fmt.Errorf("create trace directory: %w", mkErr)
-			}
-			sink, err := store.OpenJSONL(tracePath)
-			if err != nil {
-				return fmt.Errorf("open trace sink: %w", err)
-			}
-			defer func() { _ = sink.Close() }()
-
-			// Wrap the sink so the orchestrator's appends and the HTTP server's
-			// reads share one lock — the JSONLSink underneath is not safe for
-			// concurrent Append + History.
-			live := server.NewLiveSession(sink, def, string(sid), string(orch.InitialState()))
-			orch.SetEventSink(live)
-
-			// Record the effective story as the first event so the trace
-			// self-describes (matches `kitsoki run`).
-			if err := orch.RecordEffectiveStory(ctx, sid); err != nil {
-				return fmt.Errorf("record effective story: %w", err)
-			}
-
-			// Seed the initial world from the flow fixture's initial_world (if
-			// any) BEFORE on_enter runs. The orchestrator has no initial-world
-			// option, so we apply it via a Teleport to the fixture's
-			// initial_state with the world as slots. Skipped when --warp is also
-			// given (warp owns the bootstrap teleport). Documented in the flow
-			// posture: this seeds the room the flow expects to start in.
-			warpUsed := warpBasisPath != ""
-			if fixture != nil && len(fixture.InitialWorld) > 0 && !warpUsed {
-				target := app.StatePath(fixture.InitialState)
-				if target == "" {
-					target = orch.InitialState()
-				}
-				slots := make(map[string]any, len(fixture.InitialWorld))
-				for k, v := range fixture.InitialWorld {
-					slots[k] = v
-				}
-				if _, terr := orch.Teleport(ctx, sid, inbox.TeleportTarget{State: target, Slots: slots}); terr != nil {
-					return fmt.Errorf("seed initial_world via teleport: %w", terr)
-				}
-			}
-
-			// Fire the initial state's on_enter chain before serving so the
-			// first frame the browser renders reflects on-enter-bound world
-			// keys. When a teleport above already landed us in the initial
-			// state, on_enter ran as part of the teleport; running it again is
-			// idempotent for the prd flow's stubbed host calls.
-			if !warpUsed && (fixture == nil || len(fixture.InitialWorld) == 0) {
-				if err := orch.RunInitialOnEnter(ctx, sid); err != nil {
-					return fmt.Errorf("run initial on_enter: %w", err)
-				}
-			}
-
-			// --warp: bootstrap teleport (mirrors `kitsoki run`). Applied after
-			// session create so the operator lands at the primed state.
-			if warpUsed {
-				resolved, basis, basisErr := tui.LoadWarpBasis(warpBasisPath, appPath)
-				if basisErr != nil {
-					return fmt.Errorf("--warp %q: %w", warpBasisPath, basisErr)
-				}
-				if basis.State == "" {
-					return fmt.Errorf("--warp %s: missing required `state:` field", resolved)
-				}
-				slots := make(map[string]any, len(basis.World))
-				for k, v := range basis.World {
-					slots[k] = v
-				}
-				if _, warpErr := orch.Teleport(ctx, sid, inbox.TeleportTarget{
-					State: app.StatePath(basis.State),
-					Slots: slots,
-				}); warpErr != nil {
-					return fmt.Errorf("--warp %s: teleport: %w", resolved, warpErr)
-				}
-			}
-
-			// ── Serve ───────────────────────────────────────────────────────
-			driver := server.OrchestratorDriver{Orch: orch, SID: sid}
-			srv := server.NewWithSource(live, server.WithDriver(driver))
+			// ── Serve (session-routing) ──────────────────────────────────────
+			srv := server.NewMulti(registry)
 			httpSrv := &http.Server{
 				Addr:              addr,
 				Handler:           srv.Handler(),
@@ -270,7 +195,7 @@ authentication.`,
 				_ = httpSrv.Shutdown(shutCtx)
 			}()
 
-			fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: web UI for app %q (session %s) on http://%s\n", def.App.ID, sid, addr)
+			fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: web UI (%d stories across %d dir(s)) on http://%s\n", len(stories), len(dirs), addr)
 			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				return fmt.Errorf("serve: %w", err)
 			}
@@ -278,6 +203,8 @@ authentication.`,
 		},
 	}
 
+	cmd.Flags().StringVar(&configPath, "config", webconfig.DefaultConfigFile, "path to the web config file (story_dirs)")
+	cmd.Flags().StringArrayVar(&storyDirs, "stories-dir", nil, "story directory to walk for app.yaml (repeatable; overrides .kitsoki.yaml story_dirs)")
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:7777", "HTTP listen address")
 	cmd.Flags().StringVar(&harnessType, "harness", "", "harness: claude | live | replay | recording (default: auto-select; ignored with --flow)")
 	cmd.Flags().StringVar(&claudeModel, "claude-model", "", "claude model when --harness=claude (e.g. opus, sonnet)")
@@ -285,9 +212,8 @@ authentication.`,
 	cmd.Flags().StringVar(&recordPath, "record", "", "path to output JSONL recording (for --harness recording)")
 	cmd.Flags().StringVar(&dbPath, "db", "", "SQLite session store path (default: nearest .kitsoki/sessions.db)")
 	cmd.Flags().StringVar(&execModeFlag, "mode", "staged", "execution mode: staged | one-shot")
-	cmd.Flags().StringVar(&flowPath, "flow", "", "drive the session deterministically from a flow fixture (no LLM; host_handlers stub host.* calls, intents are submitted explicitly)")
+	cmd.Flags().StringVar(&flowPath, "flow", "", "drive every session deterministically from a flow fixture (no LLM; host_handlers stub host.* calls, intents are submitted explicitly)")
 	cmd.Flags().StringVar(&hostCassette, "host-cassette", "", "host cassette file backing host.* calls (deterministic, no LLM); combinable with --flow")
-	cmd.Flags().StringVar(&warpBasisPath, "warp", "", "path to a warp-basis YAML (state + world overrides); applied as the first action after session create")
 
 	return cmd
 }

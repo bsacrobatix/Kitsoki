@@ -14,8 +14,9 @@ on the UI, and authors who want to understand how their views reach the
 screen.*
 
 > Prefer a browser? The same app can be driven interactively over HTTP with
-> [`kitsoki web`](web-ui.md) — a chat-style surface beside a live trace and
-> state diagram. It shares the orchestrator with this TUI.
+> [`kitsoki web`](../web/README.md) — a multi-story story browser plus chat-style
+> session surfaces beside a live trace and state diagram. It shares the
+> orchestrator with this TUI.
 
 ---
 
@@ -66,12 +67,21 @@ room-switch commands. Notable families:
 | Command(s) | File | Purpose |
 |---|---|---|
 | `/help` | `commands_help.go` | Lists commands by category |
+| `/ideas <text>` | `commands_ideas.go` | Appends a bullet to `ideas.md` at the git toplevel — jot a thought without dispatching a turn |
 | `/actions [n]` | `commands_actions.go` | Renders/selects the room's action menu |
 | `/world` | `commands_world.go` | Hierarchical world viewer |
 | `/trace` | `commands_trace.go` | The routing pipeline trace for recent turns |
 | `/inbox` | `commands_inbox.go` | Inline notification list |
 | `/jump` | `commands_jump.go` | Navigate to background-completion events |
 | `/ide [connect\|disconnect\|status]` | `commands_ide.go` | Connect/disconnect the live editor link; ambient selection rides each turn |
+
+> **Reload parity.** `/reload` hot-reloads the running story's `app.yaml` in
+> place (re-validate, swap the `AppDef`, re-fire `on_enter`). The web UI's
+> per-session **Reload** action ([`kitsoki web`](../web/README.md#reload-parity-with-the-tui-reload))
+> mirrors this exactly — same `Orchestrator.Reload` + `RerunOnEnter` path, same
+> "current state removed; staying put" outcome. The mechanics are documented
+> once, canonically, under the **Hot reload** bullet in
+> [`docs/stories/state-machine.md`](../stories/state-machine.md#8-the-turn-loop-state-machine-of-the-orchestrator).
 
 ## Observers: engine events → transcript
 

@@ -23,7 +23,7 @@
         >
           Σ {{ fmtTokens(store.usageTotals.promptTokens + store.usageTotals.responseTokens) }} tok<template v-if="fmtCost(store.usageTotals.costUsd)"> · {{ fmtCost(store.usageTotals.costUsd) }}</template>
         </span>
-        <router-link :to="`/s/${sessionId}`" class="iv__observe-link">Observe ↗</router-link>
+        <router-link :to="`/s/${sessionId}`" class="iv__observe-link" data-testid="observe-link">Observe ↗</router-link>
       </header>
 
       <!-- Main row: chat (left) | trace (right) -->

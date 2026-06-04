@@ -135,6 +135,36 @@ func TestFromHistory_PassThrough(t *testing.T) {
 	assert.Equal(t, "", snapEmpty.Session.CurrentState)
 }
 
+// TestFromHistory_CurrentStatePrefersStateEntered locks the current-state
+// derivation: turn.end is stamped with the turn's STARTING state, so after a
+// transition (state_entered carries the NEW state, turn.end the OLD one) the
+// header must report the entered state, not whatever the last event happened to
+// carry. Regression for the live web UI showing the pre-transition state.
+func TestFromHistory_CurrentStatePrefersStateEntered(t *testing.T) {
+	t.Parallel()
+
+	def := buildMinimalAppDef()
+	base := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC)
+
+	// A foyer --go--> bar.dark transition turn, mirroring the real event
+	// stamping: state_entered carries bar/bar.dark, turn.end carries foyer.
+	hist := store.History{
+		{Turn: 1, Ts: base.Add(0), Kind: store.TurnStarted, StatePath: "foyer", Seq: 0},
+		{Turn: 1, Ts: base.Add(1 * time.Millisecond), Kind: store.StateExited, StatePath: "foyer", Seq: 1,
+			Payload: json.RawMessage(`{"state":"foyer"}`)},
+		{Turn: 1, Ts: base.Add(2 * time.Millisecond), Kind: store.StateEntered, StatePath: "bar", Seq: 2,
+			Payload: json.RawMessage(`{"state":"bar"}`)},
+		{Turn: 1, Ts: base.Add(3 * time.Millisecond), Kind: store.StateEntered, StatePath: "bar.dark", Seq: 3,
+			Payload: json.RawMessage(`{"state":"bar.dark"}`)},
+		{Turn: 1, Ts: base.Add(4 * time.Millisecond), Kind: store.TurnEnded, StatePath: "foyer", Seq: 4},
+	}
+
+	snap, err := runstatus.FromHistory(hist, def, "sess-trans")
+	require.NoError(t, err)
+	assert.Equal(t, "bar.dark", snap.Session.CurrentState,
+		"the last state_entered must win over turn.end's starting-state stamp")
+}
+
 // TestFromHistory_OracleEventsPassThroughVerbatim confirms that when a History
 // already contains OracleCalled/OracleReturned events, FromHistory does not
 // inject any additional oracle events. This is the core wave 4a contract: the

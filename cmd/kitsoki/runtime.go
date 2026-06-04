@@ -91,6 +91,54 @@ type runtimeConfig struct {
 	FlowFilePath string
 }
 
+// runtimeBase carries the session-INVARIANT construction posture that
+// `kitsoki web` resolves once at startup and every session the SessionRegistry
+// spins up then inherits. It is the subset of runtimeConfig that does not
+// depend on which story a session runs: the store path, execution mode, harness
+// selection / recording knobs, and — critically — the deterministic NO-LLM
+// posture (Flow / FlowFilePath, whose fixture may carry a HostCassette).
+//
+// The per-story fields (AppPath, Def) are filled in per session by config, so a
+// single base produces one nil-harness, cassette/stub-backed sessionRuntime per
+// session exactly as web.go's single-session path did before the registry
+// existed.
+type runtimeBase struct {
+	DBPath   string
+	ExecMode orchestrator.ExecutionMode
+
+	HarnessType   string
+	ClaudeModel   string
+	RecordingPath string
+	RecordPath    string
+
+	// Flow / FlowFilePath select the deterministic flow-driven posture for the
+	// whole server: when Flow != nil every session is built with a nil harness
+	// and host stubs / cassette episodes (Flow.HostCassette) back its host.*
+	// calls. A Playwright demo drives the live web UI with no LLM through this.
+	Flow         *testrunner.FlowFixture
+	FlowFilePath string
+}
+
+// config materialises a per-session runtimeConfig for the story at storyPath
+// with the loaded def, inheriting every session-invariant field from the base.
+// The deterministic posture (Flow / FlowFilePath) is threaded through so the
+// produced sessionRuntime is nil-harness, cassette/stub-backed when the base
+// carries a fixture — the same construction web.go performs today.
+func (b runtimeBase) config(storyPath string, def *app.AppDef) runtimeConfig {
+	return runtimeConfig{
+		AppPath:       storyPath,
+		Def:           def,
+		DBPath:        b.DBPath,
+		ExecMode:      b.ExecMode,
+		HarnessType:   b.HarnessType,
+		ClaudeModel:   b.ClaudeModel,
+		RecordingPath: b.RecordingPath,
+		RecordPath:    b.RecordPath,
+		Flow:          b.Flow,
+		FlowFilePath:  b.FlowFilePath,
+	}
+}
+
 // buildSessionRuntime performs the orchestrator CONSTRUCTION shared by
 // `kitsoki run` and `kitsoki web`: open the store, build journal reader/writer,
 // job store + scheduler, chat store, machine, host registry (per posture),
