@@ -284,8 +284,10 @@ func evalElementSources(el app.ViewElement, env expr.Env, rr ViewRenderer) (app.
 			}
 			el.ChoicePrompt = strings.TrimSpace(prompt)
 		}
-		// Evaluate per-item When guards so the browser receives only the
-		// items that are visible for the current world state.
+		// Evaluate per-item When guards and pongo-expand label / hint /
+		// slots / param.placeholder so the browser receives concrete
+		// strings, not raw template expressions. Mirrors the TUI widget's
+		// Open() expansion so both surfaces see identical values.
 		if len(el.ChoiceItems) > 0 {
 			filtered := make([]app.ChoiceItem, 0, len(el.ChoiceItems))
 			for _, item := range el.ChoiceItems {
@@ -293,9 +295,44 @@ func evalElementSources(el app.ViewElement, env expr.Env, rr ViewRenderer) (app.
 				if err != nil {
 					return el, fmt.Errorf("choice item %q when: %w", item.Label, err)
 				}
-				if keep {
-					filtered = append(filtered, item)
+				if !keep {
+					continue
 				}
+				label, err := renderLeaf(rr, item.Label, env)
+				if err != nil {
+					return el, fmt.Errorf("choice item %q label: %w", item.Label, err)
+				}
+				item.Label = strings.TrimRight(label, " \t")
+				hint, err := renderLeaf(rr, item.Hint, env)
+				if err != nil {
+					return el, fmt.Errorf("choice item %q hint: %w", item.Label, err)
+				}
+				item.Hint = strings.TrimSpace(hint)
+				if len(item.Slots) > 0 {
+					expanded := make(map[string]any, len(item.Slots))
+					for k, v := range item.Slots {
+						if s, ok := v.(string); ok {
+							sv, err := renderLeaf(rr, s, env)
+							if err != nil {
+								return el, fmt.Errorf("choice item %q slots.%s: %w", item.Label, k, err)
+							}
+							expanded[k] = sv
+						} else {
+							expanded[k] = v
+						}
+					}
+					item.Slots = expanded
+				}
+				if item.Param != nil && item.Param.Placeholder != "" {
+					ph, err := renderLeaf(rr, item.Param.Placeholder, env)
+					if err != nil {
+						return el, fmt.Errorf("choice item %q param.placeholder: %w", item.Label, err)
+					}
+					p := *item.Param
+					p.Placeholder = ph
+					item.Param = &p
+				}
+				filtered = append(filtered, item)
 			}
 			el.ChoiceItems = filtered
 		}

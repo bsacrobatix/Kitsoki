@@ -356,6 +356,66 @@ func TestRenderAll_ChoiceElementDispatch(t *testing.T) {
 	}
 }
 
+// TestEvalElements_ChoiceItemsExpandedForBrowser asserts that EvalElements
+// pongo-expands choice item labels, hints, and slot values so the browser
+// receives concrete strings (not raw {{ ... }} expressions). This is the
+// web-parity counterpart of the TUI widget's Open() expansion.
+func TestEvalElements_ChoiceItemsExpandedForBrowser(t *testing.T) {
+	view := app.View{
+		Elements: []app.ViewElement{
+			{
+				Kind:       "choice",
+				ChoiceMode: "single",
+				ChoiceItems: []app.ChoiceItem{
+					{
+						Label:  "{{ world.opts.0.path }}",
+						Hint:   "{{ world.opts.0.rec|upper }} — amend",
+						Intent: "pick",
+						When:   "len(world.opts ?? []) >= 1",
+						Slots:  map[string]any{"target": "{{ world.opts.0.path }}"},
+					},
+					// Filtered out by when guard.
+					{
+						Label:  "{{ world.opts.1.path }}",
+						Hint:   "{{ world.opts.1.rec|upper }} — amend",
+						Intent: "pick",
+						When:   "len(world.opts ?? []) >= 2",
+						Slots:  map[string]any{"target": "{{ world.opts.1.path }}"},
+					},
+				},
+			},
+		},
+	}
+	env := expr.Env{World: map[string]any{
+		"opts": []any{
+			map[string]any{"path": "docs/proposals/foo.md", "rec": "amend"},
+		},
+	}}
+
+	ev, err := EvalElements(view, env, nil)
+	if err != nil {
+		t.Fatalf("EvalElements: %v", err)
+	}
+	if len(ev.Elements) != 1 {
+		t.Fatalf("expected 1 element, got %d", len(ev.Elements))
+	}
+	items := ev.Elements[0].ChoiceItems
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item (second filtered by when), got %d", len(items))
+	}
+	it := items[0]
+	if it.Label != "docs/proposals/foo.md" {
+		t.Errorf("label not expanded: got %q", it.Label)
+	}
+	if it.Hint != "AMEND — amend" {
+		t.Errorf("hint not expanded: got %q", it.Hint)
+	}
+	sv, _ := it.Slots["target"].(string)
+	if sv != "docs/proposals/foo.md" {
+		t.Errorf("slot.target not expanded: got %q", sv)
+	}
+}
+
 // TestRenderAll_WhenGuardCacheIsPerSource asserts the guard cache
 // keys on the raw expression source — repeated guards across rooms
 // compile once. We exercise this indirectly by running the same guard
