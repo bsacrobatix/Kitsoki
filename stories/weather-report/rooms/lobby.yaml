@@ -1,0 +1,66 @@
+states:
+  lobby:
+    description: "Weather & Climate — pick a place and a mode"
+    relevant_world: [location, mode, place]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Type a place and a mode and a deterministic Starlark script will geocode it against the free Open-Meteo API and hand you back a tidy report. The script is sandboxed — no clock, no randomness, no filesystem — so a recorded run replays byte-for-byte."
+          - heading: "Two modes"
+          - list:
+              items:
+                - label: "forecast <place>"
+                  hint: "current conditions + a 5-day daily outlook"
+                - label: "climate <place>"
+                  hint: "a 2023 month-by-month climate profile (mean temp + precip)"
+          - heading: "What the script does (scripts/weather_report.star)"
+          - list:
+              items:
+                - label: "geocodes the free-text place → lat/lon"
+                  hint: "GET geocoding-api.open-meteo.com; fails cleanly on an unknown place"
+                - label: "fetches forecast OR archive data via ctx.http"
+                  hint: "branches on the chosen mode; each GET rides the trace as a {method,url,status} summary"
+                - label: "reshapes JSON with the json + math stdlib"
+                  hint: "WMO code → label; 365 daily values → 12 monthly aggregates"
+                - label: "returns a typed dict bound into world"
+                  hint: "outputs validated against the sidecar after it runs"
+        choices:
+          - list:
+              items:
+                - label: "forecast Tokyo"
+                  hint: "5-day outlook (try any city)"
+                - label: "climate Oslo"
+                  hint: "2023 climate profile (try any city)"
+                - label: "quit"
+                  hint: "leave"
+    on:
+      # Each mode sets the inputs the script reads and routes into the shared
+      # report room. We clear any prior outputs so the report room's once: call
+      # re-arms (a second look-up at a new place re-runs the script).
+      forecast:
+        - target: report
+          effects:
+            - set:
+                location: "{{ slots.location }}"
+                mode: "forecast"
+                place: ""
+                coords: ""
+                headline: ""
+                current: {}
+                rows: []
+                climate_summary: {}
+      climate:
+        - target: report
+          effects:
+            - set:
+                location: "{{ slots.location }}"
+                mode: "climate"
+                place: ""
+                coords: ""
+                headline: ""
+                current: {}
+                rows: []
+                climate_summary: {}
+      quit:
+        - target: ended

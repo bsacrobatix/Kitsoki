@@ -294,6 +294,9 @@ with the deny-all client.
 A runnable end-to-end example (record-once cassette, happy + 404 error paths)
 lives in [`stories/starlark-enrich/`](../../stories/starlark-enrich/); its
 cassettes under `cassettes/` were recorded against a live API and trimmed.
+[`stories/weather-report/`](../../stories/weather-report/) is a larger sibling:
+free-text input, two chained HTTP calls, a branch on operator-chosen mode, and
+structured (object + list) outputs rendered as markdown tables.
 
 See the [state-machine](../stories/state-machine.md#5-effects) §Effects note for
 where this sits in the effect vocabulary.
