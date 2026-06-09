@@ -25,6 +25,13 @@ type Snapshot struct {
 	Mermaid MermaidSnapshot `json:"mermaid"`
 	Events  []TraceEvent    `json:"events"`
 
+	// Annotations holds the operator scores and labels from the sidecar JSONL
+	// file (see [AnnotationPath]). It is nil (omitted from JSON) when no sidecar
+	// exists or when the snapshot was built without access to the session dir
+	// (e.g. in-memory test snapshots). The SPA uses it to render score/label
+	// badges on trace event rows.
+	Annotations []Annotation `json:"annotations,omitempty"`
+
 	// RawLines holds the original JSONL bytes for each event in Events, one
 	// entry per event, in the same order. RawLines[i] is the raw marshalled line
 	// (without trailing newline) that would appear on disk for Events[i].

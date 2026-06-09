@@ -1,0 +1,112 @@
+kind: host_cassette
+app_id: bugfix
+app_version: "1"
+record_mode: none
+match_on:
+  - handler
+
+episodes:
+
+  # ── Non-oracle stubs (replay:any) ────────────────────────────────────────────
+
+  - id: append_to_file_any
+    match:
+      handler: host.append_to_file
+    response:
+      data: { ok: true, message_id: "msg-1" }
+    replay: any
+
+  - id: inbox_add_any
+    match:
+      handler: host.inbox.add
+    response:
+      data: { ok: true, id: "ib-1" }
+    replay: any
+
+  - id: git_worktree_any
+    match:
+      handler: host.git_worktree
+    response:
+      data: { ok: true, log: "synced" }
+    replay: any
+
+  - id: git_any
+    match:
+      handler: host.git
+    response:
+      data: { ok: true, sha: "abc123", diff: "diff --git a/x b/x\n+1\n", files: [] }
+    replay: any
+
+  - id: local_any
+    match:
+      handler: host.local
+    response:
+      data: { ok: true, log: "PASS: 4 tests", passed: 4, failed: 0 }
+    replay: any
+
+  # ── Oracle stubs with oracle: blocks (replay:any) ─────────────────────────────
+  # These write oracle.call.start + oracle.call.complete events to the trace
+  # so the runstatus waterfall, decision-detail, confidence-bar, annotation,
+  # and replay tour steps have real data to display.
+
+  - id: oracle_task_any
+    match:
+      handler: host.oracle.task
+    response:
+      data:
+        ok: true
+        submitted:
+          summary_title: "Reproduction confirmed"
+          summary_markdown: "The ESC key is silently discarded during `ModeAwaitingLLM`."
+          bug_verified: true
+          confidence: 0.88
+          status: "passed"
+          outcome: "pass"
+    oracle:
+      verb: task
+      agent: "bugfix"
+      model: "claude-sonnet-4-6"
+      duration_ms: 2100
+      response: '{"summary_title":"Reproduction confirmed","confidence":0.88,"status":"passed"}'
+    replay: any
+
+  - id: oracle_decide_any
+    match:
+      handler: host.oracle.decide
+    response:
+      data:
+        ok: true
+        submitted:
+          decision: "accept"
+          confidence: 0.92
+          reason: "The reproduction evidence is clear and the fix approach is sound."
+          alternatives:
+            - intent: "refine"
+              score: 0.41
+            - intent: "skip"
+              score: 0.07
+    oracle:
+      verb: decide
+      agent: "bugfix"
+      model: "claude-sonnet-4-6"
+      duration_ms: 1500
+      response: '{"decision":"accept","confidence":0.92,"reason":"The reproduction evidence is clear and the fix approach is sound.","alternatives":[{"intent":"refine","score":0.41},{"intent":"skip","score":0.07}]}'
+    replay: any
+
+  - id: oracle_ask_any
+    match:
+      handler: host.oracle.ask
+    response:
+      data:
+        ok: true
+        submitted:
+          decision: "accept"
+          confidence: 0.89
+          reason: "Artifact satisfies all constraints."
+    oracle:
+      verb: ask
+      agent: "bugfix"
+      model: "claude-sonnet-4-6"
+      duration_ms: 980
+      response: '{"decision":"accept","confidence":0.89,"reason":"Artifact satisfies all constraints."}'
+    replay: any

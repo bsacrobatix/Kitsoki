@@ -74,12 +74,12 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useTourStore } from "../../stores/tour.js";
-import { TOUR_STEPS, type TourRoute, type TourStep } from "../../tour/manifest.js";
+import { type TourRoute, type TourStep } from "../../tour/manifest.js";
 
 const tour = useTourStore();
 const route = useRoute();
 
-const total = TOUR_STEPS.length;
+const total = computed(() => tour.steps.length);
 
 // ── Anchoring state ──────────────────────────────────────────────────────────
 interface Rect { top: number; left: number; width: number; height: number }
@@ -335,8 +335,23 @@ onMounted(() => {
   window.addEventListener("resize", onScrollResize);
   window.addEventListener("keydown", onKeydown);
   // Dev/test convenience: deterministic kickoff regardless of localStorage.
-  (window as typeof window & { __startTour?: () => void }).__startTour = () =>
-    tour.start(true);
+  type TourWindow = typeof window & {
+    __startTour?: () => void;
+    __startTourWithSteps?: (stepsJson: string) => void;
+  };
+  const win = window as TourWindow;
+  win.__startTour = () => tour.start(true);
+  // Allows the trace-features video spec to inject a custom step array:
+  //   window.__startTourWithSteps(JSON.stringify(TRACE_TOUR_STEPS))
+  win.__startTourWithSteps = (stepsJson: string) => {
+    try {
+      const parsed = JSON.parse(stepsJson) as TourStep[];
+      tour.startWithSteps(parsed, true);
+    } catch {
+      // malformed JSON — fall back to the default onboarding tour
+      tour.start(true);
+    }
+  };
   syncWatchdog();
   void refresh();
 });

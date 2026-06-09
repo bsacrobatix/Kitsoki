@@ -10,12 +10,12 @@
  * `make build && cp ./kitsoki bin/kitsoki` before recording — an un-rebuilt
  * bin/kitsoki serves a stale bundle.
  */
-import { spawn, type ChildProcess } from "child_process";
+import { spawn, spawnSync, type ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
 import os from "os";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type Video } from "@playwright/test";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,9 +61,13 @@ export async function startWebServer(opts: {
   addr: string;
   flow: string;
   storiesDir?: string;
+  /** Optional host cassette path for oracle event recording in the trace. */
+  hostCassette?: string;
 }): Promise<WebServer> {
   const storiesDir = opts.storiesDir ?? STORIES_DIR;
-  for (const p of [storiesDir, opts.flow, BIN]) {
+  const checkPaths = [storiesDir, opts.flow, BIN];
+  if (opts.hostCassette) checkPaths.push(opts.hostCassette);
+  for (const p of checkPaths) {
     if (!fs.existsSync(p)) {
       throw new Error(
         `missing required path: ${p} (run 'make build && cp ./kitsoki bin/kitsoki' first)`,
@@ -75,9 +79,12 @@ export async function startWebServer(opts: {
   const dbPath = path.join(tmpDbDir, "s.db");
   let serverLog = "";
 
+  const args = ["web", "--stories-dir", storiesDir, "--flow", opts.flow, "--addr", opts.addr, "--db", dbPath];
+  if (opts.hostCassette) args.push("--host-cassette", opts.hostCassette);
+
   const proc: ChildProcess = spawn(
     BIN,
-    ["web", "--stories-dir", storiesDir, "--flow", opts.flow, "--addr", opts.addr, "--db", dbPath],
+    args,
     { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] },
   );
   proc.stdout?.on("data", (d: Buffer) => (serverLog += d.toString()));
@@ -133,4 +140,61 @@ export async function waitForState(
   timeoutMs = 12000,
 ): Promise<void> {
   await expect(page.getByTestId("current-state")).toHaveText(state, { timeout: timeoutMs });
+}
+
+/**
+ * Prepare a fresh VIDEO_DIR for a recording run.
+ *
+ * Must be called in beforeAll (or at the top of the test) BEFORE the Playwright
+ * context is created with `recordVideo: { dir: videoDir }`. Clears any stale
+ * .webm files from previous runs so `saveAndRemuxVideo` always picks the right
+ * file and so VIDEO_DIR never silently fills up across CI runs.
+ */
+export function prepareVideoDir(videoDir: string): void {
+  fs.rmSync(videoDir, { recursive: true, force: true });
+  fs.mkdirSync(videoDir, { recursive: true });
+}
+
+/**
+ * Save and remux the Playwright-recorded video.
+ *
+ * Call this AFTER `context.close()` (which finalises the video) but BEFORE
+ * `browser.close()`. The three-step pattern:
+ *
+ *   1. `video.saveAs(raw)` — copies the specific page's .webm from VIDEO_DIR to
+ *      a known path, avoiding the "alphabetically first stale file" trap.
+ *   2. `ffmpeg -c copy` remux — Playwright's VP8 webm omits DURATION and CUES
+ *      container atoms; most players (VLC, browsers, QuickTime) render only the
+ *      first frame for the whole clip duration. The remux rebuilds the container
+ *      with proper metadata at zero re-encode cost.
+ *   3. Removes the raw file on success, keeps it as a fallback on ffmpeg failure.
+ *
+ * Returns the final stable path.
+ */
+export async function saveAndRemuxVideo(
+  video: Video | null,
+  artifactDir: string,
+  name: string,
+): Promise<string | null> {
+  if (!video) return null;
+  const raw = path.join(artifactDir, `${name}-raw.webm`);
+  const stable = path.join(artifactDir, `${name}.webm`);
+  try {
+    await video.saveAs(raw);
+  } catch (e) {
+    console.warn(`[video] saveAs failed: ${e}`);
+    return null;
+  }
+  const r = spawnSync("ffmpeg", ["-i", raw, "-c", "copy", "-y", stable], {
+    encoding: "utf8",
+  });
+  if (r.status === 0) {
+    fs.unlinkSync(raw);
+    console.log(`[video] ${stable}`);
+    return stable;
+  }
+  // ffmpeg failed — promote raw as the fallback artifact.
+  fs.renameSync(raw, stable);
+  console.warn(`[video] ffmpeg remux failed; using raw webm\n${r.stderr?.slice(0, 400)}`);
+  return stable;
 }

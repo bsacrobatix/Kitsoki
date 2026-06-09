@@ -14,6 +14,22 @@
         >{{ sys }}</button>
       </div>
 
+      <!-- Category chips -->
+      <div class="trace-timeline__filter-group" data-testid="category-filter-chips">
+        <span class="trace-timeline__filter-label">Category:</span>
+        <button
+          v-for="cat in allCategories"
+          :key="cat"
+          class="trace-timeline__chip trace-timeline__chip--category"
+          :class="{ active: selectedCategories.has(cat) }"
+          :style="selectedCategories.has(cat) ? { borderColor: COLOR_MAP[cat], color: COLOR_MAP[cat] } : {}"
+          @click="toggleCategory(cat)"
+        >
+          <span class="trace-timeline__cat-dot" :style="{ background: COLOR_MAP[cat] }"></span>
+          {{ cat }}
+        </button>
+      </div>
+
       <!-- State path single-select -->
       <div class="trace-timeline__filter-group">
         <span class="trace-timeline__filter-label">State:</span>
@@ -96,9 +112,15 @@
                   highlighted: isHighlighted(row.event.state_path),
                 }"
                 :data-event-index="row.index"
+                data-testid="trace-event-row"
                 @click="onRowClick(row.index)"
               >
                 <div class="trace-timeline__row-main">
+                  <span
+                    class="trace-timeline__obs-dot"
+                    :style="{ background: COLOR_MAP[observationKind(row.event.msg)] }"
+                    :title="observationKind(row.event.msg)"
+                  ></span>
                   <span
                     class="trace-timeline__subsystem-chip"
                     :data-subsystem="row.event.msg === 'turn.input' ? 'user' : row.subsystem"
@@ -133,6 +155,19 @@
                     class="trace-timeline__cost"
                     title="Estimated cost for this oracle call (meta.cost_usd)"
                   >{{ oracleCostStr(row.oracle.merged) }}</span>
+                  <!-- Annotation badge: shown when at least one annotation targets this event's call_id. -->
+                  <template v-if="rowAnnotations(row.event).length > 0">
+                    <span
+                      v-for="(ann, ai) in rowAnnotations(row.event)"
+                      :key="ai"
+                      class="trace-timeline__annotation-badge"
+                      :title="[ann.label, ann.score != null ? `score: ${ann.score}` : '', ann.comment].filter(Boolean).join(' · ')"
+                    >
+                      <template v-if="ann.label">{{ ann.label }}</template>
+                      <template v-else-if="ann.score != null">{{ ann.score.toFixed(2) }}</template>
+                      <template v-else>ann</template>
+                    </span>
+                  </template>
                   <span class="trace-timeline__time">{{ formatTime(row.event.time) }}</span>
                   <button
                     class="trace-timeline__expand-btn"
@@ -159,7 +194,11 @@
                     <div v-if="row.harnessCall?.incomplete" class="trace-timeline__incomplete-banner">
                       Host call dispatched but no returned event was recorded.
                     </div>
-                    <EventDetail :event="row.oracle?.merged ?? row.event" :harnessCall="row.harnessCall" />
+                    <EventDetail
+                      :event="row.oracle?.merged ?? row.event"
+                      :harnessCall="row.harnessCall"
+                      :sessionId="props.sessionId || (row.oracle?.merged ?? row.event).session_id"
+                    />
                   </template>
                 </div>
               </div>
@@ -181,11 +220,13 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, watch, nextTick } from "vue";
-import type { TraceEvent } from "../types.js";
+import type { TraceEvent, AnnotationEntry } from "../types.js";
 import EventDetail from "./EventDetail.vue";
 import WorldDiffViewer from "./WorldDiffViewer.vue";
 import { parseDiagram } from "../diagram/parse.js";
 import { fmtMs, fmtCost, readOracleUsage } from "./oracle/lib.js";
+import { observationKind, COLOR_MAP } from "../lib/observation.js";
+import type { ObservationKind } from "../lib/observation.js";
 
 // Cost string for a merged oracle row, shown inline next to the duration in the
 // collapsed timeline row. Reads the canonical attrs.meta.cost_usd (with the
@@ -205,11 +246,28 @@ const props = defineProps<{
   highlightTick?: number;
   /** Mermaid source — used to derive phase names for turn headers. */
   mermaidSource?: string | null;
+  /** Operator annotations from the session sidecar. Used to render score/label badges. */
+  annotations?: AnnotationEntry[];
+  /** Session ID passed down so EventDetail can show the annotate/replay buttons. */
+  sessionId?: string;
 }>();
 
 const emit = defineEmits<{
   (e: "select", index: number): void;
 }>();
+
+// rowAnnotations returns the annotations that target a given event, matched by
+// call_id (preferred) or turn.  Returns [] when no annotations exist.
+function rowAnnotations(event: TraceEvent): AnnotationEntry[] {
+  const anns = props.annotations;
+  if (!anns || anns.length === 0) return [];
+  const callId = event.attrs?.call_id as string | undefined;
+  return anns.filter((a) => {
+    if (callId && a.target_call_id && a.target_call_id === callId) return true;
+    if (!callId && a.target_turn && a.target_turn === event.turn) return true;
+    return false;
+  });
+}
 
 // ---- constants --------------------------------------------------------------
 
@@ -247,6 +305,12 @@ const collapsedPhases = reactive(new Set<string>());
 const expandedRows = reactive(new Set<number>());
 const copiedRows = reactive(new Set<number>());
 
+// Category filter — derived from ObservationKind. All categories selected by default.
+// selectedCategories starts as all-selected; we track a Set of active categories.
+const selectedCategories = reactive(new Set<ObservationKind>([
+  "decision", "oracle-call", "host-call", "narration", "world-mutation", "routing", "lifecycle",
+]));
+
 // ---- virtualisation state ---------------------------------------------------
 
 const bodyRef = ref<HTMLElement | null>(null);
@@ -279,6 +343,16 @@ function formatTime(iso: string): string {
 
 // ---- derived ----------------------------------------------------------------
 
+// All observation categories present in the current event list, in canonical order.
+const CATEGORY_ORDER: ObservationKind[] = [
+  "decision", "oracle-call", "host-call", "narration", "world-mutation", "routing", "lifecycle",
+];
+const allCategories = computed<ObservationKind[]>(() => {
+  const present = new Set<ObservationKind>();
+  for (const e of props.events) present.add(observationKind(e.msg));
+  return CATEGORY_ORDER.filter((c) => present.has(c));
+});
+
 // All available state paths.
 const availableStatePaths = computed(() => {
   const s = new Set<string>();
@@ -295,7 +369,8 @@ const hasActiveFilters = computed(() => {
     (s) => selectedSubsystems.has(s) || DEFAULT_OFF_SUBSYSTEMS.has(s)
   );
   const noStateFilter = selectedStatePath.value === null;
-  return !defaultSysSelected || !noStateFilter;
+  const allCatSelected = allCategories.value.every((c) => selectedCategories.has(c));
+  return !defaultSysSelected || !noStateFilter || !allCatSelected;
 });
 
 // Filtered + annotated events (preserving original index).
@@ -476,6 +551,14 @@ const filteredEvents = computed<AnnotatedEvent[]>(() => {
 
   for (let i = 0; i < props.events.length; i++) {
     const event = props.events[i]!;
+
+    // Category filter — applied before subsystem checks so it is orthogonal.
+    // turn.input is treated as "routing" (same as turn.start) for the purpose
+    // of category filtering.
+    {
+      const cat = observationKind(event.msg);
+      if (!selectedCategories.has(cat)) continue;
+    }
 
     // turn.input (UserInputReceived) is always visible regardless of the "turn"
     // chip state — it carries the user's raw message text for the turn.
@@ -918,6 +1001,16 @@ function clearFilters(): void {
     }
   });
   selectedStatePath.value = null;
+  // Re-select all categories.
+  allCategories.value.forEach((c) => selectedCategories.add(c));
+}
+
+function toggleCategory(cat: ObservationKind): void {
+  if (selectedCategories.has(cat)) {
+    selectedCategories.delete(cat);
+  } else {
+    selectedCategories.add(cat);
+  }
 }
 
 function toggleTurnCollapse(groupKey: string): void {
@@ -1139,6 +1232,29 @@ watch(
   background: #7f1d1d;
   border-color: #ef4444;
   color: #fee2e2;
+}
+
+.trace-timeline__chip--category {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.trace-timeline__cat-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Observation kind dot — small colored circle at the start of each event row */
+.trace-timeline__obs-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .trace-timeline__select {
@@ -1487,5 +1603,19 @@ watch(
   color: #475569;
   font-size: 0.875rem;
   text-align: center;
+}
+
+/* --- Annotation badges --- */
+.trace-timeline__annotation-badge {
+  display: inline-block;
+  background: #1e3a5f;
+  border: 1px solid #3b82f6;
+  color: #93c5fd;
+  border-radius: 3px;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: default;
+  white-space: nowrap;
 }
 </style>

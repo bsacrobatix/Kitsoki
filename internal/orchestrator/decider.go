@@ -107,7 +107,7 @@ func (o *Orchestrator) resolveAutoGate(ctx context.Context, sid app.SessionID, r
 	}
 	if depth > deciderMaxDepth {
 		o.recordGate(res, res.NewState, nil, "llm", "", 0, true,
-			fmt.Sprintf("decider loop exceeded depth %d", deciderMaxDepth))
+			fmt.Sprintf("decider loop exceeded depth %d", deciderMaxDepth), nil, o.decider.threshold())
 		return
 	}
 	state := res.NewState
@@ -137,7 +137,7 @@ func (o *Orchestrator) resolveAutoGate(ctx context.Context, sid app.SessionID, r
 		reason = fmt.Sprintf("chosen intent %q is not a gate candidate %v", verdict.Intent, names)
 	}
 
-	o.recordGate(res, state, names, "llm", verdict.Intent, verdict.Confidence, !valid, reason)
+	o.recordGate(res, state, names, "llm", verdict.Intent, verdict.Confidence, !valid, reason, verdict.Alternatives, threshold)
 
 	if tl != nil {
 		tl.Debug(ctx, trace.EvIntentEmitted,
@@ -257,7 +257,10 @@ func (o *Orchestrator) applyDeciderIntent(ctx context.Context, sid app.SessionID
 }
 
 // recordGate appends a GateDecided event describing how a gate resolved.
-func (o *Orchestrator) recordGate(res *machine.TurnResult, state app.StatePath, candidates []string, decider, chosen string, confidence float64, bailed bool, reason string) {
+// threshold is recorded so consumers can reproduce the auto-fire decision.
+// alternatives, when non-empty, carries the ranked runner-up scores from
+// the LLM judge so reviewers can see the full decision landscape.
+func (o *Orchestrator) recordGate(res *machine.TurnResult, state app.StatePath, candidates []string, decider, chosen string, confidence float64, bailed bool, reason string, alternatives []judges.IntentScore, threshold float64) {
 	payload := map[string]any{
 		"state":             string(state),
 		"available_intents": candidates,
@@ -265,9 +268,13 @@ func (o *Orchestrator) recordGate(res *machine.TurnResult, state app.StatePath, 
 		"chosen_intent":     chosen,
 		"confidence":        confidence,
 		"bailed_to_human":   bailed,
+		"threshold":         threshold,
 	}
 	if reason != "" {
 		payload["reason"] = reason
+	}
+	if len(alternatives) > 0 {
+		payload["alternatives"] = alternatives
 	}
 	res.Events = append(res.Events, newOrchestratorEvent(store.GateDecided, payload, 0))
 }

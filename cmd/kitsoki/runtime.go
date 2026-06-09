@@ -46,6 +46,11 @@ type sessionRuntime struct {
 	OracleReg   *oracle.Registry
 	Logger      *slog.Logger
 
+	// DeferredOracleSink is non-nil when the runtime was built with a host
+	// cassette (--host-cassette). Callers must call SetSink on it after wiring
+	// the session's event sink so cassette oracle events flow to the trace.
+	DeferredOracleSink *store.DeferredSink
+
 	closers []func()
 }
 
@@ -227,10 +232,15 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 			if casErr != nil {
 				return nil, fmt.Errorf("load host cassette: %w", casErr)
 			}
-			// stateOf is unused for replay-only dispatch here (no record sink);
-			// the cassette matcher keys on handler + args. We still pass a
-			// constant so the closure signature is satisfied.
+			// stateOf is unused for replay-only dispatch (no record sink);
+			// cassette matcher keys on handler + args only.
 			stateOf := func() string { return "" }
+			// DeferredSink: oracle events from cassette episodes that carry an
+			// oracle: block are written here immediately but forwarded to the
+			// real session sink only after the caller calls SetSink on it
+			// (registry.go does this right after orch.SetEventSink(live)).
+			deferredSink := store.NewDeferredSink()
+			rt.DeferredOracleSink = deferredSink
 			seen := map[string]bool{}
 			for _, ep := range cas.Episodes {
 				hn, okk := ep.Match["handler"].(string)
@@ -239,7 +249,7 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 				}
 				seen[hn] = true
 				fallback, _ := hostReg.Get(hn)
-				disp := testrunner.BuildCassetteDispatcher(cas, hn, stateOf, fallback, nil, clock.Real())
+				disp := testrunner.BuildCassetteDispatcherWithSink(cas, hn, stateOf, fallback, nil, clock.Real(), deferredSink, nil)
 				hostReg.Replace(hn, disp)
 			}
 		}

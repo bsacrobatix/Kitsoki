@@ -26,9 +26,16 @@ async function load(page: Page): Promise<void> {
   await page.waitForSelector(".run-view__topbar", { timeout: 10000 });
 }
 
+/** Switch to the Graph tab and wait for the StateDiagram to render. */
+async function switchToGraph(page: Page): Promise<void> {
+  await page.locator('[data-testid="tab-graph"]').click();
+  await page.waitForSelector(".state-diagram__phase", { timeout: 8000 });
+}
+
 test.describe("bugfix fixture", () => {
   test("renders phase cards in topological order from idle", async ({ page }) => {
     await load(page);
+    await switchToGraph(page);
     const phases = page.locator(".state-diagram__phase .state-diagram__phase-name");
     await expect(phases.first()).toBeVisible();
     const names = await phases.allTextContents();
@@ -63,6 +70,7 @@ test.describe("bugfix fixture", () => {
 
   test("clicking a room highlights every event whose state_path falls under it", async ({ page }) => {
     await load(page);
+    await switchToGraph(page);
 
     // Click the "reproducing" room.
     const reproducing = page
@@ -74,8 +82,12 @@ test.describe("bugfix fixture", () => {
     // The room itself should be highlighted (orange ring).
     await expect(reproducing).toHaveClass(/state-diagram__room--highlight/);
 
-    // The "clear highlight" pill should appear in the timeline panel header.
+    // The "clear highlight" pill should appear in the tab bar.
     await expect(page.locator(".run-view__clear-highlight")).toBeVisible();
+
+    // Switch to Tree tab to see the highlighted rows in the timeline.
+    await page.locator('[data-testid="tab-tree"]').click();
+    await page.waitForSelector(".trace-timeline__row", { timeout: 8000 });
 
     // Several timeline rows should pick up the .highlighted class.
     // (machine.* and turn.* rows are filtered by default, so the count
@@ -87,6 +99,7 @@ test.describe("bugfix fixture", () => {
 
   test("clicking a phase header highlights all of its rooms' events", async ({ page }) => {
     await load(page);
+    await switchToGraph(page);
 
     // Click the "testing" phase header.
     const phaseHeader = page
@@ -95,16 +108,23 @@ test.describe("bugfix fixture", () => {
       .first();
     await phaseHeader.click();
 
+    // The "clear highlight" pill should appear in the tab bar.
+    await expect(page.locator(".run-view__clear-highlight")).toBeVisible();
+
+    // Switch to Tree to see highlighted rows in the timeline.
+    await page.locator('[data-testid="tab-tree"]').click();
+    await page.waitForSelector(".trace-timeline__row", { timeout: 8000 });
+
     // Highlighted rows in the timeline.  The TraceTimeline is virtualised,
     // so only the currently-rendered window of rows can carry the .highlighted
     // class — but at least the first matching row must scroll into view.
-    await expect(page.locator(".run-view__clear-highlight")).toBeVisible();
     const highlighted = page.locator(".trace-timeline__row.highlighted");
     expect(await highlighted.count()).toBeGreaterThan(0);
   });
 
   test("clear-highlight pill removes the highlight", async ({ page }) => {
     await load(page);
+    await switchToGraph(page);
 
     await page
       .locator(".state-diagram__room")
@@ -115,6 +135,10 @@ test.describe("bugfix fixture", () => {
 
     await page.locator(".run-view__clear-highlight").click();
     await expect(page.locator(".run-view__clear-highlight")).toHaveCount(0);
+
+    // Switch to Tree to verify no highlighted rows
+    await page.locator('[data-testid="tab-tree"]').click();
+    await page.waitForSelector(".trace-timeline__row", { timeout: 8000 });
     await expect(page.locator(".trace-timeline__row.highlighted")).toHaveCount(0);
   });
 

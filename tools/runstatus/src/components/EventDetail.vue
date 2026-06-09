@@ -9,7 +9,61 @@
       <span class="event-detail__val">{{ event.time }}</span>
     </div>
 
-    <template v-if="isOracleComplete">
+    <!-- machine.gate_decided: decision detail — state, available intents, chosen, confidence -->
+    <template v-if="obsKind === 'decision' && event.msg === 'machine.gate_decided'">
+      <div v-if="event.attrs.state" class="event-detail__kv">
+        <span class="event-detail__key">Gate State</span>
+        <code class="event-detail__val">{{ event.attrs.state }}</code>
+      </div>
+      <div v-if="Array.isArray(event.attrs.available_intents) && (event.attrs.available_intents as string[]).length" class="event-detail__block">
+        <span class="event-detail__key">Available Intents</span>
+        <div class="event-detail__intent-chips">
+          <span
+            v-for="intent in (event.attrs.available_intents as string[])"
+            :key="intent"
+            class="event-detail__intent-chip"
+            :class="{ 'event-detail__intent-chip--chosen': intent === event.attrs.chosen_intent }"
+          >{{ intent }}</span>
+        </div>
+      </div>
+      <div v-if="event.attrs.decider" class="event-detail__kv">
+        <span class="event-detail__key">Decider</span>
+        <code class="event-detail__val">{{ event.attrs.decider }}</code>
+      </div>
+      <div v-if="event.attrs.chosen_intent" class="event-detail__kv">
+        <span class="event-detail__key">Chosen</span>
+        <code class="event-detail__val event-detail__val--chosen">{{ event.attrs.chosen_intent }}</code>
+      </div>
+      <div v-if="event.attrs.confidence != null" class="event-detail__kv event-detail__kv--bar">
+        <span class="event-detail__key">Confidence</span>
+        <ConfidenceBar
+          :confidence="(event.attrs.confidence as number)"
+          class="event-detail__conf-bar"
+        />
+      </div>
+      <div v-if="event.attrs.bailed_to_human" class="event-detail__kv">
+        <span class="event-detail__key">Bailed to Human</span>
+        <span class="event-detail__val event-detail__val--warn">yes</span>
+      </div>
+      <div v-if="event.attrs.reason" class="event-detail__block">
+        <span class="event-detail__key">Reason</span>
+        <pre class="event-detail__pre">{{ event.attrs.reason }}</pre>
+      </div>
+    </template>
+
+    <!-- turn.start: routing detail — shows how the turn was routed -->
+    <template v-else-if="obsKind === 'routing' && event.msg === 'turn.start'">
+      <RoutingDetail :event="event" />
+      <div class="event-detail__block">
+        <div class="event-detail__attrs-header">
+          <span class="event-detail__key">Attrs</span>
+          <button class="event-detail__copy-btn" @click="copyAttrs">Copy</button>
+        </div>
+        <pre class="event-detail__pre">{{ prettyJson(event.attrs) }}</pre>
+      </div>
+    </template>
+
+    <template v-else-if="isOracleComplete">
       <OracleDetail :event="event" />
     </template>
 
@@ -112,6 +166,14 @@
         <pre class="event-detail__pre">{{ prettyJson(event.attrs) }}</pre>
       </div>
     </template>
+
+    <!-- Annotate button: shown at the bottom when a live session_id is available. -->
+    <AnnotateButton
+      v-if="resolvedSessionId"
+      :session-id="resolvedSessionId"
+      :target-call-id="event.attrs.call_id as string | undefined"
+      :target-turn="event.turn > 0 ? event.turn : undefined"
+    />
   </div>
 </template>
 
@@ -119,8 +181,12 @@
 import { computed, reactive } from "vue";
 import type { TraceEvent } from "../types.js";
 import OracleDetail from "./oracle/OracleDetail.vue";
+import ConfidenceBar from "./oracle/ConfidenceBar.vue";
+import RoutingDetail from "./oracle/RoutingDetail.vue";
 import HostCliDetail from "./HostCliDetail.vue";
 import HostBuiltinDetail from "./HostBuiltinDetail.vue";
+import AnnotateButton from "./AnnotateButton.vue";
+import { observationKind } from "../lib/observation.js";
 
 interface HarnessCallProp {
   namespace: string;
@@ -131,8 +197,18 @@ interface HarnessCallProp {
   incomplete: boolean;
 }
 
-const props = defineProps<{ event: TraceEvent; harnessCall?: HarnessCallProp }>();
+const props = defineProps<{
+  event: TraceEvent;
+  harnessCall?: HarnessCallProp;
+  /** Optional explicit session id. Falls back to event.session_id. */
+  sessionId?: string;
+}>();
 const { harnessCall } = props;
+
+// Resolve the session id: explicit prop takes precedence, then event.session_id.
+const resolvedSessionId = computed(() =>
+  (props.sessionId || props.event.session_id) || ""
+);
 
 const TRUNCATE_LIMIT = 500;
 const showFull = reactive(new Set<string>());
@@ -160,6 +236,9 @@ async function copyAttrs(): Promise<void> {
     // ignore
   }
 }
+
+// Observation kind — used by the new decision/routing detail branches.
+const obsKind = computed(() => observationKind(props.event.msg));
 
 // oracle.call.complete events get a rich sub-renderer (OracleDetail), which
 // reads attrs.verb to route to the per-verb body.
@@ -277,5 +356,49 @@ code.event-detail__val {
 
 .event-detail__toggle-btn:hover {
   background: #1e293b;
+}
+
+/* Decision detail — intent chips */
+.event-detail__intent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.2rem;
+}
+
+.event-detail__intent-chip {
+  font-family: ui-monospace, monospace;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #94a3b8;
+}
+
+.event-detail__intent-chip--chosen {
+  background: #1e3a5f;
+  border-color: #3b82f6;
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.event-detail__val--chosen {
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.event-detail__val--warn {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.event-detail__kv--bar {
+  align-items: center;
+}
+
+.event-detail__conf-bar {
+  flex: 1;
+  min-width: 8rem;
 }
 </style>

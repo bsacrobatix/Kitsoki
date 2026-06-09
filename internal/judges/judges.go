@@ -9,6 +9,19 @@ import (
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
+// IntentScore is one runner-up entry in the Alternatives list. It records
+// the agent's relative scoring for a non-chosen intent so that the
+// gate_decided trace event carries a full ranked picture of the decision.
+type IntentScore struct {
+	// Intent is the candidate intent name (must match one of the gate
+	// candidates, but not validated here — the schema enforces it).
+	Intent string `json:"intent"`
+	// Score is the agent's relative score for this intent in [0.0, 1.0].
+	Score float64 `json:"score"`
+	// Reason is the agent's optional explanation for this score.
+	Reason string `json:"reason,omitempty"`
+}
+
 // Verdict is the typed shape of a judge's structured response. The zero
 // Verdict is a valid value but never auto-fires (empty Verdict and Intent
 // strings fail neither the "uncertain" check nor — at a zero threshold —
@@ -31,11 +44,22 @@ type Verdict struct {
 	// Confidence is the judge's self-reported confidence in [0.0, 1.0],
 	// compared against the caller's threshold by [Verdict.ShouldAutoFire].
 	Confidence float64 `json:"confidence"`
+	// Alternatives is the optional ranked list of runner-up intents with
+	// their relative scores. When the agent provides this, the engine
+	// records it in the gate_decided trace event for diagnostics and
+	// self-improvement pipelines. Not required; older verdicts without it
+	// are fully valid.
+	Alternatives []IntentScore `json:"alternatives,omitempty"`
 }
 
 // schemaJSON mirrors the judge_verdict schema. Keep this in lockstep
 // with stories/bugfix/schemas/judge_verdict.json — that on-disk schema
 // is the source of truth; if it ever drifts, update this constant.
+//
+// The "alternatives" property is intentionally NOT in "required": it is
+// optional — older verdicts without it remain fully valid. Each entry
+// carries {intent, score, reason?} and records the runner-up scores for
+// the gate_decided trace event.
 const schemaJSON = `{
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title":   "judge_verdict",
@@ -45,7 +69,20 @@ const schemaJSON = `{
     "verdict":    { "type": "string", "enum": ["pass", "fail", "uncertain"] },
     "intent":     { "type": "string", "enum": ["accept", "refine", "restart_from", "quit", "uncertain"] },
     "reason":     { "type": "string", "minLength": 4 },
-    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+    "alternatives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["intent", "score"],
+        "properties": {
+          "intent": { "type": "string" },
+          "score":  { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
   },
   "additionalProperties": false
 }`

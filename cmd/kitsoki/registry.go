@@ -181,6 +181,10 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 	// Append + History (mirrors web.go).
 	live := server.NewLiveSession(sink, def, string(sid), string(orch.InitialState()))
 	orch.SetEventSink(live)
+	// Bind the cassette deferred oracle sink now that the real sink is ready.
+	if rt.DeferredOracleSink != nil {
+		rt.DeferredOracleSink.SetSink(live)
+	}
 
 	// Record the effective story as the first event so the trace self-describes
 	// even after a later hot-reload (matches `kitsoki run` and web.go).

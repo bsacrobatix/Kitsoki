@@ -58,12 +58,48 @@ change under `tools/runstatus/src/`.
      composer for text-slot intents, click `intent-btn-*` for slot-less ones)
      and the state it should reach.
    - **Recording context** — `viewport {1440,900}`, `deviceScaleFactor: 2`
-     (retina), `recordVideo: { dir, size }`. Close the context to flush the
-     `.webm`, then copy it to a stable name.
+     (retina), `recordVideo: { dir: VIDEO_DIR, size }`.
+   - **Video save pattern** — always use the three-step pattern from
+     `_helpers/server.ts` (see below). Never `fs.copyFileSync` from `VIDEO_DIR`
+     — that picks a stale file from a previous run.
    - **Pacing** — gate every delay on `WEB_CHAT_PACE` (typing delay, a beat
      before each click, a dwell on each settled scene) so the same spec runs
      fast for CI and slow for the camera.
    - **Hash routing** — URLs are `#/`, `#/s/:id`, `#/s/:id/chat`.
+
+## Video recording — the correct pattern
+
+Playwright's VP8 webm omits `DURATION` and `CUES` container atoms. Most players
+(VLC, browsers, QuickTime, Keynote) render only the first frame for the full
+clip duration when these are missing. The fix is a cheap ffmpeg `-c copy` remux
+(no re-encode) that rebuilds the container with proper metadata.
+
+Two shared helpers in `_helpers/server.ts` wrap this correctly:
+
+```ts
+// 1. In beforeAll — clear VIDEO_DIR so stale files never pollute the run:
+prepareVideoDir(VIDEO_DIR);
+
+// 2. In the context setup — capture the Video reference BEFORE context.close():
+const page = await context.newPage();
+const video = page.video();   // ← must happen before close()
+
+// 3. In finally — save + remux AFTER context.close(), BEFORE browser.close():
+await context.close();        // finalises the recording
+await saveAndRemuxVideo(video, ARTIFACT_DIR, "my-demo");  // save + ffmpeg remux
+await browser.close();
+```
+
+`saveAndRemuxVideo(video, artifactDir, name)` writes `<name>-raw.webm`, remuxes
+to `<name>.webm`, removes the raw on success. If ffmpeg isn't available or
+fails, it falls back to the raw file with a warning (never silently loses the
+recording). Both helpers are already imported in `tour-video.spec.ts` and
+`multi-story.spec.ts` — copy that pattern for any new recording spec.
+
+**Why `video.saveAs()` and not `fs.readdirSync(VIDEO_DIR)[0]`?**
+`readdirSync` picks the alphabetically-first file, which is the OLDEST webm in
+the dir if the dir was never cleared. `video.saveAs()` gives you the specific
+page's recording regardless of what else is in the dir.
 
 2. **Validate fast (assertions only).** Iterate here until green — no waiting on
    dwells:
@@ -171,6 +207,29 @@ docs/skills/kitsoki-ui-qa/scripts/qa.sh \
 The `--frames` flag passes the labeled PNGs directly (one per step, highest
 fidelity — skips the ffmpeg scene-detection pass).
 
+To add a new step to the tour, append a `TourStep` to `TOUR_STEPS` in
+`src/tour/manifest.ts` — data-only, no other code changes:
+
+```ts
+{
+  id: "my-feature",           // stable id; also the screenshot label
+  route: "any",               // "home" | "interactive" | "any" (/s/:id observer)
+  target: "my-testid",        // data-testid to spotlight (must be universal)
+  waitForTarget: "my-testid", // wait for DOM presence before showing
+  title: "Short feature name",
+  body: "One sentence explaining what this does and why it matters.",
+  placement: "bottom",        // top | bottom | left | right | center
+  kind: "explain",            // explain (Next advances) | action (clicking advances)
+  advance: "next",
+  dwellMs: 4000,              // ms the video spec pauses on this step
+},
+```
+
+Route mapping: `/` → `"home"`, `/s/:id/chat` → `"interactive"`,
+`/s/:id` (observe) → `"any"`. An `"any"` step shows on all three routes in the
+live overlay, so only anchor to elements that exist there (e.g. `view-mode-tabs`,
+`trace-event-row`, `confidence-bar`).
+
 ## Pointers
 
 - Template spec: `tools/runstatus/tests/playwright/multi-story.spec.ts`
@@ -178,11 +237,11 @@ fidelity — skips the ffmpeg scene-detection pass).
 - Tour robustness test: `tools/runstatus/tests/playwright/tour-onboarding.spec.ts`
 - Tour manifest (shared by live overlay + video spec): `tools/runstatus/src/tour/manifest.ts`
 - Tour QA templates: `docs/skills/kitsoki-ui-qa/templates/tour-{feature,scenarios}.*`
+- Shared helpers (video, server, pacing): `tests/playwright/_helpers/server.ts`
 - Playwright config + globalSetup: `tools/runstatus/playwright.config.ts`,
   `tools/runstatus/tests/playwright/_helpers/`
 - No-LLM posture + UI surfaces: `docs/web/README.md`
-- File:// snapshot artifacts (static, no server — different from this live
-  recording): the `artifact`/`bugfix` specs + `_helpers/artifact.ts`
+- File:// snapshot artifacts (static, no server): `_helpers/artifact.ts`
 
 ## Maintenance
 

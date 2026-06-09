@@ -1,6 +1,8 @@
 package server
 
 import (
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"kitsoki/internal/app"
@@ -65,6 +67,14 @@ func (l *LiveSession) History() store.History {
 // AppDef implements [Source].
 func (l *LiveSession) AppDef() *app.AppDef { return l.def }
 
+// AnnotationPath implements [AnnotationSource]: returns the sidecar path
+// <sink-dir>/<sessionID>.annotations.jsonl, co-located with the trace JSONL.
+func (l *LiveSession) AnnotationPath() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.annotationPathLocked()
+}
+
 // Snapshot implements [Source]: the full header + diagram + events view, built
 // from the live sink under the lock via the same [runstatus.FromSink] path the
 // export-status artifact uses, so the live and exported views cannot drift.
@@ -78,7 +88,21 @@ func (l *LiveSession) Snapshot() (runstatus.Snapshot, error) {
 	if snap.Session.CurrentState == "" && l.initialState != "" {
 		snap.Session.CurrentState = l.initialState
 	}
+	// Load annotations from the sidecar (silently ignored if absent).
+	annPath := l.annotationPathLocked()
+	if anns, aerr := runstatus.LoadAnnotations(annPath); aerr == nil && len(anns) > 0 {
+		snap.Annotations = anns
+	}
 	return snap, nil
+}
+
+// annotationPathLocked computes the annotation sidecar path without acquiring
+// the mutex (must be called with l.mu already held).
+func (l *LiveSession) annotationPathLocked() string {
+	tracePath := l.sink.Path
+	dir := filepath.Dir(tracePath)
+	sid := strings.ReplaceAll(l.sid, string(filepath.Separator), "_")
+	return filepath.Join(dir, sid+".annotations.jsonl")
 }
 
 // Events implements [Source]: the cheap per-poll path. It maps the live history

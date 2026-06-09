@@ -4,6 +4,8 @@ import type {
   MermaidSnapshot,
   TraceEvent,
   TurnResult,
+  AnnotationEntry,
+  ReplayResult,
 } from "../types.js";
 import type {
   DataSource,
@@ -420,4 +422,51 @@ export class LiveSource implements DataSource {
       { session_id: sessionId }
     );
   }
+
+  /**
+   * Add an operator annotation (score / label / comment) to the session's
+   * annotation sidecar. Either targetCallId or targetTurn should be supplied
+   * to identify what is being annotated.
+   */
+  addAnnotation(
+    sessionId: string,
+    params: {
+      targetCallId?: string;
+      targetTurn?: number;
+      score?: number;
+      label?: string;
+      comment?: string;
+      annotator?: string;
+    }
+  ): Promise<{ ok: boolean }> {
+    const body: Record<string, unknown> = { session_id: sessionId };
+    if (params.targetCallId !== undefined) body["target_call_id"] = params.targetCallId;
+    if (params.targetTurn !== undefined) body["target_turn"] = params.targetTurn;
+    if (params.score !== undefined) body["score"] = params.score;
+    if (params.label !== undefined) body["label"] = params.label;
+    if (params.comment !== undefined) body["comment"] = params.comment;
+    if (params.annotator !== undefined) body["annotator"] = params.annotator;
+    return this.client.post<{ ok: boolean }>("runstatus.annotation.add", body);
+  }
+
+  /**
+   * Replay one recorded oracle call against a chosen operator.
+   * In v1 the re-dispatch is a stub (no live LLM call); the result confirms
+   * replayability and carries a note. new_verdict and diff will be populated
+   * once the live dispatch path is wired.
+   */
+  replayCall(
+    sessionId: string,
+    callId: string,
+    operator: "claude" | "local"
+  ): Promise<ReplayResult> {
+    return this.client.post<ReplayResult>("runstatus.call.replay", {
+      session_id: sessionId,
+      call_id: callId,
+      operator,
+    });
+  }
 }
+
+// Re-export for components that import AnnotationEntry from this module.
+export type { AnnotationEntry };

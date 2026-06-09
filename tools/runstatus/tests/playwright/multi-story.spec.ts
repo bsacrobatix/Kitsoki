@@ -32,6 +32,7 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import { spawn, type ChildProcess } from "child_process";
+import { prepareVideoDir, saveAndRemuxVideo } from "./_helpers/server.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -91,7 +92,7 @@ test.beforeAll(async () => {
   for (const p of [STORIES_DIR, FLOW, BIN]) {
     if (!fs.existsSync(p)) throw new Error(`missing required path: ${p} (run 'make build' first)`);
   }
-  fs.mkdirSync(VIDEO_DIR, { recursive: true });
+  prepareVideoDir(VIDEO_DIR); // clears stale .webm files; must run before context creation
   // Clean stale screenshots from a prior run so the artifact set is exact.
   if (fs.existsSync(ARTIFACT_DIR)) {
     for (const f of fs.readdirSync(ARTIFACT_DIR)) {
@@ -190,6 +191,8 @@ test.describe("multi-story web UI (live, no-LLM)", () => {
       recordVideo: { dir: VIDEO_DIR, size: { width: 1440, height: 900 } },
     });
     const page = await context.newPage();
+    // Capture before context closes — saveAndRemuxVideo needs this reference.
+    const video = page.video();
 
     try {
       // ── Scene 1: discovery / home ──────────────────────────────────────────
@@ -341,22 +344,11 @@ test.describe("multi-story web UI (live, no-LLM)", () => {
       await page.waitForTimeout(FINAL_DWELL);
     } finally {
       await page.close();
-      await context.close(); // flush the video
+      await context.close(); // finalises the video
+      await saveAndRemuxVideo(video, ARTIFACT_DIR, "multi-story-demo");
       await browser.close();
     }
 
-    // Copy the recorded webm to a stable name for review.
-    const webms = fs
-      .readdirSync(VIDEO_DIR)
-      .filter((f) => f.endsWith(".webm"))
-      .map((f) => ({ f, t: fs.statSync(path.join(VIDEO_DIR, f)).mtimeMs }))
-      .sort((a, b) => b.t - a.t);
-    expect(webms.length, "expected a recorded video webm").toBeGreaterThan(0);
-    const latest = path.join(VIDEO_DIR, webms[0].f);
-    fs.copyFileSync(latest, path.join(ARTIFACT_DIR, "multi-story-demo.webm"));
-
     console.log("[multi-story] screenshots:\n" + screenshotPaths.join("\n"));
-    console.log("[multi-story] video: " + latest);
-    console.log("[multi-story] video (stable): " + path.join(ARTIFACT_DIR, "multi-story-demo.webm"));
   });
 });

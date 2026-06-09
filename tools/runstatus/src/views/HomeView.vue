@@ -64,25 +64,73 @@
     <section class="home__section">
       <h2 class="home__subtitle">Active sessions</h2>
 
+      <!-- Filter chips -->
+      <div class="home__session-filters">
+        <button
+          class="home__filter-chip"
+          :class="{ 'home__filter-chip--active': sessionFilter === 'all' }"
+          data-testid="session-filter-all"
+          @click="sessionFilter = 'all'"
+        >All</button>
+        <button
+          class="home__filter-chip"
+          :class="{ 'home__filter-chip--active': sessionFilter === 'active' }"
+          data-testid="session-filter-active"
+          @click="sessionFilter = 'active'"
+        >Active</button>
+        <button
+          class="home__filter-chip"
+          :class="{ 'home__filter-chip--active': sessionFilter === 'terminal' }"
+          data-testid="session-filter-terminal"
+          @click="sessionFilter = 'terminal'"
+        >Terminal</button>
+      </div>
+
       <div v-if="sessionsError" class="home__status home__status--error" data-testid="sessions-error">
         {{ sessionsError }}
       </div>
       <div v-else-if="sessions.length === 0" class="home__status" data-testid="sessions-empty">
         No live sessions.
       </div>
+      <div v-else-if="filteredSessions.length === 0" class="home__status" data-testid="sessions-empty-filtered">
+        No sessions match the current filter.
+      </div>
       <table v-else class="home__table" data-testid="session-table">
         <thead>
           <tr>
-            <th>Story</th>
+            <th
+              class="home__th--sortable"
+              data-testid="session-sort-story"
+              @click="toggleSort('story')"
+            >
+              Story
+              <span class="home__sort-indicator">{{ sortIndicator('story') }}</span>
+            </th>
             <th>Session</th>
-            <th>State</th>
-            <th>Activity</th>
+            <th
+              class="home__th--sortable"
+              data-testid="session-sort-state"
+              @click="toggleSort('state')"
+            >
+              State
+              <span class="home__sort-indicator">{{ sortIndicator('state') }}</span>
+            </th>
+            <th
+              class="home__th--sortable"
+              data-testid="session-sort-activity"
+              @click="toggleSort('activity')"
+            >
+              Activity
+              <span class="home__sort-indicator">{{ sortIndicator('activity') }}</span>
+            </th>
+            <th data-testid="session-sort-turns">Turns</th>
+            <th>Duration</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           <tr
-            v-for="s in sessions"
+            v-for="s in filteredSessions"
             :key="s.session_id"
             class="home__row"
             data-testid="session-row"
@@ -95,6 +143,8 @@
             <td><code data-testid="session-id">{{ truncateId(s.session_id) }}</code></td>
             <td><code data-testid="session-state">{{ s.current_state }}</code></td>
             <td class="home__row-activity" data-testid="session-activity">{{ formatDate(s.started_at) }}</td>
+            <td class="home__row-turns" data-testid="session-turns">{{ s.turn != null ? s.turn : '—' }}</td>
+            <td class="home__row-duration" data-testid="session-duration">—</td>
             <td class="home__row-actions">
               <router-link
                 class="home__link"
@@ -111,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 // Auto-navigate fires at most once per browser tab — see lib/auto-nav for the
 // full rationale (persisted in sessionStorage; also marked spent by the session
@@ -155,6 +205,66 @@ const sessionsError = ref<string | null>(null);
 const startingPath = ref<string | null>(null);
 const startError = ref<string | null>(null);
 const startErrorPath = ref<string | null>(null);
+
+// ── Session table: filter + sort ─────────────────────────────────────────────
+type SessionFilterMode = "all" | "active" | "terminal";
+type SortKey = "story" | "state" | "activity";
+type SortDir = "asc" | "desc" | null;
+
+const sessionFilter = ref<SessionFilterMode>("all");
+const sortKey = ref<SortKey | null>(null);
+const sortDir = ref<SortDir>(null);
+
+function toggleSort(key: SortKey): void {
+  if (sortKey.value !== key) {
+    sortKey.value = key;
+    sortDir.value = "asc";
+  } else if (sortDir.value === "asc") {
+    sortDir.value = "desc";
+  } else {
+    sortKey.value = null;
+    sortDir.value = null;
+  }
+}
+
+function sortIndicator(key: SortKey): string {
+  if (sortKey.value !== key) return "";
+  return sortDir.value === "asc" ? " ▲" : " ▼";
+}
+
+const filteredSessions = computed(() => {
+  let list = sessions.value.slice();
+
+  // Apply filter
+  if (sessionFilter.value === "active") {
+    list = list.filter((s) => !s.terminal);
+  } else if (sessionFilter.value === "terminal") {
+    list = list.filter((s) => s.terminal);
+  }
+
+  // Apply sort
+  if (sortKey.value) {
+    const key = sortKey.value;
+    const dir = sortDir.value === "desc" ? -1 : 1;
+    list.sort((a, b) => {
+      let av = "";
+      let bv = "";
+      if (key === "story") {
+        av = sessionStoryTitle(a);
+        bv = sessionStoryTitle(b);
+      } else if (key === "state") {
+        av = a.current_state;
+        bv = b.current_state;
+      } else if (key === "activity") {
+        av = a.started_at;
+        bv = b.started_at;
+      }
+      return dir * av.localeCompare(bv);
+    });
+  }
+
+  return list;
+});
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -415,6 +525,38 @@ function errMsg(e: unknown): string {
   background: #1e293b;
 }
 
+/* ── Session filter chips ─────────────────────────────────────────────────── */
+.home__session-filters {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.home__filter-chip {
+  background: transparent;
+  border: 1px solid #334155;
+  color: #64748b;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+
+.home__filter-chip:hover {
+  color: #94a3b8;
+  border-color: #475569;
+  background: #1e293b;
+}
+
+.home__filter-chip--active {
+  color: #60a5fa;
+  border-color: #1d4ed8;
+  background: rgba(29, 78, 216, 0.12);
+}
+
 .home__table {
   width: 100%;
   border-collapse: collapse;
@@ -430,6 +572,20 @@ function errMsg(e: unknown): string {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.home__th--sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.home__th--sortable:hover {
+  color: #94a3b8;
+}
+
+.home__sort-indicator {
+  font-size: 0.65rem;
+  opacity: 0.8;
 }
 
 .home__table td {
@@ -453,6 +609,18 @@ function errMsg(e: unknown): string {
 .home__row-activity {
   color: #94a3b8;
   white-space: nowrap;
+}
+
+.home__row-turns {
+  color: #94a3b8;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+.home__row-duration {
+  color: #64748b;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
 }
 
 .home__row-actions {

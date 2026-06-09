@@ -134,6 +134,12 @@ test.describe("oracle separate-prompt files (artifact mode)", () => {
     // OracleDetail rendered (confirms we routed to the verb sub-renderer).
     await expect(body.locator(".oracle-detail__verb-badge")).toBeVisible({ timeout: 3000 });
 
+    // Since Slice #2 the prompts live inside the collapsed evidence drawer — expand it first.
+    const evidenceToggle = body.locator("[data-testid='decide-evidence-toggle']");
+    if (await evidenceToggle.isVisible()) {
+      await evidenceToggle.click();
+    }
+
     // The system-prompt and prompt panes show the actual sidecar contents.
     // (toContainText auto-retries while usePromptLoader's async fetch settles.)
     await expect(body).toContainText("strategy router for the bugfix pipeline");
@@ -156,6 +162,12 @@ test.describe("oracle separate-prompt files (artifact mode)", () => {
     const body = row.locator(".trace-timeline__row-body");
     await expect(body).toBeVisible({ timeout: 3000 });
     await expect(body.locator(".oracle-detail__verb-badge")).toBeVisible({ timeout: 3000 });
+
+    // Since Slice #2 the prompts live inside the collapsed evidence drawer — expand it first.
+    const evidenceToggle = body.locator("[data-testid='decide-evidence-toggle']");
+    if (await evidenceToggle.isVisible()) {
+      await evidenceToggle.click();
+    }
 
     // Placeholder names the unreachable file so an operator knows what's missing.
     await expect(body).toContainText("oracle-prompts/decide-001.txt");

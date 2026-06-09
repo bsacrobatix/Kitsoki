@@ -49,47 +49,22 @@
         {{ reloadWarning }}
       </div>
 
-      <!-- Main panels -->
+      <!-- Main panel: ViewModeTabs (Tree / Timeline / Graph) -->
       <div class="run-view__panels" ref="panelsEl">
-        <!-- Diagram panel -->
-        <div class="run-view__panel run-view__panel--diagram" :style="{ flexBasis: diagramBasis }">
-          <div class="run-view__panel-header">State Diagram</div>
-          <StateDiagram
-            v-if="store.mermaid"
-            :mermaid-source="store.mermaid.source"
-            :node-map="store.mermaid.node_map"
-            :current-state-path="store.currentStatePath"
-            :highlighted-state-paths="store.highlightedStatePaths"
-            :events="store.events"
-            :selected-event-index="store.selectedEventIndex"
-            @select="onNodeSelect"
-            @select-phase="onPhaseSelect"
-            @select-event="onEventSelect"
-          />
-          <div v-else class="run-view__empty">No diagram.</div>
-        </div>
-
-        <!-- Resize handle -->
-        <div class="run-view__divider" @mousedown.prevent="onDividerMousedown" />
-
-        <!-- Timeline panel -->
-        <div class="run-view__panel run-view__panel--timeline" :style="{ flexBasis: timelineBasis }">
-          <div class="run-view__panel-header">
-            <span>Trace</span>
-            <button
-              v-if="store.highlightedStatePaths.length > 0"
-              class="run-view__clear-highlight"
-              @click="onClearHighlight"
-              :title="'Clear diagram highlight'"
-            >clear highlight ({{ store.highlightedStatePaths.length }})</button>
-          </div>
-          <TraceTimeline
+        <div class="run-view__panel run-view__panel--tabs">
+          <ViewModeTabs
             :events="store.events"
             :selected-event-index="store.selectedEventIndex"
             :highlighted-state-paths="store.highlightedStatePaths"
             :highlight-tick="store.highlightTick"
             :mermaid-source="store.mermaid?.source ?? null"
-            @select="onEventSelect"
+            :node-map="store.mermaid?.node_map ?? null"
+            :current-state-path="store.currentStatePath"
+            :session-id="props.sessionId"
+            @select-event="onEventSelect"
+            @node-select="onNodeSelect"
+            @phase-select="onPhaseSelect"
+            @clear-highlight="onClearHighlight"
           />
         </div>
       </div>
@@ -103,9 +78,11 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRunStore } from "../stores/run.js";
 import { createDataSource } from "../data/source.js";
 import { markAutoNavDone } from "../lib/auto-nav.js";
+import { LiveSource } from "../data/live-source.js";
 import StateDiagram from "../components/StateDiagram.vue";
 import TraceTimeline from "../components/TraceTimeline.vue";
 import StoryFreshness from "../components/StoryFreshness.vue";
+import ViewModeTabs from "../components/ViewModeTabs.vue";
 import { fmtTokens, fmtCost } from "../components/oracle/lib.js";
 import type { NodeRef } from "../types.js";
 
@@ -140,43 +117,6 @@ function onFreshnessError(msg: string): void {
 }
 
 const panelsEl = ref<HTMLElement | null>(null);
-const splitPct = ref(50); // diagram gets this % of panel width
-
-const DIVIDER_PX = 6;
-
-const diagramBasis = ref("calc(50% - 3px)");
-const timelineBasis = ref("calc(50% - 3px)");
-
-function updateBases() {
-  diagramBasis.value = `calc(${splitPct.value}% - ${DIVIDER_PX / 2}px)`;
-  timelineBasis.value = `calc(${100 - splitPct.value}% - ${DIVIDER_PX / 2}px)`;
-}
-
-function onDividerMousedown(e: MouseEvent) {
-  const container = panelsEl.value;
-  if (!container) return;
-
-  const startX = e.clientX;
-  const containerW = container.getBoundingClientRect().width;
-  const startPct = splitPct.value;
-
-  function onMousemove(ev: MouseEvent) {
-    const delta = ev.clientX - startX;
-    const newPct = Math.min(80, Math.max(20, startPct + (delta / containerW) * 100));
-    splitPct.value = newPct;
-    updateBases();
-  }
-
-  function onMouseup() {
-    window.removeEventListener("mousemove", onMousemove);
-    window.removeEventListener("mouseup", onMouseup);
-  }
-
-  window.addEventListener("mousemove", onMousemove);
-  window.addEventListener("mouseup", onMouseup);
-}
-
-updateBases();
 
 onMounted(async () => {
   // Viewing a session spends the per-tab auto-nav convenience (see lib/auto-nav)
@@ -359,79 +299,13 @@ function onEventSelect(index: number): void {
   min-width: 0;
 }
 
-.run-view__panel--diagram {
-  /* flex-basis set inline */
-}
-
-.run-view__panel--timeline {
-  /* flex-basis set inline */
-}
-
-.run-view__divider {
-  flex-shrink: 0;
-  width: 6px;
-  cursor: col-resize;
-  background: transparent;
-  border-radius: 3px;
-  transition: background 0.15s;
-  position: relative;
-}
-
-.run-view__divider::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 2px;
-  width: 2px;
-  background: #1e293b;
-  border-radius: 1px;
-  transition: background 0.15s;
-}
-
-.run-view__divider:hover::after,
-.run-view__divider:active::after {
-  background: #3b82f6;
-}
-
-.run-view__panel-header {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #64748b;
-  padding: 0.25rem 0;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.run-view__clear-highlight {
-  background: #3a2d0e;
-  border: 1px solid #fbbf24;
-  color: #fde68a;
-  font-size: 0.65rem;
-  text-transform: none;
-  letter-spacing: normal;
-  padding: 0.1rem 0.4rem;
-  border-radius: 999px;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.run-view__clear-highlight:hover {
-  background: #4a3a14;
-}
-
-/* StateDiagram takes the remaining height */
-.run-view__panel--diagram :deep(.state-diagram) {
+.run-view__panel--tabs {
   flex: 1;
-  height: 100%;
+  min-width: 0;
 }
 
-/* TraceTimeline takes the remaining height */
-.run-view__panel--timeline :deep(.trace-timeline) {
+/* ViewModeTabs takes the full height */
+.run-view__panel--tabs :deep(.view-mode-tabs) {
   flex: 1;
   height: 100%;
   min-height: 0;

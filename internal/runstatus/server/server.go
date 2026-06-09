@@ -81,6 +81,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/web"
+	"kitsoki/internal/store"
 )
 
 // defaultPollInterval is how often the SSE stream re-reads the trace for newly
@@ -201,6 +202,15 @@ type Source interface {
 	AppDef() *app.AppDef
 }
 
+// AnnotationSource is an optional extension of [Source] that exposes the path
+// to the session's annotation sidecar JSONL. Sources that know their on-disk
+// location (traceFileSource, LiveSession backed by a JSONLSink) implement it;
+// in-memory / test sources do not, and annotation RPCs are silently skipped for
+// those.
+type AnnotationSource interface {
+	AnnotationPath() string
+}
+
 // traceFileSource is the read-only [Source] behind `kitsoki status serve`: it
 // re-reads and re-parses the JSONL trace file on each call, so a growing file
 // (a live run appending to it) is reflected on the next poll. A not-yet-created
@@ -212,6 +222,20 @@ type traceFileSource struct {
 }
 
 func (t *traceFileSource) AppDef() *app.AppDef { return t.def }
+
+// AnnotationPath implements [AnnotationSource]: the sidecar lives at
+// <trace-base>.annotations.jsonl, e.g. if the trace is run.jsonl the sidecar
+// is run.annotations.jsonl. This is the same name structure the trace-file
+// scheme uses; LiveSession instead derives its path from store.SessionsDir.
+func (t *traceFileSource) AnnotationPath() string {
+	// Strip the .jsonl extension (if present) and append .annotations.jsonl so
+	// the sidecar sits next to the trace in the same directory.
+	base := t.path
+	if len(base) > 6 && base[len(base)-6:] == ".jsonl" {
+		base = base[:len(base)-6]
+	}
+	return base + ".annotations.jsonl"
+}
 
 func (t *traceFileSource) Events() ([]runstatus.TraceEvent, error) {
 	f, err := os.Open(t.path)
@@ -239,7 +263,12 @@ func (t *traceFileSource) Snapshot() (runstatus.Snapshot, error) {
 	// AggregateTaskDetails already ran in Events; SnapshotFromTrace re-runs it
 	// (idempotent — it never overwrites existing detail) and renders the
 	// diagram + header.
-	return runstatus.SnapshotFromTrace(t.def, events, runstatus.HeaderOverrides{}, true), nil
+	snap := runstatus.SnapshotFromTrace(t.def, events, runstatus.HeaderOverrides{}, true)
+	// Load annotations from the sidecar (silently ignored if absent).
+	if anns, aerr := runstatus.LoadAnnotations(t.AnnotationPath()); aerr == nil && len(anns) > 0 {
+		snap.Annotations = anns
+	}
+	return snap, nil
 }
 
 // Handler returns the HTTP handler for the runstatus surface.
@@ -630,6 +659,83 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return map[string]any{"messages": msgs}, nil
 
+	// ── Annotation sidecar ────────────────────────────────────────────────────
+	case "runstatus.annotation.add":
+		sid, rerr := sessionIDParam(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		as, ok := entry.Source.(AnnotationSource)
+		if !ok {
+			return nil, &rpcError{Code: codeReadOnly, Message: "annotation.add: this source does not support annotation sidecar"}
+		}
+		a := runstatus.Annotation{
+			Ts:        time.Now().UTC(),
+			SessionID: sid,
+		}
+		if v, ok := params["target_call_id"].(string); ok {
+			a.TargetCallID = v
+		}
+		if v, ok := params["target_turn"].(float64); ok {
+			a.TargetTurn = int(v)
+		}
+		if v, ok := params["score"].(float64); ok {
+			score := v
+			a.Score = &score
+		}
+		if v, ok := params["label"].(string); ok {
+			a.Label = v
+		}
+		if v, ok := params["comment"].(string); ok {
+			a.Comment = v
+		}
+		if v, ok := params["annotator"].(string); ok {
+			a.Annotator = v
+		}
+		if err := runstatus.AppendAnnotation(as.AnnotationPath(), a); err != nil {
+			return nil, serverErr(err)
+		}
+		return map[string]any{"ok": true}, nil
+
+	// ── Call replay ───────────────────────────────────────────────────────────
+	// runstatus.call.replay reconstructs one oracle call from the recorded trace
+	// and returns a stub result describing its replayability. Actual re-dispatch
+	// against a live operator is not wired in v1 (no LLM cost in tests); the
+	// stub confirms the call is replayable and returns a note.
+	//
+	// Request params: {session_id, call_id, operator: "claude"|"local"}
+	// Response: {call_id, original_verb, replayable, note}
+	case "runstatus.call.replay":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		callID, _ := params["call_id"].(string)
+		if callID == "" {
+			return nil, &rpcError{Code: codeServerError, Message: "call.replay: missing 'call_id'"}
+		}
+		snap, err := entry.Source.Snapshot()
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		// Map TraceEvents back to store.Events so ExtractReplayableCall can scan them.
+		storeEvents := traceEventsToStoreEvents(snap.Events)
+		rc, replayErr := runstatus.ExtractReplayableCall(storeEvents, callID)
+		if replayErr != nil {
+			return nil, &rpcError{Code: codeServerError, Message: "call.replay: " + replayErr.Error()}
+		}
+		// v1 stub: confirm replayability without dispatching a live oracle call.
+		return map[string]any{
+			"call_id":       rc.CallID,
+			"original_verb": rc.Verb,
+			"replayable":    true,
+			"note":          "replay dispatch not yet wired (v1 stub)",
+		}, nil
+
 	default:
 		return nil, &rpcError{Code: codeMethodMissing, Message: "unknown method: " + method}
 	}
@@ -737,6 +843,25 @@ func filterTrace(snap runstatus.Snapshot, params map[string]any) traceResult {
 		}
 	}
 	return traceResult{Events: out, LastTurn: snap.Session.Turn}
+}
+
+// traceEventsToStoreEvents converts []runstatus.TraceEvent back to
+// []store.Event with the minimal fields ExtractReplayableCall needs:
+// Kind (from Msg), CallID (from attrs.call_id), and Payload (from Attrs
+// marshalled to JSON). This bridge avoids exposing a full store.History on
+// the Source interface; the replay handler is the only consumer.
+func traceEventsToStoreEvents(tevs []runstatus.TraceEvent) []store.Event {
+	out := make([]store.Event, 0, len(tevs))
+	for _, te := range tevs {
+		callID, _ := te.Attrs["call_id"].(string)
+		raw, _ := json.Marshal(te.Attrs)
+		out = append(out, store.Event{
+			Kind:    store.EventKind(te.Msg),
+			CallID:  callID,
+			Payload: json.RawMessage(raw),
+		})
+	}
+	return out
 }
 
 // intParam reads a numeric param (arrives as JSON float64) as an int.

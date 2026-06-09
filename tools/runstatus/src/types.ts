@@ -40,11 +40,46 @@ export interface AppDef {
   [key: string]: unknown;
 }
 
+/**
+ * AnnotationEntry is one operator score/label from the annotation sidecar
+ * JSONL. It mirrors runstatus.Annotation on the Go side.
+ */
+export interface AnnotationEntry {
+  ts: string; // ISO 8601
+  session_id: string;
+  target_call_id?: string;
+  target_turn?: number;
+  score?: number;
+  label?: string;
+  comment?: string;
+  annotator?: string;
+  schema_version: number;
+}
+
+/**
+ * ReplayResult is the response from runstatus.call.replay. In v1 the dispatch
+ * is not actually wired (no LLM cost), so replayable:true + note is the
+ * expected response shape. new_verdict and diff are reserved for when real
+ * dispatch lands.
+ */
+export interface ReplayResult {
+  call_id: string;
+  original_verb: string;
+  replayable: boolean;
+  note?: string;
+  /** Reserved: the new verdict from the re-dispatched call (not yet populated in v1). */
+  new_verdict?: unknown;
+  /** Reserved: diff between original and new verdict (not yet populated in v1). */
+  diff?: unknown;
+}
+
 export interface Snapshot {
   session: SessionHeader;
   app: AppDef;
   mermaid: MermaidSnapshot;
   events: TraceEvent[];
+  /** Operator annotations from the sidecar JSONL. Absent when no sidecar exists. */
+  annotations?: AnnotationEntry[];
 }
 
 // ── Write/read RPC: typed view + turn result ────────────────────────────────

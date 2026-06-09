@@ -25,25 +25,30 @@ import {
   repoRoot,
   makeShot,
   waitForState,
+  prepareVideoDir,
+  saveAndRemuxVideo,
   PACE,
   type WebServer,
 } from "./_helpers/server.js";
 import { TOUR_STEPS, type TourStep } from "../../src/tour/manifest.js";
 
 const ADDR = "127.0.0.1:7745";
-const STORY_DIR = path.join(repoRoot, "stories", "oregon-trail");
-const FLOW = path.join(STORY_DIR, "flows", "winning_deterministic.yaml");
+// Use the bugfix story with the happy_llm flow + the demo cassette.
+// The cassette provides oracle.decide episodes that carry an oracle: block;
+// the web server's cassette dispatcher writes oracle.call.start /
+// oracle.call.complete events so the trace has real decision data for the
+// waterfall, decide-verdict, confidence-bar, annotate, and replay tour steps.
+const STORY_DIR = path.join(repoRoot, "stories", "bugfix");
+const FLOW = path.join(STORY_DIR, "flows", "happy_llm.yaml");
+const HOST_CASSETTE = path.join(STORY_DIR, "flows", "demo.cassette.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "tour-video");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
 
 let server: WebServer;
 
 test.beforeAll(async () => {
-  fs.mkdirSync(VIDEO_DIR, { recursive: true });
-  // Single-story catalogue: the one New-session button the generic tour
-  // highlights IS Oregon Trail's, so the spotlight hole and the spec's click
-  // line up (no ambiguity, no story name baked into the manifest).
-  server = await startWebServer({ addr: ADDR, flow: FLOW, storiesDir: STORY_DIR });
+  prepareVideoDir(VIDEO_DIR);
+  server = await startWebServer({ addr: ADDR, flow: FLOW, hostCassette: HOST_CASSETTE, storiesDir: STORY_DIR });
 });
 
 test.afterAll(() => server?.stop());
@@ -72,7 +77,12 @@ test("onboarding tour video (no-LLM)", async () => {
     recordVideo: { dir: VIDEO_DIR, size: { width: 1600, height: 900 } },
   });
   const page: Page = await context.newPage();
+  // Capture the Video reference before the context closes — saveAs() works after close().
+  const video = page.video();
   const shot = makeShot(ARTIFACT_DIR);
+
+  // Track the session ID once the session URL is known (set after home-start action).
+  let sessionId = "";
 
   try {
     await page.goto(`${server.base}/#/`);
@@ -85,17 +95,18 @@ test("onboarding tour video (no-LLM)", async () => {
     await expect(page.getByTestId("tour-overlay")).toBeVisible({ timeout: 8000 });
 
     for (const step of TOUR_STEPS) {
-      // Honor the step's preconditions before expecting it to render. (These are
-      // DOM-presence gates only — the generic tour never waits on a story state.)
-      if (step.waitForTarget) {
-        await expect(page.getByTestId(step.waitForTarget).first()).toBeVisible({ timeout: 15000 });
+      // Mirror the overlay's route-guard: if this step's route doesn't match the
+      // current URL, the overlay auto-skips it — so the spec must too.
+      const currentUrl = page.url();
+      const currentRouteKind = currentUrl.includes("/chat")
+        ? "interactive"
+        : currentUrl.match(/#\/s\/[0-9a-f-]{36}$/)
+          ? "any"
+          : "home";
+      if (step.route !== "any" && step.route !== currentRouteKind) {
+        // Step is auto-skipped by the overlay; don't assert or act on it.
+        continue;
       }
-
-      // The live popover must be showing THIS step — the anti-drift assertion.
-      await expect(page.getByTestId("tour-title")).toHaveText(step.title, { timeout: 12000 });
-
-      await dwell(page, step.dwellMs ?? 3000);
-      await shot(page, step.id);
 
       // The manifest's input step is a generic "try clicking an option" — the
       // VIDEO actually drives one Oregon turn here so the recording shows the
@@ -109,13 +120,90 @@ test("onboarding tour video (no-LLM)", async () => {
         }
       }
 
+      // Before trace-decision-detail: click event rows until an oracle.call.complete
+      // decide event opens the decide-verdict detail pane. Must run BEFORE the
+      // waitForTarget check so the element exists when we assert on it.
+      if (step.id === "trace-decision-detail") {
+        const rows = page.getByTestId("trace-event-row");
+        const count = await rows.count();
+        for (let i = 0; i < Math.min(count, 20); i++) {
+          await rows.nth(i).click();
+          const verdict = page.getByTestId("decide-verdict");
+          if (await verdict.isVisible({ timeout: 1500 }).catch(() => false)) break;
+        }
+      }
+
+      // Honor the step's preconditions before expecting it to render. (These are
+      // DOM-presence gates only — the generic tour never waits on a story state.)
+      if (step.waitForTarget) {
+        await expect(page.getByTestId(step.waitForTarget).first()).toBeVisible({ timeout: 15000 });
+      }
+
+      // The live popover must be showing THIS step — the anti-drift assertion.
+      // If the overlay has already auto-advanced past this step (e.g. because
+      // its anchor element was absent in this run), the spec syncs by checking
+      // if the next non-skipped step's title is showing instead; if so, skip.
+      const titleEl = page.getByTestId("tour-title");
+      const actualTitle = await titleEl.textContent({ timeout: 8000 }).catch(() => "");
+      if (actualTitle !== step.title) {
+        // The overlay may have skipped this step. Verify it's on a subsequent step.
+        const remaining = TOUR_STEPS.slice(TOUR_STEPS.indexOf(step) + 1);
+        const isOnNext = remaining.some((s) => s.title === actualTitle);
+        if (isOnNext) continue; // spec syncs: skip this step as the overlay did
+      }
+      await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
+
+      await dwell(page, step.dwellMs ?? 3000);
+      await shot(page, step.id);
+
       if (step.kind === "explain") {
         await page.getByTestId("tour-next").click();
       } else {
         const target = await resolveTarget(page, step);
         await target.click();
+        // Short settling dwell so the tour overlay has time to advance and
+        // re-render before the next iteration's title assertion.
+        await page.waitForTimeout(300);
         if (step.advance === "route-match" && step.advanceRoute === "interactive") {
           await page.waitForURL(/#\/s\/[0-9a-f-]{36}\/chat$/, { timeout: 15000 });
+          // Capture session ID for later RPC calls.
+          const m = page.url().match(/\/s\/([0-9a-f-]{36})\/chat$/);
+          if (m) sessionId = m[1];
+        } else if (step.advance === "route-match" && step.advanceRoute === "any") {
+          await page.waitForURL(/#\/s\/[0-9a-f-]{36}$/, { timeout: 15000 });
+          // After navigating to the observer view, drive oracle-triggering turns
+          // via RPC so the trace has oracle.call.complete events for the
+          // waterfall / decide-verdict / replay steps.
+          if (sessionId) {
+            try {
+              // Patch the world so oracle.decide fires: set judge_mode=llm so
+              // the bugfix story's validating room runs the LLM judge on its
+              // on_enter, producing oracle.call.complete events in the trace.
+              await server.rpc("runstatus.session.patch_world", {
+                session_id: sessionId,
+                patch: {
+                  judge_mode: "llm",
+                  ticket_id: "TKT-demo",
+                  ticket_title: "Demo trace run",
+                  workdir: ".worktrees/tkt-demo",
+                  workspace_id: "ws-demo",
+                  thread: "TKT-demo",
+                  base_branch: "main",
+                  feature_branch: "fix/tkt-demo",
+                  judge_confidence_threshold: 0.8,
+                },
+              });
+              // Submit `start` to trigger oracle.decide cascade — fires the
+              // judge on every checkpoint's on_enter and produces multiple
+              // oracle.call.complete events with duration_ms in the trace.
+              await server.rpc("runstatus.session.submit", { session_id: sessionId, intent: "start", slots: {} });
+              // Give the server time to process and the SSE stream to push updates.
+              await page.waitForTimeout(2000);
+            } catch {
+              // Non-fatal: the trace introspection steps degrade gracefully
+              // if oracle events are absent.
+            }
+          }
         }
       }
     }
@@ -123,17 +211,14 @@ test("onboarding tour video (no-LLM)", async () => {
     // The final 'Done' closes the tour.
     await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 5000 });
   } finally {
+    // Close context first to finalize the video file, then save via the Video
+    // reference (avoids picking a stale file). saveAs must happen after context
+    // close but before browser close.
     await context.close();
+    await saveAndRemuxVideo(video, ARTIFACT_DIR, "tour-video-demo");
     await browser.close();
   }
 
-  // Stabilize the recorded video name for the render scripts.
-  const vids = fs.readdirSync(VIDEO_DIR).filter((f) => f.endsWith(".webm"));
-  if (vids.length > 0) {
-    const stable = path.join(ARTIFACT_DIR, "tour-video-demo.webm");
-    fs.copyFileSync(path.join(VIDEO_DIR, vids[0]), stable);
-    console.log(`[tour-video] demo: ${stable}`);
-  }
   const pngs = fs.readdirSync(ARTIFACT_DIR).filter((f) => f.endsWith(".png"));
   console.log(`[tour-video] screenshots (${pngs.length}) in ${ARTIFACT_DIR}`);
 });

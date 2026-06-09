@@ -2,6 +2,9 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { TOUR_STEPS, type TourStep } from "../tour/manifest.js";
 
+// Re-export TourStep so consumers (e.g. TourOverlay) can import from one place.
+export type { TourStep };
+
 /**
  * The guided-onboarding tour store. App-global (mounted once in App.vue), so its
  * position survives Vue Router navigation — that is what lets one tour walk from
@@ -64,14 +67,17 @@ export const useTourStore = defineStore("tour", () => {
   // a shared reactive nudge owned here so it survives navigation.
   const envTick = ref(0);
 
-  const steps = TOUR_STEPS;
+  // Active step array — defaults to the onboarding manifest but can be replaced
+  // by startWithSteps() for a dedicated feature-spotlight tour (e.g. the
+  // trace-introspection video spec).
+  const steps = ref<readonly TourStep[]>(TOUR_STEPS);
 
   // ---- getters ----
   const currentStep = computed<TourStep | undefined>(
-    () => steps[stepIndex.value]
+    () => steps.value[stepIndex.value]
   );
   const isFirst = computed(() => stepIndex.value === 0);
-  const isLast = computed(() => stepIndex.value === steps.length - 1);
+  const isLast = computed(() => stepIndex.value === steps.value.length - 1);
 
   // ---- actions ----
 
@@ -103,8 +109,22 @@ export const useTourStore = defineStore("tour", () => {
 
   /** Jump to a step by id (no-op if unknown). */
   function goTo(id: string): void {
-    const i = steps.findIndex((s) => s.id === id);
+    const i = steps.value.findIndex((s) => s.id === id);
     if (i >= 0) stepIndex.value = i;
+  }
+
+  /**
+   * Start a feature-spotlight tour with a custom step array. Used by the
+   * trace-features video spec via window.__startTourWithSteps. The default
+   * onboarding manifest (TOUR_STEPS) is restored automatically when the overlay
+   * finishes or is skipped.
+   */
+  function startWithSteps(customSteps: readonly TourStep[], replay = false): void {
+    if (isSnapshot()) return;
+    if (completed.value && !replay) return;
+    steps.value = customSteps;
+    stepIndex.value = 0;
+    active.value = true;
   }
 
   /** Reached the end — close and remember. */
@@ -112,6 +132,9 @@ export const useTourStore = defineStore("tour", () => {
     active.value = false;
     completed.value = true;
     writeCompleted();
+    // Restore the default manifest so a subsequent replay() call from the "?"
+    // button always returns the onboarding tour, not a feature-spotlight tour.
+    steps.value = TOUR_STEPS;
   }
 
   /** Dismiss early — same persistence as finishing (don't nag). */
@@ -144,12 +167,14 @@ export const useTourStore = defineStore("tour", () => {
     stepIndex,
     completed,
     envTick,
+    steps,
     // getters
     currentStep,
     isFirst,
     isLast,
     // actions
     start,
+    startWithSteps,
     maybeAutoStart,
     next,
     prev,
