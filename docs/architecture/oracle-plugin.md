@@ -411,6 +411,41 @@ numeric *range*, so a small model may emit e.g. `confidence: 95` for a `0..1`
 field — the decide prompt should state field scales, and any out-of-range output
 is caught by `ValidateSubmission`, which trips the `oracle.claude` fallback.
 
+### Embedding sidecar mode
+
+A `builtin.local_llm` sidecar can be repurposed as an **embedding-only**
+server by passing `WithExtraArgs("--embeddings", "--pooling", "mean")` when
+constructing the `Sidecar`. The `--embeddings` flag restricts the server to
+the `/v1/embeddings` endpoint; this is a **separate server instance** (separate
+port, separate GGUF) from any chat sidecar — not a flag on the chat one.
+
+`LocalEmbedder` (`internal/oracle/local_llm_embed.go`) implements
+`embed.Embedder` against this endpoint. It applies the model+role task prefix
+from the `modelPrefixes` map and POSTs to `/v1/embeddings`. Vectors are not
+re-normalized client-side — llama-server with `--pooling mean` returns
+L2-normalized vectors.
+
+**Supported models and their GGUFs:**
+
+- `nomic-embed-text-v1.5` — default; Matryoshka truncation to 256 dims;
+  asymmetric prefixes (`search_document:` / `search_query:`).
+- `bge-small-en-v1.5` — 384 dims; query-only prefix (`search_query:`).
+
+**Lifecycle mirrors `oracle.local`:**
+
+- **Endpoint mode** (`endpoint:` set): attach to an already-running embedding
+  server; no fetching or spawning. Works today on any platform.
+- **Managed mode** (`model:` set): fetch, sha256-verify, and spawn lazily on
+  the first `Embed` call. Requires filled model pins in `fetch.go` — these are
+  currently placeholders for the embedding GGUFs; use endpoint mode until they
+  are proven.
+
+The embedding sidecar is consumed by `host.oracle.search`
+(`internal/host/oracle_search.go`) and the embedding routing tier
+(`internal/orchestrator/embed_tier.go`). For full substrate details, including
+the `embed.Index`, `embed.Store`, prefix discipline, and `FakeEmbedder` test
+seam, see [`docs/architecture/embeddings.md`](embeddings.md).
+
 ---
 
 *For the trace event format produced by oracle calls, see

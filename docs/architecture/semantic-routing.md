@@ -410,7 +410,57 @@ From the app author's perspective there is no visible difference.
 Transport tests continue to pass unchanged; the seam is below the
 `Turn()` surface.
 
-## 6. See also
+## 6. Embedding routing tier
+
+An optional embedding tier sits between the lexical template tier (§1.3) and
+the LLM, catching paraphrase the lexical layer misses. It is off by default
+and enabled per app:
+
+```yaml
+app:
+  routing:
+    embedding:
+      enabled: true
+```
+
+When enabled, the tier embeds allowed intent names as `Document` vectors once
+at startup (lazy, cached by intent name), embeds the utterance as `Query` at
+turn time, and applies the `ConfidentBar`/`Margin` gate:
+
+- top-1 cosine ≥ `confident_bar` **and** (top1 − top2) ≥ `margin` → confident
+  hit at `semroute.ConfidenceEmbedding`.
+- top-1 ≥ bar but margin too narrow → tie → `AMBIGUOUS_INTENT` disambiguation.
+- otherwise → zero verdict → falls through to the LLM as before.
+
+`semroute.ConfidenceEmbedding` is a new band on the existing five-band scale
+that fits between the lexical template tier (0.65–0.80) and the LLM.
+
+**`routing.embedding` config fields** (see `EmbedTierConfig` in
+`internal/orchestrator/embed_tier.go`):
+
+| Field           | Default                  | Meaning |
+|-----------------|--------------------------|---------|
+| `enabled`       | `false`                  | Opt-in gate |
+| `model`         | `nomic-embed-text-v1.5`  | Embedding model |
+| `dim`           | `256`                    | Matryoshka truncation for nomic |
+| `endpoint`      | `""`                     | Attach to already-running embedding server |
+| `confident_bar` | `0.82`                   | top-1 cosine ≥ this → confident match |
+| `margin`        | `0.08`                   | top1 − top2 must exceed this; else tie |
+
+**Calibration note.** `confident_bar: 0.82` and `margin: 0.08` are
+placeholder values. The Oregon Trail bake-off (`stories/oregon-trail/`) with
+`KITSOKI_EMBED_E2E=1` will tune them and record the LLM-fallthrough delta
+relative to the current 37.5% baseline.
+
+The tier is **additive and opt-in**: stories that do not set
+`routing.embedding.enabled: true` are byte-identical to today; no cassettes
+change. The embedding sidecar lifecycle (fetch, spawn, teardown) follows the
+same pattern as `oracle.local`; see
+[`oracle-plugin.md §9`](oracle-plugin.md#9-local-model-backend) and
+[`docs/architecture/embeddings.md`](embeddings.md) for the full substrate
+reference.
+
+## 8. See also
 
 - [`architecture.md`](overview.md) §3 — where the routing tiers
   sit in the broader turn pipeline.

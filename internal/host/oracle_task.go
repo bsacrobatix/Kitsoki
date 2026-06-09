@@ -189,6 +189,13 @@ func OracleTaskHandler(ctx context.Context, args map[string]any) (Result, error)
 
 	// ── Build CLI args ────────────────────────────────────────────────────
 	baseCLIArgs := buildBaseCLIArgs(args, agent)
+	// When an acceptance schema is set the validator MCP server is attached as
+	// "validator", exposing mcp__validator__submit. Add it to the allowed tools
+	// so the agent can call submit() even when the tool list is otherwise
+	// restricted — without this the tool is hidden by --allowedTools filtering.
+	if acceptance.SchemaPath != "" {
+		tools = append(tools, "mcp__validator__submit")
+	}
 	if len(tools) > 0 {
 		baseCLIArgs = appendAllowedToolsFlag(baseCLIArgs, tools)
 	}

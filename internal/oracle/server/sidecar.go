@@ -104,6 +104,11 @@ type Sidecar struct {
 	port      int    // TCP port llama-server binds (127.0.0.1:port) in managed mode.
 	parallel  int    // llama-server --parallel slot count.
 
+	// extraArgs are appended to the llama-server argv after the standard flags.
+	// Use WithExtraArgs to pass embedding-specific flags such as --embeddings
+	// and --pooling mean when running an embedding sidecar.
+	extraArgs []string
+
 	// Seams, swappable in tests.
 	fetch     Fetcher
 	spawn     Spawner
@@ -138,6 +143,13 @@ func WithHTTPClient(c *http.Client) Option { return func(s *Sidecar) { s.client 
 
 // WithParallel overrides the llama-server --parallel slot count.
 func WithParallel(n int) Option { return func(s *Sidecar) { s.parallel = n } }
+
+// WithExtraArgs appends extra arguments to the llama-server argv. Use this to
+// pass embedding-specific flags such as --embeddings and --pooling mean when
+// constructing a sidecar for the LocalEmbedder.
+func WithExtraArgs(args ...string) Option {
+	return func(s *Sidecar) { s.extraArgs = append(s.extraArgs, args...) }
+}
 
 // NewSidecar constructs a Sidecar. In endpoint mode (endpoint != "") it returns
 // an attach-only sidecar that never fetches or spawns. In managed mode it wires
@@ -212,6 +224,7 @@ func (s *Sidecar) EnsureRunning(ctx context.Context) (string, error) {
 		"--parallel", strconv.Itoa(s.parallel),
 		"--host", "127.0.0.1",
 	}
+	args = append(args, s.extraArgs...)
 	// The binary's directory holds its bundled shared libraries (libggml*,
 	// libllama*) and, on older-glibc Linux, the libstdc++ shim — put it on
 	// LD_LIBRARY_PATH so the server resolves them.

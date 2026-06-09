@@ -284,36 +284,58 @@ func (o *Orchestrator) TrySemantic(ctx context.Context, sid app.SessionID, input
 		// instead of looking stuck on "semantic" for the whole call.
 		tl.Debug(ctx, trace.EvTurnSemanticMiss, slog.String("input", input))
 
-		// When the app opted into ExtractLLMOnNoMatch, run the LLM tier — backed
-		// by a cheap local model via oracle: oracle.local — for a schema-bounded
-		// routing attempt before the main-turn LLM. A "none"/out-of-list verdict,
-		// no registry, or an error falls through to the main-turn LLM.
-		if !o.extractLLMOnNoMatch() {
-			return nil, false, nil
+		// Embedding tier: if enabled and the Slice 3 substrate is in place, try
+		// an embedding-based match before the LLM hop.
+		embedHit := false
+		if o.embedTier != nil {
+			specs := make([]IntentSpec, len(allowedIntents))
+			for i, ai := range allowedIntents {
+				specs[i] = IntentSpec{Name: ai.Name}
+			}
+			embedVerdict, embedOK, embedErr := o.embedTier.Match(ctx, specs, input)
+			if embedErr != nil {
+				tl.Debug(ctx, trace.EvTurnSemanticMiss,
+					slog.String("reason", "embed_tier_error"),
+					slog.String("err", embedErr.Error()),
+				)
+			} else if embedOK {
+				verdict = embedVerdict
+				embedHit = true
+			}
 		}
-		llmVerdict, ok, llmErr := o.routeViaLLM(ctx, sid, turnNum, journey.State, input, allowedNames)
-		if llmErr != nil {
-			// A local-model failure must never abort the turn — record the
-			// local-LLM miss (so the pipeline marks that layer) and fall through
-			// to the main-turn LLM.
-			tl.Debug(ctx, trace.EvTurnLLMMiss,
-				slog.String("model", o.extractLLMOracle()),
-				slog.String("reason", "error"),
-				slog.String("err", llmErr.Error()),
-			)
-			return nil, false, nil
+
+		if !embedHit {
+			// When the app opted into ExtractLLMOnNoMatch, run the LLM tier — backed
+			// by a cheap local model via oracle: oracle.local — for a schema-bounded
+			// routing attempt before the main-turn LLM. A "none"/out-of-list verdict,
+			// no registry, or an error falls through to the main-turn LLM.
+			if !o.extractLLMOnNoMatch() {
+				return nil, false, nil
+			}
+			llmVerdict, ok, llmErr := o.routeViaLLM(ctx, sid, turnNum, journey.State, input, allowedNames)
+			if llmErr != nil {
+				// A local-model failure must never abort the turn — record the
+				// local-LLM miss (so the pipeline marks that layer) and fall through
+				// to the main-turn LLM.
+				tl.Debug(ctx, trace.EvTurnLLMMiss,
+					slog.String("model", o.extractLLMOracle()),
+					slog.String("reason", "error"),
+					slog.String("err", llmErr.Error()),
+				)
+				return nil, false, nil
+			}
+			if !ok {
+				tl.Debug(ctx, trace.EvTurnLLMMiss,
+					slog.String("model", o.extractLLMOracle()),
+					slog.String("reason", "no_match"),
+				)
+				return nil, false, nil
+			}
+			// LLM tier hit: adopt the verdict and fall through to the band switch,
+			// which emits EvTurnLLMRouted naming the backend so the pipeline
+			// attributes the hit to the local-LLM layer.
+			verdict = llmVerdict
 		}
-		if !ok {
-			tl.Debug(ctx, trace.EvTurnLLMMiss,
-				slog.String("model", o.extractLLMOracle()),
-				slog.String("reason", "no_match"),
-			)
-			return nil, false, nil
-		}
-		// LLM tier hit: adopt the verdict and fall through to the band switch,
-		// which emits EvTurnLLMRouted naming the backend so the pipeline
-		// attributes the hit to the local-LLM layer.
-		verdict = llmVerdict
 	}
 
 	highBar, midBar := o.semanticBars()

@@ -76,6 +76,14 @@ var modelPins = map[string]pin{
 		url:    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
 		sha256: "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
 	},
+	"nomic-embed-text-v1.5": {
+		url:    "", // TODO: pin verified HuggingFace URL + sha256 before managed mode
+		sha256: "",
+	},
+	"bge-small-en-v1.5": {
+		url:    "", // TODO: pin verified HuggingFace URL + sha256 before managed mode
+		sha256: "",
+	},
 }
 
 // cxxShim describes the libstdc++ runtime fetched on older-glibc Linux. member is

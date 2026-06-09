@@ -14,21 +14,18 @@ initial_world:
   proposal_idea:      "Add a local model oracle sidecar."
   proposal_slug:      "lmo"
   proposal_workspace: "docs/proposals/.workspace/lmo"
+  # Pre-populate the scout and researcher results so the confirm guard sees them.
+  # Seeding bypasses on_enter, so we inline the oracle results here.
+  proposal_existing_state:
+    overlaps:
+      - { path: "docs/proposals/local-model-oracle.md", kind: "accepted", summary: "Already proposes a llama.cpp sidecar for routing/small-decide.", recommendation: "amend" }
+    roadmap_fit: "Duplicates the accepted local-model-oracle proposal."
+  proposal_existing_path:   "docs/proposals/.workspace/lmo/002-existing-state.md"
+  proposal_references:
+    items: []
+  proposal_references_path: "docs/proposals/.workspace/lmo/003-references.json"
 
 host_handlers:
-  host.oracle.decide:
-    by_call:
-      existing_scan:
-        data:
-          ok: true
-          submitted:
-            overlaps:
-              - { path: "docs/proposals/local-model-oracle.md", kind: "accepted", summary: "Already proposes a llama.cpp sidecar for routing/small-decide.", recommendation: "amend" }
-            roadmap_fit: "Duplicates the accepted local-model-oracle proposal."
-      references_research:
-        data:
-          ok: true
-          submitted: { items: [] }
   host.artifacts_dir:
     data: { ok: true, path: "docs/proposals/.workspace/lmo/out.md", message_id: "out#1" }
   # Stubs for proposal_refine on_enter (advanced to by change_existing)

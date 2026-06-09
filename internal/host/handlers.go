@@ -282,6 +282,11 @@ func RegisterBuiltins(r *Registry) {
 	// host.contact_sheet — PNG montage of frames via ffmpeg tile filter.
 	r.Register("host.slidey.render", SlideyRenderHandler)
 	r.Register("host.contact_sheet", ContactSheetHandler)
+
+	// Embeddings epic, Slice 2 — host.oracle.search.
+	// The sentinel handler returns a configuration-required error; apps that
+	// want a working embedder call NewOracleSearchHandler and re-register.
+	r.Register("host.oracle.search", OracleSearchHandler)
 }
 
 // OracleExtractHandler is implemented in oracle_extract.go.

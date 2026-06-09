@@ -1,0 +1,177 @@
+# proposal_refine — brief scaffolding + quality gate.
+#
+# Stage 3 of the 4-stage proposal pipeline:
+#   intake → proposal_search → proposal_refine → proposal_draft (+ publish)
+#
+# on_enter runs three calls, each once: guarded:
+#   1. scaffold brief — host.artifacts_dir (thread=001-brief) writes the
+#      operator-editable 001-brief.md; bind → proposal_brief_path.
+#      Once: keyed off proposal_brief_path (non-empty ⇒ already ran).
+#   2. host.ide.open_file — opens the brief in the operator's editor.
+#      Once: keyed off proposal_brief_path.
+#   3. proposal_refiner (host.oracle.task id=refine_brief) — reads the
+#      search results + idea and fills in the brief scaffold.
+#      Bind → proposal_refine_analysis.
+#      Once: keyed off proposal_refine_analysis (non-empty ⇒ already ran).
+#   4. brief judge (host.oracle.decide id=brief_check) — evaluates the
+#      brief against the quality rubric.
+#      GUARDED: only fires when proposal_brief_cycle > 0 (first entry skips
+#      the judge; `ready` increments the cycle and re-enters, arming it).
+#      A `continue` verdict fires the synthetic `advance_brief` intent via
+#      post-bind emit_intent → auto-advance to proposal_draft.
+#
+# The `ready` intent increments proposal_brief_cycle (arming the judge) and
+# self-transitions (full YAML target) so on_enter re-fires with the new
+# cycle value.
+#
+# `clarify` steps all the way back to the intake room, resetting all search
+# and brief state (the operator has decided the idea itself needs rethinking).
+#
+# `discuss` folds a message into the brief via a conversational turn.
+#
+# Reload-safety: the scaffold, refiner, and judge calls are once: guarded;
+# a /reload that lands here with results already set skips the expensive
+# calls and re-renders the current brief state.
+
+states:
+
+  proposal_refine:
+    mode: conversational
+    default_intent: discuss
+    description: "Shape the brief — talk it through, then say ready to run the quality check."
+    view:
+      - banner:
+          text:     "BRIEF"
+          subtitle: "Shape the brief — ready runs the quality check"
+          color:    "#6366F1"
+      - kv:
+          pairs:
+            Brief:      '{{ world.proposal_brief_path|default:"(scaffolding…)" }}'
+            Cycle:      '{{ world.proposal_brief_cycle }}'
+            Change:     '{{ world.proposal_change_target }}'
+        when: "world.proposal_change_target != ''"
+      - kv:
+          pairs:
+            Brief:  '{{ world.proposal_brief_path|default:"(scaffolding…)" }}'
+            Cycle:  '{{ world.proposal_brief_cycle }}'
+        when: "world.proposal_change_target == ''"
+      - prose: '{{ world.proposal_refine_analysis.summary|default:"(refiner running…)" }}'
+        when: "world.proposal_brief_path != ''"
+      - prose: "⚠ Judge result: {{ world.proposal_brief_decision.verdict }} — {{ world.proposal_brief_decision.reason }}"
+        when: "world.proposal_brief_decision.verdict != '' ?? false"
+      - code: |
+          {% for q in world.proposal_brief_decision.questions %}- {{ q }}
+          {% empty %}{% endfor %}
+        when: "world.proposal_brief_decision.verdict == 'clarify' ?? false"
+      - prose: "Edit the brief at `{{ world.proposal_brief_path }}`, talk through changes here, or say **ready** when it's good."
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "ready"
+              hint:   "run the brief quality check"
+              intent: ready
+            - label:  "clarify"
+              hint:   "step back to intake — the idea needs rethinking"
+              intent: clarify
+            - label:  "quit"
+              hint:   "abandon this proposal"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    relevant_world: [proposal_idea, proposal_workspace, proposal_brief_path, proposal_existing_state, proposal_change_target, proposal_references, proposal_refine_analysis, proposal_brief_decision, proposal_brief_cycle, proposal_brief_budget]
+    on_enter:
+      # 1. Scaffold the brief — write 001-brief.md (once: brief_path not yet set).
+      - invoke: host.artifacts_dir
+        once: true
+        with:
+          thread:   "001-brief"
+          workdir:  "{{ world.proposal_workspace }}"
+          args:
+            idea:       "{{ world.proposal_idea }}"
+            references: "{{ world.proposal_references }}"
+        bind:
+          proposal_brief_path: path
+        on_error: proposal_search
+      # 2. Open the brief in the operator's editor.
+      - invoke: host.ide.open_file
+        with:
+          path: "{{ world.proposal_brief_path }}"
+        on_error: .
+      # 3. Refiner fills the scaffold with search context (once: analysis not yet set).
+      - invoke: host.oracle.task
+        once: true
+        id: refine_brief
+        with:
+          agent: proposal_refiner
+          working_dir: "{{ world.proposal_workspace }}"
+          acceptance:
+            schema: schemas/brief-refine.json
+          context:
+            prompt: prompts/proposal_refine.md
+            args:
+              idea:           "{{ world.proposal_idea }}"
+              brief_path:     "{{ world.proposal_brief_path }}"
+              existing_state: "{{ world.proposal_existing_state }}"
+              references:     "{{ world.proposal_references }}"
+              change_target:  "{{ world.proposal_change_target }}"
+        bind:
+          proposal_refine_analysis: submitted
+        on_error: proposal_search
+      # 4. Brief judge — GUARDED on proposal_brief_cycle > 0 (ready arms it).
+      - invoke: host.oracle.decide
+        id: brief_check
+        when: "world.proposal_brief_cycle > 0"
+        with:
+          agent: proposal_brief_judge
+          prompt_path: prompts/proposal_brief_check.md
+          schema: schemas/brief-check.json
+          working_dir: "."
+          args:
+            brief_path: "{{ world.proposal_brief_path }}"
+        bind:
+          proposal_brief_decision: submitted
+        emit_intent: "{{ world.proposal_brief_decision.verdict == 'continue' ? 'advance_brief' : '' }}"
+        on_error: .
+    on:
+      # Fold a conversational message into the brief (multi-turn shaping).
+      discuss:
+        - target: .
+
+      # Arm the judge: increment cycle and re-enter so on_enter fires the judge.
+      ready:
+        - target: proposal_refine
+          effects:
+            - set:
+                proposal_brief_cycle: "{{ world.proposal_brief_cycle + 1 }}"
+
+      # advance_brief is synthetic — emitted by the judge when verdict == "continue".
+      advance_brief:
+        - target: proposal_draft
+
+      # Step back to intake — full reset of search + brief state.
+      clarify:
+        - target: proposal
+          effects:
+            - set:
+                proposal_existing_state:   {}
+                proposal_existing_path:    ""
+                proposal_overlap_decision: ""
+                proposal_change_target:    ""
+                proposal_references:       {}
+                proposal_references_path:  ""
+                proposal_brief_path:       ""
+                proposal_brief_decision:   {}
+                proposal_brief_cycle:      0
+                proposal_refine_analysis:  {}
+
+      quit:
+        - target: main
+          effects:
+            - set:
+                last_error:         "proposal abandoned at brief"
+                prev_state:         "main"
+                proposal_seed_idea: ""
+      look:
+        - target: .

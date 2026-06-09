@@ -18,6 +18,11 @@ const (
 	// (synonym template with ≥1 named slot unparseable). Unreachable
 	// from Phase 2.
 	ConfidenceTemplateMissingSlot = 0.65
+	// ConfidenceEmbedding (0.82) is the band emitted by the embedding
+	// routing tier when the top-1 cosine score clears the confident_bar
+	// and the margin over top-2 clears the margin threshold. Must exceed
+	// SemanticHighBar (default 0.80) so confident embed hits are direct-routed.
+	ConfidenceEmbedding = 0.82
 	// ConfidenceTie (0.50) is the band for "two or more allowed
 	// intents matched the same input." The caller surfaces a
 	// disambiguation card; the verdict carries Candidates.

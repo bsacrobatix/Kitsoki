@@ -206,6 +206,10 @@ thought.
   the Oregon Trail calibration history. The user-facing reference
   for the shipped surface lives at
   [`../architecture/semantic-routing.md`](../architecture/semantic-routing.md).
+- [`embeddings.md`](embeddings.md) — **epic.** All 3 slices shipped. See
+  [`docs/architecture/embeddings.md`](../architecture/embeddings.md) (substrate
+  + `oracle.search`) and [`docs/architecture/semantic-routing.md`](../architecture/semantic-routing.md)
+  §6 (routing tier). Child slice files deleted.
 - [`visual-outputs.md`](visual-outputs.md) — **epic.** Make a visual output
   a step produces (MP4 / PNG slideshow / slidey deck) a first-class,
   **recorded** media artifact: emitted under `.artifacts/`, recorded in the

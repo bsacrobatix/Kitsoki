@@ -173,6 +173,11 @@ type Orchestrator struct {
 	obsMu     sync.Mutex
 	observers []SessionObserver
 
+	// embedTier is the optional embedding routing tier (Slice 3). When
+	// non-nil and cfg.Enabled is true, TrySemantic tries it between the
+	// deterministic synonyms miss and the LLM hop. Set via WithEmbedTier.
+	embedTier *EmbedTier
+
 	// matcher is the per-app semantic-routing index (see
 	// docs/architecture/semantic-routing.md). Compiled lazily on first
 	// TrySemantic call; subsequent calls reuse the cached *Matcher.
@@ -468,6 +473,12 @@ func WithOracleRegistry(reg *oracle.Registry) Option {
 	return func(o *Orchestrator) {
 		o.oracleRegistry = reg
 	}
+}
+
+// WithEmbedTier injects a pre-constructed EmbedTier for the embedding routing
+// tier. If nil or tier.cfg.Enabled is false, TrySemantic skips the embed hop.
+func WithEmbedTier(t *EmbedTier) Option {
+	return func(o *Orchestrator) { o.embedTier = t }
 }
 
 // WithEventSink wires a store.EventSink that receives every event appended
