@@ -112,6 +112,22 @@ The [`flows/`](./flows/) fixtures drive all three paths end-to-end:
   returns no results, the script `fail()`s, and the `on_error: failed` arc routes
   into the `failed` room with `world.last_error` set.
 
+## Watch it
+
+A Playwright spec drives a real `kitsoki web --flow tour.yaml` server in the
+no-LLM posture and records a screen-capture tour (video + per-scene screenshots)
+to `.artifacts/weather-report-tour/` — the trace timeline shows the genuine
+`host.starlark.run` events and their `__http_exchanges` payload:
+
+```sh
+cd tools/runstatus && pnpm exec playwright test weather-report-tour --project=chromium
+# fast (no dwells): WEB_CHAT_PACE=0 pnpm exec playwright test weather-report-tour …
+```
+
+This works because the web `--flow` posture honours `starlark_http_cassette:`
+(see `cmd/kitsoki/runtime.go`): the REAL handler runs with its `ctx.http` GETs
+replayed, no LLM and no socket.
+
 ## See also
 
 - [`stories/starlark-enrich/`](../starlark-enrich/) — the minimal one-GET sibling.

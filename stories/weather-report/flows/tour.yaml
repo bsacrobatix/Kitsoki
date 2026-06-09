@@ -38,11 +38,20 @@ turns:
       - handler: host.starlark.run
     expect_view_matches: "climate profile"
 
-  # 3. back → lobby.
+  # 3. forecast Zzqxville (report → failed): an unknown place. Geocoding returns
+  #    no results, the script fail()s, and on_error: failed routes here — the
+  #    "fails cleanly on a bad place" path the tour shows.
+  - intent: { name: forecast, slots: { location: "Zzqxville" } }
+    expect_state: failed
+    expect_view_matches: "no place found matching"
+    expect_host_calls:
+      - handler: host.starlark.run
+
+  # 4. back → lobby.
   - intent: { name: back, slots: {} }
     expect_state: lobby
 
-  # 4. quit → ended.
+  # 5. quit → ended.
   - intent: { name: quit, slots: {} }
     expect_state: ended
 
