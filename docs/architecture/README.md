@@ -42,6 +42,10 @@ these surfaces.
 - **[`oracle-cli.md`](oracle-cli.md)** — the `host.oracle.*` verb
   surface as a standalone CLI (`kitsoki oracle …`, `oracle-serve`) for
   validators and CI outside a running state machine.
+- **[`system-prompt.md`](system-prompt.md)** — the layered, cache-friendly
+  system prompt (kitsoki → project → task) composed for every claude
+  invocation, the replace-vs-append model, and the per-verb dynamic-sections
+  policy.
 - **[`transports.md`](transports.md)** — output adapters (TUI, Jira,
   Bitbucket) and how sessions are keyed by external thread.
 - **[`semantic-routing.md`](semantic-routing.md)** — the routing stack

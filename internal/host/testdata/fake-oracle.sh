@@ -19,6 +19,7 @@ while [ $# -gt 0 ]; do
     --session-id) session_id="$2"; shift 2 ;;
     --resume) session_id="$2"; shift 2 ;;
     --append-system-prompt) system_prompt="$2"; shift 2 ;;
+    --system-prompt) system_prompt="$2"; shift 2 ;;
     --model) model="$2"; shift 2 ;;
     *) shift ;;
   esac

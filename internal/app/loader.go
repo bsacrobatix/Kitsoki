@@ -673,6 +673,11 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	if def.App.ID == "" {
 		addErr("app.id is required")
 	}
+	// Layer-2 project context: at most one source. (Both empty is fine — the
+	// prompts/_project.md convention may still supply it at render time.)
+	if def.App.Context != "" && def.App.ContextPath != "" {
+		addErr("app.context and app.context_path are mutually exclusive; set only one")
+	}
 
 	// ── 2. world schema ──────────────────────────────────────────────────────
 	worldKeys := make(map[string]struct{}, len(def.World))

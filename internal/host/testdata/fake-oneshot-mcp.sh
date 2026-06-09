@@ -14,11 +14,14 @@ set -uo pipefail
 # retry-loop tests need to see --resume / --session-id.
 orig_argv=("$@")
 
-# When KITSOKI_FAKE_ARGV_DUMP is set, append the argv (space-joined +
-# newline) to that path. Tests use this to assert which session flag
-# (--session-id vs --resume) the host passed on a given call.
+# When KITSOKI_FAKE_ARGV_DUMP is set, append the argv (space-joined) as ONE
+# line per invocation to that path. Tests use this to assert which session flag
+# (--session-id vs --resume) the host passed on a given call. Newlines/tabs
+# inside an arg value (the composed --system-prompt is multi-line) are collapsed
+# to spaces so each invocation stays a single line for the test's line split.
 if [ -n "${KITSOKI_FAKE_ARGV_DUMP:-}" ]; then
-  printf '%s\n' "${orig_argv[*]}" >> "$KITSOKI_FAKE_ARGV_DUMP"
+  printf '%s' "${orig_argv[*]}" | tr '\n\t' '  ' >> "$KITSOKI_FAKE_ARGV_DUMP"
+  printf '\n' >> "$KITSOKI_FAKE_ARGV_DUMP"
 fi
 
 mcp_config=""

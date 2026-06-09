@@ -168,7 +168,7 @@ func fakeRunnerWithMeta(result string) ClaudeRunner {
 		var systemPrompt, model, allowedTools string
 		for i := 0; i < len(args); i++ {
 			switch args[i] {
-			case "--append-system-prompt":
+			case "--append-system-prompt", "--system-prompt":
 				if i+1 < len(args) {
 					systemPrompt = args[i+1]
 					i++

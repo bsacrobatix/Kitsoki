@@ -75,6 +75,12 @@ type Agent struct {
 	BashProfile        *BashProfile
 	DefaultCwd         string
 	ExternalSideEffect *bool
+	// InheritClaudeDefault, when true, opts this agent out of the layered
+	// system prompt: its persona is appended (--append-system-prompt) onto
+	// Claude Code's default rather than composed under the kitsoki + project
+	// layers and passed via --system-prompt. Migration escape hatch; default
+	// false. See internal/sysprompt and docs/architecture/system-prompt.md.
+	InheritClaudeDefault bool
 }
 
 // agentsKey is the unexported context key for the injected agents map.

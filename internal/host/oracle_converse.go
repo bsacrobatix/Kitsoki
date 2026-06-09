@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"kitsoki/internal/render/sourcecolor"
+	"kitsoki/internal/sysprompt"
 )
 
 // OracleBinEnv overrides the `claude` binary path for tests.
@@ -160,9 +161,7 @@ func OracleConverseHandler(ctx context.Context, args map[string]any) (Result, er
 		"--permission-mode", permMode,
 	}
 	cliArgs = appendSettingSourcesFlag(cliArgs)
-	if strings.TrimSpace(systemPrompt) != "" {
-		cliArgs = append(cliArgs, "--append-system-prompt", systemPrompt)
-	}
+	cliArgs, _ = appendComposedSystemPrompt(ctx, cliArgs, sysprompt.Converse, systemPrompt, agent.InheritClaudeDefault)
 	if strings.TrimSpace(agent.Model) != "" {
 		cliArgs = append(cliArgs, "--model", agent.Model)
 	}
@@ -275,7 +274,7 @@ func runConverseWithChat(ctx context.Context, cs ChatStore, chatID, question, pe
 
 	var out Result
 	lockErr := cs.WithLock(ctx, chatID, func(ctx context.Context) error {
-		inner, runErr := doConverseChatTurn(ctx, cs, chatID, question, workingDir, systemPrompt, model, permMode, tools, disallowedTools)
+		inner, runErr := doConverseChatTurn(ctx, cs, chatID, question, workingDir, systemPrompt, model, permMode, tools, disallowedTools, agent.InheritClaudeDefault)
 		out = inner
 		return runErr
 	})
@@ -292,7 +291,7 @@ func runConverseWithChat(ctx context.Context, cs ChatStore, chatID, question, pe
 //
 // Step ordering: allocate/persist the Claude session ID BEFORE appending the
 // user message to prevent orphan transcript rows on session-write failures.
-func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, workingDir, systemPrompt, model, permMode string, tools, disallowedTools []string) (Result, error) {
+func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, workingDir, systemPrompt, model, permMode string, tools, disallowedTools []string, inheritDefault bool) (Result, error) {
 	callID := newUUID()
 	callStart := time.Now()
 
@@ -343,9 +342,7 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 	} else {
 		cliArgs = append(cliArgs, "--resume", claudeSID)
 	}
-	if strings.TrimSpace(systemPrompt) != "" {
-		cliArgs = append(cliArgs, "--append-system-prompt", systemPrompt)
-	}
+	cliArgs, _ = appendComposedSystemPrompt(ctx, cliArgs, sysprompt.Converse, systemPrompt, inheritDefault)
 	if strings.TrimSpace(model) != "" {
 		cliArgs = append(cliArgs, "--model", model)
 	}

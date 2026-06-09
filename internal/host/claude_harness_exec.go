@@ -24,7 +24,7 @@ import (
 //   - context cancellation  → that error verbatim, empty stdout
 //   - infra failure (Infra) → wrapped error, empty stdout
 //   - non-zero exit code    → error carrying stderr/stdout, plus the stdout so
-//                             the caller can still parse a clarify envelope
+//     the caller can still parse a clarify envelope
 //   - clean exit            → (stdout, nil)
 //
 // The harness passes --output-format json, so runClaudeOneShot takes its

@@ -2705,9 +2705,10 @@ func agentsForContext(def *app.AppDef) map[string]host.Agent {
 	out := make(map[string]host.Agent, len(def.Agents))
 	for name, a := range def.Agents {
 		agent := host.Agent{
-			SystemPrompt: a.SystemPrompt,
-			Model:        a.Model,
-			DefaultCwd:   a.Cwd,
+			SystemPrompt:         a.SystemPrompt,
+			Model:                a.Model,
+			DefaultCwd:           a.Cwd,
+			InheritClaudeDefault: a.InheritClaudeDefault,
 		}
 		if len(a.Tools) > 0 {
 			agent.Tools = append([]string(nil), a.Tools...)
@@ -2722,6 +2723,22 @@ func agentsForContext(def *app.AppDef) map[string]host.Agent {
 		out[name] = agent
 	}
 	return out
+}
+
+// projectContextFor translates the app's Layer-2 authoring fields (app.context
+// / context_path) into the host-side ProjectContext injected per dispatch, so
+// every oracle call composes the project grounding into its system prompt. A
+// nil def or an app with neither field set yields a zero ProjectContext (the
+// host then falls back to the prompts/_project.md convention, then to no
+// project layer).
+func projectContextFor(def *app.AppDef) host.ProjectContext {
+	if def == nil {
+		return host.ProjectContext{}
+	}
+	return host.ProjectContext{
+		Inline: def.App.Context,
+		Path:   def.App.ContextPath,
+	}
 }
 
 // convertBashProfile translates an app-layer BashProfileDecl into the

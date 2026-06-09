@@ -28,6 +28,7 @@ import (
 
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/render/sourcecolor"
+	"kitsoki/internal/sysprompt"
 )
 
 // kitsokiBinaryEnv overrides the path to the kitsoki binary used to spawn the
@@ -640,9 +641,8 @@ func oracleAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, 
 	// original session's system prompt forward implicitly, so we only
 	// need to append the flag on iteration 0 (handled by BaseCLIArgs).
 	agent, _ := resolveAgent(ctx, args)
-	if sp := effectiveSystemPrompt(args, agent); strings.TrimSpace(sp) != "" {
-		cliArgs = append(cliArgs, "--append-system-prompt", sp)
-	}
+	cliArgs, _ = appendComposedSystemPrompt(ctx, cliArgs, sysprompt.AskWithMCP,
+		effectiveSystemPrompt(args, agent), agent.InheritClaudeDefault)
 	if strings.TrimSpace(agent.Model) != "" {
 		cliArgs = append(cliArgs, "--model", agent.Model)
 	}

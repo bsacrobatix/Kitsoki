@@ -32,7 +32,7 @@ func stubOracleRunner() host.ClaudeRunner {
 					sessionID = args[i+1]
 					i++
 				}
-			case "--append-system-prompt":
+			case "--append-system-prompt", "--system-prompt":
 				if i+1 < len(args) {
 					systemPrompt = args[i+1]
 					i++
@@ -65,7 +65,7 @@ func stubOneShotRunner() host.ClaudeRunner {
 		var systemPrompt, model string
 		for i := 0; i < len(args); i++ {
 			switch args[i] {
-			case "--append-system-prompt":
+			case "--append-system-prompt", "--system-prompt":
 				if i+1 < len(args) {
 					systemPrompt = args[i+1]
 					i++
@@ -193,14 +193,16 @@ func TestOracleTalk_SystemPromptThreaded(t *testing.T) {
 		t.Fatalf("unexpected Result.Error: %s", res.Error)
 	}
 	ans, _ := res.Data["answer"].(string)
-	if !strings.Contains(ans, "system=["+persona+"]") {
+	if !strings.Contains(ans, persona) {
 		t.Fatalf("system_prompt was not forwarded to --append-system-prompt; answer=%q", ans)
 	}
 }
 
-// TestOracleTalk_SystemPromptOmitted verifies the legacy path: with no
-// system_prompt arg, the binary's argv must NOT carry --append-system-prompt.
-// Apps without a persona block keep their pre-existing behaviour.
+// TestOracleTalk_SystemPromptOmitted verifies the layered contract: with no
+// system_prompt arg there is no Layer-3 persona, but the call is STILL grounded
+// — the composed system prompt carries the kitsoki Layer-1 fragment via
+// --system-prompt (which replaces Claude Code's default). Grounding is
+// unconditional; that is the moat protection.
 func TestOracleTalk_SystemPromptOmitted(t *testing.T) {
 	t.Parallel()
 	ctx := host.WithClaudeRunner(context.Background(), stubOracleRunner())
@@ -215,8 +217,8 @@ func TestOracleTalk_SystemPromptOmitted(t *testing.T) {
 		t.Fatalf("unexpected Result.Error: %s", res.Error)
 	}
 	ans, _ := res.Data["answer"].(string)
-	if strings.Contains(ans, "system=[") {
-		t.Fatalf("no system_prompt was set but --append-system-prompt leaked: answer=%q", ans)
+	if !strings.Contains(ans, "kitsoki") {
+		t.Fatalf("expected the composed kitsoki grounding even with no persona; answer=%q", ans)
 	}
 }
 
@@ -594,7 +596,7 @@ func TestOracleTalk_AgentArg_AppliesSystemPrompt(t *testing.T) {
 		t.Fatalf("unexpected Result.Error: %s", res.Error)
 	}
 	ans, _ := res.Data["answer"].(string)
-	if !strings.Contains(ans, "system=["+systemPrompt+"]") {
+	if !strings.Contains(ans, systemPrompt) {
 		t.Fatalf("agent's system_prompt did not reach the binary; answer=%q", ans)
 	}
 	if !strings.Contains(ans, "model=[claude-opus-4-7]") {
@@ -629,7 +631,7 @@ func TestOracleTalk_AgentArg_InlineSystemPromptWins(t *testing.T) {
 		t.Fatalf("unexpected Result.Error: %s", res.Error)
 	}
 	ans, _ := res.Data["answer"].(string)
-	if !strings.Contains(ans, "system=["+inline+"]") {
+	if !strings.Contains(ans, inline) {
 		t.Fatalf("inline system_prompt did not win over agent's SystemPrompt; answer=%q", ans)
 	}
 	if strings.Contains(ans, agentPrompt) {
@@ -639,7 +641,8 @@ func TestOracleTalk_AgentArg_InlineSystemPromptWins(t *testing.T) {
 
 // TestOracleTalk_AgentArg_UnknownAgent_NoSystemPrompt asserts the runtime
 // safety net: when ctx has no agents map (or the named agent isn't in it),
-// the handler silently falls back to a clean call with no system_prompt.
+// the handler falls back to a call with no Layer-3 persona. It is still
+// grounded by the kitsoki Layer-1 fragment (grounding is unconditional).
 // (Mismatches are normally caught at load time by validateAgentRef; this
 // path only runs in handlers invoked from non-app code, e.g. tests.)
 func TestOracleTalk_AgentArg_UnknownAgent_NoSystemPrompt(t *testing.T) {
@@ -657,8 +660,8 @@ func TestOracleTalk_AgentArg_UnknownAgent_NoSystemPrompt(t *testing.T) {
 		t.Fatalf("unexpected Result.Error: %s", res.Error)
 	}
 	ans, _ := res.Data["answer"].(string)
-	if strings.Contains(ans, "system=[") {
-		t.Fatalf("unresolved agent: leaked a system_prompt; answer=%q", ans)
+	if !strings.Contains(ans, "kitsoki") {
+		t.Fatalf("unresolved agent should still be grounded by the kitsoki layer; answer=%q", ans)
 	}
 }
 
@@ -693,7 +696,7 @@ func TestOracleAsk_AgentArg_AppliesSystemPrompt(t *testing.T) {
 		t.Fatalf("unexpected Result.Error: %s", res.Error)
 	}
 	out, _ := res.Data["stdout"].(string)
-	if !strings.Contains(out, "system=["+systemPrompt+"]") {
+	if !strings.Contains(out, systemPrompt) {
 		t.Fatalf("agent: did not thread system_prompt through host.oracle.ask; stdout=%q", out)
 	}
 }

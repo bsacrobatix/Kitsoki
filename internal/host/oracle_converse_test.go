@@ -43,7 +43,7 @@ func stubConverseRunner() host.ClaudeRunner {
 					resumeID = args[i+1]
 					i++
 				}
-			case "--append-system-prompt":
+			case "--append-system-prompt", "--system-prompt":
 				if i+1 < len(args) {
 					systemPrompt = args[i+1]
 					i++
@@ -269,7 +269,7 @@ func TestOracleConverse_AgentSystemPromptAndModel(t *testing.T) {
 		t.Fatalf("unexpected Result.Error: %s", res.Error)
 	}
 	ans, _ := res.Data["answer"].(string)
-	if !strings.Contains(ans, "system=[pair programmer]") {
+	if !strings.Contains(ans, "pair programmer") {
 		t.Fatalf("agent.SystemPrompt not forwarded; ans=%q", ans)
 	}
 	if !strings.Contains(ans, "model=[claude-sonnet-4-6]") {

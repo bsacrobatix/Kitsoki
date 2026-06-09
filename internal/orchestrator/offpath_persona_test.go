@@ -55,15 +55,15 @@ func TestAskOffPath_PersonaReachesOracle(t *testing.T) {
 
 	answer, err := orch.AskOffPath(ctx, sid, "where to camp?")
 	require.NoError(t, err)
-	require.True(t, strings.Contains(answer, "system=["+persona+"]"),
+	require.True(t, strings.Contains(answer, persona),
 		"persona must reach the oracle binary via --append-system-prompt; got answer=%q", answer)
 }
 
-// TestAskOffPath_NoPersona_NoSystemPromptArg asserts the legacy path: when no
-// Persona is configured on OffPathDef, AskOffPath must NOT pass any
-// system_prompt arg, so the binary command-line stays clean and apps without
-// a persona block (cloak, dev-story) keep their pre-existing behaviour.
-func TestAskOffPath_NoPersona_NoSystemPromptArg(t *testing.T) {
+// TestAskOffPath_NoPersona_StillGrounded asserts the layered contract: when no
+// Persona is configured on OffPathDef there is no Layer-3 persona, but the call
+// is STILL grounded — the composed system prompt carries the kitsoki Layer-1
+// fragment via --system-prompt. Grounding is unconditional.
+func TestAskOffPath_NoPersona_StillGrounded(t *testing.T) {
 	// Reuse the standard setup which builds a minimalOffPathApp() without a
 	// Persona — that's exactly the no-persona case we want to assert.
 	orch, _, _, sid := setupOffPathOrch(t)
@@ -71,8 +71,8 @@ func TestAskOffPath_NoPersona_NoSystemPromptArg(t *testing.T) {
 
 	answer, err := orch.AskOffPath(ctx, sid, "anything")
 	require.NoError(t, err)
-	require.False(t, strings.Contains(answer, "system=["),
-		"no persona was configured but --append-system-prompt leaked into the call: %q", answer)
+	require.True(t, strings.Contains(answer, "kitsoki"),
+		"no persona configured, but the call must still be grounded by the kitsoki layer: %q", answer)
 }
 
 // TestAskOffPath_AgentRefReachesOracle asserts the generalised path: when
@@ -117,7 +117,7 @@ func TestAskOffPath_AgentRefReachesOracle(t *testing.T) {
 
 	answer, err := orch.AskOffPath(ctx, sid, "where to camp?")
 	require.NoError(t, err)
-	require.Contains(t, answer, "system=["+agentSystemPrompt+"]",
+	require.Contains(t, answer, agentSystemPrompt,
 		"agent-resolved system_prompt must reach the oracle binary: %q", answer)
 }
 
@@ -162,6 +162,6 @@ func TestAskOffPath_PersonaWinsOverAgent(t *testing.T) {
 
 	answer, err := orch.AskOffPath(ctx, sid, "anything")
 	require.NoError(t, err)
-	require.Contains(t, answer, "system=["+inlinePersona+"]")
+	require.Contains(t, answer, inlinePersona)
 	require.NotContains(t, answer, agentPrompt)
 }

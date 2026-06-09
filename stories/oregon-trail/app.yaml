@@ -12,6 +12,18 @@ app:
   title: "The Oregon Trail"
   author: "MECC (original 1971/1985); ported to Kitsoki"
   license: "Spec & rules public domain; this port CC0"
+  # Layer-2 project context: prepended (under the kitsoki grounding) to the
+  # system prompt of every oracle call and the intent router, so each operator
+  # shares the game's domain and voice. See docs/architecture/system-prompt.md.
+  context: |
+    This is **The Oregon Trail**, a port of the 1985 MECC educational
+    survival game. The player leads a wagon party westward from Independence,
+    Missouri to Oregon's Willamette Valley in 1848, managing oxen, food,
+    ammunition, and the health of named party members across river crossings,
+    forts, weather, and trail hazards. The register is period-accurate and
+    earnest — never anachronistic or winking. Outcomes are often grim
+    (dysentery, drowning, starvation) and are stated plainly, in the
+    matter-of-fact frontier voice of the original.
 
 # Host allow-list. Phase D wires host.run (for the river_strategy
 # proposal's background execute). Phase E adds host.jobs.answer_clarification

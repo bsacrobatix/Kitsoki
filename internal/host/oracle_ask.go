@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"kitsoki/internal/render/sourcecolor"
+	"kitsoki/internal/sysprompt"
 )
 
 // mutationTools is the set of tool names that are never permitted in a
@@ -219,7 +220,7 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		tools = rewriteToolsForBashMCP(tools)
 	}
 
-	cliArgs := buildBaseCLIArgs(args, agent)
+	cliArgs := buildBaseCLIArgs(ctx, sysprompt.Ask, args, agent)
 	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 
 	// Build the MCP servers map. When Bash is in use we attach the kitsoki-bash

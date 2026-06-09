@@ -37,6 +37,7 @@ import (
 
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/render/sourcecolor"
+	"kitsoki/internal/sysprompt"
 )
 
 // mutationTools is shared with oracle_ask.go and now covers decide too.
@@ -135,7 +136,7 @@ func OracleDecideHandler(ctx context.Context, args map[string]any) (Result, erro
 	workingDir = appendDefaultCwd(workingDir, agent)
 
 	// Build base CLI args.
-	cliArgs := buildBaseCLIArgs(args, agent)
+	cliArgs := buildBaseCLIArgs(ctx, sysprompt.Decide, args, agent)
 
 	// Resolve effective tools and apply Bash MCP rewrite if Bash is present.
 	// For decide calls, Bash must have a BashProfile (enforced by the loader;

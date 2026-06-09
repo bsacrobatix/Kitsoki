@@ -613,6 +613,17 @@ type AppMeta struct {
 	Title   string `yaml:"title,omitempty"`
 	Author  string `yaml:"author,omitempty"`
 	License string `yaml:"license,omitempty"`
+
+	// Context / ContextPath author the project's Layer-2 system-prompt
+	// grounding: the app's domain, purpose, and voice, shared by every oracle
+	// call and the router. At most one may be set (loader-enforced). Context is
+	// an inline template string; ContextPath points at a prompt file resolved
+	// through the same overlay/@shared search path as any other prompt, so it
+	// can {% include %} shared fragments. When neither is set, the optional
+	// `prompts/_project.md` convention supplies Layer 2 if that file exists.
+	// See docs/architecture/system-prompt.md (Layer 2).
+	Context     string `yaml:"context,omitempty"`
+	ContextPath string `yaml:"context_path,omitempty"`
 }
 
 // VarDef describes one world variable in the schema.
@@ -1018,6 +1029,15 @@ type AgentDecl struct {
 	Model string   `yaml:"model,omitempty"`
 	Tools []string `yaml:"tools,omitempty"`
 	Cwd   string   `yaml:"cwd,omitempty"`
+
+	// InheritClaudeDefault opts this agent OUT of the layered system prompt and
+	// back to the legacy posture: the persona is passed via
+	// --append-system-prompt, stacking on top of Claude Code's full default
+	// coding-agent prompt (kitsoki + project grounding are NOT prepended). It
+	// is a migration escape hatch for an agent that genuinely needs Claude
+	// Code's default behavior; default false. See
+	// docs/architecture/system-prompt.md (Replace vs append).
+	InheritClaudeDefault bool `yaml:"inherit_claude_default,omitempty"`
 
 	// BashProfile restricts Bash tool usage when the agent's tool surface
 	// includes "Bash". Required when Bash is in Tools and the agent is

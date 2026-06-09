@@ -51,6 +51,20 @@ app:
   title: "dev-story — Engineer's Day"
   author: "Kitsoki"
   license: "CC0"
+  # Layer-2 project context: prepended (under the kitsoki grounding) to every
+  # oracle call and the intent router so each operator shares this app's domain.
+  # See docs/architecture/system-prompt.md.
+  context: |
+    This app is an engineer's daily-workflow hub. It routes a developer
+    through real software-engineering tasks over a live code repository —
+    triaging an inbox, searching and picking up tickets, fixing bugs,
+    refining pull requests, running standups and code reviews — by composing
+    sub-stories. Judgments here are technical and consequential: they decide
+    what work is picked up, whether a change is acceptable, and what gets
+    reported to a team. Favor precision; cite concrete files, symbols, and
+    commands; and prefer the smallest change that satisfies the task. This is
+    also the story kitsoki uses to improve itself, so correctness and clear,
+    auditable reasoning matter more than speed.
 
 # Local model for cheap, offline slug naming. Qwen2.5-1.5B-Instruct at Q4_K_M;
 # grammar: true enables constrained decoding so the JSON schema is satisfied on

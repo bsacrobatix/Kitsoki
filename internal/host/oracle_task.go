@@ -43,6 +43,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"kitsoki/internal/sysprompt"
 )
 
 // kitsokiSessionIDKey is the context key for the KITSOKI_SESSION_ID value.
@@ -188,7 +190,7 @@ func OracleTaskHandler(ctx context.Context, args map[string]any) (Result, error)
 	)
 
 	// ── Build CLI args ────────────────────────────────────────────────────
-	baseCLIArgs := buildBaseCLIArgs(args, agent)
+	baseCLIArgs := buildBaseCLIArgs(ctx, sysprompt.Task, args, agent)
 	// When an acceptance schema is set the validator MCP server is attached as
 	// "validator", exposing mcp__validator__submit. Add it to the allowed tools
 	// so the agent can call submit() even when the tool list is otherwise

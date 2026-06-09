@@ -384,7 +384,7 @@ inherit whatever the operator has installed under `~/.claude` — including
 **enabled plugins** (and their skills and named agents). Any globally-enabled
 plugin can then hijack a story's agent: the model, handed a task that resembles
 the plugin's domain, adopts the plugin's persona and workflow instead of the
-story's `--append-system-prompt`. (Observed: with BMAD-METHOD enabled, the `prd`
+story's composed system prompt. (Observed: with BMAD-METHOD enabled, the `prd`
 story's `interviewer` role-played BMAD's "John" PM agent — deprecation notice,
 self-chosen output path, its own pick-one menu — none of which the story asked
 for.)
@@ -392,8 +392,11 @@ for.)
 To prevent this, every oracle CLI invocation pins
 `--setting-sources project,local`, which **omits the `user` source** where
 `enabledPlugins` lives. A story's agents are therefore defined only by their own
-`--append-system-prompt` / `--model` / `--allowedTools` flags plus the
-`project`/`local` config of the `working_dir`. Auth is unaffected
+composed system prompt (the layered kitsoki → project → persona prompt passed
+via `--system-prompt`; see [system-prompt.md](system-prompt.md)) / `--model` /
+`--allowedTools` flags plus the `project`/`local` config of the `working_dir`.
+This isolation is orthogonal to layering — Layer 1 is engine text, not operator
+config. Auth is unaffected
 (OAuth/credentials are read from the keychain, not from a setting source). The
 flag is applied at every construction site via `appendSettingSourcesFlag`
 (`internal/host/agents.go`) and locked by `oracle_setting_sources_test.go`.
@@ -1172,8 +1175,9 @@ agents:
 
 | Field | Required | Notes |
 |---|---|---|
-| `system_prompt` xor `system_prompt_path` | Yes | Exactly one must be set. The loader resolves the path and inlines the text. |
+| `system_prompt` xor `system_prompt_path` | Yes | Exactly one must be set. The loader resolves the path and inlines the text. This is **Layer 3** of the composed prompt — see [system-prompt.md](system-prompt.md); it is composed under the kitsoki + project layers and passed via `--system-prompt`, not stacked on Claude Code's default. |
 | `model` | No | Forwarded as `--model` to claude. Defaults to the engine model when absent. |
+| `inherit_claude_default` | No | Escape hatch: `true` opts the agent out of layering and back to `--append-system-prompt` onto Claude Code's default (no kitsoki/project grounding). Default `false`. See [system-prompt.md](system-prompt.md). |
 | `tools` | No | Forwarded as `--allowedTools <csv>`. Normalised to `host.X` form by the loader. |
 | `cwd` | No | Default working directory for claude when the effect omits `working_dir:`. Env vars (`$VAR`, `${VAR}`) are expanded at load time. |
 | `bash_profile` | Conditional | Required when `Bash` is in `tools` and the agent is used with `host.oracle.ask` or `host.oracle.decide`. Three forms (see below). |

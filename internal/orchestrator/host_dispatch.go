@@ -66,6 +66,9 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	// files through the story's overlay → story search path. nil is safe
 	// (handlers use the legacy path).
 	ctx = host.WithPromptRenderer(ctx, o.promptRenderer)
+	// Inject the project's Layer-2 system-prompt grounding (app.context /
+	// context_path) so every oracle call composes kitsoki → project → task.
+	ctx = host.WithProjectContext(ctx, projectContextFor(o.def))
 	// Inject the live IDE link so host.ide.* handlers resolve the editor and the
 	// oracle env-scrub gate engages. nil is safe (not-connected result, no
 	// scrub). The `world.ide.connected` gate is seeded once per turn in
@@ -571,6 +574,9 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	// files through the story's overlay → story search path. nil is safe
 	// (handlers use the legacy path).
 	ctx = host.WithPromptRenderer(ctx, o.promptRenderer)
+	// Inject the project's Layer-2 system-prompt grounding (app.context /
+	// context_path) so every oracle call composes kitsoki → project → task.
+	ctx = host.WithProjectContext(ctx, projectContextFor(o.def))
 	// Inject the live IDE link (nil-safe). The `world.ide.connected` gate is
 	// seeded per turn in loadJourney; re-seed against this dispatch's world (see
 	// the note in dispatchHostCalls).

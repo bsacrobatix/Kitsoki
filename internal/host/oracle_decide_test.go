@@ -484,7 +484,7 @@ func TestOracleDecide_AgentSystemPrompt_Forwarded(t *testing.T) {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 	rat, _ := res.Data["rationale"].(string)
-	if !strings.Contains(rat, "system=[you are a judge]") {
+	if !strings.Contains(rat, "you are a judge") {
 		t.Fatalf("expected system prompt in meta; got %q", rat)
 	}
 }

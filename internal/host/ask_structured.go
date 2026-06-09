@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"kitsoki/internal/sysprompt"
 )
 
 // ErrNoValidatedPayload signals that `claude -p` exited without the LLM
@@ -93,9 +95,7 @@ func AskStructured(ctx context.Context, opts AskStructuredOptions) (json.RawMess
 	if strings.TrimSpace(opts.Model) != "" {
 		cliArgs = append(cliArgs, "--model", opts.Model)
 	}
-	if strings.TrimSpace(opts.SystemPrompt) != "" {
-		cliArgs = append(cliArgs, "--append-system-prompt", opts.SystemPrompt)
-	}
+	cliArgs, _ = appendComposedSystemPrompt(ctx, cliArgs, sysprompt.AskStructured, opts.SystemPrompt, false)
 
 	cr, runErr := runClaudeOneShot(ctx, bin, cliArgs, opts.Prompt, opts.WorkingDir)
 	if runErr != nil {

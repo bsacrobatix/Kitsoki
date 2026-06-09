@@ -15,6 +15,7 @@ import (
 
 	"kitsoki/internal/app"
 	kitsokimcp "kitsoki/internal/mcp"
+	"kitsoki/internal/sysprompt"
 	"kitsoki/internal/trace"
 )
 
@@ -252,7 +253,17 @@ func (h *ClaudeCLIHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallT
 	// become claude's system prompt (via --system-prompt, which *replaces*
 	// Claude Code's own default system prompt — see buildClaudeArgs). Only the
 	// per-turn context and the user utterance ride on stdin as the user message.
-	systemPrompt := h.stablePrefix + submitInstruction
+	//
+	// Routing composes through the same layered builder as every oracle verb
+	// (internal/sysprompt): the kitsoki grounding (Layer 1) and any project
+	// context (Layer 2) are prepended to the routing prefix + output contract
+	// (Layer 3), so the router is grounded identically to the rest of the system.
+	composed := sysprompt.Compose(sysprompt.Spec{
+		Verb:    sysprompt.Route,
+		Project: projectLayer(h.appDef),
+		Task:    h.stablePrefix + submitInstruction,
+	})
+	systemPrompt := composed.SystemPrompt
 	userMessage := dynamic + "\n## User Input\n\n" + in.UserText + "\n"
 
 	args := buildClaudeArgs(h.cfg, configPath, systemPrompt)
@@ -415,6 +426,38 @@ func (h *ClaudeCLIHarness) resolveKitsokiBin() (string, error) {
 		return "", fmt.Errorf("harness/claude-cli: locate kitsoki binary: %w", err)
 	}
 	return exe, nil
+}
+
+// projectLayer resolves the app's Layer-2 project grounding for the router
+// (sysprompt Layer 2). It reads app.context (inline) or app.context_path (a file
+// relative to KITSOKI_APP_DIR) as raw text. Unlike the oracle path
+// (internal/host/sysprompt.go), routing does not render the project context
+// through the overlay/@shared template machinery or honour the
+// prompts/_project.md convention — the harness has no prompt renderer wired —
+// so routing supports the inline/file forms only. Returns "" when neither is
+// set or the file is unreadable.
+func projectLayer(appDef *app.AppDef) string {
+	if appDef == nil {
+		return ""
+	}
+	if c := strings.TrimSpace(appDef.App.Context); c != "" {
+		return c
+	}
+	p := strings.TrimSpace(appDef.App.ContextPath)
+	if p == "" {
+		return ""
+	}
+	abs := p
+	if !filepath.IsAbs(abs) {
+		if dir := os.Getenv("KITSOKI_APP_DIR"); dir != "" {
+			abs = filepath.Join(dir, p)
+		}
+	}
+	body, err := os.ReadFile(abs)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(body))
 }
 
 // Close is a no-op for ClaudeCLIHarness (no persistent resources).
