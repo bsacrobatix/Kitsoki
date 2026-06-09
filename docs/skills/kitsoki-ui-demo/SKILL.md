@@ -35,6 +35,45 @@ pnpm -C tools/runstatus playwright:install  # chromium + ffmpeg for Playwright (
 into the binary, so an un-rebuilt binary serves a stale UI. Rebuild after any
 change under `tools/runstatus/src/`.
 
+## Deterministic recording (read this first)
+
+A demo recording has a few non-obvious traps. They're solved once, in
+`tests/playwright/_helpers/demo.ts` — **use those helpers; don't re-derive
+them.** The reference spec is `tests/playwright/diagram-showcase.spec.ts`.
+
+- **`recordVideo` captures from PAGE CREATION**, so off-camera setup (home
+  screen, the new-session click, live RPC room-flips) flashes by, rushed, at the
+  head of the video. There is no "off camera" — the camera rolls from frame 0.
+  → `installCurtain(page, title)` **before the first `goto`** drops a full-screen
+  title card that survives `page.reload` (sessionStorage), then `liftCurtain(page)`
+  once the scene is fully staged. Drive all setup behind it.
+- **Drive setup off-camera via RPC, advance on-camera via a real UI click.**
+  RPC (`runstatus.session.submit` / `patch_world`) from the test is a *different*
+  client; its turns reach the page only via cross-client SSE — a timing race
+  (sometimes live, sometimes needs a reload → nondeterministic frames). A real
+  `intent-btn-*` click in the *driving* page renders the turn result directly:
+  one deterministic visual path, no reload. Use RPC behind the curtain; click on
+  camera. (Match the flow's `initial_world` with `patch_world` if a gate needs
+  it — e.g. `judge_mode: human`.)
+- **Captions/overlays must be `pointer-events: none`** or they silently
+  intercept clicks on the UI beneath (an opaque banner over the tab bar = every
+  tab click times out). `makeCaption(page)` already is; so is the curtain.
+- **Playwright's default `actionTimeout` is 0 (INFINITE)** — a click on a
+  missing/covered element hangs the whole run with no error. The config now caps
+  it (15s); keep it. Don't write un-timeouted `.click()` in a loop.
+- **The Claude Code harness suppresses Playwright's stdout** — a failing
+  recording prints only "Exit code 1". `captureDiagnostics(page, artifactDir)`
+  writes the failure + a `mark(step)` breadcrumb to `<artifactDir>/ERROR.txt`;
+  read that file and the `NN-*.png` screenshots after the run. (Run in the
+  background and read the task-output file, or redirect to a repo file.)
+- **Unique `ADDR` port per spec; never `pkill -f kitsoki`.** A broad kill takes
+  down the user's `make web-dev` servers (`/tmp/kitsoki-fixed web …`). Give each
+  spec its own port and let `afterAll` stop only its own server.
+
+The shared helpers (`_helpers/demo.ts`): `recordingContext` (fixed 1600×900,
+clears stale webm), `installCurtain` / `liftCurtain`, `makeCaption` → `beat`,
+`captureDiagnostics`, `dwell` (PACE-scaled), `publishVideo`.
+
 ## The loop
 
 1. **Pick / author the spec.** Copy `multi-story.spec.ts` and trim to the scenes
