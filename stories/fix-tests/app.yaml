@@ -56,11 +56,16 @@ world:
   # Run state.
   cycle:          { type: int,    default: 0 }
   tests_passed:   { type: bool,   default: false }
-  run_exit_code:  { type: int,    default: 0 }
-  run_stdout:     { type: string, default: "" }
-  first_failures: { type: string, default: "" }
-  last_failures:  { type: string, default: "" }
-  refine_feedback:{ type: string, default: "" }
+
+  # Background-job bookkeeping. last_job_id is bound from each background
+  # invoke; last_job_result is engine-injected into the world only inside an
+  # on_complete: chain (so it isn't declared here).
+  last_job_id:    { type: string, default: "" }
+
+  # Most recent test-run result envelope ({exit_code, ok, stdout}), copied
+  # out of last_job_result in on_complete so the fixer prompt can read the
+  # failures (world.last_run.stdout) after the on_complete turn.
+  last_run:       { type: object, default: {} }
 
   # Fixer output (schemas/fix_artifact.json).
   fix_artifact:   { type: object, default: {} }
@@ -77,10 +82,6 @@ intents:
     slots:
       test_cmd:   { type: string, required: false }
       max_cycles: { type: int,    required: false }
-  route:
-    description: "Internal: advance the pipeline based on the latest result."
-    examples: []
-    priority: 10
   look:
     description: "Re-render the current room."
     examples: ["look", "status"]

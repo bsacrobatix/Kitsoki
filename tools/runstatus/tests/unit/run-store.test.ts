@@ -445,4 +445,40 @@ describe("useRunStore — write-side actions", () => {
     expect(store.transcript[0]).toMatchObject({ role: "user", text: "build me a thing" });
     expect(store.transcript[1]).toMatchObject({ role: "agent", text: "Got it." });
   });
+
+  // ---- session-switch isolation (bug: transcripts mixed across sessions) ----
+  // When the operator switches from one session's chat to another, the store is
+  // a singleton — hydrating the second session must drop the first session's
+  // conversational state, or its transcript bubbles bleed into the new session.
+  it("hydrate clears the prior session's transcript and view state", async () => {
+    const first = turnResult({ state: "idle", view: "Session ONE opening" });
+    const srcA = writeSource({ view: () => Promise.resolve(first) });
+
+    const store = useRunStore();
+    await store.hydrate(srcA, "sess-1");
+    await store.loadInitialView(srcA, "sess-1");
+    await store.submitIntent(
+      writeSource({ submit: () => Promise.resolve(turnResult({ view: "ONE reply" })) }),
+      "sess-1",
+      "discuss",
+      { message: "hello from one" }
+    );
+    expect(store.transcript.length).toBeGreaterThan(0);
+
+    // Switch to a second session.
+    const second = turnResult({ state: "idle", view: "Session TWO opening" });
+    const srcB = writeSource({ view: () => Promise.resolve(second) });
+    await store.hydrate(srcB, "sess-2");
+
+    // The first session's bubbles must be gone before the new view seeds.
+    expect(store.transcript).toEqual([]);
+    expect(store.currentView).toBeNull();
+    expect(store.selectedEventIndex).toBeNull();
+    expect(store.highlightedStatePaths).toEqual([]);
+
+    await store.loadInitialView(srcB, "sess-2");
+    expect(store.transcript).toHaveLength(1);
+    expect(store.transcript[0]).toMatchObject({ role: "agent", text: "Session TWO opening" });
+    expect(store.transcript.some((e) => e.text.includes("ONE"))).toBe(false);
+  });
 });

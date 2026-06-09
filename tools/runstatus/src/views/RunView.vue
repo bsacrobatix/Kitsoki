@@ -107,6 +107,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRunStore } from "../stores/run.js";
 import { createDataSource } from "../data/source.js";
 import { LiveSource } from "../data/live-source.js";
+import { markAutoNavDone } from "../lib/auto-nav.js";
 import StateDiagram from "../components/StateDiagram.vue";
 import TraceTimeline from "../components/TraceTimeline.vue";
 import { fmtTokens, fmtCost } from "../components/oracle/lib.js";
@@ -189,6 +190,9 @@ function onDividerMousedown(e: MouseEvent) {
 updateBases();
 
 onMounted(async () => {
+  // Viewing a session spends the per-tab auto-nav convenience (see lib/auto-nav)
+  // so a tab that opened straight into an observer view can still reach "/".
+  markAutoNavDone();
   await store.hydrate(createDataSource(), props.sessionId);
 });
 

@@ -10,30 +10,32 @@
  *   - Kitsoki help(kitsoki-explainer)— read-only questions about kitsoki itself
  *
  * The demo proves the full experience, recording a MacBook-resolution video +
- * per-scene screenshots:
+ * per-scene screenshots. Streaming is validated by setting
+ * KITSOKI_META_STREAM_DELAY_MS so the stub oracle emits tool/delta events with
+ * a visible pause — the streaming bubble, 🧠 brain icon, and tool breadcrumbs
+ * all render for at least the duration of the oracle call before the committed
+ * message lands.
  *
- *   1. Home meta        — the global Meta button works with NO session open:
- *                         story modes are disabled, Kitsoki help is usable.
- *   2. Drive a story    — start a PRD session (lands on the chat surface).
- *   3. Story Q&A        — read-only meta turn; reply echoes the current state.
- *   4. Story edit       — an edit turn reloads the story content IN PLACE
- *                         (no browser reload) and surfaces the changed files.
- *   5. Persistence      — close, navigate to Observe, reopen → same chat.
- *   6. New chat         — the new-chat control resets the conversation.
+ * Scenes:
+ *   1. Home meta        — Meta button works with NO session; story modes disabled,
+ *                         Kitsoki help usable.
+ *   2. Drive a story    — Start a PRD session (lands on the chat surface).
+ *   3. Story Q&A        — Read-only meta turn; streaming bubble with 🧠 visible;
+ *                         reply echoes the current state.
+ *   4. Story Q&A round 2 — Second turn in the same chat; proves multi-round.
+ *   5. Story edit       — Edit turn triggers reload; reload note + changed files.
+ *   6. Persistence      — Close, navigate, reopen → same chat.
+ *   7. New chat         — New-chat control resets the conversation.
  *
- * Repo-safety: story-edit COMMITS its changes into the story's git repo, so the
- * demo runs against a THROWAWAY COPY of stories/ in a tmp dir (not a git repo),
- * leaving the real repo untouched.
- *
- * KITSOKI_REPO is exported to the server so the cross-app kitsoki.* meta modes
- * (Kitsoki help) are injected — they are gated on that env var.
+ * Repo-safety: story-edit COMMITS its changes; the demo runs against a THROWAWAY
+ * COPY of stories/ in a tmp dir (not a git repo), leaving the real repo untouched.
  */
 import { test, expect, chromium, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
 import os from "os";
-import { spawn, type ChildProcess } from "child_process";
+import { spawn, spawnSync, type ChildProcess } from "child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,6 +85,20 @@ async function waitForHealthy(timeoutMs: number): Promise<void> {
   throw new Error(`server not healthy after ${timeoutMs}ms (last: ${lastErr})\n--- server log ---\n${serverLog}`);
 }
 
+// Pacing: WEB_CHAT_PACE=0 collapses delays for fast CI.
+const PACE = process.env.WEB_CHAT_PACE === "0" ? 0 : 1;
+const TYPE_DELAY = 55 * PACE;
+const BEFORE_ACT = 900 * PACE;
+const DWELL = 2400 * PACE;
+const OPEN_DWELL = 3000 * PACE;
+const FINAL_DWELL = 4500 * PACE;
+
+// Stream delay: per-event pause the stub injects between streaming events.
+// The stub also holds 4× this value after the tool event before text starts,
+// giving the viewer a clear look at 🧠 + ▸ ToolName + "…" before text streams.
+// Zero in fast-CI mode.
+const STREAM_DELAY_MS = PACE === 0 ? "0" : "150";
+
 test.beforeAll(async () => {
   for (const p of [STORIES_SRC, BIN]) {
     if (!fs.existsSync(p)) throw new Error(`missing required path: ${p} (run 'make build' first)`);
@@ -109,8 +125,11 @@ test.beforeAll(async () => {
     {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
-      // KITSOKI_REPO gates the cross-app kitsoki.* meta modes (Kitsoki help).
-      env: { ...process.env, KITSOKI_REPO: repoRoot },
+      env: {
+        ...process.env,
+        KITSOKI_REPO: repoRoot,
+        KITSOKI_META_STREAM_DELAY_MS: STREAM_DELAY_MS,
+      },
     },
   );
   server.stdout?.on("data", (d) => (serverLog += d.toString()));
@@ -131,14 +150,6 @@ test.afterAll(async () => {
   if (tmpRoot) fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-// Pacing: WEB_CHAT_PACE=0 collapses delays for fast assertion-only CI.
-const PACE = process.env.WEB_CHAT_PACE === "0" ? 0 : 1;
-const TYPE_DELAY = 55 * PACE;
-const BEFORE_ACT = 900 * PACE;
-const DWELL = 2400 * PACE;
-const OPEN_DWELL = 3000 * PACE;
-const FINAL_DWELL = 4500 * PACE;
-
 const screenshotPaths: string[] = [];
 let shotIdx = 0;
 async function shot(page: Page, label: string): Promise<void> {
@@ -150,21 +161,63 @@ async function shot(page: Page, label: string): Promise<void> {
   screenshotPaths.push(p);
 }
 
-// Type into the meta composer and send, waiting for a new agent bubble.
-async function metaSend(page: Page, text: string): Promise<void> {
-  const before = await page.getByTestId("meta-row-agent").count();
+/**
+ * Send a message and wait for the streaming bubble to appear (asserts 🧠 label
+ * + optional tool breadcrumbs), captures a screenshot of the streaming state,
+ * then waits for the committed agent row.
+ *
+ * With STREAM_DELAY_MS=150, the stub holds 4×150ms=600ms after the tool event
+ * before text starts (viewer sees 🧠 + tool + "…"), then streams each word at
+ * 150ms. Total bubble duration ≈ 600ms + N×150ms. Plenty of time to screenshot.
+ *
+ * In fast-CI mode (PACE=0) streaming completes instantly; skip the assertions.
+ */
+async function metaSendWithStreamCheck(
+  page: Page,
+  text: string,
+  opts: { checkStream?: boolean; checkTool?: boolean; streamShot?: string } = {}
+): Promise<void> {
+  const beforeCount = await page.getByTestId("meta-row-agent").count();
+
   const input = page.getByTestId("meta-composer-input");
   await input.click();
   await input.fill("");
   await input.pressSequentially(text, { delay: TYPE_DELAY });
   await page.waitForTimeout(BEFORE_ACT);
   await page.getByTestId("meta-composer-send").click();
-  await expect(page.getByTestId("meta-row-agent")).toHaveCount(before + 1, { timeout: 15000 });
+
+  // In non-CI mode, the stub emits events with a delay → streaming bubble stays
+  // visible for the duration of the oracle call. Assert and screenshot it.
+  if (PACE > 0 && opts.checkStream !== false) {
+    const streamBubble = page.getByTestId("meta-row-streaming");
+    await expect(streamBubble).toBeVisible({ timeout: 5000 });
+    // Brain icon must be in the "who" label
+    await expect(streamBubble.locator(".meta-row__who")).toContainText("🧠");
+    // At least one streaming text element
+    await expect(streamBubble.locator(".meta-row__text")).toBeVisible();
+    // Tool breadcrumb — appears after the stub emits its tool event
+    if (opts.checkTool !== false) {
+      await expect(streamBubble.locator(".meta-row__tool").first()).toBeVisible({ timeout: 5000 });
+    }
+    // Screenshot the streaming state: shows 🧠 + tool breadcrumb + "…" or partial text
+    if (opts.streamShot) {
+      await shot(page, opts.streamShot);
+    }
+    // Let the streaming animate for a moment so the video shows progression
+    await page.waitForTimeout(800 * PACE);
+  }
+
+  await expect(page.getByTestId("meta-row-agent")).toHaveCount(beforeCount + 1, { timeout: 25000 });
+}
+
+/** Legacy helper for scenes that don't need stream assertions. */
+async function metaSend(page: Page, text: string): Promise<void> {
+  await metaSendWithStreamCheck(page, text, { checkStream: false });
 }
 
 test.describe("meta mode (live, no-LLM)", () => {
-  test("home help → drive → story Q&A → story edit reload → persistence → new chat", async () => {
-    test.setTimeout(process.env.WEB_CHAT_PACE === "0" ? 60000 : 180000);
+  test("home help → drive → story Q&A multi-round → story edit reload → persistence → new chat", async () => {
+    test.setTimeout(PACE === 0 ? 60000 : 240000);
 
     const browser: Browser = await chromium.launch();
     const context: BrowserContext = await browser.newContext({
@@ -196,7 +249,13 @@ test.describe("meta mode (live, no-LLM)", () => {
       await page.getByTestId("meta-mode-kitsoki-ask").click();
       await expect(page.getByTestId("meta-overlay")).toBeVisible();
       await page.waitForTimeout(BEFORE_ACT);
-      await metaSend(page, "What is kitsoki in one sentence?");
+
+      await metaSendWithStreamCheck(page, "What is kitsoki in one sentence?", {
+        checkTool: false,
+        streamShot: "home-kitsoki-streaming",
+      });
+      const kitsokiReply = page.getByTestId("meta-row-agent").last();
+      await expect(kitsokiReply).toBeVisible();
       await shot(page, "home-kitsoki-help");
       await page.waitForTimeout(DWELL);
       await page.getByTestId("meta-close").click();
@@ -217,37 +276,59 @@ test.describe("meta mode (live, no-LLM)", () => {
       await shot(page, "session-chat");
       await page.waitForTimeout(OPEN_DWELL);
 
-      // ── Scene 3: Story Q&A (read-only) ─────────────────────────────────────
+      // ── Scene 3: Story Q&A round 1 — streaming visible ──────────────────────
       await page.getByTestId("meta-button").click();
       await expect(page.getByTestId("meta-menu")).toBeVisible();
       await expect(page.getByTestId("meta-mode-story-ask")).toBeEnabled({ timeout: 10000 });
       await page.getByTestId("meta-mode-story-ask").click();
       await expect(page.getByTestId("meta-overlay")).toBeVisible();
       await page.waitForTimeout(BEFORE_ACT);
-      await metaSend(page, "What state am I in, and what should I do next?");
-      // The read-only reply echoes the live state (idle) — meta sees the session.
-      await expect(page.getByTestId("meta-row-agent").last()).toContainText("idle");
-      await shot(page, "story-qa");
+
+      await metaSendWithStreamCheck(page, "What state am I in, and what should I do next?", {
+        streamShot: "story-qa-round1-brain-streaming",
+      });
+
+      // After streaming, the committed reply references the current state.
+      const qaReply1 = page.getByTestId("meta-row-agent").last();
+      await expect(qaReply1).toContainText("idle");
+      await shot(page, "story-qa-round1-committed");
+      // Hold on round 1 so the video viewer can read the exchange
       await page.waitForTimeout(DWELL);
 
-      // ── Scene 4: Story edit → in-place content reload ──────────────────────
+      // ── Scene 4: Story Q&A round 2 — multi-round in the same chat ──────────
+      await metaSendWithStreamCheck(page, "What options do I have from this state?", {
+        streamShot: "story-qa-round2-brain-streaming",
+      });
+      const qaReply2 = page.getByTestId("meta-row-agent").last();
+      await expect(qaReply2).toBeVisible();
+      // Two committed agent rows now — proves multi-round
+      await expect(page.getByTestId("meta-row-agent")).toHaveCount(2);
+      await shot(page, "story-qa-round2-both-turns");
+      // Hold long enough that the video clearly shows both exchanges together
+      await page.waitForTimeout(DWELL * 2);
+
+      // ── Scene 5: Story edit → in-place content reload ──────────────────────
       await page.getByTestId("meta-tab-story-edit").click();
       await page.waitForTimeout(BEFORE_ACT);
-      await metaSend(page, "Make the opening prompt a little warmer.");
-      // The edit landed: the overlay surfaces the reload note + changed files,
-      // and the run view re-hydrated WITHOUT a browser reload.
+
+      await metaSendWithStreamCheck(page, "Make the opening prompt a little warmer.", {
+        streamShot: "story-edit-brain-streaming",
+      });
+
+      // The edit landed: reload note appears and contains the changed marker file.
       await expect(page.getByTestId("meta-reload-note")).toBeVisible({ timeout: 15000 });
       await expect(page.getByTestId("meta-reload-note")).toContainText("meta-edits.log");
       await shot(page, "story-edit-reload");
       await page.waitForTimeout(DWELL);
-      // Count the edit-mode messages so we can prove persistence next.
+
+      // Count edit-mode rows so we can prove persistence next.
       const editMsgCount = await page.getByTestId("meta-transcript").locator(".meta-row").count();
       expect(editMsgCount).toBeGreaterThan(0);
 
-      // ── Scene 5: persistence across navigation ─────────────────────────────
+      // ── Scene 6: persistence across navigation ─────────────────────────────
       await page.getByTestId("meta-close").click();
       await expect(page.getByTestId("meta-overlay")).toHaveCount(0);
-      // Hop to the read-only observer (a different view, same session).
+      // Hop to the read-only observer.
       await page.getByTestId("observe-link").click();
       await page.waitForURL(/#\/s\/[0-9a-f-]{36}$/, { timeout: 15000 });
       await expect(page.getByTestId("breadcrumb")).toBeVisible();
@@ -260,7 +341,7 @@ test.describe("meta mode (live, no-LLM)", () => {
       await shot(page, "persistence");
       await page.waitForTimeout(DWELL);
 
-      // ── Scene 6: new chat resets the conversation ──────────────────────────
+      // ── Scene 7: new chat resets the conversation ──────────────────────────
       await page.getByTestId("meta-new").click();
       await expect(page.getByTestId("meta-transcript").locator(".meta-row")).toHaveCount(0, { timeout: 10000 });
       await shot(page, "new-chat");
@@ -277,10 +358,23 @@ test.describe("meta mode (live, no-LLM)", () => {
       .map((f) => ({ f, t: fs.statSync(path.join(VIDEO_DIR, f)).mtimeMs }))
       .sort((a, b) => b.t - a.t);
     expect(webms.length, "expected a recorded video webm").toBeGreaterThan(0);
-    const latest = path.join(VIDEO_DIR, webms[0].f);
-    fs.copyFileSync(latest, path.join(ARTIFACT_DIR, "meta-mode-demo.webm"));
+    const latestWebm = path.join(VIDEO_DIR, webms[0].f);
+    const mp4Path = path.join(ARTIFACT_DIR, "meta-mode-demo.mp4");
+
+    // Convert webm → mp4 via ffmpeg (H.264/AAC, fast preset, browser-compatible).
+    const ffResult = spawnSync(
+      "ffmpeg",
+      ["-y", "-i", latestWebm, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+       "-c:a", "aac", "-movflags", "+faststart", mp4Path],
+      { encoding: "utf8" },
+    );
+    if (ffResult.status !== 0) {
+      console.warn("[meta-mode] ffmpeg failed, falling back to webm copy:\n" + ffResult.stderr);
+      fs.copyFileSync(latestWebm, path.join(ARTIFACT_DIR, "meta-mode-demo.webm"));
+    }
 
     console.log("[meta-mode] screenshots:\n" + screenshotPaths.join("\n"));
-    console.log("[meta-mode] video (stable): " + path.join(ARTIFACT_DIR, "meta-mode-demo.webm"));
+    const videoOut = ffResult.status === 0 ? mp4Path : path.join(ARTIFACT_DIR, "meta-mode-demo.webm");
+    console.log("[meta-mode] video: " + videoOut);
   });
 });

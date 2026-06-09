@@ -27,6 +27,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
+
+	"kitsoki/internal/host"
 )
 
 // StubOracleCaller is a deterministic OracleCaller. Read-only modes get a
@@ -40,6 +43,11 @@ type StubOracleCaller struct {
 	// defaultStubMutate (append to meta-edits.log under in.Cwd). Returning
 	// an error fails the turn (surfaced as the oracle error).
 	mutate func(in AskInput) error
+	// streamDelay is the pause between emitted stream events when a
+	// StreamSink is in context. Zero means events fire instantly (unit
+	// tests). Set to ~60-100ms for demo/video renders to make streaming
+	// visible. Controlled via KITSOKI_META_STREAM_DELAY_MS.
+	streamDelay time.Duration
 
 	mu  sync.Mutex
 	seq int // per-process turn counter, so successive edits change bytes
@@ -59,6 +67,13 @@ func WithStubMutate(fn func(in AskInput) error) StubOption {
 	return func(s *StubOracleCaller) { s.mutate = fn }
 }
 
+// WithStubStreamDelay sets the per-event pause when emitting stream events
+// via the context StreamSink. Use 60-100ms for demo/video renders; leave
+// at zero (the default) for unit and fast E2E tests.
+func WithStubStreamDelay(d time.Duration) StubOption {
+	return func(s *StubOracleCaller) { s.streamDelay = d }
+}
+
 // NewStubOracleCaller builds a deterministic no-LLM OracleCaller.
 func NewStubOracleCaller(opts ...StubOption) *StubOracleCaller {
 	s := &StubOracleCaller{}
@@ -69,7 +84,10 @@ func NewStubOracleCaller(opts ...StubOption) *StubOracleCaller {
 }
 
 // Ask returns a deterministic reply. For edit-capable turns it first performs
-// the disk mutation so Controller.Send's stat-diff sees a change.
+// the disk mutation so Controller.Send's stat-diff sees a change. When a
+// StreamSink is present in ctx (the meta-stream SSE path), Ask also emits
+// realistic tool + delta events so the web UI's streaming bubble, brain icon,
+// and tool breadcrumbs become visible in demos and E2E tests.
 func (s *StubOracleCaller) Ask(ctx context.Context, in AskInput) (AskOutput, error) {
 	edited := false
 	if editCapable(in.ToolAllowlist) {
@@ -78,16 +96,71 @@ func (s *StubOracleCaller) Ask(ctx context.Context, in AskInput) (AskOutput, err
 		}
 		edited = true
 	}
-	reply := s.reply
-	if reply == nil {
-		reply = defaultStubReply
+	replyFn := s.reply
+	if replyFn == nil {
+		replyFn = defaultStubReply
 	}
+	text := replyFn(in, edited)
+
+	// Emit stream events when a sink is installed (SSE path only). Unit tests
+	// don't install a sink so this block never runs there — zero cost.
+	if sink := host.StreamSinkFrom(ctx); sink != nil {
+		s.emitStreamEvents(ctx, sink, in, text)
+	}
+
 	return AskOutput{
-		Reply: reply(in, edited),
+		Reply: text,
 		// Echo the input id so Controller.Send's "did the id change?" check
 		// stays a no-op (the real adapter does the same on an empty result).
 		NewClaudeSessionID: in.ClaudeSessionID,
 	}, nil
+}
+
+// emitStreamEvents fires a simulated tool-call breadcrumb followed by the reply
+// text split into word-chunks. Flow:
+//
+//  1. Emit tool event → browser shows 🧠 + ▸ ToolName + "…"
+//  2. "Thinking" pause (4× streamDelay) so the viewer sees that state clearly
+//  3. Stream reply word-by-word at streamDelay each
+//
+// This gives the web UI's streaming bubble visible, unhurried stages: thinking
+// indicator, then progressive text.
+func (s *StubOracleCaller) emitStreamEvents(ctx context.Context, sink host.StreamSink, in AskInput, reply string) {
+	pause := func(mult int) {
+		if s.streamDelay > 0 {
+			time.Sleep(s.streamDelay * time.Duration(mult))
+		}
+	}
+
+	// Emit one simulated tool call so the breadcrumb shows up.
+	toolName := "Read"
+	preview := "app.yaml"
+	if editCapable(in.ToolAllowlist) {
+		toolName = "Edit"
+		preview = "rooms/idle.yaml"
+	}
+	sink.OnStreamEvent(ctx, host.StreamEvent{
+		Type:    "assistant",
+		Tool:    toolName,
+		Preview: preview,
+	})
+	// Hold: browser renders 🧠 + ▸ ToolName + "…" — viewer sees "thinking" state.
+	pause(4)
+
+	// Stream the reply text in small chunks (split on whitespace + newlines).
+	// Each chunk becomes a "delta" frame on the wire.
+	words := strings.Fields(reply)
+	for i, word := range words {
+		chunk := word
+		if i < len(words)-1 {
+			chunk += " "
+		}
+		sink.OnStreamEvent(ctx, host.StreamEvent{
+			Type: "assistant",
+			Text: chunk,
+		})
+		pause(1)
+	}
 }
 
 func (s *StubOracleCaller) runMutate(in AskInput) error {

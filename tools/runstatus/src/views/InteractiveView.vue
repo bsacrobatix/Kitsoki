@@ -4,7 +4,7 @@
     <template v-else>
       <!-- Top bar -->
       <header class="iv__topbar">
-        <router-link to="/" class="iv__back">← Sessions</router-link>
+        <router-link to="/" class="iv__back" data-testid="back-stories">← Stories</router-link>
         <span class="iv__app-id">{{ appId }}</span>
         <span class="iv__sep">·</span>
         <code class="iv__current-state" data-testid="current-state">{{ store.currentStatePath || "—" }}</code>
@@ -89,10 +89,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRunStore } from "../stores/run.js";
 import { createDataSource } from "../data/source.js";
 import type { DataSource } from "../data/source.js";
+import { markAutoNavDone } from "../lib/auto-nav.js";
 import ChatTranscript from "../components/ChatTranscript.vue";
 import InputBar from "../components/InputBar.vue";
 import StateDiagram from "../components/StateDiagram.vue";
@@ -113,13 +114,33 @@ const error = ref<string | null>(null);
 
 const appId = computed(() => store.appDef?.id ?? store.appDef?.name ?? "kitsoki");
 
-onMounted(async () => {
-  source = createDataSource();
-  // hydrate loads session/app/mermaid/trace and opens the live subscription.
-  await store.hydrate(source, props.sessionId);
-  // loadInitialView seeds currentView + opening agent transcript entry.
-  await store.loadInitialView(source, props.sessionId);
+async function loadSession(sessionId: string): Promise<void> {
+  if (!source) source = createDataSource();
+  // hydrate resets prior session state, loads session/app/mermaid/trace, and
+  // opens the live subscription; loadInitialView seeds currentView + the
+  // opening agent transcript entry.
+  await store.hydrate(source, sessionId);
+  await store.loadInitialView(source, sessionId);
+}
+
+onMounted(() => {
+  // Viewing a session spends the per-tab auto-nav convenience: if this view is
+  // the tab's first mount (a pasted/bookmarked /s/:id/chat link, or the push
+  // right after starting a session), the home screen must NOT later bounce the
+  // user back in when they click "← Stories" with one live session.
+  markAutoNavDone();
+  void loadSession(props.sessionId);
 });
+
+// Switching directly between two /s/:sessionId/chat routes reuses this
+// component (only the param changes), so onMounted never re-fires. Re-load on
+// sessionId change so the new session's chat isn't left showing the old one.
+watch(
+  () => props.sessionId,
+  (next) => {
+    void loadSession(next);
+  }
+);
 
 onUnmounted(() => {
   store.teardown();
@@ -146,21 +167,13 @@ async function runTurn(fn: () => Promise<unknown>): Promise<void> {
 }
 
 /**
- * Composer + action submit. InputBar emits BOTH a high-level `send` (raw text +
- * bound intent name, for text composers) and a structured `intent` (name +
- * slots: empty for action buttons, the bound slot for text composers).
- *
- * We drive every turn through the STRUCTURED intent (submitIntent) — the
- * operator picked a concrete intent from the room's menu and the slot value is
- * already bound, so there is nothing for an interpreter to classify. This keeps
- * the interactive UI working in the deterministic (no-harness) posture
- * (`kitsoki web --flow`), where the free-text route has no interpreter, while
- * remaining correct for the live posture (an explicit intent submit is always
- * unambiguous). `onSend` is therefore a no-op label hook; `onIntent` does the
- * work for both action buttons (empty slots) and text composers (bound slot).
+ * Raw-text submission from semantic routing rooms (the free-text textarea).
+ * Routes via session.turn so the semantic router handles natural-language
+ * dispatch. Text-slot intent forms use onIntent / session.submit instead.
  */
-function onSend(_text: string, _intentName: string): void {
-  // Handled by the paired @intent emit (submitIntent) — see onIntent.
+function onSend(text: string, _intentName: string): void {
+  if (!source) return;
+  void runTurn(() => store.sendText(source!, props.sessionId, text));
 }
 
 function onIntent(name: string, slots: Record<string, unknown>): void {

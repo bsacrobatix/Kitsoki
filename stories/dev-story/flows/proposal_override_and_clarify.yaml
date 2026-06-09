@@ -1,27 +1,22 @@
 # proposal_override_and_clarify — override_new despite an overlap, then the
-# clarify back-edge to discovery.
+# clarify back-edge from refine to proposal.
 #
 # Covers the two arcs the happy/overlap flows don't: `override_new` (force a
 # new proposal even though the scout found an overlap — recorded as decision
-# "new") and `clarify` (step back from a later gate to revise the brief). The
-# completeness → discovery clarify edge here is structurally identical to the
-# references → discovery and draft → discovery clarify edges (all now `target:
-# proposal`, the merged discovery+brief room, no effects beyond resets).
+# "new") and `clarify` from the refine room (step all the way back to intake,
+# resetting all downstream state including the search results).
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposal
+initial_state: proposal_search
 initial_world:
-  judge_mode:          "human"
-  proposal_idea:       "Add a local model oracle sidecar."
-  proposal_workspace:  "docs/proposals/.workspace/lmo"
-  proposal_brief_path: "docs/proposals/.workspace/lmo/001-brief.md"
+  judge_mode:         "human"
+  proposal_idea:      "Add a local model oracle sidecar."
+  proposal_workspace: "docs/proposals/.workspace/lmo"
 
 host_handlers:
   host.oracle.decide:
     by_call:
-      brief_check:
-        data: { ok: true, submitted: { verdict: "continue", reason: "ready.", questions: [] } }
       existing_scan:
         data:
           ok: true
@@ -29,27 +24,44 @@ host_handlers:
             overlaps:
               - { path: "docs/proposals/local-model-oracle.md", kind: "accepted", summary: "Already proposes a sidecar.", recommendation: "amend" }
             roadmap_fit: "Overlaps the accepted proposal."
-      completeness_check:
-        data: { ok: true, submitted: { complete: false, problem: "p", why_kitsoki: "w", usage: "u", gaps: ["scope is unclear"] } }
+      references_research:
+        data:
+          ok: true
+          submitted: { items: [] }
   host.artifacts_dir:
     data: { ok: true, path: "docs/proposals/.workspace/lmo/out.md", message_id: "out#1" }
+  # Stubs for proposal_refine on_enter (advanced to by override_new)
+  host.ide.open_file:
+    data: { ok: true, connected: true }
+  host.oracle.task:
+    by_call:
+      refine_brief:
+        data:
+          ok: true
+          submitted: { summary: "Brief started.", gaps: ["Scope is unclear"] }
 
 turns:
-  # ready → brief passes → overlap check (scout reports an accepted overlap).
-  - intent: { name: begin_proposal, slots: {} }
-    expect_state: proposal_existing_state
-
   # Force a new proposal despite the overlap — decision recorded as "new",
-  # no change_target set.
+  # no change_target set. Advances to proposal_refine.
   - intent: { name: override_new, slots: {} }
-    expect_state: proposal_idea_completeness
+    expect_state: proposal_refine
     expect_world:
       proposal_overlap_decision: "new"
       proposal_change_target:    ""
 
-  # The completeness judge flagged gaps — step back to revise the brief
-  # (lands in the merged discovery+brief room).
+  # Step back all the way to intake — resets search + brief state.
   - intent: { name: clarify, slots: {} }
     expect_state: proposal
+    expect_world:
+      proposal_existing_state:   {}
+      proposal_existing_path:    ""
+      proposal_overlap_decision: ""
+      proposal_change_target:    ""
+      proposal_references:       {}
+      proposal_references_path:  ""
+      proposal_brief_path:       ""
+      proposal_brief_decision:   {}
+      proposal_brief_cycle:      0
+      proposal_refine_analysis:  {}
 
 expect_no_errors: true

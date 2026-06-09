@@ -107,9 +107,77 @@ change under `tools/runstatus/src/`.
 
 All require `ffmpeg` on PATH (Playwright's browser install or a system ffmpeg).
 
+## Tour walkthrough recording
+
+The onboarding tour has a dedicated, maintained spec that records it as a
+first-class demo mode:
+
+```
+tools/runstatus/tests/playwright/tour-video.spec.ts
+```
+
+The spec imports the **same step manifest** the live overlay uses
+(`src/tour/manifest.ts`) and asserts the popover title against it for every
+step — a drift guard baked into the recording. It drives all 13 tour steps in
+Oregon Trail no-LLM mode, submits one intent during the input-bar step so the
+trace lights up, and captures a labeled `NN-<step-id>.png` per step.
+
+**One-liner record** (rebuild + record + render MP4/GIF/contact-sheet):
+
+```bash
+make demo-tour
+```
+
+**Validate fast** (CI — assertions only, no dwells):
+
+```bash
+make demo-tour-fast
+```
+
+**Record + run the vision QA gate** (requires `claude` CLI):
+
+```bash
+make demo-tour-qa
+```
+
+Or step-by-step:
+
+```bash
+# 1. Validate
+cd tools/runstatus && WEB_CHAT_PACE=0 pnpm exec playwright test tour-video --project=chromium
+
+# 2. Record at watch-speed
+cd tools/runstatus && pnpm exec playwright test tour-video --project=chromium
+
+# 3. Render
+S=docs/skills/kitsoki-ui-demo/scripts
+$S/render.sh .artifacts/tour-video/tour-video-demo.webm
+```
+
+Output lands in `.artifacts/tour-video/`: raw `video/*.webm`, stable
+`tour-video-demo.webm`, rendered `tour-video-demo.mp4` / `.gif`, contact sheet,
+and numbered `NN-<step-id>.png` screenshots.
+
+To QA the recording against the tour scenarios:
+
+```bash
+docs/skills/kitsoki-ui-qa/scripts/qa.sh \
+  .artifacts/tour-video/tour-video-demo.mp4 \
+  --frames .artifacts/tour-video \
+  --feature docs/skills/kitsoki-ui-qa/templates/tour-feature.md \
+  --scenarios docs/skills/kitsoki-ui-qa/templates/tour-scenarios.yaml
+```
+
+The `--frames` flag passes the labeled PNGs directly (one per step, highest
+fidelity — skips the ffmpeg scene-detection pass).
+
 ## Pointers
 
 - Template spec: `tools/runstatus/tests/playwright/multi-story.spec.ts`
+- Tour spec: `tools/runstatus/tests/playwright/tour-video.spec.ts`
+- Tour robustness test: `tools/runstatus/tests/playwright/tour-onboarding.spec.ts`
+- Tour manifest (shared by live overlay + video spec): `tools/runstatus/src/tour/manifest.ts`
+- Tour QA templates: `docs/skills/kitsoki-ui-qa/templates/tour-{feature,scenarios}.*`
 - Playwright config + globalSetup: `tools/runstatus/playwright.config.ts`,
   `tools/runstatus/tests/playwright/_helpers/`
 - No-LLM posture + UI surfaces: `docs/web/README.md`

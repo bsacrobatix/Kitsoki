@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import type { StoryHeader } from "../../src/data/live-source.js";
 import type { SessionHeader } from "../../src/types.js";
+import { markAutoNavDone } from "../../src/lib/auto-nav.js";
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,11 @@ describe("HomeView", () => {
     listSessions.mockReset();
     push.mockReset();
     replace.mockReset();
+    // The auto-nav "already done" flag lives in sessionStorage so it survives a
+    // hard reload (see HomeView). happy-dom's storage is a global that persists
+    // across tests in this file, so clear it to give each test a fresh-tab
+    // baseline; the reload regression test below opts out by mounting twice.
+    sessionStorage.clear();
     // Default: no auto-navigation (zero sessions).
     listStories.mockResolvedValue([]);
     listSessions.mockResolvedValue([]);
@@ -188,6 +194,46 @@ describe("HomeView", () => {
     await flushPromises();
 
     expect(replace).toHaveBeenCalledWith("/s/only-done");
+    wrapper.unmount();
+  });
+
+  it("does NOT re-navigate on a reload after the first auto-nav (single session)", async () => {
+    // Regression: editing the URL back to "/" triggers a hard reload. The
+    // auto-nav guard must survive that reload (sessionStorage, not an in-memory
+    // module flag) so the user lands on the stories list instead of being
+    // bounced straight back into the one live session.
+    listSessions.mockResolvedValue([session({ session_id: "only-one" })]);
+
+    // First load of the tab → auto-nav fires once.
+    const first = mount(HomeView, mountOpts);
+    await flushPromises();
+    expect(replace).toHaveBeenCalledWith("/s/only-one/chat");
+    first.unmount();
+
+    // A hard reload re-mounts HomeView from scratch (do NOT clear storage — the
+    // tab is the same). The guard is already set, so we must stay on "/".
+    replace.mockReset();
+    const second = mount(HomeView, mountOpts);
+    await flushPromises();
+    expect(replace).not.toHaveBeenCalled();
+    expect(second.find("[data-testid='home-view']").exists()).toBe(true);
+    second.unmount();
+  });
+
+  it("does NOT auto-nav into the single session when a session view already spent the guard", async () => {
+    // Regression: when a tab's FIRST mount is a session view (a pasted /s/:id
+    // link, or the push right after starting a session), that view marks the
+    // per-tab auto-nav guard spent (see lib/auto-nav + InteractiveView/RunView).
+    // The user's first "← Stories" click then mounts HomeView with one live
+    // session — and it must NOT bounce them straight back in.
+    markAutoNavDone();
+    listSessions.mockResolvedValue([session({ session_id: "only-one" })]);
+
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    expect(replace).not.toHaveBeenCalled();
+    expect(wrapper.find("[data-testid='home-view']").exists()).toBe(true);
     wrapper.unmount();
   });
 

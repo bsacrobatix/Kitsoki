@@ -59,23 +59,14 @@ hosts:
   - host.oracle.ask
   - host.run
   # ── Proposal-authoring pipeline (rooms/proposal*.yaml) ────────────
-  # The intake room is a discovery conversation (converse + a persistent
-  # chat); the brief / existing-state / completeness / references rooms
-  # run decide gates; the draft room runs an agentic task; the brief and
-  # the gate artifacts are persisted under the per-session workspace via
-  # host.artifacts_dir. An instance importing dev-story with
-  # `hosts: declared` must list all five in its own allow-list.
-  - host.oracle.converse
+  # 4-stage pipeline: intake → search (decide ×2) → refine (task + decide) →
+  # draft+publish (task + run). The brief is scaffolded in the refine room via
+  # host.artifacts_dir so search results can inform it; host.ide.open_file
+  # opens it in the editor on first scaffold. An instance importing dev-story
+  # with `hosts: declared` must list all four in its own allow-list.
   - host.oracle.decide
   - host.oracle.task
-  - host.chat.resolve
-  # `restart` in rooms/proposal.yaml archives the discovery chat so on_enter's
-  # resolve mints a fresh thread (same as /meta new).
-  - host.chat.archive
   - host.artifacts_dir
-  # The merged discovery+brief room auto-opens the editable 001-brief.md in
-  # the operator's editor on first scaffold (degrades to just the path when no
-  # /ide link is live — open_file returns ok:false, never an error).
   - host.ide.open_file
 
 # Persona table (oracle-split proposal §3.5).
@@ -94,29 +85,8 @@ agents:
   # ── Proposal-authoring personas (rooms/proposal*.yaml) ────────────
   # One persona per pipeline step so the trace attributes model + token
   # usage per phase, the same discipline as stories/prd/. All are
-  # read-only except the author, which writes the proposal markdown into
-  # the per-session workspace.
-  proposal_interviewer:
-    system_prompt: "You are a kitsoki maintainer running a discovery conversation to develop a raw idea into something a *proposal* can be written from. kitsoki is a deterministic-state-machine PoC for LLM workflows. Ask one focused question at a time and help the operator sharpen: the problem, why kitsoki is the right tool, how an operator would use the change, and which layer it touches (story / runtime / tui / tracing). When pointed at existing docs or code, read them. Keep each reply to a sentence or two plus at most one question."
-    model: claude-sonnet-4-6
-    tools: [Read, Grep, Glob]
-    external_side_effect: false
-
-  # The every-turn brief distiller. As the discovery conversation unfolds, this
-  # task agent folds the newest exchange into 001-brief.md so the brief on disk
-  # always reflects the current understanding (the "discovery produces a valid
-  # brief" half of the room — the operator-edits-it-themselves half needs no
-  # agent). It has Write/Edit, so — exactly like proposal_author — the prompt
-  # AND this system prompt hard-forbid touching anything but the brief: a task
-  # agent with Write will otherwise YOLO-implement the idea. working_dir is the
-  # per-session workspace, not the repo, but that is NOT a write jail — the
-  # constraint is the instruction.
-  proposal_brief_writer:
-    system_prompt: "You maintain a single proposal BRIEF markdown file from a live discovery conversation. You write EXACTLY ONE file — the brief at the given path — and nothing else. You MUST NOT implement the idea or touch any source code, test, config, story YAML, or other repository file; doing so is a hard failure. Each turn you read the brief as it stands and fold in the newest exchange, filling the Why / What changes / Impact / Why-kitsoki / How-it's-used spine where you now have signal and leaving honest `<…>` placeholders where you don't. Keep it skim-in-two-minutes and never invent decisions the operator hasn't made."
-    model: claude-sonnet-4-6
-    tools: [Read, Grep, Glob, Write, Edit]
-    external_side_effect: false
-
+  # read-only except the refiner and author, which write into the
+  # per-session workspace.
   proposal_namer:
     system_prompt: "You name kitsoki proposals. Turn an idea into a short, meaningful 2-5 word kebab-case slug (like an existing docs/proposals/<slug>.md filename) — never a raw sentence. Glance at the existing proposals + in-progress workspace to match the house style and avoid an already-taken name."
     model: claude-sonnet-4-6
@@ -135,10 +105,13 @@ agents:
     tools: [Read, Grep, Glob]
     external_side_effect: false
 
-  proposal_completeness_judge:
-    system_prompt: "You are a proposal reviewer judging whether an idea is complete enough to draft. Decide whether the brief answers: what problem it solves, why kitsoki is the right tool, and how an operator will use it. Return the concrete gaps when it is not yet complete."
+  proposal_refiner:
+    # ⛔ This agent MAINTAINS THE BRIEF — it must NEVER implement the idea.
+    # working_dir is the per-session workspace, NOT a write jail — the constraint
+    # is this instruction. It writes EXACTLY ONE file: the brief at the given path.
+    system_prompt: "You are a kitsoki maintainer maintaining a proposal BRIEF markdown file, using search results (prior-art overlaps and curated references) to fill and sharpen it. You write EXACTLY ONE file — the brief at the given path — and nothing else. You MUST NOT implement the idea or touch any source code, test, config, story YAML, or other repository file; doing so is a hard failure. Read the brief, fold in search context and any operator message, fill the Why / What changes / Impact / Why-kitsoki / How-it's-used spine where you now have signal, and leave honest `<…>` placeholders where you don't. Keep it skim-in-two-minutes."
     model: claude-sonnet-4-6
-    tools: [Read, Grep, Glob]
+    tools: [Read, Grep, Glob, Write, Edit]
     external_side_effect: false
 
   proposal_researcher:
@@ -313,55 +286,37 @@ world:
   oracle_answer:       { type: string, default: "" }
 
   # ── Proposal-authoring pipeline (rooms/proposal*.yaml) ────────────
-  # A full prd-style spine prefixed `proposal_` so it never clobbers the
-  # bf/pr pipeline's shared keys (workdir, cycle, status, thread). The
-  # per-session scratch dir is `proposal_workspace` — NOT world.workdir
-  # (that is the bf/pr worktree). See docs/proposals/process-design.md
-  # §4 for the working-folder discipline.
+  # 4-stage pipeline: intake → search → refine → draft+publish.
+  # Per-session scratch dir is `proposal_workspace` — NOT world.workdir
+  # (that is the bf/pr worktree). See docs/proposals/process-design.md §4.
   proposal_slug:           { type: string, default: "" }   # meaningful slug; seeds the workspace dir + final filename
   proposal_workspace:      { type: string, default: "" }   # docs/proposals/.workspace/<slug> — gitignored scratch
-  proposal_idea:           { type: string, default: "" }   # distilled pitch (set when intake ends)
+  proposal_idea:           { type: string, default: "" }   # raw idea text from intake
   proposal_kind:           { type: string, default: "" }   # story | runtime | tui | tracing | epic (chosen by the author)
-  proposal_existing_paths: { type: string, default: "" }   # operator-named existing docs to point the pipeline at
+  proposal_existing_paths: { type: string, default: "" }   # operator-named existing docs passed to search
 
-  # intake discovery chat (proposal room)
-  proposal_chat_id:        { type: string, default: "" }
-  proposal_chat_title:     { type: string, default: "" }
-  proposal_idea_message:   { type: string, default: "" }   # operator's latest message this turn
-  proposal_idea_answer:    { type: string, default: "" }   # interviewer's latest reply
-  proposal_idea_turns:     { type: int,    default: 0 }
-
-  # brief skeleton + its decide gate (001-brief.md, brief-decision.json)
-  proposal_brief_path:     { type: string, default: "" }   # path of the operator-editable 001-brief.md (empty ⇒ skeleton not yet written)
-  proposal_brief_decision: { type: object, default: {} }   # decide verdict: { verdict: continue|clarify, questions: [...], reason }
-
-  # existing-state overlap gate (002-existing-state.md)
+  # search (002-existing-state.md + 003-references.json)
   proposal_existing_state:   { type: object, default: {} } # { overlaps: [{path, kind, summary, recommendation}], roadmap_fit }
   proposal_existing_path:    { type: string, default: "" } # path 002-existing-state.md was written to
-  proposal_overlap_decision: { type: string, default: "" } # "" | new | change_existing (operator's verdict on the overlap report)
+  proposal_overlap_decision: { type: string, default: "" } # "" | new | change_existing
   proposal_change_target:    { type: string, default: "" } # path of the proposal to amend when change_existing
+  proposal_references:       { type: object, default: {} } # { items: [{ path, sections, rationale }] }
+  proposal_references_path:  { type: string, default: "" } # path 003-references.json was written to
 
-  # idea-completeness gate (003-idea-completeness.md)
-  proposal_completeness:      { type: object, default: {} } # { complete: bool, problem, why_kitsoki, usage, gaps: [...] }
-  proposal_completeness_path: { type: string, default: "" }
+  # refine (001-brief.md + refinement analysis)
+  proposal_brief_path:      { type: string, default: "" }  # path of the operator-editable 001-brief.md
+  proposal_brief_decision:  { type: object, default: {} }  # decide verdict: { verdict: continue|clarify, questions: [...], reason }
+  proposal_refine_analysis: { type: object, default: {} }  # refiner output: { gaps: [...], summary }
 
-  # references (004-references.json)
-  proposal_references:        { type: object, default: {} } # { items: [{ path, sections, rationale }] }
-  proposal_references_prev:   { type: object, default: {} } # refine snapshot: the list the researcher revises in place (proposal_references is cleared to re-arm its once:)
-  proposal_references_path:   { type: string, default: "" }
-  proposal_references_revise: { type: bool,   default: false } # true on `refine` (revise current list), false on a fresh `regenerate`
-
-  # draft (005-proposal.md) + publish
+  # draft (004-proposal.md) + publish
   proposal_artifact:       { type: object, default: {} }   # task result: { title, summary_markdown, file_path, kind, confidence, needs_clarification, follow_up_questions }
   proposal_file:           { type: string, default: "" }   # final published path docs/proposals/<slug>.md
 
-  # refine feedback + per-phase cycle budgets
+  # feedback + per-phase cycle budgets
   proposal_refine_feedback:   { type: string, default: "" }
-  proposal_cycle:             { type: int, default: 0 }     # global audit counter for the proposal flow
+  proposal_cycle:             { type: int, default: 0 }    # global audit counter for the proposal flow
   proposal_brief_cycle:       { type: int, default: 0 }
   proposal_brief_budget:      { type: int, default: 5 }
-  proposal_references_cycle:  { type: int, default: 0 }
-  proposal_references_budget: { type: int, default: 3 }
   proposal_draft_cycle:       { type: int, default: 0 }
   proposal_draft_budget:      { type: int, default: 5 }
 
@@ -403,64 +358,79 @@ world:
 intents:
   # Day-level navigation
   go_main:
+    title: "Home"
     description: "Go to the main room."
     examples: [main, "home", "go home", "go to main"]
     priority: 10
   go_back:
+    title: "Back"
     description: "Return to the previous room."
     examples: [back, "return"]
     priority: 15
   go_inbox:
+    title: "Inbox"
     description: "Open the inbox."
     examples: [inbox, "check inbox"]
     priority: 20
   go_oracle:
+    title: "Ask Oracle"
     description: "Open the Oracle room for Q&A."
     examples: [oracle, "ask claude", "ask a question", "i have a question", "ask claude how X works"]
     priority: 18
   go_ticket_search:
+    title: "Tickets"
     description: "Open ticket search (provider-neutral)."
     examples: ["tickets", "ticket search", "find ticket"]
     priority: 40
   go_workspace_manager:
+    title: "Workspaces"
     description: "Open workspace manager."
     examples: [workspaces, "workspace manager", "list workspaces", "resume", "resume my workspace", "continue where I left off", "pick up where I left off"]
     priority: 30
   go_standup:
+    title: "Standup"
     description: "Prep for standup."
     examples: [standup, "daily", "prep standup"]
     priority: 35
   go_idea:
+    title: "New Idea"
     description: "Start an ad hoc idea or proposal — no ticket required."
-    examples: ["idea", "new idea", "propose", "ad hoc", "draft proposal", "i have an idea"]
+    examples: ["idea", "new idea", "propose", "proposal", "ad hoc", "draft proposal", "i have an idea", "work on a proposal", "new proposal", "write a proposal"]
     priority: 32
   go_code_review:
+    title: "Code Review"
     description: "Review a teammate's PR."
     examples: ["code review", "review prs"]
     priority: 33
   go_ideas:
+    title: "Ideas Backlog"
     description: "Open the ideas reviewer — reconcile the backlog and pick something to propose."
     examples: ["ideas", "review ideas", "idea backlog", "reconcile ideas", "what should I work on", "writer's block"]
     priority: 31
   go_deploy:
+    title: "Deploy"
     description: "Open the deploy room."
     examples: [deploy, "ship it"]
     priority: 28
   go_observability:
+    title: "Observability"
     description: "Open the observability room."
     examples: [logs, metrics, observability]
     priority: 27
   go_incident:
+    title: "Incident"
     description: "Open the incident room."
     examples: [incident, "on call"]
     priority: 26
   go_docs:
+    title: "Docs"
     description: "Open the docs room."
     examples: [docs, "update docs"]
     priority: 25
 
   # Ticket search slots
   search_tickets:
+    title: "Search Tickets"
     description: "Search tickets across the configured provider."
     examples: ["search for auth bugs", "find sprint tickets"]
     priority: 100
@@ -470,6 +440,7 @@ intents:
         required: true
         description: "Search query (provider-neutral)."
   pick_ticket:
+    title: "Pick Ticket"
     description: "Pick a ticket from the current results and start working on it."
     examples: ["pick TKT-001", "select 1", "pick 2", "open this ticket"]
     priority: 95
@@ -498,30 +469,37 @@ intents:
   # rev imports). `go_bugfix` targets the `bf` import compound; the
   # import's entry (idle) handles the rest.
   continue:
+    title: "Continue"
     description: "Advance to the next step. Each room defines its own continue: arc (typically: pick → bugfix, draft → review, etc.)."
     examples: ["continue", "proceed", "next", "ok", "go ahead"]
     priority: 65
   drive:
+    title: "Drive"
     description: "Drive the picked ticket through its pipeline. Routes by ticket_type: bug → bf, feature → impl, epic → cyp."
-    examples: ["drive", "go", "work on it", "push", "start", "drive it", "run the pipeline", "take it through", "drive the ticket"]
+    examples: ["drive", "go", "push", "start", "drive it", "run the pipeline", "take it through", "drive the ticket"]
     priority: 60
   go_bugfix:
+    title: "Fix Bug"
     description: "Hand off to the bugfix sub-story for the picked ticket."
     examples: ["fix bug", "bugfix", "work on bug"]
     priority: 55
   go_pr_refinement:
+    title: "PR Refinement"
     description: "Hand off to the pr-refinement sub-story for an open PR."
     examples: ["pr refinement", "monitor pr", "pr"]
     priority: 50
   go_implementation:
+    title: "Implement"
     description: "Hand off to the implementation sub-story for the picked task."
     examples: ["implement task", "implementation", "work on task"]
     priority: 55
   go_cypilot:
+    title: "Cypilot"
     description: "Hand off to the cypilot sub-story (SDLC waterfall) for the picked epic."
     examples: ["cypilot", "drive epic", "waterfall"]
     priority: 55
   go_code_review_story:
+    title: "Review PR"
     description: "Hand off to the code-review sub-story (teammate PR review)."
     examples: ["review teammate pr", "code review story", "rev"]
     priority: 33
@@ -532,6 +510,7 @@ intents:
   # arc fires this intent with the slots populated by the operator
   # (or by the inbox subsystem in autonomous mode).
   pick_review:
+    title: "Pick Review"
     description: "Pick a 'PR awaiting your review' notification from the inbox and enter the code-review story."
     examples: ["pick PR-38", "review notification", "pick review"]
     priority: 90
@@ -542,6 +521,7 @@ intents:
 
   # Inbox / oracle bare actions (kept minimal for Wave 2).
   ask_question:
+    title: "Ask a Question"
     description: "Ask the Oracle a question."
     examples: ["how does X work", "what is Y"]
     priority: 80
@@ -551,84 +531,95 @@ intents:
         required: true
 
   # ── Proposal-authoring pipeline vocabulary ────────────────────────
-  # The intake room is a discovery conversation; the rest are checkpoint
-  # gates. `begin_proposal` (not `start`) advances out of intake, because
-  # `start` is already a bare parent intent lifted from the bf import.
+  # 4-stage pipeline: intake (one discuss message) → search → refine → draft.
+  # `discuss` captures the idea (intake) or folds a message into the brief
+  # (refine). `ready` runs the brief judge in the refine room. `advance_brief`
+  # is synthetic (fired by the post-bind emit_intent when the brief passes).
   discuss:
-    description: "Send a message in the proposal-discovery conversation."
+    title: "Discuss"
+    description: "In intake: describe your proposal idea (one message advances to search). In refine: fold a message into the brief."
     examples: ["i want to build", "the idea is", "it's for", "tell me more", "here's what i'm thinking"]
-    priority: 40
+    priority: 85
     slots:
       # required forces the semantic router to fall through to the LLM
       # router so the operator's free-text message is captured whole.
       message: { type: string, required: true }
-  begin_proposal:
-    description: "Run the brief quality check — if the brief passes, advance; otherwise show what's missing."
+  ready:
+    title: "Check Brief"
+    description: "Run the brief quality check — if the brief passes, advance to draft; otherwise show what's missing."
     examples: ["ready", "check the brief", "review it", "is it good?", "done discussing", "let's go"]
     priority: 90
   advance_brief:
-    description: "Internal: fired by the brief check when the brief passes review, to leave discovery."
+    description: "Internal: fired by the brief check when the brief passes review, to advance to draft."
     examples: []
     priority: 1
   capture_existing:
+    title: "Reference Docs"
     description: "Point the proposal pipeline at existing docs to read."
     examples: ["see docs/foo.md", "based on the auth spec", "read these docs"]
     priority: 78
     slots:
       paths: { type: string, required: true, description: "Space/comma-separated files or dirs." }
-  restart:
-    description: "Discard this discovery thread and begin a fresh one without leaving the room."
-    examples: ["start over", "restart", "scrap this and start fresh", "begin again", "new idea instead"]
-    priority: 76
   confirm:
+    title: "Confirm"
     description: "Confirm the current review step (brief, completeness, references) and move on."
     examples: ["confirm", "proceed", "looks right", "the brief is good", "continue to the next step"]
     priority: 82
   recheck:
+    title: "Recheck"
     description: "Re-run the sanity check against the brief you just edited on disk."
     examples: ["recheck", "check again", "re-run the check", "i edited it"]
     priority: 66
   clarify:
+    title: "Revise Brief"
     description: "Step back to revise the brief before continuing."
     examples: [clarify, "more detail", "let me revise", "back to the brief"]
     priority: 68
   regenerate:
+    title: "Regenerate"
     description: "Re-generate the current step's machine output, optionally with feedback."
     examples: [regenerate, "search again", "redo the references", "rewrite the brief"]
     priority: 65
     slots:
       feedback: { type: string, required: false }
   refine:
+    title: "Refine"
     description: "Refine the current artifact with feedback, building on it (NOT a fresh start)."
     examples: [refine, rework, revise, "add a reference", "drop that doc", "re-scope that section"]
     priority: 70
     slots:
       feedback: { type: string, required: true }
   accept:
+    title: "Accept & Publish"
     description: "Accept the proposal draft and publish it."
     examples: ["accept", "approve", "looks good", "lgtm", "publish it"]
     priority: 85
   proceed_new:
+    title: "Create New"
     description: "No meaningful overlap — create a brand-new proposal."
     examples: ["proceed", "create new", "it's new", "no overlap"]
     priority: 64
   change_existing:
+    title: "Amend Existing"
     description: "Amend an existing overlapping proposal instead of creating a new one."
     examples: ["amend the existing one", "change that proposal", "fold into", "extend"]
     priority: 67
     slots:
       target: { type: string, required: true, description: "Path of the existing proposal to amend." }
   override_new:
+    title: "Create Anyway"
     description: "Create a new proposal despite the detected overlap (recorded for audit)."
     examples: ["new anyway", "ignore the overlap", "still create new"]
     priority: 58
 
   # ── Ideas reviewer vocabulary (rooms/ideas.yaml) ──────────────────
   apply:
+    title: "Apply Moves"
     description: "Apply the proposed ideas-backlog section moves — rewrite the file."
     examples: ["apply", "apply the moves", "update the backlog", "make the changes"]
     priority: 64
   pick:
+    title: "Pick Idea"
     description: "Start a proposal from one of the suggested ideas candidates."
     examples: ["pick 1", "pick candidate 2", "start on 1", "propose 2"]
     priority: 88
@@ -637,21 +628,25 @@ intents:
 
   # Standup / generic ack
   summarize_day:
+    title: "Summarise Day"
     description: "Summarise today's work for standup."
     examples: [summarize, "summarise day", "what did I do"]
     priority: 70
 
   proceed:
+    title: "Proceed"
     description: "Advance the current room (used by workspace_manager and other one-shot rooms)."
     examples: [proceed, "next"]
     priority: 60
 
   quit:
+    title: "Quit"
     description: "Quit the running pipeline / room."
     examples: [quit, "abort"]
     priority: 5
 
   look:
+    title: "Look"
     description: "Re-render the current view."
     examples: [look, "what now?"]
     priority: 10

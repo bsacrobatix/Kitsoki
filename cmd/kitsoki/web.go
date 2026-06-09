@@ -181,9 +181,16 @@ authentication.`,
 			// ── Serve (session-routing) ──────────────────────────────────────
 			srv := server.NewMulti(registry)
 			httpSrv := &http.Server{
-				Addr:              addr,
-				Handler:           srv.Handler(),
+				Addr:    addr,
+				Handler: srv.Handler(),
+				// ReadHeaderTimeout guards against Slowloris. Keep short.
 				ReadHeaderTimeout: 10 * time.Second,
+				// IdleTimeout recycles keep-alive connections that go quiet.
+				// No WriteTimeout: LLM oracle calls (turn/submit/continue) can
+				// block for 30-120s; a WriteTimeout would kill those responses
+				// mid-flight. SSE streams (/rpc/events) also require no write
+				// deadline — they hold the connection open indefinitely.
+				IdleTimeout: 120 * time.Second,
 			}
 
 			serveCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

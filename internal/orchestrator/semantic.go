@@ -331,10 +331,13 @@ func (o *Orchestrator) TrySemantic(ctx context.Context, sid app.SessionID, input
 		)
 		// Use the existing AMBIGUOUS_INTENT shape so the TUI's
 		// disambiguation card renders without a new code path.
+		// AllowedIntents carries only the tied candidates so the web UI
+		// and TUI show a short disambiguation list, not every intent in
+		// the room.
 		outcome := &TurnOutcome{
 			Mode:           ModeRejected,
 			NewState:       journey.State,
-			AllowedIntents: allowedNames,
+			AllowedIntents: names,
 			ErrorCode:      "AMBIGUOUS_INTENT",
 			ErrorMessage:   "Multiple intents matched. Pick one.",
 			TurnNumber:     turnNum,

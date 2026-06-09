@@ -17,7 +17,11 @@ export default defineConfig({
     host: "127.0.0.1",
     port: parseInt(process.env.VITE_PORT ?? "5173"),
     proxy: {
-      "/rpc": { target: apiBase, changeOrigin: true },
+      // timeout: 0 / proxyTimeout: 0 disables http-proxy's built-in timeout so
+      // LLM-backed turn/submit/continue/offpath calls (which can take 30-120s)
+      // never produce a 504 Gateway Timeout from the Vite dev proxy. The Go
+      // backend uses ReadHeaderTimeout only (no WriteTimeout) for the same reason.
+      "/rpc": { target: apiBase, changeOrigin: true, timeout: 0, proxyTimeout: 0 },
     },
   },
   build: {

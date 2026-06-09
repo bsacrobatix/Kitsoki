@@ -657,12 +657,14 @@ func buildDecideResult(stdout string, exitCode int, stderr, validatorOutputPath,
 		res.Data["claude_session_id"] = sessionID
 	}
 
+	submittedCaptured := false
 	if validatorOutputPath != "" {
 		vBytes, vErr := kitsokimcp.ReadCapturedPayload(validatorOutputPath)
 		if vErr == nil && len(vBytes) > 0 {
 			var parsed any
 			if jErr := json.Unmarshal(vBytes, &parsed); jErr == nil {
 				res.Data["submitted"] = unescapeOverEscapedStrings(parsed)
+				submittedCaptured = true
 			} else {
 				if errMsg == "" {
 					errMsg = fmt.Sprintf("host.oracle.decide: parse validator output: %v", jErr)
@@ -675,6 +677,11 @@ func buildDecideResult(stdout string, exitCode int, stderr, validatorOutputPath,
 		res.Error = errMsg
 	} else if exitCode != 0 {
 		res.Error = claudeExitErrorMessage(exitCode, stderr, stdout)
+	} else if validatorOutputPath != "" && !submittedCaptured {
+		// The model exited cleanly (code 0) but never called the submit tool.
+		// Return an error so on_error: arcs can route gracefully rather than
+		// silently leaving bind targets empty.
+		res.Error = "host.oracle.decide: model exited without calling submit — no verdict captured"
 	}
 	return res
 }

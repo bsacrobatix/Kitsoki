@@ -4,7 +4,6 @@
 /fromsession
 # scratch binaries (inline comments don't work in .gitignore — keep them separate)
 /.kitsoki-flows
-/.kitsoki-dev
 
 # Ephemeral render artifacts (viewable over VS Code remote tunnel)
 /.artifacts/

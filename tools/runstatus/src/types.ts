@@ -180,6 +180,8 @@ export interface IntentInfo {
   name: string;
   /** Author-declared intent title (may be absent). */
   title?: string;
+  /** Author-declared intent description — shown as a tooltip or subtitle. */
+  description?: string;
   /**
    * Name of the single free-text/string slot the UI binds its input box to.
    * Present iff the intent has exactly one string-typed slot and no required

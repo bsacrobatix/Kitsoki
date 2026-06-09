@@ -2,11 +2,12 @@
 #
 # Entering `ideas` runs the reviewer (decide) which surfaces candidates. `pick 1`
 # seeds world.proposal_seed_idea from candidate 1 and jumps into the proposal
-# intake — where begin_proposal (exercised by proposal_happy_path) mints the
-# slug + workspace. Here we only assert the seed + the jump.
+# intake (proposal room). The operator then types a message in intake to mint
+# the slug + workspace and advance to search. Here we only assert the seed + the
+# jump — the discuss → search path is covered by proposal_happy_path.
 #
-# proposal's on_enter resolves the discovery chat, so host.chat.resolve is
-# stubbed for the landing turn.
+# The intake room has no on_enter (no chat to resolve); no host stubs needed for
+# the proposal landing turn itself.
 
 test_kind: flow
 app: ../app.yaml
@@ -30,8 +31,6 @@ host_handlers:
               - { item: "choice widget (yes/no, multi-choice)", rationale: "reused across many rooms", effort: "small" }
   host.artifacts_dir:
     data: { ok: true, path: ".artifacts/ideas-review/latest.json", message_id: "latest.json#1" }
-  host.chat.resolve:
-    data: { ok: true, chat_id: "chat-1", title: "Proposal idea discovery", is_new: true }
 
 turns:
   # Enter the reviewer — on_enter surfaces the candidates.

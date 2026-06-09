@@ -1,57 +1,82 @@
 # proposal_reload_safe — on_enter is idempotent: a room whose result is
 # already present does NOT re-run its oracle call.
 #
-# This is the reload-safety contract. /reload re-fires on_enter; the `once:`
-# guards make the expensive decide/task a no-op when the result is already in
-# world. We prove it for the overlap scan without a real reload: `ready`
-# (begin_proposal) passes the brief review and auto-advances into
-# proposal_existing_state with proposal_existing_path ALREADY set and a
-# distinctive proposal_existing_state preset. The existing_scan stub returns a
-# DIFFERENT (empty) result — so if the guard failed and the scan re-ran, the
+# Proves the reload-safety contract for the search room. We start in
+# proposal_search with proposal_existing_path ALREADY set and a distinctive
+# proposal_existing_state preset. The existing_scan stub returns a DIFFERENT
+# (empty) result — so if the once: guard failed and the scan re-ran, the
 # preset would be overwritten. Asserting the preset survives proves the scan
 # was skipped.
 #
-# (The brief judge itself only runs on an explicit `ready`, never on on_enter /
-# reload — so the merged room has no on_enter LLM call to make idempotent.)
+# We advance via the intake `discuss` arc to trigger the search room's
+# on_enter. The search room's once: guards key off proposal_existing_state
+# (for the scout) and proposal_references (for the researcher) — both
+# already set in initial_world, so both LLM calls are skipped.
 
 test_kind: flow
 app: ../app.yaml
 initial_state: proposal
 initial_world:
-  judge_mode:          "human"
-  proposal_idea:       "Add a per-session working folder primitive."
-  proposal_workspace:  "docs/proposals/.workspace/wf"
-  proposal_brief_path: "docs/proposals/.workspace/wf/001-brief.md"
-  # Overlap scan already done — the preset the guard must preserve.
+  judge_mode:         "human"
+  proposal_idea:      "Add a per-session working folder primitive."
+  proposal_slug:      "wf"
+  proposal_workspace: "docs/proposals/.workspace/wf"
+  # Both search results already present — the once: guards must preserve them.
   proposal_existing_path:  "docs/proposals/.workspace/wf/002-existing-state.md"
   proposal_existing_state:
     overlaps:
       - { path: "docs/proposals/PRESET-SURVIVED.md", kind: "accepted", summary: "preset", recommendation: "amend" }
     roadmap_fit: "preset-survived"
+  proposal_references_path: "docs/proposals/.workspace/wf/003-references.json"
+  proposal_references:
+    items:
+      - { path: "docs/PRESET-REF.md", sections: "§1", rationale: "preset reference" }
 
 host_handlers:
   host.oracle.decide:
     by_call:
-      # The brief passes so `ready` advances into the overlap room.
-      brief_check:
-        data: { ok: true, submitted: { verdict: "continue", reason: "ready", questions: [] } }
-      # If the once: guard failed, this would fire and overwrite the preset.
+      name_slug:
+        data: { ok: true, submitted: { slug: "wf", rationale: "working folder" } }
+      # If the once: guard failed, these would fire and overwrite the presets.
       existing_scan:
         data: { ok: true, submitted: { overlaps: [], roadmap_fit: "SHOULD-NOT-RUN" } }
+      references_research:
+        data: { ok: true, submitted: { items: [] } }
+  host.run:
+    by_call:
+      uniquify:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"slug":"wf","workspace":"docs/proposals/.workspace/wf"}'
+          stdout_json: { slug: "wf", workspace: "docs/proposals/.workspace/wf" }
   host.artifacts_dir:
     data: { ok: true, path: "docs/proposals/.workspace/wf/out.md", message_id: "out#1" }
 
 turns:
-  # ready → brief passes → enter the overlap room (its on_enter fires).
-  # proposal_existing_path is already set ⇒ the guarded scan + write are
-  # SKIPPED, so the preset state survives verbatim (overlaps still names
-  # PRESET-SURVIVED, roadmap_fit unchanged) — not the stub's empty result.
-  - intent: { name: begin_proposal, slots: {} }
-    expect_state: proposal_existing_state
+  # Intake message → advance to proposal_search. The intake arc calls name_slug
+  # (oracle.decide), but the search room's on_enter once: guards (keyed off
+  # proposal_existing_state and proposal_references — both already set) SKIP both
+  # the scout and researcher. Presets survive verbatim — not overwritten by the
+  # "SHOULD-NOT-RUN" stubs — which is the assertion this flow makes.
+  - intent: { name: discuss, slots: { message: "I want a per-session working folder" } }
+    expect_state: proposal_search
     expect_world:
       proposal_existing_state:
         overlaps:
           - { path: "docs/proposals/PRESET-SURVIVED.md", kind: "accepted", summary: "preset", recommendation: "amend" }
         roadmap_fit: "preset-survived"
+      proposal_references:
+        items:
+          - { path: "docs/PRESET-REF.md", sections: "§1", rationale: "preset reference" }
+    # name_slug (oracle.decide) IS called in the intake arc — only the search
+    # room's existing_scan and references_research are the ones we're asserting
+    # did NOT run. We verify this via the world assertion: if the presets survived
+    # (not overwritten by "SHOULD-NOT-RUN" stubs), the once: guards worked.
+    expect_host_calls:
+      - handler: host.oracle.decide
+        args: { call: "name_slug" }
+      - handler: host.run
+        args: { call: "uniquify" }
 
 expect_no_errors: true

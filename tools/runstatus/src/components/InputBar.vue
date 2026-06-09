@@ -82,6 +82,36 @@
       </form>
     </template>
 
+    <!-- Semantic routing room: no choice items, no form, no text-slot intents.
+         Show a free-text textarea; submission goes via session.turn so the
+         semantic router handles natural-language dispatch. The room view
+         already documents the action vocabulary via list: elements. -->
+    <template v-else-if="isSemanticRoom">
+      <form
+        class="input-bar__composer input-bar__composer--semantic"
+        data-testid="composer"
+        @submit.prevent="sendRaw"
+      >
+        <textarea
+          v-model="rawDraft"
+          class="input-bar__textarea"
+          data-testid="composer-input"
+          placeholder="Type anything — the router handles the rest…"
+          rows="2"
+          :disabled="pending"
+          @keydown.enter.exact.prevent="sendRaw"
+        />
+        <button
+          class="input-bar__send"
+          type="submit"
+          data-testid="composer-send"
+          :disabled="pending || !rawDraft.trim()"
+        >
+          Send
+        </button>
+      </form>
+    </template>
+
     <!-- Legacy path: no typed-view choice items — fall back to IntentInfo buttons. -->
     <template v-else>
       <div v-if="actionIntents.length" class="input-bar__actions" data-testid="intent-actions">
@@ -92,9 +122,11 @@
           type="button"
           :disabled="pending"
           :data-testid="`intent-btn-${intent.name}`"
+          :title="intent.description || undefined"
           @click="fireIntent(intent)"
         >
-          {{ intent.title || intent.name }}
+          <span class="input-bar__btn-label">{{ intent.title || intent.name }}</span>
+          <span v-if="intent.description" class="input-bar__btn-hint">{{ intent.description }}</span>
         </button>
       </div>
     </template>
@@ -118,13 +150,14 @@
         </option>
       </select>
 
-      <input
+      <textarea
         v-model="draft"
-        class="input-bar__input"
-        type="text"
+        class="input-bar__textarea"
         data-testid="composer-input"
         :placeholder="placeholder"
+        rows="2"
         :disabled="pending"
+        @keydown.enter.exact.prevent="send"
       />
 
       <button
@@ -264,6 +297,21 @@ const actionIntents = computed(() =>
 /** Intents that bind a single free-text slot -> the composer input. */
 const textIntents = computed(() => props.intents.filter((i) => !!i.text_slot));
 
+/**
+ * True when this room uses semantic routing as its primary affordance.
+ * Requirements: the engine sent a typedView (meaning the room has a structured
+ * view declaration), but the view contains no choice or form elements and no
+ * text-slot intents. The room view already describes the action vocabulary via
+ * list: / prose: elements; the input surface should be a free-text textarea
+ * that routes via session.turn. Without a typedView the legacy button path applies.
+ */
+const isSemanticRoom = computed(() => {
+  if (!props.typedView?.Elements?.length) return false;
+  if (choiceItems.value.length || formElement.value) return false;
+  if (textIntents.value.length) return false;
+  return true;
+});
+
 const selectedTextName = ref<string>("");
 
 // Default the selected text intent to the first one; keep it valid as intents change.
@@ -293,6 +341,9 @@ const placeholder = computed(() => {
 
 const draft = ref("");
 
+// Free-text draft for semantic routing rooms.
+const rawDraft = ref("");
+
 function fireIntent(intent: IntentInfo) {
   if (props.pending) return;
   emit("intent", intent.name, {});
@@ -302,11 +353,15 @@ function send() {
   const text = draft.value.trim();
   const it = activeTextIntent.value;
   if (props.pending || !text || !it) return;
-  // Emit both: a high-level `send` (text + intent name) and the structured
-  // `intent` carrying the text in the intent's declared slot.
-  emit("send", text, it.name);
   emit("intent", it.name, { [it.text_slot as string]: text });
   draft.value = "";
+}
+
+function sendRaw() {
+  const text = rawDraft.value.trim();
+  if (props.pending || !text) return;
+  emit("send", text, "");
+  rawDraft.value = "";
 }
 </script>
 
@@ -486,6 +541,29 @@ function send() {
 
 .input-bar__input:focus {
   border-color: #2563eb;
+}
+
+.input-bar__textarea {
+  flex: 1 1 auto;
+  background: #0f1115;
+  color: #e6e9ef;
+  border: 1px solid #3a4250;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+  min-height: 2.8rem;
+  line-height: 1.5;
+}
+
+.input-bar__textarea:focus {
+  border-color: #2563eb;
+}
+
+.input-bar__composer--semantic {
+  align-items: flex-end;
 }
 
 .input-bar__send {

@@ -82,6 +82,12 @@ export const useRunStore = defineStore("run", () => {
    * then subscribe to keep events/currentStatePath updated.
    */
   async function hydrate(source: DataSource, sessionId: string): Promise<void> {
+    // The store is a singleton; switching sessions reuses it. Drop every
+    // session-scoped bit of state up front so the incoming session can't
+    // inherit the previous one's transcript bubbles, current view, selection,
+    // or diagram highlight. (hydrate already replaces events/state below, but
+    // the conversational + interaction state must be cleared explicitly.)
+    resetSessionState();
     loading.value = true;
     try {
       const [session, app, mer, traceResult] = await Promise.all([
@@ -136,6 +142,23 @@ export const useRunStore = defineStore("run", () => {
   }
 
   /**
+   * Clear all session-scoped state and stop any in-flight subscription. Called
+   * at the head of hydrate so switching sessions (the store is a singleton)
+   * starts from a clean slate instead of inheriting the prior session's
+   * transcript, current view, selection, or diagram highlight.
+   */
+  function resetSessionState(): void {
+    teardown();
+    transcript.value = [];
+    currentView.value = null;
+    events.value = [];
+    currentStatePath.value = "";
+    terminal.value = false;
+    selectedEventIndex.value = null;
+    highlightedStatePaths.value = [];
+  }
+
+  /**
    * Re-pull the session after an out-of-band content change (a meta-mode
    * story edit triggered a server-side reload). Refreshes app/mermaid/trace +
    * the current room view IN PLACE — no browser reload, and the conversational
@@ -146,11 +169,14 @@ export const useRunStore = defineStore("run", () => {
     source: DataSource,
     sessionId: string
   ): Promise<void> {
-    teardown();
+    // hydrate() clears all session-scoped state (so plain session switches
+    // start clean); a reload of the SAME session must keep the conversation,
+    // so snapshot the transcript and restore it after the reload.
+    const preserved = transcript.value.slice();
     await hydrate(source, sessionId);
+    transcript.value = preserved;
     // Refresh the current room view without appending a transcript entry
-    // (hydrate leaves transcript untouched; loadInitialView would duplicate the
-    // opening bubble).
+    // (loadInitialView would duplicate the opening bubble).
     const result = await source.view(sessionId);
     currentView.value = result;
     if (result.state) currentStatePath.value = result.state;

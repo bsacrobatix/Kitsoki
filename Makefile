@@ -14,8 +14,8 @@ SPA_SOURCES   := $(shell find $(RUNSTATUS_DIR)/src $(RUNSTATUS_DIR)/index.html \
 # Every shipped story whose deterministic flow suite `make test` exercises.
 STORY_APPS := $(wildcard stories/*/app.yaml)
 
-.PHONY: all build install uninstall test test-flows vet fmt tidy clean web web-clean web-dev e2e-docker \
-	fetch-models fetch-llama-server
+.PHONY: all build install uninstall test test-flows vet fmt tidy clean web web-clean web-dev web-dev-logs e2e-docker \
+	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa
 
 all: build
 
@@ -56,16 +56,32 @@ web-clean:
 # the Vite dev server proxies /rpc and /rpc/events to the Go backend on
 # http://127.0.0.1:7777 (override with KITSOKI_API=http://host:port).
 #
+# Both processes write to stdout/stderr AND to a rotating log file under
+# .kitsoki-logs/. The 10 most recent logs are kept (older ones are pruned at
+# each startup). Use 'make web-dev-logs' to tail the latest log.
+#
 # Pass extra Go flags via WEB_ARGS, e.g.:
 #   make web-dev WEB_ARGS="--stories-dir stories/my-story"
-WEB_ARGS ?=
+WEB_ARGS     ?=
+WEB_LOG_DIR  := .kitsoki-logs
+WEB_LOG_KEEP := 10
 web-dev:
 	@command -v pnpm >/dev/null 2>&1 || { echo "error: pnpm not found" >&2; exit 1; }
-	@go build -o .kitsoki-dev $(PKG)
-	@trap 'kill 0' INT TERM EXIT; \
-	  ./.kitsoki-dev web $(WEB_ARGS) & \
-	  cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm dev; \
+	@mkdir -p $(WEB_LOG_DIR)
+	@find $(WEB_LOG_DIR) -maxdepth 1 -name "web-dev-*.log" | sort | head -n -$(WEB_LOG_KEEP) | xargs -r rm --
+	@LOG=$(WEB_LOG_DIR)/web-dev-$$(date +%Y%m%d-%H%M%S).log; \
+	  printf 'kitsoki: debug log → %s\n' "$$LOG" >&2; \
+	  trap 'kill 0' INT TERM EXIT; \
+	  { go run $(PKG) web $(WEB_ARGS) 2>&1; } | tee -a "$$LOG" & \
+	  { cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && FORCE_COLOR=1 pnpm dev 2>&1; } | tee -a "$$LOG"; \
 	  wait
+
+# web-dev-logs tails the most recent web-dev log file.
+web-dev-logs:
+	@latest=$$(find $(WEB_LOG_DIR) -maxdepth 1 -name "web-dev-*.log" | sort | tail -1); \
+	  if [ -z "$$latest" ]; then echo "no web-dev logs found in $(WEB_LOG_DIR)" >&2; exit 1; fi; \
+	  echo "tailing $$latest" >&2; \
+	  tail -f "$$latest"
 
 # test runs the Go unit tests AND the Mode-2 deterministic story flow suites
 # (no LLM, no cost). The flow suites guard the shipped stories under stories/,
@@ -85,6 +101,39 @@ test-flows:
 		printf '\n-- flows: %s\n' "$$app"; \
 		./.kitsoki-flows test flows "$$app" || rc=1; \
 	done; rm -f ./.kitsoki-flows; exit $$rc
+
+# fix-tests drives the stories/fix-tests auto-fixer: it runs the full test
+# suite (`make test`), and if anything fails it uses claude (sonnet), via the
+# story's host.oracle.task, to fix the failures — re-running the suite up to 3
+# cycles — then writes a Markdown report under .artifacts/fix-tests/.
+#
+# Headless / one-shot: `session create` + `session continue --intent start`
+# drives the background-job pipeline to a terminal state in a single drain.
+# The fixer EDITS YOUR WORKING TREE (it has Edit/Write); review the diff after.
+# It never touches git and never makes network calls.
+#
+# Exit code: 0 when the suite is green (done_clean); nonzero when tests are
+# still red after the budget (done_exhausted) or the fixer needs a human
+# decision (blocked) — the report says which, and lists any open questions.
+.PHONY: fix-tests
+FIX_TESTS_APP := stories/fix-tests/app.yaml
+fix-tests:
+	@command -v jq >/dev/null 2>&1 || { echo "error: jq is required for 'make fix-tests'" >&2; exit 1; }
+	@go build -o ./.kitsoki-fixtests $(PKG)
+	@db=$$(mktemp -u $${TMPDIR:-/tmp}/kitsoki-fixtests-XXXXXX.db); \
+	 sid=$$(./.kitsoki-fixtests session create --app $(FIX_TESTS_APP) --db "$$db" | jq -r .session_id); \
+	 echo "fix-tests: driving session $$sid"; \
+	 echo "fix-tests: running the suite and auto-fixing with claude (sonnet) — this may take a while…"; \
+	 out=$$(./.kitsoki-fixtests session continue --app $(FIX_TESTS_APP) --db "$$db" --id "$$sid" --intent start --mode one-shot); \
+	 state=$$(printf '%s' "$$out" | jq -r .new_state); \
+	 echo; echo "fix-tests: final state = $$state"; \
+	 report=$$(ls -t .artifacts/fix-tests/report-*.md 2>/dev/null | head -1); \
+	 if [ -n "$$report" ]; then echo; echo "──────── $$report ────────"; cat "$$report"; echo "─────────────────────────"; fi; \
+	 rm -f ./.kitsoki-fixtests "$$db"; \
+	 case "$$state" in \
+	   done_clean) echo "fix-tests: PASS — suite is green."; exit 0;; \
+	   *) echo "fix-tests: FAIL ($$state) — see the report above." >&2; exit 1;; \
+	 esac
 
 vet:
 	go vet ./...
@@ -117,3 +166,26 @@ fetch-models:
 
 fetch-llama-server:
 	go run ./tools/oracle-fetch -binary
+
+# demo-tour records the onboarding tour as a shareable MP4/GIF at watch-speed
+# and renders all three post-production artifacts. Requires pnpm + ffmpeg.
+# Output: .artifacts/tour-video/ (webm, mp4, gif, contact-sheet, per-step PNGs).
+demo-tour: build
+	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	cd $(RUNSTATUS_DIR) && pnpm exec playwright test tour-video --project=chromium
+	docs/skills/kitsoki-ui-demo/scripts/render.sh .artifacts/tour-video/tour-video-demo.webm
+
+# demo-tour-fast validates the tour spec assertions only (no dwells, no render).
+# Use this in CI or to iterate on spec changes quickly.
+demo-tour-fast: build
+	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	cd $(RUNSTATUS_DIR) && WEB_CHAT_PACE=0 pnpm exec playwright test tour-video --project=chromium
+
+# demo-tour-qa records the tour video then runs the vision QA gate against it.
+# Requires the `claude` CLI on PATH. Output: .artifacts/ui-qa/tour-video-demo/.
+demo-tour-qa: demo-tour
+	docs/skills/kitsoki-ui-qa/scripts/qa.sh \
+		.artifacts/tour-video/tour-video-demo.mp4 \
+		--frames .artifacts/tour-video \
+		--feature docs/skills/kitsoki-ui-qa/templates/tour-feature.md \
+		--scenarios docs/skills/kitsoki-ui-qa/templates/tour-scenarios.yaml

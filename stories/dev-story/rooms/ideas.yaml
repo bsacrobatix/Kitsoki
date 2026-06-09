@@ -15,7 +15,7 @@
 #
 # `pick` seeds world.proposal_seed_idea from a candidate and jumps into the
 # proposal intake, so a blocked author flows straight into authoring a proposal
-# (slug + workspace minting happens in proposal.begin_proposal, reused as-is).
+# (slug + workspace minting happens in proposal.discuss, on the first message).
 
 states:
 
@@ -135,8 +135,8 @@ states:
             - say: "Applied the section moves to {{ world.ideas_path }} — `regenerate` to re-scan the rewritten backlog."
 
       # Seed the proposal pipeline from a candidate and jump into intake. Guarded
-      # on a valid 1-based index; begin_proposal (in the proposal room) mints the
-      # slug + workspace, so nothing else is needed here.
+      # on a valid 1-based index; the first `discuss` message in the proposal room
+      # mints the slug + workspace, so nothing else is needed here.
       pick:
         - when: "slots.n >= 1 && len(world.ideas_review.candidates ?? []) >= slots.n"
           target: proposal

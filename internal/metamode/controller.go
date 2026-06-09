@@ -1089,7 +1089,21 @@ func resolveCwd(m *app.MetaModeDef, a agents.Agent, appFile string) string {
 // filepath.Abs. If filepath.Abs fails (a real rarity — it only
 // errors when the OS can't get the cwd), the original is returned
 // rather than losing the value.
+//
+// Env vars are expanded FIRST, before the absolute/relative split.
+// The builtin kitsoki.* meta modes carry raw `Cwd: "${KITSOKI_REPO}"`,
+// and KITSOKI_REPO holds an absolute path — so expanding before the
+// IsAbs check lets it short-circuit as already-absolute. Expanding
+// afterwards (the old order) ran filepath.Abs on the literal
+// "${KITSOKI_REPO}" token, prepending the process cwd, and produced a
+// doubled "<cwd>/<abs-repo>" path that broke the claude chdir. Agent
+// DefaultCwd arrives pre-expanded, so ExpandEnv is a harmless no-op
+// there.
 func absolutiseAgainst(raw, baseDir string) string {
+	if raw == "" {
+		return ""
+	}
+	raw = os.ExpandEnv(raw)
 	if raw == "" {
 		return ""
 	}

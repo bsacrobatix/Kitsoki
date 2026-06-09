@@ -10,13 +10,37 @@ import { useMetaStore } from "../../src/stores/meta.js";
 import { useRunStore } from "../../src/stores/run.js";
 import type { LiveSource } from "../../src/data/live-source.js";
 
+function fakeMetaStream(
+  result: Record<string, unknown> = {},
+  events: Array<{ type: string; text?: string; tool?: string; preview?: string }> = []
+) {
+  return vi.fn().mockImplementation(
+    async (
+      _sid: string,
+      _mode: string,
+      _chatId: string,
+      _input: string,
+      onEvent: (ev: { type: string; text?: string; tool?: string; preview?: string }) => void
+    ) => {
+      for (const ev of events) onEvent(ev);
+      return {
+        assistant: "hello",
+        chat_id: "c1",
+        reload_requested: false,
+        changed_files: [],
+        ...result,
+      };
+    }
+  );
+}
+
 function fakeSource(overrides: Record<string, unknown> = {}): LiveSource {
   return {
     metaModes: vi.fn().mockResolvedValue([
       { key: "story.ask", label: "Story Q&A", banner: "", agent: "story-explainer", read_only: true, group: "story" },
     ]),
     metaEnter: vi.fn().mockResolvedValue({ chat_id: "c1", mode_key: "story.ask", messages: [] }),
-    metaSend: vi.fn().mockResolvedValue({ assistant: "hello", chat_id: "c1", reload_requested: false, changed_files: [] }),
+    metaStream: fakeMetaStream(),
     metaNew: vi.fn().mockResolvedValue({ chat_id: "c2", mode_key: "story.ask", messages: [] }),
     reloadSession: vi.fn().mockResolvedValue({ ok: true, prev_state_exists: true }),
     ...overrides,
@@ -80,7 +104,7 @@ describe("meta store", () => {
     const runStore = useRunStore();
     const rehydrate = vi.spyOn(runStore, "rehydrate").mockResolvedValue();
     const src = fakeSource({
-      metaSend: vi.fn().mockResolvedValue({
+      metaStream: fakeMetaStream({
         assistant: "applied + reloaded",
         chat_id: "c1",
         reload_requested: true,
@@ -114,5 +138,89 @@ describe("meta store", () => {
     await meta.loadModes(src, "s1");
     expect(meta.modes).toHaveLength(1);
     expect(meta.modes[0].key).toBe("story.ask");
+  });
+
+  it("delta events accumulate into pendingAssistantText during streaming", async () => {
+    const meta = useMetaStore();
+    const captured: string[] = [];
+    const src = fakeSource({
+      metaStream: fakeMetaStream({ assistant: "hello world" }, [
+        { type: "delta", text: "hello " },
+        { type: "delta", text: "world" },
+      ]),
+    });
+    // Intercept pendingAssistantText changes during send
+    const origSend = src.metaStream as ReturnType<typeof vi.fn>;
+    origSend.mockImplementation(
+      async (_s: string, _m: string, _c: string, _i: string, onEvent: (ev: { type: string; text?: string }) => void) => {
+        onEvent({ type: "delta", text: "hello " });
+        captured.push(meta.pendingAssistantText);
+        onEvent({ type: "delta", text: "world" });
+        captured.push(meta.pendingAssistantText);
+        return { assistant: "hello world", chat_id: "c1", reload_requested: false, changed_files: [] };
+      }
+    );
+    await meta.openMode(src, "s1", "story.ask");
+    await meta.send(src, "hi");
+    expect(captured[0]).toBe("hello ");
+    expect(captured[1]).toBe("hello world");
+    // Cleared after done
+    expect(meta.pendingAssistantText).toBe("");
+  });
+
+  it("tool events accumulate into pendingTools during streaming", async () => {
+    const meta = useMetaStore();
+    const src = fakeSource({
+      metaStream: fakeMetaStream({ assistant: "done" }, [
+        { type: "tool", tool: "Read", preview: "app.yaml" },
+        { type: "tool", tool: "Edit", preview: "rooms/idle.yaml" },
+      ]),
+    });
+    await meta.openMode(src, "s1", "story.edit");
+    await meta.send(src, "make it darker");
+    // Both were pushed during the call; both cleared on done
+    expect(meta.pendingTools).toEqual([]);
+  });
+
+  it("pendingTools and pendingAssistantText are cleared on error", async () => {
+    const meta = useMetaStore();
+    const src = fakeSource({
+      metaStream: vi.fn().mockImplementation(
+        async (_s: string, _m: string, _c: string, _i: string, onEvent: (ev: { type: string; text?: string; tool?: string; preview?: string }) => void) => {
+          onEvent({ type: "delta", text: "partial" });
+          onEvent({ type: "tool", tool: "Read", preview: "x" });
+          throw new Error("network error");
+        }
+      ),
+    });
+    await meta.openMode(src, "s1", "story.ask");
+    await meta.send(src, "hi");
+    expect(meta.pendingAssistantText).toBe("");
+    expect(meta.pendingTools).toEqual([]);
+    expect(meta.error).toContain("network error");
+  });
+
+  it("multi-round sends accumulate transcript correctly", async () => {
+    const meta = useMetaStore();
+    let callCount = 0;
+    const src = fakeSource({
+      metaStream: vi.fn().mockImplementation(
+        async () => ({
+          assistant: `reply ${++callCount}`,
+          chat_id: "c1",
+          reload_requested: false,
+          changed_files: [],
+        })
+      ),
+    });
+    await meta.openMode(src, "s1", "story.ask");
+    await meta.send(src, "first");
+    await meta.send(src, "second");
+    await meta.send(src, "third");
+    expect(meta.activeTranscript).toHaveLength(6); // 3 user + 3 assistant
+    expect(meta.activeTranscript[0]).toEqual({ role: "user", text: "first" });
+    expect(meta.activeTranscript[1]).toEqual({ role: "assistant", text: "reply 1" });
+    expect(meta.activeTranscript[4]).toEqual({ role: "user", text: "third" });
+    expect(meta.activeTranscript[5]).toEqual({ role: "assistant", text: "reply 3" });
   });
 });

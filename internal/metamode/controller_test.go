@@ -1137,6 +1137,43 @@ func TestResolveCwd_AbsolutisesRelative(t *testing.T) {
 	}
 }
 
+// TestResolveCwd_EnvVarCwd_NotDoubled is the regression test for the
+// web-UI "kitsoki.* meta chat does nothing" bug. The builtin kitsoki.*
+// meta modes (kitsoki.ask / kitsoki.edit / kitsoki.bug) carry
+// Cwd: "${KITSOKI_REPO}" in *raw, unexpanded* form. The effective
+// working dir the adapter hands the claude subprocess is the
+// composition expandCwd(resolveCwd(mode, agent, appFile)).
+//
+// The bug: resolveCwd ran filepath.Abs on the RAW "${KITSOKI_REPO}"
+// literal (prepending the process cwd to the un-expanded token), and
+// expandCwd then expanded the env var to its OWN absolute path —
+// yielding "<process-cwd>/<abs-KITSOKI_REPO>", a doubled path that does
+// not exist. claude then failed to chdir into it before it could even
+// run, so the meta turn produced no reply (story.* modes were fine
+// because they carry no Cwd). Env expansion must happen BEFORE
+// absolutising.
+func TestResolveCwd_EnvVarCwd_NotDoubled(t *testing.T) {
+	// A real absolute dir so the result is a stable, comparable path.
+	repo := t.TempDir()
+	t.Setenv("KITSOKI_REPO", repo)
+
+	// The home-screen ("self") driver passes appFile="" — exactly the
+	// scope where the bug bit hardest (no app dir to fall back to).
+	mode := &app.MetaModeDef{Cwd: "${KITSOKI_REPO}"}
+
+	// Reproduce the production seam: controller.Send computes
+	// resolveCwd(...) into AskInput.Cwd, then adapter applies expandCwd
+	// on the way to the handler's working_dir.
+	effective := expandCwd(resolveCwd(mode, agents.Agent{}, ""))
+
+	if effective != repo {
+		t.Errorf("effective working dir = %q, want %q (the env var's value, not a doubled path)", effective, repo)
+	}
+	if strings.Count(effective, repo) > 1 {
+		t.Errorf("effective working dir %q contains the repo path twice — env expansion ran AFTER absolutising", effective)
+	}
+}
+
 func TestNormaliseToolName(t *testing.T) {
 	cases := []struct {
 		in, want string

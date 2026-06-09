@@ -1,28 +1,23 @@
-# proposal_overlap_proposes_change — the overlap gate (proposals.md:26).
+# proposal_overlap_proposes_change — the search room's overlap handling.
 #
-# When the scout finds an overlapping proposal, `proceed_new` is GUARDED
-# (a free-typed "proceed" bounces back, default arm), and the operator is
-# steered to `change_existing` — which records change_existing + the target
-# path so the draft room amends the existing proposal instead of creating a
-# new one, even though the original intent was "create a new proposal".
+# When the scout finds an overlapping proposal, `confirm` is GUARDED on an
+# empty overlap list — a free-typed "confirm" bounces back (default arm).
+# The operator is steered to `change_existing` (amend) or `override_new`.
+# Here we test that the guard fires and that `change_existing` advances to
+# proposal_refine with the correct proposal_change_target set.
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposal
+initial_state: proposal_search
 initial_world:
-  judge_mode:          "human"
-  proposal_idea:       "Add a local model oracle sidecar."
-  proposal_slug:       "lmo"
-  proposal_workspace:  "docs/proposals/.workspace/lmo"
-  proposal_brief_path: "docs/proposals/.workspace/lmo/001-brief.md"
+  judge_mode:         "human"
+  proposal_idea:      "Add a local model oracle sidecar."
+  proposal_slug:      "lmo"
+  proposal_workspace: "docs/proposals/.workspace/lmo"
 
 host_handlers:
   host.oracle.decide:
     by_call:
-      brief_check:
-        data:
-          ok: true
-          submitted: { verdict: "continue", reason: "ready.", questions: [] }
       existing_scan:
         data:
           ok: true
@@ -30,28 +25,34 @@ host_handlers:
             overlaps:
               - { path: "docs/proposals/local-model-oracle.md", kind: "accepted", summary: "Already proposes a llama.cpp sidecar for routing/small-decide.", recommendation: "amend" }
             roadmap_fit: "Duplicates the accepted local-model-oracle proposal."
-      completeness_check:
+      references_research:
         data:
           ok: true
-          submitted: { complete: true, problem: "p", why_kitsoki: "w", usage: "u", gaps: [] }
+          submitted: { items: [] }
   host.artifacts_dir:
     data: { ok: true, path: "docs/proposals/.workspace/lmo/out.md", message_id: "out#1" }
+  # Stubs for proposal_refine on_enter (advanced to by change_existing)
+  host.ide.open_file:
+    data: { ok: true, connected: true }
+  host.oracle.task:
+    by_call:
+      refine_brief:
+        data:
+          ok: true
+          submitted: { summary: "Brief started.", gaps: [] }
 
 turns:
-  # ready → brief passes → overlap check; the scout reports an accepted overlap.
-  - intent: { name: begin_proposal, slots: {} }
-    expect_state: proposal_existing_state
-
-  # proceed_new is guarded on an empty overlap list — with an overlap present
+  # confirm is guarded on an empty overlap list — with an overlap present
   # it bounces back (default arm) rather than skipping the overlap.
-  - intent: { name: proceed_new, slots: {} }
-    expect_state: proposal_existing_state
+  - intent: { name: confirm, slots: {} }
+    expect_state: proposal_search
     expect_world:
       proposal_overlap_decision: ""
 
-  # Amend the existing proposal instead — records the decision + target.
+  # Amend the existing proposal instead — records the decision + target,
+  # advances to proposal_refine.
   - intent: { name: change_existing, slots: { target: "docs/proposals/local-model-oracle.md" } }
-    expect_state: proposal_idea_completeness
+    expect_state: proposal_refine
     expect_world:
       proposal_overlap_decision: "change_existing"
       proposal_change_target:    "docs/proposals/local-model-oracle.md"

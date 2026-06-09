@@ -247,6 +247,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/rpc", s.handleRPC)
 	mux.HandleFunc("/rpc/events", s.handleEvents)
 	mux.HandleFunc("/artifact/", s.handleArtifact)
+	mux.HandleFunc("/rpc/meta-stream", s.handleMetaStream)
 	mux.HandleFunc("/", s.handleIndex)
 	return mux
 }

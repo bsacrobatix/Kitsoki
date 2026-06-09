@@ -1,53 +1,64 @@
-# proposal_references_refine — the references room's revise/search/budget loop.
+# proposal_search_regenerate — the search room's regenerate loop.
 #
-# `refine` revises the CURRENT list in place (proposal_references_revise=true,
-# feedback recorded, cycle++); `regenerate` searches fresh (revise=false);
-# both are budget-capped — at the cap they bail to `main` (the hub has no
-# @exit). Mirrors stories/prd/flows/references_refine.yaml +
-# references_budget.yaml.
+# `regenerate` discards both the scout and researcher results and re-runs them
+# from scratch on the next on_enter. The new design has no budget tracking for
+# the search room (it was only needed for the old references room's refine loop);
+# regenerate simply clears the binds and self-transitions.
+#
+# This flow starts directly in proposal_search with results already populated,
+# verifies that regenerate clears them, and that on re-entry the oracle calls
+# fire again (once: guards re-arm when the binds are cleared).
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposal_references
+initial_state: proposal_search
 initial_world:
-  judge_mode:                 "human"
-  proposal_idea:              "Add a per-session working folder primitive."
-  proposal_workspace:         "docs/proposals/.workspace/wf"
-  proposal_brief_path:        "docs/proposals/.workspace/wf/001-brief.md"
-  proposal_references_budget:  2
+  judge_mode:         "human"
+  proposal_idea:      "Add a per-session working folder primitive."
+  proposal_workspace: "docs/proposals/.workspace/wf"
+  # Pre-populated search results (set as if the room ran already).
+  proposal_existing_state:
+    overlaps: []
+    roadmap_fit: "Original roadmap fit."
+  proposal_existing_path:   "docs/proposals/.workspace/wf/002-existing-state.md"
+  proposal_references:
+    items:
+      - { path: "docs/proposals/process-design.md", sections: "§4.3", rationale: "old reference" }
+  proposal_references_path: "docs/proposals/.workspace/wf/003-references.json"
 
 host_handlers:
   host.oracle.decide:
     by_call:
+      existing_scan:
+        data:
+          ok: true
+          submitted:
+            overlaps: []
+            roadmap_fit: "Refreshed roadmap fit."
       references_research:
         data:
           ok: true
           submitted:
             items:
-              - { path: "docs/proposals/process-design.md", sections: "§4.3", rationale: "names the workdir primitive" }
+              - { path: "docs/proposals/process-design.md", sections: "§4.3", rationale: "refreshed reference" }
   host.artifacts_dir:
-    data: { ok: true, path: "docs/proposals/.workspace/wf/004-references.json", message_id: "004-references#1" }
+    data: { ok: true, path: "docs/proposals/.workspace/wf/out.md", message_id: "out#1" }
 
 turns:
-  # Revise in place: revise flag set, feedback recorded, cycle 0→1.
-  - intent: { name: refine, slots: { feedback: "also cite docs/stories/state-machine.md" } }
-    expect_state: proposal_references
-    expect_world:
-      proposal_references_revise:   true
-      proposal_refine_feedback:     "also cite docs/stories/state-machine.md"
-      proposal_references_cycle:    1
-
-  # Fresh search: revise flag cleared, cycle 1→2.
+  # Regenerate: clear both results and self-transition (on_enter re-fires).
   - intent: { name: regenerate, slots: {} }
-    expect_state: proposal_references
+    expect_state: proposal_search
     expect_world:
-      proposal_references_revise:  false
-      proposal_references_cycle:   2
-
-  # At budget (cycle 2 >= budget 2) → bail to the hub with a last_error.
-  - intent: { name: refine, slots: { feedback: "one more" } }
-    expect_state: main
-    expect_world:
-      last_error: "proposal abandoned — references budget exhausted"
+      proposal_existing_state:
+        overlaps:    []
+        roadmap_fit: "Refreshed roadmap fit."
+      proposal_references:
+        items:
+          - { path: "docs/proposals/process-design.md", sections: "§4.3", rationale: "refreshed reference" }
+    expect_host_calls:
+      - handler: host.oracle.decide
+        args: { call: "existing_scan" }
+      - handler: host.oracle.decide
+        args: { call: "references_research" }
 
 expect_no_errors: true

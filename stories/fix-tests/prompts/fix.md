@@ -17,13 +17,10 @@ JSON via the `submit` tool.
 
 - Cycle **{{ args.cycle }}** of **{{ args.max_cycles }}**.
 - The test command is: `{{ args.test_cmd }}`
-{% if args.refine_feedback %}
-- A previous cycle already attempted a fix. These failures remained after that
-  attempt — focus on them, and do not undo the prior cycle's correct changes:
-
-```
-{{ args.refine_feedback }}
-```
+{% if args.cycle > 1 %}
+- A previous cycle already attempted a fix; the failures below are what
+  **remained** after it. Focus on them, and do not undo the prior cycle's
+  correct changes.
 {% endif %}
 
 ## Failure output

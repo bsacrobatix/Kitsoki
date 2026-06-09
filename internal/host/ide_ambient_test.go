@@ -175,7 +175,10 @@ func TestOracleDecide_DoesNotInjectIDESelection(t *testing.T) {
 		"schema":      schemaPath,
 	})
 	require.NoError(t, err)
-	require.Empty(t, res.Error)
+	// The fake runner never calls submit, so the safety-net error fires — that's
+	// expected here. Only infra failures (exec error) would be surprising.
+	assert.NotContains(t, res.Error, "claude exec failed",
+		"unexpected infra error: %s", res.Error)
 	assert.NotContains(t, stdin, ambientHeader,
 		"decide must not carry the editor selection")
 }

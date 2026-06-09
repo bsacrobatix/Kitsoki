@@ -1,19 +1,21 @@
-# proposal_draft — generate the proposal, then checkpoint.
+# proposal_draft — generate the proposal, then publish it.
 #
-# Mirrors stories/prd/rooms/drafting.yaml. on_enter runs the
+# Stage 4 (final) of the 4-stage proposal pipeline. on_enter runs the
 # `proposal_author` (host.oracle.task) which classifies the kind, copies
 # the matching docs/proposals/templates/<kind>.md, fills the Why / What
-# changes / Impact spine, and writes 005-proposal.md into the workspace —
+# changes / Impact spine, and writes 004-proposal.md into the workspace —
 # OR, when the overlap gate chose change_existing, amends
 # proposal_change_target in place. working_dir is the repo root so both the
 # workspace write and an amend of docs/proposals/<file>.md resolve.
 #
-# The acceptance schema requires needs_clarification + follow_up_questions
-# so the author can say "the inputs left gaps" — surfaced as a banner that
-# points the operator back to the brief via `clarify`.
+# On `accept`: publish_proposal.py moves 004-proposal.md from the workspace
+# to docs/proposals/<slug>.md (collision-safe) and the room transitions to
+# proposal_done (a confirmation view, inline in this file) without going
+# through a separate room. The prior proposal_publish room is gone.
 #
-# Checkpoint exits: accept → publish; refine → re-draft (budget-capped);
-# clarify → back to the brief.
+# Checkpoint exits: accept → publish → proposal_done;
+#                   refine → re-draft (budget-capped);
+#                   clarify → proposal_refine (keep search results, redo brief).
 
 states:
 
@@ -23,9 +25,9 @@ states:
       - banner:
           text:     "DRAFTING"
           subtitle: "Fill the template, review, publish"
-          color:    "#8B5CF6"   # violet — synthesis
+          color:    "#8B5CF6"
       - prose: "proposal cycle {{ world.proposal_cycle }} · draft attempt {{ world.proposal_draft_cycle }}/{{ world.proposal_draft_budget }}"
-      - prose: 'Proposal written to  {{ world.proposal_artifact.file_path|default:"(drafting — writes 005-proposal.md)" }}'
+      - prose: 'Proposal written to  {{ world.proposal_artifact.file_path|default:"(drafting — writes 004-proposal.md)" }}'
       - prose: 'Amending existing proposal:  {{ world.proposal_change_target }}'
         when:  "world.proposal_change_target"
       - kv:
@@ -89,19 +91,33 @@ states:
               existing_state:  "{{ world.proposal_existing_state }}"
               change_target:   "{{ world.proposal_change_target }}"
               references:      "{{ world.proposal_references }}"
-              output_path:     "{{ world.proposal_workspace }}/005-proposal.md"
+              output_path:     "{{ world.proposal_workspace }}/004-proposal.md"
               refine_feedback: "{{ world.proposal_refine_feedback }}"
               cycle:           "{{ world.proposal_cycle }}"
         bind:
           proposal_artifact: submitted
           proposal_kind:     "submitted.kind"
-        on_error: proposal
+        on_error: proposal_refine
     on:
-      # Accept — publish the proposal.
+      # Accept: publish the proposal (move it from workspace to docs/proposals/).
+      # publish_proposal.py handles collision-proofing and archive.
       accept:
-        - target: proposal_publish
+        - target: proposal_done
+          effects:
+            - invoke: host.run
+              id: publish
+              with:
+                cmd: python3
+                args:
+                  - "stories/dev-story/scripts/publish_proposal.py"
+                  - "{{ world.proposal_workspace }}"
+                  - "{{ world.proposal_slug }}"
+                  - "{{ world.proposal_change_target }}"
+              bind:
+                proposal_file: stdout
+              on_error: proposal_draft
 
-      # Same inputs, revise the prose. Budget gate → main (no @exit in the hub).
+      # Same inputs, revise the prose. Budget gate → main.
       refine:
         - when: "world.proposal_draft_cycle >= world.proposal_draft_budget"
           target: main
@@ -111,47 +127,71 @@ states:
                 prev_state: "main"
         - target: proposal_draft
           effects:
-            # Clear the artifact so the guarded author re-drafts.
             - set:
                 proposal_artifact:        {}
                 proposal_refine_feedback: "{{ slots.feedback ?? '' }}"
                 proposal_draft_cycle:     "{{ world.proposal_draft_cycle + 1 }}"
                 proposal_cycle:           "{{ world.proposal_cycle + 1 }}"
 
-      # Inputs were incomplete — step back to revise the brief. Reset
-      # downstream results so the revised brief re-runs the forward pipeline
-      # fresh. Clear each once: invoke's OWN bind: the decide-objects AND the
-      # write-paths (clearing only the path leaves the upstream decide armed).
+      # Inputs were incomplete — step back to refine the brief.
+      # Keep search results (proposal_existing_state, proposal_references) since
+      # the search is already done; just re-do the brief. The clarify sentinel on
+      # proposal_brief_decision prevents the judge from auto-advancing on re-entry
+      # to proposal_refine (clearing it via `ready` re-arms the judge).
       clarify:
-        - target: proposal
+        - target: proposal_refine
           effects:
             - set:
-                # A clarify sentinel (NOT {}): landing back in the merged
-                # discovery+brief room must NOT re-arm + auto-run the once: brief
-                # judge — an empty decision would, and a still-passing brief
-                # would immediately round-trip forward before the operator can
-                # revise. The sentinel keeps the judge disarmed so they rest in
-                # discovery; `ready` clears it and re-runs the check.
                 proposal_brief_decision:
                   verdict: "clarify"
-                  reason:  "Stepped back from a later gate — revise the brief (edit it or keep talking), then say ready to re-run the check."
+                  reason:  "Stepped back from draft — revise the brief (edit it or keep talking), then say ready to re-run the check."
                   questions: []
-                proposal_existing_state:    {}
-                proposal_existing_path:     ""
-                proposal_overlap_decision:  ""
-                proposal_change_target:     ""
-                proposal_completeness:      {}
-                proposal_completeness_path: ""
-                proposal_references_path:   ""
-                proposal_references:        {}
-                proposal_references_prev:   {}
-                proposal_artifact:          {}
+                proposal_refine_analysis: {}
+                proposal_artifact:        {}
 
       quit:
         - target: main
           effects:
             - set:
                 last_error: "proposal abandoned at draft"
+                prev_state: "main"
+      look:
+        - target: .
+
+  # Post-publish confirmation view (was proposal_publish.yaml, now inline).
+  # Entered from the accept arc after publish_proposal.py has bound proposal_file.
+  # on_enter is empty — publish already happened in the accept arc's effects.
+  proposal_done:
+    description: "Proposal published — review the file and return to your day."
+    view:
+      - banner:
+          text:     "PUBLISHED"
+          subtitle: "Proposal moved into the queue"
+          color:    "#10B981"
+      - prose: 'Proposal published to  {{ world.proposal_file|default:"(publishing…)" }}'
+      - prose: 'Checks archived under  {{ world.proposal_workspace }}/'
+      - kv:
+          pairs:
+            Title: '{{ world.proposal_artifact.title|default:"(n/a)" }}'
+            Kind:  '{{ world.proposal_artifact.kind|default:"(n/a)" }}'
+      - prose: "Open the published proposal to review or trim it. **main** returns to your day."
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "main"
+              hint:   "back to the engineer's day landing"
+              intent: go_main
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    relevant_world: [proposal_workspace, proposal_slug, proposal_change_target, proposal_artifact, proposal_file]
+    on:
+      go_main:
+        - target: main
+          effects:
+            - set:
+                last_error: ""
                 prev_state: "main"
       look:
         - target: .

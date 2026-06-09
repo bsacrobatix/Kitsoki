@@ -44,8 +44,8 @@
         </div>
 
         <!-- Transcript -->
-        <div class="meta-overlay__body" data-testid="meta-transcript">
-          <p v-if="meta.activeTranscript.length === 0" class="meta-overlay__empty">
+        <div class="meta-overlay__body" data-testid="meta-transcript" ref="bodyEl">
+          <p v-if="meta.activeTranscript.length === 0 && !meta.busy" class="meta-overlay__empty">
             No messages yet — ask a question or request a change below.
           </p>
           <div
@@ -56,7 +56,22 @@
             :data-testid="`meta-row-${msg.role === 'user' ? 'user' : 'agent'}`"
           >
             <span class="meta-row__who">{{ msg.role === "user" ? "you" : "agent" }}</span>
-            <span class="meta-row__text">{{ msg.text }}</span>
+            <span class="meta-row__text" v-html="renderText(msg.text)"></span>
+          </div>
+          <!-- Live streaming bubble — visible while the LLM is responding -->
+          <div
+            v-if="meta.busy"
+            class="meta-row meta-row--agent meta-row--streaming"
+            data-testid="meta-row-streaming"
+          >
+            <span class="meta-row__who">🧠 agent</span>
+            <!-- Tool breadcrumbs: one per tool call seen so far this turn -->
+            <div
+              v-for="(tc, i) in meta.pendingTools"
+              :key="i"
+              class="meta-row__tool"
+            >▸ {{ tc.tool }}{{ tc.preview ? ": " + tc.preview : "" }}</div>
+            <span class="meta-row__text meta-row__text--streaming" v-html="renderText(meta.pendingAssistantText || '…')"></span>
           </div>
         </div>
 
@@ -93,12 +108,42 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch, nextTick } from "vue";
 import { LiveSource } from "../../data/live-source.js";
 import { useMetaStore } from "../../stores/meta.js";
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// renderText escapes HTML and applies light inline markdown (bold, code) while
+// preserving newlines — the .meta-row__text CSS uses white-space: pre-wrap so
+// joined \n renders as a visible line break.
+function renderText(src: string): string {
+  return escapeHtml(src ?? "")
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    )
+    .join("\n");
+}
+
 const meta = useMetaStore();
 const source = new LiveSource("/");
+const bodyEl = ref<HTMLElement | null>(null);
+
+// Scroll to bottom whenever the transcript grows or the streaming text changes.
+watch(
+  [() => meta.activeTranscript.length, () => meta.pendingAssistantText],
+  async () => {
+    await nextTick();
+    if (bodyEl.value) {
+      bodyEl.value.scrollTop = bodyEl.value.scrollHeight;
+    }
+  }
+);
 
 // The three modes the web surface curates (same set the launcher dropdown
 // shows); the server may advertise more (story.bug, kitsoki.edit, …) that we
@@ -282,6 +327,21 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 .meta-row--user .meta-row__text {
   background: #1d4ed8;
   color: #eef2ff;
+}
+
+.meta-row--streaming {
+  opacity: 0.85;
+}
+.meta-row__text--streaming {
+  font-style: italic;
+}
+
+.meta-row__tool {
+  font-size: 0.72rem;
+  color: #38bdf8;
+  font-family: monospace;
+  padding: 0.15rem 0.65rem;
+  opacity: 0.85;
 }
 
 .meta-overlay__note {

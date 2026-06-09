@@ -127,9 +127,8 @@ func TestOracleDecide_SubmitAutoAttached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
-	// FakeDecide doesn't actually call submit so submitted is absent,
-	// but the handler should not error before reaching the runner call.
-	// rationale should carry the runner's stdout.
+	// FakeDecide simulates submit via ParseMCPConfigSubmitOutput, so submitted
+	// is present. rationale should carry the runner's stdout.
 	rat, _ := res.Data["rationale"].(string)
 	if !strings.Contains(rat, "I decided") {
 		t.Fatalf("expected rationale to contain runner stdout; got %q", rat)

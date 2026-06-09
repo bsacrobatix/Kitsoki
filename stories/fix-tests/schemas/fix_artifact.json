@@ -3,7 +3,7 @@
   "title":   "fix_artifact",
   "description": "Record produced by the fixer for one cycle: what failed, what was changed, and whether a human decision is required.",
   "type":    "object",
-  "required": ["summary_title", "summary_markdown", "files_changed", "fixed_tests", "remaining_failures", "needs_decision"],
+  "required": ["summary_title", "summary_markdown", "files_changed", "fixed_tests", "remaining_failures", "needs_decision", "confidence"],
   "properties": {
     "summary_title": {
       "type": "string",

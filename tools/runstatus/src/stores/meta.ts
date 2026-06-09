@@ -38,6 +38,10 @@ export const useMetaStore = defineStore("meta", () => {
   const error = ref<string>("");
   // A transient note shown after a story-edit reload, e.g. the changed files.
   const reloadNote = ref<string>("");
+  // In-progress assistant text while the SSE stream is live. Empty when idle.
+  const pendingAssistantText = ref<string>("");
+  // Tool calls observed during the current streaming turn (cleared on done).
+  const pendingTools = ref<{ tool: string; preview: string }[]>([]);
 
   // Modes available in the current scope (from runstatus.meta.modes).
   const modes = ref<MetaModeInfo[]>([]);
@@ -116,7 +120,7 @@ export const useMetaStore = defineStore("meta", () => {
     open.value = false;
   }
 
-  /** Send one turn; on a story-edit reload, refresh the run store in place. */
+  /** Send one turn; streams the assistant reply via SSE, finalises on done. */
   async function send(source: LiveSource, text: string): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed || busy.value) return;
@@ -125,24 +129,35 @@ export const useMetaStore = defineStore("meta", () => {
     const sessionId = activeSessionId.value;
     error.value = "";
     reloadNote.value = "";
+    pendingAssistantText.value = "";
+    pendingTools.value = [];
 
     // Optimistically show the user's turn.
     pushMessage(k, { role: "user", text: trimmed });
     busy.value = true;
     try {
-      const res = await source.metaSend(
+      const res = await source.metaStream(
         sessionId,
         mode,
         chatIds.value[k] ?? "",
-        trimmed
+        trimmed,
+        (ev) => {
+          if (ev.type === "delta" && ev.text) {
+            pendingAssistantText.value += ev.text;
+          } else if (ev.type === "tool" && ev.tool) {
+            pendingTools.value = [
+              ...pendingTools.value,
+              { tool: ev.tool, preview: ev.preview ?? "" },
+            ];
+          }
+        }
       );
+      pendingAssistantText.value = "";
+      pendingTools.value = [];
       if (res.chat_id) chatIds.value = { ...chatIds.value, [k]: res.chat_id };
       pushMessage(k, { role: "assistant", text: res.assistant });
 
       if (res.reload_requested) {
-        // Story edit landed: reload the session's content and re-hydrate the
-        // run store IN PLACE (no browser reload). Best-effort — the chat reply
-        // already shows what happened.
         const changed = res.changed_files ?? [];
         reloadNote.value =
           changed.length > 0
@@ -157,6 +172,8 @@ export const useMetaStore = defineStore("meta", () => {
         }
       }
     } catch (e) {
+      pendingAssistantText.value = "";
+      pendingTools.value = [];
       error.value = errMsg(e);
     } finally {
       busy.value = false;
@@ -200,6 +217,8 @@ export const useMetaStore = defineStore("meta", () => {
     busy,
     error,
     reloadNote,
+    pendingAssistantText,
+    pendingTools,
     modes,
     // getters
     activeTranscript,

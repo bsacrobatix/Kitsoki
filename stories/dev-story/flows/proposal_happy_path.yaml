@@ -1,21 +1,23 @@
-# proposal_happy_path — the full proposal pipeline, intent-only (no LLM).
+# proposal_happy_path — the full 4-stage proposal pipeline, intent-only (no LLM).
 #
-# proposal (discovery+brief) → begin_proposal (brief passes review, auto-
-# advances) → proposal_existing_state → proceed_new → proposal_idea_completeness
-# → confirm → proposal_references → confirm → proposal_draft → accept →
-# proposal_publish → go_main → main.
+# intake → proposal_search (scout + researcher fire on entry) → confirm (no
+# overlap) → proposal_refine (brief scaffold + refiner fire on entry; judge
+# guarded until `ready`) → ready → proposal_draft (author fires on entry) →
+# accept → proposal_done (publish fires in arc) → go_main → main.
 #
-# The merged discovery+brief room mints the workspace + scaffolds the editable
-# brief on the FIRST `discuss` message (slug → workspace → 001-brief.md →
-# open in editor), then converses and distils the brief every turn. `ready`
-# (begin_proposal) runs the brief judge; a `continue` verdict auto-advances via
-# the post-bind emit_intent — the gate out of discovery IS a passing brief.
+# The intake `discuss` mints the workspace on the first message.
+# The search `confirm` action has a guard that only allows advancing when
+# the overlap list is empty.
+# The refine `ready` action increments proposal_brief_cycle (arms the judge)
+# and re-enters with a FULL target; the judge fires on on_enter and a
+# `continue` verdict auto-advances via the post-bind emit_intent.
+# The draft accept arc runs the publish script inline; the result lands in
+# proposal_done (was proposal_publish in the prior 6-stage pipeline).
 #
-# The decide call sites (name_slug / brief_check / existing_scan /
-# completeness_check / references_research) are stubbed apart by their invoke
-# `id:` via by_call; the two host.run sites (uniquify / publish) likewise; the
-# two task sites (brief_distill / the draft, un-id'd) split by_call vs the
-# default data. judge_mode is irrelevant (the proposal gates are advisory).
+# Decide calls are stubbed by their invoke `id:` (existing_scan,
+# references_research, brief_check); the two host.run sites (uniquify,
+# publish) likewise; the task sites split by_call (refine_brief) vs the
+# default (draft author).
 
 test_kind: flow
 app: ../app.yaml
@@ -24,10 +26,6 @@ initial_world:
   judge_mode: "human"
 
 host_handlers:
-  host.chat.resolve:
-    data: { ok: true, chat_id: "chat-1", title: "Proposal idea discovery", is_new: true }
-  host.oracle.converse:
-    data: { ok: true, answer: "Got it — so the scratch dir is session-scoped and cleaned up on exit. Which engine seam establishes it?", chat_id: "chat-1", claude_session_id: "sess-1" }
   host.ide.open_file:
     data: { ok: true, connected: true }
   host.oracle.decide:
@@ -36,40 +34,30 @@ host_handlers:
         data:
           ok: true
           submitted: { slug: "first-class-working-folder", rationale: "the runtime primitive being proposed" }
-      brief_check:
-        data:
-          ok: true
-          submitted: { verdict: "continue", reason: "Crisp why, one-screen change, kind named.", questions: [] }
       existing_scan:
         data:
           ok: true
           submitted: { overlaps: [], roadmap_fit: "A net-new runtime primitive; no overlap with the current queue." }
-      completeness_check:
-        data:
-          ok: true
-          submitted:
-            complete:    true
-            problem:     "Process stories hand-roll per-session scratch dirs and collide under concurrency."
-            why_kitsoki: "The engine already keys sessions; a reserved world.workdir is a natural primitive."
-            usage:       "Stories get a safe scratch dir for free and only choose what to write."
-            gaps:        []
       references_research:
         data:
           ok: true
           submitted:
             items:
               - { path: "docs/proposals/process-design.md", sections: "§4.3", rationale: "names the first-class workdir as a future runtime slice" }
+      brief_check:
+        data:
+          ok: true
+          submitted: { verdict: "continue", reason: "Crisp why, one-screen change, kind named.", questions: [] }
   host.artifacts_dir:
     data: { ok: true, path: "docs/proposals/.workspace/first-class-working-folder/001-brief.md", message_id: "out#1" }
   host.oracle.task:
     by_call:
-      # The every-turn brief distiller binds world.proposal_idea from its idea.
-      brief_distill:
+      refine_brief:
         data:
           ok: true
           submitted:
-            idea: "Add a per-session working folder primitive so process stories get a concurrency-safe scratch dir for free."
-            note: "Filled the Idea + Why; What-changes still rough."
+            summary: "Idea is clear; Why and What-changes need detail."
+            gaps:    ["Specify which engine seam establishes the workdir", "Document cleanup on session end"]
     data:
       # The un-id'd draft author task (proposal_draft.on_enter).
       ok: true
@@ -77,7 +65,7 @@ host_handlers:
         title:               "Runtime: first-class per-session working folder"
         kind:                "runtime"
         summary_markdown:    "## Runtime: first-class per-session working folder\n\nThe engine establishes a gitignored, session-keyed working folder at session start, exposed as a reserved world.workdir, and cleans it up on exit."
-        file_path:           "docs/proposals/.workspace/first-class-working-folder/005-proposal.md"
+        file_path:           "docs/proposals/.workspace/first-class-working-folder/004-proposal.md"
         confidence:          0.82
         needs_clarification: false
         follow_up_questions: []
@@ -93,83 +81,73 @@ host_handlers:
         data: { ok: true, exit_code: 0, stdout: "docs/proposals/first-class-working-folder.md" }
 
 turns:
-  # First message: mint the workspace, scaffold + open the brief, converse, and
-  # distil. The uniquify call receiving the just-named slug proves a later
-  # invoke's with: args see an earlier invoke's bind; proposal_idea is bound
-  # from the distiller, not the raw message.
+  # Stage 1: Intake — one message mints the workspace and advances to search.
   - intent: { name: discuss, slots: { message: "I want a per-session working folder primitive" } }
-    expect_state: proposal
+    expect_state: proposal_search
     expect_world:
-      proposal_idea_turns: 1
-      proposal_slug:       "first-class-working-folder"
-      proposal_workspace:  "docs/proposals/.workspace/first-class-working-folder"
-      proposal_brief_path: "docs/proposals/.workspace/first-class-working-folder/001-brief.md"
-      proposal_idea:       "Add a per-session working folder primitive so process stories get a concurrency-safe scratch dir for free."
+      proposal_slug:      "first-class-working-folder"
+      proposal_workspace: "docs/proposals/.workspace/first-class-working-folder"
+      proposal_idea:      "I want a per-session working folder primitive"
     expect_host_calls:
+      - handler: host.oracle.decide
+        args: { call: "name_slug" }
       - handler: host.run
-        args: { call: "uniquify", args: ["stories/dev-story/scripts/proposal_workspace.py", "first-class-working-folder"] }
+        args: { call: "uniquify" }
+      # Stage 2 on_enter fires immediately on advance: scout + persist + researcher + persist
+      - handler: host.oracle.decide
+        args: { call: "existing_scan" }
+      - handler: host.artifacts_dir
+        args: { thread: "002-existing-state" }
+      - handler: host.oracle.decide
+        args: { call: "references_research" }
+      - handler: host.artifacts_dir
+        args: { thread: "003-references.json" }
+
+  # Stage 2: Search — no overlap → confirm → proposal_refine.
+  # Stage 3 on_enter: scaffold brief + open IDE + refiner (once: brief_path
+  # and once: refine_analysis). The judge is GUARDED (brief_cycle == 0) so it
+  # does NOT fire on first entry.
+  - intent: { name: confirm, slots: {} }
+    expect_state: proposal_refine
+    expect_world:
+      proposal_overlap_decision: "new"
+      proposal_existing_state:
+        overlaps:     []
+        roadmap_fit:  "A net-new runtime primitive; no overlap with the current queue."
+      proposal_references:
+        items:
+          - { path: "docs/proposals/process-design.md", sections: "§4.3", rationale: "names the first-class workdir as a future runtime slice" }
+      proposal_brief_path: "docs/proposals/.workspace/first-class-working-folder/001-brief.md"
+      proposal_brief_cycle: 0
+    expect_host_calls:
       - handler: host.artifacts_dir
         args: { thread: "001-brief" }
       - handler: host.ide.open_file
         args: { path: "docs/proposals/.workspace/first-class-working-folder/001-brief.md" }
       - handler: host.oracle.task
-        args: { call: "brief_distill" }
+        args: { call: "refine_brief" }
+    expect_no_host_calls: [host.oracle.decide]
 
-  # Second message: steady-state discuss arm — converse + distil only, NO
-  # re-mint (slug/workspace already set; no name_slug, uniquify, or open_file).
-  - intent: { name: discuss, slots: { message: "It establishes the dir at session start and cleans up on exit" } }
-    expect_state: proposal
+  # Stage 3: ready — increment cycle (arms the judge) and re-enter.
+  # Judge fires on on_enter (brief_cycle == 1 > 0), verdict = continue →
+  # post-bind emit_intent advance_brief → auto-advance to proposal_draft.
+  # Stage 4 on_enter: draft author fires.
+  - intent: { name: ready, slots: {} }
+    expect_state: proposal_draft
     expect_world:
-      proposal_idea_turns: 2
-      proposal_slug:       "first-class-working-folder"
-    expect_host_calls:
-      - handler: host.oracle.converse
-        args: {}
-      - handler: host.oracle.task
-        args: { call: "brief_distill" }
-    expect_no_host_calls: [host.ide.open_file, host.run]
-
-  # ready: the brief passes review → auto-advance (post-bind emit_intent) into
-  # the overlap check (existing_scan + 002 write fire on entry).
-  - intent: { name: begin_proposal, slots: {} }
-    expect_state: proposal_existing_state
-    expect_world:
-      proposal_brief_cycle: 1
+      proposal_brief_cycle:    1
       proposal_brief_decision:
-        verdict: "continue"
-        reason:  "Crisp why, one-screen change, kind named."
+        verdict:   "continue"
+        reason:    "Crisp why, one-screen change, kind named."
         questions: []
+      proposal_kind: "runtime"
     expect_host_calls:
       - handler: host.oracle.decide
         args: { call: "brief_check" }
-      - handler: host.artifacts_dir
-        args: { thread: "002-existing-state" }
 
-  # No overlap → proceed to a new proposal (completeness_check + 003 write).
-  - intent: { name: proceed_new, slots: {} }
-    expect_state: proposal_idea_completeness
-    expect_world:
-      proposal_overlap_decision: "new"
-    expect_host_calls:
-      - handler: host.artifacts_dir
-        args: { thread: "003-idea-completeness" }
-
-  # Idea complete → gather references (references_research + 004 write).
-  - intent: { name: confirm, slots: {} }
-    expect_state: proposal_references
-    expect_host_calls:
-      - handler: host.artifacts_dir
-        args: { thread: "004-references.json" }
-
-  # References good → draft (the author task writes 005-proposal.md).
-  - intent: { name: confirm, slots: {} }
-    expect_state: proposal_draft
-    expect_world:
-      proposal_kind: "runtime"
-
-  # Accept → publish (publish_proposal.py moves it into the queue).
+  # Stage 4: accept — publish inline (no separate proposal_publish room).
   - intent: { name: accept, slots: {} }
-    expect_state: proposal_publish
+    expect_state: proposal_done
     expect_world:
       proposal_file: "docs/proposals/first-class-working-folder.md"
     expect_host_calls:

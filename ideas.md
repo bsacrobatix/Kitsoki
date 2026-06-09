@@ -103,3 +103,18 @@
 - if we're in a meta session, and the edited yaml breaks, go back to the LLM w/ the error message and try again automatically up to retry limit - show each attempt to the user
 - agent autogen (microsoft azure)
 - git cleanup - tracking action-by-action and commit action-by-action deterministically
+- story editing view
+    - room-by-room, ordered by average graph distance from entrypoint
+    - see the hook and domain model of the room, edit the room directly within this domain model
+    - integrate the meta chat in the left column, with the deterministic view on the right like the existing web ui
+    - big focus on testing individual oracles, seeing cassettes, etc...
+    - individual oracle contracts
+- when i click on a session in web ui, take me to the chat view if it is live and the trace view if it's done/errored/etc...
+- inbox and background jobs real
+    - TUI and Web UI support
+    - navigate away from long job and come back when it's waiting on a turn
+- template vs user input vs LLM output in views
+    - use cassette recording and traces to create synthetic cases
+    - use distinctive input we can trace through multiple handoffs to capture indirect references
+    - use correctly structured json etc... so it passes validation but is still distinctive to find
+    - deterministic

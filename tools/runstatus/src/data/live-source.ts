@@ -13,6 +13,23 @@ import type {
   MetaSendResult,
   MetaMessage,
 } from "./source.js";
+
+/** One SSE frame from /rpc/meta-stream. */
+export interface MetaStreamEvent {
+  type: "delta" | "tool" | "done" | "error";
+  // delta
+  text?: string;
+  // tool
+  tool?: string;
+  preview?: string;
+  // done (mirrors MetaSendResult)
+  assistant?: string;
+  chat_id?: string;
+  reload_requested?: boolean;
+  changed_files?: string[];
+  // error
+  message?: string;
+}
 import { JsonRpcClient } from "../transport/jsonrpc.js";
 
 /**
@@ -41,8 +58,10 @@ export interface ReloadResult {
  */
 export class LiveSource implements DataSource {
   private readonly client: JsonRpcClient;
+  private readonly base: string;
 
   constructor(base = "/") {
+    this.base = base.endsWith("/") ? base : base + "/";
     this.client = new JsonRpcClient(base);
   }
 
@@ -190,6 +209,70 @@ export class LiveSource implements DataSource {
       mode,
       chat_id: chatId,
     });
+  }
+
+  /**
+   * Stream one meta turn via SSE. Calls onEvent for each "delta"/"tool" frame
+   * as the LLM generates output; resolves with the final MetaSendResult when
+   * the "done" frame arrives, or rejects on "error" or network failure.
+   */
+  async metaStream(
+    sessionId: string,
+    mode: string,
+    chatId: string,
+    input: string,
+    onEvent: (ev: MetaStreamEvent) => void
+  ): Promise<MetaSendResult> {
+    const resp = await fetch(`${this.base}rpc/meta-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        mode,
+        chat_id: chatId,
+        input,
+      }),
+    });
+    if (!resp.ok) {
+      throw new Error(`meta-stream: HTTP ${resp.status} ${resp.statusText}`);
+    }
+    if (!resp.body) {
+      throw new Error("meta-stream: no response body");
+    }
+
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let finalResult: MetaSendResult | null = null;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const raw = line.slice(6).trim();
+        if (!raw) continue;
+        const ev: MetaStreamEvent = JSON.parse(raw);
+        if (ev.type === "done") {
+          finalResult = {
+            assistant: ev.assistant ?? "",
+            chat_id: ev.chat_id ?? "",
+            reload_requested: ev.reload_requested ?? false,
+            changed_files: ev.changed_files ?? [],
+          };
+        } else if (ev.type === "error") {
+          throw new Error(ev.message ?? "meta-stream error");
+        } else {
+          onEvent(ev);
+        }
+      }
+    }
+
+    if (!finalResult) throw new Error("meta-stream: ended without done event");
+    return finalResult;
   }
 
   metaTranscript(sessionId: string, chatId: string): Promise<MetaMessage[]> {

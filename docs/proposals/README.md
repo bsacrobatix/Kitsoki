@@ -170,6 +170,32 @@ thought.
   meaningful aspect renders once per column. Producer half shipped
   and documented in `docs/tracing/trace-format.md`; the runstatus
   consumer rewrite and fixture migration remain.
+- [`trace-introspection.md`](trace-introspection.md) — **epic.** Enrich
+  `runstatus` trace viewing (inspired by a Langfuse comparison) while leaning
+  into the decision-provenance moat: co-equal view modes, decision-first
+  detail, recorded decide alternatives, human annotation, and single-call
+  operator replay. Nothing implemented yet; decomposed into six slices:
+  - [`trace-observation-kinds.md`](trace-observation-kinds.md) (tracing) — a
+    derived semantic kind taxonomy over `EventKind` (decision / oracle-call /
+    host-call / narration / world-mutation / routing / lifecycle) so every
+    consumer badges, colors, and collapses by category; no wire change.
+  - [`trace-decision-detail.md`](trace-decision-detail.md) (tui) — hero the
+    gate/routing detail with the decision (available → chosen → confidence-vs-
+    threshold → reason → bailed) and demote prompt/response to an evidence
+    drawer.
+  - [`trace-view-modes.md`](trace-view-modes.md) (tui) — co-equal Tree /
+    Timeline-waterfall / Graph view modes over the one event stream + a
+    sortable/filterable Home triage table (cost / duration / bailed).
+  - [`decision-alternatives.md`](decision-alternatives.md) (runtime) — the
+    decide verdict gains a ranked `alternatives` list, recorded in
+    `gate_decided`; selection stays deterministic (record-only).
+  - [`trace-annotation.md`](trace-annotation.md) (tracing) — a read-only
+    `trace.annotation` event in a trace-adjacent sidecar; operators score /
+    label / comment a gate or turn, making traces a labeled dataset.
+  - [`replay-decision.md`](replay-decision.md) (runtime) — `kitsoki
+    replay-call`: reconstruct one recorded oracle call from the embedded story
+    and re-dispatch it against a different operator / edited prompt, then diff
+    the verdict — the pluggable-operator moat made visible.
 - [`starlark-host.md`](starlark-host.md) —
   `host.starlark.run` capability: sandboxed Starlark scripts bundled with a
   story, with a typed `ctx` API for HTTP and world access, fully integrated

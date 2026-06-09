@@ -24,7 +24,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -390,9 +392,19 @@ func (r *SessionRegistry) agentRegistryLocked() agents.Registry {
 // the server runs in flow posture (--flow / --host-cassette), else the real
 // claude-CLI adapter. This is the seam that keeps `kitsoki web --flow` (and the
 // Playwright demo) free of any LLM call.
+//
+// When in stub posture, KITSOKI_META_STREAM_DELAY_MS sets the per-event pause
+// the stub injects while emitting streaming events. Set it to 60-100 for demo
+// recordings; leave unset (or 0) for fast tests.
 func (r *SessionRegistry) oracleForMeta() metamode.OracleCaller {
 	if r.base.Flow != nil {
-		return metamode.NewStubOracleCaller()
+		var opts []metamode.StubOption
+		if v := os.Getenv("KITSOKI_META_STREAM_DELAY_MS"); v != "" {
+			if ms, err := strconv.Atoi(v); err == nil && ms > 0 {
+				opts = append(opts, metamode.WithStubStreamDelay(time.Duration(ms)*time.Millisecond))
+			}
+		}
+		return metamode.NewStubOracleCaller(opts...)
 	}
 	return metamode.NewOracleCallerAdapter()
 }

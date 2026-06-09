@@ -148,10 +148,15 @@ func FakeDecideJSON(v any) ClaudeRunner {
 	return makeFakeRunner(string(b))
 }
 
-// makeFakeRunner returns a ClaudeRunner that always replies with result,
-// regardless of the args it receives.
+// makeFakeRunner returns a ClaudeRunner that always replies with result.
+// When --mcp-config is present it also simulates the validator submit by
+// writing result as the captured payload, so the safety-net check in
+// buildDecideResult (model exited without submit) does not fire.
 func makeFakeRunner(result string) ClaudeRunner {
-	return func(_ context.Context, _ []string, _, _ string) (ClaudeRun, error) {
+	return func(_ context.Context, args []string, _, _ string) (ClaudeRun, error) {
+		if outputPath := fakeExtractSubmitPath(args); outputPath != "" {
+			_ = os.WriteFile(outputPath, []byte(`"`+result+`"`), 0o600)
+		}
 		return ClaudeRun{Stdout: result}, nil
 	}
 }
@@ -190,6 +195,9 @@ func fakeRunnerWithMeta(result string) ClaudeRunner {
 		}
 		if allowedTools != "" {
 			out += " tools=[" + allowedTools + "]"
+		}
+		if outputPath := fakeExtractSubmitPath(args); outputPath != "" {
+			_ = os.WriteFile(outputPath, []byte(`"`+result+`"`), 0o600)
 		}
 		return ClaudeRun{Stdout: out}, nil
 	}
