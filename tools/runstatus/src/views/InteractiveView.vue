@@ -95,6 +95,7 @@
               :highlighted-state-paths="store.highlightedStatePaths"
               :events="store.events"
               :selected-event-index="store.selectedEventIndex"
+              :intents="store.currentView?.intents ?? []"
               @select="onNodeSelect"
               @select-phase="onPhaseSelect"
               @select-event="onEventSelect"

@@ -55,6 +55,13 @@ async function loadArtifact(page: Page, snapshotPath: string): Promise<string[]>
   return errors;
 }
 
+/** Select the FULL static-graph view (the diagram now defaults to the metro/
+ *  route view when a current room resolves). No-op when there are no tabs. */
+async function showFullGraph(page: Page): Promise<void> {
+  const fullTab = page.getByTestId("diagram-tab-full");
+  if ((await fullTab.count()) > 0) await fullTab.click();
+}
+
 // ════════════════════════════════════════════════════════════════════════════════
 // in-progress fixture
 // ════════════════════════════════════════════════════════════════════════════════
@@ -75,6 +82,7 @@ test.describe("in-progress fixture", () => {
 
   test("state diagram renders phase cards with room buttons", async ({ page }) => {
     await loadArtifact(page, IN_PROGRESS_SNAPSHOT);
+    await showFullGraph(page);
 
     // Phase cards stacked vertically.
     const phases = page.locator(".state-diagram__phase");
@@ -88,6 +96,7 @@ test.describe("in-progress fixture", () => {
 
   test("current state room has the 'current' modifier in the diagram", async ({ page }) => {
     await loadArtifact(page, IN_PROGRESS_SNAPSHOT);
+    await showFullGraph(page);
 
     const current = page.locator(".state-diagram__room--current");
     await expect(current).toBeVisible({ timeout: 5000 });

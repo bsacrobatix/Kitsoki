@@ -24,6 +24,11 @@ async function load(page: Page): Promise<void> {
   const url = buildArtifact(BUGFIX_SNAPSHOT);
   await page.goto(url);
   await page.waitForSelector(".run-view__topbar", { timeout: 10000 });
+  // The diagram now defaults to the metro/route view when a current room
+  // resolves; these tests exercise the FULL static graph (phase cards), so
+  // select it explicitly. No-op when the diagram opens in full (no tabs).
+  const fullTab = page.getByTestId("diagram-tab-full");
+  if ((await fullTab.count()) > 0) await fullTab.click();
 }
 
 /** Switch to the Graph tab and wait for the StateDiagram to render. */

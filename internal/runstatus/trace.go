@@ -74,7 +74,7 @@ func SnapshotFromTrace(def *app.AppDef, events []TraceEvent, ov HeaderOverrides,
 
 	var mermaid MermaidSnapshot
 	if withMermaid {
-		if fc, err := viz.FlowchartWithMap(def, viz.FlowchartOptions{Detail: viz.DetailStates}); err == nil {
+		if fc, err := viz.FlowchartWithMap(def, viz.FlowchartOptions{Detail: viz.DetailStates, Banners: true}); err == nil {
 			mermaid = MermaidSnapshot{Source: fc.Source, NodeMap: fc.NodeMap}
 		}
 	}

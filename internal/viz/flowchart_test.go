@@ -489,3 +489,40 @@ func TestFlowchartSequenceInRoomsDetail(t *testing.T) {
 	s := string(out)
 	require.Contains(t, s, "phase 0")
 }
+
+// TestFlowchartBannersOptIn verifies the FlowchartWithMap Banners option:
+// off → byte-identical to FlowchartBytes (no comments); on → one
+// `%% banner <state> <text>` line per leaf state with a STATIC banner view
+// element, and templated banner text is skipped (it's a runtime render, not
+// declared graph metadata).
+func TestFlowchartBannersOptIn(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "ban", Title: "Ban"},
+		Root: "intake",
+		States: map[string]*app.State{
+			"intake": {
+				View: app.View{Elements: []app.ViewElement{{Kind: "banner", Source: "INTAKE"}}},
+				On:   map[string][]app.Transition{"go": {{Target: "done"}}},
+			},
+			"done": {
+				Terminal: true,
+				// Templated banner text must NOT be surfaced statically.
+				View: app.View{Elements: []app.ViewElement{{Kind: "banner", Source: "{{ world.x }}"}}},
+			},
+		},
+	}
+
+	// Banners OFF: byte-identical to FlowchartBytes, no banner comments.
+	res, err := viz.FlowchartWithMap(def, viz.FlowchartOptions{Detail: viz.DetailStates})
+	require.NoError(t, err)
+	require.NotContains(t, res.Source, "%% banner")
+	raw, err := viz.FlowchartBytes(def, viz.DetailStates, viz.FlowchartFilter{})
+	require.NoError(t, err)
+	require.Equal(t, string(raw), res.Source, "Banners:false must be byte-identical to FlowchartBytes")
+
+	// Banners ON: static banner emitted; templated banner skipped.
+	res2, err := viz.FlowchartWithMap(def, viz.FlowchartOptions{Detail: viz.DetailStates, Banners: true})
+	require.NoError(t, err)
+	require.Contains(t, res2.Source, "%% banner intake INTAKE")
+	require.NotContains(t, res2.Source, "%% banner done")
+}

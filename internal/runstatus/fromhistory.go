@@ -166,7 +166,7 @@ func FromHistory(hist store.History, def *app.AppDef, sessionID string) (Snapsho
 		}
 	}
 
-	fc, err := viz.FlowchartWithMap(def, viz.FlowchartOptions{Detail: viz.DetailStates})
+	fc, err := viz.FlowchartWithMap(def, viz.FlowchartOptions{Detail: viz.DetailStates, Banners: true})
 	if err != nil {
 		return Snapshot{}, err
 	}

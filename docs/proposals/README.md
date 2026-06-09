@@ -178,12 +178,6 @@ thought.
   meaningful aspect renders once per column. Producer half shipped
   and documented in `docs/tracing/trace-format.md`; the runstatus
   consumer rewrite and fixture migration remain.
-- [`state-diagram-path-horizon.md`](state-diagram-path-horizon.md) — (tui)
-  the runstatus web state diagram parks on `main` showing the whole static
-  graph; rework it into a **path + horizon** view (where we came from + the
-  live next arcs), derived from data already in the store. Gated on a §0
-  diagnosis of whether "parked on `main`" is a trace defect. Complements the
-  `trace-view-modes` Graph mode below; nothing implemented yet.
 - [`trace-introspection.md`](trace-introspection.md) — **epic.** Enrich
   `runstatus` trace viewing (inspired by a Langfuse comparison) while leaning
   into the decision-provenance moat: co-equal view modes, decision-first

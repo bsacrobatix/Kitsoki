@@ -40,6 +40,16 @@ type FlowchartResult struct {
 type FlowchartOptions struct {
 	Detail DetailLevel
 	Filter FlowchartFilter
+
+	// Banners, when true, appends one `%% banner <state-path> <text>` comment
+	// line per leaf state that declares a static (non-templated) banner view
+	// element. Mermaid renderers ignore `%%` comments, and FlowchartBytes is
+	// not consulted, so the rendered diagram and the CLI `viz` output stay
+	// byte-identical; only consumers that parse the source (the runstatus web
+	// viewer) recover the banner. Used by the web path so the path/horizon
+	// metro stations can show each room's declared phase banner
+	// (INTAKE / SEARCHING / …) without a separate metadata channel.
+	Banners bool
 }
 
 // FlowchartWithMap is [FlowchartBytes] plus a node-ID sidecar: it runs the
@@ -76,10 +86,73 @@ func FlowchartWithMap(a *app.AppDef, opts FlowchartOptions) (FlowchartResult, er
 		return FlowchartResult{}, err
 	}
 
+	out := string(src)
+	if opts.Banners {
+		bc, err := bannerComments(a, opts)
+		if err != nil {
+			return FlowchartResult{}, err
+		}
+		if bc != "" {
+			out += "\n" + bc
+		}
+	}
+
 	return FlowchartResult{
-		Source:  string(src),
+		Source:  out,
 		NodeMap: nm,
 	}, nil
+}
+
+// bannerComments returns `%% banner <state-path> <text>` lines (one per leaf
+// state with a static banner view element) for the rooms selected by opts.Filter.
+// The state path — not the Mermaid node id — is the key, so the consumer matches
+// banners to rooms by the same label it already prefix-matches against. Returns
+// the empty string when no selected state declares a banner.
+func bannerComments(a *app.AppDef, opts FlowchartOptions) (string, error) {
+	selected, err := ResolveFilterRooms(a, opts.Filter)
+	if err != nil {
+		return "", err
+	}
+	selectedSet := map[string]bool{}
+	for _, r := range selected {
+		selectedSet[r] = true
+	}
+	rooms := GroupRooms(a)
+
+	var b strings.Builder
+	walkAllStates(a.States, "", func(path string, s *app.State) {
+		if s == nil || len(s.States) > 0 {
+			return // compound — banners live on leaf states
+		}
+		if !selectedSet[rooms.RoomOf[path]] {
+			return
+		}
+		if txt := staticBannerText(s); txt != "" {
+			fmt.Fprintf(&b, "%%%% banner %s %s\n", path, txt)
+		}
+	})
+	return b.String(), nil
+}
+
+// staticBannerText returns the first banner view element's text for a state,
+// or "" when the state declares none or the text is templated (contains `{{`).
+// Templated banners are skipped deliberately: their value is a runtime render,
+// not declared graph metadata, so surfacing them statically would be a guess.
+func staticBannerText(s *app.State) string {
+	for _, el := range s.View.Elements {
+		if el.Kind != "banner" {
+			continue
+		}
+		t := strings.TrimSpace(el.Source)
+		if t == "" || strings.Contains(t, "{{") {
+			return ""
+		}
+		if i := strings.IndexAny(t, "\r\n"); i >= 0 {
+			t = t[:i]
+		}
+		return t
+	}
+	return ""
 }
 
 // buildNodeMap walks the AppDef with the same logic as FlowchartBytes and

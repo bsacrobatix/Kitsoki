@@ -78,6 +78,64 @@ correct](../../tools/runstatus/CLAUDE.md). The artifact and live paths build
 the snapshot from the same code (`internal/runstatus.SnapshotFromTrace`), so
 the two views cannot drift.
 
+## State diagram: path & horizon views
+
+The state diagram answers **"where am I in the machine"** — not "what is the
+whole machine". It offers four views, switched by tabs; the route-centric three
+appear whenever the run has a resolvable current room, and **Metro** is the
+default (a mid-stream trace with no landed state opens in **Full**, so nothing
+regresses):
+
+- **Metro** — a vertical interchange line: the traveled leg, the current stop
+  with its live exits as pills, and the road ahead.
+- **Graph** — the same 1-hop neighbourhood as an SVG node-link diagram:
+  came-from → you-are-here → the rooms each live move leads to, with directed
+  elbow connectors.
+- **Path** — a breadcrumb of the traveled path (each room + the intent that
+  entered it) + the current room as a hero card + the live exits as chips.
+- **Full** — the whole static graph, every phase/room (the right view for the
+  "what is the entire machine" question). The "+N elsewhere" chip routes here.
+
+All three route views draw the **same three truth tiers**, styled deliberately
+distinct so the view never implies something the trace doesn't ([the trace is
+the source of truth](../../tools/runstatus/CLAUDE.md)):
+
+| Tier | Shows | Source | Truth status |
+|---|---|---|---|
+| **Traveled leg** (bright/solid) | rooms behind the current one, each tagged with the intent that entered it | ordered `machine.state_entered` → room, joined to `machine.transition` `attrs.intent` for provenance | **trace** — the run went there |
+| **Current station** (amber/solid) + horizon **pills** | the current room + the live next moves | `currentView.intents` × the room's parsed outgoing edges | **live** — what you can do now |
+| **Road ahead** (muted/**dashed**) | forward rooms not yet reached | the static graph: a greedy forward room walk (`roomSpineAhead`) | **projection** — declared, not run |
+
+Two rules are non-negotiable: the stations are **rooms** (a whole pipeline can
+live in one authored phase — dev-story's `proposal_*` rooms do — so the spine is
+walked room-by-room, not phase-by-phase); and **projection is never styled as
+traveled** (the road ahead is dashed/muted; even a terminal stop stays a dashed
+ring, never a solid traveled dot). The forward walk takes the deepest unvisited
+non-escape edge at each step and stops on a cycle, so a linear-with-shortcuts
+pipeline projects its canonical route.
+
+**Phase banners** (e.g. `INTAKE` / `SEARCHING` / `DRAFTING`) ride each station.
+They are declared graph metadata — a room's static `banner` view element —
+surfaced through the web viz path as a `%% banner <state> <text>` comment on the
+flowchart source (`viz.FlowchartOptions.Banners`, parsed into `Room.banner`).
+Templated banners are skipped (a runtime render is not declared metadata).
+
+Each horizon pill is `intent → target room`; forward pills are solid, self-loop
+and exit pills outlined. Clicking a pill (or any room/node) highlights its target
+room via the same `select` emit / `highlightedStatePaths` path a full-graph room
+click uses. A pill whose intent has no declared outgoing edge still appears, but
+does not navigate.
+
+The derivations are pure functions in `tools/runstatus/src/diagram/horizon.ts`
+(`matchRoomId`, `traveledPath`, `horizon`, `roomSpineAhead`, `spineAhead`,
+`enteringIntents`) — no Vue/DOM coupling, unit-tested in
+`tests/unit/diagram-path-horizon.test.ts`. A Playwright gate
+(`tests/playwright/diagram-overflow.spec.ts`) asserts nothing overflows in any
+view — DOM elements by `scrollWidth`, and the Graph view's SVG node labels by
+`getBBox` against their rect (long ids are compressed with `textLength`, not
+clipped). The showcase walkthrough is
+`tests/playwright/diagram-showcase.spec.ts`.
+
 ## Where the pieces live
 
 - `internal/runstatus/` — the `Snapshot` type and its builders
