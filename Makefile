@@ -14,7 +14,7 @@ SPA_SOURCES   := $(shell find $(RUNSTATUS_DIR)/src $(RUNSTATUS_DIR)/index.html \
 # Every shipped story whose deterministic flow suite `make test` exercises.
 STORY_APPS := $(wildcard stories/*/app.yaml)
 
-.PHONY: all build install uninstall test test-flows vet fmt tidy clean web web-clean e2e-docker \
+.PHONY: all build install uninstall test test-flows vet fmt tidy clean web web-clean web-dev e2e-docker \
 	fetch-models fetch-llama-server
 
 all: build
@@ -49,6 +49,23 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 # unbuilt until the next `make web`).
 web-clean:
 	rm -f $(EMBED_INDEX)
+
+# web-dev starts the kitsoki Go backend and the Vite HMR dev server in
+# parallel so edits to tools/runstatus/src/** are reflected instantly without
+# a full pnpm build + go build cycle. Access the app on http://localhost:5173;
+# the Vite dev server proxies /rpc and /rpc/events to the Go backend on
+# http://127.0.0.1:7777 (override with KITSOKI_API=http://host:port).
+#
+# Pass extra Go flags via WEB_ARGS, e.g.:
+#   make web-dev WEB_ARGS="--stories-dir stories/my-story"
+WEB_ARGS ?=
+web-dev:
+	@command -v pnpm >/dev/null 2>&1 || { echo "error: pnpm not found" >&2; exit 1; }
+	@go build -o .kitsoki-dev $(PKG)
+	@trap 'kill 0' INT TERM EXIT; \
+	  ./.kitsoki-dev web $(WEB_ARGS) & \
+	  cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm dev; \
+	  wait
 
 # test runs the Go unit tests AND the Mode-2 deterministic story flow suites
 # (no LLM, no cost). The flow suites guard the shipped stories under stories/,
