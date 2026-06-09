@@ -27,6 +27,7 @@
 //	runstatus.stories.rescan     {}                                  → []StoryHeader
 //	runstatus.session.new        {story_path}                        → {session_id}
 //	runstatus.session.reload     {session_id}                        → {ok, prev_state_exists}
+//	runstatus.session.staleness  {session_id}                        → {stale, diff}
 //	runstatus.sessions.list      {}                                  → []SessionHeader
 //	runstatus.session.get        {session_id}                        → SessionHeader
 //	runstatus.session.app        {session_id}                        → AppDef
@@ -78,7 +79,6 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
-	"kitsoki/internal/host"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/web"
 )
@@ -249,6 +249,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/rpc/events", s.handleEvents)
 	mux.HandleFunc("/artifact/", s.handleArtifact)
 	mux.HandleFunc("/rpc/meta-stream", s.handleMetaStream)
+	mux.HandleFunc("/rpc/turn-stream", s.handleTurnStream)
 	mux.HandleFunc("/", s.handleIndex)
 	return mux
 }
@@ -390,6 +391,17 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			return nil, lifecycleErr(err)
 		}
 		return map[string]any{"ok": true, "prev_state_exists": prevStateExists}, nil
+
+	case "runstatus.session.staleness":
+		sid, rerr := sessionIDParam(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		stale, diff, err := s.provider.Staleness(ctx, sid)
+		if err != nil {
+			return nil, lifecycleErr(err)
+		}
+		return map[string]any{"stale": stale, "diff": diff}, nil
 
 	// ── Session-routed reads ───────────────────────────────────────────────
 	case "runstatus.session.get":
@@ -842,114 +854,6 @@ func (s *Server) streamNew(w http.ResponseWriter, flusher http.Flusher, sub *sub
 	}
 	sub.sent = len(events)
 	flusher.Flush()
-}
-
-// ── Meta-mode streaming ──────────────────────────────────────────────────────
-
-// handleMetaStream handles POST /rpc/meta-stream. It accepts a JSON body with
-// {session_id, mode, chat_id, input}, resolves the MetaDriver, injects a
-// StreamSink into the context so the oracle subprocess emits live events, then
-// calls MetaDriver.Send. Each StreamSink event is written as a Server-Sent
-// Event frame:
-//
-//	data: {"type":"delta","text":"…"}        — assistant text chunk
-//	data: {"type":"tool","tool":"…","preview":"…"} — tool-call breadcrumb
-//	data: {"type":"done",…MetaSendResult fields…} — terminal frame
-//	data: {"type":"error","message":"…"}     — error frame (then stream ends)
-//
-// The client (live-source.ts metaStream) reads frames until "done" or "error".
-func (s *Server) handleMetaStream(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var params map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-		http.Error(w, "parse error: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	md, rerr := s.resolveMeta(params)
-	if rerr != nil {
-		http.Error(w, rerr.Message, http.StatusBadRequest)
-		return
-	}
-	mode, _ := params["mode"].(string)
-	if mode == "" {
-		http.Error(w, "meta-stream: missing 'mode'", http.StatusBadRequest)
-		return
-	}
-	chatID, _ := params["chat_id"].(string)
-	input, _ := params["input"].(string)
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	flusher.Flush()
-
-	// sseEvent serialises frame and writes it as a single SSE data line.
-	sseEvent := func(frame map[string]any) {
-		b, err := json.Marshal(frame)
-		if err != nil {
-			return
-		}
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
-		flusher.Flush()
-	}
-
-	// sink translates host.StreamEvents into SSE frames in real time.
-	sink := &metaSSESink{emit: sseEvent}
-	ctx := host.WithStreamSink(r.Context(), sink)
-
-	res, err := md.Send(ctx, mode, chatID, input)
-	if err != nil {
-		sseEvent(map[string]any{"type": "error", "message": err.Error()})
-		return
-	}
-
-	// Terminal "done" frame mirrors MetaSendResult fields.
-	sseEvent(map[string]any{
-		"type":             "done",
-		"assistant":        res.Assistant,
-		"chat_id":          res.ChatID,
-		"reload_requested": res.ReloadRequested,
-		"changed_files":    res.ChangedFiles,
-	})
-}
-
-// metaSSESink is a host.StreamSink that converts each StreamEvent into an SSE
-// frame via its emit callback. It is non-blocking: emit writes and flushes
-// synchronously on the oracle reader goroutine, which is safe here because
-// the SSE writer does not block (the HTTP response buffer is unbounded in
-// practice for these small payloads).
-type metaSSESink struct {
-	emit func(map[string]any)
-}
-
-func (s *metaSSESink) OnStreamEvent(_ context.Context, ev host.StreamEvent) {
-	switch {
-	case ev.IsResult:
-		// The terminal result event; ignored here — the caller emits "done"
-		// with the full MetaSendResult after Send returns.
-	case ev.Tool != "":
-		s.emit(map[string]any{
-			"type":    "tool",
-			"tool":    ev.Tool,
-			"preview": ev.Preview,
-		})
-	case ev.Text != "":
-		s.emit(map[string]any{
-			"type": "delta",
-			"text": ev.Text,
-		})
-	}
 }
 
 // ── Artifact serving ─────────────────────────────────────────────────────────

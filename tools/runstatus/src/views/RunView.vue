@@ -31,16 +31,12 @@
         >
           Σ {{ fmtTokens(store.usageTotals.promptTokens + store.usageTotals.responseTokens) }} tok<template v-if="fmtCost(store.usageTotals.costUsd)"> · {{ fmtCost(store.usageTotals.costUsd) }}</template>
         </span>
-        <button
-          class="run-view__reload"
-          :class="{ 'run-view__reload--pushed': !store.usageTotals.present }"
-          data-testid="reload-button"
-          :disabled="reloading"
-          :title="'Reload the story definition in place (mirrors the TUI /reload)'"
-          @click="onReload"
-        >
-          {{ reloading ? "Reloading…" : "↻ Reload" }}
-        </button>
+        <StoryFreshness
+          :session-id="sessionId"
+          :on-reloaded="onFreshnessReloaded"
+          :on-reload-error="onFreshnessError"
+          data-testid="story-freshness-widget"
+        />
       </div>
 
       <!-- Reload warning: shown when the current state was removed by the edit,
@@ -106,10 +102,10 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRunStore } from "../stores/run.js";
 import { createDataSource } from "../data/source.js";
-import { LiveSource } from "../data/live-source.js";
 import { markAutoNavDone } from "../lib/auto-nav.js";
 import StateDiagram from "../components/StateDiagram.vue";
 import TraceTimeline from "../components/TraceTimeline.vue";
+import StoryFreshness from "../components/StoryFreshness.vue";
 import { fmtTokens, fmtCost } from "../components/oracle/lib.js";
 import type { NodeRef } from "../types.js";
 
@@ -122,32 +118,25 @@ const storyTitle = computed<string>(
   () => store.appDef?.name || store.appDef?.id || "Session"
 );
 
-// ── Reload (in-place story hot-reload, mirroring the TUI /reload) ───────────
+// ── Staleness / reload ───────────────────────────────────────────────────────
 //
-// The reload RPC takes an explicit session_id, so we drive it through a direct
-// LiveSource rather than the snapshot-capable DataSource (which has no
-// reloadSession). On prev_state_exists:false the engine could not re-enter the
-// session's current state because the edit removed it, so it stays put — we
-// surface the same notice the TUI prints. On true the normal SSE-driven trace
-// refresh repaints the view, so there is nothing extra to do here.
-const source = new LiveSource("/");
-const reloading = ref(false);
+// StoryFreshness polls the server every 10 s and shows a diff modal when the
+// app.yaml on disk has changed since the session was loaded. After a successful
+// reload it calls onFreshnessReloaded so we can show the "state removed" notice
+// the TUI /reload surfaces. The LiveSource used by StoryFreshness is constructed
+// inside that component; we only need the DataSource for the rehydrate call.
 const reloadWarning = ref<string | null>(null);
 
-async function onReload(): Promise<void> {
-  if (reloading.value) return;
-  reloading.value = true;
-  reloadWarning.value = null;
-  try {
-    const res = await source.reloadSession(props.sessionId);
-    if (!res.prev_state_exists) {
-      reloadWarning.value = "current state removed; staying put";
-    }
-  } catch (e) {
-    reloadWarning.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    reloading.value = false;
+function onFreshnessReloaded(prevStateExists: boolean): void {
+  if (!prevStateExists) {
+    reloadWarning.value = "current state removed; staying put";
+  } else {
+    reloadWarning.value = null;
   }
+}
+
+function onFreshnessError(msg: string): void {
+  reloadWarning.value = msg;
 }
 
 const panelsEl = ref<HTMLElement | null>(null);
@@ -299,33 +288,6 @@ function onEventSelect(index: number): void {
   border-color: #60a5fa;
 }
 
-.run-view__reload {
-  background: transparent;
-  border: 1px solid #334155;
-  color: #cbd5e1;
-  border-radius: 4px;
-  padding: 0.1rem 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-/* When the usage chip is absent it can't push the reload button right, so the
-   button takes over the auto margin to stay flush right. */
-.run-view__reload--pushed {
-  margin-left: auto;
-}
-
-.run-view__reload:hover:not(:disabled) {
-  background: #1e293b;
-  border-color: #475569;
-}
-
-.run-view__reload:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 
 .run-view__reload-warning {
   flex-shrink: 0;

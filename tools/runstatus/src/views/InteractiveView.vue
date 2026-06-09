@@ -23,14 +23,52 @@
         >
           Σ {{ fmtTokens(store.usageTotals.promptTokens + store.usageTotals.responseTokens) }} tok<template v-if="fmtCost(store.usageTotals.costUsd)"> · {{ fmtCost(store.usageTotals.costUsd) }}</template>
         </span>
+        <StoryFreshness
+          :session-id="sessionId"
+          :on-reloaded="onFreshnessReloaded"
+          :on-reload-error="onFreshnessError"
+          data-testid="story-freshness-widget"
+        />
         <router-link :to="`/s/${sessionId}`" class="iv__observe-link" data-testid="observe-link">Observe ↗</router-link>
       </header>
+
+      <!-- Reload warning: shown when the current state was removed by the edit. -->
+      <div
+        v-if="reloadWarning"
+        class="iv__reload-warning"
+        data-testid="reload-warning"
+      >
+        {{ reloadWarning }}
+      </div>
 
       <!-- Main row: chat (left) | trace (right) -->
       <div class="iv__main">
         <!-- LEFT: conversation -->
         <section class="iv__chat" aria-label="Conversation" data-testid="chat-section">
           <ChatTranscript class="iv__transcript" :transcript="store.transcript" />
+          <!-- Streaming thinking bubble: visible while a turn is in flight -->
+          <div v-if="pending" class="iv__thinking" data-testid="thinking-bubble">
+            <div class="iv__thinking-avatar">A</div>
+            <div class="iv__thinking-bubble">
+              <div class="iv__thinking-role">Agent</div>
+              <template v-if="store.pendingStreamTools.length > 0">
+                <div
+                  v-for="(t, i) in store.pendingStreamTools"
+                  :key="i"
+                  class="iv__thinking-tool"
+                >
+                  <span class="iv__thinking-tool-name">{{ t.tool }}</span>
+                  <span v-if="t.preview" class="iv__thinking-tool-preview">{{ t.preview }}</span>
+                </div>
+              </template>
+              <div
+                v-if="store.pendingStreamText"
+                class="iv__thinking-text"
+                v-html="renderAgentMarkdown(store.pendingStreamText)"
+              ></div>
+              <div v-else class="iv__thinking-dots"><span>·</span><span>·</span><span>·</span></div>
+            </div>
+          </div>
           <div v-if="store.terminal" class="iv__done-note">
             Session complete — no further input accepted.
           </div>
@@ -94,10 +132,12 @@ import { useRunStore } from "../stores/run.js";
 import { createDataSource } from "../data/source.js";
 import type { DataSource } from "../data/source.js";
 import { markAutoNavDone } from "../lib/auto-nav.js";
+import { renderAgentMarkdown } from "../lib/markdown.js";
 import ChatTranscript from "../components/ChatTranscript.vue";
 import InputBar from "../components/InputBar.vue";
 import StateDiagram from "../components/StateDiagram.vue";
 import TraceTimeline from "../components/TraceTimeline.vue";
+import StoryFreshness from "../components/StoryFreshness.vue";
 import { fmtTokens, fmtCost } from "../components/oracle/lib.js";
 import type { NodeRef } from "../types.js";
 
@@ -113,6 +153,16 @@ const pending = ref(false);
 const error = ref<string | null>(null);
 
 const appId = computed(() => store.appDef?.id ?? store.appDef?.name ?? "kitsoki");
+
+const reloadWarning = ref<string | null>(null);
+
+function onFreshnessReloaded(prevStateExists: boolean): void {
+  reloadWarning.value = prevStateExists ? null : "current state removed; staying put";
+}
+
+function onFreshnessError(msg: string): void {
+  reloadWarning.value = msg;
+}
 
 async function loadSession(sessionId: string): Promise<void> {
   if (!source) source = createDataSource();
@@ -291,6 +341,15 @@ function onEventSelect(index: number): void {
 }
 
 /* ---- Main row ---- */
+.iv__reload-warning {
+  flex-shrink: 0;
+  padding: 0.25rem 1rem;
+  font-size: 0.8rem;
+  background: #1c1107;
+  border-bottom: 1px solid #92400e;
+  color: #fcd34d;
+}
+
 .iv__main {
   display: flex;
   flex: 1;
@@ -403,4 +462,127 @@ function onEventSelect(index: number): void {
   font-size: 0.875rem;
   padding: 1rem;
 }
+
+/* ---- Streaming thinking bubble ---- */
+.iv__thinking {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 24px 0;
+  max-width: 98%;
+}
+
+.iv__thinking-avatar {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: #475569;
+  user-select: none;
+}
+
+.iv__thinking-bubble {
+  background: #f7f8fa;
+  color: #1f2430;
+  border: 1px solid #d8dbe2;
+  border-radius: 12px;
+  border-bottom-left-radius: 4px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  min-width: 120px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.iv__thinking-role {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+
+.iv__thinking-tool {
+  display: flex;
+  gap: 0.5em;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  color: #4b5563;
+  margin-bottom: 2px;
+}
+
+.iv__thinking-tool-name {
+  font-weight: 600;
+  color: #2563eb;
+}
+
+.iv__thinking-tool-preview {
+  color: #6b7280;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60ch;
+}
+
+.iv__thinking-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+/* renderAgentMarkdown output (v-html) — style the formatted bits. A fenced
+   block becomes a code box rather than leaking as literal ```json backticks. */
+.iv__thinking-text :deep(.cv-h) {
+  font-weight: 700;
+}
+.iv__thinking-text :deep(strong) {
+  font-weight: 700;
+}
+.iv__thinking-text :deep(code) {
+  background: #e6e9ef;
+  border-radius: 4px;
+  padding: 0.05em 0.3em;
+}
+.iv__thinking-text :deep(.cv-pre) {
+  background: #1e2430;
+  color: #d6deeb;
+  border: 1px solid #cfd4dd;
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  margin: 0.35rem 0;
+  overflow-x: auto;
+  white-space: pre;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.iv__thinking-text :deep(.cv-pre code) {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+.iv__thinking-dots {
+  display: flex;
+  gap: 4px;
+  font-size: 20px;
+  color: #94a3b8;
+}
+
+@keyframes iv-dot-pulse {
+  0%, 80%, 100% { opacity: 0.2; }
+  40% { opacity: 1; }
+}
+
+.iv__thinking-dots span:nth-child(1) { animation: iv-dot-pulse 1.4s infinite 0s; }
+.iv__thinking-dots span:nth-child(2) { animation: iv-dot-pulse 1.4s infinite 0.2s; }
+.iv__thinking-dots span:nth-child(3) { animation: iv-dot-pulse 1.4s infinite 0.4s; }
 </style>

@@ -3,22 +3,25 @@
  *
  * The live-source RPC layer is mocked (no live server, no LLM): vi.mock
  * replaces both the snapshot-capable DataSource factory (so hydrate() never
- * opens a real EventSource) and the LiveSource the view uses for the
- * session_id-bearing reloadSession call. The heavy diagram/timeline children
- * are stubbed so the test exercises the reload control in isolation.
+ * opens a real EventSource) and the LiveSource that StoryFreshness uses for
+ * checkStaleness / reloadSession calls. StoryFreshness is stubbed with a
+ * thin harness component so we can fire the reload callbacks without driving
+ * the full polling cycle.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
+import { defineComponent, h } from "vue";
 import type { ReloadResult } from "../../src/data/live-source.js";
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
 
 const reloadSession = vi.fn<[string], Promise<ReloadResult>>();
+const checkStaleness = vi.fn<[string], Promise<{ stale: boolean; diff: string }>>();
 
 vi.mock("../../src/data/live-source.js", () => ({
-  LiveSource: vi.fn().mockImplementation(() => ({ reloadSession })),
+  LiveSource: vi.fn().mockImplementation(() => ({ reloadSession, checkStaleness })),
 }));
 
 // createDataSource() backs the store's hydrate(); a no-op stub keeps the view
@@ -44,6 +47,28 @@ vi.mock("../../src/data/source.js", () => ({
   createDataSource: () => dataSource,
 }));
 
+// StoryFreshness stub: renders two test-only buttons that simulate the reload
+// callbacks so RunView's warning logic can be exercised without a polling cycle.
+const StoryFreshnessStub = defineComponent({
+  props: {
+    sessionId: String,
+    onReloaded: Function,
+    onReloadError: Function,
+  },
+  setup(props) {
+    return () => h("div", { "data-testid": "freshness-stub" }, [
+      h("button", {
+        "data-testid": "stub-reload-ok",
+        onClick: () => props.onReloaded?.(true),
+      }, "reload-ok"),
+      h("button", {
+        "data-testid": "stub-reload-removed",
+        onClick: () => props.onReloaded?.(false),
+      }, "reload-removed"),
+    ]);
+  },
+});
+
 // Imported after the mocks are registered.
 import RunView from "../../src/views/RunView.vue";
 
@@ -54,6 +79,7 @@ const mountOpts = {
       RouterLink: { props: ["to"], template: "<a :href=\"to\"><slot /></a>" },
       StateDiagram: true,
       TraceTimeline: true,
+      StoryFreshness: StoryFreshnessStub,
     },
   },
 };
@@ -62,7 +88,9 @@ describe("RunView — reload control + breadcrumb", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     reloadSession.mockReset();
+    checkStaleness.mockReset();
     reloadSession.mockResolvedValue({ ok: true, prev_state_exists: true });
+    checkStaleness.mockResolvedValue({ stale: false, diff: "" });
   });
 
   it("renders a breadcrumb with the story title linking back to /", async () => {
@@ -102,23 +130,21 @@ describe("RunView — reload control + breadcrumb", () => {
     wrapper.unmount();
   });
 
-  it("Reload button calls reloadSession with the session id", async () => {
+  it("mounts the StoryFreshness widget in the toolbar", async () => {
     const wrapper = mount(RunView, mountOpts);
     await flushPromises();
 
-    await wrapper.find("[data-testid='reload-button']").trigger("click");
-    await flushPromises();
-
-    expect(reloadSession).toHaveBeenCalledWith("s1");
+    // The parent template passes data-testid="story-freshness-widget" which
+    // overwrites the stub's own testid via Vue's attribute fallthrough.
+    expect(wrapper.find("[data-testid='story-freshness-widget']").exists()).toBe(true);
     wrapper.unmount();
   });
 
-  it("shows no warning when prev_state_exists is true", async () => {
-    reloadSession.mockResolvedValue({ ok: true, prev_state_exists: true });
+  it("shows no warning when freshness callback reports prev_state_exists true", async () => {
     const wrapper = mount(RunView, mountOpts);
     await flushPromises();
 
-    await wrapper.find("[data-testid='reload-button']").trigger("click");
+    await wrapper.find("[data-testid='stub-reload-ok']").trigger("click");
     await flushPromises();
 
     expect(wrapper.find("[data-testid='reload-warning']").exists()).toBe(false);
@@ -126,11 +152,10 @@ describe("RunView — reload control + breadcrumb", () => {
   });
 
   it("surfaces the staying-put warning when prev_state_exists is false", async () => {
-    reloadSession.mockResolvedValue({ ok: true, prev_state_exists: false });
     const wrapper = mount(RunView, mountOpts);
     await flushPromises();
 
-    await wrapper.find("[data-testid='reload-button']").trigger("click");
+    await wrapper.find("[data-testid='stub-reload-removed']").trigger("click");
     await flushPromises();
 
     const warn = wrapper.find("[data-testid='reload-warning']");

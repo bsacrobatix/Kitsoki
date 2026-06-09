@@ -30,6 +30,20 @@ export interface MetaStreamEvent {
   // error
   message?: string;
 }
+
+/** One SSE frame from /rpc/turn-stream. */
+export interface TurnStreamEvent {
+  type: "delta" | "tool" | "done" | "error";
+  // delta
+  text?: string;
+  // tool
+  tool?: string;
+  preview?: string;
+  // done — carries the full TurnResult
+  result?: TurnResult;
+  // error
+  message?: string;
+}
 import { JsonRpcClient } from "../transport/jsonrpc.js";
 
 /**
@@ -161,6 +175,63 @@ export class LiveSource implements DataSource {
       session_id: sessionId,
       input,
     });
+  }
+
+  /**
+   * Stream one turn via SSE. Calls onEvent for each "delta"/"tool" frame as
+   * the oracle generates output; resolves with the final TurnResult when the
+   * "done" frame arrives, or rejects on "error" or network failure.
+   */
+  async turnStream(
+    sessionId: string,
+    method: "turn" | "submit" | "continue" | "offpath",
+    params: { input?: string; intent?: string; slots?: Record<string, unknown> },
+    onEvent: (ev: TurnStreamEvent) => void
+  ): Promise<TurnResult> {
+    const resp = await fetch(`${this.base}rpc/turn-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        method,
+        ...params,
+      }),
+    });
+    if (!resp.ok) {
+      throw new Error(`turn-stream: HTTP ${resp.status} ${resp.statusText}`);
+    }
+    if (!resp.body) {
+      throw new Error("turn-stream: no response body");
+    }
+
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let finalResult: TurnResult | null = null;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const raw = line.slice(6).trim();
+        if (!raw) continue;
+        const ev: TurnStreamEvent = JSON.parse(raw);
+        if (ev.type === "done") {
+          finalResult = ev.result ?? null;
+        } else if (ev.type === "error") {
+          throw new Error(ev.message ?? "turn-stream error");
+        } else {
+          onEvent(ev);
+        }
+      }
+    }
+
+    if (!finalResult) throw new Error("turn-stream: ended without done event");
+    return finalResult;
   }
 
   // ── Meta mode (overlay chat) ─────────────────────────────────────────────
@@ -334,5 +405,19 @@ export class LiveSource implements DataSource {
     return this.client.post<ReloadResult>("runstatus.session.reload", {
       session_id: sessionId,
     });
+  }
+
+  /**
+   * Check whether the session's app.yaml on disk has changed since it was
+   * loaded (or last reloaded). `stale` is true when they differ; `diff` is a
+   * unified-diff string suitable for display in a modal.
+   */
+  checkStaleness(
+    sessionId: string
+  ): Promise<{ stale: boolean; diff: string }> {
+    return this.client.post<{ stale: boolean; diff: string }>(
+      "runstatus.session.staleness",
+      { session_id: sessionId }
+    );
   }
 }

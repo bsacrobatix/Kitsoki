@@ -20,15 +20,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pmezard/go-difflib/difflib"
 
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
@@ -51,13 +54,14 @@ import (
 //   - sid is the orchestrator session id Reload / driver calls bind to.
 //   - source is the LiveSession; Reload reads currentState from its snapshot.
 type entry struct {
-	StoryPath string
-	Def       *app.AppDef
-	rt        *sessionRuntime
-	sid       app.SessionID
-	source    *server.LiveSession
-	driver    server.Driver
-	sink      *store.JSONLSink
+	StoryPath     string
+	Def           *app.AppDef
+	loadedContent []byte // raw app.yaml bytes at last load/reload, for staleness check
+	rt            *sessionRuntime
+	sid           app.SessionID
+	source        *server.LiveSession
+	driver        server.Driver
+	sink          *store.JSONLSink
 
 	// metaController is the lazily-built meta-mode controller for this
 	// session, cached so the persistent chat store / agent registry / AppDef
@@ -190,13 +194,16 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 		return "", fmt.Errorf("run initial on_enter: %w", err)
 	}
 
+	rawContent, _ := os.ReadFile(abs)
+
 	id := uuid.NewString()
 	e := &entry{
-		StoryPath: abs,
-		Def:       def,
-		rt:        rt,
-		sid:       sid,
-		source:    live,
+		StoryPath:     abs,
+		Def:           def,
+		loadedContent: rawContent,
+		rt:            rt,
+		sid:           sid,
+		source:        live,
 		driver:    server.OrchestratorDriver{Orch: orch, SID: sid},
 		sink:      sink,
 	}
@@ -297,8 +304,10 @@ func (r *SessionRegistry) Reload(ctx context.Context, sessionID string) (bool, e
 	// Keep the entry's display def in sync with the reloaded definition, and
 	// drop the cached meta controller so the next meta turn rebuilds against
 	// the reloaded AppDef (a story edit may have changed meta_modes).
+	freshContent, _ := os.ReadFile(e.StoryPath)
 	r.mu.Lock()
 	e.Def = res.Def
+	e.loadedContent = freshContent
 	e.metaController = nil
 	r.mu.Unlock()
 
@@ -319,6 +328,52 @@ func (r *SessionRegistry) ListStories() []server.StoryHeader {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.storyHeadersLocked()
+}
+
+// Staleness compares the session's currently-loaded app.yaml bytes against the
+// file on disk. stale is true when they differ; diff is a unified-diff string
+// (context-3 lines) the UI can render in a modal. Returns no error on a missing
+// file — that is treated as stale (content = "") rather than an error.
+func (r *SessionRegistry) Staleness(_ context.Context, sessionID string) (stale bool, diff string, err error) {
+	r.mu.Lock()
+	e, ok := r.sessions[sessionID]
+	if !ok {
+		r.mu.Unlock()
+		return false, "", fmt.Errorf("staleness: unknown session %q", sessionID)
+	}
+	loaded := e.loadedContent
+	path := e.StoryPath
+	r.mu.Unlock()
+
+	disk, readErr := os.ReadFile(path)
+	if readErr != nil {
+		disk = nil
+	}
+
+	if bytes.Equal(loaded, disk) {
+		return false, "", nil
+	}
+
+	ud := difflib.UnifiedDiff{
+		A:        difflib.SplitLines(string(loaded)),
+		B:        difflib.SplitLines(string(disk)),
+		FromFile: "loaded",
+		ToFile:   "on-disk",
+		Context:  3,
+	}
+	text, _ := difflib.GetUnifiedDiffString(ud)
+	// Build a short summary: count added/removed lines.
+	added, removed := 0, 0
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+			added++
+		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+			removed++
+		}
+	}
+	_ = added
+	_ = removed
+	return true, text, nil
 }
 
 // Rescan re-walks the configured story dirs (DiscoverStories), replaces the

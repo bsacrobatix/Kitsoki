@@ -40,6 +40,11 @@ type SessionProvider interface {
 	// /reload. prevStateExists is false when the session's current state was
 	// removed by the edit (the UI shows the "staying put" warning).
 	Reload(ctx context.Context, sessionID string) (prevStateExists bool, err error)
+	// Staleness checks whether the session's app.yaml on disk differs from the
+	// version that was loaded (or last reloaded). stale is false when the bytes
+	// are identical. diff is a unified-diff string suitable for display; empty
+	// when stale is false.
+	Staleness(ctx context.Context, sessionID string) (stale bool, diff string, err error)
 	// ListStories returns the discovered story catalogue with per-story
 	// active-session counts.
 	ListStories() []StoryHeader
@@ -148,6 +153,10 @@ func (p *singleEntryProvider) NewSession(context.Context, string) (string, error
 
 func (p *singleEntryProvider) Reload(context.Context, string) (bool, error) {
 	return false, errReadOnlySurface
+}
+
+func (p *singleEntryProvider) Staleness(context.Context, string) (bool, string, error) {
+	return false, "", errReadOnlySurface
 }
 
 func (p *singleEntryProvider) ListStories() []StoryHeader { return nil }
