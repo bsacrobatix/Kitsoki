@@ -88,16 +88,15 @@ describe("ViewElement", () => {
     w.unmount();
   });
 
-  it("renders choice as a labeled option line", () => {
+  it("omits choice elements (InputBar renders them as interactive buttons)", () => {
     const w = render({
       Kind: "choice",
       ChoicePrompt: "Pick one",
       ChoiceIntent: "select_option",
     });
-    const c = w.find(".ve-choice");
-    expect(c.exists()).toBe(true);
-    expect(c.find(".ve-choice-prompt").text()).toBe("Pick one");
-    expect(c.find(".ve-choice-intent").text()).toContain("select_option");
+    // Choice items are surfaced as clickable buttons by InputBar; ViewElement
+    // deliberately renders nothing for them to avoid duplication.
+    expect(w.find(".ve-choice").exists()).toBe(false);
     w.unmount();
   });
 

@@ -14,6 +14,41 @@ export interface TraceCursor {
   limit?: number;
 }
 
+// ── Meta mode (overlay chat) wire types ────────────────────────────────────
+// Mirror internal/runstatus/server/meta.go.
+
+/** One selectable mode in the meta dropdown. */
+export interface MetaModeInfo {
+  key: string; // "story.edit" | "story.ask" | "kitsoki.ask" | …
+  label: string;
+  banner: string;
+  agent: string;
+  read_only: boolean;
+  group: string; // "story" | "kitsoki"
+}
+
+/** One transcript turn. role: "user" | "assistant". */
+export interface MetaMessage {
+  role: string;
+  text: string;
+}
+
+/** Handle returned by enter / new: the chat row + its transcript so far. */
+export interface MetaSession {
+  chat_id: string;
+  mode_key: string;
+  messages: MetaMessage[];
+}
+
+/** Outcome of one meta turn. The reload_* fields drive in-place content refresh. */
+export interface MetaSendResult {
+  assistant: string;
+  chat_id: string;
+  reload_requested: boolean;
+  changed_files: string[];
+  commit_sha?: string;
+}
+
 export interface DataSource {
   listSessions(): Promise<SessionHeader[]>;
   getSession(sessionId: string): Promise<SessionHeader>;
@@ -45,6 +80,34 @@ export interface DataSource {
   ): Promise<TurnResult>;
   /** Read-only off-path question against the default oracle. */
   offpath(sessionId: string, input: string): Promise<{ answer: string }>;
+
+  // ── Meta mode (overlay chat) ─────────────────────────────────────────────
+  // sessionId "" targets the home-screen session-less "self" driver (kitsoki.*
+  // modes); a non-empty id targets that session's per-state driver.
+
+  /** List the meta modes available in this scope (for the dropdown). */
+  metaModes(sessionId: string): Promise<MetaModeInfo[]>;
+  /** Resolve/resume a mode's chat; returns the transcript so far. */
+  metaEnter(
+    sessionId: string,
+    mode: string,
+    chatId?: string
+  ): Promise<MetaSession>;
+  /** Issue one meta turn. */
+  metaSend(
+    sessionId: string,
+    mode: string,
+    chatId: string,
+    input: string
+  ): Promise<MetaSendResult>;
+  /** Archive the mode's chat and open a fresh one. */
+  metaNew(
+    sessionId: string,
+    mode: string,
+    chatId: string
+  ): Promise<MetaSession>;
+  /** Read a chat row's transcript (for rehydration). */
+  metaTranscript(sessionId: string, chatId: string): Promise<MetaMessage[]>;
 }
 
 /**

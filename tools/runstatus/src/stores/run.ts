@@ -135,6 +135,28 @@ export const useRunStore = defineStore("run", () => {
     _seenStateEntered = false;
   }
 
+  /**
+   * Re-pull the session after an out-of-band content change (a meta-mode
+   * story edit triggered a server-side reload). Refreshes app/mermaid/trace +
+   * the current room view IN PLACE — no browser reload, and the conversational
+   * transcript is preserved (we don't push a fresh opening view). Used by the
+   * meta store when a turn returns reload_requested.
+   */
+  async function rehydrate(
+    source: DataSource,
+    sessionId: string
+  ): Promise<void> {
+    teardown();
+    await hydrate(source, sessionId);
+    // Refresh the current room view without appending a transcript entry
+    // (hydrate leaves transcript untouched; loadInitialView would duplicate the
+    // opening bubble).
+    const result = await source.view(sessionId);
+    currentView.value = result;
+    if (result.state) currentStatePath.value = result.state;
+    terminal.value = result.mode === "completed";
+  }
+
   // ---- write-side actions ----
 
   /**
@@ -280,6 +302,7 @@ export const useRunStore = defineStore("run", () => {
     allowedIntents,
     // actions
     hydrate,
+    rehydrate,
     teardown,
     selectEvent,
     clearSelection,

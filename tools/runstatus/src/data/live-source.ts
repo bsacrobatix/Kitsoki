@@ -5,7 +5,14 @@ import type {
   TraceEvent,
   TurnResult,
 } from "../types.js";
-import type { DataSource, TraceCursor } from "./source.js";
+import type {
+  DataSource,
+  TraceCursor,
+  MetaModeInfo,
+  MetaSession,
+  MetaSendResult,
+  MetaMessage,
+} from "./source.js";
 import { JsonRpcClient } from "../transport/jsonrpc.js";
 
 /**
@@ -135,6 +142,63 @@ export class LiveSource implements DataSource {
       session_id: sessionId,
       input,
     });
+  }
+
+  // ── Meta mode (overlay chat) ─────────────────────────────────────────────
+
+  metaModes(sessionId: string): Promise<MetaModeInfo[]> {
+    return this.client
+      .post<{ modes: MetaModeInfo[] }>("runstatus.meta.modes", {
+        session_id: sessionId,
+      })
+      .then((r) => r.modes ?? []);
+  }
+
+  metaEnter(
+    sessionId: string,
+    mode: string,
+    chatId = ""
+  ): Promise<MetaSession> {
+    return this.client.post<MetaSession>("runstatus.meta.enter", {
+      session_id: sessionId,
+      mode,
+      chat_id: chatId,
+    });
+  }
+
+  metaSend(
+    sessionId: string,
+    mode: string,
+    chatId: string,
+    input: string
+  ): Promise<MetaSendResult> {
+    return this.client.post<MetaSendResult>("runstatus.meta.send", {
+      session_id: sessionId,
+      mode,
+      chat_id: chatId,
+      input,
+    });
+  }
+
+  metaNew(
+    sessionId: string,
+    mode: string,
+    chatId: string
+  ): Promise<MetaSession> {
+    return this.client.post<MetaSession>("runstatus.meta.new", {
+      session_id: sessionId,
+      mode,
+      chat_id: chatId,
+    });
+  }
+
+  metaTranscript(sessionId: string, chatId: string): Promise<MetaMessage[]> {
+    return this.client
+      .post<{ messages: MetaMessage[] }>("runstatus.meta.transcript", {
+        session_id: sessionId,
+        chat_id: chatId,
+      })
+      .then((r) => r.messages ?? []);
   }
 
   // ── Multi-story lifecycle RPCs ───────────────────────────────────────────

@@ -113,6 +113,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
+
+// Auto-navigate fires at most once per browser session. After the first
+// auto-redirect the user has explicitly chosen to land on the home screen
+// (e.g. via "← Sessions"), so we must not redirect them again.
+let _autoNavDone = false;
 import { LiveSource, type StoryHeader } from "../data/live-source.js";
 import { createDataSource } from "../data/source.js";
 import type { SessionHeader } from "../types.js";
@@ -179,11 +184,15 @@ onMounted(async () => {
   // Auto-navigate when there is exactly one live session and no others. A
   // still-running session opens on its drive (chat) surface so the operator can
   // act immediately; a finished one opens on the read-only observer.
+  // Guard: only auto-navigate once per browser session — subsequent arrivals at
+  // "/" are intentional (e.g. the user clicked "← Sessions" to get back here).
   const only = sessions.value[0];
-  if (sessions.value.length === 1 && only) {
+  if (!_autoNavDone && sessions.value.length === 1 && only) {
+    _autoNavDone = true;
     router.replace(sessionRoute(only));
     return;
   }
+  _autoNavDone = true;
 
   pollTimer = setInterval(() => {
     void loadSessions();

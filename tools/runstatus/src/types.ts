@@ -72,6 +72,43 @@ export interface ListItem {
 }
 
 /**
+ * One field in a form-mode choice element. Mirrors Go's app.ChoiceField
+ * (PascalCase on the wire).
+ */
+export interface ChoiceField {
+  Name: string;
+  Type?: string; // "string" | "int" | "float" | "bool" | "enum"
+  Hint?: string;
+  Placeholder?: string;
+  Unit?: string;
+  Values?: string[];
+  Default?: unknown;
+  Min?: unknown;
+  Max?: unknown;
+  Required?: boolean;
+  Readonly?: boolean;
+}
+
+/**
+ * One item in a single-mode choice element. Slots are pre-filled values to send
+ * when the item is selected. Param, when present, captures one extra free-text
+ * slot from the user before firing.
+ */
+export interface ChoiceItem {
+  Label: string;
+  Hint?: string;
+  Intent: string;
+  Slots?: Record<string, unknown> | null;
+  Param?: {
+    Slot: string;
+    Type: string;
+    Placeholder?: string;
+    Required?: boolean;
+    Values?: string[];
+  } | null;
+}
+
+/**
  * ViewElement is one typed entry of a View's Elements slice, discriminated by
  * `Kind`. The kinds prose / heading / code / template / banner carry their body
  * in `Source`; list carries `Items`; kv carries `Pairs`; choice carries the
@@ -100,7 +137,7 @@ export interface ViewElement {
   // ── Choice fields (populated only when Kind === "choice"). ──
   ChoiceMode?: string;
   ChoicePrompt?: string;
-  ChoiceItems?: unknown[] | null;
+  ChoiceItems?: ChoiceItem[] | null;
   ChoiceIntent?: string;
   ChoiceSlot?: string;
   ChoiceMin?: number;
@@ -108,7 +145,7 @@ export interface ViewElement {
   ChoiceMinSet?: boolean;
   ChoiceMaxSet?: boolean;
   ChoiceTemplate?: string;
-  ChoiceFields?: unknown[] | null;
+  ChoiceFields?: ChoiceField[] | null;
   ChoiceRaw?: unknown;
 }
 

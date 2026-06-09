@@ -1,21 +1,106 @@
 <template>
-  <div class="input-bar">
-    <div v-if="actionIntents.length" class="input-bar__actions" data-testid="intent-actions">
-      <button
-        v-for="intent in actionIntents"
-        :key="intent.name"
-        class="input-bar__action-btn"
-        type="button"
-        :disabled="pending"
-        :data-testid="`intent-btn-${intent.name}`"
-        @click="fireIntent(intent)"
-      >
-        {{ intent.title || intent.name }}
-      </button>
-    </div>
+  <div class="input-bar" data-testid="input-bar">
+    <!-- Choice items from typed view: labeled buttons with pre-filled slots.
+         When present, these replace the legacy no-slot action buttons since
+         choice items subsume them (back/look appear as choice items too). -->
+    <template v-if="choiceItems.length">
+      <div v-if="choicePrompt" class="input-bar__choice-prompt">{{ choicePrompt }}</div>
+      <!-- Plain buttons first (no Param) — rendered in a consistent grid. -->
+      <div v-if="buttonChoiceItems.length" class="input-bar__actions" data-testid="intent-actions">
+        <button
+          v-for="item in buttonChoiceItems"
+          :key="item.Intent + '|' + JSON.stringify(item.Slots)"
+          class="input-bar__action-btn"
+          :class="{ 'input-bar__action-btn--primary': isPrimary(item) }"
+          type="button"
+          :disabled="pending"
+          :data-testid="`intent-btn-${item.Intent}`"
+          :data-slots="JSON.stringify(item.Slots ?? {})"
+          :title="item.Hint || undefined"
+          @click="fireChoiceItem(item)"
+        >
+          <span class="input-bar__btn-label">{{ item.Label }}</span>
+          <span v-if="item.Hint" class="input-bar__btn-hint">{{ item.Hint }}</span>
+        </button>
+      </div>
+      <!-- Param forms below (each needs a text input) — stacked vertically. -->
+      <div v-if="formChoiceItems.length" class="input-bar__forms">
+        <form
+          v-for="item in formChoiceItems"
+          :key="item.Intent + '|' + JSON.stringify(item.Slots)"
+          class="input-bar__choice-param-form"
+          :data-intent="item.Intent"
+          @submit.prevent="fireChoiceParam(item, paramDrafts[item.Intent + '|' + JSON.stringify(item.Slots)] ?? '')"
+        >
+          <span class="input-bar__choice-param-label">{{ item.Label }}</span>
+          <input
+            v-model="paramDrafts[item.Intent + '|' + JSON.stringify(item.Slots)]"
+            class="input-bar__input"
+            type="text"
+            :placeholder="item.Param!.Placeholder || item.Label"
+            :disabled="pending"
+          />
+          <button
+            class="input-bar__send"
+            type="submit"
+            :disabled="pending || !(paramDrafts[item.Intent + '|' + JSON.stringify(item.Slots)] ?? '').trim()"
+          >
+            Send
+          </button>
+        </form>
+      </div>
+    </template>
+
+    <!-- Form mode: multi-field numeric/text form (mode: form in YAML). -->
+    <template v-else-if="formElement">
+      <div v-if="formPrompt" class="input-bar__choice-prompt">{{ formPrompt }}</div>
+      <form class="input-bar__form-grid" @submit.prevent="submitForm">
+        <div v-for="field in formFields" :key="field.Name" class="input-bar__form-row">
+          <label class="input-bar__form-label">
+            {{ field.Name }}
+            <span v-if="field.Unit" class="input-bar__form-unit">{{ field.Unit }}</span>
+          </label>
+          <input
+            v-model="formDrafts[field.Name]"
+            class="input-bar__input input-bar__form-input"
+            :type="field.Type === 'int' || field.Type === 'float' ? 'number' : 'text'"
+            :placeholder="field.Placeholder ?? '0'"
+            :min="field.Min != null ? String(field.Min) : undefined"
+            :max="field.Max != null ? String(field.Max) : undefined"
+            :required="field.Required ?? false"
+            :disabled="pending || field.Readonly"
+            step="1"
+          />
+        </div>
+        <button
+          class="input-bar__send input-bar__form-submit"
+          type="submit"
+          :disabled="pending"
+        >
+          Submit
+        </button>
+      </form>
+    </template>
+
+    <!-- Legacy path: no typed-view choice items — fall back to IntentInfo buttons. -->
+    <template v-else>
+      <div v-if="actionIntents.length" class="input-bar__actions" data-testid="intent-actions">
+        <button
+          v-for="intent in actionIntents"
+          :key="intent.name"
+          class="input-bar__action-btn input-bar__action-btn--primary"
+          type="button"
+          :disabled="pending"
+          :data-testid="`intent-btn-${intent.name}`"
+          @click="fireIntent(intent)"
+        >
+          {{ intent.title || intent.name }}
+        </button>
+      </div>
+    </template>
 
     <form
-      v-if="textIntents.length"
+      v-if="textIntents.length && !choiceItems.length"
       class="input-bar__composer"
       data-testid="composer"
       :data-active-intent="selectedTextName"
@@ -55,11 +140,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import type { IntentInfo } from "../types.js";
+import { computed, reactive, ref, watch } from "vue";
+import type { IntentInfo, View, ChoiceItem, ChoiceField } from "../types.js";
 
 const props = defineProps<{
   intents: IntentInfo[];
+  typedView?: View | null;
   pending?: boolean;
 }>();
 
@@ -67,6 +153,108 @@ const emit = defineEmits<{
   (e: "send", text: string, intentName: string): void;
   (e: "intent", name: string, slots: Record<string, unknown>): void;
 }>();
+
+// ── Choice items from typed view ──────────────────────────────────────────────
+
+/** All choice items from the first single-mode choice element in the typed view. */
+const choiceItems = computed<ChoiceItem[]>(() => {
+  const elements = props.typedView?.Elements;
+  if (!elements?.length) return [];
+  for (const el of elements) {
+    if (el.Kind === "choice" && el.ChoiceMode === "single" && el.ChoiceItems?.length) {
+      return el.ChoiceItems;
+    }
+  }
+  return [];
+});
+
+const choicePrompt = computed<string>(() => {
+  const elements = props.typedView?.Elements;
+  if (!elements?.length) return "";
+  for (const el of elements) {
+    if (el.Kind === "choice" && el.ChoiceItems?.length) {
+      return el.ChoicePrompt ?? "";
+    }
+  }
+  return "";
+});
+
+/** Choice items without a Param — rendered as grid buttons. */
+const buttonChoiceItems = computed<ChoiceItem[]>(() => choiceItems.value.filter(i => !i.Param));
+
+/** Choice items with a Param — rendered as text-input forms below the buttons. */
+const formChoiceItems = computed<ChoiceItem[]>(() => choiceItems.value.filter(i => !!i.Param));
+
+// ── Form-mode choice ──────────────────────────────────────────────────────────
+
+/** The form-mode choice element, if the current view has one. */
+const formElement = computed(() => {
+  const elements = props.typedView?.Elements;
+  if (!elements?.length) return null;
+  for (const el of elements) {
+    if (el.Kind === "choice" && el.ChoiceMode === "form" && el.ChoiceFields?.length) {
+      return el;
+    }
+  }
+  return null;
+});
+
+const formFields = computed<ChoiceField[]>(() => formElement.value?.ChoiceFields ?? []);
+const formIntent = computed<string>(() => formElement.value?.ChoiceIntent ?? "");
+const formPrompt = computed<string>(() => formElement.value?.ChoicePrompt ?? "");
+
+/** Mutable draft values keyed by field name. Reset whenever the form element changes. */
+const formDrafts = reactive<Record<string, string>>({});
+
+watch(formFields, (fields) => {
+  // Reset drafts to defaults when the form changes.
+  for (const f of fields) {
+    if (!(f.Name in formDrafts)) {
+      formDrafts[f.Name] = f.Default != null ? String(f.Default) : "";
+    }
+  }
+}, { immediate: true });
+
+function submitForm() {
+  if (props.pending || !formIntent.value) return;
+  const slots: Record<string, unknown> = {};
+  for (const f of formFields.value) {
+    const raw = formDrafts[f.Name] ?? "";
+    if (f.Type === "int") {
+      slots[f.Name] = parseInt(raw, 10) || 0;
+    } else if (f.Type === "float") {
+      slots[f.Name] = parseFloat(raw) || 0;
+    } else {
+      slots[f.Name] = raw;
+    }
+  }
+  emit("intent", formIntent.value, slots);
+}
+
+// Primary = first non-navigation item (not back/look/cancel)
+const navIntents = new Set(["back", "look", "cancel", "exit"]);
+function isPrimary(item: ChoiceItem): boolean {
+  return !navIntents.has(item.Intent);
+}
+
+// Per-item free-text drafts (keyed by intent+slots to handle duplicate intent names)
+const paramDrafts = ref<Record<string, string>>({});
+
+function fireChoiceItem(item: ChoiceItem) {
+  if (props.pending) return;
+  emit("intent", item.Intent, (item.Slots as Record<string, unknown>) ?? {});
+}
+
+function fireChoiceParam(item: ChoiceItem, text: string) {
+  const t = text.trim();
+  if (props.pending || !t || !item.Param) return;
+  const slots: Record<string, unknown> = { ...(item.Slots ?? {}), [item.Param.Slot]: t };
+  emit("intent", item.Intent, slots);
+  const key = item.Intent + "|" + JSON.stringify(item.Slots);
+  paramDrafts.value[key] = "";
+}
+
+// ── Legacy IntentInfo path ────────────────────────────────────────────────────
 
 /** Intents with no free-text slot and no slots at all -> plain action buttons. */
 const actionIntents = computed(() =>
@@ -126,44 +314,148 @@ function send() {
 .input-bar {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 18px;
+  gap: 12px;
+  padding: 16px 20px;
   background: #14171d;
   border-top: 1px solid #2a2f3a;
 }
 
+.input-bar__choice-prompt {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
 .input-bar__actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px;
 }
 
 .input-bar__action-btn {
   appearance: none;
-  border: 1px solid #3a4250;
+  border: 1px solid #4a5568;
   background: #1f2530;
-  color: #e6e9ef;
+  color: #c8cdd8;
   font-size: 13px;
-  font-weight: 600;
-  padding: 7px 16px;
+  font-weight: 500;
+  padding: 8px 16px;
   border-radius: 8px;
   cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  width: 100%;
   transition:
     background 0.12s ease,
-    border-color 0.12s ease;
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.input-bar__action-btn--primary {
+  background: #1e3a5f;
+  border-color: #2563eb;
+  color: #93c5fd;
+}
+
+.input-bar__action-btn--primary:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #3b82f6;
+  color: #fff;
 }
 
 .input-bar__action-btn:hover:not(:disabled) {
   background: #2a3340;
-  border-color: #4a5568;
+  border-color: #6b7588;
+  color: #e6e9ef;
+}
+
+.input-bar__btn-label {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.input-bar__btn-hint {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 400;
+  white-space: normal;
+}
+
+.input-bar__action-btn--primary .input-bar__btn-hint {
+  color: #7da8d8;
 }
 
 .input-bar__action-btn:disabled,
 .input-bar__send:disabled,
 .input-bar__input:disabled,
 .input-bar__select:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+}
+
+.input-bar__forms {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.input-bar__choice-param-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-bar__choice-param-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* fixed width so all inputs start at the same x position */
+  flex: 0 0 12rem;
+}
+
+.input-bar__form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input-bar__form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.input-bar__form-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  white-space: nowrap;
+  flex: 0 0 14rem;
+}
+
+.input-bar__form-unit {
+  font-size: 11px;
+  font-weight: 400;
+  color: #64748b;
+  margin-left: 0.3em;
+}
+
+.input-bar__form-input {
+  flex: 1 1 auto;
+  max-width: 10rem;
+}
+
+.input-bar__form-submit {
+  align-self: flex-end;
+  margin-top: 4px;
 }
 
 .input-bar__composer {

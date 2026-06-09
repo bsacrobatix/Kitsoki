@@ -99,10 +99,7 @@ const bannerClass = computed(() => {
     </div>
   </div>
 
-  <div v-else-if="el.Kind === 'choice'" class="ve-choice">
-    <span v-if="el.ChoicePrompt" class="ve-choice-prompt">{{ el.ChoicePrompt }}</span>
-    <span v-if="el.ChoiceIntent" class="ve-choice-intent">→ {{ el.ChoiceIntent }}</span>
-  </div>
+  <!-- choice elements are rendered as interactive buttons by InputBar; omit here to avoid duplication. -->
 </template>
 
 <style scoped>
@@ -111,8 +108,7 @@ const bannerClass = computed(() => {
 .ve-heading,
 .ve-list,
 .ve-kv,
-.ve-banner,
-.ve-choice {
+.ve-banner {
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
@@ -258,25 +254,5 @@ const bannerClass = computed(() => {
   color: #b42318;
 }
 
-.ve-choice {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6em;
-  margin: 0 0 0.5em;
-  padding: 0.5em 0.75em;
-  background: #f6f7f9;
-  border: 1px solid #e3e6ec;
-  border-radius: 6px;
-  font-size: 15px;
-}
 
-.ve-choice-prompt {
-  font-weight: 500;
-}
-
-.ve-choice-intent {
-  color: #6b7280;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.88em;
-}
 </style>

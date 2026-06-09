@@ -37,6 +37,7 @@
           <InputBar
             v-else
             :intents="store.currentView?.intents ?? []"
+            :typed-view="store.currentView?.typed_view"
             :pending="pending"
             @send="onSend"
             @intent="onIntent"
@@ -46,7 +47,7 @@
 
         <!-- RIGHT: live trace (diagram over timeline) -->
         <section class="iv__trace" aria-label="Trace">
-          <div class="iv__panel iv__panel--diagram">
+          <div class="iv__panel iv__panel--diagram" data-testid="trace-diagram">
             <div class="iv__panel-header">State Diagram</div>
             <StateDiagram
               v-if="store.mermaid"
@@ -62,7 +63,7 @@
             />
             <div v-else class="iv__empty">No diagram.</div>
           </div>
-          <div class="iv__panel iv__panel--timeline">
+          <div class="iv__panel iv__panel--timeline" data-testid="trace-timeline">
             <div class="iv__panel-header">
               <span>Trace</span>
               <button

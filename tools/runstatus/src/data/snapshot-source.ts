@@ -6,7 +6,14 @@ import type {
   Snapshot,
   TurnResult,
 } from "../types.js";
-import type { DataSource, TraceCursor } from "./source.js";
+import type {
+  DataSource,
+  TraceCursor,
+  MetaModeInfo,
+  MetaSession,
+  MetaSendResult,
+  MetaMessage,
+} from "./source.js";
 
 /**
  * DataSource backed by an embedded Snapshot blob (artifact / offline mode).
@@ -115,5 +122,44 @@ export class SnapshotSource implements DataSource {
 
   offpath(_sessionId: string, _input: string): Promise<{ answer: string }> {
     return this.readOnly("offpath");
+  }
+
+  // ── Meta mode ────────────────────────────────────────────────────────────
+  // A snapshot has no live engine behind it, so meta mode is unavailable; the
+  // global meta button hides itself in snapshot mode (it checks isSnapshot()).
+
+  metaModes(_sessionId: string): Promise<MetaModeInfo[]> {
+    // Soft-fail: an empty list lets the button render disabled rather than
+    // throwing during a passive home-screen poll.
+    return Promise.resolve([]);
+  }
+
+  metaEnter(
+    _sessionId: string,
+    _mode: string,
+    _chatId?: string
+  ): Promise<MetaSession> {
+    return this.readOnly("metaEnter");
+  }
+
+  metaSend(
+    _sessionId: string,
+    _mode: string,
+    _chatId: string,
+    _input: string
+  ): Promise<MetaSendResult> {
+    return this.readOnly("metaSend");
+  }
+
+  metaNew(
+    _sessionId: string,
+    _mode: string,
+    _chatId: string
+  ): Promise<MetaSession> {
+    return this.readOnly("metaNew");
+  }
+
+  metaTranscript(_sessionId: string, _chatId: string): Promise<MetaMessage[]> {
+    return this.readOnly("metaTranscript");
   }
 }
