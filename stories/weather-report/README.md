@@ -16,11 +16,11 @@ a 12-month climate profile.
 
 | Piece | File | Shows |
 |-------|------|-------|
-| free-text input | [`app.yaml`](./app.yaml) | the `forecast` / `climate` intents each carry a required `location` **slot** — the operator's free-text place name |
+| free-text input | [`app.yaml`](./app.yaml) + [`rooms/lobby.yaml`](./rooms/lobby.yaml) | the `forecast` / `climate` intents each carry a required `location` **slot**; the rooms capture it with a `choice:` **param** field (a labelled free-text box in both the TUI and web UI — no LLM needed to resolve the input) |
 | the script | [`scripts/weather_report.star`](./scripts/weather_report.star) | `main(ctx)` geocoding via `ctx.http`, **branching** on `mode`, a second `ctx.http` call, WMO-code → label maps, and bucketing 365 daily values into 12 monthly aggregates with the `json` + `math` stdlib |
 | the typed contract | [`scripts/weather_report.star.yaml`](./scripts/weather_report.star.yaml) | the sidecar: typed `inputs:` (location, mode) / `outputs:` (string, **object**, **list**) the engine validates either side of the run |
 | the wiring | [`rooms/report.yaml`](./rooms/report.yaml) | a room that `invoke:`s `host.starlark.run` with `with.inputs` from world, binds the structured outputs, uses `once: true` (reload-safe) and an `on_error: failed` arc |
-| the rendering | [`rooms/report.yaml`](./rooms/report.yaml) + [`views/base.pongo`](./views/base.pongo) | bound outputs rendered through typed view elements (`kv`, `template` markdown tables) gated by `when:` on the chosen mode |
+| the rendering | [`rooms/report.yaml`](./rooms/report.yaml) | bound outputs rendered through typed view elements (`kv`, `template` markdown tables) gated by `when:` on the chosen mode |
 | the allow-list | [`app.yaml`](./app.yaml) | `hosts: [host.starlark.run]` — the capability must be declared |
 
 ## How the call is wired

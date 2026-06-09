@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+
+	goyaml "github.com/goccy/go-yaml"
 
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
@@ -13,6 +17,7 @@ import (
 	embedstore "kitsoki/internal/embed"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
+	starlarkhost "kitsoki/internal/host/starlark"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
@@ -33,15 +38,15 @@ import (
 // Close releases everything the runtime opened, in reverse order. Callers defer
 // it after a successful build.
 type sessionRuntime struct {
-	Def          *app.AppDef
-	Orch         *orchestrator.Orchestrator
-	Store        store.Store
-	Journal      journal.Writer
-	JournalRead  journal.Reader
-	JobStore     *jobs.JobStore
-	Scheduler    jobs.Scheduler
-	ChatStore    *chats.Store
-	Machine      machine.Machine
+	Def         *app.AppDef
+	Orch        *orchestrator.Orchestrator
+	Store       store.Store
+	Journal     journal.Writer
+	JournalRead journal.Reader
+	JobStore    *jobs.JobStore
+	Scheduler   jobs.Scheduler
+	ChatStore   *chats.Store
+	Machine     machine.Machine
 	Harness     harness.Harness
 	OracleReg   *oracle.Registry
 	Logger      *slog.Logger
@@ -252,6 +257,37 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 				disp := testrunner.BuildCassetteDispatcherWithSink(cas, hn, stateOf, fallback, nil, clock.Real(), deferredSink, nil)
 				hostReg.Replace(hn, disp)
 			}
+		}
+
+		// Starlark HTTP cassette: unlike HostCassette (which replaces a whole
+		// handler with a canned Result), this lets the REAL host.starlark.run
+		// handler run — reading the script + sidecar from disk — and only
+		// replays the ctx.http.* calls the script makes from the cassette. We
+		// wrap the registered handler so each invocation runs against an
+		// injected replay client; no socket is ever opened. Mirrors
+		// testrunner.buildOrchestratorRig (replay-only — the web surface never
+		// records).
+		if cfg.Flow.StarlarkHTTPCassette != "" {
+			cassettePath := cfg.Flow.StarlarkHTTPCassette
+			if !filepath.IsAbs(cassettePath) && cfg.FlowFilePath != "" {
+				cassettePath = filepath.Join(filepath.Dir(cfg.FlowFilePath), cassettePath)
+			}
+			raw, rerr := os.ReadFile(cassettePath)
+			if rerr != nil {
+				return nil, fmt.Errorf("read starlark http cassette: %w", rerr)
+			}
+			var cas starlarkhost.HTTPCassette
+			if uerr := goyaml.Unmarshal(raw, &cas); uerr != nil {
+				return nil, fmt.Errorf("parse starlark http cassette %q: %w", cassettePath, uerr)
+			}
+			httpClient := starlarkhost.NewReplayClient(&cas)
+			if _, ok := hostReg.Get("host.starlark.run"); !ok {
+				hostReg.Register("host.starlark.run", host.StarlarkRunHandler)
+			}
+			real, _ := hostReg.Get("host.starlark.run")
+			hostReg.Replace("host.starlark.run", func(ctx context.Context, args map[string]any) (host.Result, error) {
+				return real(starlarkhost.WithHTTP(ctx, httpClient), args)
+			})
 		}
 		// Harness stays nil: flow intents are submitted explicitly via the
 		// write RPCs; the orchestrator's RunIntent path never calls the
