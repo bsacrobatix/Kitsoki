@@ -197,6 +197,71 @@ the room:
 | **Error redirect** | `on_error: <room>` | the `invoke:` returns an error | `Effect.OnError string` |
 | **Job completion** | `on_complete:` | a `background: true` invoke terminates | `Effect.OnComplete []Effect` |
 
+Those hooks compose into one room-local turn lifecycle, and that
+composition **is** the state machine: everything inside the box below is
+declared in the room's YAML, and the runtime only ever walks what the
+room declares — calling out to a host handler or an LLM agent at each
+`invoke:` and folding the typed result back into the world via `bind:`
+before the next effect runs. (Purple = an LLM call, grey = a host
+handler, blue = user-facing.)
+
+```mermaid
+flowchart TD
+    classDef ext fill:#F3F4F6,stroke:#9CA3AF,color:#000
+    classDef llm fill:#EDE9FE,stroke:#8B5CF6,color:#000
+    classDef io  fill:#DBEAFE,stroke:#2563EB,color:#000
+
+    enter(["a transition's target: lands here"]):::io
+
+    subgraph ROOM["one room's YAML = one state-machine node + its outgoing edges"]
+      direction TB
+      subgraph OE["on_enter: — runs on every (re-)entry"]
+        direction TB
+        oe_eff["effects, in declared order:<br/>set · invoke · emit_intent<br/>(each may carry a when: guard)"]
+        oe_bind["bind: result keys → world"]
+        oe_eff --> oe_bind
+      end
+      view["render view<br/>(pongo over world)"]:::io
+      wait(["user types → routed to one intent"]):::io
+      subgraph ON["on: &lt;intent&gt;: — the room's outgoing edges"]
+        direction TB
+        pick{"first arm whose<br/>when: guard passes"}
+        on_eff["effects: set · invoke · say"]
+        on_bind["bind: result keys → world"]
+        tgt{"target:"}
+        pick --> on_eff --> on_bind --> tgt
+      end
+      OE --> view --> wait --> ON
+    end
+
+    host[["host.* handler<br/>shell · files · jira · …"]]:::ext
+    oracle[["oracle.* — an LLM agent<br/>decide · ask · task · converse"]]:::llm
+
+    oe_eff -- "invoke: call out" --> host
+    oe_eff -- "invoke:" --> oracle
+    host   -- "typed result" --> oe_bind
+    oracle -- "typed result" --> oe_bind
+    on_eff -- "invoke:" --> host
+    on_eff -- "invoke:" --> oracle
+    host   -- "typed result" --> on_bind
+    oracle -- "typed result" --> on_bind
+
+    enter --> OE
+    tgt -->|". — stay, skip on_enter"| view
+    tgt -->|"this room — re-enter"| OE
+    tgt -->|"another room"| next(["that room's on_enter"]):::io
+```
+
+The box is the whole machine for this node: `on_enter` settles the world
+on arrival (re-running idempotently on every re-entry — see below), the
+view renders from that world, the user's input is routed to exactly one
+`on:` intent, the first arm whose `when:` passes fires its effects, and
+`target:` chooses the next node — `.` to re-render in place (skipping
+`on_enter`), this room to re-enter (re-running `on_enter`), or another
+room to hand off. The only steps that leave the box are the `invoke:`
+round-trips to a host or the oracle; their results re-enter only through
+`bind:`.
+
 All four foreground hooks on one room:
 
 ```yaml
@@ -428,6 +493,39 @@ falls out of four declarations cooperating (`next:` enumerates legal
 destinations, `checkpoint_intents:` is the menu, slot schemas force the
 context, guards + `cycle_budgets:` cap who and how often). See
 [`state-machine.md` §10](state-machine.md#10-controlled-navigation-back-jumps-restart-and-feedback-arcs).
+
+### The gate — the advancing intents are the decision point
+
+The set of *advancing* intents a room exposes at its end — the ones
+whose transitions move you onward — is its **gate**: the "what happens
+next" decision. A gate is not a new primitive; it is just those intents
+viewed as a choice. How it resolves depends on how many there are and
+who is asked:
+
+```yaml
+review:
+  # ... on_enter produces world.verdict ...
+  decider: llm          # pin: let the engine resolve this gate (overrides run mode)
+  on:
+    approve:         { target: ship }     # ─┐
+    request_changes: { target: revise }   #  ├─ these three advancing
+    reject:          { target: archive }  # ─┘  intents are the gate
+```
+
+- **One advancing intent → auto-advance.** The engine fires it with no
+  decider; the single-intent convention is just the degenerate gate.
+- **Many advancing intents → a *decider* picks one.** `decider:` pins it
+  per room — `"llm"` runs an `oracle.decide` judge that chooses among the
+  *enumerated* gate intents and records a `GateDecided` event; `"human"`
+  rests for an operator; `""` (the default) follows the run's execution
+  mode (`one-shot` resolves every gate by LLM, `staged` stops at a
+  multi-way gate for a person). The decider only ever picks from the
+  declared intents — it can't invent a destination.
+
+This is the same mechanism that drives input-free progression and human
+approval steps alike; the authoritative treatment, including how
+`emit_intent:` and guards feed a gate, is
+[§11](#11-driving-the-graph-without-input).
 
 ---
 
@@ -901,6 +999,119 @@ authority — paying the cost of declaring the graph up front. The
 oracle rooms (§9) are the seam between the two worlds: inside `/meta`
 or `host.oracle.task` you get the open-ended agent; the story around it
 keeps that agent on a declared leash.
+
+### 12.3 A worked example: the proposal pipeline
+
+The dev-story hub's proposal pipeline
+(`stories/dev-story/rooms/proposal*.yaml`) is §12.2 made concrete: six
+rooms, **eight distinct LLM agents**, and a deterministic publish step,
+each stage dropping a numbered artifact on disk before the next agent
+reads it. In the diagram: purple = an LLM agent, blue = human input, grey
+= a deterministic script, green = an artifact on disk.
+
+```mermaid
+flowchart TD
+    classDef llm   fill:#EDE9FE,stroke:#8B5CF6,color:#000
+    classDef art   fill:#ECFDF5,stroke:#10B981,color:#000
+    classDef det   fill:#F3F4F6,stroke:#9CA3AF,color:#000
+    classDef human fill:#DBEAFE,stroke:#2563EB,color:#000
+
+    subgraph P1["room: proposal — discovery + brief (loops every turn)"]
+      direction TB
+      idea(["operator: free-text idea"]):::human
+      namer["proposal_namer<br/>oracle.decide"]:::llm
+      uniq["proposal_workspace.py<br/>slug collision-proof"]:::det
+      interv["proposal_interviewer<br/>oracle.converse · ONE persistent thread"]:::llm
+      writer["proposal_brief_writer<br/>oracle.task · fresh session/turn"]:::llm
+      brief[/"001-brief.md"/]:::art
+      ready(["operator: say 'ready'"]):::human
+      judge{"proposal_brief_judge<br/>oracle.decide"}:::llm
+      idea --> namer --> uniq --> interv --> writer --> brief
+      interv -. loops .-> writer
+      brief --> ready --> judge
+      judge -. clarify .-> interv
+    end
+
+    subgraph P2["room: proposal_existing_state"]
+      direction TB
+      scout["proposal_scout<br/>oracle.decide"]:::llm
+      es[/"002-existing-state.md"/]:::art
+      g1{"overlap?"}:::human
+      scout --> es --> g1
+    end
+    judge -->|continue| scout
+
+    subgraph P3["room: proposal_idea_completeness"]
+      direction TB
+      comp["proposal_completeness_judge<br/>oracle.decide"]:::llm
+      ic[/"003-idea-completeness.md"/]:::art
+      g2{"complete?"}:::human
+      comp --> ic --> g2
+    end
+    g1 -->|"proceed_new / change_existing"| comp
+
+    subgraph P4["room: proposal_references"]
+      direction TB
+      res["proposal_researcher<br/>oracle.decide"]:::llm
+      refs[/"004-references.json"/]:::art
+      g3{"confirm?"}:::human
+      res --> refs --> g3
+    end
+    g2 -->|confirm| res
+
+    subgraph P5["room: proposal_draft"]
+      direction TB
+      author["proposal_author<br/>oracle.task · agentic write"]:::llm
+      draft[/"005-proposal.md"/]:::art
+      g4{"accept?"}:::human
+      author --> draft --> g4
+    end
+    g3 -->|confirm| author
+
+    subgraph P6["room: proposal_publish (no LLM)"]
+      direction TB
+      pub["publish_proposal.py<br/>deterministic move + archive"]:::det
+      out[/"docs/proposals/&lt;slug&gt;.md<br/>+ archived 001–004"/]:::art
+      pub --> out
+    end
+    g4 -->|accept| pub
+
+    g2 -. clarify .-> interv
+    g3 -. clarify .-> interv
+    g4 -. "clarify / refine" .-> author
+```
+
+Read it as the §12.2 inversion in practice:
+
+- **Every purple node is a separate agent.** Each has its own
+  `system_prompt`, `model`, and `tools:` in `app.yaml agents:` — a namer
+  that emits only a kebab slug; a read-only scout (`[Read, Grep, Glob]`);
+  an author with `Write/Edit` constrained to the one proposal file. The
+  **graph**, not a lead model, decides which runs when.
+- **Each is its own conversation.** All but one are *one-shot* —
+  `decide`/`task` open a fresh session per call and return (the verb
+  surface, §8). The exception is `proposal_interviewer` (`oracle.converse`),
+  which holds a single persistent chat thread across the whole discovery
+  loop via a `chat_id` resolved in `on_enter`. The two agents in the
+  *same* discovery room (interviewer + brief-writer) are deliberately
+  separate conversations with separate jobs.
+- **The glue between agents is deterministic and recorded.** Slug
+  uniqueness (`proposal_workspace.py`) and publish (`publish_proposal.py`)
+  are plain `host.run` scripts, not LLM calls; the human gates resolve
+  *enumerated* intents recorded as `GateDecided`. Nothing an agent emits
+  advances the pipeline until a deterministic step or a declared gate
+  consumes it.
+- **The interim artifacts are the hand-offs.** `001-brief.md` …
+  `005-proposal.md` land in a per-session workspace as each stage
+  completes, and the next agent reads the upstream *file* (the author reads
+  the brief, the references list, and the existing-state report) rather
+  than a shared in-model scratchpad. Publish moves `005` into
+  `docs/proposals/` and archives `001–004` beside it, so the reasoning that
+  produced a proposal survives with it.
+
+Eight subagents an emergent lead model might have spawned in its head,
+pinned instead to declared points in a replayable graph — each scoped,
+each recorded, each resumable across surfaces.
 
 ---
 

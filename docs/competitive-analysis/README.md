@@ -184,7 +184,7 @@ Plus a shipped surface that's distinctive but not part of the core seven:
 
 **Aggregate technical verdict:** kitsoki's architecture is on the leading edge of a 2026 design consensus that several independent groups have arrived at separately. As a working PoC already dogfooded on real internal bugs across teams, kitsoki has a 6–12 month head-start on implementation over its closest direct competitors (CompileAgent, Zigflow, StateFlow). The roadmap extensions are not pivots — each is a small step from an existing kitsoki primitive into a category-defining capability.
 
-See [`technical-research.md`][technical] for the full chain of evidence for each choice.
+See [`technical-research.md`][technical] for the full chain of evidence for each choice. For the adversarial engineering rebuttal to *"can't a code-first orchestrator like LangGraph offer the same guarantees with minimal effort?"* — the enforcement-vs-convention argument, and an honest accounting of where the objection partly lands — see [`enforcement-vs-convention.md`](enforcement-vs-convention.md). For the one-axis positioning lens against the *other* two incumbents — *agents* (Claude Code; LLM on top) and *workflow tools with a bolted-on LLM node* (n8n, Airtable; LLM at a dead-end leaf) — see [`control-inversion.md`](control-inversion.md).
 
 ---
 

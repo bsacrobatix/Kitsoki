@@ -97,3 +97,9 @@
 - take a claude skill/agent and produce a story using progressive determinism
 - user input text different bg-color in chat to highlight (also in templated view outputs)
 - full meta mode for UI in conjunction w/ vue hot reload in dev
+- does /meta story get the kitsok-story-authoring skill?
+- UI improvement skill - results in mp4 demo
+- video QA agent
+- if we're in a meta session, and the edited yaml breaks, go back to the LLM w/ the error message and try again automatically up to retry limit - show each attempt to the user
+- agent autogen (microsoft azure)
+- git cleanup - tracking action-by-action and commit action-by-action deterministically
