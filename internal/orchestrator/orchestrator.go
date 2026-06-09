@@ -1266,6 +1266,13 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		o.stopSessionListener(sid)
 	}
 
+	// Entering a room whose on_enter binds leaves result.TypedView nil
+	// (machine.Turn skipped its typed render; dispatchHostCalls only
+	// re-rendered the text). Re-render the typed view against the bound
+	// world so the browser gets typed_view instead of falling back to the
+	// 80-col plain-text blob. See refreshTypedViewAfterBind.
+	o.refreshTypedViewAfterBind(&result)
+
 	tl.Debug(ctx, trace.EvTurnDone,
 		slog.String("mode", mode.String()),
 		slog.Int("view_bytes", len(result.View)),
@@ -1763,6 +1770,13 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 		o.stopSessionListener(sid)
 	}
 
+	// Entering a room whose on_enter binds leaves result.TypedView nil
+	// (machine.Turn skipped its typed render; dispatchHostCalls only
+	// re-rendered the text). Re-render the typed view against the bound
+	// world so the browser gets typed_view instead of falling back to the
+	// 80-col plain-text blob. See refreshTypedViewAfterBind.
+	o.refreshTypedViewAfterBind(&result)
+
 	tl.Debug(ctx, trace.EvTurnDone,
 		slog.String("mode", mode.String()),
 		slog.Int("view_bytes", len(result.View)),
@@ -2135,6 +2149,11 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 		mode = ModeCompleted
 	}
 
+	// See refreshTypedViewAfterBind: a clarify→continue that lands in a
+	// room whose on_enter binds would otherwise ship typed_view=nil and the
+	// browser would fall back to the plain-text view.
+	o.refreshTypedViewAfterBind(&result)
+
 	tl.Debug(ctx, trace.EvTurnDone,
 		slog.String("mode", mode.String()),
 		slog.Int("view_bytes", len(result.View)),
@@ -2259,6 +2278,33 @@ func (o *Orchestrator) PatchWorld(ctx context.Context, sid app.SessionID, patch 
 // LoadJourney.
 func (o *Orchestrator) RenderState(state app.StatePath, w world.World) (string, error) {
 	return o.machine.RenderState(state, w)
+}
+
+// refreshTypedViewAfterBind re-renders the typed view for the settled
+// (NewState, World) when the machine left TypedView nil because the
+// transition's on_enter host calls bind. machine.Turn deliberately skips
+// its typed render in that case (see machine.go hostCallsWillBind: the
+// pre-bind world would make bound-field templates error), and the post-bind
+// re-render in dispatchHostCalls only produces the *text* view — so without
+// this step result.TypedView stays nil all the way to the browser. The web
+// surface (newTurnResult) then receives typed_view=null and falls back to
+// the ANSI-stripped 80-col text, collapsing the room's typed elements
+// (banner, kv, prose paragraphs, choice→buttons) into one monospace blob.
+//
+// No-op when a typed view is already present (the non-binding fast path) or
+// when the state has no element-array view (RenderStateTyped returns a nil
+// typed view for legacy string / extends / template_file views — those are
+// served as text by design). Pure render; safe to call after all post-bind
+// settling (emit recursion, auto-gate) has fixed the final state/world.
+func (o *Orchestrator) refreshTypedViewAfterBind(res *machine.TurnResult) {
+	if res == nil || res.TypedView != nil {
+		return
+	}
+	if _, tv, env, rr, err := o.machine.RenderStateTyped(res.NewState, res.World); err == nil && tv != nil {
+		res.TypedView = tv
+		res.RenderEnv = env
+		res.Renderer = rr
+	}
 }
 
 // LookupIntent resolves an intent definition by name scoped to the given state.

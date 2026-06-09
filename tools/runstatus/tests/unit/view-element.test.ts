@@ -30,6 +30,29 @@ describe("ViewElement", () => {
     w.unmount();
   });
 
+  it("renders **bold** spans as <strong> in prose", () => {
+    const w = render({
+      Kind: "prose",
+      Source: "→ Use **change_existing** with the path, not `override_new`.",
+    });
+    const p = w.find("p.ve-prose");
+    const strong = p.find("strong.ve-bold");
+    expect(strong.exists()).toBe(true);
+    expect(strong.text()).toBe("change_existing");
+    // Inside a code span, ** is literal (code is not re-scanned for bold).
+    expect(p.find("code.ve-inline-code").text()).toBe("override_new");
+    // No literal asterisks leak into the rendered text.
+    expect(p.text()).not.toContain("**");
+    w.unmount();
+  });
+
+  it("keeps ** literal inside an inline-code span", () => {
+    const w = render({ Kind: "prose", Source: "run `a ** b` now" });
+    expect(w.find("code.ve-inline-code").text()).toBe("a ** b");
+    expect(w.find("strong.ve-bold").exists()).toBe(false);
+    w.unmount();
+  });
+
   it("renders heading as <h3>", () => {
     const w = render({ Kind: "heading", Source: "Section Title" });
     const h = w.find("h3.ve-heading");

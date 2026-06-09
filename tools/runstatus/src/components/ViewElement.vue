@@ -19,8 +19,12 @@ const el = computed(() => props.element);
 /**
  * Split a block of prose into paragraphs on blank lines. We deliberately do NOT
  * pull in a markdown library — the viewer renders trace content for inspection,
- * not rich documents. We support exactly two inline/block conventions: blank
- * lines separate paragraphs, and backtick-delimited spans become <code>.
+ * not rich documents. We support exactly three inline/block conventions: blank
+ * lines separate paragraphs, backtick-delimited spans become <code>, and
+ * **double-asterisk** spans become <strong>. The TUI's Glamour pipeline and the
+ * main-chat plain-text fallback (lib/markdown.ts) both render bold, so a typed
+ * prose/template element must too — otherwise authored `**emphasis**` leaks to
+ * the operator as literal asterisks.
  */
 const paragraphs = computed<string[]>(() => {
   const src = el.value.Source ?? "";
@@ -31,24 +35,36 @@ const paragraphs = computed<string[]>(() => {
 });
 
 /**
- * One paragraph split into alternating text / inline-code segments. Even
- * indices are plain text, odd indices are inline-code (the content between a
- * pair of backticks). An unmatched trailing backtick is treated as literal
- * text. Newlines inside a paragraph collapse to spaces.
+ * One paragraph split into typed inline segments. Backtick pairs delimit
+ * inline-code (rendered verbatim — never re-scanned for bold, mirroring
+ * markdown's "code spans are literal" rule); outside code, double-asterisk
+ * pairs delimit bold. Newlines inside a paragraph collapse to spaces. An
+ * unmatched trailing backtick / `**` leaves an empty final segment, which is
+ * dropped.
  */
 interface Seg {
-  code: boolean;
+  kind: "text" | "code" | "bold";
   text: string;
 }
 function segments(para: string): Seg[] {
-  const parts = para.split("`");
   const out: Seg[] = [];
+  const parts = para.split("`");
   for (let i = 0; i < parts.length; i++) {
     const isCode = i % 2 === 1;
-    // A trailing unmatched backtick leaves an empty final text segment; skip it.
+    // A trailing unmatched backtick leaves an empty final segment; skip it.
     if (parts[i] === "" && isCode && i === parts.length - 1) continue;
-    const text = isCode ? parts[i] : parts[i].replace(/\s*\n\s*/g, " ");
-    out.push({ code: isCode, text });
+    if (isCode) {
+      out.push({ kind: "code", text: parts[i] });
+      continue;
+    }
+    // Outside code: collapse intra-paragraph newlines, then split bold runs.
+    // Odd indices are between a pair of `**`; empty runs (adjacent markers or
+    // an unmatched trailing `**`) render nothing, so drop them.
+    const boldParts = parts[i].replace(/\s*\n\s*/g, " ").split("**");
+    for (let j = 0; j < boldParts.length; j++) {
+      if (boldParts[j] === "") continue;
+      out.push({ kind: j % 2 === 1 ? "bold" : "text", text: boldParts[j] });
+    }
   }
   return out;
 }
@@ -72,7 +88,8 @@ const bannerClass = computed(() => {
   <template v-if="el.Kind === 'prose' || el.Kind === 'template'">
     <p v-for="(para, pi) in paragraphs" :key="pi" class="ve-prose">
       <template v-for="(seg, si) in segments(para)" :key="si">
-        <code v-if="seg.code" class="ve-inline-code">{{ seg.text }}</code>
+        <code v-if="seg.kind === 'code'" class="ve-inline-code">{{ seg.text }}</code>
+        <strong v-else-if="seg.kind === 'bold'" class="ve-bold">{{ seg.text }}</strong>
         <template v-else>{{ seg.text }}</template>
       </template>
     </p>
@@ -203,6 +220,11 @@ const bannerClass = computed(() => {
   padding: 0.08em 0.35em;
   font-size: 0.9em;
   color: #b3306b;
+}
+
+.ve-bold {
+  font-weight: 700;
+  color: #11151c;
 }
 
 .ve-heading {
