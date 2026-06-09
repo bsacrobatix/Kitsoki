@@ -123,6 +123,55 @@ func TestLocalLLMDecideProbe(t *testing.T) {
 	}
 }
 
+// TestLocalLLMSlugProbe_CodeFence verifies that a model response wrapped in
+// markdown code fences is transparently stripped and validates against slug.json.
+// This is the regression test for the bug where qwen2.5-1.5b-instruct returned
+// ```json\n{...}\n``` despite grammar constraints, causing schema_invalid.
+func TestLocalLLMSlugProbe_CodeFence(t *testing.T) {
+	t.Parallel()
+
+	schema, err := os.ReadFile("../../stories/dev-story/schemas/slug.json")
+	if err != nil {
+		t.Fatalf("read slug.json: %v", err)
+	}
+
+	if subErr := GrammarSubsetOK(json.RawMessage(schema)); subErr != nil {
+		t.Fatalf("premise: slug.json must be in-subset: %v", subErr)
+	}
+
+	// Simulate a model that wraps its JSON in a code fence (the bug).
+	fencedContent := "```json\n{\"slug\":\"virtual-pets\",\"rationale\":\"interactive pet companion\"}\n```"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := chatResponse{
+			Choices: []chatChoice{{Message: chatMessage{Role: "assistant", Content: fencedContent}}},
+			Usage:   chatUsage{PromptTokens: 80, CompletionTokens: 18},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	o := NewLocalLLM("qwen2.5-1.5b", 0, "", true, srv.URL, nil)
+	defer o.Close()
+
+	req := sampleRequest()
+	req.Verb = "decide"
+	req.SchemaJSON = json.RawMessage(schema)
+
+	resp, err := o.Ask(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if vErr := ValidateSubmission(json.RawMessage(schema), resp.Submission); vErr != nil {
+		t.Errorf("fenced slug Submission failed schema validation: %v\nsubmission: %s", vErr, resp.Submission)
+	}
+	// Stripped content must be valid JSON, not contain fences.
+	if string(resp.Submission[0]) != "{" {
+		t.Errorf("Submission does not start with '{' after strip: %s", resp.Submission)
+	}
+}
+
 // TestLocalLLMDecideProbe_Live is the opt-in A/B variant against a real
 // llama-server. It is skipped unless KITSOKI_PROBE_LOCAL_MODEL=1, honouring the
 // no-LLM-tests-by-default rule. When enabled it points NewLocalLLM at
@@ -163,4 +212,56 @@ func TestLocalLLMDecideProbe_Live(t *testing.T) {
 		t.Errorf("live decide Submission failed schema validation: %v\nsubmission: %s", vErr, resp.Submission)
 	}
 	t.Logf("live decide Submission: %s (meta: %v)", resp.Submission, resp.Meta)
+}
+
+// TestLocalLLMSlugProbe_Live is the opt-in slug-naming integration test against
+// a real local model. Uses the same KITSOKI_PROBE_LOCAL_MODEL=1 gate as the
+// decide probe. Validates that slug.json grammar is applied and the model
+// produces a valid slug — specifically exercising the code-fence strip path that
+// was found to fail in dogfood (qwen2.5-1.5b wraps its output in ```json fences
+// despite grammar constraints).
+func TestLocalLLMSlugProbe_Live(t *testing.T) {
+	if os.Getenv("KITSOKI_PROBE_LOCAL_MODEL") != "1" {
+		t.Skip("set KITSOKI_PROBE_LOCAL_MODEL=1 to probe a live local model")
+	}
+
+	schema, err := os.ReadFile("../../stories/dev-story/schemas/slug.json")
+	if err != nil {
+		t.Fatalf("read slug.json: %v", err)
+	}
+
+	endpoint := os.Getenv("KITSOKI_LOCAL_MODEL_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://127.0.0.1:8080"
+	}
+	model := os.Getenv("KITSOKI_LOCAL_MODEL")
+	if model == "" {
+		model = "qwen2.5-1.5b"
+	}
+
+	o := NewLocalLLM(model, 0, "", true, endpoint, nil)
+	defer o.Close()
+
+	req := sampleRequest()
+	req.Verb = "decide"
+	req.PromptText = `Turn the idea below into a short kebab-case slug (2-5 words, lowercase).
+
+The idea:
+
+> local model oracle for routing decisions
+
+Return ONLY a raw JSON object — no prose, no markdown, no code fences:
+{"slug": "my-proposal-slug", "rationale": "one line why"}
+
+Do NOT wrap the JSON in ` + "```" + `json … ` + "```" + ` or any other formatting.`
+	req.SchemaJSON = json.RawMessage(schema)
+
+	resp, err := o.Ask(context.Background(), req)
+	if err != nil {
+		t.Fatalf("live slug Ask: %v", err)
+	}
+	if vErr := ValidateSubmission(json.RawMessage(schema), resp.Submission); vErr != nil {
+		t.Errorf("live slug Submission failed schema validation: %v\nsubmission: %s", vErr, resp.Submission)
+	}
+	t.Logf("live slug Submission: %s (meta: %v)", resp.Submission, resp.Meta)
 }

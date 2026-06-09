@@ -306,6 +306,24 @@ func TestLocalLLMEmptyContent(t *testing.T) {
 	assertAskError(t, err, "transport_error")
 }
 
+// TestStripCodeFence verifies that code fences are stripped from model output.
+func TestStripCodeFence(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ in, want string }{
+		{`{"slug":"foo"}`, `{"slug":"foo"}`},
+		{"```json\n{\"slug\":\"foo\"}\n```", `{"slug":"foo"}`},
+		{"```\n{\"slug\":\"foo\"}\n```", `{"slug":"foo"}`},
+		{"```json\r\n{\"slug\":\"foo\"}\r\n```", `{"slug":"foo"}`},
+		{" ```json\n{\"k\":1}\n``` ", `{"k":1}`},
+	}
+	for _, c := range cases {
+		got := stripCodeFence(c.in)
+		if got != c.want {
+			t.Errorf("stripCodeFence(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // TestLocalLLMEndpointModeNoSpawn verifies endpoint mode never touches the
 // managed sidecar: Close succeeds and a connection-refused endpoint yields a
 // transport error (proving we POST directly to the endpoint, not a sidecar).

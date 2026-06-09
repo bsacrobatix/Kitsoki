@@ -54,6 +54,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // chatMessage is one entry in the OpenAI chat `messages` array.
@@ -268,6 +269,10 @@ func (o *LocalLLMOracle) Ask(ctx context.Context, req AskRequest) (AskResponse, 
 		}
 	}
 
+	// Strip markdown code fences that small models add despite grammar
+	// constraints. Matches ```json\n...\n``` and ```\n...\n``` wrappers.
+	content = stripCodeFence(content)
+
 	return AskResponse{
 		Submission: json.RawMessage(content),
 		Meta: map[string]any{
@@ -277,6 +282,23 @@ func (o *LocalLLMOracle) Ask(ctx context.Context, req AskRequest) (AskResponse, 
 			"grammar":           grammarApplied,
 		},
 	}, nil
+}
+
+// stripCodeFence removes a leading ```json\n or ```\n fence and a trailing ```
+// from s, returning the trimmed inner content. Returns s unchanged when no
+// fence is present. Small models sometimes add these despite grammar constraints.
+func stripCodeFence(s string) string {
+	s = strings.TrimSpace(s)
+	for _, prefix := range []string{"```json\n", "```json\r\n", "```\n", "```\r\n"} {
+		if strings.HasPrefix(s, prefix) {
+			s = strings.TrimPrefix(s, prefix)
+			if idx := strings.LastIndex(s, "```"); idx >= 0 {
+				s = strings.TrimSpace(s[:idx])
+			}
+			return s
+		}
+	}
+	return s
 }
 
 // translateContextErr maps a transport-level failure to a typed AskError,
