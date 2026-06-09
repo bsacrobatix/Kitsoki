@@ -1,8 +1,8 @@
 # Epic: Visual outputs from steps
 
-**Status:** Draft v1. No slices implemented yet.
+**Status:** Implemented.
 **Kind:**   epic
-**Slices:** 3 (0/3 shipped)
+**Slices:** 3 (3/3 shipped)
 
 ## Why
 
@@ -66,9 +66,9 @@ Once every slice has shipped:
 
 | # | Slice | Kind | Scope (one line) | Depends on | Status | File |
 |---|---|---|---|---|---|---|
-| 1 | media-artifact-substrate | runtime | Recorded `artifact` datapoint + world handle + `media` view element + minimal TUI pointer rendering; producer-agnostic | — | Draft | [`media-artifact-substrate.md`](media-artifact-substrate.md) |
-| 2 | visual-producers | runtime | `host.slidey.render` + contact-sheet/PNG-slideshow host calls wrapping the existing render tools | 1 | Draft | [`visual-producers.md`](visual-producers.md) |
-| 3 | web-media-rendering | tui | Vue `media` element + `kitsoki web` route serving artifact binaries (live) and inline/sidecar (snapshot) | 1 | Draft | [`web-media-rendering.md`](web-media-rendering.md) |
+| 1 | media-artifact-substrate | runtime | Recorded `artifact` datapoint + world handle + `media` view element + minimal TUI pointer rendering; producer-agnostic | — | Shipped | — |
+| 2 | visual-producers | runtime | `host.slidey.render` + contact-sheet/PNG-slideshow host calls wrapping the existing render tools | 1 | Shipped | — |
+| 3 | web-media-rendering | tui | Vue `media` element + `kitsoki web` route serving artifact binaries (live) and inline/sidecar (snapshot) | 1 | Shipped | — |
 
 ## Sequencing
 
