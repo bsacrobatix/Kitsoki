@@ -10,25 +10,25 @@ description: Debug problems with the kitsoki web UI (`make web-dev` / `kitsoki w
 - **Go backend** — `kitsoki web` on `http://127.0.0.1:7777`, serves the JSON-RPC surface (`/rpc`, `/rpc/events`, `/rpc/meta-stream`)
 - **Vite dev server** — `http://localhost:5173`, serves the Vue SPA with HMR; proxies `/rpc/**` to the Go backend
 
-Both processes write to **stdout/stderr AND a rotating log file** under `.kitsoki-logs/`. The 10 most recent runs are kept.
+Both processes write to **stdout/stderr AND a rotating log file** under `.artifacts/logs/`. The 10 most recent runs are kept.
 
 ## Finding and tailing the logs
 
 ```sh
 # List recent log files (newest last):
-ls -lt .kitsoki-logs/web-dev-*.log | head
+ls -lt .artifacts/logs/web-dev-*.log | head
 
 # Tail the latest log (convenience target):
 make web-dev-logs
 
 # Or manually:
-tail -f .kitsoki-logs/$(ls .kitsoki-logs/ | sort | tail -1)
+tail -f .artifacts/logs/$(ls .artifacts/logs/ | sort | tail -1)
 
 # Grep for errors across all recent logs:
-grep -i "error\|panic\|warn\|504\|500" .kitsoki-logs/web-dev-*.log | tail -50
+grep -i "error\|panic\|warn\|504\|500" .artifacts/logs/web-dev-*.log | tail -50
 ```
 
-The log file path is also printed to stderr at startup: `kitsoki: debug log → .kitsoki-logs/web-dev-<timestamp>.log`.
+The log file path is also printed to stderr at startup: `kitsoki: debug log → .artifacts/logs/web-dev-<timestamp>.log`.
 
 ## Common failure patterns
 
@@ -42,7 +42,7 @@ The Vite proxy returned 504 to the browser — the Go backend didn't respond in 
 |-------|---------------|-----|
 | Go backend not started yet | No `kitsoki: web UI` line in log | Wait or restart `make web-dev` |
 | LLM oracle call slow (30–120s) | Long gap between `session.turn` request and response | Normal — proxy timeout is now disabled (`timeout: 0`); wait it out |
-| Go backend panicked and died | `panic:` in log, no further output | Read the panic trace in `.kitsoki-logs/`, file a bug |
+| Go backend panicked and died | `panic:` in log, no further output | Read the panic trace in `.artifacts/logs/`, file a bug |
 | Port conflict — something else on 7777 | `bind: address already in use` in log | `lsof -i :7777` to find the process |
 
 ### Blank page / SPA not loading
@@ -51,10 +51,10 @@ The SPA is bundled into the binary only after `make build`. In `make web-dev` mo
 
 ```sh
 # Is Vite running? (look for the dev server URL)
-grep "Local:" .kitsoki-logs/web-dev-*.log | tail -3
+grep "Local:" .artifacts/logs/web-dev-*.log | tail -3
 
 # Did pnpm install fail?
-grep -i "ERR\|error" .kitsoki-logs/web-dev-*.log | head -20
+grep -i "ERR\|error" .artifacts/logs/web-dev-*.log | head -20
 ```
 
 ### SSE stream stalls / no live updates
@@ -62,7 +62,7 @@ grep -i "ERR\|error" .kitsoki-logs/web-dev-*.log | head -20
 The SSE subscription (`/rpc/events?subscription_id=…`) holds an open connection. If the browser disconnects and reconnects, the server resumes from the watermark. If it never delivers events:
 
 1. Open browser devtools → Network → filter `events` — check the SSE connection status
-2. Look for `subscription_id` in the Go logs: `grep "sub-" .kitsoki-logs/web-dev-*.log`
+2. Look for `subscription_id` in the Go logs: `grep "sub-" .artifacts/logs/web-dev-*.log`
 3. Check if the Go backend is polling: the default poll interval is 500ms, so events arrive within ~500ms of being appended to the session store
 
 ### Session not found (codeNotFound -32002)
@@ -93,7 +93,7 @@ To capture a one-off verbose run:
 ```sh
 # Start the Go backend manually with verbose output:
 go build -o .kitsoki-dev ./cmd/kitsoki && \
-  ./.kitsoki-dev web --addr 127.0.0.1:7777 2>&1 | tee .kitsoki-logs/manual-debug.log
+  ./.kitsoki-dev web --addr 127.0.0.1:7777 2>&1 | tee .artifacts/logs/manual-debug.log
 ```
 
 Then start Vite separately:

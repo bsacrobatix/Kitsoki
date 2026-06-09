@@ -13,3 +13,5 @@ use the `.context` folder for transient markdown files like proposals, summaries
 Automated testing should never use a real LLM or incur costs - mock oracles via cassettes should be used in all cases.  Tests which require real LLM must be gated and only done when specifically requested and required - never automatically or without checking first.
 
 use dependency injection patterns wherever relevant.
+
+principle of least surprise.

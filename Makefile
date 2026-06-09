@@ -57,13 +57,13 @@ web-clean:
 # http://127.0.0.1:7777 (override with KITSOKI_API=http://host:port).
 #
 # Both processes write to stdout/stderr AND to a rotating log file under
-# .kitsoki-logs/. The 10 most recent logs are kept (older ones are pruned at
+# .artifacts/logs/. The 10 most recent logs are kept (older ones are pruned at
 # each startup). Use 'make web-dev-logs' to tail the latest log.
 #
 # Pass extra Go flags via WEB_ARGS, e.g.:
 #   make web-dev WEB_ARGS="--stories-dir stories/my-story"
 WEB_ARGS     ?=
-WEB_LOG_DIR  := .kitsoki-logs
+WEB_LOG_DIR  := .artifacts/logs
 WEB_LOG_KEEP := 10
 web-dev:
 	@command -v pnpm >/dev/null 2>&1 || { echo "error: pnpm not found" >&2; exit 1; }

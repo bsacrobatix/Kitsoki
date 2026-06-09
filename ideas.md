@@ -125,3 +125,5 @@
 - name each oracle invocation so the trace has something nice to show
 - add world viewer to web ui, show types and current values, allow edit mode w/ validation
 - tool usage disappears after final message - it should be collapsed but inspectable
+- video/slidey edit/feedback mode w/ chat and timestamping/png generation built-in so it's easy to flag a scene or a range and instruct the llm - add it to web ui
+- make web-dev - keyboard shortcut (press r to reload?) that restarts the backend with any changes to go code
