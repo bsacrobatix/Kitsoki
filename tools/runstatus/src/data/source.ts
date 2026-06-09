@@ -31,6 +31,8 @@ export interface MetaModeInfo {
 export interface MetaMessage {
   role: string;
   text: string;
+  /** Tool breadcrumbs captured during this turn (assistant messages only). */
+  tools?: { tool: string; preview: string }[];
 }
 
 /** Handle returned by enter / new: the chat row + its transcript so far. */

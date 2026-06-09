@@ -462,6 +462,7 @@ func emitStreamEvent(ctx context.Context, ev map[string]any) {
 			Subtype: subtype,
 			Tool:    tool,
 			Preview: preview,
+			Tools:   assistantToolUses(ev),
 			// Full narration prose, untruncated — the transcript word-
 			// wraps it. Cutting it mid-sentence was the truncation bug.
 			Text:      text,
@@ -605,6 +606,38 @@ func classifyStreamEvent(ev map[string]any) (text, tool, toolArgs string, isResu
 		}
 	}
 	return text, tool, toolArgs, isResult, resultText, sessionID
+}
+
+// assistantToolUses returns EVERY tool_use block in an assistant event,
+// in declaration order, each with a compact one-line args preview. Where
+// classifyStreamEvent surfaces only the first tool (for the scalar
+// StreamEvent.Tool / slog breadcrumb), this is what lets a consumer
+// render each parallel tool call on its own line. Returns nil for any
+// non-assistant event or one carrying no tool_use blocks. Best-effort
+// and defensive — unknown shapes are skipped.
+func assistantToolUses(ev map[string]any) []StreamToolUse {
+	if t, _ := ev["type"].(string); t != "assistant" {
+		return nil
+	}
+	msg, _ := ev["message"].(map[string]any)
+	content, _ := msg["content"].([]any)
+	var tools []StreamToolUse
+	for _, c := range content {
+		block, _ := c.(map[string]any)
+		if bt, _ := block["type"].(string); bt != "tool_use" {
+			continue
+		}
+		name, _ := block["name"].(string)
+		if name == "" {
+			continue
+		}
+		input, _ := block["input"].(map[string]any)
+		tools = append(tools, StreamToolUse{
+			Name:    name,
+			Preview: onelinePreview(toolUseArgsPreview(name, input), 120),
+		})
+	}
+	return tools
 }
 
 // resultEventUsage extracts the token-usage object and total_cost_usd from a

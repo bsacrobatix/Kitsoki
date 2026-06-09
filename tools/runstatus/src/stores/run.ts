@@ -9,6 +9,7 @@ import type {
   View,
 } from "../types.js";
 import type { DataSource } from "../data/source.js";
+import type { LiveSource } from "../data/live-source.js";
 import { readOracleUsage } from "../components/oracle/lib.js";
 
 /** One entry of the conversational transcript shown beside the trace. */
@@ -32,6 +33,9 @@ export const useRunStore = defineStore("run", () => {
   // ---- conversational / write-side state ----
   // transcript is the ordered user↔agent exchange driven by the write RPCs.
   const transcript = ref<TranscriptEntry[]>([]);
+  // Streaming state: accumulated while a turn-stream is in flight.
+  const pendingStreamText = ref<string>("");
+  const pendingStreamTools = ref<{ tool: string; preview: string }[]>([]);
   // currentView is the latest TurnResult (the current room's view + menu).
   const currentView = ref<TurnResult | null>(null);
   // allowedIntents is the enriched per-intent menu of the current room.
@@ -234,7 +238,8 @@ export const useRunStore = defineStore("run", () => {
 
   /**
    * Submit an explicit intent (+ slots): push a user transcript entry, advance
-   * the session, and apply the resulting view.
+   * the session, and apply the resulting view. Streams oracle progress via SSE
+   * when the source supports it (LiveSource).
    */
   async function submitIntent(
     source: DataSource,
@@ -243,15 +248,36 @@ export const useRunStore = defineStore("run", () => {
     slots: Record<string, unknown> = {}
   ): Promise<TurnResult> {
     transcript.value.push({ role: "user", text: userText(intent, slots) });
-    const result = await source.submit(sessionId, intent, slots);
+    let result: TurnResult;
+    if ("turnStream" in source) {
+      const live = source as LiveSource;
+      pendingStreamText.value = "";
+      pendingStreamTools.value = [];
+      try {
+        result = await live.turnStream(sessionId, "submit", { intent, slots }, (ev) => {
+          if (ev.type === "delta" && ev.text) {
+            pendingStreamText.value += ev.text;
+          } else if (ev.type === "tool" && ev.tool) {
+            pendingStreamTools.value = [
+              ...pendingStreamTools.value,
+              { tool: ev.tool, preview: ev.preview ?? "" },
+            ];
+          }
+        });
+      } finally {
+        pendingStreamText.value = "";
+        pendingStreamTools.value = [];
+      }
+    } else {
+      result = await source.submit(sessionId, intent, slots);
+    }
     applyTurnResult(result);
     return result;
   }
 
   /**
-   * Send free text as a turn. intentName, when given, is the menu intent the UI
-   * bound its input box to (used only to label the user transcript entry); the
-   * raw text is what the interpreter receives.
+   * Send free text as a turn. Streams oracle progress via SSE when the source
+   * supports it (LiveSource).
    */
   async function sendText(
     source: DataSource,
@@ -260,7 +286,29 @@ export const useRunStore = defineStore("run", () => {
     _intentName?: string
   ): Promise<TurnResult> {
     transcript.value.push({ role: "user", text });
-    const result = await source.sendTurn(sessionId, text);
+    let result: TurnResult;
+    if ("turnStream" in source) {
+      const live = source as LiveSource;
+      pendingStreamText.value = "";
+      pendingStreamTools.value = [];
+      try {
+        result = await live.turnStream(sessionId, "turn", { input: text }, (ev) => {
+          if (ev.type === "delta" && ev.text) {
+            pendingStreamText.value += ev.text;
+          } else if (ev.type === "tool" && ev.tool) {
+            pendingStreamTools.value = [
+              ...pendingStreamTools.value,
+              { tool: ev.tool, preview: ev.preview ?? "" },
+            ];
+          }
+        });
+      } finally {
+        pendingStreamText.value = "";
+        pendingStreamTools.value = [];
+      }
+    } else {
+      result = await source.sendTurn(sessionId, text);
+    }
     applyTurnResult(result);
     return result;
   }
@@ -326,6 +374,8 @@ export const useRunStore = defineStore("run", () => {
     transcript,
     currentView,
     allowedIntents,
+    pendingStreamText,
+    pendingStreamTools,
     // actions
     hydrate,
     rehydrate,

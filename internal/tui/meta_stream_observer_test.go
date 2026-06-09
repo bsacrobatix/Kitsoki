@@ -10,6 +10,7 @@ package tui_test
 import (
 	"bytes"
 	"context"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -150,7 +151,7 @@ func TestMetaStreamSink_DispatchesEventAsMsg(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if sm.Event == want {
+		if reflect.DeepEqual(sm.Event, want) {
 			found = true
 			break
 		}

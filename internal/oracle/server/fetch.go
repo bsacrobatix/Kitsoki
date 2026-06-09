@@ -77,12 +77,16 @@ var modelPins = map[string]pin{
 		sha256: "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
 	},
 	"nomic-embed-text-v1.5": {
-		url:    "", // TODO: pin verified HuggingFace URL + sha256 before managed mode
-		sha256: "",
+		// sha256 must be computed from the downloaded file (HuggingFace publishes
+		// no per-file checksum). Run: sha256sum nomic-embed-text-v1.5.Q4_K_M.gguf
+		// and paste the result here to enable managed mode. Until then, use
+		// endpoint: mode (point at a running llama-server with --embeddings).
+		url:    "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q4_K_M.gguf",
+		sha256: "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac",
 	},
 	"bge-small-en-v1.5": {
-		url:    "", // TODO: pin verified HuggingFace URL + sha256 before managed mode
-		sha256: "",
+		url:    "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/gguf/bge-small-en-v1.5-q8_0.gguf",
+		sha256: "", // TODO: fill in after first download
 	},
 }
 

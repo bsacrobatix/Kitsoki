@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/store"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -657,5 +658,105 @@ func TestOracleDecide_PhaseOneStubReplaced(t *testing.T) {
 	}
 	if strings.Contains(res.Error, "not yet implemented") {
 		t.Fatal("Phase 1 stub is still in place — oracle_decide.go was not wired")
+	}
+}
+
+// ── 11. Code-block extraction fallback ───────────────────────────────────────
+
+// TestOracleDecide_CodeBlockFallback verifies that when the model writes a
+// valid JSON verdict inside a ```json ... ``` code block instead of calling
+// the submit tool, buildDecideResult recovers the verdict rather than
+// returning "no verdict captured".
+//
+// This pins the fix for the regression where proposal_namer (and any other
+// decide call without a validator: block) would bounce back on_error: because
+// the model emitted JSON as prose instead of using the tool.
+func TestOracleDecide_CodeBlockFallback(t *testing.T) {
+	t.Parallel()
+	schemaPath := makeSchemaFile(t)
+
+	// Runner that returns JSON in a code block but does NOT write to the
+	// validator output path — exactly what the real model does when it bypasses
+	// the submit tool.
+	codeBlockRunner := func(_ context.Context, _ []string, _, _ string) (host.ClaudeRun, error) {
+		stdout := "Here is my verdict:\n\n```json\n{\"verdict\": \"yes\"}\n```\n"
+		return host.ClaudeRun{Stdout: stdout}, nil
+	}
+	sink := &memSink{}
+	ctx := host.WithClaudeRunner(oracleCtxForTest(sink), codeBlockRunner)
+	res, err := host.OracleDecideHandler(ctx, map[string]any{
+		"prompt": "Is this a good idea?",
+		"schema": schemaPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("expected no error; got %q", res.Error)
+	}
+	submitted, ok := res.Data["submitted"]
+	if !ok {
+		t.Fatal("expected submitted to be populated from code block; was absent")
+	}
+	m, ok := submitted.(map[string]any)
+	if !ok {
+		t.Fatalf("expected submitted to be a map; got %T", submitted)
+	}
+	if m["verdict"] != "yes" {
+		t.Fatalf("expected verdict=yes; got %v", m["verdict"])
+	}
+	// The internal bypass marker must be stripped before the Result binds into
+	// world — a story bind: spec must never see it.
+	if _, present := res.Data["_tool_bypassed"]; present {
+		t.Error("internal _tool_bypassed key leaked into bound Result.Data")
+	}
+
+	// The deviation MUST be auditable in the trace: the oracle.call.complete
+	// event's Meta records that the verdict was recovered from a code block
+	// (this is why a raw ```json block reached the operator's chat).
+	var returned *store.Event
+	for i := range sink.events {
+		if sink.events[i].Kind == store.OracleReturned {
+			returned = &sink.events[i]
+		}
+	}
+	if returned == nil {
+		t.Fatal("expected an oracle.call.complete event in the trace")
+	}
+	var payload struct {
+		Meta map[string]any `json:"meta"`
+	}
+	if err := json.Unmarshal(returned.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal OracleReturned payload: %v", err)
+	}
+	if payload.Meta["tool_bypassed"] != true {
+		t.Errorf("trace Meta.tool_bypassed = %v, want true", payload.Meta["tool_bypassed"])
+	}
+	if payload.Meta["verdict_recovered_from"] != "code_block" {
+		t.Errorf("trace Meta.verdict_recovered_from = %v, want %q",
+			payload.Meta["verdict_recovered_from"], "code_block")
+	}
+}
+
+// TestOracleDecide_NoCodeBlock_StillErrors confirms the fallback does not
+// swallow the error when the model exits without any usable JSON at all.
+func TestOracleDecide_NoCodeBlock_StillErrors(t *testing.T) {
+	t.Parallel()
+	schemaPath := makeSchemaFile(t)
+
+	noJSONRunner := func(_ context.Context, _ []string, _, _ string) (host.ClaudeRun, error) {
+		return host.ClaudeRun{Stdout: "I was going to decide but I forgot."}, nil
+	}
+	ctx := host.WithClaudeRunner(context.Background(), noJSONRunner)
+	res, err := host.OracleDecideHandler(ctx, map[string]any{
+		"prompt": "Decide something.",
+		"schema": schemaPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	// The retry loop exhausts all outer iterations and surfaces abandonment.
+	if res.Error == "" {
+		t.Fatal("expected an error when model produces no usable JSON; got none")
 	}
 }

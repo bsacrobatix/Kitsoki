@@ -11,3 +11,5 @@ When we do an implementation based on a proposal, the goal is to complete the pr
 use the `.context` folder for transient markdown files like proposals, summaries, etc... and use the `.artifacts` folder (with subfolders as necessary) for any generated artifact for review that shouldn't be committed.  following these guidelines will help to avoid bot pollution and cruft in the repo.
 
 Automated testing should never use a real LLM or incur costs - mock oracles via cassettes should be used in all cases.  Tests which require real LLM must be gated and only done when specifically requested and required - never automatically or without checking first.
+
+use dependency injection patterns wherever relevant.

@@ -29,5 +29,11 @@ func ParseValidatedPayloadForTest(raw []byte) (mcp.CallToolParams, error) {
 
 // BuildClaudeArgsForTest exposes buildClaudeArgs for testing.
 func BuildClaudeArgsForTest(cfg ClaudeCLIConfig) []string {
-	return buildClaudeArgs(cfg, "")
+	return buildClaudeArgs(cfg, "", "")
+}
+
+// BuildClaudeArgsWithSystemPromptForTest exposes buildClaudeArgs with a
+// system prompt set, for testing the --system-prompt override wiring.
+func BuildClaudeArgsWithSystemPromptForTest(cfg ClaudeCLIConfig, systemPrompt string) []string {
+	return buildClaudeArgs(cfg, "", systemPrompt)
 }

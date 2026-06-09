@@ -3163,8 +3163,17 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 			}
 			// Tool use: compact one-line args breadcrumb (Preview is
 			// already clipped upstream), separate styling, leading blank
-			// line for breathing room (inside AppendMetaToolUse).
-			m.transcript.AppendMetaToolUse(ev.Tool, ev.Preview)
+			// line for breathing room (inside AppendMetaToolUse). One
+			// assistant event can batch several parallel tool calls, so
+			// render each on its own line (ev.Tools); fall back to the
+			// scalar ev.Tool for events that predate the slice.
+			if len(ev.Tools) > 0 {
+				for _, tc := range ev.Tools {
+					m.transcript.AppendMetaToolUse(tc.Name, tc.Preview)
+				}
+			} else {
+				m.transcript.AppendMetaToolUse(ev.Tool, ev.Preview)
+			}
 		} else if ev.Text != "" {
 			// Pure narration with no tool call. Ambiguous until the next
 			// event: intermediate thought (flush) or final answer (drop

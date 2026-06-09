@@ -37,6 +37,22 @@ const validatorServerName = "kitsoki-validator"
 // validatorServerName + the validator server's default `submit` tool.
 const validatorToolName = "mcp__" + validatorServerName + "__submit"
 
+// ClaudeExec runs the `claude` binary one-shot. It receives the resolved
+// binary path, the CLI args, and the prompt to pipe on stdin, and returns
+// claude's stdout. It is the single seam through which the routing harness
+// forks claude: the harness no longer execs claude itself.
+//
+// Production wires host.RunClaudeOneShotForHarness so intent routing shares the
+// oracle's invocation engine — stream/usage capture, the ClaudeRunner test
+// seam, IDE-link scrub, and env handling all apply uniformly. Tests inject the
+// same adapter (to exercise the real path) or a stub.
+//
+// The signature mirrors host.RunClaudeOneShotForHarness exactly so that bare
+// function is directly assignable to this named type without host importing
+// harness. workingDir is unused by routing (always "") but kept so the
+// contract matches the canonical runner.
+type ClaudeExec func(ctx context.Context, bin string, args []string, stdin, workingDir string) (stdout string, err error)
+
 // ClaudeCLIConfig holds optional knobs for ClaudeCLIHarness.
 type ClaudeCLIConfig struct {
 	// Model is passed as --model to claude. If empty, DefaultClaudeModel is used.
@@ -48,6 +64,11 @@ type ClaudeCLIConfig struct {
 	// validator MCP server. If empty, os.Executable() is used. Tests set
 	// this to a stub that mimics the validator's capture behavior.
 	KitsokiBin string
+	// Exec forks the claude binary. Required for routing: when nil, RunTurn
+	// returns an error rather than forking claude through a private path.
+	// Production wires host.RunClaudeOneShotForHarness at construction so all
+	// claude invocations flow through the one canonical engine.
+	Exec ClaudeExec
 }
 
 // ClaudeCLIHarness shells out to `claude -p` to route user text → IntentCall.
@@ -227,14 +248,19 @@ func (h *ClaudeCLIHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallT
 	}
 
 	dynamic := buildDynamicSuffix(h.appDef, in)
-	prompt := h.stablePrefix + dynamic + submitInstruction +
-		"\n## User Input\n\n" + in.UserText + "\n"
+	// The stable router prefix + output contract are turn-invariant, so they
+	// become claude's system prompt (via --system-prompt, which *replaces*
+	// Claude Code's own default system prompt — see buildClaudeArgs). Only the
+	// per-turn context and the user utterance ride on stdin as the user message.
+	systemPrompt := h.stablePrefix + submitInstruction
+	userMessage := dynamic + "\n## User Input\n\n" + in.UserText + "\n"
 
-	args := buildClaudeArgs(h.cfg, configPath)
+	args := buildClaudeArgs(h.cfg, configPath, systemPrompt)
 	if l.Enabled(ctx, slog.LevelDebug) {
 		l.DebugContext(ctx, trace.EvHarnessRequest,
-			slog.Int("prompt_bytes", len(prompt)),
-			slog.String("prompt_head", trace.Truncate(prompt, trace.TruncateCap)),
+			slog.Int("system_prompt_bytes", len(systemPrompt)),
+			slog.Int("user_message_bytes", len(userMessage)),
+			slog.String("prompt_head", trace.Truncate(systemPrompt, trace.TruncateCap)),
 		)
 		l.DebugContext(ctx, trace.EvHarnessExec,
 			slog.String("bin", claudeBin),
@@ -242,7 +268,11 @@ func (h *ClaudeCLIHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallT
 		)
 	}
 
-	raw, runErr := h.invoke(ctx, claudeBin, args, prompt)
+	if h.cfg.Exec == nil {
+		return mcp.CallToolParams{}, errors.New("harness/claude-cli: no ClaudeExec injected; wire host.RunClaudeOneShotForHarness at construction")
+	}
+	stdout, runErr := h.cfg.Exec(ctx, claudeBin, args, userMessage, "")
+	raw := []byte(stdout)
 	if runErr != nil {
 		l.DebugContext(ctx, trace.EvHarnessError, slog.String("error", runErr.Error()))
 		return mcp.CallToolParams{}, runErr
@@ -288,8 +318,18 @@ func (h *ClaudeCLIHarness) RunTurn(ctx context.Context, in TurnInput) (mcp.CallT
 }
 
 // buildClaudeArgs returns the CLI argument list for `claude -p`. configPath
-// is the --mcp-config file path. The model is always included.
-func buildClaudeArgs(cfg ClaudeCLIConfig, configPath string) []string {
+// is the --mcp-config file path; systemPrompt, when non-empty, is passed as
+// claude's system prompt. The model is always included.
+//
+// systemPrompt is passed via --system-prompt, which *replaces* Claude Code's
+// built-in default system prompt rather than stacking on top of it (the
+// append-mode flag is --append-system-prompt, which we deliberately do not
+// use). --exclude-dynamic-system-prompt-sections additionally strips the
+// per-machine sections claude would otherwise inject (cwd, env info, memory
+// paths, git status) — all irrelevant to intent routing. The net effect is
+// that the only system prompt claude sees for a routing turn is kitsoki's own
+// lean router prefix.
+func buildClaudeArgs(cfg ClaudeCLIConfig, configPath, systemPrompt string) []string {
 	model := cfg.Model
 	if model == "" {
 		model = DefaultClaudeModel
@@ -301,32 +341,16 @@ func buildClaudeArgs(cfg ClaudeCLIConfig, configPath string) []string {
 		"--permission-mode", "bypassPermissions",
 		"--model", model,
 	}
+	if systemPrompt != "" {
+		args = append(args,
+			"--system-prompt", systemPrompt,
+			"--exclude-dynamic-system-prompt-sections",
+		)
+	}
 	if configPath != "" {
 		args = append(args, "--mcp-config", configPath)
 	}
 	return args
-}
-
-// invoke runs `claude -p ...` with the prompt piped via stdin. Returns raw stdout.
-func (h *ClaudeCLIHarness) invoke(ctx context.Context, claudeBin string, args []string, prompt string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, claudeBin, args...)
-	cmd.Stdin = strings.NewReader(prompt)
-
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		stderrText := strings.TrimSpace(stderr.String())
-		if stderrText != "" {
-			return nil, fmt.Errorf("harness/claude-cli: claude exited with error: %w\nstderr: %s", err, stderrText)
-		}
-		return nil, fmt.Errorf("harness/claude-cli: claude exited with error: %w", err)
-	}
-	return []byte(stdout.String()), nil
 }
 
 // parseValidatedPayload decodes the JSON written by the MCP validator on a

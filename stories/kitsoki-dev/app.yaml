@@ -54,6 +54,10 @@ app:
   author: "Kitsoki"
   license: "CC0"
 
+routing:
+  embedding:
+    model: "nomic-embed-text-v1.5"
+
 # Host allow-list (proposal §9). With `hosts: declared` on the import,
 # every host the child subtree may invoke must appear here. Five
 # iface defaults (ticket / vcs / ci / workspace / transport) are
@@ -80,7 +84,9 @@ hosts:
   - host.run
   # Proposal-authoring pipeline (dev-story rooms/proposal*.yaml):
   # 4-stage pipeline using decide/task gates, workspace artifact writes,
-  # and IDE open on first brief scaffold. Required under `hosts: declared`.
+  # IDE open on first brief scaffold, and embedding-based reference search.
+  # Required under `hosts: declared`.
+  - host.oracle.search
   - host.artifacts_dir
   - host.ide.open_file
 

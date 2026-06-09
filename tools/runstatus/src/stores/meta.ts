@@ -152,10 +152,11 @@ export const useMetaStore = defineStore("meta", () => {
           }
         }
       );
+      const tools = pendingTools.value.slice();
       pendingAssistantText.value = "";
       pendingTools.value = [];
       if (res.chat_id) chatIds.value = { ...chatIds.value, [k]: res.chat_id };
-      pushMessage(k, { role: "assistant", text: res.assistant });
+      pushMessage(k, { role: "assistant", text: res.assistant, tools: tools.length ? tools : undefined });
 
       if (res.reload_requested) {
         const changed = res.changed_files ?? [];

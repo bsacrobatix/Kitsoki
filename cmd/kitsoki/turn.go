@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/spf13/cobra"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -506,13 +505,12 @@ func buildTurnHarness(harnessType, recordingPath string, def *app.AppDef, direct
 		}
 		return harness.NewReplay(recordingPath)
 	case "claude":
-		return harness.NewClaudeCLI(def, harness.ClaudeCLIConfig{})
+		return harness.NewClaudeCLI(def, harness.ClaudeCLIConfig{Exec: host.RunClaudeOneShotForHarness})
 	case "live":
-		apiKey := os.Getenv("ANTHROPIC_API_KEY")
-		if apiKey == "" {
-			return nil, fmt.Errorf("ANTHROPIC_API_KEY required for --harness live")
+		client, _, err := newLiveClient()
+		if err != nil {
+			return nil, err
 		}
-		client := anthropic.NewClient()
 		return harness.NewLive(&client, "", def)
 	default:
 		return nil, fmt.Errorf("unknown --harness %q", harnessType)

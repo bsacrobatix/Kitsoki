@@ -13,6 +13,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/harness"
+	"kitsoki/internal/host"
 	"kitsoki/internal/world"
 )
 
@@ -108,6 +109,35 @@ func TestClaudeCLIHarness_PromptContainsPrefix(t *testing.T) {
 	assert.Contains(t, prefix, "transition")
 }
 
+// TestClaudeCLIHarness_SystemPromptOverridesClaudeDefault verifies that a
+// non-empty system prompt is passed via --system-prompt (which replaces Claude
+// Code's built-in default) together with --exclude-dynamic-system-prompt-sections,
+// and that neither flag appears when no system prompt is supplied.
+func TestClaudeCLIHarness_SystemPromptOverridesClaudeDefault(t *testing.T) {
+	cfg := harness.ClaudeCLIConfig{Model: "claude-haiku-4-5"}
+
+	bare := harness.BuildClaudeArgsForTest(cfg)
+	assert.NotContains(t, bare, "--system-prompt")
+	assert.NotContains(t, bare, "--append-system-prompt")
+	assert.NotContains(t, bare, "--exclude-dynamic-system-prompt-sections")
+
+	args := harness.BuildClaudeArgsWithSystemPromptForTest(cfg, "ROUTER PROMPT")
+	assert.Contains(t, args, "--exclude-dynamic-system-prompt-sections")
+	assert.NotContains(t, args, "--append-system-prompt",
+		"router prompt must replace, not append to, Claude Code's default")
+
+	idx := -1
+	for i, a := range args {
+		if a == "--system-prompt" {
+			idx = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, idx, 0, "args should include --system-prompt")
+	require.Less(t, idx+1, len(args), "--system-prompt must be followed by its value")
+	assert.Equal(t, "ROUTER PROMPT", args[idx+1])
+}
+
 // ─── Exec plumbing test (uses fake-claude.sh) ─────────────────────────────────
 
 // TestClaudeCLIHarness_ExecPlumbing runs the fake-claude.sh stub. The stub
@@ -145,6 +175,7 @@ func TestClaudeCLIHarness_ExecPlumbing(t *testing.T) {
 	h, err := harness.NewClaudeCLI(appDef, harness.ClaudeCLIConfig{
 		ClaudeBin:  fakeBin,
 		KitsokiBin: fakeBin,
+		Exec:       host.RunClaudeOneShotForHarness,
 	})
 	require.NoError(t, err)
 
@@ -188,6 +219,7 @@ func TestClaudeCLIHarness_NoSubmitError(t *testing.T) {
 	h, err := harness.NewClaudeCLI(appDef, harness.ClaudeCLIConfig{
 		ClaudeBin:  fakeBin,
 		KitsokiBin: fakeBin,
+		Exec:       host.RunClaudeOneShotForHarness,
 	})
 	require.NoError(t, err)
 

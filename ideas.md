@@ -118,3 +118,10 @@
     - use distinctive input we can trace through multiple handoffs to capture indirect references
     - use correctly structured json etc... so it passes validation but is still distinctive to find
     - deterministic
+- needs some working state in the main chat after user presses enter
+- the web ui doesn't show the semantic routing layer aspect from the TUI, so it's not clear what's happening with the routing layer
+- routing decisions are not covered by the trace (in the UI at least)
+- embed kitsoki engine in wasm for the browser - keep the trace in local storage or something
+- name each oracle invocation so the trace has something nice to show
+- add world viewer to web ui, show types and current values, allow edit mode w/ validation
+- tool usage disappears after final message - it should be collapsed but inspectable

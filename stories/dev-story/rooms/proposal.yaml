@@ -3,20 +3,20 @@
 # Stage 1 of the 4-stage proposal pipeline:
 #   intake → proposal_search → proposal_refine → proposal_draft (+ publish)
 #
-# One message captures the idea, mints the slug, creates the workspace, and
-# advances to proposal_search. There is no multi-turn loop here — discovery
-# and brief-writing happen AFTER search, in proposal_refine, where the search
-# results inform the brief.
+# One message captures the idea and mints a candidate slug, then advances to
+# proposal_search. The workspace folder is NOT created here — the scout runs
+# first so a duplicate idea is redirected to its existing draft before any
+# new folder lands on disk (the folder is minted in proposal_materialize,
+# behind the overlap gate). There is no multi-turn loop here — discovery and
+# brief-writing happen AFTER search, in proposal_refine.
 #
 # The `proposal_seed_idea` ternary is evaluated BEFORE any set: takes effect
 # (effects evaluate against the start-of-turn world), so both the set: and
 # the invoke.args.idea: use the same expression against the same snapshot.
-# The uniquify call reads the name_slug BIND (a later invoke sees an earlier
-# invoke's bind — proved by proposal_happy_path's first-turn assertions).
 #
 # Optionally, the operator can point at existing docs before sending the idea:
 # `capture_existing` records them in proposal_existing_paths, which the search
-# room passes to both the scout and researcher.
+# room passes to the scout.
 
 states:
 
@@ -38,7 +38,8 @@ states:
             Existing docs: '{{ world.proposal_existing_paths }}'
         when: "world.proposal_existing_paths != ''"
     on:
-      # Capture the idea → mint slug → create workspace → advance to search.
+      # Capture the idea → mint candidate slug → advance to search (the scout
+      # gate). No workspace folder is created here.
       discuss:
         - target: proposal_search
           effects:
@@ -54,20 +55,23 @@ states:
                 working_dir: "."
                 args:
                   idea: "{{ world.proposal_seed_idea != '' ? world.proposal_seed_idea + ' — ' + slots.message : slots.message }}"
+                # Force the verdict through the submit tool. Without this the
+                # model can satisfy the prompt by writing a ```json block in its
+                # narration, which the engine recovers from stdout but which
+                # ALSO streams to the operator as a raw fenced block (and the
+                # deviation only shows as a WARN). The validator's state-file
+                # loop nudges the model to actually call submit() instead.
+                validator:
+                  max_retries: 3
               bind:
                 proposal_slug: "submitted.slug"
               on_error: proposal
-            - invoke: host.run
-              id: uniquify
-              with:
-                cmd: python3
-                args:
-                  - "stories/dev-story/scripts/proposal_workspace.py"
-                  - "{{ world.proposal_slug }}"
-              bind:
-                proposal_slug:      "stdout_json.slug"
-                proposal_workspace: "stdout_json.workspace"
-              on_error: proposal
+            # NB: the workspace folder is deliberately NOT minted here. The
+            # scout (proposal_search.on_enter) runs FIRST, so an idea that
+            # duplicates an in-flight draft can be redirected to the existing
+            # case BEFORE any new folder is created on disk. Folder creation
+            # (uniquify) now lives in proposal_materialize, behind the
+            # overlap gate. Intake only mints the candidate slug.
 
       # Record existing docs the operator points at; search uses proposal_existing_paths.
       capture_existing:

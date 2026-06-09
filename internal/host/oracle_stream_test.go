@@ -122,3 +122,69 @@ func TestOracleStream_ThinkingNotTruncated(t *testing.T) {
 		t.Fatal("combined text+tool_use event did not surface both Text and Tool")
 	}
 }
+
+// parallelToolRunner emits ONE assistant message that batches three
+// tool_use blocks — the shape claude produces when it fires parallel tool
+// calls. Mirrors the real symptom where only the first tool surfaced.
+func parallelToolRunner() host.ClaudeRunner {
+	return func(_ context.Context, _ []string, _ string, _ string) (host.ClaudeRun, error) {
+		lines := []string{
+			`{"type":"system","subtype":"init","session_id":"sess-parallel-1"}`,
+			`{"type":"assistant","message":{"content":[` +
+				`{"type":"tool_use","name":"Bash","input":{"command":"ls flows/"}},` +
+				`{"type":"tool_use","name":"Read","input":{"file_path":"a.md"}},` +
+				`{"type":"tool_use","name":"Read","input":{"file_path":"b.md"}}]}}`,
+			`{"type":"result","subtype":"success","result":` + mustJSON("done") + `,"session_id":"sess-parallel-1"}`,
+		}
+		return host.ClaudeRun{Stdout: strings.Join(lines, "\n") + "\n"}, nil
+	}
+}
+
+// TestOracleStream_ParallelToolsAllSurface asserts that when one assistant
+// message carries multiple tool_use blocks (parallel tool calls), EVERY
+// tool reaches the sink via StreamEvent.Tools — not just the first. This
+// is what lets the web/TUI transcript render each tool on its own line.
+// Regression: classifyStreamEvent only ever surfaced firstTool, so two of
+// the three calls below vanished from the breadcrumb stream.
+func TestOracleStream_ParallelToolsAllSurface(t *testing.T) {
+	t.Parallel()
+
+	sink := &memSink{}
+	stream := &captureStreamSink{}
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	if err := os.WriteFile(promptPath, []byte("go"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	ctx := host.WithStreamSink(oracleCtxForTest(sink), stream)
+	ctx = host.WithClaudeRunner(ctx, parallelToolRunner())
+
+	if _, err := host.OracleAskHandler(ctx, map[string]any{"prompt_path": promptPath}); err != nil {
+		t.Fatalf("OracleAskHandler: %v", err)
+	}
+
+	var tools []host.StreamToolUse
+	for _, ev := range stream.all() {
+		if ev.Type == "assistant" && len(ev.Tools) > 0 {
+			tools = ev.Tools
+			// Back-compat scalar still mirrors the first tool.
+			if ev.Tool != tools[0].Name {
+				t.Errorf("scalar Tool = %q, want first tool %q", ev.Tool, tools[0].Name)
+			}
+		}
+	}
+
+	want := []string{"Bash", "Read", "Read"}
+	if len(tools) != len(want) {
+		t.Fatalf("surfaced %d tools, want %d: %+v", len(tools), len(want), tools)
+	}
+	for i, n := range want {
+		if tools[i].Name != n {
+			t.Errorf("tool[%d].Name = %q, want %q", i, tools[i].Name, n)
+		}
+		if tools[i].Preview == "" {
+			t.Errorf("tool[%d] (%s) has empty Preview", i, n)
+		}
+	}
+}

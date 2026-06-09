@@ -28,9 +28,21 @@ host_handlers:
         data:
           ok: true
           submitted: { items: [] }
+  # override_new now cascades through proposal_materialize, which mints the
+  # folder (uniquify), runs the semantic reference search, then advances.
+  host.oracle.search:
+    data: { hits: [], top: null }
+  host.run:
+    by_call:
+      uniquify:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"slug":"lmo","workspace":"docs/proposals/.workspace/lmo"}'
+          stdout_json: { slug: "lmo", workspace: "docs/proposals/.workspace/lmo" }
   host.artifacts_dir:
     data: { ok: true, path: "docs/proposals/.workspace/lmo/out.md", message_id: "out#1" }
-  # Stubs for proposal_refine on_enter (advanced to by override_new)
+  # Stubs for proposal_refine on_enter (advanced to by override_new → materialize)
   host.ide.open_file:
     data: { ok: true, connected: true }
   host.oracle.task:

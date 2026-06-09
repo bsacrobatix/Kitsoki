@@ -10,12 +10,14 @@ import (
 	"kitsoki/internal/chathost"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
+	embedstore "kitsoki/internal/embed"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/oracle"
+	oracleserver "kitsoki/internal/oracle/server"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
 	"kitsoki/internal/testrunner"
@@ -265,6 +267,26 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		}
 		rt.OracleReg = oracleReg
 		rt.closers = append(rt.closers, func() { _ = oracleReg.Close() })
+
+		// Wire host.oracle.search when app.routing.embedding is configured.
+		// Supports endpoint mode (Endpoint set) and managed mode (Model set,
+		// no Endpoint). In managed mode the sidecar is started with
+		// --embeddings --pooling mean so it serves /v1/embeddings, not chat.
+		if ec := routingEmbedConfig(def); ec != nil && (ec.Endpoint != "" || ec.Model != "") {
+			embedder, embedClose, embedErr := buildEmbedder(ec)
+			if embedErr != nil {
+				return nil, fmt.Errorf("build embedder: %w", embedErr)
+			}
+			rt.closers = append(rt.closers, embedClose)
+			cacheDir := ec.CacheDir
+			if cacheDir == "" {
+				cacheDir = ".kitsoki-embed-cache"
+			}
+			store := embedstore.NewStore(cacheDir)
+			hostReg.Replace("host.oracle.search",
+				host.NewOracleSearchHandler(embedModel(ec), filepath.Dir(cfg.AppPath), embedder, store))
+			slog.Info("host.oracle.search: wired", "endpoint", ec.Endpoint, "model", embedModel(ec))
+		}
 	}
 
 	// Agents registry (builtins + AppDef overrides), installed process-wide so
@@ -314,4 +336,38 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 
 	ok = true
 	return rt, nil
+}
+
+// routingEmbedConfig returns the EmbedConfig from def.App.Routing.Embedding,
+// or nil when no embedding block is declared.
+func routingEmbedConfig(def *app.AppDef) *app.EmbedConfig {
+	if def.Routing == nil {
+		return nil
+	}
+	return def.Routing.Embedding
+}
+
+// embedModel returns the effective model name from ec, defaulting to
+// nomic-embed-text-v1.5 when Model is empty.
+func embedModel(ec *app.EmbedConfig) string {
+	if ec.Model != "" {
+		return ec.Model
+	}
+	return "nomic-embed-text-v1.5"
+}
+
+// buildEmbedder constructs a LocalEmbedder for endpoint or managed mode.
+// In endpoint mode (ec.Endpoint set) the sidecar attaches to a running server.
+// In managed mode (ec.Model set, no Endpoint) the sidecar fetches the GGUF and
+// spawns llama-server with --embeddings --pooling mean on first use.
+func buildEmbedder(ec *app.EmbedConfig) (*oracle.LocalEmbedder, func(), error) {
+	model := embedModel(ec)
+	opts := []oracleserver.Option{
+		// Embedding sidecars must run with --embeddings --pooling mean so the
+		// server serves /v1/embeddings rather than /v1/chat/completions.
+		oracleserver.WithExtraArgs("--embeddings", "--pooling", "mean"),
+	}
+	sc := oracleserver.NewSidecar(model, "", ec.Endpoint, 0, opts...)
+	emb := oracle.NewLocalEmbedder(model, sc)
+	return emb, func() { _ = emb.Close() }, nil
 }

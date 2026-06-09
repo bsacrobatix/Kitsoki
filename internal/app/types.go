@@ -358,6 +358,35 @@ type RoutingConfig struct {
 	// tier dispatches to (see ExtractLLMOnNoMatch). Empty defaults to
 	// "oracle.local" — the convention for the local-model backend.
 	ExtractLLMOracle string `yaml:"extract_llm_oracle,omitempty"`
+	// Embedding configures the shared embedding sidecar used by both
+	// host.oracle.search and the embedding routing tier. When nil or when
+	// both Endpoint and Model are empty, host.oracle.search remains the
+	// no-op sentinel and the embedding routing tier is disabled.
+	Embedding *EmbedConfig `yaml:"embedding,omitempty"`
+}
+
+// EmbedConfig is the app.routing.embedding config block. It is shared by the
+// host.oracle.search handler and the embedding routing tier.
+type EmbedConfig struct {
+	// Endpoint is the base URL of a running llama-server started with
+	// --embeddings --pooling mean (e.g. "http://localhost:8082"). When set
+	// the sidecar attaches without fetching or spawning. Required for now;
+	// managed mode requires a verified model pin in fetch.go.
+	Endpoint string `yaml:"endpoint,omitempty"`
+	// Model is the embedding model id (default "nomic-embed-text-v1.5").
+	// Used as the model field in /v1/embeddings requests and in the Store
+	// cache key.
+	Model string `yaml:"model,omitempty"`
+	// CacheDir is the directory for the gob corpus cache produced by
+	// host.oracle.search. Defaults to ".kitsoki-embed-cache" relative to
+	// the working directory.
+	CacheDir string `yaml:"cache_dir,omitempty"`
+	// ConfidentBar is the top-1 cosine threshold for the routing tier
+	// (default 0.82). Only relevant when the routing tier is active.
+	ConfidentBar float64 `yaml:"confident_bar,omitempty"`
+	// Margin is the top1-top2 delta required to avoid a tie verdict
+	// (default 0.08). Only relevant when the routing tier is active.
+	Margin float64 `yaml:"margin,omitempty"`
 }
 
 // DefaultRoutingConfig returns the all-defaults RoutingConfig used when

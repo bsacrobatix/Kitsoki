@@ -29,4 +29,7 @@ non-colliding name is better than a `-2` suffix.)
 
 ## Output
 
-Submit a `slug` object (see `schemas/slug.json`): `{ slug, rationale }`.
+Return your answer by **calling the `submit` tool** with a `slug` object (see
+`schemas/slug.json`): `{ slug, rationale }`. Do not print the JSON in your
+reply — call the tool. A fenced ```json block in the message body is not a
+valid response and will be rejected.

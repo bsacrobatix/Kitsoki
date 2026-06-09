@@ -66,6 +66,7 @@ hosts:
   # with `hosts: declared` must list all four in its own allow-list.
   - host.oracle.decide
   - host.oracle.task
+  - host.oracle.search
   - host.artifacts_dir
   - host.ide.open_file
 
@@ -300,6 +301,7 @@ world:
   proposal_existing_path:    { type: string, default: "" } # path 002-existing-state.md was written to
   proposal_overlap_decision: { type: string, default: "" } # "" | new | change_existing
   proposal_change_target:    { type: string, default: "" } # path of the proposal to amend when change_existing
+  proposal_reference_hits:   { type: object, default: {} } # raw hits from host.oracle.search: { hits: [{path, chunk_id, text, score}], top }
   proposal_references:       { type: object, default: {} } # { items: [{ path, sections, rationale }] }
   proposal_references_path:  { type: string, default: "" } # path 003-references.json was written to
 
@@ -551,6 +553,10 @@ intents:
     priority: 90
   advance_brief:
     description: "Internal: fired by the brief check when the brief passes review, to advance to draft."
+    examples: []
+    priority: 1
+  materialized:
+    description: "Internal: fired once the proposal workspace + references are prepared, to advance to brief authoring."
     examples: []
     priority: 1
   capture_existing:

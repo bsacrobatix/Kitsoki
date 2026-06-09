@@ -48,6 +48,13 @@ const decideDefaultMaxRetries = 5
 // decideMaxOuterIterations caps the outer `claude --resume` loop.
 const decideMaxOuterIterations = 3
 
+// decideToolBypassedKey is an internal Result.Data key set when a decide
+// verdict was recovered from a fenced code block in stdout (the model skipped
+// the submit() tool). emitDecideJournal reads it to annotate the trace + slog,
+// then deletes it so it never binds into world. Leading underscore marks it
+// internal — story bind: specs never reference it.
+const decideToolBypassedKey = "_tool_bypassed"
+
 // decideAbandonmentNudgeTemplate is the nudge sent on each --resume re-engagement.
 const decideAbandonmentNudgeTemplate = `Your previous turn ended without successfully calling submit.{{LAST_ERROR_BLOCK}}
 
@@ -251,61 +258,31 @@ func OracleDecideHandler(ctx context.Context, args map[string]any) (Result, erro
 		SpecOverridden: dOverridden,
 	})
 
-	// If a validator block is present, run the retry loop. Otherwise use
-	// OracleStreamer for the single-shot streaming path.
+	// Always use the retry loop so the abandonment-nudge cycle fires for every
+	// decide call, not just those with an explicit validator: block.
+	// When validatorBlockPresent is false the loop uses the output-file
+	// presence (not the state file) to detect a successful submit — see
+	// runDecideWithValidatorRetryLoop.
+	effectiveMaxRetries := vopts.MaxRetries
+	if effectiveMaxRetries <= 0 {
+		effectiveMaxRetries = decideDefaultMaxRetries
+	}
+	var sandboxOpts *validatorOptions
 	if validatorBlockPresent {
-		effectiveMaxRetries := vopts.MaxRetries
-		if effectiveMaxRetries <= 0 {
-			effectiveMaxRetries = decideDefaultMaxRetries
-		}
-		res := runDecideWithValidatorRetryLoop(ctx, decideLoopParams{
-			Bin:                  bin,
-			BaseCLIArgs:          cliArgs,
-			Rendered:             rendered,
-			WorkingDir:           workingDir,
-			ValidatorOutputPath:  validatorOutputPath,
-			ValidatorStatePath:   validatorStateFilePath,
-			MaxOuterIterations:   decideMaxOuterIterations,
-			ValidatorMaxRetries:  effectiveMaxRetries,
-			SandboxValidatorOpts: &vopts,
-		})
-		durationMS := time.Since(callStart).Milliseconds()
-		emitDecideJournal(ctx, callID, callStart, durationMS, agentNameFromArgs(args), agent.Model,
-			systemPrompt, rendered, decideInputDesc, res)
-		return res, nil
+		sandboxOpts = &vopts
 	}
-
-	// Single-shot path through OracleStreamer (streams reasoning tokens).
-	sessionID := newUUID()
-	streamCLIArgs := append(append([]string{}, cliArgs...), "--session-id", sessionID)
-	cr, streamSID, runErr := OracleStreamer{
-		Bin:        bin,
-		CLIArgs:    streamCLIArgs,
-		Stdin:      rendered,
-		WorkingDir: workingDir,
-	}.Run(ctx)
+	res := runDecideWithValidatorRetryLoop(ctx, decideLoopParams{
+		Bin:                  bin,
+		BaseCLIArgs:          cliArgs,
+		Rendered:             rendered,
+		WorkingDir:           workingDir,
+		ValidatorOutputPath:  validatorOutputPath,
+		ValidatorStatePath:   validatorStateFilePath,
+		MaxOuterIterations:   decideMaxOuterIterations,
+		ValidatorMaxRetries:  effectiveMaxRetries,
+		SandboxValidatorOpts: sandboxOpts,
+	})
 	durationMS := time.Since(callStart).Milliseconds()
-
-	if runErr != nil {
-		return Result{}, runErr
-	}
-	if cr.Infra != nil {
-		msg := fmt.Sprintf("host.oracle.decide: claude exec failed: %v", cr.Infra)
-		if s := strings.TrimSpace(cr.Stderr); s != "" {
-			msg = fmt.Sprintf("%s\nstderr: %s", msg, s)
-		}
-		infraRes := Result{Error: msg}
-		emitDecideJournal(ctx, callID, callStart, durationMS, agentNameFromArgs(args), agent.Model,
-			systemPrompt, rendered, decideInputDesc, infraRes)
-		return infraRes, nil
-	}
-
-	usedSessionID := sessionID
-	if streamSID != "" {
-		usedSessionID = streamSID
-	}
-
-	res := buildDecideResult(cr.Stdout, cr.ExitCode, cr.Stderr, validatorOutputPath, usedSessionID, "")
 	emitDecideJournal(ctx, callID, callStart, durationMS, agentNameFromArgs(args), agent.Model,
 		systemPrompt, rendered, decideInputDesc, res)
 	return res, nil
@@ -316,11 +293,26 @@ func OracleDecideHandler(ctx context.Context, args map[string]any) (Result, erro
 func emitDecideJournal(ctx context.Context, callID string, callStart time.Time, durationMS int64,
 	agentName, model, systemPrompt, prompt string, inputDesc map[string]any, res Result) {
 
+	// Detect (and strip) the internal bypass flag: the model returned its
+	// verdict as a fenced code block instead of a submit() tool call, so it was
+	// recovered from stdout. We record this in both the slog record and the
+	// auditable trace, then delete the key so it never binds into world.
+	toolBypassed := false
+	if res.Data != nil {
+		if b, ok := res.Data[decideToolBypassedKey].(bool); ok && b {
+			toolBypassed = true
+		}
+		delete(res.Data, decideToolBypassedKey)
+	}
+
 	// Lean slog record.
 	attrs := []any{
 		"call_id", callID,
 		"model", model,
 		"duration_ms", durationMS,
+	}
+	if toolBypassed {
+		attrs = append(attrs, "tool_bypassed", true)
 	}
 	if res.Error != "" {
 		attrs = append(attrs, "error", res.Error)
@@ -350,12 +342,26 @@ func emitDecideJournal(ctx context.Context, callID string, callStart time.Time, 
 			Error:      res.Error,
 		})
 	} else {
+		// On a tool bypass, annotate the trace's oracle.call.complete Meta so
+		// the deviation is auditable in the timeline. Merge into the usage box
+		// (appendOracleReturnedEvent only defaults Meta when nil — setting it
+		// here would otherwise drop token/cost usage from the trace).
+		var meta map[string]any
+		if toolBypassed {
+			meta = oracleUsageMeta(ctx)
+			if meta == nil {
+				meta = map[string]any{}
+			}
+			meta["tool_bypassed"] = true
+			meta["verdict_recovered_from"] = "code_block"
+		}
 		appendOracleReturnedEvent(ctx, callEnd, callID, OracleReturnedPayload{
 			Verb:       "decide",
 			Agent:      agentName,
 			Model:      model,
 			DurationMS: durationMS,
 			Response:   marshalResponse(responseDesc),
+			Meta:       meta,
 		})
 	}
 }
@@ -541,6 +547,39 @@ func runDecideWithValidatorRetryLoop(ctx context.Context, p decideLoopParams) Re
 		lastExitCode = cr.ExitCode
 		lastStderr = cr.Stderr
 
+		// When there is no validator state file (no validator: block declared),
+		// detect success by checking the output file directly — the validator
+		// MCP server writes it when submit() is called regardless of whether a
+		// post_cmd is configured. Without this branch, ReadStateFile("") always
+		// returns (0,0,"") → outcomeFromState always returns Abandoned → the
+		// loop could never detect that submit succeeded.
+		if p.ValidatorStatePath == "" {
+			if data, _ := kitsokimcp.ReadCapturedPayload(p.ValidatorOutputPath); len(data) > 0 {
+				return buildDecideResult(lastStdout, lastExitCode, lastStderr, p.ValidatorOutputPath, sessionID, "")
+			}
+			// Output file still empty — model didn't call submit.
+			// Before nudging, check whether the model wrote valid JSON in a
+			// markdown code block. If so, treat it as a successful submit so
+			// we don't burn an outer iteration on something recoverable.
+			if extracted := extractJSONFromCodeBlock(lastStdout); extracted != nil {
+				b, _ := json.Marshal(extracted)
+				_ = os.WriteFile(p.ValidatorOutputPath, b, 0o600)
+				slog.WarnContext(ctx, "oracle.decide: model bypassed submit tool — recovered verdict from code block in stdout; consider adding validator: to enforce tool use")
+				res := buildDecideResult(lastStdout, lastExitCode, lastStderr, p.ValidatorOutputPath, sessionID, "")
+				// Flag the bypass so emitDecideJournal records it in the trace
+				// (and slog). This is WHY a raw ```json block can reach the
+				// operator's chat: the verdict came back as narration text, not
+				// a clean submit() tool call. Internal-only key — stripped
+				// before the Result binds into world (see emitDecideJournal).
+				if res.Data != nil {
+					res.Data[decideToolBypassedKey] = true
+				}
+				return res
+			}
+			// Nothing recoverable — nudge and retry.
+			continue
+		}
+
 		attempts, success, lastErr := kitsokimcp.ReadStateFile(p.ValidatorStatePath)
 		switch outcomeFromState(attempts, success, p.ValidatorMaxRetries) {
 		case mcpOutcomeSuccess:
@@ -684,6 +723,34 @@ func buildDecideResult(stdout string, exitCode int, stderr, validatorOutputPath,
 		res.Error = "host.oracle.decide: model exited without calling submit — no verdict captured"
 	}
 	return res
+}
+
+// extractJSONFromCodeBlock tries to recover a JSON verdict from the model's
+// text output when it wrote ```json ... ``` instead of calling submit().
+// Strips sourcecolor sentinels before scanning. Returns nil when no valid
+// JSON block is found.
+func extractJSONFromCodeBlock(text string) any {
+	// Strip invisible sentinel characters (U+2061–U+2063) that sourcecolor
+	// uses; they appear when the model output was already wrapped elsewhere.
+	text = sourcecolor.Strip(text)
+
+	for _, fence := range []string{"```json", "```"} {
+		start := strings.Index(text, fence)
+		if start < 0 {
+			continue
+		}
+		inner := text[start+len(fence):]
+		end := strings.Index(inner, "```")
+		if end < 0 {
+			continue
+		}
+		candidate := strings.TrimSpace(inner[:end])
+		var parsed any
+		if err := json.Unmarshal([]byte(candidate), &parsed); err == nil {
+			return parsed
+		}
+	}
+	return nil
 }
 
 // renderDecideNudge renders the validator-rejection nudge prompt, injecting

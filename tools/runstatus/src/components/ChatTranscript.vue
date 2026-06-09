@@ -43,6 +43,7 @@
 import { ref, watch, nextTick, onMounted } from "vue";
 import type { View } from "../types.js";
 import ViewElement from "./ViewElement.vue";
+import { renderAgentMarkdown } from "../lib/markdown.js";
 
 export interface ChatEntry {
   role: "user" | "agent";
@@ -59,35 +60,15 @@ function hasElements(entry: ChatEntry): boolean {
   return Array.isArray(els) && els.length > 0;
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-// renderInline applies bold + inline-code to an ALREADY HTML-escaped string.
-function renderInline(s: string): string {
-  return s
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-}
-
-// renderView prepares the engine's rendered room view for display. The text is
-// HTML-escaped FIRST (it embeds user-supplied idea text), then each line is
-// kept verbatim — newlines, indentation and alignment are preserved by the
-// .chat-view CSS (white-space: pre-wrap, monospace), faithfully reproducing the
-// operator's TUI view. Inline **bold** / `code` are formatted, and an ATX
-// heading line (`## Title`) is rendered as a bold heading line with the markers
-// stripped. We do NOT join or re-flow lines: the engine already laid the view
-// out, and re-flowing collapses its lists/tables into run-on prose.
-function renderView(src: string): string {
-  return escapeHtml(src ?? "")
-    .split("\n")
-    .map((line) => {
-      const h = line.match(/^(#{1,6})\s+(.*)$/);
-      if (h) return `<span class="cv-h">${renderInline(h[2])}</span>`;
-      return renderInline(line);
-    })
-    .join("\n");
-}
+// renderView prepares the engine's rendered room view for display. Verbatim
+// line structure (newlines, indentation, column alignment) is preserved by the
+// .chat-view CSS (white-space: pre-wrap, monospace) so the operator's TUI view
+// is reproduced faithfully — we never join/re-flow lines, which would collapse
+// the engine's lists/tables into run-on prose. On top, the shared renderer
+// formats inline **bold** / `code`, ATX headings, and — crucially — fenced code
+// blocks (```json …```), so a raw fenced reply renders as a code box instead of
+// leaking to the operator as literal backticks.
+const renderView = renderAgentMarkdown;
 
 async function scrollToBottom() {
   await nextTick();
@@ -217,19 +198,41 @@ watch(
   line-height: 1.55;
   tab-size: 2;
 }
-.chat-view .cv-h {
+/* renderAgentMarkdown output is injected via v-html, so its nodes carry no
+   scoped-style attribute — target them with :deep so the rules apply. */
+.chat-view :deep(.cv-h) {
   font-weight: 700;
   color: #11151c;
 }
-.chat-view strong {
+.chat-view :deep(strong) {
   font-weight: 700;
   color: #11151c;
 }
-.chat-view code {
+.chat-view :deep(code) {
   background: #eceef2;
   border-radius: 4px;
   padding: 0.05em 0.3em;
   color: #b3306b;
+}
+/* Fenced code block (```json …```): a real code box, not raw backticks. The
+   <pre> owns its own whitespace (white-space: pre), so it is exempt from the
+   surrounding pre-wrap room-view layout. */
+.chat-view :deep(.cv-pre) {
+  background: #1e2430;
+  border: 1px solid #cfd4dd;
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem;
+  margin: 0.4rem 0;
+  overflow-x: auto;
+  white-space: pre;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.chat-view :deep(.cv-pre code) {
+  background: none;
+  padding: 0;
+  color: #d6deeb;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 .chat-elements {

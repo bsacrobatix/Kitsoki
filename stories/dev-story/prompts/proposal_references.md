@@ -38,6 +38,17 @@ Return the **full updated list**, not just the delta.
 Adjust what you look for accordingly.
 {% endif %}{% endif %}
 
+{% if args.search_hits %}## Semantic search hits (pre-ranked by embedding similarity)
+
+These chunks were retrieved automatically by `host.oracle.search` and ranked
+by cosine similarity to the idea. Start here — read the promising ones in
+full, discard the irrelevant ones, then fill any obvious gaps with your own
+search.
+
+{% for h in args.search_hits %}- **{{ h.path }}** (score {{ h.score|floatformat:2 }})  chunk `{{ h.chunk_id }}`
+  > {{ h.text|truncatechars:200 }}
+{% endfor %}
+{% endif %}
 ## Your job
 
 Search the repo's **documentation, rules, and conventions** for the

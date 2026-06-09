@@ -28,6 +28,42 @@ describe("ChatTranscript", () => {
     expect(view.text()).toContain("1. first question\n2. second question");
   });
 
+  it("renders a fenced ```json block as a code box, not literal backticks", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          {
+            role: "agent",
+            text:
+              'Here is the result:\n\n```json\n{\n  "slug": "web-companion-pet"\n}\n```\n\nDone.',
+          },
+        ],
+      },
+    });
+    const view = wrapper.find(".chat-view");
+    const pre = view.find("pre.cv-pre");
+    expect(pre.exists()).toBe(true);
+    // The JSON body is inside the code box…
+    expect(pre.text()).toContain('"slug": "web-companion-pet"');
+    // …and the literal fence markers do NOT leak into the rendered HTML.
+    expect(view.html()).not.toContain("```");
+    // The language hint rides along for syntax-class hooks.
+    expect(view.find("pre.cv-pre code").classes()).toContain("language-json");
+  });
+
+  it("escapes HTML inside a fenced block (no injection via code)", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          { role: "agent", text: "```\n<img src=x onerror=alert(1)>\n```" },
+        ],
+      },
+    });
+    const html = wrapper.find(".chat-view").html();
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img");
+  });
+
   it("escapes HTML in agent text (no injection via the view)", () => {
     const wrapper = mount(ChatTranscript, {
       props: {

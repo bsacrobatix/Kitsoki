@@ -17,7 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	anthropic "github.com/anthropics/anthropic-sdk-go"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -25,6 +24,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/harness"
+	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/kitrepo"
 	"kitsoki/internal/machine"
@@ -165,8 +165,12 @@ state machine applies the transition; the view is re-rendered.
 
 Harness auto-selection (when --harness is omitted):
   1. 'claude' binary on PATH       → claude harness (no API key needed)
-  2. ANTHROPIC_API_KEY set         → live harness (direct SDK)
+  2. Anthropic credential found    → live harness (direct SDK)
   3. otherwise                     → replay (requires --recording)
+
+A live credential is resolved from (first hit wins): ANTHROPIC_API_KEY,
+ANTHROPIC_AUTH_TOKEN, ~/.claude/settings.json (env block), or ~/.claude.json
+(primaryApiKey) — so '--harness live' works without exporting a key.
 
 Examples:
   kitsoki run testdata/apps/cloak/app.yaml
@@ -714,7 +718,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 	}
 
 	cmd.Flags().StringVar(&harnessType, "harness", "",
-		"harness type: claude|live|replay|recording (default: claude if `claude` binary on PATH, else live if ANTHROPIC_API_KEY set, else replay)")
+		"harness type: claude|live|replay|recording (default: claude if `claude` binary on PATH, else live if an Anthropic credential is found, else replay)")
 	cmd.Flags().StringVar(&claudeModel, "claude-model", "",
 		fmt.Sprintf("model passed to claude -p --model (default: %s); use 'opus' for higher quality at higher cost", harness.DefaultClaudeModel))
 	cmd.Flags().StringVar(&recordingPath, "recording", "",
@@ -754,14 +758,15 @@ func setHarnessLogger(h harness.Harness, l *slog.Logger) {
 // autoSelectHarness returns the harness type to use when --harness is not explicitly set.
 //
 // Precedence:
-//  1. `claude` binary on PATH → use ClaudeCLIHarness (no API key needed).
-//  2. ANTHROPIC_API_KEY set   → use LiveHarness (direct SDK).
-//  3. Otherwise               → use "replay" (requires --recording) or error.
+//  1. `claude` binary on PATH    → use ClaudeCLIHarness (no API key needed).
+//  2. Anthropic credential found → use LiveHarness (direct SDK). See
+//     resolveAnthropicCredential for the credential chain.
+//  3. Otherwise                  → use "replay" (requires --recording) or error.
 func autoSelectHarness() string {
 	if _, err := exec.LookPath("claude"); err == nil {
 		return "claude"
 	}
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+	if hasAnthropicCredential() {
 		return "live"
 	}
 	// Fall back to replay; the caller will error if --recording is not set.
@@ -778,7 +783,7 @@ func buildHarness(harnessType, claudeModel, recordingPath, recordPath string, de
 
 	switch harnessType {
 	case "claude":
-		return harness.NewClaudeCLI(def, harness.ClaudeCLIConfig{Model: claudeModel})
+		return harness.NewClaudeCLI(def, harness.ClaudeCLIConfig{Model: claudeModel, Exec: host.RunClaudeOneShotForHarness})
 
 	case "replay":
 		if recordingPath == "" {
@@ -787,11 +792,11 @@ func buildHarness(harnessType, claudeModel, recordingPath, recordPath string, de
 		return harness.NewReplay(recordingPath)
 
 	case "live":
-		apiKey := os.Getenv("ANTHROPIC_API_KEY")
-		if apiKey == "" {
-			return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable is required for --harness live")
+		client, source, err := newLiveClient()
+		if err != nil {
+			return nil, err
 		}
-		client := anthropic.NewClient()
+		slog.Debug("harness/live: credential resolved", "source", source)
 		return harness.NewLive(&client, "", def)
 
 	case "recording":
@@ -807,11 +812,11 @@ func buildHarness(harnessType, claudeModel, recordingPath, recordPath string, de
 			return harness.NewRecording(replay, recordPath)
 		}
 		// Wrap live with recording.
-		apiKey := os.Getenv("ANTHROPIC_API_KEY")
-		if apiKey == "" {
-			return nil, fmt.Errorf("ANTHROPIC_API_KEY required for recording mode without a recording")
+		client, source, err := newLiveClient()
+		if err != nil {
+			return nil, fmt.Errorf("recording mode without a recording requires a live credential: %w", err)
 		}
-		client := anthropic.NewClient()
+		slog.Debug("harness/recording: live credential resolved", "source", source)
 		live, err := harness.NewLive(&client, "", def)
 		if err != nil {
 			return nil, err

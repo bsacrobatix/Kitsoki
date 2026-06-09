@@ -23,18 +23,36 @@ package host
 
 import "context"
 
+// StreamToolUse is one tool_use block from an assistant event: the tool
+// name plus a compact, single-line preview of its arguments (already
+// clipped to ≤120 runes). A single assistant message commonly carries
+// several tool_use blocks (parallel tool calls), so consumers that want
+// to render each tool on its own line MUST iterate StreamEvent.Tools
+// rather than reading the back-compat scalar StreamEvent.Tool (the first
+// tool only).
+type StreamToolUse struct {
+	Name    string
+	Preview string
+}
+
 // StreamEvent is one observable unit from a streaming claude-cli call.
 // Mirrors the shape of the slog "metamode.oracle.event" record so a
 // reader of either signal sees the same payload.
 type StreamEvent struct {
 	Type    string // "system" | "assistant" | "user" | "result" | etc.
 	Subtype string // "init" | "api_retry" | "success" | "" | …
-	Tool    string // tool name for assistant tool_use events
+	Tool    string // FIRST tool name for assistant tool_use events (back-compat; see Tools)
 	// Preview is a compact, single-line peek (≤120 runes) used by the
 	// slog trace and the tool-use breadcrumb (tool args, e.g.
 	// "prompt.md"). It is deliberately clipped — never render it as
-	// narration prose; use Text for that.
+	// narration prose; use Text for that. Mirrors Tools[0].Preview.
 	Preview string
+	// Tools is EVERY tool_use block in this assistant message, in order.
+	// Claude batches parallel tool calls into one assistant event, so an
+	// event can carry multiple tools; rendering only Tool collapses them
+	// into a single line. Tool/Preview remain populated with the first
+	// entry for back-compat. Empty for non-tool events.
+	Tools []StreamToolUse
 	// Text is the FULL assistant narration / "thinking" prose for this
 	// event, untruncated and with newlines preserved. Consumers that
 	// show reasoning to the user (the transcript pane) must render this,

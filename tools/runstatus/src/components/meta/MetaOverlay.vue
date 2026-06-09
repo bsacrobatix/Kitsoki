@@ -56,6 +56,11 @@
             :data-testid="`meta-row-${msg.role === 'user' ? 'user' : 'agent'}`"
           >
             <span class="meta-row__who">{{ msg.role === "user" ? "you" : "agent" }}</span>
+            <div
+              v-for="(tc, ti) in msg.tools ?? []"
+              :key="ti"
+              class="meta-row__tool"
+            >▸ {{ tc.tool }}{{ tc.preview ? ": " + tc.preview : "" }}</div>
             <span class="meta-row__text" v-html="renderText(msg.text)"></span>
           </div>
           <!-- Live streaming bubble — visible while the LLM is responding -->
@@ -116,18 +121,36 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// renderText escapes HTML and applies light inline markdown (bold, code) while
-// preserving newlines — the .meta-row__text CSS uses white-space: pre-wrap so
-// joined \n renders as a visible line break.
+// renderText escapes HTML and applies light markdown rendering:
+//   - fenced code blocks (```lang\n...\n```) → <pre><code>
+//   - inline code (`...`) → <code>
+//   - bold (**...**) → <strong>
+// Newlines are preserved via white-space: pre-wrap on .meta-row__text.
 function renderText(src: string): string {
-  return escapeHtml(src ?? "")
-    .split("\n")
-    .map((line) =>
-      line
-        .replace(/`([^`]+)`/g, "<code>$1</code>")
-        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    )
-    .join("\n");
+  const text = src ?? "";
+  // Split into fenced-block segments and plain segments. Process alternately.
+  const parts = text.split(/(```[^\n]*\n[\s\S]*?```)/g);
+  return parts
+    .map((part, idx) => {
+      if (idx % 2 === 1) {
+        // Fenced code block: extract optional lang and body.
+        const match = part.match(/^```([^\n]*)\n([\s\S]*?)```$/);
+        const body = match ? match[2] : part.slice(3, -3);
+        const lang = match?.[1]?.trim() ?? "";
+        const langAttr = lang ? ` class="language-${escapeHtml(lang)}"` : "";
+        return `<pre class="meta-pre"><code${langAttr}>${escapeHtml(body)}</code></pre>`;
+      }
+      // Plain text: per-line inline markdown.
+      return escapeHtml(part)
+        .split("\n")
+        .map((line) =>
+          line
+            .replace(/`([^`]+)`/g, "<code>$1</code>")
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        )
+        .join("\n");
+    })
+    .join("");
 }
 
 const meta = useMetaStore();
@@ -342,6 +365,22 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   font-family: monospace;
   padding: 0.15rem 0.65rem;
   opacity: 0.85;
+}
+
+:deep(.meta-pre) {
+  background: #0a1422;
+  border: 1px solid #1e3a5f;
+  border-radius: 5px;
+  padding: 0.5rem 0.7rem;
+  margin: 0.3rem 0;
+  overflow-x: auto;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre;
+}
+:deep(.meta-pre code) {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  color: #93c5fd;
 }
 
 .meta-overlay__note {

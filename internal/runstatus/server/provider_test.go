@@ -81,6 +81,12 @@ func (p *stubProvider) Reload(ctx context.Context, sessionID string) (bool, erro
 	return p.reloadFn(ctx, sessionID)
 }
 
+// Staleness reports the session is never stale — no test exercises the
+// on-disk app.yaml drift check, so the stub is a no-op.
+func (p *stubProvider) Staleness(context.Context, string) (bool, string, error) {
+	return false, "", nil
+}
+
 func (p *stubProvider) ListStories() []server.StoryHeader {
 	p.mu.Lock()
 	defer p.mu.Unlock()
