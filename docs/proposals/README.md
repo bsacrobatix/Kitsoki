@@ -255,6 +255,20 @@ thought.
   group** via the shipped `visual-outputs` media seam (`host.contact_sheet` /
   `host.slidey.render` → `media` element). `done` is a before/after gallery.
   Composes existing hosts only. Nothing implemented yet.
+- [`story-editor-view.md`](story-editor-view.md) — **epic.** A story
+  editor surface in `kitsoki web`: rooms ordered by BFS distance from the
+  entry point, each showing its hook + domain model + typed view; meta chat
+  in the left column; an oracle workbench for cassette browsing and isolated
+  oracle replay; a reusable story viewer component. Nothing implemented yet;
+  decomposed into three slices:
+  - [`story-graph-api.md`](story-graph-api.md) (runtime) — read-only
+    backend: BFS room ordering, oracle contract extraction, cassette
+    discovery endpoints.
+  - [`story-editor-shell.md`](story-editor-shell.md) (tui) — room list +
+    hook / domain-model display + meta chat integration + IDE deep-link.
+  - [`oracle-workbench.md`](oracle-workbench.md) (tui) — cassette browser,
+    oracle contract display, isolated replay, and the reusable
+    `StoryViewer.vue` component.
 - [`work-decomposition.md`](work-decomposition.md) — **story.** A new
   `stories/decompose/` sub-story imported into dev-story: hand it an accepted
   proposal (or epic + children) and an interactive discovery conversation
