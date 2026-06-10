@@ -16,15 +16,24 @@ package host_test
 // orchestrator injects the plugin name into context only in that case). With no
 // explicit plugin, TryDispatchVerb falls through (handled=false) so the caller
 // runs its legacy in-process handler unchanged.
+//
+// Also covers: schema path → content resolution (oracle_decide.go). The plugin
+// path must load the schema file and pass its content (not the path string) to
+// TryDispatchVerb so that ValidateSubmission can compile and apply it.
 
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/host"
 	"kitsoki/internal/oracle"
+	"kitsoki/internal/store"
 )
 
 func compatCtx(t *testing.T) context.Context {
@@ -74,5 +83,101 @@ func TestTryDispatchVerb_ExplicitPlugin_Dispatches(t *testing.T) {
 	}
 	if _, ok := res.Data["submission"]; !ok {
 		t.Fatalf("dispatch result must carry submission key; got keys %v", res.Data)
+	}
+}
+
+// TestOracleDecideHandler_PluginPath_SchemaFileResolved is the regression test
+// for the bug where oracle_decide passed the schema as a JSON path string to the
+// plugin dispatch path instead of loading the schema content. This caused
+// ValidateSubmission to fail with "schema compilation failed" (a JSON Schema must
+// be an object or boolean, not a string) even when the oracle returned a valid
+// submission. The fix reads the schema file and passes its content.
+//
+// Test rigor: the fake local-LLM server returns a code-fenced submission (the
+// exact failure mode from dogfood: Qwen2.5-1.5b wraps its JSON in ```json…```).
+// Without the schema-resolution fix (and without stripCodeFence) both the
+// primary oracle AND the claude fallback fail at ValidateSubmission, so the
+// handler returns an error. With both fixes the handler returns the valid
+// submission — proving the schema file is read and the fence is stripped.
+func TestOracleDecideHandler_PluginPath_SchemaFileResolved(t *testing.T) {
+	t.Parallel()
+
+	// Minimal schema: requires a "slug" string field.
+	schemaContent := `{"type":"object","properties":{"slug":{"type":"string"}},"required":["slug"]}`
+
+	dir := t.TempDir()
+	schemaPath := filepath.Join(dir, "slug.json")
+	if err := os.WriteFile(schemaPath, []byte(schemaContent), 0o644); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+	promptPath := filepath.Join(dir, "prompt.md")
+	if err := os.WriteFile(promptPath, []byte("Name this proposal."), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	// Fake llama-server: returns the valid submission wrapped in a code fence —
+	// the exact output shape that caused the dogfood regression.
+	fenced := "```json\n{\"slug\":\"virtual-pets\"}\n```"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{"role": "assistant", "content": fenced}}},
+			"usage":   map[string]any{"prompt_tokens": 20, "completion_tokens": 8},
+		})
+	}))
+	defer srv.Close()
+
+	localLLM := oracle.NewLocalLLM("qwen2.5-1.5b", 0, "", false, srv.URL, nil)
+	defer localLLM.Close()
+
+	reg := oracle.NewRegistry()
+	reg.Register("oracle.local_llm", localLLM)
+	// oracle.claude fallback is NOT needed here since stripCodeFence + schema
+	// resolution means the primary call succeeds.
+	reg.Register("oracle.claude", oracle.New(oracle.AskFunc(func(_ context.Context, _ oracle.AskRequest) (oracle.AskResponse, error) {
+		t.Error("oracle.claude fallback must NOT be called when the primary local-LLM call succeeds after code-fence stripping")
+		return oracle.AskResponse{}, nil
+	})))
+
+	sink := &captureSink{}
+	ctx := host.WithOracleRegistry(context.Background(), reg)
+	ctx = host.WithOracleEventSink(ctx, sink)
+	ctx = host.WithOracleCallCtx(ctx, host.OracleCallCtx{
+		SessionID: app.SessionID("sess-schema-res"),
+		Turn:      app.TurnNumber(1),
+		StatePath: app.StatePath("proposal.intake"),
+	})
+	ctx = host.WithOraclePluginName(ctx, "oracle.local_llm")
+
+	res, err := host.OracleDecideHandler(ctx, map[string]any{
+		"prompt_path": promptPath,
+		"schema":      schemaPath,
+		"oracle":      "oracle.local_llm",
+	})
+	if err != nil {
+		t.Fatalf("OracleDecideHandler: unexpected Go error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("OracleDecideHandler returned error: %s", res.Error)
+	}
+
+	// The submission must be the stripped JSON, not the fenced version.
+	sub, _ := res.Data["submission"].(map[string]any)
+	if sub == nil {
+		t.Fatalf("submission is nil; data: %v", res.Data)
+	}
+	if sub["slug"] != "virtual-pets" {
+		t.Errorf("slug: got %v, want \"virtual-pets\"", sub["slug"])
+	}
+
+	// Exactly one OracleCalled + one OracleReturned; no OracleError.
+	kinds := make([]store.EventKind, len(sink.events))
+	for i, e := range sink.events {
+		kinds[i] = e.Kind
+	}
+	for _, k := range kinds {
+		if k == store.OracleError {
+			t.Error("OracleError must NOT be written when the primary call succeeds")
+		}
 	}
 }

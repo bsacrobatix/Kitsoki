@@ -112,7 +112,14 @@ func OracleDecideHandler(ctx context.Context, args map[string]any) (Result, erro
 	withArgs, _ := args["with"].(map[string]any)
 	var pluginSchemaJSON json.RawMessage
 	if strings.TrimSpace(schemaArg) != "" {
-		pluginSchemaJSON = json.RawMessage(`"` + strings.TrimSpace(schemaArg) + `"`)
+		// Resolve the schema to its actual content so the plugin can use it for
+		// grammar constraints and ValidateSubmission can compile it. Passing a
+		// path string is not valid JSON Schema (causes "schema compilation failed").
+		if schemaBytes, readErr := os.ReadFile(strings.TrimSpace(schemaArg)); readErr == nil {
+			pluginSchemaJSON = json.RawMessage(schemaBytes)
+		} else {
+			pluginSchemaJSON = json.RawMessage(`"` + strings.TrimSpace(schemaArg) + `"`)
+		}
 	}
 	if pluginRes, handled, pluginErr := TryDispatchVerb(ctx, "decide", rendered, "", agentNameFromArgs(args), "", withArgs, pluginSchemaJSON); handled {
 		if pluginErr != nil {
