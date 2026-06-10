@@ -244,6 +244,17 @@ thought.
   - [`view-proofing-tooling.md`](view-proofing-tooling.md) (tui) —
     `kitsoki view` + lint catalog + cross-env golden/property tests +
     authoring-skill wiring.
+- [`ui-fix-story.md`](ui-fix-story.md) — **story.** A new `stories/ui-fix/`
+  review→per-group fix pipeline over the `kitsoki-ui-review` skill's
+  `verdict.json`: a deterministic dedup (`host.starlark.run`) feeds an
+  interpretive **pattern-review** gate (`host.oracle.decide` clusters 371
+  findings into ranked root-cause **groups** — never blind iteration), then a
+  loop fixes **one group per agent instance** (`host.oracle.task` scoped to
+  `tools/runstatus/src/`) with a human diff checkpoint, a no-LLM geometry+axe
+  re-audit proving it cleared, and a **before/after slideshow/video per
+  group** via the shipped `visual-outputs` media seam (`host.contact_sheet` /
+  `host.slidey.render` → `media` element). `done` is a before/after gallery.
+  Composes existing hosts only. Nothing implemented yet.
 - [`work-decomposition.md`](work-decomposition.md) — **story.** A new
   `stories/decompose/` sub-story imported into dev-story: hand it an accepted
   proposal (or epic + children) and an interactive discovery conversation
