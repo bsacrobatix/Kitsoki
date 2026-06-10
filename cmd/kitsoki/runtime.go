@@ -129,6 +129,13 @@ type runtimeBase struct {
 	// calls. A Playwright demo drives the live web UI with no LLM through this.
 	Flow         *testrunner.FlowFixture
 	FlowFilePath string
+
+	// DefaultActor is the operator identity the web server records as
+	// slots.author on a browser-driven turn when no header / actor param
+	// supplies one (see server.WithDefaultActor). Empty = none configured;
+	// the registry fails a session start fast if a story enforces an author
+	// ACL guard but no identity is configured.
+	DefaultActor string
 }
 
 // config materialises a per-session runtimeConfig for the story at storyPath

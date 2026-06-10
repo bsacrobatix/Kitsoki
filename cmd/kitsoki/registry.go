@@ -22,6 +22,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,6 +57,7 @@ import (
 type entry struct {
 	StoryPath     string
 	Def           *app.AppDef
+	externalKey   string // transport:thread for store-attached sessions; "" for fresh ones
 	loadedContent []byte // raw app.yaml bytes at last load/reload, for staleness check
 	rt            *sessionRuntime
 	sid           app.SessionID
@@ -142,6 +144,14 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 		return "", err
 	}
 
+	// Fail fast (never silently no-op a guarded turn): if the story gates a turn
+	// on an author ACL but the server was started with no configured operator
+	// identity, a browser-driven `continue` would record the anonymous fallback
+	// and the guard would reject it. Surface that at session start instead.
+	if err := r.checkAuthorIdentity(def); err != nil {
+		return "", err
+	}
+
 	rt, err := buildSessionRuntime(r.base.config(abs, def))
 	if err != nil {
 		return "", err
@@ -208,8 +218,8 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 		rt:            rt,
 		sid:           sid,
 		source:        live,
-		driver:    server.OrchestratorDriver{Orch: orch, SID: sid},
-		sink:      sink,
+		driver:        server.OrchestratorDriver{Orch: orch, SID: sid},
+		sink:          sink,
 	}
 
 	r.mu.Lock()
@@ -219,6 +229,181 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 	ok = true
 	sinkOK = true
 	return id, nil
+}
+
+// AttachExternal implements [server.ExternalAttachProvider]: it binds a live web
+// session to a session in the PERSISTED store addressed by an external key
+// (`transport:thread`). If a session is already bound to that key it attaches to
+// it (the browser co-drives the same session a `kitsoki session continue` /
+// loop.py process drives); otherwise it creates a session and binds the key. The
+// returned session is driven under the per-session writer lock, so concurrent
+// drivers (browser, inbound bridge, a separate continue process) serialise
+// rather than interleave — a loser gets store.ErrSessionBusy (EX_TEMPFAIL) and
+// retries, never a corrupted journey.
+//
+// Live SSE reflects turns this process drives. A turn another process commits is
+// visible after a session reload (it is read from the shared store), not pushed
+// over SSE — the exclusive trace-file flock means two processes cannot share one
+// live trace stream. That cross-process live-stream is the remaining engine work
+// noted in docs/architecture/transports.md.
+func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key string) (string, error) {
+	abs, err := filepath.Abs(storyPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve story path %q: %w", storyPath, err)
+	}
+	transportID, thread, err := parseExternalKey(key)
+	if err != nil {
+		return "", err
+	}
+
+	// Attaching the same external key twice in one process must return the live
+	// session already bound to it, not open a second trace sink (the trace file
+	// flock is exclusive — a second open would fail) and not split one ticket
+	// across two in-process sessions.
+	if id, found := r.liveByExternalKey(key); found {
+		return id, nil
+	}
+
+	def, err := loadAppWithEnv(abs)
+	if err != nil {
+		return "", err
+	}
+	if err := r.checkAuthorIdentity(def); err != nil {
+		return "", err
+	}
+
+	rt, err := buildSessionRuntime(r.base.config(abs, def))
+	if err != nil {
+		return "", err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			rt.Close()
+		}
+	}()
+
+	orch := rt.Orch
+
+	// Resolve the external key to a persisted session, or create+bind one. Both
+	// the lookup and the create run against the shared store the persisted
+	// drivers use.
+	sid, lookErr := rt.Store.LookupByKey(ctx, transportID, thread)
+	created := false
+	switch {
+	case lookErr == nil:
+		// Attach to the existing persisted session — nothing to create.
+	case errors.Is(lookErr, store.ErrSessionNotFound):
+		sid, err = orch.NewSession(ctx)
+		if err != nil {
+			return "", fmt.Errorf("create session: %w", err)
+		}
+		if err := rt.Store.BindExternalKey(ctx, sid, transportID, thread); err != nil {
+			return "", fmt.Errorf("bind external key %q: %w", key, err)
+		}
+		created = true
+	default:
+		return "", fmt.Errorf("lookup external key %q: %w", key, lookErr)
+	}
+
+	// Open a live trace over the deterministic per-(app,transport,thread) path so
+	// any history a prior in-process run wrote is loaded and the browser sees it.
+	tracePath := store.DefaultTracePath(def.App.ID, transportID, thread)
+	if mkErr := os.MkdirAll(filepath.Dir(tracePath), 0o755); mkErr != nil {
+		return "", fmt.Errorf("create trace directory: %w", mkErr)
+	}
+	sink, err := store.OpenJSONL(tracePath)
+	if err != nil {
+		return "", fmt.Errorf("open trace sink: %w", err)
+	}
+	sinkOK := false
+	defer func() {
+		if !sinkOK {
+			_ = sink.Close()
+		}
+	}()
+
+	live := server.NewLiveSession(sink, def, string(sid), string(orch.InitialState()))
+	orch.SetEventSink(live)
+	if rt.DeferredOracleSink != nil {
+		rt.DeferredOracleSink.SetSink(live)
+	}
+
+	if err := orch.RecordEffectiveStory(ctx, sid); err != nil {
+		return "", fmt.Errorf("record effective story: %w", err)
+	}
+	// Fire the initial on_enter only for a freshly-created session; an existing
+	// persisted session is already past its initial frame and re-firing would
+	// re-run on_enter effects against a mid-flight world.
+	if created {
+		if err := orch.RunInitialOnEnter(ctx, sid); err != nil {
+			return "", fmt.Errorf("run initial on_enter: %w", err)
+		}
+	}
+
+	rawContent, _ := os.ReadFile(abs)
+
+	// The driver advances the session under the store's per-session writer lock,
+	// so co-driving (browser + bridge + a continue process) serialises.
+	lockedSID := sid
+	lock := func(lctx context.Context, fn func() error) error {
+		return rt.Store.WithWriterLock(lctx, lockedSID, fn)
+	}
+	driver := server.NewLockingDriver(server.OrchestratorDriver{Orch: orch, SID: sid}, lock)
+
+	id := uuid.NewString()
+	e := &entry{
+		StoryPath:     abs,
+		Def:           def,
+		externalKey:   key,
+		loadedContent: rawContent,
+		rt:            rt,
+		sid:           sid,
+		source:        live,
+		driver:        driver,
+		sink:          sink,
+	}
+
+	r.mu.Lock()
+	r.sessions[id] = e
+	r.mu.Unlock()
+
+	ok = true
+	sinkOK = true
+	return id, nil
+}
+
+// liveByExternalKey returns the id of a live session already bound to key, if
+// any. Used so a re-attach to the same ticket reuses the live session.
+func (r *SessionRegistry) liveByExternalKey(key string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, e := range r.sessions {
+		if e.externalKey == key {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// checkAuthorIdentity enforces the operator-identity invariant: a story that
+// reads an author ACL key in a guard (today none ship one — stories/bugfix
+// declares `allowed_authors` but never reads it) requires a configured server
+// identity, because a browser turn with no identity would record the anonymous
+// fallback and bounce off the guard with no operator-facing reason. The
+// per-request X-Kitsoki-Actor header / actor RPC param are NOT "configured" —
+// they are optional and may be absent on any turn — so the only thing that
+// satisfies the invariant at start time is a server-level default actor.
+func (r *SessionRegistry) checkAuthorIdentity(def *app.AppDef) error {
+	if r.base.DefaultActor != "" {
+		return nil
+	}
+	if def.ReadsWorldKeyInGuard("allowed_authors") {
+		return fmt.Errorf(
+			"story %q gates a turn on the author ACL key 'allowed_authors' but the web server has no configured operator identity; start with --actor <name> so browser-driven turns record a real principal",
+			storyTitle(def))
+	}
+	return nil
 }
 
 // Get resolves a live session id to the server.Entry the server routes against.
@@ -568,7 +753,8 @@ func (r *SessionRegistry) ensureSelfMetaLocked() error {
 
 // Compile-time assertions that SessionRegistry satisfies the provider seams.
 var (
-	_ server.SessionProvider  = (*SessionRegistry)(nil)
-	_ server.MetaSelfProvider = (*SessionRegistry)(nil)
-	_ server.EditorProvider   = (*SessionRegistry)(nil)
+	_ server.SessionProvider        = (*SessionRegistry)(nil)
+	_ server.MetaSelfProvider       = (*SessionRegistry)(nil)
+	_ server.EditorProvider         = (*SessionRegistry)(nil)
+	_ server.ExternalAttachProvider = (*SessionRegistry)(nil)
 )

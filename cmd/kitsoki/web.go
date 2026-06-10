@@ -54,6 +54,7 @@ func webCmd() *cobra.Command {
 		hostCassette  string
 		configPath    string
 		storyDirs     []string
+		actor         string
 	)
 
 	cmd := &cobra.Command{
@@ -168,6 +169,7 @@ authentication.`,
 				RecordPath:    recordPath,
 				Flow:          fixture,
 				FlowFilePath:  flowFilePath,
+				DefaultActor:  actor,
 			}
 
 			// ── Registry + initial story catalogue ──────────────────────────
@@ -179,7 +181,7 @@ authentication.`,
 			}
 
 			// ── Serve (session-routing) ──────────────────────────────────────
-			srv := server.NewMulti(registry)
+			srv := server.NewMulti(registry, server.WithDefaultActor(actor))
 			httpSrv := &http.Server{
 				Addr:    addr,
 				Handler: srv.Handler(),
@@ -221,6 +223,7 @@ authentication.`,
 	cmd.Flags().StringVar(&execModeFlag, "mode", "staged", "execution mode: staged | one-shot")
 	cmd.Flags().StringVar(&flowPath, "flow", "", "drive every session deterministically from a flow fixture (no LLM; host_handlers stub host.* calls, intents are submitted explicitly)")
 	cmd.Flags().StringVar(&hostCassette, "host-cassette", "", "host cassette file backing host.* calls (deterministic, no LLM); combinable with --flow")
+	cmd.Flags().StringVar(&actor, "actor", "", "operator identity recorded on browser-driven turns as slots.author (default: none; the X-Kitsoki-Actor header and an explicit actor RPC param override it)")
 
 	return cmd
 }
