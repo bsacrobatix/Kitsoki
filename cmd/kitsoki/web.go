@@ -46,6 +46,7 @@ func webCmd() *cobra.Command {
 		addr          string
 		harnessType   string
 		claudeModel   string
+		oracleBackend string
 		recordingPath string
 		recordPath    string
 		dbPath        string
@@ -165,6 +166,7 @@ authentication.`,
 				ExecMode:      execMode,
 				HarnessType:   harnessType,
 				ClaudeModel:   claudeModel,
+				OracleBackend: resolveOracleBackend(oracleBackend),
 				RecordingPath: recordingPath,
 				RecordPath:    recordPath,
 				Flow:          fixture,
@@ -217,6 +219,7 @@ authentication.`,
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:7777", "HTTP listen address")
 	cmd.Flags().StringVar(&harnessType, "harness", "", "harness: claude | live | replay | recording (default: auto-select; ignored with --flow)")
 	cmd.Flags().StringVar(&claudeModel, "claude-model", "", "claude model when --harness=claude (e.g. opus, sonnet)")
+	cmd.Flags().StringVar(&oracleBackend, "oracle", "", "coding-agent CLI backend for host.oracle.* calls: claude|copilot (default: claude, or $KITSOKI_ORACLE)")
 	cmd.Flags().StringVar(&recordingPath, "recording", "", "path to recording YAML (for --harness replay)")
 	cmd.Flags().StringVar(&recordPath, "record", "", "path to output JSONL recording (for --harness recording)")
 	cmd.Flags().StringVar(&dbPath, "db", "", "SQLite session store path (default: nearest .kitsoki/sessions.db)")
