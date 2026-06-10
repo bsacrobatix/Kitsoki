@@ -58,6 +58,14 @@ routing:
   embedding:
     model: "nomic-embed-text-v1.5"
 
+# oracle_plugins must be declared at the instance level — they are NOT inherited
+# from imported children. Mirrors the declaration in dev-story/app.yaml.
+oracle_plugins:
+  oracle.local_llm:
+    plugin: builtin.local_llm
+    model: qwen2.5-1.5b-instruct
+    grammar: true
+
 # Host allow-list (proposal §9). With `hosts: declared` on the import,
 # every host the child subtree may invoke must appear here. Five
 # iface defaults (ticket / vcs / ci / workspace / transport) are
