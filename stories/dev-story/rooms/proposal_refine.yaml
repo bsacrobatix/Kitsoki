@@ -55,15 +55,19 @@ states:
             Brief:  '{{ world.proposal_brief_path|default:"(scaffolding…)" }}'
             Cycle:  '{{ world.proposal_brief_cycle }}'
         when: "world.proposal_change_target == ''"
-      - prose: '{{ world.proposal_refine_analysis.summary|default:"(refiner running…)" }}'
+      - kv:
+          pairs:
+            Refiner: '{{ world.proposal_refine_analysis.summary|default:"(refiner running…)" }}'
         when: "world.proposal_brief_path != ''"
-      - prose: "⚠ Judge result: {{ world.proposal_brief_decision.verdict }} — {{ world.proposal_brief_decision.reason }}"
+      - kv:
+          pairs:
+            Judge: '{{ world.proposal_brief_decision.verdict }} — {{ world.proposal_brief_decision.reason }}'
         when: "world.proposal_brief_decision.verdict != '' ?? false"
       - code: |
           {% for q in world.proposal_brief_decision.questions %}- {{ q }}
           {% empty %}{% endfor %}
         when: "world.proposal_brief_decision.verdict == 'clarify' ?? false"
-      - prose: "Edit the brief at `{{ world.proposal_brief_path }}`, talk through changes here, or say **ready** when it's good."
+      - prose: "Type feedback below to have the refiner update the brief, or open it directly in your editor. Say **ready** when it's good enough to check."
       - choice:
           mode: single
           prompt: "Actions"
@@ -71,8 +75,13 @@ states:
             - label:  "ready"
               hint:   "run the brief quality check"
               intent: ready
-            - label:  "clarify"
-              hint:   "step back to intake — the idea needs rethinking"
+            - label:  "refine"
+              hint:   "re-run the refiner on the current brief as saved in your editor"
+              intent: discuss
+              slots:
+                message: ""
+            - label:  "back to intake"
+              hint:   "abandon this brief and rethink the idea from scratch"
               intent: clarify
             - label:  "quit"
               hint:   "abandon this proposal"
@@ -86,11 +95,33 @@ states:
       - invoke: host.artifacts_dir
         once: true
         with:
-          thread:   "001-brief"
-          workdir:  "{{ world.proposal_workspace }}"
-          args:
-            idea:       "{{ world.proposal_idea }}"
-            references: "{{ world.proposal_references }}"
+          thread:         "001-brief"
+          artifacts_root: "{{ world.proposal_workspace }}"
+          mode:           "replace"
+          body: |
+            # {{ world.proposal_idea }}
+
+            **Status:** Draft — in progress
+
+            ## Why
+
+            <…>
+
+            ## What changes
+
+            <…>
+
+            ## Impact
+
+            <…>
+
+            ## Why kitsoki
+
+            <…>
+
+            ## How it's used
+
+            <…>
         bind:
           proposal_brief_path: path
         on_error: proposal_search
@@ -135,9 +166,30 @@ states:
         emit_intent: "{{ world.proposal_brief_decision.verdict == 'continue' ? 'advance_brief' : '' }}"
         on_error: .
     on:
-      # Fold a conversational message into the brief (multi-turn shaping).
+      # Fold a conversational message into the brief.
+      # Re-runs the refiner with the operator's message so it updates the brief.
       discuss:
         - target: .
+          effects:
+            - invoke: host.oracle.task
+              id: refine_brief_update
+              with:
+                agent: proposal_refiner
+                working_dir: "{{ world.proposal_workspace }}"
+                acceptance:
+                  schema: schemas/brief-refine.json
+                context:
+                  prompt: prompts/proposal_refine.md
+                  args:
+                    idea:           "{{ world.proposal_idea }}"
+                    brief_path:     "{{ world.proposal_brief_path }}"
+                    existing_state: "{{ world.proposal_existing_state }}"
+                    references:     "{{ world.proposal_references }}"
+                    change_target:  "{{ world.proposal_change_target }}"
+                    message:        "{{ slots.message }}"
+              bind:
+                proposal_refine_analysis: submitted
+              on_error: .
 
       # Arm the judge: increment cycle and re-enter so on_enter fires the judge.
       ready:

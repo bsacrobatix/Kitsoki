@@ -29,7 +29,7 @@ states:
           text:     "INTAKE"
           subtitle: "Describe your idea — search runs next"
           color:    "#10B981"
-      - template: "⚠ **Something went wrong** — the pipeline hit an error and reset. Try again below."
+      - template: "⚠ **Something went wrong** — the slug-naming step failed. Send your idea again{{ world.proposal_idea != '' ? ': **' + world.proposal_idea + '**' : '' }}."
         when: "world.last_error != ''"
       - prose: 'Seeded from your ideas backlog: **{{ world.proposal_seed_idea }}** — describe or expand it to start the search.'
         when: "world.proposal_seed_idea != ''"

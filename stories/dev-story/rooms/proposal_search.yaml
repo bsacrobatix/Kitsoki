@@ -75,26 +75,28 @@ states:
             # Each item is shown only when the corresponding overlap exists.
             # Labels and slots are pongo-expanded at render time; the when:
             # guard fires before expansion so index access is always safe.
-            - label:  "{{ world.proposal_existing_state.overlaps.0.path }}"
-              hint:   "{{ world.proposal_existing_state.overlaps.0.recommendation|upper }} — amend this existing draft"
+            # Labels are short human text (Recommendation: summary excerpt);
+            # the full path lives in the hint so the button doesn't overflow.
+            - label:  "{{ world.proposal_existing_state.overlaps.0.recommendation }} (recommended)"
+              hint:   "{{ world.proposal_existing_state.overlaps.0.path }}"
               intent: change_existing
               when: "len(world.proposal_existing_state.overlaps ?? []) >= 1"
               slots:
                 target: "{{ world.proposal_existing_state.overlaps.0.path }}"
-            - label:  "{{ world.proposal_existing_state.overlaps.1.path }}"
-              hint:   "{{ world.proposal_existing_state.overlaps.1.recommendation|upper }} — amend this existing draft"
+            - label:  "{{ world.proposal_existing_state.overlaps.1.recommendation }} (2)"
+              hint:   "{{ world.proposal_existing_state.overlaps.1.path }}"
               intent: change_existing
               when: "len(world.proposal_existing_state.overlaps ?? []) >= 2"
               slots:
                 target: "{{ world.proposal_existing_state.overlaps.1.path }}"
-            - label:  "{{ world.proposal_existing_state.overlaps.2.path }}"
-              hint:   "{{ world.proposal_existing_state.overlaps.2.recommendation|upper }} — amend this existing draft"
+            - label:  "{{ world.proposal_existing_state.overlaps.2.recommendation }} (3)"
+              hint:   "{{ world.proposal_existing_state.overlaps.2.path }}"
               intent: change_existing
               when: "len(world.proposal_existing_state.overlaps ?? []) >= 3"
               slots:
                 target: "{{ world.proposal_existing_state.overlaps.2.path }}"
             # Fallback for the rare case of more than 3 overlaps.
-            - label:  "change_existing (specify path)"
+            - label:  "amend existing…"
               hint:   "more than 3 overlaps — enter the path of the draft to amend"
               intent: change_existing
               when: "len(world.proposal_existing_state.overlaps ?? []) > 3"
