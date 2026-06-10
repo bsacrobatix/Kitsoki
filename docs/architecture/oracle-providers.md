@@ -7,6 +7,11 @@
 > the [oracle plugin](./oracle-plugin.md) mechanism: plugins choose *which
 > component answers*; providers choose *which backend the claude component
 > talks to*.
+>
+> It is also orthogonal to the [oracle **backend**](./oracle-backends.md)
+> switch (`--oracle claude|copilot`): the backend chooses *which coding-agent
+> CLI* kitsoki forks (`claude` vs GitHub `copilot`); a provider retargets the
+> endpoint of the `claude` CLI specifically and is a no-op under copilot.
 
 Kitsoki's default oracle verbs (`host.oracle.{decide,ask,task,extract,converse,ask_with_mcp}`)
 fork the local `claude` binary, which talks to whatever backend the ambient
