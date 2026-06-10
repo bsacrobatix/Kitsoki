@@ -72,6 +72,10 @@ states:
           mode: single
           prompt: "Actions"
           items:
+            - label:  "advance to draft"
+              hint:   "brief approved — proceed to writing the proposal"
+              intent: advance_brief
+              when: "world.proposal_brief_decision.verdict == 'continue' ?? false"
             - label:  "ready"
               hint:   "run the brief quality check"
               intent: ready
