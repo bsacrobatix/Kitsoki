@@ -34,7 +34,10 @@ import { startWebServer, repoRoot, PACE, type WebServer } from "./_helpers/serve
 import { TOUR_STEPS } from "../../src/tour/manifest.js";
 import { geometryProbe, type RawFinding, type Severity } from "./lib/ui-audit.js";
 
-const ADDR = "127.0.0.1:7746";
+// A distinct port per viewport — reusing one port across the three sequential
+// servers races on bind/teardown and a fetch to a not-yet-released server can
+// hang the whole run.
+const PORT_BASE = 7746;
 const STORY_DIR = path.join(repoRoot, "stories", "oregon-trail");
 const FLOW = path.join(STORY_DIR, "flows", "winning_deterministic.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "ui-review");
@@ -67,6 +70,10 @@ interface TaggedFinding extends RawFinding {
   viewport: string;
   frame: string;
   source: "geometry" | "a11y";
+  // axe-only extras (the rich node data the report shows for a11y findings):
+  target?: string; // the failing node's CSS selector(s) from axe
+  failureSummary?: string; // axe's "Fix any of the following" guidance
+  helpUrl?: string; // deque rule doc
 }
 
 interface StepCapture {
@@ -74,6 +81,9 @@ interface StepCapture {
   title: string;
   route: string;
   viewport: string;
+  width: number; // viewport size at capture — part of the reproduction recipe
+  height: number;
+  url: string; // the live hash route the frame was taken at
   frame: string;
   captured: boolean;
   note?: string;
@@ -88,10 +98,12 @@ test.beforeAll(async () => {
   fs.mkdirSync(FRAMES_DIR, { recursive: true });
 });
 
-// A fixed settle so the page is laid-out before we audit it — INDEPENDENT of
-// WEB_CHAT_PACE (which only scales watch-speed dwell in the video specs). The
-// capture needs a settled DOM, not a slow one.
-const SETTLE = 400;
+// A fixed settle so the page is laid-out AND the tour overlay has anchored its
+// popover to the current step before we audit + advance — INDEPENDENT of
+// WEB_CHAT_PACE. Too small and the overlay's own watchdog races us and
+// auto-skips steps; ~0.9s is the sweet spot (reliable, still far faster than the
+// watch-speed video).
+const SETTLE = 900;
 
 function dwell(page: Page, ms: number): Promise<void> {
   return page.waitForTimeout(Math.round(ms * PACE));
@@ -157,7 +169,17 @@ async function auditStep(
   const n = String(idx).padStart(2, "0");
   const frame = `${n}-${label}@${vp.name}.png`;
   await page.screenshot({ path: path.join(FRAMES_DIR, frame) });
-  captures.push({ step: label, title: label, route, viewport: vp.name, frame, captured: true });
+  captures.push({
+    step: label,
+    title: label,
+    route,
+    viewport: vp.name,
+    width: vp.width,
+    height: vp.height,
+    url: page.url(),
+    frame,
+    captured: true,
+  });
 
   const geo = await page.evaluate(geometryProbe);
   for (const f of geo) {
@@ -173,13 +195,20 @@ async function auditStep(
         .analyze();
       for (const v of results.violations) {
         const node = v.nodes[0];
+        const sel = node?.target?.join(" ") || "";
         findings.push({
           check: `a11y:${v.id}`,
           severity: axeSeverity(v.impact),
-          selector: node?.target?.join(" ") || "",
+          selector: sel,
+          path: sel,
+          html: (node?.html || "").replace(/\s+/g, " ").trim().slice(0, 300),
+          styles: {},
+          rect: { x: 0, y: 0, w: 0, h: 0 },
           text: (node?.html || "").replace(/\s+/g, " ").trim().slice(0, 80),
           detail: v.help,
-          rect: { x: 0, y: 0, w: 0, h: 0 },
+          target: sel,
+          failureSummary: (node?.failureSummary || "").replace(/\s+/g, " ").trim(),
+          helpUrl: v.helpUrl,
           step: label,
           viewport: vp.name,
           frame,
@@ -205,6 +234,14 @@ async function walk(page: Page, vp: Viewport): Promise<void> {
   // Best-effort: a fresh server has no sessions so home renders, but tolerate a
   // redirect just in case — the tour is force-started regardless of route.
   await page.getByTestId("home-view").waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
+  // The tour's first real anchors are the story cards; if the home raced the
+  // initial scan and shows none, Rescan and wait so the tour has something to
+  // point at (otherwise it skips straight past the catalogue steps).
+  const hasCard = await page.getByTestId("story-card").first().isVisible().catch(() => false);
+  if (!hasCard) {
+    await page.getByTestId("rescan-btn").click({ timeout: 4000 }).catch(() => {});
+    await page.getByTestId("story-card").first().waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
+  }
   await page.evaluate(() => {
     (window as unknown as { __startTour?: () => void }).__startTour?.();
   });
@@ -218,6 +255,9 @@ async function walk(page: Page, vp: Viewport): Promise<void> {
       check: "tour-stalled",
       severity: "warn",
       selector: "tour-overlay",
+      path: "",
+      html: "",
+      styles: {},
       text: "tour did not start",
       detail: `the tour overlay never appeared at ${vp.name} (${vp.width}px)`,
       rect: { x: 0, y: 0, w: 0, h: 0 },
@@ -294,12 +334,16 @@ async function walk(page: Page, vp: Viewport): Promise<void> {
       // The tour could not leave this step via a real interaction. For an action
       // step that almost always means its highlighted control was not clickable
       // from here (commonly: the popover occludes the very control it spotlights).
-      // Record it as a finding — then FORCE past it with a direct DOM click so we
-      // still capture the surfaces beyond the stall (the review wants them too).
+      // Record it as a finding and stop this viewport's walk. The frame just
+      // captured for this step is the evidence (it shows the popover over the
+      // control), so cite it.
       findings.push({
         check: "tour-stalled",
         severity: "warn",
         selector: step?.target ? `[data-testid="${step.target}"]` : "tour-next",
+        path: "",
+        html: "",
+        styles: {},
         text: title,
         detail: isAction
           ? `the tour's highlighted control ("${step?.target}") could not be clicked from step "${label}" at ${vp.name} (${vp.width}px) — likely occluded or off-screen, so a user can't proceed here either`
@@ -307,7 +351,7 @@ async function walk(page: Page, vp: Viewport): Promise<void> {
         rect: { x: 0, y: 0, w: 0, h: 0 },
         step: label,
         viewport: vp.name,
-        frame: "",
+        frame: captures[captures.length - 1]?.frame ?? "",
         source: "geometry",
       });
       break; // stop this viewport's walk — the stall is recorded for the review
@@ -322,11 +366,28 @@ test("ui-review capture: walk the tour at each viewport", async () => {
   test.setTimeout(240000);
   const browser: Browser = await chromium.launch({ headless: true });
   try {
-    for (const vp of VIEWPORTS) {
-      // Fresh server (fresh DB) per viewport so each starts from a clean home
-      // with no sessions — otherwise the session the tour creates makes home
-      // auto-redirect into it on the next viewport, hiding the home screen.
-      server = await startWebServer({ addr: ADDR, flow: FLOW, storiesDir: STORY_DIR });
+    for (let vi = 0; vi < VIEWPORTS.length; vi++) {
+      const vp = VIEWPORTS[vi];
+      // Fresh server (fresh DB, distinct port) per viewport so each starts from a
+      // clean home with no sessions — otherwise the session the tour creates makes
+      // home auto-redirect into it on the next viewport, hiding the home screen.
+      server = await startWebServer({
+        addr: `127.0.0.1:${PORT_BASE + vi}`,
+        flow: FLOW,
+        storiesDir: STORY_DIR,
+      });
+      // Healthy (GET / 200) does not guarantee the initial story scan finished;
+      // if the page calls stories.list before it does, the home shows "No
+      // stories discovered" and the whole tour collapses. Wait for discovery —
+      // each rpc raced against a 2s timeout so a wedged fetch can never hang.
+      for (let i = 0; i < 30; i++) {
+        const s = await Promise.race([
+          server.rpc<unknown[]>("runstatus.stories.list", {}).catch(() => [] as unknown[]),
+          new Promise<unknown[]>((r) => setTimeout(() => r([]), 2000)),
+        ]);
+        if (Array.isArray(s) && s.length > 0) break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
       const context = await browser.newContext({
         viewport: { width: vp.width, height: vp.height },
         deviceScaleFactor: 2,
@@ -348,7 +409,21 @@ test("ui-review capture: walk the tour at each viewport", async () => {
     warn: findings.filter((f) => f.severity === "warn").length,
     info: findings.filter((f) => f.severity === "info").length,
   };
+  // The exact, deterministic way to bring the UI back to where a finding was
+  // seen — the report turns this into a copy-pasteable reproduction recipe.
+  const relFlow = path.relative(repoRoot, FLOW);
+  const relStories = path.relative(repoRoot, STORY_DIR);
+  const addr = `127.0.0.1:${PORT_BASE}`;
+  const server_recipe = {
+    addr,
+    base: `http://${addr}`,
+    storiesDir: relStories,
+    flow: relFlow,
+    cmd: `bin/kitsoki web --stories-dir ${relStories} --flow ${relFlow} --addr ${addr}`,
+    startTour: "in the browser console: window.__startTour()  (or click the “?” button)",
+  };
   const audit = {
+    server: server_recipe,
     viewports: VIEWPORTS,
     steps: TOUR_STEPS.map((s) => ({ id: s.id, title: s.title, route: s.route })),
     captures,

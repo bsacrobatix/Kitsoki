@@ -114,16 +114,38 @@ viewports `desktop,tablet,mobile`.
 
 ## verdict.json shape
 
+Every finding carries the **DOM state** it was seen in and a **reproduction
+recipe**, so a fix can be made (by a human or a fix-it agent) without re-running:
+
 ```json
 { "overall":"pass|fail", "strict":false,
+  "server":{"cmd":"bin/kitsoki web --stories-dir … --flow …","base":"http://127.0.0.1:7746"},
   "summary":{"error":0,"warn":0,"info":0,"blocking":0,
              "by_source":{"geometry":0,"a11y":0,"vision":0}},
   "findings":[
-    {"source":"vision|geometry|a11y","check":"responsive-break","severity":"error",
-     "surface":"home-story-cards","viewport":"mobile",
-     "frame":"02-home-story-cards@mobile.png",
-     "detail":"<literal observation>","recommendation":"<fix>"}]}
+    {"source":"vision|geometry|a11y","check":"a11y:color-contrast","severity":"error",
+     "surface":"home-welcome","viewport":"desktop",
+     "frame":"01-home-welcome@desktop.png", "count":1, "frames":["…"],
+     "detail":"<literal observation>","recommendation":"<fix>",
+     // DOM context (geometry + a11y; empty for vision, which only sees pixels):
+     "selector":"[data-testid=\"session-filter-active\"]",
+     "path":"div#app › div[home-view] › … › button[session-filter-active]",
+     "rect":{"x":339,"y":253,"w":63,"h":21},
+     "styles":{"fontSize":"12px","color":"rgb(100,116,139)","backgroundColor":"…", "...":"…"},
+     "html":"<button class=\"home__filter-chip\" …>Active</button>",
+     // a11y-only (from axe): the exact failing measurement + the rule doc:
+     "failureSummary":"insufficient contrast 3.75 (fg #64748b / bg #0f172a) — expected 4.5:1",
+     "helpUrl":"https://dequeuniversity.com/rules/axe/…",
+     // how to get back to it:
+     "repro":{"cmd":"…","base":"…","viewport":"1440x900","route":"home",
+              "step":"home-welcome","stepTitle":"Welcome to kitsoki","url":"…"}}]}
 ```
+
+`review-report.md` mirrors this: a quick-scan index table per severity, then a
+**Details — how to reproduce & fix** section with one card per error/warn finding
+(its DOM state, computed styles, outerHTML, and the numbered reproduction recipe).
+Info-level findings (e.g. the flood-prone tiny-text/tiny-tap-target) stay in the
+JSON with full context but are not expanded as cards, to keep the report skimmable.
 
 ## Pointers
 

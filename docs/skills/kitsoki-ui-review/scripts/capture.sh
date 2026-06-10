@@ -26,6 +26,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Reap any orphaned capture servers from an interrupted prior run — they hold the
+# binary ("Text file busy" on cp) and the capture ports, which silently poisons
+# the run (a stale server answers "no stories discovered" and the tour collapses).
+pkill -f "kitsoki web --stories-dir" 2>/dev/null || true
+sleep 1
+
 if [ "$build" -eq 1 ]; then
   echo "▸ make build (embedding the current SPA)…" >&2
   ( cd "$repo" && make build >/dev/null && cp ./kitsoki bin/kitsoki )
