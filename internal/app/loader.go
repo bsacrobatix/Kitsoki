@@ -2285,3 +2285,17 @@ func (a *appImpl) LookupIntent(ctx StatePath, name string) (Intent, bool) {
 }
 
 func (a *appImpl) WorldSchema() WorldSchema { return WorldSchema(a.def.World) }
+
+// TopLevelStateIDs returns every declared top-level state id (room id),
+// including states unreachable from the initial state. The order is
+// unspecified. This is the enumeration the story-graph tooling
+// (internal/app/graph) needs to surface orphaned rooms the App interface's
+// path-based LookupState cannot discover on its own. It is additive — callers
+// type-assert for it via an optional interface.
+func (a *appImpl) TopLevelStateIDs() []string {
+	out := make([]string, 0, len(a.def.States))
+	for id := range a.def.States {
+		out = append(out, id)
+	}
+	return out
+}

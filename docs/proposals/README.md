@@ -255,20 +255,12 @@ thought.
   group** via the shipped `visual-outputs` media seam (`host.contact_sheet` /
   `host.slidey.render` → `media` element). `done` is a before/after gallery.
   Composes existing hosts only. Nothing implemented yet.
-- [`story-editor-view.md`](story-editor-view.md) — **epic.** A story
-  editor surface in `kitsoki web`: rooms ordered by BFS distance from the
-  entry point, each showing its hook + domain model + typed view; meta chat
-  in the left column; an oracle workbench for cassette browsing and isolated
-  oracle replay; a reusable story viewer component. Nothing implemented yet;
-  decomposed into three slices:
-  - [`story-graph-api.md`](story-graph-api.md) (runtime) — read-only
-    backend: BFS room ordering, oracle contract extraction, cassette
-    discovery endpoints.
-  - [`story-editor-shell.md`](story-editor-shell.md) (tui) — room list +
-    hook / domain-model display + meta chat integration + IDE deep-link.
-  - [`oracle-workbench.md`](oracle-workbench.md) (tui) — cassette browser,
-    oracle contract display, isolated replay, and the reusable
-    `StoryViewer.vue` component.
+- ~~story-editor-view (epic) + story-graph-api / story-editor-shell /
+  oracle-workbench (slices)~~ — **shipped.** The story editor surface
+  (`/editor` route, BFS room list, hook / domain-model / typed-view detail,
+  meta chat, oracle workbench with cassette browser + isolated replay, reusable
+  `StoryViewer.vue`) now lives in narrative docs:
+  [`docs/tui/story-editor.md`](../tui/story-editor.md). Proposals deleted.
 - [`work-decomposition.md`](work-decomposition.md) — **story.** A new
   `stories/decompose/` sub-story imported into dev-story: hand it an accepted
   proposal (or epic + children) and an interactive discovery conversation

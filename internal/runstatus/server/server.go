@@ -794,6 +794,13 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		return out, nil
 
 	default:
+		// ── Story editor (per-story, no session) ─────────────────────────────
+		// The editor.* family operates on a story selected from the registry
+		// catalogue rather than a live session; dispatchEditor reports handled
+		// so unknown non-editor methods still fall through to method-missing.
+		if result, rerr, handled := s.dispatchEditor(method, params); handled {
+			return result, rerr
+		}
 		return nil, &rpcError{Code: codeMethodMissing, Message: "unknown method: " + method}
 	}
 }

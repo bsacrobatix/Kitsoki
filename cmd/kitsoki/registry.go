@@ -432,6 +432,43 @@ func storyTitle(def *app.AppDef) string {
 	return def.App.ID
 }
 
+// EditorApp implements [server.EditorProvider]: it loads the story at
+// storyPath fresh from disk and compiles it to an app.App for the read-only
+// story-editor RPCs. Loading fresh (rather than reusing a cached catalogue
+// Def) keeps the editor reflecting the on-disk story even between rescans, and
+// keeps the editor independent of any live session. ok is false (no error) for
+// an unknown story path or one that fails to load/validate — the server maps
+// that to a structured not-found error.
+//
+// storyDir is the directory containing the manifest, used to resolve cassette
+// globs for the oracle workbench.
+func (r *SessionRegistry) EditorApp(storyPath string) (app.App, string, bool) {
+	abs, err := filepath.Abs(storyPath)
+	if err != nil {
+		return nil, "", false
+	}
+	// Only serve stories in the catalogue, so the editor surface cannot be used
+	// to load arbitrary files off disk.
+	r.mu.Lock()
+	known := false
+	for _, m := range r.stories {
+		if m.Path == abs {
+			known = true
+			break
+		}
+	}
+	r.mu.Unlock()
+	if !known {
+		return nil, "", false
+	}
+
+	def, err := loadAppWithEnv(abs)
+	if err != nil {
+		return nil, "", false
+	}
+	return app.Compile(def), filepath.Dir(abs), true
+}
+
 // ── Meta mode wiring ───────────────────────────────────────────────────────
 
 // agentRegistryLocked returns the shared builtin agent registry every meta
@@ -533,4 +570,5 @@ func (r *SessionRegistry) ensureSelfMetaLocked() error {
 var (
 	_ server.SessionProvider  = (*SessionRegistry)(nil)
 	_ server.MetaSelfProvider = (*SessionRegistry)(nil)
+	_ server.EditorProvider   = (*SessionRegistry)(nil)
 )
