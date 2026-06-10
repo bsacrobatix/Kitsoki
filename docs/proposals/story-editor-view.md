@@ -3,6 +3,11 @@
 **Status:** Draft v1. No slices implemented yet.
 **Kind:**   epic
 **Slices:** 3 (0/3 shipped)
+**Mockup:**  [`.artifacts/story-editor-mockups/00-editor-composed.html`](../../.artifacts/story-editor-mockups/00-editor-composed.html)
+— static, no-JS layout exploration grounded in the existing `tools/runstatus/`
+UI (chosen: 3-column shell · wiring+view side-by-side · master-detail oracle
+workbench · column+modal story viewer). Sibling `index.html` keeps the
+rejected options for comparison. Local artifact, not committed.
 
 ## Why
 

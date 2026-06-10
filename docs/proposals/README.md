@@ -269,6 +269,41 @@ thought.
   - [`oracle-workbench.md`](oracle-workbench.md) (tui) — cassette browser,
     oracle contract display, isolated replay, and the reusable
     `StoryViewer.vue` component.
+- [`mockup-video-studio.md`](mockup-video-studio.md) — **epic.** Author UI
+  design-proposal walkthrough videos as a recorded process **and** improve
+  them in the web UI: flag a scene or time-range, grab the frame, instruct
+  the LLM, watch the video re-render. Builds on the `visual-outputs` media
+  seam (slices 2–3 are prerequisites). Nothing implemented yet; decomposed
+  into three slices:
+  - [`video-frame-seam.md`](video-frame-seam.md) (runtime) — a
+    producer-agnostic **chapter sidecar** (scene↔timestamp + `source_ref`) +
+    a deterministic `host.video.frame` still-grab, backed by one
+    `internal/video` extractor shared by a host call and the slice-2 web RPC.
+  - [`video-feedback-mode.md`](video-feedback-mode.md) (tui) — a `/review`
+    web panel: player + chapter timeline + flag-scene/range + per-flag PNG +
+    chat → structured, source-targeted **feedback notes** (capture + dispatch;
+    the LLM edit is the story's recorded decision).
+  - [`mockup-video-authoring.md`](mockup-video-authoring.md) (story) — a new
+    `stories/mockup-video/`: brief → author HTML+tour *or* slidey deck
+    (`medium: tour | deck`) → render (chapter sidecar) → review → refine-loop
+    on each flag → gallery.
+- [`web-async-inbox.md`](web-async-inbox.md) — **epic.** Expose the
+  already-built background-job/notification/teleport substrate
+  (`internal/jobs/`, `internal/inbox/`, `Orchestrator.Teleport`) to the
+  `kitsoki web` UI: kick off a long turn, navigate away, get pinged when the
+  next turn is ready, and click straight back to the originating session +
+  room. Global cross-session inbox; in-app badge + toast (no OS notification);
+  in-memory sessions (durability is future work). Nothing implemented yet;
+  decomposed into two slices:
+  - [`web-inbox-backend.md`](web-inbox-backend.md) (runtime) — hand the
+    runstatus server the session `JobStore` + scheduler; RPCs
+    `notifications.list/read/dismiss` + `session.teleport`; a cross-session
+    notification SSE feed via a registered `SessionObserver`. No new engine
+    concepts or schema change.
+  - [`web-inbox-surface.md`](web-inbox-surface.md) (tui) — the Vue web
+    equivalent of `internal/tui/inbox.go`: global chrome badge + panel +
+    toast fed by the SSE feed, a shareable `?notif=` deep-link, click →
+    navigate + teleport.
 - [`work-decomposition.md`](work-decomposition.md) — **story.** A new
   `stories/decompose/` sub-story imported into dev-story: hand it an accepted
   proposal (or epic + children) and an interactive discovery conversation
@@ -278,3 +313,12 @@ thought.
   `oracle.decide` judges feasibility + completeness, and a coordination board
   dispatches each brief into the `impl` import one at a time with a human gate.
   Nothing implemented yet.
+- [`hybrid-session-driving.md`](hybrid-session-driving.md) — **runtime.** Let
+  `kitsoki web` drive a live session (e.g. `stories/bugfix`) from the browser
+  while Jira/Bitbucket keep receiving artifacts write-only. Decouples *driving*
+  (inbound intents) from *transport* (output-only): the runstatus server stamps
+  an operator identity into `last_reply_author` (so ACL-guarded `continue` stops
+  silently no-opping), attaches to the persisted session store loop.py uses (so
+  one ticket can be co-driven), and gains an opt-in inbound poll→intent bridge
+  for Jira/PR replies. All opt-in; loop.py's existing path unchanged. Nothing
+  implemented yet.
