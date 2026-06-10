@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import type { ViewElement } from "../types.js";
 import { createDataSource } from "../data/source.js";
+import MarkdownModal from "./MarkdownModal.vue";
 
 // Resolve artifact URLs through the ambient DataSource (live or snapshot).
 // createDataSource() is cheap: it reads window.__KITSOKI_SNAPSHOT__ once and
@@ -72,6 +73,13 @@ function segments(para: string): Seg[] {
 const items = computed(() => el.value.Items ?? []);
 const pairs = computed(() => el.value.Pairs ?? []);
 
+/** Path currently open in the markdown modal (null = closed). */
+const openedPath = ref<string | null>(null);
+
+function isMarkdownPath(value: string): boolean {
+  return /\S+\.md$/.test(value.trim());
+}
+
 /** Banner color → CSS modifier class. Falls back to a neutral box. */
 const bannerClass = computed(() => {
   const c = (el.value.Color ?? "").toLowerCase();
@@ -109,9 +117,22 @@ const bannerClass = computed(() => {
   <dl v-else-if="el.Kind === 'kv'" class="ve-kv">
     <template v-for="(pair, pi) in pairs" :key="pi">
       <dt class="ve-kv-key">{{ pair.Key }}</dt>
-      <dd class="ve-kv-value">{{ pair.Value }}</dd>
+      <dd class="ve-kv-value">
+        <button
+          v-if="isMarkdownPath(pair.Value)"
+          class="ve-kv-file-link"
+          @click="openedPath = pair.Value.trim()"
+        >{{ pair.Value }}</button>
+        <template v-else>{{ pair.Value }}</template>
+      </dd>
     </template>
   </dl>
+
+  <MarkdownModal
+    v-if="openedPath !== null"
+    :path="openedPath"
+    @close="openedPath = null"
+  />
 
   <div
     v-else-if="el.Kind === 'banner'"
@@ -284,6 +305,23 @@ const bannerClass = computed(() => {
 .ve-kv-value {
   margin: 0;
   color: #1f2430;
+}
+
+.ve-kv-file-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #1d4ed8;
+  text-decoration: underline;
+  font-size: inherit;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  word-break: break-all;
+  text-align: left;
+}
+.ve-kv-file-link:hover {
+  color: #1e40af;
 }
 
 .ve-banner {

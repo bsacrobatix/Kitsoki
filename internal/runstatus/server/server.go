@@ -736,6 +736,28 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			"note":          "replay dispatch not yet wired (v1 stub)",
 		}, nil
 
+	// ── Local file read (markdown preview) ───────────────────────────────────
+	// runstatus.file.read reads a local .md file by absolute path and returns its
+	// raw content. Only .md files are served; any other extension returns an error.
+	// This is intentionally unrestricted beyond the .md check — kitsoki web is a
+	// trusted localhost-only tool.
+	//
+	// Request params: {path}
+	// Response: {content}
+	case "runstatus.file.read":
+		filePath, _ := params["path"].(string)
+		if filePath == "" {
+			return nil, &rpcError{Code: codeServerError, Message: "file.read: missing 'path'"}
+		}
+		if !strings.HasSuffix(strings.ToLower(filePath), ".md") {
+			return nil, &rpcError{Code: codeServerError, Message: "file.read: only .md files are served"}
+		}
+		data, err := os.ReadFile(filepath.Clean(filePath))
+		if err != nil {
+			return nil, serverErr(fmt.Errorf("file.read %s: %w", filePath, err))
+		}
+		return map[string]any{"content": string(data)}, nil
+
 	// ── Agent-action transcript sidecar ────────────────────────────────────────
 	// runstatus.session.transcript reads one oracle call's agent-action sidecar
 	// (the verbatim backend-native event stream the host teed at the wire) LAZILY
