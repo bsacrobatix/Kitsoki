@@ -10,9 +10,14 @@ the rendered room view (typed view elements).
 kitsoki web (Go server)                    browser
   ├─ GET /              → embedded SPA     Vue 3 + Pinia + Vue Router
   ├─ GET /rpc/events    → SSE event stream ← TraceTimeline, StateView
+  ├─ GET /rpc/notifications → SSE inbox feed ← InboxBadge/Panel/Toast (stores/inbox)
   ├─ GET /rpc           → JSON-RPC         ← stores
   └─ GET /artifact/{id} → binary stream    ← ViewElement (media kind)
 ```
+
+The cross-session global inbox (badge/toast + click-to-teleport) is documented
+canonically in
+[`docs/web/README.md` § Global inbox](../../docs/web/README.md#global-inbox-background-turn-notifications).
 
 The SPA selects its data source at startup via `createDataSource()`
 (`src/data/source.ts`):

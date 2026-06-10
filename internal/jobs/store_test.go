@@ -189,3 +189,168 @@ func TestJobStore_Notifications(t *testing.T) {
 		t.Fatalf("expected 0 unread after marking read, got %v", counts)
 	}
 }
+
+// TestJobStore_InsertNotification_DefaultsCreatedAt is a regression test for the
+// zero-CreatedAt mis-sort bug. The inbox.PostJobNotification path inserts a
+// notification WITHOUT setting CreatedAt (it leaves the zero value). Before the
+// fix, InsertNotification persisted that zero time — and time.Time{}.UnixMilli()
+// is a large NEGATIVE number, so under "ORDER BY created_at DESC" the row sorted
+// as the OLDEST. The later success notification therefore hid behind the earlier
+// info one and ListNotifications(limit=1) returned the wrong (older info) row, so
+// the success-only toast never fired.
+//
+// We insert two notifications via the bug's exact path — CreatedAt left ZERO —
+// an info first, then a success, with a tiny gap so the fix's time.Now() default
+// yields distinct, increasing timestamps. With the fix, the success row is the
+// newest and sorts first. If the fix is reverted (zero stored), both rows carry
+// the same large-negative UnixMilli and the success row no longer sorts ahead of
+// the info row, and the wall-clock-based DESC ordering is lost — failing the
+// limit=1 assertion and the "stamped non-zero" assertion below.
+func TestJobStore_InsertNotification_DefaultsCreatedAt(t *testing.T) {
+	db := openTestDB(t)
+	js, err := jobs.NewJobStore(db)
+	if err != nil {
+		t.Fatalf("NewJobStore: %v", err)
+	}
+	ctx := context.Background()
+
+	// First: an info notification, CreatedAt deliberately left ZERO (mirrors
+	// inbox.PostJobNotification, which does not set it).
+	info := &jobs.Notification{
+		SessionID: "sess-1",
+		Severity:  jobs.SeverityInfo,
+		Title:     "Job started",
+		OriginKind: "job",
+	}
+	if err := js.InsertNotification(ctx, info); err != nil {
+		t.Fatalf("InsertNotification(info): %v", err)
+	}
+
+	// A small gap so the default time.Now() stamps strictly increasing values;
+	// keeps the DESC ordering deterministic without relying on sub-millisecond
+	// wall-clock resolution between two back-to-back inserts.
+	time.Sleep(2 * time.Millisecond)
+
+	// Second: the success notification, also with CreatedAt left ZERO.
+	success := &jobs.Notification{
+		SessionID: "sess-1",
+		Severity:  jobs.SeveritySuccess,
+		Title:     "Job done",
+		OriginKind: "job",
+	}
+	if err := js.InsertNotification(ctx, success); err != nil {
+		t.Fatalf("InsertNotification(success): %v", err)
+	}
+
+	// limit=1 must return the most-recently-inserted (success) row. Under the bug
+	// (zero CreatedAt persisted) the success row sorts as oldest/ties and this
+	// returns the info row instead.
+	top, err := js.ListNotifications(ctx, "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ListNotifications(limit=1): %v", err)
+	}
+	if len(top) != 1 {
+		t.Fatalf("expected 1 notification with limit=1, got %d", len(top))
+	}
+	if top[0].Title != "Job done" || top[0].Severity != jobs.SeveritySuccess {
+		t.Fatalf("limit=1 returned wrong row: got severity=%q title=%q; want the success row (most-recently-inserted)",
+			top[0].Severity, top[0].Title)
+	}
+
+	// Both rows must be present and ordered success-then-info, with non-zero,
+	// strictly-decreasing timestamps. If InsertNotification stops defaulting
+	// CreatedAt, the stored times are the zero value (UnixMilli is negative) and
+	// this ordering/non-zero check fails.
+	all, err := js.ListNotifications(ctx, "sess-1", 2)
+	if err != nil {
+		t.Fatalf("ListNotifications(limit=2): %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected 2 notifications, got %d", len(all))
+	}
+	if all[0].Title != "Job done" || all[1].Title != "Job started" {
+		t.Fatalf("expected order [success, info], got [%q, %q]", all[0].Title, all[1].Title)
+	}
+	if all[0].CreatedAt.IsZero() || all[1].CreatedAt.IsZero() {
+		t.Fatalf("expected non-zero CreatedAt on both rows (defaulted by InsertNotification), got success=%v info=%v",
+			all[0].CreatedAt, all[1].CreatedAt)
+	}
+	if !all[0].CreatedAt.After(all[1].CreatedAt) {
+		t.Fatalf("expected success CreatedAt (%v) strictly after info CreatedAt (%v)",
+			all[0].CreatedAt, all[1].CreatedAt)
+	}
+}
+
+// TestJobStore_DismissNotification proves dismiss flips dismissed_at and the
+// dismissed row drops out of ListNotifications, while GetNotification still
+// resolves it by id (teleport needs the row even after dismiss).
+func TestJobStore_DismissNotification(t *testing.T) {
+	db := openTestDB(t)
+	js, err := jobs.NewJobStore(db)
+	if err != nil {
+		t.Fatalf("NewJobStore: %v", err)
+	}
+	ctx := context.Background()
+
+	n := &jobs.Notification{
+		SessionID:     "sess-1",
+		CreatedAt:     time.Now(),
+		Severity:      jobs.SeveritySuccess,
+		Title:         "Job done",
+		TeleportState: "reviewing",
+		OriginKind:    "job",
+		OriginRef:     "job:abc123",
+	}
+	if err := js.InsertNotification(ctx, n); err != nil {
+		t.Fatalf("InsertNotification: %v", err)
+	}
+
+	// Present before dismiss.
+	notifs, err := js.ListNotifications(ctx, "sess-1", 10)
+	if err != nil {
+		t.Fatalf("ListNotifications: %v", err)
+	}
+	if len(notifs) != 1 {
+		t.Fatalf("expected 1 notification before dismiss, got %d", len(notifs))
+	}
+
+	if err := js.DismissNotification(ctx, n.ID); err != nil {
+		t.Fatalf("DismissNotification: %v", err)
+	}
+
+	// Dropped from the list after dismiss.
+	notifs, err = js.ListNotifications(ctx, "sess-1", 10)
+	if err != nil {
+		t.Fatalf("ListNotifications after dismiss: %v", err)
+	}
+	if len(notifs) != 0 {
+		t.Fatalf("expected 0 notifications after dismiss, got %d", len(notifs))
+	}
+
+	// And out of the unread counts.
+	counts, err := js.UnreadCount(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("UnreadCount after dismiss: %v", err)
+	}
+	if len(counts) != 0 {
+		t.Fatalf("expected 0 unread after dismiss, got %v", counts)
+	}
+
+	// GetNotification still resolves it by id (teleport path).
+	got, err := js.GetNotification(ctx, n.ID)
+	if err != nil {
+		t.Fatalf("GetNotification: %v", err)
+	}
+	if got == nil || got.TeleportState != "reviewing" {
+		t.Fatalf("expected dismissed row still resolvable with teleport_state, got %+v", got)
+	}
+
+	// Unknown id is (nil, nil), not an error.
+	missing, err := js.GetNotification(ctx, "does-not-exist")
+	if err != nil {
+		t.Fatalf("GetNotification(unknown): %v", err)
+	}
+	if missing != nil {
+		t.Fatalf("expected nil for unknown id, got %+v", missing)
+	}
+}

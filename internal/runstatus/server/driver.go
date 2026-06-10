@@ -2,10 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/charmbracelet/x/ansi"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/inbox"
+	"kitsoki/internal/jobs"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/render/elements"
 )
@@ -39,6 +43,28 @@ type Driver interface {
 	// PatchWorld injects world-key overrides into the session event log without
 	// advancing a turn. For demo/test tooling (runstatus.session.patch_world).
 	PatchWorld(ctx context.Context, patch map[string]any) error
+
+	// ── Inbox (background-job notifications) ───────────────────────────────
+	// These delegate to the session's [jobs.JobStore]. The nil-safety contract
+	// mirrors internal/tui/inbox.go and Orchestrator.Teleport: a session with no
+	// JobStore (headless tests, artifact mode) reports an empty inbox and the
+	// mutating methods no-op rather than erroring.
+
+	// ListNotifications returns the session's non-dismissed notifications,
+	// newest first. Returns (nil, nil) when no JobStore is configured.
+	ListNotifications(ctx context.Context) ([]jobs.Notification, error)
+	// MarkNotificationRead stamps read_at on a notification. No-op without a
+	// JobStore.
+	MarkNotificationRead(ctx context.Context, id string) error
+	// DismissNotification stamps dismissed_at, dropping the row from the inbox.
+	// No-op without a JobStore.
+	DismissNotification(ctx context.Context, id string) error
+	// Teleport resolves a notification id to its [inbox.TeleportTarget] and jumps
+	// the session there via Orchestrator.Teleport, restoring the saved slots.
+	// Returns a typed error when there is no JobStore, the notification is
+	// unknown, or it is not teleportable (empty target state) — the surface
+	// renders such items read-only.
+	Teleport(ctx context.Context, notificationID string) (*orchestrator.TurnOutcome, error)
 }
 
 // OrchestratorDriver adapts a live *orchestrator.Orchestrator + session id to
@@ -47,7 +73,20 @@ type Driver interface {
 type OrchestratorDriver struct {
 	Orch *orchestrator.Orchestrator
 	SID  app.SessionID
+	// Jobs is the session's notification store. It MAY be nil (headless tests,
+	// artifact-mode, read-only surfaces); the inbox methods treat a nil store as
+	// an empty inbox per the nil-safety contract on the [Driver] inbox methods.
+	Jobs *jobs.JobStore
 }
+
+// ErrNoInbox is returned by Teleport when the session has no JobStore wired, so
+// the surface can distinguish "no inbox here" from a genuine teleport failure.
+var ErrNoInbox = errors.New("session has no inbox configured")
+
+// ErrNotTeleportable is returned by Teleport when the notification exists but
+// carries no destination state (an informational item); the surface renders it
+// read-only rather than as a dead link.
+var ErrNotTeleportable = errors.New("notification is not teleportable")
 
 func (d OrchestratorDriver) Turn(ctx context.Context, input string) (*orchestrator.TurnOutcome, error) {
 	return d.Orch.Turn(ctx, d.SID, input)
@@ -71,6 +110,55 @@ func (d OrchestratorDriver) View(ctx context.Context) (*orchestrator.TurnOutcome
 
 func (d OrchestratorDriver) PatchWorld(ctx context.Context, patch map[string]any) error {
 	return d.Orch.PatchWorld(ctx, d.SID, patch)
+}
+
+// ListNotifications returns the session's notifications newest-first, or an
+// empty list when no JobStore is wired (nil-safety contract). The 0 limit asks
+// the store for all non-dismissed rows.
+func (d OrchestratorDriver) ListNotifications(ctx context.Context) ([]jobs.Notification, error) {
+	if d.Jobs == nil {
+		return nil, nil
+	}
+	return d.Jobs.ListNotifications(ctx, d.SID, 0)
+}
+
+// MarkNotificationRead is a no-op without a JobStore.
+func (d OrchestratorDriver) MarkNotificationRead(ctx context.Context, id string) error {
+	if d.Jobs == nil {
+		return nil
+	}
+	return d.Jobs.MarkNotificationRead(ctx, id)
+}
+
+// DismissNotification is a no-op without a JobStore.
+func (d OrchestratorDriver) DismissNotification(ctx context.Context, id string) error {
+	if d.Jobs == nil {
+		return nil
+	}
+	return d.Jobs.DismissNotification(ctx, id)
+}
+
+// Teleport resolves the notification, projects it to a [inbox.TeleportTarget],
+// and delegates to Orchestrator.Teleport — the same deterministic jump the TUI
+// and Oracle Room banner use, so the trace is indistinguishable from a TUI
+// teleport. A nil JobStore returns [ErrNoInbox]; an unknown id or an empty
+// destination state returns [ErrNotTeleportable].
+func (d OrchestratorDriver) Teleport(ctx context.Context, notificationID string) (*orchestrator.TurnOutcome, error) {
+	if d.Jobs == nil {
+		return nil, ErrNoInbox
+	}
+	n, err := d.Jobs.GetNotification(ctx, notificationID)
+	if err != nil {
+		return nil, fmt.Errorf("teleport: resolve notification %q: %w", notificationID, err)
+	}
+	if n == nil {
+		return nil, fmt.Errorf("teleport: %w: unknown notification %q", ErrNotTeleportable, notificationID)
+	}
+	target := inbox.FromNotification(*n)
+	if target.State == "" {
+		return nil, fmt.Errorf("teleport: %w: notification %q has no destination", ErrNotTeleportable, notificationID)
+	}
+	return d.Orch.Teleport(ctx, d.SID, target)
 }
 
 // IntentInfo resolves the intent's slot schema against `state` and derives the

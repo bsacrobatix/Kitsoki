@@ -64,6 +64,40 @@ export interface StoryHeader {
   active_sessions: string[];
 }
 
+/**
+ * One notification as it rides the wire. `jobs.Notification` has NO json tags,
+ * so it serializes with Go's PascalCase field names — read these EXACTLY (not
+ * camelCase, not snake_case). Applies to both the notifications.list array and
+ * the SSE `runstatus.notification` frame's `notification` object.
+ */
+export interface Notification {
+  ID: string;
+  SessionID: string;
+  CreatedAt: string; // RFC3339 (time.Time marshals to a string)
+  Severity: "info" | "success" | "warn" | "error" | "action_required";
+  Title: string;
+  Body: string;
+  TeleportState: string;
+  TeleportSlots: Record<string, unknown> | null;
+  TeleportProposalID: string;
+  TeleportJobID: string;
+  OriginKind: string;
+  OriginRef: string;
+  // May be null/zero on the wire.
+  ReadAt?: string | null;
+  DismissedAt?: string | null;
+  SnoozedUntil?: string | null;
+  OriginURL?: string | null;
+}
+
+/** One SSE frame from /rpc/notifications (the cross-session global feed). */
+export interface NotificationFrame {
+  session_id: string;
+  notification: Notification;
+  unread: number;
+  needs_attention: number;
+}
+
 /** Result of runstatus.session.reload — mirrors Orchestrator.Reload semantics. */
 export interface ReloadResult {
   ok: boolean;
@@ -494,7 +528,138 @@ export class LiveSource implements DataSource {
       operator,
     });
   }
+
+  // ── Inbox / notifications ─────────────────────────────────────────────────
+  //
+  // The list/read/dismiss RPCs are per-session; the SUBSCRIBE feed is global
+  // (cross-session, no session_id) and is the primary source of truth for the
+  // web inbox store. read/dismiss do NOT push a refreshed-count SSE frame, so
+  // the store reconciles counts optimistically client-side.
+
+  /** List a session's notifications (most recent first), newest `limit` items. */
+  listNotifications(
+    sessionId: string,
+    limit?: number
+  ): Promise<Notification[]> {
+    const params: Record<string, unknown> = { session_id: sessionId };
+    if (limit !== undefined) params["limit"] = limit;
+    return this.client
+      .post<{ notifications: Notification[] }>(
+        "runstatus.session.notifications.list",
+        params
+      )
+      .then((r) => r.notifications ?? []);
+  }
+
+  /** Mark one notification read. */
+  readNotification(sessionId: string, id: string): Promise<{ ok: boolean }> {
+    return this.client.post<{ ok: boolean }>(
+      "runstatus.session.notifications.read",
+      { session_id: sessionId, id }
+    );
+  }
+
+  /** Dismiss one notification (removed from the active list, kept in history). */
+  dismissNotification(
+    sessionId: string,
+    id: string
+  ): Promise<{ ok: boolean }> {
+    return this.client.post<{ ok: boolean }>(
+      "runstatus.session.notifications.dismiss",
+      { session_id: sessionId, id }
+    );
+  }
+
+  /**
+   * Teleport a session to the room a notification points at. Returns a
+   * TurnResult (same shape as session.turn) so the caller can apply it to the
+   * run store. A non-teleportable / unknown id rejects with JSON-RPC -32000.
+   */
+  teleport(sessionId: string, notificationId: string): Promise<TurnResult> {
+    return this.client.post<TurnResult>("runstatus.session.teleport", {
+      session_id: sessionId,
+      notification_id: notificationId,
+    });
+  }
+
+  /**
+   * Subscribe to the GLOBAL notification feed (a second EventSource on
+   * /rpc/notifications, separate from the per-session /rpc/events stream).
+   * Mirrors the per-session subscribe lifecycle: subscribe → open stream →
+   * reconnect with exponential backoff → unsubscribe on teardown. Returns an
+   * unsubscribe function.
+   */
+  subscribeNotifications(
+    onFrame: (frame: NotificationFrame) => void,
+    onError?: (e: unknown) => void
+  ): () => void {
+    let subscriptionId = "";
+    let es: EventSource | null = null;
+    let closed = false;
+    let backoffAttempt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const openStream = () => {
+      if (closed) return;
+      const url = `${this.base}rpc/notifications?subscription_id=${encodeURIComponent(subscriptionId)}`;
+      es = new EventSource(url);
+
+      es.onmessage = (ev: MessageEvent<string>) => {
+        backoffAttempt = 0;
+        try {
+          const frame = JSON.parse(ev.data) as {
+            method?: string;
+            params?: NotificationFrame;
+          };
+          if (frame.method === "runstatus.notification" && frame.params) {
+            onFrame(frame.params);
+          }
+        } catch {
+          // Malformed frame — ignore.
+        }
+      };
+
+      es.onerror = (e) => {
+        if (closed) return;
+        onError?.(e);
+        es?.close();
+        es = null;
+        const delay = NOTIF_BACKOFF_MS[
+          Math.min(backoffAttempt++, NOTIF_BACKOFF_MS.length - 1)
+        ] ?? 5000;
+        reconnectTimer = setTimeout(() => {
+          if (!closed) openStream();
+        }, delay);
+      };
+    };
+
+    this.client
+      .post<{ subscription_id: string }>("runstatus.notifications.subscribe", {})
+      .then(({ subscription_id }) => {
+        if (closed) return;
+        subscriptionId = subscription_id;
+        openStream();
+      })
+      .catch((e) => onError?.(e));
+
+    return () => {
+      closed = true;
+      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+      es?.close();
+      es = null;
+      if (subscriptionId) {
+        this.client
+          .post("runstatus.notifications.unsubscribe", {
+            subscription_id: subscriptionId,
+          })
+          .catch(() => undefined);
+      }
+    };
+  }
 }
+
+// Backoff schedule for the notification feed reconnect (ms).
+const NOTIF_BACKOFF_MS = [250, 500, 1000, 2000, 5000];
 
 // Re-export for components that import AnnotationEntry from this module.
 export type { AnnotationEntry };

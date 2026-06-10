@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -346,6 +347,15 @@ func (js *JobStore) InsertNotification(ctx context.Context, n *Notification) err
 	if n.ID == "" {
 		n.ID = ulid.New()
 	}
+	// Stamp CreatedAt when the caller left it zero. The row is ordered by
+	// created_at DESC everywhere (ListNotifications, the SSE relay's newest-row
+	// read), so an unset CreatedAt — UnixMilli() of the zero time is a large
+	// negative — would sort the row as the OLDEST and hide it behind earlier
+	// notifications. PostJobNotification (the background-completion path) does
+	// not set it, so default it here.
+	if n.CreatedAt.IsZero() {
+		n.CreatedAt = time.Now()
+	}
 	var teleportSlotsJSON []byte
 	if n.TeleportSlots != nil {
 		b, err := json.Marshal(n.TeleportSlots)
@@ -374,6 +384,16 @@ func (js *JobStore) InsertNotification(ctx context.Context, n *Notification) err
 func (js *JobStore) MarkNotificationRead(ctx context.Context, id string) error {
 	_, err := js.db.ExecContext(ctx,
 		`UPDATE notifications SET read_at=? WHERE id=?`,
+		time.Now().UnixMilli(), id)
+	return err
+}
+
+// DismissNotification sets dismissed_at on a notification, dropping it from
+// ListNotifications and the unread counts. Mirrors MarkNotificationRead — a
+// dismiss is a terminal "I'm done with this" action distinct from "read".
+func (js *JobStore) DismissNotification(ctx context.Context, id string) error {
+	_, err := js.db.ExecContext(ctx,
+		`UPDATE notifications SET dismissed_at=? WHERE id=?`,
 		time.Now().UnixMilli(), id)
 	return err
 }
@@ -452,6 +472,45 @@ func (js *JobStore) ListNotifications(ctx context.Context, sessionID app.Session
 		out = append(out, n)
 	}
 	return out, rows.Err()
+}
+
+// GetNotification loads a single notification row by id, regardless of its
+// read/dismissed state (teleport resolution needs the teleport fields even for
+// an already-read item). Returns (nil, nil) when no row matches.
+func (js *JobStore) GetNotification(ctx context.Context, id string) (*Notification, error) {
+	row := js.db.QueryRowContext(ctx, `
+		SELECT id, session_id, created_at, severity, title, body,
+		       teleport_state, teleport_slots, teleport_proposal_id, teleport_job_id,
+		       origin_kind, origin_ref
+		FROM notifications
+		WHERE id=?`, id)
+
+	var n Notification
+	var createdAtMs int64
+	var teleportSlotsJSON sql.NullString
+	var teleportProposalID, teleportJobID sql.NullString
+	err := row.Scan(
+		&n.ID, (*string)(&n.SessionID), &createdAtMs,
+		(*string)(&n.Severity), &n.Title, &n.Body,
+		&n.TeleportState, &teleportSlotsJSON,
+		&teleportProposalID, &teleportJobID,
+		&n.OriginKind, &n.OriginRef,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	n.CreatedAt = time.UnixMilli(createdAtMs)
+	n.TeleportProposalID = teleportProposalID.String
+	n.TeleportJobID = teleportJobID.String
+	if teleportSlotsJSON.Valid {
+		if uerr := json.Unmarshal([]byte(teleportSlotsJSON.String), &n.TeleportSlots); uerr != nil {
+			slog.Warn("jobs.GetNotification: unmarshal teleport_slots failed; leaving empty", "id", n.ID, "err", uerr)
+		}
+	}
+	return &n, nil
 }
 
 func nullableBytes(b []byte) any {

@@ -180,6 +180,10 @@ authentication.`,
 
 			// ── Serve (session-routing) ──────────────────────────────────────
 			srv := server.NewMulti(registry)
+			// Attach the cross-session notification relay sink so each new
+			// session's background-turn fan-out reaches the runstatus.notification
+			// SSE feed. Set before any session.new call.
+			registry.SetNotifier(srv)
 			httpSrv := &http.Server{
 				Addr:    addr,
 				Handler: srv.Handler(),

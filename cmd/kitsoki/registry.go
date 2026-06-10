@@ -78,6 +78,12 @@ type SessionRegistry struct {
 	base runtimeBase
 	dirs []string
 
+	// notifier, when set, attaches a cross-session notification relay to each new
+	// session's orchestrator (server.Notifier, injected by web.go via
+	// SetNotifier). Read without the lock — set once at startup before any
+	// NewSession call, never mutated after.
+	notifier server.Notifier
+
 	mu       sync.Mutex
 	stories  []webconfig.StoryMeta
 	sessions map[string]*entry
@@ -104,6 +110,13 @@ func NewRegistry(cfg webconfig.WebConfig, dirs []string, base runtimeBase) *Sess
 		dirs:     dirs,
 		sessions: map[string]*entry{},
 	}
+}
+
+// SetNotifier injects the cross-session notification relay sink (the running
+// server). It must be called before the first NewSession so every live session
+// registers its relay. Idempotent-safe to call once at startup.
+func (r *SessionRegistry) SetNotifier(n server.Notifier) {
+	r.notifier = n
 }
 
 // Close releases every live session's runtime and sink, in arbitrary order. The
@@ -208,8 +221,22 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 		rt:            rt,
 		sid:           sid,
 		source:        live,
-		driver:    server.OrchestratorDriver{Orch: orch, SID: sid},
+		driver:    server.OrchestratorDriver{Orch: orch, SID: sid, Jobs: rt.JobStore},
 		sink:      sink,
+	}
+
+	// Register a per-session notification relay so the orchestrator's
+	// background-turn fan-out reaches the cross-session SSE feed. Sessions are
+	// in-memory and never explicitly removed in the PoC (Close releases the
+	// runtime on shutdown but does not delete entries), so there is no
+	// per-session UnregisterObserver here — the relay lives as long as the
+	// orchestrator. Epic open question 1 (cross-session aggregation cost): the
+	// relay holds only references to the server buffer and the JobStore, so the
+	// bound is the live-session count. The notifier is injected by web.go via
+	// SetNotifier after the server is constructed; it is nil in tests that build
+	// a registry without a server.
+	if r.notifier != nil {
+		r.notifier.AttachSession(orch, sid, id, rt.JobStore)
 	}
 
 	r.mu.Lock()

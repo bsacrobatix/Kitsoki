@@ -71,6 +71,10 @@ Two SQLite tables are created by `jobs.NewJobStore` via an embedded migration:
 | `teleport_job_id` | job ID carried to the destination |
 | `teleport_slots` | additional slots to merge into world |
 
+These rows surface in two places: the TUI panel (`internal/tui/inbox.go`) and
+the web [global inbox](../../web/README.md#global-inbox-background-turn-notifications)
+(a cross-session SSE badge/toast that teleports back to `teleport_state`).
+
 The `__on_complete` payload key is the mechanism for surviving process restarts.
 `dispatchBackground` serialises the `on_complete []app.Effect` slice to JSON and
 stores it in `Payload["__on_complete"]`. `handleJobTerminal` recovers it with

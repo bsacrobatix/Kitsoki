@@ -129,9 +129,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { useRunStore } from "../stores/run.js";
+import { useInboxStore } from "../stores/inbox.js";
 import { createDataSource } from "../data/source.js";
 import type { DataSource } from "../data/source.js";
+import { LiveSource } from "../data/live-source.js";
 import { markAutoNavDone } from "../lib/auto-nav.js";
 import { renderAgentMarkdown } from "../lib/markdown.js";
 import ChatTranscript from "../components/ChatTranscript.vue";
@@ -144,6 +147,9 @@ import type { NodeRef } from "../types.js";
 
 const props = defineProps<{ sessionId: string }>();
 const store = useRunStore();
+const route = useRoute();
+const router = useRouter();
+const inbox = useInboxStore();
 
 // One DataSource for the lifetime of the view (subscribe + write RPCs).
 let source: DataSource | null = null;
@@ -172,6 +178,35 @@ async function loadSession(sessionId: string): Promise<void> {
   // opening agent transcript entry.
   await store.hydrate(source, sessionId);
   await store.loadInitialView(source, sessionId);
+  await maybeTeleportFromQuery(sessionId);
+}
+
+/**
+ * Inbox deep-link: if the route carries `?notif=<id>`, teleport the session to
+ * that notification's target room, apply the resulting view, mark the
+ * notification read, then clear the query param via router.replace so a refresh
+ * doesn't re-teleport. A non-teleportable / unknown id rejects with -32000 — we
+ * surface it as a soft error and still clear the param. Runs AFTER hydrate so
+ * the run store is ready to receive the TurnResult.
+ */
+async function maybeTeleportFromQuery(sessionId: string): Promise<void> {
+  // Guard for mounts without a router (some unit tests mount the view bare).
+  if (!route || !router) return;
+  const raw = route.query.notif;
+  const notifId = Array.isArray(raw) ? raw[0] : raw;
+  if (!notifId || typeof notifId !== "string") return;
+  const live = new LiveSource("/");
+  try {
+    const result = await live.teleport(sessionId, notifId);
+    store.applyTurnResult(result);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
+  void inbox.markRead(live, sessionId, notifId);
+  // Clear the param so a page refresh doesn't re-fire the teleport.
+  const q = { ...route.query };
+  delete q.notif;
+  await router.replace({ path: route.path, query: q });
 }
 
 onMounted(() => {

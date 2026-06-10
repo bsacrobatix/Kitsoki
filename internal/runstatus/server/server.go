@@ -79,6 +79,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/jobs"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/web"
 	"kitsoki/internal/store"
@@ -97,6 +98,10 @@ type Server struct {
 	mu     sync.Mutex
 	subs   map[string]*subscription
 	nextID int
+
+	// notifs is the cross-session notification feed buffer (notifications.go).
+	// Always non-nil; a relay is attached per live session via AttachSession.
+	notifs *notifBuffer
 }
 
 // subscription tracks one SSE stream slot. sent is the number of events already
@@ -183,6 +188,7 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		provider: provider,
 		poll:     cfg.poll,
 		subs:     make(map[string]*subscription),
+		notifs:   newNotifBuffer(),
 	}
 }
 
@@ -276,6 +282,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rpc", s.handleRPC)
 	mux.HandleFunc("/rpc/events", s.handleEvents)
+	mux.HandleFunc("/rpc/notifications", s.handleNotifications)
 	mux.HandleFunc("/artifact/", s.handleArtifact)
 	mux.HandleFunc("/rpc/meta-stream", s.handleMetaStream)
 	mux.HandleFunc("/rpc/turn-stream", s.handleTurnStream)
@@ -580,6 +587,91 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			return nil, serverErr(err)
 		}
 		return map[string]any{"answer": answer}, nil
+
+	// ── Inbox (background-job notifications) ────────────────────────────────
+	case "runstatus.session.notifications.list":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		notifs, err := entry.Driver.ListNotifications(ctx)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		limit, ok := intParam(params, "limit")
+		if ok && limit > 0 && limit < len(notifs) {
+			notifs = notifs[:limit]
+		}
+		if notifs == nil {
+			notifs = []jobs.Notification{}
+		}
+		return map[string]any{"notifications": notifs}, nil
+
+	case "runstatus.session.notifications.read":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		id, _ := params["id"].(string)
+		if id == "" {
+			return nil, &rpcError{Code: codeServerError, Message: "notifications.read: missing 'id'"}
+		}
+		if err := entry.Driver.MarkNotificationRead(ctx, id); err != nil {
+			return nil, serverErr(err)
+		}
+		return map[string]any{"ok": true}, nil
+
+	case "runstatus.session.notifications.dismiss":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		id, _ := params["id"].(string)
+		if id == "" {
+			return nil, &rpcError{Code: codeServerError, Message: "notifications.dismiss: missing 'id'"}
+		}
+		if err := entry.Driver.DismissNotification(ctx, id); err != nil {
+			return nil, serverErr(err)
+		}
+		return map[string]any{"ok": true}, nil
+
+	case "runstatus.session.teleport":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		nid, _ := params["notification_id"].(string)
+		if nid == "" {
+			return nil, &rpcError{Code: codeServerError, Message: "session.teleport: missing 'notification_id'"}
+		}
+		out, err := entry.Driver.Teleport(ctx, nid)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return newTurnResult(out, entry.Driver), nil
+
+	case "runstatus.notifications.subscribe":
+		// Cross-session feed: no session_id — the browser home chrome opens one
+		// of these for the global badge/toast. Returns a subscription_id the
+		// client opens against GET /rpc/notifications.
+		return map[string]any{"subscription_id": s.notifs.subscribe()}, nil
+
+	case "runstatus.notifications.unsubscribe":
+		id, _ := params["subscription_id"].(string)
+		s.notifs.unsubscribe(id)
+		return map[string]any{"ok": true}, nil
 
 	// ── Meta mode (overlay chat) ────────────────────────────────────────────
 	// session_id == "" routes to the home-screen "self" driver (kitsoki.* modes);
@@ -1035,6 +1127,71 @@ func (s *Server) streamNew(w http.ResponseWriter, flusher http.Flusher, sub *sub
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
 	}
 	sub.sent = len(events)
+	flusher.Flush()
+}
+
+// handleNotifications streams the cross-session notification feed as SSE. It
+// mirrors handleEvents: poll the server-level buffer for frames appended since
+// the subscription's watermark and emit one runstatus.notification frame each.
+// The subscription_id comes from runstatus.notifications.subscribe.
+func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("subscription_id")
+	sub := s.notifs.lookup(id)
+	if sub == nil {
+		http.Error(w, "unknown subscription", http.StatusNotFound)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher.Flush()
+
+	ticker := time.NewTicker(s.poll)
+	defer ticker.Stop()
+
+	ctx := r.Context()
+	for {
+		s.streamNotifications(w, flusher, sub)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// streamNotifications emits a runstatus.notification frame for every buffered
+// notification appended since the subscription's last delivery, then advances
+// the watermark.
+func (s *Server) streamNotifications(w http.ResponseWriter, flusher http.Flusher, sub *notifSub) {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+
+	frames, watermark := s.notifs.since(sub.sent)
+	for _, fr := range frames {
+		frame := map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "runstatus.notification",
+			"params": map[string]any{
+				"session_id":      fr.SessionID,
+				"notification":    fr.Notification,
+				"unread":          fr.Unread,
+				"needs_attention": fr.NeedsAttention,
+			},
+		}
+		b, err := json.Marshal(frame)
+		if err != nil {
+			continue
+		}
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+	}
+	sub.sent = watermark
 	flusher.Flush()
 }
 

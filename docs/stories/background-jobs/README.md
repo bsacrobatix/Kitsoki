@@ -4,7 +4,10 @@ Background jobs let a kitsoki state machine invoke a long-running host handler
 without blocking the turn loop. The handler runs in a goroutine; when it
 finishes, a synthetic turn fires the `on_complete:` effect list in the
 originating state's context and posts an inbox notification. The TUI surfaces
-the notification immediately without any polling by the app author.
+the notification immediately without any polling by the app author; the **web
+UI** surfaces the same notifications as a live cross-session badge/toast with
+click-to-teleport — see the
+[global inbox](../../web/README.md#global-inbox-background-turn-notifications).
 
 ## Quick start
 

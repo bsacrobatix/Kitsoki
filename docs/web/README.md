@@ -344,6 +344,102 @@ shareable MP4/GIF/contact-sheet artifacts.
 
 ---
 
+## Global inbox (background-turn notifications)
+
+A `background: true` turn (an `oracle.task`, a `host.run`, a test run) runs off
+the turn loop; when it terminates the engine posts a **notification** stamped
+with where the work began. The TUI surfaces these via a polling panel
+(`internal/tui/inbox.go`); the web surfaces the **same** notifications as a
+global inbox in the SPA chrome — so you can kick off a long turn, navigate to
+another session or the home view, and get pinged the moment it's ready.
+
+The inbox is a mailbox that belongs to **you**, not to the room you're looking
+at: it rides in the chrome on every screen, a new item means "a turn somewhere
+is ready," and clicking it walks you back there. Closing the tab and reopening
+**re-fetches** the inbox (no OS / Web-Notification alert in v1 — a fully
+backgrounded tab won't raise a system notification).
+
+This is pure transport + UI over the existing engine substrate — the
+`notifications` table, the `$inbox` projection, `Orchestrator.Teleport`, and the
+`SessionObserver` fan-out — all documented canonically with
+[background jobs](../stories/background-jobs/runtime.md#persistence-model). No
+new engine concepts.
+
+### The flow
+
+```
+background job terminal ─▶ PostJobNotification (notifications row)   [engine]
+                        └▶ RefreshSummary ($inbox unread counts)     [engine]
+                        └▶ notifyBackgroundTurn(outcome)             [engine]
+                                 │
+                    notificationRelay (a SessionObserver the          [web wiring]
+                    server registers per live session)
+                                 ▼
+              SSE: runstatus.notification ─▶ browser badge + toast
+```
+
+A per-session relay (`internal/runstatus/server/notifications.go`) multiplexes
+every live session's posts onto **one** cross-session SSE feed the home chrome
+subscribes to; the badge increments and, for `success` / `action_required`
+severity only, a transient toast appears. Clicking either jumps you back:
+
+```
+browser click ─▶ runstatus.session.teleport {notification_id}
+                   │  resolve notification (JobStore)
+                   │  inbox.FromNotification → TeleportTarget   (internal/inbox/inbox.go)
+                   └─ Orchestrator.Teleport(sid, target)        (internal/orchestrator/teleport.go)
+                        └─ turnResult (re-rendered room + restored slots) ─▶ browser
+```
+
+Teleport is request/response, not push — it reuses the stackless jump the TUI
+and the Oracle Room banner already drive, so a browser teleport is
+indistinguishable from a TUI one in the trace.
+
+### The surfaces
+
+- **Global badge** (`components/InboxBadge.vue`) — the unread count in the
+  chrome on every screen; severity color when any item `needs_attention`,
+  mirroring the TUI's `$inbox.needs_attention` projection (`internal/tui/inbox.go`).
+- **`InboxPanel.vue`** — opens on badge click: per item a severity glyph, title,
+  relative time, and **jump** + **dismiss** affordances. A notification whose
+  origin session is no longer live degrades to a non-jumping, read-only item
+  (teleport returns a typed error).
+- **`InboxToast.vue`** — transient, shown only on a `success` / `action_required`
+  push; auto-dismisses; click = the same jump as a panel item.
+
+The store is `stores/inbox.ts` (Pinia): it subscribes to the notification feed,
+holds the unread list + counts, and reconciles `read` / `dismiss` against the
+RPC result.
+
+### Deep-link
+
+A notification jump navigates to `#/s/<sessionId>/chat?notif=<notificationId>`.
+The link carries the **notification id**, not encoded state/slots, so it can't
+forge a teleport — `InteractiveView.vue` resolves it on mount via
+`session.teleport`, applies the resulting room, marks the notification read,
+then clears the param (a refresh doesn't re-teleport). The link is shareable.
+
+### v1 scope & limits
+
+- **In-memory sessions.** A tab reconnect re-fetches via `notifications.list`;
+  there is no durability across a server restart (gated on continue-mode's
+  journal — see [Limitations](#limitations--non-goals)).
+- **No OS / Web-Notification alerts;** no per-severity muting or filtering. A
+  noisy `info`-heavy story bumps the badge but stays silent in the panel.
+- **The relay is registered per live session and never unregistered** — the PoC
+  never evicts sessions (see [Session lifecycle](#session-lifecycle)'s "no kill
+  action" / "no cap" bound), so the cross-session feed is capped at currently
+  registered sessions.
+
+**Demo.** The deterministic no-LLM tour `web-inbox-video.spec.ts` drives
+`kitsoki web` against the demo story `stories/inbox-demo/` (manifest
+`src/tour/web-inbox-manifest.ts`) and walks the full badge → toast → teleport
+path; run it to see the surface end to end (the
+[`kitsoki-ui-demo`](../skills/kitsoki-ui-demo/SKILL.md) recipe renders the
+shareable artifacts).
+
+---
+
 ## Flags
 
 `kitsoki web` takes **no positional argument**. The story directories come from
@@ -424,6 +520,50 @@ surface unaffected](#read-only-surface-unaffected)):
 | `runstatus.session.submit` | `{intent, slots}` | `SubmitDirect` (chosen intent) |
 | `runstatus.session.continue` | `{slots}` | `ContinueTurn` (supply missing slots) |
 | `runstatus.session.offpath` | `{input}` | `AskOffPath` (read-only side question) |
+
+The [global inbox](#global-inbox-background-turn-notifications) adds four more
+session-routed methods (also `Driver`-gated):
+
+| Method | Params | Returns |
+|---|---|---|
+| `runstatus.session.notifications.list` | `{session_id, limit?}` | `{notifications: [...]}` (`JobStore.ListNotifications`) |
+| `runstatus.session.notifications.read` | `{session_id, id}` | `{ok}` (`MarkNotificationRead`) |
+| `runstatus.session.notifications.dismiss` | `{session_id, id}` | `{ok}` (`DismissNotification` — sets `dismissed_at`) |
+| `runstatus.session.teleport` | `{session_id, notification_id}` | `turnResult` (resolve notification → `inbox.FromNotification` → `Orchestrator.Teleport`) |
+
+A non-teleportable or unknown notification id makes `session.teleport` return a
+JSON-RPC error (`codeServerError`, `-32000`); the surface renders that
+notification as a read-only, non-jumping item.
+
+> **Wire shape (PascalCase).** The `notification` object — returned by `.list`
+> and carried in the SSE frame below — serializes with **Go field names**, not
+> camelCase: `ID`, `SessionID`, `CreatedAt`, `Severity`, `Title`, `Body`,
+> `TeleportState`, `TeleportSlots`, `TeleportProposalID`, `TeleportJobID`,
+> `OriginKind`, `OriginRef` (severity ∈ `info`|`success`|`warn`|`error`|`action_required`).
+> A frontend must not assume camelCase.
+
+### Cross-session notification feed (the global inbox)
+
+The badge/toast feed is **not** per-session: the browser opens one
+session-less subscription and the server multiplexes every live session's posts
+onto it (see [Global inbox](#global-inbox-background-turn-notifications)).
+
+| Method | Params | Returns |
+|---|---|---|
+| `runstatus.notifications.subscribe` | `{}` | `{subscription_id}` |
+| `runstatus.notifications.unsubscribe` | `{subscription_id}` | `{ok}` |
+
+Open the stream at **`GET /rpc/notifications?subscription_id=<id>`** (text/event-stream).
+Each frame is:
+
+```jsonc
+{"jsonrpc":"2.0","method":"runstatus.notification",
+ "params":{"session_id":"…","notification":{…},"unread":2,"needs_attention":1}}
+```
+
+`notification` is the PascalCase object noted above; `unread` / `needs_attention`
+are the refreshed `$inbox` counts. These methods and the event are **additive** —
+the read-only surface and older frontends are unaffected.
 
 ### Meta-mode methods (the overlay chat)
 

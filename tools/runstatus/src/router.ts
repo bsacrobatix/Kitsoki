@@ -12,6 +12,10 @@ const router = createRouter({
     // section.)
     { path: "/", component: HomeView },
     { path: "/s/:sessionId", component: RunView, props: true },
+    // The chat route also honours an optional `?notif=<id>` query param (a
+    // shareable inbox deep-link): InteractiveView teleports to that
+    // notification's target room on mount, then clears the param. No separate
+    // route — it's a query param so existing /s/:id/chat links keep working.
     { path: "/s/:sessionId/chat", component: InteractiveView, props: true },
   ],
 });
