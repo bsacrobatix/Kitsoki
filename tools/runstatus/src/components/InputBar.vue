@@ -132,7 +132,7 @@
     </template>
 
     <form
-      v-if="textIntents.length && !choiceItems.length"
+      v-if="textIntents.length"
       class="input-bar__composer"
       data-testid="composer"
       :data-active-intent="selectedTextName"
@@ -184,7 +184,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "send", text: string, intentName: string): void;
-  (e: "intent", name: string, slots: Record<string, unknown>): void;
+  (e: "intent", name: string, slots: Record<string, unknown>, displayLabel?: string): void;
 }>();
 
 // ── Choice items from typed view ──────────────────────────────────────────────
@@ -264,10 +264,17 @@ function submitForm() {
   emit("intent", formIntent.value, slots);
 }
 
-// Primary = first non-navigation item (not back/look/cancel)
+// Primary = the FIRST non-navigation item only — so one action is visually
+// highlighted as the recommended choice rather than all of them.
 const navIntents = new Set(["back", "look", "cancel", "exit"]);
+const firstPrimaryIntent = computed<string>(() => {
+  for (const item of buttonChoiceItems.value) {
+    if (!navIntents.has(item.Intent)) return item.Intent + "|" + JSON.stringify(item.Slots ?? {});
+  }
+  return "";
+});
 function isPrimary(item: ChoiceItem): boolean {
-  return !navIntents.has(item.Intent);
+  return (item.Intent + "|" + JSON.stringify(item.Slots ?? {})) === firstPrimaryIntent.value;
 }
 
 // Per-item free-text drafts (keyed by intent+slots to handle duplicate intent names)
@@ -275,7 +282,7 @@ const paramDrafts = ref<Record<string, string>>({});
 
 function fireChoiceItem(item: ChoiceItem) {
   if (props.pending) return;
-  emit("intent", item.Intent, (item.Slots as Record<string, unknown>) ?? {});
+  emit("intent", item.Intent, (item.Slots as Record<string, unknown>) ?? {}, item.Label);
 }
 
 function fireChoiceParam(item: ChoiceItem, text: string) {
@@ -294,8 +301,35 @@ const actionIntents = computed(() =>
   props.intents.filter((i) => !i.text_slot && !i.has_slots),
 );
 
-/** Intents that bind a single free-text slot -> the composer input. */
-const textIntents = computed(() => props.intents.filter((i) => !!i.text_slot));
+// Intent names already covered by a choice-item — suppress the legacy
+// text-slot textarea to avoid rendering the same intent twice.
+//
+// Rule:
+//   - Param forms (formChoiceItems): always suppress — the param form IS the
+//     text input for that intent.
+//   - Plain buttons with no pre-filled slots (buttonChoiceItems with Slots
+//     empty/null): suppress — the button fires the intent; a textarea adds
+//     nothing and clutters the UI for non-conversational rooms.
+//   - Plain buttons WITH pre-filled slots (e.g. "refine" → discuss {message:""}):
+//     do NOT suppress — the pre-filled slot is a shortcut; the textarea still
+//     lets the operator provide actual content (e.g. typed feedback).
+const coveredByChoiceItem = computed<Set<string>>(() => {
+  const names = new Set<string>();
+  for (const item of formChoiceItems.value) {
+    names.add(item.Intent);
+  }
+  for (const item of buttonChoiceItems.value) {
+    const hasPrefilledSlots = item.Slots != null && Object.keys(item.Slots).length > 0;
+    if (!hasPrefilledSlots) names.add(item.Intent);
+  }
+  return names;
+});
+
+/** Intents that bind a single free-text slot -> the composer input.
+ *  Suppressed when a choice-item already covers the intent (see above). */
+const textIntents = computed(() =>
+  props.intents.filter((i) => !!i.text_slot && !coveredByChoiceItem.value.has(i.name)),
+);
 
 /**
  * True when this room uses semantic routing as its primary affordance.
@@ -432,13 +466,18 @@ function sendRaw() {
 .input-bar__btn-label {
   font-weight: 600;
   font-size: 13px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .input-bar__btn-hint {
   font-size: 11px;
   color: #64748b;
   font-weight: 400;
-  white-space: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .input-bar__action-btn--primary .input-bar__btn-hint {

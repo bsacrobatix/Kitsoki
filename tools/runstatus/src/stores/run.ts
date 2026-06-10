@@ -199,11 +199,13 @@ export const useRunStore = defineStore("run", () => {
    * turn's state if it would rewind — the result.state IS the current state in
    * every mode, so it is always safe to mirror.
    */
-  function applyTurnResult(result: TurnResult): void {
+  function applyTurnResult(result: TurnResult, streamedText?: string): void {
     currentView.value = result;
     if (result.state) currentStatePath.value = result.state;
     terminal.value = result.mode === "completed";
-    const text = agentText(result);
+    // Prefer the captured streaming text (oracle narration) over the static
+    // view text — it's what the agent actually said during the turn.
+    const text = streamedText?.trim() || agentText(result);
     const hasElements = (result.typed_view?.Elements?.length ?? 0) > 0;
     // Skip a content-less agent turn (e.g. a terminal transition whose target
     // renders no view) so the transcript doesn't trail an empty bubble.
@@ -245,10 +247,12 @@ export const useRunStore = defineStore("run", () => {
     source: DataSource,
     sessionId: string,
     intent: string,
-    slots: Record<string, unknown> = {}
+    slots: Record<string, unknown> = {},
+    displayLabel?: string
   ): Promise<TurnResult> {
-    transcript.value.push({ role: "user", text: userText(intent, slots) });
+    transcript.value.push({ role: "user", text: userText(intent, slots, displayLabel) });
     let result: TurnResult;
+    let capturedStream = "";
     if ("turnStream" in source) {
       const live = source as LiveSource;
       pendingStreamText.value = "";
@@ -264,6 +268,7 @@ export const useRunStore = defineStore("run", () => {
             ];
           }
         });
+        capturedStream = pendingStreamText.value;
       } finally {
         pendingStreamText.value = "";
         pendingStreamTools.value = [];
@@ -271,7 +276,7 @@ export const useRunStore = defineStore("run", () => {
     } else {
       result = await source.submit(sessionId, intent, slots);
     }
-    applyTurnResult(result);
+    applyTurnResult(result, capturedStream);
     return result;
   }
 
@@ -287,6 +292,7 @@ export const useRunStore = defineStore("run", () => {
   ): Promise<TurnResult> {
     transcript.value.push({ role: "user", text });
     let result: TurnResult;
+    let capturedStream = "";
     if ("turnStream" in source) {
       const live = source as LiveSource;
       pendingStreamText.value = "";
@@ -302,6 +308,7 @@ export const useRunStore = defineStore("run", () => {
             ];
           }
         });
+        capturedStream = pendingStreamText.value;
       } finally {
         pendingStreamText.value = "";
         pendingStreamTools.value = [];
@@ -309,7 +316,7 @@ export const useRunStore = defineStore("run", () => {
     } else {
       result = await source.sendTurn(sessionId, text);
     }
-    applyTurnResult(result);
+    applyTurnResult(result, capturedStream);
     return result;
   }
 
@@ -351,7 +358,14 @@ export const useRunStore = defineStore("run", () => {
   }
 
   /** Build the user transcript text for a submitted intent. */
-  function userText(intent: string, slots: Record<string, unknown>): string {
+  function userText(intent: string, slots: Record<string, unknown>, displayLabel?: string): string {
+    if (displayLabel?.trim()) {
+      const values = Object.values(slots).filter(
+        (v) => typeof v === "string" && v.trim() !== ""
+      );
+      if (values.length > 0) return `${displayLabel}: ${values.join(" ")}`;
+      return displayLabel;
+    }
     const values = Object.values(slots).filter(
       (v) => typeof v === "string" && v.trim() !== ""
     );

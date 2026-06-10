@@ -227,9 +227,9 @@ function onSend(text: string, _intentName: string): void {
   void runTurn(() => store.sendText(source!, props.sessionId, text));
 }
 
-function onIntent(name: string, slots: Record<string, unknown>): void {
+function onIntent(name: string, slots: Record<string, unknown>, displayLabel?: string): void {
   if (!source) return;
-  void runTurn(() => store.submitIntent(source!, props.sessionId, name, slots));
+  void runTurn(() => store.submitIntent(source!, props.sessionId, name, slots, displayLabel));
 }
 
 // ---- trace interactions (mirror RunView observer behavior) ----
