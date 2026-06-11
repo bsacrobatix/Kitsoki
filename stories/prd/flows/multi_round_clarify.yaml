@@ -38,24 +38,41 @@ host_handlers:
   host.oracle.search:
     data: { hits: [] }
   host.oracle.decide:
+    # Shared stub: the analyst (id: analyst_questions) falls through to this
+    # questions envelope; the `answer` arc's matcher (id: match_answer) is
+    # intercepted below. by_call can't sequence, so both rounds get the same
+    # matched delta — fine here, because `clarify` clears the round's answers
+    # before round 2, so each round records the same answer independently.
     data:
       ok: true
       submitted:
         questions:
           - { id: "q1", question: "What is the scope boundary?", why: "scopes the work" }
+    by_call:
+      match_answer:
+        data:
+          ok: true
+          submitted:
+            answers_block:       "Q1: the public CLI surface only\n"
+            answered_ids_append: "|1|"
+            matched_count:       1
   host.artifacts_dir:
     data: { ok: true, path: ".artifacts/prd_brief.md", message_id: "prd_brief#1" }
 
 turns:
-  # Round 1: clarify → clarifying → submit → brief, then confirm through
-  # references back to drafting for the next round.
+  # Round 1: clarify → clarifying → answer (matcher) → submit → brief, then
+  # confirm through references back to drafting for the next round.
   - intent: { name: clarify, slots: {} }
     expect_state: clarifying
-  - intent: { name: submit_answers, slots: { answers: "round one answers" } }
+  - intent: { name: answer, slots: { text: "scope is the public CLI surface only" } }
+    expect_state: clarifying
+    expect_world:
+      clarification_answers: "Q1: the public CLI surface only\n"
+  - intent: { name: submit_answers, slots: {} }
     expect_state: brief
     expect_world:
       clarifying_cycle:      1
-      clarification_answers: "round one answers"
+      clarification_answers: "Q1: the public CLI surface only\n"
   - intent: { name: confirm, slots: {} }
     expect_state: references
   - intent: { name: confirm, slots: {} }
@@ -65,16 +82,20 @@ turns:
   # so submitting again advances it to 2 (accumulation, not reset).
   - intent: { name: clarify, slots: {} }
     expect_state: clarifying
-  - intent: { name: submit_answers, slots: { answers: "round two answers" } }
+  - intent: { name: answer, slots: { text: "still just the public CLI surface" } }
+    expect_state: clarifying
+    expect_world:
+      clarification_answers: "Q1: the public CLI surface only\n"
+  - intent: { name: submit_answers, slots: {} }
     expect_state: brief
     expect_world:
       clarifying_cycle:      2
-      clarification_answers: "round two answers"
+      clarification_answers: "Q1: the public CLI surface only\n"
       # The transcript accumulates newest-round-first: Round 2 is prepended
       # while Round 1 is preserved below it. This exact-match guards against
       # a regression that overwrites instead of appending. The embedded
       # `Questions: {...}` is the clarifications object spliced as compact
       # sorted-key JSON (proposal §5.5).
-      clarification_log:     "── Round 2 ──\nQuestions: {\"questions\":[{\"id\":\"q1\",\"question\":\"What is the scope boundary?\",\"why\":\"scopes the work\"}]}\nAnswers: round two answers\n\n── Round 1 ──\nQuestions: {\"questions\":[{\"id\":\"q1\",\"question\":\"What is the scope boundary?\",\"why\":\"scopes the work\"}]}\nAnswers: round one answers\n\n\n\n"
+      clarification_log:     "── Round 2 ──\nQuestions: {\"questions\":[{\"id\":\"q1\",\"question\":\"What is the scope boundary?\",\"why\":\"scopes the work\"}]}\nAnswers: Q1: the public CLI surface only\n\n\n── Round 1 ──\nQuestions: {\"questions\":[{\"id\":\"q1\",\"question\":\"What is the scope boundary?\",\"why\":\"scopes the work\"}]}\nAnswers: Q1: the public CLI surface only\n\n\n\n\n"
 
 expect_no_errors: true

@@ -33,12 +33,24 @@ host_handlers:
   host.oracle.search:
     data: { hits: [] }
   host.oracle.decide:
+    # Shared decide stub: scout (search), analyst (clarifying), researcher
+    # (references), brief_judge — all fall through to this questions-shaped
+    # envelope. The clarifying `answer` arc's matcher (id: match_answer) is
+    # intercepted by by_call below.
     data:
       ok: true
       submitted:
         questions:
           - { id: "q1", question: "Who is the primary user?", why: "scopes the persona" }
           - { id: "q2", question: "What is the single most important success metric?", why: "defines done" }
+    by_call:
+      match_answer:
+        data:
+          ok: true
+          submitted:
+            answers_block:       "Q1: developers\nQ2: time-to-first-success\n"
+            answered_ids_append: "|1||2|"
+            matched_count:       2
   host.artifacts_dir:
     data: { ok: true, path: ".artifacts/prd/example-cli/001-brief.md", message_id: "001-brief#1" }
   # search-confirm mints the workspace; accept publishes the draft.
@@ -89,14 +101,22 @@ turns:
     expect_world:
       prd_overlap_decision: "new"
 
-  # Answer the questions → brief. The round is appended to the transcript
-  # and clarifying_cycle increments. Entering brief writes the brief
-  # artifact (stubbed host.artifacts_dir).
-  - intent: { name: submit_answers, slots: { answers: "1) developers 2) time-to-first-success" } }
+  # Answer the questions in free text — the matcher (stubbed) maps the one
+  # reply to both q1 and q2. Stays in clarifying.
+  - intent: { name: answer, slots: { text: "developers, and the metric is time-to-first-success" } }
+    expect_state: clarifying
+    expect_world:
+      answered_count:        2
+      clarification_answers: "Q1: developers\nQ2: time-to-first-success\n"
+
+  # `submit` (a pure verb, no payload) → brief. The round is appended to the
+  # transcript and clarifying_cycle increments. Entering brief writes the
+  # brief artifact (stubbed host.artifacts_dir).
+  - intent: { name: submit_answers, slots: {} }
     expect_state: brief
     expect_world:
       clarifying_cycle:      1
-      clarification_answers: "1) developers 2) time-to-first-success"
+      clarification_answers: "Q1: developers\nQ2: time-to-first-success\n"
     expect_host_calls:
       - handler: host.artifacts_dir
         args: { thread: "001-brief" }

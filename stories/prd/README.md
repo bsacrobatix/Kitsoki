@@ -75,10 +75,14 @@ intents — you don't memorize commands):
    proceeds. Committing (any of those) mints the per-PRD slug + workspace
    (`prd_slug.py`) that every later artifact writes into.
 3. **`clarifying` — answer the questions.** The `analyst` posts a numbered
-   list of the gaps that most change the PRD. **Answer one at a time by
-   number** — e.g. `3 our enterprise tenants only`. The screen tracks which
-   are answered. When you've covered enough, type **`submit`** (or `skip`
-   to move on with what you have). `regenerate` re-asks; `quit` bails.
+   list of the gaps that most change the PRD. **Just type your answers in
+   plain language** — in any order, with or without naming a number. The
+   room's `default_intent: answer` routes each reply (deterministically,
+   before the LLM) to the `answer_matcher` oracle, which maps it to the
+   question(s) it actually answers and drops them from the live list. A
+   single reply may resolve several questions at once. When you've covered
+   enough, type **`submit`** (or `skip` to move on with what you have).
+   `regenerate` re-asks; `quit` bails.
 4. **`brief` — confirm the inputs.** A read-only review of the formalized
    idea + every clarification, written to `<workspace>/001-brief.md`. Pick
    **`confirm`** to proceed, **`clarify`** to ask another round *keeping*
@@ -111,7 +115,7 @@ as the audit trail.
 ```
 idle ─start─▶ search ─confirm─▶ clarifying ─submit_answers/skip─▶ brief ─confirm─▶ references ─confirm─▶ drafting
  │ (chat)       │ (scout →        │ (decide → questions)          │ (001-       │ (decide →           │ (task → 004-prd.md;
- │ ◀─discuss    │  overlap gate;  │ ◀─answer n=… (self)           │  brief.md)  │  doc references;    │  accept publishes to
+ │ ◀─discuss    │  overlap gate;  │ ◀─answer (free text, self)    │  brief.md)  │  doc references;    │  accept publishes to
  │              │  mints slug +   ├─regenerate ─▶ clarifying       ├─confirm     │  003-references.md) │  docs/prd/<slug>.md)
  │              │  workspace)     └─quit ─▶ @exit:abandoned        ├─restart_from├─confirm             ├─accept ─▶ @exit:done
  │              ├─change_existing ─▶ clarifying (amend target)     └─quit        ├─regenerate (budget) ├─refine ─▶ drafting (budget→abandoned)
@@ -190,7 +194,7 @@ terminals so `kitsoki run` and `kitsoki test flows` terminate cleanly.
 |---|---|---|---|
 | `idle` (conversational) | `host.chat.resolve` (get-or-create) opens the discovery chat; `interviewer` (`host.oracle.converse`) replies per `discuss` turn | no — `discuss` self-loops the conversation | `search` (via `start`, which distills the chat into `world.idea`) |
 | `search` | `scout` (`host.oracle.decide`) → `prd_existing_state` (read-only prior-art scan; no artifact written) | yes — operator `confirm`s / `change_existing` / `override_new` | `clarifying`; the commit arc runs `prd_slug.py` (`host.run`) to mint `prd_slug` + `prd_workspace` |
-| `clarifying` | `analyst` (`host.oracle.decide`) → `clarifications` | no — operator answers questions one at a time (`answer n=…`) | `brief` (via `submit_answers` or `skip`) |
+| `clarifying` | `analyst` (`host.oracle.decide`) → `clarifications` | no — operator answers in free text; `default_intent: answer` → `answer_matcher` (`host.oracle.decide`) maps each reply to the question(s) it answers | `brief` (via `submit_answers` or `skip`) |
 | `brief` | `host.artifacts_dir` writes `<workspace>/001-brief.md` from `world.idea` + `world.clarification_log` (deterministic — no oracle) | yes — operator `confirm`s the brief | `references` (via `confirm`); `clarify` re-questions keeping the record; `restart_from` discards |
 | `references` | `researcher` (`host.oracle.decide`, docs-only) → `references`; `host.artifacts_dir` writes `<workspace>/003-references.md` | yes — operator `confirm`s the list | `drafting` (via `confirm`); `refine` revises the list in place; `regenerate` searches fresh (both budgeted); `clarify` re-questions keeping the record |
 | `drafting` | `author` (`host.oracle.task`) writes `<workspace>/004-prd.md` → `prd_artifact` (reads the confirmed `references`); optional `judge` | yes — `prd_artifact` | `@exit:done` (via `accept`, which runs `prd_publish.py` to move the draft to `docs/prd/<slug>.md`) |
@@ -248,8 +252,8 @@ loads standalone for tests. Parent stories project the intake keys via
 |---|---|---|
 | `discuss` | `message` (req) | Send a free-text message in the idea-discovery conversation (self-loops `idle`). |
 | `start` | — | From `idle`: distill the conversation into `world.idea` and advance to `clarifying`. |
-| `answer` | `n` (req, int) · `text` (req) | Answer ONE question by its number; self-loops `clarifying` (does NOT regenerate). Appends a `Qn: …` line to `clarification_answers` and bumps `answered_count`. |
-| `submit_answers` | (opt) `answers` | Advance to the `brief` review on the answers gathered so far; appends the round to `clarification_log` and increments `clarifying_cycle`. A pasted `answers` blob overrides the accumulated replies. |
+| `answer` | `text` (req) · `n` (opt, int) | Record a free-text answer; self-loops `clarifying` (does NOT regenerate). The room's `default_intent`, so any non-verb prose routes here deterministically (before the LLM); the `answer_matcher` oracle maps `text` to the question(s) it answers (`n`, if the operator named one, is a hint) and appends the matched `Qn: …` line(s) to `clarification_answers`, bumping `answered_count`. |
+| `submit_answers` | — | Pure verb (no slots). Advance to the `brief` review on the answers gathered so far (accumulated by `answer`); appends the round to `clarification_log` and increments `clarifying_cycle`. |
 | `skip` | — | Move on to the brief with what we have (no answers this round; no log append). |
 | `confirm` | — | Confirm the current review step (`brief` → `references`, or `references` → `drafting`). |
 | `regenerate` | (opt) `feedback` | Re-generate the current step's machine output FROM SCRATCH: in `clarifying`, re-ask this round's questions (`clarifying_cycle >= clarifying_budget` → `@exit:abandoned`); in `references`, a fresh doc search (`references_revise=false`; `references_cycle >= references_budget` → `@exit:abandoned`). Self-transition; re-fires the on_enter oracle call. |
@@ -287,6 +291,7 @@ Named agents attribute model + token usage to each step in the trace.
 | `interviewer` | `converse` | `Read`, `Grep`, `Glob` | Runs the idea-discovery chat; helps the operator sharpen the problem, users, and scope. |
 | `scout` | `decide` | `Read`, `Grep`, `Glob` | The prior-art gate: scans the workdir's docs for overlapping PRDs / requirement docs + roadmap fit, before any artifact is written. |
 | `analyst` | `decide` | `Read`, `Grep`, `Glob` | Reads the idea + upstream docs + the transcript; asks only genuinely-new questions. |
+| `answer_matcher` | `decide` | (none) | Maps each free-text operator reply to the clarifying question(s) it answers (by position) — so number-less, out-of-order answers land correctly. Returns only the delta for that reply. |
 | `researcher` | `decide` | `Read`, `Grep`, `Glob` | Searches the working dir's **docs** (not code) for prior art / constraints; curates the reference list with sections + rationale. |
 | `author` | `task` | `Read`, `Grep`, `Glob`, `Write`, `Edit` | Writes the PRD markdown to disk (reads the curated references); produces `prd_artifact`. |
 | `judge` | `decide` | (none) | Optional auto-advance gate (off by default). |

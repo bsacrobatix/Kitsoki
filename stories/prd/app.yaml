@@ -121,6 +121,18 @@ agents:
     tools: [Read, Grep, Glob]
     external_side_effect: false
 
+  # answer_matcher — decide; no tools; the clarifying room's free-text answer
+  # router. Reads the question list + the operator's latest reply and reports
+  # which question(s) it answers (by 1-based position), so a number-less,
+  # out-of-order answer still lands on the right question. Returns only the
+  # delta for that reply; the room concatenates it onto the running transcript.
+  # See rooms/clarifying.yaml `answer` arc, prompts/match_answer.md.
+  answer_matcher:
+    system_prompt: "You map an operator's free-text reply to the clarifying question(s) it answers. Match on meaning, not position; a reply may answer several questions or none. Return only the questions this reply newly resolves."
+    model: claude-sonnet-4-6
+    tools: []
+    external_side_effect: false
+
 # World — every key read in a view, effect, or guard is declared here.
 world:
   # ── intake ──────────────────────────────────────────────────────────
@@ -233,27 +245,42 @@ intents:
     examples: ["ready", "i'm ready", "build the prd", "draft it", "let's go", "done discussing", "start"]
     priority: 90
   answer:
-    description: "Answer ONE clarifying question by its number; stays on the clarifying screen so you can answer the rest one at a time."
-    examples: ["number 3 our enterprise tenants", "1) developers on the platform team", "for question 2, time-to-first-PRD under 10 min", "q4 no hard deadline"]
+    description: "Record an answer to a clarifying question; stays on the clarifying screen so you can work through the rest one at a time."
+    examples: ["platform developers", "time-to-first-PRD under 10 min", "no hard deadline", "internal tooling is out of scope"]
     priority: 75
     slots:
-      # Both required → the semantic router falls through to the LLM
-      # router, which pulls the question number AND the free-text reply
-      # out of a line like "number 3 blah blah". A choice-form param can
-      # only fill one slot, so this intent is driven by typed free text
-      # (the clarifying view carries a prose hint), not a menu selection.
-      n:    { type: int,    required: true }   # which question (1-based, as shown in the list)
-      text: { type: string, required: true }   # the answer
+      # `text` is the sole REQUIRED slot, which makes `answer` eligible as
+      # the clarifying room's `default_intent` (the free-text sink — see
+      # rooms/clarifying.yaml + docs/architecture/semantic-routing.md §1.5):
+      # any bare prose the operator types in the clarifying room routes here
+      # DETERMINISTICALLY (tier 4, before the LLM), filling `text` with the
+      # whole utterance. This closes the routing trap where a number-less
+      # answer fell through to the LLM and got mis-classified as
+      # `submit_answers` (whose optional `answers` slot greedily swallowed
+      # it, skipping the entire clarifying phase).
+      #
+      # `n` is OPTIONAL: free-text answers omit it. The `answer` arc hands
+      # the whole reply (`text`) to the answer_matcher oracle, which reads the
+      # question list and decides which question(s) the reply answers — so an
+      # out-of-order, number-less answer still lands on the right question
+      # (see rooms/clarifying.yaml + prompts/match_answer.md). `n`, when an
+      # operator does name a number, is passed to the matcher as a hint.
+      # Making `n` required again would re-open the trap AND disqualify
+      # `answer` as the default_intent (which demands exactly one required
+      # string slot).
+      n:    { type: int,    required: false }  # optional question-number hint passed to the matcher
+      text: { type: string, required: true }   # the operator's reply (the whole utterance, when routed via default_intent)
   submit_answers:
     description: "Done answering this round — advance to the brief review with the answers gathered so far."
-    examples: ["submit", "done answering", "that's all", "draft it now", "here are my answers"]
+    examples: ["submit", "done answering", "that's all", "draft it now"]
     priority: 80
-    slots:
-      # Optional now: the normal flow accumulates answers one-by-one via
-      # `answer`, so `submit` needs no payload. A pasted blob is still
-      # honoured when present (it overrides the accumulated answers — see
-      # rooms/clarifying.yaml).
-      answers: { type: string, required: false }
+    # No slots — `submit_answers` is a pure verb. The clarifying loop
+    # accumulates answers via `answer` (the free-text sink, LLM-matched), so
+    # submit carries no payload. A string slot here would (a) make submit a
+    # spurious "text intent" in the web composer — competing with `answer` to
+    # receive typed prose, the exact mis-route that sent a single answer
+    # straight to the brief — and (b) re-open the swallow-the-utterance trap.
+    # The operator submits with the explicit `submit` button / verb.
   skip:
     description: "Skip answering this round; move on to the brief with what we have."
     examples: [skip, "no more questions", "just draft", "go ahead"]

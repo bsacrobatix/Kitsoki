@@ -29,11 +29,21 @@ host_handlers:
   host.oracle.search:
     data: { hits: [] }
   host.oracle.decide:
+    # on_enter analyst (id: analyst_questions) → falls through to this envelope.
     data:
       ok: true
       submitted:
         questions:
           - { id: "q2", question: "What is explicitly out of scope?", why: "bounds the work" }
+    by_call:
+      # The matcher maps the reply to this round's only question (position 1).
+      match_answer:
+        data:
+          ok: true
+          submitted:
+            answers_block:       "Q1: internal tooling is out of scope\n"
+            answered_ids_append: "|1|"
+            matched_count:       1
   host.artifacts_dir:
     data: { ok: true, path: ".artifacts/out.md", message_id: "out#1" }
 
