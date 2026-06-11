@@ -76,6 +76,7 @@
             v-else
             :intents="store.currentView?.intents ?? []"
             :typed-view="store.currentView?.typed_view"
+            :default-intent="store.currentView?.default_intent"
             :pending="pending"
             @send="onSend"
             @intent="onIntent"

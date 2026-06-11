@@ -2329,6 +2329,29 @@ func (o *Orchestrator) LookupIntent(state app.StatePath, name string) (app.Inten
 	return o.machine.LookupIntent(state, name)
 }
 
+// StateDefaultIntent returns the resolved (import-folded) name of the given
+// state's free-text sink — its `default_intent` — or "" when the state
+// declares none. The web composer uses this to default its text-input box to
+// the room's free-text sink (e.g. `answer` in the PRD `clarifying` room)
+// rather than to an arbitrary first text-slot intent, so a typed reply routes
+// the way the room author intended. Mirrors resolveDefaultIntentName: the
+// authored name may be bare while the folded machine uses an import-prefixed
+// key, so we resolve through the state's IntentAliases.
+func (o *Orchestrator) StateDefaultIntent(state app.StatePath) string {
+	st := lookupStateByPath(o.def, state)
+	if st == nil {
+		return ""
+	}
+	di := strings.TrimSpace(st.DefaultIntent)
+	if di == "" {
+		return ""
+	}
+	if mapped, ok := st.IntentAliases[di]; ok && strings.TrimSpace(mapped) != "" {
+		return mapped
+	}
+	return di
+}
+
 // CurrentView reconstructs the current state/world for a session and returns a
 // read-only TurnOutcome describing it — the "what does the room look like right
 // now" frame the browser asks for on load (runstatus.session.view) without

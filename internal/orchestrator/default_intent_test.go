@@ -73,6 +73,26 @@ states:
 	return orch, h, s, sid
 }
 
+// TestStateDefaultIntent reports the resolved free-text sink for a state — the
+// web composer reads it (via the driver) to default its text box to the sink
+// intent. A state with a default_intent returns its name; one without returns
+// "".
+func TestStateDefaultIntent(t *testing.T) {
+	t.Parallel()
+
+	withDI, _, _, _ := newDefaultIntentApp(t, true)
+	require.Equal(t, "discuss", withDI.StateDefaultIntent(app.StatePath("chat")),
+		"a state declaring default_intent reports its resolved name")
+	require.Equal(t, "", withDI.StateDefaultIntent(app.StatePath("ended")),
+		"a state without default_intent reports empty")
+	require.Equal(t, "", withDI.StateDefaultIntent(app.StatePath("nonexistent")),
+		"an unknown state reports empty")
+
+	withoutDI, _, _, _ := newDefaultIntentApp(t, false)
+	require.Equal(t, "", withoutDI.StateDefaultIntent(app.StatePath("chat")),
+		"no default_intent declared anywhere → empty")
+}
+
 // TestDefaultIntent_UnmatchedFreeTextRoutesToDefault is the core fix: prose that
 // matches no command routes to `discuss` with the whole utterance as
 // slots.message, deterministically, without the harness.

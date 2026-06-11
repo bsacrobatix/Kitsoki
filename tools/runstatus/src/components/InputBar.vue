@@ -179,6 +179,15 @@ import type { IntentInfo, View, ChoiceItem, ChoiceField } from "../types.js";
 const props = defineProps<{
   intents: IntentInfo[];
   typedView?: View | null;
+  /**
+   * The room's free-text sink (its `default_intent`, resolved to an intent
+   * name) when it declares one. The composer defaults its text-input box to
+   * this intent so a typed reply routes the way the room author intended
+   * (e.g. `answer` in the PRD clarifying room) rather than the arbitrary first
+   * text-slot intent. Falls back to the first text intent when absent or not
+   * itself a text intent.
+   */
+  defaultIntent?: string;
   pending?: boolean;
 }>();
 
@@ -348,16 +357,26 @@ const isSemanticRoom = computed(() => {
 
 const selectedTextName = ref<string>("");
 
-// Default the selected text intent to the first one; keep it valid as intents change.
+// Default the selected text intent to the room's free-text sink
+// (default_intent) when it is itself a text intent; otherwise the first one.
+// Keep it valid as intents change. Defaulting to default_intent is what keeps
+// a typed reply in a sink room (e.g. PRD clarifying) routing to `answer`
+// rather than to whatever text-slot intent happens to sort first — the bug
+// that sent a single typed answer straight to the brief.
+function preferredTextName(list: IntentInfo[]): string {
+  const di = props.defaultIntent;
+  if (di && list.some((i) => i.name === di)) return di;
+  return list[0].name;
+}
 watch(
-  textIntents,
-  (list) => {
+  [textIntents, () => props.defaultIntent],
+  ([list]) => {
     if (!list.length) {
       selectedTextName.value = "";
       return;
     }
     if (!list.some((i) => i.name === selectedTextName.value)) {
-      selectedTextName.value = list[0].name;
+      selectedTextName.value = preferredTextName(list);
     }
   },
   { immediate: true },

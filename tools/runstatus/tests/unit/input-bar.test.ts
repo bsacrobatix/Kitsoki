@@ -21,6 +21,12 @@ const submitIntent: IntentInfo = {
   text_slot: "answer",
   has_slots: true,
 };
+const answerIntent: IntentInfo = {
+  name: "answer",
+  title: "Answer",
+  text_slot: "text",
+  has_slots: true,
+};
 
 describe("InputBar", () => {
   it("renders a button for each no-slot intent", () => {
@@ -77,6 +83,39 @@ describe("InputBar", () => {
     expect(wrapper.find(".input-bar__select").exists()).toBe(true);
     const opts = wrapper.findAll(".input-bar__select option").map((o) => o.text());
     expect(opts).toEqual(["Discuss", "Submit"]);
+    wrapper.unmount();
+  });
+
+  it("defaults the composer to the room's default_intent (not the first text intent), so a typed reply routes to the sink", async () => {
+    // Regression: PRD clarifying lists submit_answers/regenerate/answer as
+    // text intents; without honoring default_intent the composer bound typed
+    // prose to whichever sorted first and a single answer skipped to brief.
+    const wrapper = mount(InputBar, {
+      props: {
+        intents: [submitIntent, answerIntent],
+        defaultIntent: "answer",
+      },
+    });
+    // The selector shows submit first, but `answer` is the active selection.
+    const select = wrapper.find(".input-bar__select")
+      .element as HTMLSelectElement;
+    expect(select.value).toBe("answer");
+
+    await wrapper.find(".input-bar__textarea").setValue("ephemeral, resets each reload");
+    await wrapper.find(".input-bar__composer").trigger("submit");
+    const intentEv = wrapper.emitted("intent");
+    expect(intentEv).toBeTruthy();
+    expect(intentEv![0]).toEqual(["answer", { text: "ephemeral, resets each reload" }]);
+    wrapper.unmount();
+  });
+
+  it("falls back to the first text intent when default_intent is absent or not a text intent", () => {
+    const wrapper = mount(InputBar, {
+      props: { intents: [submitIntent, answerIntent], defaultIntent: "skip" },
+    });
+    const select = wrapper.find(".input-bar__select")
+      .element as HTMLSelectElement;
+    expect(select.value).toBe("submit_answers");
     wrapper.unmount();
   });
 

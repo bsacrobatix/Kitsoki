@@ -273,6 +273,14 @@ export interface TurnResult {
   typed_view?: View;
   allowed_intents?: string[];
   intents?: IntentInfo[];
+  /**
+   * The current room's free-text sink (its `default_intent`), resolved to the
+   * intent name. The composer defaults its text-input box to this intent so a
+   * typed reply routes the way the room author intended (e.g. `answer` in the
+   * PRD clarifying room) instead of an arbitrary first text-slot intent.
+   * Absent when the room declares no default_intent.
+   */
+  default_intent?: string;
   slots_needed?: SlotNeed[];
   pending_intent?: string;
   pending_slots?: Record<string, unknown>;

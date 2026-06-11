@@ -40,6 +40,12 @@ type Driver interface {
 	// newTurnResult can enrich the menu the browser renders. Returns the zero
 	// value with ok=false when the name does not resolve.
 	IntentInfo(name string, state string) (intentInfo, bool)
+	// DefaultIntent returns the resolved name of the given state's free-text
+	// sink (its `default_intent`), or "" when the state declares none. The
+	// browser composer defaults its text-input box to this intent so a typed
+	// reply routes the way the room author intended (e.g. `answer` in the PRD
+	// clarifying room) instead of an arbitrary first text-slot intent.
+	DefaultIntent(state string) string
 	// PatchWorld injects world-key overrides into the session event log without
 	// advancing a turn. For demo/test tooling (runstatus.session.patch_world).
 	PatchWorld(ctx context.Context, patch map[string]any) error
@@ -191,6 +197,12 @@ func (d OrchestratorDriver) IntentInfo(name string, state string) (intentInfo, b
 	return info, true
 }
 
+// DefaultIntent returns the resolved free-text-sink intent name for the given
+// state (or "" when none). See the Driver interface doc.
+func (d OrchestratorDriver) DefaultIntent(state string) string {
+	return d.Orch.StateDefaultIntent(app.StatePath(state))
+}
+
 // turnResult is the JSON wire shape for a [orchestrator.TurnOutcome]. It is the
 // write-RPC response the SPA renders: the resolved typed view (so the browser
 // can lay out elements itself), the pre-rendered text fallback, the allowed
@@ -210,6 +222,10 @@ type turnResult struct {
 	// single free-text slot (if any) the UI binds its input box to. It is the
 	// structured companion to AllowedIntents (which stays for back-compat).
 	Intents       []intentInfo            `json:"intents,omitempty"`
+	// DefaultIntent is the resolved name of the current state's free-text sink
+	// (its `default_intent`), or "" when none. The composer defaults its text
+	// box to this intent. See Driver.DefaultIntent.
+	DefaultIntent string                  `json:"default_intent,omitempty"`
 	SlotsNeeded   []orchestrator.SlotNeed `json:"slots_needed,omitempty"`
 	PendingIntent string                  `json:"pending_intent,omitempty"`
 	PendingSlots  map[string]any          `json:"pending_slots,omitempty"`
@@ -280,6 +296,7 @@ func newTurnResult(out *orchestrator.TurnOutcome, resolver Driver) turnResult {
 				tr.Intents = append(tr.Intents, intentInfo{Name: name})
 			}
 		}
+		tr.DefaultIntent = resolver.DefaultIntent(string(out.NewState))
 	}
 	return tr
 }

@@ -39,6 +39,7 @@ func (d *captureDriver) View(context.Context) (*orchestrator.TurnOutcome, error)
 	return &orchestrator.TurnOutcome{}, nil
 }
 func (d *captureDriver) IntentInfo(string, string) (intentInfo, bool)     { return intentInfo{}, false }
+func (d *captureDriver) DefaultIntent(string) string                      { return "" }
 func (d *captureDriver) PatchWorld(context.Context, map[string]any) error { return nil }
 func (d *captureDriver) ListNotifications(context.Context) ([]jobs.Notification, error) {
 	return nil, nil
