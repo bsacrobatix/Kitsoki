@@ -200,6 +200,49 @@ export async function waitForState(
 }
 
 /**
+ * Poll the trace RPC until at least `minCount` `oracle.call.complete` events are
+ * present, so a tour never starts spotlighting trace rows before the SSE stream
+ * has actually pushed them. A deterministic replacement for a flat
+ * `page.waitForTimeout` — the events arrive on wall-clock-variable SSE timing,
+ * so a fixed sleep is a flicker/rushed-frame risk under load. Mirrors the golden
+ * agent-actions spec's `waitForOracleTranscripts`.
+ *
+ * Resolves once the count is met; throws on timeout with the last seen count so
+ * a failed recording is diagnosable. Pass `requireTranscriptRef` to additionally
+ * gate on a `transcript_ref` attr (needed before the agent-actions drawer steps,
+ * where the affordance only renders for transcript-bearing calls).
+ */
+export async function waitForOracleComplete(
+  server: WebServer,
+  sessionId: string,
+  minCount: number,
+  timeoutMs: number,
+  requireTranscriptRef = false,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let seen = 0;
+  while (Date.now() < deadline) {
+    const tr = await server
+      .rpc<{ events?: Array<{ msg: string; attrs?: Record<string, unknown> }> }>(
+        "runstatus.session.trace",
+        { session_id: sessionId },
+      )
+      .catch(() => ({ events: [] as Array<{ msg: string; attrs?: Record<string, unknown> }> }));
+    seen = (tr.events ?? []).filter(
+      (e) =>
+        e.msg === "oracle.call.complete" &&
+        (!requireTranscriptRef || !!(e.attrs && e.attrs["transcript_ref"])),
+    ).length;
+    if (seen >= minCount) return;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  throw new Error(
+    `oracle events never settled: only ${seen}/${minCount} oracle.call.complete` +
+      `${requireTranscriptRef ? " with transcript_ref" : ""} after ${timeoutMs}ms`,
+  );
+}
+
+/**
  * Prepare a fresh VIDEO_DIR for a recording run.
  *
  * Must be called in beforeAll (or at the top of the test) BEFORE the Playwright

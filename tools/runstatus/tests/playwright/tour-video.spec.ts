@@ -25,6 +25,7 @@ import {
   repoRoot,
   makeShot,
   waitForState,
+  waitForOracleComplete,
   prepareVideoDir,
   saveVideoAsMp4,
   ChapterRecorder,
@@ -211,8 +212,9 @@ test("onboarding tour video (no-LLM)", async () => {
               // judge on every checkpoint's on_enter and produces multiple
               // oracle.call.complete events with duration_ms in the trace.
               await server.rpc("runstatus.session.submit", { session_id: sessionId, intent: "start", slots: {} });
-              // Give the server time to process and the SSE stream to push updates.
-              await page.waitForTimeout(2000);
+              // Poll the trace to a deadline (not a flat sleep) so the oracle
+              // events have landed before the trace-detail steps spotlight them.
+              await waitForOracleComplete(server, sessionId, 1, 40000);
             } catch {
               // Non-fatal: the trace introspection steps degrade gracefully
               // if oracle events are absent.

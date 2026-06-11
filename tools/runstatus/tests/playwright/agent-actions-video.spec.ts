@@ -13,7 +13,7 @@
  * spec orchestration.
  *
  * The demo cassette (stories/bugfix/flows/demo.cassette.yaml) carries the rich
- * recorded transcripts: a 12-event task arc (call_id 4e96533378e89461) and an
+ * recorded transcripts: an 18-event task arc (call_id 4e96533378e89461) and an
  * 8-event decide arc (call_id e5129592efb9250c) with the _kitsoki reject / nudge
  * / accept rows. session.new -> patch_world{judge_mode:"llm"} -> submit{start}
  * produces both calls with their transcript_ref pointers.
@@ -56,9 +56,9 @@ const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
 const DIAG_LOG = path.join(ARTIFACT_DIR, "diagnostic.log");
 
 // The recorded transcript event counts the affordance badge shows. The task
-// call has 12 events; the decide call has 8. Selecting a call's row by its
+// call has 18 events; the decide call has 8. Selecting a call's row by its
 // badge count is robust to trace ordering.
-const TASK_EVENTS = 12;
+const TASK_EVENTS = 18;
 const DECIDE_EVENTS = 8;
 
 let server: WebServer;
@@ -198,7 +198,7 @@ test("agent action transcripts feature-spotlight video", async () => {
       }
 
       // ── Pre-step setup ──────────────────────────────────────────────────
-      // Before the TASK-call steps, open the 12-event task call's drawer so the
+      // Before the TASK-call steps, open the 18-event task call's drawer so the
       // affordance / drawer / row / waterfall / accrual testids are present.
       if (step.id === "aa-affordance") {
         // Open the task call's detail pane (affordance is the step target, but

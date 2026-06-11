@@ -6,19 +6,25 @@
  * seam (render → chapters → artifact handle → /review → ffmpeg still on flag),
  * NOT a fixture stub for the artifact itself.
  *
+ * Like the golden agent-actions / diagram-showcase specs, this video is
+ * TOUR-DRIVEN: the REVIEW_TOUR_STEPS in src/tour/review-manifest.ts narrate the
+ * whole /review walk via window.__startTourWithSteps. The render→chapters→
+ * artifact→/review setup runs OFF-CAMERA via RPC (behind a curtain); once the
+ * page is ON /review the spec injects the tour, asserts the overlay is visible,
+ * and walks the steps with an anti-drift title assertion (tour-title === step
+ * title) so the manifest and video cannot silently drift. Detail-pane steps have
+ * a pre-step hook that selects + flags a moment so their spotlight testid is on
+ * screen. The tour lives in in-memory Pinia state, so the spec NEVER reloads
+ * after injecting it (a reload would tear the overlay down).
+ *
  * Determinism / no-LLM posture (docs/skills/kitsoki-ui-demo/SKILL.md):
  *   - `kitsoki web --flow stories/mockup-video/flows/demo_review.yaml`: the
  *     intake/brief-gate/authoring oracle calls are stubbed, and
  *     host.slidey.render is stubbed to return the REAL pre-rendered files under
  *     .artifacts/review-video/render. host.artifacts_dir is NOT stubbed, so the
  *     REAL builtin runs and journals the artifact handle the resolver serves.
- *   - Setup (home → session → intake → review) is driven OFF-CAMERA via RPC
- *     behind a full-screen CURTAIN.
  *   - The video_handle is content-addressed (dynamic): the spec reads it from
  *     the review room's typed_view (the media element) rather than hardcoding.
- *   - On-camera, the demo navigates to /review and advances via REAL UI clicks
- *     (timeline marker → flag → instruction → send). The flag click triggers a
- *     real runstatus.video.frame ffmpeg grab.
  *
  * PRECONDITION: the real video + chapters must exist on disk before this runs:
  *   node /home/cloud-user/code/slidey/src/index.js docs/decks/arch-and-usage.json \
@@ -38,17 +44,12 @@ import {
   makeShot,
   prepareVideoDir,
   saveVideoAsMp4,
+  dwell,
+  SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
-import {
-  DEMO_VIEWPORT,
-  dwell,
-  installCurtain,
-  liftCurtain,
-  makeCaption,
-  captureDiagnostics,
-} from "./_helpers/demo.js";
-import { REVIEW_DEMO_STEPS, type ReviewStep } from "../../src/tour/review-manifest.js";
+import { installCurtain, liftCurtain, captureDiagnostics } from "./_helpers/demo.js";
+import { REVIEW_TOUR_STEPS, type TourStep } from "../../src/tour/review-manifest.js";
 
 // 7754 — distinct from diagram-showcase (7753) / agent-actions (7748) so
 // parallel spec files never race on the same port.
@@ -73,33 +74,12 @@ test.beforeAll(async () => {
 });
 test.afterAll(() => server?.stop());
 
-/** Spotlight a target testid with an injected ring (presentation-only; never a
- *  trace/render hack). Cleared on the next call. */
-async function spotlight(page: Page, testid?: string): Promise<void> {
-  await page.evaluate((id) => {
-    document.querySelectorAll("[data-demo-spot]").forEach((el) => {
-      (el as HTMLElement).style.outline = "";
-      (el as HTMLElement).style.outlineOffset = "";
-      (el as HTMLElement).style.borderRadius = "";
-      el.removeAttribute("data-demo-spot");
-    });
-    if (!id) return;
-    const t = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
-    if (!t) return;
-    t.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
-    t.style.outline = "3px solid #fbbf24";
-    t.style.outlineOffset = "3px";
-    t.style.borderRadius = "6px";
-    t.setAttribute("data-demo-spot", "1");
-  }, testid);
-}
-
-test("mockup-video /review feedback-mode feature-spotlight (no-LLM, REAL render)", async () => {
+test("mockup-video /review feedback-mode feature-spotlight (no-LLM, REAL render, tour-driven)", async () => {
   test.setTimeout(300000);
   const browser: Browser = await chromium.launch({ headless: true });
   const context: BrowserContext = await browser.newContext({
-    viewport: { ...DEMO_VIEWPORT },
-    recordVideo: { dir: VIDEO_DIR, size: { ...DEMO_VIEWPORT } },
+    viewport: { width: 1600, height: 900 },
+    recordVideo: { dir: VIDEO_DIR, size: { width: 1600, height: 900 } },
   });
   const page: Page = await context.newPage();
   const video = page.video(); // capture BEFORE context.close()
@@ -140,10 +120,6 @@ test("mockup-video /review feedback-mode feature-spotlight (no-LLM, REAL render)
 
     // Pull the REAL, content-addressed video handle the artifacts_dir builtin
     // journalled (this is what /review resolves through the ArtifactResolver).
-    // The review room's media() element carries the handle, interpolated at
-    // render time (internal/render/elements/element.go media case), so read it
-    // straight off that element — the same value the inline player and the
-    // "Open in review" button resolve.
     const els = reviewTurn.typed_view?.Elements ?? [];
     const media = els.find((e) => e.Kind === "media" && (e.Handle || e.MediaHandle));
     const handle = media?.Handle ?? media?.MediaHandle ?? "";
@@ -162,103 +138,114 @@ test("mockup-video /review feedback-mode feature-spotlight (no-LLM, REAL render)
       throw new Error("runstatus.video.chapters returned no chapters for the real handle");
     }
 
-    // ── Show the REAL operator entry point: the review ROOM + its button ─────
-    // An operator does not type a /review URL — they land in the review room
-    // (the live chat view), where the rendered walkthrough plays inline and the
-    // media element offers an "Open in review" button. The page already sits on
-    // this session's /chat route (from the new-session click) showing an earlier
-    // room, and the RPC advancement above happened out-of-band; bounce through
-    // home so the chat view remounts and freshly hydrates to the review room.
-    // All off-camera, behind the curtain.
+    // Reach the review room (chat view), then click the REAL "Open in review"
+    // button to land on /review — all off-camera, behind the curtain. The page
+    // sits on /chat from the new-session click and the RPC advancement happened
+    // out-of-band, so bounce through home to remount + hydrate the review room.
     await page.goto(`${server.base}/#/`);
     await expect(page.getByTestId("home-view")).toBeVisible({ timeout: 15000 });
     await page.goto(`${server.base}/#/s/${sid}/chat`);
     const reviewLink = page.getByTestId("media-review-link").first();
     await expect(reviewLink).toBeVisible({ timeout: 15000 });
-    // The button must carry THIS run's resolved handle — prove the entry point
-    // is wired to the real artifact, not a literal template.
     const linkHref = (await reviewLink.getAttribute("href")) ?? "";
     if (!linkHref.includes(`video=${encodeURIComponent(handle)}`)) {
       throw new Error(`Open-in-review button href does not carry the resolved handle: ${linkHref}`);
     }
-
-    const beat = await makeCaption(page, 6000);
-    await dwell(page, 1400);
-    await liftCurtain(page);
-
-    // Step lookup so the walk reads off the manifest (single source of truth).
-    const step = (id: string): ReviewStep => {
-      const s = REVIEW_DEMO_STEPS.find((x) => x.id === id);
-      if (!s) throw new Error(`unknown review step ${id}`);
-      return s;
-    };
-    const narrate = async (id: string): Promise<ReviewStep> => {
-      const s = step(id);
-      mark(s.id);
-      await spotlight(page, s.target);
-      await beat(s.title, s.body, s.dwellMs ?? 6000);
-      await shot(page, s.id);
-      return s;
-    };
-
-    // 0. The room → click the REAL "Open in review" button to reach /review.
-    await narrate("review-entry");
     await reviewLink.click();
     await expect(page.getByTestId("review-page")).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("rp-player")).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("chapter-timeline")).toBeVisible({ timeout: 15000 });
+    mark("on /review");
 
-    // 1. Open + 2. player + 3. timeline.
-    await narrate("review-open");
-    await narrate("review-player");
-    await narrate("review-timeline");
+    // ── Inject the tour ON /review and lift the curtain ──────────────────────
+    // The /review route maps to "any" (TourOverlay.currentRouteKind), and the
+    // overlay is mounted globally in App.vue, so __startTourWithSteps drives the
+    // live overlay against the on-screen /review testids. Do NOT reload after
+    // this — the overlay lives in in-memory Pinia state.
+    await page.evaluate((stepsJson: string) => {
+      (window as unknown as { __startTourWithSteps?: (s: string) => void })
+        .__startTourWithSteps?.(stepsJson);
+    }, JSON.stringify(REVIEW_TOUR_STEPS));
+    await expect(page.getByTestId("tour-overlay")).toBeVisible({ timeout: 8000 });
+    await liftCurtain(page);
 
-    // Pick a moment on the timeline (a real seek+select) then 4. flag it.
-    // Click the 3rd chapter marker to seek, then click the track mid-point to
-    // set a point selection so 'Flag this' is enabled.
-    const track = page.getByTestId("ct-track");
-    const box = await track.boundingBox();
-    if (box) {
-      const x = box.x + box.width * 0.45;
-      const y = box.y + box.height / 2;
-      await page.mouse.move(x, y);
-      await page.mouse.down();
-      await page.mouse.up();
-      await dwell(page, 600);
+    // Has a flag been captured + selected yet? The detail-pane steps need it.
+    let flagged = false;
+    const ensureFlagSelected = async (): Promise<void> => {
+      if (flagged) return;
+      // Pick a moment on the timeline (a real seek+select) so 'Flag this' enables.
+      const track = page.getByTestId("ct-track");
+      const box = await track.boundingBox();
+      if (box) {
+        const x = box.x + box.width * 0.45;
+        const y = box.y + box.height / 2;
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.mouse.up();
+        await dwell(page, 600);
+      }
+      // The flag click triggers the REAL runstatus.video.frame ffmpeg grab.
+      await page.getByTestId("ct-flag-btn").evaluate((el) => (el as HTMLElement).click());
+      await expect(page.getByTestId("fd-still").locator("img")).toBeVisible({ timeout: 20000 });
+      await dwell(page, 800);
+      flagged = true;
+    };
+
+    // ── Walk the REVIEW_TOUR_STEPS ───────────────────────────────────────────
+    for (const step of REVIEW_TOUR_STEPS) {
+      mark(`step ${step.id}`);
+
+      // ── Pre-step setup ─────────────────────────────────────────────────────
+      // The detail-pane steps only exist once a flag is captured + selected. Do
+      // the real seek → flag → ffmpeg-still capture before the first such step.
+      if (step.id === "review-still") {
+        await ensureFlagSelected();
+      }
+      // Type the refine instruction before the "Send to refine" step so the send
+      // is a real dispatch of a non-empty note.
+      if (step.id === "review-send") {
+        const instr = page.getByTestId("fd-instruction");
+        await instr.evaluate((el) => (el as HTMLElement).click());
+        await instr.fill(
+          "This 'Story anatomy' panel is too dense — split it into two beats and slow the narration.",
+        );
+        await dwell(page, 700);
+      }
+
+      // Honor DOM-presence preconditions.
+      if (step.waitForTarget) {
+        await expect(page.getByTestId(step.waitForTarget).first()).toBeVisible({ timeout: 15000 });
+      }
+
+      // Anti-drift assertion: the popover must show THIS step's title.
+      const titleEl = page.getByTestId("tour-title");
+      const actualTitle = await titleEl.textContent({ timeout: 8000 }).catch(() => "");
+      if (actualTitle !== step.title) {
+        const remaining = REVIEW_TOUR_STEPS.slice(REVIEW_TOUR_STEPS.indexOf(step) + 1);
+        const isOnNext = remaining.some((s) => s.title === actualTitle);
+        if (isOnNext) {
+          mark(`  drift-skip: overlay on "${actualTitle}"`);
+          continue;
+        }
+      }
+      await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
+
+      await dwell(page, step.dwellMs ?? 3000);
+      await shot(page, step.id);
+
+      // Every step here is an "explain" step (advance on Next). The
+      // "review-send" step still fires the REAL dispatch first.
+      if (step.id === "review-send") {
+        await page.getByTestId("fd-send-refine").evaluate((el) => (el as HTMLElement).click());
+        await expect(page.getByTestId("fd-sent-badge")).toBeVisible({ timeout: 8000 });
+        await dwell(page, SETTLE_MS);
+      }
+      await page.getByTestId("tour-next").click();
+      await dwell(page, 700);
     }
-    const flagStep = await narrate("review-flag");
-    // The flag click triggers the REAL runstatus.video.frame ffmpeg grab.
-    await page.getByTestId(flagStep.target!).click();
-    // Wait for the captured still (the frame seam end-to-end) to render.
-    await expect(page.getByTestId("fd-still").locator("img")).toBeVisible({ timeout: 20000 });
-    await dwell(page, 800);
 
-    // 5. still + 6. source_ref + 7. instruction.
-    await narrate("review-still");
-    await narrate("review-source");
-
-    const instrStep = await narrate("review-instruction");
-    const instr = page.getByTestId(instrStep.target!);
-    await instr.click();
-    await instr.fill("This 'Story anatomy' panel is too dense — split it into two beats and slow the narration.");
-    await dwell(page, 900);
-
-    // 8. send to refine (a real runstatus.feedback.add dispatch).
-    const sendStep = await narrate("review-send");
-    await page.getByTestId(sendStep.target!).click();
-    await expect(page.getByTestId("fd-sent-badge")).toBeVisible({ timeout: 8000 });
-    await dwell(page, 900);
-
-    // 9. the flag list (dispatched dot) + Send all.
-    await narrate("review-flaglist");
-
-    // Hold a closing frame.
-    await spotlight(page, undefined);
-    await beat(
-      "Capture, resolve, dispatch",
-      "Every flag carries its still, its source_ref, and its instruction — captured in the browser, dispatched as a structured note, refined deterministically in the story.",
-      6500,
-    );
+    // The final step's "Next" closes the tour.
+    await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 5000 });
     await shot(page, "review-finale");
   } catch (err) {
     onThrow(err);

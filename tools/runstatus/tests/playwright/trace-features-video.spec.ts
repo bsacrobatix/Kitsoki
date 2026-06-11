@@ -28,6 +28,7 @@ import {
   saveVideoAsMp4,
   dwell,
   cinematicGoto,
+  waitForOracleComplete,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
@@ -177,9 +178,10 @@ test("trace introspection feature-spotlight video", async () => {
               intent: "start",
               slots: {},
             });
-            // Let the server process oracle events and push SSE updates before
-            // the introspection steps start spotlighting trace rows.
-            await page.waitForTimeout(3000);
+            // Poll the trace to a deadline (not a flat sleep) so the oracle
+            // events have actually landed before the introspection steps start
+            // spotlighting trace rows — SSE timing is wall-clock-variable.
+            await waitForOracleComplete(server, sessionId, 2, 40000);
           }
         }
         // Longer settle for action steps: tab switches / nav need the view to repaint.

@@ -3,66 +3,76 @@
  * proposal pipeline (the exact scenario the design mockup was drawn for:
  * `.artifacts/diagram-options/index.html`).
  *
- * A dedicated, feature-focused demo (distinct from the generic onboarding tour
- * in tour-video.spec.ts). It drives the kitsoki-dev proposal pipeline and walks
- * all four diagram views slowly, with captions:
+ * A dedicated, feature-focused demo (distinct from the generic onboarding tour).
+ * Like the golden agent-actions spec, this video is TOUR-DRIVEN: the
+ * DIAGRAM_SHOWCASE_TOUR_STEPS in src/tour/diagram-showcase-manifest.ts narrate
+ * the whole run via window.__startTourWithSteps. The intro opens on the home
+ * story library and its route-match action step navigates home → new session,
+ * then route "any" steps spotlight the StateDiagram's four views (metro / ego /
+ * path / full). The spec asserts each step's `title` against the live popover so
+ * the manifest and video cannot silently drift.
  *
- *   1. Metro stepper — vertical route: traveled leg (TRACE) with the intent that
- *      entered each stop, the amber current station (LIVE) + horizon pills, and
- *      the muted road ahead (PROJECTION). Phase banners (INTAKE / SEARCHING /
- *      BRIEF / DRAFTING / PUBLISHED) ride each stop.
- *   2. Ego-graph — the same neighbourhood as a node-link SVG.
- *   3. Path & Horizon — breadcrumb (room + "via <intent>") + hero card + chips.
- *   4. Full — the whole static machine.
- *
- * Then it advances the run ON-CAMERA so the metro line visibly grows.
- *
- * DETERMINISM (see docs/skills/kitsoki-ui-demo/SKILL.md → "Deterministic
- * recording" and _helpers/demo.ts):
- *   - Setup (home → session → main → proposal_search) is driven OFF-CAMERA via
- *     RPC behind a full-screen CURTAIN, so the recording never shows rushed nav.
- *   - The on-camera advance is a REAL same-page UI click (one deterministic
- *     path — not a cross-client SSE/reload race).
- *   - No LLM: the proposal_happy_path flow stubs every host call.
+ * The diagram lives in the InteractiveView (/chat) panel, so once the intro
+ * lands on the chat route the spec drives the proposal pipeline to
+ * proposal_search OFF-CAMERA via RPC (the proposal_happy_path flow stubs every
+ * host call — no LLM, no cost), and the diagram-view steps' pre-step hooks
+ * switch the matching diagram tab so the spotlighted testid is on screen.
  *
  * Record:  pnpm exec playwright test diagram-showcase --project=chromium
  * Fast:    WEB_CHAT_PACE=0 pnpm exec playwright test diagram-showcase --project=chromium
- * Then:    docs/skills/kitsoki-ui-demo/scripts/render.sh \
- *            .artifacts/diagram-showcase/diagram-showcase-demo.webm
+ *
+ * NOTE: the harness suppresses Playwright stdout, so per-step progress and any
+ * failure context is also written to .artifacts/diagram-showcase/diagnostic.log.
  */
-import { test, expect, chromium, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { test, expect, chromium, type Browser, type BrowserContext, type Page, type Locator } from "@playwright/test";
 import path from "path";
+import fs from "fs";
 import {
   startWebServer,
   repoRoot,
   makeShot,
   waitForState,
   prepareVideoDir,
-  saveAndRemuxVideo,
+  saveVideoAsMp4,
+  dwell,
+  cinematicGoto,
+  SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
-import {
-  DEMO_VIEWPORT,
-  dwell,
-  installCurtain,
-  liftCurtain,
-  makeCaption,
-  captureDiagnostics,
-} from "./_helpers/demo.js";
+import { DIAGRAM_SHOWCASE_TOUR_STEPS, type TourStep } from "../../src/tour/diagram-showcase-manifest.js";
 
+// 7753 — distinct from the other spec files so parallel runs never race on the
+// same port bind.
 const ADDR = "127.0.0.1:7753";
 const STORY_DIR = path.join(repoRoot, "stories", "dev-story");
 const FLOW = path.join(STORY_DIR, "flows", "proposal_happy_path.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "diagram-showcase");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
-const BEAT = 5000;
+const DIAG_LOG = path.join(ARTIFACT_DIR, "diagnostic.log");
 
 let server: WebServer;
+
+function diag(msg: string): void {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  try {
+    fs.appendFileSync(DIAG_LOG, line);
+  } catch {
+    /* best-effort */
+  }
+}
+
 test.beforeAll(async () => {
-  prepareVideoDir(VIDEO_DIR); // clear stale webm so saveAndRemuxVideo picks THIS run's
+  prepareVideoDir(VIDEO_DIR); // clear stale webm so saveVideoAsMp4 picks THIS run's
+  fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+  fs.writeFileSync(DIAG_LOG, "");
   server = await startWebServer({ addr: ADDR, flow: FLOW, storiesDir: STORY_DIR });
 });
 test.afterAll(() => server?.stop());
+
+/** Resolve an action step's real target element — first visible match. */
+function resolveTarget(page: Page, step: TourStep): Locator {
+  return page.getByTestId(step.target!).first();
+}
 
 /** Give the diagram the stage: shrink chat, widen the diagram panel. Injected
  *  presentation CSS only — not a render hack on the trace. */
@@ -77,132 +87,159 @@ async function stageDiagram(page: Page): Promise<void> {
   });
 }
 
+/** Switch the StateDiagram view tab so the next step's spotlight testid is present. */
+async function diagramTab(page: Page, mode: string): Promise<void> {
+  diag(`tab:${mode}`);
+  await page.getByTestId(`diagram-tab-${mode}`).click().catch(() => undefined);
+  await dwell(page, 700);
+}
+
+// The diagram tab each route "any" step needs on screen before its spotlight
+// lands (the InteractiveView renders metro by default).
+const TAB_FOR_STEP: Record<string, string> = {
+  "dsg-metro-overview": "metro",
+  "dsg-metro-traveled": "metro",
+  "dsg-metro-current": "metro",
+  "dsg-metro-horizon": "metro",
+  "dsg-metro-road-ahead": "metro",
+  "dsg-ego": "ego",
+  "dsg-path": "path",
+  "dsg-full": "full",
+  "dsg-done": "metro",
+};
+
 test("state-diagram four-view showcase (dev-story, no-LLM)", async () => {
   test.setTimeout(300000);
   const browser: Browser = await chromium.launch({ headless: true });
   const context: BrowserContext = await browser.newContext({
-    viewport: { ...DEMO_VIEWPORT },
-    recordVideo: { dir: VIDEO_DIR, size: { ...DEMO_VIEWPORT } },
+    viewport: { width: 1600, height: 900 },
+    recordVideo: { dir: VIDEO_DIR, size: { width: 1600, height: 900 } },
   });
   const page: Page = await context.newPage();
   const video = page.video(); // capture BEFORE context.close()
   const shot = makeShot(ARTIFACT_DIR);
-  const { mark, onThrow } = captureDiagnostics(page, ARTIFACT_DIR);
 
+  // Carries the session id once the intro's "New session" step creates the run.
   let sid = "";
-  const submit = (intent: string, slots: Record<string, unknown> = {}) =>
-    server.rpc("runstatus.session.submit", { session_id: sid, intent, slots });
-  const tab = async (mode: string): Promise<void> => {
-    mark(`tab:${mode}`);
-    await page.getByTestId(`diagram-tab-${mode}`).click();
-    await dwell(page, 700);
-  };
-  // Advance one stage ON-CAMERA via the real chat button. Clicking in the
-  // driving page renders the turn result directly (no cross-client SSE timing,
-  // no reload) — one deterministic visual path. `confirm` from proposal_search
-  // cascades search → materialize → refine.
-  const advance = async (intent: string, next: string): Promise<void> => {
-    mark(`advance:${intent}->${next}`);
-    await page.getByTestId(`intent-btn-${intent}`).first().click();
-    await waitForState(page, next, 12000);
-  };
-
-  // Curtain BEFORE the first goto — hides all off-camera setup.
-  await installCurtain(page, "kitsoki — the state diagram");
 
   try {
-    // ── Off-camera setup (behind the curtain): reach proposal_search ──────
-    await page.goto(`${server.base}/#/`);
-    await expect(page.getByTestId("home-view")).toBeVisible({ timeout: 15000 });
-    const card = page.locator("[data-testid='story-card']").filter({ hasText: /dev.story/i }).first();
-    await card.getByTestId("new-session-btn").click();
-    await page.waitForURL(/#\/s\/[0-9a-f-]{36}\/chat$/, { timeout: 15000 });
-    sid = page.url().match(/\/s\/([0-9a-f-]{36})\/chat$/)?.[1] ?? "";
-    await waitForState(page, "main", 15000);
-    await server.rpc("runstatus.session.patch_world", { session_id: sid, patch: { judge_mode: "human" } });
+    // ── 1. Open the home story library and start the tour ON it ──────────────
+    diag("navigating home");
+    await cinematicGoto(page, `${server.base}/#/`, { waitForTestId: "home-view" });
 
-    await submit("go_idea", { message: "work on a proposal" });
-    await submit("discuss", { message: "I want a per-session working folder primitive" });
+    await page.evaluate((stepsJson: string) => {
+      (window as unknown as { __startTourWithSteps?: (s: string) => void })
+        .__startTourWithSteps?.(stepsJson);
+    }, JSON.stringify(DIAGRAM_SHOWCASE_TOUR_STEPS));
+    await expect(page.getByTestId("tour-overlay")).toBeVisible({ timeout: 8000 });
 
-    // Reload into the populated mid-pipeline state, stage the diagram, install
-    // the caption, then lift the curtain → first visible frame is the finished
-    // metro view, never setup.
-    await page.reload();
-    await waitForState(page, "proposal_search", 15000);
-    await stageDiagram(page);
-    const beat = await makeCaption(page, BEAT);
-    await expect(page.getByTestId("diagram-metro")).toBeVisible({ timeout: 8000 });
-    await dwell(page, 1600);
-    await liftCurtain(page);
+    // ── 2. Walk the DIAGRAM_SHOWCASE_TOUR_STEPS (intro + four views) ─────────
+    for (const step of DIAGRAM_SHOWCASE_TOUR_STEPS) {
+      diag(`step ${step.id}`);
+      const currentUrl = page.url();
+      const currentRouteKind = currentUrl.includes("/chat")
+        ? "interactive"
+        : currentUrl.endsWith("/#/") || currentUrl.endsWith("/#") || currentUrl.endsWith("/")
+          ? "home"
+          : "any";
+      if (step.route !== "any" && step.route !== currentRouteKind) {
+        diag(`  route-skip (${currentRouteKind})`);
+        continue;
+      }
 
-    // ── 1. Metro stepper (default view) ──────────────────────────────────
-    mark("metro");
-    await beat("The state diagram is your route",
-      "A “metro stepper” centred on where the run is — derived entirely from the trace.", 6000);
-    await shot(page, "metro-overview");
+      // ── Pre-step setup ──────────────────────────────────────────────────
+      // After the intro lands on /chat, drive the proposal pipeline to
+      // proposal_search off-camera so the diagram populates with a real
+      // traveled leg + current station + road ahead, then stage the panel.
+      if (step.id === "dsg-metro-overview") {
+        await waitForState(page, "main", 15000);
+        await server.rpc("runstatus.session.patch_world", {
+          session_id: sid,
+          patch: { judge_mode: "human" },
+        });
+        await server.rpc("runstatus.session.submit", {
+          session_id: sid,
+          intent: "go_idea",
+          slots: { message: "work on a proposal" },
+        });
+        await server.rpc("runstatus.session.submit", {
+          session_id: sid,
+          intent: "discuss",
+          slots: { message: "I want a per-session working folder primitive" },
+        });
+        // Do NOT reload — the tour overlay lives in in-memory Pinia state and a
+        // reload would tear it down. The driving page is already on /chat
+        // watching THIS session, so SSE pushes the state updates live.
+        await waitForState(page, "proposal_search", 15000);
+        await stageDiagram(page);
+        await dwell(page, SETTLE_MS);
+      }
 
-    await beat("Where you've been",
-      "The bright leg is ground truth from the trace — each stop labelled with the intent that got you there (via go_idea, via discuss …).");
-    await expect(page.getByTestId("diagram-metro-station").first()).toBeVisible();
-    await shot(page, "metro-traveled");
+      // Switch the diagram tab so the spotlighted testid is on screen.
+      const tab = TAB_FOR_STEP[step.id];
+      if (tab) await diagramTab(page, tab);
 
-    await beat("Where you are",
-      "The amber station is the current room with its declared phase banner; the pills are the live moves available right now.");
-    await expect(page.getByTestId("diagram-current-station")).toBeVisible();
-    await shot(page, "metro-current");
+      // Honor DOM-presence preconditions.
+      if (step.waitForTarget) {
+        await expect(page.getByTestId(step.waitForTarget).first()).toBeVisible({ timeout: 15000 });
+      }
 
-    const fwdPill = page.locator('[data-testid="diagram-horizon-pill"].state-diagram__pill--forward').first();
-    if ((await fwdPill.count()) > 0) {
-      await beat("Click a next-move to see where it leads",
-        "Each pill highlights its target room across the views and the timeline.", 2500);
-      await fwdPill.click();
-      await dwell(page, 3500);
-      await shot(page, "metro-pill-highlight");
+      // Anti-drift assertion: the popover must show THIS step's title.
+      const titleEl = page.getByTestId("tour-title");
+      const actualTitle = await titleEl.textContent({ timeout: 8000 }).catch(() => "");
+      if (actualTitle !== step.title) {
+        const remaining = DIAGRAM_SHOWCASE_TOUR_STEPS.slice(
+          DIAGRAM_SHOWCASE_TOUR_STEPS.indexOf(step) + 1
+        );
+        const isOnNext = remaining.some((s) => s.title === actualTitle);
+        if (isOnNext) {
+          diag(`  drift-skip: overlay on "${actualTitle}"`);
+          continue;
+        }
+      }
+      await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
+
+      await dwell(page, step.dwellMs ?? 3000);
+      await shot(page, step.id);
+
+      if (step.kind === "explain") {
+        await page.getByTestId("tour-next").click();
+        await dwell(page, 700);
+      } else {
+        const target = resolveTarget(page, step);
+        await target.scrollIntoViewIfNeeded().catch(() => undefined);
+        if (step.advance === "route-match") {
+          await target.click();
+          await page.waitForTimeout(300);
+          if (step.advanceRoute === "interactive") {
+            await page.waitForURL(/#\/s\/[0-9a-f-]{36}\/chat$/, { timeout: 15000 });
+            const m = page.url().match(/\/s\/([0-9a-f-]{36})\/chat$/);
+            if (m) {
+              sid = m[1];
+              diag(`session ${sid}`);
+            }
+          }
+          await dwell(page, 1000);
+        } else {
+          // click-target control.
+          await target.evaluate((el) => (el as HTMLElement).click());
+          await dwell(page, 1000);
+        }
+      }
     }
 
-    await beat("Where you can go",
-      "The muted, dashed road ahead is projection from the static graph — declared, not yet travelled.");
-    await expect(page.getByTestId("diagram-road-ahead").first()).toBeVisible();
-    await shot(page, "metro-road-ahead");
-
-    // ── 2. Ego-graph (node-link) ─────────────────────────────────────────
-    await tab("ego");
-    await beat("The same neighbourhood as a node graph",
-      "Came-from → you-are-here → the rooms each live move leads to, with directed elbow connectors.", 6000);
-    await expect(page.getByTestId("diagram-ego")).toBeVisible();
-    await shot(page, "ego-graph");
-
-    // ── 3. Path & Horizon (breadcrumb + chips) ───────────────────────────
-    await tab("path");
-    await beat("Or as a breadcrumb + live chips",
-      "Provenance on top (room + via-intent), the current room as a hero card, the live exits as chips.", 6000);
-    await expect(page.getByTestId("diagram-path-horizon")).toBeVisible();
-    await shot(page, "path-horizon");
-
-    // ── 4. Watch the metro line move with the run ────────────────────────
-    await tab("metro");
-    await beat("Watch it move with the run",
-      "Confirm the search and the pipeline advances: the traveled leg grows, the road ahead shrinks — live from the trace.", 3500);
-    await advance("confirm", "proposal_refine");
-    await dwell(page, 5000);
-    await shot(page, "metro-advanced");
-
-    // ── 5. The whole machine is one click away ───────────────────────────
-    await tab("full");
-    await beat("The whole machine is always one click away",
-      "“Full” flips to the entire static graph — every phase and room — and back to your route.", 5500);
-    await shot(page, "full-graph");
-
-    await tab("metro");
-    await beat("Path & Horizon",
-      "Provenance, live moves, and projection — one feature, four views, all from the trace.", 6000);
-    await shot(page, "finale");
-  } catch (err) {
-    onThrow(err);
-    throw err;
+    // The final dsg-done step's "Done" closes the tour.
+    await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 5000 });
+  } catch (e) {
+    diag(`FAILED: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
+    diag(`--- server log ---\n${server?.log?.() ?? ""}`);
+    throw e;
   } finally {
     await context.close(); // finalises the recording
-    await saveAndRemuxVideo(video, ARTIFACT_DIR, "diagram-showcase-demo");
+    await saveVideoAsMp4(video, ARTIFACT_DIR, "diagram-showcase-demo");
     await browser.close();
   }
+
+  const pngs = fs.readdirSync(ARTIFACT_DIR).filter((f) => f.endsWith(".png"));
+  console.log(`[diagram-showcase] screenshots (${pngs.length}) in ${ARTIFACT_DIR}`);
 });

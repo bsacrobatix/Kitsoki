@@ -6,20 +6,24 @@
  * UI review: every input, button, and room view is shown on-camera with
  * narration so a reviewer can judge whether the UI is clear and not confusing.
  *
- * Scenes (on-camera, behind a curtain for setup):
- *   1. Proposal intake  — type the idea, see the slug minted + search kick off
- *   2. Proposal search  — scout results: no overlap, confirm to continue
- *   3. Proposal refine  — brief editor open in IDE, refine analysis shown
- *   4. Ready / judge    — press "ready", brief judge fires, verdict: continue
- *   5. Proposal draft   — draft generated, ready to review
- *   6. Proposal done    — published confirmation, back to main
+ * Like agent-actions-video.spec.ts, this spec is TOUR-DRIVEN: it runs ONLY the
+ * PROPOSAL_WALKTHROUGH_TOUR_STEPS from
+ * src/tour/proposal-walkthrough-manifest.ts via window.__startTourWithSteps.
+ * The tour opens on the home story library and its route-match action step
+ * navigates home → new session → the interactive /chat view, so even the intro
+ * is tour-narrated rather than silent spec orchestration.
+ *
+ * The pipeline-advancing interactions (submit the idea, click confirm / ready /
+ * advance_brief / accept) are NOT tour steps — they run as PRE-STEP HOOKS
+ * (exactly as the agent-actions spec opens drawers in pre-step hooks) so each
+ * spotlighted surface exists before the spotlight lands on it.
  *
  * No LLM: uses stories/dev-story/flows/proposal_tamagotchi_demo.yaml stubs.
  *
  * Record:  pnpm exec playwright test proposal-walkthrough --project=chromium
  * Fast:    WEB_CHAT_PACE=0 pnpm exec playwright test proposal-walkthrough --project=chromium
  */
-import { test, expect, chromium, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { test, expect, chromium, type Browser, type BrowserContext, type Page, type Locator } from "@playwright/test";
 import path from "path";
 import {
   startWebServer,
@@ -29,18 +33,15 @@ import {
   prepareVideoDir,
   saveVideoAsMp4,
   dwell,
+  cinematicGoto,
+  SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
-import {
-  DEMO_VIEWPORT,
-  installCurtain,
-  liftCurtain,
-  makeCaption,
-  captureDiagnostics,
-} from "./_helpers/demo.js";
+import { DEMO_VIEWPORT, captureDiagnostics } from "./_helpers/demo.js";
+import { PROPOSAL_WALKTHROUGH_TOUR_STEPS, type TourStep } from "../../src/tour/proposal-walkthrough-manifest.js";
 
 // Port distinct from all other specs.
-const ADDR = "127.0.0.1:7754";
+const ADDR = "127.0.0.1:7757";
 const STORY_DIR = path.join(repoRoot, "stories", "dev-story");
 const FLOW = path.join(STORY_DIR, "flows", "proposal_tamagotchi_demo.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "proposal-walkthrough");
@@ -52,6 +53,11 @@ test.beforeAll(async () => {
   server = await startWebServer({ addr: ADDR, flow: FLOW, storiesDir: STORY_DIR });
 });
 test.afterAll(() => server?.stop());
+
+/** Resolve an action step's real target element — first visible match. */
+async function resolveTarget(page: Page, step: TourStep): Promise<Locator> {
+  return page.getByTestId(step.target!).first();
+}
 
 test("proposal pipeline walkthrough — tamagotchi pets", async () => {
   test.setTimeout(300000);
@@ -65,136 +71,147 @@ test("proposal pipeline walkthrough — tamagotchi pets", async () => {
   const shot = makeShot(ARTIFACT_DIR);
   const { mark, onThrow } = captureDiagnostics(page, ARTIFACT_DIR);
 
+  // Captured once the intro's "New session" step creates the run.
   let sid = "";
   const submit = (intent: string, slots: Record<string, unknown> = {}) =>
     server.rpc("runstatus.session.submit", { session_id: sid, intent, slots });
 
-  /** Click an intent button in the current page and wait for the target state. */
-  const advance = async (intent: string, next: string, timeoutMs = 20000): Promise<void> => {
-    mark(`advance:${intent}->${next}`);
-    await page.getByTestId(`intent-btn-${intent}`).first().click();
-    await waitForState(page, next, timeoutMs);
-    await dwell(page, 1200);
-  };
-
-  await installCurtain(page, "kitsoki — proposal pipeline");
-
   try {
-    // ── Off-camera setup: boot to proposal intake room ───────────────────
-    await page.goto(`${server.base}/#/`);
-    await expect(page.getByTestId("home-view")).toBeVisible({ timeout: 15000 });
+    // ── 1. Open the home story library and start the tour ON it ──────────────
+    // The whole video is tour-driven: rather than silently flashing home -> chat
+    // before the overlay appears, we start the tour on home and let its
+    // route-match action step perform the navigation, narrated.
+    mark("navigating home");
+    await cinematicGoto(page, `${server.base}/#/`, { waitForTestId: "home-view" });
 
-    const card = page.locator("[data-testid='story-card']").filter({ hasText: /dev.story/i }).first();
-    await card.getByTestId("new-session-btn").click();
-    await page.waitForURL(/#\/s\/[0-9a-f-]{36}\/chat$/, { timeout: 15000 });
-    sid = page.url().match(/\/s\/([0-9a-f-]{36})\/chat$/)?.[1] ?? "";
-    await waitForState(page, "main", 15000);
+    await page.evaluate((stepsJson: string) => {
+      (window as unknown as { __startTourWithSteps?: (s: string) => void })
+        .__startTourWithSteps?.(stepsJson);
+    }, JSON.stringify(PROPOSAL_WALKTHROUGH_TOUR_STEPS));
+    await expect(page.getByTestId("tour-overlay")).toBeVisible({ timeout: 8000 });
 
-    // Navigate to proposal intake room off-camera.
-    await submit("go_idea", { message: "" });
-    await waitForState(page, "proposal", 12000);
+    // ── 2. Walk the PROPOSAL_WALKTHROUGH_TOUR_STEPS ──────────────────────────
+    for (const step of PROPOSAL_WALKTHROUGH_TOUR_STEPS) {
+      mark(`step ${step.id}`);
+      // Mirror the overlay's route-guard.
+      const currentUrl = page.url();
+      const currentRouteKind = currentUrl.includes("/chat")
+        ? "interactive"
+        : currentUrl.match(/#\/s\/[0-9a-f-]{36}$/)
+          ? "any"
+          : "home";
+      if (step.route !== "any" && step.route !== currentRouteKind) {
+        mark(`  route-skip (${currentRouteKind})`);
+        continue;
+      }
 
-    // Reload so the curtain shows a clean intake view.
-    await page.reload();
-    await waitForState(page, "proposal", 12000);
-    let beat = await makeCaption(page, 5000);
-    await dwell(page, 500);
-    await liftCurtain(page);
+      // ── Pre-step setup: advance the pipeline so this step's surface exists ──
+      // Each hook submits an intent (or types the idea) and waits for the next
+      // room, mirroring how the golden opens drawers before drawer steps.
+      if (step.id === "pw-intake") {
+        // The fresh run boots into "main"; navigate it into proposal intake.
+        await waitForState(page, "main", 15000);
+        await submit("go_idea", { message: "" });
+        await waitForState(page, "proposal", 12000);
+        await dwell(page, SETTLE_MS);
+      }
+      if (step.id === "pw-idea-input") {
+        // Type the idea on-camera into the composer (the spotlighted surface).
+        const composer = page.getByTestId("composer-input").first();
+        await composer.click();
+        await composer.fill("I want to add tamagotchi-style virtual pets to the session UI");
+        await dwell(page, SETTLE_MS);
+      }
+      if (step.id === "pw-search") {
+        // Submit the idea → scout search completes → proposal_search room.
+        await page.getByTestId("composer-send").first().click();
+        await waitForState(page, "proposal_search", 20000);
+        await dwell(page, SETTLE_MS);
+      }
+      if (step.id === "pw-refine") {
+        // Confirm (no overlap) → mint workspace + scaffold brief.
+        await page.getByTestId("intent-btn-confirm").first().click();
+        await waitForState(page, "proposal_refine", 20000);
+        await dwell(page, SETTLE_MS);
+      }
+      if (step.id === "pw-judge") {
+        // Press ready → brief judge fires (verdict: continue) → advance_brief
+        // appears as a choice item for the operator.
+        await page.getByTestId("intent-btn-ready").first().click();
+        await waitForState(page, "proposal_refine", 15000);
+        await expect(page.getByTestId("intent-btn-advance_brief").first()).toBeVisible({ timeout: 15000 });
+        await dwell(page, SETTLE_MS);
+      }
+      if (step.id === "pw-draft") {
+        // Advance to draft → draft author writes the proposal document.
+        await page.getByTestId("intent-btn-advance_brief").first().click();
+        await waitForState(page, "proposal_draft", 20000);
+        await dwell(page, SETTLE_MS);
+      }
+      if (step.id === "pw-done") {
+        // Accept → publish script moves the draft into docs/proposals/. Reload
+        // for the same reliability reason the original spec used.
+        await submit("accept", {});
+        await waitForState(page, "proposal_done", 20000);
+        await dwell(page, SETTLE_MS);
+      }
 
-    // ── Scene 0: Proposal intake — enter the idea ────────────────────────
-    mark("scene:intake");
-    await beat("Start with an idea",
-      "Type your idea in the chat. kitsoki will search for conflicts, scaffold a brief, and draft a proposal.", 6000);
-    await shot(page, "00-proposal-intake");
+      // Honor DOM-presence preconditions.
+      if (step.waitForTarget) {
+        await expect(page.getByTestId(step.waitForTarget).first()).toBeVisible({ timeout: 15000 });
+      }
 
-    // Type the idea in the chat composer on-camera.
-    await beat("Entering the idea…", "", 1500);
-    const composer = page.getByTestId("composer-input").first();
-    await composer.click();
-    await composer.fill("I want to add tamagotchi-style virtual pets to the session UI");
-    await dwell(page, 1500);
-    await shot(page, "01-idea-typed");
+      // Anti-drift assertion: the popover must show THIS step's title.
+      const titleEl = page.getByTestId("tour-title");
+      const actualTitle = await titleEl.textContent({ timeout: 8000 }).catch(() => "");
+      if (actualTitle !== step.title) {
+        const remaining = PROPOSAL_WALKTHROUGH_TOUR_STEPS.slice(
+          PROPOSAL_WALKTHROUGH_TOUR_STEPS.indexOf(step) + 1
+        );
+        const isOnNext = remaining.some((s) => s.title === actualTitle);
+        if (isOnNext) {
+          mark(`  drift-skip: overlay on "${actualTitle}"`);
+          continue;
+        }
+      }
+      await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
-    await beat("Submitting — kitsoki names the proposal and scouts for overlap…", "", 1500);
-    await page.getByTestId("composer-send").first().click();
-    await waitForState(page, "proposal_search", 20000);
-    await dwell(page, 1000);
+      await dwell(page, step.dwellMs ?? 3000);
+      await shot(page, step.id);
 
-    // ── Scene 1: Proposal search — scout found no conflicts ──────────────
-    mark("scene:search");
-    await beat("Step 1 of 4 — scout search complete",
-      "kitsoki searched existing proposals for overlap. No conflicts found — the idea is clear to proceed.", 5500);
-    await shot(page, "02-proposal-search");
+      if (step.kind === "explain") {
+        await page.getByTestId("tour-next").click();
+        await dwell(page, 700);
+      } else {
+        const target = await resolveTarget(page, step);
+        await target.scrollIntoViewIfNeeded().catch(() => undefined);
+        if (step.advance === "route-match") {
+          // Intro navigation (New session). The chat view is static at this
+          // point, so a hit-test click goes cleanly through the overlay hole.
+          await target.click();
+          await page.waitForTimeout(300);
+          if (step.advanceRoute === "interactive") {
+            await page.waitForURL(/#\/s\/[0-9a-f-]{36}\/chat$/, { timeout: 15000 });
+            const m = page.url().match(/\/s\/([0-9a-f-]{36})\/chat$/);
+            if (m) {
+              sid = m[1];
+              mark(`session ${sid}`);
+            }
+          } else if (step.advanceRoute === "any") {
+            await page.waitForURL(/#\/s\/[0-9a-f-]{36}$/, { timeout: 15000 });
+          }
+          await dwell(page, 1000);
+        } else {
+          // click-target: dispatch the DOM click directly so it fires both the
+          // control's @click AND the overlay's capture-phase advance listener.
+          await target.evaluate((el) => (el as HTMLElement).click());
+          await dwell(page, 1000);
+        }
+      }
+    }
 
-    await beat("Confirm to continue, or quit if the idea needs rethinking",
-      "\"confirm\" advances to the next stage. \"quit\" drops back to the main menu.", 4000);
-    await shot(page, "03-proposal-search-intents");
-
-    // ── Scene 2: Refine brief — on-camera advance ────────────────────────
-    mark("scene:refine");
-    await beat("Advancing to the brief editor…",
-      "kitsoki mints the workspace and scaffolds the brief template.", 2500);
-    await advance("confirm", "proposal_refine", 20000);
-
-    await beat("Step 2 of 4 — brief refinement",
-      "The idea has been distilled into a structured brief. Review it — the IDE has the file open for editing.", 6000);
-    await shot(page, "04-proposal-refine");
-
-    await beat("The brief already captures the key gaps",
-      "A refiner agent read the idea and noted: pet lifetime scope, and which UI surface hosts the widget.", 5000);
-    await shot(page, "05-proposal-refine-analysis");
-
-    await beat("When the brief looks right, press \"ready\"",
-      "A judge reviews the brief for completeness. If it passes, the pipeline advances automatically.", 5000);
-
-    // ── Scene 3: Ready / brief judge → advance ──────────────────────────
-    mark("scene:ready");
-    await beat("Pressing \"ready\" — the brief judge is running…",
-      "A judge reviews the brief: clear why, scoped change, named kind.", 2000);
-    // Click ready → brief_check fires (stub: continue) → engine bails to human
-    // with advance_brief available. In human judge mode emit_intent defers to
-    // the operator, so advance_brief appears as a choice item after the judge.
-    await advance("ready", "proposal_refine", 15000);
-    await dwell(page, 1000);
-    await shot(page, "06-judge-approved");
-
-    await beat("Brief approved — advancing to the draft stage",
-      "The judge verdict is \"continue\". Click \"advance to draft\" to proceed.", 3000);
-    // advance_brief is now the primary action — click it on-camera.
-    await advance("advance_brief", "proposal_draft", 20000);
-
-    // ── Scene 4: Proposal draft ──────────────────────────────────────────
-    mark("scene:draft");
-    await beat("Step 3 of 4 — proposal draft generated",
-      "The judge approved the brief (verdict: continue). A draft author wrote the full proposal document.", 6000);
-    await shot(page, "07-proposal-draft");
-
-    await beat("Review the draft, then accept to publish",
-      "\"accept\" runs the publish script: moves the draft from the workspace to docs/proposals/.", 5000);
-    await shot(page, "08-proposal-draft-intents");
-
-    // ── Scene 5: Publish (accept) ────────────────────────────────────────
-    mark("scene:publish");
-    await beat("Publishing…",
-      "The proposal moves from the .workspace/ staging area to docs/proposals/tamagotchi-pet-ui.md.", 2500);
-    // RPC + reload for the same reliability reason as the ready step.
-    await submit("accept", {});
-    await page.reload();
-    await waitForState(page, "proposal_done", 20000);
-    beat = await makeCaption(page, 5000);
-    await dwell(page, 500);
-
-    // ── Scene 6: Done ────────────────────────────────────────────────────
-    mark("scene:done");
-    await beat("Step 4 of 4 — proposal published",
-      "docs/proposals/tamagotchi-pet-ui.md is now part of the queue. Go back to the main menu to pick up the next ticket.", 7000);
-    await shot(page, "09-proposal-done");
-
-    await beat("Back to the main menu",
-      "The full pipeline: idea → scout → brief → draft → published.", 3000);
-    await advance("go_main", "main", 12000);
-    await shot(page, "10-back-to-main");
-
+    // The final step's "Done" closes the tour.
+    await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 5000 });
   } catch (err) {
     onThrow(err);
     throw err;

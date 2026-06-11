@@ -108,7 +108,7 @@ export const AGENT_ACTIONS_TOUR_STEPS: readonly TourStep[] = [
     target: "agent-actions-affordance",
     waitForTarget: "agent-actions-affordance",
     title: "Agent actions, per call",
-    body: "Select an oracle call in the trace and its detail pane gains an 'Agent actions (N)' affordance — N is the captured event count. This is the bugfix autofix task: a 12-step Read / Grep / thinking / Edit / Bash arc. Click it to open the drawer.",
+    body: "Select an oracle call in the trace and its detail pane gains an 'Agent actions (N)' affordance — N is the captured event count. This is the bugfix autofix task: an 18-step Read / Grep / thinking / Edit / Bash arc. Click it to open the drawer.",
     placement: "left",
     kind: "action",
     advance: "click-target",

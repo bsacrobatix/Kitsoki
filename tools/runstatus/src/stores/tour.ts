@@ -120,7 +120,12 @@ export const useTourStore = defineStore("tour", () => {
    * finishes or is skipped.
    */
   function startWithSteps(customSteps: readonly TourStep[], replay = false): void {
-    if (isSnapshot()) return;
+    // In snapshot mode the auto-start / "?"-replay flows stay suppressed (a
+    // shared static artifact shouldn't pop a tour at a reader), but an EXPLICIT
+    // programmatic kickoff (replay=true, e.g. the trace-introspection video
+    // spec's window.__startTourWithSteps) is allowed: it's a deliberate driver,
+    // not an unprompted onboarding nag.
+    if (isSnapshot() && !replay) return;
     if (completed.value && !replay) return;
     steps.value = customSteps;
     stepIndex.value = 0;

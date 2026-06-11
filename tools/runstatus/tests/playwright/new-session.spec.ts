@@ -33,7 +33,7 @@ const FLOW = path.join(repoRoot, "stories", "prd", "flows", "happy_path.yaml");
 
 // Distinct port from multi-story.spec.ts (7740) so the two specs' servers can
 // run in parallel under the default worker pool without colliding.
-const ADDR = "127.0.0.1:7741";
+const ADDR = "127.0.0.1:7742";
 const BASE = `http://${ADDR}`;
 const RPC = `${BASE}/rpc`;
 
