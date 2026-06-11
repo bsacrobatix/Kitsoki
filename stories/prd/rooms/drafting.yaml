@@ -26,14 +26,31 @@ states:
           text:     "DRAFTING"
           subtitle: "Generate the PRD markdown and review"
           color:    "#8B5CF6"   # violet — synthesis
+      # Error surfacing — the author (on_enter task) failed; on_error stepped
+      # BACK one stage to references (the research is already done, so the
+      # operator reviews the reference list before re-confirming into another
+      # draft) rather than dumping all the way to idle. This template renders
+      # on the rare case last_error survives into drafting; the references
+      # room carries the primary warning. last_error is set by the runtime.
+      - template: "⚠ **PRD draft failed** — {{ world.last_error }}."
+        when: "world.last_error != ''"
       - prose: "cycle {{ world.cycle }} · draft attempt {{ world.drafting_cycle }} · clarify rounds {{ world.clarifying_cycle }} · judge {{ world.judge_mode }}"
       # The written PRD is the deliverable — surface its path on its own
       # prominent line (the summary below is a digest; the full doc is the file).
-      - prose: 'PRD written to  {{ world.prd_artifact.file_path|default:"(drafting — writes .artifacts/prd.md)" }}'
+      - prose: 'PRD written to  {{ world.prd_artifact.file_path|default:"(drafting — writes 004-prd.md into the per-PRD workspace)" }}'
+      - prose: 'Published to  {{ world.prd_file }}'
+        when: "world.prd_file != ''"
       - kv:
           pairs:
             Title:      '{{ world.prd_artifact.title|default:"(pending)" }}'
             Confidence: '{{ world.prd_artifact.confidence|default:"(pending)" }}'
+      # Echo the operator's last refine instruction back so a refine turn
+      # visibly acknowledges what was asked (same "You asked: …" line as the
+      # references room + the golden proposal_refine.yaml).
+      - kv:
+          pairs:
+            You asked: '{{ world.refine_message }}'
+        when: "world.refine_message != ''"
       - prose: "⚠ The author flagged that more input is needed — see the follow-ups below, then use clarify."
         when:  "world.prd_artifact.needs_clarification"
       - code: |
@@ -74,7 +91,7 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [idea, upstream_paths, workdir, output_path, clarification_log, prd_artifact, refine_feedback, cycle, drafting_cycle, drafting_budget, clarifying_cycle, judge_mode, judge_confidence_threshold, llm_verdict]
+    relevant_world: [idea, upstream_paths, workdir, output_path, prd_workspace, prd_slug, prd_file, prd_change_target, publish_durable_path, clarification_log, prd_artifact, refine_feedback, refine_message, cycle, drafting_cycle, drafting_budget, clarifying_cycle, judge_mode, judge_confidence_threshold, llm_verdict, last_error]
     on_enter:
       # Write the PRD. working_dir pins the author's Read/Write to the
       # operator's tree; its tool calls + files_changed land in the trace.
@@ -99,13 +116,23 @@ states:
               # as compact JSON. The author reads each cited path/section
               # before writing (see prompts/draft_prd.md).
               references:        "{{ world.references }}"
-              output_path:       "{{ world.output_path }}"
+              # Write the draft INTO the per-PRD workspace as 004-prd.md (the
+              # numbered spine), not the flat .artifacts/prd.md — accept then
+              # publishes it out to the durable home. Falls back to output_path
+              # if no workspace was minted (e.g. a flow seeding drafting directly).
+              output_path:       "{{ world.prd_workspace }}/004-prd.md"
+              workspace:         "{{ world.prd_workspace }}"
               workdir:           "{{ world.workdir }}"
               refine_feedback:   "{{ world.refine_feedback }}"
               cycle:             "{{ world.cycle }}"
         bind:
           prd_artifact: submitted
-        on_error: idle
+        # Step BACK one stage to references on a failed author run (not all
+        # the way to idle): the research is already curated, so the operator
+        # reviews the reference list and re-confirms to retry the draft rather
+        # than re-pitching. The runtime sets last_error; references' view
+        # surfaces it.
+        on_error: references
 
       # Optional LLM judge (skipped in human mode). The `id:` addresses this
       # decide call site independently of clarifying's analyst decide, so a
@@ -153,9 +180,34 @@ states:
       accept:
         - target: "@exit:done"
           effects:
+            # Publish the accepted PRD out of the gitignored per-PRD workspace
+            # into its durable docs home (prd_publish.py moves 004-prd.md to
+            # <publish_durable_path>/<slug>.md, collision-safe; on the amend
+            # path it reuses prd_change_target in place). Binds prd_file = the
+            # durable path so the run ends with the deliverable OUT of
+            # .artifacts/. NOT once-guarded — a single accept fires it once.
+            # on_error: drafting holds the operator here (with last_error) so a
+            # publish failure is visible rather than silently exiting "done".
+            - invoke: host.run
+              id: publish
+              with:
+                cmd: python3
+                args:
+                  - "stories/prd/scripts/prd_publish.py"
+                  - "{{ world.prd_workspace }}"
+                  - "{{ world.prd_slug }}"
+                  - "{{ world.prd_artifact.file_path }}"
+                  - "{{ world.workdir }}"
+                  - "{{ world.publish_durable_path }}"
+                  - "{{ world.prd_change_target }}"
+              bind:
+                prd_file: stdout_json.prd_file
+              on_error: drafting
             - set:
-                status:       "done"
-                prd_artifact: "{{ world.prd_artifact }}"
+                status:        "done"
+                prd_artifact:  "{{ world.prd_artifact }}"
+                refine_message: ""
+                last_error:    ""
 
       # Same inputs, revise the prose. Budget gate → @exit:abandoned.
       refine:
@@ -172,6 +224,7 @@ states:
             # author re-drafts and the judge re-evaluates the new draft.
             - set:
                 refine_feedback: "{{ slots.feedback ?? world.llm_verdict.reason }}"
+                refine_message:  "{{ slots.feedback ?? world.llm_verdict.reason }}"   # echoed back ("You asked: …")
             - set:
                 prd_artifact:    {}
                 llm_verdict:     {}
@@ -194,6 +247,7 @@ states:
                 prd_artifact:          {}
                 llm_verdict:           {}
                 refine_feedback:       ""
+                refine_message:        ""
                 clarification_answers: ""
                 answered_count:        0
                 answered_ids:          ""

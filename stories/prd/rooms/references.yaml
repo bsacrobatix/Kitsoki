@@ -25,6 +25,97 @@
 
 states:
 
+  # references_seed — transient OPTIONAL semantic pre-seed, run BEFORE the
+  # references checkpoint.
+  #
+  # Embeds the idea (+ the clarification transcript) and retrieves the closest
+  # doc chunks (host.oracle.search) so the researcher spends its LLM budget on
+  # JUDGMENT (which hits matter, what sections, why) rather than scanning the
+  # tree from scratch. Mirrors the golden proposal pipeline's stage split
+  # (dev-story proposal_materialize.yaml: a search step that feeds a separate
+  # researcher step), adapted to prd's dwell-room shape: the search lives in
+  # its OWN transient room so a search failure NEVER strands the references
+  # checkpoint.
+  #
+  # Why a separate room rather than a search step on references' on_enter: an
+  # errored invoke routes to on_error, and a self-redirect (`on_error: <self>`)
+  # SKIPS the remaining on_enter steps (host_dispatch.go) — so a failed search
+  # inside references would block the researcher from running at all. Here the
+  # search stands alone; on BOTH success and failure we advance to references
+  # via emit_intent, carrying world.reference_hits (populated, or left empty on
+  # failure — the from-scratch fallback). Requires app.routing.embedding to be
+  # configured; when it is NOT, the sentinel errors and on_error sends us
+  # forward with empty hits.
+  references_seed:
+    description: "Pre-seeding references from a semantic search…"
+    view:
+      - prose: "Pre-seeding the reference search…"
+    relevant_world: [idea, clarification_log, reference_hits]
+    on_enter:
+      # `once: true` keyed off its bind so /reload re-renders the stored hits.
+      # The refine/regenerate arcs clear reference_hits before re-entering, so
+      # the search re-runs for the next pass.
+      - invoke: host.oracle.search
+        once: true
+        id: reference_search
+        with:
+          query: "{{ world.idea }} {{ world.clarification_log }}"
+          corpus:
+            - "docs/**/*.md"
+          top_k:     10
+          min_score: 0.30
+          chunk:
+            max:  1200
+            mode: heading
+        bind:
+          # host.oracle.search returns { hits: [...], top }; bind the hits
+          # array directly so world.reference_hits IS the ranked list (empty
+          # when nothing matched). prompts/references.md iterates it.
+          reference_hits: hits
+        # Search succeeded → advance to the checkpoint with the hits.
+        emit_intent: "seeded"
+        # Embeddings unconfigured / search failed → advance ANYWAY with empty
+        # hits (the researcher scans from scratch). on_error routes to the
+        # no-op fallback room below, which re-emits `seeded` so the references
+        # checkpoint is entered through the SAME transition path as the success
+        # case (its on_enter researcher then runs). reference_hits stays [].
+        on_error: references_seed_fallback
+    on:
+      # Synthetic — fired by the post-bind emit_intent on a successful search.
+      seeded:
+        - target: references
+
+      look:
+        - target: .
+
+  # references_seed_fallback — the no-embeddings landing pad.
+  #
+  # Reached only when the semantic search in references_seed errors (e.g.
+  # app.routing.embedding is unconfigured). It runs NO host call — it just
+  # re-emits `seeded` on entry so the references checkpoint is entered via the
+  # ordinary transition (which reliably fires references' on_enter researcher),
+  # carrying empty reference_hits. A bare on_error: references would land in
+  # references via the redirect path WITHOUT re-running its on_enter, leaving
+  # the reference list un-curated; routing through this room avoids that.
+  references_seed_fallback:
+    description: "Semantic search unavailable — curating references directly…"
+    view:
+      - prose: "Semantic pre-seed unavailable; curating references directly…"
+    relevant_world: [reference_hits, last_error]
+    on_enter:
+      # The pre-seed is OPTIONAL — an unconfigured embedding endpoint is a
+      # benign condition, not a pipeline failure. Clear the last_error the
+      # runtime set on the search fault so the references view doesn't show a
+      # scary ⚠ for a feature the operator never asked for, then advance.
+      - set:
+          last_error: ""
+        emit_intent: "seeded"
+    on:
+      seeded:
+        - target: references
+      look:
+        - target: .
+
   references:
     description: "Curate the existing docs the PRD should build on; confirm to write the PRD."
     view:
@@ -32,13 +123,29 @@ states:
           text:     "REFERENCES"
           subtitle: "Existing docs the PRD must build on — sections + why"
           color:    "#F59E0B"   # amber — gathering
+      # Error surfacing — the researcher (on_enter decide) failed; on_error
+      # stepped BACK one stage to brief (the inputs are still sound, so the
+      # operator reviews the brief before re-confirming into another search)
+      # rather than dumping all the way to idle. This template renders on the
+      # rare case last_error survives into references; the brief room carries
+      # the primary warning. last_error is set by the runtime.
+      - template: "⚠ **Reference search failed** — {{ world.last_error }}."
+        when: "world.last_error != ''"
       - prose: "cycle {{ world.cycle }} · references round {{ world.references_cycle }} · judge {{ world.judge_mode }}"
       # Saved-file path on its own prominent line — open/edit on disk directly.
-      - prose: 'Reference list saved to  {{ world.references_path|default:"(writing .artifacts/prd_references.md…)" }}'
+      - prose: 'Reference list saved to  {{ world.references_path|default:"(writing 003-references.md into the per-PRD workspace…)" }}'
       - kv:
           pairs:
             Idea:     '{{ world.idea|default:"(none)"|truncatechars:80 }}'
             Upstream: '{{ world.upstream_paths|default:"(none)" }}'
+      # Echo the operator's last refine instruction back so a refine turn
+      # visibly acknowledges what was asked (the golden proposal_refine.yaml
+      # renders the same "You asked: …" line). A blank-feedback action skips
+      # this line via the guard.
+      - kv:
+          pairs:
+            You asked: '{{ world.refine_message }}'
+        when: "world.refine_message != ''"
       - heading: "References found"
       # forloop.Counter numbers the list; §sections only when present; the
       # rationale wraps. {% empty %} covers the legitimate "nothing to cite"
@@ -84,7 +191,7 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [idea, upstream_paths, workdir, references, references_path, references_cycle, references_budget, references_revise, clarification_log, refine_feedback, cycle, judge_mode]
+    relevant_world: [idea, upstream_paths, workdir, prd_workspace, references, references_path, references_cycle, references_budget, references_revise, reference_hits, clarification_log, refine_feedback, refine_message, cycle, judge_mode, last_error]
     on_enter:
       # Curate the reference list. working_dir pins the researcher's
       # Read/Grep/Glob to the operator's tree; its tool calls land as
@@ -117,9 +224,19 @@ states:
             # clears references to re-arm once:, so the live key is empty
             # mid-revise. references_prev holds the list the researcher edits.
             current_references:  "{{ world.references_prev }}"
+            # The semantic pre-seed (step 0). Empty when embeddings are
+            # unconfigured; prompts/references.md only renders this section
+            # when non-empty, so the researcher falls back to a from-scratch
+            # search cleanly.
+            search_hits:         "{{ world.reference_hits }}"
         bind:
           references: submitted
-        on_error: idle
+        # Step BACK one stage to brief on a failed researcher run (not all
+        # the way to idle): the inputs (idea + clarification log) are still
+        # sound, so the operator reviews the brief and re-confirms to retry
+        # the search rather than re-pitching from scratch. The runtime sets
+        # last_error; brief's view surfaces it.
+        on_error: brief
 
       # Persist the curated list. A BARE `{{ world.references }}` resolves
       # to the typed object, which host.artifacts_dir pretty-prints as JSON
@@ -131,8 +248,8 @@ states:
       - invoke: host.artifacts_dir
         once: true
         with:
-          artifacts_root: "{{ world.workdir }}/.artifacts"
-          thread:         "prd_references"
+          artifacts_root: "{{ world.workdir }}/{{ world.prd_workspace }}"
+          thread:         "003-references"
           mode:           "replace"
           title:          "PRD References"
           body:           "{{ world.references }}"
@@ -147,8 +264,11 @@ states:
           effects:
             - set:
                 refine_feedback:   ""
+                refine_message:    ""   # don't leak the refine echo into drafting
                 references_revise: false
                 references_prev:   {}
+                # Leaving cleanly → clear any stale researcher error.
+                last_error:        ""
 
       # Refine the CURRENT list in place: keep what applies, apply the
       # operator's add/drop/re-scope instruction. revise=true tells the
@@ -174,13 +294,18 @@ states:
             - set:
                 references:        {}
                 references_path:   ""
+                # refine REVISES the current list in place — no fresh semantic
+                # search, so this stays a references self-loop and KEEPS the
+                # existing reference_hits as advisory context for the revision.
                 refine_feedback:   "{{ slots.feedback }}"
+                refine_message:    "{{ slots.feedback }}"   # echoed back in the view ("You asked: …")
                 references_revise: true
                 references_cycle:  "{{ world.references_cycle + 1 }}"
                 cycle:             "{{ world.cycle + 1 }}"
 
-      # Re-search the docs FRESH (revise=false). Budget gate bails instead of
-      # looping forever; otherwise self-transition re-fires on_enter.
+      # Re-search the docs FRESH (revise=false). Routes through references_seed
+      # so the semantic pre-seed re-runs too. Budget gate bails instead of
+      # looping forever.
       regenerate:
         - when: "world.references_cycle >= world.references_budget"
           target: "@exit:abandoned"
@@ -188,15 +313,18 @@ states:
             - set:
                 abandon_reason: "references_budget_exhausted"
                 status:         "abandoned"
-        - target: references
+        - target: references_seed
           effects:
-            # Fresh search: clear BOTH once: binds (object + write-path) so
-            # both on_enter invokes re-run. revise:false ⇒ no snapshot needed;
-            # the researcher starts over rather than editing current_references.
+            # Fresh search: clear the once: binds (object + write-path + the
+            # semantic hits) so the seed re-searches and both researcher +
+            # write re-run. revise:false ⇒ no snapshot needed; the researcher
+            # starts over rather than editing current_references.
             - set:
+                reference_hits:    []   # re-arm the semantic pre-seed for the fresh search
                 references:        {}
                 references_path:   ""
                 refine_feedback:   "{{ slots.feedback ?? '' }}"
+                refine_message:    ""   # fresh search, not a steer — no echo
                 references_revise: false
                 references_cycle:  "{{ world.references_cycle + 1 }}"
                 cycle:             "{{ world.cycle + 1 }}"
@@ -215,6 +343,7 @@ states:
             - set:
                 clarifications:        {}
                 refine_feedback:       ""
+                refine_message:        ""
                 clarification_answers: ""
                 answered_count:        0
                 answered_ids:          ""

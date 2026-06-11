@@ -22,10 +22,16 @@ initial_world:
   judge_mode:  "human"
 
 host_handlers:
+  # The brief room opens the editable brief in the editor on entry.
+  host.ide.open_file:
+    data: { ok: true, connected: true }
   host.chat.resolve:
     data: { ok: true, chat_id: "chat-1", title: "PRD idea discovery", is_new: true }
   host.oracle.converse:
     data: { ok: true, answer: "A CLI for X that helps developers do Y.", chat_id: "chat-1", claude_session_id: "sess-1" }
+  # references on_enter runs the optional semantic pre-seed; empty hits = no embeddings.
+  host.oracle.search:
+    data: { hits: [] }
   host.oracle.decide:
     data:
       ok: true
@@ -34,14 +40,27 @@ host_handlers:
           - { id: "q1", question: "Who is the primary user?", why: "scopes the persona" }
           - { id: "q2", question: "What is the single most important success metric?", why: "defines done" }
   host.artifacts_dir:
-    data: { ok: true, path: ".artifacts/prd_brief.md", message_id: "prd_brief#1" }
+    data: { ok: true, path: ".artifacts/prd/example-cli/001-brief.md", message_id: "001-brief#1" }
+  # search-confirm mints the workspace; accept publishes the draft.
+  host.run:
+    by_call:
+      mint_workspace:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json: { slug: "example-cli", workspace: ".artifacts/prd/example-cli" }
+      publish:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json: { prd_file: "docs/prd/example-cli.md" }
   host.oracle.task:
     data:
       ok: true
       submitted:
         title:               "PRD: Example CLI"
         summary_markdown:    "## PRD: Example CLI\n\nA sufficiently long summary body to satisfy the schema minimum length for the prd_artifact summary_markdown field, covering problem, users, goals, and metrics."
-        file_path:           ".artifacts/prd.md"
+        file_path:           ".artifacts/prd/example-cli/004-prd.md"
         confidence:          0.84
         needs_clarification: false
         follow_up_questions: []
@@ -55,12 +74,20 @@ turns:
       idea_message: "I want a CLI for X"
       idea_turns:   1
 
-  # `start` distills the conversation into world.idea and advances to
-  # clarifying.
+  # `start` distills the conversation into world.idea and advances to the
+  # prior-art gate (search). The scout (on_enter decide) runs and finds no
+  # overlap (the shared decide stub binds the questions shape, whose
+  # `.overlaps` is absent ⇒ empty), so the gate is clean.
   - intent: { name: start, slots: {} }
-    expect_state: clarifying
+    expect_state: search
     expect_world:
       idea: "A CLI for X that helps developers do Y."
+
+  # No overlap → confirm proceeds to clarifying and records the decision.
+  - intent: { name: confirm, slots: {} }
+    expect_state: clarifying
+    expect_world:
+      prd_overlap_decision: "new"
 
   # Answer the questions → brief. The round is appended to the transcript
   # and clarifying_cycle increments. Entering brief writes the brief
@@ -72,7 +99,7 @@ turns:
       clarification_answers: "1) developers 2) time-to-first-success"
     expect_host_calls:
       - handler: host.artifacts_dir
-        args: { thread: "prd_brief" }
+        args: { thread: "001-brief" }
 
   # Confirm the brief → references. Entering references runs the
   # researcher (stubbed decide) and writes the references artifact.
@@ -80,7 +107,7 @@ turns:
     expect_state: references
     expect_host_calls:
       - handler: host.artifacts_dir
-        args: { thread: "prd_references" }
+        args: { thread: "003-references" }
 
   # Confirm the references → drafting (writes the PRD via stubbed task).
   - intent: { name: confirm, slots: {} }
@@ -91,7 +118,11 @@ turns:
   - intent: { name: accept, slots: {} }
     expect_state: __exit__done
     expect_world:
-      status: "done"
+      status:   "done"
+      prd_file: "docs/prd/example-cli.md"
+    expect_host_calls:
+      - handler: host.run
+        args: { call: "publish" }
 
 expect_terminal: true
 expect_no_errors: true

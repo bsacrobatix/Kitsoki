@@ -18,7 +18,13 @@ initial_world:
       - { path: "docs/auth.md", sections: "Tokens", rationale: "token model" }
 
 host_handlers:
+  # The brief room opens the editable brief in the editor on entry.
+  host.ide.open_file:
+    data: { ok: true, connected: true }
   # Defensive: references on_enter on initial entry.
+  # references on_enter runs the optional semantic pre-seed; empty hits = no embeddings.
+  host.oracle.search:
+    data: { hits: [] }
   host.oracle.decide:
     data:
       ok: true

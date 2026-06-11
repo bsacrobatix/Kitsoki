@@ -21,6 +21,9 @@ initial_world:
   judge_mode:  "human"
 
 host_handlers:
+  # The brief room opens the editable brief in the editor on entry.
+  host.ide.open_file:
+    data: { ok: true, connected: true }
   host.oracle.task:
     data:
       ok: true
@@ -31,6 +34,9 @@ host_handlers:
         confidence:          0.84
         needs_clarification: true
         follow_up_questions: ["What is the scope boundary?"]
+  # references on_enter runs the optional semantic pre-seed; empty hits = no embeddings.
+  host.oracle.search:
+    data: { hits: [] }
   host.oracle.decide:
     data:
       ok: true

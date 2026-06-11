@@ -23,13 +23,34 @@ initial_world:
   judge_mode:  "llm"
 
 host_handlers:
+  # The brief room opens the editable brief in the editor on entry.
+  host.ide.open_file:
+    data: { ok: true, connected: true }
   host.chat.resolve:
     data: { ok: true, chat_id: "chat-1", title: "PRD idea discovery", is_new: true }
   host.oracle.converse:
     data: { ok: true, answer: "A CLI for X that helps developers do Y.", chat_id: "chat-1", claude_session_id: "sess-1" }
+  # search-confirm mints the per-PRD workspace.
+  host.run:
+    by_call:
+      mint_workspace:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json: { slug: "a-cli-for-x", workspace: ".artifacts/prd/a-cli-for-x" }
   # One stub, two call sites — addressed by the invoke `id:`.
+  # references on_enter runs the optional semantic pre-seed; empty hits = no embeddings.
+  host.oracle.search:
+    data: { hits: [] }
   host.oracle.decide:
     by_call:
+      # The prior-art scout (search room) — no overlap, so confirm proceeds.
+      existing_scan:
+        data:
+          ok: true
+          submitted:
+            overlaps: []
+            roadmap_fit: "Greenfield — no existing PRD covers this."
       analyst_questions:
         data:
           ok: true
@@ -69,9 +90,12 @@ turns:
   - intent: { name: discuss, slots: { message: "I want a CLI for X" } }
     expect_state: idle
   - intent: { name: start, slots: {} }
-    expect_state: clarifying
+    expect_state: search
     expect_world:
       idea: "A CLI for X that helps developers do Y."
+  # No overlap at the gate → confirm proceeds to clarifying.
+  - intent: { name: confirm, slots: {} }
+    expect_state: clarifying
 
   # Answer the analyst's questions → brief (analyst_questions decide bound
   # the questions; clarifying_cycle increments).

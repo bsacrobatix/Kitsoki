@@ -21,8 +21,14 @@ initial_world:
       - { id: "q3", question: "What is explicitly out of scope?", why: "bounds the work" }
 
 host_handlers:
+  # The brief room opens the editable brief in the editor on entry.
+  host.ide.open_file:
+    data: { ok: true, connected: true }
   # In case the harness fires clarifying's on_enter on initial entry, hand
   # back the same three questions so the seeded list is stable.
+  # references on_enter runs the optional semantic pre-seed; empty hits = no embeddings.
+  host.oracle.search:
+    data: { hits: [] }
   host.oracle.decide:
     data:
       ok: true

@@ -31,6 +31,11 @@ states:
           text:     "CLARIFYING"
           subtitle: "Surface the gaps before drafting the PRD"
           color:    "#3B82F6"   # blue — thinking
+      # Error surfacing — the analyst (on_enter decide) failed and on_error
+      # held us here (target: .) rather than bouncing to idle. last_error
+      # is set by the runtime; regenerate re-arms the decide for a retry.
+      - template: "⚠ **Questions generation failed** — {{ world.last_error }}. Type **regenerate** to try again, or **skip** to move on with what we have."
+        when: "world.last_error != ''"
       - prose: "cycle {{ world.cycle }} · clarify round {{ world.clarifying_cycle }} · judge {{ world.judge_mode }}"
       - kv:
           pairs:
@@ -76,7 +81,7 @@ states:
       # bouncing the operator out of text-input mode after each reply. Same
       # selectorless free-text idiom as rooms/idle.yaml.
       - prose: "When you've covered enough, say **submit** to review the brief and move on, **skip** to move on with what we have, **regenerate** to re-ask the questions, or **quit** to abandon."
-    relevant_world: [idea, upstream_paths, workdir, clarifications, clarification_answers, answered_count, answered_ids, clarification_log, clarifying_cycle, clarifying_budget, prd_artifact, refine_feedback, cycle, judge_mode]
+    relevant_world: [idea, upstream_paths, workdir, clarifications, clarification_answers, answered_count, answered_ids, clarification_log, clarifying_cycle, clarifying_budget, prd_artifact, refine_feedback, cycle, judge_mode, last_error]
     on_enter:
       # Generate this round's questions. working_dir pins the analyst's
       # Read/Grep to where the upstream docs live; its tool calls land as
@@ -105,7 +110,11 @@ states:
             feedback:           "{{ world.refine_feedback }}"
         bind:
           clarifications: submitted
-        on_error: idle
+        # Stay HERE on a failed analyst run (don't bounce all the way back
+        # to idle's discovery chat) — the idea is already distilled, so the
+        # operator just needs to retry. The runtime sets last_error; the
+        # view surfaces it and points at regenerate (which re-arms once:).
+        on_error: .
     on:
       # Answer ONE question by number. Self-transition with `target: .`
       # (NOT `target: clarifying`): `.` re-renders WITHOUT re-firing
@@ -161,10 +170,16 @@ states:
                   {{ world.clarification_log }}
             - set:
                 clarifying_cycle: "{{ world.clarifying_cycle + 1 }}"
+            # Leaving cleanly → clear any stale analyst error.
+            - set:
+                last_error: ""
 
       # No answers this round — move on with what we have. No log append.
       skip:
         - target: brief
+          effects:
+            - set:
+                last_error: ""
 
       # Re-ask: self-transition re-fires on_enter (regenerates questions
       # with refine_feedback). Budget gate bails out instead of looping.

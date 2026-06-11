@@ -15,12 +15,27 @@ initial_state: brief
 initial_world:
   idea:              "A CLI for X that helps developers do Y."
   workdir:           "."
-  output_path:       ".artifacts/prd.md"
   judge_mode:        "human"
+  prd_slug:          "example-cli"
+  prd_workspace:     ".artifacts/prd/example-cli"
   clarification_log: "── Round 1 ──\nQuestions: {\"questions\":[{\"id\":\"q1\",\"question\":\"Who is the primary user?\"}]}\nAnswers: platform developers\n\n"
 
 host_handlers:
+  # The brief room opens the editable brief in the editor on entry.
+  host.ide.open_file:
+    data: { ok: true, connected: true }
+  # accept publishes the draft out of the workspace into the durable home.
+  host.run:
+    by_call:
+      publish:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json: { prd_file: "docs/prd/example-cli.md" }
   # The references room's researcher — the only decide in this run.
+  # references on_enter runs the optional semantic pre-seed; empty hits = no embeddings.
+  host.oracle.search:
+    data: { hits: [] }
   host.oracle.decide:
     data:
       ok: true
@@ -36,7 +51,7 @@ host_handlers:
       submitted:
         title:               "PRD: Example CLI"
         summary_markdown:    "## PRD: Example CLI\n\nA sufficiently long summary body to satisfy the schema minimum length for the prd_artifact summary_markdown field, covering problem, users, goals, and metrics."
-        file_path:           ".artifacts/prd.md"
+        file_path:           ".artifacts/prd/example-cli/004-prd.md"
         confidence:          0.84
         needs_clarification: false
         follow_up_questions: []
@@ -49,7 +64,7 @@ turns:
     expect_state: references
     expect_host_calls:
       - handler: host.artifacts_dir
-        args: { thread: "prd_references" }
+        args: { thread: "003-references" }
     expect_world:
       references_path: ".artifacts/out.md"
       references:
@@ -64,7 +79,7 @@ turns:
       prd_artifact:
         title:               "PRD: Example CLI"
         summary_markdown:    "## PRD: Example CLI\n\nA sufficiently long summary body to satisfy the schema minimum length for the prd_artifact summary_markdown field, covering problem, users, goals, and metrics."
-        file_path:           ".artifacts/prd.md"
+        file_path:           ".artifacts/prd/example-cli/004-prd.md"
         confidence:          0.84
         needs_clarification: false
         follow_up_questions: []
@@ -73,7 +88,8 @@ turns:
   - intent: { name: accept, slots: {} }
     expect_state: __exit__done
     expect_world:
-      status: "done"
+      status:   "done"
+      prd_file: "docs/prd/example-cli.md"
 
 expect_terminal: true
 expect_no_errors: true

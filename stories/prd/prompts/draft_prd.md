@@ -54,8 +54,11 @@ the failure mode this guards against.
 ## What to write
 
 1. Write the full PRD as markdown to **`{{ args.output_path }}`** (relative
-   to the working directory) using `Write` — create the enclosing
-   directory first if it does not exist. A solid PRD covers: problem &
+   to the working directory) using `Write` — this is `004-prd.md` inside
+   the per-PRD workspace `{{ args.workspace }}` (the numbered artifact spine
+   alongside `001-brief.md` and `003-references.md`). Create the enclosing
+   directory first if it does not exist. On accept the document is published
+   out of this workspace into its durable docs home. A solid PRD covers: problem &
    context, target users, goals & non-goals, requirements (functional and
    non-functional), success metrics, and open questions.
 2. Write for a reader who has not seen the idea or the transcript.

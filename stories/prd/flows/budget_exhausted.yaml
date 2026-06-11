@@ -23,6 +23,9 @@ host_handlers:
         confidence:          0.84
         needs_clarification: false
         follow_up_questions: []
+  # references on_enter runs the optional semantic pre-seed; empty hits = no embeddings.
+  host.oracle.search:
+    data: { hits: [] }
   host.oracle.decide:
     data:
       ok: true

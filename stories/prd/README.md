@@ -5,14 +5,26 @@ upstream requirement docs) into a PRD markdown document. It is a
 pipeline-shaped operator story, structurally identical to
 [`stories/bugfix/`](../bugfix/) and [`stories/dev-story/`](../dev-story/);
 the novelty is the **document** artifact, a **conversational idea
-discovery** intake, a **multi-round clarification** step whose transcript
+discovery** intake, a **prior-art scout gate** that mints a per-PRD
+workspace, a **multi-round clarification** step whose transcript
 accumulates across rounds, and two **confirm-gated review rooms** (the
-formalized `brief` and a curated doc `references` list, both persisted to
-`.artifacts/`) that the operator signs off on before the PRD is written.
+formalized `brief` and a curated doc `references` list) that the operator
+signs off on before the PRD is written.
+
+Every per-PRD artifact lands under a **slug-named workspace** —
+`{{ workdir }}/.artifacts/prd/<slug>/` — as numbered files
+(`001-brief.md`, `003-references.md`, `004-prd.md`), the same multi-file
+workspace shape the `dev-story` proposal pipeline uses. On `accept` the
+draft is **published** out of the gitignored workspace to its durable home
+(`docs/prd/<slug>.md` by default, collision-safe). This mirrors
+`dev-story`'s `proposal_workspace.py` / `publish_proposal.py` sandwich:
+`scripts/prd_slug.py` mints + uniquifies the slug, `scripts/prd_publish.py`
+moves the accepted draft.
 
 No engine / widget changes — everything composes existing mechanisms (a
-conversational chat room, `host.oracle.*`, `host.artifacts_dir`, the
-cycle-budget refine loop, named agents, tracing).
+conversational chat room, `host.oracle.*`, `host.artifacts_dir`,
+`host.run` for the deterministic slug/publish glue, the cycle-budget refine
+loop, named agents, tracing).
 
 ## Using it
 
@@ -46,7 +58,7 @@ kitsoki run stories/prd/app.yaml --continue
 
 ### Walkthrough — what you type at each step
 
-The session opens **parked at `idle`**. The flow is a five-room pipeline;
+The session opens **parked at `idle`**. The flow is a six-room pipeline;
 you drive it with free text (an LLM maps what you type to the room's
 intents — you don't memorize commands):
 
@@ -55,63 +67,84 @@ intents — you don't memorize commands):
    for as long as you like. When the problem/users/scope feel covered, type
    **`ready`** (or `start`) — that distills the conversation into the
    formal idea and moves on.
-2. **`clarifying` — answer the questions.** The `analyst` posts a numbered
+2. **`search` — prior-art gate.** The `scout` checks for an existing PRD /
+   requirement doc that overlaps your idea BEFORE any artifact is written.
+   If it finds one it **strongly urges you to amend the existing doc** —
+   select it to `change_existing` (the amend target is captured), or
+   `override_new` to start fresh anyway. With no overlap, **`confirm`**
+   proceeds. Committing (any of those) mints the per-PRD slug + workspace
+   (`prd_slug.py`) that every later artifact writes into.
+3. **`clarifying` — answer the questions.** The `analyst` posts a numbered
    list of the gaps that most change the PRD. **Answer one at a time by
    number** — e.g. `3 our enterprise tenants only`. The screen tracks which
    are answered. When you've covered enough, type **`submit`** (or `skip`
    to move on with what you have). `regenerate` re-asks; `quit` bails.
-3. **`brief` — confirm the inputs.** A read-only review of the formalized
-   idea + every clarification, written to `.artifacts/prd_brief.md`. Pick
+4. **`brief` — confirm the inputs.** A read-only review of the formalized
+   idea + every clarification, written to `<workspace>/001-brief.md`. Pick
    **`confirm`** to proceed, **`clarify`** to ask another round *keeping*
    your answers, or **`restart from clarifying`/`idle`** to start that
    stage over.
-4. **`references` — confirm the prior art.** The `researcher` searches the
+5. **`references` — confirm the prior art.** The `researcher` searches the
    workdir's **docs** (not code) and proposes the documents the PRD should
    build on, each with the section(s) and a rationale, written to
-   `.artifacts/prd_references.md`. **`confirm`** to draft, **`refine "drop
+   `<workspace>/003-references.md`. **`confirm`** to draft, **`refine "drop
    the rate-limit doc; also cite docs/auth.md §Tokens"`** to edit the list
    in place, or **`regenerate`** to search fresh.
-5. **`drafting` — review the PRD.** The `author` writes the full document
-   to **`.artifacts/prd.md`** and shows a digest. **`accept`** to finish,
-   **`refine "<what to change>"`** to re-draft with the same inputs, or
+6. **`drafting` — review the PRD.** The `author` writes the full document
+   to **`<workspace>/004-prd.md`** and shows a digest. **`accept`**
+   publishes it to its durable home (`docs/prd/<slug>.md`) and finishes;
+   **`refine "<what to change>"`** re-drafts with the same inputs; or
    **`clarify`** if the draft revealed the inputs were incomplete (adds a
    Q&A round, then re-drafts).
 
-**Outputs** all land in `{{ workdir }}/.artifacts/`: `prd_brief.md`,
-`prd_references.md`, and the PRD itself `prd.md`. Each review screen shows
-its saved path prominently so you can open or edit the file on disk
-directly.
+**Per-PRD artifacts** land in the slug-named workspace
+`{{ workdir }}/.artifacts/prd/<slug>/` — `001-brief.md`,
+`003-references.md`, and the draft `004-prd.md` — as the numbered record of
+the run. Each review screen shows its saved path prominently so you can
+open or edit the file on disk directly. On `accept`, `004-prd.md` is
+**published** out to `{{ workdir }}/docs/prd/<slug>.md` (the durable home;
+`publish_durable_path` configures it), leaving the numbered checks behind
+as the audit trail.
 
 ## Story graph
 
 ```
-idle ─start─▶ clarifying ─submit_answers/skip─▶ brief ─confirm─▶ references ─confirm─▶ drafting
- │ (chat)         │ (decide → questions)          │ (.artifacts/    │ (decide →           │ (task → .artifacts/prd.md)
- │ ◀─discuss      │ ◀─answer n=… (self)           │  prd_brief.md)  │  doc references)    │
- │                ├─regenerate ─▶ clarifying       ├─confirm         ├─confirm             ├─accept ─▶ @exit:done
- │                └─quit ─▶ @exit:abandoned        ├─restart_from    ├─regenerate (budget) ├─refine ─▶ drafting (budget→abandoned)
- │                     ▲                           └─quit            ├─restart_from        ├─clarify ─▶ clarifying ◀─ another round
- │                     └──────────────────────────── clarify ───────┴─────────────────────┤
- └─quit ─▶ @exit:abandoned                                                                 ├─ restart_from ─▶ idle | clarifying
-                                                                                           └─ quit ─▶ @exit:abandoned
+idle ─start─▶ search ─confirm─▶ clarifying ─submit_answers/skip─▶ brief ─confirm─▶ references ─confirm─▶ drafting
+ │ (chat)       │ (scout →        │ (decide → questions)          │ (001-       │ (decide →           │ (task → 004-prd.md;
+ │ ◀─discuss    │  overlap gate;  │ ◀─answer n=… (self)           │  brief.md)  │  doc references;    │  accept publishes to
+ │              │  mints slug +   ├─regenerate ─▶ clarifying       ├─confirm     │  003-references.md) │  docs/prd/<slug>.md)
+ │              │  workspace)     └─quit ─▶ @exit:abandoned        ├─restart_from├─confirm             ├─accept ─▶ @exit:done
+ │              ├─change_existing ─▶ clarifying (amend target)     └─quit        ├─regenerate (budget) ├─refine ─▶ drafting (budget→abandoned)
+ │              ├─override_new ─▶ clarifying                            ▲         ├─restart_from        ├─clarify ─▶ clarifying ◀─ another round
+ │              ├─regenerate (re-scout) / quit                          └── clarify ──────────────────┤
+ └─quit ─▶ @exit:abandoned                                                                            ├─ restart_from ─▶ idle | clarifying
+                                                                                                      └─ quit ─▶ @exit:abandoned
 ```
 
 `idle` is a **conversation**, not a form: the operator talks the idea
 through with an `interviewer` agent (`discuss` self-loops), and `start`
 distills the conversation into `world.idea` before advancing.
 
+`search` is the **prior-art gate** (the `dev-story` `proposal_search`
+analogue): a read-only `scout` runs BEFORE any artifact is written, so a
+duplicate idea is caught here rather than after several clarify rounds.
+Committing to the pipeline (`confirm` / `change_existing` / `override_new`)
+runs `scripts/prd_slug.py` to mint the unique per-PRD slug + workspace; on
+the amend path `prd_change_target` records the doc to edit in place.
+
 `brief` and `references` are **confirm-gated review rooms** inserted
 before the PRD is written:
 
-- **`brief`** is *deterministic* — no oracle call. It composes the brief
-  out of what the first two phases already produced (`world.idea` from
+- **`brief`** composes the brief *deterministically* — no LLM synthesis —
+  out of what the earlier phases already produced (`world.idea` from
   `idle` + the clarification transcript from `clarifying`), writes it to
-  `{{ workdir }}/.artifacts/prd_brief.md` via `host.artifacts_dir`, and
-  gates on `confirm`.
+  `<workspace>/001-brief.md` via `host.artifacts_dir`, then runs a
+  lightweight `brief_check` gate (`host.oracle.decide`) that reads the file
+  and returns `continue` / `clarify` before the operator `confirm`s.
 - **`references`** runs the `researcher` (`host.oracle.decide`, docs-only)
   to curate the existing documents the PRD must build on — each with the
   specific section(s) and a one-line rationale — also persisted to
-  `.artifacts/prd_references.md`. The confirmed list is handed to the
+  `<workspace>/003-references.md`. The confirmed list is handed to the
   author so the PRD is drafted against the cited sections. Two ways to
   re-run it: **`refine`** revises the *current* list in place (keep what
   applies; add / drop / re-scope per your instruction), while
@@ -129,9 +162,9 @@ clarifying** two ways — the distinction matters:
 - **`restart_from clarifying`** (destructive) — *discards* the
   clarification record and re-questions from scratch.
 
-Five rooms (`idle`, `clarifying`, `brief`, `references`, `drafting`), two
-exits (`done`, `abandoned`). `drafting` is the checkpoint room — same
-shape as every `bugfix` phase.
+Six rooms (`idle`, `search`, `clarifying`, `brief`, `references`,
+`drafting`), two exits (`done`, `abandoned`). `drafting` is the checkpoint
+room — same shape as every `bugfix` phase.
 
 ## Contract
 
@@ -155,11 +188,12 @@ terminals so `kitsoki run` and `kitsoki test flows` terminate cleanly.
 
 | Room | On enter | Checkpoint? | On `accept` / advance |
 |---|---|---|---|
-| `idle` (conversational) | `host.chat.resolve` (get-or-create) opens the discovery chat; `interviewer` (`host.oracle.converse`) replies per `discuss` turn | no — `discuss` self-loops the conversation | `clarifying` (via `start`, which distills the chat into `world.idea`) |
+| `idle` (conversational) | `host.chat.resolve` (get-or-create) opens the discovery chat; `interviewer` (`host.oracle.converse`) replies per `discuss` turn | no — `discuss` self-loops the conversation | `search` (via `start`, which distills the chat into `world.idea`) |
+| `search` | `scout` (`host.oracle.decide`) → `prd_existing_state` (read-only prior-art scan; no artifact written) | yes — operator `confirm`s / `change_existing` / `override_new` | `clarifying`; the commit arc runs `prd_slug.py` (`host.run`) to mint `prd_slug` + `prd_workspace` |
 | `clarifying` | `analyst` (`host.oracle.decide`) → `clarifications` | no — operator answers questions one at a time (`answer n=…`) | `brief` (via `submit_answers` or `skip`) |
-| `brief` | `host.artifacts_dir` writes `.artifacts/prd_brief.md` from `world.idea` + `world.clarification_log` (deterministic — no oracle) | yes — operator `confirm`s the brief | `references` (via `confirm`); `clarify` re-questions keeping the record; `restart_from` discards |
-| `references` | `researcher` (`host.oracle.decide`, docs-only) → `references`; `host.artifacts_dir` writes `.artifacts/prd_references.md` | yes — operator `confirm`s the list | `drafting` (via `confirm`); `refine` revises the list in place; `regenerate` searches fresh (both budgeted); `clarify` re-questions keeping the record |
-| `drafting` | `author` (`host.oracle.task`) writes the PRD → `prd_artifact` (reads the confirmed `references`); optional `judge` | yes — `prd_artifact` | `@exit:done` (via `accept`) |
+| `brief` | `host.artifacts_dir` writes `<workspace>/001-brief.md` from `world.idea` + `world.clarification_log` (deterministic — no oracle) | yes — operator `confirm`s the brief | `references` (via `confirm`); `clarify` re-questions keeping the record; `restart_from` discards |
+| `references` | `researcher` (`host.oracle.decide`, docs-only) → `references`; `host.artifacts_dir` writes `<workspace>/003-references.md` | yes — operator `confirm`s the list | `drafting` (via `confirm`); `refine` revises the list in place; `regenerate` searches fresh (both budgeted); `clarify` re-questions keeping the record |
+| `drafting` | `author` (`host.oracle.task`) writes `<workspace>/004-prd.md` → `prd_artifact` (reads the confirmed `references`); optional `judge` | yes — `prd_artifact` | `@exit:done` (via `accept`, which runs `prd_publish.py` to move the draft to `docs/prd/<slug>.md`) |
 
 ### World contract
 
@@ -176,14 +210,21 @@ loads standalone for tests. Parent stories project the intake keys via
 | `idea_turns` | int | Discovery-chat turn count (view only). | `0` |
 | `upstream_paths` | string | Space/comma-separated files or dirs the agents read (seed via warp, or mention in the chat). | `""` |
 | `workdir` | string | Where upstream lives + the PRD is written; pins each oracle's `working_dir`. | `"."` |
-| `output_path` | string | PRD path, relative to `workdir`. Defaults under `.artifacts/` alongside the brief + reference-list artifacts. | `".artifacts/prd.md"` |
+| `output_path` | string | Fallback PRD path, relative to `workdir`. Live runs write `<prd_workspace>/004-prd.md` instead; this default only applies to a flow that seeds `drafting` directly without minting a workspace. | `".artifacts/prd.md"` |
+| `prd_slug` | string | Kebab slug minted at the `search` gate (`prd_slug.py`) — names the workspace + the published file. | `""` |
+| `prd_workspace` | string | Per-PRD workspace, relative to `workdir`: `.artifacts/prd/<slug>`. Empty until the gate mints it; every numbered artifact writes under it. | `""` |
+| `prd_existing_state` | object | `scout` result: `{ roadmap_fit, overlaps: [{path, summary, recommendation}] }` — drives the overlap gate. | `{}` |
+| `prd_overlap_decision` | string | `new` (confirm / override_new) or `change_existing` — records the gate outcome for audit. | `""` |
+| `prd_change_target` | string | On the amend path, the existing doc the author edits in place (publish reuses it rather than moving the draft). | `""` |
+| `publish_durable_path` | string | Durable home the accepted PRD is published into, relative to `workdir`. | `"docs/prd"` |
+| `prd_file` | string | Published path, bound by `prd_publish.py` on `accept` (the deliverable, out of the workspace). | `""` |
 | `clarifications` | object | This round's `decide` result: `{ questions: [{id, question, why}] }`. | `{}` |
 | `clarification_answers` | string | This round's replies, accumulated one `Qn: …` line per answered question (newest last). | `""` |
 | `answered_count` | int | Questions answered this round; drives the "Answered so far (N/total)" readout. Reset on every new round. | `0` |
 | `clarification_log` | string | Growing transcript of every prior round's Q&A (see below). | `""` |
-| `brief_path` | string | Path the brief artifact was written to (`.artifacts/prd_brief.md`). | `""` |
+| `brief_path` | string | Path the brief artifact was written to (`<workspace>/001-brief.md`). | `""` |
 | `references` | object | `researcher` result: `{ items: [{ path, sections, rationale }] }`. | `{}` |
-| `references_path` | string | Path the reference-list artifact was written to (`.artifacts/prd_references.md`). | `""` |
+| `references_path` | string | Path the reference-list artifact was written to (`<workspace>/003-references.md`). | `""` |
 | `references_cycle` | int | References re-run rounds consumed (`refine` or `regenerate`); caps via `references_budget`. | `0` |
 | `references_budget` | int | Max references re-runs before `refine`/`regenerate` abandons. | `3` |
 | `references_revise` | bool | `true` on a `refine` (revise the current list in place), `false` on a fresh `regenerate` — steers `prompts/references.md`. | `false` |
@@ -225,9 +266,10 @@ loads standalone for tests. Parent stories project the intake keys via
 |---|---|---|
 | `host.chat.resolve` | `idle` (get-or-create the discovery chat; idempotent across `on_enter` re-fires) | `internal/host/chat_handlers.go` |
 | `host.oracle.converse` | `idle` (interviewer discovery chat + distill) | `internal/host/oracle_converse.go` |
-| `host.oracle.decide` | `clarifying` (analyst), `references` (researcher), `drafting` (judge) | `internal/host/oracle_decide.go` |
+| `host.oracle.decide` | `search` (scout), `clarifying` (analyst), `references` (researcher), `drafting` (judge) | `internal/host/oracle_decide.go` |
 | `host.oracle.task` | `drafting` (author, writes the PRD) | `internal/host/oracle_task.go` |
-| `host.artifacts_dir` | `brief` (prd_brief.md), `references` (prd_references.md); `mode: replace` for `on_enter` idempotency | `internal/host/artifacts_dir_transport.go` |
+| `host.artifacts_dir` | `brief` (001-brief.md), `references` (003-references.md), into the per-PRD workspace; `mode: replace` for `on_enter` idempotency | `internal/host/artifacts_dir_transport.go` |
+| `host.run` | `search` (`prd_slug.py` mints the slug + workspace), `drafting` (`prd_publish.py` publishes the accepted draft) | `internal/host/handlers.go` |
 
 `host.chat.*` needs a ChatStore wired into the session — `kitsoki run`
 provides one (via `--db`); standalone flow fixtures stub it.
@@ -243,6 +285,7 @@ Named agents attribute model + token usage to each step in the trace.
 | Persona | Verb | Tools | Role |
 |---|---|---|---|
 | `interviewer` | `converse` | `Read`, `Grep`, `Glob` | Runs the idea-discovery chat; helps the operator sharpen the problem, users, and scope. |
+| `scout` | `decide` | `Read`, `Grep`, `Glob` | The prior-art gate: scans the workdir's docs for overlapping PRDs / requirement docs + roadmap fit, before any artifact is written. |
 | `analyst` | `decide` | `Read`, `Grep`, `Glob` | Reads the idea + upstream docs + the transcript; asks only genuinely-new questions. |
 | `researcher` | `decide` | `Read`, `Grep`, `Glob` | Searches the working dir's **docs** (not code) for prior art / constraints; curates the reference list with sections + rationale. |
 | `author` | `task` | `Read`, `Grep`, `Glob`, `Write`, `Edit` | Writes the PRD markdown to disk (reads the curated references); produces `prd_artifact`. |
@@ -311,8 +354,13 @@ gated by `when:` — not a fork in the graph (the `bugfix` pattern):
 From the original design note (now retired), resolved as implemented:
 
 1. **PRD output** — `oracle.task` writes the document to
-   `{{ workdir }}/{{ output_path }}` (durable, gives `files_changed` in the
-   trace) and returns a `summary_markdown` for the checkpoint view.
+   `<prd_workspace>/004-prd.md` (a slug-named per-PRD workspace under
+   `{{ workdir }}/.artifacts/prd/`, giving `files_changed` in the trace)
+   and returns a `summary_markdown` for the checkpoint view. On `accept`,
+   `prd_publish.py` moves it out to the durable home
+   `{{ workdir }}/{{ publish_durable_path }}/<slug>.md`. The slug + workspace
+   are minted at the `search` gate by `prd_slug.py` — the same workspace /
+   publish sandwich as `dev-story`'s proposal pipeline.
 2. **Idea capture** — a conversational discovery chat (`oracle.converse`),
    not a form: a free-form pitch is awkward to type into one input field,
    so the operator talks it through and `start` distills it. **Clarification
@@ -330,11 +378,12 @@ From the original design note (now retired), resolved as implemented:
 5. **LLM judge** — the machinery is carried (cheap), default `human`.
 6. **Review gates before drafting** — the `brief` and `references` rooms
    make the operator confirm the inputs before any PRD is written.
-   - **The brief is deterministic** — it is *not* a new LLM synthesis. The
-     first two phases already produced everything it needs (`world.idea`
-     from `idle`, the clarification transcript from `clarifying`), so the
-     room just composes them, persists to `.artifacts/prd_brief.md`, and
-     gates. No oracle call, no cost.
+   - **The brief is composed deterministically** — it is *not* a new LLM
+     synthesis. The earlier phases already produced everything it needs
+     (`world.idea` from `idle`, the clarification transcript from
+     `clarifying`), so the room just composes them and persists to
+     `<workspace>/001-brief.md`. A lightweight `brief_check` gate then
+     reads the file and returns `continue` / `clarify`.
    - **References uses `host.oracle.decide`** (the canonical
      structured-artifact verb), the same verb as `clarifying`. In flow
      fixtures the two `on_enter` deciders are kept apart by *what each
@@ -344,9 +393,11 @@ From the original design note (now retired), resolved as implemented:
      (`brief_references_path` starts at `brief` to isolate the researcher).
      Do **not** switch one room to a different oracle verb to dodge a
      stub-name collision.
-   - **Artifacts land under `{{ workdir }}/.artifacts`** (passed as
-     `artifacts_root`) so they sit in the operator's tree, and both writes
-     use `mode: replace` so an `on_enter` re-fire overwrites rather than
+   - **Artifacts land in the per-PRD workspace** under
+     `{{ workdir }}/.artifacts/prd/<slug>/` as numbered files
+     (`001-brief.md`, `003-references.md`, `004-prd.md`) so they sit in the
+     operator's tree and never collide across PRDs, and the writes use
+     `mode: replace` so an `on_enter` re-fire overwrites rather than
      stacking duplicates.
 
 ## Flow fixtures
@@ -375,6 +426,20 @@ kitsoki test flows stories/prd/app.yaml
 | `quit_from_references.yaml` | `quit` from a review room → `@exit:abandoned` stamped with the room-specific `abandon_reason` (`abandoned_at_references`). |
 | `llm_judge.yaml` | Full path in `judge_mode: llm` with an *uncertain* verdict → HOLDS at `drafting`; also proves the three `host.oracle.decide` call sites (`analyst_questions`, `references_research`, `judge_verdict`) are stubbed apart by invoke `id:` via `by_call:`. |
 | `judge_auto_accept.yaml` | The other judge half — a *confident, non-uncertain* verdict (`accept@0.92 ≥ threshold`) makes `drafting`'s `on_enter` `emit_intent: accept` the same turn, so a single `confirm` into `drafting` auto-advances to `@exit:done`. |
+| `prd_overlap_no_matches.yaml` | The prior-art gate, clean (greenfield) path: the scout finds no overlap, `confirm` mints the slug + workspace and advances to `clarifying`. |
+| `prd_overlap_proposes_change.yaml` | The scout surfaces an overlap; `change_existing` captures `prd_change_target` (the amend doc) and still mints a workspace for the check artifacts. |
+| `prd_search_override.yaml` | `override_new` starts a NEW PRD despite a detected overlap (the discouraged escape hatch), recording `prd_overlap_decision=new`. |
+| `slug_collision.yaml` | The `search` gate's workspace mint is collision-suffixed: an existing `<slug>` workspace / published PRD pushes the new one to `<slug>-2` (`prd_slug.py` uniquify). |
+| `publish_to_durable.yaml` | `accept` runs `prd_publish.py` to MOVE `004-prd.md` out of the workspace to `docs/prd/<slug>.md`, binding `prd_file` to the durable path. |
+| `references_semantic_preseed.yaml` | The optional semantic pre-seed populates the researcher's `reference_hits` before it curates. |
+| `references_no_embeddings_fallback.yaml` | The semantic pre-seed fails cleanly (no embeddings configured) and the researcher still curates from scratch. |
+| `brief_ready_judge_passes.yaml` | The `brief_check` gate returns `continue` — the brief advances to `references`. |
+| `brief_ready_judge_clarify.yaml` | The `brief_check` gate returns `clarify` — the brief loops back to `clarifying`. |
+| `capture_existing_in_discovery.yaml` | The operator names docs mid-chat in `idle`; they thread into `upstream_paths` for the scout + researcher. |
+| `once_reload_safe.yaml` | `on_enter` is idempotent: a room whose `once:`-guarded result is already bound re-renders from cache on `/reload` instead of re-running the call. |
+| `error_clarifying_holds.yaml` | A failed analyst run HOLDS in `clarifying` (surfacing `last_error`) rather than bouncing. |
+| `error_references_steps_back.yaml` | A failed researcher run steps BACK one stage to `brief`. |
+| `error_drafting_steps_back.yaml` | A failed author run steps BACK one stage to `references` (the research is already curated). |
 
 ## File layout
 
@@ -384,20 +449,28 @@ stories/prd/
   README.md                — this file
   rooms/
     idle.yaml              — idea discovery (conversational)
+    search.yaml            — prior-art scout gate; mints the slug + workspace
     clarifying.yaml        — generate + answer questions (multi-round)
-    brief.yaml             — formalize + confirm the inputs (deterministic; writes .artifacts/prd_brief.md)
-    references.yaml        — curate the doc reference list + confirm (writes .artifacts/prd_references.md)
-    drafting.yaml          — write the PRD + checkpoint
+    brief.yaml             — formalize + confirm the inputs (deterministic; writes <workspace>/001-brief.md)
+    references.yaml        — curate the doc reference list + confirm (writes <workspace>/003-references.md)
+    drafting.yaml          — write <workspace>/004-prd.md + checkpoint; accept publishes to docs/prd/<slug>.md
   prompts/
+    prd_existing_state.md  — scout: prior-art overlap scan + roadmap fit
+    brief_check.md         — (brief gate prompt)
     clarify.md             — analyst: only-new clarifying questions
     references.md          — researcher: curate the doc reference list (docs only)
     draft_prd.md           — author: write the PRD, self-assess completeness
     judge_prd.md           — judge: accept / refine / clarify / uncertain
   schemas/
-    clarifications.json    — { questions: [{id, question, why}] }
+    prd_existing_state.json — { roadmap_fit, overlaps: [{path, summary, recommendation}] }
+    brief-check.json        — brief-gate verdict
+    clarifications.json     — { questions: [{id, question, why}] }
     references.json         — { items: [{path, sections, rationale}] }
     prd_artifact.json       — { title, summary_markdown, file_path, confidence, needs_clarification, follow_up_questions }
     judge_verdict.json      — { verdict, intent, reason, confidence }
+  scripts/
+    prd_slug.py            — mint + uniquify the slug; return the workspace path (host.run, search room)
+    prd_publish.py         — move the accepted 004-prd.md to docs/prd/<slug>.md (host.run, drafting room)
   views/base.pongo         — standalone base (rooms use flattened views)
   flows/                   — deterministic flow fixtures
 ```
