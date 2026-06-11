@@ -14,7 +14,10 @@
       :data-verdict="row.kind === 'guardrail' ? (row.isError ? 'rejected' : 'pass') : undefined"
       @click="expanded = !expanded"
     >
-      <span class="aar__kind-chip" :class="chipClass">{{ kindLabel }}</span>
+      <span class="aar__kind-chip" :class="chipClass"
+        ><span v-if="kindIcon" class="aar__kind-icon">{{ kindIcon }}</span
+        >{{ kindLabel }}</span
+      >
       <span class="aar__title">{{ row.title }}</span>
 
       <span v-if="row.kind === 'guardrail'" class="aar__verdict" :class="verdictClass">
@@ -82,7 +85,24 @@ const KIND_LABEL: Record<NormalizedKind, string> = {
   banner: "HOST",
   result: "RESULT",
 };
-const kindLabel = computed(() => KIND_LABEL[props.row.kind] ?? props.row.kind);
+// The "reasoning" kind covers two distinct things: genuine model THINKING
+// (a `thinking` block / a buffered thinking-token run) and plain assistant
+// narration TEXT. Only thinking earns the brain glyph + "THINK" chip, matching
+// the TUI where 🧠 marks thinking and narration is plain text. We distinguish on
+// the normalizer's titles ("Reasoning"/"Thinking" vs "Assistant").
+const isThinking = computed(
+  () =>
+    props.row.kind === "reasoning" &&
+    /^(Reasoning|Thinking)/.test(props.row.title)
+);
+
+const kindLabel = computed(() => {
+  if (props.row.kind === "reasoning") return isThinking.value ? "THINK" : "TEXT";
+  return KIND_LABEL[props.row.kind] ?? props.row.kind;
+});
+
+// Reasoning(thinking) rows carry a brain glyph, like the TUI's "🧠 …" lines.
+const kindIcon = computed(() => (isThinking.value ? "🧠" : ""));
 
 const outputLabel = computed(() => {
   switch (props.row.kind) {
@@ -178,6 +198,12 @@ const costStr = computed(() => fmtCost(props.row.cost));
   font-family: ui-monospace, monospace;
   letter-spacing: 0.03em;
   white-space: nowrap;
+}
+
+.aar__kind-icon {
+  margin-right: 0.2rem;
+  font-size: 0.7rem;
+  letter-spacing: 0;
 }
 
 .aar__kind-chip--system    { background: #1e293b; color: #94a3b8; }

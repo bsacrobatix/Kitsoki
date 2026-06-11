@@ -8,9 +8,21 @@ const emit = defineEmits<{ close: [] }>();
 
 const content = ref<string | null>(null);
 const error = ref<string | null>(null);
+// `missing` is the graceful state for a path that is advertised in a view but
+// has not been written yet (e.g. a planned output artifact). It is NOT an error
+// — the file simply does not exist on disk yet — so we render a calm notice
+// instead of a red "Failed to load file" banner.
+const missing = ref(false);
 const rendered = ref("");
 
 const rpc = new JsonRpcClient("/");
+
+/** True when the file-read failure is a plain "file does not exist" error. */
+function isNotFound(message: string): boolean {
+  return /no such file or directory|cannot find the file|does not exist/i.test(
+    message,
+  );
+}
 
 onMounted(async () => {
   try {
@@ -20,7 +32,12 @@ onMounted(async () => {
     content.value = result.content;
     rendered.value = renderMarkdownDocument(result.content);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    const message = e instanceof Error ? e.message : String(e);
+    if (isNotFound(message)) {
+      missing.value = true;
+    } else {
+      error.value = message;
+    }
   }
 });
 
@@ -46,6 +63,10 @@ function onBackdropClick(e: MouseEvent) {
         </header>
         <div class="mm-body">
           <div v-if="error" class="mm-error">Failed to load file: {{ error }}</div>
+          <div v-else-if="missing" class="mm-missing">
+            Not written yet — this file does not exist on disk. It will appear
+            here once the step that produces it has run.
+          </div>
           <div v-else-if="content === null" class="mm-loading">Loading…</div>
           <div v-else class="mm-md" v-html="rendered" />
         </div>
@@ -121,9 +142,14 @@ function onBackdropClick(e: MouseEvent) {
 }
 
 .mm-loading,
+.mm-missing,
 .mm-error {
   color: #6b7280;
   font-size: 14px;
+}
+
+.mm-missing {
+  font-style: italic;
 }
 
 .mm-error {

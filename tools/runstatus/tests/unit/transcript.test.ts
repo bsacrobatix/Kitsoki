@@ -98,6 +98,57 @@ describe("normalizeTranscript", () => {
     expect(rows[0]!.output).toContain("off-by-one");
   });
 
+  it("folds a thinking_tokens run into the thinking block that follows it", () => {
+    const rows = normalizeTranscript(
+      data(
+        [
+          {
+            type: "assistant",
+            message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] },
+          },
+          { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } },
+          { type: "system", subtype: "thinking_tokens", estimated_tokens: 1, estimated_tokens_delta: 1 },
+          { type: "system", subtype: "thinking_tokens", estimated_tokens: 2, estimated_tokens_delta: 1 },
+          { type: "system", subtype: "thinking_tokens", estimated_tokens: 3, estimated_tokens_delta: 1 },
+          {
+            type: "assistant",
+            message: { content: [{ type: "thinking", thinking: "Now I see the gap." }] },
+          },
+        ],
+        [10, 20, 30, 40, 50, 60]
+      )
+    );
+    // No orphan counter row: the 3 deltas are absorbed by the real thinking block,
+    // which keeps its in-order slot (after the Bash tool, before its tool calls).
+    expect(rows.map((r) => r.kind)).toEqual(["tool", "reasoning"]);
+    expect(rows[1]!.title).toBe("Reasoning (≈3 tokens)");
+    expect(rows[1]!.offsetMs).toBe(60);
+    expect(rows[1]!.output).toContain("the gap");
+  });
+
+  it("emits a trailing Thinking row when the stream ends mid-think (live)", () => {
+    const rows = normalizeTranscript(
+      data(
+        [
+          {
+            type: "assistant",
+            message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] },
+          },
+          { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } },
+          { type: "system", subtype: "thinking_tokens", estimated_tokens: 5, estimated_tokens_delta: 5 },
+          { type: "system", subtype: "thinking_tokens", estimated_tokens: 9, estimated_tokens_delta: 4 },
+        ],
+        [10, 20, 30, 40]
+      )
+    );
+    // No thinking block arrived yet → one progress row at the bottom, stamped at the
+    // run start, NOT pinned ahead of the tool call.
+    expect(rows.map((r) => r.kind)).toEqual(["tool", "reasoning"]);
+    expect(rows[1]!.title).toBe("Thinking");
+    expect(rows[1]!.offsetMs).toBe(30);
+    expect(rows[1]!.output).toBe("≈9 thinking tokens");
+  });
+
   it("types mcp__validator__submit as a guardrail with its verdict", () => {
     const rows = normalizeTranscript(
       data([

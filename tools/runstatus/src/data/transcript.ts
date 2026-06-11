@@ -152,8 +152,51 @@ export function normalizeTranscript(raw: TranscriptData): NormalizedEvent[] {
   // Track the last guardrail row so a trailing _kitsoki accept/reject can stamp it.
   let lastGuardrail: NormalizedEvent | undefined;
 
+  // `thinking_tokens` system events are streaming token COUNTERS (estimated_tokens
+  // ticking up while the model thinks), not content. Emitting a row per delta is
+  // dozens of empty "SYS" lines; emitting one row at the run's START orphans a
+  // counter ahead of the real thinking and lets tool calls pile up below it.
+  // Instead we BUFFER a run and fold it into the `assistant` thinking block that
+  // follows — that block is the authoritative thinking text and always sits in
+  // order, right before the tool calls it produced. A run that is NOT followed by
+  // a thinking block (a non-thinking event interrupts it, or the stream ends
+  // mid-think while live) flushes one coalesced "Thinking" row at that point, so
+  // the only standalone thinking row is a trailing live progress indicator.
+  let pendingTokens: number | null = null;
+  let pendingOffset = 0;
+  let pendingRaw: TranscriptEvent[] = [];
+  const flushThinking = () => {
+    if (pendingTokens === null) return;
+    out.push({
+      kind: "reasoning",
+      title: "Thinking",
+      output: `≈${pendingTokens} thinking tokens`,
+      offsetMs: pendingOffset,
+      raw: pendingRaw,
+    });
+    pendingTokens = null;
+    pendingRaw = [];
+  };
+
   events.forEach((ev, i) => {
     const offsetMs = at(i);
+
+    // Buffer a thinking-token counter delta; never a row of its own.
+    if (ev.type === "system" && ev.subtype === "thinking_tokens") {
+      const t =
+        typeof ev.estimated_tokens === "number" ? ev.estimated_tokens : null;
+      if (pendingTokens === null) pendingOffset = offsetMs;
+      if (t !== null) pendingTokens = Math.max(pendingTokens ?? 0, t);
+      else pendingTokens = pendingTokens ?? 0;
+      pendingRaw.push(ev);
+      return;
+    }
+    // A real thinking block right after the run consumes the counter (it renders
+    // the actual text in the correct slot); anything else flushes it first.
+    const consumedByBlock =
+      ev.type === "assistant" &&
+      contentBlocks(ev).some((b) => b.type === "thinking");
+    if (!consumedByBlock) flushThinking();
 
     // ── kitsoki synthetic host rows ──────────────────────────────────────────
     const kit = ev["_kitsoki"];
@@ -261,9 +304,17 @@ export function normalizeTranscript(raw: TranscriptData): NormalizedEvent[] {
         }
         for (const block of contentBlocks(ev)) {
           if (block.type === "thinking") {
+            // The authoritative thinking text — folds in any buffered token run
+            // (the leading counters that streamed while this block was forming).
+            const tokenNote =
+              pendingTokens !== null && pendingTokens > 0
+                ? ` (≈${pendingTokens} tokens)`
+                : "";
+            pendingTokens = null;
+            pendingRaw = [];
             out.push({
               kind: "reasoning",
-              title: "Reasoning",
+              title: `Reasoning${tokenNote}`,
               output: typeof block.thinking === "string" ? block.thinking : "",
               offsetMs,
               raw: ev,
@@ -380,6 +431,11 @@ export function normalizeTranscript(raw: TranscriptData): NormalizedEvent[] {
         return;
     }
   });
+
+  // A token run still pending at the end never met its thinking block — the stream
+  // ends mid-think (a live call still reasoning). Surface it as a single trailing
+  // "Thinking…" progress row at the bottom, where the newest activity belongs.
+  flushThinking();
 
   return out;
 }

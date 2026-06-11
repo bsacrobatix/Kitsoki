@@ -82,13 +82,23 @@ episodes:
           - '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"func TestBar(t *testing.T) {\n  got := Bar(3)\n  if got != 6 { t.Fatalf(\"got %d\", got) }\n}"}]}}'
           - '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_02","name":"Grep","input":{"pattern":"func Bar","path":"internal/foo"}}]}}'
           - '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_02","content":"internal/foo/bar.go:12:func Bar(n int) int {"}]}}'
+          # A run of streaming thinking-token COUNTERS (estimated_tokens ticking up
+          # while the model reasons) precedes the thinking block — the real claude
+          # stream-json shape. The drawer must fold these into the thinking row, not
+          # render a wall of empty SYS rows or orphan a counter ahead of its tools.
+          - '{"type":"system","subtype":"thinking_tokens","estimated_tokens":1,"estimated_tokens_delta":1}'
+          - '{"type":"system","subtype":"thinking_tokens","estimated_tokens":2,"estimated_tokens_delta":1}'
+          - '{"type":"system","subtype":"thinking_tokens","estimated_tokens":3,"estimated_tokens_delta":1}'
+          - '{"type":"system","subtype":"thinking_tokens","estimated_tokens":5,"estimated_tokens_delta":2}'
+          - '{"type":"system","subtype":"thinking_tokens","estimated_tokens":7,"estimated_tokens_delta":2}'
+          - '{"type":"system","subtype":"thinking_tokens","estimated_tokens":9,"estimated_tokens_delta":2}'
           - '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"The off-by-one is in the loop bound."}]}}'
           - '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_03","name":"Edit","input":{"file_path":"internal/foo/bar.go","old_string":"for i := 0; i < n-1; i++","new_string":"for i := 0; i < n; i++"}}]}}'
           - '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_03","content":"edited"}]}}'
           - '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_04","name":"Bash","input":{"command":"go test ./internal/foo/..."}}]}}'
           - '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_04","content":"ok  internal/foo  0.42s"}]}}'
           - '{"type":"result","subtype":"success","result":"Reproduction confirmed; fixed the off-by-one.","usage":{"input_tokens":1200,"output_tokens":640},"total_cost_usd":0.04}'
-        timings: [0, 180, 320, 540, 760, 980, 1180, 1340, 1560, 1720, 1980, 2100]
+        timings: [0, 180, 320, 540, 760, 980, 1000, 1020, 1040, 1070, 1100, 1140, 1180, 1340, 1560, 1720, 1980, 2100]
     replay: any
 
   - id: oracle_decide_any
