@@ -13,6 +13,9 @@
   <InboxBadge />
   <InboxPanel />
   <InboxToast />
+  <!-- Global forwarded-question surface: a hard modal shown when a dispatched
+       agent forwards an AskUserQuestion into kitsoki and blocks for the answer. -->
+  <OperatorQuestionModal />
 </template>
 
 <script setup lang="ts">
@@ -26,8 +29,10 @@ import TourOverlay from "./components/tour/TourOverlay.vue";
 import InboxBadge from "./components/InboxBadge.vue";
 import InboxPanel from "./components/InboxPanel.vue";
 import InboxToast from "./components/InboxToast.vue";
+import OperatorQuestionModal from "./components/OperatorQuestionModal.vue";
 import { useTourStore } from "./stores/tour.js";
 import { useInboxStore } from "./stores/inbox.js";
+import { useOperatorQuestionStore } from "./stores/operatorQuestions.js";
 import { LiveSource } from "./data/live-source.js";
 
 const router = useRouter();
@@ -38,8 +43,17 @@ const isSnapshot =
   (globalThis as typeof globalThis & { __KITSOKI_SNAPSHOT__?: unknown })
     .__KITSOKI_SNAPSHOT__ !== undefined;
 const inbox = useInboxStore();
-if (!isSnapshot) inbox.init(new LiveSource("/"));
-onUnmounted(() => inbox.teardown());
+const operatorQuestions = useOperatorQuestionStore();
+if (!isSnapshot) {
+  const source = new LiveSource("/");
+  inbox.init(source);
+  // Forwarded-question feed shares the live-server lifecycle with the inbox.
+  operatorQuestions.init(source);
+}
+onUnmounted(() => {
+  inbox.teardown();
+  operatorQuestions.teardown();
+});
 
 // First-login auto-start — ONLY when landing on the home screen, where the tour
 // begins. Auto-starting on a deep-linked session view would strand it on a step

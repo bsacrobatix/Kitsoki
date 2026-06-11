@@ -106,6 +106,38 @@ export interface NotificationFrame {
   needs_attention: number;
 }
 
+/**
+ * One choice in an operator question (mcp `OperatorAskOption`). json-tagged on
+ * the wire, so these are the literal field names the backend emits.
+ */
+export interface OperatorQuestionOption {
+  label: string;
+  description?: string;
+}
+
+/**
+ * One forwarded question (mcp `OperatorAskQuestion`). Mirrors the
+ * AskUserQuestion shape a dispatched agent would otherwise have called — the
+ * agent's question is forwarded into kitsoki and surfaced to the operator here.
+ */
+export interface OperatorQuestion {
+  question: string;
+  header: string;
+  multiSelect?: boolean;
+  options: OperatorQuestionOption[];
+}
+
+/**
+ * One SSE frame from /rpc/questions (the per-operator forwarded-question feed).
+ * question_id is the token answerQuestion echoes back to unblock the parked
+ * oracle; questions is the full set the agent asked in one call.
+ */
+export interface OperatorQuestionFrame {
+  session_id: string;
+  question_id: string;
+  questions: OperatorQuestion[];
+}
+
 /** Result of runstatus.session.reload — mirrors Orchestrator.Reload semantics. */
 export interface ReloadResult {
   ok: boolean;
@@ -762,6 +794,98 @@ export class LiveSource implements DataSource {
           .catch(() => undefined);
       }
     };
+  }
+
+  /**
+   * Subscribe to the forwarded-question feed (a third EventSource on
+   * /rpc/questions). When a dispatched agent forwards an AskUserQuestion into
+   * kitsoki, the parked oracle turn blocks until the operator answers; a frame
+   * lands here so the SPA can surface the modal. Same subscribe → stream →
+   * backoff → unsubscribe lifecycle as the notification feed. Returns an
+   * unsubscribe function.
+   */
+  subscribeQuestions(
+    onFrame: (frame: OperatorQuestionFrame) => void,
+    onError?: (e: unknown) => void
+  ): () => void {
+    let subscriptionId = "";
+    let es: EventSource | null = null;
+    let closed = false;
+    let backoffAttempt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const openStream = () => {
+      if (closed) return;
+      const url = `${this.base}rpc/questions?subscription_id=${encodeURIComponent(subscriptionId)}`;
+      es = new EventSource(url);
+
+      es.onmessage = (ev: MessageEvent<string>) => {
+        backoffAttempt = 0;
+        try {
+          const frame = JSON.parse(ev.data) as {
+            method?: string;
+            params?: OperatorQuestionFrame;
+          };
+          if (frame.method === "runstatus.question" && frame.params) {
+            onFrame(frame.params);
+          }
+        } catch {
+          // Malformed frame — ignore.
+        }
+      };
+
+      es.onerror = (e) => {
+        if (closed) return;
+        onError?.(e);
+        es?.close();
+        es = null;
+        const delay = NOTIF_BACKOFF_MS[
+          Math.min(backoffAttempt++, NOTIF_BACKOFF_MS.length - 1)
+        ] ?? 5000;
+        reconnectTimer = setTimeout(() => {
+          if (!closed) openStream();
+        }, delay);
+      };
+    };
+
+    this.client
+      .post<{ subscription_id: string }>("runstatus.questions.subscribe", {})
+      .then(({ subscription_id }) => {
+        if (closed) return;
+        subscriptionId = subscription_id;
+        openStream();
+      })
+      .catch((e) => onError?.(e));
+
+    return () => {
+      closed = true;
+      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+      es?.close();
+      es = null;
+      if (subscriptionId) {
+        this.client
+          .post("runstatus.questions.unsubscribe", {
+            subscription_id: subscriptionId,
+          })
+          .catch(() => undefined);
+      }
+    };
+  }
+
+  /**
+   * Answer a forwarded question, unblocking the parked oracle turn. answers is
+   * keyed by each question's text; the value is the chosen option label
+   * (single-select) or an array of labels (multiSelect) — the same shape
+   * AskUserQuestion would have returned to the agent.
+   */
+  answerQuestion(
+    questionId: string,
+    answers: Record<string, string | string[]>
+  ): Promise<{ ok: boolean }> {
+    return this.client.post<{ ok: boolean }>(
+      "runstatus.session.answer_question",
+      { question_id: questionId, answers }
+    );
   }
 }
 

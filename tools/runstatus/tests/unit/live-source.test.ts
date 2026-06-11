@@ -390,4 +390,64 @@ describe("LiveSource", () => {
 
     vi.useRealTimers();
   });
+
+  it("subscribeQuestions delivers runstatus.question frames and unsubscribes", async () => {
+    fetchMock
+      .mockResolvedValueOnce(rpcOk({ subscription_id: "q-sub-1" })) // subscribe
+      .mockResolvedValueOnce(rpcOk({ ok: true })); // unsubscribe
+
+    const frames: unknown[] = [];
+    const src = new LiveSource("/");
+    const unsub = src.subscribeQuestions((f) => frames.push(f));
+
+    await new Promise<void>((r) => setTimeout(r, 0));
+
+    const es = MockEventSource.instances[0]!;
+    expect(es.url).toContain("rpc/questions?subscription_id=q-sub-1");
+    es.emit(
+      "message",
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "runstatus.question",
+        params: {
+          session_id: "pub-1",
+          question_id: "q-7",
+          questions: [{ question: "Ship?", header: "Ship", options: [{ label: "Yes" }] }],
+        },
+      })
+    );
+    // A non-question frame on the same stream is ignored.
+    es.emit("message", JSON.stringify({ method: "runstatus.notification", params: {} }));
+
+    expect(frames).toHaveLength(1);
+    expect((frames[0] as { question_id: string }).question_id).toBe("q-7");
+
+    unsub();
+    expect(es.closed).toBe(true);
+    await new Promise<void>((r) => setTimeout(r, 0));
+    const calls = fetchMock.mock.calls as [string, RequestInit][];
+    const subCall = calls.find((c) => {
+      const b = JSON.parse(c[1].body as string) as { method: string };
+      return b.method === "runstatus.questions.subscribe";
+    });
+    const unsubCall = calls.find((c) => {
+      const b = JSON.parse(c[1].body as string) as { method: string };
+      return b.method === "runstatus.questions.unsubscribe";
+    });
+    expect(subCall).toBeDefined();
+    expect(unsubCall).toBeDefined();
+  });
+
+  it("answerQuestion posts the question_id and answers map", async () => {
+    fetchMock.mockResolvedValueOnce(rpcOk({ ok: true }));
+    const src = new LiveSource("/");
+    const res = await src.answerQuestion("q-7", { Ship: "Yes" });
+    expect(res.ok).toBe(true);
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string; params: { question_id: string; answers: Record<string, unknown> } };
+    expect(body.method).toBe("runstatus.session.answer_question");
+    expect(body.params.question_id).toBe("q-7");
+    expect(body.params.answers).toEqual({ Ship: "Yes" });
+  });
 });
