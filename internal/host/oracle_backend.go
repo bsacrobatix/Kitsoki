@@ -162,6 +162,8 @@ func ResolveOracleBackendName(name string) (b oracleBackend, ok bool) {
 	switch name {
 	case "copilot":
 		return copilotBackend{}, true
+	case "codex":
+		return codexBackend{}, true
 	case "claude", "":
 		return claudeBackend{}, name == "claude"
 	default:

@@ -44,6 +44,7 @@ var allBackends = []struct {
 }{
 	{"claude", claudeBackend{}},
 	{"copilot", copilotBackend{}},
+	{"codex", codexBackend{}},
 }
 
 // TestConformance_DefaultBackendIsClaude pins the load-bearing default: a
@@ -90,6 +91,22 @@ func TestConformance_StreamParse(t *testing.T) {
 			wantReply:     "`kitsoki-tool-probe`",
 			wantSessionID: "92780eda-3bb4-4fe7-84c8-4963a6ae0ef3",
 			wantUsageKey:  "premium_requests",
+		},
+		{
+			name:          "codex/simple",
+			backend:       codexBackend{},
+			fixture:       "codex/ask_simple.jsonl",
+			wantReply:     `{"answer":"hello"}`,
+			wantSessionID: "00000000-0000-0000-0000-000000000000",
+			wantUsageKey:  "output_tokens",
+		},
+		{
+			name:          "codex/tool_round",
+			backend:       codexBackend{},
+			fixture:       "codex/with_tool_round.jsonl",
+			wantReply:     "It printed:\n\n```text\nhi\n```",
+			wantSessionID: "00000000-0000-0000-0000-000000000000",
+			wantUsageKey:  "input_tokens",
 		},
 	}
 
@@ -140,6 +157,26 @@ func TestConformance_ToolEventsClassified(t *testing.T) {
 		ce := copilotBackend{}.Classify(ev)
 		if len(ce.Tools) != 1 || ce.Tools[0].Name != "bash" {
 			t.Errorf("copilot message toolRequests = %+v, want one bash tool", ce.Tools)
+		}
+	})
+	t.Run("codex/command_execution", func(t *testing.T) {
+		ev := mustUnmarshal(t, `{"type":"item.completed","item":{"type":"command_execution","command":"/bin/zsh -lc 'echo hi'","exit_code":0,"status":"completed"}}`)
+		ce := codexBackend{}.Classify(ev)
+		if ce.Tool != "shell" || ce.ToolArgs != "/bin/zsh -lc 'echo hi'" {
+			t.Errorf("codex command classify = %q/%q, want shell/<command>", ce.Tool, ce.ToolArgs)
+		}
+		if len(ce.Tools) != 1 || ce.Tools[0].Name != "shell" {
+			t.Errorf("codex command Tools = %+v, want one shell tool", ce.Tools)
+		}
+	})
+	t.Run("codex/mcp_tool_call", func(t *testing.T) {
+		ev := mustUnmarshal(t, `{"type":"item.completed","item":{"type":"mcp_tool_call","tool":"kitsoki-validator__submit","arguments":{"answer":"hello"}}}`)
+		ce := codexBackend{}.Classify(ev)
+		if ce.Tool != "kitsoki-validator__submit" {
+			t.Errorf("codex mcp_tool_call Tool = %q, want kitsoki-validator__submit", ce.Tool)
+		}
+		if len(ce.Tools) != 1 || ce.Tools[0].Name != "kitsoki-validator__submit" {
+			t.Errorf("codex mcp_tool_call Tools = %+v, want one submit tool", ce.Tools)
 		}
 	})
 }
@@ -228,6 +265,68 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 			t.Errorf("copilot --resume not in =value form; args=%v", resume.Args)
 		}
 	})
+
+	t.Run("codex/rewrite", func(t *testing.T) {
+		// Write a real --mcp-config file so the TOML override conversion runs.
+		cfgPath := filepath.Join(t.TempDir(), "cfg.json")
+		mustWrite(t, cfgPath, `{"mcpServers":{"kitsoki-validator":{"command":"/bin/kitsoki","args":["mcp-validator","--schema","/tmp/s.json"]}}}`)
+		args := []string{
+			"-p",
+			"--permission-mode", "bypassPermissions",
+			"--setting-sources", "project,local",
+			"--append-system-prompt", "SYS-PROMPT",
+			"--model", "some-model",
+			"--effort", "low",
+			"--mcp-config", cfgPath,
+			"--output-format", "stream-json", "--verbose",
+		}
+		inv := codexBackend{}.TranslateInvocation(args, stdin, wd)
+		got := strings.Join(inv.Args, " ")
+
+		// Prompt stays on stdin with the system prompt prepended.
+		if inv.Stdin != "SYS-PROMPT\n\n---\n\n"+stdin {
+			t.Errorf("codex stdin = %q, want system prompt prepended", inv.Stdin)
+		}
+		// Base exec flags.
+		if len(inv.Args) == 0 || inv.Args[0] != "exec" {
+			t.Errorf("codex args must start with exec; args=%v", inv.Args)
+		}
+		mustContain(t, got, "--json")
+		mustContain(t, got, "--skip-git-repo-check")
+		// codex exec auto-cancels MCP tool calls unless its approval+sandbox
+		// gate is disabled, so the validator submit tool only executes with the
+		// bypass flag (verified live; see oracle_backend_codex.go).
+		mustContain(t, got, "--dangerously-bypass-approvals-and-sandbox")
+		if !hasFlagValue(inv.Args, "-C", wd) {
+			t.Errorf("codex missing -C %s; args=%v", wd, inv.Args)
+		}
+		// MCP config converted to `-c mcp_servers.*` overrides.
+		mustContain(t, got, `mcp_servers.kitsoki-validator.command="/bin/kitsoki"`)
+		mustContain(t, got, `mcp_servers.kitsoki-validator.args=["mcp-validator","--schema","/tmp/s.json"]`)
+
+		// A claude model id is dropped (some-model is not claude-shaped → kept as -m).
+		if !hasFlagValue(inv.Args, "-m", "some-model") {
+			t.Errorf("codex dropped a non-claude model; args=%v", inv.Args)
+		}
+		cb := codexBackend{}
+		mi := cb.TranslateInvocation([]string{"-p", "--model", "claude-haiku-4-5-20251001"}, "p", "")
+		if strings.Contains(strings.Join(mi.Args, " "), "-m ") {
+			t.Errorf("codex forwarded a claude model id; args=%v", mi.Args)
+		}
+
+		// Claude-only flags must be gone.
+		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--effort", "--verbose", "--append-system-prompt", "--mcp-config", "stream-json", "--output-format"} {
+			if strings.Contains(got, dropped) {
+				t.Errorf("codex args still contain dropped flag %q: %v", dropped, inv.Args)
+			}
+		}
+
+		// Resume maps onto the `exec resume <id>` subcommand form.
+		resume := cb.TranslateInvocation([]string{"-p", "--resume", "uuid-123"}, "p", "")
+		if len(resume.Args) < 3 || resume.Args[0] != "exec" || resume.Args[1] != "resume" || resume.Args[2] != "uuid-123" {
+			t.Errorf("codex --resume not in `exec resume <id>` form; args=%v", resume.Args)
+		}
+	})
 }
 
 // TestConformance_CopilotUsageOutputTokens asserts copilot's per-message
@@ -261,11 +360,13 @@ func TestConformance_CopilotUsageOutputTokens(t *testing.T) {
 // TestConformance_ValidatorToolName asserts both backends name the submit tool
 // so the prompt instruction + side-channel capture path line up.
 func TestConformance_ValidatorToolName(t *testing.T) {
-	// Exact per-backend MCP tool-name schemes (both verified against the real
-	// CLIs): claude uses mcp__<server>__<tool>, copilot uses <server>-<tool>.
+	// Exact per-backend MCP tool-name schemes (all verified against the real
+	// CLIs): claude uses mcp__<server>__<tool>, copilot uses <server>-<tool>,
+	// codex uses bare "submit" (server lives in a separate JSONL field).
 	want := map[string]string{
 		"claude":  "mcp__kitsoki-validator__submit",
 		"copilot": "kitsoki-validator-submit",
+		"codex":   "submit",
 	}
 	for _, b := range allBackends {
 		got := b.backend.ValidatorToolName("kitsoki-validator")
@@ -287,6 +388,7 @@ func TestConformance_StubRoundTrip(t *testing.T) {
 	}{
 		{"claude", claudeBackend{}, WithClaudeRunner, "claude/ask_simple.jsonl", "pong"},
 		{"copilot", copilotBackend{}, WithCopilotRunner, "copilot/ask_simple.jsonl", "pong"},
+		{"codex", codexBackend{}, WithCodexRunner, "codex/ask_simple.jsonl", `{"answer":"hello"}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

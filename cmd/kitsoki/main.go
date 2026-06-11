@@ -724,7 +724,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 	cmd.Flags().StringVar(&claudeModel, "claude-model", "",
 		fmt.Sprintf("model passed to claude -p --model (default: %s); use 'opus' for higher quality at higher cost", harness.DefaultClaudeModel))
 	cmd.Flags().StringVar(&oracleBackend, "oracle", "",
-		"coding-agent CLI backend for host.oracle.* calls: claude|copilot (default: claude, or $KITSOKI_ORACLE)")
+		"coding-agent CLI backend for host.oracle.* calls: claude|copilot|codex (default: claude, or $KITSOKI_ORACLE)")
 	cmd.Flags().StringVar(&recordingPath, "recording", "",
 		"path to recording YAML file (required for --harness replay)")
 	cmd.Flags().StringVar(&recordPath, "record", "",
@@ -819,6 +819,24 @@ func buildHarness(harnessType, claudeModel, oracleBackend, recordingPath, record
 				ClaudeBin:     copilotBin,
 				Exec:          copilotExec,
 				ValidatorTool: "kitsoki-validator-submit",
+			})
+		}
+		if oracleBackend == "codex" {
+			codexBin, err := exec.LookPath("codex")
+			if env := os.Getenv(host.CodexBinEnv); env != "" {
+				codexBin, err = env, nil
+			}
+			if err != nil {
+				return nil, fmt.Errorf("--oracle codex: %w", host.ErrOracleUnavailable)
+			}
+			codexExec := func(ctx context.Context, bin string, args []string, stdin, workingDir string) (string, error) {
+				return host.RunClaudeOneShotForHarness(host.WithOracleBackendNamed(ctx, "codex"), bin, args, stdin, workingDir)
+			}
+			return harness.NewClaudeCLI(def, harness.ClaudeCLIConfig{
+				Model:         claudeModel,
+				ClaudeBin:     codexBin,
+				Exec:          codexExec,
+				ValidatorTool: host.CodexValidatorToolName("kitsoki-validator"),
 			})
 		}
 		return harness.NewClaudeCLI(def, harness.ClaudeCLIConfig{Model: claudeModel, Exec: host.RunClaudeOneShotForHarness})
