@@ -51,18 +51,20 @@ states:
       - kv:
           pairs:
             Turns:  "{{ world.idea_turns }}"
-      # Informational only: where the PRD WILL be written once drafting runs.
-      # Rendered as prose (not a kv .md value) so the web UI does not linkify it
-      # into a clickable preview of a file that does not exist yet — the real
-      # draft lands at {{ prd_workspace }}/004-prd.md in the drafting room, and
-      # the readable artifact link is surfaced there once prd_artifact exists.
-      - prose: "Planned output: `{{ world.workdir }}/{{ world.output_path }}` (written during drafting)."
+      # Informational only: where the PRD WILL be written. The slug + per-PRD
+      # workspace are not minted until the search gate (prd_slug.py), so name
+      # the shape generically rather than a concrete path. Rendered as prose
+      # (not a kv .md value) so the web UI does not linkify it into a clickable
+      # preview of a file that does not exist yet — the real draft lands at
+      # {{ prd_workspace }}/004-prd.md in the drafting room, and the readable
+      # artifact link is surfaced there once prd_artifact exists.
+      - prose: "Planned output: a per-PRD workspace under `{{ world.workdir }}/.artifacts/prd/<slug>/` (numbered drafts), published to `{{ world.workdir }}/{{ world.publish_durable_path }}/<slug>.md` on accept."
       - prose: '{{ world.idea_answer }}'
         when: "world.idea_answer"
       # Verb hint — kept on every turn so the semantic router reliably catches
       # `ready` / `quit` typed as free text (there is no choice selector).
       - prose: "Say **ready** when it's clear enough and I'll move on to focused questions, or **quit** to abandon."
-    relevant_world: [workdir, output_path, idea, idea_message, idea_answer, idea_chat_title, idea_turns, last_error]
+    relevant_world: [workdir, publish_durable_path, idea, idea_message, idea_answer, idea_chat_title, idea_turns, last_error]
     on_enter:
       # Get-or-create the discovery chat. MUST be `host.chat.resolve`
       # (get-or-create), NOT `host.chat.create` (unconditional INSERT):
