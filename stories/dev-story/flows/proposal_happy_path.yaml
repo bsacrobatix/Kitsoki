@@ -84,7 +84,15 @@ host_handlers:
           stdout: '{"slug":"first-class-working-folder","workspace":"docs/proposals/.workspace/first-class-working-folder"}'
           stdout_json: { slug: "first-class-working-folder", workspace: "docs/proposals/.workspace/first-class-working-folder" }
       publish:
-        data: { ok: true, exit_code: 0, stdout: "docs/proposals/first-class-working-folder.md" }
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"proposal_file":"docs/proposals/first-class-working-folder.md","ticket_id":"F-2026-06-11T120000Z-first-class-working-folder","ticket_path":"issues/features/F-2026-06-11T120000Z-first-class-working-folder.md","ticket_title":"First-class working folder"}'
+          stdout_json:
+            proposal_file: "docs/proposals/first-class-working-folder.md"
+            ticket_id:     "F-2026-06-11T120000Z-first-class-working-folder"
+            ticket_path:   "issues/features/F-2026-06-11T120000Z-first-class-working-folder.md"
+            ticket_title:  "First-class working folder"
 
 turns:
   # Stage 1: Intake — one message mints the candidate SLUG (no folder yet) and
@@ -172,6 +180,12 @@ turns:
     expect_state: proposal_done
     expect_world:
       proposal_file: "docs/proposals/first-class-working-folder.md"
+      # Publish also minted a feature ticket and pinned the routing keys so the
+      # done room can drive straight into the impl pipeline.
+      proposal_ticket_path: "issues/features/F-2026-06-11T120000Z-first-class-working-folder.md"
+      ticket_id:   "F-2026-06-11T120000Z-first-class-working-folder"
+      ticket_type: "feature"
+      ticket_url:  "docs/proposals/first-class-working-folder.md"
     expect_host_calls:
       - handler: host.run
         args: { call: "publish" }

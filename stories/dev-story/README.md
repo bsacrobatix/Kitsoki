@@ -72,12 +72,12 @@ dev rebinds to `host.local_files.ticket`. Same YAML, two providers.
 | Room | Status | Notes |
 |---|---|---|
 | `main` | Wave 2 | Landing / navigation. Dispatches to bf / pr / day rooms. |
-| `ticket_search` | Wave 2 | iface.ticket.search; picks a ticket; dispatches into bf. |
+| `ticket_search` | Wave 2 | iface.ticket.search; picks a ticket, then `drive` routes by `ticket_type` (bug → bf, feature → impl, epic → cyp). `pick_ticket` reads the type off the picked row; `go_bugfix` forces bf regardless of type. |
 | `workspace_manager` | Wave 2 | iface.workspace.list. Minimal Wave 2 shape. |
 | `inbox` | Wave 2 | Navigation surface; the runtime's inbox subsystem manages items. |
 | `oracle` | Wave 2 | One-shot ask_question via `host.oracle.ask` (agent: `oracle_qa`). |
 | `standup` | Wave 2 | Aggregates iface.ticket.list_mine. |
-| `proposal*` | — | Proposal-authoring pipeline: discovery+brief (one room: the first message mints the workspace + scaffolds an editable brief, then every turn converses + distils it; `ready` runs the quality judge and a passing brief auto-advances) → existing-state → completeness → references → draft → publish. |
+| `proposal*` | — | Proposal-authoring pipeline: discovery+brief (one room: the first message mints the workspace + scaffolds an editable brief, then every turn converses + distils it; `ready` runs the quality judge and a passing brief auto-advances) → existing-state → completeness → references → draft → publish. **Publish also files a feature ticket** (`issues/features/`) linking back to the proposal, and `proposal_done`'s `implement` action (the `go_implementation` intent) drives that ticket straight into the impl pipeline (`flows/proposal_to_implementation.yaml`) — no detour through `ticket_search`. The proposal pipeline does not create a workspace; `impl.idle.on_enter` self-provisions the worktree on entry (mirroring `bf.idle`), so the impl run gets a real `feature/<ticket>` branch regardless of entry path. |
 | `ideas` | — | Ideas-backlog reviewer (see below). |
 | `code_review` | Wave 3 stub | Reserves the room; imports `stories/code-review/` in Wave 3. |
 | `deploy`, `observability`, `incident`, `docs` | Wave 3 stubs | Routing-back-to-main placeholders. |
@@ -129,8 +129,9 @@ intents at the bare name: `go_main`, `go_back`, `go_inbox`, `go_oracle`,
 | `ticket_search_smoke.yaml` | main → ticket_search → run search → pick → return. |
 | `pickup_to_bugfix.yaml` | Same as above, then dispatch into the bf import (lands in bf.idle with world_in: projections firing). |
 | `bugfix_to_pr.yaml` | The full closed-loop walk: main → bf.idle → walk every bf room to @exit:done → handoff into pr → walk pr to @exit:merged → land back in main with status="merged" and last_pr_url populated. |
+| `proposal_to_implementation.yaml` | The publish → implement bridge: proposal_done → `go_implementation` → impl.idle (on_enter self-provisions the worktree — the fixture seeds NO workspace) → walk the impl pipeline to @exit:done → main with status="merged". |
 
-All 4 / 4 pass under `kitsoki test flows`.
+These are a sample; the full suite (29 / 29) passes under `kitsoki test flows stories/dev-story/app.yaml`.
 
 ## Manual TUI walkthrough
 
@@ -165,6 +166,15 @@ $ kitsoki run stories/dev-story/app.yaml
 In Wave 3 the kitsoki-dev instance rebinds the providers and the same
 20-turn walk-through writes real diffs / opens a real PR / merges
 on github.com.
+
+The walkthrough above picks a **bug** and types `go_bugfix`. For a
+**feature** ticket (e.g. one filed by the proposal pipeline), type
+`drive` instead of `go_bugfix` after picking — `drive` reads
+`ticket_type` and routes into the impl pipeline (`impl.idle`), which
+self-provisions a `feature/<ticket>` worktree before the first room
+runs. A published proposal can also skip `ticket_search` entirely: from
+`proposal_done`, `implement` drives the freshly-filed feature ticket
+straight into impl.
 
 ## Oracle-split persona table (Phase 8)
 

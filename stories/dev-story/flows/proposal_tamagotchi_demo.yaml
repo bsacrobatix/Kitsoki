@@ -71,7 +71,15 @@ host_handlers:
           stdout: '{"slug":"tamagotchi-pet-ui","workspace":"docs/proposals/.workspace/tamagotchi-pet-ui"}'
           stdout_json: { slug: "tamagotchi-pet-ui", workspace: "docs/proposals/.workspace/tamagotchi-pet-ui" }
       publish:
-        data: { ok: true, exit_code: 0, stdout: "docs/proposals/tamagotchi-pet-ui.md" }
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"proposal_file":"docs/proposals/tamagotchi-pet-ui.md","ticket_id":"F-2026-06-11T120000Z-tamagotchi-pet-ui","ticket_path":"issues/features/F-2026-06-11T120000Z-tamagotchi-pet-ui.md","ticket_title":"Tamagotchi pet UI"}'
+          stdout_json:
+            proposal_file: "docs/proposals/tamagotchi-pet-ui.md"
+            ticket_id:     "F-2026-06-11T120000Z-tamagotchi-pet-ui"
+            ticket_path:   "issues/features/F-2026-06-11T120000Z-tamagotchi-pet-ui.md"
+            ticket_title:  "Tamagotchi pet UI"
 
 turns:
   - intent: { name: discuss, slots: { message: "I want to add tamagotchi-style virtual pets to the session UI" } }

@@ -247,7 +247,13 @@ host_interfaces:
         input:  { id: string }
         output: { id: string, path: string, branch: string, dirty: bool }
       create:
-        input:  { name: string, ticket_id: string, base: string }
+        # `id` is the workspace identity (pins the on-disk .worktrees/<id>
+        # dir basename); `name` is the branch; `base` is the branch to
+        # root from. Matches host.git_worktree's worktreeCreate, which
+        # reads id/name/base — every caller (bf.idle, impl.idle) passes
+        # `id:` from world.workspace_id. The earlier `ticket_id` label
+        # was stale: no caller passed it and the handler never read it.
+        input:  { id: string, name: string, base: string }
         output: { ok: bool, path: string }
       sync:
         input:  { id: string }
@@ -337,6 +343,7 @@ world:
   # draft (004-proposal.md) + publish
   proposal_artifact:       { type: object, default: {} }   # task result: { title, summary_markdown, file_path, kind, confidence, needs_clarification, follow_up_questions }
   proposal_file:           { type: string, default: "" }   # final published path docs/proposals/<slug>.md
+  proposal_ticket_path:    { type: string, default: "" }   # feature ticket minted at publish, links back to proposal_file
 
   # feedback + per-phase cycle budgets
   proposal_refine_feedback:   { type: string, default: "" }

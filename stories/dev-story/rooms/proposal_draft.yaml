@@ -9,11 +9,16 @@
 # workspace write and an amend of docs/proposals/<file>.md resolve.
 #
 # On `accept`: publish_proposal.py moves 004-proposal.md from the workspace
-# to docs/proposals/<slug>.md (collision-safe) and the room transitions to
-# proposal_done (a confirmation view, inline in this file) without going
-# through a separate room. The prior proposal_publish room is gone.
+# to docs/proposals/<slug>.md (collision-safe) AND mints a feature ticket
+# under issues/features/ that links back to the published proposal. It emits a
+# JSON envelope so the one call binds proposal_file plus the new ticket's
+# id / path / title; the accept arc pins ticket_type=feature so proposal_done's
+# `implement` action (go_implementation) routes straight into the impl
+# pipeline. The room then transitions to proposal_done (a confirmation view,
+# inline in this file) without going through a separate room. The prior
+# proposal_publish room is gone.
 #
-# Checkpoint exits: accept → publish → proposal_done;
+# Checkpoint exits: accept → publish (+ file ticket) → proposal_done;
 #                   refine → re-draft (budget-capped);
 #                   clarify → proposal_refine (keep search results, redo brief).
 
@@ -103,8 +108,13 @@ states:
           proposal_kind:     "submitted.kind"
         on_error: proposal_refine
     on:
-      # Accept: publish the proposal (move it from workspace to docs/proposals/).
-      # publish_proposal.py handles collision-proofing and archive.
+      # Accept: publish the proposal (move it from workspace to docs/proposals/)
+      # AND mint a feature ticket that links back to it. publish_proposal.py
+      # handles collision-proofing and emits a JSON envelope so a single call
+      # binds the published path plus the new ticket's id / path / title.
+      # ticket_type is pinned to "feature" here so the draft room's
+      # `go_implementation` arc (and main's `drive` router) route the freshly
+      # filed proposal straight into the impl pipeline.
       accept:
         - target: proposal_done
           effects:
@@ -117,9 +127,18 @@ states:
                   - "{{ world.proposal_workspace }}"
                   - "{{ world.proposal_slug }}"
                   - "{{ world.proposal_change_target }}"
+                  - "{{ world.proposal_artifact.title }}"
+                  - "{{ world.proposal_idea }}"
               bind:
-                proposal_file: stdout
+                proposal_file: stdout_json.proposal_file
+                ticket_id:     stdout_json.ticket_id
+                ticket_title:  stdout_json.ticket_title
+                ticket_url:    stdout_json.proposal_file
+                thread:        stdout_json.ticket_id
+                proposal_ticket_path: stdout_json.ticket_path
               on_error: proposal_draft
+            - set:
+                ticket_type: "feature"
 
       # Same inputs, revise the prose. Budget gate → main.
       refine:
@@ -180,19 +199,44 @@ states:
           pairs:
             Title: '{{ world.proposal_artifact.title|default:"(n/a)" }}'
             Kind:  '{{ world.proposal_artifact.kind|default:"(n/a)" }}'
-      - prose: "Open the published proposal to review or trim it. **main** returns to your day."
+      - kv:
+          pairs:
+            Ticket: '{{ world.ticket_id }} — {{ world.proposal_ticket_path }}'
+        when: "world.ticket_id != ''"
+      - prose: "A **feature ticket** was filed for this proposal — it links back to the published doc. Choose **implement** to drive it into the implementation pipeline now, or **main** to return to your day (the ticket is waiting in your queue)."
       - choice:
           mode: single
           prompt: "Actions"
           items:
+            - label:  "implement"
+              hint:   "drive the new feature ticket into the implementation pipeline"
+              intent: go_implementation
             - label:  "main"
               hint:   "back to the engineer's day landing"
               intent: go_main
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [proposal_workspace, proposal_slug, proposal_change_target, proposal_artifact, proposal_file]
+    relevant_world: [proposal_workspace, proposal_slug, proposal_change_target, proposal_artifact, proposal_file, proposal_ticket_path, ticket_id, ticket_title, ticket_type]
     on:
+      # The accept arc already pinned ticket_id / ticket_type=feature /
+      # ticket_url / thread, so impl's world_in: projection has everything it
+      # needs. Route straight into the impl import compound (same destination
+      # main's `drive` uses for a feature ticket).
+      go_implementation:
+        - when: "world.ticket_id != ''"
+          target: impl
+          effects:
+            - set:
+                last_error: ""
+                prev_state: "main"
+        - default: true
+          target: main
+          guard_hint: "No ticket was filed — return to main and pick one from your queue."
+          effects:
+            - set:
+                last_error: "proposal published but no ticket id — pick the feature from `tickets`"
+                prev_state: "main"
       go_main:
         - target: main
           effects:
