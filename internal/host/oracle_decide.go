@@ -157,6 +157,10 @@ func OracleDecideHandler(ctx context.Context, args map[string]any) (Result, erro
 	if hasBash {
 		tools = rewriteToolsForBashMCP(tools)
 	}
+	// Forward operator questions into kitsoki when a live surface is attached.
+	var opAskCleanup func()
+	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
+	defer opAskCleanup()
 	if len(tools) > 0 {
 		cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 	}

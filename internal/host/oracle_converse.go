@@ -172,6 +172,10 @@ func OracleConverseHandler(ctx context.Context, args map[string]any) (Result, er
 	if effort := strings.TrimSpace(effectiveEffort(args, agent)); effort != "" {
 		cliArgs = append(cliArgs, "--effort", effort)
 	}
+	// Forward operator questions into kitsoki when a live surface is attached.
+	var opAskCleanup func()
+	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
+	defer opAskCleanup()
 	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 	cliArgs = appendDisallowedToolsFlag(cliArgs, disallowedTools)
 
@@ -361,6 +365,10 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 	if e := strings.TrimSpace(effort); e != "" {
 		cliArgs = append(cliArgs, "--effort", e)
 	}
+	// Forward operator questions into kitsoki when a live surface is attached.
+	var opAskCleanup func()
+	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
+	defer opAskCleanup()
 	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 	cliArgs = appendDisallowedToolsFlag(cliArgs, disallowedTools)
 

@@ -204,6 +204,12 @@ func OracleTaskHandler(ctx context.Context, args map[string]any) (Result, error)
 	if acceptance.SchemaPath != "" {
 		tools = append(tools, "mcp__validator__submit")
 	}
+	// Forward operator questions into kitsoki when a live surface is attached.
+	// The listener outlives the per-attempt --resume loop (cleanup is deferred at
+	// handler scope), so a question asked on attempt N is still answerable later.
+	var opAskCleanup func()
+	baseCLIArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, baseCLIArgs, tools)
+	defer opAskCleanup()
 	if len(tools) > 0 {
 		baseCLIArgs = appendAllowedToolsFlag(baseCLIArgs, tools)
 	}

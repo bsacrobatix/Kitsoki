@@ -222,6 +222,10 @@ func OracleAskHandler(ctx context.Context, args map[string]any) (Result, error) 
 	}
 
 	cliArgs := buildBaseCLIArgs(ctx, sysprompt.Ask, args, agent)
+	// Forward operator questions into kitsoki when a live surface is attached.
+	var opAskCleanup func()
+	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
+	defer opAskCleanup()
 	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 
 	// Build the MCP servers map. When Bash is in use we attach the kitsoki-bash
