@@ -225,6 +225,10 @@ intents:
     slots:
       paths: { type: string, required: true }   # file(s)/dir(s) the operator named mid-chat; recorded into upstream_paths
   start:
+    # title sets the web action-button label (InputBar falls back to the raw
+    # intent name otherwise). idle's prose tells the operator to say "ready",
+    # so label the button to match — the intent key stays `start`.
+    title: "ready"
     description: "Done discussing — distill the idea and move on to clarifying questions."
     examples: ["ready", "i'm ready", "build the prd", "draft it", "let's go", "done discussing", "start"]
     priority: 90
