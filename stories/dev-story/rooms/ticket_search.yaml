@@ -29,6 +29,9 @@ states:
         with:
           query: "{{ world.ticket_query }}"
           limit: 25
+          # repo is honoured by host.gh.ticket (the kitsoki-dev GitHub binding)
+          # and ignored by host.local_files.ticket; "" ⇒ gh's local-remote default.
+          repo: "{{ world.ticket_repo }}"
         bind:
           ticket_results: tickets
         on_error: ticket_search
@@ -200,6 +203,7 @@ states:
             - invoke: iface.ticket.get
               with:
                 id: "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
+                repo: "{{ world.ticket_repo }}"
               bind:
                 ticket_title: title
               on_error: idle
@@ -302,6 +306,9 @@ states:
         with:
           query: "{{ world.ticket_query }}"
           limit: 25
+          # repo is honoured by host.gh.ticket (the kitsoki-dev GitHub binding)
+          # and ignored by host.local_files.ticket; "" ⇒ gh's local-remote default.
+          repo: "{{ world.ticket_repo }}"
         bind:
           ticket_results: tickets
         on_error: ticket_search

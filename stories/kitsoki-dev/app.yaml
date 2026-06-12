@@ -75,6 +75,7 @@ hosts:
   # Iface-backed handlers — rebound via host_bindings below. Listed
   # here so `hosts: declared` is satisfied.
   - host.local_files.ticket
+  - host.gh.ticket
   - host.git
   - host.local
   - host.git_worktree
@@ -102,6 +103,9 @@ hosts:
   # PRD → Design walk. Required under `hosts: declared`.
   - host.oracle.converse
   - host.chat.resolve
+  # Code-review surface (dev-story's code_review room opens diffs in the best
+  # surface). Required under `hosts: declared`.
+  - host.diff.open
 
 # This instance has no day-level rooms of its own — every visible
 # state comes from the imported dev-story hub. Imports are folded in
@@ -125,7 +129,12 @@ imports:
     # iface.transport.post carries the file path), so the local file
     # is the comment thread.
     host_bindings:
-      ticket:    host.local_files.ticket
+      # GitHub cutover (github-issues-tracker slice #4): the dogfood loop reads/
+      # writes its tickets as GitHub issues on `ticket_repo`
+      # (constructorfabric/Kitsoki). The rooms thread `repo: {{ world.ticket_repo }}`
+      # into every iface.ticket.* call. Flip back to host.local_files.ticket for a
+      # purely offline run.
+      ticket:    host.gh.ticket
       vcs:       host.git
       ci:        host.local
       workspace: host.git_worktree
