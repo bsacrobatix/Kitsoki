@@ -1624,6 +1624,96 @@ tour recorder mirrors the JSON shape in
 
 ---
 
+## host.gh.ticket — GitHub Issues-backed tracker
+
+The `ticket` host_interface backed by the GitHub `gh` CLI. It mirrors the
+file-backed `host.local_files.ticket` surface so the dogfood app
+(`stories/kitsoki-dev`) rebinds `iface.ticket → host.gh.ticket` without touching
+room YAML. Auth rides the operator's existing `gh auth` — kitsoki handles no
+tokens. Every op degrades cleanly (a `Result.Error`, not a crash) when `gh` is
+missing/unauthenticated, so rooms route the `on_error:` arc. All shell-outs go
+through the one `cliExec` seam so they're testable with a stubbed runner (no real
+GitHub in tests). Implementation:
+[`internal/host/github.go`](../../internal/host/github.go) +
+[`github_create.go`](../../internal/host/github_create.go) +
+[`github_bug.go`](../../internal/host/github_bug.go).
+
+| op | gh call | Returns |
+|---|---|---|
+| `create` | `gh issue create --repo … --title … --body … --label …` | `{id, number, url, warning?}` |
+| `search` | `gh issue list --search …` | `{tickets: [{id,title,status,priority,assignee,url}]}` |
+| `get` | `gh issue view … --json …` | `{id,title,body,status,…,comments, kitsoki_meta?}` |
+| `comment` | `gh issue comment … --body …` | `{ok, comment_id}` |
+| `transition` | `gh issue close` / `gh issue reopen` | `{ok}` |
+| `list_mine` | `gh issue list --assignee …` | `{tickets: […]}` |
+
+**Repo pin.** Every call takes a `repo` arg (`owner/repo`); the dogfood pins it
+to `constructorfabric/Kitsoki` via the `ticket_repo` world key
+(`stories/kitsoki-dev/app.yaml`) so it never silently resolves the operator's
+`origin` (a personal fork). The slug is data, not a Go constant — a fork-of-a-
+fork or downstream project overrides the world key.
+
+**Label vocabulary.** `create` maps the bug-format axes onto a fixed GitHub label
+set, applied by `create` and understood by `transition`:
+
+| axis | label |
+|---|---|
+| `severity: P0..P3` | `P0`..`P3` |
+| `component: x` | `comp:x` |
+| `target: x` | `target:x` |
+| `status: in_progress` | `in_progress` (open/closed handled by `transition`) |
+
+`create` **ensures** these labels exist (`gh label create --force`, colour by
+prefix) before applying them, so a missing label doesn't drop the rest; a true
+triage-permission wall (a fork contributor) degrades to an unlabelled issue plus
+a `warning` rather than failing the create.
+
+**The `kitsoki` body-metadata block.** GitHub has no custom fields, so the
+kitsoki-specific frontmatter (`trace_ref`, `kitsoki_rev`, `filed_by`, and the
+migration's `legacy_id`) rides in a fenced block `create` writes into the issue
+body and `get` parses back out (`kitsoki_meta`):
+
+````
+```kitsoki
+trace_ref: trace://…
+kitsoki_rev: 33f80d2
+filed_by: brad
+```
+````
+
+### Filing a bug with evidence
+
+`host.GitHubFileBug` (`github_bug.go`) is the orchestration the filing paths
+share. `gh`/a PAT cannot attach binaries to an issue (that needs an authenticated
+web session), so captured evidence (screenshot / HAR / rrweb / console) is
+uploaded as assets on a per-repo **`bug-evidence` release** and the issue body
+inlines the screenshot + links the rest at their stable release-download URLs.
+Three paths reach it:
+
+- **Web** — `kitsoki web --ticket-repo <owner/repo>` routes the Report-bug RPC
+  (`runstatus.bug.report`) to a GitHub issue with the evidence uploaded, instead
+  of a local `issues/bugs/<id>.md` + `<id>.artifacts/` folder. The capture /
+  scrub / review-modal flow is unchanged ([web-ui](../tui/web-ui.md)).
+- **CLI** — `kitsoki bug create --github <owner/repo>` files a text-only issue
+  (the CLI captures no evidence) and prints the URL.
+- **Design pipeline** — publishing a design mints a GitHub **feature** issue
+  (`target:kitsoki` + `comp:proposal`, body links the proposal) when the
+  instance sets `ticket_repo`, instead of `issues/features/<id>.md` (see the
+  [dev-story README](../../stories/dev-story/README.md)).
+
+### Migrating the legacy `issues/` pile
+
+`kitsoki issues migrate --repo <owner/repo>` is a one-shot, idempotent lift of
+the in-repo `issues/{bugs,features}/*.md` archive into GitHub issues: it creates
+each via the same path (labels + metadata block), replays the file's
+`## Comment` thread as issue comments, closes resolved/wontfix tickets, and
+writes the new issue ref into each file's `external:` frontmatter so a re-run
+skips it. The local files are never deleted — `issues/` is a frozen, deprecated
+archive ([`issues/DEPRECATED.md`](../../issues/DEPRECATED.md)). Implementation:
+[`cmd/kitsoki/issues.go`](../../cmd/kitsoki/issues.go).
+
+---
+
 ## Adding your own host
 
 See [`developer-guide.md` §5.2](developer-guide.md#52-adding-a-new-built-in-host-handler).

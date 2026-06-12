@@ -125,25 +125,18 @@ thought.
 - [`github-issues-tracker.md`](github-issues-tracker.md) — **epic.** Move
   kitsoki's own bug + feature tracker from the in-repo `issues/*.md` pile to
   **GitHub Issues** on `constructorfabric/Kitsoki` (canonical even from a
-  personal fork). The `gh`-backed `ticket` provider already ships
-  (`internal/host/github.go`, search/get/comment/transition/list_mine) — the
-  epic adds the missing **`create`** op, re-points the two bug-filing paths
-  (CLI + the web Report-bug modal, evidence uploaded to the issue) and the
-  design-pipeline feature publish, migrates the existing pile (comments,
-  state, artifacts preserved), and freezes `issues/` as a deprecated archive.
-  Hard cutover; supersedes `bug-sync-proposal.md`. Nothing implemented yet;
-  decomposed into four slices:
-  - [`gh-issue-create.md`](gh-issue-create.md) (runtime) — the `create` op +
-    the `constructorfabric/Kitsoki` repo pin + label/body-metadata conventions.
-  - [`bug-filing-to-github.md`](bug-filing-to-github.md) (runtime) —
-    `kitsoki bug create` + `runstatus.bug.report` open a GitHub issue and
-    upload the screenshot/HAR/rrweb evidence to it.
-  - [`feature-filing-to-github.md`](feature-filing-to-github.md) (story) —
-    the design pipeline's publish step mints a GitHub feature issue instead of
-    `issues/features/<id>.md`.
+  personal fork). **Slices #1–#3 shipped** (the `create` op + conventions, bug
+  filing via CLI + the web Report-bug modal with evidence as release assets, and
+  the design-pipeline feature publish) — their detail now lives in
+  [`hosts.md → host.gh.ticket`](../architecture/hosts.md#hostghticket--github-issues-backed-tracker)
+  and the child proposals are deleted. **Slice #4's tooling is shipped**
+  (`kitsoki issues migrate` + the `issues/` freeze); only the **cutover** remains
+  — the real bulk migration + rebinding `kitsoki-dev` to `host.gh.ticket`. Hard
+  cutover; supersedes `bug-sync-proposal.md`. One slice left:
   - [`issues-migration-to-github.md`](issues-migration-to-github.md) (runtime) —
-    one-shot `kitsoki issues migrate`, the `kitsoki-dev` rebind to
-    `host.gh.ticket` (the cutover), and the `issues/` deprecation notice.
+    `kitsoki issues migrate` is shipped + the `issues/` archive frozen; the
+    `kitsoki-dev` rebind to `host.gh.ticket` (the cutover) is the deferred last
+    step.
 - [`oracle-capability-model.md`](oracle-capability-model.md) — **epic.**
   One capability model governing **every** oracle (decide / ask / converse /
   task), unifying three ad-hoc restrictions and an overloaded boolean. Four

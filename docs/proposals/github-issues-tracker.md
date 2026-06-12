@@ -1,16 +1,19 @@
 # Epic: kitsoki's own tracker moves to GitHub Issues
 
-**Status:** Slices #1 + #2 **code-shipped & verified against real GitHub** — the
-`host.gh.ticket` `create` op + conventions + `ticket_repo` pin (slice #1), and
-the web Report-bug path filing a real issue with uploaded evidence (slice #2).
-Proof: https://github.com/bsacrobatix/Kitsoki/issues/3 (filed by the real path,
-labels applied by the op, evidence on the repo's `bug-evidence` release). The
-cross-site **demo** (bug → GitHub issue → triage) is built + recorded +
-QA-passed — `docs/skills/kitsoki-ui-demo/scripts/record-gh-issues-demo.sh`.
-Slices #3 (feature filing) + #4 (migration/rebind) remain design-only; see each
-child's Status.
+**Status:** Slices #1–#3 **shipped & verified against real GitHub** (their detail
+has migrated to [hosts.md → host.gh.ticket](../architecture/hosts.md#hostghticket--github-issues-backed-tracker)
+and the child proposals are deleted). Slice #4's **tooling is shipped**
+(`kitsoki issues migrate` + the `issues/` freeze); the **cutover is deferred** —
+the real bulk migration run and rebinding `kitsoki-dev` to `host.gh.ticket` are
+the deliberate last step (the epic's "land the rebind last", once the migrated
+tickets exist), and the bulk migration is an outward write the operator triggers.
+Proofs (real, on the operator's fork): bug `…/issues/3` (web), `…/issues/5`
+(CLI), feature `…/issues/6` (design pipeline). The cross-site **demo** (bug →
+GitHub issue → triage) is built + recorded + QA-passed —
+`docs/skills/kitsoki-ui-demo/scripts/record-gh-issues-demo.sh`. Delete this epic
+once slice #4's cutover lands.
 **Kind:**   epic
-**Slices:** 4 (2/4 code-shipped)
+**Slices:** 4 (3 shipped; #4 tooling shipped, cutover deferred)
 
 ## Why
 
@@ -70,12 +73,12 @@ Once every slice ships:
 
 ## Slices
 
-| # | Slice | Kind | Scope (one line) | Depends on | Status | File |
+| # | Slice | Kind | Scope (one line) | Depends on | Status | Where |
 |---|---|---|---|---|---|---|
-| 1 | gh issue **create** + constructorfabric pin | runtime | Add `create` op to `host.gh.ticket`; establish the `constructorfabric/Kitsoki` repo pin + exec cassettes | — | **Code shipped** | [`gh-issue-create.md`](gh-issue-create.md) |
-| 2 | Bug filing → GitHub | runtime | `runstatus.bug.report` creates issues; evidence uploaded as release assets (CLI path remains) | 1 | **Web path shipped** | [`bug-filing-to-github.md`](bug-filing-to-github.md) |
-| 3 | Feature filing → GitHub | story | The design pipeline's publish step mints a GitHub issue instead of `issues/features/<id>.md` | 1 | Draft | [`feature-filing-to-github.md`](feature-filing-to-github.md) |
-| 4 | Migrate + deprecate `issues/` | runtime | One-shot migration of the existing pile to GitHub; rebind `kitsoki-dev` to `host.gh.ticket`; freeze `issues/` | 1 | Draft | [`issues-migration-to-github.md`](issues-migration-to-github.md) |
+| 1 | gh issue **create** + constructorfabric pin | runtime | Add `create` op to `host.gh.ticket`; establish the `constructorfabric/Kitsoki` repo pin | — | **Shipped** | [hosts.md → host.gh.ticket](../architecture/hosts.md#hostghticket--github-issues-backed-tracker) |
+| 2 | Bug filing → GitHub | runtime | `runstatus.bug.report` (web) + `kitsoki bug create --github` (CLI) create issues; evidence uploaded as release assets | 1 | **Shipped** | [hosts.md](../architecture/hosts.md#filing-a-bug-with-evidence), [bugs.md](../stories/bugs.md) |
+| 3 | Feature filing → GitHub | story | The design pipeline's publish step mints a GitHub issue instead of `issues/features/<id>.md` | 1 | **Shipped** | [dev-story README](../../stories/dev-story/README.md) |
+| 4 | Migrate + deprecate `issues/` | runtime | One-shot `kitsoki issues migrate`; freeze `issues/`; rebind `kitsoki-dev` to `host.gh.ticket` | 1 | **Tooling shipped; cutover deferred** | [`issues-migration-to-github.md`](issues-migration-to-github.md) |
 
 ## Sequencing
 

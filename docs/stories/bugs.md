@@ -1,5 +1,13 @@
 # Bug reports
 
+> **kitsoki's own bugs now file to GitHub Issues.** `kitsoki bug create --github
+> <owner/repo>` (and the web Report-bug modal under `kitsoki web --ticket-repo
+> <owner/repo>`, which uploads its evidence) open a real GitHub issue instead of
+> a local file — see [hosts.md → host.gh.ticket](../architecture/hosts.md#hostghticket--github-issues-backed-tracker).
+> The local-file format below is the **default** (and what a *story's* own bugs
+> still use); kitsoki's in-repo `issues/` pile is a frozen archive
+> ([`issues/DEPRECATED.md`](../../issues/DEPRECATED.md)).
+
 A bug filed from inside a running app lands as a single markdown file
 on disk. There is no service, no database, and no schema beyond what
 this doc describes — the pile is grep-friendly, hand-editable, and
