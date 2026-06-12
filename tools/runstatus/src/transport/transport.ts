@@ -295,9 +295,22 @@ export class HttpTransport implements RpcTransport {
  */
 export function createTransport(base = "/"): RpcTransport {
   if (typeof acquireVsCodeApi === "function") {
-    return new BridgeTransport();
+    // The SPA constructs ~15 LiveSource instances (App.vue + each store +
+    // overlay), so createTransport runs many times in the webview. BridgeTransport
+    // MUST be a process singleton: acquireVsCodeApi() throws if called twice, and
+    // a shared instance also gives ONE postMessage listener and ONE monotonic id
+    // space so the host relay never sees colliding ids from two transports.
+    return getSharedBridgeTransport();
   }
   return new HttpTransport(base);
+}
+
+/** The one BridgeTransport for this webview document (see createTransport). */
+let sharedBridge: BridgeTransport | undefined;
+
+function getSharedBridgeTransport(): BridgeTransport {
+  if (!sharedBridge) sharedBridge = new BridgeTransport();
+  return sharedBridge;
 }
 
 // Imported after createTransport's declaration-order is irrelevant for runtime;

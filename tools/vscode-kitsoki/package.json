@@ -18,6 +18,13 @@
           "title": "Kitsoki",
           "icon": "media/icon.svg"
         }
+      ],
+      "panel": [
+        {
+          "id": "kitsokiPanel",
+          "title": "Kitsoki Trace",
+          "icon": "media/icon.svg"
+        }
       ]
     },
     "views": {
@@ -28,7 +35,7 @@
           "type": "webview"
         }
       ],
-      "panel": [
+      "kitsokiPanel": [
         {
           "id": "kitsoki.trace",
           "name": "Kitsoki Trace",
@@ -83,7 +90,8 @@
     "typecheck": "tsc --noEmit",
     "build": "node esbuild.mjs",
     "test": "node --test --import tsx tests/relay.unit.test.ts tests/bridge-relay.integration.test.ts",
-    "playwright": "playwright test"
+    "playwright": "playwright test",
+    "e2e": "KITSOKI_VSCODE_PACE=0 playwright test vscode-tour.e2e"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0",

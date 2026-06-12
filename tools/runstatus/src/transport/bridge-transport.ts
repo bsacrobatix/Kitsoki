@@ -103,8 +103,14 @@ export class BridgeTransport implements RpcTransport {
   call<T = unknown>(
     method: string,
     params: Record<string, unknown>,
-    id: number
+    _id: number
   ): Promise<T> {
+    // Ignore the caller-supplied id. As the shared singleton transport this
+    // instance mints ALL wire ids from one monotonic space — each JsonRpcClient
+    // has its own nextId starting at 1, so honoring theirs would let two clients
+    // both send call id=1 and cross-resolve each other's reply. The host echoes
+    // whatever id we send, so a private id keeps correlation unambiguous.
+    const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       this.calls.set(id, {
         resolve: resolve as (v: unknown) => void,

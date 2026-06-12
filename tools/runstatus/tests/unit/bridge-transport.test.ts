@@ -74,17 +74,20 @@ async function flush(): Promise<void> {
 describe("BridgeTransport.call", () => {
   it("posts a call envelope and resolves on call-ok", async () => {
     const { bridge, host } = makeBridge();
+    // The bridge is the shared singleton transport and mints its OWN wire id
+    // (the caller-supplied 7 is ignored) so two JsonRpcClients can't collide on
+    // id=1. Read the id it actually sent and reply on that.
     const p = bridge.call<{ ok: boolean }>("runstatus.sessions.list", { a: 1 }, 7);
 
     const env = host.last("call");
     expect(env).toMatchObject({
       t: "call",
-      id: 7,
       method: "runstatus.sessions.list",
       params: { a: 1 },
     });
+    expect(typeof env.id).toBe("number");
 
-    host.reply({ t: "call-ok", id: 7, result: { ok: true } });
+    host.reply({ t: "call-ok", id: env.id, result: { ok: true } });
     await expect(p).resolves.toEqual({ ok: true });
   });
 
@@ -94,7 +97,7 @@ describe("BridgeTransport.call", () => {
 
     host.reply({
       t: "call-err",
-      id: 3,
+      id: host.last("call").id,
       error: { code: -32001, message: "boom", data: { detail: "x" } },
     });
 
@@ -114,8 +117,9 @@ describe("BridgeTransport.call", () => {
   it("ignores a reply whose id does not match a pending call", async () => {
     const { bridge, host } = makeBridge();
     const p = bridge.call("m", {}, 1);
+    const id = host.last("call").id;
     host.reply({ t: "call-ok", id: 999, result: "wrong" });
-    host.reply({ t: "call-ok", id: 1, result: "right" });
+    host.reply({ t: "call-ok", id, result: "right" });
     await expect(p).resolves.toBe("right");
   });
 });
@@ -234,6 +238,26 @@ describe("createTransport host detection", () => {
     vi.stubGlobal("acquireVsCodeApi", () => ({ postMessage: () => {} }));
     const t = createTransport("/");
     expect(t).toBeInstanceOf(BridgeTransport);
+  });
+
+  it("returns the SAME BridgeTransport on repeated calls (singleton)", () => {
+    // Regression: the SPA constructs ~15 LiveSource instances, each calling
+    // createTransport(). acquireVsCodeApi() throws if invoked more than once, so
+    // a fresh BridgeTransport per call would crash the webview boot ("An instance
+    // of the VS Code API has already been acquired"). The factory must return one
+    // shared instance.
+    let acquireCount = 0;
+    vi.stubGlobal("acquireVsCodeApi", () => {
+      acquireCount += 1;
+      return { postMessage: () => {} };
+    });
+    const a = createTransport("/");
+    const b = createTransport("/");
+    expect(a).toBe(b);
+    expect(a).toBeInstanceOf(BridgeTransport);
+    // acquireVsCodeApi must have been called at most once across both factory
+    // invocations (it is cached after the first BridgeTransport ever built).
+    expect(acquireCount).toBeLessThanOrEqual(1);
   });
 
   it("returns HttpTransport when acquireVsCodeApi is absent", () => {

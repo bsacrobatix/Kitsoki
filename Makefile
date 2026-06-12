@@ -10,6 +10,7 @@ INSTALLDIR ?= $(if $(filter Darwin,$(shell uname -s)),$(HOME)/.local/bin,$(HOME)
 # HTML artifacts (export-status). The staged file is gitignored; a committed
 # .gitkeep keeps the //go:embed pattern matching on a fresh checkout.
 RUNSTATUS_DIR := tools/runstatus
+VSCODE_DIR    := tools/vscode-kitsoki
 EMBED_INDEX   := internal/runstatus/web/assets/index.html
 # features/*.yaml is part of the SPA's sources: the tour manifests the bundle
 # ships are code-generated from the feature catalog (see `make features`).
@@ -32,7 +33,8 @@ BASESTORIES_DIR   := internal/basestories/stories
 BASESTORIES_STAMP := internal/basestories/.embed-stamp
 
 .PHONY: all setup build install uninstall test test-flows starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories e2e-docker \
-	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test
+	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
+	vscode-e2e vscode-e2e-fast
 
 all: build
 
@@ -478,6 +480,28 @@ site-clean:
 		$(SITE_DIR)/.vitepress/dist-embedded $(SITE_DIR)/.vitepress/cache \
 		$(SITE_DIR)/src/guide $(SITE_DIR)/src/public/media
 	find $(HELPDOCS_ASSETS) -mindepth 1 ! -name .gitkeep -delete 2>/dev/null || true
+
+# vscode-e2e-fast is the deterministic, no-LLM end-to-end GATE for the VS Code
+# extension: it launches real VS Code 1.96.4, opens the Kitsoki view, asserts the
+# embedded SPA renders + a session can be started/driven + the trace surfaces
+# render — the same critical path the demo video records. KITSOKI_VSCODE_PACE=0
+# (assert-only, no recording). This is the de-risk gate; run it before recording.
+vscode-e2e-fast: web
+	go build -o bin/kitsoki ./cmd/kitsoki   # NOT `cp` — copying invalidates the
+	                                        # ad-hoc Mach-O signature on macOS and
+	                                        # Gatekeeper SIGKILLs the spawned child.
+	cd $(VSCODE_DIR) && pnpm install --frozen-lockfile --silent
+	cd $(VSCODE_DIR) && pnpm build
+	cd $(VSCODE_DIR) && KITSOKI_VSCODE_PACE=0 pnpm exec playwright test vscode-tour.e2e
+
+# vscode-e2e records the SAME asserted beats as a paced video (recordVideo on,
+# per-beat dwells) — the recorder only ADDS pacing on top of the proven path.
+# KITSOKI_VSCODE_PACE=N scales the dwells. Output: .artifacts/vscode-e2e/.
+vscode-e2e: web
+	go build -o bin/kitsoki ./cmd/kitsoki   # NOT `cp` — see vscode-e2e-fast.
+	cd $(VSCODE_DIR) && pnpm install --frozen-lockfile --silent
+	cd $(VSCODE_DIR) && pnpm build
+	cd $(VSCODE_DIR) && KITSOKI_VSCODE_PACE=$${KITSOKI_VSCODE_PACE:-1} pnpm exec playwright test vscode-tour.e2e
 
 # demo-tour records the onboarding tour as a shareable MP4/GIF at watch-speed
 # and renders the post-production artifacts. Requires pnpm + ffmpeg.

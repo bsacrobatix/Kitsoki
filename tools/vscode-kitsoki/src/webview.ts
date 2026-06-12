@@ -72,17 +72,23 @@ export class KitsokiViewProvider implements vscode.WebviewViewProvider {
     const csp = [
       `default-src 'none'`,
       `script-src 'nonce-${nonce}'`,
-      `style-src 'nonce-${nonce}' 'unsafe-inline'`,
+      // style-src uses 'unsafe-inline' ALONE (no nonce). The SPA is Vue: it
+      // injects <style> elements at runtime with no nonce, and a nonce in
+      // style-src makes the browser IGNORE 'unsafe-inline' — so a nonce here
+      // would refuse every runtime-injected style and strip the UI's styling.
+      // Inline styles cannot execute code, so 'unsafe-inline' is the safe and
+      // standard webview posture; the script nonce stays strict.
+      `style-src 'unsafe-inline'`,
       `img-src ${webview.cspSource} data: blob:`,
       `font-src ${webview.cspSource}`,
     ].join('; ');
 
-    // Add nonce to every inline <script>/<style> the singlefile bundle inlines.
+    // Add a nonce to every inline <script> the singlefile bundle inlines (the
+    // script-src policy requires it). Styles need no nonce under 'unsafe-inline'.
     html = html.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`);
-    html = html.replace(/<style(?![^>]*\bnonce=)/g, `<style nonce="${nonce}"`);
 
     const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
-    const themeTag = `<style nonce="${nonce}">${THEME_SHIM}</style>`;
+    const themeTag = `<style>${THEME_SHIM}</style>`;
 
     if (/<head[^>]*>/i.test(html)) {
       html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${cspMeta}\n${themeTag}`);

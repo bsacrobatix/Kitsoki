@@ -27,6 +27,41 @@ function freshDir(p: string): string {
   return p;
 }
 
+/**
+ * Stage the BUILT extension (package.json + dist/ + media/) into a throwaway
+ * extensions dir as `<extensionsDir>/<publisher>.<name>-<version>/`, the layout
+ * VS Code discovers an unpacked extension under `--extensions-dir`. Returns the
+ * extensions dir to pass to {@link launchVSCode}. Asserts the compiled host
+ * entry and the staged SPA are present so a missing `pnpm build` fails loudly
+ * here instead of as an inscrutable blank webview later.
+ *
+ * `extensionRoot` is the tools/vscode-kitsoki dir (where package.json lives).
+ */
+export function packageExtension(extensionRoot: string, extensionsDir: string): string {
+  const pkg = JSON.parse(fs.readFileSync(path.join(extensionRoot, 'package.json'), 'utf8')) as {
+    name: string;
+    version: string;
+    publisher: string;
+  };
+  const entry = path.join(extensionRoot, 'dist', 'extension.js');
+  const spa = path.join(extensionRoot, 'media', 'spa', 'index.html');
+  if (!fs.existsSync(entry)) {
+    throw new Error(`extension not built: ${entry} missing — run 'pnpm build' first`);
+  }
+  if (!fs.existsSync(spa) || fs.statSync(spa).size < 10_000) {
+    throw new Error(
+      `embedded SPA missing/placeholder: ${spa} — run 'make build' (or build tools/runstatus) then 'pnpm build'`,
+    );
+  }
+  freshDir(extensionsDir);
+  const dest = path.join(extensionsDir, `${pkg.publisher}.${pkg.name}-${pkg.version}`);
+  fs.mkdirSync(dest, { recursive: true });
+  fs.copyFileSync(path.join(extensionRoot, 'package.json'), path.join(dest, 'package.json'));
+  fs.cpSync(path.join(extensionRoot, 'dist'), path.join(dest, 'dist'), { recursive: true });
+  fs.cpSync(path.join(extensionRoot, 'media'), path.join(dest, 'media'), { recursive: true });
+  return extensionsDir;
+}
+
 export interface LaunchOptions {
   /** Folder opened as the workspace (last positional arg to VS Code). */
   workspace: string;
