@@ -36,7 +36,7 @@ pipeline with a checkpoint loop, structurally a cousin of `stories/bugfix/`
 - **`authoring`** — **one** `host.oracle.task`, scoped to a workspace dir,
   authors the source from the brief: `tour` → static HTML mockup page(s) +
   a tour manifest (`{id, route, target, title, body, …}`,
-  `docs/skills/kitsoki-ui-demo/SKILL.md`); `deck` → a slidey JSON deck
+  `.agents/skills/kitsoki-ui-demo/SKILL.md`); `deck` → a slidey JSON deck
   (`docs/decks/arch-and-usage.json` shape). Binds `source = {kind, paths,
   spec_path}`. Human checkpoint on the authored source.
 - **`rendering`** — **deterministic** render (no LLM): `deck` →

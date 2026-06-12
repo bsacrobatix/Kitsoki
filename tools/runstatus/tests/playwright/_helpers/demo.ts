@@ -24,7 +24,7 @@
  * `prepareVideoDir` (beforeAll) + `saveAndRemuxVideo` (after context.close) —
  * which are the canonical save path (a plain copy from the video dir picks a
  * stale file and skips the remux that fixes VP8 webm duration metadata). See
- * docs/skills/kitsoki-ui-demo/SKILL.md → "Deterministic recording".
+ * .agents/skills/kitsoki-ui-demo/SKILL.md → "Deterministic recording".
  */
 import { type Page } from "@playwright/test";
 import path from "path";

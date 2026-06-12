@@ -37,7 +37,7 @@ states:
       # Step 1: re-capture (geometry + axe only). Stubbed in flow tests.
       - invoke: host.run
         with:
-          cmd: docs/skills/kitsoki-ui-review/scripts/capture.sh
+          cmd: .agents/skills/kitsoki-ui-review/scripts/capture.sh
           args:
             - "--no-build"
             - "--fast"

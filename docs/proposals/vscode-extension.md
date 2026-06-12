@@ -297,7 +297,7 @@ on a shared desktop the PoC's ffmpeg pass caught an overlapping window. So
 ffmpeg is reserved for a dedicated Space / clean CI box where the window is
 guaranteed frontmost and unobstructed (and, on macOS, Screen-Recording
 permission is granted). Both feed the same
-`docs/skills/kitsoki-ui-demo/scripts/{webm-to-mp4,webm-to-gif,contact-sheet}.sh`
+`.agents/skills/kitsoki-ui-demo/scripts/{webm-to-mp4,webm-to-gif,contact-sheet}.sh`
 and `ChapterRecorder` sidecar unchanged. Record **headed** (macOS native; Xvfb
 on Linux), VS Code **pinned**, throwaway `--user-data-dir`/`--extensions-dir`,
 fixed window size — the same "deterministic recording" discipline the skill

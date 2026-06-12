@@ -10,7 +10,7 @@
  *
  * WHY A STATIC FIXTURE, NOT LIVE GITHUB: a kitsoki demo must be deterministic
  * and free — same input, same frames, no network, no auth, no real issue churn
- * (docs/skills/kitsoki-ui-demo/SKILL.md → "Deterministic, no-LLM"). So act 2
+ * (.agents/skills/kitsoki-ui-demo/SKILL.md → "Deterministic, no-LLM"). So act 2
  * drives a faithful static replica of the issue (fixtures/gh-issue-review.html)
  * over file://, rendering exactly what host.gh.ticket.create produces.
  *

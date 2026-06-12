@@ -14,7 +14,7 @@ things a rendered video does not give them today:
    scene or which tour step* that frame came from — otherwise "make this
    bigger" has no source to edit. slidey knows its scene boundaries; the
    `kitsoki-ui-demo` recorder knows each `TourStep`'s dwell window
-   (`docs/skills/kitsoki-ui-demo/SKILL.md`, `WEB_CHAT_PACE`/`dwellMs`). That
+   (`.agents/skills/kitsoki-ui-demo/SKILL.md`, `WEB_CHAT_PACE`/`dwellMs`). That
    knowledge is thrown away at render time.
 2. **A still PNG at an arbitrary timestamp.** To give the LLM visual context
    ("here's the frame you're being asked about") the panel must turn a video
@@ -57,7 +57,7 @@ backed by one `internal/video` extractor that the slice-2 web RPC reuses.**
     (`internal/host/visual_producers.go`, `visual-producers.md`).
   - `host.slidey.render` (`internal/host/visual_producers.go`,
     `visual-producers.md` task 1.1) — also emit the sidecar.
-  - Tour recorder (`docs/skills/kitsoki-ui-demo/` Playwright spec) — also
+  - Tour recorder (`.agents/skills/kitsoki-ui-demo/` Playwright spec) — also
     emit the sidecar.
 - **Vocabulary:** one host call (table below); one sidecar format.
 - **Stories affected:** none today; opt-in. Slice 3 is the first consumer.

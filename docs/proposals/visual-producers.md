@@ -19,7 +19,7 @@ tools already exist and are proven:
   reveal), and an interactive HTML app — all deterministic, no LLM in the
   render loop. kitsoki already ships an example spec at
   `docs/decks/arch-and-usage.json`.
-- **`contact-sheet.sh`** (`docs/skills/kitsoki-ui-demo/scripts/contact-sheet.sh`)
+- **`contact-sheet.sh`** (`.agents/skills/kitsoki-ui-demo/scripts/contact-sheet.sh`)
   tiles numbered PNGs into one storyboard montage via `ffmpeg` — already
   reused across the `kitsoki-ui-demo` and `kitsoki-ui-qa` skills.
 

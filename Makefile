@@ -162,9 +162,9 @@ test-flows:
 # resolves WITHOUT executing — so it is instant, safe, and catches scripts that
 # would fail to load (a missing main, a reference outside the sandbox surface)
 # long before `make test-flows` boots an app. starcheck is its own Go module
-# (docs/skills/starlark/tools/starcheck) so we invoke it from there with the
+# (.agents/skills/starlark/tools/starcheck) so we invoke it from there with the
 # scripts passed as absolute paths.
-STARCHECK_DIR := docs/skills/starlark/tools/starcheck
+STARCHECK_DIR := .agents/skills/starlark/tools/starcheck
 starcheck-kitsoki:
 	@scripts=$$(find stories -type f -name '*.star' | sort); \
 	if [ -z "$$scripts" ]; then echo "starcheck-kitsoki: no .star scripts under stories/"; exit 0; fi; \
@@ -268,7 +268,7 @@ demo-feature: build
 	spec=$$(printf '%s' "$$demo" | cut -f1); \
 	video=$$(printf '%s' "$$demo" | cut -f3); \
 	(cd $(RUNSTATUS_DIR) && pnpm exec playwright test "$$spec" --project=chromium); \
-	docs/skills/kitsoki-ui-demo/scripts/render.sh "$$video"
+	.agents/skills/kitsoki-ui-demo/scripts/render.sh "$$video"
 
 # feature-qa records the feature's demo then runs the vision QA gate against it
 # with the catalog-generated feature spec + scenarios. GATED: drives the real
@@ -279,7 +279,7 @@ feature-qa: demo-feature features-index
 	demo=$$(cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/generate.ts --print-demo $(FEATURE)); \
 	dir=$$(printf '%s' "$$demo" | cut -f2); \
 	video=$$(printf '%s' "$$demo" | cut -f3); \
-	docs/skills/kitsoki-ui-qa/scripts/qa.sh "$$video" \
+	.agents/skills/kitsoki-ui-qa/scripts/qa.sh "$$video" \
 		--frames "$$dir" \
 		--feature .artifacts/features/qa/$(FEATURE).feature.md \
 		--scenarios .artifacts/features/qa/$(FEATURE).scenarios.yaml
@@ -358,7 +358,7 @@ site-clean:
 demo-tour: build
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
 	cd $(RUNSTATUS_DIR) && pnpm exec playwright test tour-video --project=chromium
-	docs/skills/kitsoki-ui-demo/scripts/render.sh .artifacts/tour-video/tour-video-demo.mp4
+	.agents/skills/kitsoki-ui-demo/scripts/render.sh .artifacts/tour-video/tour-video-demo.mp4
 
 # demo-tour-fast validates the tour spec assertions only (no dwells, no render).
 # Use this in CI or to iterate on spec changes quickly.
@@ -370,7 +370,7 @@ demo-tour-fast: build
 # with the feature spec + scenarios generated from features/onboarding-tour.yaml.
 # Requires the `claude` CLI on PATH. Output: .artifacts/ui-qa/tour-video-demo/.
 demo-tour-qa: demo-tour features-index
-	docs/skills/kitsoki-ui-qa/scripts/qa.sh \
+	.agents/skills/kitsoki-ui-qa/scripts/qa.sh \
 		.artifacts/tour-video/tour-video-demo.mp4 \
 		--frames .artifacts/tour-video \
 		--feature .artifacts/features/qa/onboarding-tour.feature.md \

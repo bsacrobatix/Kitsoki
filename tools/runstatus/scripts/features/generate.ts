@@ -262,7 +262,7 @@ function renderFeatureMd(f: Feature): string {
   return lines.join("\n");
 }
 
-/** ui-qa scenarios file (docs/skills/kitsoki-ui-qa contract): feature + scenarios. */
+/** ui-qa scenarios file (.agents/skills/kitsoki-ui-qa contract): feature + scenarios. */
 function renderScenarios(f: Feature): string {
   const lines: string[] = [
     `# Generated from features/${f.id}.yaml by scripts/features/generate.ts. DO NOT EDIT.`,

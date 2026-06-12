@@ -96,6 +96,6 @@ stories/mockup-video/app.yaml` → 8/8 pass.
 ## See also
 
 - [`docs/stories/mockup-video.md`](../../docs/stories/mockup-video.md) — the narrative design.
-- [`docs/skills/kitsoki-ui-demo/SKILL.md`](../../docs/skills/kitsoki-ui-demo/SKILL.md) — the tour recorder this story drives.
-- [`docs/skills/slidey-authoring/SKILL.md`](../../docs/skills/slidey-authoring/SKILL.md) — the deck renderer.
+- [`.agents/skills/kitsoki-ui-demo/SKILL.md`](../../.agents/skills/kitsoki-ui-demo/SKILL.md) — the tour recorder this story drives.
+- [`.agents/skills/slidey-authoring/SKILL.md`](../../.agents/skills/slidey-authoring/SKILL.md) — the deck renderer.
 - [`stories/ui-fix/`](../ui-fix/), [`stories/bugfix/`](../bugfix/) — the produce/review/refine cousins.

@@ -1,7 +1,7 @@
 # authoring — ONE host.oracle.task authors the source from the brief.
 #
 # tour → static HTML mockup page(s) + a tour manifest ({id,route,target,
-#        title,body,...}, docs/skills/kitsoki-ui-demo/SKILL.md)
+#        title,body,...}, .agents/skills/kitsoki-ui-demo/SKILL.md)
 # deck → a slidey JSON deck (docs/decks shape)
 #
 # The task is scoped to world.workspace and the prompt is the v1 write-jail

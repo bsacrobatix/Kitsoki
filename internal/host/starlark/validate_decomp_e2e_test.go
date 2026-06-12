@@ -18,9 +18,9 @@ func scriptDir(t *testing.T) string {
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	// internal/host/starlark → repo root → docs/skills/work-decomposition/scripts
+	// internal/host/starlark → repo root → .agents/skills/work-decomposition/scripts
 	root := filepath.Join(filepath.Dir(file), "..", "..", "..")
-	return filepath.Join(root, "docs", "skills", "work-decomposition", "scripts")
+	return filepath.Join(root, ".agents", "skills", "work-decomposition", "scripts")
 }
 
 func loadValidateDecompScript(t *testing.T) (src []byte, sidecar *starlarkhost.Sidecar) {

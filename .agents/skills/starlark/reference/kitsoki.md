@@ -70,7 +70,7 @@ These are kitsoki-specific traps on top of the general
 
 1. **Static, ~1s — does it match the sandbox?**
    ```bash
-   docs/skills/starlark/tools/starcheck/  →  go run . -kitsoki scripts/derive.star
+   .agents/skills/starlark/tools/starcheck/  →  go run . -kitsoki scripts/derive.star
    ```
    The `-kitsoki` profile pins the real surface: `predeclared={json,math}`,
    strict dialect (no `set`/`while`/recursion/global-reassign), and requires a

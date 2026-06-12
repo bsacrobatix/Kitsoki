@@ -34,7 +34,7 @@ done
 
 ROOT="$(git rev-parse --show-toplevel)"
 RS="$ROOT/tools/runstatus"
-SCR="$ROOT/docs/skills/kitsoki-ui-demo/scripts"
+SCR="$ROOT/.agents/skills/kitsoki-ui-demo/scripts"
 OUT_DIR="$ROOT/.artifacts/gh-issues-demo"
 mkdir -p "$OUT_DIR"
 

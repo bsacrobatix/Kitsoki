@@ -54,7 +54,7 @@ across widths and environments before shipping it, and the
   `tools/runstatus/src/components/`, new `cmd/kitsoki/view.go`.
 - **Docs on ship:** `docs/stories/story-style.md`,
   `docs/embedded/app-schema.md` §"view:", `docs/tui/`, `docs/tracing/`,
-  `docs/skills/kitsoki-story-authoring/SKILL.md`.
+  `.agents/skills/kitsoki-story-authoring/SKILL.md`.
 
 ## Slices
 

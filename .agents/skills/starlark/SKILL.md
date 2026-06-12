@@ -57,7 +57,7 @@ errors that matter for an embedded config language.
 # 1. format + lint (if buildifier is installed)
 buildifier -type=default -mode=check -lint=warn module.star
 
-# 2. parse + resolve (no execution). From docs/skills/starlark/tools/starcheck:
+# 2. parse + resolve (no execution). From .agents/skills/starlark/tools/starcheck:
 go run . module.star
 go run . -r scripts/                          # a whole tree
 go run . -predeclared=world,http,secret f.star # only these builtins are granted
@@ -67,8 +67,8 @@ go run . -predeclared=world,http,secret f.star # only these builtins are granted
 go run . -kitsoki scripts/derive.star
 
 # format + starcheck over a path in one shot:
-docs/skills/starlark/tools/validate.sh scripts/
-docs/skills/starlark/tools/validate.sh scripts/derive.star -kitsoki  # flags pass through
+.agents/skills/starlark/tools/validate.sh scripts/
+.agents/skills/starlark/tools/validate.sh scripts/derive.star -kitsoki  # flags pass through
 ```
 
 `starcheck` is the tool to own: it wraps `syntax.Parse` + `resolve.File`, so by

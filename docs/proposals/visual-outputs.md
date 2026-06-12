@@ -15,7 +15,7 @@ HTML from one JSON spec). Today those only exist as side effects of
 output was produced, the trace doesn't record it, the web UI can't show
 it, and the TUI can't point an operator at it. The render tooling is
 real and proven (the standalone `slidey` pipeline; the `contact-sheet.sh`
-in `docs/skills/kitsoki-ui-demo/scripts/`) but lives entirely outside the
+in `.agents/skills/kitsoki-ui-demo/scripts/`) but lives entirely outside the
 story machinery, driven by humans and skills.
 
 The moat says every meaningful thing a step does should land as a

@@ -18,7 +18,7 @@ You may ONLY create and edit files **under the workspace directory**: `{{ args.w
 
 {% block spec_author_tour %}**If `medium` is `tour`:**
 - Author one static HTML mockup **page per scenario** under the workspace (a starter is at `templates/mockup.html.tmpl` for shape). Each page styles the feature plausibly; steps within a scenario target named regions (give them stable `id`/`data-testid` so a tour step can `target` them).
-- Author a **tour manifest** JSON (`tour.json` in the workspace): an array of steps `{id, route, target, title, body}` — the `kitsoki-ui-demo` recorder shape (`docs/skills/kitsoki-ui-demo/SKILL.md`). One step per moment you want narrated; `source_ref` granularity is `step_id`.
+- Author a **tour manifest** JSON (`tour.json` in the workspace): an array of steps `{id, route, target, title, body}` — the `kitsoki-ui-demo` recorder shape (`.agents/skills/kitsoki-ui-demo/SKILL.md`). One step per moment you want narrated; `source_ref` granularity is `step_id`.
 - Set `kind: "tour"`, `paths: [<the html pages>]`, `spec_path: "<workspace>/tour.json"`.{% endblock %}
 
 {% block spec_author_deck %}**If `medium` is `deck`:**

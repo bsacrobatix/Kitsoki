@@ -8,7 +8,7 @@
  * step — an element to spotlight (by data-testid on the static GitHub-issue
  * fixture) plus the caption to show — and the gh-issue-review-video spec walks it
  * with the portable makeCaption + makeSpotlight helpers (which inject plain DOM
- * and work on any page). See docs/skills/kitsoki-ui-demo/SKILL.md and
+ * and work on any page). See .agents/skills/kitsoki-ui-demo/SKILL.md and
  * tools/runstatus/tests/playwright/fixtures/gh-issue-review.html.
  *
  * The narrative bridges act 1 (file a bug in the kitsoki web UI) to act 3 (triage

@@ -31,9 +31,10 @@ It installs (and verifies versions of):
 | git, bash, curl | required; kitsoki also shells out to git + bash at runtime |
 | jq, ffmpeg, gh | optional; needed by some `make` targets (`fix-tests`, `demo-tour`, GitHub integration) |
 
-It also symlinks the project skills (`docs/skills/<name>/SKILL.md`)
-into `.claude/skills/` so Claude Code discovers them. Re-run `make
-setup` any time you add a skill.
+Project skills live under `.agents/skills/`, where Codex discovers
+them directly. Setup also symlinks them into `.claude/skills/` so
+Claude Code uses the same skill definitions. Re-run `make setup` any
+time you add a skill.
 
 > **Heads-up on PATH:** on Linux a fresh Go tarball install adds
 > `/usr/local/go/bin` to your PATH via `/etc/profile.d/go.sh`. Open a

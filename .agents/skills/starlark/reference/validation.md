@@ -16,7 +16,7 @@ recursion), and — via `-predeclared` — references to a builtin a capability
 level does not grant.
 
 ```bash
-# from docs/skills/starlark/tools/starcheck
+# from .agents/skills/starlark/tools/starcheck
 go run . path/to/module.star            # spec-strict, universe builtins only
 go run . -r path/to/scripts/            # recurse a directory
 

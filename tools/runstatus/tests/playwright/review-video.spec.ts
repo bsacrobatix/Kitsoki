@@ -17,7 +17,7 @@
  * screen. The tour lives in in-memory Pinia state, so the spec NEVER reloads
  * after injecting it (a reload would tear the overlay down).
  *
- * Determinism / no-LLM posture (docs/skills/kitsoki-ui-demo/SKILL.md):
+ * Determinism / no-LLM posture (.agents/skills/kitsoki-ui-demo/SKILL.md):
  *   - `kitsoki web --flow stories/mockup-video/flows/demo_review.yaml`: the
  *     intake/brief-gate/authoring oracle calls are stubbed, and
  *     host.slidey.render is stubbed to return the REAL pre-rendered files under

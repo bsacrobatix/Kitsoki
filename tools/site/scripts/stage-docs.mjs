@@ -4,7 +4,7 @@
  *
  * Allowlist-copy (not srcDir-over-docs/, not symlinks) is a structural
  * guarantee: internal material (docs/proposals/, docs/competitive-analysis/,
- * docs/skills/, ...) can never leak onto the published site because it is
+ * .agents/skills/, ...) can never leak onto the published site because it is
  * never staged. Markdown links that escape the allowlist are rewritten to
  * GitHub blob/raw URLs so they stay alive instead of going dead — and VitePress
  * runs with ignoreDeadLinks:false, so a missed rewrite FAILS the build rather

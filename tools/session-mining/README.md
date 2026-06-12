@@ -25,7 +25,7 @@ The kit serves two distinct jobs over the same distilled traces:
 | Output | A redacted, shareable, aggregatable `report.json` + `BRIEF.md` | A local, ranked, themed Markdown brief of ideas/pain/design notes |
 | Redaction | **Mandatory** — a model scores the traces, the report is shared | **None** — stays in `/tmp`, never shared; redaction would strip the content you want |
 | Extractor | `prompts/extractor.md` (vocabulary-scored) | a fan-out workflow (one reader per batch) keyed to your topic |
-| Driver | the Quickstart below | the **`session-idea-mining`** skill (`docs/skills/session-idea-mining/`) |
+| Driver | the Quickstart below | the **`session-idea-mining`** skill (`.agents/skills/session-idea-mining/`) |
 
 Both modes share `distill.jq` and the new **`prep.py`** (distill + bin-pack into
 byte-balanced batches in one command — replaces the hand-rolled `for f in $(ls -S

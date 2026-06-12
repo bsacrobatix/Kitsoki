@@ -1,6 +1,6 @@
 make your worktrees in the project root folder .worktrees
 
-Project skills live at `docs/skills/<name>/SKILL.md` and are exposed to Claude Code by symlinking into the project's `.claude/skills/<name>` (Claude Code does not auto-discover skills under `docs/`). `make setup` links every `docs/skills/*/SKILL.md` into `.claude/skills/` (relative symlinks; `.claude/` is gitignored), so after adding a new skill just re-run:
+Project skills live in the Codex-standard `.agents/skills/<name>/SKILL.md` location. Claude Code does not auto-discover that directory, so `make setup` links every `.agents/skills/*/SKILL.md` into `.claude/skills/` (relative symlinks; `.claude/` is gitignored). After adding a new skill, re-run:
 
 ```
 make setup
@@ -9,7 +9,7 @@ make setup
 To link a single skill by hand (e.g. without a full setup run):
 
 ```
-ln -s "../../docs/skills/<name>" .claude/skills/<name>
+ln -s "../../.agents/skills/<name>" .claude/skills/<name>
 ```
 
 When we do an implementation based on a proposal, the goal is to complete the proposal implementation and move the content to proper narrative docs and delete the proposal - don't leave unfinished work unless specifically instructed, and if so, update the proposal to summarize the completed aspect and focus on the remaining work.

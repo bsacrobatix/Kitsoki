@@ -26,8 +26,8 @@ concrete, file-grounded bug list.
 
 ## Impact
 
-- **New:** `docs/skills/story-qa/SKILL.md` (+ the symlink into
-  `~/.claude/skills/story-qa` per CLAUDE.md). Optionally a thin
+- **New:** `.agents/skills/story-qa/SKILL.md` (+ the project-local Claude
+  symlink created by `make setup`). Optionally a thin
   `cmd/kitsoki` wrapper or a `tools/story-qa/` runner if the loop wants
   orchestration beyond what a subagent prompt can hold.
 - **Consumes:** slice 2 (`kitsoki drive` — frames + free-text routing),
@@ -129,8 +129,8 @@ where the agent can localize it — the likely story file/room, e.g.
 
 ```
 ## 1. Skill
-- [ ] 1.1 docs/skills/story-qa/SKILL.md: the drive loop, persona/scenario contract, rubric, report shape
-- [ ] 1.2 Symlink into ~/.claude/skills/story-qa (CLAUDE.md)
+- [ ] 1.1 .agents/skills/story-qa/SKILL.md: the drive loop, persona/scenario contract, rubric, report shape
+- [ ] 1.2 Verify `make setup` links it into `.claude/skills/story-qa`
 - [ ] 1.3 Report template (.artifacts/story-qa/<run>/report.md + screenshots/)
 
 ## 2. Drive

@@ -159,7 +159,7 @@ forcing them into the bug tracker.
 tools/session-mining/prep.py          distill + (optional redact) + bin-pack into batches; prints BATCHES=/BATCHDIR=
 tools/session-mining/focus_brief.py   render synthesis JSON -> ranked Markdown brief (deterministic)
 tools/session-mining/distill.jq       raw JSONL -> compact action trace (shared with pattern-mining)
-docs/skills/session-idea-mining/mine.workflow.js   the fan-out + synthesis workflow (parameterized by args)
+.agents/skills/session-idea-mining/mine.workflow.js   the fan-out + synthesis workflow (parameterized by args)
 ```
 
 See `tools/session-mining/README.md` for the sibling pattern-mining mode (shareable,

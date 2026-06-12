@@ -72,7 +72,7 @@ Once every slice ships:
 - **Net surface:** `internal/tui/` (new frame composer extracted from
   `RootModel.View`), `internal/harness/` (VCR modes over the existing
   `RecordingHarness`/`ReplayHarness`), new `cmd/kitsoki/drive.go` and
-  `cmd/kitsoki/shot.go`, new `docs/skills/story-qa/`.
+  `cmd/kitsoki/shot.go`, new `.agents/skills/story-qa/`.
 - **Builds on:** the [`view-rendering-readability`](view-rendering-readability.md)
   epic — that epic makes the typed tree canonical and clean; this one
   composes and captures whatever it renders. Fidelity improves for free as

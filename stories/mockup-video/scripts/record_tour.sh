@@ -24,7 +24,7 @@ OUT_MP4="${WORKSPACE%/}/walkthrough.mp4"
 OUT_CHAPTERS="${WORKSPACE%/}/walkthrough.chapters.json"
 
 # Drive the kitsoki-ui-demo recorder over the authored manifest + mockup pages.
-# The recorder (docs/skills/kitsoki-ui-demo) writes OUT_MP4 and, per slice 1,
+# The recorder (.agents/skills/kitsoki-ui-demo) writes OUT_MP4 and, per slice 1,
 # OUT_CHAPTERS (the producer-agnostic chapter sidecar). The concrete recorder
 # command is the skill's harness; this wrapper is the host.run seam.
 RECORDER="${KITSOKI_UI_DEMO_RECORDER:-}"

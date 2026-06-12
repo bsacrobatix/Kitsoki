@@ -2,7 +2,7 @@
  * ui-audit.ts — the DETERMINISTIC (no-LLM) layout audit for the kitsoki web UI.
  *
  * This is the geometry half of the kitsoki-ui-review pipeline (the LLM vision
- * half lives in docs/skills/kitsoki-ui-review/scripts/review.sh). It measures
+ * half lives in .agents/skills/kitsoki-ui-review/scripts/review.sh). It measures
  * the REAL laid-out DOM in a live browser — the same authority slidey's
  * `--audit` gives a deck, but richer, because here we have a real layout engine
  * and a real viewport rather than an SVG.

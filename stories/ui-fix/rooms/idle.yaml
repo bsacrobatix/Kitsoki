@@ -139,7 +139,7 @@ states:
             - |
               set -e
               root=$(git rev-parse --show-toplevel)
-              skill="$root/docs/skills/kitsoki-ui-review/scripts"
+              skill="$root/.agents/skills/kitsoki-ui-review/scripts"
               art="$root/.artifacts/ui-review"
               mkdir -p "$art"
               "$skill/capture.sh" --no-build --fast

@@ -115,7 +115,7 @@ Run the bundled validator. Its **exit code is the gate** — do not proceed to
 review on a non-zero exit:
 
 ```
-python3 docs/skills/work-decomposition/scripts/validate_decomposition.py \
+python3 .agents/skills/work-decomposition/scripts/validate_decomposition.py \
     .artifacts/decompose/<slug>/decomposition.yaml --repo-root .
 ```
 
@@ -178,11 +178,11 @@ acceptance + scope + test_plan`) — which is exactly what the proposal's
 
 ## Maintenance
 
-This skill is exposed to Claude Code via a symlink (Claude Code doesn't
-auto-discover skills under `docs/`):
+Codex discovers this skill directly. Refresh the project-local Claude Code
+symlink after adding or moving skills:
 
 ```
-ln -s "$(pwd)/docs/skills/work-decomposition" ~/.claude/skills/work-decomposition
+make setup
 ```
 
 When the `stories/decompose/` story from the proposal ships, the

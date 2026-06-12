@@ -7,7 +7,7 @@ understand what the package is for, how to use it, what its contracts
 are, and what it deliberately does not do — without opening the source.
 
 > Writing or auditing a package? The `go-module-docs` skill
-> (`docs/skills/go-module-docs/SKILL.md`) is the operational checklist
+> (`.agents/skills/go-module-docs/SKILL.md`) is the operational checklist
 > and verification loop for this standard.
 
 ## The paragon

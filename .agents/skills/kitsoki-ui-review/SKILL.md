@@ -57,12 +57,12 @@ this review — [[project_onboarding_tour_generic]]).
 1. **(Optional) write the design intent.** Grounds the agents in what the UI is
    *for* so they don't apply a generic aesthetic. Copy and edit:
    ```bash
-   cp docs/skills/kitsoki-ui-review/templates/design-intent.example.md .context/ui-intent.md
+   cp .agents/skills/kitsoki-ui-review/templates/design-intent.example.md .context/ui-intent.md
    ```
 
 2. **Run the review** (capture → multi-agent review → gated report):
    ```bash
-   docs/skills/kitsoki-ui-review/scripts/ui-review.sh \
+   .agents/skills/kitsoki-ui-review/scripts/ui-review.sh \
      --design-intent .context/ui-intent.md
    echo "gate exit: $?"        # 0 pass · 1 blocking finding · 2 pipeline error
    ```
@@ -82,7 +82,7 @@ this review — [[project_onboarding_tour_generic]]).
 ### Faster / scoped runs
 
 ```bash
-S=docs/skills/kitsoki-ui-review/scripts
+S=.agents/skills/kitsoki-ui-review/scripts
 $S/ui-review.sh --viewports desktop                 # one viewport (fast)
 $S/ui-review.sh --no-build --no-capture --strict    # re-review existing frames
 $S/ui-review.sh --model claude-sonnet-4-6 --jobs 6   # cheaper/faster, more parallel
@@ -162,8 +162,9 @@ JSON with full context but are not expanded as cards, to keep the report skimmab
 
 ## Maintenance
 
-Exposed to Claude Code via a symlink (skills under `docs/` aren't auto-discovered):
+Codex discovers this skill directly. Refresh the project-local Claude Code
+symlink after adding or moving skills:
 
 ```
-ln -s "$(pwd)/docs/skills/kitsoki-ui-review" ~/.claude/skills/kitsoki-ui-review
+make setup
 ```

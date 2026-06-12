@@ -8,7 +8,7 @@ conventions; bug filing (web + CLI) and feature filing open real issues; the
 `issues/` pile is frozen with a migration tool. Proofs (real, on the operator's
 fork): bug `…/issues/3` (web), `…/issues/5` (CLI), feature `…/issues/6` (design
 pipeline). The cross-site **demo** is built + recorded + QA-passed
-(`docs/skills/kitsoki-ui-demo/scripts/record-gh-issues-demo.sh`). **Only one
+(`.agents/skills/kitsoki-ui-demo/scripts/record-gh-issues-demo.sh`). **Only one
 operator action remains:** run the real bulk migration of the existing 15-ticket
 pile onto `constructorfabric/Kitsoki` (`kitsoki issues migrate`). Delete this epic
 + the slice-#4 child once that lands.

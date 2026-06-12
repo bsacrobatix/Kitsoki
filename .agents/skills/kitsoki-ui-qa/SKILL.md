@@ -120,7 +120,7 @@ dev env). No `make build` needed — this consumes an existing video/frames.
    and edit — `--feature` is the *actual bug report or implementation plan*, not
    a generic blurb (see "judged against the bug/plan" above):
    ```bash
-   D=docs/skills/kitsoki-ui-qa
+   D=.agents/skills/kitsoki-ui-qa
    cp $D/templates/feature.example.md   .context/qa-feature.md   # ← the bug or plan
    cp $D/templates/scenarios.example.yaml .context/qa-scenarios.yaml
    ```
@@ -135,14 +135,14 @@ dev env). No `make build` needed — this consumes an existing video/frames.
    For a **screenshot** (or any pre-captured PNG set), pass the frames dir
    directly — the positional path is only used to name the output dir:
    ```bash
-   docs/skills/kitsoki-ui-qa/scripts/qa.sh .artifacts/fix-badge/badge.png \
+   .agents/skills/kitsoki-ui-qa/scripts/qa.sh .artifacts/fix-badge/badge.png \
      --frames   .artifacts/fix-badge \
      --feature   .context/qa-feature.md \
      --scenarios .context/qa-scenarios.yaml --strict
    ```
    For a **video**:
    ```bash
-   docs/skills/kitsoki-ui-qa/scripts/qa.sh \
+   .agents/skills/kitsoki-ui-qa/scripts/qa.sh \
      .artifacts/multi-story/multi-story.mp4 \
      --feature   .context/qa-feature.md \
      --scenarios .context/qa-scenarios.yaml
@@ -156,7 +156,7 @@ dev env). No `make build` needed — this consumes an existing video/frames.
    labeled per-scene `NN-<scene>.png`. Point `--frames` at that dir to QA those
    exact captures instead of re-extracting (highest fidelity, skips ffmpeg):
    ```bash
-   docs/skills/kitsoki-ui-qa/scripts/qa.sh .artifacts/multi-story/multi-story.mp4 \
+   .agents/skills/kitsoki-ui-qa/scripts/qa.sh .artifacts/multi-story/multi-story.mp4 \
      --frames .artifacts/multi-story --feature .context/qa-feature.md \
      --scenarios .context/qa-scenarios.yaml --strict
    ```
@@ -197,15 +197,16 @@ for faster/cheaper); `--max-frames 48`; `--strict` makes every scenario blocking
 
 ## Pointers
 
-- The recorder this inverts: [[kitsoki-ui-demo]] (`docs/skills/kitsoki-ui-demo/`)
+- The recorder this inverts: [[kitsoki-ui-demo]] (`.agents/skills/kitsoki-ui-demo/`)
   — its `NN-<scene>.png` output is the ideal `--frames` input here, and its
   `contact-sheet.sh` is reused for the storyboard.
 - Oracle = local `claude` CLI: `internal/host/oracle_runner.go`.
 
 ## Maintenance
 
-Exposed to Claude Code via a symlink (skills under `docs/` aren't auto-discovered):
+Codex discovers this skill directly. Refresh the project-local Claude Code
+symlink after adding or moving skills:
 
 ```
-ln -s "$(pwd)/docs/skills/kitsoki-ui-qa" ~/.claude/skills/kitsoki-ui-qa
+make setup
 ```

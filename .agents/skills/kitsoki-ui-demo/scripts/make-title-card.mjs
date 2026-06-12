@@ -3,7 +3,7 @@
 // ImageMagick/librsvg, so Chromium (already present for Playwright) is the
 // portable text renderer for the cross-site compositor's act dividers.
 //
-//   node docs/skills/kitsoki-ui-demo/scripts/make-title-card.mjs \
+//   node .agents/skills/kitsoki-ui-demo/scripts/make-title-card.mjs \
 //     <out.png> <title> [subtitle] [kicker] [accent]
 //
 // ESM resolves bare specifiers from the MODULE's directory, not cwd, and

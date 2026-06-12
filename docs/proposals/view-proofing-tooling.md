@@ -38,7 +38,7 @@ proof pass.
   uses) — never a re-implementation, so the proof matches production
   (`tools/runstatus/CLAUDE.md`: no UI hacks, the output must be real).
 - **Input:** new CLI command + flags; no TUI input change.
-- **Docs on ship:** `docs/tui/`, `docs/skills/kitsoki-story-authoring/SKILL.md`.
+- **Docs on ship:** `docs/tui/`, `.agents/skills/kitsoki-story-authoring/SKILL.md`.
 
 ## Mental model
 

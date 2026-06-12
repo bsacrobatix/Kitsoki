@@ -212,7 +212,7 @@ page's recording regardless of what else is in the dir.
    deliverable; only run this if you also want a looping GIF or a storyboard.
    All write to `.artifacts/`, never committed ([[feedback_artifacts_dir]]):
    ```bash
-   S=docs/skills/kitsoki-ui-demo/scripts
+   S=.agents/skills/kitsoki-ui-demo/scripts
    $S/render.sh .artifacts/<name>/<name>-demo.mp4    # gif + contact sheet (mp4 already made)
    # …or individually:
    $S/webm-to-gif.sh   .artifacts/<name>/<name>-demo.mp4 --width 900 # looping GIF for PRs/docs
@@ -288,7 +288,7 @@ cd tools/runstatus && WEB_CHAT_PACE=0 pnpm exec playwright test agent-actions-vi
 cd tools/runstatus && pnpm exec playwright test agent-actions-video --project=chromium
 
 # 4. (optional) GIF + contact sheet from the MP4
-docs/skills/kitsoki-ui-demo/scripts/render.sh .artifacts/agent-actions/agent-actions-demo.mp4
+.agents/skills/kitsoki-ui-demo/scripts/render.sh .artifacts/agent-actions/agent-actions-demo.mp4
 ```
 
 **To make a tour demo video for a NEW feature:** copy `agent-actions-manifest.ts`
@@ -342,7 +342,7 @@ cd tools/runstatus && WEB_CHAT_PACE=0 pnpm exec playwright test tour-video --pro
 cd tools/runstatus && pnpm exec playwright test tour-video --project=chromium
 
 # 3. (optional) GIF + contact sheet — the MP4 is already produced by step 2
-S=docs/skills/kitsoki-ui-demo/scripts
+S=.agents/skills/kitsoki-ui-demo/scripts
 $S/render.sh .artifacts/tour-video/tour-video-demo.mp4
 ```
 
@@ -352,11 +352,11 @@ an optional `.gif` + contact sheet, and numbered `NN-<step-id>.png` screenshots.
 To QA the recording against the tour scenarios:
 
 ```bash
-docs/skills/kitsoki-ui-qa/scripts/qa.sh \
+.agents/skills/kitsoki-ui-qa/scripts/qa.sh \
   .artifacts/tour-video/tour-video-demo.mp4 \
   --frames .artifacts/tour-video \
-  --feature docs/skills/kitsoki-ui-qa/templates/tour-feature.md \
-  --scenarios docs/skills/kitsoki-ui-qa/templates/tour-scenarios.yaml
+  --feature .agents/skills/kitsoki-ui-qa/templates/tour-feature.md \
+  --scenarios .agents/skills/kitsoki-ui-qa/templates/tour-scenarios.yaml
 ```
 
 The `--frames` flag passes the labeled PNGs directly (one per step, highest
@@ -436,7 +436,7 @@ for an actual client/CI capture.
 - Onboarding tour spec + manifest: `tour-video.spec.ts` + `src/tour/manifest.ts`
 - Tour robustness test: `tools/runstatus/tests/playwright/tour-onboarding.spec.ts`
 - Full-product walkthrough spec: `tools/runstatus/tests/playwright/multi-story.spec.ts`
-- Tour QA templates: `docs/skills/kitsoki-ui-qa/templates/tour-{feature,scenarios}.*`
+- Tour QA templates: `.agents/skills/kitsoki-ui-qa/templates/tour-{feature,scenarios}.*`
 - Shared helpers (video→MP4, server, pacing): `tests/playwright/_helpers/server.ts`
 - Playwright config + globalSetup: `tools/runstatus/playwright.config.ts`,
   `tools/runstatus/tests/playwright/_helpers/`
@@ -445,8 +445,9 @@ for an actual client/CI capture.
 
 ## Maintenance
 
-Exposed to Claude Code via a symlink (skills under `docs/` aren't auto-discovered):
+Codex discovers this skill directly. Refresh the project-local Claude Code
+symlink after adding or moving skills:
 
 ```
-ln -s "$(pwd)/docs/skills/kitsoki-ui-demo" ~/.claude/skills/kitsoki-ui-demo
+make setup
 ```

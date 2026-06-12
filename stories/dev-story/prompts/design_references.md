@@ -59,7 +59,7 @@ repo's docs and skip any path below that does not exist):
 
 - `docs/proposals/templates/` and `docs/proposals/README.md` — the
   proposal spine and lifecycle the draft must follow;
-- `docs/skills/proposal-authoring/SKILL.md` — the authoring discipline;
+- `.agents/skills/proposal-authoring/SKILL.md` — the authoring discipline;
 - `docs/proposals/process-design.md` — the process-design methodology;
 - the **gold-standard stories** (`stories/prd/`, `stories/bugfix/`) and
   `docs/stories/` when the change is story-shaped;

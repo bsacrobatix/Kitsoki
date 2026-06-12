@@ -97,7 +97,7 @@ is the host-stub source the demo video drives.
 
 A tour-narrated walkthrough of the full PRD → Design conversation — driven
 entirely through the chat UI against the no-LLM flow above — records via the
-[`kitsoki-ui-demo`](../../docs/skills/kitsoki-ui-demo/SKILL.md) skill:
+[`kitsoki-ui-demo`](../../.agents/skills/kitsoki-ui-demo/SKILL.md) skill:
 
 - manifest: `tools/runstatus/src/tour/gears-prd-design-manifest.ts`
 - spec:     `tools/runstatus/tests/playwright/gears-prd-design.spec.ts`

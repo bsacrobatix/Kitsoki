@@ -16,9 +16,8 @@
 #   - ffmpeg         (make demo-tour)
 #   - gh             (GitHub integration)
 #
-# Also links the project skills (`docs/skills/<name>/SKILL.md`) into
-# `.claude/skills/<name>` so Claude Code discovers them — Claude Code does not
-# auto-discover skills under `docs/` (see CLAUDE.md).
+# Also links the project skills (`.agents/skills/<name>/SKILL.md`) into
+# `.claude/skills/<name>` so Claude Code discovers the same skills as Codex.
 #
 # Run via `make setup`. Re-run any time; safe to run repeatedly.
 set -euo pipefail
@@ -171,15 +170,15 @@ install_optional() {
 }
 
 # --- project skills --------------------------------------------------------
-# Link docs/skills/<name> → .claude/skills/<name> (relative symlinks) so Claude
-# Code picks them up. Idempotent: refreshes our own symlinks, never clobbers a
-# real file/dir a human may have placed there.
+# Link .agents/skills/<name> → .claude/skills/<name> (relative symlinks) so
+# Claude Code picks them up. Idempotent: refreshes our own symlinks, never
+# clobbers a real file/dir a human may have placed there.
 install_skills() {
 	local root src dst
 	root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-	src="$root/docs/skills"
+	src="$root/.agents/skills"
 	dst="$root/.claude/skills"
-	[ -d "$src" ] || { warn "no docs/skills dir; skipping skill links"; return; }
+	[ -d "$src" ] || { warn "no .agents/skills dir; skipping skill links"; return; }
 	mkdir -p "$dst"
 	local n=0 name link
 	for dir in "$src"/*/; do
@@ -192,29 +191,35 @@ install_skills() {
 			warn "skills: $link exists and is not a symlink — leaving as-is"
 			continue
 		fi
-		ln -s "../../docs/skills/$name" "$link"
+		ln -s "../../.agents/skills/$name" "$link"
 		n=$((n + 1))
 	done
 	log "linked $n project skill(s) into .claude/skills/"
 }
 
 # --- main ------------------------------------------------------------------
-detect_os
-need_sudo
-[ "$PKG" = brew ] && ensure_brew
-pm_refresh
-install_required
-install_go
-install_node
-install_pnpm
-install_optional
-install_skills
+main() {
+	detect_os
+	need_sudo
+	[ "$PKG" = brew ] && ensure_brew
+	pm_refresh
+	install_required
+	install_go
+	install_node
+	install_pnpm
+	install_optional
+	install_skills
 
-log "setup complete"
-echo
-echo "Versions:"
-have go    && go version
-have node  && echo "node $(node -v)"
-have pnpm  && echo "pnpm $(pnpm -v)"
-echo
-echo "Next: run 'make install' (you may need a fresh shell so PATH changes take effect)."
+	log "setup complete"
+	echo
+	echo "Versions:"
+	have go    && go version
+	have node  && echo "node $(node -v)"
+	have pnpm  && echo "pnpm $(pnpm -v)"
+	echo
+	echo "Next: run 'make install' (you may need a fresh shell so PATH changes take effect)."
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+	main "$@"
+fi

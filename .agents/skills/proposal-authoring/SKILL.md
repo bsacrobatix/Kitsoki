@@ -180,11 +180,11 @@ remaining work.
 
 ## After adding a new template or skill
 
-Project skills under `docs/skills/` are exposed to Claude Code by a
-symlink (Claude Code doesn't auto-discover skills under `docs/`):
+Codex discovers project skills under `.agents/skills/` directly. Expose new
+skills to Claude Code through the project-local symlinks:
 
 ```
-ln -s "$(pwd)/docs/skills/proposal-authoring" ~/.claude/skills/proposal-authoring
+make setup
 ```
 
 If you add a **new template kind**, also: add a row to the which-template
