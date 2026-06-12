@@ -355,20 +355,17 @@ test("external-target PRD → Design — gears-rust", async () => {
     // The final step's "Done" closes the tour.
     await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 5000 });
 
-    // Deterministic scroll-coverage guard (no LLM): the conversation-heavy
-    // beats must each have been panned across MORE than one held stage — i.e.
-    // their conversation exceeded one screen and every slice was captured, not
-    // jumped past. A regression to instant-scroll-to-bottom collapses these to
-    // a single stage and fails here, catching the "scrolled too fast to read"
-    // bug in the deterministic test layer (the vision QA scenarios are the
-    // higher-level legibility check). gr-prd-clarify (two rounds + the
-    // preserved log) and gr-prd-draft (the full PRD) are reliably > 1 screen.
-    for (const beat of ["gr-prd-clarify", "gr-prd-draft"]) {
-      expect(
-        stageCounts[beat] ?? 0,
-        `chat beat "${beat}" must pan its conversation across >1 held stage (got ${stageCounts[beat]}) — content was scrolled past too fast`,
-      ).toBeGreaterThan(1);
-    }
+    // Deterministic guard (no LLM): every conversation turn must have been
+    // revealed one-at-a-time (input eased to top → reply eased through), each
+    // capturing its own held -in / -out frames. A regression that drops the
+    // per-turn reveal — or skips driving the walk — collapses this count and
+    // fails here, catching "scrolled too fast / not all turns shown" in the
+    // deterministic test layer (the vision QA scenarios are the higher-level
+    // legibility check). The full PRD → Design walk drives ~18 turns.
+    expect(
+      revealCount,
+      `expected the whole conversation to be revealed turn-by-turn (got ${revealCount} turns) — the natural per-turn scroll was skipped`,
+    ).toBeGreaterThanOrEqual(15);
   } catch (err) {
     onThrow(err);
     throw err;
