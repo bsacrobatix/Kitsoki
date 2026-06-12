@@ -51,22 +51,27 @@
             <div class="iv__thinking-avatar">A</div>
             <div class="iv__thinking-bubble">
               <div class="iv__thinking-role">Agent</div>
-              <template v-if="store.pendingStreamTools.length > 0">
-                <div
-                  v-for="(t, i) in store.pendingStreamTools"
-                  :key="i"
-                  class="iv__thinking-tool"
-                >
-                  <span class="iv__thinking-tool-name">{{ t.tool }}</span>
-                  <span v-if="t.preview" class="iv__thinking-tool-preview">{{ t.preview }}</span>
+              <!-- The live feed, in arrival order: thinking prose (🧠, like the
+                   TUI) interleaved with the tool calls it explains. Rendering
+                   from one ordered list is what keeps a thought ABOVE the tools
+                   that follow it — two separate buckets pushed every thought to
+                   the bottom as tool calls accumulated. -->
+              <template v-for="(item, i) in store.pendingStream" :key="i">
+                <div v-if="item.kind === 'tool'" class="iv__thinking-tool">
+                  <span class="iv__thinking-tool-name">{{ item.tool }}</span>
+                  <span v-if="item.preview" class="iv__thinking-tool-preview">{{ item.preview }}</span>
+                </div>
+                <div v-else class="iv__thinking-thought" data-testid="thinking-thought">
+                  <span class="iv__thinking-brain">🧠</span>
+                  <div
+                    class="iv__thinking-text"
+                    v-html="renderAgentMarkdown(item.text)"
+                  ></div>
                 </div>
               </template>
-              <div
-                v-if="store.pendingStreamText"
-                class="iv__thinking-text"
-                v-html="renderAgentMarkdown(store.pendingStreamText)"
-              ></div>
-              <div v-else class="iv__thinking-dots"><span>·</span><span>·</span><span>·</span></div>
+              <!-- Trailing dots while the turn is in flight: the bubble only
+                   exists mid-turn, so "more is coming" is always true here. -->
+              <div class="iv__thinking-dots"><span>·</span><span>·</span><span>·</span></div>
             </div>
           </div>
           <div v-if="store.terminal" class="iv__done-note">
@@ -557,6 +562,8 @@ function onEventSelect(index: number): void {
 }
 
 .iv__thinking-tool-name {
+  flex: 0 0 auto;
+  white-space: nowrap;
   font-weight: 600;
   color: #2563eb;
 }
@@ -567,6 +574,21 @@ function onEventSelect(index: number): void {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 60ch;
+}
+
+/* One thinking item: brain glyph beside the prose, like the TUI's "🧠 …"
+   lines. Margins give a thought breathing room from the tool rows around it. */
+.iv__thinking-thought {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45em;
+  margin: 4px 0;
+}
+
+.iv__thinking-brain {
+  flex: 0 0 auto;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .iv__thinking-text {

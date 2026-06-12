@@ -161,6 +161,11 @@ loop:
 				// the thought first, then one breadcrumb per tool — never
 				// one-or-the-other, or the prose (e.g. a fenced JSON reply)
 				// leaks away or the tools collapse into a single line.
+				// Extended-thinking prose rides its own field (see
+				// StreamEvent.Thinking); emit it ahead of the narration.
+				if ev.Thinking != "" {
+					emit(metaStreamFrame{Type: "delta", Text: ev.Thinking})
+				}
 				if ev.Text != "" {
 					emit(metaStreamFrame{Type: "delta", Text: ev.Text})
 				}

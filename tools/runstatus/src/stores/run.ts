@@ -18,7 +18,25 @@ export interface TranscriptEntry {
   text: string;
   /** The agent's typed view for this turn (when the result carried one). */
   typedView?: View;
+  /**
+   * The turn's live thinking/tool feed, preserved when the turn streamed.
+   * Rendered collapsed inside the agent bubble so the activity that produced
+   * the reply stays reviewable after the final view replaces the live bubble.
+   */
+  stream?: StreamItem[];
 }
+
+/**
+ * One item of the live turn-stream feed, in ARRIVAL ORDER. The server emits
+ * one "delta" frame per assistant thought and one "tool" frame per tool call,
+ * already interleaved the way the model produced them; keeping a single
+ * ordered list preserves that — splitting thoughts and tools into separate
+ * buckets (the old shape) re-ordered the feed so every tool call rendered
+ * above the thinking it followed.
+ */
+export type StreamItem =
+  | { kind: "thinking"; text: string }
+  | { kind: "tool"; tool: string; preview: string };
 
 export const useRunStore = defineStore("run", () => {
   // ---- state ----
@@ -33,9 +51,8 @@ export const useRunStore = defineStore("run", () => {
   // ---- conversational / write-side state ----
   // transcript is the ordered user↔agent exchange driven by the write RPCs.
   const transcript = ref<TranscriptEntry[]>([]);
-  // Streaming state: accumulated while a turn-stream is in flight.
-  const pendingStreamText = ref<string>("");
-  const pendingStreamTools = ref<{ tool: string; preview: string }[]>([]);
+  // Streaming state: the ordered thinking/tool feed of the in-flight turn.
+  const pendingStream = ref<StreamItem[]>([]);
   // currentView is the latest TurnResult (the current room's view + menu).
   const currentView = ref<TurnResult | null>(null);
   // allowedIntents is the enriched per-intent menu of the current room.
@@ -199,13 +216,19 @@ export const useRunStore = defineStore("run", () => {
    * turn's state if it would rewind — the result.state IS the current state in
    * every mode, so it is always safe to mirror.
    */
-  function applyTurnResult(result: TurnResult, streamedText?: string): void {
+  function applyTurnResult(
+    result: TurnResult,
+    streamedText?: string,
+    stream?: StreamItem[]
+  ): void {
     currentView.value = result;
     if (result.state) currentStatePath.value = result.state;
     terminal.value = result.mode === "completed";
-    // Prefer the captured streaming text (oracle narration) over the static
-    // view text — it's what the agent actually said during the turn.
-    const text = streamedText?.trim() || agentText(result);
+    // The bubble text is the final room view; the streamed narration is only
+    // the FALLBACK for view-less turns. (It used to be preferred — the only
+    // way to keep it at all — but now the full feed survives on `stream`, so
+    // preferring it would render the thinking twice and the view never.)
+    const text = agentText(result) || streamedText?.trim() || "";
     const hasElements = (result.typed_view?.Elements?.length ?? 0) > 0;
     // Skip a content-less agent turn (e.g. a terminal transition whose target
     // renders no view) so the transcript doesn't trail an empty bubble.
@@ -214,6 +237,9 @@ export const useRunStore = defineStore("run", () => {
         role: "agent",
         text,
         typedView: result.typed_view,
+        // Keep the turn's live feed so the bubble can offer it collapsed —
+        // without this the activity vanishes the moment the view renders.
+        ...(stream && stream.length > 0 ? { stream } : {}),
       });
     }
   }
@@ -239,6 +265,59 @@ export const useRunStore = defineStore("run", () => {
   }
 
   /**
+   * Run one streamed turn against a LiveSource: reset the pending feed, append
+   * each delta/tool frame in arrival order, and return the final TurnResult
+   * plus the turn's concatenated thinking prose (preferred over the static
+   * view text as the agent's transcript bubble) and the feed itself (kept on
+   * the transcript entry for collapsed display). The pending feed is cleared
+   * on the way out — the live bubble only exists while the turn is in flight.
+   */
+  async function runTurnStream(
+    live: LiveSource,
+    sessionId: string,
+    method: "turn" | "submit",
+    params: { input?: string; intent?: string; slots?: Record<string, unknown> }
+  ): Promise<{ result: TurnResult; streamedText: string; stream: StreamItem[] }> {
+    pendingStream.value = [];
+    try {
+      const result = await live.turnStream(sessionId, method, params, (ev) => {
+        if (ev.type === "delta" && ev.text) {
+          // Delta granularity varies by sender: claude emits one COMPLETE
+          // thought per frame, while chunked senders (the no-LLM stub) emit
+          // word fragments with trailing spaces. Consecutive deltas merge
+          // into one thinking item either way — a fragment (prior text ends
+          // in whitespace) continues inline, a complete thought starts a new
+          // paragraph. A tool frame ends the run, so the next thought gets
+          // its own item below that tool.
+          const last = pendingStream.value[pendingStream.value.length - 1];
+          if (last?.kind === "thinking") {
+            last.text += (/\s$/.test(last.text) ? "" : "\n\n") + ev.text;
+          } else {
+            pendingStream.value = [
+              ...pendingStream.value,
+              { kind: "thinking", text: ev.text },
+            ];
+          }
+        } else if (ev.type === "tool" && ev.tool) {
+          pendingStream.value = [
+            ...pendingStream.value,
+            { kind: "tool", tool: ev.tool, preview: ev.preview ?? "" },
+          ];
+        }
+      });
+      // Capture the feed before the finally clears the ref (clearing
+      // reassigns the array, so this reference stays intact).
+      const stream = pendingStream.value;
+      const streamedText = stream
+        .flatMap((it) => (it.kind === "thinking" ? [it.text] : []))
+        .join("\n\n");
+      return { result, streamedText, stream };
+    } finally {
+      pendingStream.value = [];
+    }
+  }
+
+  /**
    * Submit an explicit intent (+ slots): push a user transcript entry, advance
    * the session, and apply the resulting view. Streams oracle progress via SSE
    * when the source supports it (LiveSource).
@@ -253,30 +332,19 @@ export const useRunStore = defineStore("run", () => {
     transcript.value.push({ role: "user", text: userText(intent, slots, displayLabel) });
     let result: TurnResult;
     let capturedStream = "";
+    let capturedItems: StreamItem[] | undefined;
     if ("turnStream" in source) {
-      const live = source as LiveSource;
-      pendingStreamText.value = "";
-      pendingStreamTools.value = [];
-      try {
-        result = await live.turnStream(sessionId, "submit", { intent, slots }, (ev) => {
-          if (ev.type === "delta" && ev.text) {
-            pendingStreamText.value += ev.text;
-          } else if (ev.type === "tool" && ev.tool) {
-            pendingStreamTools.value = [
-              ...pendingStreamTools.value,
-              { tool: ev.tool, preview: ev.preview ?? "" },
-            ];
-          }
-        });
-        capturedStream = pendingStreamText.value;
-      } finally {
-        pendingStreamText.value = "";
-        pendingStreamTools.value = [];
-      }
+      const out = await runTurnStream(source as LiveSource, sessionId, "submit", {
+        intent,
+        slots,
+      });
+      result = out.result;
+      capturedStream = out.streamedText;
+      capturedItems = out.stream;
     } else {
       result = await source.submit(sessionId, intent, slots);
     }
-    applyTurnResult(result, capturedStream);
+    applyTurnResult(result, capturedStream, capturedItems);
     return result;
   }
 
@@ -293,30 +361,18 @@ export const useRunStore = defineStore("run", () => {
     transcript.value.push({ role: "user", text });
     let result: TurnResult;
     let capturedStream = "";
+    let capturedItems: StreamItem[] | undefined;
     if ("turnStream" in source) {
-      const live = source as LiveSource;
-      pendingStreamText.value = "";
-      pendingStreamTools.value = [];
-      try {
-        result = await live.turnStream(sessionId, "turn", { input: text }, (ev) => {
-          if (ev.type === "delta" && ev.text) {
-            pendingStreamText.value += ev.text;
-          } else if (ev.type === "tool" && ev.tool) {
-            pendingStreamTools.value = [
-              ...pendingStreamTools.value,
-              { tool: ev.tool, preview: ev.preview ?? "" },
-            ];
-          }
-        });
-        capturedStream = pendingStreamText.value;
-      } finally {
-        pendingStreamText.value = "";
-        pendingStreamTools.value = [];
-      }
+      const out = await runTurnStream(source as LiveSource, sessionId, "turn", {
+        input: text,
+      });
+      result = out.result;
+      capturedStream = out.streamedText;
+      capturedItems = out.stream;
     } else {
       result = await source.sendTurn(sessionId, text);
     }
-    applyTurnResult(result, capturedStream);
+    applyTurnResult(result, capturedStream, capturedItems);
     return result;
   }
 
@@ -388,8 +444,7 @@ export const useRunStore = defineStore("run", () => {
     transcript,
     currentView,
     allowedIntents,
-    pendingStreamText,
-    pendingStreamTools,
+    pendingStream,
     // actions
     hydrate,
     rehydrate,

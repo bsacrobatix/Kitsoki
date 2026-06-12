@@ -59,7 +59,13 @@ type StreamEvent struct {
 	// not Preview — clipping a thought mid-sentence is a visible bug.
 	// Empty for tool-only assistant events, system events, and the
 	// terminal result event.
-	Text      string
+	Text string
+	// Thinking is the extended-thinking prose for this event (claude
+	// `{"type":"thinking"}` content blocks), full and untruncated.
+	// Separate from Text — Text doubles as the reply-assembly fallback
+	// and thinking is never part of the model's reply. Surfaces that
+	// show reasoning (the 🧠 rows) must render BOTH, thinking first.
+	Thinking  string
 	SessionID string  // claude session id (system.init / result events)
 	IsResult  bool    // true on the terminal result event
 	CostUSD   float64 // result events only (0 otherwise)

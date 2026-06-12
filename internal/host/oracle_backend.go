@@ -52,6 +52,12 @@ type classifiedEvent struct {
 	// Text is the assistant narration / reasoning prose for this event, full
 	// and untruncated. Empty for tool-only, setup, and terminal events.
 	Text string
+	// Thinking is the extended-thinking prose for this event (claude
+	// `{"type":"thinking"}` content blocks), full and untruncated. Kept
+	// SEPARATE from Text: display surfaces render both as reasoning, but
+	// Text also feeds the reply-assembly fallback and thinking is never
+	// part of the model's reply.
+	Thinking string
 	// Tool / ToolArgs describe the FIRST tool invocation in this event (a
 	// compact preview of its args). Tools holds every tool invocation in
 	// declaration order. Empty for non-tool events.

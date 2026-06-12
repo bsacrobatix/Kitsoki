@@ -391,6 +391,9 @@ live overlay, so only anchor to elements that exist there (e.g. `view-mode-tabs`
   `tools/runstatus/tests/playwright/agent-actions-video.spec.ts` +
   `tools/runstatus/src/tour/agent-actions-manifest.ts`
 - Sibling feature tour: `trace-features-video.spec.ts` + `src/tour/trace-manifest.ts`
+- Sibling feature tour (cassette slow-play streaming): `chat-stream-video.spec.ts` +
+  `src/tour/chat-stream-manifest.ts` — stays in the MAIN CHAT and films the live
+  turn-stream (set `KITSOKI_CASSETTE_SLOWPLAY`; the spec defaults it to 1.5)
 - Onboarding tour spec + manifest: `tour-video.spec.ts` + `src/tour/manifest.ts`
 - Tour robustness test: `tools/runstatus/tests/playwright/tour-onboarding.spec.ts`
 - Full-product walkthrough spec: `tools/runstatus/tests/playwright/multi-story.spec.ts`

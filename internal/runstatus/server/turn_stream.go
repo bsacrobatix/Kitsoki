@@ -168,7 +168,13 @@ loop:
 				// calls it explains. Emit the thought first, then one
 				// breadcrumb per tool — emitting one-or-the-other drops the
 				// prose (e.g. a fenced JSON reply) or collapses parallel
-				// tool calls into a single line.
+				// tool calls into a single line. Extended-thinking prose
+				// rides a separate field (it must never reach the reply
+				// assembly) but is the same reasoning to a reader — emit it
+				// ahead of the narration it precedes in the message.
+				if ev.Thinking != "" {
+					emit(turnStreamFrame{Type: "delta", Text: ev.Thinking})
+				}
 				if ev.Text != "" {
 					emit(turnStreamFrame{Type: "delta", Text: ev.Text})
 				}

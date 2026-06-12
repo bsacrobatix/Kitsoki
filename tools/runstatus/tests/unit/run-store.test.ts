@@ -446,6 +446,127 @@ describe("useRunStore — write-side actions", () => {
     expect(store.transcript[1]).toMatchObject({ role: "agent", text: "Got it." });
   });
 
+  // ---- live turn-stream feed ordering ----
+  // The streaming bubble must show thinking and tool calls in ARRIVAL order
+  // (a thought stays ABOVE the tools that follow it, 🧠-style like the TUI).
+  // Regression: the old store split deltas and tools into two buckets, so the
+  // view rendered every tool above the thinking and "pushed it to the bottom".
+  it("sendText over a LiveSource keeps the thinking/tool feed in arrival order", async () => {
+    let resolveTurn!: (r: TurnResult) => void;
+    const src = writeSource() as DataSource & {
+      turnStream: (
+        sid: string,
+        method: string,
+        params: unknown,
+        onEvent: (ev: { type: string; text?: string; tool?: string; preview?: string }) => void
+      ) => Promise<TurnResult>;
+    };
+    src.turnStream = (_sid, _method, _params, onEvent) => {
+      onEvent({ type: "delta", text: "Reading the failing test first." });
+      onEvent({ type: "tool", tool: "Read", preview: "bar_test.go" });
+      onEvent({ type: "tool", tool: "Grep", preview: "func Bar" });
+      onEvent({ type: "delta", text: "The off-by-one is in the loop bound." });
+      onEvent({ type: "tool", tool: "Edit", preview: "bar.go" });
+      return new Promise<TurnResult>((resolve) => {
+        resolveTurn = resolve;
+      });
+    };
+
+    const store = useRunStore();
+    const turn = store.sendText(src, "sess-1", "fix it");
+
+    // Mid-flight: one ordered feed, thoughts interleaved with their tools.
+    expect(
+      store.pendingStream.map((it) =>
+        it.kind === "thinking" ? `think:${it.text}` : `tool:${it.tool}`
+      )
+    ).toEqual([
+      "think:Reading the failing test first.",
+      "tool:Read",
+      "tool:Grep",
+      "think:The off-by-one is in the loop bound.",
+      "tool:Edit",
+    ]);
+
+    resolveTurn(turnResult({ view: "static view" }));
+    await turn;
+
+    // Live feed cleared, but the turn's activity SURVIVES on the transcript
+    // entry (rendered collapsed in the agent bubble) — it must not vanish
+    // when the final view renders. The bubble text is the final view.
+    expect(store.pendingStream).toEqual([]);
+    expect(store.transcript[1]!.text).toBe("static view");
+    expect(
+      store.transcript[1]!.stream!.map((it) =>
+        it.kind === "thinking" ? `think:${it.text}` : `tool:${it.tool}`
+      )
+    ).toEqual([
+      "think:Reading the failing test first.",
+      "tool:Read",
+      "tool:Grep",
+      "think:The off-by-one is in the loop bound.",
+      "tool:Edit",
+    ]);
+  });
+
+  it("merges consecutive deltas into one thinking item (chunks inline, thoughts as paragraphs)", async () => {
+    let resolveTurn!: (r: TurnResult) => void;
+    const src = writeSource() as DataSource & { turnStream: unknown };
+    (src as { turnStream: unknown }).turnStream = (
+      _sid: string,
+      _method: string,
+      _params: unknown,
+      onEvent: (ev: { type: string; text?: string; tool?: string }) => void
+    ) => {
+      // Chunked sender: fragments with trailing spaces reassemble inline.
+      onEvent({ type: "delta", text: "Hello " });
+      onEvent({ type: "delta", text: "world." });
+      // A complete thought after a complete thought becomes a new paragraph.
+      onEvent({ type: "delta", text: "Second thought." });
+      onEvent({ type: "tool", tool: "Bash" });
+      // A tool frame ends the run: the next thought is its own item.
+      onEvent({ type: "delta", text: "After the tool." });
+      return new Promise<TurnResult>((resolve) => {
+        resolveTurn = resolve;
+      });
+    };
+
+    const store = useRunStore();
+    const turn = store.sendText(src, "sess-1", "go");
+
+    expect(store.pendingStream).toEqual([
+      { kind: "thinking", text: "Hello world.\n\nSecond thought." },
+      { kind: "tool", tool: "Bash", preview: "" },
+      { kind: "thinking", text: "After the tool." },
+    ]);
+
+    resolveTurn(turnResult({ view: "v" }));
+    await turn;
+    // Bubble text is the final view; the merged feed survives on the entry.
+    expect(store.transcript[1]!.text).toBe("v");
+    expect(store.transcript[1]!.stream).toEqual([
+      { kind: "thinking", text: "Hello world.\n\nSecond thought." },
+      { kind: "tool", tool: "Bash", preview: "" },
+      { kind: "thinking", text: "After the tool." },
+    ]);
+  });
+
+  it("falls back to the streamed thinking as bubble text on a view-less turn", async () => {
+    const src = writeSource() as DataSource & { turnStream: unknown };
+    (src as { turnStream: unknown }).turnStream = (
+      _sid: string,
+      _method: string,
+      _params: unknown,
+      onEvent: (ev: { type: string; text?: string }) => void
+    ) => {
+      onEvent({ type: "delta", text: "Only narration this turn." });
+      return Promise.resolve(turnResult({ view: undefined }));
+    };
+    const store = useRunStore();
+    await store.sendText(src, "sess-1", "go");
+    expect(store.transcript[1]!.text).toBe("Only narration this turn.");
+  });
+
   // ---- session-switch isolation (bug: transcripts mixed across sessions) ----
   // When the operator switches from one session's chat to another, the store is
   // a singleton — hydrating the second session must drop the first session's

@@ -3193,6 +3193,16 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 	ev := msg.Event
 	switch ev.Type {
 	case "assistant":
+		if ev.Thinking != "" {
+			// Extended-thinking prose. Unlike pure narration (which is
+			// deferred below because the FINAL reply also arrives as a
+			// plain assistant text message), thinking is never the reply —
+			// render it immediately, above whatever this event also
+			// carries. Any earlier deferred thought is proven intermediate
+			// by this fresh assistant event, so flush it first.
+			m = m.flushPendingThought()
+			m.transcript.AppendMetaThinking(ev.Thinking)
+		}
 		if ev.Tool != "" {
 			// A thought paired with a tool call is unambiguously
 			// intermediate — a tool round-trip still follows, so it is

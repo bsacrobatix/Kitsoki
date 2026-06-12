@@ -188,3 +188,82 @@ func TestOracleStream_ParallelToolsAllSurface(t *testing.T) {
 		}
 	}
 }
+
+// thinkingBlockRunner emits a stream-json transcript using extended-thinking
+// `{"type":"thinking"}` content blocks (the real claude shape when thinking is
+// enabled): a thinking-only message, a thinking+tool message, a narration text
+// message — and NO terminal result event, so the reply must come from the
+// assembled-text fallback.
+func thinkingBlockRunner(thoughtA, thoughtB, narration string) host.ClaudeRunner {
+	return func(_ context.Context, _ []string, _ string, _ string) (host.ClaudeRun, error) {
+		lines := []string{
+			`{"type":"system","subtype":"init","session_id":"sess-think-1"}`,
+			`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":` + mustJSON(thoughtA) + `}]}}`,
+			`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":` + mustJSON(thoughtB) + `},` +
+				`{"type":"tool_use","name":"Edit","input":{"file_path":"bar.go"}}]}}`,
+			`{"type":"assistant","message":{"content":[{"type":"text","text":` + mustJSON(narration) + `}]}}`,
+		}
+		return host.ClaudeRun{Stdout: strings.Join(lines, "\n") + "\n"}, nil
+	}
+}
+
+// TestOracleStream_ThinkingBlocksSurface asserts that extended-thinking
+// content blocks reach the StreamSink on the dedicated Thinking field —
+// in full, alongside any tool_use in the same message — while staying OUT
+// of Text, so the reply-assembly fallback (which accumulates Text) is
+// never polluted with reasoning prose. Regression: classifyStreamEvent
+// only extracted `text` blocks, so thinking-block thoughts silently
+// vanished from every live surface (web chat, TUI, meta overlay).
+func TestOracleStream_ThinkingBlocksSurface(t *testing.T) {
+	t.Parallel()
+
+	const thoughtA = "The off-by-one is in the loop bound."
+	const thoughtB = "Fix the bound, then re-run the tests."
+	const narration = "Edited the loop bound; tests pass."
+
+	sink := &memSink{}
+	stream := &captureStreamSink{}
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "p.md")
+	if err := os.WriteFile(promptPath, []byte("go"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	ctx := host.WithStreamSink(oracleCtxForTest(sink), stream)
+	ctx = host.WithClaudeRunner(ctx, thinkingBlockRunner(thoughtA, thoughtB, narration))
+
+	res, err := host.OracleAskHandler(ctx, map[string]any{"prompt_path": promptPath})
+	if err != nil {
+		t.Fatalf("OracleAskHandler: %v", err)
+	}
+
+	var thinkings []string
+	for _, ev := range stream.all() {
+		if ev.Type != "assistant" {
+			continue
+		}
+		if ev.Thinking != "" {
+			thinkings = append(thinkings, ev.Thinking)
+			if ev.Text != "" {
+				t.Errorf("thinking event leaked into Text: %q", ev.Text)
+			}
+		}
+		// The thinking+tool message must surface BOTH.
+		if ev.Thinking == thoughtB && ev.Tool != "Edit" {
+			t.Errorf("thinking+tool event lost its tool: Tool=%q", ev.Tool)
+		}
+	}
+	if len(thinkings) != 2 || thinkings[0] != thoughtA || thinkings[1] != thoughtB {
+		t.Fatalf("thinking blocks did not surface in order: %q", thinkings)
+	}
+
+	// No result event → the reply is the assembled-Text fallback. It must
+	// carry the narration and NONE of the thinking prose.
+	out, _ := res.Data["stdout"].(string)
+	if !strings.Contains(out, narration) {
+		t.Fatalf("fallback reply lost the narration: %q", out)
+	}
+	if strings.Contains(out, thoughtA) || strings.Contains(out, thoughtB) {
+		t.Fatalf("fallback reply polluted with thinking prose: %q", out)
+	}
+}

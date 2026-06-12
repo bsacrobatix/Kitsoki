@@ -75,6 +75,50 @@ describe("ChatTranscript", () => {
     expect(html).toContain("&lt;img");
   });
 
+  it("renders a preserved stream feed as a collapsed activity section, in order", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          {
+            role: "agent",
+            text: "Final room view.",
+            stream: [
+              { kind: "thinking", text: "I'll scan the docs first." },
+              { kind: "tool", tool: "ToolSearch", preview: "select:WebSearch" },
+              { kind: "tool", tool: "Bash", preview: "find … | grep …" },
+              { kind: "thinking", text: "The spec lives in proposals." },
+              { kind: "tool", tool: "Read", preview: "docs/proposals/x.md" },
+            ],
+          },
+        ],
+      },
+    });
+    const activity = wrapper.find("[data-testid='chat-activity']");
+    expect(activity.exists()).toBe(true);
+    // Collapsed by default: a <details> WITHOUT the open attribute, summary
+    // counts the activity.
+    expect(activity.element.hasAttribute("open")).toBe(false);
+    expect(activity.find(".chat-activity__summary").text()).toBe(
+      "🧠 2 thoughts · 3 tool calls"
+    );
+    // The feed preserves arrival order: thought, tool, tool, thought, tool.
+    const rows = activity.findAll(".chat-activity__thought, .chat-activity__tool");
+    expect(
+      rows.map((r) => (r.classes().includes("chat-activity__thought") ? "think" : "tool"))
+    ).toEqual(["think", "tool", "tool", "think", "tool"]);
+    expect(rows[0]!.text()).toContain("🧠");
+    expect(rows[0]!.text()).toContain("I'll scan the docs first.");
+    // The final view still renders as the bubble body.
+    expect(wrapper.find(".chat-view").text()).toContain("Final room view.");
+  });
+
+  it("omits the activity section when an entry carries no stream", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: { transcript: [{ role: "agent", text: "Plain view." }] },
+    });
+    expect(wrapper.find("[data-testid='chat-activity']").exists()).toBe(false);
+  });
+
   it("renders user text literally, not as markdown", () => {
     const wrapper = mount(ChatTranscript, {
       props: {

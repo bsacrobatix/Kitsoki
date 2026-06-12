@@ -498,6 +498,9 @@ func emitClassified(ctx context.Context, ce classifiedEvent) {
 	if previewSrc == "" {
 		previewSrc = ce.Text
 	}
+	if previewSrc == "" {
+		previewSrc = ce.Thinking
+	}
 	if ce.IsResult && ce.ResultText != "" {
 		previewSrc = ce.ResultText
 	}
@@ -515,6 +518,7 @@ func emitClassified(ctx context.Context, ce classifiedEvent) {
 			// Full narration prose, untruncated — the transcript word-
 			// wraps it. Cutting it mid-sentence was the truncation bug.
 			Text:      ce.Text,
+			Thinking:  ce.Thinking,
 			SessionID: ce.SessionID,
 			IsResult:  ce.IsResult,
 		}
@@ -613,7 +617,13 @@ func usageInt(usage map[string]any, key string) int {
 // clobber each other. When a message has no prose but does carry a
 // tool_result (a "user" event), its content backfills text so the slog
 // trace and reply-assembly fallback still see something.
-func classifyStreamEvent(ev map[string]any) (text, tool, toolArgs string, isResult bool, resultText, sessionID string) {
+//
+// thinking is the extended-thinking prose (`{"type":"thinking"}` content
+// blocks), joined and untruncated, kept SEPARATE from text: the display
+// surfaces render both as reasoning, but text also feeds the reply
+// assembly fallback (assembledText) and thinking is never part of the
+// model's reply — folding it in would corrupt a fallback reply.
+func classifyStreamEvent(ev map[string]any) (text, thinking, tool, toolArgs string, isResult bool, resultText, sessionID string) {
 	evType, _ := ev["type"].(string)
 	if sid, _ := ev["session_id"].(string); sid != "" {
 		sessionID = sid
@@ -624,7 +634,7 @@ func classifyStreamEvent(ev map[string]any) (text, tool, toolArgs string, isResu
 	case "assistant", "user":
 		msg, _ := ev["message"].(map[string]any)
 		contentRaw, _ := msg["content"].([]any)
-		var texts []string
+		var texts, thinkings []string
 		var firstTool, firstResult string
 		for _, c := range contentRaw {
 			block, _ := c.(map[string]any)
@@ -633,6 +643,10 @@ func classifyStreamEvent(ev map[string]any) (text, tool, toolArgs string, isResu
 			case "text":
 				if t, _ := block["text"].(string); t != "" {
 					texts = append(texts, t)
+				}
+			case "thinking":
+				if t, _ := block["thinking"].(string); t != "" {
+					thinkings = append(thinkings, t)
 				}
 			case "tool_use":
 				if n, _ := block["name"].(string); n != "" && firstTool == "" {
@@ -661,6 +675,7 @@ func classifyStreamEvent(ev map[string]any) (text, tool, toolArgs string, isResu
 			}
 		}
 		text = strings.Join(texts, "\n")
+		thinking = strings.Join(thinkings, "\n")
 		if text == "" {
 			// No narration prose — fall back to the tool_result content
 			// so "user" events still carry a preview for the trace.
@@ -673,7 +688,7 @@ func classifyStreamEvent(ev map[string]any) (text, tool, toolArgs string, isResu
 			resultText = r
 		}
 	}
-	return text, tool, toolArgs, isResult, resultText, sessionID
+	return text, thinking, tool, toolArgs, isResult, resultText, sessionID
 }
 
 // assistantToolUses returns EVERY tool_use block in an assistant event,

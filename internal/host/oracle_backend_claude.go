@@ -30,13 +30,14 @@ func (claudeBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir 
 // loops performed inline before the backend seam, reading the Anthropic
 // stream-json event shapes.
 func (claudeBackend) Classify(ev map[string]any) classifiedEvent {
-	text, tool, toolArgs, isResult, resultText, sid := classifyStreamEvent(ev)
+	text, thinking, tool, toolArgs, isResult, resultText, sid := classifyStreamEvent(ev)
 	evType, _ := ev["type"].(string)
 	subtype, _ := ev["subtype"].(string)
 	ce := classifiedEvent{
 		Type:       evType,
 		Subtype:    subtype,
 		Text:       text,
+		Thinking:   thinking,
 		Tool:       tool,
 		ToolArgs:   toolArgs,
 		Tools:      assistantToolUses(ev),
