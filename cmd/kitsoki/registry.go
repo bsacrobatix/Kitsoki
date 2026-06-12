@@ -643,7 +643,7 @@ func (r *SessionRegistry) Staleness(_ context.Context, sessionID string) (stale 
 // untouched — a session keeps running against the story it was started with even
 // if that story's manifest changed or disappeared from the catalogue.
 func (r *SessionRegistry) Rescan() ([]server.StoryHeader, error) {
-	metas, err := webconfig.DiscoverStories(r.dirs)
+	metas, err := webconfig.DiscoverStories(r.dirs, buildImportResolver())
 	if err != nil {
 		return nil, err
 	}

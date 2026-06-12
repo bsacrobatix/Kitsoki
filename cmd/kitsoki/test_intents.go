@@ -117,6 +117,7 @@ Exit codes:
 				// This is correct behaviour: the recording only covers canonical phrasings, not
 				// every colloquial phrasing in the Mode 1 fixtures (which require a live LLM).
 				SkipOnRecordingMiss: harnessType == "static",
+				ImportResolver:      buildImportResolver(),
 			}
 
 			ctx := context.Background()

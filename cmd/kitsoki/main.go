@@ -44,6 +44,12 @@ var version = "0.0.1-scaffold"
 // so tests can construct an isolated root and call Execute() against captured
 // I/O without running the real os.Args/os.Exit dance.
 func newRootCmd() *cobra.Command {
+	// kitsokiRepoFlag backs the persistent --kitsoki-repo override. It points
+	// `@kitsoki/<name>` imports at a live kitsoki checkout instead of the
+	// embedded story library (see buildImportResolver). Empty → no override;
+	// the resolver falls through to on-disk discovery then the embedded copy.
+	var kitsokiRepoFlag string
+
 	root := &cobra.Command{
 		Use:   "kitsoki",
 		Short: "Kitsoki — deterministic LLM orchestrator",
@@ -69,6 +75,20 @@ See docs/ in the repo for the narrative documentation.`,
 		// any directory without the operator setting the env var. Runs for
 		// every subcommand (no child overrides PersistentPreRun).
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// --kitsoki-repo overrides $KITSOKI_REPO when given; either way the
+			// chosen value is exported so every downstream consumer — the
+			// import resolver's override branch (buildImportResolver), the
+			// engine-targeting meta modes, expandMetaCwd, and the subprocesses
+			// the agents spawn — reads one canonical location. The flag wins so
+			// an operator can point a single invocation at a checkout without
+			// mutating their persisted ~/.kitsoki/repo.
+			if kitsokiRepoFlag != "" {
+				abs := kitsokiRepoFlag
+				if a, err := filepath.Abs(kitsokiRepoFlag); err == nil {
+					abs = a
+				}
+				_ = os.Setenv(kitrepo.EnvVar, abs)
+			}
 			if os.Getenv(kitrepo.EnvVar) == "" {
 				if repo := kitrepo.Resolve(); repo != "" {
 					_ = os.Setenv(kitrepo.EnvVar, repo)
@@ -77,6 +97,11 @@ See docs/ in the repo for the narrative documentation.`,
 			return nil
 		},
 	}
+
+	// Persistent override for `@kitsoki/<name>` import resolution. Runs for
+	// every subcommand; see buildImportResolver for the precedence order.
+	root.PersistentFlags().StringVar(&kitsokiRepoFlag, "kitsoki-repo", "",
+		"path to a kitsoki source checkout; resolves @kitsoki/NAME imports against <path>/stories/NAME (overrides $KITSOKI_REPO and the embedded story library)")
 
 	root.AddCommand(versionCmd())
 	root.AddCommand(runCmd())
@@ -108,6 +133,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(exportStatusCmd())
 	root.AddCommand(statusCmd())
 	root.AddCommand(webCmd())
+	root.AddCommand(tourCmd())
 
 	return root
 }

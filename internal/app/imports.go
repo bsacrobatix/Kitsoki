@@ -57,12 +57,43 @@ var ReservedWorldKeys = map[string]struct{}{
 	"host_error": {},
 }
 
+// ImportResolver is an injected hook that resolves an `@kitsoki/<name>`
+// import source to an absolute manifest path. It is the seam through which the
+// `--kitsoki-repo` override AND the embedded story library reach the loader
+// WITHOUT a package global (DI per CLAUDE.md).
+//
+// name is the bare story name (`dev-story` for `@kitsoki/dev-story`).
+// importerDir is the directory of the manifest doing the import, so a resolver
+// that points at a live checkout can apply relative paths correctly.
+//
+// override distinguishes the resolver's two roles, which sit on OPPOSITE sides
+// of on-disk discovery (see resolveImportSource's order):
+//
+//   - override=true  → "the explicit --kitsoki-repo / KITSOKI_REPO override".
+//     Consulted BEFORE findRepoRoot so an operator's checkout always wins.
+//     A (path,nil) result is used; a ("",nil) result means "no override set,
+//     fall through"; a non-nil error means "override set but the story is
+//     missing there" and is surfaced (never silently swallowed).
+//   - override=false → "the embedded-library fallback". Consulted only AFTER
+//     findRepoRoot fails. A non-nil error there is the terminal failure.
+//
+// A nil resolver means neither override nor embedded fallback is configured:
+// the loader keeps today's behaviour and errors on a failed `@kitsoki/<name>`
+// lookup. The loader builds one closure that handles both calls.
+type ImportResolver func(name, importerDir string, override bool) (string, error)
+
 // resolveImports walks def.Imports and folds each imported child into def.
 // Errors are returned aggregated; the caller wraps in errors.Join.
 //
 // parents is the canonical-path stack of in-progress loads, used to detect
 // cycles. A repeated path produces a ValidationError naming the cycle.
-func resolveImports(def *AppDef, file, baseDir string, parents []string) []error {
+//
+// resolver is the injected embedded-library / --kitsoki-repo fallback for
+// `@kitsoki/<name>` sources; nil keeps the legacy error-on-missing behaviour.
+// It is threaded unchanged into every recursive child load so a base story
+// imported from the embedded library can itself import siblings via
+// `@kitsoki/<name>`.
+func resolveImports(def *AppDef, file, baseDir string, parents []string, resolver ImportResolver) []error {
 	if def == nil || len(def.Imports) == 0 {
 		return nil
 	}
@@ -83,7 +114,7 @@ func resolveImports(def *AppDef, file, baseDir string, parents []string) []error
 			continue
 		}
 
-		childPath, resolveErr := resolveImportSource(imp.Source, baseDir)
+		childPath, resolveErr := resolveImportSource(imp.Source, baseDir, resolver)
 		if resolveErr != nil {
 			errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf("imports.%s: %v", alias, resolveErr)})
 			continue
@@ -105,7 +136,7 @@ func resolveImports(def *AppDef, file, baseDir string, parents []string) []error
 
 		// Load the child manifest. Imports are recursive — the child's own
 		// imports are resolved before we fold it into the parent.
-		childDef, childErrs := loadImportedChild(childPath, append(parents, canonical))
+		childDef, childErrs := loadImportedChild(childPath, append(parents, canonical), resolver)
 		if len(childErrs) > 0 {
 			errs = append(errs, childErrs...)
 			continue
@@ -186,7 +217,7 @@ func appendUnique(list []string, v string) []string {
 
 // loadImportedChild reads, parses, and recursively resolves a child
 // manifest. The child's own include: and imports: are processed in turn.
-func loadImportedChild(path string, parents []string) (*AppDef, []error) {
+func loadImportedChild(path string, parents []string, resolver ImportResolver) (*AppDef, []error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, []error{&ValidationError{File: path, Message: fmt.Sprintf("read: %v", err)}}
@@ -197,7 +228,7 @@ func loadImportedChild(path string, parents []string) (*AppDef, []error) {
 		return nil, mergeErrs
 	}
 	// Recursively resolve the child's own imports BEFORE folding into parent.
-	if impErrs := resolveImports(def, path, baseDir, parents); len(impErrs) > 0 {
+	if impErrs := resolveImports(def, path, baseDir, parents, resolver); len(impErrs) > 0 {
 		return nil, impErrs
 	}
 	// Expand the child's phase templates so the parent sees concrete states.
@@ -208,14 +239,46 @@ func loadImportedChild(path string, parents []string) (*AppDef, []error) {
 }
 
 // resolveImportSource maps a `source:` value to an absolute manifest path.
-func resolveImportSource(src, importerDir string) (string, error) {
+//
+// For an `@kitsoki/<name>` source the resolution ORDER is:
+//
+//  1. the injected resolver's `--kitsoki-repo` / KITSOKI_REPO override
+//     (override=true) — checked FIRST so an explicit operator checkout always
+//     wins, and a missing story under that override is a hard error;
+//  2. a discovered on-disk kitsoki checkout (findRepoRoot walking up from
+//     importerDir) — the dev-checkout / dogfood path;
+//  3. the injected resolver's embedded-library fallback (override=false) —
+//     reached only when no override is set AND no on-disk root is found.
+//
+// The loader builds one closure serving both resolver calls; nil keeps the
+// legacy error-on-missing behaviour.
+func resolveImportSource(src, importerDir string, resolver ImportResolver) (string, error) {
 	if strings.HasPrefix(src, "@kitsoki/") {
 		name := strings.TrimPrefix(src, "@kitsoki/")
 		if name == "" || strings.ContainsAny(name, "/\\") {
 			return "", fmt.Errorf("source %q: invalid @kitsoki name", src)
 		}
+		// 1. Explicit override wins over everything, even an on-disk root.
+		if resolver != nil {
+			resolved, rErr := resolver(name, importerDir, true)
+			if rErr != nil {
+				return "", fmt.Errorf("source %q: %w", src, rErr)
+			}
+			if resolved != "" {
+				return resolved, nil
+			}
+		}
+		// 2. Discovered on-disk kitsoki checkout.
 		root, err := findRepoRoot(importerDir)
 		if err != nil {
+			// 3. No on-disk checkout: embedded-library fallback.
+			if resolver != nil {
+				resolved, rErr := resolver(name, importerDir, false)
+				if rErr != nil {
+					return "", fmt.Errorf("source %q: %w", src, rErr)
+				}
+				return resolved, nil
+			}
 			return "", fmt.Errorf("source %q: %w", src, err)
 		}
 		candidate := filepath.Join(root, "stories", name, "app.yaml")

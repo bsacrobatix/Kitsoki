@@ -95,6 +95,22 @@ func Load(path string) (*AppDef, error) {
 // level — that's the multi-layer compose path. This
 // entrypoint is the test seam below it.
 func LoadWithOverrides(path string, ifaceOverrides map[string]string) (*AppDef, error) {
+	return LoadWithResolver(path, ifaceOverrides, nil)
+}
+
+// LoadWithResolver is LoadWithOverrides plus an injected ImportResolver — the
+// DI seam (CLAUDE.md, no package globals) through which the `--kitsoki-repo`
+// override and the embedded story library reach the import system. A nil
+// resolver is identical to LoadWithOverrides: an `@kitsoki/<name>` source with
+// no on-disk kitsoki checkout errors as before. See [ImportResolver] and
+// resolveImportSource for the resolution order.
+//
+// Intended caller: cmd/kitsoki, which builds the resolver from the
+// `--kitsoki-repo` flag / KITSOKI_REPO env and basestories.Materialize, then
+// threads it into every load. The resolver is passed unchanged into recursive
+// child loads so an embedded base story can itself import siblings via
+// `@kitsoki/<name>`.
+func LoadWithResolver(path string, ifaceOverrides map[string]string, resolver ImportResolver) (*AppDef, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("load %s: %w", path, err)
@@ -122,7 +138,7 @@ func LoadWithOverrides(path string, ifaceOverrides map[string]string) (*AppDef, 
 	// metamode controller reads this list to auto-watch every file the
 	// loader actually touched.
 	merged.LoadedManifests = appendUnique(merged.LoadedManifests, canonical)
-	if importErrs := resolveImports(merged, path, baseDir, []string{canonical}); len(importErrs) > 0 {
+	if importErrs := resolveImports(merged, path, baseDir, []string{canonical}, resolver); len(importErrs) > 0 {
 		return nil, errors.Join(importErrs...)
 	}
 

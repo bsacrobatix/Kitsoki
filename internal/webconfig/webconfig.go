@@ -301,12 +301,18 @@ type StoryMeta struct {
 }
 
 // DiscoverStories walks each directory recursively, finds every file literally
-// named `app.yaml`, and loads it via app.Load. Each successful load yields one
-// StoryMeta whose Path is the absolute app.yaml path. A per-file load error is
-// logged via the standard logger and skipped — the walk continues so a single
-// malformed manifest never suppresses its valid siblings. The only error
+// named `app.yaml`, and loads it via app.LoadWithResolver. Each successful load
+// yields one StoryMeta whose Path is the absolute app.yaml path. A per-file load
+// error is logged via the standard logger and skipped — the walk continues so a
+// single malformed manifest never suppresses its valid siblings. The only error
 // returned is for a root directory that cannot be walked (e.g. unreadable).
-func DiscoverStories(dirs []string) ([]StoryMeta, error) {
+//
+// resolver is the injected ImportResolver (DI, no package global) through which
+// an `@kitsoki/<name>` import in a discovered manifest resolves against the
+// `--kitsoki-repo` override or the embedded story library — this is what lets
+// `kitsoki web` discover a vendored instance in a FOREIGN repo with no on-disk
+// kitsoki checkout. nil keeps the legacy error-on-missing behaviour.
+func DiscoverStories(dirs []string, resolver app.ImportResolver) ([]StoryMeta, error) {
 	var metas []StoryMeta
 	for _, dir := range dirs {
 		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -323,7 +329,7 @@ func DiscoverStories(dirs []string) ([]StoryMeta, error) {
 			if absErr != nil {
 				abs = path
 			}
-			def, loadErr := app.Load(abs)
+			def, loadErr := app.LoadWithResolver(abs, nil, resolver)
 			if loadErr != nil {
 				slog.Warn("webconfig: skipping malformed story", "path", abs, "err", loadErr)
 				return nil

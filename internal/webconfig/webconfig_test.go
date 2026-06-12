@@ -143,7 +143,7 @@ func TestDiscoverStories_NestedValidAndMalformed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	metas, err := DiscoverStories([]string{root})
+	metas, err := DiscoverStories([]string{root}, nil)
 	if err != nil {
 		t.Fatalf("DiscoverStories: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestDiscoverStories_NestedValidAndMalformed(t *testing.T) {
 }
 
 func TestDiscoverStories_UnreadableRootIsError(t *testing.T) {
-	_, err := DiscoverStories([]string{filepath.Join(t.TempDir(), "does-not-exist")})
+	_, err := DiscoverStories([]string{filepath.Join(t.TempDir(), "does-not-exist")}, nil)
 	if err == nil {
 		t.Fatal("expected an error for a nonexistent root dir")
 	}

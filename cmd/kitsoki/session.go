@@ -1411,7 +1411,11 @@ func publishAppDir(appPath string) {
 // %q: %w" wrapper so call-site diagnostics stay stable.
 func loadAppWithEnv(appPath string) (*app.AppDef, error) {
 	publishAppDir(appPath)
-	def, err := app.Load(appPath)
+	// Inject the @kitsoki/<name> import resolver (--kitsoki-repo override ›
+	// on-disk kitsoki root › embedded library). A foreign repo carrying only a
+	// `source: "@kitsoki/dev-story"` instance loads against the embedded
+	// library with no kitsoki checkout present.
+	def, err := app.LoadWithResolver(appPath, nil, buildImportResolver())
 	if err != nil {
 		return nil, fmt.Errorf("load app %q: %w", appPath, err)
 	}

@@ -102,3 +102,10 @@ tools/site/src/public/media/
 # is committed so //go:embed matches on a fresh checkout.
 internal/helpdocs/assets/*
 !internal/helpdocs/assets/.gitkeep
+
+# Embedded base-story library staging (make embed-stories): the top-level
+# stories/ tree is mirrored here so //go:embed can ship it. Only the .gitkeep
+# placeholder is committed so //go:embed matches on a fresh checkout.
+internal/basestories/stories/*
+!internal/basestories/stories/.gitkeep
+internal/basestories/.embed-stamp

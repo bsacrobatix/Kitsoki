@@ -62,6 +62,7 @@ Exit codes:
 				Verbose:               verbose,
 				JSONOut:               jsonOut,
 				TracePath:             traceOut,
+				ImportResolver:        buildImportResolver(),
 			}
 
 			ctx := context.Background()

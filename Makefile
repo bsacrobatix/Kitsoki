@@ -20,7 +20,18 @@ SPA_SOURCES   := $(shell find $(RUNSTATUS_DIR)/src $(RUNSTATUS_DIR)/index.html \
 # Every shipped story whose deterministic flow suite `make test` exercises.
 STORY_APPS := $(wildcard stories/*/app.yaml)
 
-.PHONY: all setup build install uninstall test test-flows starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs e2e-docker \
+# Base-story embed: the whole stories/ library is staged into internal/
+# basestories/stories/ so //go:embed can ship it in the binary (embed can't
+# reference a parent dir, hence the staged copy). The staged tree is
+# gitignored; a committed stories/.gitkeep keeps the //go:embed pattern
+# matching on a fresh checkout. internal/basestories.Materialize extracts it
+# to a content-addressed cache at runtime so `@kitsoki/<name>` resolves with
+# only the binary present. See docs/proposals/kitsoki-as-dependency.md (slice 1).
+BASESTORIES_SRC   := $(shell find stories -type f 2>/dev/null)
+BASESTORIES_DIR   := internal/basestories/stories
+BASESTORIES_STAMP := internal/basestories/.embed-stamp
+
+.PHONY: all setup build install uninstall test test-flows starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa
 
 all: build
@@ -48,11 +59,12 @@ check-deps:
 		exit 1; \
 	fi
 
-# build / install depend on web so the binary always embeds a current SPA.
-build: check-deps web
+# build / install depend on web + embed-stories so the binary always embeds a
+# current SPA and the current story library.
+build: check-deps web embed-stories
 	go build -o $(BINARY) $(PKG)
 
-install: check-deps web
+install: check-deps web embed-stories
 	@mkdir -p $(INSTALLDIR)
 	GOBIN=$(INSTALLDIR) go install $(PKG)
 	@echo "installed $(BINARY) -> $(INSTALLDIR)/$(BINARY)"
@@ -65,6 +77,21 @@ install: check-deps web
 
 uninstall:
 	rm -f $(INSTALLDIR)/$(BINARY)
+
+# embed-stories stages the top-level stories/ library into the basestories
+# embed dir so //go:embed ships it in the binary. Incremental: re-stages only
+# when a story source file is newer than the stamp. The copy is deterministic
+# and one-directional (stories/ → internal/basestories/stories/, disjoint
+# trees) so there is no embed-of-cwd / recursive-embed footgun.
+embed-stories: $(BASESTORIES_STAMP)
+
+$(BASESTORIES_STAMP): $(BASESTORIES_SRC)
+	@rm -rf $(BASESTORIES_DIR)
+	@mkdir -p $(BASESTORIES_DIR)
+	@cp -R stories/. $(BASESTORIES_DIR)/
+	@touch $(BASESTORIES_DIR)/.gitkeep
+	@touch $@
+	@echo "staged stories/ -> $(BASESTORIES_DIR)"
 
 # web bundles the runstatus SPA and stages it into the embed dir. Incremental:
 # only rebuilds when a source file is newer than the staged bundle.

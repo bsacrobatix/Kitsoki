@@ -153,6 +153,12 @@ type IntentOptions struct {
 	// counting them as failures. Useful when running with the static harness
 	// against a recording that doesn't cover all fixture inputs.
 	SkipOnRecordingMiss bool
+	// ImportResolver is the injected ImportResolver (DI) through which an
+	// `@kitsoki/<name>` import in the app under test resolves against the
+	// `--kitsoki-repo` override or the embedded story library — letting
+	// `kitsoki test intents` run a vendored instance in a foreign repo. nil
+	// keeps the legacy error-on-missing behaviour.
+	ImportResolver app.ImportResolver
 }
 
 // ─── Baseline format ─────────────────────────────────────────────────────────
@@ -175,7 +181,7 @@ func RunIntents(ctx context.Context, appPath string, opts IntentOptions) (*Inten
 	publishAppDirForTestrunner(appPath)
 
 	// Load app.
-	def, err := app.Load(appPath)
+	def, err := app.LoadWithResolver(appPath, nil, opts.ImportResolver)
 	if err != nil {
 		return nil, fmt.Errorf("load app %q: %w", appPath, err)
 	}

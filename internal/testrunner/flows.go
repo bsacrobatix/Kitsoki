@@ -432,6 +432,13 @@ type FlowOptions struct {
 	// generated snapshot, where the runstatus SPA fetches them. When empty (the
 	// default), the rig uses a temp file that cleanup removes.
 	TracePath string
+
+	// ImportResolver is the injected ImportResolver (DI) through which an
+	// `@kitsoki/<name>` import in the app under test resolves against the
+	// `--kitsoki-repo` override or the embedded story library — letting
+	// `kitsoki test flows` run a vendored instance in a foreign repo with no
+	// on-disk kitsoki checkout. nil keeps the legacy error-on-missing behaviour.
+	ImportResolver app.ImportResolver
 }
 
 // ─── orchRig holds all resources for an orchestrator-backed flow run ─────────
@@ -911,7 +918,7 @@ func RunFlows(ctx context.Context, appPath, glob string, opts FlowOptions) (*Flo
 	publishAppDirForTestrunner(appPath)
 
 	// Load app.
-	def, err := app.Load(appPath)
+	def, err := app.LoadWithResolver(appPath, nil, opts.ImportResolver)
 	if err != nil {
 		return nil, fmt.Errorf("load app %q: %w", appPath, err)
 	}
@@ -998,7 +1005,7 @@ func runFlowFile(ctx context.Context, def *app.AppDef, m machine.Machine, appPat
 		// fixtures that opt in.
 		fixDef, fixM := def, m
 		if len(fixture.HostBindings) > 0 {
-			overriddenDef, lerr := app.LoadWithOverrides(appPath, fixture.HostBindings)
+			overriddenDef, lerr := app.LoadWithResolver(appPath, fixture.HostBindings, opts.ImportResolver)
 			if lerr != nil {
 				return nil, fmt.Errorf("fixture in %q: load with host_bindings: %w", filePath, lerr)
 			}
