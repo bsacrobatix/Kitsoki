@@ -130,21 +130,38 @@ func (l *operatorAskListener) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
+	// questionID correlates this forwarded batch across the asked/answered (or
+	// asked/unanswered) pair in the trace. Truncated like the socket-path uuid.
+	questionID := newUUID()[:12]
+
 	questions := wireToOperatorQuestions(req.Questions)
+	// headers shows WHAT was asked (each question's Header) without leaking the
+	// option labels/descriptions into the trace.
+	headers := make([]string, 0, len(questions))
+	for _, q := range questions {
+		headers = append(headers, q.Header)
+	}
 	slog.InfoContext(ctx, "operator.question.asked",
-		"session_id", l.sessionID, "questions", len(questions))
+		"session_id", l.sessionID, "question_id", questionID,
+		"questions", len(questions), "headers", headers)
 
 	askCtx, cancel := context.WithTimeout(ctx, l.timeout)
 	defer cancel()
+	// time.Now() is fine here: this is production host code, not a workflow script.
+	start := time.Now()
 	answers, askErr := l.prompter.Ask(askCtx, l.sessionID, questions)
 	if askErr != nil {
 		slog.InfoContext(ctx, "operator.question.unanswered",
-			"session_id", l.sessionID, "error", askErr.Error())
+			"session_id", l.sessionID, "question_id", questionID,
+			"outcome", "unanswered", "duration_ms", time.Since(start).Milliseconds(),
+			"error", askErr.Error())
 		l.writeResp(conn, kitsokimcp.OperatorAskResponse{Error: askErr.Error()})
 		return
 	}
 	slog.InfoContext(ctx, "operator.question.answered",
-		"session_id", l.sessionID, "answers", len(answers))
+		"session_id", l.sessionID, "question_id", questionID,
+		"outcome", "answered", "duration_ms", time.Since(start).Milliseconds(),
+		"answers", len(answers))
 	l.writeResp(conn, kitsokimcp.OperatorAskResponse{Answers: answers})
 }
 

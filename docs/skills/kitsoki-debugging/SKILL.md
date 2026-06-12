@@ -244,6 +244,40 @@ A warp doubles as a regression artifact: the same file is a flow-fixture-shaped 
 | "The model didn't see X" (a selection, the open doc, a world value) — yet the turn ran fine | The context never reached the dispatched prompt: a verb returned it but no prompt template/seam consumed it, OR an upstream parser returned empty against a real wire shape | `kitsoki trace --turns` → check the `prompt` line for that turn. If X isn't in it, it never reached the model. For host.ide.*, check `ide.context_captured` for `source:none` + `reason`. |
 | Free text "did nothing" / re-rendered the room instead of conversing | Routed to a navigation intent (e.g. `look`) instead of the conversational sink | `turn.start.routed_by` / `match_type`. Fix: give the conversational room a `default_intent` (semantic-routing.md §1.5). |
 | A feature "works" in tests but is broken live | A test double diverged from the real contract (stub returned invented shapes the parser was also written against), or the test asserted a verb result, not the model-facing prompt | Capture real wire bytes into the stub (the `ide.context_captured` `detail` field grabs raw editor envelopes); assert to the dispatched prompt; mutation-test the e2e (revert the fix → it must fail); add an opt-in live test (`//go:build ide_live`). |
+| A dispatched agent seems stuck / a modal or question never appeared / the agent got blank answers | Headless `AskUserQuestion` auto-resolves *empty*, so it is hard-denied; real questions are forwarded via `mcp__operator__ask` **only when an `OperatorPrompter` is in ctx** (web/TUI run loops). No prompter (cassette/flow/headless) ⇒ no tool ⇒ the agent is told to proceed alone. | Grep the trace for `operator.question.asked` / `…answered` / `…unanswered` (each carries `question_id`, `headers`, `duration_ms`, `outcome`). No `asked` = no prompter attached (expected headless). `asked` but no `answered` = `unanswered` (timeout/cancel) — the agent got a tool error and proceeded. See §"Operator questions never reached the operator". |
+
+## Operator questions never reached the operator
+
+When a dispatched oracle agent "asks the user" but the operator saw no
+modal — or the agent proceeded on blank answers — the cause is the
+operator-ask forwarding bridge, not a room arc. Headless `claude -p`
+auto-resolves the built-in `AskUserQuestion` with **empty** answers, so
+it is hard-denied everywhere (`alwaysDeniedTools` in
+`internal/host/agents.go`). Real questions are forwarded only through the
+`mcp__operator__ask` tool, which the host attaches **only when an
+`OperatorPrompter` is in the turn ctx** (the web/TUI run loops set it;
+`kitsoki turn`, flows, cassettes, and `oracle-serve` do not). No prompter
+⇒ no tool ⇒ the agent is instructed to decide on its own — by design.
+
+Three greppable slog events tell the whole story (each carries
+`question_id`, `headers`, `duration_ms`, `outcome`):
+
+```sh
+grep -E 'operator\.question\.(asked|answered|unanswered)' <session>.jsonl | jq -c '{kind, question_id: .payload.question_id, headers: .payload.headers, duration_ms: .payload.duration_ms, outcome: .payload.outcome}'
+```
+
+- **No `operator.question.asked`** — no prompter was attached. Expected
+  for headless/cassette/flow runs; for a live TUI/web session it means
+  the agent never invoked the tool (check the dispatched prompt has the
+  system clause and `mcp__operator__ask` in allowed tools).
+- **`asked` then `answered`** — the round-trip worked; the answer was
+  returned to the agent as the tool result.
+- **`asked` then `operator.question.unanswered`** — timeout, operator
+  cancel, or ctx cancellation. The agent received a tool error ("proceed
+  without this input") and continued, so the turn completes but the work
+  reflects an *unanswered* question. `duration_ms` near the wait bound
+  (~5 min) confirms a timeout. See
+  [`docs/architecture/operator-ask.md`](../../architecture/operator-ask.md).
 
 ## A note on `on_error: idle` as an anti-pattern
 

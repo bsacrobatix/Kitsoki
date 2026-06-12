@@ -21,3 +21,5 @@ Automated testing should never use a real LLM or incur costs - mock oracles via 
 use dependency injection patterns wherever relevant.
 
 principle of least surprise.
+
+`AskUserQuestion` is hard-denied in every dispatched `claude -p` oracle (it auto-resolves with empty answers when headless — a silent landmine). When a live operator surface is attached, agent questions are instead forwarded into kitsoki via the operator-ask bridge (the `mcp__operator__ask` tool) and surfaced on web + TUI; when no operator is attached (cassettes/flows/headless) no replacement tool is added and the agent proceeds on its own. See `docs/architecture/operator-ask.md`.

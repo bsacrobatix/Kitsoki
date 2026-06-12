@@ -2,9 +2,11 @@ package host
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"os"
 	"testing"
@@ -15,6 +17,18 @@ import (
 
 	kitsokimcp "kitsoki/internal/mcp"
 )
+
+// captureSlog installs a text-handler slog default backed by a buffer for the
+// duration of the test and restores the previous default. Returns the buffer so
+// the caller can assert on emitted structured attributes.
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
 
 // dialAsk sends one request to the listener socket and reads one response,
 // mirroring what the mcp-operator-ask grandchild does on the wire.
@@ -34,6 +48,7 @@ func dialAsk(t *testing.T, sock string, req kitsokimcp.OperatorAskRequest) kitso
 }
 
 func TestOperatorAskListener_RoundTrip(t *testing.T) {
+	logBuf := captureSlog(t)
 	fake := &fakePrompter{answers: map[string]any{"Which env?": "prod"}}
 	l, err := startOperatorAskListener(context.Background(), fake, "sess-9", time.Minute)
 	require.NoError(t, err)
@@ -56,9 +71,23 @@ func TestOperatorAskListener_RoundTrip(t *testing.T) {
 	assert.Equal(t, "Env", fake.gotQuestions[0].Header)
 	require.Len(t, fake.gotQuestions[0].Options, 2)
 	assert.Equal(t, "prod", fake.gotQuestions[0].Options[0].Label)
+
+	// The trace carries the correlatable structured attrs on the asked/answered
+	// pair. Allow a brief settle since handleConn logs on a separate goroutine.
+	require.Eventually(t, func() bool {
+		return bytes.Contains(logBuf.Bytes(), []byte("operator.question.answered"))
+	}, time.Second, 10*time.Millisecond)
+	logs := logBuf.String()
+	assert.Contains(t, logs, "operator.question.asked")
+	assert.Contains(t, logs, "question_id=")
+	assert.Contains(t, logs, "duration_ms=")
+	assert.Contains(t, logs, "outcome=answered")
+	assert.Contains(t, logs, "headers=")
+	assert.Contains(t, logs, "Env")
 }
 
 func TestOperatorAskListener_PrompterErrorBecomesErrorFrame(t *testing.T) {
+	logBuf := captureSlog(t)
 	fake := &fakePrompter{err: errors.New("operator cancelled")}
 	l, err := startOperatorAskListener(context.Background(), fake, "s", time.Minute)
 	require.NoError(t, err)
@@ -69,6 +98,15 @@ func TestOperatorAskListener_PrompterErrorBecomesErrorFrame(t *testing.T) {
 	})
 	assert.Equal(t, "operator cancelled", resp.Error)
 	assert.Nil(t, resp.Answers)
+
+	// The unanswered terminal event carries the correlatable structured attrs.
+	require.Eventually(t, func() bool {
+		return bytes.Contains(logBuf.Bytes(), []byte("operator.question.unanswered"))
+	}, time.Second, 10*time.Millisecond)
+	logs := logBuf.String()
+	assert.Contains(t, logs, "question_id=")
+	assert.Contains(t, logs, "duration_ms=")
+	assert.Contains(t, logs, "outcome=unanswered")
 }
 
 func TestOperatorAskListener_CloseRemovesSocket(t *testing.T) {
