@@ -391,8 +391,12 @@ thought.
   The extension bundles the SPA in a webview and spawns `kitsoki web` as a child
   process, relaying the existing JSON-RPC/SSE over `postMessage` — backend
   unchanged, one new `BridgeSource` behind the existing `DataSource` factory.
-  Distinct from (and complementary to) the inverse `/ide` work
-  (`ide-integration.md`). Desktop-only. Nothing implemented yet.
+  Includes a **full-editor tour-demo** capability: Playwright `_electron` drives
+  the real VS Code window, reuses the existing tour manifests + no-LLM
+  `--flow`/`--host-cassette` posture, and records the whole editor via ffmpeg —
+  a "full-editor" mode of the `kitsoki-ui-demo` pipeline. Distinct from (and
+  complementary to) the inverse `/ide` work (`ide-integration.md`). Desktop-only.
+  Nothing implemented yet.
 - [`review-externally.md`](review-externally.md) — **epic.** Give the TUI two
   "review where you actually read" affordances: terminal-friendly clickable
   links to markdown artifacts, and a "we edited *X* — review the diff?" room

@@ -2,8 +2,9 @@
 
 **Status:** Draft v1. Nothing implemented yet.
 **Kind:**   tui (operator surface) — carries one **frontend-transport** seam
-(a `postMessage` `DataSource`) and one **packaging** concern (a new
-TypeScript extension subproject under `tools/`), both called out under Impact.
+(a `postMessage` `DataSource`), one **packaging** concern (a new TypeScript
+extension subproject under `tools/`), and one **demo-harness** concern
+(tour-driven full-editor videos), all called out under Impact.
 **Epic:**   — standalone
 
 <!--
@@ -29,6 +30,14 @@ A VS Code extension closes that gap: chat in the sidebar, the trace/state
 diagram in the bottom panel, all themed to match the editor, all bound to the
 workspace's `stories/` and `.kitsoki/`. It is the natural home for an operator
 who is already a developer.
+
+And the extension must be **demoable the way the web UI already is.** kitsoki
+records deterministic, no-LLM tour videos of the browser UI today
+(`kitsoki-ui-demo` skill). The editor experience — chat sidebar, trace panel,
+the whole workbench in one frame — is its own selling point, so the same
+tour-driven recording must capture the **full VS Code window**, not just the
+embedded SPA. This proposal treats that demo capability as in-scope, not an
+afterthought (see *Tour-driven demo videos of the full editor*).
 
 ## What changes
 
@@ -59,6 +68,13 @@ implementation behind the existing factory (`tools/runstatus/src/data/source.ts:
   (`acquireVsCodeApi`) and return it. No other SPA code changes — `BridgeSource`
   satisfies the same interface (`source.ts:86`), so every store
   (`stores/run.ts`, `meta.ts`, `inbox.ts`) is untouched.
+- **Demo harness (new):** `tools/vscode-kitsoki/tests/` — a Playwright
+  `_electron` spec that launches the *real* VS Code binary, injects the existing
+  tour manifest into the chat webview, drives the editor beat-by-beat, and
+  records the **whole window** via ffmpeg. Reuses the `kitsoki-ui-demo`
+  post-production (MP4/GIF/contact-sheet, chapter sidecar) and the
+  `kitsoki-ui-qa` vision gate unchanged; extends the `kitsoki-ui-demo` skill
+  with a "full-editor" mode.
 - **Code (build):** the SPA already builds to a single inlined `index.html`
   via `vite-plugin-singlefile`; the extension build copies that artifact in
   (the same `make web` staging the Go embed uses). Set Vite `base: './'` for
@@ -186,6 +202,12 @@ The extension owns one `kitsoki web` child per workspace:
   <workspace>/.kitsoki/sessions.db`, story dir resolved from `.kitsoki.yaml` /
   `./stories` exactly as the CLI does (`cmd/kitsoki/web.go:156`). Parse the
   bound port from the server's startup line.
+- **Pass-through posture flags** (`--flow`, `--host-cassette`, `--stories-dir`)
+  read from extension settings / env at spawn, so the **same no-LLM determinism
+  the web tour relies on** is reachable in the editor — this is what makes a
+  reproducible full-editor demo possible (the recorder drives the extension; the
+  extension spawns the backend in the flow/cassette posture). No backend change:
+  `kitsoki web` already accepts these (`cmd/kitsoki/web.go`).
 - **Locate the binary:** prefer a `kitsoki.binaryPath` setting, else `kitsoki`
   on `PATH`, else surface a clear "build kitsoki / set the path" error.
 - **Forward** stdout/stderr to an `OutputChannel` ("Kitsoki").
@@ -193,6 +215,54 @@ The extension owns one `kitsoki web` child per workspace:
 - **Dispose:** kill the child in `deactivate()` and on the last webview close;
   register on `context.subscriptions`. Sessions are in-memory in `kitsoki web`
   (`web.go`), so the `--db` store is what survives a respawn.
+
+## Tour-driven demo videos of the full editor
+
+kitsoki records deterministic, no-LLM tour videos of the **web** UI by driving
+`kitsoki web` (in the `--flow`/`--host-cassette` posture) through
+Playwright/Chromium, reusing one tour manifest for both the live overlay and the
+recording (`kitsoki-ui-demo` skill; golden example
+`tools/runstatus/tests/playwright/agent-actions-video.spec.ts` +
+`src/tour/agent-actions-manifest.ts`). The extension must be demoable the same
+way — but the frame is the **whole editor** (activity bar, chat sidebar, trace
+panel, status bar), not just the embedded SPA.
+
+The pipeline has four layers; **two carry over unchanged, two swap**:
+
+| Layer | Web tour today | Full-editor tour |
+|---|---|---|
+| **Driver** | Playwright Chromium `page` on `kitsoki web` | **swap** → Playwright **`_electron`** launches the real VS Code binary (`@vscode/test-electron`'s `downloadAndUnzipVSCode` + `resolveCliArgsFromVSCodeExecutablePath` → `_electron.launch`); `app.firstWindow()` is the workbench `Page` |
+| **Tour content** | `src/tour/*-manifest.ts` injected via `window.__startTourWithSteps(…)`, asserted per step | **reuse** → same manifests, injected into the webview frame (`frameLocator('iframe.webview').frameLocator('iframe[title]')` → `evaluate`) |
+| **Determinism** | backend spawned `--flow`/`--host-cassette` | **reuse** → same backend, same flags — the extension forwards the no-LLM posture (Backend lifecycle, above) |
+| **Recorder** | Playwright `recordVideo` → `saveVideoAsMp4` | **swap** → **ffmpeg window capture** (`avfoundation` on macOS / `x11grab`+Xvfb on Linux) of the VS Code window rect → the *same* MP4/GIF/contact-sheet + chapter-sidecar + QA post-production |
+
+**Why ffmpeg, not Playwright `recordVideo` (research-grounded):** for an Electron
+window `recordVideo` captures only the renderer surface (drops the OS title bar)
+and has a history of zero-length `.webm` output for Electron; ffmpeg gives a
+clean full-window capture and feeds the existing
+`docs/skills/kitsoki-ui-demo/scripts/{webm-to-mp4,webm-to-gif,contact-sheet}.sh`
+and the `ChapterRecorder` sidecar with no change. Record **headed** (macOS
+native; Xvfb on Linux/CI), VS Code version **pinned**, with a throwaway
+`--user-data-dir`/`--extensions-dir` and a forced theme/zoom/window-size for
+crisp, reproducible frames (the same "deterministic recording" discipline the
+skill already documents — curtain/pacing/no-broad-kill).
+
+**The reach-into-the-webview detail that makes manifest reuse work:** VS Code
+nests a webview in two iframes (outer `iframe.webview`, inner `active-frame`);
+Playwright descends both with `frameLocator` (auto-waiting, more reliable than
+Selenium's manual frame switch) and `evaluate`s the existing
+`window.__startTourWithSteps(...)` injection inside it. So the chat tour runs
+identically; the *editor* beats around it (open the kitsoki activity-bar view,
+reveal the trace panel) are driven on the outer workbench `Page`, and can be
+staged deterministically via `app.evaluate(() => vscode.commands.executeCommand(…))`
+to remove command-palette timing flakiness.
+
+The chapter sidecar (`<video>.chapters.json`) and the vision QA gate
+(`kitsoki-ui-qa`) operate on the MP4 + per-step frames, so both apply unchanged
+— the same tour can be QA'd against the same scenarios whether it's the web
+build or the full editor. Net: this is the existing demo pipeline with the
+launcher and recorder swapped, captured as a **"full-editor" mode** of the
+`kitsoki-ui-demo` skill rather than a parallel system.
 
 ## Testing
 
@@ -206,13 +276,15 @@ No real LLM, no real editor, no cost (CLAUDE.md; memory: no-llm-tests):
   in for `kitsoki web` (mirrors how the SPA's `live-source` is exercised);
   assert envelope→JSON-RPC translation, SSE fan-out, id correlation, and child
   lifecycle (spawn → port parse → dispose) with a fake spawn.
-- **End-to-end (gated, optional)** `@vscode/test-electron` driving the real
+- **End-to-end (gated, optional)** Playwright `_electron` driving the real
   extension against `kitsoki web --flow <fixture> --host-cassette <…>` — the
   same deterministic, no-LLM machinery the Playwright web-chat e2e uses
   (`tools/runstatus/tests/playwright/web-chat.spec.ts`, `web-ui.md` §4). Drive
-  idle→…→terminal in the webview, assert the state badge and trace rows. Gated
-  because it needs an Electron VS Code download; the Vitest + relay-unit layers
-  are the always-on contract.
+  idle→…→terminal **in the webview frame** (descend the two iframes), assert the
+  state badge and trace rows. Gated because it needs a (pinned) VS Code download;
+  the Vitest + relay-unit layers are the always-on contract. **This e2e harness
+  is the same launcher the demo recorder uses** — the assertion run and the
+  recorded run share one spec, exactly as the web tour's fast/record modes do.
 
 ## Tasks
 
@@ -230,11 +302,23 @@ No real LLM, no real editor, no cost (CLAUDE.md; memory: no-llm-tests):
 - [ ] 2.4 postMessage ↔ JSON-RPC/SSE relay (reuse LiveSource call shapes on the host)
 - [ ] 2.5 Commands: open chat / open trace / restart backend; binaryPath setting
 
-## 3. Prove + document
-- [ ] 3.1 Extension unit tests (relay + lifecycle against a stub server)
-- [ ] 3.2 Gated @vscode/test-electron e2e over a flow + host-cassette fixture
-- [ ] 3.3 Manual run; screenshot the sidebar + panel in light/dark
-- [ ] 3.4 Write docs/tui/vscode-extension.md; cross-link; trim/delete this proposal
+## 3. Full-editor demo capability
+- [ ] 3.1 Playwright _electron launcher: pinned downloadAndUnzipVSCode + resolveCliArgs
+          + _electron.launch (clean user-data/extensions dir, forced theme/zoom/size);
+          firstWindow() → workbench Page; one spec shared by the e2e + record runs
+- [ ] 3.2 Reach into the chat webview (frameLocator x2) and inject the existing
+          src/tour/*-manifest.ts via window.__startTourWithSteps; drive editor beats
+          (activity-bar view, trace panel) on the workbench Page
+- [ ] 3.3 ffmpeg window capture (avfoundation/x11grab) → reuse kitsoki-ui-demo
+          post-production (MP4/GIF/contact-sheet) + ChapterRecorder sidecar
+- [ ] 3.4 Extend the kitsoki-ui-demo skill with a "full-editor" mode; QA via kitsoki-ui-qa
+
+## 4. Prove + document
+- [ ] 4.1 Extension unit tests (relay + lifecycle against a stub server)
+- [ ] 4.2 Gated _electron e2e (fast/assert mode) over a flow + host-cassette fixture
+- [ ] 4.3 Record the full-editor tour at watch-speed; verify frames; QA gate
+- [ ] 4.4 Manual run; screenshot the sidebar + panel in light/dark
+- [ ] 4.5 Write docs/tui/vscode-extension.md; cross-link; trim/delete this proposal
 ```
 
 ## What we lose, honestly
@@ -263,6 +347,15 @@ No real LLM, no real editor, no cost (CLAUDE.md; memory: no-llm-tests):
    extension self-contained and versioned with the binary it expects.
 3. **Marketplace packaging vs. internal `.vsix` only.** *Lean: `.vsix` /
    internal for v1*; Marketplace is a release decision once the UX is proven.
+4. **Where does the full-editor demo run?** macOS has no true headless, so the
+   recorded run is **headed** there; Linux/CI uses Xvfb. *Lean: record headed on
+   a dev box (as the web tour is run today), keep the fast/assert e2e mode the
+   only CI gate.* Open: whether to also wire an Xvfb recording job in CI.
+5. **`@mshanemc/vscode-test-playwright` (a ready `_electron`+VS Code fixture) vs.
+   hand-rolling the launch from `@vscode/test-electron` helpers.** *Lean:
+   hand-roll the thin launcher* — the harness is beta; we only need
+   `downloadAndUnzipVSCode` + `_electron.launch` + a frame-traversal helper.
+   Revisit if it stabilises.
 
 ## Non-goals
 
