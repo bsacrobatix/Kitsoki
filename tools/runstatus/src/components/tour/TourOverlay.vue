@@ -354,6 +354,7 @@ onMounted(() => {
     __startTour?: () => void;
     __startTourWithSteps?: (stepsJson: string) => void;
     __tourGoTo?: (id: string) => void;
+    __tourSkip?: () => void;
   };
   const win = window as TourWindow;
   win.__startTour = () => tour.start(true);
@@ -371,6 +372,9 @@ onMounted(() => {
   // Test hook: re-sync the overlay to a step by id when the video spec detects
   // the overlay's internal anchoring has drifted ahead of the driven step.
   win.__tourGoTo = (id: string) => tour.goTo(id);
+  // Test hook: dismiss the overlay (e.g. the VS Code recorder clears it before
+  // an out-of-webview editor beat so the popover doesn't dim the editor frame).
+  win.__tourSkip = () => tour.skip();
   syncWatchdog();
   void refresh();
 });

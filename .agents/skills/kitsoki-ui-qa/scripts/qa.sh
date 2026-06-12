@@ -9,11 +9,21 @@
 #
 # Usage: qa.sh <video> --feature <file> --scenarios <file>
 #          [--frames <dir>] [--out <dir>] [--model M]
-#          [--max-frames N] [--no-adversary] [--strict]
+#          [--max-frames N] [--scene TH] [--blank-min-coverage F]
+#          [--no-adversary] [--strict] [--blank-strict]
 #
 #   --frames <dir>  use existing labeled frames (e.g. the kitsoki-ui-demo skill's
 #                   NN-<scene>.png) as ground truth instead of extracting. Highest
-#                   fidelity when available.
+#                   fidelity when available — and, for full-editor (VS Code)
+#                   videos, the most reliable input (no scene-extraction artifacts;
+#                   see SKILL.md → "Full-editor (VS Code) evidence").
+#   --scene TH      scene-change sensitivity passed to extract-frames.sh (default
+#                   0.30); ignored when --frames is supplied.
+#   --blank-min-coverage F
+#                   min fraction a flat block must cover to be flagged by
+#                   blank-scan.sh (default 0.10). Raise to ~0.15 for full-editor
+#                   videos, whose legitimate dark editor-chrome edge strips would
+#                   otherwise trip the default — see SKILL.md.
 #   --out <dir>     artifact dir (default .artifacts/ui-qa/<video-stem>)
 #   --chapters <f>  chapter sidecar for the deterministic pacing scan (default:
 #                   auto-detect <video>.chapters.json next to the MP4)
@@ -27,7 +37,7 @@ demo_scripts="$here/../../kitsoki-ui-demo/scripts"   # reuse the recorder's cont
 video="${1:?usage: qa.sh <video> --feature <f> --scenarios <f> [opts]}"
 shift || true
 
-feature="" scenarios="" frames="" outdir="" model="" max=48 chapters="" pacing_min=""
+feature="" scenarios="" frames="" outdir="" model="" max=48 chapters="" pacing_min="" scene="" blank_min_cov=""
 adv_flag="" strict_flag="" blank_strict_flag="" pacing_strict_flag=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -39,6 +49,8 @@ while [ $# -gt 0 ]; do
     --max-frames)  max="$2"; shift 2 ;;
     --chapters)    chapters="$2"; shift 2 ;;
     --pacing-min)  pacing_min="$2"; shift 2 ;;
+    --scene)       scene="$2"; shift 2 ;;
+    --blank-min-coverage) blank_min_cov="$2"; shift 2 ;;
     --no-adversary) adv_flag="--no-adversary"; shift ;;
     --strict)      strict_flag="--strict"; shift ;;
     --blank-strict) blank_strict_flag="--blank-strict"; shift ;;
@@ -65,7 +77,9 @@ if [ -n "$frames" ]; then
   frames_dir="$frames"
 else
   echo "▸ extracting frames → $frames_dir"
-  "$here/extract-frames.sh" "$video" "$frames_dir" --max "$max"
+  extract_args=( "$video" "$frames_dir" --max "$max" )
+  [ -n "$scene" ] && extract_args+=( --scene "$scene" )
+  "$here/extract-frames.sh" "${extract_args[@]}"
 fi
 
 # 2. Contact sheet (best-effort; reuses the recorder's tiler). Non-fatal.
@@ -79,7 +93,9 @@ fi
 #     surfaces frames with a large solid white/black block for human review;
 #     --blank-strict promotes them to blocking. Never aborts the run itself.
 blank_scan="$outdir/blank-scan.json"
-"$here/blank-scan.sh" "$frames_dir" --out "$blank_scan" || true
+blank_args=( "$frames_dir" --out "$blank_scan" )
+[ -n "$blank_min_cov" ] && blank_args+=( --min-coverage "$blank_min_cov" )
+"$here/blank-scan.sh" "${blank_args[@]}" || true
 
 # 2c. Deterministic pacing scan (no LLM) over the chapter sidecar — flags
 #     narrated moments that flash by too fast to read (the WEB_CHAT_PACE=0

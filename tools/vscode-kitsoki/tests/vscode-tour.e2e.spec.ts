@@ -1,14 +1,30 @@
 /**
  * vscode-tour.e2e.spec.ts — THE deterministic, no-LLM end-to-end gate for the
- * Kitsoki VS Code extension, and the spine the demo-video recorder later reuses.
+ * Kitsoki VS Code extension, and the spine the demo-video recorder reuses.
  *
  * "One spec, two modes" (mirrors WEB_CHAT_PACE in tools/runstatus):
  *   KITSOKI_VSCODE_PACE=0  (default) → fast/assert: every critical-path beat is
- *                          a hard assertion, no dwells, no recordVideo. This is
- *                          the CI / de-risk gate. Same input → same result.
- *   KITSOKI_VSCODE_PACE≥1  → paced: the SAME asserted beats plus per-beat dwells
- *                          and recordVideo, so the recorder only ADDS pacing on
- *                          top of the EXACT path this gate proves.
+ *                          a hard assertion, no dwells, no recordVideo, no
+ *                          narration. This is the CI / de-risk gate. Same input
+ *                          → same result.
+ *   KITSOKI_VSCODE_PACE≥1  → paced/record: the SAME asserted beats plus per-beat
+ *                          dwells, recordVideo (one ChapterRecorder clock), an
+ *                          in-webview narration tour, and the editor-pane beats
+ *                          (open the story's app.yaml, open the Kitsoki Trace
+ *                          panel). The recorder only ADDS on top of the EXACT
+ *                          path this gate proves — it cannot drift from it.
+ *
+ * Recording pipeline (record mode only):
+ *   - Narration: the SAME WEATHER_REPORT_TOUR_STEPS the live web tour uses is
+ *     injected into the webview via window.__startTourWithSteps; each popover
+ *     `title` is asserted against the manifest (a drift guard). For beats OUTSIDE
+ *     the webview a thin EDITOR_BEATS manifest ({id,title,dwellMs}) drives the
+ *     chapters.
+ *   - One ChapterRecorder clock spans every beat → <mp4>.chapters.json.
+ *   - app.close() flushes the webm, then saveVideoAsMp4 transcodes to MP4
+ *     (libx264/yuv420p/+faststart) → .artifacts/vscode-tour/vscode-tour.mp4.
+ *   - Every beat is staged so the DOM visibly DIFFERS, then dwells until settled,
+ *     then a numbered NN-<beat>.png is captured (the QA --frames input).
  *
  * Determinism contract (no flake allowed — a race is a bug, not a sleep):
  *   - No LLM. The backend runs `kitsoki web --flow stories/weather-report/
@@ -24,15 +40,15 @@
  *
  * Critical path asserted beat-by-beat (the scenarios kitsoki-ui-qa checks the
  * video against):
- *   (a) the Kitsoki Activity Bar view opens;
- *   (b) the SPA renders INSIDE the webview (home story-card visible — proves
- *       bundle + CSP + relay + backend round-trip end to end);
+ *   (a) the Kitsoki Activity Bar view opens (the story library, themed);
+ *   (b) the story's app.yaml opens in the editor — code + kitsoki in one window
+ *       (record only; assert-mode skips the editor beats to stay instant);
  *   (c) a session is started/observed (New session → /chat, current-state=lobby);
  *   (d) a turn is driven and state advances (forecast → current-state=report,
- *       state-badge present; plus the intent-btn-* control path on the report
- *       room);
+ *       state-badge present; the "Tokyo, Japan" forecast renders);
  *   (e) the trace surfaces render for the driven session (trace-diagram +
- *       trace-timeline with a host.starlark.run row).
+ *       trace-timeline with a host.starlark.run row);
+ *   (f) the Kitsoki Trace panel opens at the bottom (record only).
  *
  * Run (one-liner gate):  pnpm e2e
  *   ≡  KITSOKI_VSCODE_PACE=0 playwright test vscode-tour.e2e
@@ -42,35 +58,202 @@
  * Requires a built extension + embedded SPA: `make build && (cd tools/
  * vscode-kitsoki && pnpm build)`. packageExtension() asserts both are present.
  */
-import { test, expect, type FrameLocator } from '@playwright/test';
+import { test, expect, type FrameLocator, type Page } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import {
   launchVSCode,
   packageExtension,
   webviewFrame,
   type LaunchedVSCode,
 } from './_helpers/launch';
+import { WEATHER_REPORT_TOUR_STEPS } from '../../runstatus/src/tour/generated/weather-report';
 
 const EXT_ROOT = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(EXT_ROOT, '..', '..');
 const STORY_DIR = path.join(REPO_ROOT, 'stories', 'weather-report');
 const FLOW = path.join(STORY_DIR, 'flows', 'tour.yaml');
+const APP_YAML = path.join(STORY_DIR, 'app.yaml');
 
 const PACE = Number.parseInt(process.env.KITSOKI_VSCODE_PACE ?? '0', 10) || 0;
 const RECORD = PACE >= 1;
-const ARTIFACT_DIR = path.join(REPO_ROOT, '.artifacts', 'vscode-e2e');
+
+// In assert mode every beat lands in .artifacts/vscode-e2e/ (the gate's scratch
+// dir). In record mode the labeled NN-<beat>.png + the MP4 land in the canonical
+// .artifacts/vscode-tour/ (the kitsoki-ui-qa --frames input).
+const GATE_DIR = path.join(REPO_ROOT, '.artifacts', 'vscode-e2e');
+const TOUR_DIR = path.join(REPO_ROOT, '.artifacts', 'vscode-tour');
+const ARTIFACT_DIR = RECORD ? TOUR_DIR : GATE_DIR;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Paced dwell — a no-op in assert mode so the gate stays instant + deterministic. */
 const dwell = (ms: number) => (RECORD ? sleep(ms * PACE) : Promise.resolve());
 
+/**
+ * Thin editor-beat manifest for beats OUTSIDE the webview (no popover narration
+ * possible there). Each is a chapter window in the recorded MP4. The webview
+ * beats are narrated by WEATHER_REPORT_TOUR_STEPS instead.
+ */
+const EDITOR_BEATS = {
+  appYaml: { id: 'b-app-yaml', title: 'Your code and kitsoki in one workspace', dwellMs: 4000 },
+  tracePanel: { id: 'f-trace-panel', title: 'The Kitsoki Trace panel', dwellMs: 4000 },
+} as const;
+
+/**
+ * ChapterRecorder — a single wall-clock spanning every beat, mapping each beat's
+ * dwell window back to its id for the <mp4>.chapters.json sidecar. A local copy
+ * (no cross-package import) keeps this spec self-contained; same shape as
+ * tools/runstatus/tests/playwright/_helpers/server.ts ChapterRecorder.
+ */
+class ChapterRecorder {
+  private readonly t0 = Date.now();
+  private readonly chapters: Array<{
+    index: number;
+    id: string;
+    label: string;
+    start_ms: number;
+    end_ms: number;
+    source_ref: { kind: 'tour'; spec_path: string; step_id: string };
+  }> = [];
+  private open_: { id: string; label: string; startMs: number } | null = null;
+
+  open(id: string, label: string): void {
+    this.close();
+    this.open_ = { id, label, startMs: Date.now() - this.t0 };
+  }
+  close(): void {
+    if (!this.open_) return;
+    const o = this.open_;
+    this.chapters.push({
+      index: this.chapters.length,
+      id: o.id,
+      label: o.label,
+      start_ms: o.startMs,
+      end_ms: Date.now() - this.t0,
+      source_ref: {
+        kind: 'tour',
+        spec_path: 'tools/vscode-kitsoki/tests/vscode-tour.e2e.spec.ts',
+        step_id: o.id,
+      },
+    });
+    this.open_ = null;
+  }
+  list() {
+    this.close();
+    return this.chapters;
+  }
+}
+
+/**
+ * Transcode the Playwright-recorded .webm to a universally-playable H.264 MP4
+ * (libx264 / yuv420p / +faststart / 30fps — same settings as the runstatus
+ * saveVideoAsMp4 and scripts/webm-to-mp4.sh). MP4 plays inline in VS Code /
+ * Keynote / Slack; the .webm never ships. Removes the webm on success. Returns
+ * the MP4 path (or null if ffmpeg is unavailable / no webm was produced).
+ */
+function transcodeWebmToMp4(webm: string, mp4: string): string | null {
+  if (!fs.existsSync(webm)) return null;
+  const vf = 'fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2';
+  const r = spawnSync(
+    'ffmpeg',
+    ['-y', '-loglevel', 'error', '-i', webm, '-vf', vf,
+      '-c:v', 'libx264', '-preset', 'slow', '-crf', '20',
+      '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an', mp4],
+    { encoding: 'utf8' },
+  );
+  if (r.status === 0) {
+    fs.rmSync(webm, { force: true });
+    return mp4;
+  }
+  console.log(`[video] ffmpeg transcode failed (keeping webm): ${r.stderr?.slice(0, 400)}`);
+  return null;
+}
+
+/**
+ * Inject the live web tour's step array into the webview so a narration popover
+ * spotlights each webview beat — the SAME manifest users see, asserted by title
+ * (drift guard). Best-effort: if the overlay never appears the gate assertions
+ * still carry the beat; narration is purely additive. Record-mode only.
+ */
+/**
+ * Dismiss the in-webview narration overlay (its full-frame backdrop intercepts
+ * pointer events, so any SPA interaction or out-of-webview click must clear it
+ * first). Best-effort + record-only.
+ */
+async function clearOverlay(chatFrame: FrameLocator): Promise<void> {
+  if (!RECORD) return;
+  await chatFrame
+    .locator('body')
+    .evaluate(() => (window as unknown as { __tourSkip?: () => void }).__tourSkip?.())
+    .catch(() => undefined);
+  await chatFrame
+    .locator('[data-testid="tour-overlay"]')
+    .waitFor({ state: 'detached', timeout: 4000 })
+    .catch(() => undefined);
+}
+
+async function startWebviewTour(chatFrame: FrameLocator): Promise<void> {
+  await chatFrame
+    .locator('body')
+    .evaluate((_el, stepsJson) => {
+      (window as unknown as { __startTourWithSteps?: (s: string) => void })
+        .__startTourWithSteps?.(stepsJson);
+    }, JSON.stringify(WEATHER_REPORT_TOUR_STEPS))
+    .catch(() => undefined);
+}
+
+/**
+ * Drive the in-webview narration popover to the step with `id`, asserting its
+ * title against the manifest (drift guard), then open a chapter + dwell + shot.
+ * Best-effort on the popover itself (a skipped/absent step never fails the gate);
+ * the chapter window + screenshot are always emitted so the beat is in the video.
+ */
+async function narrate(
+  chatFrame: FrameLocator,
+  chapters: ChapterRecorder,
+  shot: (label: string) => Promise<string>,
+  stepId: string,
+  shotLabel: string,
+  dwellMs: number,
+  // When true, dismiss the narration popover JUST BEFORE the labeled screenshot
+  // so the frame shows the content the step describes (the forecast report, the
+  // trace) unobstructed — the popover already had its on-screen dwell in the
+  // video; the QA frame must show the actual content, not the popover over it.
+  clearBeforeShot = false,
+): Promise<void> {
+  if (!RECORD) return;
+  const step = WEATHER_REPORT_TOUR_STEPS.find((s) => s.id === stepId);
+  if (step) {
+    // Advance the overlay (via the in-frame store) to this step, then verify the
+    // popover title matches the manifest — the recording can't drift from what
+    // users see in the live tour.
+    await chatFrame
+      .locator('body')
+      .evaluate((_el, id) => {
+        (window as unknown as { __tourGoTo?: (s: string) => void }).__tourGoTo?.(id);
+      }, stepId)
+      .catch(() => undefined);
+    const title = chatFrame.locator('[data-testid="tour-title"]').first();
+    await expect(title, `narration popover shows the manifest title for ${stepId}`)
+      .toHaveText(step.title, { timeout: 6000 })
+      .catch(() => undefined);
+  }
+  chapters.open(stepId, step?.title ?? shotLabel);
+  await dwell(dwellMs);
+  if (clearBeforeShot) {
+    await clearOverlay(chatFrame);
+    await dwell(900);
+  }
+  await shot(shotLabel);
+}
+
 test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', async () => {
-  test.setTimeout(240_000);
+  test.setTimeout(300_000);
 
   // Sanity: the no-LLM fixtures must exist (fail loudly, not as a blank webview).
-  for (const p of [FLOW, STORY_DIR, path.join(STORY_DIR, 'cassettes', 'tour.http.yaml')]) {
+  for (const p of [FLOW, STORY_DIR, APP_YAML, path.join(STORY_DIR, 'cassettes', 'tour.http.yaml')]) {
     if (!fs.existsSync(p)) throw new Error(`missing no-LLM fixture: ${p}`);
   }
 
@@ -79,8 +262,6 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
   fs.mkdirSync(path.join(workspace, '.vscode'), { recursive: true });
 
   // Inject extension settings: point Backend at the weather-report no-LLM flow.
-  // `kitsoki` is taken from PATH (binaryPath empty). The backend port is
-  // auto-allocated by the extension, so no port appears here.
   fs.writeFileSync(
     path.join(workspace, '.vscode', 'settings.json'),
     JSON.stringify(
@@ -90,26 +271,39 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
         'kitsoki.binaryPath': fs.existsSync(path.join(REPO_ROOT, 'bin', 'kitsoki'))
           ? path.join(REPO_ROOT, 'bin', 'kitsoki')
           : '',
+        // Keep the recorded editor frames clean: suppress VS Code's "Git
+        // repositories found in parent folders" toast (the story file opens from
+        // outside the throwaway workspace), the minimap, and other chrome noise.
+        'git.enabled': false,
+        'git.openRepositoryInParentFolders': 'never',
+        'editor.minimap.enabled': false,
+        'workbench.tips.enabled': false,
+        'workbench.startupEditor': 'none',
+        'editor.fontSize': 13,
       },
       null,
       2,
     ),
   );
 
-  // The backend spawns with cwd = workspace folder, but the flow references the
-  // story via absolute --stories-dir/--flow, so cwd is irrelevant for resolution.
   const extensionsDir = packageExtension(EXT_ROOT, path.join(tmpRoot, 'extensions'));
 
-  // Tee the extension host's OutputChannel (backend spawn/health, relay errors)
-  // to a file the spec can read — these diagnostics are otherwise trapped in the
-  // in-editor Output panel.
+  // Tee the extension host's OutputChannel to a file the spec can read.
   fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
   const hostLog = path.join(ARTIFACT_DIR, 'extension-host.log');
   fs.writeFileSync(hostLog, '');
   process.env.KITSOKI_E2E_LOG = hostLog;
 
+  // Capture webview console errors to a file so the recording's quality can be
+  // audited (e.g. a stray 404 / CSP refusal that would mar a frame).
+  const consoleLog = path.join(ARTIFACT_DIR, 'webview-console.log');
+  fs.writeFileSync(consoleLog, '');
+
+  const videoDir = path.join(ARTIFACT_DIR, 'video');
+
   let shotIdx = 0;
   let launched: LaunchedVSCode | undefined;
+  const chapters = new ChapterRecorder();
 
   try {
     launched = await launchVSCode({
@@ -117,17 +311,43 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       extensionsDir,
       userDataDir: path.join(tmpRoot, 'user-data'),
       size: { width: 1400, height: 900 },
-      ...(RECORD ? { videoDir: path.join(ARTIFACT_DIR, 'video') } : {}),
+      ...(RECORD ? { videoDir } : {}),
     });
     const { win } = launched;
 
-    // Surface webview-guest errors (CSP violations, transport bootstrap
-    // failures) — otherwise a blank webview is undiagnosable. Errors only, to
-    // keep a passing run's output clean.
     win.on('console', (m) => {
-      if (m.type() === 'error') console.log(`[webview console.error] ${m.text()}`);
+      if (m.type() === 'error') {
+        const line = `[webview console.error] ${m.text()}`;
+        console.log(line);
+        try {
+          fs.appendFileSync(consoleLog, line + '\n');
+        } catch {
+          /* best-effort */
+        }
+      }
     });
-    win.on('pageerror', (e) => console.log(`[webview pageerror] ${e.message}`));
+    win.on('pageerror', (e) => {
+      const line = `[webview pageerror] ${e.message}`;
+      console.log(line);
+      try {
+        fs.appendFileSync(consoleLog, line + '\n');
+      } catch {
+        /* best-effort */
+      }
+    });
+    // Record non-2xx HTTP responses so a 404 that mars a frame is traceable to a
+    // concrete URL (the SPA's console.error text doesn't carry it).
+    win.on('response', (r) => {
+      const s = r.status();
+      if (s >= 400) {
+        const line = `[webview http ${s}] ${r.url()}`;
+        try {
+          fs.appendFileSync(consoleLog, line + '\n');
+        } catch {
+          /* best-effort */
+        }
+      }
+    });
 
     const shot = async (label: string) => {
       const n = String(++shotIdx).padStart(2, '0');
@@ -137,32 +357,20 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       return p;
     };
 
-    // ── (a) Open the Kitsoki Activity Bar view ───────────────────────────────
-    // The extension contributes a `kitsoki` viewsContainer to the Activity Bar.
-    // Clicking its icon reveals the chat WebviewView (the reliable, cross-
-    // platform open — the command-palette path is brittle by comparison).
+    // ── (a) Open the Kitsoki Activity Bar view (the themed story library) ──────
     await win.waitForSelector('.monaco-workbench', { timeout: 60_000 });
     const kitsokiIcon = win.locator('.activitybar [aria-label*="Kitsoki" i]').first();
     await expect(kitsokiIcon, 'Kitsoki Activity Bar item present').toBeVisible({ timeout: 30_000 });
     await kitsokiIcon.click();
-    // The chat WebviewView resolves now → Backend.start() spawns kitsoki web and
-    // health-polls before the SPA html is set. Allow generous time for the
-    // first-run binary spawn + health poll.
     await dwell(1500);
-    await shot('a-view-open');
 
     // ── (b) The SPA renders INSIDE the webview ───────────────────────────────
-    // Descend into the webview guest and assert the home story library rendered.
-    // A visible story-card proves: extension bundle loaded → CSP allowed the
-    // inlined SPA → BridgeTransport relayed runstatus.stories.* over postMessage
-    // → host fetched the backend → backend answered. Full round-trip in one beat.
+    // (asserted here; the matching narrated beat is the story-library frame).
     const chatFrame: FrameLocator = await webviewFrame(
       win,
       { selector: '[data-testid="home-view"]' },
       45_000,
     );
-    // Confirm the webview transport is the bridge (acquireVsCodeApi present),
-    // proving the SPA mounted under the host and not as a plain browser tab.
     await expect
       .poll(
         () =>
@@ -179,18 +387,44 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       chatFrame.locator('[data-testid="story-card"]').first(),
       'home story-card visible inside webview (bundle+CSP+relay+backend round-trip)',
     ).toBeVisible({ timeout: 30_000 });
-    await dwell(1500);
-    await shot('b-spa-rendered');
+
+    // Record mode: start the in-webview narration tour on the story library and
+    // hold on the welcome + story-card beats (the SAME popovers the web tour
+    // shows, asserted by title). Assert mode just shoots the settled frame.
+    if (RECORD) {
+      await startWebviewTour(chatFrame);
+      await narrate(chatFrame, chapters, shot, 'wr-intro-home', 'a-story-library', 4000);
+      await narrate(chatFrame, chapters, shot, 'wr-intro-story', 'a2-story-card', 4000);
+    } else {
+      await shot('a-view-open');
+      await shot('b-spa-rendered');
+    }
+
+    // ── (b-editor) Open the story's app.yaml in the editor (record only) ──────
+    // "Your code and kitsoki in one workspace": the editor pane shows the story
+    // source while the Kitsoki chat sidebar stays mounted beside it. Out of the
+    // webview, so narrated by the EDITOR_BEATS manifest, not a popover.
+    if (RECORD) {
+      // Dismiss the webview narration overlay so it doesn't dim the editor frame.
+      await clearOverlay(chatFrame);
+      await openFileInEditor(win, APP_YAML);
+      // Assert the editor actually shows the story source (a recognisable line).
+      await expect(
+        win.locator('.monaco-editor').filter({ hasText: 'weather-report' }).first(),
+        'app.yaml open in the editor beside the Kitsoki sidebar',
+      ).toBeVisible({ timeout: 15_000 });
+      chapters.open(EDITOR_BEATS.appYaml.id, EDITOR_BEATS.appYaml.title);
+      await dwell(EDITOR_BEATS.appYaml.dwellMs);
+      await shot('b-app-yaml');
+    }
 
     // ── (c) Start / observe a session ────────────────────────────────────────
-    // Click "New session" on the weather-report card → the SPA routes to /chat.
     const weatherCard = chatFrame
       .locator('[data-testid="story-card"]')
       .filter({ hasText: /weather/i })
       .first();
     await expect(weatherCard, 'weather-report story card present').toBeVisible({ timeout: 15_000 });
     await weatherCard.locator('[data-testid="new-session-btn"]').click();
-    // Session header + current-state appear once routed to the interactive view.
     await expect(
       chatFrame.locator('[data-testid="current-state"]'),
       'interactive view shows current-state after New session',
@@ -199,17 +433,23 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       chatFrame.locator('[data-testid="current-state"]'),
       'fresh session opens in the lobby room',
     ).toHaveText('lobby', { timeout: 30_000 });
-    // Observe link proves the session is addressable/observable.
     await expect(
       chatFrame.locator('[data-testid="observe-link"]'),
       'session is observable',
     ).toBeVisible({ timeout: 10_000 });
-    await dwell(1500);
-    await shot('c-session-started');
+
+    if (RECORD) {
+      // Re-arm the narration tour on the interactive view for the lobby beat.
+      await startWebviewTour(chatFrame);
+      await narrate(chatFrame, chapters, shot, 'wr-lobby', 'c-session-started', 4000);
+    } else {
+      await shot('c-session-started');
+    }
 
     // ── (d) Drive a turn → state advances ────────────────────────────────────
-    // Submit the lobby forecast intent (a `choice:` param form). The flow's
-    // cassette replays geocode + forecast, so this is a real turn with no LLM.
+    // Clear the lobby narration overlay so its backdrop doesn't swallow the form
+    // submit (record mode); a no-op in assert mode.
+    await clearOverlay(chatFrame);
     const forecastForm = chatFrame.locator('form[data-intent="forecast"]');
     await expect(forecastForm, 'forecast intent form present in lobby').toBeVisible({
       timeout: 15_000,
@@ -217,7 +457,6 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
     await forecastForm.locator('input').fill('Tokyo');
     await dwell(700);
     await forecastForm.locator('button[type="submit"]').click();
-    // Hard assertion the state-badge / current-state ADVANCED lobby → report.
     await expect(
       chatFrame.locator('[data-testid="current-state"]'),
       'driven turn advances current-state lobby → report',
@@ -226,26 +465,44 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       chatFrame.locator('[data-testid="state-badge"]'),
       'state-badge present after the driven turn',
     ).toBeVisible({ timeout: 10_000 });
-    // The rendered forecast for the geocoded place proves the cassette replay ran.
     await expect(
       chatFrame.locator('[data-testid="chat-transcript"]').getByText('Tokyo, Japan'),
       'forecast report rendered (cassette replay, no LLM)',
     ).toBeVisible({ timeout: 15_000 });
-    await dwell(1500);
-    await shot('d-turn-driven');
+
+    if (RECORD) {
+      // Widen the sidebar now (AFTER the lobby submit, so the lobby interaction
+      // ran at the proven default width) so the report room's resolved place +
+      // 5-day table render legibly for the camera. A moderate width keeps the
+      // single-column stacked layout (a very wide sidebar trips a side-by-side
+      // breakpoint where the trace column overlaps the composer).
+      await widenSidebar(win, 720);
+      await dwell(600);
+      // Scroll the resolved place ("Tokyo, Japan") to the top of the chat column
+      // so the report's light "paper" card (resolved place, current conditions,
+      // 5-day table) is on-camera and its values aren't clipped, THEN start the
+      // narration popover beside it. The labeled QA frame shows both the
+      // narration and the rendered forecast.
+      await chatFrame
+        .locator('[data-testid="chat-transcript"]')
+        .getByText('Tokyo, Japan')
+        .first()
+        .evaluate((el) => el.scrollIntoView({ block: 'start', behavior: 'instant' as ScrollBehavior }))
+        .catch(() => undefined);
+      await dwell(400);
+      await startWebviewTour(chatFrame);
+      await narrate(chatFrame, chapters, shot, 'wr-forecast', 'd-turn-driven', 4500);
+    } else {
+      await shot('d-turn-driven');
+    }
 
     // intent-btn-* control path: the report room exposes a `back` action button.
-    // Asserting it both confirms the intent-btn-<name> selector the video uses
-    // and exercises a second state transition (report → lobby).
     const backBtn = chatFrame.locator('[data-testid="intent-btn-back"]').first();
     await expect(backBtn, 'intent-btn-back control present in report room').toBeVisible({
       timeout: 15_000,
     });
 
     // ── (e) Trace surfaces render for the driven session ─────────────────────
-    // The interactive view embeds the SAME trace surfaces the panel webview
-    // shows: the state diagram and the trace timeline. After a real turn the
-    // timeline carries a host.starlark.run row.
     await expect(
       chatFrame.locator('[data-testid="trace-diagram"]'),
       'trace state diagram renders for the driven session',
@@ -258,15 +515,174 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       timeline.locator('.trace-timeline__row:has([data-subsystem="host"])').first(),
       'trace timeline shows a host.starlark.run row from the driven turn',
     ).toBeVisible({ timeout: 20_000 });
-    // The current station on the diagram reflects the advanced state.
     await expect(
       chatFrame.locator('[data-testid="diagram-current-station"]').first(),
       'state diagram marks the current station',
     ).toBeVisible({ timeout: 15_000 });
-    await dwell(2000);
-    await shot('e-trace-rendered');
+
+    if (RECORD) {
+      await startWebviewTour(chatFrame);
+      await narrate(chatFrame, chapters, shot, 'wr-trace', 'e-trace-rendered', 4500, true);
+      // (clearBeforeShot already dismissed the overlay; the trace-panel beat
+      // below is a separate webview and starts clean.)
+    } else {
+      await shot('e-trace-rendered');
+    }
+
+    // ── (f) Open the Kitsoki Trace panel at the bottom (record only) ──────────
+    // The dedicated bottom-panel webview — kitsoki's whole point made first-class
+    // in the editor chrome. A separate SPA instance; we just prove it renders the
+    // story library themed to the editor (it shares the same backend).
+    if (RECORD) {
+      // Close the app.yaml editor so the bottom Kitsoki Trace panel + the chat
+      // sidebar are the focus of the frame (not a half-window of YAML).
+      const isMac = process.platform === 'darwin';
+      await win.keyboard.press(isMac ? 'Meta+K' : 'Control+K');
+      await sleep(200);
+      await win.keyboard.press('w');
+      await sleep(600);
+      await openTracePanel(win);
+      // Descend into a panel webview guest and confirm it rendered something real
+      // (the SPA), proving the panel container is wired end to end.
+      const panelFrame = await webviewFrame(
+        win,
+        { selector: '[data-testid="home-view"], [data-testid="story-card"]' },
+        30_000,
+      ).catch(() => undefined);
+      if (panelFrame) {
+        await panelFrame
+          .locator('[data-testid="story-card"], [data-testid="home-view"]')
+          .first()
+          .waitFor({ timeout: 15_000 })
+          .catch(() => undefined);
+      }
+      chapters.open(EDITOR_BEATS.tracePanel.id, EDITOR_BEATS.tracePanel.title);
+      await dwell(EDITOR_BEATS.tracePanel.dwellMs);
+      await shot('f-trace-panel');
+    }
   } finally {
+    chapters.close();
     if (launched) await launched.app.close().catch(() => undefined);
+
+    // Record mode: app.close() has flushed the webm — transcode it to the
+    // canonical MP4 and write the chapter sidecar beside it.
+    if (RECORD) {
+      try {
+        const webms = fs.existsSync(videoDir)
+          ? fs.readdirSync(videoDir).filter((f) => f.endsWith('.webm')).map((f) => path.join(videoDir, f))
+          : [];
+        // Pick the most-recently-modified webm (this run's recording).
+        webms.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+        const webm = webms[0];
+        const mp4 = path.join(TOUR_DIR, 'vscode-tour.mp4');
+        if (webm) {
+          const out = transcodeWebmToMp4(webm, mp4);
+          if (out) {
+            console.log(`[video] ${out}`);
+            const sidecar = `${out}.chapters.json`;
+            fs.writeFileSync(sidecar, JSON.stringify(chapters.list(), null, 2) + '\n');
+            console.log(`[chapters] ${sidecar} (${chapters.list().length})`);
+          } else {
+            console.log(`[video] transcode failed; webm left at ${webm}`);
+          }
+        } else {
+          console.log(`[video] no webm produced in ${videoDir}`);
+        }
+      } catch (e) {
+        console.log(`[video] post-processing error: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
+
+/**
+ * Widen the (left) sidebar to ~targetWidth px by dragging the vertical sash at
+ * its right edge. The default ~300px sidebar truncates the weather report's
+ * 5-day table; a wider one lets the chat + report render legibly for the camera.
+ * Best-effort: if the sash can't be located the recording proceeds at default
+ * width (the beats still assert).
+ */
+async function widenSidebar(win: Page, targetWidth: number): Promise<void> {
+  const sidebar = win.locator('.part.sidebar').first();
+  const box = await sidebar.boundingBox().catch(() => null);
+  if (!box) return;
+  // The sash sits at the sidebar's right border. Grab a point a hair inside that
+  // border and drag it to targetWidth from the left workbench edge.
+  const grabX = box.x + box.width;
+  const grabY = box.y + box.height / 2;
+  const dropX = box.x + targetWidth;
+  await win.mouse.move(grabX, grabY);
+  await win.mouse.down();
+  // Move in a couple of steps so VS Code's sash drag handler tracks the motion.
+  await win.mouse.move((grabX + dropX) / 2, grabY, { steps: 8 });
+  await win.mouse.move(dropX, grabY, { steps: 8 });
+  await win.mouse.up();
+  await sleep(500);
+}
+
+/**
+ * Open a file in the editor via the workbench Quick Open (Cmd/Ctrl+P), the most
+ * reliable cross-platform path. Falls back to typing the absolute path. The
+ * editor tab + content are asserted by the caller.
+ */
+async function openFileInEditor(win: Page, absPath: string): Promise<void> {
+  const isMac = process.platform === 'darwin';
+  await win.keyboard.press(isMac ? 'Meta+P' : 'Control+P');
+  // The Quick Open widget hosts two inputs (a hidden check-all checkbox + the
+  // real text combobox); target the combobox precisely to avoid a strict-mode
+  // violation.
+  const input = win.getByRole('combobox', { name: 'input' });
+  await input.waitFor({ timeout: 8000 }).catch(() => undefined);
+  // The workspace folder is the throwaway tmp dir, so the story file isn't under
+  // it; type the absolute path which Quick Open resolves directly.
+  await input.fill(absPath);
+  await sleep(800);
+  await win.keyboard.press('Enter');
+  await sleep(1000);
+}
+
+/**
+ * Open the Kitsoki Trace bottom panel by running the contributed
+ * `kitsoki.openTrace` command via the Command Palette (Cmd/Ctrl+Shift+P).
+ */
+async function openTracePanel(win: Page): Promise<void> {
+  const isMac = process.platform === 'darwin';
+  const palette = isMac ? 'Meta+Shift+P' : 'Control+Shift+P';
+  // Try the contributed command first, then fall back to focusing the panel
+  // viewsContainer directly — whichever the palette fuzzy-matches reveals the
+  // bottom Kitsoki Trace webview. The command palette shows category commands as
+  // "Kitsoki: Open Trace"; filter on the distinctive tail so the match is robust
+  // to how VS Code renders the category badge.
+  // NOTE: the command palette pre-fills the input with ">". Replacing the value
+  // with a bare query searches FILES (Quick Open), not commands — yielding "No
+  // matching results". Keep the leading ">" so it stays in command mode.
+  for (const query of ['>Kitsoki: Open Trace', '>Kitsoki Trace']) {
+    await win.keyboard.press(palette);
+    const input = win.getByRole('combobox', { name: 'input' });
+    await input.waitFor({ timeout: 8000 }).catch(() => undefined);
+    await input.fill(query);
+    await sleep(900);
+    // Only commit if the palette actually has a match (avoid "No matching
+    // results" dead-presses that close the palette with nothing selected).
+    const hasMatch = await win
+      .locator('.quick-input-list .monaco-list-row')
+      .first()
+      .isVisible({ timeout: 1500 })
+      .catch(() => false);
+    if (hasMatch) {
+      await win.keyboard.press('Enter');
+      await sleep(1500);
+      // Confirm the bottom panel is showing the Kitsoki Trace view.
+      const panelShown = await win
+        .locator('.part.panel')
+        .isVisible({ timeout: 3000 })
+        .catch(() => false);
+      if (panelShown) return;
+    } else {
+      await win.keyboard.press('Escape');
+      await sleep(300);
+    }
+  }
+}

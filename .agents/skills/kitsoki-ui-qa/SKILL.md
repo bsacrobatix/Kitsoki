@@ -198,11 +198,60 @@ dev env). No `make build` needed — this consumes an existing video/frames.
    scenario is `unsupported`, the demo didn't cover it — usually a gap in the
    *demo*, occasionally a vague scenario step to sharpen.
 
+## Full-editor (VS Code) evidence
+
+QA'ing a **full-editor** video (the kitsoki UI embedded in a VS Code window —
+see [[kitsoki-ui-demo]] → "Full-editor (VS Code) mode") differs from a browser
+video: a larger 1400×900 frame, a big **dark editor pane** / empty welcome
+region, and VS Code chrome (Activity Bar, panels) with grey edge strips. Two
+deterministic stages need the right invocation so the gate stays trustworthy:
+
+- **Prefer the labeled ground-truth frames** the recorder emits
+  (`.artifacts/vscode-tour/NN-<beat>.png`, one per beat). Pass them via
+  `--frames` — highest fidelity, no scene-extraction artifacts, and they pass
+  `blank-scan.sh` at the **default** `--min-coverage 0.10` (proven: 0 flags on
+  the 7 vscode-tour beats). **This is the recommended path.**
+  ```bash
+  docs/skills/kitsoki-ui-qa/scripts/qa.sh \
+    .artifacts/vscode-tour/vscode-tour.mp4 \
+    --frames    .artifacts/vscode-tour \
+    --feature   .context/qa-vscode-feature.md \
+    --scenarios .context/qa-vscode-scenarios.yaml --strict
+  # → overall: pass, 6/6 scenarios, 0 visual issues, 0 blank-scan flags
+  ```
+
+- **If you must scene-extract** (no labeled frames), `extract-frames.sh` at the
+  default `--scene 0.30` surfaces the editor's meaningful transitions fine
+  (≈18 frames on the 72s vscode-tour). But the full-window frames carry a
+  legitimate **grey editor-chrome edge strip** (~12.5% of the frame) that trips
+  `blank-scan.sh` at the default `--min-coverage 0.10` as a false "solid block".
+  Raise the threshold for editor videos via the `qa.sh` passthrough:
+  ```bash
+  docs/skills/kitsoki-ui-qa/scripts/qa.sh \
+    .artifacts/vscode-tour/vscode-tour.mp4 \
+    --feature .context/qa-vscode-feature.md \
+    --scenarios .context/qa-vscode-scenarios.yaml \
+    --blank-min-coverage 0.15        # editor-chrome strips no longer false-flag
+  # → blank-scan: 0 flags on the 18 extracted frames
+  ```
+  `--scene TH` is also a passthrough if you want denser/sparser extraction.
+
+The legitimately **dark** editor pane / empty welcome region does **not**
+false-flag at any setting: `blank-scan.sh`'s contrast gate treats the most-common
+dark bucket as the page background, so a large dark region is correctly ignored
+(only a *high-contrast* solid block flags). The grey edge strip was the only
+editor-specific false positive, and `--blank-min-coverage 0.15` clears it while
+still catching a genuine blank pane.
+
+A ready-to-edit feature/scenarios pair for a VS Code embed lives at
+`templates/vscode-feature.md` + `templates/vscode-scenarios.yaml` (the worked
+example behind the `vscode-tour` gate above).
+
 ## The tools (`scripts/`)
 
 | Script | Does | LLM? |
 |---|---|---|
-| `qa.sh <video> --feature F --scenarios S [--frames D] [--out D] [--model M] [--max-frames N] [--chapters F] [--pacing-min N] [--no-adversary] [--strict] [--blank-strict] [--pacing-strict]` | One-shot wrapper; exit code is the gate | via review |
+| `qa.sh <video> --feature F --scenarios S [--frames D] [--out D] [--model M] [--max-frames N] [--scene TH] [--blank-min-coverage F] [--chapters F] [--pacing-min N] [--no-adversary] [--strict] [--blank-strict] [--pacing-strict]` | One-shot wrapper; exit code is the gate. `--scene` / `--blank-min-coverage` pass through to extract-frames / blank-scan (tune for full-editor videos — see above) | via review |
 | `extract-frames.sh <video> <out-dir> [--scene TH] [--interval S] [--dedup MS] [--max N] [--width W]` | Deterministic scene-change + periodic-floor frames + `frames.json` | no |
 | `blank-scan.sh <frames-dir\|image> [--out scan.json] [--grid WxH] [--quant N] [--min-coverage F] [--empty-coverage F] [--fail-on-find]` | Deterministic monochrome-region detector → `blank-scan.json` (flags any large flat block of one colour, or a near-empty frame) | no |
 | `pacing-scan.sh <chapters.json> [--out scan.json] [--min-ms N] [--min-total-ms N] [--fail-on-find]` | Deterministic chapter-duration detector → `pacing-scan.json` (flags narrated moments that flash by below the readable-window floor) | no |

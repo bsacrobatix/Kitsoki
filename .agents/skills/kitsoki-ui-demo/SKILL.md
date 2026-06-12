@@ -474,8 +474,71 @@ set `KITSOKI_WEB_GO_RUN=1` (the default when `bin/kitsoki` is absent); stage the
 go:embed SPA first with `make web`. Build a real binary (`KITSOKI_WEB_GO_RUN=0`)
 for an actual client/CI capture.
 
+## Full-editor (VS Code) mode
+
+The same deterministic, no-LLM tour pipeline records the kitsoki UI **embedded in
+a real VS Code window** (the extension under `tools/vscode-kitsoki/`) — a
+full-editor walkthrough showing the Kitsoki sidebar, an open story file, a driven
+session, the live trace, and the bottom Kitsoki Trace panel, all themed to the
+editor. The worked reference is **`tools/vscode-kitsoki/tests/vscode-tour.e2e.spec.ts`**.
+
+It mirrors this skill's patterns, adapted to VS Code:
+
+- **One spec, two modes — gated on `KITSOKI_VSCODE_PACE`** (the analogue of
+  `WEB_CHAT_PACE`). `0` (default) is the **assert-only de-risk gate** — every beat
+  is a hard `toBeVisible`/`toHaveText`, no dwells, no recording. `≥1` is **record
+  mode**: the SAME asserted beats plus per-beat dwells, narration, the editor
+  beats, and `recordVideo`. Record mode only ADDS on top of the proven path, so it
+  can't drift from the gate.
+- **Real VS Code via an `_electron` launch helper** —
+  `tools/vscode-kitsoki/tests/_helpers/launch.ts` (`launchVSCode`,
+  `packageExtension`, `webviewFrame`) downloads + launches pinned VS Code 1.96.4
+  through Playwright's `_electron`, strips all `VSCODE_*` env, and descends into
+  the webview guest (`iframe.webview.ready >>> iframe[title]`). `recordVideo` is
+  passed only in record mode.
+- **recordVideo → MP4 + chapter sidecar.** Playwright records a `.webm`;
+  `app.close()` flushes it, then the spec transcodes to a universally-playable
+  **`.artifacts/vscode-tour/vscode-tour.mp4`** (libx264 / yuv420p / +faststart /
+  30fps — same settings as `saveVideoAsMp4` / `scripts/webm-to-mp4.sh`) and
+  removes the webm. **Never ship the `.webm`.** A single `ChapterRecorder` clock
+  spans every beat → `<mp4>.chapters.json` (the same shape as the web tours).
+- **Manifest reuse + drift guard.** The webview beats are narrated by the SAME
+  `WEATHER_REPORT_TOUR_STEPS` the live web tour uses (injected into the webview
+  via `window.__startTourWithSteps`, driven by `window.__tourGoTo`, dismissed by
+  `window.__tourSkip`); each popover `title` is asserted against the manifest, so
+  the recording can't drift from what users see. Beats **outside** the webview
+  (open `app.yaml` in the editor, open the Kitsoki Trace panel) are driven by a
+  thin in-spec editor-beat manifest (`{id,title,dwellMs}`) — no popover is
+  possible there. Each beat is staged so the DOM visibly differs, dwelled until
+  settled, then captured as a labeled `NN-<beat>.png` (the kitsoki-ui-qa
+  `--frames` input).
+- **Watch-speed staging tips proven here:** widen the Kitsoki sidebar (drag the
+  vertical sash) AFTER the lobby submit so the report renders legibly without
+  tripping the side-by-side breakpoint; clear the narration overlay
+  (`__tourSkip`) before any SPA interaction or editor beat (its backdrop
+  intercepts clicks); keep the leading `>` when filling the Command Palette
+  (replacing it searches files, not commands); suppress VS Code chrome noise in
+  the throwaway workspace settings (`git.enabled:false`,
+  `editor.minimap.enabled:false`) so frames stay clean.
+
+**Run it** (full build → gate, then record):
+
+```bash
+make vscode-e2e-fast                 # assert-only de-risk gate (KITSOKI_VSCODE_PACE=0)
+make vscode-e2e                      # record the paced tour (KITSOKI_VSCODE_PACE defaults to 1)
+KITSOKI_VSCODE_PACE=2 make vscode-e2e   # slower dwells
+```
+
+Then QA the produced MP4 — see [[kitsoki-ui-qa]] → "Full-editor (VS Code)
+evidence" (pass the labeled `NN-*.png` via `--frames`).
+
 ## Pointers
 
+- **Full-editor (VS Code) tour spec + launch helper:**
+  `tools/vscode-kitsoki/tests/vscode-tour.e2e.spec.ts` +
+  `tools/vscode-kitsoki/tests/_helpers/launch.ts` (one-spec-two-modes on
+  `KITSOKI_VSCODE_PACE`; MP4 + `.chapters.json`; manifest reuse via
+  `__startTourWithSteps`)
 - **Golden feature-tour spec + manifest:**
   `tools/runstatus/tests/playwright/agent-actions-video.spec.ts` +
   `tools/runstatus/src/tour/agent-actions-manifest.ts`

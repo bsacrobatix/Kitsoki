@@ -1,0 +1,55 @@
+# QA scenarios for the VS Code extension tour video.
+# Each step is an OBSERVABLE claim grounded in a specific labeled frame
+# (.artifacts/vscode-tour/NN-<beat>.png — pass via --frames for highest fidelity).
+# These map 1:1 to the recorded beats (a)-(f); the evidence must show the kitsoki
+# UI rendered INSIDE the VS Code chrome, not in a browser.
+
+feature: Embed the kitsoki web UI in a VS Code extension
+
+scenarios:
+  - id: a-sidebar-story-library
+    title: The Kitsoki sidebar renders the story library inside VS Code
+    required: true
+    steps:
+      - The VS Code Activity Bar and editor chrome are visible (this is VS Code, not a browser)
+      - A "KITSOKI" / "CHAT" sidebar panel is shown in the VS Code side bar
+      - A "Weather & Climate" story card is listed in the sidebar
+      - The embed is dark-themed to match the VS Code editor chrome
+
+  - id: b-code-and-kitsoki
+    title: The story's app.yaml opens in the editor beside the Kitsoki sidebar
+    required: true
+    steps:
+      - A YAML file (app.yaml) is open in the VS Code editor pane showing story source
+      - The Kitsoki chat sidebar remains mounted beside the editor in the same window
+
+  - id: c-session-lobby
+    title: A session starts from the sidebar and opens in the lobby
+    required: true
+    steps:
+      - The sidebar shows an interactive chat / session view (no longer just the story list)
+      - The session is in the "lobby" room or shows a lobby intent picker
+      - A forecast and/or climate input field is offered
+
+  - id: d-turn-drives-state
+    title: A driven turn advances state and renders the Tokyo forecast
+    required: true
+    steps:
+      - The resolved place "Tokyo, Japan" is visible in the rendered report
+      - A report / forecast card is shown (coordinates, conditions, or a 5-day table)
+      - The room has advanced to the "report" state (a report state diagram or badge is shown)
+
+  - id: e-trace-surfaces
+    title: The trace surfaces render for the driven session
+    required: true
+    steps:
+      - A state diagram (the room graph) is visible with the current station marked
+      - A trace timeline with event rows is visible
+      - A host (host.starlark.run) row or a host-call event is present in the timeline
+
+  - id: f-trace-panel
+    title: The dedicated Kitsoki Trace bottom panel opens in the editor
+    required: true
+    steps:
+      - A "KITSOKI TRACE" panel is shown in the VS Code bottom panel area
+      - The panel renders kitsoki trace content (a state diagram and/or trace timeline)
