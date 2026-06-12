@@ -1,13 +1,21 @@
-# `issues/` — kitsoki's self-tracker
+# `issues/` — kitsoki's self-tracker (DEPRECATED — see [DEPRECATED.md](./DEPRECATED.md))
 
-This directory is kitsoki's own bug + feature backlog, on disk, in
+> **⚠️ Deprecated, frozen archive.** kitsoki now tracks its own bugs and
+> features as **GitHub Issues** on
+> [`constructorfabric/Kitsoki`](https://github.com/constructorfabric/Kitsoki/issues).
+> These files are kept for reference and git history; nothing should file new
+> tickets here. New bugs come from `kitsoki bug create --github` / the web
+> Report-bug modal, new features from the design pipeline, and the existing pile
+> migrates with `kitsoki issues migrate`. See [DEPRECATED.md](./DEPRECATED.md).
+
+This directory **was** kitsoki's own bug + feature backlog, on disk, in
 plain Markdown. Each file is a YAML-frontmatter-headed `.md` per the
 bug format documented inline below (and in
 [`docs/stories/bugs.md`](../docs/stories/bugs.md)).
 
-The dogfood app (`stories/kitsoki-dev/`) reads this directory via
-`host.local_files.ticket`, so a bug filed here is immediately
-searchable + workable from `kitsoki run stories/kitsoki-dev/app.yaml`.
+Historically the dogfood app (`stories/kitsoki-dev/`) read this directory via
+`host.local_files.ticket`; once the GitHub cutover lands it binds
+`host.gh.ticket` instead.
 
 ## Layout
 

@@ -97,6 +97,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(mcpBashCmd())
 	root.AddCommand(mcpOperatorAskCmd())
 	root.AddCommand(bugCmd())
+	root.AddCommand(issuesCmd())
 	root.AddCommand(uiCmd())
 	root.AddCommand(extractCmd())
 	root.AddCommand(promptsCmd())
