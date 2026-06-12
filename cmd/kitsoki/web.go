@@ -160,6 +160,19 @@ authentication.`,
 			}
 			dirs := webconfig.Resolve(storyDirs, cfg)
 
+			// ── Operator identity ────────────────────────────────────────────
+			// An explicit --actor wins; otherwise fall back to the configured
+			// git user so browser-driven turns on a dev machine record a real
+			// principal (and stories with an author ACL can start) without the
+			// operator having to pass the flag. The X-Kitsoki-Actor header and
+			// an explicit actor RPC param still override this per turn.
+			if actor == "" {
+				if u := gitOutput("config", "user.name"); u != "" {
+					actor = u
+					fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: no --actor; using git user.name %q as operator identity\n", actor)
+				}
+			}
+
 			// ── Session-invariant construction posture every session inherits ──
 			base := runtimeBase{
 				DBPath:        dbPath,
@@ -230,7 +243,7 @@ authentication.`,
 	cmd.Flags().StringVar(&execModeFlag, "mode", "staged", "execution mode: staged | one-shot")
 	cmd.Flags().StringVar(&flowPath, "flow", "", "drive every session deterministically from a flow fixture (no LLM; host_handlers stub host.* calls, intents are submitted explicitly)")
 	cmd.Flags().StringVar(&hostCassette, "host-cassette", "", "host cassette file backing host.* calls (deterministic, no LLM); combinable with --flow")
-	cmd.Flags().StringVar(&actor, "actor", "", "operator identity recorded on browser-driven turns as slots.author (default: none; the X-Kitsoki-Actor header and an explicit actor RPC param override it)")
+	cmd.Flags().StringVar(&actor, "actor", "", "operator identity recorded on browser-driven turns as slots.author (default: git config user.name; the X-Kitsoki-Actor header and an explicit actor RPC param override it)")
 
 	return cmd
 }

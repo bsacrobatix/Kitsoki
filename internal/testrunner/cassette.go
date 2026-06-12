@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -483,7 +484,11 @@ func episodeMatches(ep *CassetteEpisode, handler string, args map[string]any, ph
 // Uses deep equality after JSON-normalising both sides so that int/float
 // comparisons from YAML work against string-typed args and vice-versa.
 func matchValue(got, want any) bool {
-	if got == want {
+	// Fast path: direct equality, but ONLY for comparable dynamic types.
+	// `got == want` panics ("comparing uncomparable type") when either side is
+	// a slice or map (e.g. matching host.run's `args` list), so guard it — the
+	// JSON-normalised path below handles those cases correctly.
+	if isComparable(got) && isComparable(want) && got == want {
 		return true
 	}
 	// JSON-normalise both sides so numeric types compare correctly.
@@ -493,6 +498,15 @@ func matchValue(got, want any) bool {
 		return false
 	}
 	return string(gj) == string(wj)
+}
+
+// isComparable reports whether v's dynamic type is comparable with ==. Slices,
+// maps, and funcs are not, and comparing them with == panics at runtime.
+func isComparable(v any) bool {
+	if v == nil {
+		return true
+	}
+	return reflect.TypeOf(v).Comparable()
 }
 
 // CassetteDispatcherOpts carries optional dependencies for BuildCassetteDispatcher.

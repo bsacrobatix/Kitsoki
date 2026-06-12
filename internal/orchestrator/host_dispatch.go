@@ -198,12 +198,35 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		// Unlike HostInvoked (which snapshots pre-bind args at machine
 		// time), this fires immediately before the handler is invoked.
 		// Replay treats it as a no-op (see store/replay.go).
-		events = append(events, newOrchestratorEvent(store.HostDispatched, map[string]any{
+		hostDispatchedEv := newOrchestratorEvent(store.HostDispatched, map[string]any{
 			"namespace":          hc.Namespace,
 			"args":               invokeArgs,
 			"rerender_fell_back": fellBack,
 			"background":         hc.Background,
-		}, 0))
+		}, 0)
+		// Flush HostDispatched to the JSONL sink LIVE, before the (possibly
+		// long-blocking) Invoke below — otherwise the whole turn's event batch
+		// is committed only at turn-end, so a slow or wedged host.run leaves the
+		// trace and the web SSE stream empty and the UI frozen with nothing to
+		// show for it (the silent-freeze half of the triage-hang bug). Mirrors
+		// the oracle handlers' live OracleCalled write (see WithOracleEventSink
+		// above). HostDispatched is a replay no-op, so a single live JSONL write
+		// is authoritative; it is deliberately kept OUT of `events` here so
+		// appendEventsAndJournal doesn't write it to the same sink a second time
+		// at turn-end. When there is no eventSink (pure-SQLite / test scaffolds)
+		// fall back to the batch so the event isn't lost.
+		if o.eventSink != nil {
+			if err := o.eventSink.Append(hostDispatchedEv); err != nil {
+				o.logger.WarnContext(ctx, "host.dispatched.flush_error",
+					slog.String("session_id", string(sid)),
+					slog.String("namespace", hc.Namespace),
+					slog.String("phase", "host_dispatched_live_flush"),
+					slog.String("err", err.Error()),
+				)
+			}
+		} else {
+			events = append(events, hostDispatchedEv)
+		}
 
 		// B-7: inject the oracle plugin alias into the context so the handler
 		// can route through host.Dispatch with the correct plugin. When
@@ -228,6 +251,16 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			w.Vars["last_error"] = err.Error()
 			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
 				"set": map[string]any{"last_error": err.Error()},
+			}, 0))
+			// Structured global host_error so the redirect target room can render
+			// a rich error (namespace + message). Reserved global, never folded.
+			herr := map[string]any{
+				"namespace": hc.Namespace,
+				"message":   err.Error(),
+			}
+			w.Vars["host_error"] = herr
+			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
+				"set": map[string]any{"host_error": herr},
 			}, 0))
 			events = append(events, newOrchestratorEvent(store.HostReturned, map[string]any{
 				"namespace": hc.Namespace,
@@ -256,6 +289,27 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			w.Vars["last_error"] = res.Error
 			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
 				"set": map[string]any{"last_error": res.Error},
+			}, 0))
+			// Structured global host_error mirrors last_error but carries the
+			// namespace and (when the host result returned a Data payload) the
+			// raw data plus the conventional stderr/exit_code host.run carries.
+			// Reserved global key, never namespaced by import folding.
+			herr := map[string]any{
+				"namespace": hc.Namespace,
+				"message":   res.Error,
+			}
+			if res.Data != nil {
+				herr["data"] = res.Data
+				if v, ok := res.Data["stderr"]; ok {
+					herr["stderr"] = v
+				}
+				if v, ok := res.Data["exit_code"]; ok {
+					herr["exit_code"] = v
+				}
+			}
+			w.Vars["host_error"] = herr
+			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
+				"set": map[string]any{"host_error": herr},
 			}, 0))
 		}
 

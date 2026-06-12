@@ -222,6 +222,20 @@ onMounted(() => {
   // user back in when they click "← Stories" with one live session.
   markAutoNavDone();
   void loadSession(props.sessionId);
+
+  // Demo / tour test hook: submit an explicit intent through THIS view's own
+  // store path (the same code path InputBar's @intent uses), so the chat +
+  // InputBar re-render reactively — unlike an out-of-band session.submit RPC,
+  // which advances the engine but leaves this view stale. Mirrors the
+  // window.__startTourWithSteps hook the tour video specs rely on. Used to
+  // drive semantic-routing rooms (no intent buttons) on-camera deterministically
+  // in the no-LLM --flow posture. Inert unless a spec calls it.
+  (window as unknown as {
+    __kitsokiSubmitIntent?: (name: string, slots?: Record<string, unknown>) => Promise<void>;
+  }).__kitsokiSubmitIntent = async (name: string, slots: Record<string, unknown> = {}) => {
+    if (!source) return;
+    await runTurn(() => store.submitIntent(source!, props.sessionId, name, slots));
+  };
 });
 
 // Switching directly between two /s/:sessionId/chat routes reuses this
@@ -236,6 +250,7 @@ watch(
 
 onUnmounted(() => {
   store.teardown();
+  delete (window as unknown as { __kitsokiSubmitIntent?: unknown }).__kitsokiSubmitIntent;
 });
 
 /**
