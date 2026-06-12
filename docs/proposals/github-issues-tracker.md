@@ -1,8 +1,12 @@
 # Epic: kitsoki's own tracker moves to GitHub Issues
 
-**Status:** Draft v1. No slices implemented yet.
+**Status:** Slice #1 **code-shipped** (the `host.gh.ticket` `create` op + label/
+body-metadata conventions + `ticket_repo` pin, unit-tested). The cross-site
+**demo** (bug → GitHub issue → triage) is built and recorded —
+`docs/skills/kitsoki-ui-demo/scripts/record-gh-issues-demo.sh`. Slices #2–#4 are
+still design-only; see each child's Status.
 **Kind:**   epic
-**Slices:** 4 (0/4 shipped)
+**Slices:** 4 (1/4 code-shipped)
 
 ## Why
 
@@ -64,7 +68,7 @@ Once every slice ships:
 
 | # | Slice | Kind | Scope (one line) | Depends on | Status | File |
 |---|---|---|---|---|---|---|
-| 1 | gh issue **create** + constructorfabric pin | runtime | Add `create` op to `host.gh.ticket`; establish the `constructorfabric/Kitsoki` repo pin + exec cassettes | — | Draft | [`gh-issue-create.md`](gh-issue-create.md) |
+| 1 | gh issue **create** + constructorfabric pin | runtime | Add `create` op to `host.gh.ticket`; establish the `constructorfabric/Kitsoki` repo pin + exec cassettes | — | **Code shipped** | [`gh-issue-create.md`](gh-issue-create.md) |
 | 2 | Bug filing → GitHub | runtime | `kitsoki bug create` + `runstatus.bug.report` create issues; upload evidence as issue attachments | 1 | Draft | [`bug-filing-to-github.md`](bug-filing-to-github.md) |
 | 3 | Feature filing → GitHub | story | The design pipeline's publish step mints a GitHub issue instead of `issues/features/<id>.md` | 1 | Draft | [`feature-filing-to-github.md`](feature-filing-to-github.md) |
 | 4 | Migrate + deprecate `issues/` | runtime | One-shot migration of the existing pile to GitHub; rebind `kitsoki-dev` to `host.gh.ticket`; freeze `issues/` | 1 | Draft | [`issues-migration-to-github.md`](issues-migration-to-github.md) |

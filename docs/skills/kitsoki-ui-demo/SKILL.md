@@ -385,11 +385,47 @@ Route mapping: `/` → `"home"`, `/s/:id/chat` → `"interactive"`,
 live overlay, so only anchor to elements that exist there (e.g. `view-mode-tabs`,
 `trace-event-row`, `confidence-bar`).
 
+## Cross-site / multi-act demos (driving a site other than kitsoki)
+
+A demo can span **several surfaces** — multiple kitsoki acts, or kitsoki **plus
+an external site** — recorded separately and composited with ffmpeg. The worked
+reference is the **gh-issues** demo (bug → GitHub issue → triage):
+
+- Acts 1 + 3 are ordinary kitsoki tours (`report-bug-video`,
+  `dev-story-bugfix-video`), driven by the kitsoki tour overlay.
+- **Act 2 drives GitHub** — `gh-issue-review-video.spec.ts` +
+  `src/tour/gh-issue-review-manifest.ts`. The kitsoki tour overlay
+  (`__startTourWithSteps`, `[data-testid=tour-*]`) only exists inside the kitsoki
+  SPA, so an external page is narrated with the **portable** helpers
+  `makeCaption` + `makeSpotlight` (`_helpers/demo.ts`) — both inject plain DOM
+  and work on any page. The page itself is a **deterministic static fixture**
+  (`fixtures/gh-issue-review.html`) driven over `file://`, never live GitHub:
+  same no-network/no-cost posture as every kitsoki demo.
+- **Composite** with `scripts/concat-videos.sh` (mpegts intermediates → clean
+  concat; accepts `video:clip.mp4` and `card:img.png[:sec]` segments). Title
+  cards are rendered by `scripts/make-title-card.mjs` (Chromium — this repo's
+  ffmpeg has no `drawtext`). `scripts/record-gh-issues-demo.sh` orchestrates
+  record-3-acts → cards → composite into
+  `.artifacts/gh-issues-demo/gh-issues-cross-site-demo.mp4`.
+
+For an external act: add a fixture (or a real allowed URL), a manifest of
+`{id,target,title,body,dwellMs}` steps, and a spec that `page.goto`s it and walks
+the steps with `spotlight(`[data-testid="…"]`)` + `caption(title, body)`. Anchor
+each `target` to something the page actually renders.
+
+To run kitsoki acts via **`go run`** (local dev — no binary to build/keep fresh)
+set `KITSOKI_WEB_GO_RUN=1` (the default when `bin/kitsoki` is absent); stage the
+go:embed SPA first with `make web`. Build a real binary (`KITSOKI_WEB_GO_RUN=0`)
+for an actual client/CI capture.
+
 ## Pointers
 
 - **Golden feature-tour spec + manifest:**
   `tools/runstatus/tests/playwright/agent-actions-video.spec.ts` +
   `tools/runstatus/src/tour/agent-actions-manifest.ts`
+- **Cross-site / multi-act demo:** `gh-issue-review-video.spec.ts` +
+  `src/tour/gh-issue-review-manifest.ts` + `fixtures/gh-issue-review.html`;
+  composited by `scripts/record-gh-issues-demo.sh` + `scripts/concat-videos.sh`
 - Sibling feature tour: `trace-features-video.spec.ts` + `src/tour/trace-manifest.ts`
 - Sibling feature tour (cassette slow-play streaming): `chat-stream-video.spec.ts` +
   `src/tour/chat-stream-manifest.ts` — films the live turn-stream in the MAIN

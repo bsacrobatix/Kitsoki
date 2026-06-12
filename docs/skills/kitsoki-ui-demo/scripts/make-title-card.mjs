@@ -3,10 +3,19 @@
 // ImageMagick/librsvg, so Chromium (already present for Playwright) is the
 // portable text renderer for the cross-site compositor's act dividers.
 //
-// Run from tools/runstatus so the @playwright/test import resolves:
-//   node ../../docs/skills/kitsoki-ui-demo/scripts/make-title-card.mjs \
+//   node docs/skills/kitsoki-ui-demo/scripts/make-title-card.mjs \
 //     <out.png> <title> [subtitle] [kicker] [accent]
-import { chromium } from "@playwright/test";
+//
+// ESM resolves bare specifiers from the MODULE's directory, not cwd, and
+// @playwright/test lives in tools/runstatus/node_modules — so resolve it
+// explicitly from there via createRequire (works regardless of where node runs).
+import { createRequire } from "module";
+import { fileURLToPath } from "url";
+import path from "path";
+const here = path.dirname(fileURLToPath(import.meta.url));
+const runstatus = path.resolve(here, "../../../..", "tools", "runstatus");
+const require = createRequire(path.join(runstatus, "package.json"));
+const { chromium } = require("@playwright/test");
 
 const [out, title, subtitle = "", kicker = "", accent = "#fbbf24"] = process.argv.slice(2);
 if (!out || !title) {

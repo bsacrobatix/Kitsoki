@@ -1,6 +1,15 @@
 # Runtime: gh issue `create` op + constructorfabric pin
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** **Code shipped** — the `create` op, the label map, the `kitsoki`
+body-metadata block (written on create, parsed back on `get`), the
+fork-contributor label-403 degradation, and the `ticket_repo:
+constructorfabric/Kitsoki` world key are implemented and unit-tested with a
+stubbed `cliExec` (no real `gh`): `internal/host/github_create.go`,
+`internal/host/github.go`, `internal/host/github_create_test.go`,
+`stories/kitsoki-dev/app.yaml`. **Remaining:** an exec-cassette fixture under the
+kitsoki-dev flow harness + migrating the op/conventions into
+`docs/architecture/hosts.md` (which has no ticket-provider section yet), then
+delete this proposal.
 **Kind:**   runtime
 **Epic:**   ./github-issues-tracker.md
 
