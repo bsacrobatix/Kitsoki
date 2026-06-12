@@ -41,6 +41,84 @@ import (
 	"time"
 )
 
+// slowPlayEnv is the env var that gates and scales cassette slow-play. It is the
+// ONE knob for the feature (see slowPlayScale for the semantics).
+const slowPlayEnv = "KITSOKI_CASSETTE_SLOWPLAY"
+
+// slowPlayScale parses the slow-play pace multiplier from the KITSOKI_CASSETTE_SLOWPLAY
+// env var and reports whether slow-play is enabled.
+//
+// Semantics (one float knob, default OFF so the test suite and normal replay stay
+// instant and deterministic):
+//   - unset / "" / "0" / "off" / anything that doesn't parse as a positive float
+//     → (0, false): DISABLED. WriteReplayTranscript behaves exactly as today —
+//     the sidecar is written instantly and nothing is streamed.
+//   - "1"   → (1, true):  replay at the recorded real-time pace.
+//   - "2"   → (2, true):  2× SLOWER than recorded (delays doubled).
+//   - "0.5" → (0.5, true): 2× FASTER than recorded (delays halved).
+//
+// The scale multiplies the recorded inter-event delta (timings[i]-timings[i-1]);
+// it never changes which events stream or in what order. A value ≤ 0 is treated
+// as disabled rather than "instant", because "stream instantly" is already the
+// disabled path and an enabled-but-zero pace would be a confusing no-op.
+func slowPlayScale() (scale float64, enabled bool) {
+	raw := strings.TrimSpace(os.Getenv(slowPlayEnv))
+	switch strings.ToLower(raw) {
+	case "", "0", "off", "false", "no":
+		return 0, false
+	}
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil || f <= 0 {
+		return 0, false
+	}
+	return f, true
+}
+
+// replaySleeper is the injectable pacing seam for slow-play. It blocks for d (or
+// returns early with ctx.Err() if ctx is cancelled first) between streamed
+// replay events. Production wires realReplaySleeper (a ctx-aware time.Sleep);
+// tests inject a recording fake so pacing is asserted deterministically with no
+// real wall-clock sleeps. d ≤ 0 returns immediately (still honouring ctx).
+type replaySleeper func(ctx context.Context, d time.Duration) error
+
+// realReplaySleeper sleeps for d but wakes immediately if ctx is cancelled, so a
+// cancelled turn never hangs in the middle of a paced replay.
+func realReplaySleeper(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// replaySleeperKey is the context key for an injected replaySleeper (tests only).
+type replaySleeperKey struct{}
+
+// withReplaySleeper installs a custom sleeper for slow-play pacing. Used only by
+// tests to drive pacing deterministically; production leaves it unset and the
+// real ctx-aware time.Sleep is used.
+func withReplaySleeper(ctx context.Context, s replaySleeper) context.Context {
+	if s == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, replaySleeperKey{}, s)
+}
+
+// replaySleeperFrom returns the injected sleeper, or realReplaySleeper when none
+// is installed (the production default).
+func replaySleeperFrom(ctx context.Context) replaySleeper {
+	if s, ok := ctx.Value(replaySleeperKey{}).(replaySleeper); ok && s != nil {
+		return s
+	}
+	return realReplaySleeper
+}
+
 // TranscriptSchemaVersion is the schema version stamped into every
 // TranscriptRef. Bump it when the sidecar layout (the .jsonl event shape or
 // the .timings format) changes incompatibly so a consumer can refuse or adapt.
@@ -233,10 +311,94 @@ func appendOutOfHostTranscript(ctx context.Context, callID, format string, event
 // so a replayed run produces a byte-identical sidecar (the golden contract). It
 // shares the exact accumulate-then-Finalize logic of the live out-of-host path.
 //
+// Slow-play (KITSOKI_CASSETTE_SLOWPLAY): when slow-play is enabled AND a
+// StreamSink is installed in ctx, the recorded events are ALSO streamed to that
+// sink — paced by their recorded per-event timings — through the exact same
+// classify→emit path a live claude call uses (emitClassified), so a web/TUI
+// stream watching a REPLAY sees streaming behaviour unfold in real-ish time
+// instead of instantly. This is REPLAY-ONLY: the live out-of-host path
+// (appendOutOfHostTranscript) already streamed live and must not double-emit, so
+// the slow-play tee lives here rather than in the shared accumulate helper. The
+// sidecar write is unchanged either way — same golden bytes. Disabled (the
+// default) restores today's instant, deterministic behaviour.
+//
 // Returns nil (writing nothing) when no writer is installed in ctx, callID is
 // empty, or events is empty, so the caller can attach the result unguarded.
 func WriteReplayTranscript(ctx context.Context, callID, format string, events []json.RawMessage, timings []int64) *TranscriptRef {
+	slowPlayReplay(ctx, format, events, timings)
 	return finalizeOutOfHostTranscript(ctx, callID, format, events, timings)
+}
+
+// slowPlayReplay streams recorded events to the StreamSink in ctx, paced by their
+// recorded timings, so a live replay watcher sees the agent's actions unfold. It
+// is a no-op (returns immediately) unless slow-play is enabled AND a StreamSink
+// is installed — the common case (tests, normal replay) pays nothing.
+//
+// Each event is run through the backend's Classify → emitClassified, identical to
+// the live streaming loop, so the StreamEvents are byte-identical in shape to a
+// live call. Synthetic "_kitsoki" rows and any other non-classifiable event still
+// reach Classify; emitClassified naturally produces a near-empty StreamEvent for
+// a row the live classifier skips — to mirror the live path (which never emits a
+// Sink event for a synthetic row) we skip emitting those but STILL honour their
+// timing slot (the inter-event sleep is taken regardless), so the waterfall pacing
+// of the surrounding real events is preserved.
+//
+// Pacing: between event i-1 and i we sleep (timings[i]-timings[i-1]) * scale ms,
+// clamping negative or missing deltas to 0. The sleep is ctx-aware (injected via
+// replaySleeperFrom) so a cancelled turn stops emission promptly instead of
+// hanging, and tests drive it with a recording fake — no real wall-clock sleeps.
+func slowPlayReplay(ctx context.Context, format string, events []json.RawMessage, timings []int64) {
+	scale, enabled := slowPlayScale()
+	if !enabled {
+		return
+	}
+	sink := StreamSinkFrom(ctx)
+	if sink == nil || len(events) == 0 {
+		return
+	}
+	backend := OracleBackendFromContext(ctx)
+	sleep := replaySleeperFrom(ctx)
+
+	var prevOffset int64
+	for i, raw := range events {
+		// Honour this event's timing slot first: sleep the scaled delta from the
+		// previous event before emitting it, so the inter-event cadence matches the
+		// recording. Clamp negative / missing deltas to 0.
+		var offset int64
+		if i < len(timings) {
+			offset = timings[i]
+		}
+		delta := offset - prevOffset
+		prevOffset = offset
+		if delta < 0 {
+			delta = 0
+		}
+		if i > 0 {
+			d := time.Duration(float64(delta) * scale * float64(time.Millisecond))
+			if err := sleep(ctx, d); err != nil {
+				return // ctx cancelled mid-replay: stop emitting promptly.
+			}
+		}
+
+		var ev map[string]any
+		if json.Unmarshal(raw, &ev) != nil {
+			continue // unparseable row: honoured its timing slot, emit nothing.
+		}
+		if isSyntheticKitsokiEvent(ev) {
+			continue // synthetic row: timing slot honoured above, but no sink emit.
+		}
+		emitClassified(ctx, backend.Classify(ev))
+	}
+}
+
+// isSyntheticKitsokiEvent reports whether ev is a kitsoki-side synthetic row (a
+// decide nudge, validator-reject boundary, tool-bypass banner) rather than a
+// backend-native stream event. Such rows carry a top-level "_kitsoki" marker key
+// (see AppendSynthetic / oracle_decide.go) and are skipped by the live classifier,
+// so slow-play must not surface them to the StreamSink either.
+func isSyntheticKitsokiEvent(ev map[string]any) bool {
+	_, ok := ev["_kitsoki"]
+	return ok
 }
 
 // transcriptEvent is one accumulated event: its verbatim JSON and capture-time
