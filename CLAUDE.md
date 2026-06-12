@@ -25,3 +25,5 @@ principle of least surprise.
 `AskUserQuestion` is hard-denied in every dispatched `claude -p` oracle (it auto-resolves with empty answers when headless — a silent landmine). When a live operator surface is attached, agent questions are instead forwarded into kitsoki via the operator-ask bridge (the `mcp__operator__ask` tool) and surfaced on web + TUI; when no operator is attached (cassettes/flows/headless) no replacement tool is added and the agent proceeds on its own. See `docs/architecture/operator-ask.md`.
 
 when in doubt always save a markdown into .context for review later - much easier to check/review than staying in the conversation and requiring an extra turn.
+
+commit when you're done with your work and commit only your work - this helps to avoid a mess in the repo.  There may be parallel agents working.
