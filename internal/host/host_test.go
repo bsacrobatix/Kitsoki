@@ -2,7 +2,9 @@ package host_test
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"kitsoki/internal/host"
 )
@@ -232,6 +234,83 @@ func TestRunHandler_FailOnError(t *testing.T) {
 	exitCode, _ := result.Data["exit_code"].(int)
 	if exitCode != 7 {
 		t.Fatalf("expected exit_code=7 alongside the error, got %v", exitCode)
+	}
+}
+
+// TestRunHandler_Timeout pins the fix for the silent session wedge: a child
+// that never returns (here a `sleep` far longer than the cap, standing in for
+// an HTTP client blocked on a half-closed proxy socket) must be killed and
+// surfaced as an on_error-routable Result.Error, NOT block the handler — which
+// would hold the session driver lock and freeze every subsequent turn.
+func TestRunHandler_Timeout(t *testing.T) {
+	r := host.NewRegistry()
+	host.RegisterBuiltins(r)
+
+	done := make(chan struct{})
+	var result host.Result
+	var err error
+	go func() {
+		result, err = r.Invoke(context.Background(), "host.run", map[string]any{
+			"cmd":     "sleep 30",
+			"timeout": 1, // seconds
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("host.run with timeout=1 did not return — the timeout did not kill the child (the wedge bug)")
+	}
+
+	if err != nil {
+		t.Fatalf("timeout should be a domain error, not infra error: %v", err)
+	}
+	if result.Error == "" {
+		t.Fatal("expected non-empty Result.Error on timeout so the on_error arc fires")
+	}
+	if !strings.Contains(result.Error, "timed out") {
+		t.Fatalf("expected a 'timed out' error, got %q", result.Error)
+	}
+	if to, _ := result.Data["timed_out"].(bool); !to {
+		t.Fatal("expected Data.timed_out=true")
+	}
+}
+
+// TestRunHandler_TimeoutNotHit confirms the cap is transparent when the
+// command finishes inside it: normal success, no timeout flag.
+func TestRunHandler_TimeoutNotHit(t *testing.T) {
+	r := host.NewRegistry()
+	host.RegisterBuiltins(r)
+
+	result, err := r.Invoke(context.Background(), "host.run", map[string]any{
+		"cmd":     "echo quick",
+		"timeout": "5s",
+	})
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("expected no error well inside the cap, got %q", result.Error)
+	}
+	if to, _ := result.Data["timed_out"].(bool); to {
+		t.Fatal("did not expect timed_out=true for a fast command")
+	}
+}
+
+func TestRunHandler_BadTimeout(t *testing.T) {
+	r := host.NewRegistry()
+	host.RegisterBuiltins(r)
+
+	result, err := r.Invoke(context.Background(), "host.run", map[string]any{
+		"cmd":     "echo hi",
+		"timeout": "not-a-duration",
+	})
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if result.Error == "" {
+		t.Fatal("expected a loud domain error for an unparseable timeout")
 	}
 }
 

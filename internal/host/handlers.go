@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // WorkspaceManagerGetHandler implements host.workspace_manager.get.
@@ -53,6 +54,17 @@ func WorkspaceManagerGetHandler(ctx context.Context, args map[string]any) (Resul
 //     coerced to its string form (numbers/bools become their decimal/`true`
 //     representation, nil becomes the empty string).
 //   - cwd          (string, optional): working directory
+//   - timeout      (number|string, optional): wall-clock cap on the child
+//     process.  A bare number is seconds (e.g. 120); a string is parsed as a
+//     Go duration (e.g. "90s", "5m").  When the cap is hit the child (and its
+//     process group) is killed and Result.Error is set ("host.run: timed out
+//     after …") so the on_enter `on_error:` arc fires instead of the turn
+//     blocking forever.  Without it a child that never exits — e.g. an HTTP
+//     client wedged on a half-closed proxy socket with no read timeout —
+//     hangs the handler, which holds the session's driver write-lock and
+//     freezes every subsequent turn with nothing surfaced to the UI or trace.
+//     Off by default so legitimately long phases (image builds, e2e) are
+//     uncapped; set it on any call that touches a flaky network boundary.
 //   - fail_on_error (bool, optional, default false): when true, a non-zero
 //     exit code populates Result.Error so the on_enter `on_error:` arc
 //     fires instead of the success `done` arc.  Off by default for
@@ -85,6 +97,20 @@ func RunHandler(ctx context.Context, args map[string]any) (Result, error) {
 		return Result{Error: "host.run: cmd argument is required"}, nil
 	}
 
+	// An optional timeout caps the child's wall-clock time.  We derive a
+	// child context so cancellation kills the process (exec.CommandContext
+	// SIGKILLs on ctx.Done), and remember the deadline so a timeout can be
+	// distinguished from an ordinary non-zero exit below.
+	timeout, terr := parseTimeout(args["timeout"])
+	if terr != nil {
+		return Result{Error: fmt.Sprintf("host.run: %v", terr)}, nil
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
 	var execCmd *exec.Cmd
 	if rawArgs, hasArgs := args["args"]; hasArgs && rawArgs != nil {
 		argv, err := coerceArgs(rawArgs)
@@ -103,6 +129,21 @@ func RunHandler(ctx context.Context, args map[string]any) (Result, error) {
 	out, err := execCmd.CombinedOutput()
 	exitCode := 0
 	if err != nil {
+		// A hit timeout cancels ctx, which kills the child and surfaces here
+		// as a non-ExitError.  Report it as a loud, on_error-routable failure
+		// rather than an opaque infra error — and keep any partial output so
+		// the error room can render what the command managed to emit.
+		if timeout > 0 && ctx.Err() == context.DeadlineExceeded {
+			return Result{
+				Data: map[string]any{
+					"stdout":    string(out),
+					"exit_code": -1,
+					"ok":        false,
+					"timed_out": true,
+				},
+				Error: fmt.Sprintf("host.run: timed out after %s", timeout),
+			}, nil
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
@@ -209,6 +250,51 @@ func coerceArgs(raw any) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// parseTimeout interprets the host.run `timeout` arg.  Nil/absent yields 0
+// (no cap).  A numeric scalar is seconds (YAML decodes these as int/int64/
+// float64).  A string is a Go duration ("90s", "5m"); a bare numeric string
+// is also accepted as seconds for author convenience.  A non-positive or
+// unparseable value is an error so a typo'd cap is loud, not silently
+// ignored (which would re-introduce the unbounded-hang it exists to prevent).
+func parseTimeout(raw any) (time.Duration, error) {
+	switch v := raw.(type) {
+	case nil:
+		return 0, nil
+	case int:
+		return secondsToDuration(float64(v))
+	case int64:
+		return secondsToDuration(float64(v))
+	case float64:
+		return secondsToDuration(v)
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return 0, nil
+		}
+		if d, err := time.ParseDuration(s); err == nil {
+			if d <= 0 {
+				return 0, fmt.Errorf("timeout must be positive, got %q", s)
+			}
+			return d, nil
+		}
+		// Fall back to bare-seconds interpretation ("120" → 120s).
+		var secs float64
+		if _, err := fmt.Sscanf(s, "%g", &secs); err != nil {
+			return 0, fmt.Errorf("timeout: cannot parse %q as duration or seconds", s)
+		}
+		return secondsToDuration(secs)
+	default:
+		return 0, fmt.Errorf("timeout must be a number or duration string, got %T", raw)
+	}
+}
+
+func secondsToDuration(secs float64) (time.Duration, error) {
+	if secs <= 0 {
+		return 0, fmt.Errorf("timeout must be positive, got %g", secs)
+	}
+	return time.Duration(secs * float64(time.Second)), nil
 }
 
 // looksLikeJSON reports whether s looks JSON-ish enough that a parse
