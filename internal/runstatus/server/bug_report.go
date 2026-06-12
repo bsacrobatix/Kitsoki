@@ -20,6 +20,7 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -30,6 +31,7 @@ import (
 	"time"
 
 	"kitsoki/internal/bugfile"
+	"kitsoki/internal/host"
 	"kitsoki/internal/runstatus/harscrub"
 )
 
@@ -119,6 +121,15 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 	// Enrich the prose body with the captured error + console state.
 	body = body + errorStateSection(errInfo) + consoleSection(consoleEntries)
 
+	png := decodeScreenshot(stringParam(params, "screenshot_png_b64"))
+
+	// GitHub mode (kitsoki web --ticket-repo): file a real GitHub issue with the
+	// evidence uploaded as release assets, instead of a local issues/bugs/<id>.md
+	// file. The github-issues-tracker cutover (slice #2).
+	if s.ticketRepo != "" {
+		return s.fileBugToGitHub(params, title, body, severity, traceRef, repro, harJSON, png, rrwebJSON, consoleJSON)
+	}
+
 	id, relPath, absPath, err := bugfile.Create(bugfile.CreateRequest{
 		Target:     "story",
 		Title:      title,
@@ -141,7 +152,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 		if wErr := os.WriteFile(filepath.Join(artifactsDir, "har.json"), harJSON, 0o644); wErr != nil {
 			return nil, serverErr(fmt.Errorf("write har.json: %w", wErr))
 		}
-		if png := decodeScreenshot(stringParam(params, "screenshot_png_b64")); png != nil {
+		if png != nil {
 			if wErr := os.WriteFile(filepath.Join(artifactsDir, "screenshot.png"), png, 0o644); wErr == nil {
 				wroteScreenshot = true
 			}
@@ -172,6 +183,76 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 	}
 
 	return map[string]any{"id": id, "path": relPath}, nil
+}
+
+// fileBugToGitHub files the bug as a real GitHub issue on s.ticketRepo: it
+// writes the (already-scrubbed) evidence to a temp dir under a unique per-bug
+// prefix, hands the paths to host.GitHubFileBug (which uploads them as release
+// assets and creates the labelled issue with the ```kitsoki metadata block),
+// and returns the issue url. No local file is written in this mode.
+func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, harJSON, png, rrwebJSON, consoleJSON []byte) (any, *rpcError) {
+	tmp, err := os.MkdirTemp("", "kitsoki-ghbug-")
+	if err != nil {
+		return nil, serverErr(fmt.Errorf("github bug: temp dir: %w", err))
+	}
+	defer os.RemoveAll(tmp)
+
+	prefix := "bug-" + time.Now().UTC().Format("20060102T150405Z")
+	var ev []host.EvidenceFile
+	add := func(base string, data []byte, image bool, label string) {
+		if len(data) == 0 {
+			return
+		}
+		name := prefix + "-" + base
+		p := filepath.Join(tmp, name)
+		if os.WriteFile(p, data, 0o644) == nil {
+			ev = append(ev, host.EvidenceFile{Name: name, Path: p, Image: image, Label: label})
+		}
+	}
+	add("screenshot.png", png, true, "Screenshot")
+	add("har.json", harJSON, false, "HAR capture (scrubbed)")
+	add("rrweb.json", rrwebJSON, false, "Session replay (rrweb)")
+	add("console.json", consoleJSON, false, "Console log")
+
+	full := body
+	if len(repro) > 0 {
+		var sb strings.Builder
+		sb.WriteString("\n\n## Steps to reproduce\n\n")
+		for i, r := range repro {
+			fmt.Fprintf(&sb, "%d. %s\n", i+1, r)
+		}
+		full += sb.String()
+	}
+
+	res, ferr := host.GitHubFileBug(context.Background(), host.GitHubBugFiling{
+		Repo:       s.ticketRepo,
+		Title:      title,
+		Body:       full,
+		Severity:   severity,
+		Component:  nonEmpty(stringParam(params, "component"), "web"),
+		Target:     nonEmpty(stringParam(params, "target"), "kitsoki"),
+		TraceRef:   traceRef,
+		KitsokiRev: gitShortRev(s.bugRoot),
+		FiledBy:    stringParam(params, "filed_by"),
+		Evidence:   ev,
+	})
+	if ferr != nil {
+		return nil, serverErr(fmt.Errorf("file bug to github (%s): %w", s.ticketRepo, ferr))
+	}
+	return map[string]any{"id": res.Number, "url": res.URL, "github": true}, nil
+}
+
+// gitShortRev returns the short HEAD sha of the repo containing dir (best-effort;
+// "" when dir is empty / not a repo / git is unavailable).
+func gitShortRev(dir string) string {
+	if strings.TrimSpace(dir) == "" {
+		return ""
+	}
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // resolveBugRoot picks the repo root for a web-filed bug. Precedence: explicit

@@ -56,6 +56,7 @@ func webCmd() *cobra.Command {
 		configPath    string
 		storyDirs     []string
 		actor         string
+		ticketRepo    string
 	)
 
 	cmd := &cobra.Command{
@@ -207,6 +208,7 @@ authentication.`,
 			srv := server.NewMulti(registry,
 				server.WithDefaultActor(actor),
 				server.WithBugRoot(resolveWebBugRoot(dirs)),
+				server.WithTicketRepo(ticketRepo),
 			)
 			// Attach the cross-session notification relay sink so each new
 			// session's background-turn fan-out reaches the runstatus.notification
@@ -255,6 +257,7 @@ authentication.`,
 	cmd.Flags().StringVar(&flowPath, "flow", "", "drive every session deterministically from a flow fixture (no LLM; host_handlers stub host.* calls, intents are submitted explicitly)")
 	cmd.Flags().StringVar(&hostCassette, "host-cassette", "", "host cassette file backing host.* calls (deterministic, no LLM); combinable with --flow")
 	cmd.Flags().StringVar(&actor, "actor", "", "operator identity recorded on browser-driven turns as slots.author (default: git config user.name; the X-Kitsoki-Actor header and an explicit actor RPC param override it)")
+	cmd.Flags().StringVar(&ticketRepo, "ticket-repo", "", "file Report-bug reports as GitHub issues on this owner/repo (evidence uploaded as release assets) instead of a local issues/bugs/*.md file; requires gh auth")
 
 	return cmd
 }

@@ -186,6 +186,12 @@ type Server struct {
 	// `kitsoki web`.
 	bugRoot string
 
+	// ticketRepo, when set (WithTicketRepo / `kitsoki web --ticket-repo`), routes
+	// runstatus.bug.report to a GitHub issue on that owner/repo (via
+	// host.GitHubFileBug — evidence uploaded as release assets) INSTEAD of a local
+	// issues/bugs/<id>.md file. The github-issues-tracker cutover (slice #2).
+	ticketRepo string
+
 	// captureStore holds scrubbed HAR snapshots between runstatus.bug.preview
 	// and the confirming runstatus.bug.report so the filed capture is identical
 	// to the one reviewed. Bounded by captureCap + captureTTL, swept on put.
@@ -221,6 +227,7 @@ type serverConfig struct {
 	driver       Driver
 	defaultActor string
 	bugRoot      string
+	ticketRepo   string
 }
 
 // WithBugRoot sets the repo root under which runstatus.bug.report writes
@@ -231,6 +238,14 @@ type serverConfig struct {
 // else the process cwd.
 func WithBugRoot(dir string) Option {
 	return func(c *serverConfig) { c.bugRoot = strings.TrimSpace(dir) }
+}
+
+// WithTicketRepo routes runstatus.bug.report to a GitHub issue on the given
+// owner/repo (evidence uploaded as release assets) instead of a local
+// issues/bugs/<id>.md file. Wired by `kitsoki web --ticket-repo`. Empty (the
+// default) keeps the local-file behaviour.
+func WithTicketRepo(repo string) Option {
+	return func(c *serverConfig) { c.ticketRepo = strings.TrimSpace(repo) }
 }
 
 // WithPollInterval overrides the SSE trace-poll interval.
@@ -313,6 +328,7 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		qreg:         newQuestionRegistry(),
 		recorder:     harrec.New(bugRecorderCapacity),
 		bugRoot:      cfg.bugRoot,
+		ticketRepo:   cfg.ticketRepo,
 		captureStore: make(map[string]*capSnap),
 	}
 }
