@@ -1,6 +1,8 @@
 # TUI: Embed the kitsoki web UI in a VS Code extension
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Draft v2. Extension not built yet; the **full-editor demo
+mechanism is PoC-validated** — a real VS Code window is driven + webview-
+traversed + recorded to MP4 in `.artifacts/vscode-poc/` (see *PoC* below).
 **Kind:**   tui (operator surface) — carries one **frontend-transport** seam
 (a `postMessage` `DataSource`), one **packaging** concern (a new TypeScript
 extension subproject under `tools/`), and one **demo-harness** concern
@@ -231,31 +233,40 @@ The pipeline has four layers; **two carry over unchanged, two swap**:
 
 | Layer | Web tour today | Full-editor tour |
 |---|---|---|
-| **Driver** | Playwright Chromium `page` on `kitsoki web` | **swap** → Playwright **`_electron`** launches the real VS Code binary (`@vscode/test-electron`'s `downloadAndUnzipVSCode` + `resolveCliArgsFromVSCodeExecutablePath` → `_electron.launch`); `app.firstWindow()` is the workbench `Page` |
-| **Tour content** | `src/tour/*-manifest.ts` injected via `window.__startTourWithSteps(…)`, asserted per step | **reuse** → same manifests, injected into the webview frame (`frameLocator('iframe.webview').frameLocator('iframe[title]')` → `evaluate`) |
+| **Driver** | Playwright Chromium `page` on `kitsoki web` | **swap** → Playwright **`_electron`** launches the real VS Code binary (`@vscode/test-electron`'s `downloadAndUnzipVSCode` → `_electron.launch`); poll `app.windows()` for `.monaco-workbench` |
+| **Tour content** | `src/tour/*-manifest.ts` injected via `window.__startTourWithSteps(…)`, asserted per step | **reuse** → same manifests, injected into the webview frame (`frameLocator('iframe.webview.ready').frameLocator('iframe[title]')` → `evaluate`) |
 | **Determinism** | backend spawned `--flow`/`--host-cassette` | **reuse** → same backend, same flags — the extension forwards the no-LLM posture (Backend lifecycle, above) |
-| **Recorder** | Playwright `recordVideo` → `saveVideoAsMp4` | **swap** → **ffmpeg window capture** (`avfoundation` on macOS / `x11grab`+Xvfb on Linux) of the VS Code window rect → the *same* MP4/GIF/contact-sheet + chapter-sidecar + QA post-production |
+| **Recorder** | Playwright `recordVideo` → `saveVideoAsMp4` | Playwright **`recordVideo`** of the workbench window → the *same* MP4/GIF/contact-sheet + chapter-sidecar + QA post-production; ffmpeg screen-grab is an optional fidelity upgrade |
 
-**Why ffmpeg, not Playwright `recordVideo` (research-grounded):** for an Electron
-window `recordVideo` captures only the renderer surface (drops the OS title bar)
-and has a history of zero-length `.webm` output for Electron; ffmpeg gives a
-clean full-window capture and feeds the existing
+**Recorder choice — `recordVideo` is the deterministic default; ffmpeg is a
+fidelity upgrade (PoC-validated, corrects the earlier lean).** The PoC below
+showed `recordVideo` is **window-isolated** — it captures the VS Code window's
+own render surface regardless of z-order or what else is on the desktop — which
+is exactly the determinism the tour pipeline needs, and it captures the whole
+workbench (activity bar, sidebar, editor, panels, webviews); it misses only the
+OS title bar. ffmpeg `avfoundation` (macOS) / `x11grab`+Xvfb (Linux) buys that
+title bar and true native chrome, but captures the **screen**, not the window —
+on a shared desktop the PoC's ffmpeg pass caught an overlapping window. So
+ffmpeg is reserved for a dedicated Space / clean CI box where the window is
+guaranteed frontmost and unobstructed (and, on macOS, Screen-Recording
+permission is granted). Both feed the same
 `docs/skills/kitsoki-ui-demo/scripts/{webm-to-mp4,webm-to-gif,contact-sheet}.sh`
-and the `ChapterRecorder` sidecar with no change. Record **headed** (macOS
-native; Xvfb on Linux/CI), VS Code version **pinned**, with a throwaway
-`--user-data-dir`/`--extensions-dir` and a forced theme/zoom/window-size for
-crisp, reproducible frames (the same "deterministic recording" discipline the
-skill already documents — curtain/pacing/no-broad-kill).
+and `ChapterRecorder` sidecar unchanged. Record **headed** (macOS native; Xvfb
+on Linux), VS Code **pinned**, throwaway `--user-data-dir`/`--extensions-dir`,
+fixed window size — the same "deterministic recording" discipline the skill
+documents (pacing/no-broad-kill), and the `app.close()`-to-flush step the PoC
+needed before transcoding.
 
-**The reach-into-the-webview detail that makes manifest reuse work:** VS Code
-nests a webview in two iframes (outer `iframe.webview`, inner `active-frame`);
-Playwright descends both with `frameLocator` (auto-waiting, more reliable than
-Selenium's manual frame switch) and `evaluate`s the existing
-`window.__startTourWithSteps(...)` injection inside it. So the chat tour runs
-identically; the *editor* beats around it (open the kitsoki activity-bar view,
-reveal the trace panel) are driven on the outer workbench `Page`, and can be
-staged deterministically via `app.evaluate(() => vscode.commands.executeCommand(…))`
-to remove command-palette timing flakiness.
+**The reach-into-the-webview detail that makes manifest reuse work (PoC-proven):**
+VS Code nests a webview in two iframes; Playwright descends both with
+`frameLocator` (auto-waiting, more reliable than Selenium's manual frame switch)
+and `evaluate`s the existing `window.__startTourWithSteps(...)` injection inside
+it. The PoC asserted `<h1>Kitsoki Demo Workspace</h1>` from inside a built-in
+Markdown-Preview webview via `iframe.webview.ready >>> iframe[title]`. So the
+chat tour runs identically; the *editor* beats around it (open the kitsoki
+activity-bar view, reveal the trace panel) are driven on the outer workbench
+`Page`, and can be staged deterministically via `app.evaluate(() =>
+vscode.commands.executeCommand(…))` to remove command-palette timing flakiness.
 
 The chapter sidecar (`<video>.chapters.json`) and the vision QA gate
 (`kitsoki-ui-qa`) operate on the MP4 + per-step frames, so both apply unchanged
@@ -263,6 +274,47 @@ The chapter sidecar (`<video>.chapters.json`) and the vision QA gate
 build or the full editor. Net: this is the existing demo pipeline with the
 launcher and recorder swapped, captured as a **"full-editor" mode** of the
 `kitsoki-ui-demo` skill rather than a parallel system.
+
+### PoC — proven end-to-end (the only genuinely new mechanism, validated)
+
+The frontend seam and the relay are conventional; the one unproven claim was
+"drive + record the *whole* VS Code window deterministically." A standalone
+harness now proves it on this machine — **`.artifacts/vscode-poc/`**
+(gitignored; re-run: `cd .artifacts/vscode-poc && node record-vscode-poc.mjs`):
+
+- **Launched real VS Code** (pinned **1.96.4** via `downloadAndUnzipVSCode`) with
+  Playwright **`_electron`** and drove deterministic beats — open a file, Command
+  Palette → "View: Toggle Word Wrap", open a second file, Markdown Preview to the
+  side, toggle the bottom panel — at ~1.5–3 s dwells.
+- **Reached into a webview** and asserted `<h1>Kitsoki Demo Workspace</h1>` from
+  inside the Markdown-Preview iframe (`iframe.webview.ready >>> iframe[title]`).
+- **Recorded the full workbench** via `recordVideo` → ffmpeg transcode:
+  **`vscode-poc.mp4`**, h264/yuv420p **1280×800 · 30 fps · 24.8 s · ~530 KB**,
+  valid/playable, with six `frame-*.png` thumbnails + `webview-proof.png` showing
+  the activity bar, Explorer, editor, and the live Markdown-Preview webview.
+
+Validated stack: macOS 26.5.1 arm64 · Node 22.20 · `playwright` 1.60.0 ·
+`@vscode/test-electron` 3.0.0 · ffmpeg 8.1.1.
+
+Gotchas the harness pins down (fold into the skill's "full-editor" mode):
+
+1. **Strip `VSCODE_*` env before launch** — inherited vars (from a parent VS
+   Code / integrated terminal) hang the launch or break webviews.
+2. **`app.firstWindow()` is flaky** — poll `app.windows()` for the one whose body
+   has `.monaco-workbench`.
+3. **`app.close()` is required to flush** the `recordVideo` `.webm` before
+   transcoding (mirrors the web pipeline's "capture `video` before `context.close`").
+4. **`resolveCliArgsFromVSCodeExecutablePath` was not needed** — passing the
+   Electron binary + our own flags worked.
+5. **ffmpeg `avfoundation` captures the screen, not the window** — needs a
+   dedicated Space / frontmost window (and macOS uses physical pixels, so crop
+   geometry is `logical × deviceScaleFactor`); this is why `recordVideo` is the
+   default. (See *Recorder choice* above.)
+
+Launch args that worked: `--no-sandbox --disable-gpu-sandbox --disable-updates
+--skip-welcome --skip-release-notes --disable-workspace-trust --disable-telemetry
+--user-data-dir=<tmp> --extensions-dir=<tmp> <workspace>`, `recordVideo: { dir,
+size: {1280,800} }`, env stripped of `VSCODE_*`.
 
 ## Testing
 
@@ -302,15 +354,18 @@ No real LLM, no real editor, no cost (CLAUDE.md; memory: no-llm-tests):
 - [ ] 2.4 postMessage ↔ JSON-RPC/SSE relay (reuse LiveSource call shapes on the host)
 - [ ] 2.5 Commands: open chat / open trace / restart backend; binaryPath setting
 
-## 3. Full-editor demo capability
-- [ ] 3.1 Playwright _electron launcher: pinned downloadAndUnzipVSCode + resolveCliArgs
-          + _electron.launch (clean user-data/extensions dir, forced theme/zoom/size);
-          firstWindow() → workbench Page; one spec shared by the e2e + record runs
-- [ ] 3.2 Reach into the chat webview (frameLocator x2) and inject the existing
+## 3. Full-editor demo capability  (mechanism proven — see PoC, .artifacts/vscode-poc/)
+- [x] 3.0 PoC: _electron launches real VS Code, webview frame-traversal asserted,
+          full window recorded to a valid MP4 (record-vscode-poc.mjs)
+- [ ] 3.1 Productionize the launcher into tools/vscode-kitsoki/tests/: pinned
+          downloadAndUnzipVSCode + _electron.launch (clean user-data/extensions dir,
+          fixed size, VSCODE_* env stripped); one spec shared by the e2e + record runs
+- [ ] 3.2 Reach into the kitsoki chat webview (frameLocator x2) and inject the existing
           src/tour/*-manifest.ts via window.__startTourWithSteps; drive editor beats
           (activity-bar view, trace panel) on the workbench Page
-- [ ] 3.3 ffmpeg window capture (avfoundation/x11grab) → reuse kitsoki-ui-demo
-          post-production (MP4/GIF/contact-sheet) + ChapterRecorder sidecar
+- [ ] 3.3 Wire the recording into the kitsoki-ui-demo post-production
+          (MP4/GIF/contact-sheet) + ChapterRecorder sidecar; recordVideo default,
+          ffmpeg screen-grab as the dedicated-display fidelity option
 - [ ] 3.4 Extend the kitsoki-ui-demo skill with a "full-editor" mode; QA via kitsoki-ui-qa
 
 ## 4. Prove + document
