@@ -1,19 +1,19 @@
 # Epic: kitsoki's own tracker moves to GitHub Issues
 
-**Status:** Slices #1–#3 **shipped & verified against real GitHub** (their detail
-has migrated to [hosts.md → host.gh.ticket](../architecture/hosts.md#hostghticket--github-issues-backed-tracker)
-and the child proposals are deleted). Slice #4's **tooling is shipped**
-(`kitsoki issues migrate` + the `issues/` freeze); the **cutover is deferred** —
-the real bulk migration run and rebinding `kitsoki-dev` to `host.gh.ticket` are
-the deliberate last step (the epic's "land the rebind last", once the migrated
-tickets exist), and the bulk migration is an outward write the operator triggers.
-Proofs (real, on the operator's fork): bug `…/issues/3` (web), `…/issues/5`
-(CLI), feature `…/issues/6` (design pipeline). The cross-site **demo** (bug →
-GitHub issue → triage) is built + recorded + QA-passed —
-`docs/skills/kitsoki-ui-demo/scripts/record-gh-issues-demo.sh`. Delete this epic
-once slice #4's cutover lands.
+**Status:** **All four slices shipped & verified** — their detail has migrated to
+[hosts.md → host.gh.ticket](../architecture/hosts.md#hostghticket--github-issues-backed-tracker)
+and the child proposals are deleted. `host.gh.ticket` has the `create` op +
+conventions; bug filing (web + CLI) and feature filing open real issues; the
+`kitsoki-dev` dogfood loop is **rebound to `host.gh.ticket`** (flows green); the
+`issues/` pile is frozen with a migration tool. Proofs (real, on the operator's
+fork): bug `…/issues/3` (web), `…/issues/5` (CLI), feature `…/issues/6` (design
+pipeline). The cross-site **demo** is built + recorded + QA-passed
+(`docs/skills/kitsoki-ui-demo/scripts/record-gh-issues-demo.sh`). **Only one
+operator action remains:** run the real bulk migration of the existing 15-ticket
+pile onto `constructorfabric/Kitsoki` (`kitsoki issues migrate`). Delete this epic
++ the slice-#4 child once that lands.
 **Kind:**   epic
-**Slices:** 4 (3 shipped; #4 tooling shipped, cutover deferred)
+**Slices:** 4 (all shipped; bulk-migration run is the last operator step)
 
 ## Why
 

@@ -169,10 +169,6 @@ thought.
 - [`auto-advance-states-proposal.md`](auto-advance-states-proposal.md) —
   auto-fire `done` after `on_enter` chains complete, with `wait: true`
   to opt out. Nothing implemented yet.
-- [`bug-sync-proposal.md`](bug-sync-proposal.md) — `kitsoki bug
-  sync` pushes local bug files to GitHub / Jira. Format support
-  shipped with the bug-filing CLI (see [`docs/stories/bugs.md`](../stories/bugs.md));
-  the command itself remains in design.
 - [`claude-code-sessions-proposal.md`](claude-code-sessions-proposal.md) —
   chats PTY mode, input queue, and multi-transport drive.
   Phases 0/A/B/C shipped (see `docs/stories/meta-mode.md` §5 and

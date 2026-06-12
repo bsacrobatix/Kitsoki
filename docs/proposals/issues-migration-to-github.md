@@ -1,17 +1,17 @@
 # Runtime: migrate the `issues/` pile to GitHub + deprecate it
 
-**Status:** **Migration tooling shipped; cutover deferred.** Done:
+**Status:** **Shipped except the real bulk-migration run.** Done:
 `kitsoki issues migrate --repo <owner/repo>` ([`cmd/kitsoki/issues.go`](../../cmd/kitsoki/issues.go))
 — idempotent create + comment-replay + close + `external:` write-back, dry-run
-verified across all 15 tickets; and the freeze
-([`issues/DEPRECATED.md`](../../issues/DEPRECATED.md) + README banner).
-**Remaining (the deliberate cutover, land last):** (1) run the real bulk
-migration on `constructorfabric/Kitsoki` (an outward mass-write the maintainer
-triggers); (2) rebind `kitsoki-dev` `host_bindings: { ticket: host.gh.ticket }`
-(`stories/kitsoki-dev/app.yaml:128`) and update the 5 kitsoki-dev flow fixtures
-to stub `host.gh.ticket.*` (exec cassettes) instead of `host.local_files.ticket`;
-(3) delete the superseded [`bug-sync-proposal.md`](bug-sync-proposal.md). Then
-delete this proposal + the epic.
+verified across all 15 tickets; the freeze
+([`issues/DEPRECATED.md`](../../issues/DEPRECATED.md) + README banner); the
+**rebind** — `kitsoki-dev` binds `ticket: host.gh.ticket` (pinned at
+`constructorfabric/Kitsoki`), the dev-story rooms thread `repo`, and the 5
+kitsoki-dev flow fixtures stub `host.gh.ticket` (kitsoki-dev flows 5/5, dev-story
+31/31); and the superseded `bug-sync-proposal.md` is deleted.
+**One step remains:** run the real bulk migration on `constructorfabric/Kitsoki`
+— an outward mass-write (~15 issues + comments + closes) the maintainer triggers
+once. After it lands, delete this proposal + the epic.
 **Kind:**   runtime
 **Epic:**   ./github-issues-tracker.md
 
