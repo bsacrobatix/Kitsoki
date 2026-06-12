@@ -25,12 +25,20 @@ in one click.
 ## What changes
 
 Add a **"Report bug"** item to the Meta dropdown
-(`tools/runstatus/src/components/meta/MetaButton.vue:44-63`). Clicking it
-captures a screenshot of the current page and the recent network trace (HAR),
-anonymizes both, and posts them to a new backend RPC that files a bug under
-`issues/bugs/` with the artifacts colocated in a per-ticket artifacts folder.
-One sentence: **the Meta menu can now file a screenshot + anonymized HAR bug
-without leaving the page.**
+(`tools/runstatus/src/components/meta/MetaButton.vue`, the `uiModes` `v-for`).
+Clicking it captures three evidence artifacts — a **screenshot** (`html-to-image`),
+a short **rolling DOM/session recording** (`rrweb`), and the recent **network
+trace** (HAR) — and posts them to a new backend RPC that anonymizes the HAR and
+files a bug under `issues/bugs/`, with the artifacts colocated in a per-ticket
+artifacts folder. One sentence: **the Meta menu can now file a screenshot +
+session recording + anonymized HAR bug without leaving the page.**
+
+The split of *where* each artifact is produced follows one rule — **don't ask
+the client to do work the server already does faithfully.** The HAR comes from
+the server, which mediates every RPC/SSE call and therefore sees request/response
+*bodies* that no in-page JavaScript can. Only the two genuinely browser-bound
+captures (the rendered screenshot and the DOM mutation stream) run client-side,
+and each is scrubbed *at capture* so nothing sensitive is ever serialized.
 
 This is distinct from the existing `*.bug` *agentic* modes — those open a chat
 overlay for a conversation. "Report bug" is a deterministic capture-and-file
@@ -43,7 +51,10 @@ dogfood pipeline — no agent hand-off in the click path.
 - **Code (web):** `tools/runstatus/src/components/meta/MetaButton.vue` (new
   menu item, capture orchestration); `tools/runstatus/src/data/live-source.ts`
   (new `reportBug` RPC client, alongside `metaStream`); a small capture helper
-  module for screenshot + HAR assembly.
+  module that drives the screenshot (visible-DOM scrub → `html-to-image`) and
+  the rrweb rolling buffer, and bundles them with the capture token.
+- **New web deps:** `html-to-image` and `rrweb` (both MIT). No existing
+  screenshot/recording dep in `tools/runstatus/package.json` today.
 - **Code (backend, runtime seam):** new RPC `runstatus.bug.report` in
   `internal/runstatus/server/server.go` (registered near the `runstatus.meta.*`
   handlers, ~line 845); a HAR ring-buffer recorder wrapping the RPC/SSE
@@ -98,30 +109,51 @@ hoc strings. Everything else in the launcher is unchanged.
 
 | Command / key | Does | Notes |
 |---|---|---|
-| Meta ▾ → **Report bug** | Capture screenshot + HAR, anonymize, file ticket | Hidden in read-only/snapshot mode |
+| Meta ▾ → **Report bug** | Capture screenshot + rrweb session + HAR, anonymize, file ticket | Hidden in read-only/snapshot mode |
 | `[open]` on result toast | Reveal the filed `issues/bugs/<id>.md` | Best-effort; copies path if no reveal host |
 
-Capture pipeline (client → server):
+Capture pipeline (client captures visual evidence → server attaches + anonymizes
+HAR → server files):
 
-1. **Screenshot** — client-side. *Lean:* `html2canvas` over the app root,
-   producing a PNG of the rendered DOM (no extra browser permission prompt).
-   See Open question §2 for the `getDisplayMedia` alternative.
-2. **HAR** — *Lean:* server-side ring buffer. The runstatus server already
-   mediates every `/rpc` and `/rpc/meta-stream` call
+1. **Screenshot** — client-side, `html-to-image` over the app root, producing a
+   PNG of the rendered DOM (no permission prompt). `html-to-image` over
+   `html2canvas`: actively maintained, faster, better fonts/SVG/TypeScript;
+   `html2canvas` is slow and `dom-to-image` is unmaintained.
+   **Before rasterizing, scrub the *visible* DOM:** walk for sensitive nodes
+   (the same selectors rrweb masks — `input[type=password]`, `.cc-number`,
+   `[data-bug-redact]` — plus value-shaped heuristics) and overlay/mask them, so
+   the screenshot can't accidentally bake in a secret that's on screen. The
+   raster is the one artifact a reviewer reads at a glance, so it must be clean
+   by construction, not by after-the-fact redaction.
+2. **Session recording** — client-side, `rrweb`. A bounded rolling buffer (last
+   ~30s of DOM mutations + the opening full snapshot) records *how the operator
+   reached the broken state*, not just the final frame. rrweb's built-in privacy
+   config does the masking **at record time** (block selectors, mask text, ignore
+   subtrees via `data-rrweb-ignore`) — form values never enter the buffer. This
+   is the rrweb-standard engine under Sentry/PostHog/OpenReplay, and the rendered
+   screenshot of step 1 can be reproduced from any replay frame.
+3. **HAR** — **server-side ring buffer** (authoritative). The runstatus server
+   already mediates every `/rpc`, `/rpc/turn-stream`, and `/rpc/meta-stream` call
    (`internal/runstatus/server/server.go`); a bounded recorder keeps the last N
    request/response pairs and serializes them as a HAR 1.2 archive on demand.
-   This is far more faithful than page-JS Resource-Timing reconstruction, which
-   cannot see request/response bodies. The client sends only a capture token;
-   the server attaches the HAR.
-3. **Anonymize** — deterministic, server-side, before anything is written:
-   strip `Authorization`/`Cookie`/`Set-Cookie` headers and known session-token
-   query params; redact absolute paths under `$HOME`; redact configured
-   secret-shaped values. Ruleset lives in one package and is unit-tested
-   against fixture HARs.
-4. **File** — `runstatus.bug.report` writes `issues/bugs/<id>.md` (reusing the
+   This sees request/response *bodies* that no page JS can, and requires zero
+   client instrumentation — the client sends only a capture token; the server
+   attaches the HAR. *Optional augmentation:* if the page is running where
+   `devtools.network.getHAR()` is available (a devtools/extension context), the
+   client may attach that full-browser HAR alongside the server's; in a plain
+   page it simply isn't present and is skipped. The server ring buffer is the
+   floor, `getHAR()` is a bonus when it happens to exist.
+4. **Anonymize** — deterministic, server-side, over the HAR before anything is
+   written: strip `Authorization`/`Cookie`/`Set-Cookie` headers and known
+   session-token query params; redact absolute paths under `$HOME`; redact
+   configured secret-shaped values. Ruleset lives in one package, unit-tested
+   against fixture HARs. (The screenshot and rrweb stream are already scrubbed at
+   capture — step 1's DOM scan and step 2's rrweb masking — so the server only
+   anonymizes the HAR it produced.)
+5. **File** — `runstatus.bug.report` writes `issues/bugs/<id>.md` (reusing the
    `kitsoki bug create` body/frontmatter logic, `cmd/kitsoki/bug.go:154-190`)
-   plus a sibling artifacts folder containing `screenshot.png` and `har.json`,
-   and links them from the ticket body. Returns `{id, path}`.
+   plus a sibling artifacts folder containing `screenshot.png`, `session.rrweb.json`,
+   and `har.json`, and links them from the ticket body. Returns `{id, path}`.
 
 ### Per-ticket artifacts folder
 
@@ -133,8 +165,9 @@ artifacts go in a **sibling** folder, not a folder-form ticket:
 issues/bugs/
 ├── 2026-06-12T…Z-web-….md          ← still a flat .md, still globbed
 └── 2026-06-12T…Z-web-….artifacts/  ← NEW, ignored by the *.md glob
-    ├── screenshot.png
-    └── har.json
+    ├── screenshot.png        ← html-to-image, visible-DOM scrubbed
+    ├── session.rrweb.json    ← rrweb rolling buffer, masked at record time
+    └── har.json              ← server ring buffer, anonymized
 ```
 
 The ticket body gets a `## Artifacts` section linking the two files relatively.
@@ -174,8 +207,10 @@ rule doesn't bind here. Coverage instead:
 
 ## 2. Web surface
 - [ ] 2.1 "Report bug" menu item in MetaButton.vue (hidden in read-only)
-- [ ] 2.2 Client screenshot (html2canvas) + capture state machine + result toast
-- [ ] 2.3 reportBug RPC client in live-source.ts
+- [ ] 2.2 rrweb rolling-buffer recorder started at app mount (masked, bounded ~30s)
+- [ ] 2.3 Screenshot: visible-DOM scrub → html-to-image; capture state machine + result toast
+- [ ] 2.4 Opportunistic devtools.network.getHAR() attach when present
+- [ ] 2.5 reportBug RPC client in live-source.ts (bundles screenshot + rrweb + token)
 
 ## 3. Prove + document
 - [ ] 3.1 Component test (renders/hidden/files) + backend + anonymizer tests
@@ -186,26 +221,34 @@ rule doesn't bind here. Coverage instead:
 
 ## What we lose, honestly
 
-- **Screenshot fidelity.** `html2canvas` rasterizes the DOM, not the real
-  compositor output — CSS it doesn't support (some filters, cross-origin
+- **Screenshot fidelity.** `html-to-image` rasterizes the DOM, not the real
+  compositor output — CSS it doesn't fully support (some filters, cross-origin
   images, canvas/video) renders imperfectly. It's "good enough to see what the
   operator saw," not a pixel-perfect capture. `getDisplayMedia` would be exact
-  but prompts the user and can capture the wrong window.
-- **HAR completeness.** A bounded ring buffer only holds recent traffic; a bug
-  whose cause scrolled out of the window won't be in the HAR. We log the buffer
-  depth in the archive so reviewers know the horizon.
-- **Anonymization is best-effort.** A redaction ruleset catches known shapes; a
-  novel secret format can leak. The artifacts are committed to the repo, so
-  this is a real risk — §3 below.
+  but prompts the user and can capture the wrong window. The rrweb recording
+  partly compensates: a reviewer can replay the real DOM if the raster is off.
+- **Always-on recording cost.** The rrweb rolling buffer must be *running* from
+  app mount to have anything at click time. That's a continuous (small) cost on
+  every session, masked-by-default, bounded to ~30s of events. It's off in
+  read-only/snapshot mode (where Report bug is hidden anyway).
+- **HAR completeness.** Both the server ring buffer and the rrweb buffer are
+  bounded; a bug whose cause scrolled out of the window won't be captured. We
+  log the buffer depth/horizon in the archive so reviewers know the limit.
+- **Anonymization is best-effort.** Client masking (rrweb config + the visible-
+  DOM scan) catches the configured shapes; the server HAR scrub catches known
+  header/path/secret shapes; a novel secret format can still leak. Artifacts are
+  committed to the repo, so this is a real risk — §3 below.
 
 ## Open questions
 
-1. **Screenshot mechanism:** `html2canvas` (no prompt, approximate) vs.
-   `getDisplayMedia` (exact, prompts, can grab wrong surface). *Lean:*
-   html2canvas for v1; revisit if fidelity complaints arise.
-2. **HAR source.** Server ring buffer (faithful, needs transport wrapper) vs.
-   client Resource-Timing reconstruction (no bodies, but zero backend work).
-   *Lean:* server ring buffer.
+1. **Screenshot mechanism:** `html-to-image` (no prompt, approximate) vs.
+   `getDisplayMedia` (exact, prompts, can grab wrong surface). *Decided:*
+   `html-to-image` for v1, backed by the rrweb replay for fidelity; revisit
+   `getDisplayMedia` only if complaints arise.
+2. **HAR source.** *Decided:* **server ring buffer** is the authoritative source
+   — it sees bodies and asks nothing of the client. `devtools.network.getHAR()`
+   is attached opportunistically *only when present* (devtools/extension
+   context); it is never required, and the feature is whole without it.
 3. **Anonymization hardening (pre-wide-release, not a v1 blocker).** Since
    artifacts are committed (decided: in-repo for now), the redaction ruleset is
    the only thing standing between a missed secret and git history. Before wide
@@ -214,7 +257,10 @@ rule doesn't bind here. Coverage instead:
    "review HAR" link in the result toast; the hardening lands before release.
 
 **Resolved:** triage is async with no agent hand-off in the click path; tickets
-and artifacts are committed to the repo for now (to evolve before wide release).
+and artifacts are committed to the repo for now (to evolve before wide release);
+HAR is captured server-side (authoritative, sees bodies, no client work) with
+`getHAR()` as an opportunistic bonus; visual evidence is client-side rrweb +
+`html-to-image`, each scrubbed at capture.
 
 ## Non-goals
 

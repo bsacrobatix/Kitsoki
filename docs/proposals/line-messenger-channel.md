@@ -2,7 +2,7 @@
 
 **Status:** Draft v1. No slices implemented yet.
 **Kind:**   epic
-**Slices:** 4 (0/4 shipped)
+**Slices:** 5 (0/5 shipped)
 
 ## Why
 
@@ -38,8 +38,12 @@ Once every slice ships, a merchant can:
 1. **Author** a customer-facing story (`stories/line-store/`,
    `stories/line-booking/`) the same way they author any kitsoki story — rooms,
    intents, typed views, host calls — with no LINE-specific code in the YAML.
-2. **Provision** a LINE channel from the kitsoki web console: paste the channel
-   secret + access token, bind it to a story, get a webhook URL.
+2. **Provision** a LINE channel from the kitsoki web console using an **existing
+   LINE Official Account** they already run: paste the channel secret + access
+   token from the LINE Developers console, bind the OA to a story, point its
+   webhook at the URL kitsoki gives them (and disable the OA's default auto-
+   reply). No new account, no migration of their followers — kitsoki slots in
+   behind the OA they have.
 3. Then **every customer who messages the LINE Official Account** transparently
    gets their own session: the first inbound event *creates* a session bound to
    `line:<channel>:<lineSourceId>`; subsequent messages route to it. Customer
@@ -47,14 +51,20 @@ Once every slice ships, a merchant can:
    uses** (`internal/semroute`) — the story author owns the customer vocabulary
    per room. Story output (prompts, view, quick-reply buttons) is posted back to
    LINE through the output transport.
-4. **Watch and assist**: the merchant sees every live customer session in a web
-   console, and when a customer-facing agent needs a human, the existing
-   **operator-ask bridge** (`docs/architecture/operator-ask.md`) surfaces the
-   question to the *merchant* on web — the customer just waits.
+4. **Watch and assist (hybrid)**: the merchant sees every live customer session
+   in a web console and runs it as a **hybrid human + bot** desk. When a
+   customer-facing agent needs a human, the existing **operator-ask bridge**
+   (`docs/architecture/operator-ask.md`) surfaces the structured question to the
+   *merchant* — and the merchant is **notified**, not left to watch a dashboard.
+   Beyond that narrow ask, the merchant can **take over and chat directly**: flip
+   a session to human-handling (which pauses the bot so it never replies over the
+   operator), type free-form prose straight into the LINE conversation, then hand
+   back to automation. The customer sees one seamless conversation.
 
 The end state: **kitsoki is the application engine and the merchant's web
-presence; LINE is one (pluggable, generic) customer channel** layered on the
-existing inbound/transport seams — not a fork of the turn loop.
+presence; LINE is one (pluggable, generic) customer channel** — running fully
+automated, fully human, or any hybrid in between — layered on the existing
+inbound/transport seams, not a fork of the turn loop.
 
 ## Impact
 
@@ -85,24 +95,28 @@ existing inbound/transport seams — not a fork of the turn loop.
 | 1 | Webhook ingress + session factory | runtime | LINE-signed webhook → get-or-create session per `line:<channel>:<src>` → drive raw text through semroute under the writer lock | — | Draft | [`line-webhook-ingress.md`](line-webhook-ingress.md) |
 | 2 | LINE output transport | runtime | `transport.Transport` for the LINE Messaging API: reply-token fast path + push fallback; typed view → text + quick-reply | 1 (shares channel config) | Draft | [`line-transport.md`](line-transport.md) |
 | 3 | Commerce + booking example stories | story | `stories/line-store/` and `stories/line-booking/`, composing slices 1–2 with existing hosts only | 1, 2 | Draft | [`line-commerce-stories.md`](line-commerce-stories.md) |
-| 4 | LINE channel console (web presence) | tui | Provision a channel (creds + story binding + webhook URL) and watch/assist live customer sessions | 1 | Draft | [`line-channel-console.md`](line-channel-console.md) |
+| 4 | LINE channel console (web presence) | tui | Provision an existing OA (creds + story binding + webhook URL), watch live sessions, **chat composer + notifications** | 1, 5 | Draft | [`line-channel-console.md`](line-channel-console.md) |
+| 5 | Live operator handoff | runtime | `handling_mode` (auto\|human): pause auto-routing, deliver free-form operator prose to LINE, emit intervention notifications | 1, 2 | Draft | [`line-operator-handoff.md`](line-operator-handoff.md) |
 
 ## Sequencing
 
 ```
 #1 (runtime: ingress + session factory) ──┬──▶ #3 (story: store + booking)
                                           │
-#2 (runtime: LINE transport) ────────────┘
-   (can build in parallel with #1; #3 needs both)
-                                          
-#1 ──▶ #4 (tui: channel console)   (console drives the factory + creds from #1)
+#2 (runtime: LINE transport) ────────────┤
+   (parallel with #1; #3 needs both)     │
+                                          ├──▶ #5 (runtime: handoff)  needs #1 ingress + #2 send
+                                          │
+#1, #5 ───────────────────────────────────┴──▶ #4 (tui: console)  drives factory + creds + handoff UI
 ```
 
 Slice **1 is the spine** — the get-or-create session factory is the one novel
 engine concept and everything else layers on it. Slice 2 (output transport) can
 be built in parallel against a stub channel config and is independently testable
-with an HTTP cassette. Slice 3 needs 1 + 2 to run end-to-end. Slice 4 needs 1's
-channel-config + factory seam but not the example stories.
+with an HTTP cassette. Slice 3 needs 1 + 2 to run end-to-end. Slice 5 (handoff)
+adds the `human` mode + operator-send seam over 1's ingress and 2's transport.
+Slice 4 (console) is the front door for all of it — provisioning + monitoring
+(needs 1) and the chat composer + notification UI (needs 5's events).
 
 ## Shared decisions
 
@@ -132,14 +146,27 @@ These span slices; each child defers here rather than re-deciding.
    — never in `app.yaml`. Stories stay portable and shareable; the same story
    serves any merchant's channel.
 
-4. **Human-in-the-loop targets the merchant, not the customer.** When a
-   customer-facing agent calls `mcp__operator__ask`, the operator-ask bridge
-   (`docs/architecture/operator-ask.md`) surfaces it on the merchant's web
-   console (slice 4). The customer sees no question; the turn waits or the story
-   provides a deterministic fallback. This preserves the CLAUDE.md headless
-   contract: no operator surface ⇒ no ask tool ⇒ agent proceeds on its own.
+4. **Human-in-the-loop targets the merchant, not the customer — and has two
+   shapes.** (a) *Structured ask:* a customer-facing agent calls
+   `mcp__operator__ask` and the operator-ask bridge
+   (`docs/architecture/operator-ask.md`) surfaces the question on the merchant
+   console — the merchant is **notified**, not made to watch. (b) *Free-form
+   takeover (slice 5):* the merchant flips a session to `human` handling, which
+   **pauses auto-routing** (the bot won't reply over the operator), and types
+   prose straight to the customer through the LINE transport, then hands back to
+   `auto`. Both preserve the CLAUDE.md headless contract: no operator surface ⇒
+   no ask tool, no notification target ⇒ the agent proceeds on its own / the
+   story's deterministic fallback. The customer never sees a question or a seam —
+   bot and operator replies share one conversation.
 
-5. **The channel is generic; only LINE is built.** Slices 1 and 4 are written
+5. **Bring-your-own Official Account.** The merchant already runs a LINE OA;
+   kitsoki **slots in behind it**, it does not create or replace it. Provisioning
+   is: register the OA's `channelSecret` + `channelAccessToken`, point the OA's
+   webhook at kitsoki's URL, disable the OA's built-in auto-reply (so kitsoki is
+   the only responder). No follower migration, no second account. The console
+   (slice 4) surfaces exactly these steps.
+
+6. **The channel is generic; only LINE is built.** Slices 1 and 4 are written
    against a `Channel` abstraction (signed webhook + push/reply transport +
    source-id extraction) so WhatsApp / Messenger / Telegram are later transports
    behind the same seam — but this epic ships **only** the LINE binding and does
@@ -179,7 +206,7 @@ These span slices; each child defers here rather than re-deciding.
 - **A general bot framework.** No NLU layer, no dialog-manager DSL — customer
   routing is the *existing* semantic router over the *existing* room intents.
   The story is the bot.
-- **Other chat platforms.** The seam is built generic (Shared decision 5) but
+- **Other chat platforms.** The seam is built generic (Shared decision 6) but
   only LINE is implemented here.
 - **Replacing the `inbound.PrefixClassifier`.** It stays for operator ticket
   replies (`hybrid-session-driving.md`); LINE simply doesn't use it.

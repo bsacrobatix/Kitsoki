@@ -3,6 +3,7 @@
 **Status:** Draft v1. Nothing implemented yet.
 **Kind:**   tui
 **Epic:**   ../line-messenger-channel.md
+**Depends on:** slice 1 (ingress/factory + channel config), slice 5 (handoff seam + events)
 
 ## Why
 
@@ -21,17 +22,29 @@ operator-ask hand-off (epic Shared decision 4) has nowhere to land.
 
 A **Channels** area in the existing runstatus web UI with two surfaces:
 
-1. **Provision** — register a LINE channel: name, story binding, `channelSecret`
-   + `channelAccessToken` (write-only, stored as injected secrets), and the
-   generated webhook URL `…/channels/line/:channelId` with a "verify" round-trip.
-2. **Console** — a live list of the customer sessions a channel is driving
-   (keyed `line:<channelId>:<src>`, epic Shared decision 1), each opening the
-   **existing** `StoryViewer`/trace view; plus the **operator-ask inbox** so a
-   merchant answers a customer-facing agent's question (the question targets the
-   merchant, not the customer).
+1. **Provision an existing Official Account** — register the merchant's LINE OA:
+   name, story binding, `channelSecret` + `channelAccessToken` (write-only,
+   stored as injected secrets, epic Shared decision 3), the generated webhook URL
+   `…/channels/line/:channelId` to paste into the LINE Developers console, a
+   "verify" round-trip, and a checklist reminder to **disable the OA's built-in
+   auto-reply** so kitsoki is the sole responder (epic Shared decision 5). No
+   new-account flow — the merchant brings the OA they already run.
+2. **Console (hybrid desk)** — a live list of the customer sessions a channel is
+   driving (keyed `line:<channelId>:<src>`, epic Shared decision 1), each opening
+   the **existing** `StoryViewer`/trace view (the transcript). On a session the
+   merchant can:
+   - **answer a structured agent ask** — the existing operator-ask inbox, now
+     grouped by channel and **notified** (browser notification + a badge) so the
+     merchant is pulled in rather than polling;
+   - **take over** — flip the session to `human` handling (slice 5), type
+     **free-form prose** in a chat composer that posts straight to the customer's
+     LINE conversation, then **hand back** to automation. While `human`, the bot
+     is paused and inbound customer messages show in the composer (a
+     `handoff.message` event) instead of auto-replying.
 
-One sentence: **the merchant's home — provision a channel and watch/assist the
-sessions it spawns — built on the existing runstatus RPC + SSE surface.**
+One sentence: **the merchant's home — provision an existing OA and run it as a
+hybrid human + bot desk — built on the existing runstatus RPC + SSE surface plus
+slice 5's handoff events.**
 
 ## Impact
 
@@ -39,10 +52,13 @@ sessions it spawns — built on the existing runstatus RPC + SSE surface.**
   view + a per-channel `Console`), reusing the shipped `StoryViewer.vue` and the
   operator-questions SSE feed (`internal/runstatus/server/operator_questions.go`,
   `docs/architecture/operator-ask.md`).
-- **RPC additions:** `runstatus.channels.list` / `.register` / `.verify`, and a
-  `runstatus.channels.sessions` listing sessions by channel — thin wrappers over
-  the slice-1 channel config + `store` external-key lookup. Mirrors the existing
-  `runstatus.sessions.*` shape (`server.go:39`).
+- **RPC additions:** `runstatus.channels.list` / `.register` / `.verify`, a
+  `runstatus.channels.sessions` listing sessions by channel, and the hybrid-desk
+  pair `runstatus.channels.session.takeover` / `.handback` (slice-5
+  `handling_mode`) + `.send` (slice-5 operator-send) — thin wrappers over the
+  slice-1 channel config, `store` external-key lookup, and slice-5 seams. Mirrors
+  the existing `runstatus.sessions.*` shape (`server.go:39`). Notifications ride
+  the existing operator-questions SSE feed extended with `handoff.*` events.
 - **Backend:** the channel config store (registration + secret storage) is the
   home for the credentials slice 1 reads; this slice owns it.
 - **Stays typed + pongo2 / Vue:** no hand-rolled rendering; the console reuses
@@ -53,50 +69,64 @@ sessions it spawns — built on the existing runstatus RPC + SSE surface.**
 ## The surface
 
 ```
-/channels                         ┌─────────────────────────────────────┐
-  ├─ [+ New LINE channel]         │ Channel: "Sakura Golf"  ● live        │
-  │     name, story ▾,            │ webhook: …/channels/line/sakura  [verify]│
-  │     channelSecret  (write)    │ ─────────────────────────────────────│
-  │     accessToken    (write)    │ Live customer sessions (line:sakura:*) │
-  │                               │  U1f3…  proposing_slot   2m ago  [open]│
-  └─ list of channels ● status    │  Ua92…  choosing         just now [open]│
-                                  │ ─────────────────────────────────────│
-                                  │ Operator inbox (2)                     │
-                                  │  "Customer asks about gluten-free…" [answer]│
-                                  └─────────────────────────────────────┘
-        [open] ──▶ existing StoryViewer / trace for that session
-        [answer] ─▶ existing operator-ask answer RPC (resolves the agent's ask)
+/channels                         ┌──────────────────────────────────────────┐
+  ├─ [+ Add Official Account]     │ Channel: "Sakura Golf"  ● live    🔔 (2)  │
+  │     name, story ▾,            │ webhook: …/channels/line/sakura   [verify]│
+  │     channelSecret  (write)    │ ☑ auto-reply disabled in LINE OA Manager  │
+  │     accessToken    (write)    │ ──────────────────────────────────────────│
+  │                               │ Live customer sessions (line:sakura:*)     │
+  └─ list of channels ● status    │  U1f3…  proposing_slot  2m   [open] 🔔 ask │
+                                  │  Ua92…  ● human-handled just now [open]    │
+                                  │ ──────────────────────────────────────────│
+                                  │ Session U1f3…   [take over] / [hand back]  │
+                                  │  customer: "do you do gluten-free?"        │
+                                  │  bot:      "Here are our courses…"          │
+                                  │  ┌──────────────────────────────────────┐ │
+                                  │  │ type a reply to the customer…   [send]│ │
+                                  │  └──────────────────────────────────────┘ │
+                                  └──────────────────────────────────────────┘
+        [open] ──▶ existing StoryViewer / trace (the transcript)
+        [answer ask] ─▶ existing operator-ask answer RPC (resolves the agent's ask)
+        [take over] ─▶ handling_mode=human (slice 5); composer sends prose to LINE
+        🔔 ─▶ browser notification on handoff.requested / new operator ask
 ```
 
 Opening a customer session reuses the shipped story-editor/viewer surface
 (`docs/tui/story-editor.md`, `StoryViewer.vue`) and the hybrid-driving operator
-identity (`hybrid-session-driving.md`) — a merchant can take over and drive a
-turn, serialized with the webhook under the writer lock. The operator inbox is
-the *existing* operator-ask web feed, grouped by channel.
+identity (`hybrid-session-driving.md`) — a merchant can drive a structured turn
+*or* take over with free-form prose, both serialized with the webhook under the
+writer lock. The operator inbox is the *existing* operator-ask web feed, grouped
+by channel and now **notified**; the chat composer + take-over/hand-back drive
+slice 5's `handling_mode` + operator-send seam.
 
 ## Reuse / build
 
 | Surface | Reuse | Build |
 |---|---|---|
-| Per-session view/trace | `StoryViewer.vue`, `runstatus.session.*` | — |
-| Operator question hand-off | operator-ask web feed (`operator_questions.go`) | group by channel |
-| Operator takeover drive | hybrid-driving identity + writer lock | — |
+| Per-session view/trace (transcript) | `StoryViewer.vue`, `runstatus.session.*` | — |
+| Structured agent ask | operator-ask web feed (`operator_questions.go`) | group by channel + **browser notification** |
+| Operator structured drive | hybrid-driving identity + writer lock | — |
+| **Free-form chat composer** | LINE transport (slice 2) + writer lock | composer view; `channels.session.send` RPC → slice-5 operator-send |
+| **Take over / hand back** | slice-5 `handling_mode` seam | toggle + `human-handled` badge; consume `handoff.*` events on SSE |
+| **Intervention notification** | operator-ask SSE + `handoff.requested` (slice 5) | browser-notification + per-channel badge |
 | Channel registration + secrets | injected-secret pattern | channel config store + RPC |
 | Session-by-channel list | `store.LookupByKey` reverse / key-prefix scan | `channels.sessions` RPC |
-| Webhook URL + verify | slice-1 handler | "verify" round-trip button |
+| Webhook URL + verify + auto-reply checklist | slice-1 handler | "verify" round-trip + setup checklist |
 
 ## Verification
 
 - RPC unit tests (`internal/runstatus/server`) mirroring the existing
   `write_test.go` / `identity_test.go` style: `channels.register` stores config
   + secrets (write-only — never echoed back), `channels.sessions` lists by key
-  prefix, `channels.verify` reports handler reachability. No LLM.
-- A Vue unit/component test for the Channels view + console list (mirrors
-  `tools/runstatus/tests/unit/`).
+  prefix, `channels.verify` reports handler reachability, `takeover`/`handback`
+  flip `handling_mode`, `send` reaches the (cassette) LINE transport. No LLM.
+- A Vue unit/component test for the Channels view + console list + chat composer
+  (mirrors `tools/runstatus/tests/unit/`).
 - A Playwright walk (mirrors the existing specs under
   `tools/runstatus/tests/playwright/`): provision a fake channel, see a seeded
-  customer session appear, open it, answer a seeded operator question — all
-  against a recorded backend, no LINE account, no LLM.
+  customer session appear, receive a seeded **intervention notification**, open
+  the session, **take over and send a free-form reply**, hand back — all against
+  a recorded backend, no LINE account, no LLM.
 
 ## Tasks
 
@@ -104,15 +134,18 @@ the *existing* operator-ask web feed, grouped by channel.
 ## 1. Backend
 - [ ] 1.1 Channel config store (register; write-only secret storage); the home slice 1 reads
 - [ ] 1.2 RPC: channels.list / register / verify / sessions (thin over config + store keys)
+- [ ] 1.3 RPC: channels.session.takeover / handback / send (over slice-5 handling_mode + operator-send)
+- [ ] 1.4 handoff.* events relayed on the operator-questions SSE feed
 
 ## 2. Web UI
-- [ ] 2.1 /channels view: list + new-channel form (story ▾, secret/token write-only, webhook URL)
-- [ ] 2.2 Per-channel console: live customer-session list (SSE), [open] → StoryViewer
-- [ ] 2.3 Operator inbox grouped by channel; [answer] → existing operator-ask answer RPC
+- [ ] 2.1 /channels view: add-existing-OA form (story ▾, secret/token write-only, webhook URL, auto-reply checklist)
+- [ ] 2.2 Per-channel console: live customer-session list (SSE), human-handled badge, [open] → StoryViewer
+- [ ] 2.3 Operator inbox grouped by channel + browser notification on ask / handoff.requested
+- [ ] 2.4 Chat composer + [take over]/[hand back]: free-form send → channels.session.send; inbound-while-human shown
 
 ## 3. Verification
-- [ ] 3.1 RPC tests (register/list/verify/sessions; secret never echoed)
-- [ ] 3.2 Vue component test; Playwright walk against a recorded backend (no LINE, no LLM)
+- [ ] 3.1 RPC tests (register/list/verify/sessions/takeover/handback/send; secret never echoed)
+- [ ] 3.2 Vue component test (composer + notification); Playwright hybrid walk against a recorded backend (no LINE, no LLM)
 
 ## 4. Document
 - [ ] 4.1 docs/tui channel-console page; trim/delete this proposal; update epic slice row
