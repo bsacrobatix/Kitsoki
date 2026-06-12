@@ -91,9 +91,8 @@ There is no `--debug` flag today, but you can get structured output by running t
 To capture a one-off verbose run:
 
 ```sh
-# Start the Go backend manually with verbose output:
-go build -o .kitsoki-dev ./cmd/kitsoki && \
-  ./.kitsoki-dev web --addr 127.0.0.1:7777 2>&1 | tee .artifacts/logs/manual-debug.log
+# Start the Go backend manually with verbose output (go run — no stray binary):
+go run ./cmd/kitsoki web --addr 127.0.0.1:7777 2>&1 | tee .artifacts/logs/manual-debug.log
 ```
 
 Then start Vite separately:
