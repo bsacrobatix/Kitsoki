@@ -30,6 +30,8 @@ func (HelpCommand) Run(m RootModel, _ []string) (string, RootModel, tea.Cmd) {
 			{"/ideas <text>", "jot an idea to ideas.md without interrupting the conversation"},
 			{"/intents [<n>]", "print available intents; <n> dispatches by index"},
 			{"/intents auto on|off", "auto-print intents after each turn"},
+			{"/provider [<name|n>]", "list harness profiles; <name|n> switches the backend/provider (next turn)"},
+			{"/model [<id|n>]", "list the active profile's models; <id|n> switches the model (next turn)"},
 			{"/inbox [<n>]", "list recent notifications; <n> opens one"},
 			{"/trace", "print the last turn's routing trace"},
 			{"/viz", "export the state diagram to a DOT file"},

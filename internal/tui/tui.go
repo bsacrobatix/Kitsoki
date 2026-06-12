@@ -1954,6 +1954,20 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		}
 		return next, cmd
 
+	case "/provider":
+		body, next, cmd := ProviderCommand{}.Run(m, parts[1:])
+		if body != "" {
+			next.transcript.AppendBlock(body)
+		}
+		return next, cmd
+
+	case "/model":
+		body, next, cmd := ModelCommand{}.Run(m, parts[1:])
+		if body != "" {
+			next.transcript.AppendBlock(body)
+		}
+		return next, cmd
+
 	case "/jump":
 		body, next, cmd := HandleJumpCommand(m, parts[1:])
 		if body != "" {
