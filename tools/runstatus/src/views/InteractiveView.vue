@@ -23,6 +23,31 @@
         >
           Σ {{ fmtTokens(store.usageTotals.promptTokens + store.usageTotals.responseTokens) }} tok<template v-if="fmtCost(store.usageTotals.costUsd)"> · {{ fmtCost(store.usageTotals.costUsd) }}</template>
         </span>
+        <span
+          v-if="store.harnessProfiles.length"
+          class="iv__harness"
+          data-testid="harness-picker"
+        >
+          <select
+            class="iv__harness-select"
+            data-testid="provider-select"
+            title="Harness profile (backend/provider) — takes effect next turn"
+            :value="store.harnessActiveProfile"
+            @change="onProviderChange"
+          >
+            <option v-for="p in store.harnessProfiles" :key="p.name" :value="p.name">{{ p.name }}</option>
+          </select>
+          <select
+            v-if="activeModels.length"
+            class="iv__harness-select"
+            data-testid="model-select"
+            title="Model for the active profile — takes effect next turn"
+            :value="activeModel"
+            @change="onModelChange"
+          >
+            <option v-for="m in activeModels" :key="m" :value="m">{{ shortModel(m) }}</option>
+          </select>
+        </span>
         <StoryFreshness
           :session-id="sessionId"
           :on-reloaded="onFreshnessReloaded"
@@ -153,6 +178,24 @@ const pending = ref(false);
 const error = ref<string | null>(null);
 
 const appId = computed(() => store.appDef?.id ?? store.appDef?.name ?? "kitsoki");
+
+// ── Harness picker (mirrors RunView) ─────────────────────────────────────────
+const activeProfileObj = computed(() => store.harnessProfiles.find((p) => p.active));
+const activeModels = computed<string[]>(() => activeProfileObj.value?.models ?? []);
+const activeModel = computed<string>(() => store.harnessModel || activeProfileObj.value?.model || "");
+
+async function onProviderChange(e: Event): Promise<void> {
+  if (!source) source = createDataSource();
+  await store.selectProfile(source, props.sessionId, (e.target as HTMLSelectElement).value);
+}
+async function onModelChange(e: Event): Promise<void> {
+  if (!source) source = createDataSource();
+  await store.selectProfile(source, props.sessionId, store.harnessActiveProfile, (e.target as HTMLSelectElement).value);
+}
+function shortModel(m: string): string {
+  const slash = m.lastIndexOf("/");
+  return slash >= 0 ? m.slice(slash + 1) : m;
+}
 
 const reloadWarning = ref<string | null>(null);
 
@@ -373,6 +416,23 @@ function onEventSelect(index: number): void {
   white-space: nowrap;
 }
 
+.iv__harness {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.iv__harness-select {
+  background: #111c33;
+  color: #cbd5e1;
+  border: 1px solid #2b3a55;
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 2px 4px;
+  max-width: 200px;
+}
+.iv__harness-select:hover {
+  border-color: #3b82f6;
+}
 .iv__observe-link {
   margin-left: auto;
   color: #94a3b8;

@@ -1,27 +1,25 @@
 /**
- * Harness-profile picker feature-spotlight video.
+ * Harness-profile picker feature-spotlight video — driven from the CHAT pane.
  *
- * Drives the runstatus web header's provider/model picker against a real
- * `kitsoki web` server in the deterministic NO-LLM posture (bugfix story under
- * the happy_llm flow). The picker is fed by a harness_profiles fixture
- * (.kitsoki.yaml) declaring the three profiles the feature ships for:
- * claude-native, synthetic-claude (an env retarget with a model catalog), and
- * synthetic-codex (the codex backend). No real key is needed — the flow posture
- * never forks a backend, so SYNTHETIC_API_KEY is a dummy that only satisfies the
- * fixture's ${VAR} load-time expansion.
+ * Drives the runstatus chat-drive surface (InteractiveView) against a real
+ * `kitsoki web` server in the deterministic NO-LLM posture: the oracle-probe
+ * story (testdata/apps/oracle_probe) asks the active harness profile's model to
+ * identify itself; a host cassette returns a different scripted identity per
+ * turn. The demo switches the header provider (claude-native → synthetic-claude
+ * → codex-native), types "who are you" each time, and shows two things:
+ *   1. the chat answer changes with the provider, and
+ *   2. each oracle row in the trace (right pane) is stamped with the selected
+ *      profile + model — the live selection, not the cassette.
  *
- * The whole turn-driving is unnecessary: this feature lives entirely in the
- * observer header, so the video opens on the observer and narrates the picker
- * switching backend (claude → synthetic-claude → synthetic-codex) and the
- * dependent model dropdown appearing/repopulating.
+ * No real key is used: the harness fixture's ${SYNTHETIC_API_KEY} is satisfied
+ * by a dummy the spec sets; the flow posture never forks a backend.
  *
  * Validate fast (assertions only, no dwells):
  *   WEB_CHAT_PACE=0 pnpm exec playwright test harness-picker-video --project=chromium
  * Record at watch-speed:
  *   pnpm exec playwright test harness-picker-video --project=chromium
  *
- * The harness suppresses Playwright stdout — per-step context + any failure is
- * written to .artifacts/harness-picker/ERROR.txt and the NN-*.png screenshots.
+ * Per-step context + failures: .artifacts/harness-picker/ERROR.txt + NN-*.png.
  */
 import { test, expect, chromium, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import path from "path";
@@ -32,7 +30,6 @@ import {
   prepareVideoDir,
   saveVideoAsMp4,
   cinematicGoto,
-  pacedClick,
   dwell,
   SETTLE_MS,
   type WebServer,
@@ -40,11 +37,20 @@ import {
 import { makeCaption, captureDiagnostics } from "./_helpers/demo.js";
 
 const ADDR = "127.0.0.1:7752";
-const STORY_DIR = path.join(repoRoot, "stories", "bugfix");
-const FLOW = path.join(STORY_DIR, "flows", "happy_llm.yaml");
+const STORY_DIR = path.join(repoRoot, "testdata", "apps", "oracle_probe");
+const FLOW = path.join(STORY_DIR, "flows", "who_are_you.flow.yaml");
+const CASSETTE = path.join(STORY_DIR, "flows", "who_are_you.cassette.yaml");
 const CONFIG = path.join(repoRoot, "tools", "runstatus", "tests", "playwright", "fixtures", "harness.kitsoki.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "harness-picker");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
+
+// The three provider switches, in order, matched to the cassette's three
+// scripted identities. `reply` is the distinguishing word in each answer.
+const STEPS = [
+  { profile: "claude-native", reply: "Claude", caption: "Native Anthropic Claude Code", sub: "Your subscription — the default profile." },
+  { profile: "synthetic-claude", reply: "GLM-5.1", caption: "claude-code on synthetic.new", sub: "Same backend, different endpoint + model (syn:large:text)." },
+  { profile: "codex-native", reply: "Codex", caption: "codex on your subscription", sub: "A different backend CLI entirely." },
+];
 
 let server: WebServer;
 
@@ -53,6 +59,7 @@ test.beforeAll(async () => {
   server = await startWebServer({
     addr: ADDR,
     flow: FLOW,
+    hostCassette: CASSETTE,
     storiesDir: STORY_DIR,
     config: CONFIG,
     extraEnv: { SYNTHETIC_API_KEY: "demo-key-not-real" },
@@ -61,7 +68,18 @@ test.beforeAll(async () => {
 
 test.afterAll(() => server?.stop());
 
-test("harness profile + model picker feature-spotlight video", async () => {
+async function typeInto(page: Page, testid: string, value: string): Promise<void> {
+  const input = page.getByTestId(testid).first();
+  await expect(input).toBeVisible({ timeout: 15000 });
+  await input.evaluate((el, v) => {
+    const node = el as HTMLInputElement | HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node), "value")?.set;
+    setter?.call(node, v);
+    node.dispatchEvent(new Event("input", { bubbles: true }));
+  }, value);
+}
+
+test("harness picker from the chat pane — switch provider, ask who-are-you", async () => {
   test.setTimeout(300000);
   const browser: Browser = await chromium.launch({ headless: true });
   const context: BrowserContext = await browser.newContext({
@@ -75,79 +93,58 @@ test("harness profile + model picker feature-spotlight video", async () => {
   const diag = captureDiagnostics(page, ARTIFACT_DIR);
 
   const provider = () => page.getByTestId("provider-select");
-  const model = () => page.getByTestId("model-select");
+  const harnessLabels = () => page.getByTestId("trace-harness-label");
 
   try {
-    // Create the run off-camera so the camera opens straight on the observer.
     const { session_id: sid } = await server.rpc<{ session_id: string }>(
       "runstatus.session.new",
       { story_path: path.join(STORY_DIR, "app.yaml") },
     );
 
-    diag.mark("open-observer");
-    await cinematicGoto(page, `${server.base}/#/s/${sid}`, { waitForTestId: "breadcrumb" });
-    const beat = await makeCaption(page, 4200);
-    // The picker lives in the TOP-RIGHT header; move the caption to the bottom so
-    // it never overlaps the element the video is demonstrating.
+    diag.mark("open-chat");
+    await cinematicGoto(page, `${server.base}/#/s/${sid}/chat`, { waitForTestId: "composer-input" });
+    const beat = await makeCaption(page, 3800);
     await page.addStyleTag({
       content:
         `#demo-caption{top:auto !important;bottom:30px !important;}` +
-        // Spotlight the picker so the eye lands on the feature under demo.
-        `[data-testid="harness-picker"]{outline:2px solid #fbbf24;outline-offset:4px;border-radius:6px;}`,
+        `[data-testid="harness-picker"]{outline:2px solid #fbbf24;outline-offset:3px;border-radius:6px;}`,
     });
 
-    // ── Scene 1: the picker, default profile active ──────────────────────────
-    diag.mark("scene-default");
-    await expect(page.getByTestId("harness-picker")).toBeVisible({ timeout: 15000 });
-    await expect(provider()).toHaveValue("claude-native");
-    // claude-native declares no model catalog → the model dropdown is hidden.
-    await expect(model()).toHaveCount(0);
     await beat(
-      "Pick the harness live",
-      "Every session opens on its default profile — here, claude-native (your Anthropic subscription).",
+      "Pick the harness, live — from the chat",
+      "The header has a provider dropdown; switching it changes which LLM answers the next turn.",
     );
-    await shot(page, "default-claude-native");
+    await shot(page, "00-chat-open");
 
-    // ── Scene 2: switch provider → synthetic-claude, model dropdown appears ───
-    diag.mark("scene-synthetic-claude");
-    await beat("Switch the provider", "One dropdown swaps the whole backend + endpoint. Takes effect next turn.");
-    await dwell(page, SETTLE_MS);
-    await provider().selectOption("synthetic-claude");
-    // The dependent model dropdown repopulates from this profile's catalog.
-    await expect(model()).toBeVisible({ timeout: 8000 });
-    await expect(provider()).toHaveValue("synthetic-claude");
-    await beat(
-      "synthetic-claude",
-      "claude-code pointed at synthetic.new — and a model catalog appears beside it.",
-    );
-    await shot(page, "synthetic-claude");
+    for (let i = 0; i < STEPS.length; i++) {
+      const step = STEPS[i];
+      diag.mark(`switch-${step.profile}`);
+      await beat(step.caption, step.sub);
+      await dwell(page, SETTLE_MS);
+      await provider().selectOption(step.profile);
+      await expect(provider()).toHaveValue(step.profile);
+      await dwell(page, SETTLE_MS);
 
-    // ── Scene 3: pick a model from the catalog ───────────────────────────────
-    diag.mark("scene-model");
-    await beat("Pick the model", "The model dropdown lists this profile's catalog.");
-    await dwell(page, SETTLE_MS);
-    await model().selectOption("hf:meta-llama/Llama-3.3-70B-Instruct");
-    await expect(model()).toHaveValue("hf:meta-llama/Llama-3.3-70B-Instruct");
-    await beat("Llama-3.3-70B", "Selected — the next oracle call uses it.");
-    await shot(page, "model-llama");
+      // Ask "who are you" from the composer.
+      await typeInto(page, "composer-input", "who are you");
+      await dwell(page, SETTLE_MS);
+      await page.getByTestId("composer-send").first().evaluate((el) => (el as HTMLElement).click());
 
-    // ── Scene 4: switch to a different backend entirely (codex) ──────────────
-    diag.mark("scene-codex");
-    await beat("A different backend", "synthetic-codex forks the codex CLI instead of claude.");
-    await dwell(page, SETTLE_MS);
-    await provider().selectOption("synthetic-codex");
-    await expect(provider()).toHaveValue("synthetic-codex");
-    // synthetic-codex declares no catalog → model dropdown hides again.
-    await expect(model()).toHaveCount(0);
-    await beat("synthetic-codex", "Codex backend, synthetic.new endpoint — no catalog, so it uses the backend default.");
-    await shot(page, "synthetic-codex");
+      // The chat shows this provider's distinct answer…
+      await expect(page.getByTestId("chat-transcript")).toContainText(step.reply, { timeout: 15000 });
+      // …and the trace stamps the selected profile on this turn's oracle call.
+      await expect(harnessLabels().filter({ hasText: step.profile }).first()).toBeVisible({ timeout: 15000 });
+      await beat(`${step.profile} answered`, `Trace row stamped profile=${step.profile} — matching the picker.`);
+      await shot(page, `0${i + 1}-${step.profile}`);
+      await dwell(page, SETTLE_MS);
+    }
 
-    // ── Scene 5: back home to the native profile ─────────────────────────────
-    diag.mark("scene-back");
-    await provider().selectOption("claude-native");
-    await expect(provider()).toHaveValue("claude-native");
-    await beat("Back to native", "Switch back any time — the active selection always shows in the header.");
-    await shot(page, "back-to-native");
+    // Final proof: three oracle calls, three distinct profile stamps in the trace.
+    for (const step of STEPS) {
+      await expect(harnessLabels().filter({ hasText: step.profile }).first()).toBeVisible();
+    }
+    await beat("Three turns, three providers", "Each oracle call in the trace carries the profile + model it ran on.");
+    await shot(page, "04-trace-all");
     await dwell(page, SETTLE_MS);
   } catch (err) {
     diag.onThrow(err);

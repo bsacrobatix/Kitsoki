@@ -797,10 +797,21 @@ func writeCassetteOracleEvents(ctx context.Context, sink store.EventSink, cas *C
 	if promptFile == "" {
 		inlinePrompt = o.Prompt
 	}
+	// Stamp the live harness selection so a cassette-replayed oracle event
+	// reflects which profile/model the operator selected for this turn — the
+	// same provenance the live path records (oracle_event_sink.go). The active
+	// profile's resolved model (selection override or profile default) supersedes
+	// the cassette's static o.Model when present, so the trace matches the picker.
+	model := o.Model
+	profileName := host.ActiveProfileNameFromCtx(ctx)
+	if ap, ok := host.ActiveProfileFromContext(ctx); ok && ap.Provider.Model != "" {
+		model = ap.Provider.Model
+	}
 	calledPayload := host.OracleCalledPayload{
 		Verb:       o.Verb,
 		Agent:      o.Agent,
-		Model:      o.Model,
+		Model:      model,
+		Profile:    profileName,
 		Prompt:     inlinePrompt,
 		PromptFile: promptFile,
 		Input:      inputRaw,

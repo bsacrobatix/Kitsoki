@@ -141,6 +141,17 @@
                       : row.event.msg
                     }}</template>
                   </span>
+                  <!-- Harness provenance: which profile/model answered this call.
+                       Matches the operator's live picker selection. -->
+                  <span
+                    v-if="row.oracle && (row.oracle.profile || row.oracle.model)"
+                    class="trace-timeline__harness"
+                    data-testid="trace-harness-label"
+                    :title="`harness profile / model for this oracle call`"
+                  >
+                    <span v-if="row.oracle.profile" class="trace-timeline__harness-profile">{{ row.oracle.profile }}</span>
+                    <span v-if="row.oracle.model" class="trace-timeline__harness-model">{{ row.oracle.model }}</span>
+                  </span>
                   <span
                     v-if="(row.oracle?.durationMs ?? row.harnessCall?.durationMs) != null"
                     class="trace-timeline__duration"
@@ -379,6 +390,12 @@ interface OracleMerge {
   complete: TraceEvent | null;
   durationMs: number | null;
   incomplete: boolean;
+  /** The harness profile name selected for this call (from oracle.call.start);
+   *  "" when the session declared no profiles. Surfaced as a row chip so the
+   *  trace shows which backend/provider answered. */
+  profile: string;
+  /** The model the call ran on (start's attrs.model). "" when unset. */
+  model: string;
   /**
    * The single logical oracle call, presented to EventDetail/OracleDetail as
    * one event. The engine records the *prompt* on oracle.call.start and the
@@ -644,7 +661,11 @@ const filteredEvents = computed<AnnotatedEvent[]>(() => {
       const merged: TraceEvent = complete
         ? { ...complete, attrs: { ...event.attrs, ...complete.attrs } }
         : event;
-      oracle = { verb, complete, durationMs: dur, incomplete: complete === null, merged };
+      // Harness provenance is recorded on the START event (OracleCalledPayload):
+      // profile = the selected harness profile, model = the resolved model.
+      const profile = typeof event.attrs.profile === "string" ? event.attrs.profile : "";
+      const model = typeof merged.attrs.model === "string" ? (merged.attrs.model as string) : "";
+      oracle = { verb, complete, durationMs: dur, incomplete: complete === null, merged, profile, model };
     }
 
     out.push({ index: i, event, subsystem, oracle });
@@ -1512,6 +1533,27 @@ watch(
   border: 1px solid #3f6212;
   border-radius: 3px;
   background: #1a2e05;
+}
+
+.trace-timeline__harness {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+.trace-timeline__harness-profile {
+  color: #c4b5fd;
+  font-size: 0.7rem;
+  font-family: ui-monospace, monospace;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid #5b21b6;
+  border-radius: 3px;
+  background: #2e1065;
+}
+.trace-timeline__harness-model {
+  color: #93c5fd;
+  font-size: 0.68rem;
+  font-family: ui-monospace, monospace;
 }
 
 .trace-timeline__incomplete {

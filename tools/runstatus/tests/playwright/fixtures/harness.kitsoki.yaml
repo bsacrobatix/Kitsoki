@@ -1,25 +1,19 @@
-# Deterministic demo fixture for the harness-profile picker.
-#
-# Declares the three profiles the demo showcases. The env values reference
-# ${SYNTHETIC_API_KEY}, which the demo spec sets to a dummy value in the spawned
-# server's environment — the no-LLM flow posture never actually forks a backend,
-# so no real key is needed to render and switch the picker. The shape matches
-# exactly what an operator writes for real use (see docs/architecture/harness-profiles.md).
+# Deterministic demo fixture for the harness-profile picker — the three
+# providers the demo showcases. The flow posture never forks a backend, so the
+# ${VAR} is satisfied by a dummy SYNTHETIC_API_KEY the spec sets; no real key is
+# used. Shape matches docs/architecture/harness-profiles.md.
 default_profile: claude-native
 harness_profiles:
   claude-native:
     backend: claude
   synthetic-claude:
     backend: claude
-    model: hf:Qwen/Qwen2.5-Coder-32B-Instruct
+    model: syn:large:text
     models:
-      - hf:Qwen/Qwen2.5-Coder-32B-Instruct
-      - hf:meta-llama/Llama-3.3-70B-Instruct
+      - syn:large:text
+      - syn:small:text
     env:
       ANTHROPIC_BASE_URL: https://api.synthetic.new/anthropic
       ANTHROPIC_AUTH_TOKEN: "${SYNTHETIC_API_KEY}"
-  synthetic-codex:
+  codex-native:
     backend: codex
-    env:
-      OPENAI_BASE_URL: https://api.synthetic.new/openai
-      OPENAI_API_KEY: "${SYNTHETIC_API_KEY}"
