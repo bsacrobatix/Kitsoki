@@ -5,7 +5,7 @@
  * nil, intents submitted explicitly — no LLM is ever called).
  *
  * Like the golden agent-actions spec, the WHOLE video is TOUR-DRIVEN: it runs
- * the MULTI_STORY_TOUR_STEPS from src/tour/multi-story-manifest.ts via
+ * the MULTI_STORY_TOUR_STEPS from src/tour/generated/multi-story.ts via
  * window.__startTourWithSteps. The tour opens on the home story library, frames
  * the catalogue, drives home → new session → the interactive /chat view via a
  * route-match action step, narrates the PRD happy path turn-by-turn on the chat
@@ -43,9 +43,11 @@ import {
   dwell,
   cinematicGoto,
   SETTLE_MS,
+  ChapterRecorder,
+  writeChapters,
 } from "./_helpers/server.js";
 import { DEMO_VIEWPORT, captureDiagnostics } from "./_helpers/demo.js";
-import { MULTI_STORY_TOUR_STEPS, type TourStep } from "../../src/tour/multi-story-manifest.js";
+import { MULTI_STORY_TOUR_STEPS, type TourStep } from "../../src/tour/generated/multi-story.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,6 +65,9 @@ const RPC = `${BASE}/rpc`;
 
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "multi-story");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
+// Feature-catalog source of truth for this spec's tour steps — each step
+// becomes a chapter in the MP4's sidecar.
+const CHAPTER_SOURCE = "features/multi-story.yaml";
 
 // ── server lifecycle (tmp DB; spawned directly so we own the DB path) ─────────
 
@@ -177,6 +182,12 @@ test.describe("multi-story full-product walkthrough (live, no-LLM)", () => {
     const video = page.video(); // capture BEFORE context.close()
     const shot = makeShot(ARTIFACT_DIR);
     const { mark, onThrow } = captureDiagnostics(page, ARTIFACT_DIR);
+
+    // Accumulate per-step time windows for the chapter sidecar. The clock
+    // starts now so windows line up with the recorded MP4 timeline. The
+    // recorder lives in the spec's Node process, so it survives the ms-reload
+    // page reload — chapters keep opening as steps settle after the seam.
+    const chapters = new ChapterRecorder();
 
     // Captured once the intro's "New session" step creates the run.
     let sid = "";
@@ -320,6 +331,10 @@ test.describe("multi-story full-product walkthrough (live, no-LLM)", () => {
         }
         await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+        // This step's spotlight is settled and on-screen — open its chapter
+        // (auto-closes the prior one) so the dwell below becomes its window.
+        chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
         await dwell(page, step.dwellMs ?? 3000);
         await shot(page, step.id);
 
@@ -362,7 +377,10 @@ test.describe("multi-story full-product walkthrough (live, no-LLM)", () => {
     } finally {
       await page.close();
       await context.close(); // finalises the video
-      await saveVideoAsMp4(video, ARTIFACT_DIR, "multi-story-demo");
+      const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "multi-story-demo");
+      // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+      // step → one chapter with source_ref kind=tour.
+      writeChapters(mp4, chapters.list());
       await browser.close();
     }
 

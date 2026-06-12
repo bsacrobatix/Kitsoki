@@ -16,7 +16,7 @@
  * so the trace shows genuine host.starlark.run invocations and the
  * __http_exchanges summary, with no LLM and no socket.
  *
- * SINGLE SOURCE OF TRUTH: src/tour/weather-report-manifest.ts drives both the
+ * SINGLE SOURCE OF TRUTH: src/tour/generated/weather-report.ts drives both the
  * live overlay and this spec; the spec asserts each popover `title`, so the two
  * cannot drift.
  *
@@ -36,19 +36,26 @@ import {
   makeShot,
   waitForState,
   saveVideoAsMp4,
+  ChapterRecorder,
+  writeChapters,
   dwell as dwellHelper,
   cinematicGoto,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
 import { captureDiagnostics } from "./_helpers/demo.js";
-import { WEATHER_REPORT_TOUR_STEPS, type TourStep } from "../../src/tour/weather-report-manifest.js";
+import { WEATHER_REPORT_TOUR_STEPS, type TourStep } from "../../src/tour/generated/weather-report.js";
 
 const ADDR = "127.0.0.1:7752";
 const STORY_DIR = path.join(repoRoot, "stories", "weather-report");
 const FLOW = path.join(STORY_DIR, "flows", "tour.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "weather-report-tour");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
+
+// The feature-catalog source of truth for this spec's tour steps: each step
+// becomes a chapter (source_ref kind=tour) whose [start,end] window is the
+// recorded dwell.
+const CHAPTER_SOURCE = "features/weather-report.yaml";
 
 let server: WebServer;
 
@@ -90,6 +97,9 @@ test("weather-report tour video (no-LLM, real host.starlark.run replay)", async 
   });
   const page: Page = await context.newPage();
   const video = page.video();
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
   // Breadcrumb + crash trail to .artifacts/weather-report-tour/ERROR.txt — the
   // harness suppresses Playwright stdout, so a failed recording is otherwise
   // undiagnosable. Marking on every scene gives the throw a precise location.
@@ -192,6 +202,10 @@ test("weather-report tour video (no-LLM, real host.starlark.run replay)", async 
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);
 
@@ -233,7 +247,10 @@ test("weather-report tour video (no-LLM, real host.starlark.run replay)", async 
     // Transcode the raw webm to a universally-playable MP4 (VS Code / Keynote /
     // Slack); never ship the webm — it omits the container atoms those players
     // need. Mirrors the golden agent-actions spec.
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "weather-report-tour");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "weather-report-tour");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 

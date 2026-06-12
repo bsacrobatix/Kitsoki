@@ -150,6 +150,11 @@ schema. The dogfood multi-glob covers both kitsoki-self bugs
 
 ## Documentation
 
+**Site:** [bsacrobatix.github.io/Kitsoki](https://bsacrobatix.github.io/Kitsoki/) —
+promo landing + help docs with recorded feature demos, generated from the
+[feature catalog](features/CLAUDE.md) (also served offline at `/help/` by
+`kitsoki web` after `make site-embed`; pipeline: [`docs/site/README.md`](docs/site/README.md)).
+
 | Doc | What |
 |---|---|
 | **[`docs/architecture/concept.md`](docs/architecture/concept.md)** | The thesis: control inversion, narrow LLM domains, progressive determinism, the spectrum of stories. **Start here.** |

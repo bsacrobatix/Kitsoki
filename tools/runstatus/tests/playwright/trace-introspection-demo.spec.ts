@@ -37,10 +37,10 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { buildArtifact } from "./_helpers/artifact.js";
-import { saveVideoAsMp4 } from "./_helpers/server.js";
+import { saveVideoAsMp4, ChapterRecorder, writeChapters } from "./_helpers/server.js";
 import { captureDiagnostics } from "./_helpers/demo.js";
 import { execSync } from "child_process";
-import { TRACE_INTROSPECTION_TOUR_STEPS, type TourStep } from "../../src/tour/trace-introspection-manifest.js";
+import { TRACE_INTROSPECTION_TOUR_STEPS, type TourStep } from "../../src/tour/generated/trace-introspection.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,6 +53,11 @@ const projectRoot = path.resolve(__dirname, "../../..");
 const repoRoot = execSync("git rev-parse --show-toplevel", { cwd: projectRoot, encoding: "utf-8" }).trim();
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "trace-introspection-demo");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
+
+// The feature-catalog source of truth for this spec's tour steps: each step
+// becomes a chapter (source_ref kind=tour) whose [start,end] window is the
+// recorded dwell.
+const CHAPTER_SOURCE = "features/trace-introspection.yaml";
 
 // Diagnostics breadcrumb sink — set by the test from captureDiagnostics so each
 // shot() records where the run was if it later throws (the harness suppresses
@@ -135,6 +140,9 @@ test("trace-introspection tour walkthrough (bugfix snapshot, no-LLM)", async () 
   });
   const page: Page = await context.newPage();
   const video = page.video(); // capture BEFORE context.close()
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
   const { mark, onThrow } = captureDiagnostics(page, ARTIFACT_DIR);
   markScene = mark;
 
@@ -164,6 +172,10 @@ test("trace-introspection tour walkthrough (bugfix snapshot, no-LLM)", async () 
       // Anti-drift: the popover must show THIS step's title.
       await expect(page.getByTestId("tour-title")).toHaveText(step.title, { timeout: 12000 });
 
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       await page.waitForTimeout(step.dwellMs ?? 3000);
       await shot(page, step.id);
 
@@ -188,7 +200,10 @@ test("trace-introspection tour walkthrough (bugfix snapshot, no-LLM)", async () 
   } finally {
     await context.close(); // finalises the recording
     // Transcode to a universally-playable MP4 — never ship the raw webm.
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "trace-introspection-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "trace-introspection-demo");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 

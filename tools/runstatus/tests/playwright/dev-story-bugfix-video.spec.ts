@@ -7,7 +7,7 @@
  * records a video + per-scene screenshots to .artifacts/dev-story-bugfix/.
  *
  * Like the golden agent-actions-video.spec.ts, this spec runs ONLY the
- * DEV_STORY_BUGFIX_TOUR_STEPS from src/tour/dev-story-bugfix-manifest.ts via
+ * DEV_STORY_BUGFIX_TOUR_STEPS from src/tour/generated/dev-story-bugfix.ts via
  * window.__startTourWithSteps. The tour drives the whole video: it opens on the
  * home story library and its route-match action step navigates home → new
  * session → the drive view, then the explain beats narrate the triage + pipeline
@@ -40,12 +40,18 @@ import {
   makeShot,
   prepareVideoDir,
   saveVideoAsMp4,
+  ChapterRecorder,
+  writeChapters,
   dwell,
   cinematicGoto,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
-import { DEV_STORY_BUGFIX_TOUR_STEPS, type TourStep } from "../../src/tour/dev-story-bugfix-manifest.js";
+import { DEV_STORY_BUGFIX_TOUR_STEPS, type TourStep } from "../../src/tour/generated/dev-story-bugfix.js";
+
+// The feature-catalog source of truth for this spec's tour steps: each step
+// becomes a chapter (source_ref kind=tour) in the MP4's sidecar.
+const CHAPTER_SOURCE = "features/dev-story-bugfix.yaml";
 
 // 7760 — confirmed free; distinct from every other spec's port so parallel
 // runs never race on the same bind.
@@ -274,6 +280,10 @@ test("dev-story triage → autonomous bugfix feature-tour video", async () => {
   const video = page.video();
   const shot = makeShot(ARTIFACT_DIR);
 
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
+
   let sessionId = "";
 
   try {
@@ -323,6 +333,10 @@ test("dev-story triage → autonomous bugfix feature-tour video", async () => {
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);
 
@@ -359,7 +373,10 @@ test("dev-story triage → autonomous bugfix feature-tour video", async () => {
     throw e;
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "dev-story-bugfix-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "dev-story-bugfix-demo");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 

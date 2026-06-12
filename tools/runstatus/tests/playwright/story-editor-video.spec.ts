@@ -6,7 +6,7 @@
  * records a video + per-scene screenshots to .artifacts/story-editor/.
  *
  * Like agent-actions-video.spec.ts, this spec runs ONLY the
- * STORY_EDITOR_TOUR_STEPS from src/tour/story-editor-manifest.ts via
+ * STORY_EDITOR_TOUR_STEPS from src/tour/generated/story-editor.ts via
  * window.__startTourWithSteps. The tour drives the whole video: it opens on the
  * home story library and its route-match action step navigates home → editor, so
  * even the intro is tour-narrated rather than silent spec orchestration.
@@ -36,10 +36,16 @@ import {
   saveVideoAsMp4,
   dwell,
   cinematicGoto,
+  ChapterRecorder,
+  writeChapters,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
-import { STORY_EDITOR_TOUR_STEPS, type TourStep } from "../../src/tour/story-editor-manifest.js";
+import { STORY_EDITOR_TOUR_STEPS, type TourStep } from "../../src/tour/generated/story-editor.js";
+
+// The feature-catalog source of truth for this tour: each step becomes a chapter
+// (source_ref kind=tour) whose [start,end] window is the recorded dwell.
+const CHAPTER_SOURCE = "features/story-editor.yaml";
 
 // 7749 — distinct from agent-actions (7748), tour-onboarding (7747),
 // trace-features (7746), editor (7798) so parallel spec files never race.
@@ -107,6 +113,10 @@ test("story editor view feature-spotlight video", async () => {
   const video = page.video();
   const shot = makeShot(ARTIFACT_DIR);
 
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
+
   try {
     // ── 1. Open the home story library and start the tour ON it ──────────────
     diag("navigating home");
@@ -164,6 +174,10 @@ test("story editor view feature-spotlight video", async () => {
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);
 
@@ -193,7 +207,10 @@ test("story editor view feature-spotlight video", async () => {
     throw e;
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "story-editor-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "story-editor-demo");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 

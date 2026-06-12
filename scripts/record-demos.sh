@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#
+# record-demos.sh — record every recordable feature demo at watch-speed,
+# incrementally.
+#
+# The demo list comes from the feature catalog contract
+# (.artifacts/features/features-index.json — `make features-index`). Each demo
+# carries a content stamp: sha256 over its spec file, its features/<id>.yaml,
+# its flow/cassette/app.yaml inputs, and the bin/kitsoki binary. A fresh stamp
+# (and an existing MP4) skips the recording — so a docs-only change re-records
+# nothing, while touching a feature's YAML, spec, story input, or the binary
+# re-records exactly the affected demos. `--force` re-records everything.
+#
+# Recording posture: WEB_CHAT_PACE=1 (watch-speed; the camera default), one
+# retry per spec, previous good artifacts are never deleted on failure.
+# Demos marked `external: true` in the catalog are skipped (their stories live
+# outside this repo). Exit nonzero if any recording ultimately failed.
+#
+# Used by `make demos` / `make demos-force`; CI runs it behind an actions/cache
+# over .artifacts so unchanged demos cost nothing.
+
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+INDEX=".artifacts/features/features-index.json"
+RUNSTATUS_DIR="tools/runstatus"
+BIN="bin/kitsoki"
+FORCE=0
+[ "${1:-}" = "--force" ] && FORCE=1
+
+command -v jq >/dev/null 2>&1 || { echo "record-demos: jq is required" >&2; exit 2; }
+[ -f "$INDEX" ] || { echo "record-demos: $INDEX missing — run: make features-index" >&2; exit 2; }
+[ -x "$BIN" ] || { echo "record-demos: $BIN missing — run: make build && cp ./kitsoki bin/kitsoki" >&2; exit 2; }
+
+if command -v sha256sum >/dev/null 2>&1; then SHA="sha256sum"; else SHA="shasum -a 256"; fi
+
+# stamp <files...> — one hash over the given files' contents (missing skipped).
+stamp() {
+	for f in "$@"; do
+		[ -n "$f" ] && [ -f "$f" ] && $SHA "$f"
+	done | $SHA | awk '{print $1}'
+}
+
+recorded=0
+skipped=0
+declare -a FAILED
+
+while IFS=$'\t' read -r id specName artifactDir video yaml spec flow cassette story; do
+	# Stamp inputs: catalog entry, spec, story inputs, binary.
+	story_app=""
+	[ -n "$story" ] && story_app="$story/app.yaml"
+	s=$(stamp "$yaml" "$spec" "$flow" "$cassette" "$story_app" "$BIN")
+	stamp_file="$artifactDir/.stamp"
+
+	if [ "$FORCE" -eq 0 ] && [ -f "$video" ] && [ -f "$stamp_file" ] && [ "$(cat "$stamp_file")" = "$s" ]; then
+		skipped=$((skipped + 1))
+		continue
+	fi
+
+	echo "record-demos: recording $id ($specName)…"
+	ok=0
+	for attempt in 1 2; do
+		if (cd "$RUNSTATUS_DIR" && WEB_CHAT_PACE=1 pnpm exec playwright test "$specName" --project=chromium); then
+			ok=1
+			break
+		fi
+		echo "record-demos: $id attempt $attempt failed$([ "$attempt" = 1 ] && echo ' — retrying')" >&2
+	done
+
+	if [ "$ok" -eq 1 ] && [ -f "$video" ]; then
+		mkdir -p "$artifactDir"
+		printf '%s' "$s" >"$stamp_file"
+		recorded=$((recorded + 1))
+	else
+		FAILED+=("$id")
+	fi
+done < <(jq -r '
+	.features[]
+	| select(.demo != null and .demo.external == false)
+	| [ .id, .demo.specName, .demo.artifactDir, .demo.video,
+	    "features/\(.id).yaml", .demo.spec,
+	    (.demo.flow // ""), (.demo.hostCassette // ""), (.demo.story // "") ]
+	| @tsv' "$INDEX")
+
+echo "record-demos: $recorded recorded, $skipped fresh (skipped), ${#FAILED[@]} failed"
+if [ "${#FAILED[@]}" -gt 0 ]; then
+	printf 'record-demos: FAILED: %s\n' "${FAILED[*]}" >&2
+	exit 1
+fi

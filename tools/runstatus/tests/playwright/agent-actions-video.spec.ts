@@ -6,7 +6,7 @@
  * and records a video + per-scene screenshots to .artifacts/agent-actions/.
  *
  * Like trace-features-video.spec.ts, this spec runs ONLY the
- * AGENT_ACTIONS_TOUR_STEPS from src/tour/agent-actions-manifest.ts via
+ * AGENT_ACTIONS_TOUR_STEPS from src/tour/generated/agent-actions.ts via
  * window.__startTourWithSteps. The tour drives the whole video: it opens on the
  * home story library and its route-match action steps navigate home → new
  * session → observer, so even the intro is tour-narrated rather than silent
@@ -37,10 +37,16 @@ import {
   saveVideoAsMp4,
   dwell,
   cinematicGoto,
+  ChapterRecorder,
+  writeChapters,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
-import { AGENT_ACTIONS_TOUR_STEPS, type TourStep } from "../../src/tour/agent-actions-manifest.js";
+import { AGENT_ACTIONS_TOUR_STEPS, type TourStep } from "../../src/tour/generated/agent-actions.js";
+
+// The feature-catalog source of truth for this tour: each step becomes a chapter
+// (source_ref kind=tour) whose [start,end] window is the recorded dwell.
+const CHAPTER_SOURCE = "features/agent-actions.yaml";
 
 // 7748 — distinct from tour-onboarding.spec.ts (7747) and trace-features (7746)
 // so parallel spec files never race on the same port bind.
@@ -127,7 +133,12 @@ async function openDrawerForCall(page: Page, wantEvents: number): Promise<boolea
   diag(`openDrawerForCall(${wantEvents}): ${count} trace-event-rows`);
   for (let i = 0; i < Math.min(count, 40); i++) {
     const row = rows.nth(i);
-    await row.click({ timeout: 4000 }).catch(() => undefined);
+    // Click the row HEADER, not the row: an expanded row's body fills the
+    // element's center and swallows clicks (@click.stop), so a center-click
+    // on an expanded row never collapses it — leaving e.g. the session.story
+    // base64 wall open across the spotlight frames.
+    const header = row.locator(".trace-timeline__row-main");
+    await header.click({ timeout: 4000 }).catch(() => undefined);
     // The affordance only renders for oracle.call.complete rows that carry a
     // transcript_ref. Look for the one whose badge count matches.
     const aff = page.getByTestId("agent-actions-affordance");
@@ -147,7 +158,7 @@ async function openDrawerForCall(page: Page, wantEvents: number): Promise<boolea
       }
     }
     // Not a match — collapse this row again so the next expand is clean.
-    await row.click({ timeout: 4000 }).catch(() => undefined);
+    await header.click({ timeout: 4000 }).catch(() => undefined);
   }
   diag(`openDrawerForCall(${wantEvents}): no matching call found`);
   return false;
@@ -163,6 +174,10 @@ test("agent action transcripts feature-spotlight video", async () => {
   const page: Page = await context.newPage();
   const video = page.video();
   const shot = makeShot(ARTIFACT_DIR);
+
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
 
   // Carries the session id once the intro's "New session" step creates the run.
   let sessionId = "";
@@ -254,6 +269,10 @@ test("agent action transcripts feature-spotlight video", async () => {
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);
 
@@ -306,6 +325,18 @@ test("agent action transcripts feature-spotlight video", async () => {
                 slots: {},
               });
               await waitForOracleTranscripts(sessionId, 40000);
+              // The RPC settle above proves the SERVER trace carries both
+              // calls; the page renders them only after the next SSE poll
+              // tick (500ms) plus a Vue frame. The drawer steps scan the
+              // timeline rows in a single un-retried pass, so also wait for
+              // the OBSERVER to catch up. The decide row is the LAST of the
+              // two calls, so its presence implies the task row too.
+              await expect(
+                page
+                  .getByTestId("trace-event-row")
+                  .filter({ hasText: "oracle.decide" })
+                  .first()
+              ).toBeVisible({ timeout: 15000 });
             }
           }
           await dwell(page, 1000);
@@ -332,7 +363,10 @@ test("agent action transcripts feature-spotlight video", async () => {
     throw e;
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "agent-actions-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "agent-actions-demo");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 
@@ -352,7 +386,10 @@ async function openTaskDetail(page: Page): Promise<boolean> {
   diag(`openTaskDetail: ${count} trace-event-rows`);
   for (let i = 0; i < Math.min(count, 40); i++) {
     const row = rows.nth(i);
-    await row.click({ timeout: 4000 }).catch(() => undefined);
+    // Header click, not row click — see openDrawerForCall: an expanded row's
+    // body swallows center-clicks, so collapsing a non-match needs the header.
+    const header = row.locator(".trace-timeline__row-main");
+    await header.click({ timeout: 4000 }).catch(() => undefined);
     const aff = page.getByTestId("agent-actions-affordance");
     const affCount = await aff.count();
     for (let a = 0; a < affCount; a++) {
@@ -362,7 +399,7 @@ async function openTaskDetail(page: Page): Promise<boolean> {
         return true; // leave the affordance present; the tour step clicks it.
       }
     }
-    await row.click({ timeout: 4000 }).catch(() => undefined);
+    await header.click({ timeout: 4000 }).catch(() => undefined);
   }
   diag(`openTaskDetail: no task call found`);
   return false;

@@ -1,7 +1,7 @@
 /**
  * Live-chat-streaming feature-spotlight video demo.
  *
- * Drives the chat-stream tour (src/tour/chat-stream-manifest.ts) against a real
+ * Drives the chat-stream tour (src/tour/generated/chat-stream.ts) against a real
  * `kitsoki web` server in the deterministic no-LLM posture (--flow
  * happy_llm.yaml + the bugfix demo cassette) and records a video + per-scene
  * screenshots to .artifacts/chat-stream/.
@@ -20,12 +20,21 @@
  * "🧠 N thoughts · M tool calls" activity section inside the final agent
  * bubble, expanded back to the same interleaved feed.
  *
+ * Then the tour opens the META OVERLAY and repeats the loop there: a Story
+ * Q&A question streams through /rpc/meta-stream (the deterministic stub
+ * oracle emits a thinking event, a Read tool call, then the reply chunks —
+ * KITSOKI_META_STREAM_DELAY_MS paces it for the camera), rendered by the SAME
+ * shared ActivityFeed/ActivityDisclosure components the main chat uses.
+ *
  * REGRESSION CONTRACT (asserted after the tour completes):
  *   a) the feed interleaves thinking and tool rows in ARRIVAL order, including
  *      thoughts carried as `thinking` content blocks (the real claude
  *      stream-json shape with extended thinking) — not just `text` blocks;
  *   b) the activity collapses into the final agent bubble and expands to the
- *      same presentation.
+ *      same presentation;
+ *   c) the meta overlay streams + preserves the same presentation, with the
+ *      reply NOT duplicated into the feed (the feed holds the reasoning, the
+ *      bubble holds the answer).
  *
  * Validate fast (no dwells, 10x replay):
  *   WEB_CHAT_PACE=0 KITSOKI_CASSETTE_SLOWPLAY=0.1 \
@@ -47,10 +56,16 @@ import {
   saveVideoAsMp4,
   dwell,
   cinematicGoto,
+  ChapterRecorder,
+  writeChapters,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
-import { CHAT_STREAM_TOUR_STEPS, type TourStep } from "../../src/tour/chat-stream-manifest.js";
+import { CHAT_STREAM_TOUR_STEPS, type TourStep } from "../../src/tour/generated/chat-stream.js";
+
+// The feature-catalog source of truth for this tour: each step becomes a chapter
+// (source_ref kind=tour) whose [start,end] window is the recorded dwell.
+const CHAPTER_SOURCE = "features/chat-stream.yaml";
 
 // 7758 — distinct from every other spec's port (7740–7757 are taken) so
 // parallel specs never race on a bind.
@@ -81,6 +96,17 @@ const EXPECTED_FEED: Array<{ kind: "think" | "tool"; match: string }> = [
 ];
 const EXPECTED_SUMMARY = "🧠 3 thoughts · 6 tool calls";
 
+// The meta turn's feed: the stub oracle (story.ask, read-only) emits one
+// thinking event and one Read tool call before streaming the reply; the
+// reply narration itself is deferred and dropped on done, so it must NOT
+// appear as a trailing thought.
+const EXPECTED_META_FEED: Array<{ kind: "think" | "tool"; match: string }> = [
+  { kind: "think", match: "Let me look at the story definition first." },
+  { kind: "tool", match: "Read" },
+];
+const EXPECTED_META_SUMMARY = "🧠 1 thought · 1 tool call";
+const META_QUESTION = "Where is this run right now, and what does this story do?";
+
 let server: WebServer;
 
 function diag(msg: string): void {
@@ -103,7 +129,17 @@ test.beforeAll(async () => {
   if (process.env.KITSOKI_CASSETTE_SLOWPLAY === undefined) {
     process.env.KITSOKI_CASSETTE_SLOWPLAY = "1.5";
   }
+  // The meta turn streams from the stub oracle; pace its events so the
+  // overlay's bubble is filmable. Keep a small floor even in fast-validation
+  // mode (WEB_CHAT_PACE=0) so the streaming bubble reliably EXISTS long
+  // enough for the tour step gated on it — at 0 the turn can finish before
+  // the step renders. startWebServer forwards process.env to the server.
+  if (process.env.KITSOKI_META_STREAM_DELAY_MS === undefined) {
+    process.env.KITSOKI_META_STREAM_DELAY_MS =
+      process.env.WEB_CHAT_PACE === "0" ? "60" : "350";
+  }
   diag(`KITSOKI_CASSETTE_SLOWPLAY=${process.env.KITSOKI_CASSETTE_SLOWPLAY}`);
+  diag(`KITSOKI_META_STREAM_DELAY_MS=${process.env.KITSOKI_META_STREAM_DELAY_MS}`);
   server = await startWebServer({ addr: ADDR, flow: FLOW, hostCassette: HOST_CASSETTE, storiesDir: STORY_DIR });
 });
 
@@ -115,25 +151,31 @@ interface FeedRow {
   text: string;
 }
 
-/** Read the live thinking-bubble feed rows (kind + text), in DOM order. */
-async function readBubbleFeed(page: Page): Promise<FeedRow[]> {
-  return page.$$eval(".iv__thinking-thought, .iv__thinking-tool", (els) =>
-    els.map((el) => ({
-      kind: el.classList.contains("iv__thinking-thought") ? ("think" as const) : ("tool" as const),
-      text: (el.textContent ?? "").trim(),
-    }))
+/**
+ * Read activity-feed rows (kind + text) inside a scope selector, in DOM
+ * order. Every surface — the live thinking bubble, the preserved disclosure,
+ * the meta overlay's bubble and disclosure — renders the same shared
+ * ActivityFeed rows, so one reader covers them all; the scope picks which.
+ */
+async function readFeedRows(page: Page, scope: string): Promise<FeedRow[]> {
+  return page.$$eval(
+    `${scope} .chat-activity__thought, ${scope} .chat-activity__tool`,
+    (els) =>
+      els.map((el) => ({
+        kind: el.classList.contains("chat-activity__thought") ? ("think" as const) : ("tool" as const),
+        text: (el.textContent ?? "").trim(),
+      }))
   );
 }
 
-/** Read the preserved chat-activity feed rows (kind + text), in DOM order. */
-async function readActivityFeed(page: Page): Promise<FeedRow[]> {
-  return page.$$eval(".chat-activity__thought, .chat-activity__tool", (els) =>
-    els.map((el) => ({
-      kind: el.classList.contains("chat-activity__thought") ? ("think" as const) : ("tool" as const),
-      text: (el.textContent ?? "").trim(),
-    }))
-  );
-}
+/** The main chat's live thinking-bubble feed. */
+const readBubbleFeed = (page: Page) => readFeedRows(page, '[data-testid="thinking-bubble"]');
+/** The main chat's preserved (expanded) activity feed. */
+const readActivityFeed = (page: Page) => readFeedRows(page, '[data-testid="chat-activity-feed"]');
+/** The meta overlay's live streaming-bubble feed. */
+const readMetaBubbleFeed = (page: Page) => readFeedRows(page, '[data-testid="meta-row-streaming"]');
+/** The meta overlay's preserved (expanded) activity feed. */
+const readMetaActivityFeed = (page: Page) => readFeedRows(page, '[data-testid="meta-activity-feed"]');
 
 /**
  * Dwell across the in-flight streaming turn, saving progressive frames
@@ -174,6 +216,41 @@ async function captureLiveStreaming(
   diag("captureLiveStreaming: bubble hidden (turn landed)");
 }
 
+/**
+ * Same progressive capture for the META overlay's streaming bubble: frames
+ * while the stub-paced turn streams the feed + reply, then wait for the
+ * bubble to dissolve into the committed assistant message. Best-effort on
+ * the frames; the post-turn meta-activity assertions are the hard gate.
+ */
+async function captureMetaStreaming(
+  page: Page,
+  shot: (p: Page, name: string) => Promise<void>
+): Promise<void> {
+  const bubble = page.getByTestId("meta-row-streaming");
+  let sawBubble = false;
+  try {
+    await expect(bubble).toBeVisible({ timeout: 6000 });
+    sawBubble = true;
+  } catch {
+    sawBubble = false;
+  }
+  diag(`captureMetaStreaming: meta-row-streaming visible=${sawBubble}`);
+  if (!sawBubble) {
+    await shot(page, "cs-meta-stream-instant");
+    return;
+  }
+  await dwell(page, 600);
+  const early = await readMetaBubbleFeed(page);
+  await shot(page, "cs-meta-stream-early");
+  await dwell(page, 1400);
+  const late = await readMetaBubbleFeed(page);
+  await shot(page, "cs-meta-stream-late");
+  diag(`captureMetaStreaming rows early=${early.length} late=${late.length}`);
+  diag(`captureMetaStreaming late feed:\n${late.map((r) => `  ${r.kind}: ${r.text}`).join("\n")}`);
+  await expect(bubble).toBeHidden({ timeout: 60000 }).catch(() => undefined);
+  diag("captureMetaStreaming: bubble hidden (meta turn landed)");
+}
+
 test("live chat streaming feature-spotlight video", async () => {
   test.setTimeout(300000);
   const browser: Browser = await chromium.launch({ headless: true });
@@ -185,11 +262,18 @@ test("live chat streaming feature-spotlight video", async () => {
   const video = page.video();
   const shot = makeShot(ARTIFACT_DIR);
 
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
+
   let sessionId = "";
   // Filled while walking the tour; asserted AFTER the walk so a content bug
   // still yields a complete recording that SHOWS the problem.
   let expandedFeed: FeedRow[] = [];
   let summaryText = "";
+  let expandedMetaFeed: FeedRow[] = [];
+  let metaSummaryText = "";
+  let metaReplyText = "";
 
   try {
     // ── 1. Open the home story library and start the tour ON it ──────────────
@@ -216,9 +300,16 @@ test("live chat streaming feature-spotlight video", async () => {
         continue;
       }
 
-      // The streaming step does its own progressive capture + advance.
-      if (step.id === "cs-stream-watch") {
-        await captureLiveStreaming(page, shot);
+      // The streaming steps do their own progressive capture + advance.
+      if (step.id === "cs-stream-watch" || step.id === "cs-meta-stream") {
+        // The popover is already on this step (the prior step's Next advanced
+        // it) — open its chapter now so the streaming capture is its window.
+        chapters.open(step.id, step.title, CHAPTER_SOURCE);
+        if (step.id === "cs-stream-watch") {
+          await captureLiveStreaming(page, shot);
+        } else {
+          await captureMetaStreaming(page, shot);
+        }
         const watchTitle = await page
           .getByTestId("tour-title")
           .textContent({ timeout: 8000 })
@@ -228,7 +319,7 @@ test("live chat streaming feature-spotlight video", async () => {
           await page.getByTestId("tour-next").click();
           await dwell(page, 700);
         } else {
-          diag(`  cs-stream-watch: overlay drifted to "${watchTitle}" — accepting`);
+          diag(`  ${step.id}: overlay drifted to "${watchTitle}" — accepting`);
         }
         continue;
       }
@@ -250,6 +341,10 @@ test("live chat streaming feature-spotlight video", async () => {
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       // Capture the collapsed summary line while the cs-collapsed spotlight is
       // on it (before the expand step opens the feed).
       if (step.id === "cs-collapsed") {
@@ -264,14 +359,49 @@ test("live chat streaming feature-spotlight video", async () => {
         await expect(page.getByTestId("chat-activity-feed").last()).toBeHidden();
       }
 
+      // The Story Q&A item only enables once the server's mode list loads;
+      // clicking a disabled button fires nothing and the click-target advance
+      // would stall the tour.
+      if (step.id === "cs-meta-mode") {
+        await expect(page.getByTestId("meta-mode-story-ask")).toBeEnabled({ timeout: 10000 });
+      }
+
+      // Type the question before the send-button spotlight dwells, so the
+      // camera sees what is about to be asked.
+      if (step.id === "cs-meta-ask") {
+        await page.getByTestId("meta-composer-input").fill(META_QUESTION);
+      }
+
+      // Mirror cs-collapsed for the meta overlay's preserved activity.
+      if (step.id === "cs-meta-collapsed") {
+        metaSummaryText =
+          (await page
+            .getByTestId("meta-activity-summary")
+            .last()
+            .textContent({ timeout: 5000 })
+            .catch(() => "")) ?? "";
+        diag(`  meta collapsed summary: "${metaSummaryText.trim()}"`);
+        await expect(page.getByTestId("meta-activity-feed").last()).toBeHidden();
+        metaReplyText =
+          (await page
+            .getByTestId("meta-row-agent")
+            .last()
+            .textContent({ timeout: 5000 })
+            .catch(() => "")) ?? "";
+      }
+
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);
 
       if (step.kind === "explain") {
-        // Read the expanded feed on its spotlight step, after the dwell.
+        // Read the expanded feeds on their spotlight steps, after the dwell.
         if (step.id === "cs-expanded") {
           expandedFeed = await readActivityFeed(page);
           diag(`  expanded feed (${expandedFeed.length} rows):\n${expandedFeed.map((r) => `  ${r.kind}: ${r.text}`).join("\n")}`);
+        }
+        if (step.id === "cs-meta-expanded") {
+          expandedMetaFeed = await readMetaActivityFeed(page);
+          diag(`  expanded META feed (${expandedMetaFeed.length} rows):\n${expandedMetaFeed.map((r) => `  ${r.kind}: ${r.text}`).join("\n")}`);
         }
         await page.getByTestId("tour-next").click();
         await dwell(page, 700);
@@ -337,13 +467,32 @@ test("live chat streaming feature-spotlight video", async () => {
     for (const row of expandedFeed.filter((r) => r.kind === "think")) {
       expect(row.text).toContain("🧠");
     }
+
+    // ── 4. The meta-overlay contract: same presentation, shared components.
+    expect(metaSummaryText.trim()).toBe(EXPECTED_META_SUMMARY);
+    expect(expandedMetaFeed.map((r) => r.kind)).toEqual(EXPECTED_META_FEED.map((r) => r.kind));
+    for (let i = 0; i < EXPECTED_META_FEED.length; i++) {
+      expect(expandedMetaFeed[i]!.text).toContain(EXPECTED_META_FEED[i]!.match);
+    }
+    for (const row of expandedMetaFeed.filter((r) => r.kind === "think")) {
+      expect(row.text).toContain("🧠");
+    }
+    // The reply must land in the bubble — and must NOT duplicate into the
+    // feed as a trailing thought (the deferred-narration drop).
+    expect(metaReplyText).toContain("deterministic no-LLM reply");
+    for (const row of expandedMetaFeed) {
+      expect(row.text).not.toContain("deterministic no-LLM reply");
+    }
   } catch (e) {
     diag(`FAILED: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
     diag(`--- server log ---\n${server?.log?.() ?? ""}`);
     throw e;
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "chat-stream-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "chat-stream-demo");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 

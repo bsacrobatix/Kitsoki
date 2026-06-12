@@ -10,7 +10,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "playwright": "playwright test",
-    "playwright:install": "playwright install --with-deps chromium"
+    "playwright:install": "playwright install --with-deps chromium",
+    "features:gen": "tsx scripts/features/generate.ts",
+    "features:check": "tsx scripts/features/generate.ts --check",
+    "features:index": "tsx scripts/features/generate.ts --index"
   },
   "dependencies": {
     "pinia": "^2.3.1",
@@ -24,9 +27,12 @@
     "@vitejs/plugin-vue": "^5.2.3",
     "@vue/test-utils": "^2.4.6",
     "happy-dom": "^17.4.4",
+    "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
     "vite-plugin-singlefile": "^2.3.3",
-    "vitest": "^3.1.4"
+    "vitest": "^3.1.4",
+    "yaml": "^2.8.0",
+    "zod": "^4.0.0"
   }
 }

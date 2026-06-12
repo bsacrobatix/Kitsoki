@@ -8,7 +8,7 @@
  *
  * Like agent-actions-video.spec.ts, this spec is TOUR-DRIVEN: it runs ONLY the
  * DESIGN_WALKTHROUGH_TOUR_STEPS from
- * src/tour/design-walkthrough-manifest.ts via window.__startTourWithSteps.
+ * src/tour/generated/design-walkthrough.ts via window.__startTourWithSteps.
  * The tour opens on the home story library and its route-match action step
  * navigates home → new session → the interactive /chat view, so even the intro
  * is tour-narrated rather than silent spec orchestration.
@@ -32,13 +32,19 @@ import {
   waitForState,
   prepareVideoDir,
   saveVideoAsMp4,
+  ChapterRecorder,
+  writeChapters,
   dwell,
   cinematicGoto,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
 import { DEMO_VIEWPORT, captureDiagnostics } from "./_helpers/demo.js";
-import { DESIGN_WALKTHROUGH_TOUR_STEPS, type TourStep } from "../../src/tour/design-walkthrough-manifest.js";
+import { DESIGN_WALKTHROUGH_TOUR_STEPS, type TourStep } from "../../src/tour/generated/design-walkthrough.js";
+
+// The feature-catalog source of truth for this spec's tour steps: each step
+// becomes a chapter (source_ref kind=tour) in the MP4's sidecar.
+const CHAPTER_SOURCE = "features/design-walkthrough.yaml";
 
 // Port distinct from all other specs.
 const ADDR = "127.0.0.1:7757";
@@ -70,6 +76,10 @@ test("design pipeline walkthrough — tamagotchi pets", async () => {
   const video = page.video();
   const shot = makeShot(ARTIFACT_DIR);
   const { mark, onThrow } = captureDiagnostics(page, ARTIFACT_DIR);
+
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
 
   // Captured once the intro's "New session" step creates the run.
   let sid = "";
@@ -176,6 +186,10 @@ test("design pipeline walkthrough — tamagotchi pets", async () => {
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);
 
@@ -217,7 +231,10 @@ test("design pipeline walkthrough — tamagotchi pets", async () => {
     throw err;
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "design-walkthrough");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "design-walkthrough");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 });

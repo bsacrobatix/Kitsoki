@@ -7,7 +7,7 @@
  * NOT a fixture stub for the artifact itself.
  *
  * Like the golden agent-actions / diagram-showcase specs, this video is
- * TOUR-DRIVEN: the REVIEW_TOUR_STEPS in src/tour/review-manifest.ts narrate the
+ * TOUR-DRIVEN: the REVIEW_TOUR_STEPS in src/tour/generated/review.ts narrate the
  * whole /review walk via window.__startTourWithSteps. The render→chapters→
  * artifact→/review setup runs OFF-CAMERA via RPC (behind a curtain); once the
  * page is ON /review the spec injects the tour, asserts the overlay is visible,
@@ -46,10 +46,12 @@ import {
   saveVideoAsMp4,
   dwell,
   SETTLE_MS,
+  ChapterRecorder,
+  writeChapters,
   type WebServer,
 } from "./_helpers/server.js";
 import { installCurtain, liftCurtain, captureDiagnostics } from "./_helpers/demo.js";
-import { REVIEW_TOUR_STEPS, type TourStep } from "../../src/tour/review-manifest.js";
+import { REVIEW_TOUR_STEPS, type TourStep } from "../../src/tour/generated/review.js";
 
 // 7754 — distinct from diagram-showcase (7753) / agent-actions (7748) so
 // parallel spec files never race on the same port.
@@ -59,6 +61,10 @@ const FLOW = path.join(STORY_DIR, "flows", "demo_review.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "review-video");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
 const REAL_VIDEO = path.join(ARTIFACT_DIR, "render", "walkthrough.mp4");
+// Feature-catalog source of truth for this spec's tour steps — each step
+// becomes a chapter in the SPEC's own recorded MP4 sidecar (distinct from the
+// REAL render's walkthrough.mp4.chapters.json, which the demo plays against).
+const CHAPTER_SOURCE = "features/review.yaml";
 
 let server: WebServer;
 
@@ -85,6 +91,10 @@ test("mockup-video /review feedback-mode feature-spotlight (no-LLM, REAL render,
   const video = page.video(); // capture BEFORE context.close()
   const shot = makeShot(ARTIFACT_DIR);
   const { mark, onThrow } = captureDiagnostics(page, ARTIFACT_DIR);
+
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
 
   let sid = "";
   const submit = (intent: string, slots: Record<string, unknown> = {}) =>
@@ -230,6 +240,10 @@ test("mockup-video /review feedback-mode feature-spotlight (no-LLM, REAL render,
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);
 
@@ -252,7 +266,10 @@ test("mockup-video /review feedback-mode feature-spotlight (no-LLM, REAL render,
     throw err;
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "review-video-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "review-video-demo");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 

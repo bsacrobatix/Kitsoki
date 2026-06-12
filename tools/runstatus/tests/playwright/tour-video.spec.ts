@@ -37,7 +37,7 @@ import { TOUR_STEPS, type TourStep } from "../../src/tour/manifest.js";
 
 // The tour manifest IS the chapter source: each TourStep becomes a chapter
 // (source_ref kind=tour) whose [start,end] window is the recorded dwell.
-const TOUR_SPEC_PATH = "tools/runstatus/src/tour/manifest.ts";
+const TOUR_SPEC_PATH = "features/onboarding-tour.yaml";
 
 const ADDR = "127.0.0.1:7745";
 // Use the bugfix story with the happy_llm flow + the demo cassette.

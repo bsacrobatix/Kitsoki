@@ -11,8 +11,11 @@ INSTALLDIR ?= $(if $(filter Darwin,$(shell uname -s)),$(HOME)/.local/bin,$(HOME)
 # .gitkeep keeps the //go:embed pattern matching on a fresh checkout.
 RUNSTATUS_DIR := tools/runstatus
 EMBED_INDEX   := internal/runstatus/web/assets/index.html
+# features/*.yaml is part of the SPA's sources: the tour manifests the bundle
+# ships are code-generated from the feature catalog (see `make features`).
 SPA_SOURCES   := $(shell find $(RUNSTATUS_DIR)/src $(RUNSTATUS_DIR)/index.html \
-	$(RUNSTATUS_DIR)/package.json $(RUNSTATUS_DIR)/vite.config.ts 2>/dev/null)
+	$(RUNSTATUS_DIR)/package.json $(RUNSTATUS_DIR)/vite.config.ts 2>/dev/null) \
+	$(wildcard features/*.yaml)
 
 # Every shipped story whose deterministic flow suite `make test` exercises.
 STORY_APPS := $(wildcard stories/*/app.yaml)
@@ -72,7 +75,7 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 		echo "error: pnpm not found — needed to build the runstatus SPA." >&2; \
 		echo "       run 'make setup' to install Node + pnpm, or 'make web-clean' if a bundle is already staged." >&2; \
 		exit 1; }
-	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile && pnpm build
+	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile && pnpm features:check && pnpm build
 	@mkdir -p $(dir $(EMBED_INDEX))
 	cp $(RUNSTATUS_DIR)/dist/index.html $(EMBED_INDEX)
 	@echo "staged runstatus SPA -> $(EMBED_INDEX)"
@@ -233,6 +236,121 @@ fetch-models:
 fetch-llama-server:
 	go run ./tools/oracle-fetch -binary
 
+# Feature catalog: features/*.yaml at the repo root is the single source of
+# truth for feature content — tour steps, demo bindings, promo/docs metadata,
+# and ui-qa scenarios. The committed tour manifests under
+# tools/runstatus/src/tour/generated/ are CODE-GENERATED from it.
+#   features        regenerate the manifests + features/feature.schema.json
+#   features-check  validate the catalog and fail on stale generated files
+#                   (runs inside `make build` and `make test` — a stale manifest
+#                   can never be embedded into the binary)
+#   features-index  emit the site/QA contract to .artifacts/features/
+.PHONY: features features-check features-index demo-feature feature-qa
+features:
+	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:gen
+
+features-check:
+	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:check
+
+features-index:
+	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:index
+
+# demo-feature records ONE feature's demo video at watch-speed and renders the
+# GIF + contact sheet. Spec + artifact paths come from the feature catalog.
+# Usage: make demo-feature FEATURE=agent-actions
+FEATURE ?=
+demo-feature: build
+	@test -n "$(FEATURE)" || { echo "usage: make demo-feature FEATURE=<id>" >&2; exit 1; }
+	@mkdir -p bin && cp $(BINARY) bin/$(BINARY)
+	@cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	@set -e; \
+	demo=$$(cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/generate.ts --print-demo $(FEATURE)); \
+	spec=$$(printf '%s' "$$demo" | cut -f1); \
+	video=$$(printf '%s' "$$demo" | cut -f3); \
+	(cd $(RUNSTATUS_DIR) && pnpm exec playwright test "$$spec" --project=chromium); \
+	docs/skills/kitsoki-ui-demo/scripts/render.sh "$$video"
+
+# feature-qa records the feature's demo then runs the vision QA gate against it
+# with the catalog-generated feature spec + scenarios. GATED: drives the real
+# `claude` CLI — never run automatically (CLAUDE.md LLM-test policy).
+# Usage: make feature-qa FEATURE=agent-actions
+feature-qa: demo-feature features-index
+	@set -e; \
+	demo=$$(cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/generate.ts --print-demo $(FEATURE)); \
+	dir=$$(printf '%s' "$$demo" | cut -f2); \
+	video=$$(printf '%s' "$$demo" | cut -f3); \
+	docs/skills/kitsoki-ui-qa/scripts/qa.sh "$$video" \
+		--frames "$$dir" \
+		--feature .artifacts/features/qa/$(FEATURE).feature.md \
+		--scenarios .artifacts/features/qa/$(FEATURE).scenarios.yaml
+
+# demos records every recordable feature demo at watch-speed, incrementally:
+# per-demo content stamps (feature YAML + spec + story inputs + binary) skip
+# anything unchanged. demos-force re-records everything. See
+# scripts/record-demos.sh for the stamp design.
+.PHONY: demos demos-force site-full
+demos: build features-index
+	@mkdir -p bin && cp $(BINARY) bin/$(BINARY)
+	@cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	./scripts/record-demos.sh
+
+demos-force: build features-index
+	@mkdir -p bin && cp $(BINARY) bin/$(BINARY)
+	@cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	./scripts/record-demos.sh --force
+
+# site-full is the everything path: record any stale demos, then build the
+# Pages site from them. (What the CI deploy effectively runs.)
+site-full: demos site
+
+# ── Promo site + help docs (tools/site, VitePress) ──────────────────────────
+# One source tree, two variants: the GitHub Pages site (full videos, base
+# $(SITE_BASE)) and the binary-embedded /help/ copy (posters only — built by
+# site-embed in a later phase). Videos are NEVER committed: `make demos`
+# records them into .artifacts/ and `site` stages whatever exists — a missing
+# video degrades to a poster + placeholder, never a build failure.
+SITE_DIR  := tools/site
+SITE_BASE ?= /Kitsoki/
+
+.PHONY: site site-data site-dev site-clean
+# site-data emits the feature-catalog contract (features-index.json + QA files)
+# into the site's gitignored gen/ dir.
+site-data:
+	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && \
+		pnpm exec tsx scripts/features/generate.ts --index --out $(CURDIR)/$(SITE_DIR)/.vitepress/gen
+
+site: site-data
+	cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent
+	cd $(SITE_DIR) && pnpm stage:docs && pnpm stage:media
+	cd $(SITE_DIR) && SITE_BASE=$(SITE_BASE) pnpm build
+	node $(SITE_DIR)/scripts/check-leaks.mjs $(SITE_DIR)/.vitepress/dist
+	@echo "site built -> $(SITE_DIR)/.vitepress/dist"
+
+# site-dev runs the VitePress HMR dev server (docs iterate instantly; media —
+# videos/posters — reflect whatever `make demos` has recorded so far).
+site-dev: site-data
+	cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent && pnpm stage:docs && pnpm stage:media && pnpm dev
+
+# site-embed builds the EMBEDDED variant (base /help/, posters only — no MP4s
+# in the binary) and stages it into internal/helpdocs/assets/ so the next
+# `make build` serves it offline at /help/. ~2-4MB on the binary.
+HELPDOCS_ASSETS := internal/helpdocs/assets
+.PHONY: site-embed
+site-embed: site-data
+	cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent
+	cd $(SITE_DIR) && pnpm stage:docs && pnpm stage:media --variant embedded
+	cd $(SITE_DIR) && SITE_BASE=/help/ SITE_VARIANT=embedded pnpm build
+	node $(SITE_DIR)/scripts/check-leaks.mjs $(SITE_DIR)/.vitepress/dist-embedded --embedded
+	find $(HELPDOCS_ASSETS) -mindepth 1 ! -name .gitkeep -delete
+	cp -R $(SITE_DIR)/.vitepress/dist-embedded/. $(HELPDOCS_ASSETS)/
+	@echo "help docs staged -> $(HELPDOCS_ASSETS) (next 'make build' embeds them at /help/)"
+
+site-clean:
+	rm -rf $(SITE_DIR)/.vitepress/gen $(SITE_DIR)/.vitepress/dist \
+		$(SITE_DIR)/.vitepress/dist-embedded $(SITE_DIR)/.vitepress/cache \
+		$(SITE_DIR)/src/guide $(SITE_DIR)/src/public/media
+	find $(HELPDOCS_ASSETS) -mindepth 1 ! -name .gitkeep -delete 2>/dev/null || true
+
 # demo-tour records the onboarding tour as a shareable MP4/GIF at watch-speed
 # and renders the post-production artifacts. Requires pnpm + ffmpeg.
 # The spec emits the canonical MP4 directly (never .webm); render adds GIF +
@@ -248,11 +366,12 @@ demo-tour-fast: build
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
 	cd $(RUNSTATUS_DIR) && WEB_CHAT_PACE=0 pnpm exec playwright test tour-video --project=chromium
 
-# demo-tour-qa records the tour video then runs the vision QA gate against it.
+# demo-tour-qa records the tour video then runs the vision QA gate against it,
+# with the feature spec + scenarios generated from features/onboarding-tour.yaml.
 # Requires the `claude` CLI on PATH. Output: .artifacts/ui-qa/tour-video-demo/.
-demo-tour-qa: demo-tour
+demo-tour-qa: demo-tour features-index
 	docs/skills/kitsoki-ui-qa/scripts/qa.sh \
 		.artifacts/tour-video/tour-video-demo.mp4 \
 		--frames .artifacts/tour-video \
-		--feature docs/skills/kitsoki-ui-qa/templates/tour-feature.md \
-		--scenarios docs/skills/kitsoki-ui-qa/templates/tour-scenarios.yaml
+		--feature .artifacts/features/qa/onboarding-tour.feature.md \
+		--scenarios .artifacts/features/qa/onboarding-tour.scenarios.yaml

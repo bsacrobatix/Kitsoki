@@ -9,7 +9,7 @@
  * .artifacts/devstory-triage/.
  *
  * Runs ONLY the DEVSTORY_TRIAGE_TOUR_STEPS from
- * src/tour/devstory-triage-manifest.ts via window.__startTourWithSteps. The
+ * src/tour/generated/devstory-triage.ts via window.__startTourWithSteps. The
  * tour drives the whole video: it opens on the home story library, its
  * route-match action step navigates home → new session → the drive view, then
  * the explain beats narrate the triage + handoff while the spec drives the
@@ -41,11 +41,17 @@ import {
   makeShot,
   prepareVideoDir,
   saveVideoAsMp4,
+  ChapterRecorder,
+  writeChapters,
   dwell,
   cinematicGoto,
   type WebServer,
 } from "./_helpers/server.js";
-import { DEVSTORY_TRIAGE_TOUR_STEPS } from "../../src/tour/devstory-triage-manifest.js";
+import { DEVSTORY_TRIAGE_TOUR_STEPS } from "../../src/tour/generated/devstory-triage.js";
+
+// The feature-catalog source of truth for this spec's tour steps: each step
+// becomes a chapter (source_ref kind=tour) in the MP4's sidecar.
+const CHAPTER_SOURCE = "features/devstory-triage.yaml";
 
 // 7762 — the stage-1 port (matches the cassette-validation server). Distinct
 // from every other spec's port so parallel runs never race on the same bind.
@@ -188,6 +194,10 @@ test("devstory triage → bugfix handoff feature-tour video", async () => {
   const video = page.video();
   const shot = makeShot(ARTIFACT_DIR);
 
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
+
   try {
     // ── 1. Open the home story library and start the tour ON it ──────────────
     diag("navigating home");
@@ -238,6 +248,11 @@ test("devstory triage → bugfix handoff feature-tour video", async () => {
         await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
       }
 
+      // This step is settled and on-screen (the terminal beat tolerates the
+      // overlay being gone) — open its chapter (auto-closes the prior one) so
+      // the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);
 
@@ -276,7 +291,10 @@ test("devstory triage → bugfix handoff feature-tour video", async () => {
     throw e;
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "devstory-triage-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "devstory-triage-demo");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 

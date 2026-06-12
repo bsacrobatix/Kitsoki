@@ -5,7 +5,7 @@
  *
  * A dedicated, feature-focused demo (distinct from the generic onboarding tour).
  * Like the golden agent-actions spec, this video is TOUR-DRIVEN: the
- * DIAGRAM_SHOWCASE_TOUR_STEPS in src/tour/diagram-showcase-manifest.ts narrate
+ * DIAGRAM_SHOWCASE_TOUR_STEPS in src/tour/generated/diagram-showcase.ts narrate
  * the whole run via window.__startTourWithSteps. The intro opens on the home
  * story library and its route-match action step navigates home → new session,
  * then route "any" steps spotlight the StateDiagram's four views (metro / ego /
@@ -34,12 +34,18 @@ import {
   waitForState,
   prepareVideoDir,
   saveVideoAsMp4,
+  ChapterRecorder,
+  writeChapters,
   dwell,
   cinematicGoto,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
-import { DIAGRAM_SHOWCASE_TOUR_STEPS, type TourStep } from "../../src/tour/diagram-showcase-manifest.js";
+import { DIAGRAM_SHOWCASE_TOUR_STEPS, type TourStep } from "../../src/tour/generated/diagram-showcase.js";
+
+// The feature-catalog source of truth for this spec's tour steps: each step
+// becomes a chapter (source_ref kind=tour) in the MP4's sidecar.
+const CHAPTER_SOURCE = "features/diagram-showcase.yaml";
 
 // 7753 — distinct from the other spec files so parallel runs never race on the
 // same port bind.
@@ -118,6 +124,10 @@ test("state-diagram four-view showcase (dev-story, no-LLM)", async () => {
   const page: Page = await context.newPage();
   const video = page.video(); // capture BEFORE context.close()
   const shot = makeShot(ARTIFACT_DIR);
+
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
 
   // Carries the session id once the intro's "New session" step creates the run.
   let sid = "";
@@ -199,6 +209,10 @@ test("state-diagram four-view showcase (dev-story, no-LLM)", async () => {
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);
 
@@ -236,7 +250,10 @@ test("state-diagram four-view showcase (dev-story, no-LLM)", async () => {
     throw e;
   } finally {
     await context.close(); // finalises the recording
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "diagram-showcase-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "diagram-showcase-demo");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 

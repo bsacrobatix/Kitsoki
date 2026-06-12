@@ -1,7 +1,7 @@
 /**
  * Mockup Video Studio — full story-walkthrough feature-spotlight video.
  *
- * Drives the dedicated mockup-video tour (src/tour/mockup-video-manifest.ts)
+ * Drives the dedicated mockup-video tour (src/tour/generated/mockup-video.ts)
  * against a real `kitsoki web` server in the deterministic no-LLM posture
  * (--flow stories/mockup-video/flows/demo_web.yaml) and records a video +
  * per-step screenshots to .artifacts/mockup-video-demo/.
@@ -41,9 +41,11 @@ import {
   dwell,
   cinematicGoto,
   SETTLE_MS,
+  ChapterRecorder,
+  writeChapters,
   type WebServer,
 } from "./_helpers/server.js";
-import { MOCKUP_VIDEO_TOUR_STEPS, type TourStep } from "../../src/tour/mockup-video-manifest.js";
+import { MOCKUP_VIDEO_TOUR_STEPS, type TourStep } from "../../src/tour/generated/mockup-video.js";
 
 // 7755 — distinct from review-video (7754) / agent-actions (7748) so parallel
 // spec files never race on the same port bind.
@@ -52,6 +54,10 @@ const STORY_DIR = path.join(repoRoot, "stories", "mockup-video");
 const FLOW = path.join(STORY_DIR, "flows", "demo_web.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "mockup-video-demo");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
+// Feature-catalog source of truth for this spec's tour steps — each step
+// becomes a chapter in the SPEC's own recorded MP4 sidecar (NOT the story's
+// inline walkthrough.mp4, which carries its own Go-side chapters).
+const CHAPTER_SOURCE = "features/mockup-video.yaml";
 const DIAG_LOG = path.join(ARTIFACT_DIR, "diagnostic.log");
 const ERROR_TXT = path.join(ARTIFACT_DIR, "ERROR.txt");
 const REAL_VIDEO = path.join(repoRoot, ".artifacts", "review-video", "render", "walkthrough.mp4");
@@ -99,6 +105,10 @@ test("mockup video studio full-walkthrough feature-spotlight video", async () =>
   const page: Page = await context.newPage();
   const video = page.video();
   const shot = makeShot(ARTIFACT_DIR);
+
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
 
   try {
     // ── Open the home story library and start the tour ON it ─────────────────
@@ -163,6 +173,10 @@ test("mockup video studio full-walkthrough feature-spotlight video", async () =>
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);
 
@@ -210,7 +224,10 @@ test("mockup video studio full-walkthrough feature-spotlight video", async () =>
     throw e;
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "mockup-video-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "mockup-video-demo");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 

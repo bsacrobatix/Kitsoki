@@ -82,3 +82,18 @@ internal/runstatus/web/assets/index.html
 internal/oracle/server/cache/*
 !internal/oracle/server/cache/.gitkeep
 bin/
+
+# Promo site / help docs (tools/site) — staged docs/media and build outputs are
+# derived (from docs/, features/, and .artifacts/ recordings); never committed.
+tools/site/node_modules/
+tools/site/.vitepress/gen/
+tools/site/.vitepress/dist/
+tools/site/.vitepress/dist-embedded/
+tools/site/.vitepress/cache/
+tools/site/src/guide/
+tools/site/src/public/media/
+
+# Embedded help-docs staging (make site-embed); only the .gitkeep placeholder
+# is committed so //go:embed matches on a fresh checkout.
+internal/helpdocs/assets/*
+!internal/helpdocs/assets/.gitkeep

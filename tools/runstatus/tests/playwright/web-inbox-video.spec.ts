@@ -16,7 +16,7 @@
  * scheduler clock (the stub's `delay` sleeps real time under `kitsoki web`).
  *
  * Like agent-actions-video.spec.ts, this spec runs ONLY the WEB_INBOX_TOUR_STEPS
- * from src/tour/web-inbox-manifest.ts via window.__startTourWithSteps. The tour
+ * from src/tour/generated/web-inbox.ts via window.__startTourWithSteps. The tour
  * drives the whole video: it opens on the home story library and its route-match
  * action step navigates home → new session → chat, so even the intro is
  * tour-narrated. The inbox surfaces (badge/toast/panel) are the cross-client SSE
@@ -39,12 +39,14 @@ import {
   makeShot,
   prepareVideoDir,
   saveVideoAsMp4,
+  ChapterRecorder,
+  writeChapters,
   dwell,
   cinematicGoto,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
-import { WEB_INBOX_TOUR_STEPS, type TourStep } from "../../src/tour/web-inbox-manifest.js";
+import { WEB_INBOX_TOUR_STEPS, type TourStep } from "../../src/tour/generated/web-inbox.js";
 
 // 7791 — distinct from agent-actions (7748), tour-onboarding (7747), and
 // trace-features (7746) so parallel spec files never race on the same port.
@@ -54,6 +56,11 @@ const FLOW = path.join(STORY_DIR, "flows", "background_notifies.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "web-inbox");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
 const ERROR_LOG = path.join(ARTIFACT_DIR, "ERROR.txt");
+
+// The feature-catalog source of truth for this spec's tour steps: each step
+// becomes a chapter (source_ref kind=tour) whose [start,end] window is the
+// recorded dwell.
+const CHAPTER_SOURCE = "features/web-inbox.yaml";
 
 let server: WebServer;
 
@@ -90,6 +97,9 @@ test("web async-inbox feature-spotlight video", async () => {
   });
   const page: Page = await context.newPage();
   const video = page.video();
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
   const shot = makeShot(ARTIFACT_DIR);
 
   try {
@@ -146,6 +156,10 @@ test("web async-inbox feature-spotlight video", async () => {
         }
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
+
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
 
       // The toast is transient (auto-dismisses 6s after the SSE push), so grab
       // its screenshot BEFORE the dwell consumes the remaining window; every
@@ -205,7 +219,10 @@ test("web async-inbox feature-spotlight video", async () => {
     throw e;
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "web-inbox-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "web-inbox-demo");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 

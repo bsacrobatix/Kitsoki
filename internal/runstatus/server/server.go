@@ -79,6 +79,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/helpdocs"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/web"
@@ -368,6 +369,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/artifact/", s.handleArtifact)
 	mux.HandleFunc("/rpc/meta-stream", s.handleMetaStream)
 	mux.HandleFunc("/rpc/turn-stream", s.handleTurnStream)
+	// Embedded help-docs site (make site-embed). Serves an actionable
+	// placeholder when not staged — never an error (see internal/helpdocs).
+	mux.Handle("/help/", http.StripPrefix("/help/", helpdocs.Handler()))
 	mux.HandleFunc("/", s.handleIndex)
 	return mux
 }

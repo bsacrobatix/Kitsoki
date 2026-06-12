@@ -6,7 +6,7 @@
  * records a video + per-scene screenshots to .artifacts/trace-features/.
  *
  * Unlike tour-video.spec.ts (which walks the full 13-step onboarding), this spec
- * runs ONLY the trace-introspection steps from src/tour/trace-manifest.ts via
+ * runs ONLY the trace-introspection steps from src/tour/generated/trace-features.ts via
  * window.__startTourWithSteps. The tour itself drives the whole video: it opens
  * on the home story library, then its route-match action steps navigate home →
  * new session → observer, so even the intro is tour-narrated rather than silent
@@ -29,10 +29,16 @@ import {
   dwell,
   cinematicGoto,
   waitForOracleComplete,
+  ChapterRecorder,
+  writeChapters,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
-import { TRACE_TOUR_STEPS, type TourStep } from "../../src/tour/trace-manifest.js";
+import { TRACE_TOUR_STEPS, type TourStep } from "../../src/tour/generated/trace-features.js";
+
+// The feature-catalog source of truth for this tour: each step becomes a chapter
+// (source_ref kind=tour) whose [start,end] window is the recorded dwell.
+const CHAPTER_SOURCE = "features/trace-features.yaml";
 
 const ADDR = "127.0.0.1:7746";
 // Use the bugfix story with the happy_llm flow + the demo cassette so the
@@ -70,6 +76,10 @@ test("trace introspection feature-spotlight video", async () => {
   const page: Page = await context.newPage();
   const video = page.video();
   const shot = makeShot(ARTIFACT_DIR);
+
+  // Accumulate per-step time windows for the chapter sidecar. The clock starts
+  // now so windows line up with the recorded MP4 timeline.
+  const chapters = new ChapterRecorder();
 
   // Carries the session id once the intro's "New session" step creates the run.
   let sessionId = "";
@@ -132,6 +142,10 @@ test("trace introspection feature-spotlight video", async () => {
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+      // This step's spotlight is settled and on-screen — open its chapter
+      // (auto-closes the prior one) so the dwell below becomes its window.
+      chapters.open(step.id, step.title, CHAPTER_SOURCE);
+
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);
 
@@ -193,7 +207,10 @@ test("trace introspection feature-spotlight video", async () => {
     await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 5000 });
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "trace-features-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "trace-features-demo");
+    // Emit the producer-agnostic chapter sidecar beside the MP4: each tour
+    // step → one chapter with source_ref kind=tour.
+    writeChapters(mp4, chapters.list());
     await browser.close();
   }
 
