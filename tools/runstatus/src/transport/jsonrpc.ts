@@ -41,83 +41,46 @@ export class JsonRpcError extends Error {
   }
 }
 
-// Backoff schedule: 250, 500, 1000, 2000, then cap at 5000 ms.
-const BACKOFF_MS = [250, 500, 1000, 2000, 5000];
-
-function nextBackoff(attempt: number): number {
-  return BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] ?? 5000;
-}
+import type { RpcTransport, LastRpcError } from "./transport.js";
+import { HttpTransport } from "./transport.js";
 
 /** The last failed RPC, surfaced for bug-report error context. */
-export interface LastRpcError {
-  method: string;
-  code: unknown;
-  message: string;
+export type { LastRpcError };
+
+/**
+ * VS Code injects `acquireVsCodeApi` into the webview's global scope. Declared
+ * here so the transport factory's host-detection branch typechecks in the SPA
+ * build (the function is absent in a plain browser tab — guard with `typeof`).
+ */
+declare global {
+  // eslint-disable-next-line no-var
+  function acquireVsCodeApi(): { postMessage(message: unknown): void };
 }
 
 export class JsonRpcClient {
-  private readonly base: string;
+  private readonly transport: RpcTransport;
   private nextId = 1;
-  private lastError: LastRpcError | null = null;
 
-  constructor(base = "/") {
-    // Normalise: ensure it ends with "/"
-    this.base = base.endsWith("/") ? base : base + "/";
+  /**
+   * @param base      JSON-RPC endpoint base (default "/"); used only when no
+   *                  transport is injected (constructs an HttpTransport).
+   * @param transport optional injected transport (HttpTransport in a browser
+   *                  tab, BridgeTransport in a VS Code webview). DI seam.
+   */
+  constructor(base = "/", transport?: RpcTransport) {
+    this.transport = transport ?? new HttpTransport(base);
   }
 
   /** The most recent failed RPC (HTTP or JSON-RPC error), or null. */
   getLastError(): LastRpcError | null {
-    return this.lastError;
+    return this.transport.getLastError();
   }
 
   async post<T = unknown>(
     method: string,
     params: Record<string, unknown> = {}
   ): Promise<T> {
-    const id = this.nextId++;
-    const body: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
-
-    let resp: Response;
-    try {
-      resp = await fetch(`${this.base}rpc`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      this.lastError = { method, code: "fetch", message };
-      throw e;
-    }
-
-    if (!resp.ok) {
-      this.lastError = {
-        method,
-        code: resp.status,
-        message: `HTTP ${resp.status}: ${resp.statusText}`,
-      };
-      throw new JsonRpcError(
-        resp.status,
-        `HTTP ${resp.status}: ${resp.statusText}`
-      );
-    }
-
-    const frame = (await resp.json()) as JsonRpcResponse<T>;
-
-    if (frame.error !== undefined) {
-      this.lastError = {
-        method,
-        code: frame.error.code,
-        message: frame.error.message,
-      };
-      throw new JsonRpcError(
-        frame.error.code,
-        frame.error.message,
-        frame.error.data
-      );
-    }
-
-    return frame.result as T;
+    return this.transport.call<T>(method, params, this.nextId++);
   }
 
   /**
@@ -138,88 +101,66 @@ export class JsonRpcClient {
       last_turn: number;
     }>
   ): () => void {
-    let subscriptionId = "";
-    let es: EventSource | null = null;
     let lastTurn = -1;
     let closed = false;
-    let backoffAttempt = 0;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubStream: (() => void) | null = null;
+    let subscriptionId = "";
 
-    const openStream = () => {
-      if (closed) return;
-
-      const url = `${this.base}rpc/events?subscription_id=${encodeURIComponent(subscriptionId)}`;
-      es = new EventSource(url);
-
-      es.onmessage = (ev: MessageEvent<string>) => {
-        backoffAttempt = 0; // reset on successful message
-        try {
-          const frame = JSON.parse(ev.data) as JsonRpcNotification;
-          if (
-            frame.method === "runstatus.event" &&
-            frame.params !== undefined
-          ) {
-            const { event } = frame.params as {
-              subscription_id: string;
-              event: import("../types.js").TraceEvent;
-            };
-            if (event.turn > lastTurn) {
-              lastTurn = event.turn;
-            }
-            onEvent(event);
+    // Parse a /rpc/events SSE frame and fan a runstatus.event to onEvent.
+    const onMessage = (raw: string) => {
+      try {
+        const frame = JSON.parse(raw) as JsonRpcNotification;
+        if (frame.method === "runstatus.event" && frame.params !== undefined) {
+          const { event } = frame.params as {
+            subscription_id: string;
+            event: import("../types.js").TraceEvent;
+          };
+          if (event.turn > lastTurn) {
+            lastTurn = event.turn;
           }
-        } catch {
-          // Malformed frame — ignore.
+          onEvent(event);
         }
-      };
-
-      es.onerror = () => {
-        if (closed) return;
-        es?.close();
-        es = null;
-
-        const delay = nextBackoff(backoffAttempt++);
-        reconnectTimer = setTimeout(() => {
-          if (closed) return;
-          const sinceТurn = lastTurn >= 0 ? lastTurn + 1 : 0;
-          getTrace(sinceТurn)
-            .then(({ events, last_turn }) => {
-              if (closed) return;
-              for (const event of events) {
-                if (event.turn > lastTurn) {
-                  lastTurn = event.turn;
-                  onEvent(event);
-                }
-              }
-              if (last_turn > lastTurn) {
-                lastTurn = last_turn;
-              }
-              openStream();
-            })
-            .catch(() => {
-              if (!closed) openStream();
-            });
-        }, delay);
-      };
+      } catch {
+        // Malformed frame — ignore.
+      }
     };
 
-    // Kick off: subscribe first, then open stream.
+    // On reconnect, backfill via getTrace(since_turn) before the stream
+    // reopens (the transport drives the reopen).
+    const onReconnect = async () => {
+      const sinceТurn = lastTurn >= 0 ? lastTurn + 1 : 0;
+      const { events, last_turn } = await getTrace(sinceТurn);
+      if (closed) return;
+      for (const event of events) {
+        if (event.turn > lastTurn) {
+          lastTurn = event.turn;
+          onEvent(event);
+        }
+      }
+      if (last_turn > lastTurn) {
+        lastTurn = last_turn;
+      }
+    };
+
+    // Kick off: subscribe first, then open the stream via the transport.
     this.post<{ subscription_id: string }>(
       "runstatus.session.subscribe",
       { session_id: sessionId }
     ).then(({ subscription_id }) => {
       if (closed) return;
+      unsubStream = this.transport.openEventStream(
+        "rpc/events",
+        { subscription_id },
+        { onMessage, onReconnect }
+      );
+      // Surface the subscription id so teardown can unsubscribe it server-side.
       subscriptionId = subscription_id;
-      openStream();
     });
 
     return () => {
       closed = true;
-      if (reconnectTimer !== null) {
-        clearTimeout(reconnectTimer);
-      }
-      es?.close();
-      es = null;
+      unsubStream?.();
+      unsubStream = null;
       if (subscriptionId) {
         // Fire-and-forget; ignore errors on cleanup.
         this.post("runstatus.session.unsubscribe", {

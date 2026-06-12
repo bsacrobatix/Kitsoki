@@ -96,7 +96,7 @@ import type { TraceEvent, NodeRef } from "../types.js";
 
 type ViewMode = "tree" | "timeline" | "graph" | "actions";
 
-const props = defineProps<{
+defineProps<{
   events: TraceEvent[];
   selectedEventIndex: number | null;
   highlightedStatePaths: string[];

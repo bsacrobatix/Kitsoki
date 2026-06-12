@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "outDir": "dist",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "types": ["node", "vscode"]
+  },
+  "include": ["src", "tests"],
+  "_comment": "bridge-relay.integration.test.ts is excluded from tsc: it deliberately imports the runstatus SPA's BridgeTransport (an ESM, \"type\":\"module\" package) across the package boundary to guard the postMessage wire format end-to-end. Pulling that ESM graph into this CommonJS-resolution program causes module-format conflicts that are meaningless here. The test IS still run by `pnpm test` (tsx executes + node:test asserts it).",
+  "exclude": ["node_modules", "dist", "tests/bridge-relay.integration.test.ts"]
+}

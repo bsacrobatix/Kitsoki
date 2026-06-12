@@ -1,0 +1,158 @@
+// launch.ts — typed, thin port of the VS Code launch mechanism proven in
+// .artifacts/vscode-poc/record-vscode-poc.mjs. Both the e2e driving spec and
+// the demo recorder import this; keep it dependency-light and side-effect free
+// at import time.
+//
+// Proven facts baked in here (see .artifacts/vscode-poc/NOTES.md):
+//  - download+launch VS Code 1.96.4 via @vscode/test-electron + Playwright _electron.
+//  - STRIP all VSCODE_* env vars before launch (inherited ones hang the window
+//    and break custom webviews).
+//  - firstWindow() is flaky; poll app.windows() for `.monaco-workbench` instead.
+//  - webview descent is `iframe.webview.ready` >>> `iframe[title]`.
+
+import { _electron, type ElectronApplication, type Page, type FrameLocator } from 'playwright';
+import { downloadAndUnzipVSCode } from '@vscode/test-electron';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+
+/** Pinned VS Code version proven by the PoC. */
+export const VSCODE_VERSION = '1.96.4';
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function freshDir(p: string): string {
+  fs.rmSync(p, { recursive: true, force: true });
+  fs.mkdirSync(p, { recursive: true });
+  return p;
+}
+
+export interface LaunchOptions {
+  /** Folder opened as the workspace (last positional arg to VS Code). */
+  workspace: string;
+  /** Directory the recordVideo .webm is written to. Omit to disable recording. */
+  videoDir?: string;
+  /** Extensions dir; defaults to a throwaway temp dir. Install the built extension here. */
+  extensionsDir?: string;
+  /** User data dir; defaults to a throwaway temp dir. */
+  userDataDir?: string;
+  /** Window size for recordVideo. Defaults to 1280x800. */
+  size?: { width: number; height: number };
+  /** Launch timeout ms. Defaults to 120000. */
+  timeout?: number;
+}
+
+export interface LaunchedVSCode {
+  app: ElectronApplication;
+  /** The workbench window (one whose .monaco-workbench exists). */
+  win: Page;
+}
+
+/**
+ * Download (cached) + launch real VS Code with the proven flags and return the
+ * app plus the workbench window. Caller is responsible for `app.close()`.
+ */
+export async function launchVSCode(opts: LaunchOptions): Promise<LaunchedVSCode> {
+  const tmpRoot = path.join(os.tmpdir(), 'vscode-kitsoki-test');
+  const userDataDir = freshDir(opts.userDataDir ?? path.join(tmpRoot, 'user-data'));
+  const extensionsDir = opts.extensionsDir
+    ? opts.extensionsDir
+    : freshDir(path.join(tmpRoot, 'extensions'));
+  const size = opts.size ?? { width: 1280, height: 800 };
+
+  const executablePath = await downloadAndUnzipVSCode(VSCODE_VERSION);
+
+  // CRITICAL: strip all VSCODE_* env vars (inherited ones hang the launch).
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined) continue;
+    if (/^VSCODE_/i.test(k)) continue;
+    env[k] = v;
+  }
+
+  const args = [
+    '--no-sandbox',
+    '--disable-gpu-sandbox',
+    '--disable-updates',
+    '--skip-welcome',
+    '--skip-release-notes',
+    '--disable-workspace-trust',
+    '--disable-telemetry',
+    `--user-data-dir=${userDataDir}`,
+    `--extensions-dir=${extensionsDir}`,
+    opts.workspace,
+  ];
+
+  const app = await _electron.launch({
+    executablePath,
+    env,
+    args,
+    timeout: opts.timeout ?? 120_000,
+    ...(opts.videoDir ? { recordVideo: { dir: freshDir(opts.videoDir), size } } : {}),
+  });
+
+  const win = await acquireWorkbench(app);
+  return { app, win };
+}
+
+/**
+ * Poll app.windows() for the workbench window (firstWindow() is flaky because
+ * VS Code spawns background windows). Falls back to firstWindow().
+ */
+export async function acquireWorkbench(app: ElectronApplication): Promise<Page> {
+  let win: Page | null = null;
+  for (let i = 0; i < 120; i++) {
+    for (const w of app.windows()) {
+      try {
+        if (await w.locator('.monaco-workbench').count()) {
+          win = w;
+          break;
+        }
+      } catch {
+        /* not ready */
+      }
+    }
+    if (win) break;
+    await sleep(500);
+  }
+  if (!win) win = await app.firstWindow({ timeout: 30_000 });
+  await win.waitForSelector('.monaco-workbench', { timeout: 60_000 });
+  return win;
+}
+
+/**
+ * Descend into a VS Code webview's guest document. Proven chain on 1.96.4:
+ * `iframe.webview.ready` (outer host) >>> `iframe[title]` (inner active-frame).
+ * Tries a small fallback matrix and returns the first FrameLocator whose guest
+ * contains `probe` (default: any element).
+ */
+export async function webviewFrame(
+  win: Page,
+  probe?: { selector: string; hasText?: string },
+  timeoutMs = 8000,
+): Promise<FrameLocator> {
+  const outers = ['iframe.webview.ready', 'iframe.webview'];
+  const inners = ['iframe[title]', 'iframe[name="active-frame"]', 'iframe'];
+  const deadline = Date.now() + timeoutMs;
+  let last: FrameLocator | null = null;
+  while (Date.now() < deadline) {
+    for (const outer of outers) {
+      for (const inner of inners) {
+        const fl = win.frameLocator(outer).frameLocator(inner);
+        last = fl;
+        try {
+          const target = probe
+            ? fl.locator(probe.selector, probe.hasText ? { hasText: probe.hasText } : undefined).first()
+            : fl.locator('body').first();
+          await target.waitFor({ timeout: 1000 });
+          return fl;
+        } catch {
+          /* try next combo */
+        }
+      }
+    }
+    await sleep(250);
+  }
+  if (last) return last;
+  throw new Error('could not locate VS Code webview guest frame');
+}

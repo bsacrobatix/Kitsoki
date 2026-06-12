@@ -8,6 +8,11 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 const apiBase = process.env.KITSOKI_API ?? "http://127.0.0.1:7777";
 
 export default defineConfig({
+  // Webview-relative asset resolution: under a VS Code webview the SPA is loaded
+  // via asWebviewUri (not from a server root), so emitted asset URLs must be
+  // relative ("./") rather than absolute ("/"). The single-file build inlines
+  // everything, so this is harmless for the browser/Go-embed build too.
+  base: "./",
   plugins: [vue(), viteSingleFile()],
   server: {
     middlewareMode: false,

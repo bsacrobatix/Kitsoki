@@ -594,5 +594,6 @@ export const useRunStore = defineStore("run", () => {
     loadInitialView,
     submitIntent,
     sendText,
+    applyTurnResult,
   };
 });

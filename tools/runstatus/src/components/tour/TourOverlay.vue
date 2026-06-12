@@ -236,12 +236,13 @@ const dimEnabled = computed<boolean>(() => tour.currentStep?.dim !== false);
 const ringStyle = computed<Record<string, string>>(() => {
   const h = hole.value;
   if (!h) return { display: "none" };
-  return {
+  const style: Record<string, string> = {
     top: `${h.top}px`,
     left: `${h.left}px`,
     width: `${h.width}px`,
     height: `${h.height}px`,
   };
+  return style;
 });
 
 const strips = computed(() => {

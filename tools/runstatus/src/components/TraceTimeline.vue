@@ -284,7 +284,7 @@ function rowAnnotations(event: TraceEvent): AnnotationEntry[] {
 
 // ---- constants --------------------------------------------------------------
 
-const ALL_SUBSYSTEMS = ["turn", "machine", "world", "host", "oracle", "other"] as const;
+const ALL_SUBSYSTEMS = ["turn", "machine", "world", "host", "oracle", "harness", "other"] as const;
 type Subsystem = (typeof ALL_SUBSYSTEMS)[number];
 
 // Canonical oracle events: the verb lives in attrs.verb, not the msg.  The
@@ -956,8 +956,6 @@ const flatItems = computed<FlatItem[]>(() => {
   }
   return items;
 });
-
-const totalHeight = computed(() => flatItems.value.length * ROW_HEIGHT_ESTIMATE);
 
 const visibleStart = computed(() => {
   if (!useVirtualisation.value) return 0;

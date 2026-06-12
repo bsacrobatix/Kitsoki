@@ -246,7 +246,7 @@ const bannerClass = computed(() => {
       <iframe
         v-else-if="mediaMime === 'text/html'"
         class="ve-media-iframe"
-        sandbox
+        sandbox=""
         :src="artifactUrl(mediaHandle)"
         :title="mediaCaption || mediaHandle"
       />

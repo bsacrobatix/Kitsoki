@@ -61,6 +61,8 @@ export interface TurnStreamEvent {
 }
 import { JsonRpcClient } from "../transport/jsonrpc.js";
 import type { LastRpcError } from "../transport/jsonrpc.js";
+import { createTransport } from "../transport/transport.js";
+import type { RpcTransport } from "../transport/transport.js";
 
 /**
  * StoryHeader is one discovered story as the home-screen browser renders it.
@@ -154,11 +156,18 @@ export interface ReloadResult {
  */
 export class LiveSource implements DataSource {
   private readonly client: JsonRpcClient;
-  private readonly base: string;
+  private readonly transport: RpcTransport;
 
-  constructor(base = "/") {
-    this.base = base.endsWith("/") ? base : base + "/";
-    this.client = new JsonRpcClient(base);
+  /**
+   * @param base      JSON-RPC endpoint base (default "/").
+   * @param transport optional injected transport. Defaults to
+   *                  createTransport(base) — HttpTransport in a browser tab,
+   *                  BridgeTransport inside a VS Code webview — so every existing
+   *                  `new LiveSource("/")` call site bridges transparently.
+   */
+  constructor(base = "/", transport: RpcTransport = createTransport(base)) {
+    this.transport = transport;
+    this.client = new JsonRpcClient(base, transport);
   }
 
   listSessions(): Promise<SessionHeader[]> {
@@ -284,56 +293,35 @@ export class LiveSource implements DataSource {
    * the oracle generates output; resolves with the final TurnResult when the
    * "done" frame arrives, or rejects on "error" or network failure.
    */
-  async turnStream(
+  turnStream(
     sessionId: string,
     method: "turn" | "submit" | "continue" | "offpath",
     params: { input?: string; intent?: string; slots?: Record<string, unknown> },
     onEvent: (ev: TurnStreamEvent) => void
   ): Promise<TurnResult> {
-    const resp = await fetch(`${this.base}rpc/turn-stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: sessionId,
-        method,
-        ...params,
-      }),
-    });
-    if (!resp.ok) {
-      throw new Error(`turn-stream: HTTP ${resp.status} ${resp.statusText}`);
-    }
-    if (!resp.body) {
-      throw new Error("turn-stream: no response body");
-    }
-
-    const reader = resp.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    let finalResult: TurnResult | null = null;
-
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const raw = line.slice(6).trim();
-        if (!raw) continue;
-        const ev: TurnStreamEvent = JSON.parse(raw);
-        if (ev.type === "done") {
-          finalResult = ev.result ?? null;
-        } else if (ev.type === "error") {
-          throw new Error(ev.message ?? "turn-stream error");
-        } else {
-          onEvent(ev);
-        }
+    return this.transport.postEventStream<TurnResult>(
+      "rpc/turn-stream",
+      { session_id: sessionId, method, ...params },
+      {
+        onFrame: (frame) => onEvent(frame as unknown as TurnStreamEvent),
+        reduce: (frame) => {
+          const ev = frame as unknown as TurnStreamEvent;
+          if (ev.type === "done") {
+            // Mirror the original loop's `finalResult = ev.result ?? null`
+            // followed by `if (!finalResult) throw "ended without done event"`:
+            // a done frame carrying no result is a malformed terminal.
+            if (ev.result == null) {
+              throw new Error("turn-stream: ended without done event");
+            }
+            return { result: ev.result };
+          }
+          if (ev.type === "error") {
+            throw new Error(ev.message ?? "turn-stream error");
+          }
+          return undefined;
+        },
       }
-    }
-
-    if (!finalResult) throw new Error("turn-stream: ended without done event");
-    return finalResult;
+    );
   }
 
   // ── Meta mode (overlay chat) ─────────────────────────────────────────────
@@ -389,63 +377,37 @@ export class LiveSource implements DataSource {
    * as the LLM generates output; resolves with the final MetaSendResult when
    * the "done" frame arrives, or rejects on "error" or network failure.
    */
-  async metaStream(
+  metaStream(
     sessionId: string,
     mode: string,
     chatId: string,
     input: string,
     onEvent: (ev: MetaStreamEvent) => void
   ): Promise<MetaSendResult> {
-    const resp = await fetch(`${this.base}rpc/meta-stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: sessionId,
-        mode,
-        chat_id: chatId,
-        input,
-      }),
-    });
-    if (!resp.ok) {
-      throw new Error(`meta-stream: HTTP ${resp.status} ${resp.statusText}`);
-    }
-    if (!resp.body) {
-      throw new Error("meta-stream: no response body");
-    }
-
-    const reader = resp.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    let finalResult: MetaSendResult | null = null;
-
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const raw = line.slice(6).trim();
-        if (!raw) continue;
-        const ev: MetaStreamEvent = JSON.parse(raw);
-        if (ev.type === "done") {
-          finalResult = {
-            assistant: ev.assistant ?? "",
-            chat_id: ev.chat_id ?? "",
-            reload_requested: ev.reload_requested ?? false,
-            changed_files: ev.changed_files ?? [],
-          };
-        } else if (ev.type === "error") {
-          throw new Error(ev.message ?? "meta-stream error");
-        } else {
-          onEvent(ev);
-        }
+    return this.transport.postEventStream<MetaSendResult>(
+      "rpc/meta-stream",
+      { session_id: sessionId, mode, chat_id: chatId, input },
+      {
+        onFrame: (frame) => onEvent(frame as unknown as MetaStreamEvent),
+        reduce: (frame) => {
+          const ev = frame as unknown as MetaStreamEvent;
+          if (ev.type === "done") {
+            return {
+              result: {
+                assistant: ev.assistant ?? "",
+                chat_id: ev.chat_id ?? "",
+                reload_requested: ev.reload_requested ?? false,
+                changed_files: ev.changed_files ?? [],
+              },
+            };
+          }
+          if (ev.type === "error") {
+            throw new Error(ev.message ?? "meta-stream error");
+          }
+          return undefined;
+        },
       }
-    }
-
-    if (!finalResult) throw new Error("meta-stream: ended without done event");
-    return finalResult;
+    );
   }
 
   metaTranscript(sessionId: string, chatId: string): Promise<MetaMessage[]> {
@@ -758,43 +720,21 @@ export class LiveSource implements DataSource {
     onError?: (e: unknown) => void
   ): () => void {
     let subscriptionId = "";
-    let es: EventSource | null = null;
     let closed = false;
-    let backoffAttempt = 0;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubStream: (() => void) | null = null;
 
-    const openStream = () => {
-      if (closed) return;
-      const url = `${this.base}rpc/notifications?subscription_id=${encodeURIComponent(subscriptionId)}`;
-      es = new EventSource(url);
-
-      es.onmessage = (ev: MessageEvent<string>) => {
-        backoffAttempt = 0;
-        try {
-          const frame = JSON.parse(ev.data) as {
-            method?: string;
-            params?: NotificationFrame;
-          };
-          if (frame.method === "runstatus.notification" && frame.params) {
-            onFrame(frame.params);
-          }
-        } catch {
-          // Malformed frame — ignore.
+    const onMessage = (raw: string) => {
+      try {
+        const frame = JSON.parse(raw) as {
+          method?: string;
+          params?: NotificationFrame;
+        };
+        if (frame.method === "runstatus.notification" && frame.params) {
+          onFrame(frame.params);
         }
-      };
-
-      es.onerror = (e) => {
-        if (closed) return;
-        onError?.(e);
-        es?.close();
-        es = null;
-        const delay = NOTIF_BACKOFF_MS[
-          Math.min(backoffAttempt++, NOTIF_BACKOFF_MS.length - 1)
-        ] ?? 5000;
-        reconnectTimer = setTimeout(() => {
-          if (!closed) openStream();
-        }, delay);
-      };
+      } catch {
+        // Malformed frame — ignore.
+      }
     };
 
     this.client
@@ -802,15 +742,18 @@ export class LiveSource implements DataSource {
       .then(({ subscription_id }) => {
         if (closed) return;
         subscriptionId = subscription_id;
-        openStream();
+        unsubStream = this.transport.openEventStream(
+          "rpc/notifications",
+          { subscription_id },
+          { onMessage, onError }
+        );
       })
       .catch((e) => onError?.(e));
 
     return () => {
       closed = true;
-      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-      es?.close();
-      es = null;
+      unsubStream?.();
+      unsubStream = null;
       if (subscriptionId) {
         this.client
           .post("runstatus.notifications.unsubscribe", {
@@ -834,43 +777,21 @@ export class LiveSource implements DataSource {
     onError?: (e: unknown) => void
   ): () => void {
     let subscriptionId = "";
-    let es: EventSource | null = null;
     let closed = false;
-    let backoffAttempt = 0;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubStream: (() => void) | null = null;
 
-    const openStream = () => {
-      if (closed) return;
-      const url = `${this.base}rpc/questions?subscription_id=${encodeURIComponent(subscriptionId)}`;
-      es = new EventSource(url);
-
-      es.onmessage = (ev: MessageEvent<string>) => {
-        backoffAttempt = 0;
-        try {
-          const frame = JSON.parse(ev.data) as {
-            method?: string;
-            params?: OperatorQuestionFrame;
-          };
-          if (frame.method === "runstatus.question" && frame.params) {
-            onFrame(frame.params);
-          }
-        } catch {
-          // Malformed frame — ignore.
+    const onMessage = (raw: string) => {
+      try {
+        const frame = JSON.parse(raw) as {
+          method?: string;
+          params?: OperatorQuestionFrame;
+        };
+        if (frame.method === "runstatus.question" && frame.params) {
+          onFrame(frame.params);
         }
-      };
-
-      es.onerror = (e) => {
-        if (closed) return;
-        onError?.(e);
-        es?.close();
-        es = null;
-        const delay = NOTIF_BACKOFF_MS[
-          Math.min(backoffAttempt++, NOTIF_BACKOFF_MS.length - 1)
-        ] ?? 5000;
-        reconnectTimer = setTimeout(() => {
-          if (!closed) openStream();
-        }, delay);
-      };
+      } catch {
+        // Malformed frame — ignore.
+      }
     };
 
     this.client
@@ -878,15 +799,18 @@ export class LiveSource implements DataSource {
       .then(({ subscription_id }) => {
         if (closed) return;
         subscriptionId = subscription_id;
-        openStream();
+        unsubStream = this.transport.openEventStream(
+          "rpc/questions",
+          { subscription_id },
+          { onMessage, onError }
+        );
       })
       .catch((e) => onError?.(e));
 
     return () => {
       closed = true;
-      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-      es?.close();
-      es = null;
+      unsubStream?.();
+      unsubStream = null;
       if (subscriptionId) {
         this.client
           .post("runstatus.questions.unsubscribe", {
@@ -1029,9 +953,6 @@ export interface BugReportResult {
   /** repo-relative path, e.g. "issues/bugs/<id>.md". */
   path: string;
 }
-
-// Backoff schedule for the notification feed reconnect (ms).
-const NOTIF_BACKOFF_MS = [250, 500, 1000, 2000, 5000];
 
 // Re-export for components that import AnnotationEntry from this module.
 export type { AnnotationEntry };

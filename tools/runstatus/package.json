@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "vue-tsc --build",
     "playwright": "playwright test",
     "playwright:install": "playwright install --with-deps chromium",
     "features:gen": "tsx scripts/features/generate.ts",
@@ -34,6 +35,7 @@
     "vite": "^6.3.5",
     "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^3.1.4",
+    "vue-tsc": "^2.2.10",
     "yaml": "^2.8.0",
     "zod": "^4.0.0"
   }

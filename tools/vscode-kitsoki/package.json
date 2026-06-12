@@ -1,0 +1,98 @@
+{
+  "name": "kitsoki",
+  "displayName": "Kitsoki",
+  "description": "Embed the kitsoki web UI (chat + trace) inside VS Code.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "kitsoki",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kitsoki",
+          "title": "Kitsoki",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "kitsoki": [
+        {
+          "id": "kitsoki.chat",
+          "name": "Chat",
+          "type": "webview"
+        }
+      ],
+      "panel": [
+        {
+          "id": "kitsoki.trace",
+          "name": "Kitsoki Trace",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "kitsoki.openChat",
+        "title": "Kitsoki: Open Chat",
+        "category": "Kitsoki"
+      },
+      {
+        "command": "kitsoki.openTrace",
+        "title": "Kitsoki: Open Trace",
+        "category": "Kitsoki"
+      },
+      {
+        "command": "kitsoki.restartBackend",
+        "title": "Kitsoki: Restart Backend",
+        "category": "Kitsoki"
+      }
+    ],
+    "configuration": {
+      "title": "Kitsoki",
+      "properties": {
+        "kitsoki.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the kitsoki binary. When empty, 'kitsoki' on PATH is used."
+        },
+        "kitsoki.flow": {
+          "type": "string",
+          "default": "",
+          "description": "Flow fixture to pass to 'kitsoki web --flow'. Leave empty for live posture."
+        },
+        "kitsoki.hostCassette": {
+          "type": "string",
+          "default": "",
+          "description": "Host cassette to pass to 'kitsoki web --host-cassette'."
+        },
+        "kitsoki.storiesDir": {
+          "type": "string",
+          "default": "",
+          "description": "Stories directory to pass to 'kitsoki web --stories-dir'."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node esbuild.mjs",
+    "test": "node --test --import tsx tests/relay.unit.test.ts tests/bridge-relay.integration.test.ts",
+    "playwright": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@types/node": "^22.15.21",
+    "@types/vscode": "^1.96.0",
+    "@vscode/test-electron": "^3.0.0",
+    "esbuild": "^0.24.0",
+    "playwright": "^1.52.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
