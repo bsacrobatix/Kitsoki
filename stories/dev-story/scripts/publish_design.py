@@ -52,6 +52,7 @@ lexical-sort prefix.
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 
@@ -137,6 +138,49 @@ def write_feature_ticket(
     return ticket_id, dest
 
 
+def file_feature_issue_github(slug: str, title: str, idea: str, design_rel: str, repo: str) -> tuple:
+    """Mint a GitHub feature issue on `repo` linking the published proposal,
+    instead of an issues/features/<id>.md file.
+
+    Labels target:kitsoki + comp:proposal (the GitHub twin of the local
+    format's component: proposal). Returns (issue_number, issue_url). Mirrors
+    the Go host.gh.ticket create op: ensure the labels exist (best-effort), and
+    degrade to an unlabelled file if the caller lacks triage.
+    """
+    ticket_title = title.strip() or slug
+    body_idea = idea.strip()
+    body = (
+        f"Implement the accepted proposal:\n\n[{design_rel}]({design_rel})\n\n"
+        + (f"{body_idea}\n\n" if body_idea else "")
+        + "## Source\n\n"
+        "Filed automatically when the proposal was published. The linked "
+        "proposal carries the full Why / What changes / Impact spine — read it "
+        "before starting implementation.\n"
+    )
+    labels = ["target:kitsoki", "comp:proposal"]
+    for lab in labels:
+        color = "1d76db" if lab.startswith("target:") else "d4c5f9"
+        subprocess.run(
+            ["gh", "label", "create", lab, "--repo", repo, "--color", color, "--force"],
+            capture_output=True, text=True,
+        )
+    args = ["gh", "issue", "create", "--repo", repo, "--title", ticket_title, "--body", body]
+    for lab in labels:
+        args += ["--label", lab]
+    res = subprocess.run(args, capture_output=True, text=True)
+    if res.returncode != 0:
+        # Degrade to an unlabelled issue (a fork contributor without triage).
+        res = subprocess.run(
+            ["gh", "issue", "create", "--repo", repo, "--title", ticket_title, "--body", body],
+            capture_output=True, text=True,
+        )
+        if res.returncode != 0:
+            raise RuntimeError("gh issue create failed: " + res.stderr.strip())
+    url = res.stdout.strip().splitlines()[-1].strip()
+    number = url.rstrip("/").rsplit("/", 1)[-1]
+    return number, url
+
+
 def main() -> None:
     if len(sys.argv) < 3:
         print(
@@ -154,6 +198,7 @@ def main() -> None:
     durable = sys.argv[7] if len(sys.argv) > 7 else os.path.join("docs", "proposals")
     doc_filename = sys.argv[8].strip() if len(sys.argv) > 8 else ""
     ticket_dir = sys.argv[9] if len(sys.argv) > 9 else os.path.join("issues", "features")
+    ticket_repo = sys.argv[10].strip() if len(sys.argv) > 10 else ""
 
     if change_target.strip():
         # Amend path: the author edited an existing proposal in place. Nothing
@@ -188,13 +233,22 @@ def main() -> None:
         design_rel = os.path.relpath(dest, workdir)
 
     # Mint the feature ticket that links back to the published proposal, so the
-    # draft room can route straight into the implementation pipeline — UNLESS
-    # the profile skips it (external target tracks work in its own issues).
-    if ticket_dir.strip():
+    # draft room can route straight into the implementation pipeline. Precedence:
+    #   ticket_repo set  → a GitHub feature issue (kitsoki-dev's GitHub cutover);
+    #   ticket_dir set   → a local issues/features/<id>.md file (the default);
+    #   both empty       → skip (an external target tracks work elsewhere).
+    ticket_url = ""
+    if ticket_repo:
+        ticket_id, ticket_url = file_feature_issue_github(
+            slug_in, title, idea_in, design_rel, ticket_repo
+        )
+        ticket_rel = ""
+    elif ticket_dir.strip():
         ticket_id, ticket_abs = write_feature_ticket(
             slug_in, title, idea_in, design_rel, resolve(workdir, ticket_dir)
         )
         ticket_rel = os.path.relpath(ticket_abs, workdir)
+        ticket_url = design_rel
     else:
         ticket_id, ticket_rel = "", ""
 
@@ -205,6 +259,7 @@ def main() -> None:
                 "ticket_id": ticket_id,
                 "ticket_path": ticket_rel,
                 "ticket_title": title,
+                "ticket_url": ticket_url,
             }
         ),
         end="",

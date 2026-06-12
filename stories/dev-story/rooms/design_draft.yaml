@@ -137,11 +137,14 @@ states:
                   - "{{ world.design_durable_path }}"
                   - "{{ world.design_doc_filename }}"
                   - "{{ world.design_ticket_dir }}"
+                  # ticket_repo (slice #3): non-empty ⇒ mint a GitHub feature
+                  # issue instead of a local issues/features/<id>.md file.
+                  - "{{ world.ticket_repo }}"
               bind:
                 design_file: stdout_json.design_file
                 ticket_id:     stdout_json.ticket_id
                 ticket_title:  stdout_json.ticket_title
-                ticket_url:    stdout_json.design_file
+                ticket_url:    stdout_json.ticket_url
                 thread:        stdout_json.ticket_id
                 design_ticket_path: stdout_json.ticket_path
               on_error: design_draft

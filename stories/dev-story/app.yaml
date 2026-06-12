@@ -377,6 +377,7 @@ world:
   design_durable_path:   { type: string, default: "docs/proposals" }          # design publish home; per-gear: gears/<gear>/docs
   design_doc_filename:   { type: string, default: "" }                        # fixed DESIGN filename for an external target (e.g. "DESIGN"); "" ⇒ slug-named
   design_ticket_dir:     { type: string, default: "issues/features" }         # where the linking feature ticket is minted; "" ⇒ skip (external target)
+  ticket_repo:           { type: string, default: "" }                        # owner/repo for GitHub-issue tickets; non-empty ⇒ feature publish mints a GitHub issue instead of a local file (slice #3). kitsoki-dev pins constructorfabric/Kitsoki.
 
   # ── Ideas reviewer (rooms/ideas.yaml) ─────────────────────────────
   # The backlog reconciler: reads world.ideas_path, the commit history, and the

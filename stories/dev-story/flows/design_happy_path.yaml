@@ -87,12 +87,13 @@ host_handlers:
         data:
           ok: true
           exit_code: 0
-          stdout: '{"design_file":"docs/proposals/first-class-working-folder.md","ticket_id":"F-2026-06-11T120000Z-first-class-working-folder","ticket_path":"issues/features/F-2026-06-11T120000Z-first-class-working-folder.md","ticket_title":"First-class working folder"}'
+          stdout: '{"design_file":"docs/proposals/first-class-working-folder.md","ticket_id":"F-2026-06-11T120000Z-first-class-working-folder","ticket_path":"issues/features/F-2026-06-11T120000Z-first-class-working-folder.md","ticket_title":"First-class working folder","ticket_url":"docs/proposals/first-class-working-folder.md"}'
           stdout_json:
             design_file: "docs/proposals/first-class-working-folder.md"
             ticket_id:     "F-2026-06-11T120000Z-first-class-working-folder"
             ticket_path:   "issues/features/F-2026-06-11T120000Z-first-class-working-folder.md"
             ticket_title:  "First-class working folder"
+            ticket_url:    "docs/proposals/first-class-working-folder.md"
 
 turns:
   # Stage 1: Intake — one message mints the candidate SLUG (no folder yet) and
