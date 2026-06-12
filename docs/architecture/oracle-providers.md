@@ -12,6 +12,12 @@
 > switch (`--oracle claude|copilot`): the backend chooses *which coding-agent
 > CLI* kitsoki forks (`claude` vs GitHub `copilot`); a provider retargets the
 > endpoint of the `claude` CLI specifically and is a no-op under copilot.
+>
+> The `env` merge itself is backend-**agnostic** (it lands on whichever CLI is
+> forked); only the *variable names* are backend-specific — `ANTHROPIC_*` for
+> claude, `OPENAI_*` for codex. A [harness profile](./harness-profiles.md) uses
+> exactly this to point the **codex** backend at an alternate endpoint, and lets
+> an operator switch backend + provider + model live from the TUI / web.
 
 Kitsoki's default oracle verbs (`host.oracle.{decide,ask,task,extract,converse,ask_with_mcp}`)
 fork the local `claude` binary, which talks to whatever backend the ambient

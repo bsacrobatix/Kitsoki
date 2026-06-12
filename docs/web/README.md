@@ -135,6 +135,14 @@ The two surfaces link to each other both ways, so neither is a dead-end: a live
 session always offers the path to driving it, a driven session the path to its
 trace.
 
+When `harness_profiles:` are declared in `.kitsoki.yaml`, the Observe header also
+carries a **provider dropdown** and a dependent **model dropdown** — the live
+control over which LLM backend/provider and model answer this session. Switching
+fires `runstatus.session.set_selection` and takes effect on the next turn; the
+model dropdown appears only for a profile that declares a model catalog. See
+[Harness Profiles](../architecture/harness-profiles.md) for the full mechanism
+(it is the same selection the TUI's `/provider` / `/model` drive).
+
 ### Layout (Drive)
 
 ```

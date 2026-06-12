@@ -74,6 +74,8 @@ room-switch commands. Notable families:
 | `/world` | `commands_world.go` | Hierarchical world viewer |
 | `/trace` | `commands_trace.go` | The routing pipeline trace for recent turns |
 | `/inbox` | `commands_inbox.go` | Inline notification list |
+| `/provider [name\|n]` | `commands_harness.go` | List/switch the [harness profile](../architecture/harness-profiles.md) (backend/provider); takes effect next turn |
+| `/model [id\|n]` | `commands_harness.go` | List/switch the active profile's model; takes effect next turn |
 | `/jump` | `commands_jump.go` | Navigate to background-completion events |
 | `/ide [connect\|disconnect\|status]` | `commands_ide.go` | Connect/disconnect the live editor link; ambient selection rides each turn |
 | `/open <path>` | `commands_open.go` | Open an artifact (resolved against the run's cwd) in `$EDITOR` or the OS default — the terminal-agnostic fallback for `.md` links |

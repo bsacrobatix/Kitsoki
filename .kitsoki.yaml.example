@@ -1,0 +1,44 @@
+# Example .kitsoki.yaml with harness profiles.
+#
+#   cp .kitsoki.yaml.example .kitsoki.yaml
+#   export SYNTHETIC_API_KEY=sk-...      # in your shell / profile / .envrc
+#   kitsoki web --stories-dir stories    # then pick the provider in the header
+#   # …or in the TUI:  /provider synthetic-claude  ·  /model 2
+#
+# See docs/architecture/harness-profiles.md for the full reference. The env
+# values use ${VAR} interpolation against the process environment — your key is
+# never written into this file, and is never recorded in any trace.
+
+default_profile: claude-native
+
+harness_profiles:
+  # Your native Anthropic Claude Code subscription (ambient auth — nothing to set).
+  claude-native:
+    backend: claude
+
+  # claude-code pointed at synthetic.new (Anthropic-compatible endpoint).
+  synthetic-claude:
+    backend: claude
+    model: hf:Qwen/Qwen2.5-Coder-32B-Instruct
+    models:
+      - hf:Qwen/Qwen2.5-Coder-32B-Instruct
+      - hf:meta-llama/Llama-3.3-70B-Instruct
+    env:
+      ANTHROPIC_BASE_URL: https://api.synthetic.new/anthropic
+      ANTHROPIC_AUTH_TOKEN: "${SYNTHETIC_API_KEY}"
+
+  # The codex CLI pointed at synthetic.new (OpenAI-compatible endpoint).
+  synthetic-codex:
+    backend: codex
+    env:
+      OPENAI_BASE_URL: https://api.synthetic.new/openai
+      OPENAI_API_KEY: "${SYNTHETIC_API_KEY}"
+
+  # codex with its own config/auth (no retarget).
+  codex-native:
+    backend: codex
+
+  # A local llama.cpp model via the builtin plugin (no backend CLI forked).
+  llama-local:
+    plugin: builtin.local_llm
+    model: h200/gpt-oss-120b
