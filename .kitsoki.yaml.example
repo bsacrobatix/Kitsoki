@@ -17,21 +17,28 @@ harness_profiles:
     backend: claude
 
   # claude-code pointed at synthetic.new (Anthropic-compatible endpoint).
+  # claude-code appends /v1/messages, so the base URL omits /v1.
+  # The syn: aliases always route to the latest recommended model.
   synthetic-claude:
     backend: claude
-    model: hf:Qwen/Qwen2.5-Coder-32B-Instruct
+    model: syn:large:text                 # GLM-5.1 (large text)
     models:
-      - hf:Qwen/Qwen2.5-Coder-32B-Instruct
-      - hf:meta-llama/Llama-3.3-70B-Instruct
+      - syn:large:text                    # GLM-5.1
+      - syn:small:text                    # GLM-4.7-Flash
     env:
       ANTHROPIC_BASE_URL: https://api.synthetic.new/anthropic
       ANTHROPIC_AUTH_TOKEN: "${SYNTHETIC_API_KEY}"
 
   # The codex CLI pointed at synthetic.new (OpenAI-compatible endpoint).
+  # The OpenAI base URL includes /v1.
   synthetic-codex:
     backend: codex
+    model: syn:large:text
+    models:
+      - syn:large:text
+      - syn:small:text
     env:
-      OPENAI_BASE_URL: https://api.synthetic.new/openai
+      OPENAI_BASE_URL: https://api.synthetic.new/openai/v1
       OPENAI_API_KEY: "${SYNTHETIC_API_KEY}"
 
   # codex with its own config/auth (no retarget).

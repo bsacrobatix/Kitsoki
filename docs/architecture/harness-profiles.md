@@ -36,19 +36,21 @@ harness_profiles:
     backend: claude                     # (ambient auth; the default)
 
   synthetic-claude:                     # claude-code pointed at synthetic.new
-    backend: claude
-    model: hf:Qwen/Qwen2.5-Coder-32B-Instruct
+    backend: claude                     # base URL omits /v1 (claude appends /v1/messages)
+    model: syn:large:text               # syn: aliases route to the latest model
     models:                             # catalog the /model command + web dropdown list
-      - hf:Qwen/Qwen2.5-Coder-32B-Instruct
-      - hf:meta-llama/Llama-3.3-70B-Instruct
+      - syn:large:text                  # GLM-5.1
+      - syn:small:text                  # GLM-4.7-Flash
     env:
       ANTHROPIC_BASE_URL: https://api.synthetic.new/anthropic
       ANTHROPIC_AUTH_TOKEN: "${SYNTHETIC_API_KEY}"
 
   synthetic-codex:                      # the codex CLI pointed at synthetic.new
-    backend: codex
+    backend: codex                      # OpenAI base URL includes /v1
+    model: syn:large:text
+    models: [syn:large:text, syn:small:text]
     env:
-      OPENAI_BASE_URL: https://api.synthetic.new/openai
+      OPENAI_BASE_URL: https://api.synthetic.new/openai/v1
       OPENAI_API_KEY: "${SYNTHETIC_API_KEY}"
 
   codex-native: { backend: codex }      # codex's own config/auth
@@ -130,9 +132,10 @@ The three providers the feature targets, end to end:
    export SYNTHETIC_API_KEY=sk-...        # in your shell / profile / .envrc
    ```
 
-   (The Anthropic-compatible base URL for synthetic.new is assumed to be
-   `https://api.synthetic.new/anthropic` and the OpenAI-compatible one
-   `https://api.synthetic.new/openai`; adjust the `env` URLs if yours differ.)
+   (synthetic.new's Anthropic-compatible base is `https://api.synthetic.new/anthropic`
+   — claude-code appends `/v1/messages` — and the OpenAI-compatible base is
+   `https://api.synthetic.new/openai/v1`. Use the `syn:` model aliases
+   (`syn:large:text`, `syn:small:text`) to track the latest models.)
 
 2. **Native Anthropic Claude Code** — `claude-native`: ambient auth, nothing to
    set. Verified live: a real `kitsoki turn` routes free text → intent with the
