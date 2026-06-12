@@ -338,6 +338,7 @@ onMounted(() => {
   type TourWindow = typeof window & {
     __startTour?: () => void;
     __startTourWithSteps?: (stepsJson: string) => void;
+    __tourGoTo?: (id: string) => void;
   };
   const win = window as TourWindow;
   win.__startTour = () => tour.start(true);
@@ -352,6 +353,9 @@ onMounted(() => {
       tour.start(true);
     }
   };
+  // Test hook: re-sync the overlay to a step by id when the video spec detects
+  // the overlay's internal anchoring has drifted ahead of the driven step.
+  win.__tourGoTo = (id: string) => tour.goTo(id);
   syncWatchdog();
   void refresh();
 });
