@@ -1,12 +1,16 @@
 # Epic: kitsoki's own tracker moves to GitHub Issues
 
-**Status:** Slice #1 **code-shipped** (the `host.gh.ticket` `create` op + label/
-body-metadata conventions + `ticket_repo` pin, unit-tested). The cross-site
-**demo** (bug → GitHub issue → triage) is built and recorded —
-`docs/skills/kitsoki-ui-demo/scripts/record-gh-issues-demo.sh`. Slices #2–#4 are
-still design-only; see each child's Status.
+**Status:** Slices #1 + #2 **code-shipped & verified against real GitHub** — the
+`host.gh.ticket` `create` op + conventions + `ticket_repo` pin (slice #1), and
+the web Report-bug path filing a real issue with uploaded evidence (slice #2).
+Proof: https://github.com/bsacrobatix/Kitsoki/issues/3 (filed by the real path,
+labels applied by the op, evidence on the repo's `bug-evidence` release). The
+cross-site **demo** (bug → GitHub issue → triage) is built + recorded +
+QA-passed — `docs/skills/kitsoki-ui-demo/scripts/record-gh-issues-demo.sh`.
+Slices #3 (feature filing) + #4 (migration/rebind) remain design-only; see each
+child's Status.
 **Kind:**   epic
-**Slices:** 4 (1/4 code-shipped)
+**Slices:** 4 (2/4 code-shipped)
 
 ## Why
 
@@ -69,7 +73,7 @@ Once every slice ships:
 | # | Slice | Kind | Scope (one line) | Depends on | Status | File |
 |---|---|---|---|---|---|---|
 | 1 | gh issue **create** + constructorfabric pin | runtime | Add `create` op to `host.gh.ticket`; establish the `constructorfabric/Kitsoki` repo pin + exec cassettes | — | **Code shipped** | [`gh-issue-create.md`](gh-issue-create.md) |
-| 2 | Bug filing → GitHub | runtime | `kitsoki bug create` + `runstatus.bug.report` create issues; upload evidence as issue attachments | 1 | Draft | [`bug-filing-to-github.md`](bug-filing-to-github.md) |
+| 2 | Bug filing → GitHub | runtime | `runstatus.bug.report` creates issues; evidence uploaded as release assets (CLI path remains) | 1 | **Web path shipped** | [`bug-filing-to-github.md`](bug-filing-to-github.md) |
 | 3 | Feature filing → GitHub | story | The design pipeline's publish step mints a GitHub issue instead of `issues/features/<id>.md` | 1 | Draft | [`feature-filing-to-github.md`](feature-filing-to-github.md) |
 | 4 | Migrate + deprecate `issues/` | runtime | One-shot migration of the existing pile to GitHub; rebind `kitsoki-dev` to `host.gh.ticket`; freeze `issues/` | 1 | Draft | [`issues-migration-to-github.md`](issues-migration-to-github.md) |
 

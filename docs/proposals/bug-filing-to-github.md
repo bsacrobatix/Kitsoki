@@ -1,6 +1,18 @@
 # Runtime: bug filing creates a GitHub issue
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** **Web path code-shipped + verified against real GitHub.**
+`kitsoki web --ticket-repo <owner/repo>` routes `runstatus.bug.report` to a real
+GitHub issue via `host.GitHubFileBug` (`internal/host/github_bug.go`,
+`internal/runstatus/server/bug_report.go`, `server.go` `WithTicketRepo`,
+`cmd/kitsoki/web.go`). Evidence (screenshot/HAR/rrweb/console) is uploaded as
+assets on a `bug-evidence` release (gh/PAT can't attach binaries to an issue
+natively) and linked + inlined in the body, which also carries the slice-#1
+labels + `kitsoki` metadata block. Unit-tested with a stubbed `cliExec`.
+**Verified for real:** https://github.com/bsacrobatix/Kitsoki/issues/3 (labels
+P2/comp:web/target:kitsoki, evidence on the repo's `bug-evidence` release).
+**Remaining:** the CLI `kitsoki bug create --github` path (web path shipped
+first, as planned), and migrating the surface into `docs/stories/bugs.md` +
+`docs/tui/web-ui.md`, then delete this proposal.
 **Kind:**   runtime
 **Epic:**   ./github-issues-tracker.md
 
