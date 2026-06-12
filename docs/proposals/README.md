@@ -60,6 +60,20 @@ thought.
 
 ## Current proposals
 
+- [`stories-as-trainable-models.md`](stories-as-trainable-models.md) — **epic.**
+  Reframe a kitsoki story as a quasi-deterministic, **trainable** model of a
+  domain: forward pass = running a session, training set = the event log, but the
+  "weights" being adjusted are the story's scripts/prompts/workflow graph, not a
+  tensor. Subsumes the **training half** of the
+  [4-layer self-improvement model](../competitive-analysis/market-research.md):
+  L1–L2 (validate+nudge, recycle-to-prior-step) stay as the *adaptive forward
+  pass*, L3–L4 (self-patch, cross-run mining) become the trainable model — with
+  the existing [`tools/session-mining/`](../../tools/session-mining/README.md)
+  ladder as the L4 substrate. Three slices (0/3): the **loss**
+  ([`reward-function.md`](reward-function.md), runtime), the **gradient** via
+  failure→success credit assignment ([`credit-assignment.md`](credit-assignment.md),
+  tracing), and the **optimizer step + validation gate**
+  ([`training-loop.md`](training-loop.md), runtime+story).
 - [`dynamic-model-and-provider-control.md`](dynamic-model-and-provider-control.md)
   — **epic.** Live operator control of the model + provider/harness from
   `/model` and `/provider` (TUI) and a web header picker. Collapses kitsoki's
