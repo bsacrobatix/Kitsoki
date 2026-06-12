@@ -1,7 +1,11 @@
-// webview.ts — KitsokiViewProvider serves the bundled singlefile SPA into a
-// WebviewView (used for both the sidebar chat view and the panel trace view),
-// injects a per-resolve nonce + CSP, and wires the postMessage relay to the
-// shared backend.
+// webview.ts — renders the bundled singlefile SPA into a VS Code webview and
+// wires the postMessage relay to the shared backend.
+//
+// The primary surface is an EDITOR-AREA WebviewPanel (KitsokiPanel) so the chat
+// is front-and-center in the wide editor, not crushed into the narrow sidebar.
+// Inside that webview the SPA auto-enables its embed layout (chat dominant + a
+// hint rail that maximizes trace/graph). mountSpa() is the one shared code path:
+// relay wiring + nonce/CSP + backend start.
 
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
@@ -76,91 +80,137 @@ html body .chat-bubble--agent .chat-view code {
 }
 `;
 
-export class KitsokiViewProvider implements vscode.WebviewViewProvider {
-  constructor(
-    private readonly extensionUri: vscode.Uri,
-    private readonly backend: Backend,
-    private readonly out: vscode.OutputChannel,
-  ) {}
+/** Read the bundled singlefile SPA and inject a per-render CSP + nonce + theme. */
+export function renderSpaHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+  const indexPath = vscode.Uri.joinPath(extensionUri, 'media', 'spa', 'index.html').fsPath;
+  let html = fs.readFileSync(indexPath, 'utf8');
+  const nonce = crypto.randomBytes(16).toString('base64');
 
-  resolveWebviewView(view: vscode.WebviewView): void {
-    const mediaRoot = vscode.Uri.joinPath(this.extensionUri, 'media');
-    view.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [mediaRoot],
-    };
+  const csp = [
+    `default-src 'none'`,
+    `script-src 'nonce-${nonce}'`,
+    // style-src uses 'unsafe-inline' ALONE (no nonce). The SPA is Vue: it
+    // injects <style> elements at runtime with no nonce, and a nonce in
+    // style-src makes the browser IGNORE 'unsafe-inline' — so a nonce here
+    // would refuse every runtime-injected style and strip the UI's styling.
+    // Inline styles cannot execute code, so 'unsafe-inline' is the safe and
+    // standard webview posture; the script nonce stays strict.
+    `style-src 'unsafe-inline'`,
+    `img-src ${webview.cspSource} data: blob:`,
+    `font-src ${webview.cspSource}`,
+  ].join('; ');
 
-    const relay = new Relay({
-      base: '', // set once the backend is ready (see below)
-      post: (env: OutboundEnvelope) => {
-        void view.webview.postMessage(env);
-      },
-      log: (line) => this.out.appendLine(line),
-    });
+  // Add a nonce to every inline <script> the singlefile bundle inlines (the
+  // script-src policy requires it). Styles need no nonce under 'unsafe-inline'.
+  html = html.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`);
 
-    const sub = view.webview.onDidReceiveMessage((msg: InboundEnvelope) => {
-      relay.handle(msg);
-    });
+  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+  const themeTag = `<style>${THEME_SHIM}</style>`;
 
-    view.onDidDispose(() => {
-      relay.dispose();
-      sub.dispose();
-    });
-
-    // Bring up the shared backend, then point the relay at it and render.
-    void this.backend
-      .start()
-      .then((base) => {
-        relay.setBase(base);
-        view.webview.html = this.renderHtml(view.webview);
-      })
-      .catch((err: Error) => {
-        this.out.appendLine(`[webview] backend start failed: ${err.message}`);
-        view.webview.html = this.renderError(err.message);
-      });
+  if (/<head[^>]*>/i.test(html)) {
+    html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${cspMeta}\n${themeTag}`);
+  } else {
+    html = `${cspMeta}\n${themeTag}\n${html}`;
   }
+  return html;
+}
 
-  private renderHtml(webview: vscode.Webview): string {
-    const indexPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'spa', 'index.html').fsPath;
-    let html = fs.readFileSync(indexPath, 'utf8');
-    const nonce = crypto.randomBytes(16).toString('base64');
-
-    const csp = [
-      `default-src 'none'`,
-      `script-src 'nonce-${nonce}'`,
-      // style-src uses 'unsafe-inline' ALONE (no nonce). The SPA is Vue: it
-      // injects <style> elements at runtime with no nonce, and a nonce in
-      // style-src makes the browser IGNORE 'unsafe-inline' — so a nonce here
-      // would refuse every runtime-injected style and strip the UI's styling.
-      // Inline styles cannot execute code, so 'unsafe-inline' is the safe and
-      // standard webview posture; the script nonce stays strict.
-      `style-src 'unsafe-inline'`,
-      `img-src ${webview.cspSource} data: blob:`,
-      `font-src ${webview.cspSource}`,
-    ].join('; ');
-
-    // Add a nonce to every inline <script> the singlefile bundle inlines (the
-    // script-src policy requires it). Styles need no nonce under 'unsafe-inline'.
-    html = html.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`);
-
-    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
-    const themeTag = `<style>${THEME_SHIM}</style>`;
-
-    if (/<head[^>]*>/i.test(html)) {
-      html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${cspMeta}\n${themeTag}`);
-    } else {
-      html = `${cspMeta}\n${themeTag}\n${html}`;
-    }
-    return html;
-  }
-
-  private renderError(message: string): string {
-    return `<!DOCTYPE html><html><head><meta charset="utf-8">
+/** Minimal error page shown when the backend never comes up. */
+export function renderError(message: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
 </head><body style="font-family: sans-serif; padding: 1rem; color: var(--vscode-errorForeground);">
 <h3>Kitsoki backend failed to start</h3>
 <pre>${message.replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</pre>
 <p>Run <code>Kitsoki: Restart Backend</code> after fixing the binary path / settings.</p>
 </body></html>`;
+}
+
+/**
+ * Wire a webview to the shared backend: a postMessage relay (host side of the
+ * BridgeTransport protocol), then bring the backend up and render the SPA. The
+ * returned Disposable tears down the relay + message subscription. Shared by the
+ * editor panel and any other webview surface so they can never drift.
+ */
+export function mountSpa(
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri,
+  backend: Backend,
+  out: vscode.OutputChannel,
+): vscode.Disposable {
+  const mediaRoot = vscode.Uri.joinPath(extensionUri, 'media');
+  webview.options = { enableScripts: true, localResourceRoots: [mediaRoot] };
+
+  const relay = new Relay({
+    base: '', // set once the backend is ready (below)
+    post: (env: OutboundEnvelope) => {
+      void webview.postMessage(env);
+    },
+    log: (line) => out.appendLine(line),
+  });
+
+  const sub = webview.onDidReceiveMessage((msg: InboundEnvelope) => relay.handle(msg));
+
+  void backend
+    .start()
+    .then((base) => {
+      relay.setBase(base);
+      webview.html = renderSpaHtml(webview, extensionUri);
+    })
+    .catch((err: Error) => {
+      out.appendLine(`[webview] backend start failed: ${err.message}`);
+      webview.html = renderError(err.message);
+    });
+
+  return new vscode.Disposable(() => {
+    relay.dispose();
+    sub.dispose();
+  });
+}
+
+/**
+ * KitsokiPanel — the singleton editor-area WebviewPanel that hosts the chat
+ * front-and-center. reveal() creates it on first use and re-focuses it after;
+ * the SPA inside auto-enables its embed layout (hint rail) because the webview
+ * exposes acquireVsCodeApi.
+ */
+export class KitsokiPanel {
+  private static current: KitsokiPanel | undefined;
+
+  static reveal(
+    extensionUri: vscode.Uri,
+    backend: Backend,
+    out: vscode.OutputChannel,
+  ): void {
+    if (KitsokiPanel.current) {
+      KitsokiPanel.current.panel.reveal(vscode.ViewColumn.Active);
+      return;
+    }
+    const panel = vscode.window.createWebviewPanel(
+      'kitsoki.chatPanel',
+      'Kitsoki',
+      vscode.ViewColumn.Active,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')],
+      },
+    );
+    KitsokiPanel.current = new KitsokiPanel(panel, extensionUri, backend, out);
+  }
+
+  private readonly mount: vscode.Disposable;
+
+  private constructor(
+    private readonly panel: vscode.WebviewPanel,
+    extensionUri: vscode.Uri,
+    backend: Backend,
+    out: vscode.OutputChannel,
+  ) {
+    this.mount = mountSpa(panel.webview, extensionUri, backend, out);
+    panel.onDidDispose(() => {
+      this.mount.dispose();
+      KitsokiPanel.current = undefined;
+    });
   }
 }

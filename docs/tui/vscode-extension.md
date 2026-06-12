@@ -1,8 +1,9 @@
 # The VS Code extension
 
 The `tools/vscode-kitsoki/` extension puts kitsoki's **web UI inside the editor**:
-chat in the activity-bar sidebar, the live trace + state diagram in a bottom
-panel, themed to match VS Code, bound to the workspace's `stories/` and
+the **chat front and center** in an editor-area panel, with the live **trace + state
+diagram as a maximizable hint rail** beside it, themed to match VS Code, bound to
+the workspace's `stories/` and
 `.kitsoki/`. It is a **third head** on the orchestrator body — the same Vue SPA
 the [browser web UI](web-ui.md) serves, relayed into a webview instead of a
 browser tab, driving the same `kitsoki web` backend over the same JSON-RPC/SSE
@@ -22,33 +23,42 @@ what is unique to the editor embed.*
 
 ## Layout
 
+The SPA's own multi-pane layout (chat **and** trace fighting for width) is wrong
+inside VS Code's narrow chrome. So the embed runs the SPA in a dedicated **editor
+panel** and the SPA detects the webview host (`acquireVsCodeApi` present →
+`isEmbedded()`, `tools/runstatus/src/lib/embed.ts`) and switches the interactive
+view to its **embed layout**: chat dominant, trace + graph collapsed into a thin
+**hint rail** that maximizes on click.
+
 ```
 VS Code window
-┌──────────┬───────────────────────────────────────────────┐
-│ Activity │  editor: your story YAML / code                │
-│   bar    │                                                │
-│  [≈]     ├───────────────────────────────────────────────┤
-│ kitsoki  │  ╭ Kitsoki › Chat (sidebar WebviewView) ─────╮ │
-│          │  │  story library · chat transcript · room    │ │
-│          │  │  view · trace + state diagram (one SPA)     │ │
-│          │  ╰────────────────────────────────────────────╯ │
-├──────────┴───────────────────────────────────────────────┤
-│ Panel  [ Kitsoki Trace ]   a second SPA instance          │
-└───────────────────────────────────────────────────────────┘
+┌──────────┬─────────────────────────────────────────────────────┐
+│ Activity │  editor area: Kitsoki panel (front/center)           │
+│   bar    │ ┌──────────────────────────┬───────────────────────┐ │
+│  [K]     │ │  CHAT                     │ ▸ Trace   12 events   │ │
+│ kitsoki  │ │  story library →          │   room report · live  │ │
+│ launcher │ │  transcript · room view   │ ▸ Graph   5 rooms     │ │
+│ (welcome │ │  > type a message…        │   current report      │ │
+│  button) │ └──────────────────────────┴───────────────────────┘ │
+│          │   click ▸ Trace / Graph → maximizes beside the chat   │
+└──────────┴─────────────────────────────────────────────────────┘
 ```
 
-- **Sidebar chat** — a `WebviewView` (`kitsoki.chat`) in a custom activity-bar
-  `viewsContainer` (`kitsoki`). It loads the full SPA, so the story library, chat,
-  room view, and the per-session trace/diagram all render in it.
-- **Bottom Trace panel** — a second `WebviewView` (`kitsoki.trace`) in a `panel`
-  `viewsContainer` (`kitsokiPanel`). It loads the *same* bundle and shares the one
-  backend (and therefore the session store).
+- **Editor panel** — a `WebviewPanel` (`KitsokiPanel`, `src/webview.ts`) in the
+  editor area. The SPA renders chat front/center; the **hint rail** holds a live
+  **Trace** card (event count, current room, live/done) and **Graph** card (rooms,
+  current room, next intents). Clicking a card maximizes the full `TraceTimeline` /
+  `StateDiagram` beside the chat (a 44/56 horizontal split) with a switch + minimize.
+- **Activity-bar launcher** — the `kitsoki` `viewsContainer` hosts a thin
+  `kitsoki.launch` tree view whose `viewsWelcome` is an **Open Kitsoki Chat** button
+  → `command:kitsoki.openChat`. Revealing the view (clicking the Kitsoki icon) also
+  auto-opens the editor panel.
+- **Code + kitsoki in one workspace** — open your story's `app.yaml` (or any code)
+  in a split beside the Kitsoki panel; both are themed to the editor.
 
-Both views are registered by one `KitsokiViewProvider`
-(`tools/vscode-kitsoki/src/webview.ts`) and declared under `contributes` in
-`tools/vscode-kitsoki/package.json`. Commands `Kitsoki: Open Chat`,
-`Open Trace`, and `Restart Backend` are contributed in the `Kitsoki` category
-(`tools/vscode-kitsoki/src/extension.ts`).
+`mountSpa()` (`src/webview.ts`) is the one shared path that wires a webview's relay,
+brings up the backend, and renders the bundle. Commands `Kitsoki: Open Chat` and
+`Restart Backend` are contributed in the `Kitsoki` category (`src/extension.ts`).
 
 ## The transport seam — where the embed plugs in
 
@@ -201,8 +211,8 @@ strict. The SPA is same-document (singlefile, no network), so `connect-src` stay
 
 The extension is demoable exactly the way the web UI is
 ([`kitsoki-ui-demo`](../skills/kitsoki-ui-demo/SKILL.md)), but the frame is the
-**whole editor** (activity bar, sidebar, editor pane, trace panel), not just the
-embedded SPA. One Playwright spec serves both roles — the worked reference is
+**whole editor** (activity bar, editor panel, hint rail, split editor), not just
+the embedded SPA. One Playwright spec serves both roles — the worked reference is
 **`tools/vscode-kitsoki/tests/vscode-tour.e2e.spec.ts`**, the `_electron` analog of
 the web tour's `agent-actions-video.spec.ts`.
 
@@ -230,19 +240,21 @@ guest (`iframe.webview.ready >>> iframe[title]`, the proven 1.96.4 chain in
 **reuses the web tour manifest** (`WEATHER_REPORT_TOUR_STEPS`) injected via
 `window.__startTourWithSteps`, asserting each popover title against the manifest (a
 drift guard — the recording can't diverge from the live overlay). An *editor beat*
-(open the story's `app.yaml`, open the Trace panel) is driven on the outer
-workbench page from a thin in-spec `EDITOR_BEATS` manifest. Both advance one
+(maximize the graph, split the story's `app.yaml` beside the panel) is driven on the
+outer workbench page from a thin in-spec `EDITOR_BEATS` manifest. Both advance one
 `ChapterRecorder` clock, so the chapter sidecar spans the whole editor tour.
 
 **Critical path asserted beat-by-beat** (and the scenarios the QA gate checks the
-video against): (a) the Kitsoki activity-bar view opens and shows the themed story
-library; (b) the story's `app.yaml` opens in the editor — code + kitsoki in one
-window (record only); (c) a session starts (`current-state = lobby`); (d) a turn is
-driven and state advances (`forecast` → `current-state = report`, the "Tokyo,
-Japan" forecast renders — proving the cassette replay ran end-to-end through
-bundle → CSP → BridgeTransport → relay → backend); (e) the trace surfaces render
-(`trace-diagram` + `trace-timeline` with a `host.starlark.run` row); (f) the bottom
-Trace panel opens (record only).
+video against): (a) the Kitsoki editor panel opens and shows the themed story
+library (clicking the activity-bar icon auto-opens it); (c) a session starts
+(`current-state = lobby`) with the **hint rail** (`hint-rail` → `hint-trace` +
+`hint-graph`) present; (d) a turn is driven and state advances (`forecast` →
+`current-state = report`, the "Tokyo, Japan" forecast renders — proving the cassette
+replay ran end-to-end through bundle → CSP → BridgeTransport → relay → backend) with
+chat front/center; (e) **maximizing the Trace hint** renders the full timeline
+(`trace-timeline` with a `host.starlark.run` row); (f) **switching to the Graph**
+renders the state diagram (`trace-diagram`, current station marked); (g) the finale
+splits `app.yaml` beside the panel — code + kitsoki side by side (record only).
 
 In record mode `app.close()` flushes the Playwright `.webm`, an in-spec transcode
 emits a faststart H.264 MP4 to `.artifacts/vscode-tour/vscode-tour.mp4` with a
@@ -270,8 +282,9 @@ build the binary, build the extension bundle (esbuild), then run the gate.
 
 Manual run (outside the e2e harness): build `bin/kitsoki`, build the extension
 (`cd tools/vscode-kitsoki && pnpm install && pnpm build`), point
-`kitsoki.binaryPath` at it, open the Kitsoki activity-bar view. The chat sidebar
-spawns the backend and renders the story library.
+`kitsoki.binaryPath` at it, click the Kitsoki activity-bar icon (or run
+`Kitsoki: Open Chat`). The editor panel spawns the backend and renders the story
+library; start a session for chat front/center with the trace + graph hint rail.
 
 Tests:
 

@@ -39,16 +39,19 @@
  *     toHaveText/toBeVisible expectations with timeouts.
  *
  * Critical path asserted beat-by-beat (the scenarios kitsoki-ui-qa checks the
- * video against):
- *   (a) the Kitsoki Activity Bar view opens (the story library, themed);
- *   (b) the story's app.yaml opens in the editor — code + kitsoki in one window
- *       (record only; assert-mode skips the editor beats to stay instant);
- *   (c) a session is started/observed (New session → /chat, current-state=lobby);
+ * video against). The embed layout puts chat front/center with trace+graph as a
+ * maximizable hint rail (the layout rework):
+ *   (a) the Kitsoki editor panel opens (the story library, themed) — clicking the
+ *       Activity Bar icon auto-opens the editor-area webview;
+ *   (c) a session is started/observed (New session → /chat, current-state=lobby)
+ *       and the hint rail (Trace + Graph cards) is present;
  *   (d) a turn is driven and state advances (forecast → current-state=report,
- *       state-badge present; the "Tokyo, Japan" forecast renders);
- *   (e) the trace surfaces render for the driven session (trace-diagram +
- *       trace-timeline with a host.starlark.run row);
- *   (f) the Kitsoki Trace panel opens at the bottom (record only).
+ *       state-badge present; the "Tokyo, Japan" forecast renders) with chat
+ *       front/center;
+ *   (e) maximizing the Trace hint renders the full timeline (host.starlark.run row);
+ *   (f) switching to the Graph renders the state diagram (current station marked);
+ *   (g) finale — app.yaml splits beside the Kitsoki panel, code + kitsoki side by
+ *       side (record only; assert-mode skips the editor-split beat to stay instant).
  *
  * Run (one-liner gate):  pnpm e2e
  *   ≡  KITSOKI_VSCODE_PACE=0 playwright test vscode-tour.e2e
@@ -97,8 +100,12 @@ const dwell = (ms: number) => (RECORD ? sleep(ms * PACE) : Promise.resolve());
  * beats are narrated by WEATHER_REPORT_TOUR_STEPS instead.
  */
 const EDITOR_BEATS = {
-  appYaml: { id: 'b-app-yaml', title: 'Your code and kitsoki in one workspace', dwellMs: 4000 },
-  tracePanel: { id: 'f-trace-panel', title: 'The Kitsoki Trace panel', dwellMs: 4000 },
+  // Maximizing the Graph hint is a webview beat with no matching tour popover, so
+  // it rides this manifest (chapter window + shot) rather than narrate().
+  graph: { id: 'e2-graph-max', title: 'Maximize the state diagram', dwellMs: 4000 },
+  // The finale: app.yaml split beside the Kitsoki editor panel — code + kitsoki in
+  // one workspace, side by side (horizontal).
+  splitEditor: { id: 'f-split-editor', title: 'Your code and kitsoki, side by side', dwellMs: 4000 },
 } as const;
 
 /**
@@ -400,24 +407,6 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       await shot('b-spa-rendered');
     }
 
-    // ── (b-editor) Open the story's app.yaml in the editor (record only) ──────
-    // "Your code and kitsoki in one workspace": the editor pane shows the story
-    // source while the Kitsoki chat sidebar stays mounted beside it. Out of the
-    // webview, so narrated by the EDITOR_BEATS manifest, not a popover.
-    if (RECORD) {
-      // Dismiss the webview narration overlay so it doesn't dim the editor frame.
-      await clearOverlay(chatFrame);
-      await openFileInEditor(win, APP_YAML);
-      // Assert the editor actually shows the story source (a recognisable line).
-      await expect(
-        win.locator('.monaco-editor').filter({ hasText: 'weather-report' }).first(),
-        'app.yaml open in the editor beside the Kitsoki sidebar',
-      ).toBeVisible({ timeout: 15_000 });
-      chapters.open(EDITOR_BEATS.appYaml.id, EDITOR_BEATS.appYaml.title);
-      await dwell(EDITOR_BEATS.appYaml.dwellMs);
-      await shot('b-app-yaml');
-    }
-
     // ── (c) Start / observe a session ────────────────────────────────────────
     const weatherCard = chatFrame
       .locator('[data-testid="story-card"]')
@@ -436,6 +425,20 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
     await expect(
       chatFrame.locator('[data-testid="observe-link"]'),
       'session is observable',
+    ).toBeVisible({ timeout: 10_000 });
+    // The embed layout: chat is front/center and the trace + graph live in a thin
+    // hint rail (collapsed, live). This is the whole point of the rework.
+    await expect(
+      chatFrame.locator('[data-testid="hint-rail"]'),
+      'embed hint rail present (chat front/center, trace+graph hinted)',
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(
+      chatFrame.locator('[data-testid="hint-trace"]'),
+      'collapsed Trace hint card present',
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(
+      chatFrame.locator('[data-testid="hint-graph"]'),
+      'collapsed Graph hint card present',
     ).toBeVisible({ timeout: 10_000 });
 
     if (RECORD) {
@@ -471,13 +474,8 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
     ).toBeVisible({ timeout: 15_000 });
 
     if (RECORD) {
-      // Widen the sidebar now (AFTER the lobby submit, so the lobby interaction
-      // ran at the proven default width) so the report room's resolved place +
-      // 5-day table render legibly for the camera. A moderate width keeps the
-      // single-column stacked layout (a very wide sidebar trips a side-by-side
-      // breakpoint where the trace column overlaps the composer).
-      await widenSidebar(win, 720);
-      await dwell(600);
+      // The Kitsoki editor panel is already full editor-area width, so no sidebar
+      // widening is needed; the chat is front/center with the hint rail beside it.
       // Scroll the resolved place ("Tokyo, Japan") to the top of the chat column
       // so the report's light "paper" card (resolved place, current conditions,
       // 5-day table) is on-camera and its values aren't clipped, THEN start the
@@ -502,63 +500,61 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       timeout: 15_000,
     });
 
-    // ── (e) Trace surfaces render for the driven session ─────────────────────
-    await expect(
-      chatFrame.locator('[data-testid="trace-diagram"]'),
-      'trace state diagram renders for the driven session',
-    ).toBeVisible({ timeout: 15_000 });
+    // ── (e) Maximize the Trace hint → the full timeline ──────────────────────
+    // The embed layout keeps trace+graph as collapsed hints; maximizing mounts
+    // the full component beside the chat (horizontal). Clear any narration overlay
+    // first so the click lands on the card.
+    await clearOverlay(chatFrame);
+    await chatFrame.locator('[data-testid="hint-trace"]').click();
     const timeline = chatFrame.locator('[data-testid="trace-timeline"]');
-    await expect(timeline, 'trace timeline renders for the driven session').toBeVisible({
+    await expect(timeline, 'maximized Trace renders the full timeline').toBeVisible({
       timeout: 15_000,
     });
     await expect(
       timeline.locator('.trace-timeline__row:has([data-subsystem="host"])').first(),
       'trace timeline shows a host.starlark.run row from the driven turn',
     ).toBeVisible({ timeout: 20_000 });
+
+    if (RECORD) {
+      await startWebviewTour(chatFrame);
+      await narrate(chatFrame, chapters, shot, 'wr-trace', 'e-trace-max', 4500, true);
+    } else {
+      await shot('e-trace-max');
+    }
+
+    // ── (f) Switch to the Graph → the full state diagram ─────────────────────
+    // From the maximized Trace, the switch control flips to the diagram in place.
+    await clearOverlay(chatFrame);
+    await chatFrame.locator('[data-testid="switch-graph"]').click();
+    await expect(
+      chatFrame.locator('[data-testid="trace-diagram"]'),
+      'maximized Graph renders the state diagram',
+    ).toBeVisible({ timeout: 15_000 });
     await expect(
       chatFrame.locator('[data-testid="diagram-current-station"]').first(),
       'state diagram marks the current station',
     ).toBeVisible({ timeout: 15_000 });
 
     if (RECORD) {
-      await startWebviewTour(chatFrame);
-      await narrate(chatFrame, chapters, shot, 'wr-trace', 'e-trace-rendered', 4500, true);
-      // (clearBeforeShot already dismissed the overlay; the trace-panel beat
-      // below is a separate webview and starts clean.)
-    } else {
-      await shot('e-trace-rendered');
+      chapters.open(EDITOR_BEATS.graph.id, EDITOR_BEATS.graph.title);
+      await dwell(EDITOR_BEATS.graph.dwellMs);
     }
+    await shot('f-graph-max');
 
-    // ── (f) Open the Kitsoki Trace panel at the bottom (record only) ──────────
-    // The dedicated bottom-panel webview — kitsoki's whole point made first-class
-    // in the editor chrome. A separate SPA instance; we just prove it renders the
-    // story library themed to the editor (it shares the same backend).
+    // ── (g) Finale: code + kitsoki side by side (record only) ────────────────
+    // Minimize back to the chat-front/center rail, then split the story's app.yaml
+    // beside the Kitsoki editor panel — code and kitsoki in one workspace.
     if (RECORD) {
-      // Close the app.yaml editor so the bottom Kitsoki Trace panel + the chat
-      // sidebar are the focus of the frame (not a half-window of YAML).
-      const isMac = process.platform === 'darwin';
-      await win.keyboard.press(isMac ? 'Meta+K' : 'Control+K');
-      await sleep(200);
-      await win.keyboard.press('w');
-      await sleep(600);
-      await openTracePanel(win);
-      // Descend into a panel webview guest and confirm it rendered something real
-      // (the SPA), proving the panel container is wired end to end.
-      const panelFrame = await webviewFrame(
-        win,
-        { selector: '[data-testid="home-view"], [data-testid="story-card"]' },
-        30_000,
-      ).catch(() => undefined);
-      if (panelFrame) {
-        await panelFrame
-          .locator('[data-testid="story-card"], [data-testid="home-view"]')
-          .first()
-          .waitFor({ timeout: 15_000 })
-          .catch(() => undefined);
-      }
-      chapters.open(EDITOR_BEATS.tracePanel.id, EDITOR_BEATS.tracePanel.title);
-      await dwell(EDITOR_BEATS.tracePanel.dwellMs);
-      await shot('f-trace-panel');
+      await chatFrame.locator('[data-testid="expanded-minimize"]').click().catch(() => undefined);
+      await dwell(700);
+      await openFileBeside(win, APP_YAML);
+      await expect(
+        win.locator('.monaco-editor').filter({ hasText: 'weather-report' }).first(),
+        'app.yaml open in a split beside the Kitsoki editor panel',
+      ).toBeVisible({ timeout: 15_000 });
+      chapters.open(EDITOR_BEATS.splitEditor.id, EDITOR_BEATS.splitEditor.title);
+      await dwell(EDITOR_BEATS.splitEditor.dwellMs);
+      await shot('g-split-editor');
     }
   } finally {
     chapters.close();
@@ -598,28 +594,50 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
 });
 
 /**
- * Widen the (left) sidebar to ~targetWidth px by dragging the vertical sash at
- * its right edge. The default ~300px sidebar truncates the weather report's
- * 5-day table; a wider one lets the chat + report render legibly for the camera.
- * Best-effort: if the sash can't be located the recording proceeds at default
- * width (the beats still assert).
+ * Run a Command Palette command by title. Tries each candidate query in order,
+ * committing only when the palette actually has a match (so a missing command
+ * never dead-presses Enter on "No matching results"). Keep the leading ">" so the
+ * palette stays in command mode (a bare query searches files instead). Returns
+ * true once a command was committed.
  */
-async function widenSidebar(win: Page, targetWidth: number): Promise<void> {
-  const sidebar = win.locator('.part.sidebar').first();
-  const box = await sidebar.boundingBox().catch(() => null);
-  if (!box) return;
-  // The sash sits at the sidebar's right border. Grab a point a hair inside that
-  // border and drag it to targetWidth from the left workbench edge.
-  const grabX = box.x + box.width;
-  const grabY = box.y + box.height / 2;
-  const dropX = box.x + targetWidth;
-  await win.mouse.move(grabX, grabY);
-  await win.mouse.down();
-  // Move in a couple of steps so VS Code's sash drag handler tracks the motion.
-  await win.mouse.move((grabX + dropX) / 2, grabY, { steps: 8 });
-  await win.mouse.move(dropX, grabY, { steps: 8 });
-  await win.mouse.up();
-  await sleep(500);
+async function runPaletteCommand(win: Page, queries: string[]): Promise<boolean> {
+  const isMac = process.platform === 'darwin';
+  const palette = isMac ? 'Meta+Shift+P' : 'Control+Shift+P';
+  for (const query of queries) {
+    await win.keyboard.press(palette);
+    const input = win.getByRole('combobox', { name: 'input' });
+    await input.waitFor({ timeout: 8000 }).catch(() => undefined);
+    await input.fill(query);
+    await sleep(800);
+    const hasMatch = await win
+      .locator('.quick-input-list .monaco-list-row')
+      .first()
+      .isVisible({ timeout: 1500 })
+      .catch(() => false);
+    if (hasMatch) {
+      await win.keyboard.press('Enter');
+      await sleep(1200);
+      return true;
+    }
+    await win.keyboard.press('Escape');
+    await sleep(300);
+  }
+  return false;
+}
+
+/**
+ * Open a file in a split editor BESIDE the Kitsoki panel: open it (it lands in the
+ * active group, atop the retained Kitsoki webview), then move it into a right
+ * group so the chat stays visible on the left — code + kitsoki side by side.
+ */
+async function openFileBeside(win: Page, absPath: string): Promise<void> {
+  await openFileInEditor(win, absPath);
+  await runPaletteCommand(win, [
+    '>View: Move Editor into Right Group',
+    '>View: Move Editor into Next Group',
+    '>Move Editor into Right Group',
+  ]);
+  await sleep(800);
 }
 
 /**
@@ -641,48 +659,4 @@ async function openFileInEditor(win: Page, absPath: string): Promise<void> {
   await sleep(800);
   await win.keyboard.press('Enter');
   await sleep(1000);
-}
-
-/**
- * Open the Kitsoki Trace bottom panel by running the contributed
- * `kitsoki.openTrace` command via the Command Palette (Cmd/Ctrl+Shift+P).
- */
-async function openTracePanel(win: Page): Promise<void> {
-  const isMac = process.platform === 'darwin';
-  const palette = isMac ? 'Meta+Shift+P' : 'Control+Shift+P';
-  // Try the contributed command first, then fall back to focusing the panel
-  // viewsContainer directly — whichever the palette fuzzy-matches reveals the
-  // bottom Kitsoki Trace webview. The command palette shows category commands as
-  // "Kitsoki: Open Trace"; filter on the distinctive tail so the match is robust
-  // to how VS Code renders the category badge.
-  // NOTE: the command palette pre-fills the input with ">". Replacing the value
-  // with a bare query searches FILES (Quick Open), not commands — yielding "No
-  // matching results". Keep the leading ">" so it stays in command mode.
-  for (const query of ['>Kitsoki: Open Trace', '>Kitsoki Trace']) {
-    await win.keyboard.press(palette);
-    const input = win.getByRole('combobox', { name: 'input' });
-    await input.waitFor({ timeout: 8000 }).catch(() => undefined);
-    await input.fill(query);
-    await sleep(900);
-    // Only commit if the palette actually has a match (avoid "No matching
-    // results" dead-presses that close the palette with nothing selected).
-    const hasMatch = await win
-      .locator('.quick-input-list .monaco-list-row')
-      .first()
-      .isVisible({ timeout: 1500 })
-      .catch(() => false);
-    if (hasMatch) {
-      await win.keyboard.press('Enter');
-      await sleep(1500);
-      // Confirm the bottom panel is showing the Kitsoki Trace view.
-      const panelShown = await win
-        .locator('.part.panel')
-        .isVisible({ timeout: 3000 })
-        .catch(() => false);
-      if (panelShown) return;
-    } else {
-      await win.keyboard.press('Escape');
-      await sleep(300);
-    }
-  }
 }

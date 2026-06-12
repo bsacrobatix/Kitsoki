@@ -18,40 +18,26 @@
           "title": "Kitsoki",
           "icon": "media/icon.svg"
         }
-      ],
-      "panel": [
-        {
-          "id": "kitsokiPanel",
-          "title": "Kitsoki Trace",
-          "icon": "media/icon.svg"
-        }
       ]
     },
     "views": {
       "kitsoki": [
         {
-          "id": "kitsoki.chat",
-          "name": "Chat",
-          "type": "webview"
-        }
-      ],
-      "kitsokiPanel": [
-        {
-          "id": "kitsoki.trace",
-          "name": "Kitsoki Trace",
-          "type": "webview"
+          "id": "kitsoki.launch",
+          "name": "Kitsoki"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "kitsoki.launch",
+        "contents": "Chat with your agent, front and center in the editor — with live trace and graph hints you can maximize.\n\n[Open Kitsoki Chat](command:kitsoki.openChat)"
+      }
+    ],
     "commands": [
       {
         "command": "kitsoki.openChat",
         "title": "Kitsoki: Open Chat",
-        "category": "Kitsoki"
-      },
-      {
-        "command": "kitsoki.openTrace",
-        "title": "Kitsoki: Open Trace",
         "category": "Kitsoki"
       },
       {
