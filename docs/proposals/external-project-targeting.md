@@ -126,10 +126,10 @@ prd→proposal chain from #3.
 
 1. **Where does an instance for a foreign repo physically live** — in the
    kitsoki repo (`stories/gears-rust/`, run with `--warp` pointing `workdir`
-   at the checkout) or vendored into the target repo (`.kitsoki/`)? *Lean:
-   author in the kitsoki repo, keep the instance `workdir`-agnostic (set via
-   warp only) so the same dir can be copied into a target later. Decided per
-   #4.*
+   at the checkout) or vendored into the target repo (`.kitsoki/`)? *Resolved
+   in [`kitsoki-as-dependency.md`](kitsoki-as-dependency.md): vendored into the
+   target repo, importing the base via `@kitsoki/dev-story` from a binary-embedded
+   story library. gears-rust is the migration proof (that epic's slice #3).*
 2. **Does `prd` stay runnable standalone after #3 folds it into
    `dev-story`?** *Lean: yes — import is additive; `stories/prd/app.yaml`
    remains a valid root, `dev-story` just imports it under an alias. Decided
