@@ -17,8 +17,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -27,6 +29,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/bugfile"
+	"kitsoki/internal/host"
 )
 
 // Back-compat local aliases over the extracted internal/bugfile core.
@@ -83,6 +86,7 @@ func bugCreateCmd() *cobra.Command {
 		severity    string
 		traceRef    string
 		targetDir   string
+		githubRepo  string
 		clockNowSec int64
 	)
 	cmd := &cobra.Command{
@@ -116,6 +120,41 @@ resolved target-root. Exit 1 on error.`,
 			var now time.Time
 			if clockNowSec > 0 {
 				now = time.Unix(clockNowSec, 0).UTC()
+			}
+
+			// GitHub mode (--github owner/repo): file a real GitHub issue via the
+			// same host.GitHubFileBug path the web Report-bug RPC uses (text-only —
+			// the CLI captures no screenshot/HAR/rrweb), and print the issue URL.
+			if strings.TrimSpace(githubRepo) != "" {
+				normTarget, err := normaliseTarget(target)
+				if err != nil {
+					return err
+				}
+				ghBody := body
+				if len(reproSteps) > 0 {
+					var sb strings.Builder
+					sb.WriteString("\n\n## Steps to reproduce\n\n")
+					for i, r := range reproSteps {
+						fmt.Fprintf(&sb, "%d. %s\n", i+1, r)
+					}
+					ghBody += sb.String()
+				}
+				res, err := host.GitHubFileBug(context.Background(), host.GitHubBugFiling{
+					Repo:       githubRepo,
+					Title:      title,
+					Body:       ghBody,
+					Severity:   severity,
+					Component:  component,
+					Target:     normTarget,
+					TraceRef:   traceRef,
+					KitsokiRev: gitShortRevCWD(),
+					FiledBy:    os.Getenv("USER"),
+				})
+				if err != nil {
+					return fmt.Errorf("file bug to github (%s): %w", githubRepo, err)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), res.URL)
+				return nil
 			}
 
 			req := BugCreateRequest{
@@ -154,6 +193,7 @@ resolved target-root. Exit 1 on error.`,
 	cmd.Flags().StringVar(&severity, "severity", "", "free-form severity tag (agent prompts use low|med|high)")
 	cmd.Flags().StringVar(&traceRef, "trace-ref", "", "path to a trace file or a session id")
 	cmd.Flags().StringVar(&targetDir, "target-dir", "", "override the resolved target-root (escape hatch)")
+	cmd.Flags().StringVar(&githubRepo, "github", "", "file a GitHub issue on this owner/repo instead of a local markdown file (requires gh auth)")
 	cmd.Flags().Int64Var(&clockNowSec, "clock-now", 0,
 		"Unix-seconds override for the filed-at timestamp (tests only; 0 = use real clock)")
 	_ = cmd.Flags().MarkHidden("clock-now")
@@ -279,6 +319,16 @@ with that id exists.`,
 	cmd.Flags().StringVar(&target, "target", "", "bug target: story|kitsoki (required)")
 	cmd.Flags().StringVar(&targetDir, "target-dir", "", "override the resolved target-root (escape hatch)")
 	return cmd
+}
+
+// gitShortRevCWD returns the short HEAD sha of the repo containing the process
+// cwd (best-effort; "" when not a repo / git unavailable).
+func gitShortRevCWD() string {
+	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // stringOrDefault returns v if non-empty, else def.

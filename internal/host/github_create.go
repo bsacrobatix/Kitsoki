@@ -71,14 +71,24 @@ func ghTicketCreate(ctx context.Context, args map[string]any) (Result, error) {
 	if err != nil {
 		return Result{Error: fmt.Sprintf("ticket.create: exec: %v", err)}, nil
 	}
-	// A fork contributor without triage permission can still *open* an issue,
-	// but applying labels 403s.  Degrade rather than fail: retry unlabelled and
-	// surface a warning (epic open question 2 / gh-issue-create.md).
-	if code != 0 && len(labels) > 0 && ghLooksLikeLabelPermissionErr(stderr) {
-		warning = "labels not applied (insufficient triage permission on the repo); issue filed unlabelled"
-		stdout, stderr, code, err = cliExec(ctx, "", "gh", build(false)...)
+	// `gh issue create --label X` fails the WHOLE create if any one label is
+	// missing OR the caller lacks triage. Recover in two steps so the fixed
+	// kitsoki vocabulary is applied whenever possible:
+	//   1. ensure the labels exist (best-effort), then retry WITH labels;
+	//   2. only if that still fails (a real triage-permission wall) drop labels
+	//      and warn — a fork contributor can still file the issue unlabelled.
+	if code != 0 && len(labels) > 0 && ghLooksLikeLabelErr(stderr) {
+		ghEnsureLabels(ctx, repo, labels)
+		stdout, stderr, code, err = cliExec(ctx, "", "gh", build(true)...)
 		if err != nil {
 			return Result{Error: fmt.Sprintf("ticket.create: exec: %v", err)}, nil
+		}
+		if code != 0 && ghLooksLikeLabelErr(stderr) {
+			warning = "labels not applied (insufficient triage permission on the repo); issue filed unlabelled"
+			stdout, stderr, code, err = cliExec(ctx, "", "gh", build(false)...)
+			if err != nil {
+				return Result{Error: fmt.Sprintf("ticket.create: exec: %v", err)}, nil
+			}
 		}
 	}
 	if code != 0 {
@@ -198,9 +208,10 @@ func ghParseMetadata(body string) map[string]any {
 	return out
 }
 
-// ghLooksLikeLabelPermissionErr is a heuristic over gh's stderr for the
-// "you may open the issue but not label it" 403 a fork contributor hits.
-func ghLooksLikeLabelPermissionErr(stderr string) bool {
+// ghLooksLikeLabelErr is a heuristic over gh's stderr for a create that failed
+// on labels — either a missing label or the "you may open the issue but not
+// label it" 403 a fork contributor hits.
+func ghLooksLikeLabelErr(stderr string) bool {
 	s := strings.ToLower(stderr)
 	if !strings.Contains(s, "label") {
 		return false
@@ -208,8 +219,45 @@ func ghLooksLikeLabelPermissionErr(stderr string) bool {
 	return strings.Contains(s, "not have permission") ||
 		strings.Contains(s, "resource not accessible") ||
 		strings.Contains(s, "could not add label") ||
+		strings.Contains(s, "not found") ||
 		strings.Contains(s, "must have") ||
 		strings.Contains(s, "403")
+}
+
+// ghEnsureLabels best-effort creates each label on the repo with a colour
+// derived from its prefix (gh label create --force is create-or-update, so it's
+// idempotent). Failures are ignored — the caller's degrade-to-unlabelled path
+// covers a repo where the caller lacks triage to create labels.
+func ghEnsureLabels(ctx context.Context, repo string, labels []string) {
+	for _, l := range labels {
+		args := []string{"label", "create", l, "--color", labelColor(l), "--force"}
+		if repo != "" {
+			args = append(args, "--repo", repo)
+		}
+		_, _, _, _ = cliExec(ctx, "", "gh", args...)
+	}
+}
+
+// labelColor picks a GitHub label colour for a kitsoki-vocabulary label.
+func labelColor(label string) string {
+	switch {
+	case label == "P0":
+		return "b60205"
+	case label == "P1":
+		return "d93f0b"
+	case label == "P2":
+		return "fbca04"
+	case label == "P3":
+		return "0e8a16"
+	case strings.HasPrefix(label, "comp:"):
+		return "d4c5f9"
+	case strings.HasPrefix(label, "target:"):
+		return "1d76db"
+	case label == "in_progress":
+		return "fef2c0"
+	default:
+		return "ededed"
+	}
 }
 
 // issueNumberFromURL pulls the trailing issue number off a gh-printed issue
