@@ -35,7 +35,9 @@ import (
 	"kitsoki/internal/viz"
 )
 
-const version = "0.0.1-scaffold"
+// version is stamped at release time via -ldflags "-X main.version=...".
+// The default is the dev/unstamped value (`go build`, `go run`, tests).
+var version = "0.0.1-scaffold"
 
 // newRootCmd builds the top-level cobra command tree. Extracted from main()
 // so tests can construct an isolated root and call Execute() against captured
