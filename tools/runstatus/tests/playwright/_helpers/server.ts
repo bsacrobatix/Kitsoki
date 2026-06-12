@@ -120,10 +120,16 @@ export async function startWebServer(opts: {
   storiesDir?: string;
   /** Optional host cassette path for oracle event recording in the trace. */
   hostCassette?: string;
+  /** Optional .kitsoki.yaml path (--config), e.g. to declare harness_profiles. */
+  config?: string;
+  /** Optional extra env merged into the spawned server (e.g. a dummy
+   *  SYNTHETIC_API_KEY so a harness_profiles fixture's ${VAR} resolves). */
+  extraEnv?: Record<string, string>;
 }): Promise<WebServer> {
   const storiesDir = opts.storiesDir ?? STORIES_DIR;
   const checkPaths = [storiesDir, opts.flow, BIN];
   if (opts.hostCassette) checkPaths.push(opts.hostCassette);
+  if (opts.config) checkPaths.push(opts.config);
   for (const p of checkPaths) {
     if (!fs.existsSync(p)) {
       throw new Error(
@@ -138,6 +144,7 @@ export async function startWebServer(opts: {
 
   const args = ["web", "--stories-dir", storiesDir, "--flow", opts.flow, "--addr", opts.addr, "--db", dbPath];
   if (opts.hostCassette) args.push("--host-cassette", opts.hostCassette);
+  if (opts.config) args.push("--config", opts.config);
 
   // Slow-play passthrough (opt-in): when the RECORDING process has
   // KITSOKI_CASSETTE_SLOWPLAY set, forward it to the spawned server so a
@@ -146,10 +153,11 @@ export async function startWebServer(opts: {
   // recorded timings) into the web turn-stream. An UNSET run inherits nothing
   // here, so the default `playwright test` posture stays instant + deterministic
   // (CLAUDE.md: tests must not slow down or become non-deterministic by default).
-  const childEnv = { ...process.env };
+  const childEnv: Record<string, string | undefined> = { ...process.env };
   if (process.env.KITSOKI_CASSETTE_SLOWPLAY !== undefined) {
     childEnv.KITSOKI_CASSETTE_SLOWPLAY = process.env.KITSOKI_CASSETTE_SLOWPLAY;
   }
+  if (opts.extraEnv) Object.assign(childEnv, opts.extraEnv);
 
   const proc: ChildProcess = spawn(
     BIN,
