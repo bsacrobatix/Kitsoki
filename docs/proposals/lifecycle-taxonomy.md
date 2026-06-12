@@ -97,6 +97,32 @@ work ships, with their outcome reflected back onto the Feature's `status`.
 see the [prior-art note](notes/lifecycle-taxonomy-prior-art.md) §2 and Open
 question 9.)
 
+### Where PRD and ADR sit
+
+The two classic SDLC artifacts deliberately do **not** become objects here:
+
+- **PRD.** A PRD is a *view over the durable catalog*, not a fifth object: the
+  Feature tree (`composed_of` DAG) with summaries, acceptance criteria, and
+  status *is* the product-requirements content, so a PRD can be rendered from
+  the catalog rather than authored beside it and allowed to drift. (Constructor
+  Studio and BMAD both keep PRD as a separately-authored markdown artifact and
+  then need cross-reference lints to keep it consistent with FEATURE specs —
+  [prior-art note](notes/lifecycle-taxonomy-prior-art.md) §2/§4; deriving the
+  view avoids that whole failure class.) Where a kitsoki story drives an
+  *external* project's SDLC (the cypilot story, gears-rust's `docs/PRD.md`),
+  PRD remains the external tool's artifact kind — this taxonomy is kitsoki's
+  internal model.
+- **ADR.** Proposals are transient, so durable decision rationale needs a home
+  that survives the trim-on-ship. That home already exists: proposal content
+  worth keeping moves to narrative docs under `docs/architecture/` on ship —
+  an ADR is exactly that residue, and v1 keeps it as plain markdown (decisions
+  are *documents first*, the `artifact-format.md` split, so they take the
+  markdown-with-frontmatter container, not this YAML one). The trace is
+  preserved through the Feature's design history (`proposals:`, Open
+  question 5) and ordinary links into `docs/architecture/`. If decisions ever
+  need linting (supersedes-chains, status), a `lifecycle/adr/v1` schema can be
+  added without disturbing the four objects.
+
 ## Impact
 
 - **Code seams:** new `internal/lifecycle/` (loader, schema registry, lint).
