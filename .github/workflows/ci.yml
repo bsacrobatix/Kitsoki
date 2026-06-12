@@ -30,10 +30,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # `make test` runs `go test ./...` plus the deterministic story flow
-      # suites (no LLM, no cost). It needs only Go, bash and jq — jq is
-      # preinstalled on ubuntu-latest, and the committed
+      # ffmpeg backs the video-frame / chapter handlers (internal/video,
+      # internal/host video tests, runstatus video RPC). jq is preinstalled on
+      # ubuntu-latest; Go comes from setup-go above; the committed
       # internal/runstatus/web/assets/.gitkeep satisfies the //go:embed pattern
-      # so the SPA build (pnpm) is not required just to compile + test.
+      # so no pnpm/SPA build is needed just to test.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      # `make test` runs `go test ./...` plus the deterministic story flow
+      # suites (no LLM, no cost).
       - name: Run tests
         run: make test

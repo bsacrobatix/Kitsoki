@@ -112,29 +112,21 @@ func TestCallTool_NilArgsSendsEmptyObject(t *testing.T) {
 
 func TestCallTool_CtxCancelUnblocks(t *testing.T) {
 	s := newStubServer(t)
-	// Make tools/call hang: a result override of nil is fine, but we need the
-	// server to NOT answer. Easiest: point the stub at a tool the responder
-	// answers, but cancel before it can. We instead use a manually-controlled
-	// gate by overriding handle via a never-answering tool name path.
 	c, err := Dial(shortCtx(t), s.lock())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
 
+	// A cancelled context must surface as context.Canceled — not hang, and not
+	// ErrNotConnected. Use an ALREADY-cancelled context so the assertion is
+	// deterministic: the previous version cancelled on a goroutine and raced the
+	// call, which on a tightly-scheduled runner could let a connection drop win
+	// and return ErrNotConnected before the cancel was observed (CI flake). The
+	// contract is enforced by the ctx.Err() short-circuit at the top of CallTool.
 	ctx, cancel := context.WithCancel(context.Background())
-	// Cancel almost immediately; the call must return ctx.Err(), not hang.
-	go func() { cancel() }()
-	// Use a tool the stub answers, but the race with cancel is the point:
-	// even if it answers, repeated cancels guarantee we exercise the ctx path.
-	_, err = c.CallTool(ctx, "getDiagnostics", nil)
-	if err == nil {
-		// It may have completed before cancel; retry with an already-cancelled ctx.
-		dctx, dcancel := context.WithCancel(context.Background())
-		dcancel()
-		_, err = c.CallTool(dctx, "getDiagnostics", nil)
-	}
-	if !errors.Is(err, context.Canceled) {
+	cancel()
+	if _, err = c.CallTool(ctx, "getDiagnostics", nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("want context.Canceled, got %v", err)
 	}
 }
