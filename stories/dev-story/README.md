@@ -34,14 +34,21 @@ dev-story
   │                     bf__done_artifact.summary_{title,markdown})
   │       abandoned → main (status: "abandoned")
   │
-  └── imports pr  (../pr-refinement)
-        entry: open_pr   # skip pr-refinement's standalone-only idle
-        world_in: ticket_id, workdir, feature_branch, base_branch,
-                  pr_title, pr_body, judge_mode, …
+  ├── imports pr  (../pr-refinement)
+  │     entry: open_pr   # skip pr-refinement's standalone-only idle
+  │     world_in: ticket_id, workdir, feature_branch, base_branch,
+  │               pr_title, pr_body, judge_mode, …
+  │     exits:
+  │       merged          → main (status: "merged", last_pr_url=pr__pr_url)
+  │       abandoned       → main (status: "abandoned")
+  │       pushback_resolved → main (Wave 3 reserves; Wave 2 maps to main)
+  │
+  └── imports prd (../prd)             # the front of the PRD → Design walk
+        entry: idle
+        world_in: workdir, judge_mode, judge_confidence_threshold
         exits:
-          merged          → main (status: "merged", last_pr_url=pr__pr_url)
-          abandoned       → main (status: "abandoned")
-          pushback_resolved → main (Wave 3 reserves; Wave 2 maps to main)
+          done      → prd_published    # landing room; carries the PRD into design
+          abandoned → main (status: "abandoned")
 ```
 
 The bf → pr handoff is one import edge. When bf fires `@exit:done` the
@@ -51,6 +58,31 @@ transitions into `pr` — whose compound OnEnter runs the pr `world_in:`
 setters in parent scope to project those keys into `pr__<key>` (which
 pr's own rooms then reference). The full chain is exercised by
 `flows/bugfix_to_pr.yaml`.
+
+## PRD → Design walk
+
+`main → prd → (publish) → prd_published → continue → design` is the
+discovery-to-design walk. From `main`, `prd` enters the imported
+[`stories/prd/`](../prd/) discovery pipeline (idle → clarifying → brief →
+references → drafting). When the operator accepts, prd publishes the PRD
+to `docs/prd/<slug>.md` and fires `@exit:done`; dev-story lands in the
+**`prd_published`** room ([`rooms/prd_published.yaml`](./rooms/prd_published.yaml)),
+which confirms the published path and offers two arcs:
+
+- **`continue`** → the **design** intake, seeding `design_seed_idea` with
+  a pointer to the just-published PRD (`"Author a design from the PRD at
+  <prd_file>"`) so the design author reads it as prior art.
+- **`go_main`** → back to the hub.
+
+`prd_file` is a host **bind** in prd's drafting accept arc (it comes from
+`prd_publish.py` stdout), so it commits post-dispatch — too late for a
+synchronous exit `set:` projection to carry it (contrast bf → pr, whose
+carried `done_artifact` is a synchronous `set:`). The flat world keeps
+`prd__prd_file` once the turn settles, so `prd_published` reads
+`world.prd__prd_file` directly. prd stays runnable standalone
+(`kitsoki run stories/prd/app.yaml`) — the redirect lives only in
+dev-story's composition. The walk is exercised by
+[`flows/prd_to_design.yaml`](./flows/prd_to_design.yaml).
 
 ## Provider neutrality
 
@@ -77,7 +109,8 @@ dev rebinds to `host.local_files.ticket`. Same YAML, two providers.
 | `inbox` | Wave 2 | Navigation surface; the runtime's inbox subsystem manages items. |
 | `oracle` | Wave 2 | One-shot ask_question via `host.oracle.ask` (agent: `oracle_qa`). |
 | `standup` | Wave 2 | Aggregates iface.ticket.list_mine. |
-| `proposal*` | — | Proposal-authoring pipeline: discovery+brief (one room: the first message mints the workspace + scaffolds an editable brief, then every turn converses + distils it; `ready` runs the quality judge and a passing brief auto-advances) → existing-state → completeness → references → draft → publish. **Publish also files a feature ticket** (`issues/features/`) linking back to the proposal, and `proposal_done`'s `implement` action (the `go_implementation` intent) drives that ticket straight into the impl pipeline (`flows/proposal_to_implementation.yaml`) — no detour through `ticket_search`. The proposal pipeline does not create a workspace; `impl.idle.on_enter` self-provisions the worktree on entry (mirroring `bf.idle`), so the impl run gets a real `feature/<ticket>` branch regardless of entry path. |
+| `design*` | — | **Design pipeline** (formerly the "proposal" pipeline): discovery+brief (one room: the first message mints the workspace + scaffolds an editable brief, then every turn converses + distils it; `ready` runs the quality judge and a passing brief auto-advances) → existing-state → completeness → references → draft → publish (to `docs/proposals/<slug>.md`). **Publish also files a feature ticket** (`issues/features/`) linking back to the design doc, and `design_done`'s `implement` action (the `go_implementation` intent) drives that ticket straight into the impl pipeline (`flows/design_to_implementation.yaml`) — no detour through `ticket_search`. The design pipeline does not create a worktree; `impl.idle.on_enter` self-provisions it on entry (mirroring `bf.idle`), so the impl run gets a real `feature/<ticket>` branch regardless of entry path. Reached ad-hoc via `idea`, or as the back half of the [PRD → Design walk](#prd--design-walk). |
+| `prd_published` | — | PRD → Design landing room (see [PRD → Design walk](#prd--design-walk)). |
 | `ideas` | — | Ideas-backlog reviewer (see below). |
 | `code_review` | Wave 3 stub | Reserves the room; imports `stories/code-review/` in Wave 3. |
 | `deploy`, `observability`, `incident`, `docs` | Wave 3 stubs | Routing-back-to-main placeholders. |
@@ -95,9 +128,9 @@ concrete evidence, plus a few high-value **candidates** worth proposing next.
 The decide is interpretation; the mutation is deterministic. `apply` is a
 confirm gate: it hands the persisted report to `scripts/ideas_reconcile.py`,
 which rewrites the backlog file (the same decide→script discipline as the
-proposal slug step). `pick N` seeds `world.proposal_seed_idea` from candidate N
-and jumps into the `proposal` intake — so a blocked author flows straight into
-authoring a proposal (slug + workspace minting is reused as-is). `regenerate`
+design slug step). `pick N` seeds `world.design_seed_idea` from candidate N
+and jumps into the `design` intake — so a blocked author flows straight into
+authoring a design doc (slug + workspace minting is reused as-is). `regenerate`
 re-scans the rewritten backlog.
 
 ## Intent surface
@@ -129,9 +162,10 @@ intents at the bare name: `go_main`, `go_back`, `go_inbox`, `go_oracle`,
 | `ticket_search_smoke.yaml` | main → ticket_search → run search → pick → return. |
 | `pickup_to_bugfix.yaml` | Same as above, then dispatch into the bf import (lands in bf.idle with world_in: projections firing). |
 | `bugfix_to_pr.yaml` | The full closed-loop walk: main → bf.idle → walk every bf room to @exit:done → handoff into pr → walk pr to @exit:merged → land back in main with status="merged" and last_pr_url populated. |
-| `proposal_to_implementation.yaml` | The publish → implement bridge: proposal_done → `go_implementation` → impl.idle (on_enter self-provisions the worktree — the fixture seeds NO workspace) → walk the impl pipeline to @exit:done → main with status="merged". |
+| `design_to_implementation.yaml` | The publish → implement bridge: design_done → `go_implementation` → impl.idle (on_enter self-provisions the worktree — the fixture seeds NO workspace) → walk the impl pipeline to @exit:done → main with status="merged". |
+| `prd_to_design.yaml` | The PRD → Design walk: main → `go_prd` → walk the imported prd pipeline to @exit:done → land in `prd_published` (prd__prd_file lifted) → `continue` → the `design` intake, seeded with a pointer to the published PRD. |
 
-These are a sample; the full suite (29 / 29) passes under `kitsoki test flows stories/dev-story/app.yaml`.
+These are a sample; the full suite (30 / 30) passes under `kitsoki test flows stories/dev-story/app.yaml`.
 
 ## Manual TUI walkthrough
 
@@ -168,13 +202,37 @@ In Wave 3 the kitsoki-dev instance rebinds the providers and the same
 on github.com.
 
 The walkthrough above picks a **bug** and types `go_bugfix`. For a
-**feature** ticket (e.g. one filed by the proposal pipeline), type
+**feature** ticket (e.g. one filed by the design pipeline), type
 `drive` instead of `go_bugfix` after picking — `drive` reads
 `ticket_type` and routes into the impl pipeline (`impl.idle`), which
 self-provisions a `feature/<ticket>` worktree before the first room
-runs. A published proposal can also skip `ticket_search` entirely: from
-`proposal_done`, `implement` drives the freshly-filed feature ticket
+runs. A published design doc can also skip `ticket_search` entirely: from
+`design_done`, `implement` drives the freshly-filed feature ticket
 straight into impl.
+
+## Demo: PRD → Design (judge_mode=human)
+
+The [PRD → Design walk](#prd--design-walk) replayed by hand. With the
+standalone defaults (or via the `kitsoki-dev` instance, which rebinds
+providers to local files):
+
+```
+$ kitsoki run stories/dev-story/app.yaml
+> prd                       # main → prd.idle (discovery chat opens)
+> I want a CLI for X         # discovery conversation (prd__discuss)
+> prd__start                # distil idea → prd.search (prior-art gate)
+> prd__confirm              # no overlap → prd.clarifying (questions posed)
+> developers; time-to-first-success   # answer (prd__answer); last answer auto-advances
+> prd__confirm              # brief → prd.references
+> prd__confirm              # references → prd.drafting (PRD authored)
+> prd__accept               # publish docs/prd/<slug>.md → prd_published
+> continue                  # → design intake, seeded "Author a design from the PRD at …"
+> <describe / refine>        # the design pipeline takes over: search → brief → draft → publish
+```
+
+`prd_published` also offers `main` to return to the hub without
+designing. The deterministic, no-LLM version of this exact walk is
+[`flows/prd_to_design.yaml`](./flows/prd_to_design.yaml).
 
 ## Oracle-split persona table (Phase 8)
 

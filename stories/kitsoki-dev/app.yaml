@@ -90,13 +90,18 @@ hosts:
   # `hosts: declared` import on `core` requires every transitively-
   # exposed host to appear here too.
   - host.run
-  # Proposal-authoring pipeline (dev-story rooms/proposal*.yaml):
+  # Design pipeline (dev-story rooms/design*.yaml):
   # 4-stage pipeline using decide/task gates, workspace artifact writes,
   # IDE open on first brief scaffold, and embedding-based reference search.
   # Required under `hosts: declared`.
   - host.oracle.search
   - host.artifacts_dir
   - host.ide.open_file
+  # PRD discovery pipeline (dev-story imports stories/prd/): a
+  # conversational discovery (converse + a persistent chat) feeding the
+  # PRD → Design walk. Required under `hosts: declared`.
+  - host.oracle.converse
+  - host.chat.resolve
 
 # This instance has no day-level rooms of its own — every visible
 # state comes from the imported dev-story hub. Imports are folded in

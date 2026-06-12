@@ -89,7 +89,7 @@ describe("ViewElement", () => {
     const w = render({
       Kind: "kv",
       Pairs: [
-        { Key: "state", Value: "proposal_draft" },
+        { Key: "state", Value: "design_draft" },
         { Key: "turn", Value: "7" },
       ],
     });
@@ -98,7 +98,7 @@ describe("ViewElement", () => {
     const dts = w.findAll("dt.ve-kv-key");
     const dds = w.findAll("dd.ve-kv-value");
     expect(dts.map((d) => d.text())).toEqual(["state", "turn"]);
-    expect(dds.map((d) => d.text())).toEqual(["proposal_draft", "7"]);
+    expect(dds.map((d) => d.text())).toEqual(["design_draft", "7"]);
     w.unmount();
   });
 

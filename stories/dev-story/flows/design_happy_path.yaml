@@ -1,21 +1,21 @@
-# proposal_happy_path — the full proposal pipeline, intent-only (no LLM).
+# design_happy_path — the full proposal pipeline, intent-only (no LLM).
 #
-# intake → proposal_search (scout ONLY fires on entry — the early gate) →
-# confirm (no overlap) → proposal_materialize (folder + references fire on
-# entry, then auto-advance) → proposal_refine (brief scaffold + refiner fire
-# on entry; judge guarded until `ready`) → ready → proposal_draft (author
-# fires on entry) → accept → proposal_done (publish in arc) → go_main → main.
+# intake → design_search (scout ONLY fires on entry — the early gate) →
+# confirm (no overlap) → design_materialize (folder + references fire on
+# entry, then auto-advance) → design_refine (brief scaffold + refiner fire
+# on entry; judge guarded until `ready`) → ready → design_draft (author
+# fires on entry) → accept → design_done (publish in arc) → go_main → main.
 #
 # The intake `discuss` mints only the candidate SLUG — the workspace folder is
-# created later, in proposal_materialize, AFTER the scout gate clears.
+# created later, in design_materialize, AFTER the scout gate clears.
 # The search `confirm` action has a guard that only allows advancing when
-# the overlap list is empty; it lands in proposal_materialize, whose final
-# on_enter step emits `materialized` to cascade straight to proposal_refine.
-# The refine `ready` action increments proposal_brief_cycle (arms the judge)
+# the overlap list is empty; it lands in design_materialize, whose final
+# on_enter step emits `materialized` to cascade straight to design_refine.
+# The refine `ready` action increments design_brief_cycle (arms the judge)
 # and re-enters with a FULL target; the judge fires on on_enter and a
 # `continue` verdict auto-advances via the post-bind emit_intent.
 # The draft accept arc runs the publish script inline; the result lands in
-# proposal_done (was proposal_publish in the prior 6-stage pipeline).
+# design_done (was design_publish in the prior 6-stage pipeline).
 #
 # Decide calls are stubbed by their invoke `id:` (existing_scan,
 # references_research, brief_check); the two host.run sites (uniquify,
@@ -24,7 +24,7 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposal
+initial_state: design
 initial_world:
   judge_mode: "human"
 
@@ -51,7 +51,7 @@ host_handlers:
         data:
           ok: true
           submitted: { verdict: "continue", reason: "Crisp why, one-screen change, kind named.", questions: [] }
-  # Semantic reference search pre-seeds the researcher (proposal_materialize).
+  # Semantic reference search pre-seeds the researcher (design_materialize).
   host.oracle.search:
     data: { hits: [], top: null }
   host.artifacts_dir:
@@ -65,7 +65,7 @@ host_handlers:
             summary: "Idea is clear; Why and What-changes need detail."
             gaps:    ["Specify which engine seam establishes the workdir", "Document cleanup on session end"]
     data:
-      # The un-id'd draft author task (proposal_draft.on_enter).
+      # The un-id'd draft author task (design_draft.on_enter).
       ok: true
       submitted:
         title:               "Runtime: first-class per-session working folder"
@@ -87,25 +87,25 @@ host_handlers:
         data:
           ok: true
           exit_code: 0
-          stdout: '{"proposal_file":"docs/proposals/first-class-working-folder.md","ticket_id":"F-2026-06-11T120000Z-first-class-working-folder","ticket_path":"issues/features/F-2026-06-11T120000Z-first-class-working-folder.md","ticket_title":"First-class working folder"}'
+          stdout: '{"design_file":"docs/proposals/first-class-working-folder.md","ticket_id":"F-2026-06-11T120000Z-first-class-working-folder","ticket_path":"issues/features/F-2026-06-11T120000Z-first-class-working-folder.md","ticket_title":"First-class working folder"}'
           stdout_json:
-            proposal_file: "docs/proposals/first-class-working-folder.md"
+            design_file: "docs/proposals/first-class-working-folder.md"
             ticket_id:     "F-2026-06-11T120000Z-first-class-working-folder"
             ticket_path:   "issues/features/F-2026-06-11T120000Z-first-class-working-folder.md"
             ticket_title:  "First-class working folder"
 
 turns:
   # Stage 1: Intake — one message mints the candidate SLUG (no folder yet) and
-  # advances to search. The scout fires on entry to proposal_search (the early
+  # advances to search. The scout fires on entry to design_search (the early
   # gate). No workspace, no 002, no references at this point.
   - intent: { name: discuss, slots: { message: "I want a per-session working folder primitive" } }
-    expect_state: proposal_search
+    expect_state: design_search
     expect_world:
-      proposal_slug: "first-class-working-folder"
-      proposal_idea: "I want a per-session working folder primitive"
+      design_slug: "first-class-working-folder"
+      design_idea: "I want a per-session working folder primitive"
       # No overlap folder minted yet.
-      proposal_workspace: ""
-      proposal_existing_state:
+      design_workspace: ""
+      design_existing_state:
         overlaps:     []
         roadmap_fit:  "A net-new runtime primitive; no overlap with the current queue."
     expect_host_calls:
@@ -117,26 +117,26 @@ turns:
     # The folder + reference work is deferred behind the gate.
     expect_no_host_calls: [host.run, host.artifacts_dir]
 
-  # Stage 2: Search — no overlap → confirm → proposal_materialize → (auto-
-  # advance via emit_intent) → proposal_refine, all in one turn.
+  # Stage 2: Search — no overlap → confirm → design_materialize → (auto-
+  # advance via emit_intent) → design_refine, all in one turn.
   #   materialize on_enter: uniquify (folder) + 002 persist + references + 003
   #     persist (the 003 write emits `materialized`).
   #   refine on_enter: scaffold 001-brief + open IDE + refiner. The judge is
   #     GUARDED (brief_cycle == 0) so it does NOT fire on first entry.
   - intent: { name: confirm, slots: {} }
-    expect_state: proposal_refine
+    expect_state: design_refine
     expect_world:
-      proposal_overlap_decision: "new"
+      design_overlap_decision: "new"
       # The folder is finally minted here, behind the gate.
-      proposal_workspace: "docs/proposals/.workspace/first-class-working-folder"
-      proposal_existing_state:
+      design_workspace: "docs/proposals/.workspace/first-class-working-folder"
+      design_existing_state:
         overlaps:     []
         roadmap_fit:  "A net-new runtime primitive; no overlap with the current queue."
-      proposal_references:
+      design_references:
         items:
           - { path: "docs/proposals/process-design.md", sections: "§4.3", rationale: "names the first-class workdir as a future runtime slice" }
-      proposal_brief_path: "docs/proposals/.workspace/first-class-working-folder/001-brief.md"
-      proposal_brief_cycle: 0
+      design_brief_path: "docs/proposals/.workspace/first-class-working-folder/001-brief.md"
+      design_brief_cycle: 0
     expect_host_calls:
       # Materialize: folder + persisted scout report + references + persisted refs.
       - handler: host.run
@@ -157,17 +157,17 @@ turns:
 
   # Stage 3: ready — increment cycle (arms the judge) and re-enter.
   # Judge fires on on_enter (brief_cycle == 1 > 0), verdict = continue →
-  # post-bind emit_intent advance_brief → auto-advance to proposal_draft.
+  # post-bind emit_intent advance_brief → auto-advance to design_draft.
   # Stage 4 on_enter: draft author fires.
   - intent: { name: ready, slots: {} }
-    expect_state: proposal_draft
+    expect_state: design_draft
     expect_world:
-      proposal_brief_cycle:    1
-      proposal_brief_decision:
+      design_brief_cycle:    1
+      design_brief_decision:
         verdict:   "continue"
         reason:    "Crisp why, one-screen change, kind named."
         questions: []
-      proposal_kind: "runtime"
+      design_kind: "runtime"
     expect_host_calls:
       - handler: host.oracle.decide
         args: { call: "brief_check" }
@@ -175,14 +175,14 @@ turns:
     # golden-example view change).
     expect_view_matches: "Draft.*004-proposal\\.md"
 
-  # Stage 4: accept — publish inline (no separate proposal_publish room).
+  # Stage 4: accept — publish inline (no separate design_publish room).
   - intent: { name: accept, slots: {} }
-    expect_state: proposal_done
+    expect_state: design_done
     expect_world:
-      proposal_file: "docs/proposals/first-class-working-folder.md"
+      design_file: "docs/proposals/first-class-working-folder.md"
       # Publish also minted a feature ticket and pinned the routing keys so the
       # done room can drive straight into the impl pipeline.
-      proposal_ticket_path: "issues/features/F-2026-06-11T120000Z-first-class-working-folder.md"
+      design_ticket_path: "issues/features/F-2026-06-11T120000Z-first-class-working-folder.md"
       ticket_id:   "F-2026-06-11T120000Z-first-class-working-folder"
       ticket_type: "feature"
       ticket_url:  "docs/proposals/first-class-working-folder.md"

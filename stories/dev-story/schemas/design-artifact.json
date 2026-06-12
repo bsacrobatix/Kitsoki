@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "proposal_artifact",
+  "title": "design_artifact",
   "description": "Artifact produced by the draft room: the proposal written to disk (filling the matching template kind) plus a checkpoint summary and a self-assessed completeness signal.",
   "type": "object",
   "required": ["title", "kind", "summary_markdown", "file_path", "confidence", "needs_clarification", "follow_up_questions"],

@@ -3,7 +3,7 @@
  *
  * A self-contained step array for the dedicated state-diagram video demo. Like
  * agent-actions-manifest.ts, this tour opens on the home story library,
- * introduces the dev-story proposal pipeline, drives a fresh run via a
+ * introduces the dev-story design pipeline, drives a fresh run via a
  * route-match action step (home → new session), then walks the StateDiagram's
  * four route-centric views AS IMPLEMENTED:
  *   1. Metro stepper — the traveled leg (TRACE), the amber current station
@@ -39,7 +39,7 @@ export const DIAGRAM_SHOWCASE_TOUR_STEPS: readonly TourStep[] = [
     id: "dsg-intro-home",
     route: "home",
     title: "Start at the story library",
-    body: "Every run begins here, in the story library — each card is a deterministic story graph kitsoki runs the same way every time. We'll showcase the state diagram on the kitsoki-dev proposal pipeline.",
+    body: "Every run begins here, in the story library — each card is a deterministic story graph kitsoki runs the same way every time. We'll showcase the state diagram on the kitsoki-dev design pipeline.",
     placement: "center",
     kind: "explain",
     advance: "next",
@@ -51,8 +51,8 @@ export const DIAGRAM_SHOWCASE_TOUR_STEPS: readonly TourStep[] = [
     route: "home",
     target: "story-card",
     waitForTarget: "story-card",
-    title: "The proposal pipeline",
-    body: "This story walks a proposal from intake through searching, brief, drafting, and published. As the run moves between rooms, the state diagram redraws your route live from the trace.",
+    title: "The design pipeline",
+    body: "This story walks a design from intake through searching, brief, drafting, and published. As the run moves between rooms, the state diagram redraws your route live from the trace.",
     placement: "right",
     kind: "explain",
     advance: "next",

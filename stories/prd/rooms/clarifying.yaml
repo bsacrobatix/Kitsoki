@@ -197,10 +197,15 @@ states:
               # question, fire the synthetic submit_answers intent so the
               # operator drops straight into the brief review — no separate
               # `submit` step. Guarded on len(questions) > 0 so a round with no
-              # questions doesn't trivially auto-submit on a stray reply. The
-              # post-bind world isn't visible here, so we recompute the new
-              # count from the pre-turn snapshot + this turn's matched_count.
-              emit_intent: "{{ len(world.clarifications.questions) > 0 && int(world.answered_count + result.submitted.matched_count) >= len(world.clarifications.questions) ? 'submit_answers' : '' }}"
+              # questions doesn't trivially auto-submit on a stray reply.
+              # emit_intent: is a POST-BIND pass (DispatchPostBindEmits) — it
+              # sees the bound world (answered_count just set above) but NOT
+              # `result`, which is out of scope by then. Read the freshly-bound
+              # world.answered_count, the same idiom every bugfix checkpoint
+              # uses (e.g. stories/bugfix/rooms/reproducing.yaml emit_intent
+              # reads the bound world.llm_verdict). Referencing result here is
+              # what crashed the answer arc (nil result.submitted).
+              emit_intent: "{{ len(world.clarifications.questions) > 0 && int(world.answered_count) >= len(world.clarifications.questions) ? 'submit_answers' : '' }}"
               on_error: .
 
       # Done answering — advance to the brief review (NOT straight to

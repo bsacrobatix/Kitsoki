@@ -38,7 +38,7 @@ states:
       # The written PRD is the deliverable — its path leads the kv as a BARE
       # path value: the web UI linkifies a kv value ending in .md into a
       # clickable file preview (prose never linkifies — same idiom as the
-      # brief/references rooms and dev-story's proposal_refine Brief row).
+      # brief/references rooms and dev-story's design_refine Brief row).
       # The pending placeholder ends in ")" so it stays plain text.
       - kv:
           pairs:
@@ -54,7 +54,7 @@ states:
         when: "world.prd_file != ''"
       # Echo the operator's last refine instruction back so a refine turn
       # visibly acknowledges what was asked (same "You asked: …" line as the
-      # references room + the golden proposal_refine.yaml).
+      # references room + the golden design_refine.yaml).
       - kv:
           pairs:
             You asked: '{{ world.refine_message }}'

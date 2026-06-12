@@ -1000,10 +1000,10 @@ oracle rooms (§9) are the seam between the two worlds: inside `/meta`
 or `host.oracle.task` you get the open-ended agent; the story around it
 keeps that agent on a declared leash.
 
-### 12.3 A worked example: the proposal pipeline
+### 12.3 A worked example: the design pipeline
 
-The dev-story hub's proposal pipeline
-(`stories/dev-story/rooms/proposal*.yaml`) is §12.2 made concrete: six
+The dev-story hub's design pipeline
+(`stories/dev-story/rooms/design*.yaml`) is §12.2 made concrete: six
 rooms, **eight distinct LLM agents**, and a deterministic publish step,
 each stage dropping a numbered artifact on disk before the next agent
 reads it. In the diagram: purple = an LLM agent, blue = human input, grey
@@ -1019,13 +1019,13 @@ flowchart TD
     subgraph P1["room: proposal — discovery + brief (loops every turn)"]
       direction TB
       idea(["operator: free-text idea"]):::human
-      namer["proposal_namer<br/>oracle.decide"]:::llm
-      uniq["proposal_workspace.py<br/>slug collision-proof"]:::det
+      namer["design_namer<br/>oracle.decide"]:::llm
+      uniq["design_workspace.py<br/>slug collision-proof"]:::det
       interv["proposal_interviewer<br/>oracle.converse · ONE persistent thread"]:::llm
       writer["proposal_brief_writer<br/>oracle.task · fresh session/turn"]:::llm
       brief[/"001-brief.md"/]:::art
       ready(["operator: say 'ready'"]):::human
-      judge{"proposal_brief_judge<br/>oracle.decide"}:::llm
+      judge{"design_brief_judge<br/>oracle.decide"}:::llm
       idea --> namer --> uniq --> interv --> writer --> brief
       interv -. loops .-> writer
       brief --> ready --> judge
@@ -1034,7 +1034,7 @@ flowchart TD
 
     subgraph P2["room: proposal_existing_state"]
       direction TB
-      scout["proposal_scout<br/>oracle.decide"]:::llm
+      scout["design_scout<br/>oracle.decide"]:::llm
       es[/"002-existing-state.md"/]:::art
       g1{"overlap?"}:::human
       scout --> es --> g1
@@ -1052,16 +1052,16 @@ flowchart TD
 
     subgraph P4["room: proposal_references"]
       direction TB
-      res["proposal_researcher<br/>oracle.decide"]:::llm
+      res["design_researcher<br/>oracle.decide"]:::llm
       refs[/"004-references.json"/]:::art
       g3{"confirm?"}:::human
       res --> refs --> g3
     end
     g2 -->|confirm| res
 
-    subgraph P5["room: proposal_draft"]
+    subgraph P5["room: design_draft"]
       direction TB
-      author["proposal_author<br/>oracle.task · agentic write"]:::llm
+      author["design_author<br/>oracle.task · agentic write"]:::llm
       draft[/"005-proposal.md"/]:::art
       g4{"accept?"}:::human
       author --> draft --> g4
@@ -1070,7 +1070,7 @@ flowchart TD
 
     subgraph P6["room: proposal_publish (no LLM)"]
       direction TB
-      pub["publish_proposal.py<br/>deterministic move + archive"]:::det
+      pub["publish_design.py<br/>deterministic move + archive"]:::det
       out[/"docs/proposals/&lt;slug&gt;.md<br/>+ archived 001–004"/]:::art
       pub --> out
     end
@@ -1096,7 +1096,7 @@ Read it as the §12.2 inversion in practice:
   *same* discovery room (interviewer + brief-writer) are deliberately
   separate conversations with separate jobs.
 - **The glue between agents is deterministic and recorded.** Slug
-  uniqueness (`proposal_workspace.py`) and publish (`publish_proposal.py`)
+  uniqueness (`design_workspace.py`) and publish (`publish_design.py`)
   are plain `host.run` scripts, not LLM calls; the human gates resolve
   *enumerated* intents recorded as `GateDecided`. Nothing an agent emits
   advances the pipeline until a deterministic step or a declared gate

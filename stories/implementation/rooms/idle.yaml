@@ -31,7 +31,7 @@ states:
     # Provision the worktree on entry — mirrors bugfix/rooms/idle.yaml.
     # The impl pipeline writes code, commits, and opens a PR against
     # world.workdir; entry paths that don't pre-seed it (dev-story's
-    # `drive` / `go_implementation` / proposal_done `implement`) used to
+    # `drive` / `go_implementation` / design_done `implement`) used to
     # land here with workdir="" and run the whole pipeline against the
     # repo root with no branch — the oracle saw an empty workdir and got
     # "confused". Flow fixtures seed initial_state=idle (which bypasses

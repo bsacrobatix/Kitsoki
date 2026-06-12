@@ -10,7 +10,7 @@ Usage:
                  bounded kebab-case reduction of its first line — no LLM call
                  is needed (the PRD pipeline already distilled the idea in the
                  idle discovery chat; this is the deterministic naming step,
-                 the analogue of dev-story's proposal_workspace.py).
+                 the analogue of dev-story's design_workspace.py).
   workdir        operator working tree (world.workdir); the workspace is
                  minted under <workdir>/.artifacts/prd/<slug>. Defaults to ".".
   durable_path   durable home checked for collisions (world.publish_durable_path,

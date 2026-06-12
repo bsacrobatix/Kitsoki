@@ -27,7 +27,7 @@
  *
  * The pipeline-advancing interactions (submit each PRD intent) are NOT tour
  * steps — the spec performs them as pre-step hooks (exactly as the
- * proposal-walkthrough spec advances the pipeline before each spotlight) so
+ * design-walkthrough spec advances the pipeline before each spotlight) so
  * each spotlighted surface and state exists before the spotlight lands.
  *
  * Like manifest.ts this file MUST stay free of Vue / Pinia / DOM-runtime

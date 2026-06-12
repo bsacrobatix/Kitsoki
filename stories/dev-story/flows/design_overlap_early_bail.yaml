@@ -1,4 +1,4 @@
-# proposal_overlap_early_bail — regression of record for the "third folder" bug.
+# design_overlap_early_bail — regression of record for the "third folder" bug.
 #
 # Reported symptom: proposing the same idea a third time, the pipeline dutifully
 # minted a THIRD workspace folder and only surfaced the duplicate AFTER it had
@@ -8,20 +8,20 @@
 #
 # The fix makes the scout an EARLY GATE:
 #   - intake mints only a candidate slug; NO folder is created.
-#   - proposal_search.on_enter runs ONLY the scout (no folder, no references).
+#   - design_search.on_enter runs ONLY the scout (no folder, no references).
 #   - when the scout finds an overlap, change_existing continues the existing
 #     draft WITHOUT ever calling uniquify — so no fourth folder is born.
 #
 # This flow drives the full intake → scan → amend path with the scout returning
 # overlaps, and asserts the side-effects that USED to leak now do not:
 #   turn 1: NO host.run (uniquify), NO host.oracle.search/references, NO
-#           002/003 artifact writes; proposal_workspace stays empty.
-#   turn 2: change_existing → proposal_refine pointing the workspace at the
+#           002/003 artifact writes; design_workspace stays empty.
+#   turn 2: change_existing → design_refine pointing the workspace at the
 #           EXISTING draft, again with NO host.run (no new folder minted).
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposal
+initial_state: design
 initial_world:
   judge_mode: "human"
 
@@ -38,7 +38,7 @@ host_handlers:
               - { path: "docs/proposals/.workspace/tamagotchi-pet-ui/", kind: "in_progress", summary: "In-progress draft for this exact idea — the most complete of the duplicates; continue this one.", recommendation: "amend" }
               - { path: "docs/proposals/.workspace/tamagotchi-web-pet/", kind: "in_progress", summary: "Second duplicate draft for the same idea; drop it.", recommendation: "supersede" }
             roadmap_fit: "Already in flight as two in-progress drafts — continue tamagotchi-pet-ui, do not start a third."
-  # Stubs for proposal_refine on_enter (reached via change_existing).
+  # Stubs for design_refine on_enter (reached via change_existing).
   host.artifacts_dir:
     data: { ok: true, path: "docs/proposals/.workspace/tamagotchi-pet-ui/001-brief.md", message_id: "out#1" }
   host.ide.open_file:
@@ -52,15 +52,15 @@ host_handlers:
 
 turns:
   # Intake: one message mints only the candidate slug, then the scout fires on
-  # entry to proposal_search and finds the duplicates. CRITICALLY, no folder is
+  # entry to design_search and finds the duplicates. CRITICALLY, no folder is
   # minted and no references are gathered — the gate bails before any of that.
   - intent: { name: discuss, slots: { message: "tomogachi pets for web ui - pixel art creatures to keep the user company" } }
-    expect_state: proposal_search
+    expect_state: design_search
     expect_world:
-      proposal_slug: "web-pixel-pet"
+      design_slug: "web-pixel-pet"
       # No folder created — the regression was a fresh folder appearing here.
-      proposal_workspace: ""
-      proposal_existing_state:
+      design_workspace: ""
+      design_existing_state:
         overlaps:
           - { path: "docs/proposals/.workspace/tamagotchi-pet-ui/", kind: "in_progress", summary: "In-progress draft for this exact idea — the most complete of the duplicates; continue this one.", recommendation: "amend" }
           - { path: "docs/proposals/.workspace/tamagotchi-web-pet/", kind: "in_progress", summary: "Second duplicate draft for the same idea; drop it.", recommendation: "supersede" }
@@ -77,11 +77,11 @@ turns:
   # Continue the pre-existing case. The existing draft becomes the workspace and
   # we drop straight into refine — NO new folder is minted (no host.run).
   - intent: { name: change_existing, slots: { target: "docs/proposals/.workspace/tamagotchi-pet-ui/" } }
-    expect_state: proposal_refine
+    expect_state: design_refine
     expect_world:
-      proposal_overlap_decision: "change_existing"
-      proposal_change_target:    "docs/proposals/.workspace/tamagotchi-pet-ui/"
-      proposal_workspace:        "docs/proposals/.workspace/tamagotchi-pet-ui/"
+      design_overlap_decision: "change_existing"
+      design_change_target:    "docs/proposals/.workspace/tamagotchi-pet-ui/"
+      design_workspace:        "docs/proposals/.workspace/tamagotchi-pet-ui/"
     expect_host_calls:
       - handler: host.oracle.task
         args: { call: "refine_brief" }

@@ -1,14 +1,14 @@
 /**
- * Proposal-pipeline walkthrough feature-spotlight tour manifest.
+ * Design-pipeline walkthrough feature-spotlight tour manifest.
  *
- * A self-contained step array for the proposal-walkthrough video demo
- * (tests/playwright/proposal-walkthrough.spec.ts). Like
+ * A self-contained step array for the design-walkthrough video demo
+ * (tests/playwright/design-walkthrough.spec.ts). Like
  * agent-actions-manifest.ts, it opens on the home story library, explains the
  * dev-story pipeline, drives a fresh run via a route-match action step
- * (home → new session → the interactive /chat view), then walks the proposal
+ * (home → new session → the interactive /chat view), then walks the design
  * pipeline ON the interactive run: idea intake, the scout-search result, the
  * refined brief, the brief judge, the generated draft, and the published
- * proposal — using the realistic "tamagotchi-style virtual pets" idea as
+ * design doc — using the realistic "tamagotchi-style virtual pets" idea as
  * content.
  *
  * SINGLE SOURCE OF TRUTH: the same array drives both
@@ -36,13 +36,13 @@ import { type TourStep } from "./manifest.js";
 // from this one module (mirrors agent-actions-manifest.ts).
 export type { TourStep };
 
-export const PROPOSAL_WALKTHROUGH_TOUR_STEPS: readonly TourStep[] = [
+export const DESIGN_WALKTHROUGH_TOUR_STEPS: readonly TourStep[] = [
   // ── Intro: the story library → a fresh run (tour-driven navigation) ─────────
   {
     id: "pw-intro-home",
     route: "home",
     title: "Start with an idea",
-    body: "Every run begins here, in the story library. We'll walk the proposal pipeline on the dev-story: an idea becomes a scoped, scouted, brief-reviewed, and published proposal — all as one deterministic flow.",
+    body: "Every run begins here, in the story library. We'll walk the design pipeline on the dev-story: an idea becomes a scoped, scouted, brief-reviewed, and published design doc — all as one deterministic flow.",
     placement: "center",
     kind: "explain",
     advance: "next",
@@ -67,7 +67,7 @@ export const PROPOSAL_WALKTHROUGH_TOUR_STEPS: readonly TourStep[] = [
     target: "new-session-btn",
     waitForTarget: "new-session-btn",
     title: "Spin up a run",
-    body: "Click New session to create a fresh, independently-traced run of the proposal pipeline.",
+    body: "Click New session to create a fresh, independently-traced run of the design pipeline.",
     placement: "right",
     kind: "action",
     advance: "route-match",
@@ -75,15 +75,15 @@ export const PROPOSAL_WALKTHROUGH_TOUR_STEPS: readonly TourStep[] = [
     dwellMs: 3500,
   },
 
-  // ── Scene 0: Proposal intake — enter the idea ───────────────────────────────
-  // Pre-step hook: navigate the run into the proposal intake room.
+  // ── Scene 0: Design intake — enter the idea ─────────────────────────────────
+  // Pre-step hook: navigate the run into the design intake room.
   {
     id: "pw-intake",
     route: "interactive",
     target: "chat-section",
     waitForTarget: "chat-section",
-    title: "Proposal intake",
-    body: "Type your idea in the chat. kitsoki will name the proposal, search for conflicts, scaffold a brief, and draft a full proposal document — each stage visible on the live trace to the right.",
+    title: "Design intake",
+    body: "Type your idea in the chat. kitsoki will name the design, search for conflicts, scaffold a brief, and draft a full design document — each stage visible on the live trace to the right.",
     placement: "right",
     kind: "explain",
     advance: "next",
@@ -102,15 +102,15 @@ export const PROPOSAL_WALKTHROUGH_TOUR_STEPS: readonly TourStep[] = [
     dwellMs: 5500,
   },
 
-  // ── Scene 1: Proposal search — scout found no conflicts ─────────────────────
-  // Pre-step hook: fill + submit the idea, wait for proposal_search.
+  // ── Scene 1: Design search — scout found no conflicts ───────────────────────
+  // Pre-step hook: fill + submit the idea, wait for design_search.
   {
     id: "pw-search",
     route: "interactive",
     target: "chat-section",
     waitForTarget: "current-state",
     title: "Step 1 of 4 — scout search",
-    body: "kitsoki searched existing proposals for overlap. No conflicts found — the idea is clear to proceed. The current room shows at the top, and every stage lands on the live trace.",
+    body: "kitsoki searched existing designs for overlap. No conflicts found — the idea is clear to proceed. The current room shows at the top, and every stage lands on the live trace.",
     placement: "right",
     kind: "explain",
     advance: "next",
@@ -130,7 +130,7 @@ export const PROPOSAL_WALKTHROUGH_TOUR_STEPS: readonly TourStep[] = [
   },
 
   // ── Scene 2: Refine brief ───────────────────────────────────────────────────
-  // Pre-step hook: click confirm, wait for proposal_refine.
+  // Pre-step hook: click confirm, wait for design_refine.
   {
     id: "pw-refine",
     route: "interactive",
@@ -172,15 +172,15 @@ export const PROPOSAL_WALKTHROUGH_TOUR_STEPS: readonly TourStep[] = [
     dwellMs: 5500,
   },
 
-  // ── Scene 4: Proposal draft ─────────────────────────────────────────────────
-  // Pre-step hook: click advance_brief, wait for proposal_draft.
+  // ── Scene 4: Design draft ───────────────────────────────────────────────────
+  // Pre-step hook: click advance_brief, wait for design_draft.
   {
     id: "pw-draft",
     route: "interactive",
     target: "chat-section",
     waitForTarget: "current-state",
-    title: "Step 3 of 4 — proposal draft",
-    body: "The brief was approved, so a draft author wrote the full proposal document: a persistent virtual-pet widget in the session header, its mood tracking the story phase, state persisted in world vars.",
+    title: "Step 3 of 4 — design draft",
+    body: "The brief was approved, so a draft author wrote the full design document: a persistent virtual-pet widget in the session header, its mood tracking the story phase, state persisted in world vars.",
     placement: "right",
     kind: "explain",
     advance: "next",
@@ -200,13 +200,13 @@ export const PROPOSAL_WALKTHROUGH_TOUR_STEPS: readonly TourStep[] = [
   },
 
   // ── Scene 5: Done ───────────────────────────────────────────────────────────
-  // Pre-step hook: submit accept, reload, wait for proposal_done.
+  // Pre-step hook: submit accept, reload, wait for design_done.
   {
     id: "pw-done",
     route: "interactive",
     target: "chat-section",
     waitForTarget: "current-state",
-    title: "Step 4 of 4 — proposal published",
+    title: "Step 4 of 4 — design published",
     body: "docs/proposals/tamagotchi-pet-ui.md is now part of the queue. The full pipeline — idea → scout → brief → judge → draft → published — ran as one deterministic, fully-traced flow.",
     placement: "right",
     kind: "explain",
@@ -218,7 +218,7 @@ export const PROPOSAL_WALKTHROUGH_TOUR_STEPS: readonly TourStep[] = [
     route: "interactive",
     target: "state-badge",
     waitForTarget: "state-badge",
-    title: "That's the proposal pipeline",
+    title: "That's the design pipeline",
     body: "You've seen the whole flow on-camera: every input, button, and room view, with the live trace recording each stage. Hit '?' anytime to replay this tour.",
     placement: "bottom",
     kind: "explain",

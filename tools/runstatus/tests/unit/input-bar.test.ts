@@ -187,7 +187,7 @@ describe("InputBar", () => {
   // a room's view inadvertently hides the primary text input or breaks navigation.
 
   it("choice items present: text-slot composer is hidden even when text-slot intents exist", () => {
-    // This is the exact regression that was introduced: proposal room had
+    // This is the exact regression that was introduced: design room had
     // discuss + capture_existing as text-slot intents, a choice: element was
     // added to the view, and the text-slot composer silently disappeared.
     const captureIntent: IntentInfo = {
@@ -264,8 +264,8 @@ describe("InputBar", () => {
 // ── Room-level config tests ───────────────────────────────────────────────────
 //
 // These tests use IntentInfo shapes that EXACTLY mirror what
-// OrchestratorDriver.IntentInfo returns for the dev-story proposal room
-// (stories/dev-story/rooms/proposal.yaml + app.yaml).  They connect the
+// OrchestratorDriver.IntentInfo returns for the dev-story design room
+// (stories/dev-story/rooms/design.yaml + app.yaml).  They connect the
 // room's YAML configuration to the InputBar surface the operator sees.
 //
 // Regression class:
@@ -274,27 +274,27 @@ describe("InputBar", () => {
 //      "Reference Docs". The Go test in internal/orchestrator/ guards the server
 //      side; this test guards the browser's rendering of the server's response.
 //
-//   B. Choice element kills composer — adding a choice: element to the proposal
+//   B. Choice element kills composer — adding a choice: element to the design
 //      room's view must NOT silently hide the text-slot composer.
 //
 //   C. Semantic textarea fallback — when no text-slot intents are present but
 //      a typed view is (no choice), the semantic textarea must appear.
 
-describe("InputBar — proposal room config", () => {
+describe("InputBar — design room config", () => {
   // Realistic IntentInfo shapes as returned by OrchestratorDriver.IntentInfo
-  // for the proposal state. Ordering here mirrors AllowedIntents priority sort:
+  // for the design state. Ordering here mirrors AllowedIntents priority sort:
   // discuss (85) > capture_existing (78). Both have a single string slot.
-  const proposalIntents: IntentInfo[] = [
+  const designIntents: IntentInfo[] = [
     { name: "discuss", title: "Discuss", text_slot: "message", has_slots: true },
     { name: "capture_existing", title: "Reference Docs", text_slot: "paths", has_slots: true },
     { name: "look", title: "Look", has_slots: false },
     { name: "quit", title: "Quit", has_slots: false },
   ];
 
-  // Proposal room's typed view: banner + conditional prose (both branches) +
+  // Design room's typed view: banner + conditional prose (both branches) +
   // conditional kv — but NO choice element. This is the view that triggers
   // the text-slot composer path (not the choice path, not semantic).
-  const proposalTypedView = {
+  const designTypedView = {
     Elements: [
       {
         Kind: "banner" as const,
@@ -313,12 +313,12 @@ describe("InputBar — proposal room config", () => {
     ],
   };
 
-  it("Test A — proposal room: discuss is the default intent in the composer dropdown", () => {
+  it("Test A — design room: discuss is the default intent in the composer dropdown", () => {
     // Asserts that when AllowedIntents arrives in priority order (discuss
     // first, capture_existing second), the InputBar's dropdown defaults to
     // "discuss" and the composer is visible.
     const wrapper = mount(InputBar, {
-      props: { intents: proposalIntents, typedView: proposalTypedView },
+      props: { intents: designIntents, typedView: designTypedView },
     });
 
     // The composer is visible because there are text-slot intents and no choice.
@@ -336,14 +336,14 @@ describe("InputBar — proposal room config", () => {
     wrapper.unmount();
   });
 
-  it("Test B — adding a choice: element to the proposal room view silently kills the idea composer", () => {
+  it("Test B — adding a choice: element to the design room view silently kills the idea composer", () => {
     // Documents the regression class: a choice: element added to the view
     // takes over the InputBar, hiding the text-slot composer entirely.
     // The text-slot intents are still present on the server side — they just
     // have no UI affordance for the operator to reach them.
     const viewWithChoice = {
       Elements: [
-        ...proposalTypedView.Elements,
+        ...designTypedView.Elements,
         {
           Kind: "choice" as const,
           ChoiceMode: "single",
@@ -360,7 +360,7 @@ describe("InputBar — proposal room config", () => {
       ],
     };
     const wrapper = mount(InputBar, {
-      props: { intents: proposalIntents, typedView: viewWithChoice },
+      props: { intents: designIntents, typedView: viewWithChoice },
     });
 
     // The choice element is shown (the param form for capture_existing).
@@ -373,7 +373,7 @@ describe("InputBar — proposal room config", () => {
     wrapper.unmount();
   });
 
-  it("Test C — proposal room without text-slot intents and with typed view shows semantic textarea", () => {
+  it("Test C — design room without text-slot intents and with typed view shows semantic textarea", () => {
     // When only no-slot navigation intents (look, quit) are present and the
     // view has structured elements but no choice, the semantic textarea appears.
     // This is the path a future "view-only / navigate-away" state would take.
@@ -382,7 +382,7 @@ describe("InputBar — proposal room config", () => {
       { name: "quit", title: "Quit", has_slots: false },
     ];
     const wrapper = mount(InputBar, {
-      props: { intents: navOnlyIntents, typedView: proposalTypedView },
+      props: { intents: navOnlyIntents, typedView: designTypedView },
     });
 
     // The semantic composer IS shown (typed view + no choice + no text intents).

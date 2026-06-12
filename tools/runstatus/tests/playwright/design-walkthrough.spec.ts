@@ -1,14 +1,14 @@
 /**
- * Proposal pipeline walkthrough video — tamagotchi-pets edition.
+ * Design pipeline walkthrough video — tamagotchi-pets edition.
  *
- * Records the full proposal user flow from idea entry through to a published
- * proposal, using the tamagotchi-pets idea as realistic content. Designed for
+ * Records the full design user flow from idea entry through to a published
+ * design doc, using the tamagotchi-pets idea as realistic content. Designed for
  * UI review: every input, button, and room view is shown on-camera with
  * narration so a reviewer can judge whether the UI is clear and not confusing.
  *
  * Like agent-actions-video.spec.ts, this spec is TOUR-DRIVEN: it runs ONLY the
- * PROPOSAL_WALKTHROUGH_TOUR_STEPS from
- * src/tour/proposal-walkthrough-manifest.ts via window.__startTourWithSteps.
+ * DESIGN_WALKTHROUGH_TOUR_STEPS from
+ * src/tour/design-walkthrough-manifest.ts via window.__startTourWithSteps.
  * The tour opens on the home story library and its route-match action step
  * navigates home → new session → the interactive /chat view, so even the intro
  * is tour-narrated rather than silent spec orchestration.
@@ -18,10 +18,10 @@
  * (exactly as the agent-actions spec opens drawers in pre-step hooks) so each
  * spotlighted surface exists before the spotlight lands on it.
  *
- * No LLM: uses stories/dev-story/flows/proposal_tamagotchi_demo.yaml stubs.
+ * No LLM: uses  stubs.
  *
- * Record:  pnpm exec playwright test proposal-walkthrough --project=chromium
- * Fast:    WEB_CHAT_PACE=0 pnpm exec playwright test proposal-walkthrough --project=chromium
+ * Record:  pnpm exec playwright test design-walkthrough --project=chromium
+ * Fast:    WEB_CHAT_PACE=0 pnpm exec playwright test design-walkthrough --project=chromium
  */
 import { test, expect, chromium, type Browser, type BrowserContext, type Page, type Locator } from "@playwright/test";
 import path from "path";
@@ -38,13 +38,13 @@ import {
   type WebServer,
 } from "./_helpers/server.js";
 import { DEMO_VIEWPORT, captureDiagnostics } from "./_helpers/demo.js";
-import { PROPOSAL_WALKTHROUGH_TOUR_STEPS, type TourStep } from "../../src/tour/proposal-walkthrough-manifest.js";
+import { DESIGN_WALKTHROUGH_TOUR_STEPS, type TourStep } from "../../src/tour/design-walkthrough-manifest.js";
 
 // Port distinct from all other specs.
 const ADDR = "127.0.0.1:7757";
 const STORY_DIR = path.join(repoRoot, "stories", "dev-story");
-const FLOW = path.join(STORY_DIR, "flows", "proposal_tamagotchi_demo.yaml");
-const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "proposal-walkthrough");
+const FLOW = path.join(STORY_DIR, "flows", "design_tamagotchi_demo.yaml");
+const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "design-walkthrough");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
 
 let server: WebServer;
@@ -59,7 +59,7 @@ async function resolveTarget(page: Page, step: TourStep): Promise<Locator> {
   return page.getByTestId(step.target!).first();
 }
 
-test("proposal pipeline walkthrough — tamagotchi pets", async () => {
+test("design pipeline walkthrough — tamagotchi pets", async () => {
   test.setTimeout(300000);
   const browser: Browser = await chromium.launch({ headless: true });
   const context: BrowserContext = await browser.newContext({
@@ -87,11 +87,11 @@ test("proposal pipeline walkthrough — tamagotchi pets", async () => {
     await page.evaluate((stepsJson: string) => {
       (window as unknown as { __startTourWithSteps?: (s: string) => void })
         .__startTourWithSteps?.(stepsJson);
-    }, JSON.stringify(PROPOSAL_WALKTHROUGH_TOUR_STEPS));
+    }, JSON.stringify(DESIGN_WALKTHROUGH_TOUR_STEPS));
     await expect(page.getByTestId("tour-overlay")).toBeVisible({ timeout: 8000 });
 
-    // ── 2. Walk the PROPOSAL_WALKTHROUGH_TOUR_STEPS ──────────────────────────
-    for (const step of PROPOSAL_WALKTHROUGH_TOUR_STEPS) {
+    // ── 2. Walk the DESIGN_WALKTHROUGH_TOUR_STEPS ────────────────────────────
+    for (const step of DESIGN_WALKTHROUGH_TOUR_STEPS) {
       mark(`step ${step.id}`);
       // Mirror the overlay's route-guard.
       const currentUrl = page.url();
@@ -109,10 +109,10 @@ test("proposal pipeline walkthrough — tamagotchi pets", async () => {
       // Each hook submits an intent (or types the idea) and waits for the next
       // room, mirroring how the golden opens drawers before drawer steps.
       if (step.id === "pw-intake") {
-        // The fresh run boots into "main"; navigate it into proposal intake.
+        // The fresh run boots into "main"; navigate it into design intake.
         await waitForState(page, "main", 15000);
         await submit("go_idea", { message: "" });
-        await waitForState(page, "proposal", 12000);
+        await waitForState(page, "design", 12000);
         await dwell(page, SETTLE_MS);
       }
       if (step.id === "pw-idea-input") {
@@ -123,36 +123,36 @@ test("proposal pipeline walkthrough — tamagotchi pets", async () => {
         await dwell(page, SETTLE_MS);
       }
       if (step.id === "pw-search") {
-        // Submit the idea → scout search completes → proposal_search room.
+        // Submit the idea → scout search completes → design_search room.
         await page.getByTestId("composer-send").first().click();
-        await waitForState(page, "proposal_search", 20000);
+        await waitForState(page, "design_search", 20000);
         await dwell(page, SETTLE_MS);
       }
       if (step.id === "pw-refine") {
         // Confirm (no overlap) → mint workspace + scaffold brief.
         await page.getByTestId("intent-btn-confirm").first().click();
-        await waitForState(page, "proposal_refine", 20000);
+        await waitForState(page, "design_refine", 20000);
         await dwell(page, SETTLE_MS);
       }
       if (step.id === "pw-judge") {
         // Press ready → brief judge fires (verdict: continue) → advance_brief
         // appears as a choice item for the operator.
         await page.getByTestId("intent-btn-ready").first().click();
-        await waitForState(page, "proposal_refine", 15000);
+        await waitForState(page, "design_refine", 15000);
         await expect(page.getByTestId("intent-btn-advance_brief").first()).toBeVisible({ timeout: 15000 });
         await dwell(page, SETTLE_MS);
       }
       if (step.id === "pw-draft") {
-        // Advance to draft → draft author writes the proposal document.
+        // Advance to draft → draft author writes the design document.
         await page.getByTestId("intent-btn-advance_brief").first().click();
-        await waitForState(page, "proposal_draft", 20000);
+        await waitForState(page, "design_draft", 20000);
         await dwell(page, SETTLE_MS);
       }
       if (step.id === "pw-done") {
         // Accept → publish script moves the draft into docs/proposals/. Reload
         // for the same reliability reason the original spec used.
         await submit("accept", {});
-        await waitForState(page, "proposal_done", 20000);
+        await waitForState(page, "design_done", 20000);
         await dwell(page, SETTLE_MS);
       }
 
@@ -165,8 +165,8 @@ test("proposal pipeline walkthrough — tamagotchi pets", async () => {
       const titleEl = page.getByTestId("tour-title");
       const actualTitle = await titleEl.textContent({ timeout: 8000 }).catch(() => "");
       if (actualTitle !== step.title) {
-        const remaining = PROPOSAL_WALKTHROUGH_TOUR_STEPS.slice(
-          PROPOSAL_WALKTHROUGH_TOUR_STEPS.indexOf(step) + 1
+        const remaining = DESIGN_WALKTHROUGH_TOUR_STEPS.slice(
+          DESIGN_WALKTHROUGH_TOUR_STEPS.indexOf(step) + 1
         );
         const isOnNext = remaining.some((s) => s.title === actualTitle);
         if (isOnNext) {
@@ -217,7 +217,7 @@ test("proposal pipeline walkthrough — tamagotchi pets", async () => {
     throw err;
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, ARTIFACT_DIR, "proposal-walkthrough");
+    await saveVideoAsMp4(video, ARTIFACT_DIR, "design-walkthrough");
     await browser.close();
   }
 });

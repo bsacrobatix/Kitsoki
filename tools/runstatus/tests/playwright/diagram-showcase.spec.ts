@@ -1,6 +1,6 @@
 /**
  * State-diagram SHOWCASE video — the four route views against the dev-story
- * proposal pipeline (the exact scenario the design mockup was drawn for:
+ * design pipeline (the exact scenario the design mockup was drawn for:
  * `.artifacts/diagram-options/index.html`).
  *
  * A dedicated, feature-focused demo (distinct from the generic onboarding tour).
@@ -13,8 +13,8 @@
  * the manifest and video cannot silently drift.
  *
  * The diagram lives in the InteractiveView (/chat) panel, so once the intro
- * lands on the chat route the spec drives the proposal pipeline to
- * proposal_search OFF-CAMERA via RPC (the proposal_happy_path flow stubs every
+ * lands on the chat route the spec drives the design pipeline to
+ * design_search OFF-CAMERA via RPC (the design_happy_path flow stubs every
  * host call — no LLM, no cost), and the diagram-view steps' pre-step hooks
  * switch the matching diagram tab so the spotlighted testid is on screen.
  *
@@ -45,7 +45,7 @@ import { DIAGRAM_SHOWCASE_TOUR_STEPS, type TourStep } from "../../src/tour/diagr
 // same port bind.
 const ADDR = "127.0.0.1:7753";
 const STORY_DIR = path.join(repoRoot, "stories", "dev-story");
-const FLOW = path.join(STORY_DIR, "flows", "proposal_happy_path.yaml");
+const FLOW = path.join(STORY_DIR, "flows", "design_happy_path.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "diagram-showcase");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
 const DIAG_LOG = path.join(ARTIFACT_DIR, "diagnostic.log");
@@ -148,8 +148,8 @@ test("state-diagram four-view showcase (dev-story, no-LLM)", async () => {
       }
 
       // ── Pre-step setup ──────────────────────────────────────────────────
-      // After the intro lands on /chat, drive the proposal pipeline to
-      // proposal_search off-camera so the diagram populates with a real
+      // After the intro lands on /chat, drive the design pipeline to
+      // design_search off-camera so the diagram populates with a real
       // traveled leg + current station + road ahead, then stage the panel.
       if (step.id === "dsg-metro-overview") {
         await waitForState(page, "main", 15000);
@@ -170,7 +170,7 @@ test("state-diagram four-view showcase (dev-story, no-LLM)", async () => {
         // Do NOT reload — the tour overlay lives in in-memory Pinia state and a
         // reload would tear it down. The driving page is already on /chat
         // watching THIS session, so SSE pushes the state updates live.
-        await waitForState(page, "proposal_search", 15000);
+        await waitForState(page, "design_search", 15000);
         await stageDiagram(page);
         await dwell(page, SETTLE_MS);
       }

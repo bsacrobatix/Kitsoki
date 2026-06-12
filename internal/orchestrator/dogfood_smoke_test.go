@@ -786,7 +786,7 @@ func TestDogfoodSmoke_FullImplementationPipeline(t *testing.T) {
 // assumed the parent projected workspace_id / workdir / feature_branch
 // in via world_in:. The bugfix entry path (bf.idle) self-provisions a
 // worktree, but the implementation entry paths (dev-story `drive` /
-// `go_implementation` / proposal_done `implement`) never did. A live
+// `go_implementation` / design_done `implement`) never did. A live
 // dogfood run drove a feature ticket into impl and the very first
 // oracle call dispatched `workdir:""` — the model got "confused".
 //

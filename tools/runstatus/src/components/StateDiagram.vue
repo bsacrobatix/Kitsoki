@@ -29,7 +29,7 @@
       <!-- Three truth tiers, visually distinct per tools/runstatus/CLAUDE.md:
            traveled (TRACE, solid green), current (LIVE, amber) + horizon pills,
            road ahead (PROJECTION, muted/dashed). Stations are ROOMS — the
-           proposal pipeline lives in one phase, so a phase spine would collapse
+           design pipeline lives in one phase, so a phase spine would collapse
            it. Banners are declared metadata (parse.ts Room.banner). -->
       <div v-if="mode === 'metro'" class="state-diagram__metro" data-testid="diagram-metro">
         <!-- Traveled leg (TRACE) -->
@@ -457,7 +457,7 @@ const horizonArcs = computed<HorizonArc[]>(() =>
 );
 
 // ---- Room-level path + provenance (metro / ego / path views) -------------
-// The proposal pipeline (dev-story) lives in ONE phase, so these walk ROOMS,
+// The design pipeline (dev-story) lives in ONE phase, so these walk ROOMS,
 // not phases — the phase-keyed `ahead` would show nothing for it.
 const traveledRoomIds = computed<string[]>(() =>
   traveledPath(props.events ?? [], diagram.value),

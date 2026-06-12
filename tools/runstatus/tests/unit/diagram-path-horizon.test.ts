@@ -189,58 +189,58 @@ describe("horizon — spineAhead (PROJECTION tier)", () => {
   });
 });
 
-// A dev-story-shaped proposal pipeline: ALL proposal rooms in ONE phase, with a
+// A dev-story-shaped design pipeline: ALL design rooms in ONE phase, with a
 // `change_existing` SHORTCUT (search → refine) that corrupts BFS distance
 // (refine and materialize both land at distance 3). Carries `%% banner`
 // side-channel comments like the real web viz path emits.
-const PROPOSAL_SRC = `flowchart LR
+const DESIGN_SRC = `flowchart LR
   Start(["<b>Start</b>"]):::input
   subgraph SG_main["<b>phase 0 · main</b> — Hub."]
     direction LR
     ST_main[/"main"/]:::room
   end
-  subgraph SG_proposal["<b>phase 1 · proposal</b> — Proposal pipeline."]
+  subgraph SG_design["<b>phase 1 · design</b> — Design pipeline."]
     direction LR
-    ST_proposal[/"proposal"/]:::room
-    ST_proposal_search[/"proposal_search"/]:::room
-    ST_proposal_materialize[/"proposal_materialize"/]:::room
-    ST_proposal_refine[/"proposal_refine"/]:::room
-    ST_proposal_draft[/"proposal_draft"/]:::room
-    ST_proposal_done[/"proposal_done"/]:::room
+    ST_design[/"design"/]:::room
+    ST_design_search[/"design_search"/]:::room
+    ST_design_materialize[/"design_materialize"/]:::room
+    ST_design_refine[/"design_refine"/]:::room
+    ST_design_draft[/"design_draft"/]:::room
+    ST_design_done[/"design_done"/]:::room
   end
   Start --> ST_main
-  ST_main -- "go_idea" --> ST_proposal
-  ST_proposal -- "discuss" --> ST_proposal_search
-  ST_proposal -- "quit" --> ST_main
-  ST_proposal_search -- "confirm" --> ST_proposal_materialize
-  ST_proposal_search -- "change_existing" --> ST_proposal_refine
-  ST_proposal_search -- "quit" --> ST_main
-  ST_proposal_materialize -- "confirm" --> ST_proposal_refine
-  ST_proposal_materialize -- "quit" --> ST_main
-  ST_proposal_refine -- "advance_brief" --> ST_proposal_draft
-  ST_proposal_refine -- "clarify" --> ST_proposal
-  ST_proposal_refine -- "quit" --> ST_main
-  ST_proposal_draft -- "accept" --> ST_proposal_done
-  ST_proposal_draft -- "quit" --> ST_main
-  ST_proposal_done -- "go_main" --> ST_main
-%% banner proposal INTAKE
-%% banner proposal_search SEARCHING
-%% banner proposal_materialize PREPARING
-%% banner proposal_refine BRIEF
-%% banner proposal_draft DRAFTING
-%% banner proposal_done PUBLISHED
+  ST_main -- "go_idea" --> ST_design
+  ST_design -- "discuss" --> ST_design_search
+  ST_design -- "quit" --> ST_main
+  ST_design_search -- "confirm" --> ST_design_materialize
+  ST_design_search -- "change_existing" --> ST_design_refine
+  ST_design_search -- "quit" --> ST_main
+  ST_design_materialize -- "confirm" --> ST_design_refine
+  ST_design_materialize -- "quit" --> ST_main
+  ST_design_refine -- "advance_brief" --> ST_design_draft
+  ST_design_refine -- "clarify" --> ST_design
+  ST_design_refine -- "quit" --> ST_main
+  ST_design_draft -- "accept" --> ST_design_done
+  ST_design_draft -- "quit" --> ST_main
+  ST_design_done -- "go_main" --> ST_main
+%% banner design INTAKE
+%% banner design_search SEARCHING
+%% banner design_materialize PREPARING
+%% banner design_refine BRIEF
+%% banner design_draft DRAFTING
+%% banner design_done PUBLISHED
 `;
 
 describe("parse — banner side-channel (declared projection metadata)", () => {
-  const d = parseDiagram(PROPOSAL_SRC);
+  const d = parseDiagram(DESIGN_SRC);
 
   it("attaches each room's `%% banner` text by label", () => {
-    expect(d.roomById.get("ST_proposal")?.banner).toBe("INTAKE");
-    expect(d.roomById.get("ST_proposal_search")?.banner).toBe("SEARCHING");
-    expect(d.roomById.get("ST_proposal_materialize")?.banner).toBe("PREPARING");
-    expect(d.roomById.get("ST_proposal_refine")?.banner).toBe("BRIEF");
-    expect(d.roomById.get("ST_proposal_draft")?.banner).toBe("DRAFTING");
-    expect(d.roomById.get("ST_proposal_done")?.banner).toBe("PUBLISHED");
+    expect(d.roomById.get("ST_design")?.banner).toBe("INTAKE");
+    expect(d.roomById.get("ST_design_search")?.banner).toBe("SEARCHING");
+    expect(d.roomById.get("ST_design_materialize")?.banner).toBe("PREPARING");
+    expect(d.roomById.get("ST_design_refine")?.banner).toBe("BRIEF");
+    expect(d.roomById.get("ST_design_draft")?.banner).toBe("DRAFTING");
+    expect(d.roomById.get("ST_design_done")?.banner).toBe("PUBLISHED");
   });
 
   it("leaves rooms without a banner comment undefined", () => {
@@ -249,69 +249,69 @@ describe("parse — banner side-channel (declared projection metadata)", () => {
 });
 
 describe("horizon — roomSpineAhead (ROOM-level PROJECTION)", () => {
-  const d = parseDiagram(PROPOSAL_SRC);
+  const d = parseDiagram(DESIGN_SRC);
 
   it("recovers the canonical pipeline despite the distance-corrupting shortcut", () => {
-    // From proposal_search the greedy deepest-unvisited walk must yield the FULL
+    // From design_search the greedy deepest-unvisited walk must yield the FULL
     // route materialize→refine→draft→done, NOT the change_existing shortcut that
     // skips materialize (which BFS distance alone would not disambiguate).
-    const res = roomSpineAhead("ST_proposal_search", d, [
+    const res = roomSpineAhead("ST_design_search", d, [
       "ST_main",
-      "ST_proposal",
-      "ST_proposal_search",
+      "ST_design",
+      "ST_design_search",
     ]);
     expect(res.rooms.map((r) => r.label)).toEqual([
-      "proposal_materialize",
-      "proposal_refine",
-      "proposal_draft",
-      "proposal_done",
+      "design_materialize",
+      "design_refine",
+      "design_draft",
+      "design_done",
     ]);
     expect(res.branched).toBe(true); // change_existing is a real alternative
   });
 
   it("projects the whole pipeline from the intake room", () => {
-    const res = roomSpineAhead("ST_proposal", d, ["ST_main", "ST_proposal"]);
+    const res = roomSpineAhead("ST_design", d, ["ST_main", "ST_design"]);
     expect(res.rooms.map((r) => r.label)).toEqual([
-      "proposal_search",
-      "proposal_materialize",
-      "proposal_refine",
-      "proposal_draft",
-      "proposal_done",
+      "design_search",
+      "design_materialize",
+      "design_refine",
+      "design_draft",
+      "design_done",
     ]);
   });
 
   it("excludes the hub and escape intents, and stops at journey's end", () => {
-    const res = roomSpineAhead("ST_proposal_done", d, []);
+    const res = roomSpineAhead("ST_design_done", d, []);
     expect(res.rooms).toEqual([]); // only go_main (to hub) remains → nothing ahead
   });
 
   it("returns empty with no current room or no diagram", () => {
     expect(roomSpineAhead(null, d)).toEqual({ rooms: [], branched: false });
-    expect(roomSpineAhead("ST_proposal", null)).toEqual({ rooms: [], branched: false });
+    expect(roomSpineAhead("ST_design", null)).toEqual({ rooms: [], branched: false });
   });
 });
 
 describe("horizon — enteringIntents (TRACE provenance)", () => {
-  const d = parseDiagram(PROPOSAL_SRC);
+  const d = parseDiagram(DESIGN_SRC);
 
   it("maps each entered room to the intent that drove it from machine.transition", () => {
     const events: Transitionish[] = [
-      { msg: "machine.transition", attrs: { intent: "go_idea", to: "proposal" } },
-      { msg: "machine.state_entered" as unknown as string, attrs: { to: "proposal" } }, // ignored
-      { msg: "machine.transition", attrs: { intent: "discuss", to: "proposal_search" } },
-      { msg: "machine.transition", attrs: { intent: "confirm", to: "proposal_materialize" } },
+      { msg: "machine.transition", attrs: { intent: "go_idea", to: "design" } },
+      { msg: "machine.state_entered" as unknown as string, attrs: { to: "design" } }, // ignored
+      { msg: "machine.transition", attrs: { intent: "discuss", to: "design_search" } },
+      { msg: "machine.transition", attrs: { intent: "confirm", to: "design_materialize" } },
     ];
     const m = enteringIntents(events, d);
-    expect(m.get("ST_proposal")).toBe("go_idea");
-    expect(m.get("ST_proposal_search")).toBe("discuss");
-    expect(m.get("ST_proposal_materialize")).toBe("confirm");
+    expect(m.get("ST_design")).toBe("go_idea");
+    expect(m.get("ST_design_search")).toBe("discuss");
+    expect(m.get("ST_design_materialize")).toBe("confirm");
   });
 
   it("keeps the most recent entry intent when a room is re-entered", () => {
     const events: Transitionish[] = [
-      { msg: "machine.transition", attrs: { intent: "discuss", to: "proposal_search" } },
-      { msg: "machine.transition", attrs: { intent: "regenerate", to: "proposal_search" } },
+      { msg: "machine.transition", attrs: { intent: "discuss", to: "design_search" } },
+      { msg: "machine.transition", attrs: { intent: "regenerate", to: "design_search" } },
     ];
-    expect(enteringIntents(events, d).get("ST_proposal_search")).toBe("regenerate");
+    expect(enteringIntents(events, d).get("ST_design_search")).toBe("regenerate");
   });
 });

@@ -18,7 +18,7 @@
 #     └─quit ─▶ @exit:abandoned                                        └────────────────────────────┤
 #                                                                                                    └─ quit ─▶ @exit:abandoned
 #
-# search is the prior-art gate (the dev-story proposal_search analogue): a
+# search is the prior-art gate (the dev-story design_search analogue): a
 # read-only scout runs BEFORE any artifact is written, so a duplicate idea
 # is caught early. Committing (confirm / change_existing / override_new)
 # runs scripts/prd_slug.py to mint a unique per-PRD slug + workspace

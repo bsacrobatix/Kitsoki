@@ -41,16 +41,25 @@ Tie-breaker: choose the template whose **design sections you'll actually
 fill in**, and note spillover under **Impact**. If two kinds each carry
 real design weight, it's an epic.
 
-## Two ways to author: by hand, or the interactive `idea` flow
+## Two ways to author: by hand, or the interactive design pipeline
 
 This skill covers authoring a proposal **by hand** (below). kitsoki also
 ships the same discipline as a **process story** you can drive
-interactively — the `idea` flow in `stories/dev-story/` (reachable from the
-dogfood instance):
+interactively — the **design pipeline** in `stories/dev-story/` (reachable
+from the dogfood instance). Enter it ad-hoc via `idea`, or as the back half
+of the **PRD → Design walk** (type `prd`, author a PRD, then `continue` from
+the `prd_published` room to carry it into the design intake — see the
+[dev-story README](../../../stories/dev-story/README.md#prd--design-walk)):
 
 ```
-kitsoki run stories/kitsoki-dev/app.yaml   # land in main; type `idea`
+kitsoki run stories/kitsoki-dev/app.yaml   # land in main; type `idea` (or `prd`)
 ```
+
+> **Naming:** the in-story pipeline is the **design** pipeline (rooms
+> `design` / `design_search` / `design_refine` / `design_draft` / …); the
+> templates (`docs/proposals/templates/`), the `docs/proposals/` output
+> directory, and this **`proposal-authoring`** skill keep their names — the
+> pipeline emits proposal-shaped design docs into `docs/proposals/`.
 
 It walks the proposal process from `docs/proposals/proposals.md`:
 
@@ -76,7 +85,7 @@ The interactive flow **applies the same spine + template selection** this
 skill describes — use whichever fits. The design discipline behind it
 (deterministic vs. decide vs. task, the validation sandwich, the
 working-folder ergonomics) is [`docs/proposals/process-design.md`](../../proposals/process-design.md) §§1–5;
-the room-by-room mechanics are in `stories/dev-story/rooms/proposal*.yaml`,
+the room-by-room mechanics are in `stories/dev-story/rooms/design*.yaml`,
 modelled on the gold-standard `stories/prd/`.
 
 ## Authoring a focused proposal

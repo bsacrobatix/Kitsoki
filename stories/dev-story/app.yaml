@@ -81,7 +81,7 @@ hosts:
   - host.inbox.add
   - host.oracle.ask
   - host.run
-  # ── Proposal-authoring pipeline (rooms/proposal*.yaml) ────────────
+  # ── Design pipeline (rooms/design*.yaml) ───────────────────────
   # 4-stage pipeline: intake → search (decide ×2) → refine (task + decide) →
   # draft+publish (task + run). The brief is scaffolded in the refine room via
   # host.artifacts_dir so search results can inform it; host.ide.open_file
@@ -92,6 +92,15 @@ hosts:
   - host.oracle.search
   - host.artifacts_dir
   - host.ide.open_file
+  # ── PRD discovery (imported `prd`, stories/prd/) ──────────────────
+  # The PRD pipeline is a conversational discovery (host.oracle.converse +
+  # a persistent chat via host.chat.resolve) that decide/task-gates into a
+  # published PRD. Its decide/task/search/artifacts_dir/ide.open_file/run
+  # needs are already covered above; converse + chat.resolve are unique to
+  # it. An instance importing dev-story with `hosts: declared` must list
+  # both in its own allow-list (see stories/kitsoki-dev/app.yaml).
+  - host.oracle.converse
+  - host.chat.resolve
 
 # Persona table (oracle-split proposal §3.5).
 #
@@ -106,30 +115,30 @@ agents:
     tools: [Read, Grep, Glob]
     bash_profile: read-only
 
-  # ── Proposal-authoring personas (rooms/proposal*.yaml) ────────────
+  # ── Design-pipeline personas (rooms/design*.yaml) ──────────────
   # One persona per pipeline step so the trace attributes model + token
   # usage per phase, the same discipline as stories/prd/. All are
   # read-only except the refiner and author, which write into the
   # per-session workspace.
-  proposal_namer:
+  design_namer:
     system_prompt: "You name kitsoki proposals. Turn an idea into a short, meaningful 2-5 word kebab-case slug (like an existing docs/proposals/<slug>.md filename) — never a raw sentence. Glance at the existing proposals + in-progress workspace to match the house style and avoid an already-taken name."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
     external_side_effect: false
 
-  proposal_brief_judge:
+  design_brief_judge:
     system_prompt: "You are a proposal reviewer sanity-checking a brief an operator has just filled in. Read the brief from disk and decide whether it has enough signal to proceed (a crisp Why, a one-screen What-changes, and a named kind) or whether it needs clarification. When it needs work, return the smallest set of specific clarifying questions."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
     external_side_effect: false
 
-  proposal_scout:
+  design_scout:
     system_prompt: "You are a kitsoki maintainer checking whether a proposed idea overlaps with work already in flight. Search the proposals workspace (docs/proposals/.workspace/), the accepted proposals (docs/proposals/*.md), and the feature/bug docs for anything the idea duplicates, extends, or conflicts with. When you find an overlap, recommend AMENDING the existing proposal rather than creating a new one. Report where the idea fits on the roadmap."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
     external_side_effect: false
 
-  proposal_refiner:
+  design_refiner:
     # ⛔ This agent MAINTAINS THE BRIEF — it must NEVER implement the idea.
     # working_dir is the per-session workspace, NOT a write jail — the constraint
     # is this instruction. It writes EXACTLY ONE file: the brief at the given path.
@@ -138,15 +147,15 @@ agents:
     tools: [Read, Grep, Glob, Write, Edit]
     external_side_effect: false
 
-  proposal_researcher:
+  design_researcher:
     system_prompt: "You are a kitsoki maintainer curating the reference materials a proposal must build on. Read the idea and the brief, then search the repo's DOCUMENTATION, rules, and guidelines — docs/, READMEs, gold-standard stories, the proposal templates and skill — for prior art, constraints, and conventions the proposal must honour. For each reference give the path, the specific section(s) / line range that matter, and a one-line rationale. Prefer a short, high-signal list."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
     external_side_effect: false
 
-  proposal_author:
+  design_author:
     # ⛔ This agent AUTHORS A PROPOSAL DOCUMENT — it must NEVER implement the
-    # idea. The hard rule is repeated in prompts/proposal_draft.md. It has
+    # idea. The hard rule is repeated in prompts/design_draft.md. It has
     # Write/Edit ONLY to produce the proposal markdown (working_dir is not a
     # write jail — the constraint is the instruction, so it is emphatic).
     system_prompt: "You are a kitsoki maintainer authoring a PROPOSAL DOCUMENT — a design write-up, NOT an implementation. You write exactly ONE file: the proposal markdown at the given output path (or, when amending, the named existing proposal). You MUST NOT implement the idea: do NOT create, edit, or modify any source code, test, config, story YAML, or any other repository file. Reading the codebase (Read/Grep/Glob) to ground the proposal is expected; writing anything other than the single proposal markdown is a hard failure. Classify the change kind, copy the matching template under docs/proposals/templates/, and fill the Why / What changes / Impact spine, grounding every claim in the cited references."
@@ -315,55 +324,55 @@ world:
   oracle_question:     { type: string, default: "" }
   oracle_answer:       { type: string, default: "" }
 
-  # ── Proposal-authoring pipeline (rooms/proposal*.yaml) ────────────
+  # ── Design pipeline (rooms/design*.yaml) ───────────────────────
   # 4-stage pipeline: intake → search → refine → draft+publish.
-  # Per-session scratch dir is `proposal_workspace` — NOT world.workdir
+  # Per-session scratch dir is `design_workspace` — NOT world.workdir
   # (that is the bf/pr worktree). See docs/proposals/process-design.md §4.
-  proposal_slug:           { type: string, default: "" }   # meaningful slug; seeds the workspace dir + final filename
-  proposal_workspace:      { type: string, default: "" }   # docs/proposals/.workspace/<slug> — gitignored scratch
-  proposal_idea:           { type: string, default: "" }   # raw idea text from intake
-  proposal_kind:           { type: string, default: "" }   # story | runtime | tui | tracing | epic (chosen by the author)
-  proposal_existing_paths: { type: string, default: "" }   # operator-named existing docs passed to search
+  design_slug:           { type: string, default: "" }   # meaningful slug; seeds the workspace dir + final filename
+  design_workspace:      { type: string, default: "" }   # docs/proposals/.workspace/<slug> — gitignored scratch
+  design_idea:           { type: string, default: "" }   # raw idea text from intake
+  design_kind:           { type: string, default: "" }   # story | runtime | tui | tracing | epic (chosen by the author)
+  design_existing_paths: { type: string, default: "" }   # operator-named existing docs passed to search
 
   # search (002-existing-state.md + 003-references.json)
-  proposal_existing_state:   { type: object, default: {} } # { overlaps: [{path, kind, summary, recommendation}], roadmap_fit }
-  proposal_existing_path:    { type: string, default: "" } # path 002-existing-state.md was written to
-  proposal_overlap_decision: { type: string, default: "" } # "" | new | change_existing
-  proposal_change_target:    { type: string, default: "" } # path of the proposal to amend when change_existing
-  proposal_reference_hits:   { type: object, default: {} } # raw hits from host.oracle.search: { hits: [{path, chunk_id, text, score}], top }
-  proposal_references:       { type: object, default: {} } # { items: [{ path, sections, rationale }] }
-  proposal_references_path:  { type: string, default: "" } # path 003-references.json was written to
+  design_existing_state:   { type: object, default: {} } # { overlaps: [{path, kind, summary, recommendation}], roadmap_fit }
+  design_existing_path:    { type: string, default: "" } # path 002-existing-state.md was written to
+  design_overlap_decision: { type: string, default: "" } # "" | new | change_existing
+  design_change_target:    { type: string, default: "" } # path of the proposal to amend when change_existing
+  design_reference_hits:   { type: object, default: {} } # raw hits from host.oracle.search: { hits: [{path, chunk_id, text, score}], top }
+  design_references:       { type: object, default: {} } # { items: [{ path, sections, rationale }] }
+  design_references_path:  { type: string, default: "" } # path 003-references.json was written to
 
   # refine (001-brief.md + refinement analysis)
-  proposal_brief_path:      { type: string, default: "" }  # path of the operator-editable 001-brief.md
-  proposal_brief_decision:  { type: object, default: {} }  # decide verdict: { verdict: continue|clarify, questions: [...], reason }
-  proposal_refine_analysis: { type: object, default: {} }  # refiner output: { gaps: [...], summary }
-  proposal_last_refine_message: { type: string, default: "" }  # operator's last refine instruction, echoed in the brief view
+  design_brief_path:      { type: string, default: "" }  # path of the operator-editable 001-brief.md
+  design_brief_decision:  { type: object, default: {} }  # decide verdict: { verdict: continue|clarify, questions: [...], reason }
+  design_refine_analysis: { type: object, default: {} }  # refiner output: { gaps: [...], summary }
+  design_last_refine_message: { type: string, default: "" }  # operator's last refine instruction, echoed in the brief view
 
   # draft (004-proposal.md) + publish
-  proposal_artifact:       { type: object, default: {} }   # task result: { title, summary_markdown, file_path, kind, confidence, needs_clarification, follow_up_questions }
-  proposal_file:           { type: string, default: "" }   # final published path docs/proposals/<slug>.md
-  proposal_ticket_path:    { type: string, default: "" }   # feature ticket minted at publish, links back to proposal_file
+  design_artifact:       { type: object, default: {} }   # task result: { title, summary_markdown, file_path, kind, confidence, needs_clarification, follow_up_questions }
+  design_file:           { type: string, default: "" }   # final published path docs/proposals/<slug>.md
+  design_ticket_path:    { type: string, default: "" }   # feature ticket minted at publish, links back to design_file
 
   # feedback + per-phase cycle budgets
-  proposal_refine_feedback:   { type: string, default: "" }
-  proposal_cycle:             { type: int, default: 0 }    # global audit counter for the proposal flow
-  proposal_brief_cycle:       { type: int, default: 0 }
-  proposal_brief_budget:      { type: int, default: 5 }
-  proposal_draft_cycle:       { type: int, default: 0 }
-  proposal_draft_budget:      { type: int, default: 5 }
+  design_refine_feedback:   { type: string, default: "" }
+  design_cycle:             { type: int, default: 0 }    # global audit counter for the proposal flow
+  design_brief_cycle:       { type: int, default: 0 }
+  design_brief_budget:      { type: int, default: 5 }
+  design_draft_cycle:       { type: int, default: 0 }
+  design_draft_budget:      { type: int, default: 5 }
 
   # ── Ideas reviewer (rooms/ideas.yaml) ─────────────────────────────
   # The backlog reconciler: reads world.ideas_path, the commit history, and the
   # docs, proposes section moves (ideas_review), and rewrites the file
-  # deterministically on `apply`. `pick` seeds proposal_seed_idea (consumed by
+  # deterministically on `apply`. `pick` seeds design_seed_idea (consumed by
   # the proposal intake) so a blocked author flows straight into authoring.
   ideas_path:            { type: string, default: "ideas.md" } # backlog file (repo-relative); per-story files work by overriding this
   ideas_review:          { type: object, default: {} }          # decide report: { reclassifications: [...], candidates: [...], summary }
   ideas_review_path:     { type: string, default: "" }          # path the report JSON was written to (fed to the reconcile script)
   ideas_review_feedback: { type: string, default: "" }          # optional operator steering for a re-scan
   ideas_apply_result:    { type: object, default: {} }          # reconcile script result: { moved, not_found, sections }
-  proposal_seed_idea:    { type: string, default: "" }          # candidate text handed from the ideas room into the proposal intake
+  design_seed_idea:    { type: string, default: "" }          # candidate text handed from the ideas room into the proposal intake
 
   # ── PR handoff (lifted from `pr` import's exits.merged.set) ───────
   last_pr_url:         { type: string, default: "" }
@@ -563,7 +572,7 @@ intents:
         type: string
         required: true
 
-  # ── Proposal-authoring pipeline vocabulary ────────────────────────
+  # ── Design pipeline vocabulary ────────────────────────────────────
   # 4-stage pipeline: intake (one discuss message) → search → refine → draft.
   # `discuss` captures the idea (intake) or folds a message into the brief
   # (refine). `ready` runs the brief judge in the refine room. `advance_brief`
@@ -648,6 +657,16 @@ intents:
     description: "Create a new proposal despite the detected overlap (recorded for audit)."
     examples: ["new anyway", "ignore the overlap", "still create new"]
     priority: 58
+
+  # ── PRD → Design walk vocabulary ──────────────────────────────────
+  # `go_prd` (main) enters the imported prd discovery pipeline. The
+  # prd_published landing reuses the generic `continue` intent (above) to
+  # carry the just-published PRD into the design intake.
+  go_prd:
+    title: "Author a PRD"
+    description: "Start the PRD discovery pipeline, then carry it into design."
+    examples: ["prd", "write a prd", "start a prd", "author a prd", "product requirements"]
+    priority: 86
 
   # ── Ideas reviewer vocabulary (rooms/ideas.yaml) ──────────────────
   apply:
@@ -905,6 +924,47 @@ imports:
         to: main
         set:
           status: "dismissed"
+      abandoned:
+        to: main
+        set:
+          status: "abandoned"
+
+  # PRD discovery — the front of the PRD → Design walk. Reached from main
+  # via `go_prd`. prd runs discovery → clarifying → brief → references →
+  # drafting and publishes a PRD to docs/prd/<slug>.md (prd_publish.py
+  # returns prd_file). On @exit:done we lift prd_file into the parent and
+  # land in `prd_published` (rooms/prd_published.yaml), which tells the
+  # operator the PRD shipped and offers `continue` (into the design
+  # intake, seeded with the PRD path) or `go_main`. prd stays runnable
+  # standalone — this redirect lives only in dev-story's composition.
+  prd:
+    source: ../prd
+    entry: idle
+
+    world_in:
+      workdir:    "{{ world.workdir }}"
+      judge_mode: "{{ world.judge_mode }}"
+      judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
+
+    # prd's checkpoint vocabulary (discuss/ready/confirm/accept/refine/
+    # clarify/regenerate/quit/look …) collides wholesale with the design
+    # pipeline's intents, so nothing lifts to bare: the operator types the
+    # prefixed `prd__accept` etc. while inside prd (the discovery rooms are
+    # conversational, so free-text still routes to the child's default).
+    intents:
+      import: []
+
+    exits:
+      # No `set:` projection for prd_file: it is a host BIND in prd's
+      # drafting accept arc (prd_publish.py stdout), so it commits
+      # post-dispatch — AFTER an exit `set:` (a synchronous effect) would
+      # read it. The flat world keeps prd__prd_file once the turn settles,
+      # so the prd_published landing room reads world.prd__prd_file
+      # directly (settled by render time). Contrast bf → pr, whose carried
+      # value (done_artifact) is a synchronous `set:`, so the projection
+      # works there.
+      done:
+        to: prd_published
       abandoned:
         to: main
         set:

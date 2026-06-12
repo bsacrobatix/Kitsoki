@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""proposal_workspace.py — validate a proposed slug for uniqueness and
+"""design_workspace.py — validate a proposed slug for uniqueness and
 return the per-session workspace path.
 
 Usage:
-    python3 proposal_workspace.py <proposed-slug>
+    python3 design_workspace.py <proposed-slug>
 
 The slug itself is named by an oracle.decide call (the LLM turns the idea
-into a short kebab-case name — see prompts/proposal_slug.md); THIS script is
+into a short kebab-case name — see prompts/design_slug.md); THIS script is
 the deterministic uniqueness check that completes the validation sandwich:
 it ensures the slug collides with neither an accepted proposal
 (`docs/proposals/<slug>.md`) nor an in-progress draft
@@ -15,7 +15,7 @@ unique.
 
 stdout: a JSON object {"slug": "...", "workspace": "docs/proposals/.workspace/<slug>"}.
 host.run parses it into `stdout_json` so the intake room binds both
-`proposal_slug` and `proposal_workspace` from this one call.
+`design_slug` and `design_workspace` from this one call.
 """
 
 import json

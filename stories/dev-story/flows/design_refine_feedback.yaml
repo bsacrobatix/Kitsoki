@@ -1,12 +1,12 @@
-# proposal_refine_feedback — the refine room's conversational feedback loop.
+# design_refine_feedback — the refine room's conversational feedback loop.
 #
 # Locks in the golden behaviour added when the idea-proposal room graduated to
-# a golden example (see the proposal_refine room's "You asked" / open-questions
-# view block and the stable-question-numbering rule in prompts/proposal_refine.md):
+# a golden example (see the design_refine room's "You asked" / open-questions
+# view block and the stable-question-numbering rule in prompts/design_refine.md):
 #
 #   1. Typing feedback in the brief room routes to `discuss` (the room's
 #      default_intent). The arc FIRST records the operator's message into
-#      world.proposal_last_refine_message, THEN re-runs the refiner with that
+#      world.design_last_refine_message, THEN re-runs the refiner with that
 #      message folded into its context (id=refine_brief_update).
 #   2. The re-rendered view echoes the instruction back ("You asked: …") so the
 #      operator gets confirmation the refiner heard them.
@@ -16,21 +16,21 @@
 #      unused integer. The view renders the gap strings VERBATIM, so the stable
 #      numbering the refiner emits is exactly what the operator sees.
 #
-# The brief already exists (proposal_brief_path set) and the refiner has already
-# run once (proposal_refine_analysis set with the initial gaps), so the on_enter
+# The brief already exists (design_brief_path set) and the refiner has already
+# run once (design_refine_analysis set with the initial gaps), so the on_enter
 # scaffold/open/refiner steps are all once-guarded and must NOT re-fire — only
 # the discuss arc's refine_brief_update task runs.
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposal_refine
+initial_state: design_refine
 initial_world:
   judge_mode:           "human"
-  proposal_idea:        "Add a per-session working folder primitive."
-  proposal_slug:        "wf"
-  proposal_workspace:   "docs/proposals/.workspace/wf"
-  proposal_brief_path:  "docs/proposals/.workspace/wf/001-brief.md"
-  proposal_refine_analysis:
+  design_idea:        "Add a per-session working folder primitive."
+  design_slug:        "wf"
+  design_workspace:   "docs/proposals/.workspace/wf"
+  design_brief_path:  "docs/proposals/.workspace/wf/001-brief.md"
+  design_refine_analysis:
     summary: "Idea is clear; cleanup timing and the engine seam are open."
     # Two open questions, each carrying its STABLE permanent number.
     gaps:
@@ -61,13 +61,13 @@ turns:
   - intent:
       name: discuss
       slots: { message: "Clean it up on session end, not lazily." }
-    expect_state: proposal_refine
+    expect_state: design_refine
     expect_world:
       # The operator's instruction is recorded for the echo line.
-      proposal_last_refine_message: "Clean it up on session end, not lazily."
+      design_last_refine_message: "Clean it up on session end, not lazily."
       # The refiner's updated analysis replaces the prior one. Stable numbering:
       # #1 dropped (answered), #2 unchanged, #3 new — never re-sequenced.
-      proposal_refine_analysis:
+      design_refine_analysis:
         summary: "Cleanup timing settled (session end); seam + import-cache interaction still open."
         gaps:
           - "2. Which engine seam establishes the folder at session start?"
@@ -86,7 +86,7 @@ turns:
   # open-questions block renders the survivor and new gap with their stable
   # numbers — and that the dropped #1 is gone.
   - intent: { name: look, slots: {} }
-    expect_state: proposal_refine
+    expect_state: design_refine
     expect_view_matches: "2\\. Which engine seam[\\s\\S]*3\\. How does the per-session folder"
 
 expect_no_errors: true

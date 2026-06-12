@@ -1,0 +1,247 @@
+# design_draft — generate the proposal, then publish it.
+#
+# Stage 4 (final) of the 4-stage proposal pipeline. on_enter runs the
+# `design_author` (host.oracle.task) which classifies the kind, copies
+# the matching docs/proposals/templates/<kind>.md, fills the Why / What
+# changes / Impact spine, and writes 004-proposal.md into the workspace —
+# OR, when the overlap gate chose change_existing, amends
+# design_change_target in place. working_dir is the repo root so both the
+# workspace write and an amend of docs/proposals/<file>.md resolve.
+#
+# On `accept`: publish_design.py moves 004-proposal.md from the workspace
+# to docs/proposals/<slug>.md (collision-safe) AND mints a feature ticket
+# under issues/features/ that links back to the published proposal. It emits a
+# JSON envelope so the one call binds design_file plus the new ticket's
+# id / path / title; the accept arc pins ticket_type=feature so design_done's
+# `implement` action (go_implementation) routes straight into the impl
+# pipeline. The room then transitions to design_done (a confirmation view,
+# inline in this file) without going through a separate room. The prior
+# design_publish room is gone.
+#
+# Checkpoint exits: accept → publish (+ file ticket) → design_done;
+#                   refine → re-draft (budget-capped);
+#                   clarify → design_refine (keep search results, redo brief).
+
+states:
+
+  design_draft:
+    description: "Draft the proposal; review and accept, refine, or step back."
+    view:
+      - banner:
+          text:     "DRAFTING"
+          subtitle: "Fill the template, review, publish"
+          color:    "#8B5CF6"
+      - prose: "design cycle {{ world.design_cycle }} · draft attempt {{ world.design_draft_cycle }}/{{ world.design_draft_budget }}"
+      - kv:
+          pairs:
+            Draft: '{{ world.design_artifact.file_path|default:"(drafting — writes 004-proposal.md)" }}'
+      - kv:
+          pairs:
+            Amending: '{{ world.design_change_target }}'
+        when: "world.design_change_target"
+      - kv:
+          pairs:
+            Title:      '{{ world.design_artifact.title|default:"(pending)" }}'
+            Kind:       '{{ world.design_artifact.kind|default:"(pending)" }}'
+            Confidence: '{{ world.design_artifact.confidence|default:"(pending)" }}'
+      - prose: "⚠ The author flagged that more input is needed — see the follow-ups, then use clarify to revise the brief."
+        when:  "world.design_artifact.needs_clarification"
+      - code: |
+          {% for q in world.design_artifact.follow_up_questions %}- {{ q }}
+          {% empty %}(no follow-ups){% endfor %}
+        when: "world.design_artifact.needs_clarification"
+      - heading: "Design"
+      - code: '{{ world.design_artifact.summary_markdown|default:"(pending — oracle has not returned yet; the full proposal is written to the output file)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "accept"
+              hint:   "publish — the design is ready"
+              intent: accept
+            - label:  "refine"
+              hint:   "re-draft with feedback (same inputs)"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what to change"
+                required:    false
+            - label:  "clarify"
+              hint:   "the inputs were incomplete — step back to revise the brief"
+              intent: clarify
+            - label:  "quit"
+              hint:   "abandon this design"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    relevant_world: [design_idea, design_kind, design_workspace, design_brief_path, design_existing_state, design_change_target, design_references, design_artifact, design_refine_feedback, design_cycle, design_draft_cycle, design_draft_budget]
+    on_enter:
+      # `once: true` for reload-safety (the agentic author is the most
+      # expensive call in the pipeline): keyed off its binds (design_artifact
+      # + design_kind — both unset on first entry, both set after). /reload
+      # re-renders the stored draft; `refine`/`clarify` clear design_artifact
+      # (an unset bind ⇒ once: re-arms) to force a re-draft.
+      - invoke: host.oracle.task
+        once: true
+        with:
+          agent: design_author
+          working_dir: "."
+          acceptance:
+            schema: schemas/design-artifact.json
+          context:
+            prompt: prompts/design_draft.md
+            args:
+              idea:            "{{ world.design_idea }}"
+              kind:            "{{ world.design_kind }}"
+              workdir:         "{{ world.design_workspace }}"
+              brief_path:      "{{ world.design_brief_path }}"
+              existing_state:  "{{ world.design_existing_state }}"
+              change_target:   "{{ world.design_change_target }}"
+              references:      "{{ world.design_references }}"
+              output_path:     "{{ world.design_workspace }}/004-proposal.md"
+              refine_feedback: "{{ world.design_refine_feedback }}"
+              cycle:           "{{ world.design_cycle }}"
+        bind:
+          design_artifact: submitted
+          design_kind:     "submitted.kind"
+        on_error: design_refine
+    on:
+      # Accept: publish the proposal (move it from workspace to docs/proposals/)
+      # AND mint a feature ticket that links back to it. publish_design.py
+      # handles collision-proofing and emits a JSON envelope so a single call
+      # binds the published path plus the new ticket's id / path / title.
+      # ticket_type is pinned to "feature" here so the draft room's
+      # `go_implementation` arc (and main's `drive` router) route the freshly
+      # filed proposal straight into the impl pipeline.
+      accept:
+        - target: design_done
+          effects:
+            - invoke: host.run
+              id: publish
+              with:
+                cmd: python3
+                args:
+                  - "stories/dev-story/scripts/publish_design.py"
+                  - "{{ world.design_workspace }}"
+                  - "{{ world.design_slug }}"
+                  - "{{ world.design_change_target }}"
+                  - "{{ world.design_artifact.title }}"
+                  - "{{ world.design_idea }}"
+              bind:
+                design_file: stdout_json.design_file
+                ticket_id:     stdout_json.ticket_id
+                ticket_title:  stdout_json.ticket_title
+                ticket_url:    stdout_json.design_file
+                thread:        stdout_json.ticket_id
+                design_ticket_path: stdout_json.ticket_path
+              on_error: design_draft
+            - set:
+                ticket_type: "feature"
+
+      # Same inputs, revise the prose. Budget gate → main.
+      refine:
+        - when: "world.design_draft_cycle >= world.design_draft_budget"
+          target: main
+          effects:
+            - set:
+                last_error: "design abandoned — draft budget exhausted"
+                prev_state: "main"
+        - target: design_draft
+          effects:
+            - set:
+                design_artifact:        {}
+                design_refine_feedback: "{{ slots.feedback ?? '' }}"
+                design_draft_cycle:     "{{ world.design_draft_cycle + 1 }}"
+                design_cycle:           "{{ world.design_cycle + 1 }}"
+
+      # Inputs were incomplete — step back to refine the brief.
+      # Keep search results (design_existing_state, design_references) since
+      # the search is already done; just re-do the brief. The clarify sentinel on
+      # design_brief_decision prevents the judge from auto-advancing on re-entry
+      # to design_refine (clearing it via `ready` re-arms the judge).
+      clarify:
+        - target: design_refine
+          effects:
+            - set:
+                design_brief_decision:
+                  verdict: "clarify"
+                  reason:  "Stepped back from draft — revise the brief (edit it or keep talking), then say ready to re-run the check."
+                  questions: []
+                design_refine_analysis: {}
+                design_artifact:        {}
+
+      quit:
+        - target: main
+          effects:
+            - set:
+                last_error: "design abandoned at draft"
+                prev_state: "main"
+      look:
+        - target: .
+
+  # Post-publish confirmation view (was design_publish.yaml, now inline).
+  # Entered from the accept arc after publish_design.py has bound design_file.
+  # on_enter is empty — publish already happened in the accept arc's effects.
+  design_done:
+    description: "Proposal published — review the file and return to your day."
+    view:
+      - banner:
+          text:     "PUBLISHED"
+          subtitle: "Design moved into the queue"
+          color:    "#10B981"
+      - kv:
+          pairs:
+            Published: '{{ world.design_file|default:"(publishing…)" }}'
+      - prose: 'Checks archived under  {{ world.design_workspace }}/'
+      - kv:
+          pairs:
+            Title: '{{ world.design_artifact.title|default:"(n/a)" }}'
+            Kind:  '{{ world.design_artifact.kind|default:"(n/a)" }}'
+      - kv:
+          pairs:
+            Ticket: '{{ world.ticket_id }} — {{ world.design_ticket_path }}'
+        when: "world.ticket_id != ''"
+      - prose: "A **feature ticket** was filed for this design — it links back to the published doc. Choose **implement** to drive it into the implementation pipeline now, or **main** to return to your day (the ticket is waiting in your queue)."
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "implement"
+              hint:   "drive the new feature ticket into the implementation pipeline"
+              intent: go_implementation
+            - label:  "main"
+              hint:   "back to the engineer's day landing"
+              intent: go_main
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    relevant_world: [design_workspace, design_slug, design_change_target, design_artifact, design_file, design_ticket_path, ticket_id, ticket_title, ticket_type]
+    on:
+      # The accept arc already pinned ticket_id / ticket_type=feature /
+      # ticket_url / thread, so impl's world_in: projection has everything it
+      # needs. Route straight into the impl import compound (same destination
+      # main's `drive` uses for a feature ticket).
+      go_implementation:
+        - when: "world.ticket_id != ''"
+          target: impl
+          effects:
+            - set:
+                last_error: ""
+                prev_state: "main"
+        - default: true
+          target: main
+          guard_hint: "No ticket was filed — return to main and pick one from your queue."
+          effects:
+            - set:
+                last_error: "design published but no ticket id — pick the feature from `tickets`"
+                prev_state: "main"
+      go_main:
+        - target: main
+          effects:
+            - set:
+                last_error: ""
+                prev_state: "main"
+      look:
+        - target: .

@@ -9,7 +9,7 @@
 An oracle whose toolbox resolves to the `write` or `external` class — chiefly
 `host.oracle.task`, but any write-capable `converse` too — can write anywhere
 its tools reach. `working_dir` is not a jail (`internal/host/oracle_task.go:284`
-just sets the subprocess CWD). Real incident: `proposal_author`, asked for a
+just sets the subprocess CWD). Real incident: `design_author`, asked for a
 *proposal document*, implemented the idea instead — wrote `cmd/kitsoki/web.go` +
 `internal/runstatus/server/live.go` + a `/actions→/intents` rename alongside
 `docs/proposals/web-ui.md`.
@@ -57,9 +57,9 @@ is the workspace, and the engine decides what leaves the box.*
   `Sandbox` field on the task invoke); load-time validation.
 - **Vocabulary:** one config block (`sandbox:`), the persist/override events
   (table below). No change to `set:`/`bind:`/`once:`/the acceptance loop.
-- **Stories affected:** none forced. `proposal_author` is the first adopter
+- **Stories affected:** none forced. `design_author` is the first adopter
   (workspace = `docs/proposals/.workspace/<slug>`; it already writes only
-  there and `publish_proposal.py` moves the result out — so confinement is a
+  there and `publish_design.py` moves the result out — so confinement is a
   natural fit). bugfix/implementation/cypilot writers can adopt to confine to
   their worktree.
 - **Backward compat:** opt-in, default off. No `sandbox:` → today's behavior.
@@ -128,7 +128,7 @@ and whether the judge agreed).
 
 ## Backward compatibility / migration
 
-Opt-in; absent `sandbox:` nothing changes. First adopter `proposal_author`
+Opt-in; absent `sandbox:` nothing changes. First adopter `design_author`
 (its YOLO becomes kernel-impossible). Degraded mode (no userns/Landlock — e.g.
 some CI/containers) keeps tool-minimization (no `Bash` for doc agents) +
 prompt guidance + the persist allowlist, and emits a `TaskSandboxStart{backend:
@@ -138,7 +138,7 @@ backend.
 ## Tasks
 
 Dependency-ordered. **The fix ships at the end of Phase 4** (confinement alone
-makes `proposal_author`'s YOLO kernel-impossible); the persist/override layer
+makes `design_author`'s YOLO kernel-impossible); the persist/override layer
 (Phase 5) is a deferred slice for *worktree-mutating* tasks and could be its
 own proposal. Sizes: S ≈ <½ day, M ≈ 1–2 days, L ≈ 3+ days. Critical path runs
 through **0.1**.
@@ -195,10 +195,10 @@ through **0.1**.
         (a script) that attempts to write `cmd/kitsoki/web.go` → denied; a
         workspace write → ok. Drives the real `oracle_task` confinement path.
 
-## Phase 4 — adopt proposal_author  (deps: Phase 3)  ← THE FIX SHIPS HERE
-- [ ] 4.1 (S) Add `sandbox:` to the `proposal_draft` task invoke
-        (workspace = `{{ world.proposal_workspace }}`, repo_ro, allow_net).
-        publish_proposal.py (outside the sandbox) still moves the result out —
+## Phase 4 — adopt design_author  (deps: Phase 3)  ← THE FIX SHIPS HERE
+- [ ] 4.1 (S) Add `sandbox:` to the `design_draft` task invoke
+        (workspace = `{{ world.design_workspace }}`, repo_ro, allow_net).
+        publish_design.py (outside the sandbox) still moves the result out —
         unchanged.
 - [ ] 4.2 (S) Flow/integration: confirm the existing proposal flows stay green
         and the sandboxed author cannot reach tracked source.
@@ -210,7 +210,7 @@ through **0.1**.
 ## Phase 5 — persist + override gate (DEFERRED slice; worktree-mutating tasks)
 - [ ] 5.1 (M) Post-task persist: diff the workspace, copy in-allowlist
         (`persist:` globs) files into the repo; `TaskPersist{paths}` event.
-        (Not needed by proposal_author — its workspace is the gitignored scratch
+        (Not needed by design_author — its workspace is the gitignored scratch
         and publish handles the move; this is for tasks whose output lands in
         tracked paths.)
 - [ ] 5.2 (M) Reject-with-override: an out-of-allowlist persist is rejected;
@@ -239,7 +239,7 @@ through **0.1**.
   containers) with a config knob to hard-fail a `sandbox:` task where
   confinement is mandatory (2.2/3.2).
 - **Who implements:** a non-sandboxed engineer/agent builds this — do NOT route
-  it through the YOLO-prone `proposal_author` (it can't implement anyway once
+  it through the YOLO-prone `design_author` (it can't implement anyway once
   it has no Bash + is sandboxed; noted to avoid the obvious irony).
 - **Sequencing recap:** `0.1 → {1, 2} → 3 → 4` ships the fix; `5` (needs 1+3)
   and `6` follow. 0.1 is the only real unknown; if its bind set proves
@@ -251,7 +251,7 @@ through **0.1**.
 Core needs no LLM: drive a subprocess inside the backend and assert the
 repo-write fails (EROFS) while the workspace-write succeeds — exactly the PoC
 already run by hand (python + sed + redirect). The override-judge is the one
-LLM touch; stub it. The headline test: a stubbed sandboxed `proposal_author`
+LLM touch; stub it. The headline test: a stubbed sandboxed `design_author`
 that tries to write `cmd/kitsoki/web.go` is denied and only `005-proposal.md`
 persists.
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""publish_proposal.py — move a drafted proposal out of the per-session
+"""publish_design.py — move a drafted proposal out of the per-session
 workspace into the docs/proposals/ queue, then mint a feature ticket that
 links back to it so the proposal can be driven into implementation.
 
 Usage:
-    python3 publish_proposal.py <workspace> <slug> [change_target] [title] [idea]
+    python3 publish_design.py <workspace> <slug> [change_target] [title] [idea]
 
   workspace      docs/proposals/.workspace/<slug> — holds 005-proposal.md
                  (the draft) plus the numbered check artifacts 001..004.
@@ -20,7 +20,7 @@ Usage:
 stdout: a single JSON object so host.run parses it into `stdout_json` and the
 draft room binds several world keys from one call:
 
-    {"proposal_file": "docs/proposals/<slug>.md",
+    {"design_file": "docs/proposals/<slug>.md",
      "ticket_id":     "F-<ts>-<slug>",
      "ticket_path":   "issues/features/F-<ts>-<slug>.md",
      "ticket_title":  "<title>"}
@@ -69,7 +69,7 @@ def find_path(base_dir: str, slug: str) -> str:
     raise RuntimeError("too many conflicts for slug: " + slug)
 
 
-def write_feature_ticket(slug: str, title: str, idea: str, proposal_rel: str) -> tuple:
+def write_feature_ticket(slug: str, title: str, idea: str, design_rel: str) -> tuple:
     """Mint issues/features/<id>.md linking back to the published proposal.
 
     Returns (ticket_id, ticket_rel_path). The id is timestamp-prefixed
@@ -94,14 +94,14 @@ def write_feature_ticket(slug: str, title: str, idea: str, proposal_rel: str) ->
         "status: open\n"
         "severity: P2\n"
         'assignee: ""\n'
-        f'url: "{proposal_rel}"\n'
+        f'url: "{design_rel}"\n'
         "component: proposal\n"
         f'filed_at: "{filed_at}"\n'
-        f'proposal: "{proposal_rel}"\n'
+        f'proposal: "{design_rel}"\n'
         "---\n\n"
         f"# {ticket_title}\n\n"
         "Implement the accepted proposal:\n\n"
-        f"[{proposal_rel}]({proposal_rel})\n\n"
+        f"[{design_rel}]({design_rel})\n\n"
         + (f"{body_idea}\n\n" if body_idea else "")
         + "## Source\n\n"
         "Filed automatically when the proposal was published. The linked\n"
@@ -132,12 +132,12 @@ def main() -> None:
     if change_target.strip():
         # Amend path: the author edited an existing proposal in place. Nothing
         # to move — the existing file is the published one.
-        proposal_rel = os.path.relpath(change_target.strip())
+        design_rel = os.path.relpath(change_target.strip())
         title = title_in.strip() or slug_in
     else:
         src = os.path.join(workspace, "005-proposal.md")
         if not os.path.isfile(src):
-            print(f"publish_proposal: no draft at {src}", file=sys.stderr)
+            print(f"publish_design: no draft at {src}", file=sys.stderr)
             sys.exit(1)
 
         with open(src) as f:
@@ -154,16 +154,16 @@ def main() -> None:
         # Move the draft into the queue; leave the numbered checks in the
         # workspace as the record.
         os.replace(src, dest)
-        proposal_rel = os.path.relpath(dest)
+        design_rel = os.path.relpath(dest)
 
     # Mint the feature ticket that links back to the published proposal, so the
     # draft room can route straight into the implementation pipeline.
-    ticket_id, ticket_rel = write_feature_ticket(slug_in, title, idea_in, proposal_rel)
+    ticket_id, ticket_rel = write_feature_ticket(slug_in, title, idea_in, design_rel)
 
     print(
         json.dumps(
             {
-                "proposal_file": proposal_rel,
+                "design_file": design_rel,
                 "ticket_id": ticket_id,
                 "ticket_path": ticket_rel,
                 "ticket_title": title,

@@ -1,10 +1,10 @@
 /**
  * Text-containment / overflow gate for the four state-diagram views.
  *
- * Drives the dev-story proposal pipeline to a mid-pipeline room (proposal_refine
+ * Drives the dev-story design pipeline to a mid-pipeline room (design_refine
  * — the worst case: a traveled leg + live pills + a road ahead, all with long
- * `proposal_*` room labels), deterministically and with NO LLM (the
- * proposal_happy_path flow stubs every host call). Then for each view it asserts
+ * `design_*` room labels), deterministically and with NO LLM (the
+ * design_happy_path flow stubs every host call). Then for each view it asserts
  * nothing overflows:
  *
  *   - metro / path / full — DOM/CSS: every labelled element must satisfy
@@ -24,7 +24,7 @@ import { startWebServer, repoRoot, waitForState, type WebServer } from "./_helpe
 
 const ADDR = "127.0.0.1:7751";
 const STORY_DIR = path.join(repoRoot, "stories", "dev-story");
-const FLOW = path.join(STORY_DIR, "flows", "proposal_happy_path.yaml");
+const FLOW = path.join(STORY_DIR, "flows", "design_happy_path.yaml");
 
 let server: WebServer;
 
@@ -88,7 +88,7 @@ test("all four diagram views: nothing overflows", async () => {
     await submit("discuss", { message: "I want a per-session working folder primitive" });
     await submit("confirm", {});
     await page.reload();
-    await waitForState(page, "proposal_refine", 15000);
+    await waitForState(page, "design_refine", 15000);
     await expect(page.getByTestId("diagram-tabs")).toBeVisible({ timeout: 8000 });
 
     // DOM views.

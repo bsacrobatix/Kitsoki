@@ -171,7 +171,7 @@ world:
   # exactly once per session per ticket — mirrors bugfix's
   # bf_autostart_attempted. Without provisioning, an entry path that
   # does NOT pre-seed workdir (dev-story's `drive` / `go_implementation`
-  # / proposal_done `implement`) ran the pipeline against an empty
+  # / design_done `implement`) ran the pipeline against an empty
   # workdir; only the flow fixtures papered over it via initial_world.
   impl_provision_attempted: { type: bool, default: false }
 

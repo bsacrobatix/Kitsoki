@@ -15,7 +15,7 @@
  *
  * The pipeline-advancing interactions (type the idea, send each PRD intent) are
  * NOT tour steps — the spec performs them as PRE-STEP HOOKS (exactly as the
- * proposal-walkthrough spec advances the pipeline before each spotlight) so
+ * design-walkthrough spec advances the pipeline before each spotlight) so
  * each spotlighted surface and state exists before the spotlight lands.
  *
  * THE RELOAD SEAM. A real `page.goto` reload tears down the in-memory Pinia

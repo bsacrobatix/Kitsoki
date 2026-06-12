@@ -1,36 +1,36 @@
-# proposal_search — prior-art scout (the early-bail gate).
+# design_search — prior-art scout (the early-bail gate).
 #
 # Stage 2 of the 4-stage proposal pipeline:
-#   intake → proposal_search → proposal_refine → proposal_draft (+ publish)
+#   intake → design_search → design_refine → design_draft (+ publish)
 #
 # on_enter runs ONE oracle.decide (once: guarded by its bind):
-#   existing_scan — the proposal_scout identifies overlapping proposals and
+#   existing_scan — the design_scout identifies overlapping proposals and
 #   roadmap fit. This is the EARLY GATE: it runs before any workspace folder
 #   is created and before reference curation, so a duplicate idea is caught
 #   here rather than after a fourth folder + a full reference sweep.
 #
 # This room is purely read-only — no folder, no artifact write. The folder
 # (uniquify), the 002-existing-state.md artifact, and the reference sweep
-# all live DOWNSTREAM in proposal_materialize, reached only once the
+# all live DOWNSTREAM in design_materialize, reached only once the
 # operator has committed to a NEW proposal.
 #
 # Branching on the scout result:
 #   - overlaps present → the view STRONGLY urges continuing the existing
 #     draft. Each overlap renders as its own labelled choice item (up to 3;
 #     a free-form fallback handles the rare case of more). Selecting one
-#     fires `change_existing` with the path pre-bound (→ proposal_refine,
+#     fires `change_existing` with the path pre-bound (→ design_refine,
 #     NO new folder); `override_new` is the discouraged escape hatch.
 #     `confirm` is guarded and bounces while overlaps remain.
-#   - no overlaps → `confirm` advances to proposal_materialize cleanly.
+#   - no overlaps → `confirm` advances to design_materialize cleanly.
 #   - `regenerate` discards the scan and re-fires on_enter.
 #   - `quit` abandons back to main.
 #
-# Reload-safety: existing_scan is `once: true` keyed off proposal_existing_state.
+# Reload-safety: existing_scan is `once: true` keyed off design_existing_state.
 # A /reload that lands here with the scan already done skips the call.
 
 states:
 
-  proposal_search:
+  design_search:
     description: "Scanning for prior art before any folder is created."
     view:
       - banner:
@@ -39,13 +39,13 @@ states:
           color:    "#F59E0B"
       - kv:
           pairs:
-            Idea: '{{ world.proposal_idea }}'
-        when: "world.proposal_idea != ''"
+            Idea: '{{ world.design_idea }}'
+        when: "world.design_idea != ''"
       - heading: "Overlap scan"
-      - prose: '{{ world.proposal_existing_state.roadmap_fit|default:"(running — waiting for scout result)" }}'
+      - prose: '{{ world.design_existing_state.roadmap_fit|default:"(running — waiting for scout result)" }}'
       # ── Overlap detected: strong bail toward the existing case ──────────
-      - template: "⚠ **This idea is already in flight.** You have existing draft(s)/proposal(s) for it (listed below). **Continue the existing case — do NOT start a new one.** A fresh proposal here just creates another duplicate folder to reconcile later."
-        when: "len(world.proposal_existing_state.overlaps ?? []) > 0"
+      - template: "⚠ **This idea is already in flight.** You have existing draft(s)/design(s) for it (listed below). **Continue the existing case — do NOT start a new one.** A fresh design here just creates another duplicate folder to reconcile later."
+        when: "len(world.design_existing_state.overlaps ?? []) > 0"
       # One wrapping paragraph per overlap. This is a `template:` (not `code:`
       # or `prose:`): long prose summaries must reflow, which rules out `code:`
       # (a non-wrapping monospace box that overflows horizontally in the web
@@ -58,27 +58,27 @@ states:
       # Keep to paragraphs + inline `code` only — **bold**/`- ` bullets render
       # in the TUI but leak as literal text in the web template renderer.
       - template: |
-          {% for o in world.proposal_existing_state.overlaps %}[{{ o.recommendation|upper }}] `{{ o.path }}` — {{ o.summary }}{% if not forloop.Last %}
+          {% for o in world.design_existing_state.overlaps %}[{{ o.recommendation|upper }}] `{{ o.path }}` — {{ o.summary }}{% if not forloop.Last %}
 
           {% endif %}{% endfor %}
-        when: "len(world.proposal_existing_state.overlaps ?? []) > 0"
+        when: "len(world.design_existing_state.overlaps ?? []) > 0"
       - kv:
           pairs:
-            "Overlap 1": '{{ world.proposal_existing_state.overlaps.0.path }}'
-        when: "len(world.proposal_existing_state.overlaps ?? []) >= 1"
+            "Overlap 1": '{{ world.design_existing_state.overlaps.0.path }}'
+        when: "len(world.design_existing_state.overlaps ?? []) >= 1"
       - kv:
           pairs:
-            "Overlap 2": '{{ world.proposal_existing_state.overlaps.1.path }}'
-        when: "len(world.proposal_existing_state.overlaps ?? []) >= 2"
+            "Overlap 2": '{{ world.design_existing_state.overlaps.1.path }}'
+        when: "len(world.design_existing_state.overlaps ?? []) >= 2"
       - kv:
           pairs:
-            "Overlap 3": '{{ world.proposal_existing_state.overlaps.2.path }}'
-        when: "len(world.proposal_existing_state.overlaps ?? []) >= 3"
+            "Overlap 3": '{{ world.design_existing_state.overlaps.2.path }}'
+        when: "len(world.design_existing_state.overlaps ?? []) >= 3"
       - prose: "→ Select the matching draft below to continue it — the `AMEND`-tagged one is recommended. Only use `override_new` if you are certain none applies."
-        when: "len(world.proposal_existing_state.overlaps ?? []) > 0"
+        when: "len(world.design_existing_state.overlaps ?? []) > 0"
       # ── No overlap: clean path ──────────────────────────────────────────
       - prose: "No overlapping work found — `confirm` to create the workspace and proceed to brief authoring."
-        when: "len(world.proposal_existing_state.overlaps ?? []) == 0 && world.proposal_existing_state.roadmap_fit != ''"
+        when: "len(world.design_existing_state.overlaps ?? []) == 0 && world.design_existing_state.roadmap_fit != ''"
       - choice:
           mode: single
           prompt: "Actions"
@@ -89,29 +89,29 @@ states:
             # guard fires before expansion so index access is always safe.
             # Labels are short human text (Recommendation: summary excerpt);
             # the full path lives in the hint so the button doesn't overflow.
-            - label:  "{{ world.proposal_existing_state.overlaps.0.recommendation }} (recommended)"
-              hint:   "{{ world.proposal_existing_state.overlaps.0.path }}"
+            - label:  "{{ world.design_existing_state.overlaps.0.recommendation }} (recommended)"
+              hint:   "{{ world.design_existing_state.overlaps.0.path }}"
               intent: change_existing
-              when: "len(world.proposal_existing_state.overlaps ?? []) >= 1"
+              when: "len(world.design_existing_state.overlaps ?? []) >= 1"
               slots:
-                target: "{{ world.proposal_existing_state.overlaps.0.path }}"
-            - label:  "{{ world.proposal_existing_state.overlaps.1.recommendation }} (2)"
-              hint:   "{{ world.proposal_existing_state.overlaps.1.path }}"
+                target: "{{ world.design_existing_state.overlaps.0.path }}"
+            - label:  "{{ world.design_existing_state.overlaps.1.recommendation }} (2)"
+              hint:   "{{ world.design_existing_state.overlaps.1.path }}"
               intent: change_existing
-              when: "len(world.proposal_existing_state.overlaps ?? []) >= 2"
+              when: "len(world.design_existing_state.overlaps ?? []) >= 2"
               slots:
-                target: "{{ world.proposal_existing_state.overlaps.1.path }}"
-            - label:  "{{ world.proposal_existing_state.overlaps.2.recommendation }} (3)"
-              hint:   "{{ world.proposal_existing_state.overlaps.2.path }}"
+                target: "{{ world.design_existing_state.overlaps.1.path }}"
+            - label:  "{{ world.design_existing_state.overlaps.2.recommendation }} (3)"
+              hint:   "{{ world.design_existing_state.overlaps.2.path }}"
               intent: change_existing
-              when: "len(world.proposal_existing_state.overlaps ?? []) >= 3"
+              when: "len(world.design_existing_state.overlaps ?? []) >= 3"
               slots:
-                target: "{{ world.proposal_existing_state.overlaps.2.path }}"
+                target: "{{ world.design_existing_state.overlaps.2.path }}"
             # Fallback for the rare case of more than 3 overlaps.
             - label:  "amend existing…"
               hint:   "more than 3 overlaps — enter the path of the draft to amend"
               intent: change_existing
-              when: "len(world.proposal_existing_state.overlaps ?? []) > 3"
+              when: "len(world.design_existing_state.overlaps ?? []) > 3"
               param:
                 slot:        target
                 type:        string
@@ -121,85 +121,85 @@ states:
               hint:   "no overlap — create the workspace and proceed"
               intent: confirm
             - label:  "override_new"
-              hint:   "start a NEW proposal despite the overlap (discouraged)"
+              hint:   "start a NEW design despite the overlap (discouraged)"
               intent: override_new
             - label:  "regenerate"
               hint:   "re-run the prior-art scout from scratch"
               intent: regenerate
             - label:  "quit"
-              hint:   "abandon this proposal"
+              hint:   "abandon this design"
               intent: quit
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [proposal_idea, proposal_existing_state, proposal_existing_path, proposal_overlap_decision, proposal_change_target]
+    relevant_world: [design_idea, design_existing_state, design_existing_path, design_overlap_decision, design_change_target]
     on_enter:
       # Scout: check for overlapping proposals + roadmap fit. THE EARLY GATE —
-      # runs before any folder is created. once: keyed off proposal_existing_state.
+      # runs before any folder is created. once: keyed off design_existing_state.
       - invoke: host.oracle.decide
         once: true
         id: existing_scan
         with:
-          agent: proposal_scout
-          prompt_path: prompts/proposal_existing_state.md
+          agent: design_scout
+          prompt_path: prompts/design_existing_state.md
           schema: schemas/existing-state.json
           working_dir: "."
           args:
-            idea:           "{{ world.proposal_idea }}"
-            existing_paths: "{{ world.proposal_existing_paths }}"
+            idea:           "{{ world.design_idea }}"
+            existing_paths: "{{ world.design_existing_paths }}"
         bind:
-          proposal_existing_state: submitted
-        on_error: proposal
+          design_existing_state: submitted
+        on_error: design
     on:
       # No overlap: commit to a new proposal → materialize the workspace.
       # GUARDED: while overlaps remain, confirm bounces (the operator must
       # either change_existing or explicitly override_new).
       confirm:
-        - when: "len(world.proposal_existing_state.overlaps ?? []) > 0"
+        - when: "len(world.design_existing_state.overlaps ?? []) > 0"
           target: .
           effects:
             - set:
-                proposal_overlap_decision: ""
-        - target: proposal_materialize
+                design_overlap_decision: ""
+        - target: design_materialize
           effects:
             - set:
-                proposal_overlap_decision: "new"
-                proposal_change_target:    ""
+                design_overlap_decision: "new"
+                design_change_target:    ""
 
       # Overlap found: continue an existing draft. No new folder is created —
       # the existing draft's directory becomes the workspace, and refine
       # scaffolds/amends the brief in place.
       change_existing:
-        - target: proposal_refine
+        - target: design_refine
           effects:
             - set:
-                proposal_overlap_decision: "change_existing"
-                proposal_change_target:    "{{ slots.target }}"
-                proposal_workspace:        "{{ slots.target }}"
+                design_overlap_decision: "change_existing"
+                design_change_target:    "{{ slots.target }}"
+                design_workspace:        "{{ slots.target }}"
 
       # Override: create a new proposal despite the overlap (recorded for audit).
       override_new:
-        - target: proposal_materialize
+        - target: design_materialize
           effects:
             - set:
-                proposal_overlap_decision: "new"
-                proposal_change_target:    ""
+                design_overlap_decision: "new"
+                design_change_target:    ""
 
       # Re-run the scout from scratch.
       # Explicit target (not ".") so on_enter re-fires and the scout runs.
       regenerate:
-        - target: proposal_search
+        - target: design_search
           effects:
             - set:
-                proposal_existing_state: {}
-                proposal_existing_path:  ""
+                design_existing_state: {}
+                design_existing_path:  ""
 
       quit:
         - target: main
           effects:
             - set:
-                last_error:         "proposal abandoned at search"
+                last_error:         "design abandoned at search"
                 prev_state:         "main"
-                proposal_seed_idea: ""
+                design_seed_idea: ""
       look:
         - target: .

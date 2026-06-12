@@ -6,7 +6,7 @@ Usage:
 
 The MOVES are an interpretive decision made by the `ideas_reviewer` oracle
 (see prompts/ideas_review.md); THIS script is the deterministic executor — the
-same decide→script discipline as proposal_workspace.py. It reads the reviewer's
+same decide→script discipline as design_workspace.py. It reads the reviewer's
 report (the `ideas_review` object persisted to JSON by host.artifacts_dir),
 takes its `reclassifications`, and rewrites <ideas_path> moving each named
 bullet from its current section to its target section.

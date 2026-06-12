@@ -122,7 +122,7 @@ first if needed.
 
 ## Output
 
-Submit a `proposal_artifact` (see `schemas/proposal-artifact.json`):
+Submit a `design_artifact` (see `schemas/design-artifact.json`):
 `title`, `kind`, `summary_markdown` (the checkpoint view — the proposal
 body or a faithful digest), `file_path` (where you wrote it),
 `confidence`, `needs_clarification`, and `follow_up_questions`.

@@ -266,7 +266,17 @@ func (rw *childRewriter) rewriteEffect(eff *Effect) {
 		eff.With = newWith
 	}
 
-	// Bind: keys are world keys, values are result keys (no rewrite).
+	// Bind: keys are world keys (LHS, namespaced like Set keys). Values
+	// are EITHER a bare result-field path (e.g. "submitted",
+	// "stdout_json.prd_file") OR a full template that merges the host
+	// result with the running world (e.g.
+	// "{{ world.answered_count + result.submitted.matched_count }}", the
+	// accumulator idiom in stories/prd/rooms/clarifying.yaml). The bare
+	// form has no `world.` ref so rewriteExpr is a no-op; the template
+	// form MUST have its `world.<childKey>` refs namespaced like every
+	// other expression, else the child reads the un-prefixed (nil) key at
+	// runtime. (Before this, bind values were passed through verbatim —
+	// the bug the first import of a bind-template story exposed.)
 	if len(eff.Bind) > 0 {
 		newBind := make(map[string]string, len(eff.Bind))
 		for k, v := range eff.Bind {
@@ -274,7 +284,7 @@ func (rw *childRewriter) rewriteEffect(eff *Effect) {
 			if _, ok := rw.childWorldKey[k]; ok {
 				newKey = rw.alias + "__" + k
 			}
-			newBind[newKey] = v
+			newBind[newKey] = rw.rewriteExpr(v)
 		}
 		eff.Bind = newBind
 	}

@@ -1,10 +1,10 @@
 # ideas_review_pick_seeds_proposal — the writer's-block handoff, intent-only.
 #
 # Entering `ideas` runs the reviewer (decide) which surfaces candidates. `pick 1`
-# seeds world.proposal_seed_idea from candidate 1 and jumps into the proposal
+# seeds world.design_seed_idea from candidate 1 and jumps into the proposal
 # intake (proposal room). The operator then types a message in intake to mint
 # the slug + workspace and advance to search. Here we only assert the seed + the
-# jump — the discuss → search path is covered by proposal_happy_path.
+# jump — the discuss → search path is covered by design_happy_path.
 #
 # The intake room has no on_enter (no chat to resolve); no host stubs needed for
 # the proposal landing turn itself.
@@ -39,8 +39,8 @@ turns:
 
   # Pick candidate 1 → seed the proposal pipeline and land in intake.
   - intent: { name: pick, slots: { n: 1 } }
-    expect_state: proposal
+    expect_state: design
     expect_world:
-      proposal_seed_idea: "single LLM chat across rooms with scoped containment"
+      design_seed_idea: "single LLM chat across rooms with scoped containment"
 
 expect_no_errors: true

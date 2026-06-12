@@ -90,6 +90,25 @@ thought.
   - [`qa-agent-skill.md`](qa-agent-skill.md) (tooling) — the `story-qa`
     subagent: persona + scenario → drive loop → scored UX rubric +
     report + screenshots + bug list.
+- [`external-project-targeting.md`](external-project-targeting.md) — **epic.**
+  Point `dev-story` at a **foreign repo** by filling a small **profile**
+  (ticket adapter + doc-template set + placement rule + commit/CI discipline)
+  rather than editing the pipeline; fold `prd` into `dev-story` and chain the
+  published PRD into the design pipeline (PRD→Design as one walk).
+  `constructorfabric/gears-rust` is the worked example (gh-issue tickets,
+  `gears-sdlc` PRD/DESIGN/ADR templates + `cpt-` IDs, per-gear placement, DCO
+  + `make check`). **Slice #3 (PRD→Design chain) shipped** — migrated to the
+  [dev-story README](../../stories/dev-story/README.md#prd--design-walk) and
+  its proposal deleted; this also renamed dev-story's "proposal" pipeline to
+  the **design** pipeline. The remaining three slices are **deferred** (GitHub
+  integration comes later):
+  - [`external-project-profile.md`](external-project-profile.md) (runtime, deferred) —
+    parameterize doc templates / placement / id-scheme + wire `repo_root`
+    passthrough so retargeting is config, not code.
+  - [`gh-ticket-adapter.md`](gh-ticket-adapter.md) (runtime, deferred) — a `gh`-backed
+    glue provider satisfying the `ticket` interface against GitHub issues.
+  - [`gears-rust-instance.md`](gears-rust-instance.md) (story, deferred) — the worked
+    example filling the profile; the copy-me template for any new target.
 - [`oracle-capability-model.md`](oracle-capability-model.md) — **epic.**
   One capability model governing **every** oracle (decide / ask / converse /
   task), unifying three ad-hoc restrictions and an overloaded boolean. Four
@@ -149,6 +168,16 @@ thought.
   `docs/stories/state-machine.md` §"`on_enter` must be idempotent"; the
   `proposal_*.yaml` rooms are migrated); the `/reload --force` companion to
   bypass it during authoring (Open question 1) remains.
+- [`lifecycle-taxonomy.md`](lifecycle-taxonomy.md) — **runtime.** A YAML
+  domain model for the early project lifecycle: composable **Features**
+  (media / help / tutorials / acceptance criteria at every level) →
+  **Proposals** (the spine as data) → **Plans** (tasks with expected files +
+  per-file change descriptions) → **TestSpecs** (scenarios tracing back to
+  feature acceptance criteria, mapped to harness + fixture + evidence).
+  Pure-YAML containers with pinned JSON Schemas, markdown embedded inline or
+  via a generalized `!include`, and a deterministic two-layer validation
+  (per-file schema + catalog lint: DAGs, refs, coverage). Initial design for
+  review; nothing implemented yet.
 - [`local-model-oracle.md`](local-model-oracle.md) — a `builtin.local_llm`
   oracle plugin that drives a local llama.cpp `llama-server` sidecar over
   OpenAI-compatible HTTP, with grammar-forced schema-valid output, for
@@ -297,3 +326,11 @@ thought.
   one ticket can be co-driven), and gains an opt-in inbound poll→intent bridge
   for Jira/PR replies. All opt-in; loop.py's existing path unchanged. Nothing
   implemented yet.
+- [`vscode-extension.md`](vscode-extension.md) — **tui.** Embed the shipped
+  runstatus web UI (`docs/tui/web-ui.md`) as a native VS Code surface: chat in
+  the sidebar, trace/state diagram in the bottom panel, themed to the editor.
+  The extension bundles the SPA in a webview and spawns `kitsoki web` as a child
+  process, relaying the existing JSON-RPC/SSE over `postMessage` — backend
+  unchanged, one new `BridgeSource` behind the existing `DataSource` factory.
+  Distinct from (and complementary to) the inverse `/ide` work
+  (`ide-integration.md`). Desktop-only. Nothing implemented yet.

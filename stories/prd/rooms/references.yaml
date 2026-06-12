@@ -32,7 +32,7 @@ states:
   # doc chunks (host.oracle.search) so the researcher spends its LLM budget on
   # JUDGMENT (which hits matter, what sections, why) rather than scanning the
   # tree from scratch. Mirrors the golden proposal pipeline's stage split
-  # (dev-story proposal_materialize.yaml: a search step that feeds a separate
+  # (dev-story design_materialize.yaml: a search step that feeds a separate
   # researcher step), adapted to prd's dwell-room shape: the search lives in
   # its OWN transient room so a search failure NEVER strands the references
   # checkpoint.
@@ -135,14 +135,14 @@ states:
       # The saved-file path is a kv value holding the BARE path: the web UI
       # linkifies a kv value ending in .md into a clickable file preview
       # (prose never linkifies — same idiom as the brief room and dev-story's
-      # proposal_refine Brief row). The pending placeholder stays plain text.
+      # design_refine Brief row). The pending placeholder stays plain text.
       - kv:
           pairs:
             References: '{{ world.references_path|default:"(writing 003-references.md into the per-PRD workspace…)" }}'
             Idea:       '{{ world.idea|default:"(none)"|truncatechars:80 }}'
             Upstream:   '{{ world.upstream_paths|default:"(none)" }}'
       # Echo the operator's last refine instruction back so a refine turn
-      # visibly acknowledges what was asked (the golden proposal_refine.yaml
+      # visibly acknowledges what was asked (the golden design_refine.yaml
       # renders the same "You asked: …" line). A blank-feedback action skips
       # this line via the guard.
       - kv:

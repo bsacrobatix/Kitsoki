@@ -666,12 +666,12 @@ the choice buttons. When these overlap in a `mode: conversational` room the
 author gets two text inputs for the same intent — one from the param form,
 one from the textarea — which is confusing and looks like a bug.
 
-This bit the proposal pipeline twice:
+This bit the design pipeline twice:
 
 - `change_existing` (intent with `target: string, required: true`) + "amend
   existing…" choice item with `param: { slot: target }` → two "Amend
-  Existing" inputs in `proposal_search`.
-- Adding `intent: discuss, param: { slot: message }` to `proposal_refine`
+  Existing" inputs in `design_search`.
+- Adding `intent: discuss, param: { slot: message }` to `design_refine`
   (a conversational room) + the existing `discuss` textarea → two message
   inputs.
 

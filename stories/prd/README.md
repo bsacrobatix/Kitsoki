@@ -17,7 +17,7 @@ Every per-PRD artifact lands under a **slug-named workspace** —
 workspace shape the `dev-story` proposal pipeline uses. On `accept` the
 draft is **published** out of the gitignored workspace to its durable home
 (`docs/prd/<slug>.md` by default, collision-safe). This mirrors
-`dev-story`'s `proposal_workspace.py` / `publish_proposal.py` sandwich:
+`dev-story`'s `design_workspace.py` / `publish_design.py` sandwich:
 `scripts/prd_slug.py` mints + uniquifies the slug, `scripts/prd_publish.py`
 moves the accepted draft.
 
@@ -129,7 +129,7 @@ idle ─start─▶ search ─confirm─▶ clarifying ─submit_answers/skip─
 through with an `interviewer` agent (`discuss` self-loops), and `start`
 distills the conversation into `world.idea` before advancing.
 
-`search` is the **prior-art gate** (the `dev-story` `proposal_search`
+`search` is the **prior-art gate** (the `dev-story` `design_search`
 analogue): a read-only `scout` runs BEFORE any artifact is written, so a
 duplicate idea is caught here rather than after several clarify rounds.
 Committing to the pipeline (`confirm` / `change_existing` / `override_new`)

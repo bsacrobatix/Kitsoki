@@ -6,7 +6,7 @@
 
 ## Why
 
-The proposal pipeline (`stories/dev-story/rooms/proposal*.yaml`) ends at
+The design pipeline (`stories/dev-story/rooms/design*.yaml`) ends at
 **publish**: a focused proposal lands in `docs/proposals/<slug>.md` and the
 operator is on their own to break it into work and drive each piece. For an
 epic (`docs/proposals/templates/epic.md` — a Slices table over linked
@@ -88,15 +88,15 @@ workspace mint, world reset — are story-layer (`host.run` + `set:`), so:
 
 | Pipeline step | Mechanism | Reference |
 |---|---|---|
-| Load proposal / epic + children | `host.run` reader script (reads `docs/proposals/<slug>.md`, parses an epic Slices table) | mirror `stories/dev-story/scripts/proposal_workspace.py` |
-| Mint per-session workspace + editable scope note | `host.run` workspace mint + `host.artifacts_dir` scaffold + `host.ide.open_file` | `stories/dev-story/rooms/proposal.yaml` (001-brief mint arm) |
-| Interactive discovery | `mode: conversational` + `host.oracle.converse` + a scope-note writer `host.oracle.task` | `stories/dev-story/rooms/proposal.yaml` discuss arc |
+| Load proposal / epic + children | `host.run` reader script (reads `docs/proposals/<slug>.md`, parses an epic Slices table) | mirror `stories/dev-story/scripts/design_workspace.py` |
+| Mint per-session workspace + editable scope note | `host.run` workspace mint + `host.artifacts_dir` scaffold + `host.ide.open_file` | `stories/dev-story/rooms/design.yaml` (001-brief mint arm) |
+| Interactive discovery | `mode: conversational` + `host.oracle.converse` + a scope-note writer `host.oracle.task` | `stories/dev-story/rooms/design.yaml` discuss arc |
 | **Structural verification of the brief manifest** | `host.oracle.decide` with `schema:` → MCP submit validator forces a schema-valid `submit()` | `docs/architecture/hosts.md` § `host.oracle.decide`; `stories/dev-story/rooms/proposal_idea_completeness.yaml` |
-| Render YAML + deep structural lint (DAG, ids, coverage) | deterministic `host.run` → exit code is the gate | the proposal pipeline's slug/uniquify "validation sandwich" (`proposal.yaml` `uniquify`) |
+| Render YAML + deep structural lint (DAG, ids, coverage) | deterministic `host.run` → exit code is the gate | the design pipeline's slug/uniquify "validation sandwich" (`design.yaml` `uniquify`) |
 | **Adversarial feasibility + completeness review** | `host.oracle.decide` skeptic agent → `{verdict, reason, questions}` | `stories/code-review/rooms/review_pr.yaml`; `brief-decision.json` verdict shape |
-| Checkpoint / iterate on a failing gate | `accept` / `revise(feedback)` + cycle budget → `@exit:abandoned` | `stories/bugfix/rooms/proposing.yaml`; `stories/dev-story/rooms/proposal_draft.yaml` refine arc |
+| Checkpoint / iterate on a failing gate | `accept` / `revise(feedback)` + cycle budget → `@exit:abandoned` | `stories/bugfix/rooms/proposing.yaml`; `stories/dev-story/rooms/design_draft.yaml` refine arc |
 | **Materialise a brief as a ticket** the pipeline can read | `host.run` writes a local ticket (id/title/body = brief) the default `iface.ticket.get` resolves | `stories/implementation/rooms/review_task.yaml` (`iface.ticket.get`); `host.local_files.ticket` default |
-| Mint a fresh worktree/branch per brief | `host.run` workspace + branch mint | `stories/dev-story/scripts/proposal_workspace.py`; `stories/dev-story/rooms/workspace_manager.yaml` |
+| Mint a fresh worktree/branch per brief | `host.run` workspace + branch mint | `stories/dev-story/scripts/design_workspace.py`; `stories/dev-story/rooms/workspace_manager.yaml` |
 | Dispatch one brief into build+test | reset `impl__*` keys (`set:`), then enter the `impl` import; its `@exit:done` returns to the board | `stories/dev-story/app.yaml:768` (impl import, `entry: idle`, `world_in:`); `internal/app/imports.go:6` (single fold) |
 
 ## Story graph
@@ -234,12 +234,12 @@ can't (acyclic deps, id uniqueness, coverage).
   inspection), args = `{source_text, scope_path, children}`. The
   **MCP submit validator** forces a schema-valid `submit()`; `bind:
   decomposition: submitted`. `once: true`, keyed on `decomposition` so
-  `revise`/`fail` clear it to re-arm (the `proposal_draft.yaml` pattern).
+  `revise`/`fail` clear it to re-arm (the `design_draft.yaml` pattern).
 - **Intents:** `built` → `validate`; `quit`. `built` is fired by an
   `emit_intent: built` effect in `on_enter`, guarded
   `when: "len(world.decomposition.briefs) > 0"`, so it advances whether or not
   the (`once: true`) decide actually ran this turn — reload / `look` re-advance
-  rather than stall (`stories/dev-story/rooms/proposal_draft.yaml` pattern).
+  rather than stall (`stories/dev-story/rooms/design_draft.yaml` pattern).
 - **View:** a `kv` of brief count + kinds + the `coverage_note`; a `code`
   block listing `id — title (deps)` per brief.
 

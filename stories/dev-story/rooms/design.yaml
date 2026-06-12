@@ -1,26 +1,26 @@
 # proposal — single free-form intake.
 #
 # Stage 1 of the 4-stage proposal pipeline:
-#   intake → proposal_search → proposal_refine → proposal_draft (+ publish)
+#   intake → design_search → design_refine → design_draft (+ publish)
 #
 # One message captures the idea and mints a candidate slug, then advances to
-# proposal_search. The workspace folder is NOT created here — the scout runs
+# design_search. The workspace folder is NOT created here — the scout runs
 # first so a duplicate idea is redirected to its existing draft before any
-# new folder lands on disk (the folder is minted in proposal_materialize,
+# new folder lands on disk (the folder is minted in design_materialize,
 # behind the overlap gate). There is no multi-turn loop here — discovery and
-# brief-writing happen AFTER search, in proposal_refine.
+# brief-writing happen AFTER search, in design_refine.
 #
-# The `proposal_seed_idea` ternary is evaluated BEFORE any set: takes effect
+# The `design_seed_idea` ternary is evaluated BEFORE any set: takes effect
 # (effects evaluate against the start-of-turn world), so both the set: and
 # the invoke.args.idea: use the same expression against the same snapshot.
 #
 # Optionally, the operator can point at existing docs before sending the idea:
-# `capture_existing` records them in proposal_existing_paths, which the search
+# `capture_existing` records them in design_existing_paths, which the search
 # room passes to the scout.
 
 states:
 
-  proposal:
+  design:
     mode: conversational
     default_intent: discuss
     description: "Describe your proposal idea — one message starts the search."
@@ -29,57 +29,57 @@ states:
           text:     "INTAKE"
           subtitle: "Describe your idea — search runs next"
           color:    "#10B981"
-      - template: "⚠ **Something went wrong** — the slug-naming step failed. Send your idea again{{ world.proposal_idea != '' ? ': **' + world.proposal_idea + '**' : '' }}."
+      - template: "⚠ **Something went wrong** — the slug-naming step failed. Send your idea again{{ world.design_idea != '' ? ': **' + world.design_idea + '**' : '' }}."
         when: "world.last_error != ''"
-      - prose: 'Seeded from your ideas backlog: **{{ world.proposal_seed_idea }}** — describe or expand it to start the search.'
-        when: "world.proposal_seed_idea != ''"
+      - prose: 'Seeded from your ideas backlog: **{{ world.design_seed_idea }}** — describe or expand it to start the search.'
+        when: "world.design_seed_idea != ''"
       - prose: "Describe the change you want to propose — as rough or specific as you like. One message starts the pipeline: I'll search for prior art and relevant docs before we shape the brief.\n\nOptionally, point me at existing docs first with `see docs/…` — they'll be passed to the search."
-        when: "world.proposal_seed_idea == ''"
+        when: "world.design_seed_idea == ''"
       - kv:
           pairs:
-            Existing docs: '{{ world.proposal_existing_paths }}'
-        when: "world.proposal_existing_paths != ''"
+            Existing docs: '{{ world.design_existing_paths }}'
+        when: "world.design_existing_paths != ''"
     on:
       # Capture the idea → mint candidate slug → advance to search (the scout
       # gate). No workspace folder is created here.
       discuss:
-        - target: proposal_search
+        - target: design_search
           effects:
             - set:
-                proposal_idea: "{{ world.proposal_seed_idea != '' ? world.proposal_seed_idea + ' — ' + slots.message : slots.message }}"
-                proposal_seed_idea: ""
+                design_idea: "{{ world.design_seed_idea != '' ? world.design_seed_idea + ' — ' + slots.message : slots.message }}"
+                design_seed_idea: ""
                 last_error: ""
             - invoke: host.oracle.decide
               id: name_slug
               oracle: oracle.local_llm
               with:
-                prompt_path: prompts/proposal_slug.md
+                prompt_path: prompts/design_slug.md
                 schema: schemas/slug.json
                 args:
-                  idea: "{{ world.proposal_seed_idea != '' ? world.proposal_seed_idea + ' — ' + slots.message : slots.message }}"
+                  idea: "{{ world.design_seed_idea != '' ? world.design_seed_idea + ' — ' + slots.message : slots.message }}"
               bind:
-                proposal_slug: "submitted.slug"
-              on_error: proposal
+                design_slug: "submitted.slug"
+              on_error: design
             # NB: the workspace folder is deliberately NOT minted here. The
-            # scout (proposal_search.on_enter) runs FIRST, so an idea that
+            # scout (design_search.on_enter) runs FIRST, so an idea that
             # duplicates an in-flight draft can be redirected to the existing
             # case BEFORE any new folder is created on disk. Folder creation
-            # (uniquify) now lives in proposal_materialize, behind the
+            # (uniquify) now lives in design_materialize, behind the
             # overlap gate. Intake only mints the candidate slug.
 
-      # Record existing docs the operator points at; search uses proposal_existing_paths.
+      # Record existing docs the operator points at; search uses design_existing_paths.
       capture_existing:
         - target: .
           effects:
             - set:
-                proposal_existing_paths: "{{ slots.paths }}"
+                design_existing_paths: "{{ slots.paths }}"
 
       quit:
         - target: main
           effects:
             - set:
-                last_error:         "proposal abandoned at intake"
+                last_error:         "design abandoned at intake"
                 prev_state:         "main"
-                proposal_seed_idea: ""
+                design_seed_idea: ""
       look:
         - target: .

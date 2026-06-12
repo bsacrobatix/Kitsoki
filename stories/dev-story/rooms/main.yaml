@@ -74,6 +74,7 @@ states:
       - heading: "Propose & plan"
       - list:
           items:
+            - { label: "prd",   hint: "author a PRD, then carry it into design" }
             - { label: "idea",  hint: "draft an ad hoc proposal — no ticket needed" }
             - { label: "ideas", hint: "reconcile the backlog / pick something to propose" }
 
@@ -119,10 +120,14 @@ states:
         - target: standup
           effects:
             - set: { prev_state: "main" }
-      go_idea:
-        - target: proposal
+      go_prd:
+        - target: prd
           effects:
-            - set: { prev_state: "main", proposal_seed_idea: "" }
+            - set: { prev_state: "main", last_error: "" }
+      go_idea:
+        - target: design
+          effects:
+            - set: { prev_state: "main", design_seed_idea: "" }
       go_ideas:
         - target: ideas
           effects:

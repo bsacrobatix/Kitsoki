@@ -6,7 +6,7 @@
 # durable artifact and gates on the operator's confirmation before the
 # pipeline goes looking for reference material and writes the PRD.
 #
-# on_enter runs three calls (golden proposal_refine shape):
+# on_enter runs three calls (golden design_refine shape):
 #   1. scaffold the brief — host.artifacts_dir (thread=prd_brief) writes
 #      the operator-EDITABLE .artifacts/prd_brief.md; bind → brief_path.
 #      once: keyed off brief_path (non-empty ⇒ already ran) so a re-fire —
@@ -52,7 +52,7 @@ states:
       # The saved-file path is a kv value holding the BARE path: the web UI
       # linkifies a kv value ending in .md into a clickable file preview
       # (prose/template/code never linkify — same idiom as dev-story's
-      # proposal_refine Brief row and this story's search-room Overlap rows).
+      # design_refine Brief row and this story's search-room Overlap rows).
       # The pending placeholder ends in "…)" so it stays plain text.
       - kv:
           pairs:

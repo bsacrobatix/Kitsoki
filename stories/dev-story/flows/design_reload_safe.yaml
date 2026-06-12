@@ -1,34 +1,34 @@
-# proposal_reload_safe — on_enter is idempotent: a room whose result is
+# design_reload_safe — on_enter is idempotent: a room whose result is
 # already present does NOT re-run its oracle call.
 #
 # Proves the reload-safety contract for the search room. We start in intake
-# with a distinctive proposal_existing_state preset. The existing_scan stub
+# with a distinctive design_existing_state preset. The existing_scan stub
 # returns a DIFFERENT (empty) result — so if the once: guard failed and the
 # scan re-ran, the preset would be overwritten. Asserting the preset survives
 # proves the scan was skipped.
 #
 # We advance via the intake `discuss` arc to trigger the search room's
 # on_enter. The search room runs ONLY the scout, whose once: guard keys off
-# proposal_existing_state — already set in initial_world, so it is skipped.
+# design_existing_state — already set in initial_world, so it is skipped.
 # (Intake no longer mints the workspace folder; that moved behind the scout
-# gate into proposal_materialize.)
+# gate into design_materialize.)
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposal
+initial_state: design
 initial_world:
   judge_mode:         "human"
-  proposal_idea:      "Add a per-session working folder primitive."
-  proposal_slug:      "wf"
-  proposal_workspace: "docs/proposals/.workspace/wf"
+  design_idea:      "Add a per-session working folder primitive."
+  design_slug:      "wf"
+  design_workspace: "docs/proposals/.workspace/wf"
   # Both search results already present — the once: guards must preserve them.
-  proposal_existing_path:  "docs/proposals/.workspace/wf/002-existing-state.md"
-  proposal_existing_state:
+  design_existing_path:  "docs/proposals/.workspace/wf/002-existing-state.md"
+  design_existing_state:
     overlaps:
       - { path: "docs/proposals/PRESET-SURVIVED.md", kind: "accepted", summary: "preset", recommendation: "amend" }
     roadmap_fit: "preset-survived"
-  proposal_references_path: "docs/proposals/.workspace/wf/003-references.json"
-  proposal_references:
+  design_references_path: "docs/proposals/.workspace/wf/003-references.json"
+  design_references:
     items:
       - { path: "docs/PRESET-REF.md", sections: "§1", rationale: "preset reference" }
 
@@ -44,15 +44,15 @@ host_handlers:
     data: { ok: true, path: "docs/proposals/.workspace/wf/out.md", message_id: "out#1" }
 
 turns:
-  # Intake message → advance to proposal_search. The intake arc calls name_slug
+  # Intake message → advance to design_search. The intake arc calls name_slug
   # (oracle.decide), but the search room's on_enter once: guards (keyed off
-  # proposal_existing_state and proposal_references — both already set) SKIP both
+  # design_existing_state and design_references — both already set) SKIP both
   # the scout and researcher. Presets survive verbatim — not overwritten by the
   # "SHOULD-NOT-RUN" stubs — which is the assertion this flow makes.
   - intent: { name: discuss, slots: { message: "I want a per-session working folder" } }
-    expect_state: proposal_search
+    expect_state: design_search
     expect_world:
-      proposal_existing_state:
+      design_existing_state:
         overlaps:
           - { path: "docs/proposals/PRESET-SURVIVED.md", kind: "accepted", summary: "preset", recommendation: "amend" }
         roadmap_fit: "preset-survived"

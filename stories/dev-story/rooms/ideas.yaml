@@ -13,7 +13,7 @@
 # (the same decide→script discipline as the proposal slug step). The operator
 # confirms the moves first (this is a gate, not auto-apply).
 #
-# `pick` seeds world.proposal_seed_idea from a candidate and jumps into the
+# `pick` seeds world.design_seed_idea from a candidate and jumps into the
 # proposal intake, so a blocked author flows straight into authoring a proposal
 # (slug + workspace minting happens in proposal.discuss, on the first message).
 
@@ -74,7 +74,7 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [ideas_path, ideas_review, ideas_review_path, ideas_review_feedback, ideas_apply_result, proposal_seed_idea]
+    relevant_world: [ideas_path, ideas_review, ideas_review_path, ideas_review_feedback, ideas_apply_result, design_seed_idea]
     on_enter:
       # Reconcile the backlog. working_dir is the repo root (".") so the reviewer
       # can read ideas.md, run `git log`, and scan docs/proposals/ + docs/.
@@ -139,10 +139,10 @@ states:
       # mints the slug + workspace, so nothing else is needed here.
       pick:
         - when: "slots.n >= 1 && len(world.ideas_review.candidates ?? []) >= slots.n"
-          target: proposal
+          target: design
           effects:
             - set:
-                proposal_seed_idea: "{{ world.ideas_review.candidates[slots.n - 1].item }}"
+                design_seed_idea: "{{ world.ideas_review.candidates[slots.n - 1].item }}"
                 prev_state:         "ideas"
         - default: true
           target: .

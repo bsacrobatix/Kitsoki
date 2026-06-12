@@ -4,7 +4,7 @@
 # it advances to clarifying and records prd_overlap_decision: "new".
 #
 # initial_state: search seeds the scout result directly (bypassing on_enter),
-# the same technique the golden proposal_overlap_* fixtures use.
+# the same technique the golden design_overlap_* fixtures use.
 
 test_kind: flow
 app: ../app.yaml

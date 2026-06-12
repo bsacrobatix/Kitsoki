@@ -230,7 +230,7 @@ export interface RoomSpine {
 
 /**
  * The road ahead at ROOM granularity — needed when a whole pipeline lives in a
- * single phase (dev-story's `proposal_*` rooms are all one phase, so the
+ * single phase (dev-story's `design_*` rooms are all one phase, so the
  * phase-keyed {@link spineAhead} would show nothing ahead).
  *
  * It is a greedy forward walk from the current room: at each step take the
@@ -304,7 +304,7 @@ export interface Transitionish {
  * Maps each room the run ENTERED to the intent that drove the entry, from the
  * `machine.transition` event stream (attrs.intent is the triggering intent,
  * attrs.to the landed state). Used for the breadcrumb provenance ("main →
- * proposal *via go_idea*"). The most recent transition into a room wins.
+ * design *via go_idea*"). The most recent transition into a room wins.
  *
  * Source / truth status: TRACE — ground truth, the intent the run actually fired.
  */

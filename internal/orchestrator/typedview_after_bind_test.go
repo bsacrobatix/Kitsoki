@@ -11,7 +11,7 @@ package orchestrator_test
 // the way to the web surface (newTurnResult), which then sent typed_view=null
 // and the browser fell back to the ANSI-stripped 80-col text — collapsing the
 // room's typed elements (banner, prose, choice→buttons) into one monospace
-// blob. This is exactly what made dev-story's proposal_search overlap list AND
+// blob. This is exactly what made dev-story's design_search overlap list AND
 // its "Actions" menu render garbled in the web UI.
 //
 // The existing TypedView regressions (submitdirect_typedview_test.go,

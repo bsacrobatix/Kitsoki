@@ -35,7 +35,7 @@ states:
 
   room:
     # Element-array (typed) view — the shape that must survive the binding
-    # on_enter. Mirrors proposal_search: a heading, prose that reads the
+    # on_enter. Mirrors design_search: a heading, prose that reads the
     # bound world value, and a single-mode choice (the "Actions" menu that
     # was rendering as garbled plain text in the web before the fix).
     view:

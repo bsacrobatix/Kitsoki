@@ -1,4 +1,4 @@
-# proposal_override_and_clarify — override_new despite an overlap, then the
+# design_override_and_clarify — override_new despite an overlap, then the
 # clarify back-edge from refine to proposal.
 #
 # Covers the two arcs the happy/overlap flows don't: `override_new` (force a
@@ -8,11 +8,11 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposal_search
+initial_state: design_search
 initial_world:
   judge_mode:         "human"
-  proposal_idea:      "Add a local model oracle sidecar."
-  proposal_workspace: "docs/proposals/.workspace/lmo"
+  design_idea:      "Add a local model oracle sidecar."
+  design_workspace: "docs/proposals/.workspace/lmo"
 
 host_handlers:
   host.oracle.decide:
@@ -28,7 +28,7 @@ host_handlers:
         data:
           ok: true
           submitted: { items: [] }
-  # override_new now cascades through proposal_materialize, which mints the
+  # override_new now cascades through design_materialize, which mints the
   # folder (uniquify), runs the semantic reference search, then advances.
   host.oracle.search:
     data: { hits: [], top: null }
@@ -42,7 +42,7 @@ host_handlers:
           stdout_json: { slug: "lmo", workspace: "docs/proposals/.workspace/lmo" }
   host.artifacts_dir:
     data: { ok: true, path: "docs/proposals/.workspace/lmo/out.md", message_id: "out#1" }
-  # Stubs for proposal_refine on_enter (advanced to by override_new → materialize)
+  # Stubs for design_refine on_enter (advanced to by override_new → materialize)
   host.ide.open_file:
     data: { ok: true, connected: true }
   host.oracle.task:
@@ -54,26 +54,26 @@ host_handlers:
 
 turns:
   # Force a new proposal despite the overlap — decision recorded as "new",
-  # no change_target set. Advances to proposal_refine.
+  # no change_target set. Advances to design_refine.
   - intent: { name: override_new, slots: {} }
-    expect_state: proposal_refine
+    expect_state: design_refine
     expect_world:
-      proposal_overlap_decision: "new"
-      proposal_change_target:    ""
+      design_overlap_decision: "new"
+      design_change_target:    ""
 
   # Step back all the way to intake — resets search + brief state.
   - intent: { name: clarify, slots: {} }
-    expect_state: proposal
+    expect_state: design
     expect_world:
-      proposal_existing_state:   {}
-      proposal_existing_path:    ""
-      proposal_overlap_decision: ""
-      proposal_change_target:    ""
-      proposal_references:       {}
-      proposal_references_path:  ""
-      proposal_brief_path:       ""
-      proposal_brief_decision:   {}
-      proposal_brief_cycle:      0
-      proposal_refine_analysis:  {}
+      design_existing_state:   {}
+      design_existing_path:    ""
+      design_overlap_decision: ""
+      design_change_target:    ""
+      design_references:       {}
+      design_references_path:  ""
+      design_brief_path:       ""
+      design_brief_decision:   {}
+      design_brief_cycle:      0
+      design_refine_analysis:  {}
 
 expect_no_errors: true
