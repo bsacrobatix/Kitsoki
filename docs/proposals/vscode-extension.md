@@ -70,13 +70,15 @@ implementation behind the existing factory (`tools/runstatus/src/data/source.ts:
   (`acquireVsCodeApi`) and return it. No other SPA code changes — `BridgeSource`
   satisfies the same interface (`source.ts:86`), so every store
   (`stores/run.ts`, `meta.ts`, `inbox.ts`) is untouched.
-- **Demo harness (new):** `tools/vscode-kitsoki/tests/` — a Playwright
-  `_electron` spec that launches the *real* VS Code binary, injects the existing
-  tour manifest into the chat webview, drives the editor beat-by-beat, and
-  records the **whole window** via ffmpeg. Reuses the `kitsoki-ui-demo`
-  post-production (MP4/GIF/contact-sheet, chapter sidecar) and the
-  `kitsoki-ui-qa` vision gate unchanged; extends the `kitsoki-ui-demo` skill
-  with a "full-editor" mode.
+- **Demo harness (new):** `tools/vscode-kitsoki/tests/` — a **deterministic
+  driving spec**, the analog of the web tour spec (`agent-actions-video.spec.ts`):
+  one Playwright `_electron` spec with fast/assert + record modes that launches
+  the *real* VS Code binary, reuses the existing tour manifest inside the chat
+  webview, drives the editor beat-by-beat, and records the **whole window**.
+  Reuses the `kitsoki-ui-demo` post-production (MP4/GIF/contact-sheet, chapter
+  sidecar) and the `kitsoki-ui-qa` vision gate unchanged; ships as the
+  `kitsoki-ui-demo` skill's "full-editor" mode. (Mechanism PoC-proven — *PoC*
+  below.)
 - **Code (build):** the SPA already builds to a single inlined `index.html`
   via `vite-plugin-singlefile`; the extension build copies that artifact in
   (the same `make web` staging the Go embed uses). Set Vite `base: './'` for
@@ -238,6 +240,51 @@ The pipeline has four layers; **two carry over unchanged, two swap**:
 | **Determinism** | backend spawned `--flow`/`--host-cassette` | **reuse** → same backend, same flags — the extension forwards the no-LLM posture (Backend lifecycle, above) |
 | **Recorder** | Playwright `recordVideo` → `saveVideoAsMp4` | Playwright **`recordVideo`** of the workbench window → the *same* MP4/GIF/contact-sheet + chapter-sidecar + QA post-production; ffmpeg screen-grab is an optional fidelity upgrade |
 
+### The deterministic driving spec (the headline deliverable)
+
+The deliverable is **not** a recorder utility — it is a **deterministic spec**
+that drives the full editor, the exact analog of
+`agent-actions-video.spec.ts`, carrying every property that makes the web tour
+spec reproducible. It is the source of truth; the video is its by-product.
+
+- **One spec, two modes — same as the web tour.** A single
+  `tools/vscode-kitsoki/tests/<feature>-video.spec.ts` runs in *fast/assert*
+  mode (pace = 0, every beat asserted, no dwell — the CI/validation gate) and
+  *record* mode (paced dwells, recorder on). Gate the pace on an env var
+  (`KITSOKI_VSCODE_PACE`, mirroring `WEB_CHAT_PACE`) so the same spec validates
+  fast and records at watch-speed. **Validate green before you record** — the
+  web pipeline's rule, unchanged.
+- **One manifest, both surfaces, asserted per step (the drift guard).** The
+  web spec injects `src/tour/<feature>-manifest.ts` and asserts each popover
+  `title` against it so the recording can't drift from the live overlay. The
+  editor spec reuses that **same manifest** for the in-webview chat steps, and
+  asserts the same titles inside the frame — plus a thin **editor-beat manifest**
+  for the steps that live *outside* the webview (open the kitsoki activity-bar
+  view, reveal the trace panel, focus a file). Each editor beat is one row:
+  `{ id, command | testid, expect, dwellMs }`.
+- **Two beat kinds, one timeline.** A step is either a **webview beat** (descend
+  `iframe.webview.ready >>> iframe[title]`, drive the kitsoki UI by its existing
+  `data-testid`s — `intent-btn-*`, `composer-*`, `state-badge` — exactly as the
+  browser tour does) or an **editor beat** (driven on the outer workbench `Page`:
+  click an activity-bar item, run a command). Both advance the one
+  `ChapterRecorder` clock, so the chapter sidecar spans the whole editor tour.
+- **Deterministic staging beats native flakiness.** Where the web tour uses the
+  curtain + off-camera RPC, the editor spec stages state via
+  `app.evaluate(() => vscode.commands.executeCommand(id, …))` (no command-palette
+  typing race) for setup, and drives the *visible* beats as real clicks on
+  camera — the same "stage off-camera, advance on-camera" split. No `firstWindow`
+  race (poll `windows()` for `.monaco-workbench`); strip `VSCODE_*` env; fixed
+  window size; pinned VS Code — all PoC-pinned (below).
+- **Same no-LLM backend.** The extension spawns `kitsoki web` in the
+  `--flow`/`--host-cassette` posture (Backend lifecycle, above), so the recorded
+  turns are reproducible and free — identical determinism contract to the web
+  tour, no live LLM ever (CLAUDE.md; `kitsoki-ui-demo`).
+- **Authoring loop, unchanged.** Copy the editor-beat manifest + spec, point at a
+  fresh feature manifest and a fresh backend port, run fast-mode to green, then
+  record — the four-command loop the `kitsoki-ui-demo` skill documents, with the
+  launcher/recorder swapped. This ships as the skill's **"full-editor" mode**,
+  not a parallel system.
+
 **Recorder choice — `recordVideo` is the deterministic default; ffmpeg is a
 fidelity upgrade (PoC-validated, corrects the earlier lean).** The PoC below
 showed `recordVideo` is **window-isolated** — it captures the VS Code window's
@@ -357,12 +404,15 @@ No real LLM, no real editor, no cost (CLAUDE.md; memory: no-llm-tests):
 ## 3. Full-editor demo capability  (mechanism proven — see PoC, .artifacts/vscode-poc/)
 - [x] 3.0 PoC: _electron launches real VS Code, webview frame-traversal asserted,
           full window recorded to a valid MP4 (record-vscode-poc.mjs)
-- [ ] 3.1 Productionize the launcher into tools/vscode-kitsoki/tests/: pinned
+- [ ] 3.1 Launcher helper in tools/vscode-kitsoki/tests/_helpers: pinned
           downloadAndUnzipVSCode + _electron.launch (clean user-data/extensions dir,
-          fixed size, VSCODE_* env stripped); one spec shared by the e2e + record runs
-- [ ] 3.2 Reach into the kitsoki chat webview (frameLocator x2) and inject the existing
-          src/tour/*-manifest.ts via window.__startTourWithSteps; drive editor beats
-          (activity-bar view, trace panel) on the workbench Page
+          fixed size, VSCODE_* env stripped, poll windows() for .monaco-workbench)
+- [ ] 3.2 The deterministic driving spec <feature>-video.spec.ts (analog of
+          agent-actions-video.spec.ts): ONE spec, two modes gated on KITSOKI_VSCODE_PACE
+          (fast/assert = CI gate; paced = record). Editor-beat manifest ({id,command|testid,
+          expect,dwellMs}) + REUSE src/tour/*-manifest.ts inside the webview; assert each
+          step's title against the manifest (drift guard); stage via app.evaluate(commands),
+          advance visible beats as real clicks; one ChapterRecorder across both surfaces
 - [ ] 3.3 Wire the recording into the kitsoki-ui-demo post-production
           (MP4/GIF/contact-sheet) + ChapterRecorder sidecar; recordVideo default,
           ffmpeg screen-grab as the dedicated-display fidelity option
