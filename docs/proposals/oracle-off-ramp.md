@@ -3,6 +3,12 @@
 **Status:** Draft v1. Nothing implemented yet.
 **Kind:**   runtime
 **Epic:**   — standalone
+**Depends on:** [`web-text-input-floor.md`](web-text-input-floor.md) — the
+off-ramp fires only on free text the router can't map; the web UI hides
+the free-text composer whenever a `choice:` widget is present, so without
+that fix the off-ramp ships working in the TUI and dead on the web (the
+intake/discovery/menu rooms that most want it are exactly the ones that
+show a widget).
 
 ## Why
 

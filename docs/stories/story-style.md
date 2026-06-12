@@ -389,6 +389,40 @@ Cross-references:
 
 ---
 
+## 3.8 The view must read as plain text
+
+A story runs on more surfaces than the TUI. Most sessions are carried
+by plain-text comment threads — Jira, Bitbucket, Slack/Teams, email —
+where there is no color, no alignment guarantee, and no interactive
+widget. The view you author is *projected* onto each surface: the TUI
+gets the polish, a text transport gets a Markdown serialization of the
+same element tree. **Author for the text projection and let the TUI add
+polish on top** — never the reverse. (Why this is a hard requirement,
+not a nicety: [`../architecture/transports.md` §7](../architecture/transports.md#7-every-story-must-work-text-only).)
+
+Concretely:
+
+- **Never put essential meaning in color.** The emerald/red action
+  palette (§1) and source-color (§8) are *redundant* cues — a blocked
+  action is already prefixed `✗` and names its reason in text. If "it's
+  red" is the only signal, the comment-thread reader misses it.
+- **Typed elements over `view: |` strings** (§2, §3.5): they serialize
+  to clean Markdown. Layout you hand-align inside a `code:` block or
+  ASCII table survives only in a monospace surface — keep
+  layout-critical status in `kv:` / `list:`, which reflow anywhere.
+- **`choice:` (§3.6) and `media:` (§3.7) are enhancements, not the only
+  path.** A `choice:` widget collapses to nothing on a comment thread,
+  so the same intents must stay reachable by typing — keep the `list:`
+  of action labels (or a prose hint) so the text reader still sees the
+  menu; the router/classifier resolves the typed reply. A `media:`
+  embed degrades to a path pointer, so put the artifact's *meaning* in
+  a neighboring `prose:`, not only in the embed.
+- **The reply prompt is always text.** Per §3.5 rule 2 the action menu
+  / reply line renders unconditionally — on a comment thread that line
+  is the user's entire interface.
+
+---
+
 ## 4. Placeholders for empty / pending values
 
 Lowercase, in parentheses. The pongo `|default` filter is the standard
@@ -526,6 +560,9 @@ Before you ship a new room:
       (`{}`). Action-menu / reply prompt is unconditional.
 - [ ] No `{% for %}` over a world key that might be absent / nil.
       Either guard with `{% if %}` or use a typed `list: from: …`.
+- [ ] The view reads on a plain-text surface (§3.8): no meaning
+      carried only by color or a `choice:`/`media:` widget; every
+      intent reachable by typing.
 
 ---
 

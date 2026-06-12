@@ -246,6 +246,10 @@ right-side panel and the in-view templates read.
 
 The result is rendered by the surface — the TUI runs it through
 Glamour; transports send it as Markdown or convert to wiki markup.
+Because most surfaces are plain-text comment threads, the view must
+read on text alone: see
+[`story-style.md` §3.8](story-style.md#38-the-view-must-read-as-plain-text)
+and [`../architecture/transports.md` §7](../architecture/transports.md#7-every-story-must-work-text-only).
 
 #### View renders run AFTER `on_enter` `bind:` settles
 

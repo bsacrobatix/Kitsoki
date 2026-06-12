@@ -451,7 +451,11 @@ by a `when:` on the invoke). Details and a worked example:
 [`state-machine.md` §3 "View renders run AFTER on_enter bind settles"](state-machine.md#view-renders-run-after-on_enter-bind-settles).
 How elements actually render on screen is the TUI's job
 ([`../tui/README.md`](../tui/README.md)); how a story *should* look is
-[`story-style.md`](story-style.md).
+[`story-style.md`](story-style.md). And because most surfaces are
+plain-text comment threads (Jira, Bitbucket, Slack/Teams), every view
+must also read as text alone — never leaning on color or an interactive
+widget for anything essential
+([`../architecture/transports.md` §7](../architecture/transports.md#7-every-story-must-work-text-only)).
 
 ---
 

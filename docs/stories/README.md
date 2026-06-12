@@ -40,7 +40,8 @@ way, see [`../architecture/concept.md`](../architecture/concept.md).)
 
 - **[`story-style.md`](story-style.md)** — how a story should *look* and
   *read*: blocks, typed view elements, colors, action menus, narration
-  voice, placeholders. The short guide; copy Oregon Trail when in
+  voice, placeholders, and the [text-only rule](story-style.md#38-the-view-must-read-as-plain-text)
+  every view must satisfy. The short guide; copy Oregon Trail when in
   doubt. (How those elements render is [`../tui/`](../tui/README.md).)
 - **[`choice-widget.md`](choice-widget.md)** — the choice widget
   cookbook: single-select, multi-select, and form modes, with patterns

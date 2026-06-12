@@ -4,6 +4,9 @@ A **transport** is an output adapter onto an external surface. The TUI
 transcript is one transport; Jira ticket comments and Bitbucket PR
 comments are two more. The same room — state graph, intents, phases,
 checkpoints — works no matter which transport carries the conversation.
+Because most of those surfaces are plain-text comment threads, every
+story must also be fully usable as text — see
+[§7](#7-every-story-must-work-text-only).
 
 A **session** is one running instance of a state machine for one app.
 Sessions are persistent and are addressed two ways:
@@ -218,6 +221,72 @@ This is the single most-bitten gotcha when wiring up an external
 transport. The marker is configurable per-transport in `app.yaml`;
 when you change it, also change the corresponding filter in the
 external driver.
+
+---
+
+## 7. Every story must work text-only
+
+Most surfaces are plain-text comment threads — a Jira comment, a
+Bitbucket PR comment, a Slack/Teams message, an email reply. The TUI
+and web UI, with their color and interactive widgets, are the
+exception, not the rule. So the contract is stronger than "the state
+graph runs on any transport" (the opening claim of this doc):
+**every story must be fully drivable and legible with nothing but
+text.** A room that only works in the TUI is broken on Jira.
+
+There are two sides to it:
+
+- **Output.** A room's `view:` is authored as typed elements — the
+  canonical form — and each surface *projects* them. The TUI paints
+  color and widgets; a text transport serializes the same element tree
+  to Markdown (the Jira transport then converts Markdown → wiki markup,
+  §2). Nothing essential — narration, status, or the available actions
+  — may live *only* in color, a `choice:` widget, or a `media:` embed,
+  because those collapse to plain text or vanish entirely on a comment
+  thread. Write the view so its Markdown projection alone tells the
+  user where they are and what they can do.
+
+- **Input.** Every intent must be reachable by typing. The semantic
+  router (free text → intent) and the deterministic `PrefixClassifier`
+  (`continue` / `refine: …` / `jump_to …`, §8.2) are the text-only
+  input path; a `choice:` widget is a TUI/web affordance layered on
+  top, never the only way to fire an intent. A room whose only path
+  forward is a click cannot be advanced from a Jira comment.
+
+This is why `choice:` short-circuits the router but never replaces it,
+and why the action menu must render unconditionally as text — the
+comment-thread user has only the text. The authoring rules that keep a
+view honest on a text surface live in
+[`../stories/story-style.md` §3.5](../stories/story-style.md#35-the-view-must-always-render-to-something-visible)
+and [§3.8](../stories/story-style.md#38-the-view-must-read-as-plain-text).
+
+### 7.1 Known gaps (the contract is not yet enforced)
+
+The contract above is the design intent; an audit (2026-06) found the
+runtime does not yet guarantee it. Until these close, text-only safety
+rests on author discipline — which holds across shipped stories today,
+but nothing prevents a regression:
+
+- **The web composer hides free-text input when a `choice:`/`form`
+  element is present.** `InputBar.vue` renders the free-text path only
+  when the room declares no widget, with no escape hatch (the TUI has
+  `Tab → chat`). A web user facing a choice widget can submit *only* the
+  enumerated options — so the planned **oracle off-ramp** (no-match →
+  oracle chat) is unreachable on the web. This is the biggest gap; fix
+  proposed in
+  [`../proposals/web-text-input-floor.md`](../proposals/web-text-input-floor.md).
+- **The static `choice:` footer advertises keyboard affordances that
+  don't exist on a text surface.** The body the Jira/Bitbucket
+  transports emit ends with `[↑/↓ move • Enter pick • Tab chat • Esc
+  cancel]`, and form-mode emits bare `____` underlines, with no "reply
+  with `intent field=value`" instruction. The labels *are* shown, so the
+  room is drivable, but the footer misleads. (See
+  [`web-text-input-floor.md`](../proposals/web-text-input-floor.md)
+  Non-goals.)
+- **No load-time lint enforces text-only safety.** Nothing rejects a
+  room whose only affordance is a widget with no typeable intent path,
+  or a `media:` whose meaning isn't mirrored in prose. The invariant is
+  documented but unchecked.
 
 ---
 

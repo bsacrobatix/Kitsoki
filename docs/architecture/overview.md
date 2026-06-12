@@ -241,9 +241,13 @@ implementation to drift from.
 ## 5. Conversations across surfaces
 
 A conversation has to live somewhere — a TUI window, a Jira ticket
-comment thread, or (on the roadmap) a Bitbucket PR or a Slack thread.
-Kitsoki calls each of these a **surface** (or, viewed from inside, a
-**transport**), and the same application works across all of them.
+comment thread, a Bitbucket PR, or (on the roadmap) a Slack/Teams
+thread. Kitsoki calls each of these a **surface** (or, viewed from
+inside, a **transport**), and the same application works across all of
+them. Because most surfaces are plain-text comment threads, this puts a
+hard requirement on every story: it must be fully drivable and legible
+as text, never depending on color or interactive widgets for anything
+essential. See [`transports.md` §7](transports.md#7-every-story-must-work-text-only).
 
 ```mermaid
 flowchart LR
