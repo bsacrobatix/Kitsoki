@@ -55,7 +55,7 @@ const STEPS: {
   effort?: string;
 }[] = [
   { profile: "claude-native", reply: "Claude", model: "opus", effort: "high", caption: "Native Anthropic Claude Code", sub: "Pick the model (opus) and the reasoning effort (high)." },
-  { profile: "synthetic-claude", reply: "GLM-5.1", model: "syn:small:text", caption: "claude-code on synthetic.new", sub: "Same backend, different endpoint — and its own model catalog." },
+  { profile: "synthetic-claude", reply: "GLM-5.1", model: "hf:zai-org/GLM-5.1", caption: "claude-code on synthetic.new", sub: "Pick a specific always-on model — hf:zai-org/GLM-5.1, not just a syn: alias." },
   { profile: "codex-native", reply: "Codex", model: "gpt-5", caption: "codex on your subscription", sub: "A different backend CLI — with its own models." },
 ];
 
@@ -166,6 +166,8 @@ test("harness picker from the chat pane — switch provider, ask who-are-you", a
     }
     await expect(harnessLabels().filter({ hasText: "opus" }).first()).toBeVisible();
     await expect(harnessLabels().filter({ hasText: "high" }).first()).toBeVisible();
+    // synthetic ran a specific model, not just a syn: alias.
+    await expect(harnessLabels().filter({ hasText: "hf:zai-org/GLM-5.1" }).first()).toBeVisible();
     await beat("Three turns, three providers", "Each oracle call in the trace carries the profile, model + effort it ran on.");
     await shot(page, "04-trace-all");
     await dwell(page, SETTLE_MS);

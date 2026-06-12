@@ -14,7 +14,9 @@ harness_profiles:
   synthetic-claude:
     backend: claude
     model: syn:large:text
-    models: [syn:large:text, syn:small:text]
+    # Offer a specific always-on model alongside the aliases (in a real config
+    # models_endpoint pulls the full live list).
+    models: [syn:large:text, syn:small:text, "hf:zai-org/GLM-5.1", "hf:Qwen/Qwen3.6-27B"]
     env:
       ANTHROPIC_BASE_URL: https://api.synthetic.new/anthropic
       ANTHROPIC_AUTH_TOKEN: "${SYNTHETIC_API_KEY}"
