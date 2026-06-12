@@ -30,7 +30,7 @@ command -v ffmpeg >/dev/null 2>&1 || { echo "ffmpeg not on PATH" >&2; exit 1; }
 [ -f "$in" ] || { echo "no such file: $in" >&2; exit 1; }
 [ -n "$out" ] || out="${in%.*}.gif"
 
-pal="$(mktemp --suffix=.png)"
+pal="$(mktemp -t webm-to-gif-pal).png"
 trap 'rm -f "$pal"' EXIT
 
 scale="fps=${fps},scale=${width}:-1:flags=lanczos"

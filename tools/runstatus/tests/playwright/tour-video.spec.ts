@@ -226,6 +226,12 @@ test("onboarding tour video (no-LLM)", async () => {
 
     // The final 'Done' closes the tour.
     await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 5000 });
+    // Capture a labeled frame of the dismissed state (overlay gone) so a QA pass
+    // against the per-step PNGs can verify the tour actually concludes — the
+    // tour-done step's own screenshot is taken before Done is clicked and still
+    // shows the closing popover. Dwell so the video lingers on the clean UI.
+    await dwell(page, 3000);
+    await shot(page, "tour-dismissed");
   } finally {
     // Close context first to finalize the video file, then save via the Video
     // reference (avoids picking a stale file). saveAs must happen after context
