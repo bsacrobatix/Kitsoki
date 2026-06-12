@@ -71,9 +71,22 @@ export const useOperatorQuestionStore = defineStore("operatorQuestions", () => {
     answers: Record<string, string | string[]>
   ): Promise<void> {
     const frame = active.value;
-    if (!frame || !src || submitting.value) return;
+    if (!frame || submitting.value) return;
     submitting.value = true;
     try {
+      // Demo seam local-resolve: a frame injected by the deterministic demo
+      // driver (window.__pushOperatorQuestion) has no pending registry entry on
+      // the backend, so there is no parked goroutine to unblock — round-tripping
+      // the answerQuestion RPC would 404. Frames the demo injects carry a
+      // "demo-" question_id; for those we skip the RPC and resolve locally so the
+      // modal dismisses exactly as it would in production. The modal rendering +
+      // option-selection UX is unchanged; only the network round-trip is bypassed
+      // (analogous to how __startTourWithSteps bypasses the tour auto-start).
+      if (frame.question_id.startsWith("demo-")) {
+        queue.value.shift();
+        return;
+      }
+      if (!src) return;
       const res = await src.answerQuestion(frame.question_id, answers);
       if (res.ok) {
         queue.value.shift();

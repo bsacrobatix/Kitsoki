@@ -79,6 +79,23 @@ describe("operator-question store", () => {
     expect(store.pending).toBe(1);
   });
 
+  it("short-circuits the RPC for a demo- question_id and advances locally", async () => {
+    const store = useOperatorQuestionStore();
+    const { source, push, answer } = fakeSource();
+    store.init(source);
+    push(frame("demo-q-1"));
+    push(frame("q-2"));
+
+    await store.answer({ Ship: "Yes" });
+
+    // No backend round-trip for the injected demo frame…
+    expect(answer).not.toHaveBeenCalled();
+    // …but the queue still advances and submitting toggled back off.
+    expect(store.active?.question_id).toBe("q-2");
+    expect(store.pending).toBe(1);
+    expect(store.submitting).toBe(false);
+  });
+
   it("leaves the question at the head when the answer RPC reports !ok", async () => {
     const store = useOperatorQuestionStore();
     const { source, push } = fakeSource(async () => ({ ok: false }));

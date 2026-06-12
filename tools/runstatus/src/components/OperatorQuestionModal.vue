@@ -8,10 +8,41 @@
 // the agent. It is intentionally a hard modal (no dismiss / no backdrop close):
 // an agent is waiting, and the only way forward is to answer. Escape and
 // backdrop clicks are inert by design.
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useOperatorQuestionStore } from "../stores/operatorQuestions.js";
+import type { OperatorQuestionFrame } from "../data/live-source.js";
 
 const store = useOperatorQuestionStore();
+
+// Deterministic demo/test driver (mirrors TourOverlay's __startTourWithSteps).
+// The operator-question modal only renders when the backend pushes a
+// /rpc/questions SSE frame, which needs a real dispatched agent — impossible in
+// the no-LLM demo posture. This seam lets the demo spec inject a frame directly
+// into the store's onFrame() so the REAL modal renders. Guarded the same way as
+// the tour seam: it only ever ENQUEUES a frame the caller already constructed,
+// so production behaviour is untouched (nothing calls this in prod). The local
+// answer() short-circuit (operatorQuestions store) pairs with this for frames
+// whose question_id starts with "demo-".
+type OperatorQuestionWindow = typeof window & {
+  __pushOperatorQuestion?: (frameJson: string) => void;
+};
+
+onMounted(() => {
+  const win = window as OperatorQuestionWindow;
+  win.__pushOperatorQuestion = (frameJson: string) => {
+    try {
+      const frame = JSON.parse(frameJson) as OperatorQuestionFrame;
+      store.onFrame(frame);
+    } catch {
+      /* malformed JSON — ignore (deterministic test/demo driver only) */
+    }
+  };
+});
+
+onUnmounted(() => {
+  const win = window as OperatorQuestionWindow;
+  delete win.__pushOperatorQuestion;
+});
 
 const active = computed(() => store.active);
 // pending count beyond the active one, surfaced as a "N more queued" hint.
