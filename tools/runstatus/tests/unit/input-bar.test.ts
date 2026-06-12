@@ -240,6 +240,111 @@ describe("InputBar", () => {
     wrapper.unmount();
   });
 
+  // ── Free-text floor ───────────────────────────────────────────────────────────
+  // The text-only contract (transports.md §7) requires every room to be
+  // drivable by typing. A choice/form widget would otherwise hide all free text,
+  // so we render a de-emphasized free-text floor below it that routes via
+  // session.turn (semantic router → off-ramp) — emitted as 'send', distinct from
+  // the labeled-intent composer's 'intent'/session.submit.
+
+  const choiceOnlyView = {
+    Elements: [
+      {
+        Kind: "choice" as const,
+        ChoiceMode: "single",
+        ChoicePrompt: "Actions",
+        ChoiceItems: [
+          { Label: "Start", Intent: "start" },
+          { Label: "quit", Intent: "quit" },
+        ],
+      },
+    ],
+  };
+
+  const formOnlyView = {
+    Elements: [
+      {
+        Kind: "choice" as const,
+        ChoiceMode: "form",
+        ChoicePrompt: "Enter values",
+        ChoiceIntent: "submit_values",
+        ChoiceFields: [{ Name: "qty", Type: "int" }],
+      },
+    ],
+  };
+
+  it("choice present: a free-text floor is shown and emits 'send' (raw text via session.turn)", async () => {
+    const wrapper = mount(InputBar, {
+      props: { intents: [startIntent], typedView: choiceOnlyView },
+    });
+    // Choice buttons are the primary affordance…
+    expect(wrapper.find('[data-testid="intent-actions"]').exists()).toBe(true);
+    // …and the floor is present beneath them.
+    const floor = wrapper.find('[data-testid="text-floor"]');
+    expect(floor.exists()).toBe(true);
+
+    await wrapper.find('[data-testid="text-floor-input"]').setValue("something off-menu");
+    await floor.trigger("submit");
+
+    const sendEv = wrapper.emitted("send");
+    expect(sendEv).toBeTruthy();
+    expect(sendEv![0]).toEqual(["something off-menu", ""]);
+    // The floor never fires a labeled intent — that path is for the widget.
+    expect(wrapper.emitted("intent")).toBeFalsy();
+    wrapper.unmount();
+  });
+
+  it("form present: a free-text floor is shown too", () => {
+    const wrapper = mount(InputBar, {
+      props: { intents: [], typedView: formOnlyView },
+    });
+    expect(wrapper.find(".input-bar__form-grid").exists()).toBe(true);
+    expect(wrapper.find('[data-testid="text-floor"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("no floor on semantic or text-slot rooms — they already expose a text box", () => {
+    const semanticView = {
+      Elements: [{ Kind: "prose" as const, Source: "Say what you want." }],
+    };
+    const semantic = mount(InputBar, {
+      props: { intents: [startIntent], typedView: semanticView },
+    });
+    expect(semantic.find('[data-testid="text-floor"]').exists()).toBe(false);
+    semantic.unmount();
+
+    const textSlot = mount(InputBar, { props: { intents: [discussIntent] } });
+    expect(textSlot.find('[data-testid="text-floor"]').exists()).toBe(false);
+    textSlot.unmount();
+  });
+
+  it("the floor is disabled while a turn is pending", () => {
+    const wrapper = mount(InputBar, {
+      props: { intents: [startIntent], typedView: choiceOnlyView, pending: true },
+    });
+    const ta = wrapper.find('[data-testid="text-floor-input"]').element as HTMLTextAreaElement;
+    expect(ta.disabled).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("a floor draft survives a widget→semantic switch (shared rawDraft)", async () => {
+    // The TUI's /input restores a prior draft across the widget↔text toggle;
+    // the floor shares rawDraft with the semantic composer so a half-typed
+    // message is not lost when the room's view changes.
+    const semanticView = {
+      Elements: [{ Kind: "prose" as const, Source: "Say what you want." }],
+    };
+    const wrapper = mount(InputBar, {
+      props: { intents: [startIntent], typedView: choiceOnlyView },
+    });
+    await wrapper.find('[data-testid="text-floor-input"]').setValue("draft in progress");
+    // Room transitions to a semantic view (choice gone).
+    await wrapper.setProps({ typedView: semanticView });
+    const composer = wrapper.find('[data-testid="composer-input"]').element as HTMLTextAreaElement;
+    expect(composer.value).toBe("draft in progress");
+    wrapper.unmount();
+  });
+
   it("when two text-slot intents exist, dropdown defaults to the first one listed", () => {
     // Guards the priority-ordering fix: discuss must be first so it is the
     // default selection, not capture_existing ("Reference Docs").

@@ -251,7 +251,12 @@ There are two sides to it:
   (`continue` / `refine: …` / `jump_to …`, §8.2) are the text-only
   input path; a `choice:` widget is a TUI/web affordance layered on
   top, never the only way to fire an intent. A room whose only path
-  forward is a click cannot be advanced from a Jira comment.
+  forward is a click cannot be advanced from a Jira comment. On the web,
+  where a `choice:`/`form` widget would otherwise hide the text box,
+  `InputBar.vue` renders a persistent, de-emphasized free-text **floor**
+  beneath the widget — mirroring the TUI's `Tab → chat` escape — so
+  arbitrary text always routes through `session.turn` (semantic router →
+  off-ramp) regardless of what typed-view elements the room declares.
 
 This is why `choice:` short-circuits the router but never replaces it,
 and why the action menu must render unconditionally as text — the
@@ -267,22 +272,13 @@ runtime does not yet guarantee it. Until these close, text-only safety
 rests on author discipline — which holds across shipped stories today,
 but nothing prevents a regression:
 
-- **The web composer hides free-text input when a `choice:`/`form`
-  element is present.** `InputBar.vue` renders the free-text path only
-  when the room declares no widget, with no escape hatch (the TUI has
-  `Tab → chat`). A web user facing a choice widget can submit *only* the
-  enumerated options — so the planned **oracle off-ramp** (no-match →
-  oracle chat) is unreachable on the web. This is the biggest gap; fix
-  proposed in
-  [`../proposals/web-text-input-floor.md`](../proposals/web-text-input-floor.md).
 - **The static `choice:` footer advertises keyboard affordances that
   don't exist on a text surface.** The body the Jira/Bitbucket
   transports emit ends with `[↑/↓ move • Enter pick • Tab chat • Esc
   cancel]`, and form-mode emits bare `____` underlines, with no "reply
   with `intent field=value`" instruction. The labels *are* shown, so the
-  room is drivable, but the footer misleads. (See
-  [`web-text-input-floor.md`](../proposals/web-text-input-floor.md)
-  Non-goals.)
+  room is drivable, but the footer misleads — a transport-aware
+  footer/serialization is its own change.
 - **No load-time lint enforces text-only safety.** Nothing rejects a
   room whose only affordance is a widget with no typeable intent path,
   or a `media:` whose meaning isn't mirrored in prose. The invariant is

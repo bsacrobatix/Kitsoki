@@ -131,6 +131,41 @@
       </div>
     </template>
 
+    <!-- Free-text floor: a choice/form widget otherwise hides all free text,
+         but the text-only contract (transports.md §7) says every room must be
+         drivable by typing. This persistent, de-emphasized composer routes via
+         session.turn (semantic router → oracle off-ramp), so arbitrary text is
+         always submittable alongside the structured widget — the only path to a
+         no-match the off-ramp needs. Mirrors the TUI's Tab escape-hatch
+         (choice_widget.go); the widget stays the primary affordance, this is the
+         floor beneath it. Semantic/text-slot rooms already expose a text box, so
+         they need no extra floor. rawDraft is shared with the semantic composer,
+         so a draft survives any widget↔text switch. -->
+    <form
+      v-if="showTextFloor"
+      class="input-bar__composer input-bar__composer--floor"
+      data-testid="text-floor"
+      @submit.prevent="sendRaw"
+    >
+      <textarea
+        v-model="rawDraft"
+        class="input-bar__textarea"
+        data-testid="text-floor-input"
+        placeholder="…or type a message instead"
+        rows="1"
+        :disabled="pending"
+        @keydown.enter.exact.prevent="sendRaw"
+      />
+      <button
+        class="input-bar__send"
+        type="submit"
+        data-testid="text-floor-send"
+        :disabled="pending || !rawDraft.trim()"
+      >
+        Send
+      </button>
+    </form>
+
     <form
       v-if="textIntents.length && !choiceItems.length && !formElement"
       class="input-bar__composer"
@@ -354,6 +389,16 @@ const isSemanticRoom = computed(() => {
   if (textIntents.value.length) return false;
   return true;
 });
+
+/**
+ * True when a structured widget (single-mode choice or form-mode choice) is the
+ * room's primary affordance and would otherwise hide free text entirely. In that
+ * case we still render a free-text floor below the widget so arbitrary text stays
+ * submittable via session.turn (semantic router → off-ramp), honoring the
+ * text-only contract. Semantic and text-slot rooms already expose a text box, so
+ * they get no extra floor.
+ */
+const showTextFloor = computed(() => choiceItems.value.length > 0 || formElement.value != null);
 
 const selectedTextName = ref<string>("");
 
@@ -622,6 +667,21 @@ function sendRaw() {
 
 .input-bar__composer--semantic {
   align-items: flex-end;
+}
+
+/* The free-text floor sits below a choice/form widget as a de-emphasized
+   escape hatch — a dashed rule and muted, slightly smaller box keep the
+   structured widget the visual primary while text stays reachable. */
+.input-bar__composer--floor {
+  align-items: flex-end;
+  padding-top: 12px;
+  border-top: 1px dashed #2a2f3a;
+}
+
+.input-bar__composer--floor .input-bar__textarea {
+  font-size: 13px;
+  background: #0c0e12;
+  min-height: 2.4rem;
 }
 
 .input-bar__send {
