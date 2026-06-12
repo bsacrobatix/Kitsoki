@@ -132,12 +132,15 @@ states:
       - template: "⚠ **Reference search failed** — {{ world.last_error }}."
         when: "world.last_error != ''"
       - prose: "cycle {{ world.cycle }} · references round {{ world.references_cycle }} · judge {{ world.judge_mode }}"
-      # Saved-file path on its own prominent line — open/edit on disk directly.
-      - prose: 'Reference list saved to  {{ world.references_path|default:"(writing 003-references.md into the per-PRD workspace…)" }}'
+      # The saved-file path is a kv value holding the BARE path: the web UI
+      # linkifies a kv value ending in .md into a clickable file preview
+      # (prose never linkifies — same idiom as the brief room and dev-story's
+      # proposal_refine Brief row). The pending placeholder stays plain text.
       - kv:
           pairs:
-            Idea:     '{{ world.idea|default:"(none)"|truncatechars:80 }}'
-            Upstream: '{{ world.upstream_paths|default:"(none)" }}'
+            References: '{{ world.references_path|default:"(writing 003-references.md into the per-PRD workspace…)" }}'
+            Idea:       '{{ world.idea|default:"(none)"|truncatechars:80 }}'
+            Upstream:   '{{ world.upstream_paths|default:"(none)" }}'
       # Echo the operator's last refine instruction back so a refine turn
       # visibly acknowledges what was asked (the golden proposal_refine.yaml
       # renders the same "You asked: …" line). A blank-feedback action skips

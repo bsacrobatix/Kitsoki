@@ -49,11 +49,14 @@ states:
       - template: "⚠ **Brief save failed** — {{ world.last_error }}. Fix the issue and **confirm** to retry."
         when: "world.last_error != ''"
       - prose: "cycle {{ world.cycle }} · clarify rounds {{ world.clarifying_cycle }} · brief checks {{ world.brief_cycle }} · judge {{ world.judge_mode }}"
-      # The saved-file path gets its own prominent line (not buried in the kv
-      # status) — the operator can open/edit the artifact on disk directly.
-      - prose: 'Brief saved to  {{ world.brief_path|default:"(writing 001-brief.md into the per-PRD workspace…)" }}'
+      # The saved-file path is a kv value holding the BARE path: the web UI
+      # linkifies a kv value ending in .md into a clickable file preview
+      # (prose/template/code never linkify — same idiom as dev-story's
+      # proposal_refine Brief row and this story's search-room Overlap rows).
+      # The pending placeholder ends in "…)" so it stays plain text.
       - kv:
           pairs:
+            Brief:    '{{ world.brief_path|default:"(writing 001-brief.md into the per-PRD workspace…)" }}'
             Idea:     '{{ world.idea|default:"(none)"|truncatechars:80 }}'
             Upstream: '{{ world.upstream_paths|default:"(none)" }}'
       - heading: "Idea"
