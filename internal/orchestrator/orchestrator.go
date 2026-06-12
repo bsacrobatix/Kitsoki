@@ -586,12 +586,35 @@ func (o *Orchestrator) RunInitialOnEnter(ctx context.Context, sid app.SessionID)
 	if journey.Turn > 0 {
 		return nil
 	}
-	state := lookupStateByPath(o.def, journey.State)
-	if state == nil || len(state.OnEnter) == 0 {
+	// Fire the on_enter chain for EVERY state entered at boot — the
+	// ancestor compounds AND the leaf, in root→leaf order — not just the
+	// leaf. The initial state is reached by resolving the root compound's
+	// `initial:` chain, not by a transition, so nothing here walks the
+	// compound ancestors the way Machine.Turn's entered-path loop does.
+	// That matters because import-folding parks an import's `world_in:`
+	// setters on the import wrapper's compound on_enter (see app/imports.go
+	// §6). For a NON-root import a real entry transition fires them; for the
+	// ROOT import (`root: core`) there is no such transition, so an instance
+	// that retargets a profile key via the root import's `world_in:` got
+	// none of them — the child kept its own defaults. Walking the prefix
+	// chain here mirrors stateEnterPaths("", journey.State): the same
+	// root→leaf on_enter sequence a real entry transition would fire.
+	p := string(journey.State)
+	if idx := strings.Index(p, "#"); idx >= 0 {
+		p = p[:idx]
+	}
+	var onEnter []app.Effect
+	parts := strings.Split(p, ".")
+	for i := range parts {
+		if anc := lookupStateByPath(o.def, app.StatePath(strings.Join(parts[:i+1], "."))); anc != nil {
+			onEnter = append(onEnter, anc.OnEnter...)
+		}
+	}
+	if len(onEnter) == 0 {
 		return nil
 	}
 
-	resolved, newWorld, hostCalls, _, effEvents, runErr := o.machine.RunEffectsAndState(ctx, journey.State, journey.World, state.OnEnter)
+	resolved, newWorld, hostCalls, _, effEvents, runErr := o.machine.RunEffectsAndState(ctx, journey.State, journey.World, onEnter)
 	if runErr != nil {
 		return fmt.Errorf("orchestrator: RunInitialOnEnter: run on_enter for %q: %w", journey.State, runErr)
 	}
