@@ -288,6 +288,14 @@ func (c *Client) drain(cause error) {
 // response is returned as a Go error. A socket drop while in flight fails the
 // call with ErrNotConnected.
 func (c *Client) CallTool(ctx context.Context, name string, args any) (json.RawMessage, error) {
+	// Honour an already-cancelled/expired context before any connection-state
+	// check: the caller cancelled, so context.Canceled is the right answer even
+	// if the link has since dropped (c.dead). Without this, a cancel that races
+	// a drop can surface as ErrNotConnected instead of ctx.Err() — a flaky
+	// "want context.Canceled, got ide: not connected" under tight scheduling.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if args == nil {
 		args = map[string]any{}
 	}
