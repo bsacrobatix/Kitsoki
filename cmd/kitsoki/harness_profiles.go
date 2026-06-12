@@ -1,0 +1,29 @@
+package main
+
+import (
+	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/webconfig"
+)
+
+// harnessProfilesFromConfig translates the loaded webconfig profiles (YAML
+// shape, ${VAR} already expanded and validated by webconfig.Load) into the
+// orchestrator's runtime form, stamping each entry's Name from its key. An
+// empty/declared-nothing config yields (nil, "") so the caller skips the option
+// and the session stays on the static --oracle path.
+func harnessProfilesFromConfig(cfg webconfig.WebConfig) (map[string]orchestrator.HarnessProfile, string) {
+	if len(cfg.HarnessProfiles) == 0 {
+		return nil, ""
+	}
+	out := make(map[string]orchestrator.HarnessProfile, len(cfg.HarnessProfiles))
+	for name, p := range cfg.HarnessProfiles {
+		out[name] = orchestrator.HarnessProfile{
+			Name:    name,
+			Backend: p.Backend,
+			Model:   p.Model,
+			Models:  p.Models,
+			Env:     p.Env,
+			Plugin:  p.Plugin,
+		}
+	}
+	return out, cfg.DefaultProfile
+}

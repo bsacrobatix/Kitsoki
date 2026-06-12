@@ -33,6 +33,7 @@ import (
 	"kitsoki/internal/store"
 	"kitsoki/internal/tui"
 	"kitsoki/internal/viz"
+	"kitsoki/internal/webconfig"
 )
 
 // version is stamped at release time via -ldflags "-X main.version=...".
@@ -226,6 +227,16 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				return err
 			}
 
+			// Load machine-global harness profiles from .kitsoki.yaml in the
+			// cwd so /provider /model work in the TUI exactly as on the web. A
+			// missing file is not an error; an invalid profile (bad backend,
+			// unset ${VAR}, dangling default_profile) fails fast here.
+			webCfg, err := webconfig.Load(webconfig.DefaultConfigFile)
+			if err != nil {
+				return err
+			}
+			harnessProfiles, defaultProfile := harnessProfilesFromConfig(webCfg)
+
 			// Determine DB path.
 			if dbPath == "" {
 				dbPath = defaultDBPath()
@@ -254,17 +265,19 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 
 			// ── Orchestrator construction (shared with `kitsoki web`) ───────
 			rt, err := buildSessionRuntime(runtimeConfig{
-				AppPath:       appPath,
-				Def:           def,
-				DBPath:        dbPath,
-				ExecMode:      execMode,
-				HarnessType:   harnessType,
-				ClaudeModel:   claudeModel,
-				OracleBackend: resolveOracleBackend(oracleBackend),
-				RecordingPath: recordingPath,
-				RecordPath:    recordPath,
-				PromptOverlay: promptOverlay,
-				RoomEnterSink: roomEnterSink,
+				AppPath:         appPath,
+				Def:             def,
+				DBPath:          dbPath,
+				ExecMode:        execMode,
+				HarnessType:     harnessType,
+				ClaudeModel:     claudeModel,
+				OracleBackend:   resolveOracleBackend(oracleBackend),
+				HarnessProfiles: harnessProfiles,
+				DefaultProfile:  defaultProfile,
+				RecordingPath:   recordingPath,
+				RecordPath:      recordPath,
+				PromptOverlay:   promptOverlay,
+				RoomEnterSink:   roomEnterSink,
 			})
 			if err != nil {
 				return err

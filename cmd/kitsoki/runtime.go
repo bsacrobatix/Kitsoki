@@ -97,6 +97,13 @@ type runtimeConfig struct {
 	// "copilot") for host.oracle.* calls. Empty keeps the default (claude).
 	OracleBackend string
 
+	// HarnessProfiles / DefaultProfile carry the operator-declared harness
+	// profiles (from .kitsoki.yaml) into the orchestrator so a live session can
+	// switch backend/model/env via /provider /model or the web picker. Empty
+	// leaves the static OracleBackend path untouched.
+	HarnessProfiles map[string]orchestrator.HarnessProfile
+	DefaultProfile  string
+
 	// WantRoomEnterSink allocates a TUI room-enter sink and wires it into the
 	// orchestrator. `kitsoki run` sets this; `kitsoki web` does not.
 	RoomEnterSink orchestrator.RoomEnterSink
@@ -127,6 +134,11 @@ type runtimeBase struct {
 	RecordPath    string
 	OracleBackend string
 
+	// HarnessProfiles / DefaultProfile are resolved once at web startup from
+	// .kitsoki.yaml and inherited by every session the registry spins up.
+	HarnessProfiles map[string]orchestrator.HarnessProfile
+	DefaultProfile  string
+
 	// Flow / FlowFilePath select the deterministic flow-driven posture for the
 	// whole server: when Flow != nil every session is built with a nil harness
 	// and host stubs / cassette episodes (Flow.HostCassette) back its host.*
@@ -149,17 +161,19 @@ type runtimeBase struct {
 // carries a fixture — the same construction web.go performs today.
 func (b runtimeBase) config(storyPath string, def *app.AppDef) runtimeConfig {
 	return runtimeConfig{
-		AppPath:       storyPath,
-		Def:           def,
-		DBPath:        b.DBPath,
-		ExecMode:      b.ExecMode,
-		HarnessType:   b.HarnessType,
-		ClaudeModel:   b.ClaudeModel,
-		RecordingPath: b.RecordingPath,
-		RecordPath:    b.RecordPath,
-		OracleBackend: b.OracleBackend,
-		Flow:          b.Flow,
-		FlowFilePath:  b.FlowFilePath,
+		AppPath:         storyPath,
+		Def:             def,
+		DBPath:          b.DBPath,
+		ExecMode:        b.ExecMode,
+		HarnessType:     b.HarnessType,
+		ClaudeModel:     b.ClaudeModel,
+		RecordingPath:   b.RecordingPath,
+		RecordPath:      b.RecordPath,
+		OracleBackend:   b.OracleBackend,
+		HarnessProfiles: b.HarnessProfiles,
+		DefaultProfile:  b.DefaultProfile,
+		Flow:            b.Flow,
+		FlowFilePath:    b.FlowFilePath,
 	}
 }
 
@@ -378,6 +392,9 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 	}
 	if cfg.OracleBackend != "" {
 		runOpts = append(runOpts, orchestrator.WithOracleBackendName(cfg.OracleBackend))
+	}
+	if len(cfg.HarnessProfiles) > 0 {
+		runOpts = append(runOpts, orchestrator.WithHarnessProfiles(cfg.HarnessProfiles, cfg.DefaultProfile))
 	}
 	if d := def.Decider; d != nil {
 		runOpts = append(runOpts, orchestrator.WithDecider(orchestrator.DeciderConfig{

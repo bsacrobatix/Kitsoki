@@ -177,6 +177,18 @@ func applyProvider(ctx context.Context, args map[string]any, agent Agent) (conte
 		name = agent.Provider
 	}
 	if name == "" {
+		// No explicit provider on this call: fall back to the session's active
+		// harness profile (the lowest-precedence default). An explicit agent
+		// model still wins — the profile only fills what the call left blank.
+		if prof, ok := ActiveProfileFromContext(ctx); ok {
+			if strings.TrimSpace(agent.Model) == "" && strings.TrimSpace(prof.Provider.Model) != "" {
+				agent.Model = prof.Provider.Model
+			}
+			if strings.TrimSpace(agent.Effort) == "" && strings.TrimSpace(prof.Provider.Effort) != "" {
+				agent.Effort = prof.Provider.Effort
+			}
+			ctx = WithOracleProviderEnv(ctx, prof.Provider.Env)
+		}
 		return ctx, agent
 	}
 	providers := ProvidersFromContext(ctx)
@@ -195,6 +207,46 @@ func applyProvider(ctx context.Context, args map[string]any, agent Agent) (conte
 	}
 	ctx = WithOracleProviderEnv(ctx, prov.Env)
 	return ctx, agent
+}
+
+// activeProfileKey carries the session's active harness profile (a Provider plus
+// its name) down to applyProvider as the lowest-precedence default.
+type activeProfileKey struct{}
+
+// ActiveProfile is the resolved harness profile in effect for a session: a
+// Provider (env + model + effort) plus the profile Name (recorded in traces).
+// It is installed per-dispatch by the orchestrator from the live selection and
+// consulted by applyProvider only when an oracle call names no explicit
+// provider — so a story/effect that pins a provider or model always wins.
+type ActiveProfile struct {
+	Name     string
+	Provider Provider
+}
+
+// WithActiveProfile installs the session's active harness profile onto ctx. A
+// zero-value profile (no name, empty provider) is a no-op so callers needn't
+// guard the no-profiles case.
+func WithActiveProfile(ctx context.Context, p ActiveProfile) context.Context {
+	if p.Name == "" && p.Provider.Model == "" && p.Provider.Effort == "" && len(p.Provider.Env) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, activeProfileKey{}, p)
+}
+
+// ActiveProfileFromContext returns the active harness profile installed with
+// WithActiveProfile, and whether one was installed.
+func ActiveProfileFromContext(ctx context.Context) (ActiveProfile, bool) {
+	p, ok := ctx.Value(activeProfileKey{}).(ActiveProfile)
+	return p, ok
+}
+
+// ActiveProfileNameFromCtx returns just the active profile's name (for trace
+// stamping), or "" when none is installed.
+func ActiveProfileNameFromCtx(ctx context.Context) string {
+	if p, ok := ActiveProfileFromContext(ctx); ok {
+		return p.Name
+	}
+	return ""
 }
 
 // agentsKey is the unexported context key for the injected agents map.

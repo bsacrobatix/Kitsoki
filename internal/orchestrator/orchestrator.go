@@ -81,8 +81,21 @@ type Orchestrator struct {
 	// (and the intent-routing harness) forks: "" / "claude" (default) or
 	// "copilot". Installed into the dispatch context via
 	// host.WithOracleBackendNamed alongside the agents/providers maps. Set via
-	// WithOracleBackendName (kitsoki --oracle / $KITSOKI_ORACLE).
+	// WithOracleBackendName (kitsoki --oracle / $KITSOKI_ORACLE). When a harness
+	// profile is selected (below) its backend supersedes this per-dispatch; this
+	// remains the fallback for the no-profile path.
 	oracleBackendName string
+
+	// harnessProfiles / defaultProfile / selection make the backend/provider/model
+	// a session-mutable, profile-named choice resolved per-dispatch instead of the
+	// static oracleBackendName. Seeded by WithHarnessProfiles from .kitsoki.yaml;
+	// empty leaves the legacy static path untouched. selection is read on every
+	// dispatch (resolveSelection) and written from a surface goroutine
+	// (SetSelection) — guarded by selMu. See docs/architecture/harness-profiles.md.
+	harnessProfiles map[string]HarnessProfile
+	defaultProfile  string
+	selection       ProfileSelection
+	selMu           sync.RWMutex
 
 	// roomEnterSink, when non-nil, receives a pre-rendered banner string
 	// every time a turn transitions into a new room (top-level state).

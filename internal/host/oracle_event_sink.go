@@ -197,6 +197,12 @@ type OracleCalledPayload struct {
 	Verb  string `json:"verb"`
 	Agent string `json:"agent,omitempty"`
 	Model string `json:"model,omitempty"`
+	// Profile is the active harness profile name in effect for this call, when a
+	// session selected one (TUI /provider, web picker). It records which
+	// operator-selected backend/endpoint answered — never the env secrets behind
+	// it. Empty for the default no-profile path. Stamped centrally in
+	// appendOracleCalledEvent / appendOracleCalledEventWithEpisode.
+	Profile string `json:"profile,omitempty"`
 	// Prompt is the inline rendered prompt, present when it is small enough to
 	// embed (≤ the offload threshold). Larger prompts are written to a sidecar
 	// file and referenced via PromptFile instead. Exactly one of Prompt /
@@ -301,6 +307,9 @@ func appendOracleCalledEvent(ctx context.Context, ts time.Time, callID string, p
 		return
 	}
 	oc := OracleCallCtxFrom(ctx)
+	if payload.Profile == "" {
+		payload.Profile = ActiveProfileNameFromCtx(ctx)
+	}
 
 	// Guarantee a prompt reference: offload large prompts to a sidecar file,
 	// otherwise embed inline so a consumer never faces a missing reference.

@@ -159,6 +159,7 @@ authentication.`,
 				return err
 			}
 			dirs := webconfig.Resolve(storyDirs, cfg)
+			harnessProfiles, defaultProfile := harnessProfilesFromConfig(cfg)
 
 			// ── Operator identity ────────────────────────────────────────────
 			// An explicit --actor wins; otherwise fall back to the configured
@@ -175,16 +176,18 @@ authentication.`,
 
 			// ── Session-invariant construction posture every session inherits ──
 			base := runtimeBase{
-				DBPath:        dbPath,
-				ExecMode:      execMode,
-				HarnessType:   harnessType,
-				ClaudeModel:   claudeModel,
-				OracleBackend: resolveOracleBackend(oracleBackend),
-				RecordingPath: recordingPath,
-				RecordPath:    recordPath,
-				Flow:          fixture,
-				FlowFilePath:  flowFilePath,
-				DefaultActor:  actor,
+				DBPath:          dbPath,
+				ExecMode:        execMode,
+				HarnessType:     harnessType,
+				ClaudeModel:     claudeModel,
+				OracleBackend:   resolveOracleBackend(oracleBackend),
+				HarnessProfiles: harnessProfiles,
+				DefaultProfile:  defaultProfile,
+				RecordingPath:   recordingPath,
+				RecordPath:      recordPath,
+				Flow:            fixture,
+				FlowFilePath:    flowFilePath,
+				DefaultActor:    actor,
 			}
 
 			// ── Registry + initial story catalogue ──────────────────────────

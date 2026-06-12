@@ -73,7 +73,13 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	// once per dispatch (cheap — translation is tag-equivalent).
 	ctx = host.WithAgents(ctx, agentsForContext(o.def))
 	ctx = host.WithProviders(ctx, providersForContext(o.def))
-	ctx = host.WithOracleBackendNamed(ctx, o.oracleBackendName)
+	// Resolve the live harness selection once for this dispatch: the active
+	// profile chooses the backend to fork and the env/model default (installed as
+	// the lowest-precedence provider via WithActiveProfile). No profile selected
+	// ⇒ the static backend and a no-op active profile (legacy path, byte-identical).
+	backendName, activeProfile := o.resolveSelection(o.oracleBackendName)
+	ctx = host.WithOracleBackendNamed(ctx, backendName)
+	ctx = host.WithActiveProfile(ctx, activeProfile)
 	// Inject the prompt renderer so oracle handlers resolve and render prompt
 	// files through the story's overlay → story search path. nil is safe
 	// (handlers use the legacy path).
@@ -675,7 +681,13 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	}
 	ctx = host.WithAgents(ctx, agentsForContext(o.def))
 	ctx = host.WithProviders(ctx, providersForContext(o.def))
-	ctx = host.WithOracleBackendNamed(ctx, o.oracleBackendName)
+	// Resolve the live harness selection once for this dispatch: the active
+	// profile chooses the backend to fork and the env/model default (installed as
+	// the lowest-precedence provider via WithActiveProfile). No profile selected
+	// ⇒ the static backend and a no-op active profile (legacy path, byte-identical).
+	backendName, activeProfile := o.resolveSelection(o.oracleBackendName)
+	ctx = host.WithOracleBackendNamed(ctx, backendName)
+	ctx = host.WithActiveProfile(ctx, activeProfile)
 	// Inject the prompt renderer so oracle handlers resolve and render prompt
 	// files through the story's overlay → story search path. nil is safe
 	// (handlers use the legacy path).

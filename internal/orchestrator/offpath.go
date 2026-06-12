@@ -110,7 +110,11 @@ func (o *Orchestrator) AskOffPath(ctx context.Context, sid app.SessionID, questi
 	// resolved agent) without having to import the app package.
 	ctx = host.WithAgents(ctx, agentsForContext(o.def))
 	ctx = host.WithProviders(ctx, providersForContext(o.def))
-	ctx = host.WithOracleBackendNamed(ctx, o.oracleBackendName)
+	// Off-path oracle calls honor the live harness selection too (see
+	// host_dispatch.go).
+	backendName, activeProfile := o.resolveSelection(o.oracleBackendName)
+	ctx = host.WithOracleBackendNamed(ctx, backendName)
+	ctx = host.WithActiveProfile(ctx, activeProfile)
 	ctx = host.WithPromptRenderer(ctx, o.promptRenderer)
 	ctx = host.WithProjectContext(ctx, projectContextFor(o.def))
 	// Inject the live IDE link (nil-safe) so the off-path oracle subprocess

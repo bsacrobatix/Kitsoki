@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -37,16 +38,55 @@ const DefaultConfigFile = ".kitsoki.yaml"
 // file supply a story directory.
 var defaultStoryDirs = []string{"./stories"}
 
-// WebConfig is the on-disk configuration for the web UI. It carries only
-// story_dirs for now; the struct is the stable extension point for future keys.
+// WebConfig is the on-disk configuration for the web UI and (since harness
+// profiles) the TUI. It is the stable extension point for machine-global keys.
 type WebConfig struct {
 	// StoryDirs lists the directories DiscoverStories walks for app.yaml files.
 	StoryDirs []string `yaml:"story_dirs"`
+
+	// HarnessProfiles declares named harness profiles — operator-selectable
+	// bundles of {backend, env, model} that a live session can switch between
+	// via the TUI's /provider /model commands or the web header picker. Keyed
+	// by profile name. See docs/architecture/harness-profiles.md.
+	HarnessProfiles map[string]HarnessProfile `yaml:"harness_profiles,omitempty"`
+	// DefaultProfile names the profile new sessions start on. Empty ⇒ the
+	// flag-derived static default (today's --oracle/--model path). Must name a
+	// declared profile when set.
+	DefaultProfile string `yaml:"default_profile,omitempty"`
 }
+
+// HarnessProfile is one operator-declared harness profile: a named bundle of
+// the oracle-selection axes collapsed behind a single name. Every field is
+// optional; an all-empty profile means "today's ambient default" (claude
+// backend, ambient auth). Env values use ${VAR} interpolation, expanded at
+// load time against the process environment (an unset var is a hard error,
+// mirroring providers:).
+type HarnessProfile struct {
+	// Backend selects which coding-agent CLI is forked: claude|copilot|codex.
+	// Empty ⇒ claude. Ignored when Plugin is set.
+	Backend string `yaml:"backend,omitempty"`
+	// Model is the default --model for this profile (an explicit per-effect or
+	// agent model still wins). Optional.
+	Model string `yaml:"model,omitempty"`
+	// Models is the catalog the /model command and web dropdown list. Optional;
+	// when set, Model (and any operator model selection) must be a member.
+	Models []string `yaml:"models,omitempty"`
+	// Env overrides merged onto the forked CLI subprocess (e.g. ANTHROPIC_BASE_URL
+	// + ANTHROPIC_AUTH_TOKEN to retarget claude at synthetic.new). ${VAR}-expanded
+	// at load time. Never recorded in traces.
+	Env map[string]string `yaml:"env,omitempty"`
+	// Plugin routes the profile through an oracle plugin (e.g. builtin.local_llm
+	// for llama.cpp) instead of forking a backend CLI. Optional.
+	Plugin string `yaml:"plugin,omitempty"`
+}
+
+var validBackends = map[string]bool{"": true, "claude": true, "copilot": true, "codex": true}
 
 // Load reads WebConfig from the given path. A missing file is not an error —
 // it returns a zero WebConfig (empty StoryDirs) so the caller can fall back to
-// the default via Resolve. Any other read or parse failure is returned.
+// the default via Resolve. Any other read or parse failure is returned, as is
+// any harness-profile validation failure (unknown backend, ${VAR} unset,
+// default_profile naming an undeclared profile).
 func Load(path string) (WebConfig, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -59,7 +99,77 @@ func Load(path string) (WebConfig, error) {
 	if err := yaml.Unmarshal(b, &cfg); err != nil {
 		return WebConfig{}, fmt.Errorf("parse %s: %w", path, err)
 	}
+	if err := cfg.resolveHarnessProfiles(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	return cfg, nil
+}
+
+// resolveHarnessProfiles validates every declared profile and expands ${VAR}
+// references in env values in place. Fail-fast at load (never at first
+// dispatch), mirroring the providers: contract.
+func (cfg *WebConfig) resolveHarnessProfiles() error {
+	for name, p := range cfg.HarnessProfiles {
+		if !validBackends[p.Backend] {
+			return fmt.Errorf("harness_profiles.%s: backend %q is invalid (want claude|copilot|codex)", name, p.Backend)
+		}
+		for k, v := range p.Env {
+			expanded, missing := expandEnvVar(v)
+			if missing != "" {
+				return fmt.Errorf("harness_profiles.%s: env var %s referenced in env.%s not set", name, missing, k)
+			}
+			p.Env[k] = expanded
+		}
+		if len(p.Models) > 0 && p.Model != "" && !contains(p.Models, p.Model) {
+			return fmt.Errorf("harness_profiles.%s: model %q is not in its models catalog", name, p.Model)
+		}
+		cfg.HarnessProfiles[name] = p
+	}
+	if cfg.DefaultProfile != "" {
+		if _, ok := cfg.HarnessProfiles[cfg.DefaultProfile]; !ok {
+			return fmt.Errorf("default_profile %q names no declared harness profile", cfg.DefaultProfile)
+		}
+	}
+	return nil
+}
+
+func contains(ss []string, s string) bool {
+	for _, x := range ss {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// expandEnvVar replaces ${VAR} tokens against the process environment, returning
+// the expanded string, or ("", VAR) for the first unset variable. A replacement
+// value is never re-scanned. Semantics mirror the app loader's expandEnvVar so
+// harness_profiles and providers behave identically.
+func expandEnvVar(s string) (expanded, missing string) {
+	var buf strings.Builder
+	for i := 0; i < len(s); {
+		idx := strings.Index(s[i:], "${")
+		if idx < 0 {
+			buf.WriteString(s[i:])
+			break
+		}
+		buf.WriteString(s[i : i+idx])
+		i += idx + 2
+		end := strings.Index(s[i:], "}")
+		if end < 0 {
+			buf.WriteString("${")
+			continue
+		}
+		name := s[i : i+end]
+		i += end + 1
+		val, ok := os.LookupEnv(name)
+		if !ok {
+			return "", name
+		}
+		buf.WriteString(val)
+	}
+	return buf.String(), ""
 }
 
 // Resolve picks the effective story directories with first-non-empty-wins
