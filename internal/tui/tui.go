@@ -83,6 +83,15 @@ const (
 	// text escape hatch. See docs/stories/choice-widget.md §2.10
 	// "Coexisting with a free-text verb".
 	ModeChoosing
+	// ModeOperatorQuestion is active while a dispatched agent's forwarded
+	// AskUserQuestion owns the keyboard. Arrow keys move the cursor; Space
+	// toggles a multi-select option; Enter confirms the current question
+	// (advancing through a multi-question batch); Esc lets the agent decide
+	// on its own. Unlike ModeChoosing this overlays a turn that is still
+	// in flight — the oracle is blocked waiting for the answer — so on commit
+	// the model resumes ModeAwaitingLLM rather than returning to ModeOnPath.
+	// See internal/tui/operator_question.go.
+	ModeOperatorQuestion
 )
 
 // ctrlCQuitWindow is how long after a Ctrl+C the next Ctrl+C will quit
@@ -134,19 +143,20 @@ type RootModel struct {
 	height   int
 	quitting bool
 
-	location       locationModel
-	transcript     transcriptModel
-	menu           menuModel
-	inbox          inboxModel
-	offPath        offPathModel
-	clarify        clarifyModel
-	disambiguation disambiguationModel
-	choice         choiceWidgetModel
-	menuSystem     menuSystemModel
-	metaMode       metaModel
-	sessionsPanel  sessionsPanelModel
-	worldView      worldViewModel
-	prompt         textarea.Model
+	location         locationModel
+	transcript       transcriptModel
+	menu             menuModel
+	inbox            inboxModel
+	offPath          offPathModel
+	clarify          clarifyModel
+	disambiguation   disambiguationModel
+	choice           choiceWidgetModel
+	operatorQuestion operatorQuestionModel
+	menuSystem       menuSystemModel
+	metaMode         metaModel
+	sessionsPanel    sessionsPanelModel
+	worldView        worldViewModel
+	prompt           textarea.Model
 
 	// pendingDraft holds whatever was in the prompt textarea when an
 	// interactive choice widget seized focus. Open() clears the
@@ -179,6 +189,15 @@ type RootModel struct {
 	// leaves stream events on the slog trace only; the user falls
 	// back to the buffered "agent is thinking…" UX.
 	metaStreamSink *MetaStreamSink
+
+	// operatorPrompter, when non-nil, is injected into each turn ctx so a
+	// dispatched oracle agent that forwards an AskUserQuestion surfaces the
+	// question as an inline widget (ModeOperatorQuestion) and blocks for the
+	// operator's answer. Allocated up-front (NewTUIOperatorPrompter) and bound
+	// to the tea.Program post-construction via Attach() — mirrors
+	// metaStreamSink's lifecycle. Nil leaves the headless posture: the agent
+	// is told to proceed on its own.
+	operatorPrompter *TUIOperatorPrompter
 
 	// metaStreamPending holds a pure-narration ("thinking") assistant
 	// message that has streamed in but not yet been committed to the
@@ -523,6 +542,17 @@ func WithMetaStreamSink(sink *MetaStreamSink) RootModelOption {
 	return func(m *RootModel) { m.metaStreamSink = sink }
 }
 
+// WithOperatorPrompter wires a *TUIOperatorPrompter into the RootModel so a
+// dispatched oracle agent that forwards an AskUserQuestion surfaces it as an
+// inline question widget and blocks for the operator's answer. Like
+// WithMetaStreamSink the prompter is unbound at construction; the caller binds
+// it to the *tea.Program post-construction via prompter.Attach(prog). When
+// omitted (or nil) the headless tool-denied posture applies: the agent is told
+// to proceed on its own.
+func WithOperatorPrompter(prompter *TUIOperatorPrompter) RootModelOption {
+	return func(m *RootModel) { m.operatorPrompter = prompter }
+}
+
 // WithRoutingObserver wires a *RoutingObserver into the RootModel. The
 // observer is the slog→tea.Msg bridge that converts orchestrator
 // routing events into RoutingTier*Msg deliveries for the progressive
@@ -605,25 +635,26 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	sp.Style = lipgloss.NewStyle().Foreground(colorPrimary)
 
 	m := RootModel{
-		orch:           orch,
-		sid:            sid,
-		appPath:        appPath,
-		mode:           ModeOnPath,
-		width:          defaultWidth,
-		height:         defaultHeight,
-		location:       newLocationModel(),
-		transcript:     newTranscriptModel(defaultWidth-menuWidth-6, transcriptHeight-inboxHeight),
-		menu:           newMenuModel(menuWidth, transcriptHeight-inboxHeight),
-		inbox:          newInboxModel(menuWidth, inboxHeight),
-		offPath:        newOffPathModel(offPathBannerFromApp(orch.AppDef())),
-		clarify:        newClarifyModel(),
-		disambiguation: newDisambiguationModel(),
-		choice:         newChoiceWidgetModel(),
-		menuSystem:     newMenuSystemModel(metaMenuEntries(orch.AppDef())),
-		metaMode:       newMetaModel(),
-		sessionsPanel:  newSessionsPanelModel(),
-		prompt:         ti,
-		spinner:        sp,
+		orch:             orch,
+		sid:              sid,
+		appPath:          appPath,
+		mode:             ModeOnPath,
+		width:            defaultWidth,
+		height:           defaultHeight,
+		location:         newLocationModel(),
+		transcript:       newTranscriptModel(defaultWidth-menuWidth-6, transcriptHeight-inboxHeight),
+		menu:             newMenuModel(menuWidth, transcriptHeight-inboxHeight),
+		inbox:            newInboxModel(menuWidth, inboxHeight),
+		offPath:          newOffPathModel(offPathBannerFromApp(orch.AppDef())),
+		clarify:          newClarifyModel(),
+		disambiguation:   newDisambiguationModel(),
+		choice:           newChoiceWidgetModel(),
+		operatorQuestion: newOperatorQuestionModel(),
+		menuSystem:       newMenuSystemModel(metaMenuEntries(orch.AppDef())),
+		metaMode:         newMetaModel(),
+		sessionsPanel:    newSessionsPanelModel(),
+		prompt:           ti,
+		spinner:          sp,
 	}
 
 	// Set initial state.
@@ -949,6 +980,11 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.mode == ModeChoosing {
 		return m.updateChoosing(msg)
 	}
+	// If a forwarded agent question is on screen, it owns the keyboard until
+	// the operator answers (or hits Esc to let the agent decide).
+	if m.mode == ModeOperatorQuestion {
+		return m.updateOperatorQuestion(msg)
+	}
 	// If the system menu overlay is active, it owns the keyboard.
 	if m.mode == ModeMenu {
 		return m.updateMenuSystem(msg)
@@ -982,6 +1018,9 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = ModeOnPath
 		m.inFlightCancel = nil
 		return m.handleTurnOutcome(msg)
+
+	case operatorQuestionMsg:
+		return m.handleOperatorQuestion(msg)
 
 	case offPathReplyMsg:
 		return m.handleOffPathReply(msg)
@@ -1815,6 +1854,13 @@ func startAsyncTurn(
 	// no-op (empty File) leaves the prompt scope byte-identical to a turn
 	// with no editor; otherwise the oracle handlers expose it as args.ide.
 	ctx = host.WithIDEAmbient(ctx, m.pendingIDEAmbient)
+	// Wire the operator prompter so a dispatched oracle agent that forwards an
+	// AskUserQuestion can surface it as an inline widget and block for the
+	// operator's answer. Nil-safe: WithOperatorPrompter no-ops on a nil
+	// prompter, leaving the headless tool-denied posture.
+	if m.operatorPrompter != nil {
+		ctx = host.WithOperatorPrompter(ctx, m.operatorPrompter)
+	}
 	m.inFlightCancel = cancel
 	m.mode = ModeAwaitingLLM
 	m.pendingKind = kind
@@ -3880,6 +3926,112 @@ func (m RootModel) updateChoosing(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Everything else (spinner ticks, inbox poll, routing observer
 	// messages) falls through to the default branch so the model
 	// keeps reacting underneath the widget overlay.
+	return m, nil
+}
+
+// handleOperatorQuestion opens the inline question widget when a dispatched
+// oracle agent forwards an AskUserQuestion into kitsoki (operatorQuestionMsg,
+// dispatched by TUIOperatorPrompter.Ask). The turn is still in flight — the
+// oracle is blocked on msg.answerCh — so we overlay the question on the live
+// region and switch to ModeOperatorQuestion without disturbing the awaiting
+// state we restore on commit.
+//
+// A malformed (empty) batch can't be answered: we hand the agent a nil answer
+// straight back so it proceeds on its own, rather than trapping the operator.
+func (m RootModel) handleOperatorQuestion(msg operatorQuestionMsg) (tea.Model, tea.Cmd) {
+	if err := m.operatorQuestion.Open(msg.questions, msg.answerCh); err != nil {
+		slog.Warn("tui.operator_question.open_failed", slog.String("err", err.Error()))
+		if msg.answerCh != nil {
+			msg.answerCh <- nil
+		}
+		return m, nil
+	}
+	// Settle any in-flight live line (e.g. a resolved routing line) before the
+	// question takes the slot, then paint the question.
+	if m.transcript.hasLive() {
+		m.transcript.FinalizeLive("")
+	}
+	m.transcript.AppendLive(m.operatorQuestion.View(m.transcript.wrapWidth()))
+	m.mode = ModeOperatorQuestion
+	return m, nil
+}
+
+// updateOperatorQuestion handles input while a forwarded agent question owns the
+// keyboard. Routes tea.KeyMsg through operatorQuestionModel.Update; resize /
+// turn-outcome messages fall through so the rest of the model keeps reacting
+// (mirror updateChoosing).
+//
+// On commit the answer is sent back over the channel the oracle is parked on and
+// the model RESUMES ModeAwaitingLLM (the same turn continues) — unlike the
+// choice widget, which starts a fresh turn. A nil answer (Esc) tells the host to
+// let the agent decide on its own.
+func (m RootModel) updateOperatorQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m = m.resize()
+		m.transcript.UpdateLive(m.operatorQuestion.View(m.transcript.wrapWidth()))
+		return m, nil
+
+	case turnOutcomeMsg:
+		// The turn completed/cancelled while the question was on screen — the
+		// only way this happens is a ctx cancel (Ctrl+C) unblocking the parked
+		// Ask. Tear the widget down (the oracle already returned ctx.Err(); no
+		// answer is owed) and fall through to the normal handler.
+		m.operatorQuestion.Close()
+		m.transcript.FinalizeLive("")
+		m.mode = ModeOnPath
+		m.inFlightCancel = nil
+		return m.handleTurnOutcome(msg)
+
+	case continueTurnOutcomeMsg:
+		return m.handleContinueTurnOutcome(msg)
+
+	case tea.KeyMsg:
+		// Ctrl+C cancels the whole turn — the parked oracle's ctx is cancelled,
+		// Ask returns, and a turnOutcomeMsg (cancelled) will follow.
+		if msg.Type == tea.KeyCtrlC {
+			if m.inFlightCancel != nil {
+				m.inFlightCancel()
+			}
+			return m, nil
+		}
+
+		var result *operatorQuestionResult
+		var cmd tea.Cmd
+		m.operatorQuestion, cmd, result = m.operatorQuestion.Update(msg)
+		m.transcript.UpdateLive(m.operatorQuestion.View(m.transcript.wrapWidth()))
+		if result == nil {
+			return m, cmd
+		}
+
+		// Hand the answer (or nil on cancel) back to the parked oracle and
+		// resume awaiting the in-flight turn's completion.
+		answerCh := m.operatorQuestion.answerCh
+		body := m.operatorQuestion.View(m.transcript.wrapWidth())
+		m.operatorQuestion.Close()
+		m.transcript.FinalizeLive(body)
+		m.mode = ModeAwaitingLLM
+		if result.Cancel {
+			m.transcript.AppendSystem("(left the answer to the agent)")
+			if answerCh != nil {
+				answerCh <- nil
+			}
+		} else {
+			m.transcript.AppendSystem("(answer sent to the agent)")
+			if answerCh != nil {
+				answerCh <- result.Answers
+			}
+		}
+		// Resume the spinner so the awaiting-LLM caption animates again.
+		if cmd == nil {
+			return m, m.spinner.Tick
+		}
+		return m, tea.Batch(cmd, m.spinner.Tick)
+	}
+
+	// Everything else falls through so the model keeps reacting underneath.
 	return m, nil
 }
 
