@@ -365,11 +365,12 @@ world:
   # ── External-target profile (doc shape + placement) ───────────────
   # Defaults reproduce kitsoki's own behaviour exactly (flat docs/proposals
   # + docs/prd, slug-named files, a feature ticket on publish). An instance
-  # app (e.g. stories/gears-rust/) overrides these to retarget the PRD →
-  # Design walk at a foreign repo: publish into <workdir>/<durable> under a
-  # FIXED gears-sdlc filename (PRD.md / DESIGN.md), reading the target's own
-  # doc templates, and skipping the kitsoki feature ticket. See the
-  # "doc profile" section of the dev-story README and stories/gears-rust/.
+  # app (e.g. the gears-rust instance, now vendored in the gears repo under
+  # .kitsoki/gears-rust/) overrides these to retarget the PRD → Design walk at
+  # a foreign repo: publish into <workdir>/<durable> under a FIXED gears-sdlc
+  # filename (PRD.md / DESIGN.md), reading the target's own doc templates, and
+  # skipping the kitsoki feature ticket. See the "doc profile" section of the
+  # dev-story README.
   repo_root:             { type: string, default: "" }                        # external checkout root (forward-compat; ticket passthrough is the deferred gh-adapter slice)
   publish_durable_path:  { type: string, default: "docs/prd" }                # prd publish home (projected into the prd import); per-gear: gears/<gear>/docs
   prd_doc_filename:      { type: string, default: "" }                        # fixed PRD filename for an external target (e.g. "PRD"); "" ⇒ slug-named

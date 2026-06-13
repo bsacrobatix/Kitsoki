@@ -89,7 +89,7 @@ Once every slice ships:
 | 1 | Target-project profile | runtime | Parameterize doc shape / placement + `repo_root` passthrough so retargeting is config, not code | — | ✅ Shipped | [dev-story README → doc profile](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project) |
 | 2 | gh ticket adapter | runtime | A `gh`-backed glue provider satisfying the `ticket` interface against GitHub issues | 1 | Deferred | [`gh-ticket-adapter.md`](gh-ticket-adapter.md) |
 | 3 | prd into dev-story | story | Import `prd`, add `go_prd` from `main`, chain its `@exit:done` into the **design** intake | — | ✅ Shipped | [dev-story README → PRD → Design walk](../../stories/dev-story/README.md#prd--design-walk) |
-| 4 | gears-rust instance | story | The worked example: fill the profile (gears-sdlc docs under `gears/<gear>/docs/`, the copy-me template) | 1, 3 | ✅ Shipped | [gears-rust README](../../stories/gears-rust/README.md) |
+| 4 | gears-rust instance | story | The worked example: fill the profile (gears-sdlc docs under `gears/<gear>/docs/`, the copy-me template) | 1, 3 | ✅ Shipped | [gears-rust README (in the gears repo)](https://github.com/constructorfabric/gears-rust/blob/docs/kitsoki-integration/.kitsoki/gears-rust/README.md) |
 
 ## Sequencing
 
@@ -127,9 +127,28 @@ prd→proposal chain from #3.
 1. **Where does an instance for a foreign repo physically live** — in the
    kitsoki repo (`stories/gears-rust/`, run with `--warp` pointing `workdir`
    at the checkout) or vendored into the target repo (`.kitsoki/`)? *Resolved
-   in [`kitsoki-as-dependency.md`](kitsoki-as-dependency.md): vendored into the
-   target repo, importing the base via `@kitsoki/dev-story` from a binary-embedded
-   story library. gears-rust is the migration proof (that epic's slice #3).*
+   and **shipped** by [`kitsoki-as-dependency.md`](kitsoki-as-dependency.md)
+   slice #3: external targets are vendored into the target repo and import the
+   base via `@kitsoki/dev-story`, resolved from a binary-embedded story library
+   (no kitsoki checkout). See "External targets live in their own repo" below.*
+
+### External targets live in their own repo
+
+External targets no longer live in the kitsoki repo. A target repo carries its
+own `.kitsoki/<name>/` instance (`app.yaml`, `templates/`, `flows/`,
+`scenarios/`, the `drive:`-enabled tour manifest + `features/<id>.yaml`) plus a
+`.kitsoki.yaml` (`story_dirs: [ .kitsoki ]`, consumed by `internal/webconfig`).
+The instance imports the kitsoki base via `import: { source: "@kitsoki/dev-story" }`,
+which resolves from the binary's embedded story library — so the target repo
+runs `kitsoki web` / `kitsoki tour` with only the binary present, no kitsoki
+checkout. The kitsoki repo keeps only self-targeting (dogfood) stories.
+
+`gears-rust` is the worked example, now vendored at
+[`constructorfabric/gears-rust` → `.kitsoki/gears-rust/`](https://github.com/constructorfabric/gears-rust/tree/docs/kitsoki-integration/.kitsoki/gears-rust).
+The only instance edit on the move was the import source
+(`../dev-story` → `"@kitsoki/dev-story"`) and the `world.workdir`/`world.repo_root`
+defaults (`../gears-rust` → `.`, the gears checkout root). The full migration
+mechanics are in [`kitsoki-as-dependency.md`](kitsoki-as-dependency.md) slice 3.
 2. **Does `prd` stay runnable standalone after #3 folds it into
    `dev-story`?** *Lean: yes — import is additive; `stories/prd/app.yaml`
    remains a valid root, `dev-story` just imports it under an alias. Decided

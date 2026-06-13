@@ -21,12 +21,19 @@ flow tests (see [[feedback_no_llm_tests]] and `docs/web/README.md` →
 
 > **Pick the worked reference that matches the ask — copy it, don't start blank:**
 > - **A tour demo video of one feature** (the usual ask — "make a tour demo
->   video of X") → the **golden example** is
->   `tools/runstatus/tests/playwright/agent-actions-video.spec.ts` +
->   `src/tour/agent-actions-manifest.ts`. The *whole* video is tour-narrated: it
->   opens on the home story library, frames the demo story, drives home → new
->   session → observer via narrated action steps, then walks the feature. See
->   **[Feature tour demo video — the golden example](#feature-tour-demo-video--the-golden-example)**.
+>   video of X") → copy the **agent-actions** spec template
+>   (`tools/runstatus/tests/playwright/agent-actions-video.spec.ts` +
+>   `src/tour/agent-actions-manifest.ts`), which demonstrates the tour-narration
+>   pattern: the *whole* video is tour-narrated — it opens on the home story
+>   library, frames the demo story, drives home → new session → observer via
+>   narrated action steps, then walks the feature. See **[Feature tour demo
+>   video — the spec template](#feature-tour-demo-video--the-golden-example)**.
+> - **The golden example of conversation-driven development** (iterative
+>   clarification, brief refinement, multi-document publication in one session) →
+>   the **dev-story PRD → Design** demo (`features/dev-story-prd-design.yaml` +
+>   `stories/dev-story/flows/prd_to_design_full.yaml`). When slice 2 ships it
+>   renders via `kitsoki tour --feature dev-story-prd-design` (binary-native, no
+>   Playwright). See **[Dev-story PRD → Design](#dev-story-prd--design-golden-conversation-driven-example)**.
 > - **The generic onboarding tour** → `tour-video.spec.ts` + `src/tour/manifest.ts`.
 > - **A full-product walkthrough** (home → new session → drive/observe → reload →
 >   active sessions) → `multi-story.spec.ts`. The single-purpose chat drive lives
@@ -298,6 +305,57 @@ tour-narrated. Copy `agent-actions-video.spec.ts` → `<feature>-video.spec.ts`,
 point it at the new manifest and a fresh `ADDR` port, adjust the pre-step hooks
 to open your feature's surfaces, then run the four commands above with the new
 spec name. Anchor every `target` to a `data-testid` the feature actually ships.
+
+## Dev-story PRD → Design (golden conversation-driven example)
+
+When the ask is **making a demo of conversation-driven development** (iterative
+clarification, brief refinement, multi-document publication in one session),
+copy the **dev-story PRD → Design** demo — it is the golden, maintained reference:
+
+- feature:  `features/dev-story-prd-design.yaml`
+- manifest: `tools/runstatus/src/tour/generated/dev-story-prd-design.ts` (generated — `make features`)
+- flow:     `stories/dev-story/flows/prd_to_design_full.yaml` (no-LLM, cassette-driven)
+- spec (Playwright, stub until slice 2):
+  `tools/runstatus/tests/playwright/dev-story-prd-design-video.spec.ts`
+
+What makes it the golden example:
+
+- **The whole video is tour-driven.** The manifest's 11 steps walk the canonical
+  conversation-driven-development loop: PRD discovery → multi-round clarification
+  → PRD publish (to `docs/prd/<slug>.md`) → design intake (seeded from the PRD) →
+  design brief refinement → design publish (to `docs/proposals/<slug>.md`) +
+  auto-minted feature ticket (`issues/features/`) → back to the hub. Narration
+  and `drive:` actions are inseparable — every action is framed by a popover
+  explaining *why* kitsoki does it that way.
+- **It is kitsoki's self-targeting dogfood — "kitsoki on kitsoki".** Unlike the
+  gears-rust demo (now an external `.kitsoki/gears-rust/` instance in the gears
+  repo, which retargets an external
+  repo and skips the ticket mint), this walk authors kitsoki proposals using
+  kitsoki itself — the cleanest proof that the system can improve itself.
+- **Binary-rendered (slice 2 prerequisite).** When the `kitsoki tour` subcommand
+  ships, this demo renders with `kitsoki tour --feature dev-story-prd-design`
+  (no Playwright, no Node — headless Chrome + ffmpeg from the binary alone), the
+  first proof that the binary-native tour renderer works end-to-end. **Today
+  (pre-slice-2)** the bound spec is a skipped stub and there is no record path
+  yet; the flow fixture is already no-LLM (cassette-driven) and passes under
+  `kitsoki test flows stories/dev-story/app.yaml`, so the *content* is verified
+  even though the *recording* awaits slice 2.
+
+**Record via the binary (slice 2 on):**
+
+```bash
+# Once slice 2 ships, this becomes a one-liner:
+kitsoki tour --feature dev-story-prd-design --out .artifacts/dev-story-prd-design/
+```
+
+**Record via Playwright (pre-slice-2):** deferred — the spec body is a TBD stub
+(copy `agent-actions-video.spec.ts` when authoring it, driving the
+`DEV_STORY_PRD_DESIGN_TOUR_STEPS` manifest against a `kitsoki web` server seeded
+with `stories/dev-story/flows/prd_to_design_full.yaml`).
+
+This demo is the **proof that conversation-driven-development methodology** (the
+epic at `docs/proposals/conversation-driven-development.md`) works for kitsoki
+itself — and it runs no-LLM, deterministic, and verifiable.
 
 ## Onboarding tour recording
 

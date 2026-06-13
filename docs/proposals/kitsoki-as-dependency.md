@@ -1,8 +1,16 @@
 # Epic: kitsoki as a dependency — base stories + demos inside a foreign repo
 
-**Status:** Draft v1. No slices implemented yet.
+**Status:** Implemented (code-complete). All 4 slices shipped on branch
+`kitsoki-as-dependency`; the gears instance is vendored into the gears repo
+(PR #4082). Narrative moved to the dev-story README, the `kitsoki-ui-demo`
+SKILL.md, and `external-project-targeting.md`. **Remaining (validation, not
+mechanism):** (a) a short `kitsoki tour` reference under `docs/`; (b) replace
+the skipped `dev-story-prd-design-video.spec.ts` stub with a real binary-native
+render (`kitsoki tour --feature dev-story-prd-design`) and a `kitsoki-ui-qa`
+legibility pass on both the dev-story and gears renders (screencast-cadence
+spike, shared decision 3). Delete this file once (a) and (b) land.
 **Kind:**   epic
-**Slices:** 4 (0/4 shipped)
+**Slices:** 4 (4/4 shipped; video-render validation outstanding)
 
 ## Why
 

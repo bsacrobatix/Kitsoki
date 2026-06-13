@@ -91,10 +91,16 @@ default, but the *document shape* and *placement* are a **profile** an
 instance app can override — no engine or room change needed. An instance
 points the same hub at a foreign repo (different doc shape, fixed
 filenames, per-scope tree) purely by setting world keys. The worked,
-copy-me example is [`stories/gears-rust/`](../gears-rust/), which retargets
+copy-me example is the **gears repo** ([`.kitsoki/gears-rust/`](https://github.com/constructorfabric/gears-rust/tree/docs/kitsoki-integration/.kitsoki/gears-rust)),
+which retargets
 [`constructorfabric/gears-rust`](https://github.com/constructorfabric/gears-rust)
 and lands gears-sdlc-shaped `PRD.md` / `DESIGN.md` under
-`gears/<gear>/docs/`.
+`gears/<gear>/docs/`. External targets now live in their **own** repo (a
+`.kitsoki/<name>/` instance + a `.kitsoki.yaml`), importing this base via
+`@kitsoki/dev-story` from the binary's embedded story library — see
+[`kitsoki-as-dependency.md`](../../docs/proposals/kitsoki-as-dependency.md)
+for the full epic, including how to render the demo via `kitsoki tour`
+(slice 2) and the slice-3 vendoring mechanics.
 
 The profile is the "External-target profile" world block in
 [`app.yaml`](./app.yaml) (search `External-target profile`). Every key has
@@ -135,9 +141,10 @@ positional args:
 
 Per-gear placement is expressed simply as `publish_durable_path:
 gears/<gear>/docs` (a plain relative dir) plus the `doc_filename`
-override — there is no placement enum. See
-[`stories/gears-rust/`](../gears-rust/) for the filled profile, its
-scenario, and the two no-LLM flows that assert the resolved paths.
+override — there is no placement enum. For the filled profile, its
+scenario, and the two no-LLM flows that assert the resolved paths, see
+[the gears-rust instance in the gears repo](https://github.com/constructorfabric/gears-rust/tree/docs/kitsoki-integration/.kitsoki/gears-rust)
+([README](https://github.com/constructorfabric/gears-rust/blob/docs/kitsoki-integration/.kitsoki/gears-rust/README.md)).
 
 ## Provider neutrality
 
@@ -264,6 +271,67 @@ self-provisions a `feature/<ticket>` worktree before the first room
 runs. A published design doc can also skip `ticket_search` entirely: from
 `design_done`, `implement` drives the freshly-filed feature ticket
 straight into impl.
+
+## Demo video: PRD → Design (conversation-driven development)
+
+The dev-story hub's PRD → Design walk is recorded as a **deterministic, no-LLM
+tour video** — the golden example for conversation-driven development (the
+[`conversation-driven-development`](../../docs/proposals/conversation-driven-development.md)
+epic). The same walk (minus the feature ticket) drives the **gears-rust**
+external-target demo (which now lives in the gears repo as a `.kitsoki/gears-rust/`
+instance — see the [Doc profile](#doc-profile--targeting-an-external-project)
+section above); this one is kitsoki's self-targeting parallel —
+**"kitsoki on kitsoki"**.
+
+- **Flow fixture (no-LLM):**
+  [`flows/prd_to_design_full.yaml`](./flows/prd_to_design_full.yaml) — the
+  single-session walk: `main → prd` (discovery + multi-round clarification) →
+  `prd_published` (landing) → `continue` → `design` (intake seeded from the PRD)
+  → `design_refine` (conversational brief refinement) → `design_draft`
+  (publish + mint feature ticket) → `main`. The gears-rust variant (in the gears
+  repo's [`.kitsoki/gears-rust/`](https://github.com/constructorfabric/gears-rust/tree/docs/kitsoki-integration/.kitsoki/gears-rust)
+  instance) is the same structure retargeted to an external repo, with
+  `design_ticket_dir: ""` (skips the ticket mint) and fixed `PRD.md` / `DESIGN.md`
+  filenames. This one uses the dev-story **defaults** — slug-named docs in
+  kitsoki's own tree and a feature ticket on publish.
+
+- **Tour manifest + catalog:**
+  [`features/dev-story-prd-design.yaml`](../../features/dev-story-prd-design.yaml)
+  — 11 narrated steps that walk every beat of the loop: discovery chat,
+  clarification rounds, PRD draft review and publish, design intake handoff,
+  design brief refinement, design publish, feature-ticket auto-mint. With
+  slice 2 of the [kitsoki-as-dependency](../../docs/proposals/kitsoki-as-dependency.md)
+  epic, this renders via `kitsoki tour --feature dev-story-prd-design`
+  (binary-native MP4, no Playwright). Pre-slice-2 the bound spec is a skipped
+  stub; the flow fixture's *content* is already verified no-LLM under
+  `kitsoki test flows stories/dev-story/app.yaml`.
+
+**The canonical conversation-driven-development loop:**
+
+1. **PRD discovery** (`prd.idle → prd.search → prd.clarifying`) — a conversational
+   pitch that shapes itself through questions (who's the actor? what's success?)
+   into a crisp problem statement, over **multiple** clarification rounds.
+2. **PRD publish** (`prd.drafting → accept`) — the draft is authored, reviewed,
+   and published to `docs/prd/<slug>.md`.
+3. **Design intake** (the `prd_published` handoff → `design`) — the design
+   conversation opens *seeded with the published PRD* as prior art, not a blank
+   slate (`design_seed_idea` ← `"Author a design from the PRD at <prd_file>"`).
+4. **Design brief refinement** (`design → design_search → design_refine → ready`)
+   — the brief is scaffolded, gaps are flagged by a refiner, and the operator
+   iterates the brief (the same multi-round discipline as PRD clarification)
+   before a quality gate clears it.
+5. **Design publish + ticket mint** (`design_draft → accept`) — the design
+   publishes to `docs/proposals/<slug>.md` and a feature ticket is automatically
+   filed at `issues/features/F-<timestamp>-<slug>.md`, linking back to the
+   proposal. The ticket can be picked up by the impl pipeline immediately (the
+   [`design_to_implementation.yaml`](./flows/design_to_implementation.yaml) bridge).
+
+This single-session closure — from idea to PRD to design to a filed ticket, all
+driven by conversation — is kitsoki's own development model. It proves the system
+can improve itself using its own machinery.
+
+See [`docs/skills/kitsoki-ui-demo/SKILL.md`](../../docs/skills/kitsoki-ui-demo/SKILL.md)
+for the golden-example pointer and binary-render instructions (slice 2 on).
 
 ## Demo: PRD → Design (judge_mode=human)
 
