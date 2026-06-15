@@ -39,17 +39,15 @@
  *     toHaveText/toBeVisible expectations with timeouts.
  *
  * Critical path asserted beat-by-beat (the scenarios kitsoki-ui-qa checks the
- * video against). The embed layout puts chat front/center with trace+graph as a
- * maximizable hint rail (the layout rework):
+ * video against). The embed chat panel shows ONLY the chat; trace + graph are
+ * their own dockable windows (surface decomposition):
  *   (a) the Kitsoki editor panel opens (the story library, themed) — clicking the
  *       Activity Bar icon auto-opens the editor-area webview;
- *   (c) a session is started/observed (New session → /chat, current-state=lobby)
- *       and the hint rail (Trace + Graph cards) is present;
+ *   (c) a session is started/observed (New session → /chat, current-state=lobby);
+ *       the chat panel is chat-only (NO trace/graph hint rail);
  *   (d) a turn is driven and state advances (forecast → current-state=report,
  *       state-badge present; the "Tokyo, Japan" forecast renders) with chat
  *       front/center;
- *   (e) maximizing the Trace hint renders the full timeline (host.starlark.run row);
- *   (f) switching to the Graph renders the state diagram (current station marked);
  *   (h) surface decomposition — "Kitsoki: Open Trace" docks the Trace as its OWN
  *       webview in the "Kitsoki Surfaces" sidebar (a separate document/store from
  *       the chat) that discovers + follows the SAME session via
@@ -114,13 +112,10 @@ const dwell = (ms: number) => (RECORD ? sleep(ms * PACE) : Promise.resolve());
  * beats are narrated by WEATHER_REPORT_TOUR_STEPS instead.
  */
 const EDITOR_BEATS = {
-  // Maximizing the Graph hint is a webview beat with no matching tour popover, so
-  // it rides this manifest (chapter window + shot) rather than narrate().
-  graph: { id: 'e2-graph-max', title: 'Maximize the state diagram', dwellMs: 4000 },
   // Surface decomposition: Trace and Graph each open as their OWN webview in the
-  // bottom panel — a separate document/store from the chat editor panel — and
-  // discover-and-follow the SAME backend session via runstatus.session.current.
-  // These ride the manifest (no web-tour popover exists for the native panels).
+  // "Kitsoki Surfaces" sidebar — a separate document/store from the chat editor
+  // panel — and discover-and-follow the SAME backend session via
+  // runstatus.session.current. These ride the manifest (no web-tour popover).
   tracePanel: { id: 'h-trace-panel', title: 'Trace in its own panel — same session', dwellMs: 4500 },
   graphPanel: { id: 'i-graph-panel', title: 'State graph in its own panel — same session', dwellMs: 4500 },
   // The finale: app.yaml split beside the Kitsoki editor panel — code + kitsoki in
@@ -492,20 +487,13 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       chatFrame.locator('[data-testid="observe-link"]'),
       'session is observable',
     ).toBeVisible({ timeout: 10_000 });
-    // The embed layout: chat is front/center and the trace + graph live in a thin
-    // hint rail (collapsed, live). This is the whole point of the rework.
+    // The embed chat panel shows ONLY the chat — no trace/graph rail. Trace and
+    // Graph open as their own dockable windows (beats h/i), so the chat never
+    // repeats them.
     await expect(
       chatFrame.locator('[data-testid="hint-rail"]'),
-      'embed hint rail present (chat front/center, trace+graph hinted)',
-    ).toBeVisible({ timeout: 15_000 });
-    await expect(
-      chatFrame.locator('[data-testid="hint-trace"]'),
-      'collapsed Trace hint card present',
-    ).toBeVisible({ timeout: 10_000 });
-    await expect(
-      chatFrame.locator('[data-testid="hint-graph"]'),
-      'collapsed Graph hint card present',
-    ).toBeVisible({ timeout: 10_000 });
+      'embed chat panel has NO trace/graph hint rail (chat-only)',
+    ).toHaveCount(0, { timeout: 10_000 });
 
     if (RECORD) {
       // Re-arm the narration tour on the interactive view for the lobby beat.
@@ -540,13 +528,12 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
     ).toBeVisible({ timeout: 15_000 });
 
     if (RECORD) {
-      // The Kitsoki editor panel is already full editor-area width, so no sidebar
-      // widening is needed; the chat is front/center with the hint rail beside it.
-      // Scroll the resolved place ("Tokyo, Japan") to the top of the chat column
-      // so the report's light "paper" card (resolved place, current conditions,
-      // 5-day table) is on-camera and its values aren't clipped, THEN start the
-      // narration popover beside it. The labeled QA frame shows both the
-      // narration and the rendered forecast.
+      // The chat panel is the full editor-area width (chat-only). Scroll the
+      // resolved place ("Tokyo, Japan") to the top of the chat column so the
+      // report's "paper" card (resolved place, current conditions, 5-day table)
+      // is on-camera and its values aren't clipped, THEN start the narration
+      // popover beside it. The labeled QA frame shows both the narration and the
+      // rendered forecast.
       await chatFrame
         .locator('[data-testid="chat-transcript"]')
         .getByText('Tokyo, Japan')
@@ -565,47 +552,6 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
     await expect(backBtn, 'intent-btn-back control present in report room').toBeVisible({
       timeout: 15_000,
     });
-
-    // ── (e) Maximize the Trace hint → the full timeline ──────────────────────
-    // The embed layout keeps trace+graph as collapsed hints; maximizing mounts
-    // the full component beside the chat (horizontal). Clear any narration overlay
-    // first so the click lands on the card.
-    await clearOverlay(chatFrame);
-    await chatFrame.locator('[data-testid="hint-trace"]').click();
-    const timeline = chatFrame.locator('[data-testid="trace-timeline"]');
-    await expect(timeline, 'maximized Trace renders the full timeline').toBeVisible({
-      timeout: 15_000,
-    });
-    await expect(
-      timeline.locator('.trace-timeline__row:has([data-subsystem="host"])').first(),
-      'trace timeline shows a host.starlark.run row from the driven turn',
-    ).toBeVisible({ timeout: 20_000 });
-
-    if (RECORD) {
-      await startWebviewTour(chatFrame);
-      await narrate(chatFrame, chapters, shot, 'wr-trace', 'e-trace-max', 4500, true);
-    } else {
-      await shot('e-trace-max');
-    }
-
-    // ── (f) Switch to the Graph → the full state diagram ─────────────────────
-    // From the maximized Trace, the switch control flips to the diagram in place.
-    await clearOverlay(chatFrame);
-    await chatFrame.locator('[data-testid="switch-graph"]').click();
-    await expect(
-      chatFrame.locator('[data-testid="trace-diagram"]'),
-      'maximized Graph renders the state diagram',
-    ).toBeVisible({ timeout: 15_000 });
-    await expect(
-      chatFrame.locator('[data-testid="diagram-current-station"]').first(),
-      'state diagram marks the current station',
-    ).toBeVisible({ timeout: 15_000 });
-
-    if (RECORD) {
-      chapters.open(EDITOR_BEATS.graph.id, EDITOR_BEATS.graph.title);
-      await dwell(EDITOR_BEATS.graph.dwellMs);
-    }
-    await shot('f-graph-max');
 
     // ── (h) Surface decomposition: Trace in its OWN panel, same session ───────
     // The headline of this rework. "Kitsoki: Open Trace" reveals a webview view
@@ -677,11 +623,9 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
     expect(spawnCount, 'exactly one backend process serves all three surfaces').toBe(1);
 
     // ── (g) Finale: code + kitsoki side by side (record only) ────────────────
-    // Minimize back to the chat-front/center rail, then split the story's app.yaml
-    // beside the Kitsoki editor panel — code and kitsoki in one workspace.
+    // Split the story's app.yaml beside the Kitsoki chat panel — code and kitsoki
+    // (chat + the docked trace/graph surfaces) in one workspace.
     if (RECORD) {
-      await chatFrame.locator('[data-testid="expanded-minimize"]').click().catch(() => undefined);
-      await dwell(700);
       await openFileBeside(win, APP_YAML);
       await expect(
         win.locator('.monaco-editor').filter({ hasText: 'weather-report' }).first(),

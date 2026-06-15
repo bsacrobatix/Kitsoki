@@ -85,8 +85,10 @@
 
       <!-- Main row: chat (left) | trace (right).
            Browser: chat 46% | diagram+timeline 54%.
-           Embed (VS Code): chat front/center | a thin hint rail that maximizes. -->
-      <div class="iv__main" :class="{ 'iv__main--embed': embed, 'iv__main--expanded': embed && !!expanded }">
+           Embed (VS Code): chat ONLY — trace + graph live in their own dockable
+           windows (the "Kitsoki Surfaces" panels), so the chat panel never repeats
+           them. -->
+      <div class="iv__main" :class="{ 'iv__main--embed': embed }">
         <!-- LEFT: conversation -->
         <section class="iv__chat" aria-label="Conversation" data-testid="chat-section">
           <ChatTranscript class="iv__transcript" :transcript="store.chatEntries" />
@@ -160,96 +162,8 @@
           </div>
         </section>
 
-        <!-- RIGHT (embed): hint rail — Trace + Graph as live, maximizable cards.
-             Chat stays front/center; a card maximizes beside it (horizontal). -->
-        <aside v-else class="iv__side" data-testid="hint-rail">
-          <!-- Collapsed: two compact live hints. -->
-          <template v-if="!expanded">
-            <button
-              type="button"
-              class="iv__hint"
-              data-testid="hint-trace"
-              title="Maximize the trace timeline"
-              @click="expand('trace')"
-            >
-              <div class="iv__hint-head">
-                <span class="iv__hint-title">Trace</span>
-                <span class="iv__hint-grow" aria-hidden="true" data-testid="hint-trace-maximize">⤢</span>
-              </div>
-              <div class="iv__hint-metric">{{ store.events.length }} <span>events</span></div>
-              <div class="iv__hint-row">
-                <span class="iv__hint-dot" :class="store.terminal ? 'is-done' : 'is-live'"></span>
-                room <code>{{ store.currentStatePath || "—" }}</code>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              class="iv__hint"
-              data-testid="hint-graph"
-              title="Maximize the state diagram"
-              @click="expand('graph')"
-            >
-              <div class="iv__hint-head">
-                <span class="iv__hint-title">Graph</span>
-                <span class="iv__hint-grow" aria-hidden="true" data-testid="hint-graph-maximize">⤢</span>
-              </div>
-              <div class="iv__hint-metric">{{ roomCount }} <span>rooms</span></div>
-              <div class="iv__hint-row">
-                current <code>{{ store.currentStatePath || "—" }}</code>
-              </div>
-              <div class="iv__hint-row">{{ intentCount }} next intent{{ intentCount === 1 ? '' : 's' }}</div>
-            </button>
-          </template>
-
-          <!-- Maximized: the full component beside the chat, with a minimize. -->
-          <div v-else class="iv__expanded" data-testid="hint-expanded">
-            <header class="iv__expanded-head">
-              <span class="iv__expanded-title">{{ expanded === 'graph' ? 'State Diagram' : 'Trace' }}</span>
-              <button
-                type="button"
-                class="iv__expanded-switch"
-                :data-testid="expanded === 'graph' ? 'switch-trace' : 'switch-graph'"
-                @click="expand(expanded === 'graph' ? 'trace' : 'graph')"
-              >{{ expanded === 'graph' ? 'Trace ⤢' : 'Graph ⤢' }}</button>
-              <button
-                type="button"
-                class="iv__expanded-min"
-                data-testid="expanded-minimize"
-                title="Minimize"
-                @click="minimize"
-              >Minimize ✕</button>
-            </header>
-
-            <div v-if="expanded === 'graph'" class="iv__panel iv__panel--diagram" data-testid="trace-diagram">
-              <StateDiagram
-                v-if="store.mermaid"
-                :mermaid-source="store.mermaid.source"
-                :node-map="store.mermaid.node_map"
-                :current-state-path="store.currentStatePath"
-                :highlighted-state-paths="store.highlightedStatePaths"
-                :events="store.events"
-                :selected-event-index="store.selectedEventIndex"
-                :intents="store.currentView?.intents ?? []"
-                @select="onNodeSelect"
-                @select-phase="onPhaseSelect"
-                @select-event="onEventSelect"
-              />
-              <div v-else class="iv__empty">No diagram.</div>
-            </div>
-
-            <div v-else class="iv__panel iv__panel--timeline" data-testid="trace-timeline">
-              <TraceTimeline
-                :events="store.events"
-                :selected-event-index="store.selectedEventIndex"
-                :highlighted-state-paths="store.highlightedStatePaths"
-                :highlight-tick="store.highlightTick"
-                :mermaid-source="store.mermaid?.source ?? null"
-                @select="onEventSelect"
-              />
-            </div>
-          </div>
-        </aside>
+        <!-- Embed (VS Code): nothing beside the chat — Trace and Graph open as
+             their own dockable windows via "Kitsoki: Open Trace" / "Open Graph". -->
       </div>
     </template>
   </div>
@@ -285,26 +199,9 @@ const inbox = useInboxStore();
 const proposals = useProposalsStore();
 
 // Embed layout (VS Code webview): chat front/center with a hint rail that
-// maximizes trace/graph. The standalone browser app keeps its full layout.
+// chat is shown ALONE (trace + graph have their own dockable windows). The
+// standalone browser app keeps its full layout (chat | diagram + timeline).
 const embed = computed(() => isEmbedded() || route?.query?.embed === "1");
-
-// Which hint, if any, is maximized beside the chat.
-const expanded = ref<null | "trace" | "graph">(null);
-function expand(which: "trace" | "graph"): void {
-  expanded.value = which;
-}
-function minimize(): void {
-  expanded.value = null;
-}
-
-// Live hint metrics (cheap — read straight off the store).
-const roomCount = computed(
-  () =>
-    Object.values(store.mermaid?.node_map ?? {}).filter(
-      (n) => (n as NodeRef).kind === "state",
-    ).length,
-);
-const intentCount = computed(() => store.currentView?.intents?.length ?? 0);
 
 // One DataSource for the lifetime of the view (subscribe + write RPCs).
 let source: DataSource | null = null;
@@ -760,168 +657,16 @@ function onEventSelect(index: number): void {
   padding: 1rem;
 }
 
-/* ---- Embed layout (VS Code webview): chat front/center + hint rail ---- */
-/* Chat is dominant; the right side is a thin rail of live, maximizable cards.
-   When a card is maximized the rail widens to ~56% (horizontal split) and the
-   chat stays visible — never replaced. */
-/* A gutter so the chat content (the InputBar's Send sits at the chat's right
-   edge) never abuts the rail, plus z-index so the chat wins the hit-test at the
-   seam. */
-.iv__main--embed {
-  gap: 10px;
-}
+/* ---- Embed layout (VS Code webview): chat ONLY ---- */
+/* The chat panel shows just the conversation; Trace and Graph are their own
+   dockable windows (the "Kitsoki Surfaces" panels), so the chat fills the width. */
 .iv__main--embed .iv__chat {
   flex: 1 1 auto;
-  position: relative;
-  z-index: 1;
 }
 /* Let the intent-form inputs shrink below their intrinsic width so the row (and
-   its Send) always fits the chat column — never overflowing under the rail. */
+   its Send) always fits the chat column. */
 .iv__main--embed .iv__chat :deep(.input-bar__input) {
   min-width: 0;
-}
-
-.iv__side {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  flex: 0 0 240px;
-  min-width: 0;
-  min-height: 0;
-  padding: 0.6rem;
-  background: var(--k-bg-deep, #0b1220);
-  border-left: 1px solid var(--k-border, #1e293b);
-  transition: flex-basis 0.18s ease;
-}
-/* Maximized: a deterministic 44/56 split (both percentage bases compete on equal
-   grow), so the panel is prominent while the chat stays front/center. Overrides
-   the collapsed-rail `flex: 1 1 auto` chat basis. */
-.iv__main--expanded .iv__chat {
-  flex: 1 1 44%;
-}
-.iv__main--expanded .iv__side {
-  flex: 1 1 56%;
-}
-
-/* Collapsed hint card */
-.iv__hint {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  text-align: left;
-  font: inherit;
-  color: #cbd5e1;
-  background: var(--k-bg-widget, #0f172a);
-  border: 1px solid var(--k-border, #1e293b);
-  border-radius: 8px;
-  padding: 0.7rem 0.8rem;
-  cursor: pointer;
-}
-.iv__hint:hover {
-  border-color: var(--k-border-subtle, #334155);
-  background: var(--k-bg-hover, #131f38);
-}
-.iv__hint-head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.iv__hint-title {
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--k-fg-muted, #94a3b8);
-}
-.iv__hint-grow {
-  margin-left: auto;
-  color: var(--k-fg-muted, #64748b);
-  font-size: 0.95rem;
-}
-.iv__hint:hover .iv__hint-grow {
-  color: var(--k-fg-accent, #93c5fd);
-}
-.iv__hint-metric {
-  font-size: 1.45rem;
-  font-weight: 700;
-  color: var(--k-fg, #e2e8f0);
-  line-height: 1.1;
-}
-.iv__hint-metric span {
-  font-size: 0.7rem;
-  font-weight: 500;
-  color: var(--k-fg-muted, #64748b);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.iv__hint-row {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.72rem;
-  color: var(--k-fg-muted, #94a3b8);
-}
-.iv__hint-row code {
-  font-family: ui-monospace, monospace;
-  color: var(--k-fg-code, #7dd3fc);
-}
-.iv__hint-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.iv__hint-dot.is-live {
-  background: var(--k-success, #34d399);
-  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.15);
-}
-.iv__hint-dot.is-done {
-  background: var(--k-fg-subtle, #475569);
-}
-
-/* Maximized panel */
-.iv__expanded {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-  gap: 0.4rem;
-}
-.iv__expanded-head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-.iv__expanded-title {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--k-fg-muted, #64748b);
-}
-.iv__expanded-switch,
-.iv__expanded-min {
-  font: inherit;
-  font-size: 0.68rem;
-  cursor: pointer;
-  border-radius: 999px;
-  padding: 0.12rem 0.5rem;
-  background: var(--k-bg-widget, #0f172a);
-  border: 1px solid var(--k-border, #1e293b);
-  color: var(--k-fg-muted, #94a3b8);
-}
-.iv__expanded-switch {
-  margin-left: auto;
-}
-.iv__expanded-switch:hover,
-.iv__expanded-min:hover {
-  border-color: var(--k-border-subtle, #334155);
-  color: #cbd5e1;
-}
-.iv__expanded .iv__panel {
-  flex: 1 1 auto;
 }
 
 /* ---- Streaming thinking bubble ---- */

@@ -26,36 +26,33 @@ what is unique to the editor embed.*
 The SPA's own multi-pane layout (chat **and** trace fighting for width) is wrong
 inside VS Code's narrow chrome. So the embed runs the SPA in a dedicated **editor
 panel** and the SPA detects the webview host (`acquireVsCodeApi` present →
-`isEmbedded()`, `tools/runstatus/src/lib/embed.ts`) and switches the interactive
-view to its **embed layout**: chat dominant, trace + graph collapsed into a thin
-**hint rail** that maximizes on click.
+`isEmbedded()`, `tools/runstatus/src/lib/embed.ts`) and renders the interactive
+view **chat-only** — trace and graph are their own dockable windows (see
+[Surface decomposition](#surface-decomposition--chat-trace-and-graph-as-independent-windows)),
+so the chat panel never repeats them.
 
 ```
 VS Code window
-┌──────────┬─────────────────────────────────────────────────────┐
-│ Activity │  editor area: Kitsoki panel (front/center)           │
-│   bar    │ ┌──────────────────────────┬───────────────────────┐ │
-│  [K]     │ │  CHAT                     │ ▸ Trace   12 events   │ │
-│ kitsoki  │ │  story library →          │   room report · live  │ │
-│ launcher │ │  transcript · room view   │ ▸ Graph   5 rooms     │ │
-│ (welcome │ │  > type a message…        │   current report      │ │
-│  button) │ └──────────────────────────┴───────────────────────┘ │
-│          │   click ▸ Trace / Graph → maximizes beside the chat   │
-└──────────┴─────────────────────────────────────────────────────┘
+┌──────────┬──────────────────────────────────────────────────────┐
+│ Activity │  editor area: Kitsoki CHAT panel (front/center)       │
+│   bar    │ ┌──────────────────────────────────────────────────┐ │
+│ [K] chat │ │  CHAT  — story library → transcript · room view   │ │
+│ [K] surf │ │  > type a message…                                │ │
+│          │ └──────────────────────────────────────────────────┘ │
+│ Trace ▏  │   Trace + Graph open as their OWN docked surfaces      │
+│ Graph ▏  │   ("Kitsoki Surfaces" container) — never in the chat.  │
+└──────────┴──────────────────────────────────────────────────────┘
 ```
 
 - **Editor panel** — a `WebviewPanel` (`ChatPanel`, `src/webview.ts`) in the
   editor area, registered with a `WebviewPanelSerializer` so it revives after
   reload / restart / window-move (its persisted state is just a marker; the live
   session is re-discovered on boot, see [Surface decomposition](#surface-decomposition--chat-trace-and-graph-as-independent-windows)).
-  It mounts the **full SPA** (no surface marker): chat front/center, with the
-  **hint rail** holding a live **Trace** card (event count, current room, live/done)
-  and **Graph** card (rooms, current room, next intents). Clicking a card maximizes
-  the full `TraceTimeline` / `StateDiagram` beside the chat (a 44/56 horizontal
-  split) with a switch + minimize.
-- **Standalone trace / graph surfaces** — the same `TraceTimeline` / `StateDiagram`
-  can also each dock as their **own webview** in the **Kitsoki Surfaces** activity-bar
-  container (`kitsoki.trace`, `kitsoki.graph` `WebviewView`s). See
+  It mounts the **full SPA** (no surface marker) but the embed interactive layout is
+  **chat-only**: the conversation fills the panel — no trace/graph hint rail.
+- **Standalone trace / graph surfaces** — the `TraceTimeline` / `StateDiagram` each
+  dock as their **own webview** in the **Kitsoki Surfaces** activity-bar container
+  (`kitsoki.trace`, `kitsoki.graph` `WebviewView`s). See
   [Surface decomposition](#surface-decomposition--chat-trace-and-graph-as-independent-windows).
 - **Activity-bar launcher** — the `kitsoki` `viewsContainer` hosts a thin
   `kitsoki.launch` tree view whose `viewsWelcome` is an **Open Kitsoki Chat** button
@@ -310,8 +307,9 @@ strict. The SPA is same-document (singlefile, no network), so `connect-src` stay
 
 The extension is demoable exactly the way the web UI is
 ([`kitsoki-ui-demo`](../skills/kitsoki-ui-demo/SKILL.md)), but the frame is the
-**whole editor** (activity bar, editor panel, hint rail, split editor), not just
-the embedded SPA. One Playwright spec serves both roles — the worked reference is
+**whole editor** (activity bar, chat panel, the docked trace/graph surfaces, split
+editor), not just the embedded SPA. One Playwright spec serves both roles — the
+worked reference is
 **`tools/vscode-kitsoki/tests/vscode-tour.e2e.spec.ts`**, the `_electron` analog of
 the web tour's `agent-actions-video.spec.ts`.
 
@@ -339,29 +337,29 @@ guest (`iframe.webview.ready >>> iframe[title]`, the proven 1.96.4 chain in
 **reuses the web tour manifest** (`WEATHER_REPORT_TOUR_STEPS`) injected via
 `window.__startTourWithSteps`, asserting each popover title against the manifest (a
 drift guard — the recording can't diverge from the live overlay). An *editor beat*
-(maximize the graph, split the story's `app.yaml` beside the panel) is driven on the
-outer workbench page from a thin in-spec `EDITOR_BEATS` manifest. Both advance one
-`ChapterRecorder` clock, so the chapter sidecar spans the whole editor tour.
+(open the docked trace/graph surfaces, split the story's `app.yaml` beside the
+panel) is driven on the outer workbench page from a thin in-spec `EDITOR_BEATS`
+manifest. Both advance one `ChapterRecorder` clock, so the chapter sidecar spans
+the whole editor tour.
 
 **Critical path asserted beat-by-beat** (and the scenarios the QA gate checks the
 video against): (a) the Kitsoki editor panel opens and shows the themed story
 library (clicking the activity-bar icon auto-opens it); (c) a session starts
-(`current-state = lobby`) with the **hint rail** (`hint-rail` → `hint-trace` +
-`hint-graph`) present; (d) a turn is driven and state advances (`forecast` →
-`current-state = report`, the "Tokyo, Japan" forecast renders — proving the cassette
-replay ran end-to-end through bundle → CSP → BridgeTransport → relay → backend) with
-chat front/center; (e) **maximizing the Trace hint** renders the full timeline
-(`trace-timeline` with a `host.starlark.run` row); (f) **switching to the Graph**
-renders the state diagram (`trace-diagram`, current station marked); (h) **`Kitsoki:
-Open Trace`** docks a **standalone** Trace surface (`surface-trace`) in the Kitsoki
-Surfaces sidebar that followed the same session — its own webview, separate store,
-re-rendering the driven timeline; (i) **`Kitsoki: Open Graph`** docks a standalone
-Graph surface (`surface-graph`) following the session, current station marked; (j)
-**one backend** — chat + trace + graph relay to a single spawned process (asserted
-via the host log: exactly one `[backend] spawn`); (g) the finale splits `app.yaml`
-beside the panel — code + kitsoki side by side (record only). The standalone-surface
-beats find the right webview among several via a `surfaceFrame(testid)` scan (the
-single-webview `webviewFrame` helper can't disambiguate once 3 webviews are open).
+(`current-state = lobby`) and the chat panel is **chat-only** (`hint-rail` count is
+0 — no trace/graph in the chat); (d) a turn is driven and state advances
+(`forecast` → `current-state = report`, the "Tokyo, Japan" forecast renders —
+proving the cassette replay ran end-to-end through bundle → CSP → BridgeTransport →
+relay → backend); (h) **`Kitsoki: Open Trace`** docks a **standalone** Trace
+surface (`surface-trace`) in the Kitsoki Surfaces sidebar that followed the same
+session — its own webview, separate store, rendering the driven timeline
+(`trace-timeline` with a `host` row); (i) **`Kitsoki: Open Graph`** docks a
+standalone Graph surface (`surface-graph`) following the session, current station
+marked (`diagram-current-station`); (j) **one backend** — chat + trace + graph relay
+to a single spawned process (asserted via the host log: exactly one
+`[backend] spawn`); (g) the finale splits `app.yaml` beside the panel — code +
+kitsoki side by side (record only). The standalone-surface beats find the right
+webview among several via a `surfaceFrame(testid)` scan (the single-webview
+`webviewFrame` helper can't disambiguate once 3 webviews are open).
 
 In record mode `app.close()` flushes the Playwright `.webm`, an in-spec transcode
 emits a faststart H.264 MP4 to `.artifacts/vscode-tour/vscode-tour.mp4` with a
