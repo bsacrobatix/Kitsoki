@@ -23,6 +23,7 @@
 
       <div class="surface__body" data-testid="trace-timeline">
         <TraceTimeline
+          compact
           :events="store.events"
           :selected-event-index="store.selectedEventIndex"
           :highlighted-state-paths="store.highlightedStatePaths"

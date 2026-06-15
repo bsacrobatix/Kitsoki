@@ -369,6 +369,21 @@ the [`kitsoki-ui-qa`](../skills/kitsoki-ui-qa/SKILL.md) vision gate validates th
 result (proven `pass`, 8/8 scenarios — including the standalone trace/graph
 surfaces following the same session) using the same frames + chapter sidecar.
 
+### Per-panel review (Vue layer)
+
+The full-editor video proves the *flow*; it does not show each surface at the
+**exact size it occupies** when docked. `make surface-panels`
+(`tools/runstatus/tests/playwright/surface-panels.spec.ts`) is the Vue-layer
+companion: it spawns `kitsoki web` (no-LLM), drives one forecast turn over RPC, then
+screenshots each `?surface=` target at its real VS Code sizes/orientations — chat
+(editor), trace + graph (narrow sidebar, **stacked** half-height, and wide bottom
+panel) — into `.artifacts/surface-panels/`. Feed those PNGs straight to
+`kitsoki-ui-qa --frames` to QA each panel as actually presented. This is how the
+trace's filter-bar-crowding-out-rows regression was caught: in a docked panel the
+`TraceTimeline` filter bar now collapses behind a one-line **Filters** toggle
+(`compact` prop) so the event rows fill the height; the state graph's Metro view
+already fits narrow/short. Re-run it in any review that touches surface layout.
+
 ## Build and run
 
 The SPA builds to a single inlined `index.html`

@@ -1,7 +1,19 @@
 <template>
-  <div class="trace-timeline">
+  <div class="trace-timeline" :class="{ 'trace-timeline--compact': compact }">
+    <!-- Compact (docked panel): a one-line toggle so the filter bar doesn't crowd
+         out the rows; collapsed by default. -->
+    <button
+      v-if="compact"
+      type="button"
+      class="trace-timeline__filters-toggle"
+      :aria-expanded="filtersOpen"
+      @click="filtersOpen = !filtersOpen"
+    >
+      <span>{{ filtersOpen ? '▾' : '▸' }} Filters</span>
+      <span v-if="hasActiveFilters" class="trace-timeline__filters-active" title="filters active">●</span>
+    </button>
     <!-- Filter bar -->
-    <div class="trace-timeline__filters">
+    <div v-show="filtersOpen" class="trace-timeline__filters">
       <!-- Subsystem chips -->
       <div class="trace-timeline__filter-group">
         <span class="trace-timeline__filter-label">Subsystem:</span>
@@ -263,11 +275,19 @@ const props = defineProps<{
   annotations?: AnnotationEntry[];
   /** Session ID passed down so EventDetail can show the annotate/replay buttons. */
   sessionId?: string;
+  /** Compact mode (a docked surface in a narrow/short VS Code panel): collapse the
+   * filter bar behind a toggle (default collapsed) so the timeline rows — the
+   * point of the panel — fill the height instead of being crowded out. */
+  compact?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "select", index: number): void;
 }>();
+
+// In compact mode the filter bar starts collapsed (rows get the height); in the
+// full browser layout it is always shown (no toggle).
+const filtersOpen = ref(!props.compact);
 
 // rowAnnotations returns the annotations that target a given event, matched by
 // call_id (preferred) or turn.  Returns [] when no annotations exist.
@@ -1210,6 +1230,45 @@ watch(
   border-radius: 6px;
   overflow: hidden;
   font-size: 0.8125rem;
+}
+
+/* --- Compact filters toggle (docked panel) --- */
+.trace-timeline__filters-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.3rem 0.55rem;
+  font: inherit;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+  color: var(--k-fg-muted, #94a3b8);
+  background: var(--k-bg-widget, #0f172a);
+  border: none;
+  border-bottom: 1px solid var(--k-border, #1e293b);
+  cursor: pointer;
+}
+.trace-timeline__filters-toggle:hover {
+  color: var(--k-fg, #e2e8f0);
+}
+.trace-timeline__filters-active {
+  color: var(--k-fg-accent, #7dd3fc);
+  font-size: 0.6rem;
+}
+/* In compact mode the (collapsible) filter bar floats over the rows so toggling it
+   never reflows / shrinks the timeline body. */
+.trace-timeline--compact {
+  position: relative;
+}
+.trace-timeline--compact .trace-timeline__filters {
+  position: absolute;
+  top: 1.6rem;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
 }
 
 /* --- Filters --- */

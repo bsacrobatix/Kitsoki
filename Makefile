@@ -503,6 +503,17 @@ vscode-e2e: web
 	cd $(VSCODE_DIR) && pnpm build
 	cd $(VSCODE_DIR) && KITSOKI_VSCODE_PACE=$${KITSOKI_VSCODE_PACE:-1} pnpm exec playwright test vscode-tour.e2e
 
+# surface-panels renders each decomposed surface (chat / trace / graph) at the REAL
+# sizes + orientations it occupies in VS Code (editor panel; narrow sidebar; wide
+# bottom panel) into .artifacts/surface-panels/, so each panel can be reviewed /
+# QA'd as actually presented (catches cut-off at narrow/short docks). No-LLM, Vue
+# layer (browser). Rebuilds the embedded binary first so the captures reflect the
+# latest SPA. Feed the PNGs to kitsoki-ui-qa via --frames.
+.PHONY: surface-panels
+surface-panels: web
+	go build -o bin/kitsoki ./cmd/kitsoki
+	cd $(RUNSTATUS_DIR) && pnpm exec playwright test surface-panels --project=chromium
+
 # demo-tour records the onboarding tour as a shareable MP4/GIF at watch-speed
 # and renders the post-production artifacts. Requires pnpm + ffmpeg.
 # The spec emits the canonical MP4 directly (never .webm); render adds GIF +
