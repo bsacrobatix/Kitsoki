@@ -1,8 +1,9 @@
 # Epic: kitsoki as a dependency — base stories + demos inside a foreign repo
 
 **Status:** Implemented (code-complete + validated). All 4 slices shipped on
-branch `kitsoki-as-dependency`; the gears instance is vendored zero-config into
-the gears repo under `stories/gears-rust/` (PR #4082). Narrative moved to the
+branch `kitsoki-as-dependency`; the gears team's own instance lives zero-config
+in the gears repo under `stories/gears-rust/`, importing `@kitsoki/dev-story`
+(PR #4082). Narrative moved to the
 dev-story README, the `kitsoki-ui-demo` SKILL.md, `external-project-targeting.md`,
 and the new [`kitsoki tour` reference](../web/tour.md). The dev-story PRD → Design
 demo now renders binary-native (`kitsoki tour --feature dev-story-prd-design`) —
@@ -36,8 +37,8 @@ binary present**: that repo carries its own tiny instance that does
 and the demo video **renders from the binary** (`kitsoki tour …`) with no
 pnpm/Playwright. This resolves
 [`external-project-targeting.md`](external-project-targeting.md) open question #1
-(instance in the kitsoki repo vs vendored into the target repo) in favour of
-*vendored into the target repo, base from the binary*.
+(instance in the kitsoki repo vs owned by the target repo) in favour of
+*the target repo owns its instance and imports the base from the binary*.
 
 ## What changes
 
@@ -184,8 +185,8 @@ the subcommand is additive.
 
 ## Slice 3 — Move gears-rust to the gears repo
 
-The gears repo becomes a normal kitsoki host repo: the instance vendored
-zero-config under `stories/gears-rust/` (`app.yaml`, `templates/`, `flows/` incl.
+The gears repo becomes a normal kitsoki host repo: the gears team's own instance
+lives zero-config under `stories/gears-rust/` (`app.yaml`, `templates/`, `flows/` incl.
 `prd_to_design_full.yaml`, `scenarios/`, the `drive:`-enabled tour manifest, and
 `features/gears-prd-design.yaml`) — discovered by the default `./stories` walk
 (`internal/webconfig` `defaultStoryDirs`), so no `.kitsoki.yaml` is needed. The

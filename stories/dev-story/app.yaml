@@ -365,8 +365,9 @@ world:
   # ── External-target profile (doc shape + placement) ───────────────
   # Defaults reproduce kitsoki's own behaviour exactly (flat docs/proposals
   # + docs/prd, slug-named files, a feature ticket on publish). An instance
-  # app (e.g. the gears-rust instance, now vendored in the gears repo under
-  # stories/gears-rust/) overrides these to retarget the PRD → Design walk at
+  # app (e.g. the gears team's own gears-rust instance, in the gears repo under
+  # stories/gears-rust/, importing this hub) overrides these to retarget the
+  # PRD → Design walk at
   # a foreign repo: publish into <workdir>/<durable> under a FIXED gears-sdlc
   # filename (PRD.md / DESIGN.md), reading the target's own doc templates, and
   # skipping the kitsoki feature ticket. See the "doc profile" section of the

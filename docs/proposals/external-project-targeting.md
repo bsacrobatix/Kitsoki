@@ -126,9 +126,9 @@ prd→proposal chain from #3.
 
 1. **Where does an instance for a foreign repo physically live** — in the
    kitsoki repo (`stories/gears-rust/`, run with `--warp` pointing `workdir`
-   at the checkout) or vendored into the target repo (`.kitsoki/`)? *Resolved
+   at the checkout) or owned by the target repo? *Resolved
    and **shipped** by [`kitsoki-as-dependency.md`](kitsoki-as-dependency.md)
-   slice #3: external targets are vendored into the target repo and import the
+   slice #3: the target repo owns its instance and imports the
    base via `@kitsoki/dev-story`, resolved from a binary-embedded story library
    (no kitsoki checkout). See "External targets live in their own repo" below.*
 
@@ -145,7 +145,7 @@ binary's embedded story library — so the target repo runs `kitsoki web` /
 `kitsoki tour` with only the binary present, no kitsoki checkout. The kitsoki
 repo keeps only self-targeting (dogfood) stories.
 
-`gears-rust` is the worked example, now vendored at
+`gears-rust` is the worked example — the gears team's own instance at
 [`constructorfabric/gears-rust` → `stories/gears-rust/`](https://github.com/constructorfabric/gears-rust/tree/docs/kitsoki-integration/stories/gears-rust).
 The only instance edit on the move was the import source
 (`../dev-story` → `"@kitsoki/dev-story"`) and the `world.workdir`/`world.repo_root`

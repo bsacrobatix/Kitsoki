@@ -101,7 +101,7 @@ walk — no `.kitsoki.yaml` needed), importing this base via
 `@kitsoki/dev-story` from the binary's embedded story library — see
 [`kitsoki-as-dependency.md`](../../docs/proposals/kitsoki-as-dependency.md)
 for the full epic, including how to render the demo via `kitsoki tour`
-(slice 2) and the slice-3 vendoring mechanics.
+(slice 2) and the slice-3 migration mechanics.
 
 The profile is the "External-target profile" world block in
 [`app.yaml`](./app.yaml) (search `External-target profile`). Every key has

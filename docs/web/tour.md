@@ -4,9 +4,9 @@
 deterministic, no-LLM demo MP4** from a declarative tour manifest — no Node,
 pnpm, or Playwright. It is the binary-native counterpart to the Playwright
 recording specs (see [Demo, video & testing](README.md#demo-video--testing)): a
-foreign repo that vendors a kitsoki instance can produce its own demo video with
-only the `kitsoki` binary present (the [kitsoki-as-dependency](../proposals/kitsoki-as-dependency.md)
-epic, slice 2).
+foreign repo that owns a kitsoki instance (importing `@kitsoki/<name>`) can
+produce its own demo video with only the `kitsoki` binary present (the
+[kitsoki-as-dependency](../proposals/kitsoki-as-dependency.md) epic, slice 2).
 
 It reuses `kitsoki web`'s no-LLM plumbing verbatim: a **flow fixture** (plus an
 optional host cassette) stubs every `host.*` call, the same posture
