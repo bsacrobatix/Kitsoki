@@ -328,30 +328,28 @@ What makes it the golden example:
   and `drive:` actions are inseparable — every action is framed by a popover
   explaining *why* kitsoki does it that way.
 - **It is kitsoki's self-targeting dogfood — "kitsoki on kitsoki".** Unlike the
-  gears-rust demo (now an external `.kitsoki/gears-rust/` instance in the gears
+  gears-rust demo (now an external `stories/gears-rust/` instance in the gears
   repo, which retargets an external
   repo and skips the ticket mint), this walk authors kitsoki proposals using
   kitsoki itself — the cleanest proof that the system can improve itself.
-- **Binary-rendered (slice 2 prerequisite).** When the `kitsoki tour` subcommand
-  ships, this demo renders with `kitsoki tour --feature dev-story-prd-design`
-  (no Playwright, no Node — headless Chrome + ffmpeg from the binary alone), the
-  first proof that the binary-native tour renderer works end-to-end. **Today
-  (pre-slice-2)** the bound spec is a skipped stub and there is no record path
-  yet; the flow fixture is already no-LLM (cassette-driven) and passes under
+- **Binary-rendered.** This demo renders straight from the binary with
+  `kitsoki tour --feature dev-story-prd-design` (no Playwright, no Node —
+  headless Chrome + ffmpeg alone), the proof that the binary-native tour renderer
+  works end-to-end. The flow fixture is no-LLM (cassette-driven) and passes under
   `kitsoki test flows stories/dev-story/app.yaml`, so the *content* is verified
-  even though the *recording* awaits slice 2.
+  independently of the recording.
 
-**Record via the binary (slice 2 on):**
+**Record via the binary:**
 
 ```bash
-# Once slice 2 ships, this becomes a one-liner:
 kitsoki tour --feature dev-story-prd-design --out .artifacts/dev-story-prd-design/
 ```
 
-**Record via Playwright (pre-slice-2):** deferred — the spec body is a TBD stub
-(copy `agent-actions-video.spec.ts` when authoring it, driving the
-`DEV_STORY_PRD_DESIGN_TOUR_STEPS` manifest against a `kitsoki web` server seeded
-with `stories/dev-story/flows/prd_to_design_full.yaml`).
+See the [`kitsoki tour` reference](../../web/tour.md) for the full flag surface,
+output artifacts, and the no-LLM contract. The Playwright path
+(`agent-actions-video.spec.ts` is the template) remains available for demos that
+need browser features the binary renderer does not yet drive, but the binary
+command is the default for any tour bound to a feature catalog entry.
 
 This demo is the **proof that conversation-driven-development methodology** (the
 epic at `docs/proposals/conversation-driven-development.md`) works for kitsoki

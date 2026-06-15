@@ -132,6 +132,12 @@ the missing MP4).`,
 				}
 				outDir = filepath.Join(repoRoot, ".artifacts", name)
 			}
+			// Must be absolute: the stitch runs ffmpeg with its cwd set to the
+			// frames/ subdir, so a relative --out would resolve against that
+			// subdir (not the process cwd) and ffmpeg would fail to open the MP4.
+			if abs, aerr := filepath.Abs(outDir); aerr == nil {
+				outDir = abs
+			}
 
 			// ── Build the no-LLM server handler (reuse web.go plumbing) ──────
 			handler, closeFn, err := buildTourServer(resolvedStoryDirs, binding.Flow, binding.HostCassette, dbPathForTour())
@@ -159,6 +165,9 @@ the missing MP4).`,
 				if res.VideoPath != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "%s\n", res.VideoPath)
 					fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: chapters → %s\n", res.ChaptersPath)
+				}
+				if res.StepsPath != "" {
+					fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: step refs → %s\n", res.StepsPath)
 				}
 			}
 			if runErr != nil {
@@ -217,8 +226,14 @@ func buildTourServer(storyDirs []string, flowPath, hostCassette, dbPath string) 
 	dirs := webconfig.Resolve(storyDirs, cfg)
 
 	base := runtimeBase{
-		DBPath:       dbPath,
-		ExecMode:     orchestrator.ExecStaged,
+		DBPath: dbPath,
+		// One-shot, not staged: a tour is a scripted, deterministic playback of
+		// a flow fixture, so each driven intent must run to completion in a
+		// single turn — the same posture `kitsoki test flows` uses. Staged mode
+		// pauses emitted/gated steps (e.g. the design-brief judge's emit_intent
+		// advance_brief) for an operator advance the manifest never issues, which
+		// would strand the render mid-walk.
+		ExecMode:     orchestrator.ExecOneShot,
 		Flow:         &fixture,
 		FlowFilePath: flowPath,
 	}

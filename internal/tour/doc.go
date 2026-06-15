@@ -27,6 +27,10 @@
 //	    <out>/<videoBase>.mp4.chapters.json  (internal/video.WriteChapters;
 //	                                          one Chapter per step, source_ref
 //	                                          kind="tour", step_id=<step.id>)
+//	    <out>/<videoBase>.mp4.steps.json     (one StepShot per PNG: a deterministic
+//	                                          PNG → spec-location reference + the
+//	                                          assertions the render enforced —
+//	                                          see steps.go)
 //	    <out>/NN-<step-id>.png               (per-step poster frames)
 //
 // # Drive actions are the manifest's self-driving data

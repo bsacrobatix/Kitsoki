@@ -1,16 +1,21 @@
 # Epic: kitsoki as a dependency — base stories + demos inside a foreign repo
 
-**Status:** Implemented (code-complete). All 4 slices shipped on branch
-`kitsoki-as-dependency`; the gears instance is vendored into the gears repo
-(PR #4082). Narrative moved to the dev-story README, the `kitsoki-ui-demo`
-SKILL.md, and `external-project-targeting.md`. **Remaining (validation, not
-mechanism):** (a) a short `kitsoki tour` reference under `docs/`; (b) replace
-the skipped `dev-story-prd-design-video.spec.ts` stub with a real binary-native
-render (`kitsoki tour --feature dev-story-prd-design`) and a `kitsoki-ui-qa`
-legibility pass on both the dev-story and gears renders (screencast-cadence
-spike, shared decision 3). Delete this file once (a) and (b) land.
+**Status:** Implemented (code-complete + validated). All 4 slices shipped on
+branch `kitsoki-as-dependency`; the gears instance is vendored zero-config into
+the gears repo under `stories/gears-rust/` (PR #4082). Narrative moved to the
+dev-story README, the `kitsoki-ui-demo` SKILL.md, `external-project-targeting.md`,
+and the new [`kitsoki tour` reference](../web/tour.md). The dev-story PRD → Design
+demo now renders binary-native (`kitsoki tour --feature dev-story-prd-design`) —
+148s MP4, 11 chapters, validated by a `kitsoki-ui-qa` pass (8/9 beats proven from
+frames; the multi-round-clarification beat is proven deterministically by the new
+`steps.json` `states_asserted`). Three render bugs were fixed landing it: the
+tour driver now types via the text-floor when a choice widget hides the composer;
+the render runs one-shot (not staged) so `emit_intent` chains settle; and a
+relative `--out` no longer breaks the ffmpeg stitch. **Remaining (release, not
+implementation):** push the branch + the gears side and update PR #4082; delete
+this file on merge (its narrative now lives in the docs above).
 **Kind:**   epic
-**Slices:** 4 (4/4 shipped; video-render validation outstanding)
+**Slices:** 4 (4/4 shipped and validated)
 
 ## Why
 
@@ -48,8 +53,9 @@ Once every slice ships:
   headless Chrome — no Node/pnpm/Playwright. Tour manifests become
   **self-driving** (each step carries declarative `drive:` actions), so the
   binary, not a hand-written `.spec.ts`, can render any demo.
-- `gears-rust` lives in the **gears repo** (`.kitsoki/gears-rust/` + a
-  `.kitsoki.yaml`), importing the base via `@kitsoki/dev-story`; it runs there
+- `gears-rust` lives in the **gears repo** (zero-config `stories/gears-rust/`,
+  discovered by the default `./stories` walk), importing the base via
+  `@kitsoki/dev-story`; it runs there
   with `kitsoki web` and `kitsoki tour`. The kitsoki repo keeps only
   self-targeting (dogfood) stories.
 - A parallel **dev-story (self-targeting) PRD → Design golden video**, rendered
@@ -178,15 +184,16 @@ the subcommand is additive.
 
 ## Slice 3 — Move gears-rust to the gears repo
 
-The gears repo becomes a normal kitsoki host repo: a `.kitsoki.yaml` with
-`story_dirs: [ .kitsoki ]` (consumed by `internal/webconfig`) and the instance
-vendored under `.kitsoki/gears-rust/` (`app.yaml`, `templates/`, `flows/` incl.
+The gears repo becomes a normal kitsoki host repo: the instance vendored
+zero-config under `stories/gears-rust/` (`app.yaml`, `templates/`, `flows/` incl.
 `prd_to_design_full.yaml`, `scenarios/`, the `drive:`-enabled tour manifest, and
-`features/gears-prd-design.yaml`). The only instance edit is the import:
-`source: ../dev-story` → `source: "@kitsoki/dev-story"`; the doc-profile `world:`
-keys are unchanged, with `workdir`/`repo_root` now defaulting to `.` (the gears
-checkout). It runs there with `kitsoki web` (discovers the instance via
-`.kitsoki.yaml`) and `kitsoki tour --feature gears-prd-design`.
+`features/gears-prd-design.yaml`) — discovered by the default `./stories` walk
+(`internal/webconfig` `defaultStoryDirs`), so no `.kitsoki.yaml` is needed. The
+only instance edit is the import: `source: ../dev-story` →
+`source: "@kitsoki/dev-story"`; the doc-profile `world:` keys are unchanged, with
+`workdir`/`repo_root` now defaulting to `.` (the gears checkout). It runs there
+with `kitsoki web` (discovers the instance under `stories/`) and
+`kitsoki tour --feature gears-prd-design`.
 
 In the **kitsoki repo**: delete `stories/gears-rust/**`,
 `tools/runstatus/tests/playwright/gears-prd-design.spec.ts`,

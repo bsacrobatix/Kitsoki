@@ -49,8 +49,10 @@ type Config struct {
 type Result struct {
 	VideoPath    string          // <OutDir>/<VideoBase>.mp4 (empty if ffmpeg absent/failed)
 	ChaptersPath string          // <OutDir>/<VideoBase>.mp4.chapters.json
+	StepsPath    string          // <OutDir>/<VideoBase>.mp4.steps.json
 	Chapters     []video.Chapter // the per-step chapters
-	PNGPaths     []string        // per-step poster PNGs
+	Steps        []StepShot      // per-step PNG → spec-location records (deterministic)
+	PNGPaths     []string        // per-step poster PNG paths (derived from Steps)
 	FrameCount   int             // screencast frames captured
 }
 
@@ -157,25 +159,31 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 
 	// ── Walk the steps ────────────────────────────────────────────────────────
 	exec := newExecutor(runCtx, cfg.Pace)
-	pngs, err := walkSteps(runCtx, cfg, exec, chapters, cap)
+	shots, err := walkSteps(runCtx, cfg, exec, chapters, cap)
 	if err != nil {
 		return nil, err
 	}
 
-	// ── Seal chapters; stitch the MP4; write the sidecar ──────────────────────
+	// ── Seal chapters; stitch the MP4; write the sidecars ─────────────────────
 	cap.stop(runCtx)
 	chs := chapters.list()
-	res := &Result{Chapters: chs, PNGPaths: pngs, FrameCount: cap.frameCount()}
+	pngs := make([]string, len(shots))
+	for i, s := range shots {
+		pngs[i] = filepath.Join(cfg.OutDir, s.PNG)
+	}
+	res := &Result{Chapters: chs, Steps: shots, PNGPaths: pngs, FrameCount: cap.frameCount()}
 
 	videoPath := filepath.Join(cfg.OutDir, cfg.VideoBase+".mp4")
 	stitchErr := cap.stitch(ctx, videoPath, cfg.FPS)
 	if stitchErr != nil {
-		// Honest partial: a render with no ffmpeg still produced PNGs + chapters.
-		// Surface the stitch error but keep the chapter sidecar (written against
-		// the would-be MP4 path so the sibling convention holds).
-		sidecar, werr := video.WriteChapters(videoPath, chs)
-		if werr == nil {
+		// Honest partial: a render with no ffmpeg still produced PNGs + sidecars.
+		// Surface the stitch error but keep the chapter + step sidecars (written
+		// against the would-be MP4 path so the sibling convention holds).
+		if sidecar, werr := video.WriteChapters(videoPath, chs); werr == nil {
 			res.ChaptersPath = sidecar
+		}
+		if steps, werr := writeStepShots(videoPath, shots); werr == nil {
+			res.StepsPath = steps
 		}
 		return res, fmt.Errorf("stitch video: %w", stitchErr)
 	}
@@ -185,6 +193,11 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		return res, fmt.Errorf("write chapters: %w", err)
 	}
 	res.ChaptersPath = sidecar
+	steps, err := writeStepShots(videoPath, shots)
+	if err != nil {
+		return res, fmt.Errorf("write step shots: %w", err)
+	}
+	res.StepsPath = steps
 	return res, nil
 }
 

@@ -49,15 +49,15 @@ func startTour(ctx context.Context, steps []TourStep) error {
 // asserts the popover title, (5) opens the chapter + holds + captures a PNG, then
 // (6) advances (Next for explain; click target for action). Returns the per-step
 // PNG paths.
-func walkSteps(ctx context.Context, cfg Config, exec *executor, chapters *chapterRecorder, cap *screencastCapturer) ([]string, error) {
-	var pngs []string
+func walkSteps(ctx context.Context, cfg Config, exec *executor, chapters *chapterRecorder, cap *screencastCapturer) ([]StepShot, error) {
+	var shots []StepShot
 	pngIdx := 0
-	for _, step := range cfg.Manifest.Steps {
+	for i, step := range cfg.Manifest.Steps {
 		// (1) Route guard — skip a step whose route we are not on (the overlay
 		// holds it too). "any" always runs.
 		routeKind, err := currentRouteKind(ctx)
 		if err != nil {
-			return pngs, err
+			return shots, err
 		}
 		if step.Route != "any" && step.Route != routeKind {
 			continue
@@ -71,7 +71,7 @@ func walkSteps(ctx context.Context, cfg Config, exec *executor, chapters *chapte
 
 		// (2) Self-driving actions (the data form of the spec's pre-step setup).
 		if err := exec.run(step.Drive); err != nil {
-			return pngs, fmt.Errorf("step %q drive: %w", step.ID, err)
+			return shots, fmt.Errorf("step %q drive: %w", step.ID, err)
 		}
 
 		// (3) DOM-presence precondition.
@@ -80,13 +80,13 @@ func walkSteps(ctx context.Context, cfg Config, exec *executor, chapters *chapte
 			err := chromedp.Run(wctx, chromedp.WaitVisible(targetSelector(step.WaitForTarget), chromedp.ByQuery))
 			cancel()
 			if err != nil {
-				return pngs, fmt.Errorf("step %q waitForTarget %q: %w", step.ID, step.WaitForTarget, err)
+				return shots, fmt.Errorf("step %q waitForTarget %q: %w", step.ID, step.WaitForTarget, err)
 			}
 		}
 
 		// (4) Anti-drift: the popover must show THIS step's title.
 		if err := assertTitle(ctx, step.Title); err != nil {
-			return pngs, fmt.Errorf("step %q: %w", step.ID, err)
+			return shots, fmt.Errorf("step %q: %w", step.ID, err)
 		}
 
 		// (5) Non-interactive steps open their chapter, hold, and capture here.
@@ -98,21 +98,24 @@ func walkSteps(ctx context.Context, cfg Config, exec *executor, chapters *chapte
 				dwellMs = 3000
 			}
 			if err := exec.dwell(dwellMs); err != nil {
-				return pngs, err
+				return shots, err
 			}
 		}
 		pngIdx++
 		png, err := capturePNG(ctx, cfg.OutDir, pngIdx, step.ID)
 		if err == nil {
-			pngs = append(pngs, png)
+			// Record the deterministic spec reference for this capture: every
+			// precondition above (drive wait-states, waitForTarget, assertTitle)
+			// has passed, so the screenshot provably depicts spec step i.
+			shots = append(shots, cfg.Manifest.stepShot(pngIdx, i, filepath.Base(png), step))
 		}
 
 		// (6) Advance.
 		if err := advance(ctx, exec, step); err != nil {
-			return pngs, fmt.Errorf("step %q advance: %w", step.ID, err)
+			return shots, fmt.Errorf("step %q advance: %w", step.ID, err)
 		}
 	}
-	return pngs, nil
+	return shots, nil
 }
 
 // advance moves past a step: explain → click Next; action → click the target.

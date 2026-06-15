@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -109,6 +110,28 @@ func TestTour_EndToEnd(t *testing.T) {
 	}
 	if res.FrameCount == 0 {
 		t.Error("no screencast frames captured")
+	}
+
+	// The deterministic per-step sidecar: one StepShot per captured PNG, each
+	// referencing its exact spec location and asserted at capture.
+	if res.StepsPath == "" {
+		t.Fatal("no steps sidecar path")
+	}
+	stepsData, err := os.ReadFile(res.StepsPath)
+	if err != nil {
+		t.Fatalf("read steps sidecar: %v", err)
+	}
+	var shots []tour.StepShot
+	if err := json.Unmarshal(stepsData, &shots); err != nil {
+		t.Fatalf("unmarshal steps sidecar: %v", err)
+	}
+	if len(shots) != len(res.PNGPaths) {
+		t.Errorf("want %d step shots, got %d", len(res.PNGPaths), len(shots))
+	}
+	for i, s := range shots {
+		if s.SpecRef.StepID == "" || s.SpecRef.Pointer == "" || s.PNG == "" || !s.TitleAsserted {
+			t.Errorf("shot %d under-specified: %+v", i, s)
+		}
 	}
 }
 

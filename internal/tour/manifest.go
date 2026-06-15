@@ -94,6 +94,22 @@ type TourManifest struct {
 	Export   string     `yaml:"export" json:"export"`
 	Steps    []TourStep `yaml:"steps" json:"steps"`
 	SpecPath string     `yaml:"-" json:"-"`
+	// SpecPointerBase is the RFC 6901 JSON Pointer prefix to the steps array in
+	// SpecPath's parsed document: "/tour/steps" for a feature catalog,
+	// "/steps" for a standalone --manifest file. [TourManifest.stepPointer]
+	// appends the step index to it for a [StepShot]'s addressable spec location.
+	SpecPointerBase string `yaml:"-" json:"-"`
+}
+
+// stepPointer returns the RFC 6901 JSON Pointer to step i in SpecPath's document
+// (e.g. "/tour/steps/5"). It defaults to a top-level "/steps" base when none was
+// set by the loader.
+func (m *TourManifest) stepPointer(i int) string {
+	base := m.SpecPointerBase
+	if base == "" {
+		base = "/steps"
+	}
+	return fmt.Sprintf("%s/%d", base, i)
 }
 
 // featureFile is the slice of a feature-catalog YAML the tour renderer reads:
@@ -132,7 +148,7 @@ func LoadFeatureManifest(featurePath, repoRoot string) (*TourManifest, DemoBindi
 	if len(f.Tour.Steps) == 0 {
 		return nil, DemoBinding{}, fmt.Errorf("feature %q has no tour steps", featurePath)
 	}
-	m := &TourManifest{Export: f.Tour.Export, Steps: f.Tour.Steps, SpecPath: relTo(repoRoot, featurePath)}
+	m := &TourManifest{Export: f.Tour.Export, Steps: f.Tour.Steps, SpecPath: relTo(repoRoot, featurePath), SpecPointerBase: "/tour/steps"}
 	if err := m.validate(); err != nil {
 		return nil, DemoBinding{}, err
 	}
@@ -168,6 +184,7 @@ func LoadTourManifest(manifestPath string) (*TourManifest, error) {
 		return nil, fmt.Errorf("manifest %q has no steps", manifestPath)
 	}
 	m.SpecPath = manifestPath
+	m.SpecPointerBase = "/steps"
 	if err := m.validate(); err != nil {
 		return nil, err
 	}

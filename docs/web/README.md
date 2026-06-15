@@ -718,6 +718,13 @@ popover. All three specs share the live-server harness
 [`kitsoki-ui-demo`](../skills/kitsoki-ui-demo/SKILL.md) recipe for rendering
 shareable MP4/GIF/contact-sheet artifacts.
 
+**Binary-native rendering.** [`kitsoki tour`](tour.md) records the same kind of
+demo MP4 (+ chapter sidecar + per-step PNGs) straight from the binary — headless
+Chrome + ffmpeg, no Node/pnpm/Playwright — driving a self-describing tour
+manifest from the feature catalog. It is how a foreign repo that only vendors a
+kitsoki instance produces its own demo video; see the [`kitsoki tour`
+reference](tour.md).
+
 Other tests: `cd tools/runstatus && pnpm test` (Vitest, frontend);
 `go test ./internal/runstatus/... ./cmd/kitsoki/` (backend).
 

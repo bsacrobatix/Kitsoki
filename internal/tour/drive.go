@@ -82,10 +82,19 @@ func (e *executor) dwell(ms int) error {
 
 // typeAndSend fills the composer with text and clicks send (gears spec
 // typeAndSend). The fill dispatches an input event so the Vue v-model updates
-// and composer-send enables, then a short settle, then the send click.
+// and the send button enables, then a short settle, then the send click.
+//
+// A room that shows a choice/form widget hides the primary composer but still
+// exposes the free-text "text floor" beneath it (InputBar.vue, data-testid
+// text-floor-*) — the text-only contract says every room is drivable by typing
+// (docs/architecture/transports.md §7). So the gestures fall back to the floor
+// when the primary composer is absent: composer-input → text-floor-input,
+// composer-send → text-floor-send. Both route through the same sendRaw semantic
+// off-ramp, so the keystrokes are faithful either way.
 func (e *executor) typeAndSend(text string) error {
 	fill := fmt.Sprintf(`(() => {
-  const input = document.querySelector('[data-testid="composer-input"]');
+  const input = document.querySelector('[data-testid="composer-input"]')
+             || document.querySelector('[data-testid="text-floor-input"]');
   if (!input) return false;
   input.focus();
   input.value = %q;
@@ -97,14 +106,15 @@ func (e *executor) typeAndSend(text string) error {
 		return fmt.Errorf("fill composer: %w", err)
 	}
 	if !ok {
-		return fmt.Errorf("composer-input not found")
+		return fmt.Errorf("composer-input not found (no composer or text floor)")
 	}
-	// Let v-model settle so composer-send enables (spec waits 200ms here).
+	// Let v-model settle so the send button enables (spec waits 200ms here).
 	if err := e.sleepRaw(200 * time.Millisecond); err != nil {
 		return err
 	}
 	send := `(() => {
-  const btn = document.querySelector('[data-testid="composer-send"]');
+  const btn = document.querySelector('[data-testid="composer-send"]')
+           || document.querySelector('[data-testid="text-floor-send"]');
   if (!btn) return false;
   btn.click();
   return true;
@@ -113,7 +123,7 @@ func (e *executor) typeAndSend(text string) error {
 		return fmt.Errorf("click send: %w", err)
 	}
 	if !ok {
-		return fmt.Errorf("composer-send not found")
+		return fmt.Errorf("composer-send not found (no composer or text floor)")
 	}
 	return nil
 }
