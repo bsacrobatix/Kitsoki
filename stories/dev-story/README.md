@@ -91,12 +91,13 @@ default, but the *document shape* and *placement* are a **profile** an
 instance app can override — no engine or room change needed. An instance
 points the same hub at a foreign repo (different doc shape, fixed
 filenames, per-scope tree) purely by setting world keys. The worked,
-copy-me example is the **gears repo** ([`.kitsoki/gears-rust/`](https://github.com/constructorfabric/gears-rust/tree/docs/kitsoki-integration/.kitsoki/gears-rust)),
+copy-me example is the **gears repo** ([`stories/gears-rust/`](https://github.com/constructorfabric/gears-rust/tree/docs/kitsoki-integration/stories/gears-rust)),
 which retargets
 [`constructorfabric/gears-rust`](https://github.com/constructorfabric/gears-rust)
 and lands gears-sdlc-shaped `PRD.md` / `DESIGN.md` under
 `gears/<gear>/docs/`. External targets now live in their **own** repo (a
-`.kitsoki/<name>/` instance + a `.kitsoki.yaml`), importing this base via
+zero-config `stories/<name>/` instance, discovered by the default `./stories`
+walk — no `.kitsoki.yaml` needed), importing this base via
 `@kitsoki/dev-story` from the binary's embedded story library — see
 [`kitsoki-as-dependency.md`](../../docs/proposals/kitsoki-as-dependency.md)
 for the full epic, including how to render the demo via `kitsoki tour`
@@ -143,8 +144,8 @@ Per-gear placement is expressed simply as `publish_durable_path:
 gears/<gear>/docs` (a plain relative dir) plus the `doc_filename`
 override — there is no placement enum. For the filled profile, its
 scenario, and the two no-LLM flows that assert the resolved paths, see
-[the gears-rust instance in the gears repo](https://github.com/constructorfabric/gears-rust/tree/docs/kitsoki-integration/.kitsoki/gears-rust)
-([README](https://github.com/constructorfabric/gears-rust/blob/docs/kitsoki-integration/.kitsoki/gears-rust/README.md)).
+[the gears-rust instance in the gears repo](https://github.com/constructorfabric/gears-rust/tree/docs/kitsoki-integration/stories/gears-rust)
+([README](https://github.com/constructorfabric/gears-rust/blob/docs/kitsoki-integration/stories/gears-rust/README.md)).
 
 ## Provider neutrality
 
@@ -278,7 +279,7 @@ The dev-story hub's PRD → Design walk is recorded as a **deterministic, no-LLM
 tour video** — the golden example for conversation-driven development (the
 [`conversation-driven-development`](../../docs/proposals/conversation-driven-development.md)
 epic). The same walk (minus the feature ticket) drives the **gears-rust**
-external-target demo (which now lives in the gears repo as a `.kitsoki/gears-rust/`
+external-target demo (which now lives in the gears repo as a `stories/gears-rust/`
 instance — see the [Doc profile](#doc-profile--targeting-an-external-project)
 section above); this one is kitsoki's self-targeting parallel —
 **"kitsoki on kitsoki"**.
@@ -289,7 +290,7 @@ section above); this one is kitsoki's self-targeting parallel —
   `prd_published` (landing) → `continue` → `design` (intake seeded from the PRD)
   → `design_refine` (conversational brief refinement) → `design_draft`
   (publish + mint feature ticket) → `main`. The gears-rust variant (in the gears
-  repo's [`.kitsoki/gears-rust/`](https://github.com/constructorfabric/gears-rust/tree/docs/kitsoki-integration/.kitsoki/gears-rust)
+  repo's [`stories/gears-rust/`](https://github.com/constructorfabric/gears-rust/tree/docs/kitsoki-integration/stories/gears-rust)
   instance) is the same structure retargeted to an external repo, with
   `design_ticket_dir: ""` (skips the ticket mint) and fixed `PRD.md` / `DESIGN.md`
   filenames. This one uses the dev-story **defaults** — slug-named docs in

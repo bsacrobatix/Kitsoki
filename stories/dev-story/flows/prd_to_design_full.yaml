@@ -1,7 +1,7 @@
 # prd_to_design_full (dev-story) — the WHOLE PRD → Design walk, one session.
 #
 # kitsoki's SELF-TARGETING parallel of the gears-rust external-target flow
-# (now in the gears repo: .kitsoki/gears-rust/flows/prd_to_design_full.yaml).
+# (now in the gears repo: stories/gears-rust/flows/prd_to_design_full.yaml).
 # Where the gears variant retargets a foreign repo (external doc profile, fixed
 # gears-sdlc PRD.md/DESIGN.md filenames, NO kitsoki feature ticket), this flow
 # runs against kitsoki ITSELF — "kitsoki on kitsoki" — using the dev-story
