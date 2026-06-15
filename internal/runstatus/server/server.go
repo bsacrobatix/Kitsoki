@@ -175,6 +175,12 @@ type Server struct {
 	questions *questionBuffer
 	qreg      *questionRegistry
 
+	// current is the "current session" feed buffer (session_current.go). It holds
+	// the id of the most recently created/attached session so trace-only and
+	// graph-only surfaces (no chat) can discover and follow it. Always non-nil; the
+	// registry pushes values through EmitCurrentSession.
+	current *currentBuffer
+
 	// recorder is the HAR ring buffer capturing the last N /rpc request/response
 	// pairs. runstatus.bug.report snapshots + scrubs it into the bug's artifacts.
 	// Always non-nil.
@@ -326,6 +332,7 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		notifs:       newNotifBuffer(),
 		questions:    newQuestionBuffer(),
 		qreg:         newQuestionRegistry(),
+		current:      newCurrentBuffer(),
 		recorder:     harrec.New(bugRecorderCapacity),
 		bugRoot:      cfg.bugRoot,
 		ticketRepo:   cfg.ticketRepo,
@@ -424,6 +431,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/rpc", s.handleRPC)
 	mux.HandleFunc("/rpc/events", s.handleEvents)
 	mux.HandleFunc("/rpc/notifications", s.handleNotifications)
+	mux.HandleFunc("/rpc/session-current", s.handleSessionCurrent)
 	mux.HandleFunc("/rpc/questions", s.handleQuestions)
 	mux.HandleFunc("/artifact/", s.handleArtifact)
 	mux.HandleFunc("/rpc/meta-stream", s.handleMetaStream)
@@ -938,6 +946,26 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 	case "runstatus.notifications.unsubscribe":
 		id, _ := params["subscription_id"].(string)
 		s.notifs.unsubscribe(id)
+		return map[string]any{"ok": true}, nil
+
+	// ── Current session (active-session discovery) ──────────────────────────
+	// Trace-only / graph-only surfaces have no chat to start a session, so they
+	// discover and follow the single active session. session.current returns the
+	// most recently created/attached session id (or null); the subscribe/stream
+	// pair pushes a runstatus.session.changed frame whenever it changes.
+	case "runstatus.session.current":
+		id, ok := s.currentSession()
+		if ok {
+			return map[string]any{"session_id": id}, nil
+		}
+		return map[string]any{"session_id": nil}, nil
+
+	case "runstatus.session.current.subscribe":
+		return map[string]any{"subscription_id": s.current.subscribe()}, nil
+
+	case "runstatus.session.current.unsubscribe":
+		id, _ := params["subscription_id"].(string)
+		s.current.unsubscribe(id)
 		return map[string]any{"ok": true}, nil
 
 	// ── Operator questions (forwarded agent questions) ──────────────────────
@@ -1529,6 +1557,86 @@ func (s *Server) streamNotifications(w http.ResponseWriter, flusher http.Flusher
 				"notification":    fr.Notification,
 				"unread":          fr.Unread,
 				"needs_attention": fr.NeedsAttention,
+			},
+		}
+		b, err := json.Marshal(frame)
+		if err != nil {
+			continue
+		}
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+	}
+	sub.sent = watermark
+	flusher.Flush()
+}
+
+// ── Current session feed ─────────────────────────────────────────────────────
+
+// currentSession resolves the current (most recently created/attached) session
+// id. It prefers the provider's authoritative answer when the provider implements
+// [CurrentSessionProvider]; otherwise it falls back to the last value pushed onto
+// the current-session feed via EmitCurrentSession. ok is false when there is no
+// current session.
+func (s *Server) currentSession() (string, bool) {
+	if cp, ok := s.provider.(CurrentSessionProvider); ok {
+		return cp.CurrentSession()
+	}
+	if v, ok := s.current.currentValue(); ok && v != nil {
+		return *v, true
+	}
+	return "", false
+}
+
+// handleSessionCurrent streams the current-session feed as SSE. It mirrors
+// handleNotifications: poll the server-level buffer for frames appended since the
+// subscription's watermark and emit one runstatus.session.changed frame each. The
+// subscription_id comes from runstatus.session.current.subscribe; a fresh
+// subscription is seeded with the current value so a late subscriber syncs.
+func (s *Server) handleSessionCurrent(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("subscription_id")
+	sub := s.current.lookup(id)
+	if sub == nil {
+		http.Error(w, "unknown subscription", http.StatusNotFound)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher.Flush()
+
+	ticker := time.NewTicker(s.poll)
+	defer ticker.Stop()
+
+	ctx := r.Context()
+	for {
+		s.streamSessionCurrent(w, flusher, sub)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// streamSessionCurrent emits a runstatus.session.changed frame for every buffered
+// current-session value appended since the subscription's last delivery, then
+// advances the watermark.
+func (s *Server) streamSessionCurrent(w http.ResponseWriter, flusher http.Flusher, sub *currentSub) {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+
+	frames, watermark := s.current.since(sub.sent)
+	for _, fr := range frames {
+		frame := map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "runstatus.session.changed",
+			"params": map[string]any{
+				"session_id": fr.SessionID,
 			},
 		}
 		b, err := json.Marshal(frame)

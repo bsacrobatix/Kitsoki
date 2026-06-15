@@ -86,6 +86,21 @@ export class SnapshotSource implements DataSource {
     return () => undefined;
   }
 
+  // ── Active-session discovery ─────────────────────────────────────────────
+  // A snapshot IS the single session, so the current session is its session id.
+
+  getCurrentSession(): Promise<string | null> {
+    return Promise.resolve(this.snap.session.session_id ?? null);
+  }
+
+  /** Invoke onChange once with the snapshot session id; return a no-op disposer. */
+  subscribeCurrentSession(
+    onChange: (sessionId: string | null) => void
+  ): () => void {
+    onChange(this.snap.session.session_id ?? null);
+    return () => undefined;
+  }
+
   // ── Write/read RPCs ────────────────────────────────────────────────────
   //
   // A snapshot is a frozen, read-only trace artifact: there is no live session

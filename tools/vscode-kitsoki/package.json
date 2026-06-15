@@ -17,6 +17,11 @@
           "id": "kitsoki",
           "title": "Kitsoki",
           "icon": "media/icon.svg"
+        },
+        {
+          "id": "kitsoki-surfaces",
+          "title": "Kitsoki Surfaces",
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -25,6 +30,18 @@
         {
           "id": "kitsoki.launch",
           "name": "Kitsoki"
+        }
+      ],
+      "kitsoki-surfaces": [
+        {
+          "id": "kitsoki.trace",
+          "name": "Trace",
+          "type": "webview"
+        },
+        {
+          "id": "kitsoki.graph",
+          "name": "Graph",
+          "type": "webview"
         }
       ]
     },
@@ -38,6 +55,16 @@
       {
         "command": "kitsoki.openChat",
         "title": "Kitsoki: Open Chat",
+        "category": "Kitsoki"
+      },
+      {
+        "command": "kitsoki.openTrace",
+        "title": "Kitsoki: Open Trace",
+        "category": "Kitsoki"
+      },
+      {
+        "command": "kitsoki.openGraph",
+        "title": "Kitsoki: Open Graph",
         "category": "Kitsoki"
       },
       {

@@ -50,6 +50,14 @@
  *       front/center;
  *   (e) maximizing the Trace hint renders the full timeline (host.starlark.run row);
  *   (f) switching to the Graph renders the state diagram (current station marked);
+ *   (h) surface decomposition — "Kitsoki: Open Trace" docks the Trace as its OWN
+ *       webview in the "Kitsoki Surfaces" sidebar (a separate document/store from
+ *       the chat) that discovers + follows the SAME session via
+ *       runstatus.session.current and re-renders the driven timeline (host row);
+ *   (i) likewise "Kitsoki: Open Graph" docks a standalone Graph surface that
+ *       follows the session and marks the current station;
+ *   (j) one backend — the chat + trace + graph webviews relay to a SINGLE spawned
+ *       `kitsoki web` process (asserted via the host log: exactly one spawn);
  *   (g) finale — app.yaml splits beside the Kitsoki panel, code + kitsoki side by
  *       side (record only; assert-mode skips the editor-split beat to stay instant).
  *
@@ -103,6 +111,12 @@ const EDITOR_BEATS = {
   // Maximizing the Graph hint is a webview beat with no matching tour popover, so
   // it rides this manifest (chapter window + shot) rather than narrate().
   graph: { id: 'e2-graph-max', title: 'Maximize the state diagram', dwellMs: 4000 },
+  // Surface decomposition: Trace and Graph each open as their OWN webview in the
+  // bottom panel — a separate document/store from the chat editor panel — and
+  // discover-and-follow the SAME backend session via runstatus.session.current.
+  // These ride the manifest (no web-tour popover exists for the native panels).
+  tracePanel: { id: 'h-trace-panel', title: 'Trace in its own panel — same session', dwellMs: 4500 },
+  graphPanel: { id: 'i-graph-panel', title: 'State graph in its own panel — same session', dwellMs: 4500 },
   // The finale: app.yaml split beside the Kitsoki editor panel — code + kitsoki in
   // one workspace, side by side (horizontal).
   splitEditor: { id: 'f-split-editor', title: 'Your code and kitsoki, side by side', dwellMs: 4000 },
@@ -254,6 +268,49 @@ async function narrate(
     await dwell(900);
   }
   await shot(shotLabel);
+}
+
+/**
+ * Find the SPECIFIC webview guest frame that contains [data-testid="<testid>"],
+ * scanning ALL `iframe.webview` hosts (the shared webviewFrame helper only probes
+ * the .first() one, which breaks once multiple surfaces — chat panel + trace panel
+ * + graph panel — are open at once). Returns the inner FrameLocator so callers can
+ * assert against that surface's document in isolation.
+ */
+async function surfaceFrame(win: Page, testid: string, timeoutMs = 30_000): Promise<FrameLocator> {
+  const inners = ['iframe[title]', 'iframe[name="active-frame"]', 'iframe'];
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const count = await win.locator('iframe.webview').count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      for (const inner of inners) {
+        const fl = win.frameLocator('iframe.webview').nth(i).frameLocator(inner).first();
+        try {
+          await fl.locator(`[data-testid="${testid}"]`).first().waitFor({ timeout: 1000 });
+          return fl;
+        } catch {
+          /* try next inner / next webview host */
+        }
+      }
+    }
+    await sleep(250);
+  }
+  throw new Error(`no webview frame containing [data-testid="${testid}"] within ${timeoutMs}ms`);
+}
+
+/**
+ * Toggle a sidebar view pane (by its header title) collapsed/expanded. Used to
+ * give the focused surface the full sidebar height — and to make the trace beat
+ * and graph beat visually distinct (collapse the other one). Pane headers are
+ * workbench chrome (not inside a webview), so this click is reliable.
+ */
+async function clickPaneHeader(win: Page, title: string): Promise<void> {
+  await win
+    .locator('.pane-header')
+    .filter({ hasText: new RegExp(`^\\s*${title}\\b`, 'i') })
+    .first()
+    .click()
+    .catch(() => undefined);
 }
 
 test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', async () => {
@@ -540,6 +597,75 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       await dwell(EDITOR_BEATS.graph.dwellMs);
     }
     await shot('f-graph-max');
+
+    // ── (h) Surface decomposition: Trace in its OWN panel, same session ───────
+    // The headline of this rework. "Kitsoki: Open Trace" reveals a webview view
+    // docked in the bottom panel — a SEPARATE document (own Pinia store, own
+    // Relay) from the chat editor panel. It has no chat to start a session, so it
+    // discovers and follows the active one via runstatus.session.current, then
+    // renders the SAME driven trace. Proves N-windows / one-session fan-out.
+    const traceOpened = await runPaletteCommand(win, ['>Kitsoki: Open Trace']);
+    expect(traceOpened, '"Kitsoki: Open Trace" command available').toBe(true);
+    await dwell(600);
+    const traceFrame: FrameLocator = await surfaceFrame(win, 'surface-trace', 30_000);
+    // Collapse the Graph pane so Trace fills the sidebar height (its event ROWS,
+    // not just header + filters, are on-camera) and this beat is visually distinct
+    // from the graph beat.
+    await clickPaneHeader(win, 'Graph');
+    await dwell(500);
+    await expect(
+      traceFrame.locator('[data-testid="surface-trace"]'),
+      'Trace panel mounts the standalone trace surface (its own webview)',
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      traceFrame.locator('[data-testid="trace-timeline"]'),
+      'standalone Trace surface followed the active session and rendered the timeline',
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      traceFrame
+        .locator('[data-testid="trace-timeline"]')
+        .locator('.trace-timeline__row:has([data-subsystem="host"])')
+        .first(),
+      'standalone Trace shows the SAME driven turn (host.starlark.run row) — shared session',
+    ).toBeVisible({ timeout: 30_000 });
+    if (RECORD) {
+      chapters.open(EDITOR_BEATS.tracePanel.id, EDITOR_BEATS.tracePanel.title);
+      await dwell(EDITOR_BEATS.tracePanel.dwellMs);
+    }
+    await shot('h-trace-panel');
+
+    // ── (i) Surface decomposition: Graph in its OWN panel, same session ───────
+    const graphOpened = await runPaletteCommand(win, ['>Kitsoki: Open Graph']);
+    expect(graphOpened, '"Kitsoki: Open Graph" command available').toBe(true);
+    // Collapse the Trace pane so the Graph diagram fills the sidebar — a distinct
+    // frame from the trace beat (the Graph focus above re-expanded its pane).
+    await clickPaneHeader(win, 'Trace');
+    await dwell(500);
+    const graphFrame: FrameLocator = await surfaceFrame(win, 'surface-graph', 30_000);
+    await expect(
+      graphFrame.locator('[data-testid="surface-graph"]'),
+      'Graph panel mounts the standalone graph surface (its own webview)',
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      graphFrame.locator('[data-testid="trace-diagram"]'),
+      'standalone Graph surface followed the active session and rendered the diagram',
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      graphFrame.locator('[data-testid="diagram-current-station"]').first(),
+      'standalone Graph marks the current station — shared session',
+    ).toBeVisible({ timeout: 30_000 });
+    if (RECORD) {
+      chapters.open(EDITOR_BEATS.graphPanel.id, EDITOR_BEATS.graphPanel.title);
+      await dwell(EDITOR_BEATS.graphPanel.dwellMs);
+    }
+    await shot('i-graph-panel');
+
+    // ── (j) One backend across every surface ─────────────────────────────────
+    // Chat panel + Trace panel + Graph panel are three webviews, but the host
+    // spawns exactly ONE `kitsoki web` process — they all relay to it. Assert the
+    // extension host log shows a single backend spawn (no per-surface backend).
+    const spawnCount = (fs.readFileSync(hostLog, 'utf8').match(/\[backend\] spawn:/g) ?? []).length;
+    expect(spawnCount, 'exactly one backend process serves all three surfaces').toBe(1);
 
     // ── (g) Finale: code + kitsoki side by side (record only) ────────────────
     // Minimize back to the chat-front/center rail, then split the story's app.yaml

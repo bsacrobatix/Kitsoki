@@ -2,6 +2,8 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import App from "./App.vue";
 import router from "./router.js";
+import SurfaceHost from "./surfaces/SurfaceHost.vue";
+import { resolveSurface } from "./surfaces/select.js";
 import { installConsoleCapture } from "./data/console-capture.js";
 import { installErrorCapture, vueErrorHandler } from "./data/error-capture.js";
 import { startSessionCapture } from "./data/session-capture.js";
@@ -28,8 +30,22 @@ installConsoleCapture();
 installErrorCapture();
 startSessionCapture();
 
-const app = createApp(App);
-app.config.errorHandler = vueErrorHandler;
-app.use(createPinia());
-app.use(router);
-app.mount("#app");
+// Surface decomposition (VS Code): each surface (chat / trace / graph) can mount
+// standalone, selected by an injected global `window.__KITSOKI_SURFACE` (a plain
+// string). A `?surface=` query param is honoured as a browser dev fallback. When
+// neither selects a valid surface we keep today's full SPA (App + router) intact.
+// Single-surface mode still needs Pinia (the run store) but not the router.
+const surface = resolveSurface();
+
+if (surface) {
+  const app = createApp(SurfaceHost, { surface });
+  app.config.errorHandler = vueErrorHandler;
+  app.use(createPinia());
+  app.mount("#app");
+} else {
+  const app = createApp(App);
+  app.config.errorHandler = vueErrorHandler;
+  app.use(createPinia());
+  app.use(router);
+  app.mount("#app");
+}

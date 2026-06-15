@@ -80,8 +80,22 @@ html body .chat-bubble--agent .chat-view code {
 }
 `;
 
-/** Read the bundled singlefile SPA and inject a per-render CSP + nonce + theme. */
-export function renderSpaHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+/** Which kitsoki surface a webview hosts. Injected as `window.__KITSOKI_SURFACE`
+ * so the SPA mounts the right single-surface view (trace / graph). A webview with
+ * NO surface marker (the chat editor panel) boots the full SPA — home library +
+ * the interactive embed layout (chat front/center + a maximizable trace/graph
+ * hint rail). So 'chat' exists for browser `?surface=chat` / standalone use, but
+ * the extension's chat panel deliberately uses the richer full SPA (undefined). */
+export type Surface = 'chat' | 'trace' | 'graph';
+
+/** Read the bundled singlefile SPA and inject a per-render CSP + nonce + theme.
+ * `surface` is optional: when omitted the SPA boots its full experience (the chat
+ * panel); when set, the SPA mounts that single decomposed surface (trace/graph). */
+export function renderSpaHtml(
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri,
+  surface?: Surface,
+): string {
   const indexPath = vscode.Uri.joinPath(extensionUri, 'media', 'spa', 'index.html').fsPath;
   let html = fs.readFileSync(indexPath, 'utf8');
   const nonce = crypto.randomBytes(16).toString('base64');
@@ -106,11 +120,18 @@ export function renderSpaHtml(webview: vscode.Webview, extensionUri: vscode.Uri)
 
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
   const themeTag = `<style>${THEME_SHIM}</style>`;
+  // Surface marker — read by the SPA on boot to mount a single decomposed view.
+  // Omitted for the chat panel so it boots the full SPA. Uses the SAME nonce as
+  // every other script so script-src lets it run.
+  const surfaceTag = surface
+    ? `<script nonce="${nonce}">window.__KITSOKI_SURFACE=${JSON.stringify(surface)};</script>`
+    : '';
+  const head = `${cspMeta}\n${themeTag}${surfaceTag ? `\n${surfaceTag}` : ''}`;
 
   if (/<head[^>]*>/i.test(html)) {
-    html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${cspMeta}\n${themeTag}`);
+    html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${head}`);
   } else {
-    html = `${cspMeta}\n${themeTag}\n${html}`;
+    html = `${head}\n${html}`;
   }
   return html;
 }
@@ -137,6 +158,7 @@ export function mountSpa(
   extensionUri: vscode.Uri,
   backend: Backend,
   out: vscode.OutputChannel,
+  surface?: Surface,
 ): vscode.Disposable {
   const mediaRoot = vscode.Uri.joinPath(extensionUri, 'media');
   webview.options = { enableScripts: true, localResourceRoots: [mediaRoot] };
@@ -155,7 +177,7 @@ export function mountSpa(
     .start()
     .then((base) => {
       relay.setBase(base);
-      webview.html = renderSpaHtml(webview, extensionUri);
+      webview.html = renderSpaHtml(webview, extensionUri, surface);
     })
     .catch((err: Error) => {
       out.appendLine(`[webview] backend start failed: ${err.message}`);
@@ -168,35 +190,62 @@ export function mountSpa(
   });
 }
 
+/** Shared webview-panel options for the chat surface. */
+function chatPanelOptions(extensionUri: vscode.Uri): vscode.WebviewPanelOptions & vscode.WebviewOptions {
+  return {
+    enableScripts: true,
+    retainContextWhenHidden: true,
+    localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')],
+  };
+}
+
+/** The viewType for the chat editor panel — also the serializer key. */
+export const CHAT_PANEL_VIEW_TYPE = 'kitsoki.chat';
+
 /**
- * KitsokiPanel — the singleton editor-area WebviewPanel that hosts the chat
- * front-and-center. reveal() creates it on first use and re-focuses it after;
- * the SPA inside auto-enables its embed layout (hint rail) because the webview
- * exposes acquireVsCodeApi.
+ * ChatPanel — the reveal-or-create editor-area WebviewPanel that hosts the chat
+ * front-and-center. It mounts the FULL SPA (no surface marker) so it keeps the
+ * home library + the interactive embed layout (chat dominant + a maximizable
+ * trace/graph hint rail) — the trace/graph dockable views are additive, not a
+ * replacement. One panel at a time: reveal() re-focuses the existing one or
+ * creates it. The SPA auto-enables its embed layout because the webview exposes
+ * acquireVsCodeApi.
+ *
+ * adopt() takes an already-created panel (used by the WebviewPanelSerializer to
+ * revive after reload/restart/window-move) and mounts the chat surface on it.
  */
-export class KitsokiPanel {
-  private static current: KitsokiPanel | undefined;
+export class ChatPanel {
+  private static current: ChatPanel | undefined;
 
   static reveal(
     extensionUri: vscode.Uri,
     backend: Backend,
     out: vscode.OutputChannel,
   ): void {
-    if (KitsokiPanel.current) {
-      KitsokiPanel.current.panel.reveal(vscode.ViewColumn.Active);
+    if (ChatPanel.current) {
+      // Re-focus the live panel. Beside is harmless when already in a column;
+      // explicit columns are flaky across windows, so prefer Active.
+      ChatPanel.current.panel.reveal(vscode.ViewColumn.Active);
       return;
     }
     const panel = vscode.window.createWebviewPanel(
-      'kitsoki.chatPanel',
+      CHAT_PANEL_VIEW_TYPE,
       'Kitsoki',
       vscode.ViewColumn.Active,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true,
-        localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')],
-      },
+      chatPanelOptions(extensionUri),
     );
-    KitsokiPanel.current = new KitsokiPanel(panel, extensionUri, backend, out);
+    ChatPanel.current = new ChatPanel(panel, extensionUri, backend, out);
+  }
+
+  /** Adopt a panel VS Code revived for us (serializer path). */
+  static adopt(
+    panel: vscode.WebviewPanel,
+    extensionUri: vscode.Uri,
+    backend: Backend,
+    out: vscode.OutputChannel,
+  ): void {
+    // A revived panel replaces any tracked one (there is only ever one chat panel).
+    ChatPanel.current = new ChatPanel(panel, extensionUri, backend, out);
   }
 
   private readonly mount: vscode.Disposable;
@@ -207,10 +256,59 @@ export class KitsokiPanel {
     backend: Backend,
     out: vscode.OutputChannel,
   ) {
+    // No surface marker → full SPA (home + interactive embed with hint rail).
     this.mount = mountSpa(panel.webview, extensionUri, backend, out);
     panel.onDidDispose(() => {
       this.mount.dispose();
-      KitsokiPanel.current = undefined;
+      if (ChatPanel.current === this) ChatPanel.current = undefined;
     });
+  }
+}
+
+/**
+ * Serializer for the chat editor panel. VS Code persists the panel across
+ * reload / restart / window-move and calls deserializeWebviewPanel to revive it;
+ * we re-mount the chat surface. State is just the surface marker — the live
+ * session is re-discovered on boot via the backend session.current seam, so we
+ * never persist session data here.
+ */
+export function makeChatPanelSerializer(
+  extensionUri: vscode.Uri,
+  backend: Backend,
+  out: vscode.OutputChannel,
+): vscode.WebviewPanelSerializer {
+  return {
+    async deserializeWebviewPanel(panel: vscode.WebviewPanel): Promise<void> {
+      panel.webview.options = chatPanelOptions(extensionUri);
+      ChatPanel.adopt(panel, extensionUri, backend, out);
+    },
+  };
+}
+
+/**
+ * WebviewViewProvider for a sidebar surface (trace / graph). resolveWebviewView
+ * mounts the SPA with the surface marker; the SPA re-hydrates frontend-side on
+ * each (re)resolve / visibility change.
+ *
+ * IMPORTANT caveat: hidden webview views can drop postMessage even with
+ * retainContextWhenHidden — so we DO NOT push state into hidden views. State
+ * lands frontend-side on resolve/visibility re-hydrate (backend session.current
+ * seam), never via host->webview pushes while hidden.
+ */
+export class SurfaceViewProvider implements vscode.WebviewViewProvider {
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly backend: Backend,
+    private readonly out: vscode.OutputChannel,
+    private readonly surface: Surface,
+  ) {}
+
+  resolveWebviewView(view: vscode.WebviewView): void {
+    view.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')],
+    };
+    const mount = mountSpa(view.webview, this.extensionUri, this.backend, this.out, this.surface);
+    view.onDidDispose(() => mount.dispose());
   }
 }

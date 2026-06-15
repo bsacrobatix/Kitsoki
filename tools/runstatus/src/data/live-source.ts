@@ -220,6 +220,74 @@ export class LiveSource implements DataSource {
     );
   }
 
+  // ── Active-session discovery ─────────────────────────────────────────────
+  //
+  // Trace-only / graph-only surfaces (no chat) follow the single active session.
+
+  getCurrentSession(): Promise<string | null> {
+    return this.client
+      .post<{ session_id: string | null }>("runstatus.session.current", {})
+      .then((r) => r.session_id ?? null);
+  }
+
+  /**
+   * Subscribe to current-session changes: open an EventSource on
+   * /rpc/session-current and invoke onChange for each runstatus.session.changed
+   * frame (the server seeds the latest value on subscribe so a late subscriber
+   * syncs at once). Mirrors the notification feed's subscribe → open stream →
+   * unsubscribe lifecycle. Returns an unsubscribe disposer.
+   */
+  subscribeCurrentSession(
+    onChange: (sessionId: string | null) => void
+  ): () => void {
+    let subscriptionId = "";
+    let closed = false;
+    let unsubStream: (() => void) | null = null;
+
+    const onMessage = (raw: string) => {
+      try {
+        const frame = JSON.parse(raw) as {
+          method?: string;
+          params?: { session_id?: string | null };
+        };
+        if (frame.method === "runstatus.session.changed" && frame.params) {
+          onChange(frame.params.session_id ?? null);
+        }
+      } catch {
+        // Malformed frame — ignore.
+      }
+    };
+
+    this.client
+      .post<{ subscription_id: string }>(
+        "runstatus.session.current.subscribe",
+        {}
+      )
+      .then(({ subscription_id }) => {
+        if (closed) return;
+        subscriptionId = subscription_id;
+        unsubStream = this.transport.openEventStream(
+          "rpc/session-current",
+          { subscription_id },
+          { onMessage }
+        );
+      })
+      .catch(() => undefined);
+
+    return () => {
+      closed = true;
+      unsubStream?.();
+      unsubStream = null;
+      if (subscriptionId) {
+        this.client
+          .post("runstatus.session.current.unsubscribe", {
+            subscription_id: subscriptionId,
+          })
+          .catch(() => undefined);
+      }
+    };
+  }
+
   // ── Write/read RPCs ────────────────────────────────────────────────────
   //
   // The live server hosts a single in-process session, so the write/read RPCs

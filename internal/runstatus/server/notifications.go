@@ -206,6 +206,13 @@ type Notifier interface {
 	// browser-facing session id the SPA routes/teleports on (the registry entry
 	// key); pass "" to fall back to the orchestrator sid (tests).
 	AttachSession(orch *orchestrator.Orchestrator, sid app.SessionID, publicID string, js *jobs.JobStore)
+
+	// EmitCurrentSession pushes a new "current session" value onto the
+	// current-session feed (session_current.go) so subscribers receive a
+	// runstatus.session.changed frame. The registry calls it from its new/attach
+	// code paths after the session id is determined. Pass ok=false to signal "no
+	// current session" (a null session_id on the wire).
+	EmitCurrentSession(sessionID string, ok bool)
 }
 
 // AttachSession implements [Notifier]: it registers a [notificationRelay] for

@@ -125,6 +125,12 @@ type SessionRegistry struct {
 	stories  []webconfig.StoryMeta
 	sessions map[string]*entry
 
+	// currentSessionID is the id of the most recently created (NewSession) or
+	// attached (AttachExternal) session — the "current" session trace-only and
+	// graph-only surfaces follow (server.CurrentSessionProvider). Empty means no
+	// session yet. Guarded by mu.
+	currentSessionID string
+
 	// Meta-mode shared resources, all guarded by mu. agentReg is the builtin
 	// agent registry every meta controller resolves names against. The self*
 	// fields back the home-screen (session-less) meta driver for the cross-app
@@ -287,7 +293,15 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 
 	r.mu.Lock()
 	r.sessions[id] = e
+	r.currentSessionID = id
 	r.mu.Unlock()
+
+	// The current session changed: notify subscribers (trace-only / graph-only
+	// surfaces follow this). Emitted outside the lock, after the value is
+	// committed. Nil in tests that build a registry without a server.
+	if r.notifier != nil {
+		r.notifier.EmitCurrentSession(id, true)
+	}
 
 	ok = true
 	sinkOK = true
@@ -324,6 +338,14 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	// flock is exclusive — a second open would fail) and not split one ticket
 	// across two in-process sessions.
 	if id, found := r.liveByExternalKey(key); found {
+		// Re-attaching to an already-live session makes it the current session
+		// again (an operator opening that ticket's surface is now following it).
+		r.mu.Lock()
+		r.currentSessionID = id
+		r.mu.Unlock()
+		if r.notifier != nil {
+			r.notifier.EmitCurrentSession(id, true)
+		}
 		return id, nil
 	}
 
@@ -429,7 +451,13 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 
 	r.mu.Lock()
 	r.sessions[id] = e
+	r.currentSessionID = id
 	r.mu.Unlock()
+
+	// The current session changed: notify subscribers (same as NewSession).
+	if r.notifier != nil {
+		r.notifier.EmitCurrentSession(id, true)
+	}
 
 	// Attach the cross-session notification relay, same as NewSession — a
 	// store-attached (hybrid) session's background-turn fan-out must also reach
@@ -495,6 +523,24 @@ func (r *SessionRegistry) Get(sessionID string) (server.Entry, bool) {
 		Frames:    e.frameRecorderLocked(),
 		Feedback:  e.feedbackSinkLocked(),
 	}, true
+}
+
+// CurrentSession implements [server.CurrentSessionProvider]: it returns the id of
+// the most recently created (NewSession) or attached (AttachExternal) session.
+// Trace-only and graph-only surfaces, which have no chat to start a session, read
+// this to discover and follow the active session. ok is false when no session has
+// been created yet, or when the tracked id is no longer live (defensive — the PoC
+// never deletes entries).
+func (r *SessionRegistry) CurrentSession() (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.currentSessionID == "" {
+		return "", false
+	}
+	if _, ok := r.sessions[r.currentSessionID]; !ok {
+		return "", false
+	}
+	return r.currentSessionID, true
 }
 
 // List returns a runstatus.SessionHeader per live session, for
@@ -830,4 +876,5 @@ var (
 	_ server.MetaSelfProvider       = (*SessionRegistry)(nil)
 	_ server.EditorProvider         = (*SessionRegistry)(nil)
 	_ server.ExternalAttachProvider = (*SessionRegistry)(nil)
+	_ server.CurrentSessionProvider = (*SessionRegistry)(nil)
 )

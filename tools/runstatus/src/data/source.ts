@@ -102,6 +102,26 @@ export interface DataSource {
   /** Returns an unsubscribe function. */
   subscribe(sessionId: string, onEvent: (e: TraceEvent) => void): () => void;
 
+  // ── Active-session discovery ─────────────────────────────────────────────
+  // Trace-only and graph-only surfaces have no chat to start a session, so they
+  // discover and follow the single active (current) session.
+
+  /**
+   * Read the current (most recently created/attached) session id, or null when
+   * there is no current session. LiveSource hits runstatus.session.current;
+   * SnapshotSource returns the snapshot's session id.
+   */
+  getCurrentSession(): Promise<string | null>;
+  /**
+   * Subscribe to changes of the current session. onChange is invoked with the
+   * new session id (or null) whenever it changes; LiveSource also seeds the
+   * latest value on subscribe so a late subscriber syncs. Returns an unsubscribe
+   * disposer.
+   */
+  subscribeCurrentSession(
+    onChange: (sessionId: string | null) => void
+  ): () => void;
+
   // ── Write/read RPCs (live session only) ──────────────────────────────────
 
   /** Read the current room's typed view + allowed intents without advancing. */

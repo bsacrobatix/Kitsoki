@@ -71,6 +71,19 @@ type ExternalAttachProvider interface {
 	AttachExternal(ctx context.Context, storyPath, key string) (sessionID string, err error)
 }
 
+// CurrentSessionProvider is an optional extension of [SessionProvider]: a
+// provider that tracks which of its live sessions is "current" — the one most
+// recently created (session.new) or attached (session.attach). Trace-only and
+// graph-only surfaces, which have no chat to start a session, read this via the
+// runstatus.session.current RPC to discover and follow the active session. A
+// provider that does not implement it (e.g. the single-entry adapter) makes the
+// server fall back to the last value pushed onto the current-session feed.
+type CurrentSessionProvider interface {
+	// CurrentSession returns the id of the current live session. ok is false when
+	// there is no current session (returns a null session_id on the wire).
+	CurrentSession() (sessionID string, ok bool)
+}
+
 // ArtifactResolver looks up a media artifact by its opaque handle ID and
 // returns the absolute path and MIME type of the file on disk.  It is set on
 // [Entry] by the live registry for sessions whose orchestrator wires a journal

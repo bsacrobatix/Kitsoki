@@ -5,7 +5,12 @@
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import { Backend } from './backend';
-import { KitsokiPanel } from './webview';
+import {
+  ChatPanel,
+  SurfaceViewProvider,
+  makeChatPanelSerializer,
+  CHAT_PANEL_VIEW_TYPE,
+} from './webview';
 
 let backend: Backend | undefined;
 
@@ -56,7 +61,29 @@ export function activate(context: vscode.ExtensionContext): void {
   backend = new Backend(out, cwd);
   context.subscriptions.push({ dispose: () => backend?.dispose() });
 
-  const openChat = () => KitsokiPanel.reveal(context.extensionUri, backend!, out);
+  const openChat = () => ChatPanel.reveal(context.extensionUri, backend!, out);
+
+  // Sidebar surfaces (trace / graph) live as webview views in the Kitsoki
+  // container. Each builds its own Relay via mountSpa against the ONE shared
+  // backend; the SPA re-hydrates frontend-side on resolve/visibility.
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      'kitsoki.trace',
+      new SurfaceViewProvider(context.extensionUri, backend, out, 'trace'),
+    ),
+    vscode.window.registerWebviewViewProvider(
+      'kitsoki.graph',
+      new SurfaceViewProvider(context.extensionUri, backend, out, 'graph'),
+    ),
+  );
+
+  // Revive the chat editor panel after reload/restart/window-move.
+  context.subscriptions.push(
+    vscode.window.registerWebviewPanelSerializer(
+      CHAT_PANEL_VIEW_TYPE,
+      makeChatPanelSerializer(context.extensionUri, backend, out),
+    ),
+  );
 
   // Launcher view in the Kitsoki Activity Bar container. createTreeView (not
   // registerTreeDataProvider) so we get onDidChangeVisibility to auto-open.
@@ -74,6 +101,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('kitsoki.openChat', openChat),
+    vscode.commands.registerCommand('kitsoki.openTrace', () =>
+      vscode.commands.executeCommand('kitsoki.trace.focus'),
+    ),
+    vscode.commands.registerCommand('kitsoki.openGraph', () =>
+      vscode.commands.executeCommand('kitsoki.graph.focus'),
+    ),
     vscode.commands.registerCommand('kitsoki.restartBackend', async () => {
       out.appendLine('[extension] restart backend requested');
       try {
