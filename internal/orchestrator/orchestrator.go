@@ -1132,6 +1132,15 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 			}, nil
 
 		default:
+			// Oracle off-ramp: on a genuine no-match in a room that declared
+			// oracle_off_ramp, hand the original free text to a converse turn
+			// instead of persisting a rejection (Task 1.3/1.4). Inert for every
+			// other code flowing through here (GUARD_FAILED, INVALID_SLOT_VALUE,
+			// INTENT_NOT_ALLOWED_IN_STATE, …) and when the room has no off-ramp.
+			if outcome, ok := o.maybeOffRamp(ctx, sid, journey.State, input, ve.Code, harnessConfidence(params), allowedNames, turnNum); ok {
+				return outcome, nil
+			}
+
 			// INTENT_NOT_ALLOWED, GUARD_FAILED, etc.: persist the failure events.
 			failureEvents := append(prefix, result.Events...)
 			endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
@@ -2106,6 +2115,13 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 			for _, a := range ai {
 				allowedNames = append(allowedNames, a.Name)
 			}
+		}
+		// Oracle off-ramp: routed through the same helper so the rejection
+		// sites can't drift (Task 1.3). This is the slot-continuation path —
+		// it carries no fresh free-text utterance, so maybeOffRamp's empty-input
+		// guard makes it inert here; the call exists for parity, not effect.
+		if outcome, ok := o.maybeOffRamp(ctx, sid, journey.State, "", ve.Code, call.Confidence, allowedNames, turnNum); ok {
+			return outcome, nil
 		}
 		// Rejection path: TypedView/RenderEnv/Renderer intentionally
 		// omitted. The state did not transition (NewState == journey.State),

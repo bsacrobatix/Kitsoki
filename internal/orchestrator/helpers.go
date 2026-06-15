@@ -341,6 +341,16 @@ func (o *Orchestrator) RunIntentWithInput(ctx context.Context, sid app.SessionID
 			}, nil
 		}
 
+		// Oracle off-ramp: on a genuine no-match in an off-ramp room, route the
+		// original free text to converse instead of rejecting (Task 1.3/1.4).
+		// On this direct-intent path the genuine utterance is displayInput (the
+		// synthetic "[intent] <name>" marker is not free text), so pass that;
+		// an empty displayInput makes maybeOffRamp inert. Inert for every
+		// non-no-match code flowing through here.
+		if outcome, ok := o.maybeOffRamp(ctx, sid, journey.State, displayInput, ve.Code, call.Confidence, allowedNames, turnNum); ok {
+			return outcome, nil
+		}
+
 		failureEvents := append([]store.Event{inputEvent, startEvent}, result.Events...)
 		endEvent := newOrchestratorEvent(store.TurnEnded, map[string]any{
 			"outcome": "rejected",

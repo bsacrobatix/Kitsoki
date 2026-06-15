@@ -750,6 +750,17 @@ type State struct {
 	// Timeout declares an automatic transition after a duration.
 	Timeout *TimeoutDef `yaml:"timeout,omitempty"`
 
+	// OracleOffRamp opts this room into the oracle off-ramp: a free-text
+	// utterance that routes to no declared intent here is handed to an oracle
+	// converse turn instead of bounced back as a rejection, without advancing
+	// the state machine or mutating world. Accepts the bare scalar
+	// `oracle_off_ramp: true` or the {agent, persona, banner} struct form (see
+	// OffRampDef). Nil — the default — means no off-ramp; rejections behave
+	// exactly as before. The loader nils this pointer for an explicit
+	// `oracle_off_ramp: false`, so the runtime treats `!= nil` as "fires."
+	// Rejected at load time on terminal: true or mode: conversational states.
+	OracleOffRamp *OffRampDef `yaml:"oracle_off_ramp,omitempty"`
+
 	// IntentAliases records the bare → renamed mapping produced by the
 	// imports rewriter. When this state lives inside one or more import
 	// alias wrappers, every intent that the rewriter renamed (e.g.
@@ -1049,6 +1060,101 @@ type OffPathDef struct {
 	// startup by host.SetAgentRegistry. Mutually composable with
 	// Persona (above) — Persona wins when both are set.
 	Agent string `yaml:"agent,omitempty"`
+}
+
+// OffRampDef configures a state's oracle off-ramp: the no-match door into the
+// same free-form converse mechanism off_path: reaches through its typed-trigger
+// door (see docs/stories/meta-mode.md). When a free-text utterance routes to no
+// declared intent in a room that declares the off-ramp, the orchestrator hands
+// the original text to an oracle converse turn (via Orchestrator.AskOffPath)
+// instead of bouncing it back as a rejection — without advancing the state
+// machine or mutating world.
+//
+// The field is opt-in per room and accepts two author forms, decoded by
+// UnmarshalYAML (modeled on View.UnmarshalYAML):
+//
+//	oracle_off_ramp: true                  # bare scalar — use the off-path voice
+//	oracle_off_ramp: { agent: discovery-guide, banner: "(thinking)" }  # struct
+//
+// The struct fields mirror the subset of OffPathDef that styles the off-path
+// voice (Agent / Persona / Banner); Trigger and Return are off-path-only and
+// have no analogue here (the off-ramp is triggered by a no-match, not a typed
+// string, and never changes the resting state). A nil *OffRampDef means the
+// room has no off-ramp — the default — and behavior is byte-identical to today.
+type OffRampDef struct {
+	// Agent, when non-empty, names an entry in AppDef.Agents whose
+	// SystemPrompt + Model style the off-ramp converse call. Validated at
+	// load time against the top-level agents: map (mirrors OffPathDef.Agent).
+	Agent string `yaml:"agent,omitempty"`
+	// Persona is an optional inline system-prompt-style instruction for the
+	// off-ramp voice, equivalent to OffPathDef.Persona. When both Persona and
+	// Agent are set, Persona wins (mirrors off-path precedence).
+	Persona string `yaml:"persona,omitempty"`
+	// Banner is an optional label shown when the off-ramp engages, equivalent
+	// to OffPathDef.Banner.
+	Banner string `yaml:"banner,omitempty"`
+
+	// enabled distinguishes an active off-ramp from an explicit
+	// `oracle_off_ramp: false`. Because goccy allocates the pointer and calls
+	// UnmarshalYAML even for the `false` scalar, a nil check alone can't tell
+	// "off-ramp on, bare form" (a zero struct) from "off-ramp off" (also a
+	// zero struct). UnmarshalYAML sets this true for `true` and the struct
+	// form, false for `false`; the loader's normalizeOffRamp post-pass then
+	// nils the State pointer whenever enabled is false, so every downstream
+	// reader can treat `State.OracleOffRamp != nil` as "the off-ramp fires."
+	enabled bool `yaml:"-"`
+}
+
+// Enabled reports whether this off-ramp def represents an active off-ramp
+// (the author wrote `true` or the struct form) rather than an explicit
+// `oracle_off_ramp: false`. The loader nils the State pointer for the
+// disabled case, so runtime callers normally just nil-check the pointer; this
+// accessor exists for the loader's own normalization pass and for tests.
+func (d *OffRampDef) Enabled() bool { return d != nil && d.enabled }
+
+// UnmarshalYAML decodes the oracle_off_ramp: field from one of two author
+// forms — the bare boolean scalar or the {agent, persona, banner} mapping —
+// modeled on View.UnmarshalYAML's scalar-or-struct probe. goccy/go-yaml hands
+// us the raw bytes of the YAML subtree; we try the scalar first and fall
+// through to the struct form.
+//
+// Decoding contract:
+//   - `oracle_off_ramp: true`  → a zero-value *OffRampDef (off-path voice).
+//   - `oracle_off_ramp: false` → the field is treated as absent; the caller's
+//     pointer stays nil. (The decoder runs only when the key is present, so a
+//     `false` is the author explicitly opting out — same as omitting the key.)
+//   - mapping form               → the named agent/persona/banner.
+//
+// A scalar that is neither a boolean nor the empty mapping is an error so a
+// typo (`oracle_off_ramp: yes please`) fails the load instead of silently
+// disabling the off-ramp.
+func (d *OffRampDef) UnmarshalYAML(data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	// Try the boolean scalar form first — the common case.
+	var b bool
+	if err := goyaml.Unmarshal(data, &b); err == nil {
+		// `true` → enabled bare form (off-path voice); `false` → disabled,
+		// which the loader's normalize pass nils out.
+		*d = OffRampDef{enabled: b}
+		return nil
+	}
+
+	// Fall through: the struct form. Probe with the exact field set so a
+	// stray key (e.g. trigger:, which is off-path-only) fails the load.
+	type offRampForm struct {
+		Agent   string `yaml:"agent,omitempty"`
+		Persona string `yaml:"persona,omitempty"`
+		Banner  string `yaml:"banner,omitempty"`
+	}
+	var f offRampForm
+	if err := goyaml.UnmarshalWithOptions(data, &f, goyaml.Strict()); err != nil {
+		return fmt.Errorf("oracle_off_ramp: must be `true` or an {agent, persona, banner} mapping: %w", err)
+	}
+	*d = OffRampDef{Agent: f.Agent, Persona: f.Persona, Banner: f.Banner, enabled: true}
+	return nil
 }
 
 // TimeoutDef configures an automatic state transition after a duration.

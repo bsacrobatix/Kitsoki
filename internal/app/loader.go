@@ -811,6 +811,12 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	}
 	validateStates(file, "", def.States, globalIntents, def.Intents, nil, worldKeys, allStatePaths, stateOnKeys, allowedHosts, declaredAgents, &errs)
 
+	// Oracle off-ramp: normalize an explicit `false` to a nil pointer and
+	// enforce the terminal/conversational placement invariants. Runs before
+	// validateAgentReferences (step 9b) so the agent check sees the
+	// normalized pointers. See docs/stories/meta-mode.md.
+	normalizeAndValidateOffRamps(file, def, &errs)
+
 	// ── 7a'. static expression compile-check ──────────────────────────────────
 	// Compile (never evaluate) every effect value and guard expression so a
 	// malformed expr-lang expression — e.g. a pongo-only `|default:` filter
@@ -1957,6 +1963,79 @@ func validateMetaModes(file string, def *AppDef, errs *[]error) {
 	}
 }
 
+// normalizeAndValidateOffRamps walks every state in the tree and enforces the
+// oracle off-ramp's load-time invariants (see docs/stories/meta-mode.md and
+// the OffRampDef doc):
+//
+//   - An explicit `oracle_off_ramp: false` is normalized to a nil pointer so
+//     every downstream reader can treat `State.OracleOffRamp != nil` as "the
+//     off-ramp fires." (goccy allocates the pointer even for `false`; the
+//     def's enabled flag is the discriminant.)
+//   - An off-ramp on a `terminal: true` state is rejected: a terminal state
+//     ends the journey and never routes free text, so the flag is meaningless.
+//   - An off-ramp on a `mode: conversational` state is rejected: that harness
+//     is already free-form, so the flag is redundant and would shadow it.
+//
+// The off-ramp's agent: reference is validated separately in
+// validateAgentReferences (the single agent-resolution site), so this pass
+// only owns the placement invariants. Agent names are also collected here for
+// that pass to consume.
+func normalizeAndValidateOffRamps(file string, def *AppDef, errs *[]error) {
+	if def == nil {
+		return
+	}
+	var walk func(prefix string, states map[string]*State)
+	walk = func(prefix string, states map[string]*State) {
+		// Iterate in sorted name order for deterministic error ordering.
+		for _, name := range sortedStateNames(states) {
+			s := states[name]
+			if s == nil {
+				continue
+			}
+			path := joinPath(prefix, name)
+			if s.OracleOffRamp != nil {
+				if !s.OracleOffRamp.Enabled() {
+					// Explicit `false`: drop the def so the runtime sees no
+					// off-ramp. No further checks apply.
+					s.OracleOffRamp = nil
+				} else {
+					if s.Terminal {
+						*errs = append(*errs, &ValidationError{
+							File: file,
+							Message: fmt.Sprintf(
+								"state %q declares oracle_off_ramp on a terminal: true state; a terminal state never routes free text",
+								path),
+						})
+					}
+					if s.Mode == "conversational" {
+						*errs = append(*errs, &ValidationError{
+							File: file,
+							Message: fmt.Sprintf(
+								"state %q declares oracle_off_ramp on a mode: conversational state; that harness is already free-form, so the flag is meaningless there",
+								path),
+						})
+					}
+				}
+			}
+			if len(s.States) > 0 {
+				walk(path, s.States)
+			}
+		}
+	}
+	walk("", def.States)
+}
+
+// sortedStateNames returns the keys of a state map in lexical order so callers
+// that emit per-state diagnostics produce deterministic output.
+func sortedStateNames(states map[string]*State) []string {
+	names := make([]string, 0, len(states))
+	for name := range states {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // validateAgentReferences walks every site in the AppDef where an agent name
 // can be selected (meta_modes[*].agent, off_path.agent) and asserts the
 // referenced name resolves either in def.Agents or in
@@ -2018,6 +2097,29 @@ func validateAgentReferences(file string, def *AppDef, errs *[]error) {
 			addUnknown(def.OffPath.Agent, "off_path.agent")
 		}
 	}
+
+	// states.<path>.oracle_off_ramp.agent — one site per off-ramp room. Walk
+	// the full state tree (off-ramps may sit on nested states) in sorted path
+	// order for stable error ordering. Mirrors the off_path.agent check.
+	var walkOffRampAgents func(prefix string, states map[string]*State)
+	walkOffRampAgents = func(prefix string, states map[string]*State) {
+		for _, name := range sortedStateNames(states) {
+			s := states[name]
+			if s == nil {
+				continue
+			}
+			path := joinPath(prefix, name)
+			if s.OracleOffRamp != nil && s.OracleOffRamp.Agent != "" {
+				if _, ok := known[s.OracleOffRamp.Agent]; !ok {
+					addUnknown(s.OracleOffRamp.Agent, fmt.Sprintf("states.%s.oracle_off_ramp.agent", path))
+				}
+			}
+			if len(s.States) > 0 {
+				walkOffRampAgents(path, s.States)
+			}
+		}
+	}
+	walkOffRampAgents("", def.States)
 
 	// background_jobs.<name>.agent is intentionally absent: no first-class
 	// background_jobs YAML type exists today. Once it lands, walk it here.
