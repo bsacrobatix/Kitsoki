@@ -76,7 +76,19 @@ the missing MP4).`,
 				return fmt.Errorf("exactly one of --feature or --manifest is required")
 			}
 
-			repoRoot := discoverRepoRoot()
+			// repoRoot is the FEATURE-CATALOG root (features/<id>.yaml + the demo
+			// binding paths), discovered by walking up from the cwd — intentionally
+			// DECOUPLED from the @kitsoki import resolver ($KITSOKI_REPO). For the
+			// --manifest path there is no feature to locate, so the cwd is the root
+			// (only used to default --out there).
+			var repoRoot string
+			if featureID != "" {
+				repoRoot = discoverFeatureRootCwd(featureID)
+			} else if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+				repoRoot = cwd
+			} else {
+				repoRoot = "."
+			}
 
 			// ── Resolve the manifest + demo binding ──────────────────────────
 			var (
@@ -256,23 +268,31 @@ func dbPathForTour() string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("kitsoki-tour-%d.db", os.Getpid()))
 }
 
-// discoverRepoRoot locates the kitsoki repo root the feature catalog
-// (features/*.yaml) and demo-binding paths resolve against. Order: $KITSOKI_REPO
-// (exported by the root command's PersistentPreRunE from --kitsoki-repo / the
-// persisted ~/.kitsoki/repo), then a walk up from the cwd for a directory that
-// holds a features/ dir, then the cwd. The --feature path's existence is checked
-// by the caller, so a wrong root surfaces as a clear "feature not found".
-func discoverRepoRoot() string {
-	if env := os.Getenv("KITSOKI_REPO"); env != "" {
-		return env
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	dir := cwd
+// discoverFeatureRoot locates the FEATURE-CATALOG root — the directory whose
+// features/<featureID>.yaml holds the tour spec (and the story/flow/host-cassette
+// demo binding paths resolve relative to it). It is INTENTIONALLY DECOUPLED from
+// the `@kitsoki` import resolver, which still keys off $KITSOKI_REPO / --kitsoki-repo
+// (or the embedded library) via buildImportResolver in resolver.go. Conflating the
+// two roots hijacked a foreign repo's own feature with whatever $KITSOKI_REPO (the
+// persisted ~/.kitsoki/repo) happened to point at, breaking the "run in a foreign
+// repo with only the binary" promise.
+//
+// Precedence:
+//  1. The nearest ancestor of startDir (walking up) whose features/<featureID>.yaml
+//     EXISTS — the foreign repo running the binary wins over any global $KITSOKI_REPO.
+//  2. Else $KITSOKI_REPO, but only if $KITSOKI_REPO/features/<featureID>.yaml exists.
+//  3. Else startDir, so the caller emits its clear "feature %q not found at <path>".
+//
+// startDir and getenv are injected so the discovery is unit-testable without
+// os.Chdir / mutating the process environment. discoverFeatureRootCwd wires the
+// real cwd + os.Getenv.
+func discoverFeatureRoot(featureID, startDir string, getenv func(string) string) string {
+	rel := filepath.Join("features", featureID+".yaml")
+
+	// 1. Walk up from startDir for the nearest ancestor that actually has the file.
+	dir := startDir
 	for {
-		if st, err := os.Stat(filepath.Join(dir, "features")); err == nil && st.IsDir() {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
@@ -281,5 +301,25 @@ func discoverRepoRoot() string {
 		}
 		dir = parent
 	}
-	return cwd
+
+	// 2. Fall back to $KITSOKI_REPO only if it actually holds the feature.
+	if env := getenv("KITSOKI_REPO"); env != "" {
+		if _, err := os.Stat(filepath.Join(env, rel)); err == nil {
+			return env
+		}
+	}
+
+	// 3. Neither found it — return startDir for a clear "feature not found" error.
+	return startDir
+}
+
+// discoverFeatureRootCwd wires discoverFeatureRoot to the real process cwd and
+// environment. On a cwd lookup failure it falls back to "." so the walk is still
+// well-defined.
+func discoverFeatureRootCwd(featureID string) string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
+	return discoverFeatureRoot(featureID, cwd, os.Getenv)
 }
