@@ -119,6 +119,41 @@ describe("ChatTranscript", () => {
     expect(wrapper.find("[data-testid='chat-activity']").exists()).toBe(false);
   });
 
+  it("marks an off-ramp agent bubble distinctly (chip + data-mode), but renders the answer verbatim", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          {
+            role: "agent",
+            text: "Kitsoki is a deterministic state-machine runtime.",
+            isOffRamp: true,
+          },
+        ],
+      },
+    });
+    // The bubble carries a stable testid + data-mode so the tour / vision-QA
+    // can assert deterministically that this answer was a free-form off-ramp.
+    const bubble = wrapper.find("[data-testid='offramp-bubble']");
+    expect(bubble.exists()).toBe(true);
+    expect(bubble.attributes("data-mode")).toBe("offpath");
+    expect(bubble.classes()).toContain("chat-bubble--offramp");
+    // The visible "off the menu" chip distinguishes it from a normal bubble.
+    expect(wrapper.find("[data-testid='offramp-chip']").text()).toContain("off the menu");
+    // The answer text itself is rendered verbatim (not altered by the chip).
+    expect(wrapper.find(".chat-view").text()).toContain(
+      "Kitsoki is a deterministic state-machine runtime."
+    );
+  });
+
+  it("does NOT mark a normal agent bubble as off-ramp", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: { transcript: [{ role: "agent", text: "A normal room view." }] },
+    });
+    expect(wrapper.find("[data-testid='offramp-bubble']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='offramp-chip']").exists()).toBe(false);
+    expect(wrapper.find(".chat-bubble").classes()).not.toContain("chat-bubble--offramp");
+  });
+
   it("renders user text literally, not as markdown", () => {
     const wrapper = mount(ChatTranscript, {
       props: {

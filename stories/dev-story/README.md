@@ -158,7 +158,7 @@ dev rebinds to `host.local_files.ticket`. Same YAML, two providers.
 
 | Room | Status | Notes |
 |---|---|---|
-| `main` | Wave 2 | Landing / navigation. Dispatches to bf / pr / day rooms. |
+| `main` | Wave 2 | Landing / navigation. Dispatches to bf / pr / day rooms. Declares the [oracle off-ramp](../../docs/stories/state-machine.md#11-off-path-the-global-escape-hatch) (`oracle_off_ramp.agent: oracle_qa`): a free-text question the menu can't route is answered in place instead of bouncing back to the catalog. |
 | `ticket_search` | Wave 2 | iface.ticket.search; picks a ticket, then `drive` routes by `ticket_type` (bug → bf, feature → impl, epic → cyp). `pick_ticket` reads the type off the picked row; `go_bugfix` forces bf regardless of type. |
 | `workspace_manager` | Wave 2 | iface.workspace.list. Minimal Wave 2 shape. |
 | `inbox` | Wave 2 | Navigation surface; the runtime's inbox subsystem manages items. |

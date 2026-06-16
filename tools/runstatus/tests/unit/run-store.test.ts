@@ -431,6 +431,54 @@ describe("useRunStore — write-side actions", () => {
     expect(store.transcript[1]).toMatchObject({ role: "agent", text: "How many?" });
   });
 
+  // ---- off-ramp ("offpath") turn ----
+  // An unroutable free-text utterance fires the oracle off-ramp: a voiced
+  // converse answer that does NOT advance state. The result is mode "offpath"
+  // carrying the converse answer as `view`, the UN-advanced state, and the
+  // room's SAME menu echoed unchanged. The store must (a) mark the agent bubble
+  // isOffRamp so it can render distinctly, and (b) keep state + the menu intact.
+  it("sendText flags an offpath turn's agent bubble isOffRamp and keeps the menu unchanged", async () => {
+    const src = writeSource({
+      sendTurn: () =>
+        Promise.resolve(
+          turnResult({
+            mode: "offpath",
+            // Off-ramp does NOT advance: same resting room, same menu echoed.
+            state: "idle",
+            view: "Kitsoki is a deterministic state-machine runtime for agents.",
+            allowed_intents: ["start", "discuss"],
+            intents: [
+              { name: "start", has_slots: false },
+              { name: "discuss", text_slot: "message", has_slots: true },
+            ],
+          })
+        ),
+    });
+    const store = useRunStore();
+    await store.sendText(src, "sess-1", "what even is kitsoki?", "discuss");
+
+    const agent = store.transcript[1]!;
+    expect(agent).toMatchObject({
+      role: "agent",
+      text: "Kitsoki is a deterministic state-machine runtime for agents.",
+      isOffRamp: true,
+    });
+    // State is unchanged (no advance) and not terminal.
+    expect(store.currentStatePath).toBe("idle");
+    expect(store.terminal).toBe(false);
+    // The room's menu persists, echoed unchanged.
+    expect(store.allowedIntents.map((i) => i.name)).toEqual(["start", "discuss"]);
+  });
+
+  // A normal (transitioned / rejected) agent bubble must NOT be flagged
+  // isOffRamp — the off-ramp treatment is reserved for mode "offpath".
+  it("does not flag a normal transitioned turn as isOffRamp", async () => {
+    const src = writeSource({ sendTurn: () => Promise.resolve(turnResult({ view: "Onward." })) });
+    const store = useRunStore();
+    await store.sendText(src, "sess-1", "ok", "discuss");
+    expect(store.transcript[1]!.isOffRamp).toBeUndefined();
+  });
+
   it("sendText pushes the raw text as the user entry and applies the result", async () => {
     let capturedInput = "";
     const src = writeSource({

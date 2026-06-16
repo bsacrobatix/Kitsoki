@@ -986,14 +986,37 @@ the declarative `agents:` block — see [`meta-mode.md`](meta-mode.md).
 Meta mode is what most authors should reach for today; off-path remains
 the simple banner-only escape hatch.
 
-Off-path is reached through a *typed-trigger* door. A planned companion —
-the **oracle off-ramp** — adds an *automatic*, room-scoped door into the
-same free-form `converse` mechanism: a room that declares
-`oracle_off_ramp:` routes a genuine no-match (`UNKNOWN_INTENT` /
-`INTENT_UNKNOWN`, §4) into an oracle answer instead of rejecting, with no
-transition and no world write. Not implemented today; design and the
-orchestrator seam are in
-[`../proposals/oracle-off-ramp.md`](../proposals/oracle-off-ramp.md).
+### The oracle off-ramp — the automatic no-match door
+
+One voice, two entrances. Off-path is reached through a *typed-trigger*
+door; the **oracle off-ramp** is the *automatic*, room-scoped door into the
+same free-form `converse` mechanism. A room that declares `oracle_off_ramp:`
+routes a genuine no-match into an oracle answer instead of rejecting, with
+no transition and no world write — the room stays put and its menu is there
+next turn.
+
+```yaml
+main:                       # a normal menu / discovery room
+  oracle_off_ramp:
+    agent: oracle_qa        # bare `oracle_off_ramp: true` adopts the off-path voice
+```
+
+The off-ramp fires on the **real no-match** path: free text the router
+can't map and the LLM declines to classify surfaces as the
+`LLM_CLARIFICATION` clarify code, which `maybeOffRamp`
+(`internal/orchestrator/offpath.go`) intercepts before the shared
+`ModeRejected` return (it also covers the `UNKNOWN_INTENT` / `INTENT_UNKNOWN`
+codes from the MCP / router paths). It is **inert** for every other
+rejection — `GUARD_FAILED`, `MISSING_SLOTS`, `INTENT_NOT_ALLOWED_IN_STATE`,
+`AMBIGUOUS_INTENT` — because those name a real, author-surfaced signal, not
+chat fodder. A load-time invariant rejects the flag on a `terminal: true`
+or `mode: conversational` state (the latter is already free-form), so it
+belongs on a normal menu / discovery room. Trace: `OffPathEntered` is
+labeled `reason: "off_ramp"` with the triggering `error_code`, followed by
+the usual `OffPathQuestion` / `OffPathAnswer`; there is no
+`TurnEnded(rejected)` and no transition. First adopter: the dev-story hub
+(`stories/dev-story/rooms/main.yaml`). Full design narrative:
+[`architecture.md` §9](architecture.md#9-oracle-rooms-meta-and-off-path).
 
 ---
 

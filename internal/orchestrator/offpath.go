@@ -174,7 +174,18 @@ func (o *Orchestrator) askOffPathVoiced(ctx context.Context, sid app.SessionID, 
 		"chat_id":  chatID,
 	}, 0)
 
-	res, err := host.OracleConverseHandler(ctx, args)
+	// Resolve the converse handler through the host registry when one is wired,
+	// so a deterministic stub (a --host-cassette dispatcher that Replace()d
+	// host.oracle.converse, or a flow host_handlers stub) intercepts the
+	// off-path/off-ramp voice exactly like any other host.* call. Falling back
+	// to the package handler keeps the no-registry path (bare tests) working.
+	converse := host.OracleConverseHandler
+	if o.hosts != nil {
+		if h, ok := o.hosts.Get("host.oracle.converse"); ok {
+			converse = h
+		}
+	}
+	res, err := converse(ctx, args)
 	if err != nil {
 		// Infrastructure failure (claude binary issues, etc.) — record the
 		// question, surface the error to the caller.

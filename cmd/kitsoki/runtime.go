@@ -66,6 +66,40 @@ func (rt *sessionRuntime) Close() {
 	}
 }
 
+// applyHostCassette loads a host cassette and replaces each handler it mentions
+// (one episode group per `match.handler`) with a cassette-backed dispatcher in
+// hostReg. It is shared by both postures: the nil-harness flow posture
+// (relativeTo = the flow file's dir) and the live-harness posture (relativeTo =
+// "" → resolve against cwd). The cassette's oracle: blocks flow to the session
+// trace via rt.DeferredOracleSink, which the caller forwards once the live sink
+// is wired (registry.go calls SetSink right after orch.SetEventSink).
+func applyHostCassette(rt *sessionRuntime, hostReg *host.Registry, cassettePath, relativeTo string) error {
+	if !filepath.IsAbs(cassettePath) && relativeTo != "" {
+		cassettePath = filepath.Join(filepath.Dir(relativeTo), cassettePath)
+	}
+	cas, err := testrunner.LoadCassette(cassettePath)
+	if err != nil {
+		return fmt.Errorf("load host cassette: %w", err)
+	}
+	// stateOf is unused for replay-only dispatch (no record sink); the cassette
+	// matcher keys on handler + args only.
+	stateOf := func() string { return "" }
+	deferredSink := store.NewDeferredSink()
+	rt.DeferredOracleSink = deferredSink
+	seen := map[string]bool{}
+	for _, ep := range cas.Episodes {
+		hn, ok := ep.Match["handler"].(string)
+		if !ok || hn == "" || seen[hn] {
+			continue
+		}
+		seen[hn] = true
+		fallback, _ := hostReg.Get(hn)
+		disp := testrunner.BuildCassetteDispatcherWithSink(cas, hn, stateOf, fallback, nil, clock.Real(), deferredSink, nil)
+		hostReg.Replace(hn, disp)
+	}
+	return nil
+}
+
 // runtimeConfig selects which construction posture buildSessionRuntime takes.
 // The three postures are mutually exclusive in their oracle/host wiring:
 //
@@ -111,6 +145,11 @@ type runtimeConfig struct {
 	// Flow-posture fields.
 	Flow         *testrunner.FlowFixture
 	FlowFilePath string
+
+	// HostCassette layers a host cassette over the live-harness posture (see
+	// runtimeBase.HostCassette). Distinct from Flow.HostCassette, which only
+	// applies in the nil-harness flow posture.
+	HostCassette string
 }
 
 // runtimeBase carries the session-INVARIANT construction posture that
@@ -146,6 +185,15 @@ type runtimeBase struct {
 	Flow         *testrunner.FlowFixture
 	FlowFilePath string
 
+	// HostCassette layers a host cassette over the LIVE (harness) posture: when
+	// a real harness is built (e.g. --harness replay drives free-text routing
+	// deterministically) but specific host.* calls must still be stubbed (the
+	// off-ramp's host.oracle.converse), this path's episodes replace those
+	// handlers in the real host registry. It is the replay-harness analogue of
+	// Flow.HostCassette (which only applies in the nil-harness flow posture).
+	// Empty = no cassette layered. Resolved relative to cwd.
+	HostCassette string
+
 	// DefaultActor is the operator identity the web server records as
 	// slots.author on a browser-driven turn when no header / actor param
 	// supplies one (see server.WithDefaultActor). Empty = none configured;
@@ -174,6 +222,7 @@ func (b runtimeBase) config(storyPath string, def *app.AppDef) runtimeConfig {
 		DefaultProfile:  b.DefaultProfile,
 		Flow:            b.Flow,
 		FlowFilePath:    b.FlowFilePath,
+		HostCassette:    b.HostCassette,
 	}
 }
 
@@ -255,33 +304,8 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		testrunner.RegisterHostStubs(hostReg, cfg.Flow.HostHandlers)
 
 		if cfg.Flow.HostCassette != "" {
-			cassettePath := cfg.Flow.HostCassette
-			if !filepath.IsAbs(cassettePath) && cfg.FlowFilePath != "" {
-				cassettePath = filepath.Join(filepath.Dir(cfg.FlowFilePath), cassettePath)
-			}
-			cas, casErr := testrunner.LoadCassette(cassettePath)
-			if casErr != nil {
-				return nil, fmt.Errorf("load host cassette: %w", casErr)
-			}
-			// stateOf is unused for replay-only dispatch (no record sink);
-			// cassette matcher keys on handler + args only.
-			stateOf := func() string { return "" }
-			// DeferredSink: oracle events from cassette episodes that carry an
-			// oracle: block are written here immediately but forwarded to the
-			// real session sink only after the caller calls SetSink on it
-			// (registry.go does this right after orch.SetEventSink(live)).
-			deferredSink := store.NewDeferredSink()
-			rt.DeferredOracleSink = deferredSink
-			seen := map[string]bool{}
-			for _, ep := range cas.Episodes {
-				hn, okk := ep.Match["handler"].(string)
-				if !okk || hn == "" || seen[hn] {
-					continue
-				}
-				seen[hn] = true
-				fallback, _ := hostReg.Get(hn)
-				disp := testrunner.BuildCassetteDispatcherWithSink(cas, hn, stateOf, fallback, nil, clock.Real(), deferredSink, nil)
-				hostReg.Replace(hn, disp)
+			if err := applyHostCassette(rt, hostReg, cfg.Flow.HostCassette, cfg.FlowFilePath); err != nil {
+				return nil, err
 			}
 		}
 
@@ -321,6 +345,17 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 	} else {
 		hostReg = host.NewRegistry()
 		host.RegisterBuiltins(hostReg)
+		// Layer a host cassette over the live-harness posture when requested
+		// (e.g. --harness replay for free-text routing + --host-cassette for the
+		// off-ramp's host.oracle.converse). The cassette's episodes replace the
+		// matching builtin handlers so those host.* calls are deterministic while
+		// the real harness still drives intent routing. Applied BEFORE the
+		// allow-list check so a stubbed handler is still a registered host.
+		if cfg.HostCassette != "" {
+			if err := applyHostCassette(rt, hostReg, cfg.HostCassette, ""); err != nil {
+				return nil, err
+			}
+		}
 		if err := hostReg.ValidateAllowList(def.Hosts); err != nil {
 			return nil, fmt.Errorf("validate hosts: %w", err)
 		}

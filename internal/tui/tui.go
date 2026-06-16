@@ -2475,6 +2475,44 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 			m.transcript.AppendBlock(block)
 		}
 
+	case orchestrator.ModeOffPath:
+		// A SYNCHRONOUS off-path outcome — the oracle off-ramp fired on a
+		// no-match free-text utterance in a room that declared
+		// `oracle_off_ramp:`. The orchestrator already ran the converse
+		// turn and handed back the free-form answer in out.View WITHOUT
+		// advancing the state machine or mutating world. We render that
+		// answer as the soft off-path-themed agent bubble and leave the
+		// user exactly where they were: same room, same menu.
+		//
+		// This is DISTINCT from the typed `/freeform` flow (offpath.go),
+		// which flips the model into the persistent ModeOffPath *view
+		// mode* and gates further input behind the async AskOffPath loop.
+		// Here we must NOT enter that mode — the room is still on-path and
+		// the next turn should route normally — so we keep m.mode at
+		// ModeOnPath (already restored at the top of handleTurnOutcome).
+		m.transcript.FinalizeLive("")
+		// State is unchanged by contract; carry NewState through so a
+		// non-empty resting path keeps currentState honest (it equals the
+		// room the user is standing in).
+		if out.NewState != "" {
+			m.currentState = out.NewState
+		}
+		answer := out.View
+		if answer == "" {
+			answer = "(no reply)"
+		}
+		// Soft amber off-path answer styling — mirrors the typed-trigger
+		// off-path reply (handleOffPathReply → AppendOffPathAnswer) so a
+		// no-match answer reads as the same free-form voice. The user
+		// echo already happened at submit time, so pass userInput="".
+		m.transcript.AppendOffPathAnswer("", answer)
+		// Re-assert the menu from the echoed (unchanged) allowed list so
+		// the room's actions stay advertised, then refresh the location
+		// bar against the unchanged resting state.
+		w := m.orch.InitialWorld()
+		m = m.updateMenuFromAllowed(out.AllowedIntents, w)
+		m = m.updateLocation(out)
+
 	case orchestrator.ModeRejected:
 		m.transcript.FinalizeLive("")
 		m.currentState = out.NewState

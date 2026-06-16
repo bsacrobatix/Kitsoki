@@ -577,6 +577,13 @@ For now the controller hardcodes `--permission-mode bypassPermissions`
 metas will declare `oracle_verb: ask`. The loader will cross-check the
 declared verb against the agent's tool surface at app-load time.
 
+The **oracle off-ramp** is a third consumer of this `converse` voice: a
+room's `oracle_off_ramp.agent:` joins the same agent-precedence chain
+(`per-call agent:` > `meta_modes[mode].agent` > `oracle_off_ramp.agent` >
+`off_path.agent` > app default). It is the automatic no-match door rather
+than a typed `/meta` overlay — see
+[`state-machine.md` §11](state-machine.md#11-off-path-the-global-escape-hatch).
+
 ---
 
 ## 11. Limitations

@@ -113,6 +113,17 @@ authentication.`,
 				fixture      *testrunner.FlowFixture
 				flowFilePath string
 			)
+			// liveCassette layers a host cassette over the LIVE-harness posture
+			// (--harness replay/recording) instead of the nil-harness flow
+			// posture. When the operator asks for a real interpreter harness AND
+			// a host cassette, free-text routing must stay live (replay drives
+			// it) while specific host.* calls — the oracle off-ramp's
+			// host.oracle.converse — are stubbed by the cassette. A flow fixture
+			// would force a nil harness and reject every free-text turn, so we do
+			// NOT build one in that case; the cassette rides runtimeBase.HostCassette.
+			liveHarness := harnessType == "replay" || harnessType == "recording" || harnessType == "live" || harnessType == "claude"
+			var liveCassette string
+
 			if flowPath != "" {
 				abs, aerr := filepath.Abs(flowPath)
 				if aerr != nil {
@@ -128,16 +139,27 @@ authentication.`,
 					return fmt.Errorf("parse --flow %q: %w", flowPath, uerr)
 				}
 				fixture = &f
+			} else if hostCassette != "" && liveHarness {
+				// --host-cassette WITH an interpreter harness: keep the harness
+				// live (it routes free text) and layer the cassette over the real
+				// host registry. No flow fixture (a flow forces a nil harness).
+				if abs, aerr := filepath.Abs(hostCassette); aerr == nil {
+					liveCassette = abs
+				} else {
+					liveCassette = hostCassette
+				}
 			} else if hostCassette != "" {
-				// --host-cassette without --flow: a minimal deterministic
-				// fixture carrying only the cassette, so the nil-harness posture
-				// applies and cassette episodes back every host.* call.
+				// --host-cassette without --flow and without an interpreter
+				// harness: a minimal deterministic fixture carrying only the
+				// cassette, so the nil-harness posture applies and cassette
+				// episodes back every host.* call (intents submitted explicitly).
 				fixture = &testrunner.FlowFixture{}
 			}
 
-			// --host-cassette overrides / sets the fixture's cassette path. The
-			// path is resolved relative to the flow file (when --flow is set) or
-			// the cwd (when standalone) inside buildSessionRuntime.
+			// --host-cassette overrides / sets the FLOW fixture's cassette path
+			// (flow posture only). The path is resolved relative to the flow file
+			// (when --flow is set) or the cwd (when standalone) inside
+			// buildSessionRuntime. The live-harness path uses liveCassette above.
 			if hostCassette != "" && fixture != nil {
 				fixture.HostCassette = hostCassette
 				if flowFilePath == "" {
@@ -188,6 +210,7 @@ authentication.`,
 				RecordPath:      recordPath,
 				Flow:            fixture,
 				FlowFilePath:    flowFilePath,
+				HostCassette:    liveCassette,
 				DefaultActor:    actor,
 			}
 

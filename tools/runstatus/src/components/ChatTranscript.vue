@@ -10,8 +10,30 @@
       <div class="chat-avatar" :class="`chat-avatar--${entry.role}`">
         {{ entry.role === "user" ? "U" : "A" }}
       </div>
-      <div class="chat-bubble" :class="`chat-bubble--${entry.role}`">
+      <div
+        class="chat-bubble"
+        :class="[
+          `chat-bubble--${entry.role}`,
+          { 'chat-bubble--offramp': entry.role === 'agent' && entry.isOffRamp },
+        ]"
+        :data-testid="
+          entry.role === 'agent' && entry.isOffRamp ? 'offramp-bubble' : undefined
+        "
+        :data-mode="entry.role === 'agent' && entry.isOffRamp ? 'offpath' : undefined"
+      >
         <div class="chat-role">{{ entry.role === "user" ? "You" : "Agent" }}</div>
+        <!-- An off-ramp answer is a free-form converse reply that did NOT
+             advance state (TurnResult mode "offpath"). The chip marks it as
+             "off the menu" so a viewer (and vision-QA) can tell it apart from a
+             normal room transition and from a rejection. The menu still shows
+             because state is unchanged. -->
+        <div
+          v-if="entry.role === 'agent' && entry.isOffRamp"
+          class="chat-offramp-chip"
+          data-testid="offramp-chip"
+        >
+          ↪ off the menu
+        </div>
         <!-- The turn's preserved thinking/tool feed, collapsed by default so
              the final view leads but the activity that produced it stays one
              click away (matching the live bubble it replaces). -->
@@ -57,6 +79,8 @@ export interface ChatEntry {
   typedView?: View;
   /** The turn's preserved thinking/tool feed (collapsed activity section). */
   stream?: StreamItem[];
+  /** True when this agent bubble is an off-ramp ("offpath") converse answer. */
+  isOffRamp?: boolean;
 }
 
 const props = defineProps<{ transcript: ChatEntry[] }>();
@@ -179,6 +203,31 @@ watch(
   color: #1f2430;
   border: 1px solid #d8dbe2;
   border-bottom-left-radius: 4px;
+}
+
+/* Off-ramp ("offpath") agent bubble: a free-form converse answer that did NOT
+   advance state. A subtle left-border accent + a small chip distinguish it from
+   a normal room-view bubble (which renders a menu transition) and from a
+   rejection — without altering the answer text itself. */
+.chat-bubble--offramp {
+  border-left: 3px solid #8b5cf6;
+}
+
+.chat-offramp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6d28d9;
+  background: #ede9fe;
+  border: 1px solid #ddd6fe;
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-bottom: 6px;
 }
 
 .chat-role {

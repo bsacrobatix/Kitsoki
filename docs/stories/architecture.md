@@ -678,33 +678,52 @@ chat is allowed on-path. ([`state-machine.md` §11](state-machine.md#11-off-path
 ### The oracle off-ramp — a no-match door into the same chat
 
 Off-path is reached through a **typed-trigger door**: the user must type
-the declared trigger string. A planned companion adds a second,
-*automatic* door scoped to a single room — the **oracle off-ramp**. A room
-that declares `oracle_off_ramp:` says, in effect, "if the user says
-something I can't map to any of my intents, don't bounce them — answer."
-When routing and the LLM resolve to **no declared intent**
-(`UNKNOWN_INTENT` / `INTENT_UNKNOWN`) in such a room, the orchestrator
-hands the original free text to an oracle `converse` turn instead of
-returning the usual "I didn't catch that" rejection (§6), and the room
-stays put — no transition, no world write. It is automatic, room-scoped
-off-path entry, triggered by a no-match rather than a typed trigger, and
-it shares off-path's `converse` mechanism and agent/persona precedence.
+the declared trigger string. The **oracle off-ramp** adds a second,
+*automatic* door scoped to a single room. A room that declares
+`oracle_off_ramp:` says, in effect, "if the user says something I can't
+map to any of my intents, don't bounce them — answer." When free-text
+routing and the LLM resolve to **no declared intent** in such a room, the
+orchestrator hands the original free text to an oracle `converse` turn
+instead of returning the usual "I didn't catch that" rejection (§6), and
+the room stays put — no transition, no world write. It is automatic,
+room-scoped off-path entry, triggered by a no-match rather than a typed
+trigger, and it shares off-path's `converse` mechanism and agent/persona
+precedence (`oracle_off_ramp.agent:` > `off_path.agent:` > app default).
 
-The off-ramp fires **only** on a genuine no-match. A
-recognised-but-blocked intent — `GUARD_FAILED`,
-`INTENT_NOT_ALLOWED_IN_STATE`, a missing slot — still rejects or clarifies
+```yaml
+main:                       # a normal menu/discovery room
+  oracle_off_ramp:
+    agent: oracle_qa        # the off-ramp voice (struct form)
+  on:
+    go_tickets: [{ target: ticket_search }]
+    # …
+```
+
+The dominant entry is the **free-text no-match**: the router can't map the
+utterance and the LLM declines to classify it, which surfaces as the
+`LLM_CLARIFICATION` clarify code. `maybeOffRamp`
+(`internal/orchestrator/offpath.go`) intercepts that code (plus the
+`UNKNOWN_INTENT` / `INTENT_UNKNOWN` codes from the MCP / router paths) just
+before the shared `ModeRejected` returns, and only when the resting state
+declared the flag. The off-ramp fires **only** on those genuine no-match
+codes — a recognised-but-blocked intent (`GUARD_FAILED`,
+`INTENT_NOT_ALLOWED_IN_STATE`, a missing slot) still rejects or clarifies
 as today, because those are signals the author wants surfaced, not chat
 fodder. The decision to off-ramp is deterministic (a room flag × which
 error code came back); only the answer is interpretive, and it is recorded
-like any off-path turn.
+like any off-path turn — an `OffPathEntered` labeled `reason: "off_ramp"`
+(with the triggering `error_code`), then `OffPathQuestion` / `OffPathAnswer`;
+no `TurnEnded(rejected)`, no transition. The outcome is `ModeOffPath` (over
+the web RPC: `{ mode:"offpath", view:<answer>, state:<unchanged>,
+allowed_intents:<menu> }`), so a renderer shows the answer and the same
+menu persists because state is unchanged.
 
-> **Not implemented today.** No `State` field enables this yet; a no-match
-> in any room returns `ModeRejected` and re-prompts with the menu. Design,
-> the load-time invariants, and the orchestrator seam are specced in
-> [`../proposals/oracle-off-ramp.md`](../proposals/oracle-off-ramp.md). It
-> rides the same convergence as the note below — once off-path becomes
-> `/meta default-oracle`, the off-ramp is "auto-enter that agent on a
-> no-match."
+A load-time invariant rejects the flag on a `terminal: true` or
+`mode: conversational` state (a terminal state never routes free text; a
+conversational room is already free-form, so the flag is meaningless). It
+therefore belongs on a normal menu / discovery room — the dev-story hub
+(`stories/dev-story/rooms/main.yaml`) is the first adopter. Two entrances,
+one voice: see [`state-machine.md` §11](state-machine.md#11-off-path-the-global-escape-hatch).
 
 ### Meta mode — persistent named-agent sidebars
 

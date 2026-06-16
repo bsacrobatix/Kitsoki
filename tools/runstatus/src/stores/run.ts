@@ -26,6 +26,13 @@ export interface TranscriptEntry {
    * the reply stays reviewable after the final view replaces the live bubble.
    */
   stream?: StreamItem[];
+  /**
+   * True when this agent bubble came from an off-ramp turn (TurnResult mode
+   * "offpath"): a free-form `host.oracle.converse` answer that did NOT advance
+   * state. The transcript marks it so the bubble can be rendered distinctly
+   * ("off the menu") — the menu still persists because state is unchanged.
+   */
+  isOffRamp?: boolean;
 }
 
 // StreamItem (the ordered feed shape) moved to lib/activity.ts so the meta
@@ -250,6 +257,9 @@ export const useRunStore = defineStore("run", () => {
         // Keep the turn's live feed so the bubble can offer it collapsed —
         // without this the activity vanishes the moment the view renders.
         ...(stream && stream.length > 0 ? { stream } : {}),
+        // Mark an off-ramp answer so the bubble renders distinctly. The state
+        // is unchanged, so the menu / allowed-intents UI persists alongside it.
+        ...(result.mode === "offpath" ? { isOffRamp: true } : {}),
       });
     }
   }

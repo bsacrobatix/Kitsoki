@@ -20,6 +20,19 @@ states:
     description: "dev-story — Independence, Missouri for the engineer's day."
     relevant_world: [ticket_id, ticket_title, ticket_type, last_pr_url, status, inbox_unread, workdir, feature_branch]
 
+    # Oracle off-ramp (docs/stories/state-machine.md §11). The hub is the
+    # free-form-first front door — "say what you want, in your own words."
+    # Most utterances route to a bound `on:` arc, but a question the menu
+    # genuinely can't act on (e.g. "how does the semantic router pick an
+    # intent?") would otherwise dead-end in "I didn't catch that." The
+    # off-ramp catches that no-match and hands the original text to a
+    # read-only converse turn — the room stays put, the catalog above is
+    # still there next turn. We voice it with the same `oracle_qa` persona
+    # the dedicated `oracle` room uses, so an answered question reads the
+    # same whether the operator typed `oracle` first or just asked.
+    oracle_off_ramp:
+      agent: oracle_qa
+
     # Free-form-first landing. Per docs/stories/choice-widget.md §1, a
     # hub whose actions are orthogonal navigation (not a ranked choice)
     # converts AWAY from the `choice:` picker: the primary affordance is
