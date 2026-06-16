@@ -458,6 +458,80 @@ func newKitsokiRoot(t *testing.T) string {
 	return root
 }
 
+// TestImports_OffRampAgentNamespaced is the regression guard for the
+// fold-time rewrite at imports_rewriter.go:142-145: when an imported room
+// opts into the oracle off-ramp with `oracle_off_ramp.agent: <child-agent>`,
+// the fold must prefix that agent name with the import alias (alias+"__"+name)
+// so the renamed parent.Agents[<alias>__<agent>] key satisfies the load-time
+// walkOffRampAgents validator. Without the rewrite, Load fails with an
+// "unknown agent" ValidationError because the off-ramp carries a dangling
+// reference to the child's pre-fold agent name.
+//
+// This mirrors the meta_mode.agent fold (imports.go) and is the ONLY test
+// reaching the off-ramp branch of rewriteState — every other off-ramp test
+// is single-file (non-imported) and the shipped demo uses persona:, not
+// agent:, so OracleOffRamp.Agent is empty there.
+func TestImports_OffRampAgentNamespaced(t *testing.T) {
+	root := t.TempDir()
+
+	childDir := mkdirT(t, root, "child")
+	mustWrite(t, childDir, "app.yaml", `app: { id: child, version: 0.1.0 }
+hosts: [host.run]
+world: {}
+intents:
+  browse: { description: browse }
+exits:
+  done: { description: "..." }
+agents:
+  guide:
+    system_prompt: "answer kindly"
+root: desk
+states:
+  desk:
+    description: "menu room"
+    oracle_off_ramp: { agent: guide }
+    on:
+      browse:
+        - target: "@exit:done"
+`)
+
+	parentDir := mkdirT(t, root, "parent")
+	mustWrite(t, parentDir, "app.yaml", `app: { id: parent, version: 0.1.0 }
+hosts: [host.run]
+world: {}
+intents:
+  go: { description: go }
+imports:
+  sub:
+    source: ../child
+    entry: desk
+    exits:
+      done: { to: ended }
+root: main
+states:
+  main:
+    on:
+      go:
+        - target: sub
+  ended:
+    terminal: true
+`)
+
+	// Load is the load-bearing assertion: without the rewrite branch this
+	// returns an "unknown agent guide" ValidationError from walkOffRampAgents.
+	def, err := Load(filepath.Join(parentDir, "app.yaml"))
+	require.NoError(t, err)
+
+	// The child's `desk` folds under the `sub` alias wrapper.
+	desk := def.States["sub"].States["desk"]
+	require.NotNil(t, desk, "child desk should fold under alias `sub`; got %v", keysOf(def.States["sub"].States))
+	require.NotNil(t, desk.OracleOffRamp, "folded desk keeps its off-ramp")
+	require.Equal(t, "sub__guide", desk.OracleOffRamp.Agent,
+		"off-ramp agent must be alias-prefixed after fold")
+	require.Contains(t, def.Agents, "sub__guide",
+		"the renamed agent must exist in the folded top-level agents: map")
+}
+
 func mkdirT(t *testing.T, parts ...string) string {
 	t.Helper()
 	p := filepath.Join(parts...)
