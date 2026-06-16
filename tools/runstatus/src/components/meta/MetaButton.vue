@@ -10,6 +10,25 @@
       @click="toggleDropdown"
     >
       <span class="meta-launcher__spark">✦</span> Meta
+      <!-- Status badges: a meta chat is working (spinner) and/or has a reply
+           waiting (dot). Both can show at once — distinct modes, distinct
+           states. -->
+      <span
+        v-if="meta.anyBusy"
+        class="meta-launcher__status meta-launcher__status--busy"
+        data-testid="meta-status-busy"
+        title="A meta chat is working…"
+        aria-label="meta chat working"
+        >⟳</span
+      >
+      <span
+        v-if="meta.anyWaiting"
+        class="meta-launcher__status meta-launcher__status--ready"
+        data-testid="meta-status-ready"
+        title="A meta chat has a reply waiting"
+        aria-label="meta chat reply waiting"
+        >●</span
+      >
       <span class="meta-launcher__caret">▾</span>
     </button>
 
@@ -24,7 +43,23 @@
         :title="isEnabled(m.key) ? m.hint : m.disabledHint"
         @click="choose(m.key)"
       >
-        <span class="meta-launcher__item-label">{{ m.label }}</span>
+        <span class="meta-launcher__item-label">
+          {{ m.label }}
+          <span
+            v-if="status(m.key).busy"
+            class="meta-launcher__status meta-launcher__status--busy"
+            :data-testid="`meta-item-status-busy-${testidFor(m.key)}`"
+            title="Working…"
+            >⟳</span
+          >
+          <span
+            v-else-if="status(m.key).waiting"
+            class="meta-launcher__status meta-launcher__status--ready"
+            :data-testid="`meta-item-status-ready-${testidFor(m.key)}`"
+            title="Reply waiting"
+            >●</span
+          >
+        </span>
         <span class="meta-launcher__item-hint">{{ m.hint }}</span>
       </button>
 
@@ -136,6 +171,13 @@ function isEnabled(key: string): boolean {
   return meta.modes.some((m) => m.key === key);
 }
 
+// Per-mode working/waiting status for the dropdown items, scoped to the routed
+// session. A mode is "busy" while its turn streams and "waiting" once a turn
+// finishes that the user hasn't viewed yet.
+function status(key: string): { busy: boolean; waiting: boolean } {
+  return meta.statusFor(sessionId.value, key);
+}
+
 function testidFor(key: string): string {
   return key.replace(/\./g, "-");
 }
@@ -241,6 +283,45 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 .meta-launcher__caret {
   font-size: 0.6rem;
   opacity: 0.8;
+}
+
+/* Status badges — shared by the launcher button and the dropdown items. */
+.meta-launcher__status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  line-height: 1;
+  margin-left: 0.15rem;
+}
+.meta-launcher__status--busy {
+  color: #fbbf24; /* amber: a turn is streaming */
+  animation: meta-spin 1s linear infinite;
+}
+.meta-launcher__status--ready {
+  color: #4ade80; /* green: a reply is waiting */
+  font-size: 0.55rem;
+  animation: meta-pulse 1.6s ease-in-out infinite;
+}
+@keyframes meta-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes meta-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .meta-launcher__status--busy,
+  .meta-launcher__status--ready {
+    animation: none;
+  }
 }
 
 .meta-launcher__menu {

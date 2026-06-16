@@ -143,17 +143,39 @@ describe("MetaOverlay", () => {
 
   // ── Streaming bubble ──────────────────────────────────────────────────────
 
+  // A LiveSource whose metaStream emits the given events then never resolves,
+  // so the turn stays in flight (busy + live feed) for the component to inspect.
+  // Mirrors how the app actually reaches the streaming state — busy/pendingStream
+  // are per-scope runtime, not directly assignable from outside.
+  function streamingSource(
+    events: Array<{ type: string; text?: string; tool?: string; preview?: string }>
+  ): LiveSource {
+    return {
+      metaEnter: vi.fn().mockResolvedValue({ chat_id: "c1", mode_key: "story.ask", messages: [] }),
+      metaStream: vi.fn().mockImplementation(
+        async (
+          _s: string,
+          _m: string,
+          _c: string,
+          _i: string,
+          onEvent: (ev: { type: string; text?: string; tool?: string; preview?: string }) => void
+        ) => {
+          for (const ev of events) onEvent(ev);
+          return new Promise(() => {}); // never resolves — the turn keeps streaming
+        }
+      ),
+    } as unknown as LiveSource;
+  }
+
   it("streaming bubble shows 🧠 agent label while busy", async () => {
     const meta = useMetaStore();
     meta.modes = [
       { key: "story.ask", label: "Story Q&A", banner: "", agent: "story-explainer", read_only: true, group: "story" },
     ];
-    // Force busy state manually so we can inspect the streaming DOM
-    meta.open = true;
-    meta.activeMode = "story.ask";
-    meta.activeSessionId = "s1";
-    meta.busy = true;
-    meta.pendingAssistantText = "thinking...";
+    const src = streamingSource([{ type: "delta", text: "thinking..." }]);
+    await meta.openMode(src, "s1", "story.ask");
+    void meta.send(src, "hi"); // do not await — the turn stays in flight
+    await flushPromises();
 
     const wrapper = mount(MetaOverlay, mountOpts);
     await flushPromises();
@@ -170,16 +192,14 @@ describe("MetaOverlay", () => {
     meta.modes = [
       { key: "story.ask", label: "Story Q&A", banner: "", agent: "story-explainer", read_only: true, group: "story" },
     ];
-    meta.open = true;
-    meta.activeMode = "story.ask";
-    meta.activeSessionId = "s1";
-    meta.busy = true;
-    meta.pendingAssistantText = "";
-    meta.pendingStream = [
-      { kind: "thinking", text: "Let me look at the story first." },
-      { kind: "tool", tool: "Read", preview: "app.yaml" },
-      { kind: "tool", tool: "Glob", preview: "rooms/*.yaml" },
-    ];
+    const src = streamingSource([
+      { type: "think", text: "Let me look at the story first." },
+      { type: "tool", tool: "Read", preview: "app.yaml" },
+      { type: "tool", tool: "Glob", preview: "rooms/*.yaml" },
+    ]);
+    await meta.openMode(src, "s1", "story.ask");
+    void meta.send(src, "hi"); // do not await — the turn stays in flight
+    await flushPromises();
 
     const wrapper = mount(MetaOverlay, mountOpts);
     await flushPromises();

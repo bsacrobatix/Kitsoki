@@ -267,6 +267,103 @@ describe("meta store", () => {
     expect(meta.error).toContain("network error");
   });
 
+  // ── per-scope streaming runtime: persistence + launcher status ────────────
+
+  // A source whose metaStream emits `events` then blocks until `release()` is
+  // called — lets a test hold a turn "in flight" across close/reopen/switch.
+  function blockingSource(
+    events: Array<{ type: string; text?: string; tool?: string; preview?: string }> = []
+  ): { source: LiveSource; release: (result?: Record<string, unknown>) => void } {
+    let release!: (result?: Record<string, unknown>) => void;
+    const metaStream = vi.fn().mockImplementation(
+      async (
+        _s: string,
+        _m: string,
+        _c: string,
+        _i: string,
+        onEvent: (ev: { type: string; text?: string; tool?: string; preview?: string }) => void
+      ) =>
+        new Promise((resolve) => {
+          for (const ev of events) onEvent(ev);
+          release = (result = {}) =>
+            resolve({ assistant: "done", chat_id: "c1", reload_requested: false, changed_files: [], ...result });
+        })
+    );
+    return { source: fakeSource({ metaStream }), release: (r) => release(r) };
+  }
+
+  it("an in-flight turn keeps streaming into its scope across close + reopen", async () => {
+    const meta = useMetaStore();
+    const { source, release } = blockingSource([
+      { type: "tool", tool: "Read", preview: "app.yaml" },
+    ]);
+    await meta.openMode(source, "s1", "story.ask");
+    const turn = meta.send(source, "hi"); // do not await — turn is mid-stream
+    await Promise.resolve();
+
+    expect(meta.busy).toBe(true);
+    expect(meta.pendingStream).toHaveLength(1);
+
+    // Close + reopen the SAME scope: the live turn must be untouched.
+    meta.close();
+    await meta.openMode(source, "s1", "story.ask");
+    expect(meta.busy).toBe(true); // not clobbered by openMode's seed path
+    expect(meta.pendingStream).toHaveLength(1);
+
+    release();
+    await turn;
+    expect(meta.busy).toBe(false);
+    expect(meta.activeTranscript).toHaveLength(2);
+  });
+
+  it("a turn that finishes while closed flags the scope as waiting; reopen clears it", async () => {
+    const meta = useMetaStore();
+    const { source, release } = blockingSource();
+    await meta.openMode(source, "s1", "story.ask");
+    const turn = meta.send(source, "hi");
+    await Promise.resolve();
+
+    meta.close();
+    release();
+    await turn;
+
+    // Finished unseen → launcher should advertise a waiting reply.
+    expect(meta.anyBusy).toBe(false);
+    expect(meta.anyWaiting).toBe(true);
+    expect(meta.statusFor("s1", "story.ask")).toEqual({ busy: false, waiting: true });
+
+    // Reopening the scope marks it seen.
+    await meta.openMode(source, "s1", "story.ask");
+    expect(meta.anyWaiting).toBe(false);
+    expect(meta.statusFor("s1", "story.ask").waiting).toBe(false);
+  });
+
+  it("anyBusy and anyWaiting aggregate across scopes (both can be true)", async () => {
+    const meta = useMetaStore();
+    // Scope A: finishes while we're looking elsewhere → waiting.
+    const a = blockingSource();
+    await meta.openMode(a.source, "s1", "story.ask");
+    const turnA = meta.send(a.source, "ask");
+    await Promise.resolve();
+    // Switch to scope B and leave A streaming.
+    const b = blockingSource([{ type: "tool", tool: "Edit", preview: "x.yaml" }]);
+    await meta.openMode(b.source, "s1", "story.edit");
+    const turnB = meta.send(b.source, "edit");
+    await Promise.resolve();
+
+    // B is the active streaming scope; A finishes now, unseen → waiting.
+    expect(meta.statusFor("s1", "story.edit").busy).toBe(true);
+    a.release();
+    await turnA;
+
+    expect(meta.anyBusy).toBe(true); // B still streaming
+    expect(meta.anyWaiting).toBe(true); // A waiting
+    expect(meta.statusFor("s1", "story.ask")).toEqual({ busy: false, waiting: true });
+
+    b.release();
+    await turnB;
+  });
+
   it("multi-round sends accumulate transcript correctly", async () => {
     const meta = useMetaStore();
     let callCount = 0;

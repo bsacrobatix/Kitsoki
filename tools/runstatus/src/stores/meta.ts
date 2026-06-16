@@ -19,6 +19,18 @@ import { useRunStore } from "./run.js";
  * id per (session, mode) so a reopen resumes without a round-trip, and a full
  * page reload rehydrates from the row via metaEnter.
  *
+ * Crucially, the in-flight streaming runtime (busy / pendingStream /
+ * pendingAssistantText / error / reloadNote) is ALSO kept per scope, in
+ * `runtimes`. A send() turn is a long-lived async over an SSE that outlives the
+ * overlay — closing the modal does not abort it (LiveSource.metaStream's fetch
+ * is not cancelled). Holding that runtime per scope is what lets a turn keep
+ * streaming into its own scope while the user closes the overlay, switches
+ * modes, or reopens: the display is consistent on reopen as if it had stayed
+ * open, and a turn that finishes while you're looking elsewhere flags `waiting`
+ * for the launcher badge instead of silently completing. The busy/pending/…
+ * getters below project the active scope's runtime so the overlay component and
+ * the unit tests read them exactly as before.
+ *
  * Modes the UI exposes (resolved against the server's available set):
  *   - story.edit  — edit this story's YAML (writes + commits + reloads content)
  *   - story.ask   — read-only Q&A about the current story
@@ -30,34 +42,58 @@ function scopeKey(sessionId: string, mode: string): string {
   return `${sessionId}::${mode}`;
 }
 
+/**
+ * The per-scope streaming runtime. One of these exists per (session, mode) that
+ * has been opened; a send() turn mutates only its own scope's runtime, so it is
+ * unaffected by the user closing/reopening the overlay or switching modes.
+ */
+interface ScopeRuntime {
+  // A send() turn is streaming for this scope.
+  busy: boolean;
+  // In-progress deferred assistant narration (see send()'s callback). Empty
+  // when idle.
+  pendingAssistantText: string;
+  // The ordered thinking/tool feed of the in-flight turn (cleared on done).
+  pendingStream: StreamItem[];
+  // Last turn's error / story-edit reload note, scoped so they don't leak
+  // across modes.
+  error: string;
+  reloadNote: string;
+  // A turn finished (reply OR error) for this scope while the user was NOT
+  // looking at it — overlay closed, or a different scope active. Cleared when
+  // the scope is next viewed (markSeen). Drives the launcher "ready" badge.
+  waiting: boolean;
+}
+
+function freshRuntime(): ScopeRuntime {
+  return {
+    busy: false,
+    pendingAssistantText: "",
+    pendingStream: [],
+    error: "",
+    reloadNote: "",
+    waiting: false,
+  };
+}
+
 export const useMetaStore = defineStore("meta", () => {
   // ---- state ----
   const open = ref(false);
   const activeMode = ref<string>("");
   const activeSessionId = ref<string>("");
-  const busy = ref(false);
-  const error = ref<string>("");
-  // A transient note shown after a story-edit reload, e.g. the changed files.
-  const reloadNote = ref<string>("");
-  // In-progress assistant narration while the SSE stream is live. Empty when
-  // idle. Unlike the feed below, this text is DEFERRED: the model's final
-  // reply also arrives as plain narration, so each narration delta is held
-  // here until later activity (a think/tool frame, or a fresh complete
-  // narration) proves it intermediate — then it flushes into the feed as a
-  // thought. Whatever is still held when "done" arrives IS the reply and is
-  // dropped (the done frame carries it authoritatively). This mirrors the
-  // TUI's metaStreamPending deferral (tui.go handleMetaStreamEvent).
-  const pendingAssistantText = ref<string>("");
-  // The ordered thinking/tool feed of the in-flight turn (cleared on done) —
-  // the same shape the main chat streams (see stores/run.ts pendingStream).
-  const pendingStream = ref<StreamItem[]>([]);
+  // A momentary seed round-trip (metaEnter / metaNew) for the active scope.
+  // Distinct from a scope's `busy` so opening/resetting never disturbs an
+  // in-flight turn streaming in another scope.
+  const entering = ref(false);
 
   // Modes available in the current scope (from runstatus.meta.modes).
   const modes = ref<MetaModeInfo[]>([]);
 
-  // Per-(session,mode) transcript + chat id, kept across close/reopen/nav.
+  // Per-(session,mode) transcript, chat id, and streaming runtime — all kept
+  // across close/reopen/nav so the overlay is genuinely persistent.
   const transcripts = ref<Record<string, MetaMessage[]>>({});
   const chatIds = ref<Record<string, string>>({});
+  const runtimes = ref<Record<string, ScopeRuntime>>({});
 
   // ---- getters ----
   const activeKey = computed(() =>
@@ -70,7 +106,60 @@ export const useMetaStore = defineStore("meta", () => {
     modes.value.find((m) => m.key === activeMode.value)
   );
 
+  const activeRuntime = computed<ScopeRuntime | undefined>(
+    () => runtimes.value[activeKey.value]
+  );
+  // Project the active scope's runtime so the overlay/tests read these exactly
+  // as they did when the state was global. `entering` folds in so the composer
+  // stays disabled during the seed round-trip, matching the prior behaviour.
+  const busy = computed(
+    () => (activeRuntime.value?.busy ?? false) || entering.value
+  );
+  const pendingAssistantText = computed(
+    () => activeRuntime.value?.pendingAssistantText ?? ""
+  );
+  const pendingStream = computed<StreamItem[]>(
+    () => activeRuntime.value?.pendingStream ?? []
+  );
+  const error = computed(() => activeRuntime.value?.error ?? "");
+  const reloadNote = computed(() => activeRuntime.value?.reloadNote ?? "");
+
+  // Launcher aggregates: a meta chat anywhere is working / has a reply waiting.
+  // Both can be true at once (one mode streaming while another finished) — the
+  // launcher renders a distinct badge for each.
+  const anyBusy = computed(() =>
+    Object.values(runtimes.value).some((r) => r.busy)
+  );
+  const anyWaiting = computed(() =>
+    Object.values(runtimes.value).some((r) => r.waiting)
+  );
+
+  /** Working/waiting status for one (session, mode) — for the dropdown items. */
+  function statusFor(
+    sessionId: string,
+    mode: string
+  ): { busy: boolean; waiting: boolean } {
+    const r = runtimes.value[scopeKey(sessionId, mode)];
+    return { busy: !!r?.busy, waiting: !!r?.waiting };
+  }
+
   // ---- actions ----
+
+  /** Get (creating if needed) the streaming runtime for a scope. */
+  function runtime(k: string): ScopeRuntime {
+    let rt = runtimes.value[k];
+    if (!rt) {
+      rt = freshRuntime();
+      runtimes.value[k] = rt;
+    }
+    return rt;
+  }
+
+  /** Clear a scope's "reply waiting" flag — it is now being viewed. */
+  function markSeen(k: string): void {
+    const r = runtimes.value[k];
+    if (r?.waiting) r.waiting = false;
+  }
 
   /** Track which session the overlay targets (set from the current route). */
   function setSession(sessionId: string): void {
@@ -84,9 +173,9 @@ export const useMetaStore = defineStore("meta", () => {
   ): Promise<void> {
     try {
       modes.value = await source.metaModes(sessionId);
-    } catch (e) {
+    } catch {
+      // Best-effort: an unavailable mode set just leaves the dropdown empty.
       modes.value = [];
-      error.value = errMsg(e);
     }
   }
 
@@ -112,53 +201,66 @@ export const useMetaStore = defineStore("meta", () => {
     activeSessionId.value = sessionId;
     activeMode.value = mode;
     open.value = true;
-    error.value = "";
-    reloadNote.value = "";
-    busy.value = true;
+    const k = scopeKey(sessionId, mode);
+    const rt = runtime(k);
+    rt.error = "";
+    rt.reloadNote = "";
+    // The user is now looking at this scope — clear its pending-reply flag.
+    markSeen(k);
+    // Already entered: resume instantly. Do NOT touch the scope's runtime — a
+    // turn may be streaming into it right now and must keep its busy/feed.
+    if (chatIds.value[k]) return;
+    entering.value = true;
     try {
       await ensureEntered(source, sessionId, mode);
     } catch (e) {
-      error.value = errMsg(e);
+      rt.error = errMsg(e);
     } finally {
-      busy.value = false;
+      entering.value = false;
     }
   }
 
-  /** Close the overlay (transcripts are kept for the next open). */
+  /** Close the overlay (transcripts + runtimes are kept for the next open). */
   function close(): void {
     open.value = false;
-  }
-
-  /**
-   * Flush the deferred narration into the feed as a thought. Called when
-   * later stream activity proves the held narration was intermediate; the
-   * narration still held when the turn ends is the reply and is dropped.
-   */
-  function flushNarration(): void {
-    const held = pendingAssistantText.value;
-    if (held.trim()) {
-      const next = pendingStream.value.slice();
-      appendThought(next, held.trimEnd());
-      pendingStream.value = next;
-    }
-    pendingAssistantText.value = "";
   }
 
   /** Send one turn; streams the assistant reply via SSE, finalises on done. */
   async function send(source: LiveSource, text: string): Promise<void> {
     const trimmed = text.trim();
-    if (!trimmed || busy.value) return;
+    // Capture the scope NOW: the user may close/switch while this turn streams,
+    // but every mutation below targets this captured scope's runtime.
     const k = activeKey.value;
     const mode = activeMode.value;
     const sessionId = activeSessionId.value;
-    error.value = "";
-    reloadNote.value = "";
-    pendingAssistantText.value = "";
-    pendingStream.value = [];
+    const rt = runtime(k);
+    if (!trimmed || rt.busy) return;
+    rt.error = "";
+    rt.reloadNote = "";
+    rt.pendingAssistantText = "";
+    rt.pendingStream = [];
+    rt.waiting = false;
+
+    // In-progress assistant narration is DEFERRED: the model's final reply also
+    // arrives as plain narration, so each narration delta is held in
+    // rt.pendingAssistantText until later activity (a think/tool frame, or a
+    // fresh complete narration) proves it intermediate — then it flushes into
+    // the feed as a thought. Whatever is still held when "done" arrives IS the
+    // reply and is dropped (the done frame carries it authoritatively). This
+    // mirrors the TUI's metaStreamPending deferral (tui.go).
+    const flushNarration = (): void => {
+      const held = rt.pendingAssistantText;
+      if (held.trim()) {
+        const next = rt.pendingStream.slice();
+        appendThought(next, held.trimEnd());
+        rt.pendingStream = next;
+      }
+      rt.pendingAssistantText = "";
+    };
 
     // Optimistically show the user's turn.
     pushMessage(k, { role: "user", text: trimmed });
-    busy.value = true;
+    rt.busy = true;
     try {
       const res = await source.metaStream(
         sessionId,
@@ -171,9 +273,9 @@ export const useMetaStore = defineStore("meta", () => {
             // into the feed. Any held narration is proven intermediate by
             // this fresh model activity, so flush it first.
             flushNarration();
-            const next = pendingStream.value.slice();
+            const next = rt.pendingStream.slice();
             appendThought(next, ev.text);
-            pendingStream.value = next;
+            rt.pendingStream = next;
           } else if (ev.type === "delta" && ev.text) {
             // Narration: ambiguous until the next event — intermediate
             // thought (flushed by whatever follows) or the final reply
@@ -182,29 +284,29 @@ export const useMetaStore = defineStore("meta", () => {
             // fragment continues the held text, while a COMPLETE prior
             // narration (no trailing whitespace) is proven intermediate by
             // this fresh one and flushes into the feed.
-            const held = pendingAssistantText.value;
+            const held = rt.pendingAssistantText;
             if (held && !/\s$/.test(held)) {
               flushNarration();
-              pendingAssistantText.value = ev.text;
+              rt.pendingAssistantText = ev.text;
             } else {
-              pendingAssistantText.value = held + ev.text;
+              rt.pendingAssistantText = held + ev.text;
             }
           } else if (ev.type === "tool" && ev.tool) {
             // A tool round-trip still follows, so any held narration was
             // unambiguously intermediate.
             flushNarration();
-            const next = pendingStream.value.slice();
+            const next = rt.pendingStream.slice();
             appendTool(next, ev.tool, ev.preview ?? "");
-            pendingStream.value = next;
+            rt.pendingStream = next;
           }
         }
       );
       // The narration still held is the reply (rendered from res.assistant
       // below) — dropping it from the feed is the point, or every reply
       // would duplicate as a trailing thought.
-      const stream = pendingStream.value;
-      pendingAssistantText.value = "";
-      pendingStream.value = [];
+      const stream = rt.pendingStream;
+      rt.pendingAssistantText = "";
+      rt.pendingStream = [];
       if (res.chat_id) chatIds.value = { ...chatIds.value, [k]: res.chat_id };
       pushMessage(k, {
         role: "assistant",
@@ -214,7 +316,7 @@ export const useMetaStore = defineStore("meta", () => {
 
       if (res.reload_requested) {
         const changed = res.changed_files ?? [];
-        reloadNote.value =
+        rt.reloadNote =
           changed.length > 0
             ? `Story reloaded — changed: ${changed.join(", ")}`
             : "Story reloaded.";
@@ -223,15 +325,19 @@ export const useMetaStore = defineStore("meta", () => {
           const runStore = useRunStore();
           await runStore.rehydrate(source, sessionId);
         } catch (e) {
-          reloadNote.value = `Reload failed: ${errMsg(e)}`;
+          rt.reloadNote = `Reload failed: ${errMsg(e)}`;
         }
       }
     } catch (e) {
-      pendingAssistantText.value = "";
-      pendingStream.value = [];
-      error.value = errMsg(e);
+      rt.pendingAssistantText = "";
+      rt.pendingStream = [];
+      rt.error = errMsg(e);
     } finally {
-      busy.value = false;
+      rt.busy = false;
+      // If the user isn't currently looking at this scope, flag the finished
+      // turn so the launcher can surface a "reply waiting" badge.
+      const viewed = open.value && activeKey.value === k;
+      if (!viewed) rt.waiting = true;
     }
   }
 
@@ -240,9 +346,7 @@ export const useMetaStore = defineStore("meta", () => {
     const k = activeKey.value;
     const mode = activeMode.value;
     const sessionId = activeSessionId.value;
-    error.value = "";
-    reloadNote.value = "";
-    busy.value = true;
+    entering.value = true;
     try {
       const sess = await source.metaNew(
         sessionId,
@@ -251,10 +355,12 @@ export const useMetaStore = defineStore("meta", () => {
       );
       chatIds.value = { ...chatIds.value, [k]: sess.chat_id };
       transcripts.value = { ...transcripts.value, [k]: [] };
+      // Reset the streaming runtime too — fresh chat, fresh feed/badges.
+      runtimes.value[k] = freshRuntime();
     } catch (e) {
-      error.value = errMsg(e);
+      runtime(k).error = errMsg(e);
     } finally {
-      busy.value = false;
+      entering.value = false;
     }
   }
 
@@ -269,15 +375,19 @@ export const useMetaStore = defineStore("meta", () => {
     open,
     activeMode,
     activeSessionId,
+    entering,
+    modes,
+    // getters
     busy,
     error,
     reloadNote,
     pendingAssistantText,
     pendingStream,
-    modes,
-    // getters
     activeTranscript,
     activeModeInfo,
+    anyBusy,
+    anyWaiting,
+    statusFor,
     // actions
     setSession,
     loadModes,
