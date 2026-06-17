@@ -1,9 +1,9 @@
 /**
- * "Cherney loop" feature-tour manifest.
+ * "Cherny loop" feature-tour manifest.
  *
- * A self-contained step array for the cherney-loop video demo. Like
+ * A self-contained step array for the cherny-loop video demo. Like
  * report-bug-manifest.ts, the WHOLE video is tour-driven: it opens on the home
- * story library, frames the cherney-loop story, drives a fresh run (home → new
+ * story library, frames the cherny-loop story, drives a fresh run (home → new
  * session → drive view) via a route-match action step, then walks the loop in
  * the InteractiveView — configure a goal + gate + budget, launch, and watch the
  * loop iterate (each iteration shown, the gate's failure fed forward) until the
@@ -16,7 +16,7 @@
  *
  * SINGLE SOURCE OF TRUTH: this array drives both the live tour overlay
  * (window.__startTourWithSteps) and the Playwright spec
- * (tests/playwright/cherney-loop-video.spec.ts), which asserts each step's
+ * (tests/playwright/cherny-loop-video.spec.ts), which asserts each step's
  * `title` against the live popover so the two cannot drift.
  *
  * Targets are testids the home + InteractiveView ship: home-view, story-card,
@@ -28,13 +28,13 @@ import { type TourStep } from "./manifest.js";
 
 export type { TourStep };
 
-export const CHERNEY_LOOP_TOUR_STEPS: readonly TourStep[] = [
+export const CHERNY_LOOP_TOUR_STEPS: readonly TourStep[] = [
   // ── Intro: the story library → a fresh run (tour-driven navigation) ─────────
   {
     id: "cl-intro-home",
     route: "home",
     title: "Start at the story library",
-    body: "Every run begins here in the story library. We'll demonstrate the Cherney loop — an agent that iterates toward a goal until a gate proves it's met, or a budget stops it.",
+    body: "Every run begins here in the story library. We'll demonstrate the Cherny loop — an agent that iterates toward a goal until a gate proves it's met, or a budget stops it.",
     placement: "center",
     kind: "explain",
     advance: "next",
@@ -46,7 +46,7 @@ export const CHERNEY_LOOP_TOUR_STEPS: readonly TourStep[] = [
     route: "home",
     target: "story-card",
     waitForTarget: "story-card",
-    title: "The cherney-loop story",
+    title: "The cherny-loop story",
     body: "This story runs the loop: a maker makes the smallest change toward your goal, a checker gates it, and a budget guards against runaway cost. Every iteration is shown and recorded.",
     placement: "right",
     kind: "explain",
@@ -72,7 +72,7 @@ export const CHERNEY_LOOP_TOUR_STEPS: readonly TourStep[] = [
     id: "cl-welcome",
     route: "any",
     title: "Reason → act → gate → repeat",
-    body: "A Cherney loop replaces prompting an agent with writing the loop that prompts it: define a goal, and the agent iterates until a gate says the goal is actually met — bounded by a budget so it can never run forever.",
+    body: "A Cherny loop replaces prompting an agent with writing the loop that prompts it: define a goal, and the agent iterates until a gate says the goal is actually met — bounded by a budget so it can never run forever.",
     placement: "center",
     kind: "explain",
     advance: "next",
@@ -155,7 +155,7 @@ export const CHERNEY_LOOP_TOUR_STEPS: readonly TourStep[] = [
   {
     id: "cl-done",
     route: "any",
-    title: "That's the Cherney loop",
+    title: "That's the Cherny loop",
     body: "A goal, a gate that deterministically proves it, a budget that bounds it, and every iteration shown and recorded — restartable and shareable. Swap the script gate for an adversarial oracle when the goal is prose, not a test. Hit '?' to replay this tour.",
     placement: "center",
     kind: "explain",

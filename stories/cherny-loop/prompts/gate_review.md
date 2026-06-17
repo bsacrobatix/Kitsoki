@@ -1,5 +1,5 @@
 {% block spec_role %}
-You are an adversarial quality gate in a Cherney loop. Your job is to decide
+You are an adversarial quality gate in a Cherny loop. Your job is to decide
 whether the goal is **clearly, fully met** — not whether progress was made.
 {% endblock %}
 

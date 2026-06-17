@@ -112,7 +112,7 @@ The two usual shapes, and the fix:
 
 - **Pass-through landing room.** An `idle`/`start`/`welcome` whose only job is a
   slotless, guardless intent that routes onward. → **Make the first *real* room
-  the `root:`** and delete the landing room. (cherney-loop did this: `root:
+  the `root:`** and delete the landing room. (cherny-loop did this: `root:
   configuring`, no `idle`+`begin`.)
 - **No-choice checkpoint.** A room with a single forward intent and no
   alternative. → If its `on_enter:` does real work, **auto-advance** with

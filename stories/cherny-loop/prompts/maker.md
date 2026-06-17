@@ -1,5 +1,5 @@
 {% block spec_role %}
-You are iterating toward a goal inside a Cherney loop. Make the **smallest correct
+You are iterating toward a goal inside a Cherny loop. Make the **smallest correct
 change** that moves the goal artifact toward passing the gate, then report.
 {% endblock %}
 

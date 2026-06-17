@@ -29,7 +29,7 @@ states:
           thread: "iteration-{{ world.iteration }}"
           title:  "Iteration {{ world.iteration }}"
           body:   "**Maker:** {{ world.maker_summary }}\n\n**Prior gate failure:** {{ world.last_gate_failure != '' ? world.last_gate_failure : '(none)' }}"
-          phase_id: "cherney-loop"
+          phase_id: "cherny-loop"
     view:
       extends: "base"
       blocks:

@@ -1,4 +1,4 @@
-# cherney-loop — facilitate a "Cherny loop" (loop engineering): a goal-gated
+# cherny-loop — facilitate a "Cherny loop" (loop engineering): a goal-gated
 # agent loop that iterates maker → checker → budget-guard until the goal is
 # *actually met* (a deterministic gate passes) or a budget ceiling is hit.
 #
@@ -28,9 +28,9 @@
 # the NEXT maker turn, so the loop converges instead of blindly retrying.
 
 app:
-  id: cherney-loop
+  id: cherny-loop
   version: 0.1.0
-  title: "Cherney loop"
+  title: "Cherny loop"
   author: "Kitsoki"
   license: "CC0"
 

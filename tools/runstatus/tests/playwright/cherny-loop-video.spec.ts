@@ -1,13 +1,13 @@
 /**
- * "Cherney loop" feature-tour video demo.
+ * "Cherny loop" feature-tour video demo.
  *
- * Drives the cherney-loop tour against a real `kitsoki web` server in the
+ * Drives the cherny-loop tour against a real `kitsoki web` server in the
  * deterministic no-LLM posture (--flow web_tour.yaml; the flow's host_handlers
  * stub the maker / script gate / artifact write, so NO host cassette is needed)
- * and records a video + per-scene screenshots to .artifacts/cherney-loop/.
+ * and records a video + per-scene screenshots to .artifacts/cherny-loop/.
  *
  * Like the golden agent-actions / dev-story-bugfix specs, this runs ONLY the
- * CHERNEY_LOOP_TOUR_STEPS via window.__startTourWithSteps. The tour drives the
+ * CHERNY_LOOP_TOUR_STEPS via window.__startTourWithSteps. The tour drives the
  * whole video: it opens on the home story library and a route-match action step
  * navigates home → new session → the drive view, then the explain beats narrate
  * the loop while the spec drives the matching intents between beats.
@@ -20,12 +20,12 @@
  *     page hook (goal + gate + budget in one shot).
  *
  * Validate fast (no dwells):
- *   WEB_CHAT_PACE=0 pnpm exec playwright test cherney-loop-video --project=chromium
+ *   WEB_CHAT_PACE=0 pnpm exec playwright test cherny-loop-video --project=chromium
  * Record at watch-speed:
- *   pnpm exec playwright test cherney-loop-video --project=chromium
+ *   pnpm exec playwright test cherny-loop-video --project=chromium
  *
  * The harness suppresses Playwright stdout, so per-step progress and any failure
- * context is also written to .artifacts/cherney-loop/ERROR.txt.
+ * context is also written to .artifacts/cherny-loop/ERROR.txt.
  */
 import { test, expect, chromium, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import path from "path";
@@ -42,15 +42,15 @@ import {
   cinematicGoto,
   type WebServer,
 } from "./_helpers/server.js";
-import { CHERNEY_LOOP_TOUR_STEPS } from "../../src/tour/cherney-loop-manifest.js";
+import { CHERNY_LOOP_TOUR_STEPS } from "../../src/tour/cherny-loop-manifest.js";
 
-const CHAPTER_SOURCE = "stories/cherney-loop/flows/web_tour.yaml";
+const CHAPTER_SOURCE = "stories/cherny-loop/flows/web_tour.yaml";
 
 // 7771 — distinct from every other spec's port so parallel runs never race.
 const ADDR = "127.0.0.1:7771";
-const STORY_DIR = path.join(repoRoot, "stories", "cherney-loop");
+const STORY_DIR = path.join(repoRoot, "stories", "cherny-loop");
 const FLOW = path.join(STORY_DIR, "flows", "web_tour.yaml");
-const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "cherney-loop");
+const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "cherny-loop");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
 const ERROR_TXT = path.join(ARTIFACT_DIR, "ERROR.txt");
 
@@ -146,7 +146,7 @@ async function driveForStep(page: Page, stepId: string): Promise<void> {
   }
 }
 
-test("cherney loop feature-tour video", async () => {
+test("cherny loop feature-tour video", async () => {
   test.setTimeout(300000);
   const browser: Browser = await chromium.launch({ headless: true });
   const context: BrowserContext = await browser.newContext({
@@ -166,10 +166,10 @@ test("cherney loop feature-tour video", async () => {
     await page.evaluate((stepsJson: string) => {
       (window as unknown as { __startTourWithSteps?: (s: string) => void })
         .__startTourWithSteps?.(stepsJson);
-    }, JSON.stringify(CHERNEY_LOOP_TOUR_STEPS));
+    }, JSON.stringify(CHERNY_LOOP_TOUR_STEPS));
     await expect(page.getByTestId("tour-overlay")).toBeVisible({ timeout: 8000 });
 
-    for (const step of CHERNEY_LOOP_TOUR_STEPS) {
+    for (const step of CHERNY_LOOP_TOUR_STEPS) {
       diag(`step ${step.id}`);
       const currentUrl = page.url();
       const currentRouteKind = currentUrl.includes("/chat")
@@ -224,11 +224,11 @@ test("cherney loop feature-tour video", async () => {
     throw e;
   } finally {
     await context.close();
-    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "cherney-loop-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "cherny-loop-demo");
     writeChapters(mp4, chapters.list());
     await browser.close();
   }
 
   const pngs = fs.readdirSync(ARTIFACT_DIR).filter((f) => f.endsWith(".png"));
-  console.log(`[cherney-loop-video] screenshots (${pngs.length}) in ${ARTIFACT_DIR}`);
+  console.log(`[cherny-loop-video] screenshots (${pngs.length}) in ${ARTIFACT_DIR}`);
 });

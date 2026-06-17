@@ -1,6 +1,6 @@
-# cherney-loop
+# cherny-loop
 
-Facilitate a **Cherney loop** (loop engineering, after Boris Cherny): an agent
+Facilitate a **Cherny loop** (loop engineering, after Boris Cherny): an agent
 iterates toward a goal until a **gate** proves the goal is *actually met* — or a
 **budget** ceiling is hit. Each iteration is a visible, tracked turn; every
 iteration is persisted as a numbered artifact so the run is restartable and
@@ -67,7 +67,7 @@ oracle gates), iteration-budget exhaustion, cost-budget exhaustion, the
 feedback-into-next-iteration edge, and a full multi-iteration run to the ceiling.
 
 ```
-kitsoki test flows stories/cherney-loop/app.yaml
+kitsoki test flows stories/cherny-loop/app.yaml
 ```
 
 ## Implementation note (engine discipline)

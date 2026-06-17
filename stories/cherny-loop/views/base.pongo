@@ -1,5 +1,5 @@
 {% comment %}
-cherney-loop base view. Block contract shared across kitsoki stories
+cherny-loop base view. Block contract shared across kitsoki stories
 (docs/stories/story-style.md §2): status / heading / body / choices / footer.
 
 The status line is the loop dashboard — iteration vs budget and $ spend vs
