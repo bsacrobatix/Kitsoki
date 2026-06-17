@@ -165,6 +165,10 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	// See machine.HostInvocation.WorldSnapshot.
 	dispatchBinds := map[string]any{}
 
+	// batchCost sums the oracle cost (total_cost_usd) of every call in this
+	// batch; folded into the reserved cost world vars after the loop.
+	var batchCost float64
+
 	for _, hc := range calls {
 		// Background invocations go to the scheduler; foreground go to the host registry.
 		if hc.Background && o.scheduler != nil {
@@ -262,6 +266,7 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		invokeCtx = host.WithWorldSnapshot(invokeCtx, w.Vars)
 
 		res, err := o.hosts.Invoke(invokeCtx, hc.Namespace, invokeArgs)
+		batchCost += host.OracleCostFrom(invokeCtx)
 		if err != nil {
 			// Infrastructure failure (e.g. handler not registered): record and move on.
 			w.Vars["last_error"] = err.Error()
@@ -415,6 +420,13 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			redirect = app.StatePath(hc.OnError)
 			break
 		}
+	}
+
+	// Fold this batch's oracle spend into the reserved cost world vars before the
+	// redirect/render paths so they (and any error room) see the current totals.
+	if costEvents := foldOracleCost(&w, batchCost); len(costEvents) > 0 {
+		events = append(events, costEvents...)
+		applied = true
 	}
 
 	if redirect != "" {
@@ -714,6 +726,10 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	// See machine.HostInvocation.WorldSnapshot.
 	dispatchBinds := map[string]any{}
 
+	// batchCost sums the oracle cost (total_cost_usd) of every call in this
+	// batch; folded into the reserved cost world vars after the loop.
+	var batchCost float64
+
 	for _, hc := range calls {
 		// Re-render templates against the invoke's position-snapshot +
 		// accumulated binds (NOT the live post-chain world) so chained
@@ -729,10 +745,12 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 		}, 0))
 		// B-7: inject oracle plugin alias for summary dispatch path.
 		invokeCtx2 := host.WithWorldSnapshot(ctx, w.Vars)
+		invokeCtx2 = host.WithOracleUsageBox(invokeCtx2)
 		if hc.OraclePlugin != "" {
 			invokeCtx2 = host.WithOraclePluginName(invokeCtx2, hc.OraclePlugin)
 		}
 		res, err := o.hosts.Invoke(invokeCtx2, hc.Namespace, invokeArgs)
+		batchCost += host.OracleCostFrom(invokeCtx2)
 		if err != nil {
 			summary.Error = err.Error()
 			summaries = append(summaries, summary)
@@ -811,6 +829,13 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 		}
 	}
 
+	// Fold this batch's oracle spend into the reserved cost world vars before the
+	// redirect/render paths so they (and any error room) see the current totals.
+	if costEvents := foldOracleCost(&w, batchCost); len(costEvents) > 0 {
+		events = append(events, costEvents...)
+		applied = true
+	}
+
 	if redirect != "" {
 		errEvents, errWorld, errView, resolvedRedirect, redirErr := o.enterRedirectState(ctx, "", state, redirect, w)
 		if redirErr != nil {
@@ -837,4 +862,52 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 		return summaries, events, w, "", "", fmt.Errorf("re-render after host dispatch: %w", err)
 	}
 	return summaries, events, w, view, "", nil
+}
+
+// foldOracleCost folds the oracle spend accumulated across one host-dispatch
+// batch (batchCost, the sum of host.OracleCostFrom over the batch's calls) into
+// the reserved, engine-managed world vars, returning the EffectApplied events to
+// journal so replay reconstructs the same totals from the event log:
+//
+//   - turn_cost_usd    — cost of the most recent host-dispatch batch (reset to 0
+//     on a batch with no oracle spend, e.g. host.run-only).
+//   - session_cost_usd — cumulative oracle spend across the whole session.
+//
+// Stories guard on these directly (e.g. `when: "world.session_cost_usd >=
+// world.cost_budget"`); WorldFromSchema seeds both to 0 so a guard that runs
+// before any oracle call still reads a number. No event is emitted when nothing
+// changed, keeping the journal free of no-op writes.
+func foldOracleCost(w *world.World, batchCost float64) []store.Event {
+	var events []store.Event
+	if batchCost != worldFloat(w.Vars["turn_cost_usd"]) {
+		w.Vars["turn_cost_usd"] = batchCost
+		events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
+			"set": map[string]any{"turn_cost_usd": batchCost},
+		}, 0))
+	}
+	if batchCost > 0 {
+		session := worldFloat(w.Vars["session_cost_usd"]) + batchCost
+		w.Vars["session_cost_usd"] = session
+		events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
+			"set": map[string]any{"session_cost_usd": session},
+		}, 0))
+	}
+	return events
+}
+
+// worldFloat coerces a world value to float64 — float64 when set by foldOracleCost
+// or rehydrated from journal JSON, int when a story declares an integer default,
+// 0 when missing or non-numeric.
+func worldFloat(v any) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case float32:
+		return float64(x)
+	case int:
+		return float64(x)
+	case int64:
+		return float64(x)
+	}
+	return 0
 }

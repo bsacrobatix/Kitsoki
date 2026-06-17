@@ -133,6 +133,23 @@ func recordOracleUsage(ctx context.Context, usage map[string]any, cost float64) 
 	b.mu.Unlock()
 }
 
+// OracleCostFrom returns the total_cost_usd recorded into the per-call usage box
+// in ctx, or 0 when no box is installed or nothing was recorded. The orchestrator
+// reads this immediately after host.Invoke to fold the call's cost into the
+// reserved world vars turn_cost_usd / session_cost_usd. Both the live claude
+// transport (recordOracleUsage during streaming) and the cassette dispatch path
+// (recordOracleUsage from resp.Meta) populate the box, so the value is the same
+// in live and replay — keeping cost-budget guards deterministic in flow tests.
+func OracleCostFrom(ctx context.Context) float64 {
+	b := oracleUsageBoxFrom(ctx)
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.cost
+}
+
 // oracleUsageMeta builds the OracleReturned.Meta map from the usage box in ctx,
 // or returns nil when no usage was recorded (so Meta stays omitempty). The
 // shape is {"usage": {…claude usage object…}, "cost_usd": <float>}.

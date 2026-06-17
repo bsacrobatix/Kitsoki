@@ -2675,5 +2675,17 @@ func WorldFromSchema(schema app.WorldSchema) world.World {
 			w.Vars[k] = def.Default
 		}
 	}
+	// Reserved, engine-managed cost vars. Seeded to 0 so a story can guard on
+	// them (`when: "world.session_cost_usd >= world.cost_budget"`) without
+	// declaring them, and so a guard that runs before any oracle call reads a
+	// number rather than nil. The orchestrator overwrites these from real oracle
+	// spend each turn (see foldOracleCost). A story that declares its own default
+	// for either key keeps it — the seed only fills an absent key.
+	if _, ok := w.Vars["session_cost_usd"]; !ok {
+		w.Vars["session_cost_usd"] = 0.0
+	}
+	if _, ok := w.Vars["turn_cost_usd"]; !ok {
+		w.Vars["turn_cost_usd"] = 0.0
+	}
 	return w
 }

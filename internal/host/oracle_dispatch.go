@@ -319,6 +319,18 @@ func Dispatch(ctx context.Context, dr OracleDispatchRequest) (OracleDispatchResu
 	episodeID := episodeIDFromMeta(resp.Meta)
 	matchIdx := matchIdxFromMeta(resp.Meta)
 
+	// Record this call's cost into the per-call usage box so the orchestrator
+	// can fold it into the reserved world vars turn_cost_usd / session_cost_usd
+	// (see OracleCostFrom). Live calls already record cost via the claude CLI
+	// transport during streaming; recording again here is a harmless last-write
+	// of the same value. The point of doing it at this single chokepoint is the
+	// CASSETTE path: replayed episodes carry cost only in resp.Meta, so without
+	// this a cost-budget guard would see $0 in flow tests. recordOracleUsage is
+	// a no-op when cost is 0, so non-oracle dispatches are unaffected.
+	if c, ok := resp.Meta["cost_usd"].(float64); ok && c != 0 {
+		recordOracleUsage(ctx, nil, c)
+	}
+
 	// Write OracleCalled after Ask returns so cassette episode_id/match_idx
 	// are available. For all transports this is functionally equivalent to
 	// writing before: OracleCalled is a no-op for replay, and the event pair

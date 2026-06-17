@@ -510,6 +510,25 @@ Two scopes live alongside `world`:
 - **`$host_error`** — set by the orchestrator when an `on_error:`
   transition fires; readable in the *target* state's first guard.
 
+Two reserved, engine-managed `world` keys carry oracle spend so a story can
+budget against cost without any host wiring (both seeded to `0` by
+`WorldFromSchema`, so a guard reads a number even before the first oracle call):
+
+- **`world.turn_cost_usd`** — `total_cost_usd` of the most recent host-dispatch
+  batch (reset to `0` on a batch with no oracle spend, e.g. `host.run`-only).
+- **`world.session_cost_usd`** — cumulative oracle spend across the session.
+
+The orchestrator overwrites these each turn from the oracle transport's reported
+cost (`foldOracleCost`, journaled as `EffectApplied` so replay reconstructs the
+same totals). Cassette episodes carry `cost_usd`, so cost-budget guards are
+deterministic in flow tests. Typical use — stop a loop on goal-met *or*
+budget-hit:
+
+```yaml
+when: "world.session_cost_usd >= world.cost_budget"
+target: "@exit:exhausted"
+```
+
 ---
 
 ## 7. Guards (the `expr` language)
