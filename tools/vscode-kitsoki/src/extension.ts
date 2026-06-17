@@ -1,6 +1,9 @@
-// extension.ts — activation entry point. The primary surface is the editor-area
-// KitsokiPanel (chat front/center + hint rail). The Activity Bar icon hosts a
-// thin launcher view whose Welcome button — and first reveal — open that panel.
+// extension.ts — activation entry point. One Kitsoki Activity Bar menu hosts the
+// surfaces (Chat / Trace / Graph) as sidebar webview views. The narrow Chat is the
+// first item; its title-bar pop-out button promotes the conversation to the
+// editor-area ChatPanel (the richer full-SPA window). There is no separate
+// launcher view — revealing Kitsoki shows the surfaces; the pop-out lives on the
+// chat panel.
 
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
@@ -38,21 +41,6 @@ function teeToFile(out: vscode.OutputChannel, logPath: string | undefined): vsco
   });
 }
 
-/**
- * The Activity Bar launcher view. It renders no tree rows — its `viewsWelcome`
- * (package.json) shows the "Open Kitsoki Chat" button — and auto-opens the editor
- * panel the first time the user reveals it (clicks the Kitsoki Activity Bar icon).
- * Least-surprise: revealing Kitsoki opens Kitsoki.
- */
-class LaunchViewProvider implements vscode.TreeDataProvider<never> {
-  getChildren(): never[] {
-    return [];
-  }
-  getTreeItem(): vscode.TreeItem {
-    return new vscode.TreeItem('');
-  }
-}
-
 export function activate(context: vscode.ExtensionContext): void {
   const out = teeToFile(vscode.window.createOutputChannel('Kitsoki'), process.env.KITSOKI_E2E_LOG);
   context.subscriptions.push(out);
@@ -88,20 +76,6 @@ export function activate(context: vscode.ExtensionContext): void {
       makeChatPanelSerializer(context.extensionUri, backend, out),
     ),
   );
-
-  // Launcher view in the Kitsoki Activity Bar container. createTreeView (not
-  // registerTreeDataProvider) so we get onDidChangeVisibility to auto-open.
-  const launchView = vscode.window.createTreeView('kitsoki.launch', {
-    treeDataProvider: new LaunchViewProvider(),
-  });
-  let autoOpened = false;
-  launchView.onDidChangeVisibility((e) => {
-    if (e.visible && !autoOpened) {
-      autoOpened = true;
-      openChat();
-    }
-  });
-  context.subscriptions.push(launchView);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('kitsoki.openChat', openChat),

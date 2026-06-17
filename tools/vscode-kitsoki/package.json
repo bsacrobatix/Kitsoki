@@ -17,22 +17,11 @@
           "id": "kitsoki",
           "title": "Kitsoki",
           "icon": "media/icon.svg"
-        },
-        {
-          "id": "kitsoki-surfaces",
-          "title": "Kitsoki Surfaces",
-          "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
       "kitsoki": [
-        {
-          "id": "kitsoki.launch",
-          "name": "Kitsoki"
-        }
-      ],
-      "kitsoki-surfaces": [
         {
           "id": "kitsoki.chat",
           "name": "Chat",
@@ -50,12 +39,6 @@
         }
       ]
     },
-    "viewsWelcome": [
-      {
-        "view": "kitsoki.launch",
-        "contents": "Chat with your agent, front and center in the editor — with live trace and graph hints you can maximize.\n\n[Open Kitsoki Chat](command:kitsoki.openChat)"
-      }
-    ],
     "commands": [
       {
         "command": "kitsoki.openChat",

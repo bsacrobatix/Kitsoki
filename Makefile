@@ -544,9 +544,16 @@ vscode-theming-sidebyside: web
 	cd $(VSCODE_DIR) && KITSOKI_VSCODE_THEME="Default Light Modern" KITSOKI_VSCODE_PACE=$${KITSOKI_VSCODE_PACE:-1} pnpm exec playwright test vscode-tour.e2e
 	docs/skills/kitsoki-ui-qa/scripts/blank-scan.sh $(DARK_TOUR)  --fail-foreign --out .artifacts/qa-vscode-dark.json  >/dev/null
 	docs/skills/kitsoki-ui-qa/scripts/blank-scan.sh $(LIGHT_TOUR) --fail-foreign --out .artifacts/qa-vscode-light.json >/dev/null
+	@# Crop both panels to the COMMON (even) height before stacking: the screen
+	@# work area clamps the window, so a render can land 872 or 874 px tall run to
+	@# run, and hstack rejects mismatched heights. Crop from top-left (drops at most
+	@# a couple bg-coloured px off the bottom).
+	H=$$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 $(DARK_TOUR)); \
+	HL=$$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 $(LIGHT_TOUR)); \
+	H=$$(( H < HL ? H : HL )); H=$$(( H - (H % 2) )); \
 	ffmpeg -y -loglevel error -i $(DARK_TOUR) -i $(LIGHT_TOUR) \
-		-filter_complex "[0:v][1:v]hstack=inputs=2:shortest=1,scale=trunc(iw/2)*2:trunc(ih/2)*2" \
-		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart -an $(SIDEBYSIDE)
+		-filter_complex "[0:v]crop=iw:$$H:0:0[d];[1:v]crop=iw:$$H:0:0[l];[d][l]hstack=inputs=2:shortest=1[v]" \
+		-map "[v]" -c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart -an $(SIDEBYSIDE)
 	-docs/skills/kitsoki-ui-qa/scripts/blank-scan.sh $(SIDEBYSIDE) --out .artifacts/qa-vscode-sidebyside.json >/dev/null  # advisory (bichromatic)
 	@echo "[sidebyside] $(SIDEBYSIDE)"
 

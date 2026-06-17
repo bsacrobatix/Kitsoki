@@ -75,7 +75,6 @@ import { spawnSync } from 'node:child_process';
 import {
   launchVSCode,
   packageExtension,
-  webviewFrame,
   type LaunchedVSCode,
 } from './_helpers/launch';
 import { WEATHER_REPORT_TOUR_STEPS } from '../../runstatus/src/tour/generated/weather-report';
@@ -511,20 +510,35 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       return p;
     };
 
-    // ── (a) Open the Kitsoki Activity Bar view (the themed story library) ──────
+    // ── (a) Reveal the single Kitsoki menu, then open the editor chat panel ────
+    // There is ONE Kitsoki Activity Bar menu now (Chat / Trace / Graph as sidebar
+    // surfaces). Reveal it (the narrow Chat is the first item), then open the rich
+    // editor-area chat panel — the full SPA story library + interactive embed where
+    // the narrated tour beats live. No launcher view: open it via its command.
     await win.waitForSelector('.monaco-workbench', { timeout: 60_000 });
     const kitsokiIcon = win.locator('.activitybar [aria-label*="Kitsoki" i]').first();
-    await expect(kitsokiIcon, 'Kitsoki Activity Bar item present').toBeVisible({ timeout: 30_000 });
+    await expect(kitsokiIcon, 'the single Kitsoki Activity Bar menu present').toBeVisible({
+      timeout: 30_000,
+    });
     await kitsokiIcon.click();
-    await dwell(1500);
+    // Wait for the single Kitsoki sidebar to actually render its Chat pane before
+    // driving the palette — clicking the icon resolves a webview and momentarily
+    // steals focus, so pressing the palette mid-transition is a race. Asserting the
+    // pane header lands first keeps this deterministic (a race is a bug, not a sleep).
+    await expect(
+      win.locator('.pane-header').filter({ hasText: /^\s*Chat\b/i }).first(),
+      'the one Kitsoki menu opened with the Chat surface as its first pane',
+    ).toBeVisible({ timeout: 30_000 });
+    await dwell(1000);
+    const chatOpened = await runPaletteCommand(win, ['>Kitsoki: Open Chat']);
+    expect(chatOpened, '"Kitsoki: Open Chat" command available').toBe(true);
+    await dwell(1300);
 
     // ── (b) The SPA renders INSIDE the webview ───────────────────────────────
     // (asserted here; the matching narrated beat is the story-library frame).
-    const chatFrame: FrameLocator = await webviewFrame(
-      win,
-      { selector: '[data-testid="home-view"]' },
-      45_000,
-    );
+    // surfaceFrame (not webviewFrame.first()) — the sidebar Chat surface is also a
+    // webview now, so scan all hosts for the editor panel's home-view.
+    const chatFrame: FrameLocator = await surfaceFrame(win, 'home-view', 45_000);
     await expect
       .poll(
         () =>
