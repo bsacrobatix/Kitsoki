@@ -146,9 +146,12 @@ schema-constrained *and* re-validated deterministically in step C:
 
 The oracle *proposes* a structured hypothesis; deterministic code *disposes* of it.
 `ground.py` confirms (1) the cited line actually contains that tool call, and (2)
-every emitted parameter value is a substring of the cited tool input — so a
-fabricated action or parameter is rejected, not reported. This is the mechanism
-that makes the "deterministic recipe" claim trustworthy (review §3). The verbatim
+every emitted parameter value is a **substring** of the cited tool input — so an
+action or parameter the trace doesn't support is rejected, not reported. The
+substring check is strong for distinctive values (paths, flags, messages) and
+weaker for short common ones (a one-word value can match incidentally); it is a
+grounding gate against fabrication, not a proof of exact equality. This is what
+makes the "deterministic recipe" claim trustworthy (review §3). The verbatim
 `user_text` is recovered deterministically from the raw transcript, **never** taken
 from the LLM.
 
@@ -255,7 +258,8 @@ coverage worksheet. The loop is documented at
 [`docs/stories/story-coverage-mining.md`](../../docs/stories/story-coverage-mining.md);
 the worked flagship (committed corpus + `run.sh` demo + filled worksheet) is
 [`examples/git-ops/`](examples/git-ops/), exercised by the no-LLM
-`tests/test_git_ops_coverage.py`.
+`tests/test_git_ops_coverage.py`. Driven by the **`story-coverage-mining`** skill
+(`.agents/skills/story-coverage-mining/`).
 
 ---
 

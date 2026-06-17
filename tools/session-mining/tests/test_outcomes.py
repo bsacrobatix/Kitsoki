@@ -127,6 +127,35 @@ def run():
         check(tto[1] is not None and "block text" in tto[1]["stdout_head"],
               "tur-shapes: list toolUseResult must surface text block as stdout_head, got %r" % tto[1])
 
+        # (1d) BATCHED tool_results in one user record (regression: some CC
+        # versions batch parallel tool calls into a single user record with N
+        # tool_result blocks but only ONE record-level toolUseResult; that tur
+        # cannot be attributed to a specific block, so it must NOT be duplicated
+        # onto every block's stdout). Two parallel Bash calls, distinct content.
+        braw = os.path.join(work, "batch_raw")
+        os.makedirs(braw)
+        with open(os.path.join(braw, "sess-batch.jsonl"), "w") as fh:
+            fh.write("\n".join([
+                json.dumps({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": "b1", "name": "Bash", "input": {}},
+                    {"type": "tool_use", "id": "b2", "name": "Bash", "input": {}}]}}),
+                json.dumps({"type": "user",
+                            "toolUseResult": {"stdout": "SHARED-DO-NOT-DUP", "stderr": "", "interrupted": False},
+                            "message": {"content": [
+                                {"type": "tool_result", "tool_use_id": "b1", "is_error": False, "content": "OUT-ONE"},
+                                {"type": "tool_result", "tool_use_id": "b2", "is_error": True, "content": "OUT-TWO"}]}}),
+            ]) + "\n")
+        bp = os.path.join(work, "batch_outcomes.json")
+        outcomes.main(["--raw", braw, "--out", bp])
+        bto = _load(bp)["sessions"]["sess-batch"]["tool_outcomes"]
+        check(len(bto) == 2, "batched: expected 2 tool_outcomes, got %d" % len(bto))
+        check(all("SHARED-DO-NOT-DUP" not in (o or {}).get("stdout_head", "") for o in bto),
+              "batched: the shared toolUseResult.stdout must NOT be duplicated onto blocks: %r" % bto)
+        check(bto[0]["is_error"] is False and "OUT-ONE" in bto[0]["stdout_head"],
+              "batched: block b1 must keep its own is_error/content: %r" % bto[0])
+        check(bto[1]["is_error"] is True and "OUT-TWO" in bto[1]["stdout_head"],
+              "batched: block b2 must keep its own is_error/content: %r" % bto[1])
+
         # --- scored spine: ground -> tag_score ---
         ground.main(["--oracle", os.path.join(FIX, "oracle.json"),
                      "--traces", traces, "--out", grounded])

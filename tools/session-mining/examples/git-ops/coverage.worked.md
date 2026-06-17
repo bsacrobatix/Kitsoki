@@ -33,8 +33,8 @@ candidate room's bash against that outcome — the irreducibly human/LLM step.
   that did not exist before Phase 1.
 - **Intent-driven verdict (the strongest signal).** Row 2 *succeeded on exit 0* yet
   is the most actionable finding, surfaced only by `satisfaction.corrected` reading
-  the follow-up turn. It routes to a **gate-shaped gap** — the bridge to
-  `dev-story-mining`'s gate-discovery loop.
+  the follow-up turn. It routes to a **gate-shaped gap** — the gate-discovery signal
+  (see `docs/stories/story-coverage-mining.md`).
 - **The honest ceiling.** The recovered outcome is raw git (`Merge made by 'ort'`);
   the story's outcome is bound world (`last_op_outcome: merged`). Matching them (row
   5) is a grounded human judgment, not a string compare — Phase 1 makes it

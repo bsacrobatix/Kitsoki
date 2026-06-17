@@ -46,11 +46,33 @@ def _unquote(s):
     return s
 
 
+def _split_flow(inner):
+    """Split a flow-list body on top-level commas, honoring single/double quotes
+    (so `"git merge, squash"` stays one element). No nesting/escapes — the profile
+    subset doesn't need them."""
+    parts, buf, quote = [], [], None
+    for ch in inner:
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+            buf.append(ch)
+        elif ch == ",":
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    parts.append("".join(buf))
+    return [p for p in parts if p.strip()]
+
+
 def _parse_value(val):
     val = val.strip()
     if val.startswith("["):
         inner = val[1:val.rindex("]")] if "]" in val else val[1:]
-        return [_unquote(p) for p in inner.split(",") if p.strip()]
+        return [_unquote(p) for p in _split_flow(inner)]
     # scalar: strip an inline comment only when the value is not quoted
     if not (val.startswith('"') or val.startswith("'")):
         val = val.split("#", 1)[0].strip()
@@ -58,14 +80,26 @@ def _parse_value(val):
 
 
 def load_profile(path):
+    """Parse the mining.profile.yaml subset: indent-nested maps, scalar values,
+    and flow-style lists `[a, "b c", ...]`. This is a SUBSET, not full YAML — it
+    fails loud on the shapes it can't represent (block lists, tab indentation)
+    rather than silently producing garbage."""
     root = {}
     stack = [(-1, root)]  # (indent, container-dict)
     with open(path) as fh:
-        for raw in fh:
+        for n, raw in enumerate(fh, 1):
             line = raw.rstrip("\n")
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
-            indent = len(line) - len(line.lstrip(" "))
+            ws = line[:len(line) - len(line.lstrip())]
+            if "\t" in ws:
+                raise ValueError("%s:%d uses tab indentation; the profile parser "
+                                 "requires spaces (YAML forbids tabs)" % (path, n))
+            if line.lstrip().startswith("- "):
+                raise ValueError("%s:%d uses a block-style list (`- item`); this "
+                                 "profile parser only supports flow lists "
+                                 "(`key: [a, b, c]`)" % (path, n))
+            indent = len(ws)
             while len(stack) > 1 and indent <= stack[-1][0]:
                 stack.pop()
             parent = stack[-1][1]
@@ -153,6 +187,7 @@ def main(argv=None):
     action_tags = set(scope.get("action_tags", []))
     owns = prof.get("owns", {})
     markers = prof.get("non_goal_markers", [])
+    non_goals = prof.get("non_goals", [])  # the declared v1 non-goal set (surfaced for the map)
     story = prof.get("story", "?")
 
     intents = json.load(open(os.path.join(args.job_dir, "intents.json"))).get("intents", [])
@@ -201,6 +236,7 @@ def main(argv=None):
         "schema_version": "1.0",
         "story": story,
         "job": os.path.basename(os.path.normpath(args.job_dir)),
+        "non_goals": non_goals,
         "total_in_scope": len(rows),
         "total_out_of_scope_by_tag": out_of_scope,
         "deduped_shapes": len(group_list),

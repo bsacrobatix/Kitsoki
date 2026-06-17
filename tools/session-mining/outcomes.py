@@ -91,19 +91,26 @@ def collect_session(jsonl_path, stdout_head):
                         if isinstance(b, dict) and b.get("type") == "tool_use":
                             tool_uses.append({"id": b.get("id")})
             elif typ == "user":
-                # Top-level toolUseResult (sibling of message); shared by the
-                # tool_result block(s) in the same user record.
+                # Top-level toolUseResult (sibling of message). A user record
+                # normally carries exactly ONE tool_result block, so the record's
+                # toolUseResult belongs to it. If a record ever carries MULTIPLE
+                # tool_result blocks (some CC versions batch parallel tool calls),
+                # the single record-level toolUseResult cannot be attributed to a
+                # specific block — duplicating its stdout/stderr onto every block
+                # would mis-report parallel calls. In that case drop it and fall
+                # back to each block's own `content`. (is_error is per-block.)
                 tur = obj.get("toolUseResult")
                 content = (obj.get("message") or {}).get("content")
                 blocks = [b for b in content
                           if isinstance(b, dict) and b.get("type") == "tool_result"] \
                     if isinstance(content, list) else []
+                attr_tur = tur if len(blocks) == 1 else None
                 if blocks:
                     for b in blocks:
                         result = {
                             "is_error": bool(b.get("is_error", False)),
                             "content": b.get("content"),
-                            "tool_use_result": tur,
+                            "tool_use_result": attr_tur,
                         }
                         rid = b.get("tool_use_id")
                         if rid is not None:

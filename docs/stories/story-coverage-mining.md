@@ -60,8 +60,9 @@ exit 0**. It routes to one of two improvement shapes:
 - **DIVERGES** — the story would *reproduce the rejected outcome*; fix the room.
 - **Gate-shaped gap (more common)** — users repeatedly correct right after workflow
   X ⇒ X needs a **gate the story lacks** (a confirm, a diff-review, a base check).
-  This is the bridge to [`dev-story-mining`](../../stories/dev-story-mining/)'s
-  gate-discovery loop.
+  This is the **gate-discovery** signal: the satisfaction flag is what connects "this
+  story behaves wrong" to "this story is *missing a decision*" (the deferred
+  `story-mining` story in *What remains* below would automate this map).
 
 It is a recall-biased **review flag** that raises an intent's priority and nominates
 a gate — never an automatic verdict (it inspects only the *immediately* following
@@ -151,8 +152,8 @@ room bash** — that is the irreducible ② step.
 The doc + profile + Phase-1 outcome capture + `coverage_prep.py` are landed and
 proven on git-ops. Two extensions are deliberately deferred:
 
-- **A runnable `story-mining` story** — generalize `dev-story-mining` with the map
-  gate switched to the conformance verdict, judge-polymorphic. Highest investment;
+- **A runnable `story-mining` story** — generalize this loop into a kitsoki story
+  whose map gate is the conformance verdict, judge-polymorphic. Highest investment;
   justified only if this becomes a recurring multi-story program. It inherits ②'s
   human/LLM-in-the-loop map — there is no "for free" generalization.
 - **Phase-2 sharpening** — determinism scoring that reads `corrected`/`is_error`

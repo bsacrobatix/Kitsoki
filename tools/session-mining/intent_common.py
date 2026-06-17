@@ -76,9 +76,18 @@ def load_tag_vocab(path):
         if re.match(r"^    members:\s*$", raw):
             in_members = True
             continue
-        m = re.match(r"^      -\s*(\S+)\s*$", raw)
+        m = re.match(r"^      -\s*(.+?)\s*$", raw)
         if m and cur_dim and in_members:
-            out["dimensions"][cur_dim].add(m.group(1))
+            member = m.group(1)
+            # tolerate an inline `# comment` and surrounding quotes so a vocab
+            # edit doesn't silently drop a tag (which would later be reported as
+            # an "unknown tag" and dropped from every intent).
+            if not (member.startswith('"') or member.startswith("'")):
+                member = member.split("#", 1)[0].strip()
+            if len(member) >= 2 and member[0] in "\"'" and member[-1] == member[0]:
+                member = member[1:-1]
+            if member:
+                out["dimensions"][cur_dim].add(member)
     return out
 
 
