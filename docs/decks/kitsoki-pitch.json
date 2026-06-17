@@ -1,0 +1,1090 @@
+{
+  "_comment": "Kitsoki concept pitch. Leads with control inversion and the proofs a coding-agent skeptic can't dismiss: the runtime overrules the model mid-call, ~78% of turns never call the LLM, edits hot-reload and replay byte-for-byte as tests, and the workflow runs where work already lives.",
+  "meta": {
+    "mode": "pitch",
+    "title": "Kitsoki",
+    "ticket": "",
+    "phase": "demo",
+    "resolution": {
+      "width": 1920,
+      "height": 1080
+    },
+    "narration": {
+      "voice": "en-AU-NatashaNeural",
+      "rate": "+0%"
+    }
+  },
+  "scenes": [
+    {
+      "type": "title",
+      "title": "Kitsoki",
+      "subtitle": "A conversational workflow engine with deterministic flow"
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "The setting",
+      "body": "You have a workflow. People drive it by chatting where the work already lives.",
+      "lede": "A GitHub issue. A Jira ticket. A Slack thread. A CRM record.",
+      "hold": 165,
+      "narration": "You have a workflow. People drive it by chatting where the work lives."
+    },
+    {
+      "type": "diagram-svg",
+      "title": "One workflow, many surfaces",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1100 460",
+          "nodes": [
+            {
+              "id": "wf",
+              "label": "Kitsoki",
+              "sub": "state machine",
+              "x": 420,
+              "y": 170,
+              "w": 286,
+              "h": 130,
+              "style": "primary"
+            },
+            {
+              "id": "gh",
+              "label": "GitHub issue",
+              "sub": "comments",
+              "x": 370,
+              "y": 20,
+              "w": 388,
+              "h": 120
+            },
+            {
+              "id": "jira",
+              "label": "Jira ticket",
+              "sub": "comments",
+              "x": 20,
+              "y": 175,
+              "w": 361,
+              "h": 120
+            },
+            {
+              "id": "cli",
+              "label": "Local TUI",
+              "sub": "kitsoki run",
+              "x": 740,
+              "y": 175,
+              "w": 320,
+              "h": 120
+            },
+            {
+              "id": "slack",
+              "label": "Slack thread",
+              "sub": "replies",
+              "x": 370,
+              "y": 320,
+              "w": 388,
+              "h": 120
+            }
+          ],
+          "edges": [
+            {
+              "from": "gh",
+              "to": "wf"
+            },
+            {
+              "from": "jira",
+              "to": "wf"
+            },
+            {
+              "from": "cli",
+              "to": "wf"
+            },
+            {
+              "from": "slack",
+              "to": "wf"
+            }
+          ]
+        }
+      ],
+      "caption": "One YAML state machine drives every surface \u2014 the same flow runs in a terminal and in a real ticket thread.",
+      "hold": 210,
+      "narration": "One YAML state machine drives every surface. GitHub, Jira, Slack, or your terminal."
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "The problem",
+      "body": "Building this chatbot is harder than it looks.",
+      "lede": "Pure LLM agents drift, can't be tested, and break unpredictably. Hand-coded state machines can't parse free text or evolve.",
+      "hold": 165,
+      "narration": "Building this is harder than it looks. Agents drift. State machines can't parse text."
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Control inversion",
+      "panels": [
+        {
+          "label": "Typical agent",
+          "viewBox": "0 0 420 380",
+          "nodes": [
+            {
+              "id": "llm",
+              "label": "LLM",
+              "sub": "plan \u00b7 reason \u00b7 decide",
+              "x": 70,
+              "y": 50,
+              "w": 320,
+              "h": 118,
+              "style": "primary"
+            },
+            {
+              "id": "rt",
+              "label": "runtime",
+              "sub": "execute",
+              "x": 70,
+              "y": 240,
+              "w": 320,
+              "h": 118
+            }
+          ],
+          "edges": [
+            {
+              "from": "llm",
+              "to": "rt",
+              "label": "calls"
+            }
+          ],
+          "caption": "LLM holds the plan; runtime executes."
+        },
+        {
+          "label": "Kitsoki",
+          "viewBox": "0 0 420 380",
+          "nodes": [
+            {
+              "id": "rt",
+              "label": "runtime",
+              "sub": "state machine",
+              "x": 70,
+              "y": 50,
+              "w": 320,
+              "h": 118,
+              "style": "primary"
+            },
+            {
+              "id": "llm",
+              "label": "LLM",
+              "sub": "narrow sub-task",
+              "x": 70,
+              "y": 240,
+              "w": 320,
+              "h": 118,
+              "style": "secondary"
+            }
+          ],
+          "edges": [
+            {
+              "from": "rt",
+              "to": "llm",
+              "label": "resolve this",
+              "side": "left"
+            },
+            {
+              "from": "llm",
+              "to": "rt",
+              "label": "typed intent",
+              "side": "right"
+            }
+          ],
+          "caption": "Runtime holds the plan; LLM is called as a sub-task."
+        }
+      ],
+      "caption": "The arrow that matters is the LLM's return arrow \u2014 a typed intent, not a free-form action.",
+      "hold": 210,
+      "narration": "Kitsoki flips control. The runtime is in charge. The LLM is called only when interpretation is needed."
+    },
+    {
+      "type": "diagram-svg",
+      "title": "One prompt",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 700 660",
+          "nodes": [
+            {
+              "id": "prompt",
+              "label": "PROMPT",
+              "lines": [
+                "validate the bug,",
+                "then fix it,",
+                "then make sure",
+                "you did a good job."
+              ],
+              "x": 130,
+              "y": 50,
+              "w": 464,
+              "h": 240
+            },
+            {
+              "id": "agent",
+              "label": "agent",
+              "sub": "opus",
+              "lines": [
+                "tools: shell + git + repo",
+                "domain: entire codebase"
+              ],
+              "x": 130,
+              "y": 410,
+              "w": 464,
+              "h": 220,
+              "style": "primary"
+            }
+          ],
+          "edges": [
+            {
+              "from": "prompt",
+              "to": "agent"
+            }
+          ]
+        }
+      ],
+      "caption": "One agent. One prompt. No structure between the steps.",
+      "hold": 240,
+      "narration": "The naive approach: one big prompt. Validate, fix, verify. The agent does everything."
+    },
+    {
+      "type": "title",
+      "title": "vs."
+    },
+    {
+      "_comment": "Scene 7\u201313: full graph shown throughout; one item highlighted per slide.",
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 680 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 260,
+              "w": 540,
+              "h": 150
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 480,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 approve or refine"
+              ],
+              "x": 70,
+              "y": 730,
+              "w": 540,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails"
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved"
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass"
+            }
+          ]
+        }
+      ],
+      "caption": "Phase 1: read-only \u2014 confirm the bug exists before any code changes.",
+      "hold": 120,
+      "narration": "Four phases, three gates \u2014 starting with reproduce.",
+      "seamless": true,
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 680 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 260,
+              "w": 540,
+              "h": 150
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 480,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 approve or refine"
+              ],
+              "x": 70,
+              "y": 730,
+              "w": 540,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails",
+              "highlighted": true
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved"
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass"
+            }
+          ]
+        }
+      ],
+      "caption": "Gate: test must fail \u2014 no planning until the bug is proven reproducible.",
+      "hold": 90,
+      "narration": "The first gate: test must fail before planning begins.",
+      "seamless": true,
+      "skipTitle": true,
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 680 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 260,
+              "w": 540,
+              "h": 150,
+              "style": "primary"
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 480,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 approve or refine"
+              ],
+              "x": 70,
+              "y": 730,
+              "w": 540,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails"
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved"
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass"
+            }
+          ]
+        }
+      ],
+      "caption": "Phase 2: propose the fix approach \u2014 requires operator sign-off before proceeding.",
+      "hold": 120,
+      "narration": "Plan proposes the fix \u2014 awaiting operator sign-off.",
+      "seamless": true,
+      "skipTitle": true,
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 680 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 260,
+              "w": 540,
+              "h": 150
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 480,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 approve or refine"
+              ],
+              "x": 70,
+              "y": 730,
+              "w": 540,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails"
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved",
+              "highlighted": true
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass"
+            }
+          ]
+        }
+      ],
+      "caption": "Gate: no code written until the plan is approved.",
+      "hold": 90,
+      "narration": "Gate: no code changes until the plan is signed off.",
+      "seamless": true,
+      "skipTitle": true,
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 680 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 260,
+              "w": 540,
+              "h": 150
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 480,
+              "w": 540,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 approve or refine"
+              ],
+              "x": 70,
+              "y": 730,
+              "w": 540,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails"
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved"
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass"
+            }
+          ]
+        }
+      ],
+      "caption": "Phase 3: writes to an isolated worktree \u2014 scoped to code changes only.",
+      "hold": 120,
+      "narration": "Implement writes to a scoped worktree \u2014 isolated from main.",
+      "seamless": true,
+      "skipTitle": true,
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 680 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 260,
+              "w": 540,
+              "h": 150
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 480,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 approve or refine"
+              ],
+              "x": 70,
+              "y": 730,
+              "w": 540,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails"
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved"
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass",
+              "highlighted": true
+            }
+          ]
+        }
+      ],
+      "caption": "Gate: tests must pass \u2014 review only sees working code.",
+      "hold": 90,
+      "narration": "Gate: tests must pass before sending to human review.",
+      "seamless": true,
+      "skipTitle": true,
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 680 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 260,
+              "w": 540,
+              "h": 150
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 480,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 approve or refine"
+              ],
+              "x": 70,
+              "y": 730,
+              "w": 540,
+              "h": 150,
+              "style": "primary"
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails"
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved"
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass"
+            }
+          ]
+        }
+      ],
+      "caption": "Deterministic gates between phases ensure preconditions are met before continuing.",
+      "hold": 210,
+      "narration": "Review approves \u2014 or sends it back. Deterministic gates ensure preconditions are met.",
+      "skipTitle": true,
+      "instant": true
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "Semantic routing",
+      "body": "Three layers route most turns without the LLM.",
+      "lede": "Synonyms catch verbatim aliases. Slot templates catch common shapes. The LLM is called only when both layers miss \u2014 and 78% of turns don't reach it.",
+      "hold": 195,
+      "narration": "Three semantic layers route most turns. Synonyms first, slot templates next, the LLM only as fallback."
+    },
+    {
+      "type": "trace",
+      "title": "Deterministic first",
+      "turns": [
+        {
+          "user": "kick off the next bug",
+          "layers": [
+            {
+              "name": "synonym",
+              "result": "MISS"
+            },
+            {
+              "name": "slot",
+              "result": "MISS"
+            },
+            {
+              "name": "LLM",
+              "result": "HIT",
+              "ms": 240
+            }
+          ],
+          "intent": "pickup_bug"
+        },
+        {
+          "user": "review",
+          "layers": [
+            {
+              "name": "synonym",
+              "result": "HIT"
+            }
+          ],
+          "intent": "review_bug",
+          "no_llm": true
+        }
+      ],
+      "caption": "Synonyms and slot templates handle the common cases. The LLM is only called when they miss.",
+      "hold": 210,
+      "narration": "The first turn misses both deterministic layers, so kitsoki calls the LLM. The second turn hits a synonym \u2014 no LLM needed."
+    },
+    {
+      "_comment": "P1 \u2014 the host rejects the model mid-call. The single hardest beat for a coding-agent skeptic to dismiss: their model is its own authority.",
+      "type": "diagram-svg",
+      "title": "The runtime overrules the model",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 820 640",
+          "nodes": [
+            {
+              "id": "llm",
+              "label": "LLM",
+              "sub": "proposes a decision",
+              "lines": [
+                "verb: decide"
+              ],
+              "x": 190,
+              "y": 20,
+              "w": 440,
+              "h": 150
+            },
+            {
+              "id": "runtime",
+              "label": "runtime",
+              "sub": "validates the answer",
+              "lines": [
+                "rejects off-contract"
+              ],
+              "x": 190,
+              "y": 250,
+              "w": 440,
+              "h": 150,
+              "style": "primary"
+            },
+            {
+              "id": "accepted",
+              "label": "accepted",
+              "sub": "recorded in the trace",
+              "x": 190,
+              "y": 490,
+              "w": 440,
+              "h": 120
+            }
+          ],
+          "edges": [
+            {
+              "from": "llm",
+              "to": "runtime",
+              "label": "submits",
+              "side": "right"
+            },
+            {
+              "from": "runtime",
+              "to": "llm",
+              "label": "reject \u00b7 re-prompt",
+              "side": "left"
+            },
+            {
+              "from": "runtime",
+              "to": "accepted",
+              "label": "valid"
+            }
+          ]
+        }
+      ],
+      "caption": "Even when the LLM is called, the runtime validates the answer \u2014 and can reject and re-prompt it mid-call.",
+      "hold": 240,
+      "narration": "And when the LLM is called, the runtime still polices the answer. An off-contract decision is rejected, the model is nudged, and only a valid decision is accepted \u2014 every step on the record.",
+      "instant": true
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "The dev loop",
+      "body": "Author locally. Replay. Deploy.",
+      "lede": "Edit the YAML and the running machine hot-reloads. Every turn replays byte-for-byte with no LLM call \u2014 the spec is its own regression test. Attach to GitHub Issues or Jira with one config change.",
+      "hold": 180,
+      "narration": "Author locally. The running machine hot-reloads your edits, and every turn replays byte-for-byte with no LLM \u2014 so the spec is its own test. Then attach to GitHub or Jira."
+    },
+    {
+      "type": "thread",
+      "title": "Driven from where work lives",
+      "panels": [
+        {
+          "system": "jira",
+          "ref": "PLTFRM-89507",
+          "stage": "refine",
+          "messages": [
+            {
+              "author": "alice",
+              "role": "dev",
+              "body": "Also reject service-account JWTs. They shouldn't reach this route."
+            },
+            {
+              "author": "kitsoki",
+              "role": "bot",
+              "body": "Plan updated:\n\u2022 added negative test for service-account JWT\n\u2022 tightened middleware match"
+            }
+          ]
+        },
+        {
+          "system": "bitbucket",
+          "ref": "PR-481",
+          "stage": "review",
+          "messages": [
+            {
+              "author": "alice",
+              "role": "dev",
+              "body": "use a ternary here"
+            },
+            {
+              "author": "kitsoki",
+              "role": "bot",
+              "body": "Acknowledged. Pushing fix\u2026\n\n\u2713 pushed  a3f8d2c \u00b7 refactor(auth): use ternary in service-account check"
+            }
+          ]
+        }
+      ],
+      "caption": "No local checkout. No \"kitsoki run\". The state machine runs in CI; comments are the surface.",
+      "hold": 270,
+      "narration": "Developers drive workflows from where the work lives. Comment on a ticket to refine. Comment on a pull request to push a fix."
+    },
+    {
+      "type": "stat",
+      "value": "78%",
+      "label": "of turns route deterministically \u2014 without calling the LLM.",
+      "detail": "Measured across the cloak, oregon-trail and dev-story stories.",
+      "hold": 150,
+      "narration": "Across our stories, seventy-eight percent of turns route without an LLM call."
+    },
+    {
+      "type": "thread",
+      "title": "Improves with use",
+      "panels": [
+        {
+          "system": "jira",
+          "ref": "PLTFRM-89507",
+          "stage": "trace",
+          "messages": [
+            {
+              "author": "kitsoki",
+              "role": "bot",
+              "body": "Test-review converted from LLM call \u2192 deterministic script.\n\nTrace showed 47 identical calls; replaced with a 12-line script."
+            }
+          ]
+        },
+        {
+          "system": "jira",
+          "ref": "PLTFRM-89507",
+          "stage": "feedback",
+          "messages": [
+            {
+              "author": "alice",
+              "role": "dev",
+              "body": "feedback for kitsoki \u2014 you're being way too verbose in the comments"
+            },
+            {
+              "author": "kitsoki",
+              "role": "bot",
+              "body": "Acknowledged. Tuning comment verbosity in next deploy."
+            }
+          ]
+        },
+        {
+          "system": "jira",
+          "ref": "PLTFRM-89507",
+          "stage": "knowledge",
+          "messages": [
+            {
+              "author": "kitsoki",
+              "role": "bot",
+              "body": "Indexed your team's internal tooling and docs:\n\u2022 runbook RUN-042 \u2192 embedded in the auth-fix prompt\n\u2022 stand-validate command \u2192 wrapped as a host call"
+            }
+          ]
+        }
+      ],
+      "caption": "The trace tells the author where the LLM keeps being asked the same question. Each conversion is one diff against the YAML \u2014 and the system absorbs your existing tools as it goes.",
+      "hold": 300,
+      "narration": "Kitsoki improves with use. It converts repeated LLM calls into scripts. It accepts your feedback. And it indexes your team's existing tools."
+    },
+    {
+      "type": "cta",
+      "wordmark": "Kitsoki",
+      "tagline": "Prove what the model did \u2014 and what it couldn't",
+      "url": "github.com/constructorfabric/Kitsoki",
+      "hold": 180,
+      "narration": "Kitsoki \u2014 prove what the model did, and what it couldn't."
+    }
+  ]
+}
