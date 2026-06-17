@@ -1,0 +1,31 @@
+# Oracle gate mode: host.oracle.decide adversarially reviews the artifact and
+# returns pass=true → @exit:achieved. Same loop, different (LLM) checker — for
+# goals no script can encode.
+test_kind: flow
+app: ../app.yaml
+initial_state: iterating
+initial_world:
+  goal_text:        "Write a clear one-page design doc for the cache layer"
+  goal_artifact:    "docs/cache-design.md"
+  gate_mode:        "oracle"
+  iteration:        2
+  iteration_budget: 8
+  maker_summary:    "rewrote the eviction section"
+
+host_handlers:
+  host.oracle.decide:
+    data:
+      submitted:
+        pass:   true
+        reason: "Covers eviction, sizing, and failure modes with examples."
+        fixes:  []
+  host.artifacts_dir: { data: { ok: true } }
+
+turns:
+  - intent: { name: evaluate, slots: {} }
+    expect_state: __exit__achieved
+    expect_world:
+      goal_achieved:   true
+      terminal_reason: "achieved"
+
+expect_terminal: true

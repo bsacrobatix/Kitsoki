@@ -1,0 +1,58 @@
+states:
+  configuring:
+    description: "Configure the loop"
+    relevant_world: [goal_text, gate_mode, gate_command, iteration_budget, cost_budget_usd]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Set the goal, the gate that proves it, and the budgets. `launch` runs the first iteration."
+          - kv:
+              pairs:
+                Goal:          '{{ world.goal_text|default:"(not yet chosen)" }}'
+                Artifact:      '{{ world.goal_artifact|default:"(none)" }}'
+                Gate mode:     "{{ world.gate_mode }}"
+                Gate command:  '{{ world.gate_command|default:"(none — required for script mode)" }}'
+                Iteration cap: "{{ world.iteration_budget }}"
+                Cost cap:      '{% if world.cost_budget_usd > 0 %}${{ world.cost_budget_usd }}{% else %}(disabled){% endif %}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "configure goal=… gate_command=… iteration_budget=… cost_budget=…"
+                  hint:  "set any subset"
+                - label: "launch"
+                  hint:  "run the first iteration"
+                  when:  "world.goal_text != ''"
+                - label: "✗ launch — set a goal first"
+                  when:  "world.goal_text == ''"
+                - label: "abort"
+                  hint:  "abandon the loop"
+                - label: "look"
+    on:
+      configure:
+        - target: .
+          effects:
+            - set:
+                goal_text:        "{{ slots.goal ?? world.goal_text }}"
+                gate_mode:        "{{ slots.gate_mode ?? world.gate_mode }}"
+                gate_command:     "{{ slots.gate_command ?? world.gate_command }}"
+                iteration_budget: "{{ slots.iteration_budget ?? world.iteration_budget }}"
+                cost_budget_usd:  "{{ slots.cost_budget ?? world.cost_budget_usd }}"
+      launch:
+        - when: "world.goal_text == ''"
+          target: .
+          effects:
+            - say: "Set a goal first: `configure goal=…`."
+        - target: iterating
+      abort:
+        - target: "@exit:abandoned"
+          effects:
+            - set: { terminal_reason: "aborted" }
+      look:
+        - target: .
+      "*":
+        - default: true
+          target: .
+          effects:
+            - say: "Use `configure`, `launch`, or `abort`."

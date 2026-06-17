@@ -1,0 +1,29 @@
+# Gate fails and the $ ceiling is breached → @exit:exhausted (cost_budget).
+# session_cost_usd (0.60, the reserved engine-maintained spend; seeded here to
+# simulate prior oracle cost) >= cost_budget_usd (0.50), so the cost guard fires
+# before the iteration ceiling.
+test_kind: flow
+app: ../app.yaml
+initial_state: iterating
+initial_world:
+  goal_text:        "Make the unit tests pass"
+  gate_mode:        "script"
+  gate_command:     "go test ./..."
+  iteration:        2
+  iteration_budget: 10
+  cost_budget_usd:  0.50
+  session_cost_usd: 0.60
+  maker_summary:    "expensive attempt"
+
+host_handlers:
+  host.run:           { data: { ok: false, exit_code: 1, stdout: "FAIL" } }
+  host.oracle.task:   { data: { submitted: { summary: "stub" } } }
+  host.artifacts_dir: { data: { ok: true } }
+
+turns:
+  - intent: { name: evaluate, slots: {} }
+    expect_state: __exit__exhausted
+    expect_world:
+      terminal_reason: "cost_budget"
+
+expect_terminal: true

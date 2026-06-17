@@ -1,0 +1,110 @@
+states:
+  iterating:
+    description: "Iteration — maker at work"
+    relevant_world: [iteration, iteration_budget, goal_text, maker_summary, last_gate_failure, session_cost_usd]
+    # on_enter runs one maker iteration: bump the counter, let the maker make a
+    # change toward the goal (fed the previous gate failure as feedback — the
+    # ralph-style reset: anchors + the one failure reason, not a growing
+    # transcript), then persist the iteration as a numbered artifact.
+    on_enter:
+      - increment: { iteration: 1 }
+      - invoke: host.oracle.task
+        with:
+          agent: maker
+          acceptance:
+            schema: schemas/maker_output.json
+          context:
+            prompt: prompts/maker.md
+            args:
+              goal:              "{{ world.goal_text }}"
+              goal_artifact:     "{{ world.goal_artifact }}"
+              anchor_files:      "{{ world.anchor_files }}"
+              iteration:         "{{ world.iteration }}"
+              last_gate_failure: "{{ world.last_gate_failure != '' ? world.last_gate_failure : '(first iteration — no prior feedback)' }}"
+        bind:
+          maker_summary: submitted.summary
+        on_error: iterating_error
+      - invoke: host.artifacts_dir
+        with:
+          thread: "iteration-{{ world.iteration }}"
+          title:  "Iteration {{ world.iteration }}"
+          body:   "**Maker:** {{ world.maker_summary }}\n\n**Prior gate failure:** {{ world.last_gate_failure != '' ? world.last_gate_failure : '(none)' }}"
+          phase_id: "cherney-loop"
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Goal:      "{{ world.goal_text }}"
+                Iteration: "{{ world.iteration }} of {{ world.iteration_budget }}"
+          - heading: "Maker"
+          - prose: '{{ world.maker_summary|default:"(pending — maker has not returned)" }}'
+          - heading: "Feedback carried in"
+          - prose: '{{ world.last_gate_failure|default:"(none — first iteration)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "evaluate"
+                  hint:  "run the gate on this iteration"
+                - label: "abort"
+                  hint:  "abandon the loop"
+                - label: "look"
+    on:
+      evaluate:
+        - target: gating
+          effects:
+            # Reset the gate verdict so the routing emits in gating defer to the
+            # post-bind pass (gate_ok == "" makes every == true/== false guard
+            # false until the checker binds a real bool).
+            - set: { gate_ok: "", gate_stdout: "", gate_reason: "" }
+      abort:
+        - target: "@exit:abandoned"
+          effects:
+            - set: { terminal_reason: "aborted" }
+      look:
+        - target: .
+      "*":
+        - default: true
+          target: .
+          effects:
+            - say: "Type `evaluate` to run the gate, or `abort`."
+
+  # Maker host-call failure lands here rather than silently bouncing to idle.
+  iterating_error:
+    description: "Maker call failed"
+    relevant_world: [last_error, iteration]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "The maker call failed on iteration {{ world.iteration }}."
+          - code: '{{ world.last_error|default:"(no error detail)" }}'
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "evaluate"
+                  hint:  "gate the artifact anyway"
+                - label: "abort"
+                - label: "look"
+    on:
+      evaluate:
+        - target: gating
+          effects:
+            # Reset the gate verdict so the routing emits in gating defer to the
+            # post-bind pass (gate_ok == "" makes every == true/== false guard
+            # false until the checker binds a real bool).
+            - set: { gate_ok: "", gate_stdout: "", gate_reason: "" }
+      abort:
+        - target: "@exit:abandoned"
+          effects:
+            - set: { terminal_reason: "aborted" }
+      look:
+        - target: .
+      "*":
+        - default: true
+          target: .
+          effects:
+            - say: "Type `evaluate` or `abort`."

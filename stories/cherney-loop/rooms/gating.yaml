@@ -1,0 +1,91 @@
+states:
+  gating:
+    description: "Gate — checking the goal"
+    relevant_world: [gate_mode, gate_ok, gate_exit_code, iteration, iteration_budget, session_cost_usd, cost_budget_usd]
+    # Run the configured checker, then route on the verdict + budgets. The maker
+    # (in `iterating`) cannot grade itself: the checker is either deterministic
+    # code (script) or a separate-context adversarial oracle.
+    #
+    # Routing is a set of mutually-exclusive GUARDED emit_intents — each reads
+    # world.gate_ok, which forces the engine to settle the gate's binds before
+    # routing (the bugfix judge→emit pattern). An unguarded emit would resolve
+    # before the bind lands and always see gate_ok=false.
+    on_enter:
+      # Script gate — deterministic, free, incorruptible. Passes iff exit 0.
+      - invoke: host.run
+        when: "world.gate_mode == 'script'"
+        with:
+          cmd: "{{ world.gate_command }}"
+          fail_on_error: false
+        bind:
+          gate_ok:        ok
+          gate_exit_code: exit_code
+          gate_stdout:    stdout
+      # Oracle gate — adversarial review for goals no test can encode.
+      - invoke: host.oracle.decide
+        when: "world.gate_mode == 'oracle'"
+        with:
+          prompt: prompts/gate_review.md
+          schema: schemas/gate_verdict.json
+          agent: gate_reviewer
+          args:
+            goal:          "{{ world.goal_text }}"
+            goal_artifact: "{{ world.goal_artifact }}"
+        bind:
+          gate_ok:     submitted.pass
+          gate_reason: submitted.reason
+      # Each guard compares gate_ok to a concrete bool, so all four are false
+      # while gate_ok is "" (pre-bind) and exactly one is true post-bind.
+      # 1. Goal met — always wins.
+      - when: "world.gate_ok == true"
+        emit_intent: mark_achieved
+      # 2. Cost ceiling (only when enabled). session_cost_usd is the reserved
+      #    engine-maintained $ spend.
+      - when: "world.gate_ok == false && world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd"
+        emit_intent: mark_cost_exhausted
+      # 3. Iteration ceiling (only if cost did not already fire).
+      - when: "world.gate_ok == false && !(world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd) && world.iteration >= world.iteration_budget"
+        emit_intent: mark_iter_exhausted
+      # 4. Otherwise loop: hand the gate's failure reason to the next maker turn.
+      - when: "world.gate_ok == false && !(world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd) && world.iteration < world.iteration_budget"
+        emit_intent: loop_again
+        slots:
+          feedback: "{{ world.gate_reason }}{{ world.gate_stdout }}"
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Gating iteration {{ world.iteration }}…"
+        choices:
+          - list:
+              items:
+                - label: "look"
+    on:
+      mark_achieved:
+        - target: "@exit:achieved"
+          effects:
+            - set: { goal_achieved: true, terminal_reason: "achieved" }
+      mark_cost_exhausted:
+        - target: "@exit:exhausted"
+          effects:
+            - set: { terminal_reason: "cost_budget" }
+      mark_iter_exhausted:
+        - target: "@exit:exhausted"
+          effects:
+            - set: { terminal_reason: "iteration_budget" }
+      loop_again:
+        - target: iterating
+          effects:
+            - set:
+                last_gate_failure: "{{ slots.feedback }}"
+      abort:
+        - target: "@exit:abandoned"
+          effects:
+            - set: { terminal_reason: "aborted" }
+      look:
+        - target: .
+      "*":
+        - default: true
+          target: .
+          effects:
+            - say: "Gating…"

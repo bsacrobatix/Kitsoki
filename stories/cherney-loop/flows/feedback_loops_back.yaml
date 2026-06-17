@@ -1,0 +1,29 @@
+# Gate fails with budget left → the failure reason is captured into
+# last_gate_failure and the loop runs the NEXT maker iteration with it. Proves
+# the feedback edge: the gate's stdout becomes the next maker's feedback, the
+# iteration counter advances, and a fresh maker summary lands.
+test_kind: flow
+app: ../app.yaml
+initial_state: iterating
+initial_world:
+  goal_text:        "Make the unit tests pass"
+  gate_mode:        "script"
+  gate_command:     "go test ./..."
+  iteration:        1
+  iteration_budget: 5
+  maker_summary:    "first attempt"
+
+host_handlers:
+  host.run:           { data: { ok: false, exit_code: 1, stdout: "FAIL: missing IPv6 case" } }
+  host.oracle.task:   { data: { submitted: { summary: "added the IPv6 case the gate asked for" } } }
+  host.artifacts_dir: { data: { ok: true } }
+
+turns:
+  # evaluate gates iteration 1 (fails) → loops back → iterating.on_enter runs
+  # maker iteration 2 fed the failure reason.
+  - intent: { name: evaluate, slots: {} }
+    expect_state: iterating
+    expect_world:
+      iteration:         2
+      last_gate_failure: "FAIL: missing IPv6 case"
+      maker_summary:     "added the IPv6 case the gate asked for"
