@@ -21,18 +21,20 @@
         "
         :data-mode="entry.role === 'agent' && entry.isOffRamp ? 'offpath' : undefined"
       >
-        <div class="chat-role">{{ entry.role === "user" ? "You" : "Agent" }}</div>
         <!-- An off-ramp answer is a free-form converse reply that did NOT
-             advance state (TurnResult mode "offpath"). The chip marks it as
-             "off the menu" so a viewer (and vision-QA) can tell it apart from a
-             normal room transition and from a rejection. The menu still shows
-             because state is unchanged. -->
-        <div
-          v-if="entry.role === 'agent' && entry.isOffRamp"
-          class="chat-offramp-chip"
-          data-testid="offramp-chip"
-        >
-          ↪ off the menu
+             advance state (TurnResult mode "offpath"). The chip sits beside the
+             "Agent" role so a viewer (and vision-QA) can tell it apart from a
+             normal room transition and from a rejection — at a glance, in the
+             same header line. The menu still shows because state is unchanged. -->
+        <div class="chat-role-row">
+          <div class="chat-role">{{ entry.role === "user" ? "You" : "Agent" }}</div>
+          <div
+            v-if="entry.role === 'agent' && entry.isOffRamp"
+            class="chat-offramp-chip"
+            data-testid="offramp-chip"
+          >
+            ↪ off path
+          </div>
         </div>
         <!-- The turn's preserved thinking/tool feed, collapsed by default so
              the final view leads but the activity that produced it stays one
@@ -206,28 +208,41 @@ watch(
 }
 
 /* Off-ramp ("offpath") agent bubble: a free-form converse answer that did NOT
-   advance state. A subtle left-border accent + a small chip distinguish it from
-   a normal room-view bubble (which renders a menu transition) and from a
-   rejection — without altering the answer text itself. */
+   advance state. Unlike a normal room-view bubble (which renders a menu
+   transition) or a rejection, the whole bubble is tinted a soft violet and
+   ringed with a distinct border so it reads as visually set-apart at a glance —
+   without altering the answer text itself. The chip beside the role names it. */
 .chat-bubble--offramp {
-  border-left: 3px solid #8b5cf6;
+  background: #f6f3ff;
+  border: 1px solid #c4b5fd;
+  border-left: 4px solid #8b5cf6;
+  box-shadow: 0 1px 2px rgba(139, 92, 246, 0.18);
+}
+
+/* Header line: the "Agent" role label and (when present) the off-path chip sit
+   on one row so the off-path marker is read alongside the speaker, not stacked
+   beneath it. */
+.chat-role-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
 .chat-offramp-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  align-self: flex-start;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #6d28d9;
-  background: #ede9fe;
-  border: 1px solid #ddd6fe;
+  letter-spacing: 0.05em;
+  color: #ffffff;
+  background: #7c3aed;
+  border: 1px solid #6d28d9;
   border-radius: 999px;
-  padding: 1px 8px;
-  margin-bottom: 6px;
+  padding: 2px 9px;
+  box-shadow: 0 1px 2px rgba(124, 58, 237, 0.3);
 }
 
 .chat-role {
@@ -236,7 +251,6 @@ watch(
   text-transform: uppercase;
   letter-spacing: 0.04em;
   opacity: 0.6;
-  margin-bottom: 4px;
 }
 
 .chat-text {

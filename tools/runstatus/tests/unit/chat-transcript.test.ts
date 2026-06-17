@@ -137,8 +137,8 @@ describe("ChatTranscript", () => {
     expect(bubble.exists()).toBe(true);
     expect(bubble.attributes("data-mode")).toBe("offpath");
     expect(bubble.classes()).toContain("chat-bubble--offramp");
-    // The visible "off the menu" chip distinguishes it from a normal bubble.
-    expect(wrapper.find("[data-testid='offramp-chip']").text()).toContain("off the menu");
+    // The visible "off path" chip distinguishes it from a normal bubble.
+    expect(wrapper.find("[data-testid='offramp-chip']").text()).toContain("off path");
     // The answer text itself is rendered verbatim (not altered by the chip).
     expect(wrapper.find(".chat-view").text()).toContain(
       "Kitsoki is a deterministic state-machine runtime."

@@ -30,7 +30,7 @@ export interface TranscriptEntry {
    * True when this agent bubble came from an off-ramp turn (TurnResult mode
    * "offpath"): a free-form `host.oracle.converse` answer that did NOT advance
    * state. The transcript marks it so the bubble can be rendered distinctly
-   * ("off the menu") — the menu still persists because state is unchanged.
+   * ("off path") — the menu still persists because state is unchanged.
    */
   isOffRamp?: boolean;
 }

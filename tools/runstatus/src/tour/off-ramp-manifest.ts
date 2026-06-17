@@ -81,7 +81,7 @@ export const OFF_RAMP_TOUR_STEPS: readonly TourStep[] = [
     route: "interactive",
     target: "offramp-bubble",
     title: "Answered in place — no bounce",
-    body: "We typed 'why should I trust an AI with my project?' — a question the menu can't map. Instead of 'I didn't catch that,' the off-ramp handed it to a voiced converse turn. The reply is marked '↪ off the menu': it answered, and nothing else moved.",
+    body: "We typed 'why should I trust an AI with my project?' — a question the menu can't map. Instead of 'I didn't catch that,' the off-ramp handed it to a voiced converse turn. The reply is marked '↪ off path': it answered, and nothing else moved.",
     placement: "left",
     kind: "explain",
     advance: "next",
