@@ -134,3 +134,7 @@ Key invariants verified:
 - `stories/git-ops/README.md` — operator entry guide
 - `docs/architecture/hosts.md` §host.run — `cwd:` arg and argv mode
 - `docs/stories/state-machine.md` §staged-gate — why static emit targets matter
+- [`story-coverage-mining.md`](story-coverage-mining.md) — git-ops is the **flagship
+  worked example** for mining a story's coverage from real transcripts; the corpus,
+  demo, and worked worksheet live in `tools/session-mining/examples/git-ops/`, the
+  profile in `stories/git-ops/mining.profile.yaml`.

@@ -71,6 +71,9 @@ way, see [`../architecture/concept.md`](../architecture/concept.md).)
   points for the patterns above.
 - **[`../tracing/testing.md`](../tracing/testing.md)** — how to lock
   your story's behaviour with deterministic flow tests.
+- **[`story-coverage-mining.md`](story-coverage-mining.md)** — drive a
+  story's tests + features from real transcripts (mine → map → author).
+  Worked flagship: `tools/session-mining/examples/git-ops/`.
 - **The `host.*` reference** lives under architecture:
   [`../architecture/hosts.md`](../architecture/hosts.md).
 - **The authoritative schema**: `kitsoki docs app-schema` (source at

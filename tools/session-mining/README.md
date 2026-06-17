@@ -248,6 +248,15 @@ positional cascade), the ordinal-alignment invariant against the emitted report,
 `satisfaction` review flag, back-compat (no new keys without `--outcomes`), and
 schema conformance.
 
+**Downstream consumer — story coverage mining.** The outcome + satisfaction lenses
+exist to drive a kitsoki **story**'s tests and features from real transcripts:
+`coverage_prep.py` + a per-story `mining.profile.yaml` turn a mined run into a
+coverage worksheet. The loop is documented at
+[`docs/stories/story-coverage-mining.md`](../../docs/stories/story-coverage-mining.md);
+the worked flagship (committed corpus + `run.sh` demo + filled worksheet) is
+[`examples/git-ops/`](examples/git-ops/), exercised by the no-LLM
+`tests/test_git_ops_coverage.py`.
+
 ---
 
 ## Concepts
@@ -475,9 +484,11 @@ outcomes.py             INTENT MINING step E′ (optional) — recover per-tool-
 emit.py                 INTENT MINING step F — emit the two linked reports; verbatim text from raw jsonl; --outcomes attaches per-action outcome + per-instance satisfaction
 verify_link.py          check the intents.json <-> analysis.json cross-link contract
 validate_reports.py     validate both reports against their JSON Schemas (needs `jsonschema`)
-tests/                  fixture + no-LLM end-to-end test of the intent-mining C->F pipeline
+coverage_prep.py        STORY COVERAGE MINING data-prep — scope-filter + arg-aware dedup + candidate-room join + outcome/satisfaction inlining over a story's mining.profile.yaml; emits intents.git.json + a coverage.md worksheet skeleton (NO verdicts). See docs/stories/story-coverage-mining.md
+tests/                  fixture + no-LLM end-to-end tests (intent C->F pipeline; outcome+satisfaction; the git-ops coverage flagship)
 examples/report.example.json   a real redacted report (reference run)
 examples/merge/         two reports + their merged output (worked aggregation)
+examples/git-ops/       STORY COVERAGE MINING flagship — committed corpus + run.sh demo + worked coverage.worked.md (the worked answer to "how does coverage mining work?")
 ```
 
 ## Limitations
