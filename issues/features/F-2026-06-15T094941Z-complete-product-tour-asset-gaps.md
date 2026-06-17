@@ -29,6 +29,23 @@ against source. The proposal's differentiating beats — the ones that defeat a
 skeptic — depend on **demo assets that do not exist or are broken today.** This
 ticket enumerates the missing/broken features so the persuasive cut is buildable.
 
+### Progress (2026-06-17, branch `feat/complete-product-tour`)
+
+- **G4 — DONE** (`5f69dbf`): multi-story spec repaired to the two-turn clarifying
+  flow; persistence/active-sessions beat records green (95.5s, 12 chapters).
+- **U2 — DONE** (`2e0ca42`): the host-rejects-the-model guardrail arc now LEADS
+  `agent-actions` (step 6/17). P1 surfaced; drawer helpers made backdrop-proof.
+- **U5 — DONE** (`e2d2377`): story-editor hook framed as the host allow-list
+  security boundary.
+- **U1 — re-scoped UP**: `turn.start` carries `direct:true` and `routing-detail`
+  renders it, but no bugfix turn is cleanly zero-oracle and selecting the routing
+  event needs a spec hook — a `trace-features` extend, not a freebie.
+- **G1/G2 — re-scoped UP**: `meta-mode.spec.ts` / `harness-picker-video.spec.ts`
+  are standalone scene-driven specs, NOT tour-manifest-driven like the 17
+  cataloged features — promotion means a manifest AND a spec rewrite.
+- Remaining: U1, U4, U3, G1, G2, G3, G5, master stitch (§8-gated). See
+  `.context/complete-product-tour-progress.md`.
+
 Severity rationale: the four irrefutable on-screen proofs (host-rejects-the-model,
 zero-oracle-call routing, live FSM self-edit, film-is-a-CI-test) each have **no
 analog in a general coding agent**, and three of them are currently un-filmable.
