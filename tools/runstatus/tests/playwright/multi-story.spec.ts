@@ -218,7 +218,11 @@ test.describe("multi-story full-product walkthrough (live, no-LLM)", () => {
     // the button beneath it would be intercepted).
     async function clickIntent(intent: string): Promise<void> {
       const btn = page.getByTestId(`intent-btn-${intent}`).first();
-      await expect(btn).toBeVisible({ timeout: 15000 });
+      // toBeEnabled (not just toBeVisible): action buttons are
+      // `:disabled="pending"` while the prior turn is in flight, and a DOM
+      // .click() on a disabled button is a silent no-op. Wait out any pending
+      // turn so the intent actually fires.
+      await expect(btn).toBeEnabled({ timeout: 15000 });
       await btn.evaluate((el) => (el as HTMLElement).click());
     }
 
@@ -289,8 +293,30 @@ test.describe("multi-story full-product walkthrough (live, no-LLM)", () => {
           await dwell(page, SETTLE_MS);
         }
         if (step.id === "ms-chat-clarifying") {
-          // Answer the questions → brief.
-          await sendText("submit_answers", "1) developers 2) time-to-first-success");
+          // The PRD clarifying gate is a TWO-turn dance (per
+          // stories/prd/flows/happy_path.yaml + rooms/clarifying.yaml):
+          //   (1) `answer` the questions in free text — the stubbed matcher
+          //       resolves both q1+q2 (matched_count:2), so the "Answered so far"
+          //       readout flips to 2/2, but the room STAYS in clarifying (a
+          //       self-transition; there is no auto-advance here).
+          //   (2) the slot-less `submit_answers` verb appends the round and
+          //       advances clarifying → brief.
+          //
+          // The historical break sent `submit_answers` carrying the answer text
+          // in ONE turn. `submit_answers` is a pure verb with no composer option
+          // (the composer-select only renders with >1 text intent, and clarifying
+          // has exactly one — `answer`), so selectOption silently fell back to the
+          // default `answer` intent and the room never left clarifying (34×
+          // "Expected brief, Received clarifying" in the old ERROR.txt).
+          //
+          // Wait on the 2/2 readout — NOT on the state, which never changes across
+          // the answer self-transition — so the answer turn has fully settled and
+          // its `pending` flag (which disables the action buttons) has cleared
+          // before we click submit_answers.
+          await sendText("answer", "developers, and the metric is time-to-first-success");
+          await expect(page.getByText(/Answered so far \(2\/2\)/)).toBeVisible({ timeout: 15000 });
+          await dwell(page, SETTLE_MS);
+          await clickIntent("submit_answers");
           await waitForState(page, "brief", 15000);
           await dwell(page, SETTLE_MS);
         }
