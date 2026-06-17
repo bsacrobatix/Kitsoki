@@ -275,6 +275,32 @@ async function surfaceFrame(win: Page, testid: string, timeoutMs = 30_000): Prom
 }
 
 /**
+ * Widen the primary side bar by dragging its right-edge sash to `targetRightX`
+ * (window CSS px). The picker flow drives the narrow Kitsoki sidebar surfaces, so
+ * at the default ~257px width most of the frame is empty editor; widening lets the
+ * surfaces dominate the frame. Record-only (the gate doesn't care about width, and
+ * a drag has no place in the deterministic assert path). Best-effort — never fails
+ * the gate by itself.
+ */
+async function widenSidebar(win: Page, targetRightX: number): Promise<void> {
+  if (!RECORD) return;
+  const sidebar = win.locator('.part.sidebar').first();
+  const box = await sidebar.boundingBox().catch(() => null);
+  if (!box) return;
+  // The sash sits on the sidebar's right edge; grab it there and drag right. Use a
+  // y well inside the sidebar body (below the pane headers) so we never catch a
+  // header/tab instead of the sash.
+  const y = box.y + Math.min(300, box.height / 2);
+  await win.mouse.move(box.x + box.width, y);
+  await win.mouse.down();
+  await win.mouse.move(targetRightX, y, { steps: 16 });
+  await win.mouse.up();
+  // Park the cursor off the sash so its blue hover highlight doesn't bleed into the
+  // captured frames (the empty editor area is inert — hovering it shows nothing).
+  await win.mouse.move(targetRightX + 240, y);
+}
+
+/**
  * Toggle a sidebar view pane (by its header title) collapsed/expanded. Used to
  * give the focused surface the full sidebar height — and to make the trace beat
  * and graph beat visually distinct (collapse the other one). Pane headers are
@@ -452,6 +478,10 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
       win.locator('.pane-header').filter({ hasText: /^\s*Chat\b/i }).first(),
       'the one Kitsoki menu opened with the Chat surface as its first pane',
     ).toBeVisible({ timeout: 30_000 });
+    // Widen the sidebar (record only) so the narrow Chat/Trace/Graph surfaces fill
+    // the frame instead of leaving ~65% empty editor. The 1400px window → a ~760px
+    // sidebar right edge lets the surfaces dominate while the editor stays present.
+    await widenSidebar(win, 760);
     await dwell(1000);
 
     // Open Chat → its story picker opens (a native QuickPick). Pick weather; the
