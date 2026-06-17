@@ -97,6 +97,36 @@ def run():
         check(mto[2] is not None and "R3" in mto[2]["stdout_head"],
               "missing-result: m3 must keep its OWN R3 (no cascade), got %r" % mto[2])
 
+        # (1c) toolUseResult NON-DICT shapes (regression: real transcripts carry
+        # toolUseResult as a bare string or a list of content blocks for some
+        # tools; calling .get on those crashed on real data). Must not raise and
+        # must surface the text as stdout_head.
+        traw = os.path.join(work, "tur_raw")
+        os.makedirs(traw)
+        with open(os.path.join(traw, "sess-tur.jsonl"), "w") as fh:
+            # Both results are toolUseResult-only (no tool_result block, no result
+            # ids) -> the join is unambiguously positional; this isolates the
+            # non-dict-toolUseResult crash from the id/positional join logic.
+            fh.write("\n".join([
+                json.dumps({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {}}]}}),
+                # toolUseResult is a bare STRING:
+                json.dumps({"type": "user", "toolUseResult": "file contents here"}),
+                json.dumps({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": "t2", "name": "Read", "input": {}}]}}),
+                # toolUseResult is a LIST of content blocks:
+                json.dumps({"type": "user",
+                            "toolUseResult": [{"type": "text", "text": "block text"}]}),
+            ]) + "\n")
+        tur_p = os.path.join(work, "tur_outcomes.json")
+        outcomes.main(["--raw", traw, "--out", tur_p])  # must not raise
+        tto = _load(tur_p)["sessions"]["sess-tur"]["tool_outcomes"]
+        check(len(tto) == 2, "tur-shapes: expected 2 tool_outcomes, got %d" % len(tto))
+        check(tto[0] is not None and "file contents here" in tto[0]["stdout_head"],
+              "tur-shapes: string toolUseResult must surface as stdout_head, got %r" % tto[0])
+        check(tto[1] is not None and "block text" in tto[1]["stdout_head"],
+              "tur-shapes: list toolUseResult must surface text block as stdout_head, got %r" % tto[1])
+
         # --- scored spine: ground -> tag_score ---
         ground.main(["--oracle", os.path.join(FIX, "oracle.json"),
                      "--traces", traces, "--out", grounded])

@@ -155,13 +155,21 @@ def _outcome_from(result, stdout_head):
     """Build the {is_error, stdout_head, stderr_head, interrupted} entry, or None."""
     if result is None:
         return None
-    tur = result.get("tool_use_result") or {}
-    if tur:
+    tur = result.get("tool_use_result")
+    if isinstance(tur, dict) and tur:
+        # the canonical Bash/tool shape: {stdout, stderr, interrupted}
         stdout = _head(tur.get("stdout"), stdout_head)
         stderr = _head(tur.get("stderr"), stdout_head)
         interrupted = bool(tur.get("interrupted", False))
+    elif isinstance(tur, (str, list)) and tur:
+        # real transcripts also carry toolUseResult as a bare string or a list of
+        # content blocks (Read/Edit/structured tools). Treat it as stdout; never
+        # call .get on it (that was a crash on real data).
+        stdout = _head(_content_text(tur) if isinstance(tur, list) else tur, stdout_head)
+        stderr = ""
+        interrupted = False
     else:
-        # no toolUseResult — fall back to the tool_result content for stdout
+        # no usable toolUseResult — fall back to the tool_result content for stdout
         # (content may be a bare string or a list of content blocks).
         stdout = _head(_content_text(result.get("content")), stdout_head)
         stderr = ""
