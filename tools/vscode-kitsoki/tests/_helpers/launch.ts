@@ -81,6 +81,11 @@ export interface LaunchedVSCode {
   app: ElectronApplication;
   /** The workbench window (one whose .monaco-workbench exists). */
   win: Page;
+  /** Actual web-content viewport (CSS px) once sized for recording. May be SMALLER
+   *  than the requested record size when the screen work area clamps the window —
+   *  the recorder then pads the shortfall with a grey bar, so the caller crops the
+   *  video to this. Undefined when not recording. */
+  viewport?: { w: number; h: number };
 }
 
 /**
@@ -141,11 +146,30 @@ export async function launchVSCode(opts: LaunchOptions): Promise<LaunchedVSCode>
         const w = BrowserWindow.getAllWindows()[0];
         if (!w) return;
         if (w.isMaximized()) w.unmaximize();
-        w.setBounds({ x: 0, y: 0, width: s.width, height: s.height });
+        // recordVideo captures the web CONTENTS at `size`; any shortfall is padded
+        // with the recorder's grey background (a bar down the short edge). Set the
+        // OUTER size explicitly accounting for window chrome (the title bar steals
+        // height → a grey bar along the BOTTOM that setContentSize didn't cure), so
+        // the contents land at exactly `size` and the workbench fills every edge.
+        const [ow, oh] = w.getSize();
+        const [cw, ch] = w.getContentSize();
+        w.setSize(s.width + (ow - cw), s.height + (oh - ch));
       }, size)
       .catch(() => undefined);
     // Let the workbench relayout to the new bounds before beats are captured.
     await win.waitForTimeout(400);
+    const vp = await win
+      .evaluate(() => ({ w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio }))
+      .catch(() => null);
+    console.log(`[launch] content viewport ${JSON.stringify(vp)} target ${size.width}x${size.height}`);
+    if (vp && vp.w > 0 && vp.h > 0) {
+      // Clamp to the requested size (content can't exceed the record frame) and to
+      // even dims (libx264/yuv420p) — the caller crops the .mp4 to this to drop any
+      // recorder pad bar the screen-clamped window left.
+      const vw = Math.min(size.width, vp.w) & ~1;
+      const vh = Math.min(size.height, vp.h) & ~1;
+      return { app, win, viewport: { w: vw, h: vh } };
+    }
   }
 
   return { app, win };

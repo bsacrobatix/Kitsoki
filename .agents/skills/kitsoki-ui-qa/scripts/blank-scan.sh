@@ -62,8 +62,8 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 not on PATH" >&2; exit 2; 
 src="${1:-}"; shift || true
 [ -n "$src" ] || { echo "usage: blank-scan.sh <frames-dir|image> [opts]" >&2; exit 2; }
 
-out="" grid="48x27" quant=24 contrast=64 min_cov="0.10" empty_cov="0.985" fail_on_find=0
-gutter_min="0.10" gutter_uniform="0.94"
+out="" grid="48x27" quant=24 contrast=64 min_cov="0.10" empty_cov="0.985" fail_on_find=0 fail_foreign=0
+gutter_min="0.10" gutter_uniform="0.94" gutter_foreign="0.02"
 while [ $# -gt 0 ]; do
   case "$1" in
     --out)            out="$2"; shift 2 ;;
@@ -74,7 +74,9 @@ while [ $# -gt 0 ]; do
     --empty-coverage) empty_cov="$2"; shift 2 ;;
     --gutter-min)     gutter_min="$2"; shift 2 ;;
     --gutter-uniform) gutter_uniform="$2"; shift 2 ;;
+    --gutter-foreign) gutter_foreign="$2"; shift 2 ;;
     --fail-on-find)   fail_on_find=1; shift ;;
+    --fail-foreign)   fail_foreign=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -102,12 +104,14 @@ case "$src" in
     ;;
 esac
 [ "${#frames[@]}" -gt 0 ] || { echo "no frames to scan under $src" >&2; exit 2; }
-cleanup() { [ -n "$tmp_extracted" ] && rm -rf "$tmp_extracted"; }
+# Preserve the real exit code: capture $? FIRST (the `[ -n ]` test would otherwise
+# clobber it to 1 when no temp dir was made), clean up, then exit with it.
+cleanup() { ec=$?; [ -n "$tmp_extracted" ] && rm -rf "$tmp_extracted"; exit "$ec"; }
 trap cleanup EXIT
 
 GW="${grid%x*}"; GH="${grid#*x}"
 
-python3 - "$GW" "$GH" "$quant" "$contrast" "$min_cov" "$empty_cov" "$gutter_min" "$gutter_uniform" "$fail_on_find" "$out" "${frames[@]}" <<'PY'
+python3 - "$GW" "$GH" "$quant" "$contrast" "$min_cov" "$empty_cov" "$gutter_min" "$gutter_uniform" "$gutter_foreign" "$fail_on_find" "$fail_foreign" "$out" "${frames[@]}" <<'PY'
 import sys, json, subprocess
 from collections import Counter
 gw, gh = int(sys.argv[1]), int(sys.argv[2])
@@ -115,8 +119,10 @@ quant = max(1, int(sys.argv[3]))
 contrast = float(sys.argv[4])
 min_cov = float(sys.argv[5]); empty_cov = float(sys.argv[6])
 gutter_min = float(sys.argv[7]); gutter_uniform = float(sys.argv[8])
-fail_on_find = sys.argv[9] == "1"
-out = sys.argv[10]; frames = sys.argv[11:]
+gutter_foreign = float(sys.argv[9])
+fail_on_find = sys.argv[10] == "1"
+fail_foreign = sys.argv[11] == "1"
+out = sys.argv[12]; frames = sys.argv[13:]
 total = gw * gh
 
 def dist(a, b):
@@ -235,6 +241,7 @@ for path in frames:
                      "coverage": blob_cov, "bbox": box},
            "gutters": gutters}
     reasons = []
+    has_foreign = False
     if blob_cov >= min_cov and blob_bucket is not None:
         reasons.append(f"a solid {hexof(blob_bucket)} block (high-contrast vs "
                        f"the {hexof(bg_bucket)} background) covers "
@@ -244,18 +251,27 @@ for path in frames:
     # recorder padding the frame). Only on a frame that DOES have content (a
     # near-empty page is reported separately below).
     if bg_cov < empty_cov:
-        worst_side = max(gutters, key=lambda s: gutters[s]["width"])
-        worst = gutters[worst_side]["width"]
-        gcol = gutters[worst_side]["color"]
-        if worst >= gutter_min:
-            foreign = gcol is not None and dist(
-                tuple(int(gcol[i:i+2], 16) for i in (1, 3, 5)), bg_bucket) > contrast
+        for side in ("right", "left", "bottom", "top"):
+            w_ = gutters[side]["width"]
+            gcol = gutters[side]["color"]
+            if gcol is None or w_ <= 0:
+                continue
+            foreign = dist(tuple(int(gcol[i:i+2], 16) for i in (1, 3, 5)), bg_bucket) > contrast
+            # A FOREIGN flat band (distinct from the UI) is a composited recorder/
+            # letterbox bar — wrong at ANY thickness, so a low floor. A band the
+            # SAME colour as the bg is a dead content margin — only matters when
+            # it's a substantial slice (gutter_min).
+            thresh = gutter_foreign if foreign else gutter_min
+            if w_ < thresh:
+                continue
+            if foreign:
+                has_foreign = True
             kind = (f"a foreign flat {gcol} bar (distinct from the {hexof(bg_bucket)} "
                     f"UI — likely a recorder/letterbox bar composited OVER the frame)"
                     if foreign else
-                    f"a flat {gcol} {worst_side} gutter the content never reaches")
-            reasons.append(f"{kind} spans {worst*100:.0f}% of the frame at the "
-                           f"{worst_side} edge")
+                    f"a flat {gcol} {side} gutter the content never reaches")
+            reasons.append(f"{kind} spans {w_*100:.0f}% of the frame at the "
+                           f"{side} edge")
     if bg_cov >= empty_cov:
         reasons.append(f"the frame is {bg_cov*100:.0f}% a single flat colour "
                        f"{hexof(bg_bucket)} — almost nothing rendered")
@@ -264,6 +280,7 @@ for path in frames:
         rec_f = dict(rec)
         rec_f["issue"] = ("; ".join(reasons) +
                           " — likely a blank/broken render where content was expected")
+        rec_f["foreign"] = has_foreign
         flagged.append(rec_f)
 
 report = {"grid": f"{gw}x{gh}", "quant": quant, "contrast": contrast,
@@ -276,14 +293,21 @@ if out:
 else:
     print(text)
 
+foreign = [r for r in flagged if r.get("foreign")]
 if flagged:
     print(f"blank-scan: {len(flagged)} frame(s) with a large monochromatic "
           f"region — review:", file=sys.stderr)
     for r in flagged:
-        print(f"  {r['frame']}: {r['issue']}", file=sys.stderr)
+        tag = "FOREIGN BAR " if r.get("foreign") else ""
+        print(f"  {tag}{r['frame']}: {r['issue']}", file=sys.stderr)
 else:
     print(f"blank-scan: no large monochromatic regions in {len(frames)} "
           f"frame(s)", file=sys.stderr)
 
-sys.exit(3 if (flagged and fail_on_find) else 0)
+# --fail-on-find: any flag fails. --fail-foreign: ONLY a composited foreign bar
+# (recorder/letterbox) fails — bg-coloured "content doesn't reach the edge"
+# gutters are advisory, because sparse-but-correct UI (a code editor, a chat
+# column) legitimately leaves themed background at an edge.
+hard = (flagged and fail_on_find) or (foreign and fail_foreign)
+sys.exit(3 if hard else 0)
 PY

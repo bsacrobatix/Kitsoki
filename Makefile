@@ -510,15 +510,17 @@ vscode-e2e: web
 # is smaller than the recordVideo size). It MUST scan the video, not the window
 # screenshots: a recorder-pad bar is composited into the .mp4 and is absent from
 # the PNG screenshots — which is exactly how a 14%-wide grey bar shipped unseen.
-# A gate by default (the recorder bar is never acceptable); set ADVISORY=1 to
-# downgrade to a report-only pass.
+# Gates on a FOREIGN bar only (a composited recorder/letterbox strip — never
+# acceptable); bg-coloured "content doesn't reach the edge" gutters are reported
+# but advisory, since sparse-but-correct UI (a code editor, a chat column) leaves
+# themed bg at an edge legitimately. ADVISORY=1 downgrades to report-only.
 #   VIDEO overrides the target (default the dark-theme tour mp4).
 VSCODE_QA_VIDEO ?= .artifacts/vscode-tour-default-dark-modern/vscode-tour.mp4
 .PHONY: vscode-qa
 vscode-qa:
 	docs/skills/kitsoki-ui-qa/scripts/blank-scan.sh $(VSCODE_QA_VIDEO) \
 		--out .artifacts/vscode-tour-blank-scan.json \
-		$(if $(filter 1,$(ADVISORY)),,--fail-on-find) >/dev/null
+		$(if $(filter 1,$(ADVISORY)),,--fail-foreign) >/dev/null
 
 # surface-panels renders each decomposed surface (chat / trace / graph) at the REAL
 # sizes + orientations it occupies in VS Code (editor panel; narrow sidebar; wide

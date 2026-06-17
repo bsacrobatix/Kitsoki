@@ -181,9 +181,18 @@ class ChapterRecorder {
  * Keynote / Slack; the .webm never ships. Removes the webm on success. Returns
  * the MP4 path (or null if ffmpeg is unavailable / no webm was produced).
  */
-function transcodeWebmToMp4(webm: string, mp4: string, headTrimMs = 0): string | null {
+function transcodeWebmToMp4(
+  webm: string,
+  mp4: string,
+  headTrimMs = 0,
+  crop?: { w: number; h: number },
+): string | null {
   if (!fs.existsSync(webm)) return null;
-  const vf = 'fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2';
+  // Crop to the real content box first (top-left), dropping any recorder grey pad
+  // bar the screen-clamped window left along the short edge(s); then 30fps + even-
+  // dims for libx264.
+  const cropF = crop ? `crop=${crop.w}:${crop.h}:0:0,` : '';
+  const vf = `${cropF}fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2`;
   // -ss before -i drops the boot preamble (and its recorder grey bar) from the
   // head; the chapter sidecar is shifted by the same amount to stay in sync.
   const seek = headTrimMs > 250 ? ['-ss', (headTrimMs / 1000).toFixed(2)] : [];
@@ -666,7 +675,7 @@ test('vscode tour e2e — load, render, drive, trace (no-LLM, deterministic)', a
         const webm = webms[0];
         const mp4 = path.join(TOUR_DIR, 'vscode-tour.mp4');
         if (webm) {
-          const out = transcodeWebmToMp4(webm, mp4, bootTrimMs);
+          const out = transcodeWebmToMp4(webm, mp4, bootTrimMs, launched?.viewport);
           if (out) {
             console.log(`[video] ${out} (trimmed ${bootTrimMs}ms boot preamble)`);
             const sidecar = `${out}.chapters.json`;
