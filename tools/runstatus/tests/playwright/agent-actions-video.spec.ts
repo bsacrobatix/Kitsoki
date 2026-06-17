@@ -138,7 +138,11 @@ async function openDrawerForCall(page: Page, wantEvents: number): Promise<boolea
     // on an expanded row never collapses it — leaving e.g. the session.story
     // base64 wall open across the spotlight frames.
     const header = row.locator(".trace-timeline__row-main");
-    await header.click({ timeout: 4000 }).catch(() => undefined);
+    // Dispatch the DOM click directly (not a hit-test .click()): a pre-step
+    // hook can run while the tour-overlay backdrop from the prior step still
+    // covers the trace rows, which intercepts hit-test clicks and times them
+    // out. el.click() fires the row header's @click regardless of the backdrop.
+    await header.evaluate((el) => (el as HTMLElement).click()).catch(() => undefined);
     // The affordance only renders for oracle.call.complete rows that carry a
     // transcript_ref. Look for the one whose badge count matches.
     const aff = page.getByTestId("agent-actions-affordance");
@@ -147,7 +151,9 @@ async function openDrawerForCall(page: Page, wantEvents: number): Promise<boolea
       const txt = (await aff.nth(a).textContent({ timeout: 1500 }).catch(() => "")) ?? "";
       if (txt.includes(`(${wantEvents})`)) {
         diag(`  row ${i}: matched affordance "${txt.trim()}"`);
-        await aff.nth(a).click({ timeout: 4000 });
+        // DOM click (backdrop-proof — see header note above): open this call's
+        // agent-actions drawer regardless of any overlay backdrop covering it.
+        await aff.nth(a).evaluate((el) => (el as HTMLElement).click());
         const drawer = page.getByTestId("agent-actions-drawer");
         const ok = await drawer
           .first()
@@ -158,7 +164,11 @@ async function openDrawerForCall(page: Page, wantEvents: number): Promise<boolea
       }
     }
     // Not a match — collapse this row again so the next expand is clean.
-    await header.click({ timeout: 4000 }).catch(() => undefined);
+    // Dispatch the DOM click directly (not a hit-test .click()): a pre-step
+    // hook can run while the tour-overlay backdrop from the prior step still
+    // covers the trace rows, which intercepts hit-test clicks and times them
+    // out. el.click() fires the row header's @click regardless of the backdrop.
+    await header.evaluate((el) => (el as HTMLElement).click()).catch(() => undefined);
   }
   diag(`openDrawerForCall(${wantEvents}): no matching call found`);
   return false;
@@ -389,7 +399,11 @@ async function openTaskDetail(page: Page): Promise<boolean> {
     // Header click, not row click — see openDrawerForCall: an expanded row's
     // body swallows center-clicks, so collapsing a non-match needs the header.
     const header = row.locator(".trace-timeline__row-main");
-    await header.click({ timeout: 4000 }).catch(() => undefined);
+    // Dispatch the DOM click directly (not a hit-test .click()): a pre-step
+    // hook can run while the tour-overlay backdrop from the prior step still
+    // covers the trace rows, which intercepts hit-test clicks and times them
+    // out. el.click() fires the row header's @click regardless of the backdrop.
+    await header.evaluate((el) => (el as HTMLElement).click()).catch(() => undefined);
     const aff = page.getByTestId("agent-actions-affordance");
     const affCount = await aff.count();
     for (let a = 0; a < affCount; a++) {
@@ -399,7 +413,11 @@ async function openTaskDetail(page: Page): Promise<boolean> {
         return true; // leave the affordance present; the tour step clicks it.
       }
     }
-    await header.click({ timeout: 4000 }).catch(() => undefined);
+    // Dispatch the DOM click directly (not a hit-test .click()): a pre-step
+    // hook can run while the tour-overlay backdrop from the prior step still
+    // covers the trace rows, which intercepts hit-test clicks and times them
+    // out. el.click() fires the row header's @click regardless of the backdrop.
+    await header.evaluate((el) => (el as HTMLElement).click()).catch(() => undefined);
   }
   diag(`openTaskDetail: no task call found`);
   return false;
