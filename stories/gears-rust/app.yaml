@@ -82,6 +82,10 @@ hosts:
   - host.ide.open_file
   - host.oracle.converse
   - host.chat.resolve
+  # ── Review-diff (host.diff.open) — populated by bugfix's reviewing_external ──
+  # Required under `hosts: declared` because bugfix (transitively imported via
+  # dev-story) calls host.diff.open from the reviewing_external room.
+  - host.diff.open
 
 imports:
   core:
