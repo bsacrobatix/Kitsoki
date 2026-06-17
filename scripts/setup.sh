@@ -230,6 +230,44 @@ install_agents() {
 	log "linked $n project agent(s) into .claude/agents/"
 }
 
+# --- git hooks -------------------------------------------------------------
+# Link scripts/git-hooks/* → .git/hooks/* (relative symlinks) so git itself
+# enforces the repo's hooks. The reference-transaction guard pins the primary
+# checkout to its default branch — see scripts/git-hooks/reference-transaction.
+# .git/hooks is shared with linked worktrees, so installing here covers them all.
+# Idempotent: refreshes our own symlinks, never clobbers a real hook a human placed.
+install_git_hooks() {
+	local root src dst common
+	root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+	src="$root/scripts/git-hooks"
+	[ -d "$src" ] || { warn "no scripts/git-hooks dir; skipping git hook links"; return; }
+	# Resolve the common git dir so this works whether setup runs from the primary
+	# checkout or a linked worktree.
+	common="$(git -C "$root" rev-parse --git-common-dir 2>/dev/null || true)"
+	[ -n "$common" ] || { warn "not a git repo; skipping git hook links"; return; }
+	case "$common" in /*) ;; *) common="$root/$common" ;; esac
+	dst="$common/hooks"
+	mkdir -p "$dst"
+	local n=0 name link rel
+	for hook in "$src"/*; do
+		[ -f "$hook" ] || continue
+		name="$(basename "$hook")"
+		chmod +x "$hook"
+		link="$dst/$name"
+		if [ -L "$link" ]; then
+			rm -f "$link"
+		elif [ -e "$link" ]; then
+			warn "git-hooks: $link exists and is not a symlink — leaving as-is"
+			continue
+		fi
+		# Absolute symlink: the hooks dir lives under .git, whose depth from the
+		# repo root varies, so a relative path is brittle here.
+		ln -s "$hook" "$link"
+		n=$((n + 1))
+	done
+	log "linked $n git hook(s) into $dst"
+}
+
 # --- main ------------------------------------------------------------------
 main() {
 	detect_os
@@ -243,6 +281,7 @@ main() {
 	install_optional
 	install_skills
 	install_agents
+	install_git_hooks
 
 	log "setup complete"
 	echo
