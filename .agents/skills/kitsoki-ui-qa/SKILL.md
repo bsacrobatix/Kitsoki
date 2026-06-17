@@ -140,6 +140,14 @@ pipeline removes that failure mode structurally, not by hoping the model behaves
    which promotes them to a blocking gate — the same advisory/strict shape as
    `blank-scan`. This is the deterministic catch for "the pacing is terrible" that
    no amount of frame-by-frame vision review can see.
+8. **Stuck-placeholder check.** A panel can sit on a *transient* placeholder
+   forever — a "Loading…" spinner whose loading flag is never lowered — and every
+   single frame of it still looks "fine," so blank-scan (mostly themed bg) and a
+   frame-at-a-time reviewer both miss it. The review prompt now reads the frames as
+   a **timeline** and fails a panel whose placeholder persists across many frames
+   (rule 7), and a **deterministic** `placeholder-scan.sh` (OCR) flags a placeholder
+   that runs unbroken for `--min-run` frames or covers `--min-fraction` of the demo.
+   This is what catches "the three panels just say Loading… for a long time."
 
 ## Prerequisites
 
@@ -255,6 +263,7 @@ example behind the `vscode-tour` gate above).
 | `extract-frames.sh <video> <out-dir> [--scene TH] [--interval S] [--dedup MS] [--max N] [--width W]` | Deterministic scene-change + periodic-floor frames + `frames.json` | no |
 | `blank-scan.sh <frames-dir\|image> [--out scan.json] [--grid WxH] [--quant N] [--min-coverage F] [--empty-coverage F] [--fail-on-find]` | Deterministic monochrome-region detector → `blank-scan.json` (flags any large flat block of one colour, or a near-empty frame) | no |
 | `pacing-scan.sh <chapters.json> [--out scan.json] [--min-ms N] [--min-total-ms N] [--fail-on-find]` | Deterministic chapter-duration detector → `pacing-scan.json` (flags narrated moments that flash by below the readable-window floor) | no |
+| `placeholder-scan.sh <frames-dir\|image\|video> [--out scan.json] [--pattern RE] [--min-fraction F] [--min-run N] [--fail-on-find]` | Deterministic OCR stuck-placeholder detector → flags a placeholder (default `\bloading\b`) that persists across a long unbroken run / large fraction of frames — a "Loading…" that never resolves. Skips (advisory) if `tesseract` is absent | no (OCR) |
 | `qa-review.sh --frames D --feature F --scenarios S --out V [--model M] [--no-adversary]` | Read-only vision agent → evidence-cited `verdict.json` + adversarial re-check | **yes** |
 | `report.sh <verdict.json> [--out report.md] [--strict] [--blank-scan scan.json] [--blank-strict] [--pacing-scan scan.json] [--pacing-strict]` | `verdict.json` (+ optional scans) → `qa-report.md`; recomputes the gate exit code | no |
 

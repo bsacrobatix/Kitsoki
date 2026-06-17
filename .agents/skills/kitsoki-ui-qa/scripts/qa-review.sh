@@ -157,6 +157,7 @@ EVIDENCE RULES (these make the review trustworthy — follow them exactly):
    state; a silent blank where content belongs is a render bug — flag it.)
    Proactively scan EVERY frame for such dead regions even when no scenario step
    names them, and report each in a top-level "visual_issues" array.
+<<<<<<< HEAD:.agents/skills/kitsoki-ui-qa/scripts/qa-review.sh
 6. ANNOTATION CONSISTENCY — a demo must use ONE narration mechanism throughout.
    These videos narrate with EITHER tour popovers (a titled card with a step
    counter like "Step 3 of 9" and Back / Next / Skip buttons, usually anchored to
@@ -172,6 +173,16 @@ EVIDENCE RULES (these make the review trustworthy — follow them exactly):
    frame with no narration at all) contributes NOTHING to this array — leave it
    empty in that case. Do NOT flag a video merely for being caption-narrated or
    merely for being tour-narrated; only flag the MIX of the two.
+7. STUCK PLACEHOLDERS — a transient placeholder that NEVER resolves is a bug, even
+   though any single frame of it looks "fine". Read the frames as a TIMELINE: if a
+   panel shows a loading placeholder — "Loading…", a spinner, a skeleton, an empty
+   "…" pane — across MULTIPLE frames spanning a meaningful stretch of the demo (it
+   should have rendered content or an empty/start state by then), that panel is
+   stuck (a classic cause: a `loading` flag the code never lowers). Treat it as a
+   `fail` for any step claiming that panel rendered, AND add a `visual_issues` entry
+   citing the first and last frame the placeholder persists in (e.g. "the Trace
+   panel shows 'Loading…' from 0002 through 0009 — never resolves"). A placeholder
+   in just one transitional frame is fine; persistence across many is the bug.
 
 Compute each scenario's status as the worst of its steps (fail < unsupported <
 pass). Copy each scenario's `id`, `title`, and `required` exactly from the YAML

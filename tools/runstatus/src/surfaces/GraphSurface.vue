@@ -77,7 +77,11 @@ async function adopt(id: string | null): Promise<void> {
       loading.value = false;
     }
   } else {
+    // No active session: clear the initial loading flag so the empty state renders.
+    // Without this, `loading` (true at init) is never lowered when current-session
+    // discovery returns null, leaving the surface stuck on "Loading…" indefinitely.
     store.teardown();
+    loading.value = false;
   }
 }
 

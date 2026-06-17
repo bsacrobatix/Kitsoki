@@ -521,6 +521,12 @@ vscode-qa:
 	docs/skills/kitsoki-ui-qa/scripts/blank-scan.sh $(VSCODE_QA_VIDEO) \
 		--out .artifacts/vscode-tour-blank-scan.json \
 		$(if $(filter 1,$(ADVISORY)),,--fail-foreign) >/dev/null
+	@# Stuck-placeholder gate: a panel sitting on "Loading…" for a long unbroken run
+	@# is a code/perf bug (a loading flag never lowered), invisible to blank-scan
+	@# (mostly themed bg). OCR catches it deterministically; skips if tesseract absent.
+	docs/skills/kitsoki-ui-qa/scripts/placeholder-scan.sh $(VSCODE_QA_VIDEO) \
+		--out .artifacts/vscode-tour-placeholder-scan.json \
+		$(if $(filter 1,$(ADVISORY)),,--fail-on-find)
 
 # vscode-theming-sidebyside renders the SAME tour under the dark and light editor
 # themes, then composes them into one dark|light comparison MP4 (proves the embed
