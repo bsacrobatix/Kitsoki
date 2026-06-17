@@ -303,6 +303,53 @@ demos-force: build features-index
 # Pages site from them. (What the CI deploy effectively runs.)
 site-full: demos site
 
+# ── render: one friendly, extensible front door for local artifacts ─────────
+# The rendering machinery already exists (demos / demo-feature / site), but
+# under names you have to know. `make render` is the discoverable entrypoint
+# for "generate the things people watch and read, locally": today the full set
+# of demo videos, tomorrow docs and a stitched product-tour master.
+#
+# It is reuse-first — every render-* target delegates to the underlying target
+# so there is exactly one implementation each. The video path stays incremental
+# (per-demo content stamps skip anything unchanged — see scripts/record-demos.sh),
+# so re-running `make render` after a docs-only edit records nothing.
+#
+# To grow it: add a render-<kind> target below and list it in `make render-help`
+# (next up: `render-tour` — stitch the per-section videos into one master with
+# .agents/skills/kitsoki-ui-demo/scripts/concat-videos.sh).
+.PHONY: render render-help render-videos render-video render-docs render-all
+FORCE ?=
+
+render: render-videos
+	@echo
+	@echo "rendered demo videos -> .artifacts/<id>/*.mp4"
+	@echo "more: 'make render-help' (single feature, docs, everything)"
+
+render-help:
+	@echo "render targets:"
+	@echo "  make render                     record every demo video (incremental)"
+	@echo "  make render FORCE=1             re-record every demo video"
+	@echo "  make render-video FEATURE=<id>  one feature: video + GIF + contact sheet"
+	@echo "  make render-docs                build the promo site + help docs"
+	@echo "  make render-all                 videos + docs"
+
+# render-videos delegates to the incremental demos pipeline (FORCE=1 -> force).
+render-videos:
+	@$(MAKE) $(if $(FORCE),demos-force,demos)
+
+# render-video records ONE feature's video and renders its GIF + contact sheet.
+render-video:
+	@$(MAKE) demo-feature FEATURE=$(FEATURE)
+
+# render-docs builds the VitePress promo site + help docs from whatever demos
+# have been recorded (a missing video degrades to a poster, never a failure).
+render-docs:
+	@$(MAKE) site
+
+# render-all is the everything path: refresh the videos, then build the site.
+render-all:
+	@$(MAKE) demos site
+
 # ── Promo site + help docs (tools/site, VitePress) ──────────────────────────
 # One source tree, two variants: the GitHub Pages site (full videos, base
 # $(SITE_BASE)) and the binary-embedded /help/ copy (posters only — built by
