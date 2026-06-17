@@ -200,7 +200,7 @@ All kinds use the dotted form the SPA subsystem chip logic already consumes.
 | `machine.say`                | Once per `say:` effect that resolves. Payload `{"text": …}`; replay no-op. Split out of `world.update` so a timeline can render narration as its own row. |
 | `machine.state_exited`       | Machine leaves a state (compound or leaf).                  |
 | `machine.state_entered`      | Machine enters a state (compound or leaf).                  |
-| `machine.off_path_entered`   | User activates off-path mode.                               |
+| `machine.off_path_entered`   | Off-path mode begins. Carries `reason` (see below): a typed `/freeform` trigger (`freeform`) or an automatic oracle off-ramp on a no-match (`off_ramp`). |
 | `machine.off_path_exited`    | User returns from off-path mode.                            |
 | `machine.timeout`            | Synthetic timeout-fired turn.                               |
 | `harness.called`             | Host side-effect dispatched (pre-bind args).                |
@@ -216,6 +216,22 @@ All kinds use the dotted form the SPA subsystem chip logic already consumes.
 round-trip — `BuildJourney` ignores them; the JSONL reader passes them through
 unchanged. A trace written by a newer kitsoki still loads under an older one
 up to the point of an unknown kind that matters for state reconstruction.
+
+**`machine.off_path_entered` payload — why the turn went free-form.** Off-path
+mode has two doors, distinguished by the `reason` field; the fields are additive,
+so older traces lacking them replay unchanged.
+
+| Payload key  | Type    | When present | Meaning                                                            |
+|--------------|---------|--------------|--------------------------------------------------------------------|
+| `from_state` | string  | always       | The resting state the off-path turn ran against (unchanged afterwards). |
+| `reason`     | string  | always       | `freeform` — the user typed the `off_path:` trigger; or `off_ramp` — an automatic oracle off-ramp on a no-match in a room that declared `oracle_off_ramp:`. |
+| `error_code` | string  | `off_ramp` only | The no-match code that triggered the off-ramp: `UNKNOWN_INTENT`, `INTENT_UNKNOWN`, or `LLM_CLARIFICATION`. |
+| `confidence` | float64 | `off_ramp` only | The router confidence at the no-match, for audit.                |
+
+An off-ramp turn emits `oracle.off_path.question` / `oracle.off_path.answer`
+(the converse exchange) but **never** a `turn.end` with a rejected outcome — the
+whole point is that a no-match is answered instead of bounced. See
+[`docs/stories/state-machine.md`](../stories/state-machine.md) §11.
 
 ### Oracle event kinds
 

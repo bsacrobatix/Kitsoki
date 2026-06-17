@@ -508,6 +508,60 @@ func TestTurn_OffRampWiring_ClarifyInNonOffRampRoom(t *testing.T) {
 	}
 }
 
+// TestTurn_OffRampWiring_ValidIntentNotSwallowed is the complementary negative
+// proof to the no-match/clarify wiring tests: a VALID intent in an off-ramp room
+// must transition normally and must NOT be diverted into the off-ramp. The
+// off-ramp is scoped to no-match codes (see TestMaybeOffRamp_ScopeGuard), but
+// those tests drive the helper with synthetic codes; this one drives the REAL
+// Turn() entry point with a genuinely routable intent (`look`, resolved by the
+// routing harness to the declared `look` self-transition) against the opted-in
+// `idea` room and asserts the success path is untouched. A regression that
+// consulted maybeOffRamp on every outcome (not just the no-match branches) would
+// swallow this transition and fail here — the gap the other wiring tests, which
+// only ever feed a no-match, cannot catch.
+func TestTurn_OffRampWiring_ValidIntentNotSwallowed(t *testing.T) {
+	orch, raw, sid := setupOffRampOrchDef(t, offRampApp(), offRampRoutingHarness{}, true)
+	ctx := context.Background()
+
+	// Prime: one successful `look` turn materializes the root `idea` state.
+	_, err := orch.Turn(ctx, sid, "look")
+	require.NoError(t, err)
+	jBefore, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("idea"), jBefore.State, "resting in the off-ramp room")
+
+	// Snapshot so we inspect only the events the asserted (valid) turn appends.
+	histBefore, err := raw.LoadHistory(sid)
+	require.NoError(t, err)
+	priorEvents := len(histBefore)
+
+	// A second `look` — a valid, routable intent in the off-ramp room.
+	outcome, err := orch.Turn(ctx, sid, "look")
+	require.NoError(t, err)
+	require.NotNil(t, outcome)
+	require.Equal(t, ModeTransitioned, outcome.Mode,
+		"a valid intent in an off-ramp room must transition, not off-ramp")
+	require.NotEqual(t, ModeOffPath, outcome.Mode,
+		"the off-ramp must not swallow a successful intent")
+	require.Equal(t, app.StatePath("idea"), outcome.NewState,
+		"the look self-transition rests back in idea")
+
+	// The valid turn appended a TransitionApplied and NO OffPathEntered.
+	hist, err := raw.LoadHistory(sid)
+	require.NoError(t, err)
+	var sawTransition bool
+	for _, ev := range hist[priorEvents:] {
+		switch ev.Kind {
+		case store.TransitionApplied:
+			sawTransition = true
+		case store.OffPathEntered:
+			t.Fatalf("a valid intent must not enter the off-ramp (reason=%q)", reasonOf(ev))
+		}
+	}
+	require.True(t, sawTransition,
+		"a valid intent must persist the ordinary TransitionApplied")
+}
+
 // errorCodeOf extracts the `error_code` string from an event payload.
 func errorCodeOf(ev store.Event) string {
 	var m map[string]any

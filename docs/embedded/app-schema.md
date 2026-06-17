@@ -88,6 +88,7 @@ states:
     relevant_world:  [ <world-key>, ... ]            # pinned in TUI location indicator
     relevant_slots:  [ <slot-name>, ... ]
     timeout:         <TimeoutDef>                    # optional auto-transition
+    oracle_off_ramp: <OffRampDef>                    # optional no-match door (see below)
 ```
 
 Rules:
@@ -841,6 +842,52 @@ off_path:
   banner:   "(help mode)"
   return:   main              # state to re-enter after exiting off-path
 ```
+
+## `OffRampDef` (`oracle_off_ramp:`)
+
+Per-state **no-match door**. When a free-text utterance routes to no declared
+intent in a room that sets `oracle_off_ramp`, the orchestrator hands the
+original text to an oracle converse turn (the same voice `off_path:` reaches)
+instead of bouncing it back as a rejection — **without advancing the state
+machine or mutating world**. The menu still renders; the resting state is
+unchanged. The TurnResult `mode` is `offpath`. Contrast with `off_path:`: that
+is an automatic room-scoped door triggered by a *typed string* that *does*
+change state; the off-ramp fires on a *no-match* and *never* changes state.
+
+Opt-in per room; two author forms (the struct mirrors the subset of
+`OffPathDef` that styles the voice — `trigger`/`return` are off-path-only and
+have no analogue here):
+
+```yaml
+oracle_off_ramp: true                                          # bare scalar — use the off-path voice
+oracle_off_ramp: { agent: discovery-guide, banner: "(thinking)" }  # struct form
+```
+
+| Field     | Required | Notes                                                                                       |
+|-----------|----------|---------------------------------------------------------------------------------------------|
+| `agent`   | no       | Names an entry in top-level `agents:` whose system prompt + model style the converse call. Validated at load against the `agents:` map (mirrors `off_path.agent`). |
+| `persona` | no       | Inline system-prompt-style instruction for the off-ramp voice. When both `persona` and `agent` are set, `persona` wins. |
+| `banner`  | no       | One-line label shown when the off-ramp engages.                                             |
+
+Load-time invariants (a violating `oracle_off_ramp` fails the load):
+
+- **Rejected on `terminal: true`** — a terminal state has no resting menu to return to.
+- **Rejected on `mode: conversational`** — an Oracle Room already routes all free text; an off-ramp would be redundant.
+- A named `agent:` must exist in the top-level `agents:` map.
+- The struct is strict — off-path-only keys (e.g. `trigger:`, `return:`) are rejected.
+
+A nil/absent `oracle_off_ramp` (or `oracle_off_ramp: false`) means no off-ramp —
+the default — and rejections behave exactly as before. See
+[`docs/stories/architecture.md`](../stories/architecture.md) §9 and
+[`docs/stories/state-machine.md`](../stories/state-machine.md) §11 for the full
+design, and [`stories/off-ramp-demo/`](../../stories/off-ramp-demo/) for a
+runnable example.
+
+> **Rendering note (web):** for the free-text floor to render on a menu room,
+> the off-ramp room's `view:` must be a **flat** typed-element list, not the
+> `extends:` + `blocks:` chrome form — the inheritance pipeline strips the
+> typed-view choice metadata the web `InputBar` needs to show the always-present
+> text box. See `stories/off-ramp-demo/rooms/desk.yaml`.
 
 ## `TimeoutDef`
 

@@ -213,10 +213,20 @@ thought.
   correctness % across backends (Claude vs free llama.cpp), so a call site can
   be routed to the cheap backend with evidence. Produces the measurement
   `local-model-oracle.md` consumes. Nothing implemented yet.
-- [`oracle-off-ramp.md`](oracle-off-ramp.md) — a per-room
-  `oracle_off_ramp:` opt-in: when free text maps to no declared intent,
-  hand the turn to an oracle `converse` answer instead of rejecting, with
-  no state/world change. Nothing implemented yet.
+- `oracle-off-ramp.md` — a per-room `oracle_off_ramp:` opt-in: when free text
+  maps to no declared intent, hand the turn to an oracle `converse` answer
+  instead of rejecting, with no state/world change. **Shipped**; the proposal
+  was retired into the narrative docs — see
+  [`docs/stories/architecture.md`](../stories/architecture.md) §9,
+  [`docs/stories/state-machine.md`](../stories/state-machine.md) §11,
+  [`docs/embedded/app-schema.md`](../embedded/app-schema.md) (`OffRampDef`), and
+  the runnable [`stories/off-ramp-demo/`](../../stories/off-ramp-demo/).
+- `web-text-input-floor.md` — (tui, web) always offer a free-text composer in
+  the web UI, even when a `choice:` widget is shown. Closed the biggest gap in
+  the [text-only contract](../architecture/transports.md#7-every-story-must-work-text-only)
+  and unblocked the oracle off-ramp on the web. **Shipped** as the `showTextFloor`
+  free-text floor (`tools/runstatus/src/components/InputBar.vue`); the proposal
+  was retired.
 - [`stories/prd/`](../../stories/prd/README.md) — a standalone
   PRD-authoring operator story. Shipped; the design proposal was never
   committed, so its reference is the story README.
