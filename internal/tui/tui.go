@@ -684,7 +684,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	// the reconstructed transcript drops a mis-styled box (it picks up the
 	// trailing agent body's background) into the middle of the history.
 	if !m.resumed {
-		if welcome := buildWelcome(orch, sid, appPath, m.currentTheme(), defaultWidth); welcome != "" {
+		if welcome := buildWelcome(orch, sid, appPath, defaultWidth); welcome != "" {
 			m.transcript.pending = append(m.transcript.pending, welcome)
 		}
 	}

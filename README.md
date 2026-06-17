@@ -1,5 +1,7 @@
 # kitsoki
 
+<img src="docs/branding/assets/mesa-sun.svg" align="right" width="132" alt="The Kitsoki Mesa Sun — a desert sun rising over a terraced pueblo">
+
 A conversational workflow engine built on one commitment: **make workflows as
 deterministic as possible, and confine the LLM to narrow, identified,
 traceable decision points.**
@@ -223,6 +225,12 @@ settlement — a collection of houses, ceremonial chambers, and public
 plazas arranged into one living whole. The metaphor fits a
 conversational workflow engine that hosts many surfaces (TUI, daemon, Jira,
 Bitbucket) as connected rooms under one architecture.
+
+The **Mesa Sun** mark — a desert sun rising over a terraced cliff-dwelling —
+carries the same metaphor in geometry; see
+[`docs/branding/logo.md`](docs/branding/logo.md) for the mark, palette, and
+usage (it appears in the README header, the web UI favicon, and the TUI
+startup banner).
 
 Greek mythology is exhausted as a source of software names. Every
 other tool is *Hermes*, *Hydra*, *Apollo*, *Athena*, *Pythia*, or some

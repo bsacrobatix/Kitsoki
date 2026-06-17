@@ -139,6 +139,37 @@ type Welcome struct {
 	// Status is the optional bottom-row context line (e.g.
 	// "session: sess_42 · room: idle"). Rendered muted-italic.
 	Status string
+	// Logo, when true, renders the Kitsoki "Mesa Sun" pixel-art mark to
+	// the left of the text column. Brand colours are fixed (the desert
+	// palette) regardless of the active theme; see [mesaSunArt].
+	Logo bool
+}
+
+// mesaSunArt renders the Kitsoki "Mesa Sun" mark (docs/branding/logo.md) as
+// compact terminal pixel-art: a five-rayed desert sun above a terraced,
+// stepped pueblo with a single dark doorway, on a rust ground band. Each
+// line is padded to a fixed 10-column canvas so the column joins cleanly
+// beside the welcome text. When noColor is set the desert tints drop but
+// the block silhouette still reads.
+func mesaSunArt(noColor bool) string {
+	st := func(c lipgloss.Color) lipgloss.Style {
+		if noColor {
+			return lipgloss.NewStyle()
+		}
+		return lipgloss.NewStyle().Foreground(c)
+	}
+	gold, clay, adobe, rust, door := st(brandGold), st(brandClay), st(brandAdobe), st(brandRust), st(brandShadow)
+	lines := []string{
+		gold.Render(`  \  |  / `), // rays: up-left, up, up-right
+		gold.Render(` ── ███ ──`), // horizontal rays + sun
+		gold.Render(`    ███   `), // sun base
+		clay.Render(`    ▟█▙   `), // raised central block
+		adobe.Render(`   ▟███▙  `), // upper terrace (lighter tier)
+		clay.Render(`  ▟█████▙ `), // lower terrace
+		"  " + clay.Render("███") + door.Render("█") + clay.Render("███") + " ", // ground floor + doorway
+		rust.Render(` █████████`), // ground band
+	}
+	return strings.Join(lines, "\n")
 }
 
 // WelcomeBlock renders the multi-line bordered welcome banner. Boxed
@@ -177,6 +208,12 @@ func (r *Renderer) WelcomeBlock(w Welcome) string {
 	}
 
 	body := strings.Join(lines, "\n")
+	// Brand logo column to the left of the text, top-aligned so the mark's
+	// crown lines up with the title. JoinHorizontal pads the shorter block
+	// to match heights.
+	if w.Logo {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, mesaSunArt(r.NoColor), "   ", body)
+	}
 	// Thick border that spans the full terminal width — gives the
 	// welcome banner the heft the user asked for ("consume the
 	// full width and have a thicker border"). Width includes the

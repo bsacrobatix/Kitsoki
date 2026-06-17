@@ -93,7 +93,7 @@ Examples:
 	cmd.Flags().StringVar(&block, "block", "",
 		"render just one block kind (header, user_turn, routing_status, routing, agent_turn, system_notice, slash_output, menu, inbox, background_complete, footer, prompt). Overrides --view.")
 	cmd.Flags().StringVar(&theme, "theme", "default",
-		"colour palette: default | meta-blue | meta-amber | off-path | all (bake-off)")
+		"colour palette: default | mesa | meta-blue | meta-amber | off-path | all (bake-off)")
 	cmd.Flags().IntVar(&width, "width", 80,
 		"terminal width to render against")
 	cmd.Flags().StringVar(&fixture, "fixture", "",
@@ -283,6 +283,7 @@ func renderSingleBlock(r *blocks.Renderer, name string) (string, error) {
 		return r.World(blocks.WorldFixture()), nil
 	case "welcome":
 		return r.WelcomeBlock(blocks.Welcome{
+			Logo:     true,
 			Title:    "kitsoki · cypilot",
 			Subtitle: "v1.2.0 · by brad",
 			Hints: []string{

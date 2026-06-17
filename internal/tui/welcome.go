@@ -21,13 +21,18 @@ import (
 // buildWelcome returns the rendered welcome block (lipgloss-styled
 // rounded box) or "" when there's nothing to advertise. The width is
 // the terminal's column count at startup; the box auto-fits.
-func buildWelcome(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, themeName string, width int) string {
+//
+// The banner always renders with the brand "mesa" theme and the Mesa Sun
+// pixel-art mark (docs/branding/logo.md) — it is the start-of-session brand
+// moment, so it stays in desert tones regardless of the active room theme.
+func buildWelcome(orch *orchestrator.Orchestrator, sid app.SessionID, appPath string, width int) string {
 	def := orch.AppDef()
 	if def == nil {
 		return ""
 	}
-	r := blocks.New(width, themeName)
+	r := blocks.New(width, "mesa")
 	w := blocks.Welcome{
+		Logo:     true,
 		Title:    welcomeTitle(def, appPath),
 		Subtitle: welcomeSubtitle(def),
 		Hints: []string{
