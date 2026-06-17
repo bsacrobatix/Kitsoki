@@ -68,6 +68,19 @@ app-icon tiles where the default rust building would disappear.
 
 ---
 
+## In context
+
+The mark across the forms a logo actually ships in — a light app bar with the
+wordmark, window / browser-tab chrome, and a circular avatar.
+
+| | |
+|---|---|
+| <img src="assets/context-appbar.svg" width="240" alt="Kitsoki wordmark on a light app bar"> | **App bar / wordmark.** Full mark beside "kits<b>oki</b>" — lowercase humanist sans, the trailing *oki* set in Clay. For paper / sand surfaces. The [README](../../README.md) header uses the same lockup on transparent (`mesa-sun-wordmark.svg`). |
+| <img src="assets/context-tab.svg" width="240" alt="Kitsoki in window / browser-tab chrome"> | **Window / tab chrome.** Simplified glyph + label on a dark title bar — the favicon-scale placement. |
+| <img src="assets/mesa-sun-avatar.svg" width="80" alt="Kitsoki circular avatar"> | **Avatar.** Full mark centred on a paper disc inside an Adobe ring — for profile / identity spots. |
+
+---
+
 ## Palette
 
 | Role | Name | Hex |
@@ -100,7 +113,8 @@ the mark to float in the middle of the tile.
 dark or clay tiles; use the **mono** glyph wherever the host supplies the colour.
 
 **Wordmark.** Pair the mark with "kitsoki" set lowercase in a humanist sans, or small-caps
-with extra letter-spacing. The mark also stands alone.
+with extra letter-spacing — the trailing *oki* in Clay. The prebuilt lockup is
+`mesa-sun-wordmark.svg` (transparent). The mark also stands alone.
 
 ### Don't
 
@@ -123,6 +137,10 @@ All assets live in [`assets/`](assets/):
 | `mesa-sun-simple.svg` | Simplified glyph (≤ 24 px, favicons) |
 | `mesa-sun-mono.svg` | Monochrome / template icon (`currentColor`) |
 | `mesa-sun-light.svg` | Full mark recoloured for dark/clay tiles |
+| `mesa-sun-avatar.svg` | Full mark on a paper disc with an Adobe ring (avatars / profile spots) |
+| `mesa-sun-wordmark.svg` | Mark + "kitsoki" lockup, transparent (README header) |
+| `context-appbar.svg` | Wordmark on a light app bar ("in context" mock) |
+| `context-tab.svg` | "In context" mock — glyph + label in window / tab chrome |
 
 The exploratory set — all ten original concepts and an interactive size/variation
 preview — lives under `.artifacts/kitsoki-logos/` (not committed).

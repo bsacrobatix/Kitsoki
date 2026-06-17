@@ -1,6 +1,4 @@
-# kitsoki
-
-<img src="docs/branding/assets/mesa-sun.svg" align="right" width="132" alt="The Kitsoki Mesa Sun — a desert sun rising over a terraced pueblo">
+<img src="docs/branding/assets/mesa-sun-wordmark.svg" width="200" alt="kitsoki — the Mesa Sun wordmark">
 
 A conversational workflow engine built on one commitment: **make workflows as
 deterministic as possible, and confine the LLM to narrow, identified,
