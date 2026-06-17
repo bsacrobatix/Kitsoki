@@ -19,6 +19,14 @@
 #     when it covers >= --min-coverage. Contrast is the key: a broken render
 #     (white box, grey placeholder, colour fill) stands OUT from the bg, whereas
 #     a dark panel on a dark theme is low-contrast and ignored;
+#   • EDGE-GUTTER check (contrast-independent): from each edge inward, count the
+#     contiguous band of rows/columns that are ~entirely the background bucket.
+#     A wide band the content never reaches — a one-sided empty strip on an
+#     otherwise-populated frame — is flagged as a gutter. This catches the case
+#     the contrast gate is blind to: an empty margin that MATCHES the theme bg
+#     (e.g. left-packed 80-col content in a wide panel leaving a dead right
+#     third). It only fires when the frame has real content elsewhere, so a
+#     legitimately sparse screen stays quiet;
 #   • separately, a frame whose single most-common colour covers >=
 #     --empty-coverage is flagged as near-empty (essentially nothing rendered).
 #
@@ -29,9 +37,10 @@
 # Usage:
 #   blank-scan.sh <frames-dir|image> [--out scan.json] [--grid WxH]
 #                 [--quant N] [--contrast D] [--min-coverage F]
-#                 [--empty-coverage F] [--fail-on-find]
+#                 [--empty-coverage F] [--gutter-min F] [--gutter-uniform F]
+#                 [--fail-on-find]
 # Defaults: --grid 48x27 --quant 24 --contrast 64 --min-coverage 0.10
-#           --empty-coverage 0.985
+#           --empty-coverage 0.985 --gutter-min 0.16 --gutter-uniform 0.94
 # Exit: 0 = scanned OK (no flags, or flags but advisory);
 #       3 = flags found AND --fail-on-find; 2 = usage/tool error.
 #
@@ -47,6 +56,7 @@ src="${1:-}"; shift || true
 [ -n "$src" ] || { echo "usage: blank-scan.sh <frames-dir|image> [opts]" >&2; exit 2; }
 
 out="" grid="48x27" quant=24 contrast=64 min_cov="0.10" empty_cov="0.985" fail_on_find=0
+gutter_min="0.16" gutter_uniform="0.94"
 while [ $# -gt 0 ]; do
   case "$1" in
     --out)            out="$2"; shift 2 ;;
@@ -55,6 +65,8 @@ while [ $# -gt 0 ]; do
     --contrast)       contrast="$2"; shift 2 ;;
     --min-coverage)   min_cov="$2"; shift 2 ;;
     --empty-coverage) empty_cov="$2"; shift 2 ;;
+    --gutter-min)     gutter_min="$2"; shift 2 ;;
+    --gutter-uniform) gutter_uniform="$2"; shift 2 ;;
     --fail-on-find)   fail_on_find=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -71,15 +83,16 @@ fi
 
 GW="${grid%x*}"; GH="${grid#*x}"
 
-python3 - "$GW" "$GH" "$quant" "$contrast" "$min_cov" "$empty_cov" "$fail_on_find" "$out" "${frames[@]}" <<'PY'
+python3 - "$GW" "$GH" "$quant" "$contrast" "$min_cov" "$empty_cov" "$gutter_min" "$gutter_uniform" "$fail_on_find" "$out" "${frames[@]}" <<'PY'
 import sys, json, subprocess
 from collections import Counter
 gw, gh = int(sys.argv[1]), int(sys.argv[2])
 quant = max(1, int(sys.argv[3]))
 contrast = float(sys.argv[4])
 min_cov = float(sys.argv[5]); empty_cov = float(sys.argv[6])
-fail_on_find = sys.argv[7] == "1"
-out = sys.argv[8]; frames = sys.argv[9:]
+gutter_min = float(sys.argv[7]); gutter_uniform = float(sys.argv[8])
+fail_on_find = sys.argv[9] == "1"
+out = sys.argv[10]; frames = sys.argv[11:]
 total = gw * gh
 
 def dist(a, b):
@@ -134,6 +147,30 @@ def largest_blob(bs, bg):
             best = (len(cells), target, box)
     return best
 
+def edge_gutters(bs, bg):
+    # Contrast-INDEPENDENT edge check: from each edge inward, count the contiguous
+    # band of lines (columns for left/right, rows for top/bottom) that are
+    # ~entirely the background bucket. A wide such band is a dead margin the
+    # content never reaches — the failure the contrast gate is blind to, because
+    # the margin IS the bg colour. Returns the widest gutter per side as a frac of
+    # that axis (0..1).
+    def col_bg_frac(x):
+        return sum(1 for y in range(gh) if bs[y*gw + x] == bg) / gh
+    def row_bg_frac(y):
+        return sum(1 for x in range(gw) if bs[y*gw + x] == bg) / gw
+    def run(idxs, frac):
+        n = 0
+        for i in idxs:
+            if frac(i) >= gutter_uniform: n += 1
+            else: break
+        return n
+    return {
+        "right":  round(run(range(gw-1, -1, -1), col_bg_frac) / gw, 3),
+        "left":   round(run(range(0, gw),        col_bg_frac) / gw, 3),
+        "bottom": round(run(range(gh-1, -1, -1), row_bg_frac) / gh, 3),
+        "top":    round(run(range(0, gh),        row_bg_frac) / gh, 3),
+    }
+
 results, flagged = [], []
 for path in frames:
     name = path.rsplit("/", 1)[-1]
@@ -146,15 +183,26 @@ for path in frames:
     bg_cov = round(bg_n / total, 4)
     area, blob_bucket, box = largest_blob(bs, bg_bucket)
     blob_cov = round(area / total, 4)
+    gutters = edge_gutters(bs, bg_bucket)
     rec = {"frame": name,
            "background": {"color": hexof(bg_bucket), "coverage": bg_cov},
            "block": {"color": hexof(blob_bucket) if blob_bucket else None,
-                     "coverage": blob_cov, "bbox": box}}
+                     "coverage": blob_cov, "bbox": box},
+           "gutters": gutters}
     reasons = []
     if blob_cov >= min_cov and blob_bucket is not None:
         reasons.append(f"a solid {hexof(blob_bucket)} block (high-contrast vs "
                        f"the {hexof(bg_bucket)} background) covers "
                        f"{blob_cov*100:.0f}% of the frame")
+    # Edge gutter: a wide one-sided dead margin, but only on a frame that DOES
+    # have content (not a near-empty page — that is reported separately below).
+    if bg_cov < empty_cov:
+        worst_side = max(gutters, key=gutters.get)
+        worst = gutters[worst_side]
+        if worst >= gutter_min:
+            reasons.append(f"a flat {hexof(bg_bucket)} {worst_side} gutter spans "
+                           f"{worst*100:.0f}% of the frame — content does not reach "
+                           f"the {worst_side} edge")
     if bg_cov >= empty_cov:
         reasons.append(f"the frame is {bg_cov*100:.0f}% a single flat colour "
                        f"{hexof(bg_bucket)} — almost nothing rendered")
@@ -167,6 +215,7 @@ for path in frames:
 
 report = {"grid": f"{gw}x{gh}", "quant": quant, "contrast": contrast,
           "min_coverage": min_cov, "empty_coverage": empty_cov,
+          "gutter_min": gutter_min, "gutter_uniform": gutter_uniform,
           "frames_scanned": len(frames), "flagged": flagged, "frames": results}
 text = json.dumps(report, indent=2)
 if out:

@@ -93,9 +93,24 @@
   --k-button-hover-bg: var(--vscode-button-hoverBackground, #2563eb);
 
   /* ── Agent room-view "paper card" ───────────────────────────────────────── */
-  /* In VS Code: follows the editor widget surface, so it darkens with the theme.
-   * In the browser: the deliberate LIGHT sheet on the dark desk is preserved. */
-  --k-paper-bg: var(--vscode-editorWidget-background, #f7f8fa);
+  /* The report card must read as an ELEVATED sheet, not blend into the desk.
+   * In several VS Code dark themes (e.g. Default Dark Modern) editorWidget-
+   * background (#252526) is nearly identical to editor-background (#1f1f1f), so a
+   * raw widget surface makes the card invisible — its trailing space (where short
+   * room-view lines don't fill the card) then reads as a dead "gray gutter".
+   * Mixing a little of the editor FOREGROUND into the widget surface lifts the
+   * card off the desk in BOTH directions: lighter on a dark theme, marginally
+   * deeper on a light one — so it always reads as a card. The browser keeps its
+   * deliberate light sheet via the fallbacks. */
+  --k-paper-bg: color-mix(
+    in srgb,
+    var(--vscode-editorWidget-background, #f7f8fa) 90%,
+    var(--vscode-editor-foreground, #1f2430) 10%
+  );
   --k-paper-fg: var(--vscode-editor-foreground, #1f2430);
-  --k-paper-border: var(--vscode-panel-border, #d8dbe2);
+  --k-paper-border: color-mix(
+    in srgb,
+    var(--vscode-panel-border, #d8dbe2) 60%,
+    var(--vscode-editor-foreground, #1f2430) 40%
+  );
 }

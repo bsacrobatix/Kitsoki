@@ -503,6 +503,19 @@ vscode-e2e: web
 	cd $(VSCODE_DIR) && pnpm build
 	cd $(VSCODE_DIR) && KITSOKI_VSCODE_PACE=$${KITSOKI_VSCODE_PACE:-1} pnpm exec playwright test vscode-tour.e2e
 
+# vscode-qa is the DETERMINISTIC (no-LLM) review pass over the recorded VS Code
+# demo frames: blank-scan flags large monochromatic regions AND one-sided dead
+# edge gutters (content that doesn't reach an edge — the failure mode that let an
+# invisible-card "gray bar" ship). Advisory by default (exit 0 + JSON report);
+# set FAIL_ON_FIND=1 to make it a gate. Run after `make vscode-e2e`.
+#   DIR overrides the frame dir (default .artifacts/vscode-tour).
+VSCODE_QA_DIR ?= .artifacts/vscode-tour
+.PHONY: vscode-qa
+vscode-qa:
+	docs/skills/kitsoki-ui-qa/scripts/blank-scan.sh $(VSCODE_QA_DIR) \
+		--out .artifacts/vscode-tour-blank-scan.json \
+		$(if $(filter 1,$(FAIL_ON_FIND)),--fail-on-find,) >/dev/null
+
 # surface-panels renders each decomposed surface (chat / trace / graph) at the REAL
 # sizes + orientations it occupies in VS Code (editor panel; narrow sidebar; wide
 # bottom panel) into .artifacts/surface-panels/, so each panel can be reviewed /
