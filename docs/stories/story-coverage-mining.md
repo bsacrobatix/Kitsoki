@@ -88,6 +88,12 @@ behind `grep -qi "CONFLICT"` branches). Recognising that a mined
 reading shell, not aligning a sequence. The recipe + outcome is **evidence**; a
 human (or an LLM) assigns the verdict.
 
+A note on the two words: **coverage mining** is the activity (the whole
+mine → map → author loop); the per-intent judgment it produces is the
+**conformance verdict** (one of the five below). "Coverage" is the headline
+name across the skill, tooling, and worksheets; "conformance" is reserved for
+the verdict — they are not two features.
+
 For each in-scope intent, one verdict:
 
 | Verdict | Test | Action |
