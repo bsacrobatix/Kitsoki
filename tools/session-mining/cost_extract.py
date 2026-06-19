@@ -24,6 +24,16 @@ the session grows, plus the cache-read (reprocess) tokens each turn re-reads jus
 to carry the prior conversation forward. The header also reports what share of
 all input tokens were reprocessing. --grep finds the turn that ran a command.
 
+COLD RESUMES (coming back after a break) are tracked too, and measured rather
+than modelled. Resuming a session APPENDS to the same transcript file (cross-file
+parentUuid links are vanishingly rare), so a break shows up as a large time gap
+between consecutive records. Past the 1h cache TTL the cache is gone, so the
+first turn back re-WRITES the prefix cold — a cache_creation spike billed at the
+write rate. We detect gaps >= CACHE_TTL_MIN and capture that re-write as the REAL
+$ paid just to re-warm the conversation before any work happens. (When a
+transcript contains no such break, the summary falls back to a clearly-labelled
+rate counterfactual instead.)
+
 Usage:
   # whole-session real cost
   cost_extract.py SESSION.jsonl
@@ -42,6 +52,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
 import glob
 import json
 import os
@@ -50,6 +61,21 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pricing
+
+# Claude Code's prompt cache TTL (minutes). A gap longer than this between
+# consecutive transcript records means the cache expired: resuming re-WRITES the
+# prefix cold (a cache_creation spike) instead of re-reading it. Resumes append to
+# the same session file, so a within-file time gap is the continuation signal.
+CACHE_TTL_MIN = 60
+
+
+def _ts(s):
+    if not isinstance(s, str):
+        return None
+    try:
+        return datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -66,6 +92,12 @@ class Turn:
     models: set = field(default_factory=set)
     commands: list = field(default_factory=list)  # tool_use signatures seen
     exact: bool = True  # False if any message hit an unpriced model
+    # Cold-resume: gap (minutes) before this turn if it followed a break past the
+    # cache TTL, and the REAL cost of the cold prefix re-write on the first turn
+    # back (directly measured from its cache_creation, not a counterfactual).
+    gap_min: float = 0.0
+    rewarm_tokens: int = 0
+    rewarm_usd: float = 0.0
 
     @property
     def total_tokens(self) -> int:
@@ -94,6 +126,14 @@ class SessionCost:
 
     def exact(self) -> bool:
         return all(t.exact for t in self.turns)
+
+    def resumes(self) -> list:
+        """Turns that followed a break past the cache TTL (cold resumes)."""
+        return [t for t in self.turns if t.gap_min >= CACHE_TTL_MIN]
+
+    def rewarm_usd(self) -> float:
+        """REAL total $ paid to re-warm the conversation after breaks."""
+        return sum(t.rewarm_usd for t in self.turns)
 
 
 def _user_text(content) -> str | None:
@@ -127,10 +167,27 @@ def _tool_sigs(content) -> list:
     return sigs
 
 
+def _rewarm_cost(usage: dict, model: str) -> tuple[int, float]:
+    """The cold prefix re-write on the first turn back: just the cache_creation
+    (write) component, priced at the write rate. This is REAL cost paid to
+    re-warm the conversation, measured from the resume turn's usage."""
+    p, _ = pricing.price_for(model)
+    cc = usage.get("cache_creation") or {}
+    cw5 = cc.get("ephemeral_5m_input_tokens")
+    cw1 = cc.get("ephemeral_1h_input_tokens")
+    if cw5 is None and cw1 is None:
+        cw5, cw1 = usage.get("cache_creation_input_tokens", 0), 0
+    toks = (cw5 or 0) + (cw1 or 0)
+    usd = ((cw5 or 0) * p.cache_write_5m + (cw1 or 0) * p.cache_write_1h) / 1e6
+    return toks, usd
+
+
 def extract(path: str) -> SessionCost:
     sc = SessionCost(path=path)
     cur = Turn(user_text="(session start)")
     sc.turns.append(cur)
+    prev_ts = None        # timestamp of the previous record (any type)
+    pending_gap = 0.0     # gap before the current turn, until its first call lands
     with open(path) as fh:
         for line in fh:
             line = line.strip()
@@ -140,18 +197,31 @@ def extract(path: str) -> SessionCost:
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            ts = _ts(rec.get("timestamp"))
+            gap = ((ts - prev_ts).total_seconds() / 60) if (ts and prev_ts) else 0.0
+            if ts:
+                prev_ts = ts
             msg = rec.get("message") or {}
             if rec.get("type") == "user" and not rec.get("isMeta"):
                 ut = _user_text(msg.get("content"))
                 if ut is not None:
                     cur = Turn(user_text=ut)
                     sc.turns.append(cur)
+                    # a break before this user request => cold resume; record the
+                    # gap and re-warm the first assistant call below.
+                    cur.gap_min = gap if gap >= CACHE_TTL_MIN else 0.0
+                    pending_gap = cur.gap_min
             elif rec.get("type") == "assistant":
                 usage = msg.get("usage")
                 if not usage:
                     continue
                 model = msg.get("model", "")
                 usd, exact = pricing.message_cost(usage, model)
+                if pending_gap and cur.calls == 0:
+                    # first call after the break: its cache_creation IS the cold
+                    # prefix re-write. Capture the real re-warm cost, once.
+                    cur.rewarm_tokens, cur.rewarm_usd = _rewarm_cost(usage, model)
+                    pending_gap = 0.0
                 cur.calls += 1
                 cur.input_tokens += usage.get("input_tokens", 0)
                 cur.output_tokens += usage.get("output_tokens", 0)
@@ -227,26 +297,34 @@ def main() -> None:
               f"{sc.tokens():,} tok · models {sorted(sc.models())}")
         print(f"  reprocessing tax: {share:.0f}% of input tokens were cache reads "
               f"of prior context ({reproc:,} tok re-read to take the next action)")
-        # Cold-resume premium (PER-TURN — consecutive turns within the hour stay
-        # warm, so this is not a session-wide multiplier). Take the single action
-        # that re-read the most prior context: resume it cold, past the 1h TTL, and
-        # that prefix re-bills without the cache discount — ~10x for the same
-        # action. Kitsoki: $0 either way, because no conversation is fed to a model.
+        # Cold resumes — REAL, measured. A break past the 1h cache TTL forces the
+        # next turn to re-WRITE the prefix cold (a cache_creation spike), captured
+        # as rewarm_usd. Kitsoki: $0 to resume — no conversation cache to expire.
         model = next(iter(sc.models()), "")
-        # Use a SMALL action (<=3 calls) so cache_read ~ one re-read of the prefix
-        # at that depth — the honest "come back and do one small thing" case, not a
-        # giant multi-call turn whose cache_read sums many re-reads.
-        small = [t for t in sc.turns if t.calls <= 3 and t.cache_read]
-        worst = max(small or sc.turns, key=lambda t: t.cache_read, default=None)
-        if worst and worst.cache_read and model:
-            cons, first = pricing.cold_premium(model)
-            p, _ = pricing.price_for(model)
-            warm = worst.cache_read * p.cache_read / 1e6
-            print(f"  cold-resume premium (one small action, after a break): "
-                  f"re-reading the {worst.cache_read:,}-tok prefix cost "
-                  f"{fmt_usd(warm)} warm; cold (past the 1h TTL) it re-bills at "
-                  f"~{cons:.0f}x ({fmt_usd(warm * cons)}), first cold turn ~{first:.0f}x "
-                  f"({fmt_usd(warm * first)})  | {worst.user_text[:36]}")
+        resumes = sc.resumes()
+        if resumes:
+            tot = sc.rewarm_usd()
+            print(f"  cold resumes: {len(resumes)} break(s) >1h cost {fmt_usd(tot)} "
+                  f"REAL just to re-warm the conversation (measured cache re-writes):")
+            for t in sorted(resumes, key=lambda x: -x.rewarm_usd)[:3]:
+                warm = t.rewarm_tokens * pricing.price_for(model)[0].cache_read / 1e6
+                mult = (t.rewarm_usd / warm) if warm else 0
+                print(f"    +{t.gap_min/60:4.1f}h gap -> re-wrote {t.rewarm_tokens:,} tok "
+                      f"cold = {fmt_usd(t.rewarm_usd)} ({mult:.0f}x the warm "
+                      f"{fmt_usd(warm)})  | {t.user_text[:40]}")
+        elif model:
+            # No break observed in this transcript — show the rate-based premium so
+            # the cold case is still visible (counterfactual on measured warm tokens).
+            small = [t for t in sc.turns if t.calls <= 3 and t.cache_read]
+            worst = max(small or sc.turns, key=lambda t: t.cache_read, default=None)
+            if worst and worst.cache_read:
+                cons, first = pricing.cold_premium(model)
+                p, _ = pricing.price_for(model)
+                warm = worst.cache_read * p.cache_read / 1e6
+                print(f"  cold-resume premium (no break in this transcript; rate "
+                      f"counterfactual): re-reading the {worst.cache_read:,}-tok "
+                      f"prefix cost {fmt_usd(warm)} warm -> ~{cons:.0f}x "
+                      f"({fmt_usd(warm * cons)}) cold | {worst.user_text[:32]}")
         if args.by_turn:
             # The story is the CLIMB: each turn re-reads the whole conversation so
             # far, so the cost of taking the next action rises as the session
@@ -258,6 +336,10 @@ def main() -> None:
             for t in sc.turns:
                 cum += t.cost_usd
                 flag = "" if t.exact else " *"
+                if t.gap_min >= CACHE_TTL_MIN:
+                    print(f"    {'⏸ ':>9} {'':>11} {'':>11} {'':>5}   "
+                          f"·· +{t.gap_min/60:.1f}h break -> cold re-warm "
+                          f"{fmt_usd(t.rewarm_usd)} ({t.rewarm_tokens:,} tok re-written)")
                 print(f"    {fmt_usd(t.cost_usd):>9} {fmt_usd(cum):>11} "
                       f"{t.cache_read:>11,} {t.calls:>5}{flag}  | {t.user_text[:56]}")
     if any_inexact:
@@ -265,11 +347,16 @@ def main() -> None:
 
 
 def _turn_json(sc: SessionCost, t: Turn) -> dict:
-    return dict(session=os.path.basename(sc.path), user_text=t.user_text,
-                calls=t.calls, cost_usd=round(t.cost_usd, 6),
-                input_tokens=t.input_tokens, output_tokens=t.output_tokens,
-                cache_read=t.cache_read, cache_write=t.cache_write,
-                models=sorted(t.models), exact=t.exact)
+    d = dict(session=os.path.basename(sc.path), user_text=t.user_text,
+             calls=t.calls, cost_usd=round(t.cost_usd, 6),
+             input_tokens=t.input_tokens, output_tokens=t.output_tokens,
+             cache_read=t.cache_read, cache_write=t.cache_write,
+             models=sorted(t.models), exact=t.exact)
+    if t.gap_min >= CACHE_TTL_MIN:
+        d["cold_resume"] = dict(gap_min=round(t.gap_min, 1),
+                                rewarm_tokens=t.rewarm_tokens,
+                                rewarm_usd=round(t.rewarm_usd, 6))
+    return d
 
 
 def _session_json(sc: SessionCost) -> dict:
@@ -277,6 +364,8 @@ def _session_json(sc: SessionCost) -> dict:
                 cost_usd=round(sc.total(), 6), api_calls=sc.calls(),
                 total_tokens=sc.tokens(), models=sorted(sc.models()),
                 exact=sc.exact(),
+                cold_resumes=len(sc.resumes()),
+                rewarm_usd=round(sc.rewarm_usd(), 6),
                 turns=[_turn_json(sc, t) for t in sc.turns])
 
 

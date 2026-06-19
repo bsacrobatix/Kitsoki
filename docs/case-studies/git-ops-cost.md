@@ -75,30 +75,34 @@ the git-ops story's entire four-operation run. But the floor understates
 reality. Developers don't commit in a vacuum; they commit on turn 20 of a
 working session, and pay the turn-20 reprocessing price to do it.
 
-### And it's worse cold: coming back after a break
+### And it's worse cold: coming back after a break (measured)
 
-The climb above assumes the cache is **warm** — those 1.1M tokens for
-"what branch?" were billed at the cache-read rate (~0.1× input). Claude
-Code's prompt cache has a **1-hour TTL** (transcripts record every write
-as `ephemeral_1h`). Step away longer than that — lunch, a meeting, the
-next morning — and the cache is gone. The same prefix now re-bills
-*without the discount*: at full input rate on re-read (**~10×** the warm
-cost), and the first cold turn re-*writes* the prefix at up to **~20×**.
+The climb above assumes the cache is **warm**. Claude Code's prompt cache
+has a **1-hour TTL**. Step away longer — lunch, a meeting, the next
+morning — and it's gone: the first turn back must re-*write* the whole
+conversation prefix cold (at the cache-write rate, ~20× the cache-read
+rate) before any work happens.
 
-So the same trivial "what branch?", resumed cold:
+This is **directly measurable**, not modelled. Resuming a session appends
+to the same transcript file (cross-file continuation links are vanishingly
+rare — 1 in 207 sessions here), so a break is a large time gap between
+consecutive records, and the cold re-write is a `cache_creation` spike on
+the next turn. `cost_extract.py` detects gaps past the TTL and prices that
+re-write. Real examples from this repo's sessions:
 
-| | re-read 1.1M-tok prefix | for one one-word question |
-|---|---|---|
-| warm (within the hour) | cache-read rate | **$1.68** |
-| cold (past the 1h TTL) | full input rate, ~10× | **~$16.76** |
-| cold, first turn back | cache-*write* 1h, ~20× | **~$33.51** |
+| break | resumed with | cold re-warm (measured) | vs warm |
+|---|---|---|---|
+| **20.2 h** (`a650171f`) | *"just commit on main"* | **$4.22** | 20× ($0.21) |
+| 5.3 h (`55ca3a24`) | *"continue"* | $3.69 | 20× |
+| 1.8 h (`54b43d51`) | *"run the analysis again"* | $0.75 | 20× |
 
-You walked away, came back, asked one word — and paid up to $33 before the
-model did anything, purely to re-warm the conversation. In the git-ops
-story this is a deterministic branch-detection host call: **$0**, warm or
-cold, because there is no conversation cache to expire — nothing is fed
-back through a model. The cold-resume penalty isn't a tail risk; it's the
-normal cost of returning to any long-running session.
+You came back the next morning, typed *"just commit on main"*, and paid
+**$4.22 to re-warm the conversation before git even ran** — re-writing
+140,623 tokens cold. In the git-ops story, "commit on main" is a
+deterministic git operation: **$0** to resume, warm or cold, because there
+is no conversation cache to expire — nothing is fed back through a model.
+The cold-resume penalty isn't a tail risk; it's what you pay every time
+you return to a long-running session.
 
 ---
 
@@ -144,7 +148,7 @@ turns the dominant cost term to zero.
 | git-ops **story** | 4 operations, any session length, warm or cold | **$0.0955**, flat |
 | Claude Code, **isolated floor** | one `commit this`, fresh session | ~$0.12 |
 | Claude Code, **realistic** | git ops entangled in a working session | $1–$20+ **per turn**, climbing |
-| Claude Code, **cold resume** | one small action after a >1h break | ~10–20× the warm turn (e.g. $1.68 → $17–34) |
+| Claude Code, **cold resume** | one small action after a >1h break | the re-warm alone, measured: $0.75–$4.22 before any work |
 | Claude Code, **a full session** | the demo-building session itself | **$546.13** |
 
 The story did the four operations once for less than a single isolated
@@ -201,13 +205,14 @@ python3 tools/session-mining/tests/test_cost_estimate.py
   attributes all its cost to that turn — but that's faithful: you *did*
   pay to reprocess the whole conversation for that turn regardless of how
   many sub-tasks it contained.
-* **The warm numbers are measured; the cold premium is a rate
-  counterfactual.** The reprocessed token counts are recorded (exact); the
-  ~10–20× cold multiple is the published rate ratio (full-input or
-  cache-write-1h ÷ cache-read), applied to a *small* (≤3-call) action so it
-  reflects one prefix re-read, not a multi-call turn's summed reads. It is
-  not a session-wide multiplier — consecutive turns within the hour stay
-  warm.
+* **Cold resumes are measured where a break exists, counterfactual
+  otherwise.** When a transcript contains a real >1h gap, the cold re-write
+  is read straight from the resume turn's `cache_creation` (exact, e.g. the
+  $4.22 above). Only when a transcript has no such break does the tool fall
+  back to a clearly-labelled rate counterfactual (cache-write-1h ÷
+  cache-read ≈ 20×) on a small action's measured prefix. Either way it is a
+  per-resume figure, not a session-wide multiplier — consecutive turns
+  within the hour stay warm.
 * **Everything uncertain pushes the raw number up.** Real sessions have
   retries, larger diffs, and longer system prompts; the deterministic
   story's $0.0955 is the committed measured value. The honest claim is the

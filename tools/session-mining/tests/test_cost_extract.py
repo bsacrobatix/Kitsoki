@@ -105,6 +105,42 @@ def run():
     check(any("git commit" in c for c in t1.commands),
           "turn1 must record the git commit command: %r" % t1.commands)
 
+    # --- cold-resume detection from a within-file time gap -------------------
+    def amsg_ts(out_tok, t, cache_write=0):
+        m = {"type": "assistant", "timestamp": t,
+             "message": {"model": "claude-sonnet-4-6",
+                         "content": [{"type": "text", "text": "ok"}],
+                         "usage": {"input_tokens": 5, "output_tokens": out_tok,
+                                   "cache_read_input_tokens": 1000,
+                                   "cache_creation_input_tokens": cache_write,
+                                   "cache_creation": {"ephemeral_5m_input_tokens": 0,
+                                                      "ephemeral_1h_input_tokens": cache_write}}}}
+        return m
+
+    gap_lines = [
+        {"type": "user", "timestamp": "2026-06-01T10:00:00Z", "message": {"content": "start"}},
+        amsg_ts(10, "2026-06-01T10:00:05Z"),
+        # next user request comes 20 hours later -> cold resume, prefix re-written
+        {"type": "user", "timestamp": "2026-06-02T06:00:00Z", "message": {"content": "just commit"}},
+        amsg_ts(10, "2026-06-02T06:00:10Z", cache_write=120000),
+    ]
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "g.jsonl")
+        with open(p, "w") as fh:
+            for r in gap_lines:
+                fh.write(json.dumps(r) + "\n")
+        gsc = ce.extract(p)
+
+    check(len(gsc.resumes()) == 1, "expected 1 cold resume, got %d" % len(gsc.resumes()))
+    res = gsc.resumes()[0]
+    check(res.user_text == "just commit", "resume turn text: %r" % res.user_text)
+    check(1190 < res.gap_min < 1210, "gap should be ~20h (1200min), got %r" % res.gap_min)
+    check(res.rewarm_tokens == 120000, "rewarm tokens: %r" % res.rewarm_tokens)
+    want_rewarm = 120000 * sonnet.cache_write_1h / 1e6
+    approx(gsc.rewarm_usd(), want_rewarm, "rewarm cost = cache_write @ 1h rate")
+    # the FIRST turn (no gap) is not a resume
+    check(gsc.turns[0].gap_min == 0, "first turn must not be flagged a resume")
+
     # session cost == sum of message costs (exact arithmetic)
     per_msg = sum(pricing.message_cost(
         {"input_tokens": 100, "output_tokens": o, "cache_read_input_tokens": 0,
@@ -119,7 +155,7 @@ def run():
             print("  -", f)
         return 1
     print("PASS: pricing + cost_extract (no LLM): exact arithmetic, turn "
-          "attribution, fallback flagging")
+          "attribution, fallback flagging, cold-resume detection")
     return 0
 
 
