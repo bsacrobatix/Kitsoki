@@ -29,3 +29,5 @@ when in doubt always save a markdown into .context for review later - much easie
 commit when you're done with your work and commit only your work - this helps to avoid a mess in the repo.  There may be parallel agents working.  Keep a minimum number of commits and amend as you go where there's no value in separate commits.  Separate key decisions or aspects in clean commits to enable bisect and reverts to work well and not create a mess.
 
 avoid generating a binary of kitsoki for testing - just use go run unless there's some very specific reason that won't work (I think there's issues related to file embedding... not sure)
+
+the kitsoki architecture provides extensive flow testing and mocking capabilities - both synthetic and recorded - to enable thorough testing and demonstration without LLM usage.  make sure to de-risk all cases with flow tests and mocked interactions - and when doing live integration tested if mocks/flows change ensure the tests accurately reflect it.
