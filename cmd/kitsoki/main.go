@@ -111,6 +111,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(replayRoutingCmd())
 	root.AddCommand(testCmd())
 	root.AddCommand(serveCmd())
+	root.AddCommand(mcpCmd())
 	root.AddCommand(renderCmd())
 	root.AddCommand(docsCmd())
 	root.AddCommand(recordCmd())

@@ -1,0 +1,373 @@
+package studio
+
+import (
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+
+	"kitsoki/internal/app"
+	"kitsoki/internal/harness"
+	rsserver "kitsoki/internal/runstatus/server"
+)
+
+// HarnessMode selects how a driving handle's harness resolves intents. The
+// no-LLM default is replay; live is opt-in per session.
+type HarnessMode string
+
+const (
+	// HarnessReplay is the no-LLM default: a ReplayHarness drives the session
+	// from a recording, so the studio server incurs no LLM cost unless the
+	// caller explicitly opts into live.
+	HarnessReplay HarnessMode = "replay"
+	// HarnessLive routes intents through a real LLM. Opt-in only — a session is
+	// never built live unless the open call asks for it.
+	HarnessLive HarnessMode = "live"
+)
+
+// normalize coerces an empty/unknown mode to the no-LLM default (replay), so a
+// caller that omits the mode never accidentally gets a live harness. Only the
+// exact string "live" selects live (shared decision 3).
+func (m HarnessMode) normalize() HarnessMode {
+	if m == HarnessLive {
+		return HarnessLive
+	}
+	return HarnessReplay
+}
+
+// HarnessBuilder is the injectable seam that constructs a driving handle's
+// harness. The default (DefaultHarnessBuilder) builds a no-LLM ReplayHarness for
+// replay mode and defers live construction to the host. Tests inject a builder
+// that returns a FAILING live harness to prove a default-mode handle never
+// reaches it.
+//
+// mode is already normalized (replay|live); recordingPath is the replay
+// recording for replay mode (empty for live). Returning an error fails the open
+// call fast with a structured tool error rather than half-creating a handle.
+type HarnessBuilder func(mode HarnessMode, recordingPath string) (harness.Harness, error)
+
+// DefaultHarnessBuilder is the production harness seam. Replay mode builds a
+// ReplayHarness from the recording path (no LLM); live mode is wired by the
+// driving slice (slice 7) and reported as unavailable here so a premature live
+// open fails loudly instead of silently no-op'ing.
+func DefaultHarnessBuilder(mode HarnessMode, recordingPath string) (harness.Harness, error) {
+	switch mode.normalize() {
+	case HarnessLive:
+		return nil, fmt.Errorf("studio: harness:live is not wired in the server core (driving lands in a later slice)")
+	default:
+		if recordingPath == "" {
+			return nil, fmt.Errorf("studio: harness:replay requires a recording path")
+		}
+		return harness.NewReplay(recordingPath)
+	}
+}
+
+// WorkspaceHandle is the single authoring-workspace handle (≤1 per studio
+// session). It is a story directory under authoring plus the cached result of
+// loading it — the *app.AppDef and any load/validation error — so a story.*
+// tool (slice 6) reads the cached load instead of re-walking the disk each call.
+type WorkspaceHandle struct {
+	// Dir is the story directory root the agent is authoring.
+	Dir string
+	// Def is the cached app.Load result for Dir (nil when the last load failed).
+	Def *app.AppDef
+	// LoadErr is the cached load/validation error from app.Load (nil on success).
+	// app.Load returns errors.Join of the validation errors; story.* surfaces it.
+	LoadErr error
+}
+
+// SessionHandle is one keyed driving session: a kitsoki session bound to an
+// OrchestratorDriver, its harness mode (replay|live) + recording, and its trace
+// path. The server core opens the handle and wires its harness via the
+// HarnessBuilder seam; the OrchestratorDriver itself is filled by the driving
+// slice (slice 7) — here Driver may be the zero value.
+type SessionHandle struct {
+	// Key is the client-facing handle name (e.g. "s1"); unique within a session.
+	Key string
+	// SID is the kitsoki session id this handle drives (empty until slice 7
+	// creates the underlying session).
+	SID app.SessionID
+	// Mode is the resolved harness mode (always normalized to replay|live).
+	Mode HarnessMode
+	// RecordingPath is the replay recording backing a replay-mode handle.
+	RecordingPath string
+	// TracePath is the JSONL trace this handle writes through (the same trace
+	// `kitsoki turn --trace` produces); empty until the driving slice opens one.
+	TracePath string
+	// Harness is the harness built by the HarnessBuilder seam for this handle.
+	// A default-mode handle holds a ReplayHarness and never a live one.
+	Harness harness.Harness
+	// Driver advances the session. Bound by the driving slice (slice 7); the
+	// zero value here.
+	Driver rsserver.Driver
+}
+
+// SessionInfo is the wire shape for one session handle in studio.handles. JSON
+// tags are load-bearing (read by the client).
+type SessionInfo struct {
+	Handle    string `json:"handle"`               // the handle key
+	SessionID string `json:"session_id,omitempty"` // kitsoki session id (when bound)
+	Mode      string `json:"mode"`                 // harness mode (replay|live)
+	TracePath string `json:"trace_path,omitempty"` // JSONL trace path (when opened)
+}
+
+// WorkspaceInfo is the wire shape for the workspace handle in studio.handles.
+type WorkspaceInfo struct {
+	Dir   string `json:"dir"`              // the authoring directory
+	AppID string `json:"app_id,omitempty"` // cached app id (empty when load failed)
+	Valid bool   `json:"valid"`            // whether the cached load succeeded
+}
+
+// HandlesSnapshot is the studio.handles result: the open session handles and the
+// workspace handle (if one is bound).
+type HandlesSnapshot struct {
+	Sessions  []SessionInfo  `json:"sessions"`            // open driving handles
+	Workspace *WorkspaceInfo `json:"workspace,omitempty"` // bound authoring workspace, if any
+}
+
+// StudioSession is the connecting client's in-memory state: at most one
+// authoring workspace handle and 0..n keyed driving-session handles. It owns
+// handle lifecycle (open/list/resolve/close) with fail-fast resolution — an
+// unknown handle is a typed error, never a panic or silent no-op (principle of
+// least surprise). Safe for concurrent use.
+type StudioSession struct {
+	mu        sync.Mutex
+	workspace *WorkspaceHandle
+	sessions  map[string]*SessionHandle
+	nextID    int
+	build     HarnessBuilder
+}
+
+// NewStudioSession constructs an empty StudioSession. A nil builder falls back to
+// DefaultHarnessBuilder, so production callers need not pass one; tests inject a
+// builder to control (or fail) harness construction.
+func NewStudioSession(build HarnessBuilder) *StudioSession {
+	if build == nil {
+		build = DefaultHarnessBuilder
+	}
+	return &StudioSession{
+		sessions: make(map[string]*SessionHandle),
+		build:    build,
+	}
+}
+
+// OpenWorkspaceParams configures OpenWorkspace.
+type OpenWorkspaceParams struct {
+	// Dir is the story directory to bind as the authoring workspace.
+	Dir string
+	// Def is the pre-loaded app definition for Dir (caller-supplied so the
+	// command can load it with the same import resolver as the rest of the CLI).
+	Def *app.AppDef
+	// LoadErr is the load/validation error from loading Dir, cached for story.*.
+	LoadErr error
+}
+
+// OpenWorkspace binds the single authoring workspace. It is an error
+// (ErrWorkspaceExists) to bind a second workspace without closing the first, and
+// an error (ErrBadRequest) to bind an empty directory — fail-fast, never a silent
+// replace.
+func (ss *StudioSession) OpenWorkspace(p OpenWorkspaceParams) (*WorkspaceHandle, error) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	if p.Dir == "" {
+		return nil, &openError{Code: ErrBadRequest, Msg: "workspace dir is required"}
+	}
+	if ss.workspace != nil {
+		return nil, &openError{Code: ErrWorkspaceExists, Msg: fmt.Sprintf("a workspace is already bound (%s); close it first", ss.workspace.Dir)}
+	}
+	wh := &WorkspaceHandle{Dir: p.Dir, Def: p.Def, LoadErr: p.LoadErr}
+	ss.workspace = wh
+	return wh, nil
+}
+
+// Workspace returns the bound workspace handle, or (nil, false) when none is
+// bound. A story.* tool calls this and returns ErrNoWorkspace on !ok.
+func (ss *StudioSession) Workspace() (*WorkspaceHandle, bool) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.workspace, ss.workspace != nil
+}
+
+// CloseWorkspace unbinds the workspace handle. It is a no-op when none is bound
+// (idempotent close is the least-surprising behaviour for teardown).
+func (ss *StudioSession) CloseWorkspace() {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	ss.workspace = nil
+}
+
+// OpenSessionParams configures OpenSession.
+type OpenSessionParams struct {
+	// Key is the requested handle key. Empty auto-assigns a fresh "s<N>" key.
+	Key string
+	// Mode is the harness mode; empty/unknown normalizes to replay (no LLM).
+	Mode HarnessMode
+	// RecordingPath is the replay recording for a replay-mode handle.
+	RecordingPath string
+	// SID is the kitsoki session id the driving slice binds (optional here).
+	SID app.SessionID
+	// TracePath is the JSONL trace path the driving slice opens (optional here).
+	TracePath string
+}
+
+// OpenSession opens a new driving-session handle. It builds the handle's harness
+// through the HarnessBuilder seam with the normalized mode (replay unless the
+// caller explicitly opts into live), so a default-mode open never constructs a
+// live harness. A duplicate key (ErrBadRequest) or a harness-build failure
+// (ErrHarness) is a fail-fast error — no half-open handle is left behind.
+func (ss *StudioSession) OpenSession(p OpenSessionParams) (*SessionHandle, error) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	mode := p.Mode.normalize()
+
+	key := p.Key
+	if key == "" {
+		ss.nextID++
+		key = fmt.Sprintf("s%d", ss.nextID)
+	} else if _, exists := ss.sessions[key]; exists {
+		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session handle %q is already open", key)}
+	}
+
+	h, err := ss.build(mode, p.RecordingPath)
+	if err != nil {
+		return nil, &openError{Code: ErrHarness, Msg: fmt.Sprintf("build %s harness: %v", mode, err)}
+	}
+
+	sh := &SessionHandle{
+		Key:           key,
+		SID:           p.SID,
+		Mode:          mode,
+		RecordingPath: p.RecordingPath,
+		TracePath:     p.TracePath,
+		Harness:       h,
+	}
+	ss.sessions[key] = sh
+	return sh, nil
+}
+
+// ResolveSession returns the handle for key, or a structured tool error
+// (ErrUnknownHandle) when no such handle is open — never nil-without-error, so
+// callers cannot accidentally deref a missing handle.
+func (ss *StudioSession) ResolveSession(key string) (*SessionHandle, error) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	sh, ok := ss.sessions[key]
+	if !ok {
+		return nil, &openError{Code: ErrUnknownHandle, Msg: fmt.Sprintf("no open session handle %q", key)}
+	}
+	return sh, nil
+}
+
+// CloseSession closes the handle for key, releasing its harness. Closing an
+// unknown handle is a structured error (ErrUnknownHandle) — closing something
+// that was never open is a caller mistake worth surfacing, not a silent no-op.
+func (ss *StudioSession) CloseSession(key string) error {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	sh, ok := ss.sessions[key]
+	if !ok {
+		return &openError{Code: ErrUnknownHandle, Msg: fmt.Sprintf("no open session handle %q", key)}
+	}
+	if sh.Harness != nil {
+		_ = sh.Harness.Close()
+	}
+	delete(ss.sessions, key)
+	return nil
+}
+
+// Snapshot renders the open handles into the studio.handles wire shape. Session
+// handles are returned in insertion-stable key order (s1, s2, …) so the output
+// is deterministic for tests and human reading.
+func (ss *StudioSession) Snapshot() HandlesSnapshot {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	snap := HandlesSnapshot{Sessions: make([]SessionInfo, 0, len(ss.sessions))}
+	// Deterministic order by the auto-assigned numeric suffix when present,
+	// falling back to lexical for caller-supplied keys.
+	keys := make([]string, 0, len(ss.sessions))
+	for k := range ss.sessions {
+		keys = append(keys, k)
+	}
+	sortSessionKeys(keys)
+	for _, k := range keys {
+		sh := ss.sessions[k]
+		snap.Sessions = append(snap.Sessions, SessionInfo{
+			Handle:    sh.Key,
+			SessionID: string(sh.SID),
+			Mode:      string(sh.Mode),
+			TracePath: sh.TracePath,
+		})
+	}
+	if ss.workspace != nil {
+		// Valid means the cached load actually produced a definition with no
+		// error — an unbound-but-not-yet-loaded workspace (no Def, no err) is
+		// not valid, so a story.* tool can tell "loaded clean" from "nothing
+		// loaded".
+		wi := &WorkspaceInfo{
+			Dir:   ss.workspace.Dir,
+			Valid: ss.workspace.LoadErr == nil && ss.workspace.Def != nil,
+		}
+		if ss.workspace.Def != nil {
+			wi.AppID = ss.workspace.Def.App.ID
+		}
+		snap.Workspace = wi
+	}
+	return snap
+}
+
+// sortSessionKeys orders handle keys so auto-assigned "s<N>" keys sort
+// numerically (s2 before s10) and caller-supplied keys sort lexically after.
+// Stable, deterministic output for tests and human reading.
+func sortSessionKeys(keys []string) {
+	sort.SliceStable(keys, func(i, j int) bool {
+		ni, oki := autoKeyNum(keys[i])
+		nj, okj := autoKeyNum(keys[j])
+		switch {
+		case oki && okj:
+			return ni < nj
+		case oki != okj:
+			return oki // auto-assigned keys sort before custom keys
+		default:
+			return keys[i] < keys[j]
+		}
+	})
+}
+
+// autoKeyNum returns the numeric suffix of an auto-assigned "s<N>" key and true,
+// or (0, false) for a caller-supplied key.
+func autoKeyNum(k string) (int, bool) {
+	if !strings.HasPrefix(k, "s") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(k[1:])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// openError is the internal error type carrying a studio tool-error code so a
+// handler can translate it to buildToolError without string-matching. Callers
+// use AsToolError to project any error onto a (code, message) pair.
+type openError struct {
+	Code string
+	Msg  string
+}
+
+func (e *openError) Error() string { return e.Msg }
+
+// AsToolError projects err onto a (code, message) suitable for buildToolError.
+// A *openError carries its own code; any other error maps to ErrBadRequest so a
+// handler always has a structured envelope to return.
+func AsToolError(err error) (code, msg string) {
+	if err == nil {
+		return "", ""
+	}
+	if oe, ok := err.(*openError); ok {
+		return oe.Code, oe.Msg
+	}
+	return ErrBadRequest, err.Error()
+}

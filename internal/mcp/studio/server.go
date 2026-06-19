@@ -1,0 +1,176 @@
+// Package studio implements the `kitsoki mcp` server — the studio facade an
+// external coding agent attaches to in order to author a story, drive a session,
+// and see the result. It is a sibling to internal/mcp (the per-app `transition`
+// server): same official github.com/modelcontextprotocol/go-sdk v1.0.0 SDK, same
+// StdioTransport, same AddTool/handler/structured-error shape — but its state is
+// an authoring workspace and a set of live driving sessions (the handle model in
+// handles.go), not one app's transitions.
+//
+// # Slice scope (the server core)
+//
+// This is the keystone of the facade: the server, the handle model, the tool
+// registry, and the no-LLM default. It ships a trivial studio.ping/studio.handles
+// pair so the transport, attach config, and handle lifecycle are verifiable
+// end-to-end before the domain tools (story.* slice 6, session.*/render.* slice 7)
+// plug into the same registry. No interpretive act (free-text routing, any live
+// harness call) happens in the server core — those belong to a session handle's
+// orchestrator + harness and are deferred to slice 7, replay-gated there.
+//
+// # No-LLM default
+//
+// Every driving handle is built with a replay harness unless the caller
+// explicitly opts into harness:live (HarnessMode). The harness is constructed
+// behind an injectable seam (HarnessBuilder) so a test can supply a failing live
+// harness and assert a default-mode handle never reaches it.
+//
+// # Tool names
+//
+// Tools keep the dotted family.verb convention (studio.ping); the SDK exposes
+// them to the client as mcp__kitsoki__studio.ping per the mcp__<server>__<tool>
+// convention. The v1.0.0 SDK accepts a dot in the tool name at registration.
+package studio
+
+import (
+	"context"
+	"encoding/json"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// Version is the studio server's reported implementation version. It rides the
+// MCP Implementation block and is echoed by studio.ping so a client can confirm
+// which server build it attached to.
+const Version = "0.0.1"
+
+// implementationName is the MCP server name. Combined with a tool name it forms
+// the mcp__kitsoki__<tool> identifier the client sees.
+const implementationName = "kitsoki-studio"
+
+// Server is the concrete studio MCP server wrapping the Go SDK. Construct with
+// NewServer; serve with Run (stdio) or Connect (in-process testing). It owns one
+// StudioSession — the in-memory handle store every tool operates on.
+type Server struct {
+	mcpSrv *mcpsdk.Server
+	sess   *StudioSession
+}
+
+// NewServer constructs a studio Server over the given StudioSession and registers
+// the studio.ping / studio.handles tools. Pass a session built with NewStudioSession
+// (or one seeded with an initial workspace). The server is ready to call Run or
+// Connect.
+func NewServer(sess *StudioSession) *Server {
+	srv := &Server{sess: sess}
+	srv.mcpSrv = mcpsdk.NewServer(&mcpsdk.Implementation{
+		Name:    implementationName,
+		Version: Version,
+	}, nil)
+
+	// studio.ping — liveness; proves transport + attach.
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "studio.ping",
+		Description: "Liveness probe for the kitsoki studio server. Returns {ok, version}; proves the stdio transport and attach config resolved to this binary.",
+	}, srv.handlePing)
+
+	// studio.handles — lists the open handles and their modes.
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "studio.handles",
+		Description: "List the open studio handles: the driving sessions (id, harness mode, trace path) and the authoring workspace (if one is bound).",
+	}, srv.handleHandles)
+
+	return srv
+}
+
+// Session exposes the underlying StudioSession so callers and tests can open or
+// inspect handles directly (the domain tools in slices 6/7 dispatch through it).
+func (srv *Server) Session() *StudioSession { return srv.sess }
+
+// Run starts the studio server on the StdioTransport and blocks until the context
+// is done or the peer disconnects. This is the entry point for `kitsoki mcp`.
+func (srv *Server) Run(ctx context.Context) error {
+	return srv.mcpSrv.Run(ctx, &mcpsdk.StdioTransport{})
+}
+
+// Connect exposes the underlying mcpsdk.Server so callers can use
+// mcpsdk.NewInMemoryTransports for in-process testing (mirrors mcp.Server.Connect).
+func (srv *Server) Connect(ctx context.Context, t mcpsdk.Transport, opts *mcpsdk.ServerSessionOptions) (*mcpsdk.ServerSession, error) {
+	return srv.mcpSrv.Connect(ctx, t, opts)
+}
+
+// ── tool args / results ──────────────────────────────────────────────────────
+
+// PingArgs is the (empty) input to studio.ping.
+type PingArgs struct{}
+
+// PingOK is the success response of studio.ping. JSON tags are load-bearing
+// (read by the client).
+type PingOK struct {
+	OK      bool   `json:"ok"`      // always true on this branch
+	Version string `json:"version"` // the studio server version (== Version)
+}
+
+// HandlesArgs is the (empty) input to studio.handles.
+type HandlesArgs struct{}
+
+// ── handlers ──────────────────────────────────────────────────────────────────
+
+// handlePing returns {ok:true, version}. It never errors — its only job is to
+// prove the transport and attach config resolved to this server.
+func (srv *Server) handlePing(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args PingArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	return nil, PingOK{OK: true, Version: Version}, nil
+}
+
+// handleHandles snapshots the open handles. It never errors — an empty studio
+// session reports zero sessions and no workspace.
+func (srv *Server) handleHandles(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args HandlesArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	return nil, srv.sess.Snapshot(), nil
+}
+
+// ── structured tool errors ───────────────────────────────────────────────────
+
+// ToolError is the structured error payload returned when a studio tool rejects
+// a call (an unknown handle, no workspace bound, etc.). It mirrors
+// internal/mcp.TransitionError: ok:false plus a typed error so the client can
+// self-correct rather than parse a free-text message.
+type ToolError struct {
+	OK    bool   `json:"ok"`    // always false on this branch
+	Code  string `json:"code"`  // machine-readable error code (see the Err* codes)
+	Error string `json:"error"` // human-readable message
+}
+
+// Studio tool-error codes. Stable strings the client can branch on.
+const (
+	// ErrUnknownHandle — a tool named a session handle that is not open.
+	ErrUnknownHandle = "UNKNOWN_HANDLE"
+	// ErrNoWorkspace — a story.* tool was called with no workspace bound.
+	ErrNoWorkspace = "NO_WORKSPACE"
+	// ErrWorkspaceExists — open requested a workspace while one is already bound.
+	ErrWorkspaceExists = "WORKSPACE_EXISTS"
+	// ErrBadRequest — the arguments were malformed (e.g. empty required field).
+	ErrBadRequest = "BAD_REQUEST"
+	// ErrHarness — the session's harness could not be constructed.
+	ErrHarness = "HARNESS"
+)
+
+// buildToolError wraps a code + message into a CallToolResult with IsError=true.
+// The structured JSON payload rides in Content so the client can branch on Code.
+// Mirrors internal/mcp.buildErrorResult. Handlers return
+// `return buildToolError(code, msg), nil, nil` — a rejected call is a normal
+// interpreted outcome, not a transport error.
+func buildToolError(code, msg string) *mcpsdk.CallToolResult {
+	payload := ToolError{OK: false, Code: code, Error: msg}
+	b, _ := json.Marshal(payload)
+	return &mcpsdk.CallToolResult{
+		IsError: true,
+		Content: []mcpsdk.Content{
+			&mcpsdk.TextContent{Text: string(b)},
+		},
+	}
+}
