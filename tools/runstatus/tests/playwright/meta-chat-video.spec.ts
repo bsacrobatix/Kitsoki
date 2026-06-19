@@ -17,11 +17,14 @@
  * meta-mode StubOracleCaller; KITSOKI_META_STREAM_DELAY_MS paces its stream so a
  * close-mid-stream is reliably filmable. NEVER a real LLM.
  *
- * The four-step intro is tour-narrated (home -> story -> new session ->
- * observer/chat, via META_CHAT_TOUR_STEPS through the tour overlay). After the
- * intro the spec drives the close/reopen/badge choreography directly with
- * captions — the tour overlay (z 1500) cannot narrate the meta overlay (z 1000)
- * being opened and closed.
+ * ONE annotation style throughout — every narrated moment is a TOUR POPOVER, no
+ * banner captions. The four-step intro is walked through the tour overlay
+ * (home → story → new session → chat). From mc-open-mode onward the spec PERFORMS
+ * each open/close/send action, then jumps the overlay to the matching step
+ * (window.__tourGoTo) and asserts its title against META_CHAT_TOUR_STEPS. The
+ * tour overlay (z 1500, popover 1600) renders ABOVE the meta overlay (z 1000), so
+ * the popover can spotlight meta-overlay / the streaming row / the launcher
+ * badges — there is no z-index blocker.
  *
  * Validate fast (no dwells, tiny but non-zero stream delay so the bubble exists
  * long enough to assert close-mid-stream):
@@ -49,8 +52,11 @@ import {
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
-import { makeCaption, type Beat } from "./_helpers/demo.js";
-import { META_CHAT_TOUR_STEPS } from "../../src/tour/meta-chat-manifest.js";
+import {
+  META_CHAT_TOUR_STEPS,
+  MC_FIRST_CHOREO_STEP,
+  type TourStep,
+} from "../../src/tour/meta-chat-manifest.js";
 
 const CHAPTER_SOURCE = "tools/runstatus/src/tour/meta-chat-manifest.ts";
 
@@ -64,6 +70,14 @@ const DIAG_LOG = path.join(ARTIFACT_DIR, "diagnostic.log");
 
 const ASK_QUESTION = "What does this story do, and where is the run right now?";
 const ASK2_QUESTION = "Which rooms can the autofix agent reach from idle?";
+
+// The intro steps are walked through the overlay's Next button; from this id on
+// the spec drives the choreography and syncs the overlay manually.
+const FIRST_CHOREO_IDX = META_CHAT_TOUR_STEPS.findIndex((s) => s.id === MC_FIRST_CHOREO_STEP);
+const INTRO_STEPS = META_CHAT_TOUR_STEPS.slice(0, FIRST_CHOREO_IDX);
+const STEP_BY_ID: Record<string, TourStep> = Object.fromEntries(
+  META_CHAT_TOUR_STEPS.map((s) => [s.id, s])
+);
 
 let server: WebServer;
 
@@ -88,7 +102,7 @@ test.beforeAll(async () => {
   // when we assert close-mid-stream (at 0 the turn finishes before the click).
   if (process.env.KITSOKI_META_STREAM_DELAY_MS === undefined) {
     process.env.KITSOKI_META_STREAM_DELAY_MS =
-      process.env.WEB_CHAT_PACE === "0" ? "120" : "900";
+      process.env.WEB_CHAT_PACE === "0" ? "120" : "380";
   }
   diag(`KITSOKI_META_STREAM_DELAY_MS=${process.env.KITSOKI_META_STREAM_DELAY_MS}`);
   server = await startWebServer({ addr: ADDR, flow: FLOW, storiesDir: STORY_DIR });
@@ -104,6 +118,65 @@ async function expectBusyBadge(page: Page, timeout = 8000): Promise<void> {
 /** Wait for the launcher ready badge (●) to appear, with a timeout. */
 async function expectReadyBadge(page: Page, timeout = 30000): Promise<void> {
   await expect(page.getByTestId("meta-status-ready")).toBeVisible({ timeout });
+}
+
+/**
+ * Click a meta control by testid via a DOM-dispatched click. The tour popover
+ * (z 1600) renders ABOVE the meta overlay / launcher menu, so a hit-test click
+ * is intercepted by the popover; dispatching the click directly fires the
+ * control's own handler regardless of paint order (the golden agent-actions
+ * spec's technique for controls under the tour backdrop).
+ */
+async function metaClick(page: Page, testid: string, timeout = 10000): Promise<void> {
+  const el = page.getByTestId(testid).first();
+  await expect(el).toBeAttached({ timeout });
+  await el.evaluate((node) => (node as HTMLElement).click());
+}
+
+/** Fill a meta composer input via the DOM (the tour popover covers it). */
+async function metaFill(page: Page, testid: string, value: string): Promise<void> {
+  const el = page.getByTestId(testid).first();
+  await expect(el).toBeAttached({ timeout: 8000 });
+  await el.evaluate((node, v) => {
+    const input = node as HTMLInputElement | HTMLTextAreaElement;
+    input.focus();
+    input.value = v as string;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+}
+
+/**
+ * Sync the tour overlay to a choreography step and narrate it. The spec has
+ * already performed the action that makes the step's target real; this jumps the
+ * overlay's popover to that step (window.__tourGoTo), asserts the popover title
+ * matches the manifest (drift guard, like the golden agent-actions spec), opens
+ * the chapter, dwells, and screenshots. The step stays `kind:"explain"` so the
+ * overlay never advances it on its own.
+ */
+async function narrate(
+  page: Page,
+  chapters: ChapterRecorder,
+  shot: (p: Page, name: string) => Promise<void>,
+  stepId: string,
+  opts: { skipShot?: boolean } = {}
+): Promise<void> {
+  const step = STEP_BY_ID[stepId];
+  if (!step) throw new Error(`unknown choreography step: ${stepId}`);
+  diag(`narrate ${stepId}`);
+  await page.evaluate((id: string) => {
+    (window as unknown as { __tourGoTo?: (s: string) => void }).__tourGoTo?.(id);
+  }, stepId);
+  // The overlay must still be active for the popover to render.
+  await expect(page.getByTestId("tour-overlay")).toBeVisible({ timeout: 8000 });
+  // Drift guard: the popover shows THIS step's title.
+  await expect(page.getByTestId("tour-title")).toHaveText(step.title, { timeout: 12000 });
+  chapters.open(step.id, step.title, CHAPTER_SOURCE);
+  await dwell(page, step.dwellMs ?? 3000);
+  // A caller that captured the labeled frame at a precise moment (e.g. the
+  // timing-sensitive both-badges window) passes skipShot so the dwell above
+  // doesn't overwrite that frame with a later state.
+  if (!opts.skipShot) await shot(page, step.id);
 }
 
 test("meta-chat persistence + launcher status feature-spotlight video", async () => {
@@ -128,7 +201,6 @@ test("meta-chat persistence + launcher status feature-spotlight video", async ()
   let readyClearedOnReopen = false;
   let sawBothBadges = false;
 
-  let beat: Beat;
   let sessionId = "";
 
   try {
@@ -142,8 +214,8 @@ test("meta-chat persistence + launcher status feature-spotlight video", async ()
     }, JSON.stringify(META_CHAT_TOUR_STEPS));
     await expect(page.getByTestId("tour-overlay")).toBeVisible({ timeout: 8000 });
 
-    for (const step of META_CHAT_TOUR_STEPS) {
-      diag(`step ${step.id}`);
+    for (const step of INTRO_STEPS) {
+      diag(`intro step ${step.id}`);
       const url = page.url();
       const routeKind = url.includes("/chat")
         ? "interactive"
@@ -182,37 +254,31 @@ test("meta-chat persistence + launcher status feature-spotlight video", async ()
         await dwell(page, 1000);
       }
     }
-    // The intro's last step (mc-launcher) is an explain step whose Next closes
-    // the tour overlay.
-    await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 8000 });
 
-    // ── 2. Captions take over for the persistence/badge choreography ─────────
-    beat = await makeCaption(page, 4500);
+    // The tour overlay STAYS active through the choreography — the intro's last
+    // step (mc-launcher) is advanced via Next above, leaving the overlay on the
+    // first choreography step. From here the spec performs each action and syncs
+    // the overlay to the matching step via narrate().
+    await expect(page.getByTestId("tour-overlay")).toBeVisible({ timeout: 8000 });
 
-    // Open the ✦ Meta launcher dropdown and pick Story Q&A.
+    // ── 2. Open the ✦ Meta launcher dropdown and pick Story Q&A ──────────────
+    // Use DOM-dispatched clicks for every meta control: the tour overlay stays
+    // active through the choreography, and its popover (z 1600) sits above the
+    // launcher menu / overlay, so a hit-test click is intercepted.
     diag("open meta launcher");
-    await expect(page.getByTestId("meta-mode-story-ask")).toBeVisible({ timeout: 4000 }).catch(async () => {
-      await page.getByTestId("meta-button").click();
-    });
-    // The dropdown may need an explicit open click.
     if (!(await page.getByTestId("meta-mode-story-ask").isVisible().catch(() => false))) {
-      await page.getByTestId("meta-button").click();
+      await metaClick(page, "meta-button");
     }
-    chapters.open("mc-open-mode", "Open Story Q&A", CHAPTER_SOURCE);
-    await beat("Open a Story Q&A chat", "Read-only conversation with an agent that can inspect the loaded story.", 3000);
     await expect(page.getByTestId("meta-mode-story-ask")).toBeEnabled({ timeout: 10000 });
-    await page.getByTestId("meta-mode-story-ask").click();
+    await metaClick(page, "meta-mode-story-ask");
     await expect(page.getByTestId("meta-overlay")).toBeVisible({ timeout: 8000 });
     await dwell(page, SETTLE_MS);
-    await shot(page, "mc-overlay-open");
+    await narrate(page, chapters, shot, "mc-open-mode");
 
     // Scenario 1 — type a question, send, watch the streaming bubble appear.
     diag("send meta question 1");
-    await page.getByTestId("meta-composer-input").fill(ASK_QUESTION);
-    await shot(page, "mc-question-typed");
-    chapters.open("mc-stream", "The turn streams", CHAPTER_SOURCE);
-    await beat("Ask the agent — the turn streams live", "🧠 thinking and a Read tool call arrive in the bubble, paced by the stub oracle.", 1500);
-    await page.getByTestId("meta-composer-send").click();
+    await metaFill(page, "meta-composer-input", ASK_QUESTION);
+    await metaClick(page, "meta-composer-send");
     const streamingBubble = page.getByTestId("meta-row-streaming");
     try {
       await expect(streamingBubble).toBeVisible({ timeout: 8000 });
@@ -221,70 +287,60 @@ test("meta-chat persistence + launcher status feature-spotlight video", async ()
       sawStreaming = false;
     }
     diag(`scenario1 sawStreaming=${sawStreaming}`);
-    // Dwell so the feed fills with the thought + Read row on camera.
-    await dwell(page, 2600);
-    await shot(page, "mc-streaming");
+    await narrate(page, chapters, shot, "mc-stream");
 
     // Scenario 2 — CLOSE the overlay mid-stream; launcher shows the ⟳ badge.
+    // The ⟳ badge (meta.anyBusy) renders on the always-present launcher as soon
+    // as the turn is in flight — even with the overlay open — so wait for it
+    // BEFORE closing. That both proves the turn is mid-stream and removes the
+    // race where a fast stub stream finishes before a post-close poll fires.
     diag("close overlay mid-stream");
-    chapters.open("mc-close-busy", "Close while it works", CHAPTER_SOURCE);
-    await beat("Close the overlay while it's still working", "The turn keeps streaming — closing does not abort it.", 1200);
-    // Sanity: it must STILL be streaming when we close (the close-mid-stream
-    // claim is only meaningful if the turn hasn't finished).
-    const stillBusyOnClose = await streamingBubble.isVisible().catch(() => false);
-    diag(`  bubble visible at close time=${stillBusyOnClose}`);
-    await page.getByTestId("meta-close").click();
-    await expect(page.getByTestId("meta-overlay")).toHaveCount(0, { timeout: 5000 });
-    await dwell(page, 600);
     try {
-      await expectBusyBadge(page, 6000);
-      sawBusyOnClose = true;
+      await expectBusyBadge(page, 8000);
+      await metaClick(page, "meta-close");
+      await expect(page.getByTestId("meta-overlay")).toHaveCount(0, { timeout: 5000 });
+      // The turn keeps streaming after close, so the badge persists.
+      sawBusyOnClose = await page.getByTestId("meta-status-busy").isVisible().catch(() => false);
     } catch {
       sawBusyOnClose = false;
+      // Still close the overlay so the rest of the walk proceeds.
+      await metaClick(page, "meta-close").catch(() => undefined);
+      await expect(page.getByTestId("meta-overlay")).toHaveCount(0, { timeout: 5000 }).catch(() => undefined);
     }
     diag(`scenario2 sawBusyOnClose=${sawBusyOnClose}`);
-    await beat("⟳ working — a meta chat is busy", "The launcher badge tells you a turn is streaming, even with the overlay closed.", 2200);
-    await shot(page, "mc-badge-busy");
+    await narrate(page, chapters, shot, "mc-close-busy");
 
     // Scenario 3 — REOPEN; the same conversation is intact and still streaming.
     diag("reopen overlay mid-stream");
-    chapters.open("mc-reopen", "Reopen — nothing lost", CHAPTER_SOURCE);
-    await beat("Reopen — right where you left it", "The same conversation, the same in-flight turn: as if it was never closed.", 1200);
-    await page.getByTestId("meta-button").click();
-    await page.getByTestId("meta-mode-story-ask").click();
+    await metaClick(page, "meta-button");
+    await metaClick(page, "meta-mode-story-ask");
     await expect(page.getByTestId("meta-overlay")).toBeVisible({ timeout: 8000 });
     // The user turn must still be present (transcript persisted).
     const userRows = page.getByTestId("meta-row-user");
     resumedTranscriptIntact =
       (await userRows.count().catch(() => 0)) >= 1 &&
       ((await userRows.first().textContent().catch(() => "")) ?? "").includes("What does this story do");
-    // And the streaming bubble is (very likely) still there — the turn outlived
-    // the close. Best-effort: a fast replay can land the reply before reopen.
     resumedStreaming = await streamingBubble.isVisible().catch(() => false);
     diag(`scenario3 transcriptIntact=${resumedTranscriptIntact} stillStreaming=${resumedStreaming}`);
-    await dwell(page, 1500);
-    await shot(page, "mc-reopened");
+    await narrate(page, chapters, shot, "mc-reopen");
+
     // Let this turn finish while we watch, so the overlay shows the resolved
     // reply (consistent resolution) before we stage the "ready" scenario.
     await expect(streamingBubble).toBeHidden({ timeout: 40000 }).catch(() => undefined);
     await expect(page.getByTestId("meta-row-agent").last()).toBeVisible({ timeout: 5000 }).catch(() => undefined);
-    await beat("The turn resolves consistently", "The streaming bubble dissolves into the agent's reply — the conversation never reset.", 2500);
-    await shot(page, "mc-resolved");
+    await narrate(page, chapters, shot, "mc-resolved");
 
     // Scenario 4 — start ANOTHER turn, close immediately, let it FINISH while
     // closed → the launcher shows the ready ● badge; reopening clears it.
     diag("send meta question 2, then close to finish-while-closed");
-    await page.getByTestId("meta-composer-input").fill(ASK2_QUESTION);
-    chapters.open("mc-ready", "A reply waiting", CHAPTER_SOURCE);
-    await beat("Ask again, then close immediately", "This time we close right away and let the turn finish while the overlay is shut.", 1200);
-    await page.getByTestId("meta-composer-send").click();
+    await metaFill(page, "meta-composer-input", ASK2_QUESTION);
+    await metaClick(page, "meta-composer-send");
     await expect(streamingBubble).toBeVisible({ timeout: 8000 }).catch(() => undefined);
     await dwell(page, 800);
-    await page.getByTestId("meta-close").click();
+    await metaClick(page, "meta-close");
     await expect(page.getByTestId("meta-overlay")).toHaveCount(0, { timeout: 5000 });
     // While closed, the badge is first ⟳ (working) and then flips to ● (ready)
     // when the turn finishes.
-    await beat("Waiting for the reply…", "⟳ while it streams, then ● the moment the answer lands — all with the overlay closed.", 1500);
     try {
       await expectReadyBadge(page, 40000);
       sawReadyWhenDone = true;
@@ -292,53 +348,38 @@ test("meta-chat persistence + launcher status feature-spotlight video", async ()
       sawReadyWhenDone = false;
     }
     diag(`scenario4 sawReadyWhenDone=${sawReadyWhenDone}`);
-    await dwell(page, 1200);
-    await beat("● ready — a reply is waiting", "The green badge says the answer arrived while you were elsewhere.", 2400);
-    await shot(page, "mc-badge-ready");
+    await narrate(page, chapters, shot, "mc-ready");
 
     // Reopening clears the ready badge.
     diag("reopen to clear ready badge");
-    await page.getByTestId("meta-button").click();
-    await page.getByTestId("meta-mode-story-ask").click();
+    await metaClick(page, "meta-button");
+    await metaClick(page, "meta-mode-story-ask");
     await expect(page.getByTestId("meta-overlay")).toBeVisible({ timeout: 8000 });
-    await dwell(page, 800);
+    await dwell(page, 600);
     readyClearedOnReopen = !(await page.getByTestId("meta-status-ready").isVisible().catch(() => false));
     diag(`scenario4 readyClearedOnReopen=${readyClearedOnReopen}`);
-    await beat("Reopen — the badge clears", "Viewing the reply marks it seen; the ● goes away.", 2200);
-    await shot(page, "mc-ready-cleared");
+    await narrate(page, chapters, shot, "mc-ready-cleared");
 
-    // Scenario 5 (stretch) — two modes at once: leave THIS reply unseen by
-    // switching to Kitsoki help, send there, and close mid-stream so one mode is
-    // ⟳ working while... actually we want one ● + one ⟳ simultaneously. Stage:
-    //  - story.ask currently has an UNSEEN finished reply? No — reopening
-    //    cleared it. Instead: open kitsoki.ask, send, close mid-stream (⟳).
-    //    Meanwhile re-send in story.ask and let it finish closed (●). Showing
-    //    BOTH at once is timing-sensitive, hence required:false.
+    // Scenario 5 (stretch) — two modes at once: story.ask holds an unseen
+    // finishing reply (●) while a kitsoki.ask turn streams (⟳). Timing-sensitive,
+    // hence required:false — only narrate mc-both-badges if both badges land.
     diag("scenario5: attempt both badges at once");
     try {
-      // story.ask: send a turn and DON'T view its completion → will go ●.
       await expect(page.getByTestId("meta-overlay")).toBeVisible();
-      await page.getByTestId("meta-composer-input").fill("Summarise the story in one line.");
-      await page.getByTestId("meta-composer-send").click();
+      await metaFill(page, "meta-composer-input", "Summarise the story in one line.");
+      await metaClick(page, "meta-composer-send");
       await expect(streamingBubble).toBeVisible({ timeout: 8000 }).catch(() => undefined);
       await dwell(page, 400);
-      // Switch to Kitsoki help (a DIFFERENT scope) and start a turn there; the
-      // story.ask turn keeps streaming in its own scope behind the tab.
       const kitsokiTab = page.getByTestId("meta-tab-kitsoki-ask");
       if (await kitsokiTab.isVisible().catch(() => false)) {
-        await kitsokiTab.click();
+        await metaClick(page, "meta-tab-kitsoki-ask");
         await dwell(page, 400);
-        await page.getByTestId("meta-composer-input").fill("What is kitsoki?");
-        await page.getByTestId("meta-composer-send").click();
+        await metaFill(page, "meta-composer-input", "What is kitsoki?");
+        await metaClick(page, "meta-composer-send");
         await expect(streamingBubble).toBeVisible({ timeout: 8000 }).catch(() => undefined);
         await dwell(page, 600);
-        // Close now: kitsoki.ask is streaming (⟳); story.ask may have finished
-        // while we were on the other tab (●). Close to surface both on the
-        // launcher.
-        await page.getByTestId("meta-close").click();
+        await metaClick(page, "meta-close");
         await expect(page.getByTestId("meta-overlay")).toHaveCount(0, { timeout: 5000 });
-        await beat("Both at once — one waiting, one working", "Distinct modes hold distinct state: ● a reply waiting, ⟳ another turn streaming.", 1500);
-        // Poll briefly for BOTH badges visible together.
         const deadline = Date.now() + 12000;
         while (Date.now() < deadline) {
           const busy = await page.getByTestId("meta-status-busy").isVisible().catch(() => false);
@@ -350,8 +391,21 @@ test("meta-chat persistence + launcher status feature-spotlight video", async ()
           await page.waitForTimeout(300);
         }
         diag(`scenario5 sawBothBadges=${sawBothBadges}`);
-        await dwell(page, 1800);
-        await shot(page, "mc-both-badges");
+        if (sawBothBadges) {
+          // Capture the labeled frame NOW, while BOTH badges are on screen — the
+          // busy turn finishes shortly, so a shot taken after narrate()'s dwell
+          // would catch only the ● ready badge. Sync the popover first so the
+          // captured frame already carries the tour narration, then narrate with
+          // skipShot so the dwell doesn't overwrite this frame.
+          await page.evaluate((id: string) => {
+            (window as unknown as { __tourGoTo?: (s: string) => void }).__tourGoTo?.(id);
+          }, "mc-both-badges");
+          await expect(page.getByTestId("tour-title"))
+            .toHaveText(STEP_BY_ID["mc-both-badges"].title, { timeout: 8000 })
+            .catch(() => undefined);
+          await shot(page, "mc-both-badges");
+          await narrate(page, chapters, shot, "mc-both-badges", { skipShot: true });
+        }
       } else {
         diag("scenario5: kitsoki-ask tab not available; skipping both-badges stage");
       }
@@ -359,9 +413,10 @@ test("meta-chat persistence + launcher status feature-spotlight video", async ()
       diag(`scenario5 error (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    chapters.open("mc-done", "Done", CHAPTER_SOURCE);
-    await beat("Your meta chat never loses its place", "Stream it, close it, come back later — the conversation and its status are always there.", 3500);
-    await shot(page, "mc-done");
+    // Final step — narrate the close-out, then advance Next to dismiss the tour.
+    await narrate(page, chapters, shot, "mc-done");
+    await page.getByTestId("tour-next").click().catch(() => undefined);
+    await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 8000 }).catch(() => undefined);
   } catch (e) {
     diag(`FAILED: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
     diag(`--- server log ---\n${server?.log?.() ?? ""}`);
