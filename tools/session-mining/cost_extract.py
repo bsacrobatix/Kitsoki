@@ -10,11 +10,19 @@ split, so there is nothing to model: real cost is a dot product of recorded
 counts with published rates.
 
 A real Claude Code session is one long transcript with many operations
-interleaved. The natural unit is the USER TURN: a user message plus the assistant
-API calls (tool round-trips) it triggers before the next user message. That maps
-one-to-one onto "operations" in the git sessions we mine — "commit the staged
-fix" is one turn, "rebase onto main" is the next. So --by-turn attributes the
-real cost of each operation, and --grep finds the turn that ran a given command.
+interleaved, and that entanglement is the whole point — not noise to strip out.
+To take the NEXT action, the model reprocesses the ENTIRE conversation before it
+(those are the cache-read tokens). So the same `git commit` is cheap as the 2nd
+action and expensive as the 30th — not because committing got harder, but
+because there's now a long conversation to re-read to get there. That
+reprocessing tax is exactly what Kitsoki's deterministic engine eliminates: it
+never feeds a conversation back through a model to decide the next step.
+
+So the unit is the USER TURN (a user message + the assistant API calls it
+triggers), and the story --by-turn tells is the CLIMB: per-action cost rising as
+the session grows, plus the cache-read (reprocess) tokens each turn re-reads just
+to carry the prior conversation forward. The header also reports what share of
+all input tokens were reprocessing. --grep finds the turn that ran a command.
 
 Usage:
   # whole-session real cost
@@ -211,16 +219,29 @@ def main() -> None:
         return
 
     for sc in sessions:
+        reproc = sum(t.cache_read for t in sc.turns)
+        total_in = sum(t.input_tokens + t.cache_read + t.cache_write for t in sc.turns)
+        share = (reproc / total_in * 100) if total_in else 0.0
         print(f"\n# {os.path.basename(sc.path)}")
         print(f"  total {fmt_usd(sc.total())} · {sc.calls()} API calls · "
               f"{sc.tokens():,} tok · models {sorted(sc.models())}")
+        print(f"  reprocessing tax: {share:.0f}% of input tokens were cache reads "
+              f"of prior context ({reproc:,} tok re-read to take the next action)")
         if args.by_turn:
+            # The story is the CLIMB: each turn re-reads the whole conversation so
+            # far, so the cost of taking the next action rises as the session
+            # grows. cumⁿ = what you've paid to reach this action; reproc = tokens
+            # re-read this turn just to carry the prior conversation forward.
+            print(f"    {'cost':>9} {'cumulative':>11} {'reproc-tok':>11} "
+                  f"{'calls':>5}  | action")
+            cum = 0.0
             for t in sc.turns:
-                flag = "" if t.exact else " [fallback-priced]"
-                print(f"    {fmt_usd(t.cost_usd):>10}  {t.calls:>2}c  "
-                      f"{t.total_tokens:>8,}t{flag}  | {t.user_text[:64]}")
+                cum += t.cost_usd
+                flag = "" if t.exact else " *"
+                print(f"    {fmt_usd(t.cost_usd):>9} {fmt_usd(cum):>11} "
+                      f"{t.cache_read:>11,} {t.calls:>5}{flag}  | {t.user_text[:56]}")
     if any_inexact:
-        print(f"\n[!] some messages priced via {pricing.PRICED_AT}")
+        print(f"\n[!] some messages priced via {pricing.PRICED_AT} (marked *)")
 
 
 def _turn_json(sc: SessionCost, t: Turn) -> dict:

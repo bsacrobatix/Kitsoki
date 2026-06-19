@@ -30,12 +30,14 @@ on prompt incantations to enforce structure.
   ships as the [`bugfix`](../../stories/bugfix/) story.
 
 - **[git-ops-cost.md](git-ops-cost.md)** — the *how much*. Puts a price
-  tag on progressive determinism: four operations mined from real Claude
-  Code sessions (commit, rebase-with-conflict, merge, worktree) run as
-  the [`git-ops`](../../stories/git-ops/) story for ~$0.10, versus a
-  modelled 3–55× as a raw agentic loop. Introduces the re-send-everything
-  cost model and the [`cost_estimate.py`](../../tools/session-mining/cost_estimate.py)
-  estimator, with warm/cold and prior-context as the two axes.
+  tag on progressive determinism using **real telemetry** from real
+  Claude Code sessions. The four git-ops operations run as the
+  [`git-ops`](../../stories/git-ops/) story for a committed $0.0955, flat
+  in session length — versus a raw agentic loop where 98–99% of every
+  turn's cost is *reprocessing the prior conversation* to reach the next
+  action (the demo-building session itself cost $546). Introduces the
+  real-cost extractor [`cost_extract.py`](../../tools/session-mining/cost_extract.py)
+  (reads recorded `message.usage`, exact) and the reprocessing-tax framing.
 
 Future studies (planned, not yet written):
 
