@@ -1,5 +1,5 @@
 {
-  "_comment": "Kitsoki concept pitch. Leads with control inversion and the proofs a coding-agent skeptic can't dismiss: the runtime overrules the model mid-call, ~78% of turns never call the LLM, edits hot-reload and replay byte-for-byte as tests, and the workflow runs where work already lives.",
+  "_comment": "Kitsoki concept pitch. Leads with control inversion and the proofs a coding-agent skeptic can't dismiss: the runtime overrules the model mid-call, ~78% of turns never call the LLM, edits hot-reload and replay byte-for-byte as tests, and the workflow runs where work already lives. After the one-prompt strawman it credits the Cherny loop (loop engineering: a gated, budgeted agent loop that converges) and argues phases-not-prompts is that idea generalized into a composable graph. The phases arc then shows the gates routing review failures back to implement, plan, or reproduce \u2014 and that this can loop multiple times.",
   "meta": {
     "mode": "pitch",
     "title": "Kitsoki",
@@ -248,6 +248,97 @@
       "narration": "The naive approach: one big prompt. Validate, fix, verify. The agent does everything."
     },
     {
+      "type": "diagram-svg",
+      "title": "The Cherny loop",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1180 760",
+          "nodes": [
+            {
+              "id": "goal",
+              "label": "goal",
+              "sub": "+ a gate that can prove it",
+              "x": 70,
+              "y": 20,
+              "w": 520,
+              "h": 120
+            },
+            {
+              "id": "maker",
+              "label": "maker",
+              "sub": "smallest change toward the goal",
+              "lines": [
+                "fed the last gate failure"
+              ],
+              "x": 70,
+              "y": 200,
+              "w": 520,
+              "h": 160,
+              "style": "primary"
+            },
+            {
+              "id": "gate",
+              "label": "gate \u00b7 checker",
+              "sub": "script (exit 0) or oracle",
+              "lines": [
+                "pass = goal actually met"
+              ],
+              "x": 70,
+              "y": 420,
+              "w": 520,
+              "h": 160
+            },
+            {
+              "id": "done",
+              "label": "done",
+              "sub": "goal met \u2014 or budget ceiling hit",
+              "x": 70,
+              "y": 640,
+              "w": 520,
+              "h": 100
+            }
+          ],
+          "edges": [
+            {
+              "from": "goal",
+              "to": "maker"
+            },
+            {
+              "from": "maker",
+              "to": "gate",
+              "label": "check"
+            },
+            {
+              "from": "gate",
+              "to": "done",
+              "label": "\u2713 pass"
+            },
+            {
+              "from": "gate",
+              "to": "maker",
+              "style": "back",
+              "bus": 700,
+              "lift": 0,
+              "label": "fail \u00b7 feed the reason forward"
+            }
+          ]
+        }
+      ],
+      "caption": "Loop engineering, after Boris Cherny: an agent iterates toward a goal until a gate proves it's actually met \u2014 or a budget ceiling stops it. Launch it once; it converges on its own.",
+      "hold": 240,
+      "narration": "This is loop engineering \u2014 what Boris Cherny calls a loop. Instead of prompting an agent, you write the loop that prompts it: a maker makes the smallest change, a gate proves whether the goal is actually met, and a budget keeps it from running forever. Each failure feeds the next iteration, so it converges. You launch it once and watch it finish.",
+      "instant": true
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "Loop engineering, generalized",
+      "body": "Kitsoki is the same idea \u2014 a graph of these loops.",
+      "lede": "A Cherny loop solves one goal with one gate and one budget. Kitsoki makes every phase its own gated, budgeted loop and composes them \u2014 so the approach is more structured, scalable, repeatable, composable, extendable, traceable, and deterministic wherever a script can replace the model.",
+      "hold": 210,
+      "narration": "Kitsoki takes the same idea and generalizes it. A single Cherny loop solves one goal. Kitsoki makes every phase its own gated, budgeted loop, then composes them into a graph you can extend \u2014 more structured, scalable, repeatable, composable, extendable, traceable, and deterministic. That's phases, not prompts."
+    },
+    {
       "type": "title",
       "title": "vs."
     },
@@ -416,7 +507,7 @@
           ]
         }
       ],
-      "caption": "Gate: test must fail \u2014 no planning until the bug is proven reproducible.",
+      "caption": "Deterministic gate: the test must fail first \u2014 no planning until the bug is proven reproducible. A script decides, not a judgment.",
       "hold": 90,
       "narration": "The first gate: test must fail before planning begins.",
       "seamless": true,
@@ -760,9 +851,105 @@
           ]
         }
       ],
-      "caption": "Gate: tests must pass \u2014 review only sees working code.",
+      "caption": "Deterministic gate: the tests must pass \u2014 review only sees working code. A script decides, for free.",
       "hold": 90,
       "narration": "Gate: tests must pass before sending to human review.",
+      "seamless": true,
+      "skipTitle": true,
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1100 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 260,
+              "w": 540,
+              "h": 150
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 480,
+              "w": 540,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 approve or refine"
+              ],
+              "x": 70,
+              "y": 730,
+              "w": 540,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails"
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved"
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass"
+            },
+            {
+              "from": "implement",
+              "to": "implement",
+              "style": "recycle",
+              "bus": 700,
+              "lift": -55,
+              "land": 55,
+              "label": "fails or won't run \u2192 retry",
+              "highlighted": true
+            }
+          ]
+        }
+      ],
+      "caption": "Layer 1 is mechanical: the gate just runs the tests. They fail \u2014 or won't even run against the harness \u2014 and implement retries itself, in place. No human, no step backward.",
+      "hold": 165,
+      "narration": "The first gate is deterministic \u2014 it only runs the tests. If they fail, or don't even run against the harness, the phase loops on itself and tries again. No human, no step backward; it fixes itself in place.",
       "seamless": true,
       "skipTitle": true,
       "instant": true
@@ -846,9 +1033,395 @@
           ]
         }
       ],
-      "caption": "Deterministic gates between phases ensure preconditions are met before continuing.",
+      "caption": "The last gate is different: review is an oracle \u2014 an adversarial judgment, not a script. It can approve the work, or send it back.",
+      "hold": 165,
+      "narration": "The final gate is an oracle. Unlike the deterministic gates, review is an adversarial judgment \u2014 it can approve the work, or, when the issue isn't really fixed, send it back to an earlier phase.",
+      "skipTitle": true,
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 680 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 150
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 200,
+              "w": 540,
+              "h": 120
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 370,
+              "w": 540,
+              "h": 150
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 adversarial judgment"
+              ],
+              "x": 70,
+              "y": 560,
+              "w": 540,
+              "h": 120,
+              "style": "primary"
+            },
+            {
+              "id": "merge",
+              "label": "merge",
+              "sub": "\u2192 main",
+              "x": 70,
+              "y": 750,
+              "w": 540,
+              "h": 110
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails"
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved"
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass"
+            },
+            {
+              "from": "review",
+              "to": "merge",
+              "gate": "oracle \u00b7 approve?",
+              "oracle": true,
+              "highlighted": true
+            }
+          ]
+        }
+      ],
+      "caption": "Three deterministic gates (orange) are scripts \u2014 exact, free, incorruptible. The last gate is an oracle (violet): an adversarial review for what no test can encode. Pass, and it merges.",
       "hold": 210,
-      "narration": "Review approves \u2014 or sends it back. Deterministic gates ensure preconditions are met.",
+      "narration": "Most of these gates are deterministic \u2014 scripts that pass or fail exactly, for free. But the final gate is an oracle: an adversarial review, for the quality no test can encode. When it approves, the work merges to main.",
+      "skipTitle": true,
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1240 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 260,
+              "w": 540,
+              "h": 150
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 480,
+              "w": 540,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 approve or refine"
+              ],
+              "x": 70,
+              "y": 730,
+              "w": 540,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails"
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved"
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass"
+            },
+            {
+              "from": "review",
+              "to": "implement",
+              "style": "back",
+              "bus": 660,
+              "lift": -30,
+              "label": "missed case",
+              "highlighted": true
+            }
+          ]
+        }
+      ],
+      "caption": "Just a missed case \u2014 back to implement. The plan and root cause stand.",
+      "hold": 150,
+      "narration": "If it's only a missed edge case, the work goes back to implement. Same plan, same diagnosis \u2014 just more code.",
+      "seamless": false,
+      "skipTitle": true,
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1240 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 260,
+              "w": 540,
+              "h": 150,
+              "style": "primary"
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 480,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 approve or refine"
+              ],
+              "x": 70,
+              "y": 730,
+              "w": 540,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails"
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved"
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass"
+            },
+            {
+              "from": "review",
+              "to": "plan",
+              "style": "back",
+              "bus": 720,
+              "lift": 0,
+              "label": "wrong plan",
+              "highlighted": true
+            }
+          ]
+        }
+      ],
+      "caption": "The fix was wrong \u2014 back to plan. Re-plan against what review learned.",
+      "hold": 150,
+      "narration": "If review shows the plan itself was wrong, the work goes back to plan \u2014 to choose a different approach.",
+      "seamless": true,
+      "skipTitle": true,
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Phases, not prompts",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1240 900",
+          "nodes": [
+            {
+              "id": "reproduce",
+              "label": "reproduce",
+              "sub": "haiku",
+              "lines": [
+                "read-only \u00b7 ticket + repo",
+                "\u2192 failing test fixture"
+              ],
+              "x": 70,
+              "y": 10,
+              "w": 540,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "plan",
+              "label": "plan",
+              "sub": "opus",
+              "lines": [
+                "\u2192 fix plan (operator approval)"
+              ],
+              "x": 70,
+              "y": 260,
+              "w": 540,
+              "h": 150
+            },
+            {
+              "id": "implement",
+              "label": "implement",
+              "sub": "sonnet",
+              "lines": [
+                "worktree write only",
+                "\u2192 commit"
+              ],
+              "x": 70,
+              "y": 480,
+              "w": 540,
+              "h": 180
+            },
+            {
+              "id": "review",
+              "label": "review",
+              "sub": "opus",
+              "lines": [
+                "read-only \u00b7 approve or refine"
+              ],
+              "x": 70,
+              "y": 730,
+              "w": 540,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "reproduce",
+              "to": "plan",
+              "gate": "gate \u00b7 test fails"
+            },
+            {
+              "from": "plan",
+              "to": "implement",
+              "gate": "gate \u00b7 approved"
+            },
+            {
+              "from": "implement",
+              "to": "review",
+              "gate": "gate \u00b7 tests pass"
+            },
+            {
+              "from": "review",
+              "to": "reproduce",
+              "style": "back",
+              "bus": 780,
+              "lift": 30,
+              "label": "wrong root cause",
+              "highlighted": true
+            }
+          ]
+        }
+      ],
+      "caption": "The root cause was wrong \u2014 back to reproduce. Investigate before planning again.",
+      "hold": 150,
+      "narration": "And if the root cause was wrong, it goes all the way back to reproduce \u2014 to investigate again before planning.",
+      "seamless": true,
       "skipTitle": true,
       "instant": true
     },
