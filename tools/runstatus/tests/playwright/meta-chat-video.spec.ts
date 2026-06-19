@@ -50,6 +50,7 @@ import {
   ChapterRecorder,
   writeChapters,
   SETTLE_MS,
+  demoAddr,
   type WebServer,
 } from "./_helpers/server.js";
 import {
@@ -62,7 +63,7 @@ import { cameraContext } from "./_helpers/camera.js";
 const CHAPTER_SOURCE = "tools/runstatus/src/tour/meta-chat-manifest.ts";
 
 // 7765 — the brief reserves this port (7740–7762 are taken).
-const ADDR = "127.0.0.1:7765";
+const ADDR = demoAddr(7765);
 const STORY_DIR = path.join(repoRoot, "stories", "bugfix");
 const FLOW = path.join(STORY_DIR, "flows", "happy_llm.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "meta-chat");

@@ -36,7 +36,7 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import { spawn, type ChildProcess } from "child_process";
-import { saveVideoAsMp4, ChapterRecorder, writeChapters } from "./_helpers/server.js";
+import { saveVideoAsMp4, ChapterRecorder, writeChapters, demoAddr } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,7 +47,7 @@ const repoRoot = path.resolve(__dirname, "../../../..");
 const BIN = path.join(repoRoot, "bin", "kitsoki");
 const STORIES_SRC = path.join(repoRoot, "stories");
 
-const ADDR = "127.0.0.1:7741";
+const ADDR = demoAddr(7741);
 const BASE = `http://${ADDR}`;
 const RPC = `${BASE}/rpc`;
 

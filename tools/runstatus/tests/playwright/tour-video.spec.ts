@@ -31,6 +31,7 @@ import {
   ChapterRecorder,
   writeChapters,
   PACE,
+  demoAddr,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
@@ -40,7 +41,7 @@ import { TOUR_STEPS, type TourStep } from "../../src/tour/manifest.js";
 // (source_ref kind=tour) whose [start,end] window is the recorded dwell.
 const TOUR_SPEC_PATH = "features/onboarding-tour.yaml";
 
-const ADDR = "127.0.0.1:7745";
+const ADDR = demoAddr(7745);
 // Use the bugfix story with the happy_llm flow + the demo cassette.
 // The cassette provides oracle.decide episodes that carry an oracle: block;
 // the web server's cassette dispatcher writes oracle.call.start /

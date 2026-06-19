@@ -36,6 +36,7 @@ import {
   saveVideoAsMp4,
   ChapterRecorder,
   writeChapters,
+  demoAddr,
   dwell,
   cinematicGoto,
   SETTLE_MS,
@@ -50,7 +51,7 @@ const CHAPTER_SOURCE = "features/diagram-showcase.yaml";
 
 // 7753 — distinct from the other spec files so parallel runs never race on the
 // same port bind.
-const ADDR = "127.0.0.1:7753";
+const ADDR = demoAddr(7753);
 const STORY_DIR = path.join(repoRoot, "stories", "dev-story");
 const FLOW = path.join(STORY_DIR, "flows", "design_happy_path.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "diagram-showcase");

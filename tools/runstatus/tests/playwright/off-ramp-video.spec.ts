@@ -45,6 +45,7 @@ import {
   SETTLE_MS,
   ChapterRecorder,
   writeChapters,
+  demoAddr,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
 import { captureDiagnostics } from "./_helpers/demo.js";
@@ -64,7 +65,7 @@ const HOST_CASSETTE = path.join(STORY_DIR, "assets", "converse-cassette.yaml");
 
 // Unique port — distinct from every other spec (7740 multi-story, 7746-7748
 // trace/onboarding/agent-actions) so parallel runs never race on the bind.
-const ADDR = "127.0.0.1:7751";
+const ADDR = demoAddr(7751);
 const BASE = `http://${ADDR}`;
 const RPC = `${BASE}/rpc`;
 

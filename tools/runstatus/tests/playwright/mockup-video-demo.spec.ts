@@ -43,6 +43,7 @@ import {
   SETTLE_MS,
   ChapterRecorder,
   writeChapters,
+  demoAddr,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
@@ -50,7 +51,7 @@ import { MOCKUP_VIDEO_TOUR_STEPS, type TourStep } from "../../src/tour/generated
 
 // 7755 — distinct from review-video (7754) / agent-actions (7748) so parallel
 // spec files never race on the same port bind.
-const ADDR = "127.0.0.1:7755";
+const ADDR = demoAddr(7755);
 const STORY_DIR = path.join(repoRoot, "stories", "mockup-video");
 const FLOW = path.join(STORY_DIR, "flows", "demo_web.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "mockup-video-demo");

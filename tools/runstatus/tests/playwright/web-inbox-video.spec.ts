@@ -44,6 +44,7 @@ import {
   dwell,
   cinematicGoto,
   SETTLE_MS,
+  demoAddr,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
@@ -51,7 +52,7 @@ import { WEB_INBOX_TOUR_STEPS, type TourStep } from "../../src/tour/generated/we
 
 // 7791 — distinct from agent-actions (7748), tour-onboarding (7747), and
 // trace-features (7746) so parallel spec files never race on the same port.
-const ADDR = "127.0.0.1:7791";
+const ADDR = demoAddr(7791);
 const STORY_DIR = path.join(repoRoot, "stories", "inbox-demo");
 const FLOW = path.join(STORY_DIR, "flows", "background_notifies.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "web-inbox");

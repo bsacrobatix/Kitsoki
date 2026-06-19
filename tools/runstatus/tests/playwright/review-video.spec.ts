@@ -48,6 +48,7 @@ import {
   SETTLE_MS,
   ChapterRecorder,
   writeChapters,
+  demoAddr,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
@@ -56,7 +57,7 @@ import { REVIEW_TOUR_STEPS, type TourStep } from "../../src/tour/generated/revie
 
 // 7754 — distinct from diagram-showcase (7753) / agent-actions (7748) so
 // parallel spec files never race on the same port.
-const ADDR = "127.0.0.1:7754";
+const ADDR = demoAddr(7754);
 const STORY_DIR = path.join(repoRoot, "stories", "mockup-video");
 const FLOW = path.join(STORY_DIR, "flows", "demo_review.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "review-video");

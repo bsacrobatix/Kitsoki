@@ -25,12 +25,13 @@ import {
   repoRoot,
   makeShot,
   waitForState,
+  demoAddr,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
 
 const FLOW = path.join(repoRoot, "stories", "oregon-trail", "flows", "winning_deterministic.yaml");
-const ADDR = "127.0.0.1:7743";
+const ADDR = demoAddr(7743);
 
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "oregon-trail-e2e");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");

@@ -16,7 +16,7 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import { expect, type Page, type Video, type Locator } from "@playwright/test";
-import { profileSuffix } from "./camera.js";
+import { profileSuffix, activeProfile } from "./camera.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,6 +24,23 @@ const __dirname = path.dirname(__filename);
 export const repoRoot = path.resolve(__dirname, "../../../../..");
 export const BIN = path.join(repoRoot, "bin", "kitsoki");
 export const STORIES_DIR = path.join(repoRoot, "stories");
+
+/**
+ * The loopback address a demo spec's server binds to. `basePort` is the spec's
+ * stable port; this is the ONE place a port is computed — no spec hardcodes a
+ * raw `127.0.0.1:NNNN`.
+ *
+ * Two shifts keep concurrent recordings from colliding:
+ *   - `KITSOKI_DEMO_PORT_BASE` (default 0) shifts EVERY demo's port, so another
+ *     session / worktree can claim a free range and stop squatting yours (the
+ *     bug that left trace-features a 3s cut for a whole session);
+ *   - the active camera profile's `portShift`, so parallel profile passes of one
+ *     spec (desktop + mobile) never land on the same port.
+ */
+export function demoAddr(basePort: number): string {
+  const shift = Number(process.env.KITSOKI_DEMO_PORT_BASE ?? "0");
+  return `127.0.0.1:${basePort + shift + activeProfile().portShift}`;
+}
 
 /**
  * `go run` vs. a built binary. The rule: `go run ./cmd/kitsoki` for LOCAL DEV /

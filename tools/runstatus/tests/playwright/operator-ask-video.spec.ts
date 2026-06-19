@@ -43,6 +43,7 @@ import {
   ChapterRecorder,
   writeChapters,
   SETTLE_MS,
+  demoAddr,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
@@ -54,7 +55,7 @@ const CHAPTER_SOURCE = "features/operator-ask.yaml";
 
 // 7749 — distinct from agent-actions (7748), trace-features (7746) and
 // tour-onboarding (7747) so parallel spec files never race on the same port.
-const ADDR = "127.0.0.1:7749";
+const ADDR = demoAddr(7766);
 const STORY_DIR = path.join(repoRoot, "stories", "bugfix");
 const FLOW = path.join(STORY_DIR, "flows", "happy_llm.yaml");
 const HOST_CASSETTE = path.join(STORY_DIR, "flows", "demo.cassette.yaml");

@@ -29,6 +29,9 @@ export interface CameraProfile {
   readonly fps: number;
   /** Emulate a touch device (sets Playwright `hasTouch` + `isMobile`). */
   readonly touch: boolean;
+  /** Port offset added to every spec's base port so parallel profile passes of
+   *  one spec never collide (see demoAddr in server.ts). */
+  readonly portShift: number;
 }
 
 /**
@@ -41,9 +44,9 @@ export interface CameraProfile {
  * lockstep or the master tour letterboxes.
  */
 export const PROFILES = {
-  desktop: { id: "desktop", width: 1600, height: 900, deviceScaleFactor: 2, fps: 30, touch: false },
-  tablet: { id: "tablet", width: 1112, height: 834, deviceScaleFactor: 2, fps: 30, touch: true },
-  mobile: { id: "mobile", width: 390, height: 844, deviceScaleFactor: 3, fps: 30, touch: true },
+  desktop: { id: "desktop", width: 1600, height: 900, deviceScaleFactor: 2, fps: 30, touch: false, portShift: 0 },
+  tablet: { id: "tablet", width: 1112, height: 834, deviceScaleFactor: 2, fps: 30, touch: true, portShift: 1000 },
+  mobile: { id: "mobile", width: 390, height: 844, deviceScaleFactor: 3, fps: 30, touch: true, portShift: 2000 },
 } as const satisfies Record<string, CameraProfile>;
 
 export type ProfileId = keyof typeof PROFILES;

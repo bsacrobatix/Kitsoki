@@ -31,6 +31,7 @@ import {
   saveVideoAsMp4,
   ChapterRecorder,
   writeChapters,
+  demoAddr,
   cinematicGoto,
   dwell,
   SETTLE_MS,
@@ -39,7 +40,7 @@ import {
 import { makeCaption, captureDiagnostics } from "./_helpers/demo.js";
 import { cameraContext } from "./_helpers/camera.js";
 
-const ADDR = "127.0.0.1:7752";
+const ADDR = demoAddr(7752);
 const STORY_DIR = path.join(repoRoot, "testdata", "apps", "oracle_probe");
 const FLOW = path.join(STORY_DIR, "flows", "who_are_you.flow.yaml");
 const CASSETTE = path.join(STORY_DIR, "flows", "who_are_you.cassette.yaml");

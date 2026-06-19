@@ -43,6 +43,7 @@ import {
   saveVideoAsMp4,
   ChapterRecorder,
   writeChapters,
+  demoAddr,
   dwell,
   cinematicGoto,
   type WebServer,
@@ -56,7 +57,7 @@ const CHAPTER_SOURCE = "features/devstory-triage.yaml";
 
 // 7762 — the stage-1 port (matches the cassette-validation server). Distinct
 // from every other spec's port so parallel runs never race on the same bind.
-const ADDR = "127.0.0.1:7762";
+const ADDR = demoAddr(7762);
 // The devstory app lives in the cyber-repo worktree, not this kitsoki repo.
 const CYBER_STORIES = "/home/cloud-user/code/cyber-repo/.worktrees/pr-refinement/stories";
 const STORY_DIR = path.join(CYBER_STORIES, "devstory");

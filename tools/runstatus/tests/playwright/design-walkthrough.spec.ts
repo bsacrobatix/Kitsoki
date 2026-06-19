@@ -34,6 +34,7 @@ import {
   saveVideoAsMp4,
   ChapterRecorder,
   writeChapters,
+  demoAddr,
   dwell,
   cinematicGoto,
   SETTLE_MS,
@@ -48,7 +49,7 @@ import { DESIGN_WALKTHROUGH_TOUR_STEPS, type TourStep } from "../../src/tour/gen
 const CHAPTER_SOURCE = "features/design-walkthrough.yaml";
 
 // Port distinct from all other specs.
-const ADDR = "127.0.0.1:7757";
+const ADDR = demoAddr(7757);
 const STORY_DIR = path.join(repoRoot, "stories", "dev-story");
 const FLOW = path.join(STORY_DIR, "flows", "design_tamagotchi_demo.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "design-walkthrough");

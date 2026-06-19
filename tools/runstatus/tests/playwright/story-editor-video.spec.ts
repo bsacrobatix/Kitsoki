@@ -39,6 +39,7 @@ import {
   ChapterRecorder,
   writeChapters,
   SETTLE_MS,
+  demoAddr,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
@@ -50,7 +51,7 @@ const CHAPTER_SOURCE = "features/story-editor.yaml";
 
 // 7749 — distinct from agent-actions (7748), tour-onboarding (7747),
 // trace-features (7746), editor (7798) so parallel spec files never race.
-const ADDR = "127.0.0.1:7749";
+const ADDR = demoAddr(7749);
 const STORY_DIR = path.join(repoRoot, "stories", "prd");
 const FLOW = path.join(STORY_DIR, "flows", "happy_path.yaml");
 const PRD_APP = path.join(STORY_DIR, "app.yaml");

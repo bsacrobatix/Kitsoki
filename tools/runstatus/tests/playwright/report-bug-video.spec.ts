@@ -52,6 +52,7 @@ import {
   dwell,
   cinematicGoto,
   SETTLE_MS,
+  demoAddr,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
@@ -59,7 +60,7 @@ import { REPORT_BUG_TOUR_STEPS, type TourStep } from "../../src/tour/report-bug-
 
 // 7750 — distinct from agent-actions (7748), tour-onboarding (7747) and
 // trace-features (7746) so parallel spec files never race on the same bind.
-const ADDR = "127.0.0.1:7750";
+const ADDR = demoAddr(7750);
 
 // REPO-SAFETY: copy the bugfix story into a throwaway dir OUTSIDE this git
 // repo, so the filed ticket lands there (resolveWebBugRoot walks up to the

@@ -45,6 +45,7 @@ import {
   SETTLE_MS,
   ChapterRecorder,
   writeChapters,
+  demoAddr,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
 import { captureDiagnostics } from "./_helpers/demo.js";
@@ -60,7 +61,7 @@ const BIN = path.join(repoRoot, "bin", "kitsoki");
 const STORIES_DIR = path.join(repoRoot, "stories");
 const FLOW = path.join(repoRoot, "stories", "prd", "flows", "happy_path.yaml");
 
-const ADDR = "127.0.0.1:7740";
+const ADDR = demoAddr(7740);
 const BASE = `http://${ADDR}`;
 const RPC = `${BASE}/rpc`;
 

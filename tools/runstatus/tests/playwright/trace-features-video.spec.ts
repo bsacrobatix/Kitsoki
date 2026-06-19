@@ -32,6 +32,7 @@ import {
   ChapterRecorder,
   writeChapters,
   SETTLE_MS,
+  demoAddr,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
@@ -41,7 +42,7 @@ import { TRACE_TOUR_STEPS, type TourStep } from "../../src/tour/generated/trace-
 // (source_ref kind=tour) whose [start,end] window is the recorded dwell.
 const CHAPTER_SOURCE = "features/trace-features.yaml";
 
-const ADDR = "127.0.0.1:7746";
+const ADDR = demoAddr(7746);
 // Use the bugfix story with the happy_llm flow + the demo cassette so the
 // trace has real oracle.call.complete events for the waterfall, decide-verdict,
 // confidence-bar, annotation, and replay steps.

@@ -58,6 +58,7 @@ import {
   cinematicGoto,
   ChapterRecorder,
   writeChapters,
+  demoAddr,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
@@ -70,7 +71,7 @@ const CHAPTER_SOURCE = "features/chat-stream.yaml";
 
 // 7758 — distinct from every other spec's port (7740–7757 are taken) so
 // parallel specs never race on a bind.
-const ADDR = "127.0.0.1:7758";
+const ADDR = demoAddr(7758);
 const STORY_DIR = path.join(repoRoot, "stories", "bugfix");
 const FLOW = path.join(STORY_DIR, "flows", "happy_llm.yaml");
 const HOST_CASSETTE = path.join(STORY_DIR, "flows", "demo.cassette.yaml");

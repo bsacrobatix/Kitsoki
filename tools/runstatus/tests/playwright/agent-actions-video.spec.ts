@@ -39,6 +39,7 @@ import {
   cinematicGoto,
   ChapterRecorder,
   writeChapters,
+  demoAddr,
   SETTLE_MS,
   type WebServer,
 } from "./_helpers/server.js";
@@ -51,7 +52,7 @@ const CHAPTER_SOURCE = "features/agent-actions.yaml";
 
 // 7748 — distinct from tour-onboarding.spec.ts (7747) and trace-features (7746)
 // so parallel spec files never race on the same port bind.
-const ADDR = "127.0.0.1:7748";
+const ADDR = demoAddr(7748);
 // Same server posture as the trace-features spec: the bugfix story under the
 // happy_llm flow + the demo cassette, so the trace carries real
 // oracle.call.complete events whose transcript_ref pointers back the drawer.

@@ -42,6 +42,7 @@ import {
   saveVideoAsMp4,
   ChapterRecorder,
   writeChapters,
+  demoAddr,
   dwell,
   cinematicGoto,
   SETTLE_MS,
@@ -56,7 +57,7 @@ const CHAPTER_SOURCE = "features/dev-story-bugfix.yaml";
 
 // 7760 — confirmed free; distinct from every other spec's port so parallel
 // runs never race on the same bind.
-const ADDR = "127.0.0.1:7760";
+const ADDR = demoAddr(7760);
 const STORY_DIR = path.join(repoRoot, "stories", "dev-story");
 const FLOW = path.join(STORY_DIR, "flows", "tour_triage_to_bugfix.yaml");
 // No host cassette: the flow's host_handlers stub every host.* call along the

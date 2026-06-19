@@ -41,13 +41,14 @@ import {
   dwell as dwellHelper,
   cinematicGoto,
   SETTLE_MS,
+  demoAddr,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
 import { captureDiagnostics } from "./_helpers/demo.js";
 import { WEATHER_REPORT_TOUR_STEPS, type TourStep } from "../../src/tour/generated/weather-report.js";
 
-const ADDR = "127.0.0.1:7752";
+const ADDR = demoAddr(7767);
 const STORY_DIR = path.join(repoRoot, "stories", "weather-report");
 const FLOW = path.join(STORY_DIR, "flows", "tour.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "weather-report-tour");
