@@ -261,6 +261,18 @@ the worked flagship (committed corpus + `run.sh` demo + filled worksheet) is
 `tests/test_git_ops_coverage.py`. Driven by the **`story-coverage-mining`** skill
 (`.agents/skills/story-coverage-mining/`).
 
+**Downstream consumer — cost tracking.** The same per-story
+`mining.profile.yaml` also drives **cost savings**. `cost_report.py`
+(`make cost-report`) pairs each story's deterministic cost (oracle `cost_usd`
+summed from its host cassette; routed/host steps are $0) against the real
+raw-agentic cost of the same operations in mined sessions — a per-intent
+median/p90 distribution, the reprocessing tax, and cold-resume re-warm — read
+from recorded `message.usage` via `cost_extract.py` + `pricing.py` (exact, no
+LLM). The narrative is the
+[git-ops cost case study](../../docs/case-studies/git-ops-cost.md);
+`make cost-report-test` runs the whole stack's no-LLM invariants
+(`test_cost_extract.py`, `test_cost_estimate.py`, `test_cost_report.py`).
+
 ---
 
 ## Concepts

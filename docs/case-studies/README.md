@@ -38,6 +38,10 @@ on prompt incantations to enforce structure.
   action (the demo-building session itself cost $546). Introduces the
   real-cost extractor [`cost_extract.py`](../../tools/session-mining/cost_extract.py)
   (reads recorded `message.usage`, exact) and the reprocessing-tax framing.
+  Now generated **per story** by
+  [`cost_report.py`](../../tools/session-mining/cost_report.py) (`make
+  cost-report`): the deterministic story cost vs the real raw-agentic
+  cost of the same operations, with a per-intent distribution.
 
 Future studies (planned, not yet written):
 

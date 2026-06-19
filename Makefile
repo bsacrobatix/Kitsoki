@@ -32,7 +32,7 @@ BASESTORIES_DIR   := internal/basestories/stories
 BASESTORIES_STAMP := internal/basestories/.embed-stamp
 
 .PHONY: all setup build install uninstall test test-flows starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories e2e-docker \
-	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa
+	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test
 
 all: build
 
@@ -182,6 +182,26 @@ test-flows:
 		printf '\n-- flows: %s\n' "$$app"; \
 		./.kitsoki-flows test flows "$$app" || rc=1; \
 	done; rm -f ./.kitsoki-flows; exit $$rc
+
+# cost-report builds the per-story cost-savings report (the reusable form of
+# docs/case-studies/git-ops-cost.md): the deterministic story cost (oracle spend
+# from each story's host cassette) vs the REAL raw-agentic cost of the same
+# operations, from telemetry already on disk. NO LLM, no cost. Writes a markdown
+# table to .artifacts/cost-report/ (gitignored — it reads your local transcripts).
+# Override the transcript pool with PROJECTS='~/.claude/projects/<glob>*'.
+COST_REPORT_OUT ?= .artifacts/cost-report/cost-report.md
+PROJECTS ?=
+cost-report:
+	@python3 tools/session-mining/cost_report.py --all \
+		$(if $(PROJECTS),--projects '$(PROJECTS)',) --out $(COST_REPORT_OUT)
+	@echo "report: $(COST_REPORT_OUT)"
+
+# cost-report-test runs the no-LLM invariants for the whole real-cost stack
+# (pricing, the extractor, the estimator fallback, and the report driver).
+cost-report-test:
+	@for t in test_cost_extract test_cost_estimate test_cost_report; do \
+		python3 tools/session-mining/tests/$$t.py || exit 1; \
+	done
 
 # starcheck-kitsoki is the static host.starlark.run pre-flight: it runs the
 # starcheck tool's -kitsoki profile (predeclared={json,math}, strict dialect,

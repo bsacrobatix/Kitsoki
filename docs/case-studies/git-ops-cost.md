@@ -224,48 +224,52 @@ python3 tools/session-mining/tests/test_cost_estimate.py
 
 ---
 
-## Toward per-story cost tracking
+## Per-story cost tracking — `make cost-report`
 
-This case study is a hand-built template. The goal is to make it
-**automatic and per-story**: every story should publish, alongside its
-behaviour, the cost savings it delivers versus doing the same work in a
-raw agentic loop — with session mining supplying the denominator. The
-pieces are mostly in place; the work is wiring them together. Full plan in
-[`docs/proposals/per-story-cost-tracking.md`](../proposals/per-story-cost-tracking.md);
-the short version:
+This case study is the hand-written *narrative*; the **numbers it argues
+are now generated per story, automatically**, by
+[`cost_report.py`](../../tools/session-mining/cost_report.py)
+(`make cost-report`). For every story that ships a `mining.profile.yaml` it
+pairs two figures and reports the gap:
 
-1. **A real baseline per story, from mining.** Each story already has a
-   `mining.profile.yaml` and a mined session corpus. Run `cost_extract.py`
-   over that corpus (prep.py already writes `costs.json`) to get the real
-   "raw agentic cost" denominator — reprocessing tax and cold-resume
-   re-warm broken out — instead of one curated example.
+- **numerator — the deterministic story cost.** Read straight from the
+  story's host cassette(s): every routed/host step is $0 by construction,
+  so the oracle `cost_usd` *is* the story's cost. Programmatic, not
+  transcribed by hand (this section used to copy git-ops's $0.0121/$0.0834
+  into prose; the tool now sums them from the cassette).
+- **denominator — the raw agentic cost.** The same operations in real
+  Claude Code sessions, scoped by the story's `mining.profile.yaml` grep
+  (the same prefilter mining uses; dispatched agent/oracle sessions
+  dropped), found per user-turn by `cost_extract.py`, and reported as a
+  **distribution** (median / p90 per intent), with the reprocessing tax and
+  cold-resume re-warm those turns paid — not one curated example.
 
-2. **Measure the deterministic side live, not from hand-authored
-   cassettes.** The git-ops story's oracle costs ($0.0121, $0.0834) were
-   authored by hand. Kitsoki runs already emit `oracle.call.complete`
-   events with real `cost_usd`/usage; capture those into a per-story ledger
-   so the numerator is measured, and record real oracle cassettes so the
-   demo's spend is genuine too. **This is the biggest honesty gap today.**
+```bash
+make cost-report                       # all stories -> .artifacts/cost-report/cost-report.md
+python3 tools/session-mining/cost_report.py --story git-ops   # one story, to stdout
+make cost-report-test                  # the no-LLM invariants for the whole stack
+```
 
-3. **Match per intent, not just per session.** The mining intent taxonomy
-   already classifies operations; align mined operations to the story's
-   intents so savings are computed per intent (commit vs rebase vs merge),
-   apples-to-apples, not session-aggregate.
-
-4. **Report a distribution, not an anecdote.** Across the mined corpus,
-   emit median / p90 raw cost per operation so each story's savings carry
-   error bars rather than resting on one "$4.22" example.
-
-5. **One report across all stories.** A `make cost-report` that, per story,
-   pairs the mined baseline with the measured story cost and emits a
-   savings table — the reusable form of this document. Surface the model
-   mix too: real sessions run on Opus while the narrow oracle tasks need
-   only Sonnet, which is itself a savings lever worth naming.
+For git-ops today that yields the story's **$0.0955** against a real
+median of **~$17 per equivalent operation** across dozens of mined
+sessions (≈175×), and surfaces the **model-mix lever** the deterministic
+boundary unlocks: the raw operations ran on Opus, while the story's two
+oracle calls need only Sonnet (~5× cheaper per token). Stories without a
+recorded oracle cassette yet show a real raw baseline and a *"not yet
+measured"* numerator — which is the honest state until they record one.
 
 The throughline: **session mining is the cost denominator for the whole
-project.** It already supplies coverage and intents; cost savings is the
-same corpus read through `cost_extract.py`. Every new story that ships a
-`mining.profile.yaml` should get a cost-savings number for free.
+project.** The same corpus that gives coverage and intents gives "what
+would this have cost as an agent loop?" — so every new story gets a
+cost-savings number for free.
+
+**What's still hand-authored (the remaining honesty gap).** git-ops's two
+oracle costs live in a `record_mode: none` cassette — *authored*, not
+recorded. `cost_report.py` flags them (⚠ authored), but closing the gap
+means recording real oracle cassettes (LLM spend, gated) so the numerator
+is measured end-to-end. That, plus a couple of methodology refinements, is
+tracked in
+[`docs/proposals/per-story-cost-tracking.md`](../proposals/per-story-cost-tracking.md).
 
 ## See also
 
