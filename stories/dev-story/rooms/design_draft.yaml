@@ -179,9 +179,9 @@ states:
             - set:
                 last_error: "design abandoned — draft budget exhausted"
                 prev_state: "landing"
-        # IDE-connected refine: stage into 004-proposal-next.md, show a native diff
-        # with the feedback as a comment, gate accept/reject in the editor (mirrors
-        # prd/drafting). Disconnected runs fall through to the plain arc below.
+        # IDE-connected refine: stage into 004-proposal-next.md, show a native diff,
+        # gate accept/reject in the editor (mirrors prd/drafting). Disconnected runs
+        # fall through to the plain arc below.
         - when: "world.ide.connected"
           target: design_draft
           effects:
@@ -230,7 +230,6 @@ states:
                 path:          "{{ world.design_draft_doc }}"
                 new_text_path: "{{ world.design_stage_doc }}"
                 title:         "Design refinement"
-                comment:       "{{ slots.feedback ?? '' }}"
               bind:
                 design_diff_verdict: "verdict"
               on_error: design_draft

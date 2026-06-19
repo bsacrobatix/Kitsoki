@@ -9,9 +9,9 @@
 // load-bearing.
 //
 // openDiff is intentionally a thin stub in this slice (returns {ok:true}); the
-// native diff + accept/reject verdict gate + inline comment land in
-// DiffController (see ide-diff.ts) and replace this method. Everything else is
-// the genuine, hand-drivable behaviour.
+// native diff + accept/reject verdict gate land in DiffController (see
+// ide-diff.ts) and replace this method. Everything else is the genuine,
+// hand-drivable behaviour.
 
 import * as vscode from 'vscode';
 import * as path from 'node:path';
@@ -137,9 +137,9 @@ export class IdeTools {
   }
 
   /**
-   * openDiff — open a native side-by-side diff with the refine feedback as an
-   * inline comment and accept/reject affordances, then BLOCK until the operator
-   * decides. The returned {verdict} is what the Go handler surfaces so the story
+   * openDiff — open a native side-by-side diff with accept/reject affordances,
+   * then BLOCK until the operator decides. The returned {verdict} is what the
+   * Go handler surfaces so the story
    * branches (publish on accept, re-refine on reject). Without a DiffController
    * it degrades to a non-blocking ack.
    */

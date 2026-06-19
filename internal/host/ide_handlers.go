@@ -308,8 +308,7 @@ func IDEOpenFileHandler(ctx context.Context, args map[string]any) (Result, error
 // non-gating) defaults to "accepted" — the v1 proceed-anyway behaviour.
 //
 // Args: path (required), new_text OR new_text_path (the proposed content inline
-// or a staged file the editor reads), title (optional), comment (optional inline
-// feedback shown on the diff). Result.Data on success:
+// or a staged file the editor reads), title (optional). Result.Data on success:
 // {"ok":true,"connected":true,"verdict":"accepted"|"rejected"}; not-connected:
 // {"connected":false,"ok":false}.
 func IDEOpenDiffHandler(ctx context.Context, args map[string]any) (Result, error) {
@@ -332,9 +331,6 @@ func IDEOpenDiffHandler(ctx context.Context, args map[string]any) (Result, error
 	}
 	if t, ok := args["title"].(string); ok && t != "" {
 		toolArgs["title"] = t
-	}
-	if c, ok := args["comment"].(string); ok && c != "" {
-		toolArgs["comment"] = c
 	}
 
 	raw, err := link.CallTool(ctx, "openDiff", toolArgs)

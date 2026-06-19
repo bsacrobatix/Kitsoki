@@ -272,25 +272,22 @@ func TestIDEOpenDiff_Connected_NonBlocking(t *testing.T) {
 	}
 }
 
-// open_diff surfaces the editor's accept/reject verdict and forwards the inline
-// comment, so a story can bind data.verdict and branch (publish vs re-refine).
-func TestIDEOpenDiff_SurfacesVerdictAndComment(t *testing.T) {
+// open_diff surfaces the editor's accept/reject verdict, so a story can bind
+// data.verdict and branch (publish vs re-refine).
+func TestIDEOpenDiff_SurfacesVerdict(t *testing.T) {
 	link := &fakeLink{
 		connected: true,
 		results:   map[string]json.RawMessage{"openDiff": envelope(`{"ok":true,"verdict":"rejected"}`, false)},
 	}
 	ctx := host.WithIDELink(context.Background(), link)
 	res, err := host.IDEOpenDiffHandler(ctx, map[string]any{
-		"path": "/a.md", "new_text": "v2", "title": "t", "comment": "tighten the why",
+		"path": "/a.md", "new_text": "v2", "title": "t",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Data["verdict"] != "rejected" {
 		t.Fatalf("verdict: want rejected, got %v", res.Data["verdict"])
-	}
-	if link.lastArgs["comment"] != "tighten the why" {
-		t.Fatalf("comment not forwarded: %v", link.lastArgs)
 	}
 	if link.lastArgs["new_text"] != "v2" {
 		t.Fatalf("new_text not forwarded: %v", link.lastArgs)

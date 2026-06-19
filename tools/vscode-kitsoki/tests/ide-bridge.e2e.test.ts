@@ -7,9 +7,9 @@
 //   - the backend discovers the extension's lock and connects its IDE link
 //     (CLAUDE_CODE_SSE_PORT), so world.ide.connected is true in a web session;
 //   - entering the drafting room dispatches host.ide.open_file for the PRD;
-//   - a refine dispatches host.ide.open_diff with the staged proposal + the
-//     feedback comment, BLOCKS for the verdict, and on accept the story promotes
-//     the v2 artifact (the editor applied the change).
+//   - a refine dispatches host.ide.open_diff with the staged proposal, BLOCKS
+//     for the verdict, and on accept the story promotes the v2 artifact (the
+//     editor applied the change).
 //
 // No VS Code, no Playwright — just the two real processes over the real MCP wire.
 // The Playwright tour records the same walk for the video; this proves it WORKS.
@@ -166,7 +166,6 @@ test('ide bridge: PRD walk opens the draft and a refine shows a verdict-gated di
       String(d.new_text_path).includes('004-prd-next'),
       `diff right = staged proposal, got ${d.new_text_path}`,
     );
-    assert.match(String(d.comment), /tenant isolation/i, 'feedback carried as the inline comment');
 
     // The accepted verdict promoted v2 — the view now shows the Non-Goals section.
     const afterView = await rpc<any>(base, 'runstatus.session.view', { session_id });

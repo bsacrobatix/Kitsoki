@@ -5,12 +5,10 @@
 // (link.CallTool awaits indefinitely). DiffController fulfils that call by:
 //   1. opening a real side-by-side diff — left = the on-disk file, right = the
 //      proposed text (a virtual doc), so VS Code's stock diff navigation applies;
-//   2. surfacing the refine feedback as an inline comment thread anchored on the
-//      change;
-//   3. exposing Accept/Reject via THREE native affordances (editor title-bar
-//      actions, a CodeLens at the top of the proposed doc, and the comment-thread
-//      buttons) plus the command palette — all firing the same commands;
-//   4. NOT resolving the openDiff response until the operator decides. Accept
+//   2. exposing Accept/Reject via two native affordances (editor title-bar
+//      actions and a CodeLens at the top of the proposed doc) plus the command
+//      palette — all firing the same commands;
+//   3. NOT resolving the openDiff response until the operator decides. Accept
 //      writes the proposed text to the file (the change is applied, native
 //      intuition) and returns verdict:"accepted"; Reject leaves the file and
 //      returns verdict:"rejected". The Go handler surfaces that verdict so the
@@ -32,7 +30,6 @@ interface Pending {
   filePath: string;
   newText: string;
   rightUri: vscode.Uri;
-  thread: vscode.CommentThread | undefined;
   resolve: (v: { ok: boolean; verdict: Verdict }) => void;
 }
 
@@ -47,7 +44,6 @@ interface Logger {
  */
 export class DiffController {
   private readonly contents = new Map<string, string>(); // virtual path -> proposed text
-  private readonly commentController: vscode.CommentController;
   private pending: Pending | undefined;
   private seq = 0;
   private readonly disposables: vscode.Disposable[] = [];
@@ -59,13 +55,6 @@ export class DiffController {
         provideTextDocumentContent: (uri) => this.contents.get(uri.path) ?? '',
       }),
     );
-
-    // Inline comment thread carrying the refine feedback + Accept/Reject buttons.
-    this.commentController = vscode.comments.createCommentController(
-      'kitsoki.refine',
-      'Kitsoki refinement',
-    );
-    this.disposables.push(this.commentController);
 
     // CodeLens at the top of the proposed doc — a second native affordance.
     this.disposables.push(
@@ -109,7 +98,7 @@ export class DiffController {
   /**
    * Open the diff and block until the operator accepts/rejects. Returns the
    * verdict for the Go handler to surface. args: {path, new_text | new_text_path,
-   * title?, comment?}. The proposed text is `new_text` inline, or read from
+   * title?}. The proposed text is `new_text` inline, or read from
    * `new_text_path` (the staged draft on disk — avoids piping a large doc
    * through the MCP envelope).
    */
@@ -127,7 +116,6 @@ export class DiffController {
       }
     }
     const title = typeof args.title === 'string' && args.title ? args.title : 'Kitsoki — proposed change';
-    const comment = typeof args.comment === 'string' ? args.comment : '';
 
     if (!filePath) {
       return { ok: false, verdict: 'rejected' };
@@ -147,28 +135,12 @@ export class DiffController {
       { viewColumn: chatDocColumn(), preview: false, preserveFocus: true } as vscode.TextDocumentShowOptions,
     );
 
-    let thread: vscode.CommentThread | undefined;
-    if (comment) {
-      thread = this.commentController.createCommentThread(leftUri, new vscode.Range(0, 0, 0, 0), [
-        {
-          body: new vscode.MarkdownString(comment),
-          mode: vscode.CommentMode.Preview,
-          author: { name: 'Kitsoki' },
-          contextValue: 'kitsoki.refine',
-        },
-      ]);
-      thread.canReply = false;
-      thread.label = 'Refinement';
-      thread.contextValue = 'kitsoki.refine';
-      thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-    }
-
     // Drive the editor/title `when` clause for the Accept/Reject toolbar actions.
     await vscode.commands.executeCommand('setContext', 'kitsoki.diffPending', true);
     this.out.appendLine(`[ide] openDiff ${filePath} (awaiting verdict)`);
 
     return new Promise((resolve) => {
-      this.pending = { id, filePath, newText, rightUri, thread, resolve };
+      this.pending = { id, filePath, newText, rightUri, resolve };
     });
   }
 
@@ -189,7 +161,6 @@ export class DiffController {
       this.out.appendLine(`[ide] diff rejected -> ${p.filePath} unchanged`);
     }
 
-    p.thread?.dispose();
     this.contents.delete(p.rightUri.path);
     void vscode.commands.executeCommand('setContext', 'kitsoki.diffPending', false);
     this.closeDiffTab(p.rightUri);

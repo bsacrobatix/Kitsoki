@@ -1,7 +1,7 @@
 /**
  * vscode-prd-demo.e2e.spec.ts — the PRD editor demo: the brief/PRD mirrored into
  * a real VS Code editor, and a refine shown as a NATIVE DIFF with an in-editor
- * accept/reject verdict + inline comment. Deterministic, no-LLM.
+ * accept/reject verdict. Deterministic, no-LLM.
  *
  * Drives the gears-rust PRD walk through the chat UI (the SAME story + proven
  * core__ drive sequence as the native web tour gears-prd-design.spec.ts), but
@@ -231,7 +231,7 @@ test('vscode prd demo — brief/PRD in the editor, refine shows a verdict-gated 
     await dwell(5000); // linger on the full PRD in the editor (the headline beat)
     await shot('c-draft-in-editor');
 
-    // ── Refine → a NATIVE DIFF with the feedback as an inline comment ────────
+    // ── Refine → a NATIVE side-by-side DIFF (verdict-gated) ──────────────────
     // The refine turn SUSPENDS on the diff verdict; the room emits a `say:`
     // message first, so reveal() scrolls the chat to show the operator's refine
     // request + the agent's "review the diff" message before the diff opens.
@@ -244,16 +244,12 @@ test('vscode prd demo — brief/PRD in the editor, refine shows a verdict-gated 
         ).toBeVisible({ timeout: 30_000 }),
       'prd-refine',
     );
-    await expect(
-      win.locator('.review-comment, .comment-body, .monaco-editor .comment-thread').filter({ hasText: /tenant isolation/i }).first(),
-      'the refine feedback shows as an inline comment',
-    ).toBeVisible({ timeout: 15_000 });
     // The diff opens at the document header; jump to the first CHANGE so the green
     // added lines (## Non-Goals, the tenant-isolation requirement) are on-camera —
     // not just an overview-ruler marker.
     await win.locator('.monaco-diff-editor').first().click({ position: { x: 60, y: 60 } }).catch(() => undefined);
     await runPaletteCommand(win, ['>Go to Next Difference', '>Diff Editor: Go to Next Change', '>Go to Next Change in Diff Editor']);
-    await dwell(5500); // linger on the diff + the green Non-Goals/tenant-isolation additions + the comment
+    await dwell(5500); // linger on the diff + the green Non-Goals/tenant-isolation additions
     await shot('d-refine-diff');
 
     // ── Accept the change IN the diff (native editor title action / codelens) ─

@@ -99,18 +99,6 @@
           "group": "navigation@2"
         }
       ],
-      "comments/commentThread/title": [
-        {
-          "command": "kitsoki.diff.accept",
-          "when": "commentController == kitsoki.refine",
-          "group": "inline@1"
-        },
-        {
-          "command": "kitsoki.diff.reject",
-          "when": "commentController == kitsoki.refine",
-          "group": "inline@2"
-        }
-      ],
       "commandPalette": [
         {
           "command": "kitsoki.popOutChat",

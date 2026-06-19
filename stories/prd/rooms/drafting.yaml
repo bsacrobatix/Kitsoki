@@ -309,14 +309,13 @@ states:
             # Tell the operator what to do while the diff blocks the turn — without
             # this the chat shows an empty pending bubble during the suspension.
             - say: "Proposed a refinement — review the change in the diff and **Accept** or **Reject** it."
-            # Show the diff (live PRD vs staged proposal) with the feedback as an
-            # inline comment; BLOCK until the operator decides; bind the verdict.
+            # Show the diff (live PRD vs staged proposal); BLOCK until the
+            # operator decides; bind the verdict.
             - invoke: host.ide.open_diff
               with:
                 path:          "{{ world.prd_draft_doc }}"
                 new_text_path: "{{ world.prd_stage_doc }}"
                 title:         "PRD refinement"
-                comment:       "{{ world.refine_message }}"
               bind:
                 prd_diff_verdict: "verdict"
               on_error: drafting
