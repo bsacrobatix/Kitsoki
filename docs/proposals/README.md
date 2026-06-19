@@ -103,22 +103,40 @@ thought.
   Three v1 surfaces shipped (`docs/architecture/developer-guide.md` §6);
   the scripted `kitsoki drive` (§1) is superseded by the
   [`story-qa-agent`](story-qa-agent.md) epic, which makes it interactive.
-- [`story-qa-agent.md`](story-qa-agent.md) — **epic.** A Claude agent
-  that QAs a story by *using* it: given a persona + scenario it walks the
-  story turn-by-turn, reading the exact human-fidelity screen (and a real
-  screenshot of it), and reports view/navigation/intuitiveness/objective
-  findings. Nothing implemented yet; decomposed into four slices:
-  - [`qa-frame-seam.md`](qa-frame-seam.md) (tui) — one composer that
-    returns the full screen (body + chrome) as `{text, ansi, metadata}`
-    at any width; the live TUI renders through it too.
-  - [`qa-drive-command.md`](qa-drive-command.md) (runtime) —
-    `kitsoki drive`: persistent trace session, free-text input,
-    `--harness live|replay`, VCR record/playback modes; emits the frame
-    per turn.
-  - [`qa-screenshot.md`](qa-screenshot.md) (tui) — `kitsoki shot`:
-    ANSI→PNG of a frame for visual review.
+- [`mcp-studio.md`](mcp-studio.md) — **epic.** A broad MCP server (`kitsoki
+  mcp`) that an **external** LLM client (Claude Code / Desktop / an IDE agent)
+  connects to, giving it the author→drive→see loop over kitsoki: author stories
+  directly (`story.read/write/validate/graph/test`, no-LLM), drive + introspect
+  live sessions (`session.new/drive/submit/inspect/trace`), and **see** any state
+  as the assembled terminal `Frame` *and* a real browser screenshot
+  (`render.tui/tui_png/web`, returned as MCP image content). Distinct from the
+  narrow `kitsoki serve` (one `transition` tool); reuses the operator-ask MCP
+  substrate (`modelcontextprotocol/go-sdk`, `writeMCPConfigTempfile`). **Absorbs**
+  the frame composer / `kitsoki drive` / `kitsoki shot` slices from
+  `story-qa-agent` (now their owner). Nothing implemented yet; seven slices
+  (substrate 1–4, facade 5–7):
+  - [`qa-frame-seam.md`](qa-frame-seam.md) (tui) — the `Frame` composer:
+    full screen (body + chrome) as `{text, ansi, metadata}` at any width.
+  - [`qa-drive-command.md`](qa-drive-command.md) (runtime) — `kitsoki drive`:
+    persistent trace session, free-text input, `--harness live|replay`, VCR modes.
+  - [`qa-screenshot.md`](qa-screenshot.md) (tui) — `kitsoki shot`: ANSI→PNG.
+  - [`web-screenshot.md`](web-screenshot.md) (tui) — headless render of the **web**
+    view of any state → PNG; reusable seam extracted from the skills-only Playwright.
+  - [`mcp-server-core.md`](mcp-server-core.md) (runtime) — the `kitsoki mcp` stdio
+    server, the handle/workspace model, tool registry, no-LLM default, client attach.
+  - [`mcp-authoring-tools.md`](mcp-authoring-tools.md) (runtime) — `story.*` direct
+    file primitives over `app.Load` / `graph.*` / `testrunner.RunFlows`.
+  - [`mcp-session-tools.md`](mcp-session-tools.md) (runtime) — `session.*` + `render.*`
+    tools wrapping the drive loop, `buildInspectOutput`, and the screenshots.
+- [`story-qa-agent.md`](story-qa-agent.md) — **epic** (re-scoped). A Claude agent
+  that QAs a story by *using* it: given a persona + scenario it walks the story
+  turn-by-turn through the [`mcp-studio`](mcp-studio.md) tools, reading the exact
+  human-fidelity screen (and a screenshot), and reports
+  view/navigation/intuitiveness/objective findings. Its frame composer / drive /
+  shot slices were **absorbed into [`mcp-studio`](mcp-studio.md)**; only the one
+  remaining slice is owned here:
   - [`qa-agent-skill.md`](qa-agent-skill.md) (tooling) — the `story-qa`
-    subagent: persona + scenario → drive loop → scored UX rubric +
+    subagent: persona + scenario → studio drive loop → scored UX rubric +
     report + screenshots + bug list.
 - [`external-project-targeting.md`](external-project-targeting.md) — **epic.**
   Point `dev-story` at a **foreign repo** by filling a small **profile**

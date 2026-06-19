@@ -2,7 +2,11 @@
 
 **Status:** Draft v1. Nothing implemented yet.
 **Kind:**   tui
-**Epic:**   [story-qa-agent.md](story-qa-agent.md) (slice 1)
+**Epic:**   [mcp-studio.md](mcp-studio.md) (slice 1)
+
+_Absorbed from the [`story-qa-agent`](story-qa-agent.md) epic into
+[`mcp-studio`](mcp-studio.md); the QA agent is now a **consumer** of this `Frame`
+seam (via the MCP `render.*` tools), not its owner._
 
 ## Why
 
@@ -72,7 +76,7 @@ Frame (what the composer returns)         Sources (unchanged renderers)
 
 ## Rendering changes
 
-- **New `Frame` type** (shared decision 1 of the epic):
+- **New `Frame` type** (shared decision 2 of the epic):
 
   ```go
   type Frame struct {
@@ -178,5 +182,6 @@ glanceable.
 ## Non-goals
 
 - Scrollback history in the frame (the driver's JSONL keeps per-turn
-  frames — epic open question 1).
+  frames; the `story-qa` agent's cross-cutting question owns whether the
+  agent needs scrollback).
 - Any change to *how* elements render (that's `view-rendering-readability`).

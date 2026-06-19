@@ -2,7 +2,12 @@
 
 **Status:** Draft v1. Nothing implemented yet.
 **Kind:**   tui
-**Epic:**   [story-qa-agent.md](story-qa-agent.md) (slice 3)
+**Epic:**   [mcp-studio.md](mcp-studio.md) (slice 3)
+
+_Absorbed from the [`story-qa-agent`](story-qa-agent.md) epic into
+[`mcp-studio`](mcp-studio.md); the MCP `render.tui_png` tool wraps this, and the
+QA agent is now a **consumer** of it, not its owner. Its web twin is the new
+[`web-screenshot`](web-screenshot.md) slice._
 
 ## Why
 
@@ -33,7 +38,7 @@ image.
   live TUI.
 - **Rendering:** consumes `Frame.ANSI` from slice 1; does **not** re-layout
   — it only paints already-composed bytes. The frame is the single source
-  of layout truth (epic shared decision 2).
+  of layout truth (epic shared decision 4 — don't fork the renderers).
 - **Input:** none — it's a one-shot command.
 - **Docs on ship:** `docs/tui/` (a short "screenshots" note); artifacts go
   to `.artifacts/` per CLAUDE.md, never committed.

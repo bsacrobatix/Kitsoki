@@ -2,7 +2,11 @@
 
 **Status:** Draft v1. Nothing implemented yet.
 **Kind:**   runtime
-**Epic:**   [story-qa-agent.md](story-qa-agent.md) (slice 2)
+**Epic:**   [mcp-studio.md](mcp-studio.md) (slice 2)
+
+_Absorbed from the [`story-qa-agent`](story-qa-agent.md) epic into
+[`mcp-studio`](mcp-studio.md); the MCP `session.*` tools wrap this drive loop, and
+the QA agent is now a **consumer** of it, not its owner._
 
 ## Why
 
@@ -87,7 +91,7 @@ CLI flags only — no engine vocabulary:
 | flag | `--harness` | `live \| replay` | live = `LiveHarness`; replay = `ReplayHarness` (`replay.go:67`) |
 | flag | `--cassette` | path | recording.yaml to replay and/or record into |
 | flag | `--record` | `once \| none \| all \| new` | VCR mode (below) |
-| flag | `--cols`/`--rows` | int | frame width/height (epic open Q2) |
+| flag | `--cols`/`--rows` | int | frame width/height |
 | flag | `--script` | path | optional batch input file (CI smoke) |
 
 ## The model
@@ -111,7 +115,8 @@ the trace + the cassette).
 
 After python-vcr, applied to the routing cassette
 (`RecordingHarness`/`ReplayHarness` already give record + replay; this adds
-the *modes* and unifies the file shape — epic shared decision 4):
+the *modes* and unifies the file shape — epic shared decision 3, no-LLM by
+default):
 
 | `--record` | On a cassette **hit** | On a cassette **miss** |
 |---|---|---|
@@ -213,7 +218,7 @@ no-LLM-tests).
 ## Non-goals
 
 - Oracle-output cassettes (converse/decide/task bodies) — parallel
-  cassette-quality proposal (epic shared decision 4).
+  cassette-quality proposal (an epic non-goal).
 - A TUI. `drive` is headless; the agent reads JSON frames, not a screen.
 - Screenshot rendering — slice 3 (`kitsoki shot`) consumes the frame this
   emits.

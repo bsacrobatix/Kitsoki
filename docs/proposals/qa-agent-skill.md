@@ -6,9 +6,11 @@
 
 ## Why
 
-Slices 1–3 give the substrate: a human-fidelity `Frame`, a headless
-free-text driver, and a screenshot. This slice is the actor that uses
-them. A flow fixture proves a story *transitions correctly*; it cannot
+The [`mcp-studio`](mcp-studio.md) epic gives the substrate — a human-fidelity
+`Frame`, a headless free-text driver (`kitsoki drive`), terminal + web
+screenshots, and the `session.*`/`render.*` MCP tools that expose them. This
+slice is the actor that uses them. A flow fixture proves a story *transitions
+correctly*; it cannot
 tell you the menu is bewildering, the objective takes two needless turns,
 a view buries the one thing the operator needs, or a room dead-ends with
 no obvious way forward. Those are judgement calls — exactly what a Claude
@@ -30,8 +32,10 @@ concrete, file-grounded bug list.
   symlink created by `make setup`). Optionally a thin
   `cmd/kitsoki` wrapper or a `tools/story-qa/` runner if the loop wants
   orchestration beyond what a subagent prompt can hold.
-- **Consumes:** slice 2 (`kitsoki drive` — frames + free-text routing),
-  slice 3 (`kitsoki shot` — PNGs). Nothing in the engine changes.
+- **Consumes:** the [`mcp-studio`](mcp-studio.md) tools (`session.drive` —
+  frames + free-text routing; `render.tui_png`/`render.web` — PNGs), or the
+  underlying `kitsoki drive` / `kitsoki shot` CLIs directly. Nothing in the
+  engine changes.
 - **Artifacts:** reports + screenshots go to `.artifacts/story-qa/<run>/`
   (CLAUDE.md: never committed). Cassettes captured during a live run go
   beside the story (`stories/<name>/recording.yaml`) so the run is
