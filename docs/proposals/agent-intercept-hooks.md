@@ -34,7 +34,7 @@ degraded ones, and the proposal has to say so.
 
 | Agent | Pre-model hook | Bypass the LLM? | Show a result? | Our path |
 |---|---|---|---|---|
-| **Claude Code** | `UserPromptSubmit` | **yes** — `decision:"block"` (or exit 2) erases the prompt; no assistant turn | **yes** — as the **block `reason`** | **Full.** Shim blocks + surfaces `result_text`. |
+| **Claude Code** | `UserPromptSubmit` | **yes** — `decision:"block"` (or exit 2) erases the prompt; no assistant turn | **yes** — as the **block `reason`** (in-moment; ephemeral in transcript) | **Full.** Shim blocks + surfaces a composed report. |
 | **Codex CLI** | none (only `PreToolUse`/`PostToolUse`, tool-level, post-reasoning) | no | n/a | **Degraded.** Explicit user-invoked `k <cmd>` alias → `kitsoki intercept`. Track [openai/codex#11870](https://github.com/openai/codex/issues/11870) (`BeforeModel`). |
 | **GitHub Copilot** | `userPromptSubmitted` (**observe-only**) + `preToolUse` (tool-level) | no | n/a | **Degraded.** Observe-only logging; explicit `k <cmd>`; optional `kitsoki serve` MCP tool — **flagged model-in-the-loop, not a bypass.** |
 
@@ -53,11 +53,22 @@ voice pre-model, and we do not pretend otherwise (epic decision #2).
 ```
 1. read stdin JSON; resolve the binding from `.kitsoki.yaml` in `cwd`
 2. if no `intercept:` block or intercept.enabled=false → exit 0 silently (prompt proceeds)
-3. run: kitsoki intercept --session <session_id> --input <prompt>   (cwd = <cwd>)
-4. exit 0  (matched + executed) → print {"decision":"block",
-              "reason":"⌁ kitsoki handled this (no LLM):\n<result_text>"} ; exit 0
+3. run: kitsoki intercept --input <prompt>   (cwd = <cwd>; stateless OneShot — epic decision #6)
+4. exit 0  (matched + executed) → compose an interception report from the JSON
+              ({intent, result_text, actions[]}) and print
+              {"decision":"block","reason":<report>} ; exit 0
    exit 10 (pass-through)        → exit 0 silently  (prompt proceeds to the LLM)
    anything else / timeout       → exit 0 silently  (FAIL-OPEN — never wedge the agent)
+```
+
+The report is the user's whole window into the intercept, so it is composed, not a
+raw echo — marked, naming the command, listing what ran, ending in the outcome:
+
+```
+⌁ kitsoki handled this (no LLM) — rebase
+  • git fetch origin
+  • git rebase origin/main   (3 commits replayed)
+✅ Rebased onto origin/main, no conflicts.   ·   ⟲ recorded in the kitsoki trace
 ```
 
 Non-negotiables (principle of least surprise):
@@ -70,8 +81,32 @@ Non-negotiables (principle of least surprise):
 - **Escapable.** An `escape_prefix` (configurable; default off) forces a turn to
   the agent despite a match, so the user is never trapped on a phrasing the gate
   claims.
-- **Fast.** The common non-command path is exit 10 from the lexical tiers
-  (microseconds, epic OQ #3); the shim adds only process spawn.
+- **Fast enough.** A non-command misses the lexical tiers in microseconds; with the
+  full no-LLM stack on (epic decision #7) it may also pay the embedding round-trip
+  before returning exit 10. Accepted for v1; the later `tiers:` selector is the
+  relief valve (epic OQ #2). The shim adds only a process spawn on top.
+
+### Informing the user, not disappearing
+
+The intercepted turn must *tell the user what happened*, not feel like a swallowed
+message. The mechanics force a specific posture (verified against
+[code.claude.com hooks](https://code.claude.com/docs/en/hooks.md)):
+
+- The block `reason` (the report above) **is shown to the user when it fires** — so
+  the user always sees the recognized command, the steps, and the outcome
+  in-the-moment.
+- It is **ephemeral in Claude's transcript**: a blocked prompt is erased and is
+  absent from scrollback / `--resume`. That is a Claude limitation, not our choice.
+  The **durable** record is the kitsoki trace (slice #1's `intercept.*` events),
+  which a `kitsoki trace` / web surface can replay in full.
+- **Rejected alternative — don't block, emit `systemMessage`.** `systemMessage`
+  *does* persist a user-visible note, but it does **not** block, so the prompt
+  still reaches the model — defeating the whole point (epic decision #3). We will
+  not trade the bypass for persistence.
+- **Open verification (epic OQ #1).** Whether `systemMessage` returned *alongside*
+  `decision:"block"` yields a *persisted* note **and** still bypasses the model is
+  undocumented; if it does, the shim adopts it to close the ephemerality gap. Until
+  verified, the in-moment report + the durable trace is the contract.
 
 ## The binding — `.kitsoki.yaml intercept:`
 
@@ -86,8 +121,9 @@ intercept:
   app: stories/dev-commands/app.yaml   # the bound app
   room: commands                        # the room to gate against
   confidence_bar: 0.90                  # synonym floor; deterministic (1.00) always wins (epic decision #1)
-  tiers: [deterministic, synonym]       # no-LLM tiers only; add `embedding` to opt into recall-over-latency
   escape_prefix: "//"                   # optional: force pass-through even on a match
+  # v1 runs every no-LLM tier the app enables (epic decision #7); a `tiers:`
+  # selector to narrow that for latency is a later flag.
 ```
 
 ## Degraded paths (Codex / Copilot)
@@ -123,7 +159,8 @@ that epic, but composes cleanly with it.
 ```
 ## 1. Shims + binding
 - [ ] 1.1 `intercept:` schema on webconfig.WebConfig (+ .local override; load-time validation)
-- [ ] 1.2 Claude Code `UserPromptSubmit` shim (block+reason on match; fail-open; marked; escapable)
+- [ ] 1.2 Claude Code `UserPromptSubmit` shim: compose the interception report from the
+        JSON (intent + actions[] + outcome), block on match; fail-open; marked; escapable
 - [ ] 1.3 `kitsoki hook install --agent claude` — idempotent, dry-run diff, `--write`
 
 ## 2. Degraded paths
@@ -132,9 +169,10 @@ that epic, but composes cleanly with it.
 - [ ] 2.3 Link the upstream pre-model-hook feature requests; note the shim is a near-drop-in when they land
 
 ## 3. Verification (no LLM, no real agent)
-- [ ] 3.1 Shim unit: feed a fake stdin JSON → assert block JSON on a fixture match, silence on pass-through
+- [ ] 3.1 Shim unit: feed a fake stdin JSON → assert the composed report in the block JSON on a fixture match, silence on pass-through
 - [ ] 3.2 Shim unit: interceptor error/timeout → fail-open (prompt proceeds)
 - [ ] 3.3 `kitsoki hook install` idempotency + dry-run-diff test
+- [ ] 3.4 Gated live check (epic OQ #1): does `block`+`systemMessage` persist a transcript note without invoking the model? Adopt if yes.
 
 ## 4. Document
 - [ ] 4.1 `docs/architecture/prompt-intercept.md` (agent-integration half + the capability matrix) + getting-started snippet; trim this slice from the epic

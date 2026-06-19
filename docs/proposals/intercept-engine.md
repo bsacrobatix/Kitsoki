@@ -64,16 +64,16 @@ intent against the bound room and captures the rendered result.
 
 | Kind | Name | Shape | Notes |
 |---|---|---|---|
-| command | `kitsoki intercept` | stdin host-hook JSON **or** `--input`/`--session`/`--app`/`--room`/`--bar` → JSON verdict + exit code | no-LLM classify + gated execute |
-| method | `Orchestrator.Classify` | `(ctx, state, input) → (semroute.Verdict, matched bool)` | zero effects; lexical tiers only; no harness, no extract-LLM |
+| command | `kitsoki intercept` | stdin host-hook JSON **or** `--input`/`--app`/`--room`/`--bar` → JSON verdict + exit code | no-LLM classify + gated execute (stateless OneShot, v1); `session_id` on stdin is ignored until the persistent follow-on |
+| method | `Orchestrator.Classify` | `(ctx, state, input) → (semroute.Verdict, matched bool)` | zero effects; **all no-LLM tiers** (deterministic/synonym/embedding-if-on); no harness, no extract-LLM |
 | exit code | `0 / 1 / 2 / 3 / 10` | handled / rejected / terminal / infra / **no-match (pass-through)** | the hook branches on this — reuses `kitsoki turn`'s 0–3 (`turn.go:46`), adds a distinct pass-through code |
-| config | `.kitsoki.yaml intercept:` | `{enabled, app, room, confidence_bar, tiers}` | the per-repo binding — **schema owned by slice #2** |
+| config | `.kitsoki.yaml intercept:` | `{enabled, app, room, confidence_bar}` | the per-repo binding — **schema owned by slice #2**; a `tiers:` selector to narrow the no-LLM stack is a later flag (epic decision #7) |
 
 ## The model
 
 ```
 host prompt ──▶ kitsoki intercept ──▶ Classify(state, input)
-                                          │   (deterministic | synonym | [embedding] — NO LLM)
+                                          │   (deterministic | synonym | embedding-if-the-app-enables-it — NO LLM, all no-LLM tiers)
                                           ▼
                                     semroute.Verdict
                                           │
@@ -81,29 +81,36 @@ host prompt ──▶ kitsoki intercept ──▶ Classify(state, input)
                        │no ──────────────────────────────▶ exit 10  (hook passes prompt to the agent's LLM)
                        │yes
                        ▼
-                 execute intent on the bound room  (OneShot v1 │ trace-backed persistent later)
+                 execute intent on the bound room  (OneShot — stateless, v1)
                        ▼
-                 {matched:true, intent, confidence, match_reason, result_text, terminal, needs_followup}
+                 {matched:true, intent, confidence, match_reason, result_text, actions[], terminal, needs_followup}
                        ▼
-                 exit 0  (hook blocks the prompt, surfaces result_text)
+                 exit 0  (hook composes a report from this and blocks the prompt — slice #2)
 ```
 
-- **Interpretive vs deterministic:** classify is *lexical matching*, not LLM
-  interpretation — it is already deterministic and replayable
-  ([semantic-routing.md §1.1–1.3](../architecture/semantic-routing.md)). Execute
-  is the ordinary state-machine path (deterministic effects + recorded host
-  calls). Nothing on this path is an LLM decision; that is the point.
+- **Interpretive vs deterministic:** classify is *lexical/embedding matching*, not
+  LLM interpretation — it is already deterministic and replayable
+  ([semantic-routing.md §1.1–1.6](../architecture/semantic-routing.md)). Execute is
+  the ordinary state-machine path (deterministic effects + recorded host calls).
+  Nothing on this path is an LLM decision; that is the point.
 - **The gate** is pure data: `Verdict.Confidence`, `Verdict.Candidates`
   (non-empty ⇒ tie ⇒ pass-through), and `Verdict.MissingSlots`
   (`verdict.go:32`) against the configured bar. The `RequiresUnfilledSlot` guard
   that production routing already applies (semantic-routing.md §3.1) means a
   verb that names a command but can't fill a required slot is a **pass-through**,
   not a half-executed command.
+- **The result feeds the report.** `OneShot` already returns `Effects`,
+  `HostCalls`, and the rendered `View` (`outcome.go:147`). `intercept` surfaces the
+  view as `result_text` and a host-call summary as `actions[]` ("what kitsoki
+  did"), so slice #2's hook can compose a human interception report rather than
+  echo a terse string (epic decision #2).
 
 ## Decision recording
 
-Interception must be auditable (epic decision #5). The classify pass already emits
-`turn.deterministic_hit` / `turn.deterministic_miss`
+Interception must be auditable (epic decision #5). Stateless `OneShot` writes no
+session journal, so `kitsoki intercept` emits these events to a trace sink/log
+directly (an optional `--trace <path>` or the slog trace). The classify pass
+already emits `turn.deterministic_hit` / `turn.deterministic_miss`
 (`deterministic.go:202`/`:248`) and `turn.semantic_hit`; this slice adds one
 interception-level event so the *gate* outcome is reconstructable:
 
@@ -174,17 +181,20 @@ Zero-effect and execute paths are covered by `kitsoki test flows` fixtures with
 host cassettes (CLAUDE.md: no real LLM, no cost). The classify/execute refactor is
 guarded by the existing `Turn` flow fixtures continuing to pass unchanged.
 
+Two prior questions are now **decided** (epic decisions #6–#7): execution is
+stateless `OneShot` for v1 (persistent `session_id`-keyed flows are a future step),
+and classify runs **all** the no-LLM tiers the app enables (a `tiers:` selector is
+a later flag).
+
 ## Open questions
 
 1. **Pass-through exit code** — a distinct code (10) vs reusing `kitsoki turn`'s
    `1` (rejected). *Lean: distinct — the hook must never confuse "kitsoki declined
    to handle this" (pass to the agent) with "kitsoki handled it and the intent was
    rejected" (a real, surfaced result).*
-2. **Execute mode for v1** — stateless `OneShot` vs trace-backed persistent
-   (`session_id`-keyed). *Lean: `OneShot` for v1; persistent immediately after, to
-   unlock multi-turn command flows (clarify → confirm) with no LLM.*
-3. **Embedding tier in `intercept`** — recall vs the synchronous round-trip on
-   every prompt. *Lean: off by default; opt-in via `tiers:` per repo (epic OQ #3).*
+2. **`actions[]` shape** — a flat list of host-call names, or richer
+   `{verb, summary}` rows the hook can format line-by-line. *Lean: `{verb,
+   summary}` so the report reads as steps, not opaque call names.*
 
 ## Non-goals
 
