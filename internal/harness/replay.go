@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/goccy/go-yaml"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -17,11 +18,11 @@ import (
 // docs/tracing/cassettes.md for the on-disk format).
 type recordingFile struct {
 	Kind          string           `yaml:"kind"`
-	AppID         string           `yaml:"app_id"`
-	AppVersion    string           `yaml:"app_version"`
-	GeneratedAt   string           `yaml:"generated_at"`
-	Generator     string           `yaml:"generator"`
-	MinConfidence float64          `yaml:"min_confidence"`
+	AppID         string           `yaml:"app_id,omitempty"`
+	AppVersion    string           `yaml:"app_version,omitempty"`
+	GeneratedAt   string           `yaml:"generated_at,omitempty"`
+	Generator     string           `yaml:"generator,omitempty"`
+	MinConfidence float64          `yaml:"min_confidence,omitempty"`
 	Entries       []recordingEntry `yaml:"entries"`
 }
 
@@ -41,23 +42,23 @@ type recordingFile struct {
 //
 // Example clarify entry:
 //
-//	- state: "ROOT.lobby"
-//	  input: "tell me a joke about quantum physics"
-//	  clarify: true
-//	  message: "I can route you to a room, but I can't free-associate."
+//   - state: "ROOT.lobby"
+//     input: "tell me a joke about quantum physics"
+//     clarify: true
+//     message: "I can route you to a room, but I can't free-associate."
 type recordingEntry struct {
 	State      string          `yaml:"state"`
 	Input      string          `yaml:"input"`
-	Intent     recordingIntent `yaml:"intent"`
-	Confidence float64         `yaml:"confidence"`
-	MajorityOf int             `yaml:"majority_of"`
+	Intent     recordingIntent `yaml:"intent,omitempty"`
+	Confidence float64         `yaml:"confidence,omitempty"`
+	MajorityOf int             `yaml:"majority_of,omitempty"`
 	// Clarify marks this entry as a deterministic no-match: RunTurn returns a
 	// *ClarifyResponse instead of an intent. When true, `intent` is ignored
 	// (and must be omitted; see the load-time invariant in NewReplay).
-	Clarify bool `yaml:"clarify"`
+	Clarify bool `yaml:"clarify,omitempty"`
 	// Message is the free-form clarification text surfaced when Clarify is true.
 	// Optional; the orchestrator falls back to a generic hint when empty.
-	Message string `yaml:"message"`
+	Message string `yaml:"message,omitempty"`
 }
 
 // recordingIntent holds the intent name and slot map within a recording entry.
@@ -105,6 +106,28 @@ type ReplayHarness struct {
 	normalized map[recordingKey]*recordingEntry
 	// logger is used for structured trace events.
 	logger *slog.Logger
+
+	// lastConfidence is the confidence of the most recently resolved intent
+	// entry, exposed via LastConfidence for headless drivers (kitsoki drive)
+	// that surface routing confidence per turn. Guarded by mu.
+	mu             sync.Mutex
+	lastConfidence float64
+}
+
+// ConfidenceReporter is implemented by harnesses that can report the routing
+// confidence of their most recent resolved turn. kitsoki drive type-asserts on
+// it to fill the per-turn JSONL `confidence` field without reaching into the
+// orchestrator's internal trace events.
+type ConfidenceReporter interface {
+	LastConfidence() float64
+}
+
+// LastConfidence returns the confidence of the most recently resolved intent
+// entry (0 if none resolved or the entry carried no confidence).
+func (h *ReplayHarness) LastConfidence() float64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastConfidence
 }
 
 // NewReplay loads a recording YAML from recordingPath and constructs a ReplayHarness.
@@ -127,6 +150,18 @@ func NewReplay(recordingPath string) (*ReplayHarness, error) {
 		return nil, fmt.Errorf("harness/replay: recording %q has no entries", recordingPath)
 	}
 
+	h, err := newReplayFromFile(rf)
+	if err != nil {
+		return nil, fmt.Errorf("harness/replay: recording %q: %w", recordingPath, err)
+	}
+	return h, nil
+}
+
+// newReplayFromFile indexes an already-parsed recordingFile into a
+// ReplayHarness. Factored out of NewReplay so an in-memory cassette (the VCR
+// harness's growing recording.yaml) can be re-indexed after each append
+// without a disk round-trip. The same per-entry load-time invariants apply.
+func newReplayFromFile(rf recordingFile) (*ReplayHarness, error) {
 	h := &ReplayHarness{
 		exact:      make(map[recordingKey]*recordingEntry, len(rf.Entries)),
 		normalized: make(map[recordingKey]*recordingEntry, len(rf.Entries)),
@@ -136,19 +171,19 @@ func NewReplay(recordingPath string) (*ReplayHarness, error) {
 	for i := range rf.Entries {
 		e := &rf.Entries[i]
 		if e.State == "" {
-			return nil, fmt.Errorf("harness/replay: recording entry %d has empty state", i)
+			return nil, fmt.Errorf("entry %d has empty state", i)
 		}
 		if e.Input == "" {
-			return nil, fmt.Errorf("harness/replay: recording entry %d has empty input", i)
+			return nil, fmt.Errorf("entry %d has empty input", i)
 		}
 		if e.Clarify {
 			// A clarify entry yields a *ClarifyResponse, not an intent — the
 			// two kinds are mutually exclusive to keep authoring unambiguous.
 			if e.Intent.Name != "" {
-				return nil, fmt.Errorf("harness/replay: recording entry %d sets clarify:true and intent.name=%q (a clarify entry must omit intent)", i, e.Intent.Name)
+				return nil, fmt.Errorf("entry %d sets clarify:true and intent.name=%q (a clarify entry must omit intent)", i, e.Intent.Name)
 			}
 		} else if e.Intent.Name == "" {
-			return nil, fmt.Errorf("harness/replay: recording entry %d has empty intent name (set intent.name, or clarify:true for a deterministic no-match)", i)
+			return nil, fmt.Errorf("entry %d has empty intent name (set intent.name, or clarify:true for a deterministic no-match)", i)
 		}
 
 		exactKey := recordingKey{State: e.State, Input: e.Input}
@@ -215,6 +250,9 @@ func (h *ReplayHarness) resolve(ctx context.Context, l *slog.Logger, input strin
 		)
 		return mcp.CallToolParams{}, &ClarifyResponse{Message: e.Message}
 	}
+	h.mu.Lock()
+	h.lastConfidence = e.Confidence
+	h.mu.Unlock()
 	l.DebugContext(ctx, trace.EvHarnessRecordingHit,
 		slog.String("input", input),
 		slog.String("intent", e.Intent.Name),
@@ -238,13 +276,20 @@ func normalizeInput(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// entryToParams converts a recording entry to a mcp.CallToolParams.
+// entryToParams converts a recording entry to a mcp.CallToolParams. The
+// recorded confidence is carried through on the arguments so the orchestrator's
+// routing breadcrumb (EvTurnLLMRouted) and any confidence-reading consumer
+// (kitsoki drive's per-turn JSONL) observe the cassette's confidence under
+// replay — identical to the field the live harness populates.
 func entryToParams(e *recordingEntry) mcp.CallToolParams {
 	args := map[string]any{
 		"intent": e.Intent.Name,
 	}
 	if e.Intent.Slots != nil {
 		args["slots"] = e.Intent.Slots
+	}
+	if e.Confidence != 0 {
+		args["confidence"] = e.Confidence
 	}
 	return mcp.CallToolParams{
 		Name:      "transition",

@@ -25,7 +25,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -318,119 +317,32 @@ func runTraceTurn(cmd *cobra.Command, appPath, tracePath, intentName string, slo
 		slots[pair[:idx]] = pair[idx+1:]
 	}
 
-	// Ensure the trace directory exists.
-	if dir := filepath.Dir(tracePath); dir != "" && dir != "." {
-		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
-			return infraError("create trace dir: %v", mkErr)
-		}
-	}
-
-	// Open (or create) the JSONL trace.
-	sink, err := store.OpenJSONL(tracePath)
-	if err != nil {
-		return infraError("open trace %q: %v", tracePath, err)
-	}
-	defer func() { _ = sink.Close() }()
-
-	// Resolve the story. With --app, load from disk (the original path). Without
-	// --app, reconstruct the effective story FROM the trace itself — the trace
-	// is self-contained, so a continued turn no longer depends on the story
-	// files still being on disk or unchanged (see store.StoryAtTurn /
-	// app.LoadFromFiles, and store.StorySnapshot for why this is deterministic).
-	var def *app.AppDef
-	if appPath != "" {
-		def, err = loadAppWithEnv(appPath)
-		if err != nil {
-			return infraError("%v", err)
-		}
-	} else {
-		history := sink.History()
-		latestTurn := app.TurnNumber(0)
-		for _, ev := range history {
-			if ev.Turn > latestTurn {
-				latestTurn = ev.Turn
-			}
-		}
-		files, entry, atErr := store.StoryAtTurn(history, latestTurn)
-		if atErr != nil {
-			return infraError("reconstruct story from trace: %v (provide --app if the trace predates story snapshots)", atErr)
-		}
-		var cleanup func()
-		def, cleanup, err = app.LoadFromFiles(files, entry)
-		if err != nil {
-			return infraError("load story from trace: %v", err)
-		}
-		defer cleanup()
-	}
-
-	m, err := machine.New(def)
-	if err != nil {
-		return infraError("build machine: %v", err)
-	}
-
-	// Build an in-memory store for session/snapshot metadata.  The event write
-	// path is redirected to the JSONLSink via WithEventSink; the in-memory store
-	// handles the session lifecycle (NewSession, session locks, etc.) and is never
-	// written to for events when the eventSink is set.
-	s, err := store.OpenMemory()
-	if err != nil {
-		return infraError("open in-memory store: %v", err)
-	}
-	defer func() { _ = s.Close() }()
-
-	hostReg := host.NewRegistry()
-	host.RegisterBuiltins(hostReg)
-	if err := hostReg.ValidateAllowList(def.Hosts); err != nil {
-		return infraError("validate hosts: %v", err)
-	}
-
-	// Build oracle registry for the trace path. The noRunHarness is used for
-	// intent routing; oracle.claude builtin wraps it too but oracle calls in the
-	// trace path are direct-intent (no LLM oracle), so the registry is wired for
-	// external transports declared in oracle_plugins:.
-	oracleReg, oracleRegErr := oracle.BuildRegistryFromDef(def, &noRunHarness{})
-	if oracleRegErr != nil {
-		return infraError("build oracle registry: %v", oracleRegErr)
-	}
-	defer func() { _ = oracleReg.Close() }()
-
-	orch := orchestrator.New(def, m, s, &noRunHarness{},
-		orchestrator.WithHostRegistry(hostReg),
-		orchestrator.WithEventSink(sink),
-		orchestrator.WithEventSinkAuthority(true),
-		orchestrator.WithOracleRegistry(oracleReg),
-	)
-
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	// Create a session in the in-memory store (needed for orchestrator plumbing).
-	sid, err := orch.NewSession(ctx)
+	// Shared trace+story+session bootstrap (also used by `kitsoki drive`).
+	// The direct-intent path never routes free text, so a noRunHarness is
+	// wired in: any harness invocation is a bug and errors loudly.
+	ts, err := setupTraceSession(ctx, appPath, tracePath, &noRunHarness{})
 	if err != nil {
-		return infraError("new session: %v", err)
+		return err
 	}
-
-	// Record the effective story (base snapshot on a fresh trace; diff if the
-	// on-disk story drifted from what the trace already carries). Skipped when
-	// the story was reconstructed from the trace — its hash already matches.
-	if err := orch.RecordEffectiveStory(ctx, sid); err != nil {
-		return infraError("record effective story: %v", err)
-	}
+	defer ts.Close()
 
 	// Capture the event count after the snapshot so we echo only the turn's
 	// events, not the (large) story snapshot.
-	histBefore := len(sink.History())
+	histBefore := len(ts.Sink.History())
 
 	// Run one direct-intent turn against the JSONL-backed session.
-	outcome, err := orch.SubmitDirect(ctx, sid, intentName, slots)
+	outcome, err := ts.Orch.SubmitDirect(ctx, ts.SID, intentName, slots)
 	if err != nil {
 		return infraError("submit direct: %v", err)
 	}
 
 	// Echo newly appended events to stdout as JSONL.
-	histAfter := sink.History()
+	histAfter := ts.Sink.History()
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	for _, ev := range histAfter[histBefore:] {
 		if encErr := enc.Encode(ev); encErr != nil {
