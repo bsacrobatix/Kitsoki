@@ -152,8 +152,16 @@ function startStaticServer(html: string): Promise<{ origin: string; close: () =>
   });
 }
 
-/** Install the page.route RPC + artifact stubs for the no-LLM posture. */
-async function installStubs(page: Page): Promise<void> {
+/** Install the page.route RPC + artifact stubs for the no-LLM posture.
+ *
+ * `getFrameStill` lets the test hand the artifact route a REAL screenshot of the
+ * reconstructed kitsoki UI (captured off the /review rrweb replay frame) once it
+ * has painted. Until then it returns null and the route falls back to ONE_PX_PNG,
+ * so nothing breaks before the capture is taken. With the still set, the /point
+ * window's `<img :src=artifactUrl(...)>` shows real UI behind the SpatialPicker
+ * instead of a 1×1 pixel scaled into a black rectangle (and the /review fd-still
+ * thumbnail becomes real too). */
+async function installStubs(page: Page, getFrameStill: () => Buffer | null): Promise<void> {
   await page.route("**/rpc", async (route) => {
     const body = route.request().postDataJSON() as { method: string; params: Record<string, unknown> };
     let result: unknown = {};
@@ -178,9 +186,11 @@ async function installStubs(page: Page): Promise<void> {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, result }),
     });
   });
-  // The captured still + frame media resolve to the 1×1 PNG.
+  // The captured still + frame media resolve to a REAL screenshot of the
+  // reconstructed kitsoki UI once /review has painted it; before then (and as a
+  // safe fallback) they resolve to the 1×1 PNG.
   await page.route("**/artifact/**", async (route) => {
-    await route.fulfill({ contentType: "image/png", body: ONE_PX_PNG });
+    await route.fulfill({ contentType: "image/png", body: getFrameStill() ?? ONE_PX_PNG });
   });
 }
 
@@ -216,7 +226,13 @@ test("spatial oracle feature-spotlight video", async () => {
   const chapters = new ChapterRecorder();
   const { mark, onThrow } = captureDiagnostics(page, ARTIFACT_DIR);
 
-  await installStubs(page);
+  // A real screenshot of the reconstructed kitsoki UI, captured off the /review
+  // rrweb replay frame after it paints. The artifact route serves it for the
+  // /point window's frame (and the /review fd-still) once it's set; until then
+  // it's null and the route falls back to ONE_PX_PNG so nothing breaks early.
+  let frameStill: Buffer | null = null;
+
+  await installStubs(page, () => frameStill);
 
   try {
     // ── Stage /review behind a settle so the camera arrives on a composed view ─
@@ -352,6 +368,18 @@ test("spatial oracle feature-spotlight video", async () => {
     await overlayStep("so-answer");
     // The /review tour has finished — the overlay is gone.
     await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 5000 });
+
+    // ── Capture a REAL still of the reconstructed kitsoki UI ──────────────────
+    // The /review rrweb replay frame has painted real reconstructed UI by now.
+    // Screenshot it into a Buffer and hand it to the artifact route, so the
+    // /point window's frame (and the /review fd-still thumbnail) show real UI
+    // instead of a 1×1 PNG scaled into a black box. Assert the frame is visible
+    // and let it settle so the captured region is not blank.
+    mark("capture replay still");
+    const replayFrame = page.getByTestId("rp-replay-frame");
+    await expect(replayFrame).toBeVisible();
+    await dwell(page, SETTLE_MS);
+    frameStill = await replayFrame.screenshot();
 
     // ── 8. The chrome-less /point handoff window (PORTABLE caption) ───────────
     // The chromeless route renders ONLY <PointPage>; <TourOverlay> is v-if'd out,
