@@ -47,6 +47,10 @@ go_failures=0
 flow_failures=0
 features_failures=0
 features_skipped=0
+mining_failures=0
+mining_skipped=0
+mining_total=0
+declare -a MINING_FAILED
 
 # ---------------------------------------------------------------------------
 # Suite 1: go test ./...   (-json so we can separate signal from per-test noise)
@@ -125,6 +129,34 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Suite 4: session-mining no-LLM invariants (stdlib python, committed fixtures)
+# ---------------------------------------------------------------------------
+# The intent pipeline, outcome capture, git-ops coverage, and the real-cost
+# stack are all pure-python and run against frozen oracle JSON — NEVER a live
+# LLM (AGENTS.md). `go test ./...` doesn't touch them, so they'd rot unguarded.
+# Gated on python3 like the feature catalog is gated on pnpm.
+section "session-mining (python)"
+if command -v python3 >/dev/null 2>&1; then
+	shopt -s nullglob
+	MINING_TESTS=(tools/session-mining/tests/test_*.py)
+	shopt -u nullglob
+	for t in "${MINING_TESTS[@]}"; do
+		mining_total=$((mining_total + 1))
+		mout="$TMP/mining-$(basename "$t").out"
+		python3 "$t" >"$mout" 2>&1
+		rc=$?
+		{ printf -- '-- %s (exit %d)\n' "$t" "$rc"; cat "$mout"; } >>"$REPORT"
+		if [ "$rc" -ne 0 ]; then
+			MINING_FAILED+=("$t")
+			mining_failures=$((mining_failures + 1))
+		fi
+	done
+else
+	mining_skipped=1
+	echo "skipped: python3 missing" >>"$REPORT"
+fi
+
+# ---------------------------------------------------------------------------
 # Report rotation
 # ---------------------------------------------------------------------------
 # shellcheck disable=SC2012
@@ -133,7 +165,7 @@ ls -1t "$REPORT_DIR"/test-*.log 2>/dev/null | tail -n +$((KEEP + 1)) | while rea
 # ---------------------------------------------------------------------------
 # Console summary
 # ---------------------------------------------------------------------------
-total_failures=$((go_failures + flow_failures + features_failures))
+total_failures=$((go_failures + flow_failures + features_failures + mining_failures))
 
 if [ "$total_failures" -eq 0 ]; then
 	printf '%s✓%s go test ./...   %s%d packages%s\n' "$GREEN" "$RST" "$DIM" "$go_pkgs_total" "$RST"
@@ -142,6 +174,11 @@ if [ "$total_failures" -eq 0 ]; then
 		printf '%s-%s feature catalog %sskipped (pnpm/node_modules missing)%s\n' "$YELLOW" "$RST" "$DIM" "$RST"
 	else
 		printf '%s✓%s feature catalog\n' "$GREEN" "$RST"
+	fi
+	if [ "$mining_skipped" -eq 1 ]; then
+		printf '%s-%s session-mining   %sskipped (python3 missing)%s\n' "$YELLOW" "$RST" "$DIM" "$RST"
+	else
+		printf '%s✓%s session-mining  %s%d suites%s\n' "$GREEN" "$RST" "$DIM" "$mining_total" "$RST"
 	fi
 	printf '%s✓ all tests passed%s   %s· report: %s%s\n' "$BOLD$GREEN" "$RST" "$DIM" "$REPORT" "$RST"
 	exit 0
@@ -206,6 +243,15 @@ fi
 if [ "$features_failures" -gt 0 ]; then
 	printf '\n%s✗ feature catalog%s — validation/freshness failed:\n' "$BOLD$RED" "$RST"
 	sed 's/^/  /' "$TMP/features.out"
+fi
+
+# --- Session-mining failures --------------------------------------------------
+if [ "$mining_failures" -gt 0 ]; then
+	printf '\n%s✗ session-mining%s — %d/%d suite(s) failed\n' "$BOLD$RED" "$RST" "$mining_failures" "$mining_total"
+	for t in "${MINING_FAILED[@]}"; do
+		printf '\n%s%s%s\n' "$YELLOW" "$t" "$RST"
+		sed 's/^/  /' "$TMP/mining-$(basename "$t").out"
+	done
 fi
 
 printf '\n%s✗ %d failure group(s)%s   %s· full report: %s%s\n' \

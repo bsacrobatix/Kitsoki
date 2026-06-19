@@ -32,7 +32,7 @@ BASESTORIES_DIR   := internal/basestories/stories
 BASESTORIES_STAMP := internal/basestories/.embed-stamp
 
 .PHONY: all setup build install uninstall test test-flows starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories e2e-docker \
-	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test
+	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test
 
 all: build
 
@@ -145,11 +145,13 @@ web-dev-logs:
 	  echo "tailing $$latest" >&2; \
 	  tail -f "$$latest"
 
-# test runs the Go unit tests AND the Mode-2 deterministic story flow suites
-# (no LLM, no cost). The flow suites guard the shipped stories under stories/,
-# which `go test ./...` does not touch. scripts/run-tests.sh collects every
-# failure across both suites (never bails early), prints a terse summary on
-# success / full detail on failure, and always writes a rotated full report to
+# test runs the Go unit tests, the Mode-2 deterministic story flow suites, the
+# feature catalog, AND the session-mining no-LLM invariants (== mining-test) —
+# all without an LLM or cost. The flow suites guard the shipped stories under
+# stories/ and the mining suites guard tools/session-mining/, neither of which
+# `go test ./...` touches. scripts/run-tests.sh collects every failure across
+# all suites (never bails early), prints a terse summary on success / full
+# detail on failure, and always writes a rotated full report to
 # .artifacts/test-reports/.
 test:
 	@./scripts/run-tests.sh
@@ -196,12 +198,20 @@ cost-report:
 		$(if $(PROJECTS),--projects '$(PROJECTS)',) --out $(COST_REPORT_OUT)
 	@echo "report: $(COST_REPORT_OUT)"
 
-# cost-report-test runs the no-LLM invariants for the whole real-cost stack
-# (pricing, the extractor, the estimator fallback, and the report driver).
-cost-report-test:
-	@for t in test_cost_extract test_cost_estimate test_cost_report; do \
-		python3 tools/session-mining/tests/$$t.py || exit 1; \
-	done
+# mining-test runs every no-LLM invariant in the session-mining stack: the
+# intent pipeline + parsers, outcome/satisfaction capture, the git-ops coverage
+# end-to-end, and the whole real-cost stack (pricing, extractor, estimator
+# fallback, report driver). All run against committed fixtures + frozen oracle
+# JSON — NEVER a live LLM (AGENTS.md). `scripts/run-tests.sh` runs this as its
+# fourth suite so `make test` / CI guard it; run standalone for a fast loop.
+mining-test:
+	@rc=0; for t in tools/session-mining/tests/test_*.py; do \
+		printf '\n-- %s\n' "$$t"; python3 "$$t" || rc=1; \
+	done; exit $$rc
+
+# cost-report-test — alias kept for the cost case study's docs; mining-test is
+# the canonical target (it's a superset: cost + coverage + pipeline invariants).
+cost-report-test: mining-test
 
 # starcheck-kitsoki is the static host.starlark.run pre-flight: it runs the
 # starcheck tool's -kitsoki profile (predeclared={json,math}, strict dialect,

@@ -269,9 +269,10 @@ raw-agentic cost of the same operations in mined sessions — a per-intent
 median/p90 distribution, the reprocessing tax, and cold-resume re-warm — read
 from recorded `message.usage` via `cost_extract.py` + `pricing.py` (exact, no
 LLM). The narrative is the
-[git-ops cost case study](../../docs/case-studies/git-ops-cost.md);
-`make cost-report-test` runs the whole stack's no-LLM invariants
-(`test_cost_extract.py`, `test_cost_estimate.py`, `test_cost_report.py`).
+[git-ops cost case study](../../docs/case-studies/git-ops-cost.md). `make
+mining-test` runs every no-LLM invariant in this directory (the cost stack plus
+the intent-pipeline, outcomes, and git-ops coverage suites); `make test` and CI
+run it as a fourth suite, so these guards never rot.
 
 ---
 

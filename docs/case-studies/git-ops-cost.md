@@ -247,7 +247,7 @@ pairs two figures and reports the gap:
 ```bash
 make cost-report                       # all stories -> .artifacts/cost-report/cost-report.md
 python3 tools/session-mining/cost_report.py --story git-ops   # one story, to stdout
-make cost-report-test                  # the no-LLM invariants for the whole stack
+make mining-test                       # the no-LLM invariants for the whole stack (also run by `make test`)
 ```
 
 For git-ops today that yields the story's **$0.0955** against a real
