@@ -4480,42 +4480,15 @@ func (m RootModel) View() string {
 	//   > [prompt textarea]
 	//   [per-room status row, if the state declares Footer]
 	//   [coloured framework status row: room · state · mode · queue]
-	r := blocks.New(m.width, m.currentTheme())
-	var parts []string
-	if live := m.transcript.LiveLine(); live != "" {
-		parts = append(parts, live)
-	}
-	if bannerLine != "" {
-		parts = append(parts, bannerLine)
-	}
-	parts = append(parts, r.Divider())
-	parts = append(parts, promptLine)
-	if line2 := footerStoryLine(m); line2 != "" {
-		parts = append(parts,
-			lipgloss.NewStyle().
-				Foreground(colorMuted).
-				Italic(true).
-				Render(line2))
-	}
-	parts = append(parts, r.StatusRow(footerFrameworkLine(m), modeLabel(m.mode)))
-
-	// Assemble the final view by joining parts with explicit newlines.
-	// We use simple string concatenation instead of JoinVertical to avoid
-	// padding issues that could cause horizontal alignment of multi-line
-	// parts like promptLine (which contains indicator\n + prompt).
-	// Trim trailing newlines from each part to prevent double-spacing.
-	var output strings.Builder
-	for _, part := range parts {
-		trimmed := strings.TrimRight(part, "\n")
-		if trimmed == "" {
-			continue
-		}
-		if output.Len() > 0 {
-			output.WriteString("\n")
-		}
-		output.WriteString(trimmed)
-	}
-	return output.String()
+	// Bottom-chrome assembly routes through the frame composer so the
+	// live screen and every headless capture (kitsoki drive / shot) are
+	// the same bytes. composeChromeParts builds the exact part list that
+	// View() used to inline; joinChromeParts performs the same
+	// trim-and-newline join. The live path passes m.width (chrome only —
+	// the body lives in scrollback via tea.Println), so this output is
+	// byte-identical to the pre-composer assembly.
+	parts := composeChromeParts(m, m.width, promptLine, bannerLine)
+	return joinChromeParts(parts)
 }
 
 // promptPrefix returns the styled mode-specific prompt prefix.

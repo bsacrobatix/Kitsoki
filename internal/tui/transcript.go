@@ -1263,6 +1263,22 @@ func (m *transcriptModel) EntryCount() int {
 	return len(m.entries)
 }
 
+// LastBody returns the styled body of the most recently appended entry,
+// or "" when the transcript is empty. The live TUI never re-renders this
+// into View() (settled bodies live in scrollback via tea.Println); it is
+// exposed so the frame composer can include the current room body in a
+// single still Frame for headless callers (see ComposeFrame). Entries
+// that carry only a header (a bare user-input echo) contribute no body,
+// so this walks backwards to the last entry whose body is non-empty.
+func (m *transcriptModel) LastBody() string {
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].body != "" {
+			return m.entries[i].body
+		}
+	}
+	return ""
+}
+
 func max(a, b int) int {
 	if a > b {
 		return a
