@@ -192,6 +192,12 @@ export const CHAT_PANEL_VIEW_TYPE = 'kitsoki.chat';
 export class ChatPanel {
   private static current: ChatPanel | undefined;
 
+  /** The editor column the popped-out chat panel lives in, or undefined when it
+   *  isn't open. Lets host.ide.* open documents BESIDE the conversation. */
+  static get column(): vscode.ViewColumn | undefined {
+    return ChatPanel.current?.panel.viewColumn;
+  }
+
   static reveal(
     extensionUri: vscode.Uri,
     backend: Backend,

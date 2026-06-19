@@ -135,6 +135,36 @@ remux pattern documented below, **not** a plain copy from the video dir.
      see **[Feature tour demo video](#feature-tour-demo-video--the-golden-example)**.
    - **Hash routing** — URLs are `#/`, `#/s/:id`, `#/s/:id/chat`.
 
+## Demoing human usage — the conversation must be followable
+
+A demo of someone USING kitsoki is worthless if a viewer can't follow the
+conversation. `kitsoki-ui-qa` now **fails** a demo that breaks any of these
+(rules 7–8 there), so author for them up front — don't fix it by hand after:
+
+- **Keep the chat visible — never let it be covered.** When the operator opens a
+  document (the brief/PRD/diff via `host.ide.*`, or any file), it must appear
+  BESIDE the conversation, not ON it. The extension already opens host.ide docs in
+  the column beside the popped-out chat (`chatDocColumn` in
+  `tools/vscode-kitsoki/src/ide-tools.ts`); the recording must keep that
+  split (chat in one editor column, docs in the next) and minimise the sidebar so
+  both read clearly. Verify the chat transcript is visible in EVERY beat where a
+  file is open.
+- **Show every user input — slowly.** Each operator input must be on-screen as
+  legible text long enough to read. Type inputs visibly (character-by-character in
+  record mode), then `dwell` on the input AND on the reply before advancing. A
+  reply may be truncated if long, but enough must show to understand what happened.
+  An input that flashes past (a no-op `dwell` between turns) is what makes a demo
+  "jumpy" — pace every turn.
+- **No overlapping tour labels.** A coachmark/popover/tooltip must never sit on top
+  of the chat. Dismiss any onboarding/tour overlay before driving, and keep
+  spotlight popovers off the conversation.
+- **Word intents naturally — never the raw `_` names.** Drive via natural language
+  in the composer where the deterministic router allows; never type or surface the
+  underscored internal intent names (`core__prd__start`). Visible labels (buttons,
+  the state-diagram "via …" breadcrumb) are humanised by the UI — keep them that
+  way; if a label shows a raw `name`, give the intent a natural `title:` rather
+  than papering over it in the spec.
+
 ## Video recording — the correct pattern
 
 **Always emit MP4, never `.webm`.** Playwright records VP8 `.webm`, which (a)

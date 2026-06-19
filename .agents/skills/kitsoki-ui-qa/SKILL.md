@@ -148,6 +148,19 @@ pipeline removes that failure mode structurally, not by hoping the model behaves
    (rule 7), and a **deterministic** `placeholder-scan.sh` (OCR) flags a placeholder
    that runs unbroken for `--min-run` frames or covers `--min-fraction` of the demo.
    This is what catches "the three panels just say Loading… for a long time."
+7. **Conversation-legibility + occlusion check.** A demo of human usage must let a
+   viewer FOLLOW the conversation. The review prompt (rules 7–8) reads the frames as
+   a timeline and emits a blocking `visual_issues[]` entry when: an operator INPUT
+   is never visible as legible text (it flashed by / was sent off-camera); an agent
+   RESPONSE is clipped to nothing or never shown (long replies MAY truncate); the
+   chat transcript is **covered or pushed off-screen** by another panel (a
+   file/PRD/diff editor opening OVER the conversation); or a floating overlay (tour
+   coachmark / popover / tooltip) overlaps and obscures the chat. This is what
+   catches "the video is jumpy, you can't see the user inputs, and the editor hides
+   the chat." Because `visual_issues` always block the gate, a hidden-chat or
+   missing-input demo can never pass — author the demo so the chat stays visible
+   beside the editor and every input dwells long enough to read (see
+   `kitsoki-ui-demo`).
 
 ## Prerequisites
 

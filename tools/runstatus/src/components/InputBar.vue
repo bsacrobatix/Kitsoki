@@ -192,7 +192,7 @@
           :title="intent.description || undefined"
           @click="fireIntent(intent)"
         >
-          <span class="input-bar__btn-label">{{ intent.title || intent.name }}</span>
+          <span class="input-bar__btn-label">{{ intent.title || humanizeIntent(intent.name) }}</span>
           <span v-if="intent.description" class="input-bar__btn-hint">{{ intent.description }}</span>
         </button>
       </div>
@@ -248,7 +248,7 @@
         :disabled="pending"
       >
         <option v-for="intent in textIntents" :key="intent.name" :value="intent.name">
-          {{ intent.title || intent.name }}
+          {{ intent.title || humanizeIntent(intent.name) }}
         </option>
       </select>
 
@@ -278,6 +278,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import type { IntentInfo, View, ChoiceItem, ChoiceField } from "../types.js";
+import { humanizeIntent } from "../lib/intent.js";
 
 const props = defineProps<{
   intents: IntentInfo[];

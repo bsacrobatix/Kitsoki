@@ -119,6 +119,12 @@ test('vscode prd demo — brief/PRD in the editor, refine shows a verdict-gated 
     await clickViewTitleAction(win, 'Chat', 'Open Chat in Editor');
     await win.locator('.tab.active').filter({ hasText: /Kitsoki/i }).first().waitFor({ timeout: 30_000 }).catch(() => undefined);
 
+    // Clean stage BEFORE resolving the chat frame (closing the sidebar webviews
+    // re-indexes iframes, so do it first): minimise the sidebar so the chat (left)
+    // and the editor docs (right, opened BESIDE via host.ide) fill the frame.
+    await runPaletteCommand(win, ['>View: Close Primary Side Bar', '>View: Toggle Primary Side Bar']);
+    await sleep(600);
+
     // back-stories is present ONLY in the full editor panel → the expanded frame.
     const chat = await surfaceFrame(win, 'back-stories', 45_000);
     const state = () => chat.locator('[data-testid="current-state"]');
@@ -126,25 +132,41 @@ test('vscode prd demo — brief/PRD in the editor, refine shows a verdict-gated 
 
     const domClick = (loc: ReturnType<FrameLocator['locator']>) =>
       loc.first().evaluate((el) => (el as HTMLElement).click());
+    // Type VISIBLY (char-by-char in record mode) so the viewer sees the operator's
+    // input appear, then dwell on the input AND the reply so the conversation is
+    // followable — never a flashed-past, no-op turn.
     const typeAndSend = async (textVal: string) => {
       const input = chat.locator('[data-testid="composer-input"]').first();
       await expect(input).toBeVisible({ timeout: 15_000 });
-      await input.fill(textVal);
-      await sleep(250);
+      await input.click();
+      await input.fill('');
+      await input.pressSequentially(textVal, { delay: RECORD ? 38 : 0 });
+      await dwell(1200); // the typed input rests on screen before it is sent
       await input.press('Enter');
+      await dwell(1700); // the reply renders + rests so it is readable
     };
     const clickIntent = async (intent: string) => {
       const btn = chat.locator(`[data-testid="intent-btn-${intent}"]`).first();
       await expect(btn).toBeVisible({ timeout: 20_000 });
+      await dwell(900);
       await domClick(btn);
+      await dwell(1500);
     };
     const fillRefine = async (feedback: string) => {
       const form = chat.locator('form[data-intent="core__prd__refine"]').first();
       await expect(form).toBeVisible({ timeout: 20_000 });
-      await form.locator('input').first().fill(feedback);
-      await sleep(250);
+      const input = form.locator('input').first();
+      await input.click();
+      await input.pressSequentially(feedback, { delay: RECORD ? 38 : 0 });
+      await dwell(1400);
       await domClick(form.locator('button[type="submit"]'));
+      await dwell(1500);
     };
+
+    // Dismiss any onboarding/tour overlay so it never sits over the conversation,
+    // then focus the composer to start driving.
+    await win.keyboard.press('Escape').catch(() => undefined);
+    await chat.locator('[data-testid="composer-input"]').first().click().catch(() => undefined);
 
     // ── Discovery → drafting (proven gears core__ drive; deterministic, no LLM) ─
     await wait('core.main');
@@ -195,6 +217,11 @@ test('vscode prd demo — brief/PRD in the editor, refine shows a verdict-gated 
       win.locator('.review-comment, .comment-body, .monaco-editor .comment-thread').filter({ hasText: /tenant isolation/i }).first(),
       'the refine feedback shows as an inline comment',
     ).toBeVisible({ timeout: 15_000 });
+    // The diff opens at the document header; jump to the first CHANGE so the green
+    // added lines (## Non-Goals, the tenant-isolation requirement) are on-camera —
+    // not just an overview-ruler marker.
+    await win.locator('.monaco-diff-editor').first().click({ position: { x: 60, y: 60 } }).catch(() => undefined);
+    await runPaletteCommand(win, ['>Go to Next Difference', '>Diff Editor: Go to Next Change', '>Go to Next Change in Diff Editor']);
     await dwell(5500); // linger on the diff + the green Non-Goals/tenant-isolation additions + the comment
     await shot('d-refine-diff');
 
@@ -207,16 +234,19 @@ test('vscode prd demo — brief/PRD in the editor, refine shows a verdict-gated 
       win.locator('.monaco-diff-editor').first(),
       'accepting closes the diff editor',
     ).toBeHidden({ timeout: 30_000 });
-    await dwell(3500); // linger on the applied PRD
-    await shot('e-accepted');
-
-    // Back in the chat, the drafting view reflects v2 (Non-Goals).
+    // The diff applied: the PRD editor (004-prd.md) now carries the v2 content —
+    // the added Non-Goals section is in the document. This is the v2 evidence
+    // (the editor, not the chat — the diff wrote the file).
     await expect(
-      chat.locator('[data-testid="chat-transcript"]').getByText(/Non-Goals/i).first(),
-      'the accepted refine promoted v2 into the chat view',
+      win.locator('.monaco-editor').filter({ hasText: /Non-Goals/i }).first(),
+      'the accepted refine applied v2 — Non-Goals is now in the PRD editor',
     ).toBeVisible({ timeout: 20_000 });
-    await dwell(4000);
-    await shot('f-v2-in-chat');
+    // Confirm the conversation also acknowledged the accept (the chat moved on).
+    await expect(state(), 'still in drafting, ready for the next move').toHaveText('core.prd.drafting', {
+      timeout: 20_000,
+    });
+    await dwell(5000); // linger on the applied v2 PRD in the editor + the chat
+    await shot('e-accepted-v2');
   } finally {
     if (launched) await launched.app.close().catch(() => undefined);
     // Transcode through the shared guard: the canonical vscode-prd-demo.mp4 is

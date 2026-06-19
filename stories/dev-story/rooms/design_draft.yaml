@@ -224,6 +224,7 @@ states:
               bind:
                 design_stage_doc: "path"
               on_error: design_draft
+            - say: "Proposed a refinement — review the change in the diff and **Accept** or **Reject** it."
             - invoke: host.ide.open_diff
               with:
                 path:          "{{ world.design_draft_doc }}"

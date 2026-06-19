@@ -182,6 +182,27 @@ EVIDENCE RULES (these make the review trustworthy — follow them exactly):
    citing the first and last frame the placeholder persists in (e.g. "the Trace
    panel shows 'Loading…' from 0002 through 0009 — never resolves"). A placeholder
    in just one transitional frame is fine; persistence across many is the bug.
+7. CONVERSATION LEGIBILITY — when the demo shows a chat/conversation (the operator
+   talking to the agent), a viewer must be able to FOLLOW the human usage. Reading
+   the frames as a TIMELINE, verify:
+   (a) every operator INPUT the demo sends appears somewhere as legible text (a
+       chat message/bubble you can actually read) — an input that is never visible
+       in any frame (it flashed by too fast, or was sent off-camera) is a failure;
+   (b) enough of each agent RESPONSE is visible to understand what happened — a
+       long response MAY be truncated, but a reply clipped to nothing (or never
+       shown at all) is a failure;
+   (c) the chat transcript is NOT covered, pushed off-screen, or collapsed to
+       unreadability by another panel — a classic bug is a file/PRD/diff editor
+       opening OVER the conversation so the messages are no longer visible.
+   For any of these, add a "visual_issues" entry naming the frame(s) and the
+   missing/obscured content (e.g. "the chat is fully covered by the 004-prd.md
+   editor in 0005-0008 — the user inputs and replies are not visible"), and `fail`
+   any step that depends on seeing the conversation.
+8. OCCLUSION / OVERLAPPING OVERLAYS — a floating overlay (a tour coachmark,
+   popover, tooltip, toast, or spotlight) that OVERLAPS and obscures the primary
+   content — especially the chat — is a failure, not decoration. If a tour label
+   sits on top of the conversation so messages/inputs are hidden behind it, add a
+   "visual_issues" entry naming the frame and the obscured content.
 
 Compute each scenario's status as the worst of its steps (fail < unsupported <
 pass). Copy each scenario's `id`, `title`, and `required` exactly from the YAML

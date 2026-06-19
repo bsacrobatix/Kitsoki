@@ -22,7 +22,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { resolveWorkspacePath } from './ide-tools';
+import { resolveWorkspacePath, chatDocColumn } from './ide-tools';
 
 export const DIFF_SCHEME = 'kitsoki-diff';
 export type Verdict = 'accepted' | 'rejected';
@@ -144,7 +144,7 @@ export class DiffController {
       leftUri,
       rightUri,
       title,
-      { preview: false } as vscode.TextDocumentShowOptions,
+      { viewColumn: chatDocColumn(), preview: false, preserveFocus: true } as vscode.TextDocumentShowOptions,
     );
 
     let thread: vscode.CommentThread | undefined;

@@ -48,7 +48,7 @@
               <span class="state-diagram__ms-name">{{ r.label }}</span>
               <span v-if="r.banner" class="state-diagram__ms-banner state-diagram__ms-banner--done">{{ r.banner }}</span>
             </span>
-            <span v-if="enteringIntent(r.id)" class="state-diagram__ms-via">via {{ enteringIntent(r.id) }}</span>
+            <span v-if="enteringIntent(r.id)" class="state-diagram__ms-via" :title="enteringIntent(r.id)">via {{ humanizeIntent(enteringIntent(r.id)) }}</span>
           </span>
         </button>
 
@@ -212,7 +212,7 @@
               @click="onRoomClickById(r.id)"
             >
               <span class="state-diagram__crumb-room">{{ r.label }}</span>
-              <span v-if="enteringIntent(r.id)" class="state-diagram__crumb-via">via {{ enteringIntent(r.id) }}</span>
+              <span v-if="enteringIntent(r.id)" class="state-diagram__crumb-via" :title="enteringIntent(r.id)">via {{ humanizeIntent(enteringIntent(r.id)) }}</span>
             </button>
             <span class="state-diagram__crumb-arrow">→</span>
           </template>
@@ -373,6 +373,7 @@ import {
   type HorizonArc,
 } from "../diagram/horizon.js";
 import type { NodeRef, TraceEvent, IntentInfo } from "../types.js";
+import { humanizeIntent } from "../lib/intent.js";
 
 const props = defineProps<{
   mermaidSource: string;
@@ -484,6 +485,9 @@ const enteringIntentByRoom = computed(() =>
 function enteringIntent(roomId: string): string | undefined {
   return enteringIntentByRoom.value.get(roomId);
 }
+
+// humanizeIntent (display label for the "via …" breadcrumb) is shared with
+// InputBar — see ../lib/intent.ts. The trace keeps the raw name (title on hover).
 // Road ahead at ROOM granularity (PROJECTION). Seeds the cycle guard with the
 // traveled path so the projection never loops back onto rooms already left.
 const roomAhead = computed(() =>
