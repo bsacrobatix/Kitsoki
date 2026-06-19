@@ -29,6 +29,14 @@ on prompt incantations to enforce structure.
   them, and a failing test as the reproduction artifact. The pipeline
   ships as the [`bugfix`](../../stories/bugfix/) story.
 
+- **[git-ops-cost.md](git-ops-cost.md)** — the *how much*. Puts a price
+  tag on progressive determinism: four operations mined from real Claude
+  Code sessions (commit, rebase-with-conflict, merge, worktree) run as
+  the [`git-ops`](../../stories/git-ops/) story for ~$0.10, versus a
+  modelled 3–55× as a raw agentic loop. Introduces the re-send-everything
+  cost model and the [`cost_estimate.py`](../../tools/session-mining/cost_estimate.py)
+  estimator, with warm/cold and prior-context as the two axes.
+
 Future studies (planned, not yet written):
 
 - **PR refinement.** The `pr-refinement` tail: watching CI, resolving
