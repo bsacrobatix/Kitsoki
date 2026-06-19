@@ -32,7 +32,7 @@ tour:
       route: home
       target: story-card
       title: The bug-fix pipeline
-      body: This story hands a ticket to a dispatched `claude -p` autofix agent. When that agent hits a fork it can't decide alone, it forwards an AskUserQuestion back into kitsoki — and the oracle turn parks, blocking, until an operator answers.
+      body: "This story hands a ticket to a dispatched `claude -p` autofix agent. Here's the landmine kitsoki defuses: run that agent headless and its AskUserQuestion doesn't block — the tool silently auto-resolves to an *empty* answer, so the agent sails past the fork on a non-decision you never see. kitsoki hard-denies that tool and forwards the question back to the operator instead — the oracle turn parks, blocking, until a human answers."
       placement: right
       kind: explain
       advance: next
@@ -132,7 +132,7 @@ tour:
     - id: oa-done
       route: interactive
       title: That's operator-ask forwarding
-      body: "You've seen the full round-trip: a dispatched agent forwards a question, kitsoki parks the oracle turn and surfaces a blocking modal, the operator picks (single- or multi-select), and Send answer echoes the choice back to unblock the exact parked goroutine. The agent never silently guesses — a human decides the fork."
+      body: "You've seen the full round-trip: a dispatched agent forwards a question, kitsoki parks the oracle turn and surfaces a blocking modal, the operator picks (single- or multi-select), and Send answer echoes the choice back to unblock the exact parked goroutine. The headless default would have let the agent guess on an empty answer — here a human decides the fork instead, and the runtime never moves until they do."
       placement: center
       kind: explain
       advance: next
