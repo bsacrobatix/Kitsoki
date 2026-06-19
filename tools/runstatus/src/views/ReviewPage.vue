@@ -22,10 +22,12 @@ import type { Chapter, VisualBundle } from "../data/source.js";
 import type { Flag } from "../lib/flags.js";
 import type { ResolvedElement } from "../lib/resolveElement.js";
 import { dominantChapter } from "../lib/flags.js";
+import type { RrwebEvent } from "../data/session-capture.js";
 import ChapterTimeline from "../components/ChapterTimeline.vue";
 import FlagList from "../components/FlagList.vue";
 import FlagDetail from "../components/FlagDetail.vue";
 import SpatialPicker from "../components/SpatialPicker.vue";
+import ReplayFrame from "../components/ReplayFrame.vue";
 
 const props = defineProps<{ sessionId: string }>();
 
@@ -58,11 +60,26 @@ const playerDurationMs = ref(0);
 
 // Spatial picker over the player frame (docs/tui/spatial-capture.md). The
 // frame's natural size feeds the rendered→frame-pixel map; default to a 16:9
-// box until the video reports its intrinsic size. The resolver runs against the
-// LIVE document (one resolver, two roots — the rrweb iframe root is slice 3).
+// box until the video reports its intrinsic size. In the LIVE-video path the
+// resolver runs against the LIVE document (one resolver, two roots); when the
+// reviewed media carries recorded rrweb events we instead render a ReplayFrame
+// (the reconstructed-DOM root — epic shared decision 2), so a click resolves a
+// REAL app control rather than the opaque <video>.
 const frameNatural = ref({ width: 1280, height: 720 });
 const pickerRoot = computed<Document | null>(() =>
   typeof document !== "undefined" ? document : null
+);
+
+// Recorded rrweb session backing this review, when present. `events` ≥ 2
+// (Meta + FullSnapshot) means the media is a reconstructed session: render the
+// ReplayFrame picker over it. `width`/`height` are the recording's INTRINSIC
+// viewport — the replay iframe's own pixel space, which the picker maps clicks
+// into (NOT the scaled render size).
+const replay = ref<{ events: RrwebEvent[]; width: number; height: number } | null>(
+  null
+);
+const hasReplay = computed(
+  () => !!replay.value && replay.value.events.length >= 2
 );
 const totalMs = computed(() => {
   const fromChapters = chapters.value.reduce(
@@ -84,6 +101,23 @@ onMounted(async () => {
     // errors surface for the operator.
     chapters.value = [];
     loadError.value = e instanceof Error ? e.message : String(e);
+  }
+  // Optional reconstructed-DOM replay: if the source exposes recorded rrweb
+  // events for this media, render the ReplayFrame picker over the real UI
+  // instead of the opaque <video>. A source without it (snapshot/artifact) omits
+  // the method; any failure silently keeps the video path (never blocks review).
+  if (ds.videoEvents) {
+    try {
+      const r = await ds.videoEvents(props.sessionId, video.value);
+      if (r.events.length >= 2) {
+        replay.value = r;
+        if (r.width > 0 && r.height > 0) {
+          frameNatural.value = { width: r.width, height: r.height };
+        }
+      }
+    } catch {
+      /* no replay sidecar — keep the live-video path */
+    }
   }
 });
 
@@ -246,25 +280,41 @@ async function onSendAll() {
       <!-- Left: player + timeline + flags -->
       <section class="rp-left">
         <div v-if="video" class="rp-frame" data-testid="rp-frame">
-          <video
-            ref="player"
-            class="rp-player"
-            data-testid="rp-player"
-            controls
-            preload="metadata"
-            :src="videoUrl()"
-            @loadedmetadata="onLoadedMetadata"
-          />
-          <!-- Spatial picker: live only once a flag is selected (it stashes the
-               point/element on that flag). pointer-events live so it captures
-               clicks; it drops them momentarily to hit-test the page behind. -->
-          <SpatialPicker
-            v-if="selectedFlag"
+          <!-- Reconstructed-DOM path: when the reviewed media carries recorded
+               rrweb events, render the rrweb Replayer (REAL UI) under the picker
+               so a click resolves a real app control against the reconstructed
+               DOM (epic shared decision 2). The picker lives inside ReplayFrame,
+               rooted at the replay iframe's contentDocument. -->
+          <ReplayFrame
+            v-if="hasReplay && selectedFlag"
+            :events="replay!.events"
             :natural-width="frameNatural.width"
             :natural-height="frameNatural.height"
-            :root="pickerRoot"
             @pick="onPick"
           />
+          <!-- Live-video path (unchanged): the opaque <video> + a transparent
+               picker that drops pointer-events to hit-test the page behind it. -->
+          <template v-else>
+            <video
+              ref="player"
+              class="rp-player"
+              data-testid="rp-player"
+              controls
+              preload="metadata"
+              :src="videoUrl()"
+              @loadedmetadata="onLoadedMetadata"
+            />
+            <!-- Spatial picker: live only once a flag is selected (it stashes the
+                 point/element on that flag). pointer-events live so it captures
+                 clicks; it drops them momentarily to hit-test the page behind. -->
+            <SpatialPicker
+              v-if="selectedFlag"
+              :natural-width="frameNatural.width"
+              :natural-height="frameNatural.height"
+              :root="pickerRoot"
+              @pick="onPick"
+            />
+          </template>
         </div>
         <ChapterTimeline
           :chapters="chapters"

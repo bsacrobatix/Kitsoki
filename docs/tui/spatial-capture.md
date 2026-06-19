@@ -44,6 +44,7 @@ rrweb-reconstructed DOM (the bug-report capture) — that had never been bound.
 | Component | Source | Renders / does |
 |---|---|---|
 | `SpatialPicker.vue` | overlay over the displayed frame | crosshair at the click point; drag → box annotation; maps the click from the rendered frame back into the root's pixel space and emits the resolved bundle |
+| `ReplayFrame.vue` | an rrweb `Replayer` + a `SpatialPicker` rooted at its iframe | mounts the recorded session as a paused still of the **real reconstructed UI** and overlays the picker (the "second root") so a click resolves a real app element, not the opaque `<video>` |
 | `lib/resolveElement.ts` | a DOM root + (x,y) | `elementFromPoint(root, x, y)` → `{selector, role, text, bbox}`; **pure**, no global `document` |
 | element chip | `resolveElement` output | the `selector` + `role` + truncated visible `text` |
 | chat attachment | the bundle + a thumbnail | the still + the chip on the sent message |
@@ -61,6 +62,19 @@ The capture is wired into [`ReviewPage.vue`](video-review.md), and a flag in
 - **rrweb `Replayer` iframe** (`iframe.contentDocument`) in a recorded/review
   context — the reconstructed-DOM substrate the bug-report capture already
   builds.
+
+The review surface mounts both. `ReplayFrame.vue` wraps an rrweb `Replayer`
+(the same lazy-`import('rrweb')` + `new Replayer(events, { root })` setup
+`BugReportModal.vue` uses), pauses on the last frame, and overlays a
+`SpatialPicker` rooted at the Replayer iframe's `contentDocument`. When the
+reviewed media carries recorded rrweb events (`DataSource.videoEvents` returns
+≥ 2 events), [`ReviewPage.vue`](video-review.md) renders the `ReplayFrame` —
+the **real reconstructed UI**, so a click resolves a real app control
+(`intent-btn-run`, role `button`) — instead of the opaque `<video>`; without a
+recorded session it keeps the live-`<video>` + transparent-overlay path. The
+recording's intrinsic viewport (the rrweb `Meta` width/height) is the iframe's
+own pixel space, into which `SpatialPicker` maps the click before resolving;
+the live page rect only scales the *rendered* overlay (`scaleReplayToFit`).
 
 Element identity prefers a `data-testid` ancestor — the app testids everything
 (`intent-btn-*`, `chat-row-*`, `composer-*`), so a testid is the most stable
@@ -103,8 +117,14 @@ Web surface — Vitest + Playwright, never the Go `CapturedIO` harness, oracle
 - `tests/unit/converse-visual-attachment.test.ts` — the off-path call ships the
   `visual` bundle.
 - `tests/playwright/spatial-capture.spec.ts` — drive `kitsoki web` against a
-  fixture frame, click a known element, **Ask**, assert `session.offpath` fired
-  with the `visual` bundle.
+  fixture frame (the live-`<video>` path), click a known element, **Ask**,
+  assert `session.offpath` fired with the `visual` bundle.
+- `tests/playwright/spatial-replay-resolve.spec.ts` — the **replay-frame**
+  path: `videoEvents` returns the checked-in rrweb fixture
+  (`tests/fixtures/spatial-replay.rrweb.json`, recorded at 1280×720),
+  `ReviewPage` mounts `ReplayFrame`, a click over the reconstructed Run button
+  resolves `[data-testid="intent-btn-run"]` (role `button`) — proving
+  resolution against the reconstructed DOM, not the `<video>`.
 
 ## Non-goals
 

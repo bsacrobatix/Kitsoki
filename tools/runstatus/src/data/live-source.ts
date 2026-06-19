@@ -786,6 +786,26 @@ export class LiveSource implements DataSource {
     return res.chapters ?? [];
   }
 
+  async videoEvents(
+    sessionId: string,
+    video: string
+  ): Promise<{
+    events: import("./session-capture.js").RrwebEvent[];
+    width: number;
+    height: number;
+  }> {
+    const res = await this.client.post<{
+      events?: import("./session-capture.js").RrwebEvent[];
+      width?: number;
+      height?: number;
+    }>("runstatus.video.events", { session_id: sessionId, video });
+    return {
+      events: res.events ?? [],
+      width: res.width ?? 0,
+      height: res.height ?? 0,
+    };
+  }
+
   videoFrame(
     sessionId: string,
     video: string,

@@ -66,6 +66,22 @@ const ONE_PX_PNG = Buffer.from(
   "base64",
 );
 
+// The checked-in deterministic rrweb fixture — recorded at a FIXED 1280×720
+// viewport (a minimal real kitsoki UI fragment with Run/Refine intent buttons +
+// a chat row). When videoEvents returns it, /review renders the rrweb Replayer
+// (REAL reconstructed UI) under the picker, so a click resolves a real control
+// (intent-btn-run) against the reconstructed DOM — the headline of the feature.
+const REC_W = 1280;
+const REC_H = 720;
+// The Run button's center in those natural pixels (bbox {x:20,y:664,w:73,h:38}).
+const RUN_CENTER = { x: 57, y: 683 };
+const REPLAY_EVENTS = JSON.parse(
+  fs.readFileSync(
+    path.join(projectRoot, "tests", "fixtures", "spatial-replay.rrweb.json"),
+    "utf-8",
+  ),
+) as unknown[];
+
 const CHAPTERS = [
   {
     index: 0,
@@ -112,6 +128,9 @@ async function installStubs(page: Page): Promise<void> {
     switch (body.method) {
       case "runstatus.video.chapters":
         result = { chapters: CHAPTERS };
+        break;
+      case "runstatus.video.events":
+        result = { events: REPLAY_EVENTS, width: REC_W, height: REC_H };
         break;
       case "runstatus.video.frame":
         result = { handle: "frame#deadbeef", mime: "image/png", kind: "image" };
@@ -206,18 +225,31 @@ test("spatial oracle feature-spotlight video", async () => {
     await page.getByTestId("ct-marker-intro").click();
     await page.getByTestId("ct-flag-btn").click();
     await expect(page.getByTestId("flag-detail")).toBeVisible();
-    await expect(page.getByTestId("spatial-picker")).toBeVisible();
+    // The reconstructed-DOM replay frame renders the REAL UI under the picker.
+    await expect(page.getByTestId("rp-replay-frame")).toBeVisible();
+    await expect(page.getByTestId("spatial-picker")).toBeVisible({ timeout: 10000 });
     await dwell(page, SETTLE_MS);
 
     // ── 4. The picker overlay ─────────────────────────────────────────────────
     await beat("so-picker");
 
-    // ── 5. Click the frame → pin a crosshair + resolve the element ────────────
-    mark("click the frame");
-    await page.getByTestId("spatial-picker").click({ position: { x: 120, y: 90 } });
+    // ── 5. Click the Run button → pin a crosshair + resolve the real control ──
+    mark("click the Run button");
+    const picker = page.getByTestId("spatial-picker");
+    const pbox = await picker.boundingBox();
+    if (!pbox) throw new Error("picker has no bounding box");
+    // position is relative to the picker box, which covers the rendered (scaled)
+    // replay exactly — so the fraction of natural pixels equals the box fraction.
+    await picker.click({
+      position: {
+        x: (RUN_CENTER.x / REC_W) * pbox.width,
+        y: (RUN_CENTER.y / REC_H) * pbox.height,
+      },
+    });
     await expect(page.getByTestId("sp-point")).toBeVisible();
     await expect(page.getByTestId("fd-element")).toBeVisible();
-    await expect(page.getByTestId("fd-element")).toContainText("rp-player");
+    // Resolution against the reconstructed DOM: a REAL app control, not <video>.
+    await expect(page.getByTestId("fd-element")).toContainText("intent-btn-run");
     await dwell(page, SETTLE_MS);
     await beat("so-point");
     await beat("so-element");

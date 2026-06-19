@@ -1,0 +1,333 @@
+[
+  {
+    "type": 4,
+    "data": {
+      "href": "about:blank",
+      "width": 1280,
+      "height": 720
+    },
+    "timestamp": 1700000000000
+  },
+  {
+    "type": 2,
+    "data": {
+      "node": {
+        "type": 0,
+        "childNodes": [
+          {
+            "type": 1,
+            "name": "html",
+            "publicId": "",
+            "systemId": "",
+            "id": 2
+          },
+          {
+            "type": 2,
+            "tagName": "html",
+            "attributes": {
+              "lang": "en"
+            },
+            "childNodes": [
+              {
+                "type": 2,
+                "tagName": "head",
+                "attributes": {},
+                "childNodes": [
+                  {
+                    "type": 3,
+                    "textContent": "\n",
+                    "id": 5
+                  },
+                  {
+                    "type": 2,
+                    "tagName": "meta",
+                    "attributes": {
+                      "charset": "utf-8"
+                    },
+                    "childNodes": [],
+                    "id": 6
+                  },
+                  {
+                    "type": 3,
+                    "textContent": "\n",
+                    "id": 7
+                  },
+                  {
+                    "type": 2,
+                    "tagName": "title",
+                    "attributes": {},
+                    "childNodes": [
+                      {
+                        "type": 3,
+                        "textContent": "kitsoki",
+                        "id": 9
+                      }
+                    ],
+                    "id": 8
+                  },
+                  {
+                    "type": 3,
+                    "textContent": "\n",
+                    "id": 10
+                  },
+                  {
+                    "type": 2,
+                    "tagName": "style",
+                    "attributes": {
+                      "_cssText": "* { box-sizing: border-box; }body { margin: 0px; font-family: -apple-system, \"Segoe UI\", Roboto, sans-serif; background: rgb(13, 27, 42); color: rgb(226, 232, 240); }.app { display: flex; flex-direction: column; height: 100vh; }.topbar { padding: 14px 20px; border-bottom: 1px solid rgb(30, 58, 95); font-weight: 600; font-size: 16px; background: rgb(10, 21, 33); }.body { flex: 1 1 0%; display: flex; }.transcript { flex: 1 1 0%; padding: 20px; display: flex; flex-direction: column; gap: 12px; }.row { display: flex; gap: 10px; max-width: 70%; }.row .who { font-size: 12px; color: rgb(96, 165, 250); font-weight: 600; padding-top: 4px; }.bubble { background: rgb(17, 36, 58); border: 1px solid rgb(30, 58, 95); border-radius: 10px; padding: 10px 14px; font-size: 14px; line-height: 1.4; }.intents { display: flex; gap: 12px; padding: 18px 20px; border-top: 1px solid rgb(30, 58, 95); background: rgb(10, 21, 33); }button.intent { font-style: inherit; font-variant: inherit; font-stretch: inherit; line-height: inherit; font-family: inherit; font-optical-sizing: inherit; font-size-adjust: inherit; font-kerning: inherit; font-feature-settings: inherit; font-variation-settings: inherit; font-language-override: inherit; font-size: 14px; font-weight: 600; padding: 10px 22px; border-radius: 8px; border: 1px solid rgb(37, 99, 235); cursor: pointer; }button.intent.primary { background: rgb(37, 99, 235); color: rgb(255, 255, 255); }button.intent.ghost { background: transparent; color: rgb(147, 197, 253); border-color: rgb(44, 74, 110); }"
+                    },
+                    "childNodes": [
+                      {
+                        "type": 3,
+                        "textContent": "",
+                        "id": 12
+                      }
+                    ],
+                    "id": 11
+                  },
+                  {
+                    "type": 3,
+                    "textContent": "\n",
+                    "id": 13
+                  }
+                ],
+                "id": 4
+              },
+              {
+                "type": 3,
+                "textContent": "\n",
+                "id": 14
+              },
+              {
+                "type": 2,
+                "tagName": "body",
+                "attributes": {},
+                "childNodes": [
+                  {
+                    "type": 3,
+                    "textContent": "\n  ",
+                    "id": 16
+                  },
+                  {
+                    "type": 2,
+                    "tagName": "div",
+                    "attributes": {
+                      "class": "app"
+                    },
+                    "childNodes": [
+                      {
+                        "type": 3,
+                        "textContent": "\n    ",
+                        "id": 18
+                      },
+                      {
+                        "type": 2,
+                        "tagName": "div",
+                        "attributes": {
+                          "class": "topbar",
+                          "data-testid": "topbar"
+                        },
+                        "childNodes": [
+                          {
+                            "type": 3,
+                            "textContent": "kitsoki — order-pizza · room: choose",
+                            "id": 20
+                          }
+                        ],
+                        "id": 19
+                      },
+                      {
+                        "type": 3,
+                        "textContent": "\n    ",
+                        "id": 21
+                      },
+                      {
+                        "type": 2,
+                        "tagName": "div",
+                        "attributes": {
+                          "class": "body"
+                        },
+                        "childNodes": [
+                          {
+                            "type": 3,
+                            "textContent": "\n      ",
+                            "id": 23
+                          },
+                          {
+                            "type": 2,
+                            "tagName": "div",
+                            "attributes": {
+                              "class": "transcript",
+                              "data-testid": "transcript"
+                            },
+                            "childNodes": [
+                              {
+                                "type": 3,
+                                "textContent": "\n        ",
+                                "id": 25
+                              },
+                              {
+                                "type": 2,
+                                "tagName": "div",
+                                "attributes": {
+                                  "class": "row",
+                                  "data-testid": "chat-row-agent"
+                                },
+                                "childNodes": [
+                                  {
+                                    "type": 3,
+                                    "textContent": "\n          ",
+                                    "id": 27
+                                  },
+                                  {
+                                    "type": 2,
+                                    "tagName": "span",
+                                    "attributes": {
+                                      "class": "who"
+                                    },
+                                    "childNodes": [
+                                      {
+                                        "type": 3,
+                                        "textContent": "agent",
+                                        "id": 29
+                                      }
+                                    ],
+                                    "id": 28
+                                  },
+                                  {
+                                    "type": 3,
+                                    "textContent": "\n          ",
+                                    "id": 30
+                                  },
+                                  {
+                                    "type": 2,
+                                    "tagName": "div",
+                                    "attributes": {
+                                      "class": "bubble"
+                                    },
+                                    "childNodes": [
+                                      {
+                                        "type": 3,
+                                        "textContent": "Which size would you like? I can run the order or refine the choices.",
+                                        "id": 32
+                                      }
+                                    ],
+                                    "id": 31
+                                  },
+                                  {
+                                    "type": 3,
+                                    "textContent": "\n        ",
+                                    "id": 33
+                                  }
+                                ],
+                                "id": 26
+                              },
+                              {
+                                "type": 3,
+                                "textContent": "\n      ",
+                                "id": 34
+                              }
+                            ],
+                            "id": 24
+                          },
+                          {
+                            "type": 3,
+                            "textContent": "\n    ",
+                            "id": 35
+                          }
+                        ],
+                        "id": 22
+                      },
+                      {
+                        "type": 3,
+                        "textContent": "\n    ",
+                        "id": 36
+                      },
+                      {
+                        "type": 2,
+                        "tagName": "div",
+                        "attributes": {
+                          "class": "intents",
+                          "data-testid": "intent-bar"
+                        },
+                        "childNodes": [
+                          {
+                            "type": 3,
+                            "textContent": "\n      ",
+                            "id": 38
+                          },
+                          {
+                            "type": 2,
+                            "tagName": "button",
+                            "attributes": {
+                              "class": "intent primary",
+                              "data-testid": "intent-btn-run"
+                            },
+                            "childNodes": [
+                              {
+                                "type": 3,
+                                "textContent": "Run",
+                                "id": 40
+                              }
+                            ],
+                            "id": 39
+                          },
+                          {
+                            "type": 3,
+                            "textContent": "\n      ",
+                            "id": 41
+                          },
+                          {
+                            "type": 2,
+                            "tagName": "button",
+                            "attributes": {
+                              "class": "intent ghost",
+                              "data-testid": "intent-btn-refine"
+                            },
+                            "childNodes": [
+                              {
+                                "type": 3,
+                                "textContent": "Refine",
+                                "id": 43
+                              }
+                            ],
+                            "id": 42
+                          },
+                          {
+                            "type": 3,
+                            "textContent": "\n    ",
+                            "id": 44
+                          }
+                        ],
+                        "id": 37
+                      },
+                      {
+                        "type": 3,
+                        "textContent": "\n  ",
+                        "id": 45
+                      }
+                    ],
+                    "id": 17
+                  },
+                  {
+                    "type": 3,
+                    "textContent": "\n\n",
+                    "id": 46
+                  }
+                ],
+                "id": 15
+              }
+            ],
+            "id": 3
+          }
+        ],
+        "id": 1
+      },
+      "initialOffset": {
+        "left": 0,
+        "top": 0
+      }
+    },
+    "timestamp": 1700000000010
+  }
+]

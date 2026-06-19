@@ -33,10 +33,10 @@
  *
  * Like the other manifests this file MUST stay free of Vue / Pinia / DOM-runtime
  * imports — plain types and data only. Every `target` here is a testid the
- * feature actually ships: review-page, rp-frame, rp-player, chapter-timeline,
- * ct-marker-intro, ct-flag-btn, flag-detail, spatial-picker, sp-point,
- * fd-element, fd-still, fd-chat-box, fd-chat-send, fd-chat, point-page, pp-frame,
- * pp-input, pp-send.
+ * feature actually ships: review-page, rp-frame, rp-replay-frame, rp-player,
+ * chapter-timeline, ct-marker-intro, ct-flag-btn, flag-detail, spatial-picker,
+ * sp-point, fd-element, fd-still, fd-chat-box, fd-chat-send, fd-chat, point-page,
+ * pp-frame, pp-input, pp-send.
  */
 
 import { type TourStep } from "./manifest.js";
@@ -63,7 +63,7 @@ export const SPATIAL_ORACLE_TOUR_STEPS: readonly TourStep[] = [
     route: "any",
     target: "rp-frame",
     title: "The review surface",
-    body: "The /review page shows a recorded run as a video player with a chapter timeline beneath it. Each marker is a scene you can seek to, select, and flag for discussion.",
+    body: "The /review page shows a recorded run with a chapter timeline beneath it. When the capture carries a recorded rrweb session, the frame is the REAL reconstructed UI — not an opaque video — so you can point at actual controls. Each marker is a scene you can seek to, select, and flag for discussion.",
     placement: "right",
     kind: "explain",
     advance: "next",
@@ -87,7 +87,7 @@ export const SPATIAL_ORACLE_TOUR_STEPS: readonly TourStep[] = [
     route: "any",
     target: "spatial-picker",
     title: "The spatial picker",
-    body: "This transparent overlay sits over the frame. A click pins a point; a drag draws a box. To hit-test what's UNDER it, the picker momentarily drops its own pointer-events so elementFromPoint returns the real element behind it — the player here.",
+    body: "This transparent overlay sits over the frame. A click pins a point; a drag draws a box. Over a reconstructed rrweb session the picker resolves the click against the replay iframe's own DOM — so it returns the REAL app element under your cursor (a Run button here), not a pixel.",
     placement: "left",
     kind: "explain",
     advance: "next",
@@ -111,7 +111,7 @@ export const SPATIAL_ORACLE_TOUR_STEPS: readonly TourStep[] = [
     route: "any",
     target: "fd-element",
     title: "Resolved to an element chip",
-    body: "The DOM element under the click resolves into a typed 'pointing at:' chip — selector, role, and truncated text. That structured element, not just an (x,y), is what the oracle receives.",
+    body: "The reconstructed-DOM element under the click resolves into a typed 'pointing at:' chip — selector (here the Run intent button), role, and truncated text. That structured element, not just an (x,y), is what the oracle receives.",
     placement: "left",
     kind: "explain",
     advance: "next",

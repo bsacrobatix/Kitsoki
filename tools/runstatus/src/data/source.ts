@@ -286,6 +286,20 @@ export interface DataSource {
 
   /** Read a video's chapter sidecar (empty array when none). */
   videoChapters(sessionId: string, video: string): Promise<Chapter[]>;
+  /**
+   * Read the recorded rrweb session events that back a reviewed video, or `[]`
+   * when the media is a plain capture with no reconstructed-DOM sidecar. When
+   * present, the review surface renders the rrweb Replayer (real reconstructed
+   * UI) under the spatial picker instead of the opaque `<video>` element, so a
+   * click resolves a REAL app control against the reconstructed DOM (epic shared
+   * decision 2 — "rrweb's reconstructed DOM is the pixel↔element bridge"); the
+   * intrinsic recording viewport rides alongside as the iframe's pixel space.
+   * Optional: a source without recorded sessions (snapshot/artifact) omits it.
+   */
+  videoEvents?(
+    sessionId: string,
+    video: string
+  ): Promise<{ events: import("./session-capture.js").RrwebEvent[]; width: number; height: number }>;
   /** Grab a still at t_ms; returns the recorded still's artifact handle. */
   videoFrame(
     sessionId: string,
