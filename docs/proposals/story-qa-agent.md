@@ -1,10 +1,12 @@
 # Epic: Story QA agent — drive a story as a human would
 
 **Status:** Draft v1. Re-scoped: the frame composer, `kitsoki drive`, and
-`kitsoki shot` slices were **absorbed into the [`mcp-studio`](mcp-studio.md)
-epic** (which exposes author/drive/see as an MCP server). This epic now owns only
-its one remaining slice — the **QA agent skill**, a *consumer* of that server.
-**Slices:** 1 owned (0/1 shipped) + 3 absorbed → `mcp-studio`.
+`kitsoki shot` slices were absorbed into the **mcp-studio** epic (which exposes
+author/drive/see as an MCP server) and have since **shipped** — see
+[`docs/architecture/mcp-studio.md`](../architecture/mcp-studio.md). This epic now
+owns only its one remaining slice — the **QA agent skill**, a *consumer* of that
+shipped server. **Slices:** 1 owned (0/1 shipped); its substrate shipped under
+mcp-studio.
 
 ## Why
 
@@ -17,7 +19,7 @@ trace + `turn` + `inspect` surfaces let the AI *probe* a story; they don't let i
 the menu is confusing or the objective is two turns further than it should be.
 
 The substrate to *use* a story — the human-fidelity frame, an interactive drive
-loop, a screenshot — is now built by [`mcp-studio`](mcp-studio.md) and exposed to
+loop, a screenshot — is now built by [`mcp-studio`](../architecture/mcp-studio.md) and exposed to
 any external agent as MCP tools. This epic is the **agent that wields it**: handed
 a *persona* and a *scenario*, it walks a story end-to-end through the studio's
 `session.drive` + `render.*` tools, reading the exact screen a human would, and
@@ -42,10 +44,10 @@ are designed and owned by the `mcp-studio` slices, not here.
 ## Impact
 
 - **Spans:** tooling (the agent skill + rubric). The tui/runtime substrate moved
-  to [`mcp-studio`](mcp-studio.md).
+  to [`mcp-studio`](../architecture/mcp-studio.md).
 - **Net surface:** new `.agents/skills/story-qa/` only; everything else is a
   consumer of the MCP studio tools.
-- **Builds on:** [`mcp-studio`](mcp-studio.md) (frame composer, `kitsoki drive`,
+- **Builds on:** [`mcp-studio`](../architecture/mcp-studio.md) (frame composer, `kitsoki drive`,
   `kitsoki shot`, web screenshot, and the `session.*`/`render.*` tools) and the
   [`view-rendering-readability`](view-rendering-readability.md) epic (fidelity
   improves for free as that lands).
@@ -56,13 +58,15 @@ are designed and owned by the `mcp-studio` slices, not here.
 
 | # | Slice | Kind | Scope (one line) | Depends on | Status | File |
 |---|---|---|---|---|---|---|
-| 1 | Frame seam | tui | One composer → the full human screen | — | **Absorbed → [`mcp-studio`](mcp-studio.md) #1** | [`qa-frame-seam.md`](qa-frame-seam.md) |
-| 2 | `kitsoki drive` | runtime | Interactive headless driver + VCR | 1 | **Absorbed → [`mcp-studio`](mcp-studio.md) #2** | [`qa-drive-command.md`](qa-drive-command.md) |
-| 3 | `kitsoki shot` | tui | ANSI→PNG of a Frame | 1 | **Absorbed → [`mcp-studio`](mcp-studio.md) #3** | [`qa-screenshot.md`](qa-screenshot.md) |
-| 4 | `story-qa` agent | tooling | Persona + scenario → studio drive loop → scored UX rubric + report + screenshots + bug list | `mcp-studio` | Draft | [`qa-agent-skill.md`](qa-agent-skill.md) |
+| 1 | Frame seam | tui | One composer → the full human screen | — | **Shipped** (mcp-studio) | — |
+| 2 | `kitsoki drive` | runtime | Interactive headless driver + VCR | 1 | **Shipped** (mcp-studio) | — |
+| 3 | `kitsoki shot` | tui | ANSI→PNG of a Frame | 1 | **Shipped** (mcp-studio) | — |
+| 4 | `story-qa` agent | tooling | Persona + scenario → studio drive loop → scored UX rubric + report + screenshots + bug list | mcp-studio | Draft | [`qa-agent-skill.md`](qa-agent-skill.md) |
 
-Slices 1–3's design docs continue to live in their files (re-pointed to
-`mcp-studio`); this epic links them only for history.
+Slices 1–3 (plus the web-screenshot seam) shipped under the **mcp-studio**
+epic — [`docs/architecture/mcp-studio.md`](../architecture/mcp-studio.md) and
+[`docs/tui/frame-composition.md`](../tui/frame-composition.md); only slice 4
+remains.
 
 ## Sequencing
 
@@ -76,7 +80,7 @@ mcp-studio (#1 frame, #2 drive, #3 shot, #4 web-shot, #7 session+render tools)
 
 ## Shared decisions
 
-Deferred to [`mcp-studio`](mcp-studio.md): the `Frame` as the unit of fidelity
+Deferred to [`mcp-studio`](../architecture/mcp-studio.md): the `Frame` as the unit of fidelity
 (its shared decision 2), the no-LLM-by-default / live-opt-in posture (its 3), and
 "don't fork the renderers" (its 4). This epic adds one:
 
@@ -94,7 +98,7 @@ Deferred to [`mcp-studio`](mcp-studio.md): the `Frame` as the unit of fidelity
 ## Non-goals
 
 - The frame composer, drive loop, or screenshots — owned by
-  [`mcp-studio`](mcp-studio.md).
+  [`mcp-studio`](../architecture/mcp-studio.md).
 - A new view renderer — [`view-rendering-readability`](view-rendering-readability.md).
 - Replacing flow fixtures / `kitsoki test` — those stay the deterministic
   correctness gate; this is exploratory UX QA on top.

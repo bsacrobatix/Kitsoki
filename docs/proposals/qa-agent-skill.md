@@ -6,7 +6,7 @@
 
 ## Why
 
-The [`mcp-studio`](mcp-studio.md) epic gives the substrate — a human-fidelity
+The [`mcp-studio`](../architecture/mcp-studio.md) epic gives the substrate — a human-fidelity
 `Frame`, a headless free-text driver (`kitsoki drive`), terminal + web
 screenshots, and the `session.*`/`render.*` MCP tools that expose them. This
 slice is the actor that uses them. A flow fixture proves a story *transitions
@@ -32,7 +32,7 @@ concrete, file-grounded bug list.
   symlink created by `make setup`). Optionally a thin
   `cmd/kitsoki` wrapper or a `tools/story-qa/` runner if the loop wants
   orchestration beyond what a subagent prompt can hold.
-- **Consumes:** the [`mcp-studio`](mcp-studio.md) tools (`session.drive` —
+- **Consumes:** the [`mcp-studio`](../architecture/mcp-studio.md) tools (`session.drive` —
   frames + free-text routing; `render.tui_png`/`render.web` — PNGs), or the
   underlying `kitsoki drive` / `kitsoki shot` CLIs directly. Nothing in the
   engine changes.

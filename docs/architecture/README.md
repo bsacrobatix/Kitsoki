@@ -51,11 +51,17 @@ these surfaces.
 - **[`oracle-cli.md`](oracle-cli.md)** — the `host.oracle.*` verb
   surface as a standalone CLI (`kitsoki oracle …`, `oracle-serve`) for
   validators and CI outside a running state machine.
+- **[`mcp-studio.md`](mcp-studio.md)** — the `kitsoki mcp` studio server
+  an external coding agent attaches to: the handle model and the
+  `story.*` / `session.*` / `render.*` tool surface that let it author a
+  story, drive a live session (no-LLM by default), and *see* the terminal
+  and browser views — plus the MCP-client operator surface.
 - **[`operator-ask.md`](operator-ask.md)** — forwarding a dispatched
-  agent's clarifying question back to the live operator (web + TUI) via
-  the `mcp__operator__ask` bridge, replacing the headless-broken
-  built-in `AskUserQuestion` tool; the DI `OperatorPrompter` seam,
-  interactivity gating, the wire schema, and the trace events.
+  agent's clarifying question back to the live operator (web + TUI + the
+  MCP studio client) via the `mcp__operator__ask` bridge, replacing the
+  headless-broken built-in `AskUserQuestion` tool; the DI
+  `OperatorPrompter` seam, interactivity gating, the wire schema, and the
+  trace events.
 - **[`system-prompt.md`](system-prompt.md)** — the layered, cache-friendly
   system prompt (kitsoki → project → task) composed for every claude
   invocation, the replace-vs-append model, and the per-verb dynamic-sections

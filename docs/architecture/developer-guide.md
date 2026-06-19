@@ -335,6 +335,38 @@ powers the typed-JSON submit side-channel that oracle handlers
 `schema:`) attach to Claude. Run it directly when debugging a
 schema-shaped prompt.
 
+### 6.6 The MCP studio and its render substrate
+
+`kitsoki mcp` is the **studio** server an external coding agent attaches
+to, to author a story, drive a live session, and *see* the result over
+one MCP connection — the author→drive→see control plane, distinct from the
+narrow per-app `kitsoki serve`. Its handle model and `story.*` /
+`session.*` / `render.*` tool surface are documented in
+[`mcp-studio.md`](mcp-studio.md).
+
+```sh
+kitsoki mcp --stories-dir ./stories       # studio server on stdio
+```
+
+Three substrate commands back the studio's "see" tools and are useful
+standalone when debugging rendering or capturing evidence — all no-LLM:
+
+```sh
+# Drive a story headlessly with free-text input, persisting a trace and
+# emitting the assembled Frame per turn (--harness replay | live, VCR modes):
+kitsoki drive testdata/apps/cloak/app.yaml --trace /tmp/cloak.jsonl
+
+# Rasterise a Frame (or a past turn re-composed from a trace) to a PNG:
+kitsoki shot app.yaml --trace /tmp/cloak.jsonl --turn 3 -o /tmp/cloak.png
+
+# Screenshot the REAL kitsoki web SPA for a state to a PNG (flow/cassette,
+# no LLM — the reusable seam behind render.web):
+kitsoki web-shot stories/bugfix --flow flows/x.yaml -o /tmp/web.png
+```
+
+The `Frame` (`internal/tui/frame.go`) is the shared unit of fidelity; its
+composition is documented in [`docs/tui/frame-composition.md`](../tui/frame-composition.md).
+
 ---
 
 ## 7. Coding conventions

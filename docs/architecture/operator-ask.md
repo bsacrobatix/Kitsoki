@@ -108,6 +108,53 @@ matches existing oracle-call-blocks-turn behavior and is far simpler.
    `operator_question.go`: an `OperatorPrompter` that pushes a bubbletea
    message into the running program and renders an inline
    `ModeOperatorQuestion` choice widget, resolving on submit.
+4. **MCP client** — `internal/mcp/studio/operator_prompter.go`: the
+   prompter for a [`kitsoki mcp` studio](mcp-studio.md) session — the
+   surface is the driving MCP client itself (see below).
+
+## MCP client surface
+
+When the operator is an external LLM driving a story through the
+[MCP studio](mcp-studio.md) (`session.drive`), the studio injects a
+third `OperatorPrompter` whose surface is the MCP connection — so a
+driven sub-agent's `mcp__operator__ask` reaches the **driving client**,
+the one story behaviour a plain headless session can't exercise. It is a
+new *implementation* of the unchanged interface: the per-call socket, the
+`attachOperatorAsk` gate ("prompter present → tool attached"), the
+wire/answer schema, the bounded wait, and the three `operator.question.*`
+trace events are reused verbatim. Only the round-trip transport differs,
+and the prompter picks one at dispatch:
+
+```
+Claude Code ──(session.drive)──▶ studio turn ──▶ oracle sub-agent ──▶ mcp__operator__ask
+                                                       (per-call unix socket, EXISTING) │
+                              studio OperatorPrompter.Ask(sessionID, questions) ◀────────┘
+                                  ├─ PRIMARY: MCP elicitation request → client → answer  (one nested session.drive)
+                                  └─ FALLBACK: session.drive returns {awaiting_operator}; (turn parked, lock held)
+                                               client calls session.answer → resumes
+                              ← answers down the socket ──▶ sub-agent continues ──▶ turn completes
+```
+
+- **Primary — MCP elicitation.** When the client advertises the
+  elicitation capability, `Ask` sends a server-initiated elicitation
+  request and blocks for the response, mirroring how the web/TUI
+  prompters block. `session.drive` stays one call: the elicitation is a
+  nested request mid-turn while the sub-agent is already parked on the
+  socket.
+- **Fallback — suspend/resume via `session.answer`.** For clients
+  without elicitation, `session.drive` returns `{awaiting_operator,
+  question_id, questions}` and the turn goroutine stays parked (writer
+  lock held, exactly as a TUI/web operator-ask parks it); the client
+  calls `session.answer`, which delivers the answer and blocks until the
+  turn completes, returning either `{outcome, frame}` or another
+  `awaiting_operator`. The client loops drive→answer→…→outcome. Works on
+  **any** MCP client, so coherence never depends on elicitation support.
+
+The prompter is the same DI seam a **stub** satisfies, so a no-LLM flow
+test injects a scripted-answer transport and exercises a story's
+operator-ask branch deterministically (the existing operator-ask test
+pattern); the live path (real `claude -p` sub-agent + real client) is
+gated like the other live operator-ask test below.
 
 ## Wire / answer schema = `AskUserQuestion`'s, verbatim
 
