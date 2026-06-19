@@ -1,3 +1,8 @@
+---
+name: rendering-tests
+description: Use when debugging TUI layout issues, writing regression tests for rendering problems, or analyzing View() output structure with RenderingAnalyzer.
+---
+
 # TUI Rendering Test Skill
 
 **Use this when:** Debugging TUI layout issues, writing regression tests for rendering problems, or analyzing View() output structure.
