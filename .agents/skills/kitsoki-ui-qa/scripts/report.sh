@@ -41,8 +41,10 @@ command -v jq >/dev/null 2>&1 || { echo "jq not on PATH" >&2; exit 1; }
 jq -e . "$verdict" >/dev/null 2>&1 || { echo "verdict is not valid JSON: $verdict" >&2; exit 2; }
 [ -n "$out" ] || out="$(dirname "$verdict")/qa-report.md"
 
+bf="$(mktemp)"; pf="$(mktemp)"; vf="$(mktemp)"
+trap 'rm -f "$bf" "$pf" "$vf"' EXIT
+
 # A slurpable blank-scan file (empty object when absent/invalid → no warnings).
-bf="$(mktemp)"; trap 'rm -f "$bf" "$pf"' EXIT
 if [ -n "$blank_scan" ] && jq -e . "$blank_scan" >/dev/null 2>&1; then
   cp "$blank_scan" "$bf"
 else
@@ -50,16 +52,47 @@ else
 fi
 
 # A slurpable pacing-scan file (empty object when absent/invalid → no warnings).
-pf="$(mktemp)"
 if [ -n "$pacing_scan" ] && jq -e . "$pacing_scan" >/dev/null 2>&1; then
   cp "$pacing_scan" "$pf"
 else
   echo '{}' > "$pf"
 fi
 
+# Snapshot the verdict ONCE. The rendered "Gate:" line and the process exit code
+# below both read THIS snapshot (not the live file), so a verdict rewritten by a
+# concurrent qa run can never make the report and the exit code disagree.
+cp "$verdict" "$vf"
+
+# --- Gate decision (SINGLE source of truth) --------------------------------
+# Computed once here, then used for BOTH the rendered gate line and the exit
+# code — they can no longer diverge (the historical bug: the render omitted the
+# strict adversary-incomplete block, so a report could read "PASS" while the
+# script exited 1).
+blockers="$(jq --argjson strict "$strict" '
+  [ .scenarios[]
+    | select( if $strict==1 then (.status!="pass")
+              else (.status!="pass" and (.required!=false)) end ) ]
+  | length' "$vf")"
+vis_block="$(jq '[ .visual_issues[]? ] | length' "$vf")"
+ann_block="$(jq '[ .annotation_issues[]? ] | length' "$vf")"
+blank_n="$(jq '(.flagged // []) | length' "$bf")"
+pacing_n="$(jq '(.flagged // []) | length' "$pf")"
+blank_block=0;  [ "$blank_n"  -gt 0 ] && [ "$blank_strict"  -eq 1 ] && blank_block=1
+pacing_block=0; [ "$pacing_n" -gt 0 ] && [ "$pacing_strict" -eq 1 ] && pacing_block=1
+adv_block=0
+if [ "$strict" -eq 1 ]; then
+  adv_status="$(jq -r '.adversary.status // "absent"' "$vf")"
+  if [ "$adv_status" != "ok" ] && [ "$adv_status" != "absent" ]; then adv_block=1; fi
+fi
+gate_pass=1
+for n in "$blockers" "$vis_block" "$ann_block" "$blank_block" "$pacing_block" "$adv_block"; do
+  [ "$n" -eq 0 ] || gate_pass=0
+done
+
 # --- Markdown report -------------------------------------------------------
 jq -r --argjson strict "$strict" --argjson blank_strict "$blank_strict" \
       --argjson pacing_strict "$pacing_strict" \
+      --argjson gate_pass "$gate_pass" --argjson adv_block "$adv_block" \
       --slurpfile blank "$bf" --slurpfile pacing "$pf" '
   def icon(s): if s=="pass" then "✅" elif s=="fail" then "❌" else "⚠️" end;
   def gated(sc): if $strict==1 then (sc.status=="pass")
@@ -71,11 +104,13 @@ jq -r --argjson strict "$strict" --argjson blank_strict "$blank_strict" \
   ( ($blank_strict==1) and (($bl|length) > 0) ) as $blank_block |
   ( ($pacing[0].flagged // []) ) as $pc |
   ( ($pacing_strict==1) and (($pc|length) > 0) ) as $pacing_block |
-  ( (($blockers|length) + ($vis|length) + ($ann|length))==0 and ($blank_block|not) and ($pacing_block|not) ) as $pass |
+  # The gate decision is computed ONCE in bash and injected here so the rendered
+  # line can never disagree with the process exit code.
+  ( $gate_pass==1 ) as $pass |
   "# UI demo QA report",
   "",
   ( if $pass then "**Gate: ✅ PASS**\([ (if ($bl|length)>0 then "\($bl|length) advisory blank-scan warning(s)" else empty end), (if ($pc|length)>0 then "\($pc|length) advisory pacing warning(s)" else empty end) ] | if length>0 then " — " + join(", ") else "" end)"
-    else "**Gate: ❌ FAIL** — \(($blockers|length)) blocking scenario(s), \(($vis|length)) visual issue(s), \(($ann|length)) annotation issue(s)\(if $blank_block then ", \($bl|length) blank-scan flag(s)" else "" end)\(if $pacing_block then ", \($pc|length) pacing flag(s)" else "" end)" end ),
+    else "**Gate: ❌ FAIL** — \(($blockers|length)) blocking scenario(s), \(($vis|length)) visual issue(s), \(($ann|length)) annotation issue(s)\(if $adv_block==1 then ", adversarial verification incomplete" else "" end)\(if $blank_block then ", \($bl|length) blank-scan flag(s)" else "" end)\(if $pacing_block then ", \($pc|length) pacing flag(s)" else "" end)" end ),
   "",
   "| metric | n |",
   "|---|---|",
@@ -139,70 +174,30 @@ jq -r --argjson strict "$strict" --argjson blank_strict "$blank_strict" \
     )
   ),
   ""
-' "$verdict" > "$out"
+' "$vf" > "$out"
 
-# --- Gate exit code (independent of the report rendering above) ------------
-blockers="$(jq --argjson strict "$strict" '
-  [ .scenarios[]
-    | select( if $strict==1 then (.status!="pass")
-              else (.status!="pass" and (.required!=false)) end ) ]
-  | length' "$verdict")"
-
-# A blank/broken render where visual content is expected is a real defect: any
-# reported visual_issue blocks the gate, at every effort level (not just strict).
-vis_block="$(jq '[ .visual_issues[]? ] | length' "$verdict")"
-if [ "$vis_block" -gt 0 ]; then
-  echo "gate: $vis_block visual issue(s) — blank/broken render where content was expected" >&2
-fi
-
-# Mixed narration styles (tour-popover in some frames AND banner/caption in
-# others) are an annotation-consistency defect: any reported annotation_issue
-# blocks the gate, at every effort level (same treatment as visual_issues).
-ann_block="$(jq '[ .annotation_issues[]? ] | length' "$verdict")"
-if [ "$ann_block" -gt 0 ]; then
-  echo "gate: $ann_block annotation issue(s) — mixed narration styles within one video" >&2
-fi
-
-# Deterministic blank-scan flags are advisory by default (surfaced, never block);
-# --blank-strict promotes them to blocking.
-blank_n="$(jq '(.flagged // []) | length' "$bf")"
-blank_block=0
+# --- Gate exit code -------------------------------------------------------
+# Uses the SAME flags computed once above — no recomputation, no second read of
+# the verdict, so the exit code always matches the rendered "Gate:" line.
+#
+# A blank/broken render where visual content is expected, and mixed narration
+# styles, are real defects: any reported visual_issue / annotation_issue blocks
+# at every effort level. Blank/pacing scan flags are advisory unless their
+# --*-strict flag is set. Under --strict an adversarial pass that was supposed
+# to run but did not complete (adversary.status present and != "ok") also blocks.
+[ "$vis_block"  -gt 0 ] && echo "gate: $vis_block visual issue(s) — blank/broken render where content was expected" >&2
+[ "$ann_block"  -gt 0 ] && echo "gate: $ann_block annotation issue(s) — mixed narration styles within one video" >&2
 if [ "$blank_n" -gt 0 ]; then
-  if [ "$blank_strict" -eq 1 ]; then
-    blank_block=1
-    echo "gate: $blank_n blank-scan flag(s) blocking (--blank-strict)" >&2
-  else
-    echo "advisory: $blank_n blank-scan flag(s) — large monochrome region(s), review by eye" >&2
-  fi
+  [ "$blank_strict" -eq 1 ] \
+    && echo "gate: $blank_n blank-scan flag(s) blocking (--blank-strict)" >&2 \
+    || echo "advisory: $blank_n blank-scan flag(s) — large monochrome region(s), review by eye" >&2
 fi
-
-# Deterministic pacing flags are advisory by default (surfaced, never block);
-# --pacing-strict promotes them to blocking. A popover that holds for tens of ms
-# is unreadable — the signature of a demo recorded at fast-validation pace.
-pacing_n="$(jq '(.flagged // []) | length' "$pf")"
-pacing_block=0
 if [ "$pacing_n" -gt 0 ]; then
-  if [ "$pacing_strict" -eq 1 ]; then
-    pacing_block=1
-    echo "gate: $pacing_n pacing flag(s) blocking (--pacing-strict) — popover(s) too fast to read" >&2
-  else
-    echo "advisory: $pacing_n pacing flag(s) — narrated moment(s) flash by, review pacing" >&2
-  fi
+  [ "$pacing_strict" -eq 1 ] \
+    && echo "gate: $pacing_n pacing flag(s) blocking (--pacing-strict) — popover(s) too fast to read" >&2 \
+    || echo "advisory: $pacing_n pacing flag(s) — narrated moment(s) flash by, review pacing" >&2
 fi
-
-# Under --strict, an adversarial pass that was supposed to run but did NOT
-# complete (adversary.status present and != "ok") is itself a blocking failure:
-# the downgrade-only re-check is part of the strict guarantee, so a silent
-# adversary flake must not pass. Absent field (--no-adversary / older verdict)
-# is a no-op.
-adv_block=0
-if [ "$strict" -eq 1 ]; then
-  adv_status="$(jq -r '.adversary.status // "absent"' "$verdict")"
-  if [ "$adv_status" != "ok" ] && [ "$adv_status" != "absent" ]; then
-    adv_block=1
-    echo "strict gate: adversarial verification did not complete (adversary.status=$adv_status)" >&2
-  fi
-fi
+[ "$adv_block" -eq 1 ] && echo "strict gate: adversarial verification did not complete (adversary.status=${adv_status:-absent})" >&2
 
 echo "wrote $out  (blocking scenarios: $blockers, visual issues: $vis_block, annotation issues: $ann_block, blank-scan: $blank_n$([ "$blank_strict" -eq 1 ] && echo ' blocking' || echo ' advisory'), pacing: $pacing_n$([ "$pacing_strict" -eq 1 ] && echo ' blocking' || echo ' advisory'))"
-{ [ "$blockers" -eq 0 ] && [ "$adv_block" -eq 0 ] && [ "$vis_block" -eq 0 ] && [ "$ann_block" -eq 0 ] && [ "$blank_block" -eq 0 ] && [ "$pacing_block" -eq 0 ]; } || exit 1
+[ "$gate_pass" -eq 1 ] || exit 1

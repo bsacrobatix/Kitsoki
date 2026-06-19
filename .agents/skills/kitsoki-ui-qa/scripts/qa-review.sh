@@ -207,10 +207,16 @@ HEAD
 } > "$review_prompt"
 
 echo "▸ grounded review ($model, $(echo "$frame_list" | wc -l | tr -d ' ') frames)…" >&2
-if ! call_claude_json "$review_prompt" review > "$out"; then
+# Write atomically (temp on the SAME filesystem as $out, then mv) so a concurrent
+# reader — e.g. report.sh, or a watcher — never observes a truncated or partial
+# verdict, only the previous file or the complete new one.
+out_tmp="$(mktemp "$(dirname "$out")/.verdict.XXXXXX")"
+if ! call_claude_json "$review_prompt" review > "$out_tmp"; then
+  rm -f "$out_tmp"
   echo "grounded review did not produce parseable JSON after retries" >&2
   exit 2
 fi
+mv -f "$out_tmp" "$out"
 
 # ---------- pass 2: adversarial verification (downgrade-only, delta output) ----------
 if [ "$adversary" -eq 1 ]; then
@@ -298,7 +304,14 @@ v["overall"] = "pass" if all_required_pass else "fail"
 v["summary"] = {"scenarios_total": len(v.get("scenarios", [])),
                 "passed": counts["pass"], "failed": counts["fail"], "unsupported": counts["unsupported"]}
 v["adversary"] = {"status": "ok", "downgrades_applied": applied}
-with open(verdict_path, "w") as f: json.dump(v, f, indent=2)
+# Atomic rewrite: write a sibling temp then os.replace, so a concurrent reader
+# never sees a verdict whose summary and per-scenario statuses disagree (the
+# truncate-then-write window). os.replace is atomic on the same filesystem.
+import os, tempfile
+d = os.path.dirname(verdict_path) or "."
+fd, tmp_path = tempfile.mkstemp(dir=d, prefix=".verdict.")
+with os.fdopen(fd, "w") as f: json.dump(v, f, indent=2)
+os.replace(tmp_path, verdict_path)
 print(f"  adversary applied {len(applied)} downgrade(s)", file=sys.stderr)
 PY
   else
