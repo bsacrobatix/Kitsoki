@@ -52,6 +52,10 @@ const implementationName = "kitsoki-studio"
 type Server struct {
 	mcpSrv *mcpsdk.Server
 	sess   *StudioSession
+	// webShot is the injectable render.web seam (slice 4 webshot.Shot, wrapped
+	// by cmd/kitsoki). Nil → render.web degrades to text (no browser host). A
+	// test injects a stub that returns a synthetic PNG with no Chromium.
+	webShot WebShotFunc
 }
 
 // NewServer constructs a studio Server over the given StudioSession and registers
@@ -80,12 +84,23 @@ func NewServer(sess *StudioSession) *Server {
 	// story.* — the deterministic, LLM-free authoring tools (slice 6).
 	srv.registerStoryTools()
 
+	// session.* / render.* — drive a live (replay-default) session and see it
+	// (slice 7).
+	srv.registerSessionTools()
+
 	return srv
 }
 
 // Session exposes the underlying StudioSession so callers and tests can open or
 // inspect handles directly (the domain tools in slices 6/7 dispatch through it).
 func (srv *Server) Session() *StudioSession { return srv.sess }
+
+// SetWebShot injects the render.web seam: the function that rasterises a studio
+// web render spec to a PNG. The production wiring (cmd/kitsoki) builds it over
+// the slice-4 webshot.Shot with a real HandlerServer + NodeInvoker; a test
+// injects a stub returning a synthetic PNG with no browser. When unset,
+// render.web degrades to a text-only "needs a browser-capable host" result.
+func (srv *Server) SetWebShot(fn WebShotFunc) { srv.webShot = fn }
 
 // Run starts the studio server on the StdioTransport and blocks until the context
 // is done or the peer disconnects. This is the entry point for `kitsoki mcp`.

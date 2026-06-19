@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strconv"
@@ -98,9 +99,16 @@ type SessionHandle struct {
 	// Harness is the harness built by the HarnessBuilder seam for this handle.
 	// A default-mode handle holds a ReplayHarness and never a live one.
 	Harness harness.Harness
-	// Driver advances the session. Bound by the driving slice (slice 7); the
-	// zero value here.
+	// Driver advances the session. Bound when a driving runtime is attached
+	// (OpenDrivingSession); the zero value for a metadata-only handle.
 	Driver rsserver.Driver
+	// StoryPath is the story this handle drives (set when a runtime is attached).
+	StoryPath string
+	// Runtime is the live driving substrate (orchestrator + trace + frame
+	// composer) backing this handle. Non-nil once OpenDrivingSession wires it;
+	// nil for a metadata-only handle opened via OpenSession. CloseSession tears
+	// it down.
+	Runtime *sessionRuntime
 }
 
 // SessionInfo is the wire shape for one session handle in studio.handles. JSON
@@ -247,6 +255,72 @@ func (ss *StudioSession) OpenSession(p OpenSessionParams) (*SessionHandle, error
 	return sh, nil
 }
 
+// OpenDrivingSessionParams configures OpenDrivingSession.
+type OpenDrivingSessionParams struct {
+	// Key is the requested handle key. Empty auto-assigns a fresh "s<N>" key.
+	Key string
+	// Mode is the harness mode; empty/unknown normalizes to replay (no LLM).
+	Mode HarnessMode
+	// RecordingPath is the replay recording for a replay-mode handle.
+	RecordingPath string
+	// StoryPath is the story directory / app.yaml the session drives. Required.
+	StoryPath string
+	// TracePath is the JSONL trace the runtime writes through. Required.
+	TracePath string
+}
+
+// OpenDrivingSession opens a driving-session handle backed by a live runtime: it
+// builds the handle's harness through the HarnessBuilder seam (replay unless the
+// caller explicitly opts into live, so a default-mode open never constructs a
+// live harness), then wires a sessionRuntime — a JSONL-trace orchestrator plus
+// the slice-1 frame composer — over it. The runtime takes ownership of the
+// harness; on any failure nothing is registered and both are torn down.
+//
+// ctx bounds the (potentially blocking) initial on_enter; build is the seam that
+// constructs the orchestrator (defaults to newSessionRuntime, overridden by a
+// test to assert no live harness is ever driven).
+func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSessionParams) (*SessionHandle, error) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	mode := p.Mode.normalize()
+
+	key := p.Key
+	if key == "" {
+		ss.nextID++
+		key = fmt.Sprintf("s%d", ss.nextID)
+	} else if _, exists := ss.sessions[key]; exists {
+		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session handle %q is already open", key)}
+	}
+
+	h, err := ss.build(mode, p.RecordingPath)
+	if err != nil {
+		return nil, &openError{Code: ErrHarness, Msg: fmt.Sprintf("build %s harness: %v", mode, err)}
+	}
+
+	// newSessionRuntime takes ownership of h: on a returned error h is already
+	// closed; on success rt.Close tears it down.
+	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h)
+	if err != nil {
+		// h was already closed inside newSessionRuntime on error.
+		return nil, err
+	}
+
+	sh := &SessionHandle{
+		Key:           key,
+		SID:           rt.sid,
+		Mode:          mode,
+		RecordingPath: p.RecordingPath,
+		StoryPath:     p.StoryPath,
+		TracePath:     p.TracePath,
+		Harness:       h,
+		Driver:        rt.driver,
+		Runtime:       rt,
+	}
+	ss.sessions[key] = sh
+	return sh, nil
+}
+
 // ResolveSession returns the handle for key, or a structured tool error
 // (ErrUnknownHandle) when no such handle is open — never nil-without-error, so
 // callers cannot accidentally deref a missing handle.
@@ -270,7 +344,12 @@ func (ss *StudioSession) CloseSession(key string) error {
 	if !ok {
 		return &openError{Code: ErrUnknownHandle, Msg: fmt.Sprintf("no open session handle %q", key)}
 	}
-	if sh.Harness != nil {
+	// The runtime owns the harness lifecycle: closing it tears down the
+	// orchestrator, trace sink, and harness together. Only close the harness
+	// directly for a metadata-only handle (no runtime), to avoid a double-close.
+	if sh.Runtime != nil {
+		sh.Runtime.Close()
+	} else if sh.Harness != nil {
 		_ = sh.Harness.Close()
 	}
 	delete(ss.sessions, key)

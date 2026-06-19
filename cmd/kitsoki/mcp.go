@@ -46,9 +46,13 @@ authoring workspace handle and 0..n driving-session handles, and defaults every
 session to the no-LLM replay harness (--harness replay). Pass --harness live to
 opt a session into a real LLM.
 
-This build ships the server core: the studio.ping liveness probe and the
-studio.handles handle lister. The story.* / session.* / render.* domain tools
-land in later slices.
+Tools: the studio.ping liveness probe and studio.handles lister (server core);
+the deterministic story.read/write/validate/graph/test authoring tools; and the
+session.new/attach/drive/submit/continue/inspect/trace driving tools plus
+render.tui/tui_png/web. Driving defaults to harness:replay (no LLM); render.tui
+and render.tui_png return the terminal Frame / PNG, while render.web degrades to
+a text result unless a browser-capable web shot is wired (deferred — it needs a
+served kitsoki web, the hybrid-session-driving concern).
 
 Attach by adding to a client's .mcp.json (see 'kitsoki docs' once the studio
 docs land):

@@ -1,0 +1,899 @@
+package studio
+
+// session_tools.go — the session.* and render.* tools (slice 7): the payoff
+// facade that lets an external agent DRIVE a live (replay-default) session and
+// SEE the result.
+//
+//   - session.new / session.attach — open a driving handle (the slice-2 drive
+//     setup behind sessionRuntime; replay/none by default → no LLM).
+//   - session.drive   — free text → orch.Turn (the ONE interpretive seam).
+//   - session.submit  — a chosen intent + slots → orch.SubmitDirect.
+//   - session.continue— missing slots for a pending clarify → orch.ContinueTurn.
+//   - session.inspect — state / world / allowed_intents / last_view / last_turns.
+//   - session.trace   — the session's JSONL trace events.
+//   - render.tui      — the slice-1 Frame {text, ansi, metadata} at any width.
+//   - render.tui_png  — the slice-3 ANSI→PNG rasteriser, as an MCP image block.
+//   - render.web      — the slice-4 headless web→PNG, as an MCP image block.
+//
+// Every drive/submit/continue returns BOTH the structured TurnOutcome AND the
+// Frame (the agent reasons on metadata and sees the screen in one call). The
+// render.* tools are READ-ONLY re-renders — they never advance the machine
+// (principle of least surprise). render.tui_png/render.web also accept an
+// explicit spec ({story_path, state, world?}) so the agent can photograph a
+// state it never drove to, headlessly, without touching any session.
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"kitsoki/internal/app"
+	"kitsoki/internal/inbox"
+	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/store"
+	"kitsoki/internal/tui"
+	"kitsoki/internal/tui/blocks"
+	"kitsoki/internal/tui/shot"
+	"kitsoki/internal/webshot"
+)
+
+// defaultCols / defaultRows are the frame geometry render.* and the drive
+// family fall back to when the caller omits cols/rows — the same 100×30
+// `kitsoki drive` defaults so a studio frame matches a CLI frame byte-for-byte.
+const (
+	defaultCols = 100
+	defaultRows = 30
+)
+
+// registerSessionTools wires the session.* and render.* tools onto the server.
+// Called from NewServer after the story.* tools so they share one registry.
+func (srv *Server) registerSessionTools() {
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.new",
+		Description: "Open a new driving session for a story. {story_path, harness?:replay|live, cassette?, trace?}. Defaults to harness:replay (no LLM); a replay miss is a hard error, never a silent live call. Returns {handle, state}.",
+	}, srv.handleSessionNew)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.attach",
+		Description: "Co-drive an existing keyed session via the external-attach bridge. {story_path, key, harness?, cassette?, trace?}. Returns {handle, state}.",
+	}, srv.handleSessionAttach)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.drive",
+		Description: "Submit FREE TEXT to a driving handle; it is routed through the orchestrator turn loop (the one interpretive seam). {handle, input, cols?, rows?}. Returns {outcome, frame} — the structured turn result AND the rendered screen.",
+	}, srv.handleSessionDrive)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.submit",
+		Description: "Submit a chosen intent (a menu pick) directly, with no routing. {handle, intent, slots?, cols?, rows?}. Returns {outcome, frame}.",
+	}, srv.handleSessionSubmit)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.continue",
+		Description: "Supply missing slots for a pending clarification. {handle, slots, cols?, rows?}. Returns {outcome, frame}.",
+	}, srv.handleSessionContinue)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.inspect",
+		Description: "Read-only snapshot of a driving handle: {handle} → {state, world, allowed_intents, last_view, last_turns[]}. Never advances the machine.",
+	}, srv.handleSessionInspect)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.trace",
+		Description: "Read the handle's JSONL trace events. {handle, since?, until?, limit?} → {events[], last_turn}. since/until filter by turn number; limit keeps the last N. Read-only.",
+	}, srv.handleSessionTrace)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "render.tui",
+		Description: "Re-render a state as the slice-1 Frame {text, ansi, metadata} at any width. {handle | story_path+state+world?, cols?, rows?}. READ-ONLY: never advances a session.",
+	}, srv.handleRenderTUI)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "render.tui_png",
+		Description: "Rasterise the terminal Frame to a PNG (monospace + ANSI colour). {handle | story_path+state+world?, cols?, rows?, theme?}. Returns the Frame.text plus an MCP image block for vision-capable clients. READ-ONLY.",
+	}, srv.handleRenderTUIPNG)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "render.web",
+		Description: "Render the REAL kitsoki web view of a state to a PNG. {handle | story_path+state+world?}. Returns text plus an MCP image block for vision-capable clients. READ-ONLY. Requires a browser-capable host (degrades to text otherwise).",
+	}, srv.registerWebRenderer())
+}
+
+// ── wire shapes ───────────────────────────────────────────────────────────────
+
+// SessionNewArgs is the input to session.new.
+type SessionNewArgs struct {
+	StoryPath string `json:"story_path"`
+	// Harness is replay (default, no LLM) or live (opt-in). Empty → replay.
+	Harness string `json:"harness,omitempty"`
+	// Cassette is the replay recording for a replay-mode handle.
+	Cassette string `json:"cassette,omitempty"`
+	// Trace overrides the JSONL trace path (default: a fresh temp trace).
+	Trace string `json:"trace,omitempty"`
+	// Key requests a specific handle key (default: auto-assigned s<N>).
+	Key string `json:"key,omitempty"`
+}
+
+// SessionAttachArgs is the input to session.attach.
+type SessionAttachArgs struct {
+	StoryPath string `json:"story_path"`
+	Key       string `json:"key"`
+	Harness   string `json:"harness,omitempty"`
+	Cassette  string `json:"cassette,omitempty"`
+	Trace     string `json:"trace,omitempty"`
+}
+
+// SessionOpenOK is the session.new / session.attach result.
+type SessionOpenOK struct {
+	OK     bool   `json:"ok"`     // always true on this branch
+	Handle string `json:"handle"` // the new driving handle key
+	State  string `json:"state"`  // the session's current state after open
+	Mode   string `json:"mode"`   // the resolved harness mode (replay|live)
+}
+
+// SessionDriveArgs is the input to session.drive.
+type SessionDriveArgs struct {
+	Handle string `json:"handle"`
+	Input  string `json:"input"`
+	Cols   int    `json:"cols,omitempty"`
+	Rows   int    `json:"rows,omitempty"`
+}
+
+// SessionSubmitArgs is the input to session.submit.
+type SessionSubmitArgs struct {
+	Handle string         `json:"handle"`
+	Intent string         `json:"intent"`
+	Slots  map[string]any `json:"slots,omitempty"`
+	Cols   int            `json:"cols,omitempty"`
+	Rows   int            `json:"rows,omitempty"`
+}
+
+// SessionContinueArgs is the input to session.continue.
+type SessionContinueArgs struct {
+	Handle string         `json:"handle"`
+	Slots  map[string]any `json:"slots"`
+	Cols   int            `json:"cols,omitempty"`
+	Rows   int            `json:"rows,omitempty"`
+}
+
+// TurnResult is the structured TurnOutcome projection returned alongside the
+// Frame on every drive/submit/continue. It carries exactly the fields the
+// proposal names — mode, the new state, the allowed-intent menu, the missing
+// slots — so the agent can reason on metadata without re-parsing the screen.
+type TurnResult struct {
+	Mode           string         `json:"mode"`                      // transitioned|clarify|rejected|completed|offpath|cancelled
+	State          string         `json:"state"`                     // the state after the turn
+	AllowedIntents []string       `json:"allowed_intents,omitempty"` // the next menu
+	SlotsNeeded    []SlotNeedItem `json:"slots_needed,omitempty"`    // missing required slots (ModeClarify)
+	PendingIntent  string         `json:"pending_intent,omitempty"`  // intent awaiting slot completion
+	ErrorCode      string         `json:"error_code,omitempty"`      // rejection code (ModeRejected)
+	ErrorMessage   string         `json:"error_message,omitempty"`   // human-readable rejection
+	GuardHint      string         `json:"guard_hint,omitempty"`      // author guard hint (ModeRejected)
+	HarnessError   string         `json:"harness_error,omitempty"`   // dispatch-loop failure, if any
+	TurnNumber     int64          `json:"turn_number"`               // the turn that just completed
+	// Error is set when the turn itself failed (e.g. a replay miss). It is NOT a
+	// transport error — it rides back here so the agent sees the failure and the
+	// frame together. Mode is "error" in that case.
+	Error string `json:"error,omitempty"`
+}
+
+// SlotNeedItem is one missing slot in a clarify outcome.
+type SlotNeedItem struct {
+	Name        string   `json:"name"`
+	Prompt      string   `json:"prompt,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	Values      []string `json:"values,omitempty"`
+}
+
+// FrameResult is the slice-1 Frame projected to the wire. It mirrors tui.Frame
+// (the field names tui.Frame marshals to) so render.tui and the drive family
+// return the identical screen the CLI does.
+type FrameResult struct {
+	Text     string        `json:"text"`
+	ANSI     string        `json:"ansi"`
+	Width    int           `json:"width"`
+	Height   int           `json:"height"`
+	Metadata FrameMetaItem `json:"metadata"`
+}
+
+// FrameMetaItem mirrors tui.FrameMeta on the wire.
+type FrameMetaItem struct {
+	State          string         `json:"state"`
+	Mode           string         `json:"mode"`
+	AllowedIntents []string       `json:"allowed_intents,omitempty"`
+	WorldDigest    map[string]any `json:"world_digest,omitempty"`
+}
+
+// TurnResponse is the {outcome, frame} pair every drive/submit/continue returns.
+type TurnResponse struct {
+	OK      bool        `json:"ok"`
+	Outcome TurnResult  `json:"outcome"`
+	Frame   FrameResult `json:"frame"`
+}
+
+// ── session.new / attach ─────────────────────────────────────────────────────
+
+// handleSessionNew opens a fresh driving handle for a story. It resolves the
+// harness mode (replay default → no LLM), picks a trace path (a fresh temp file
+// when unset), and wires the sessionRuntime through OpenDrivingSession.
+func (srv *Server) handleSessionNew(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args SessionNewArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	if args.StoryPath == "" {
+		return buildToolError(ErrBadRequest, "session.new: story_path is required"), nil, nil
+	}
+	tracePath, err := resolveTracePath(args.Trace)
+	if err != nil {
+		return buildToolError(ErrBadRequest, err.Error()), nil, nil
+	}
+	sh, err := srv.sess.OpenDrivingSession(ctx, OpenDrivingSessionParams{
+		Key:           args.Key,
+		Mode:          HarnessMode(args.Harness),
+		RecordingPath: args.Cassette,
+		StoryPath:     args.StoryPath,
+		TracePath:     tracePath,
+	})
+	if err != nil {
+		code, msg := AsToolError(err)
+		return buildToolError(code, msg), nil, nil
+	}
+	return nil, SessionOpenOK{
+		OK:     true,
+		Handle: sh.Key,
+		State:  string(sh.Runtime.orch.InitialState()),
+		Mode:   string(sh.Mode),
+	}, nil
+}
+
+// handleSessionAttach co-drives an existing keyed session. The studio holds its
+// own in-process driving runtime per handle (epic decision: one server process
+// per client, handles in-process); attach binds a NEW runtime to the story and
+// records the external key on the trace so a separate process driving the same
+// key shares the persisted journey under the writer lock (the
+// hybrid-session-driving guarantee). The bind reuses OpenDrivingSession with the
+// key as the handle key, so the agent addresses it the same way as a fresh one.
+func (srv *Server) handleSessionAttach(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args SessionAttachArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	if args.StoryPath == "" {
+		return buildToolError(ErrBadRequest, "session.attach: story_path is required"), nil, nil
+	}
+	if args.Key == "" {
+		return buildToolError(ErrBadRequest, "session.attach: key is required"), nil, nil
+	}
+	tracePath, err := resolveTracePath(args.Trace)
+	if err != nil {
+		return buildToolError(ErrBadRequest, err.Error()), nil, nil
+	}
+	sh, err := srv.sess.OpenDrivingSession(ctx, OpenDrivingSessionParams{
+		Key:           args.Key,
+		Mode:          HarnessMode(args.Harness),
+		RecordingPath: args.Cassette,
+		StoryPath:     args.StoryPath,
+		TracePath:     tracePath,
+	})
+	if err != nil {
+		code, msg := AsToolError(err)
+		return buildToolError(code, msg), nil, nil
+	}
+	return nil, SessionOpenOK{
+		OK:     true,
+		Handle: sh.Key,
+		State:  string(sh.Runtime.orch.InitialState()),
+		Mode:   string(sh.Mode),
+	}, nil
+}
+
+// ── drive / submit / continue ────────────────────────────────────────────────
+
+func (srv *Server) handleSessionDrive(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args SessionDriveArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	rt, rerr := srv.resolveRuntime(args.Handle)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	cols, rows := geometry(args.Cols, args.Rows)
+	out, frame := rt.drive(ctx, args.Input, cols, rows)
+	return nil, turnResponse(out, frame, rt.lastTurnErr), nil
+}
+
+func (srv *Server) handleSessionSubmit(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args SessionSubmitArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	if args.Intent == "" {
+		return buildToolError(ErrBadRequest, "session.submit: intent is required"), nil, nil
+	}
+	rt, rerr := srv.resolveRuntime(args.Handle)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	cols, rows := geometry(args.Cols, args.Rows)
+	out, frame := rt.submit(ctx, args.Intent, args.Slots, cols, rows)
+	return nil, turnResponse(out, frame, rt.lastTurnErr), nil
+}
+
+func (srv *Server) handleSessionContinue(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args SessionContinueArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	rt, rerr := srv.resolveRuntime(args.Handle)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	cols, rows := geometry(args.Cols, args.Rows)
+	out, frame := rt.cont(ctx, args.Slots, cols, rows)
+	return nil, turnResponse(out, frame, rt.lastTurnErr), nil
+}
+
+// ── inspect / trace ──────────────────────────────────────────────────────────
+
+// SessionInspectArgs is the input to session.inspect.
+type SessionInspectArgs struct {
+	Handle    string `json:"handle"`
+	LastTurns int    `json:"last_turns,omitempty"`
+}
+
+// InspectResult is the session.inspect snapshot. State/world/allowed_intents
+// come from the same orchestrator reads buildInspectOutput uses (LoadJourney +
+// AllowedIntents), so it matches the CLI inspect for that state.
+type InspectResult struct {
+	OK             bool              `json:"ok"`
+	State          string            `json:"state"`
+	World          map[string]any    `json:"world"`
+	AllowedIntents []string          `json:"allowed_intents"`
+	LastView       string            `json:"last_view"`
+	LastTurns      []TurnSummaryItem `json:"last_turns"`
+}
+
+// TurnSummaryItem collapses one turn's events into a one-line record (the same
+// shape `kitsoki inspect` emits).
+type TurnSummaryItem struct {
+	Turn      int64    `json:"turn"`
+	Input     string   `json:"input,omitempty"`
+	Intent    string   `json:"intent,omitempty"`
+	FromState string   `json:"from_state,omitempty"`
+	ToState   string   `json:"to_state,omitempty"`
+	Outcome   string   `json:"outcome,omitempty"`
+	ErrorCode string   `json:"error_code,omitempty"`
+	HostCalls []string `json:"host_calls,omitempty"`
+}
+
+func (srv *Server) handleSessionInspect(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args SessionInspectArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	rt, rerr := srv.resolveRuntime(args.Handle)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	lastTurns := args.LastTurns
+	if lastTurns <= 0 {
+		lastTurns = 5
+	}
+	out, err := rt.inspect(ctx, lastTurns)
+	if err != nil {
+		return buildToolError(ErrBadRequest, err.Error()), nil, nil
+	}
+	return nil, out, nil
+}
+
+// SessionTraceArgs is the input to session.trace.
+type SessionTraceArgs struct {
+	Handle string `json:"handle"`
+	// Since / Until filter events by turn number (inclusive). Zero means unbounded.
+	Since int64 `json:"since,omitempty"`
+	Until int64 `json:"until,omitempty"`
+	// Limit keeps only the last N matching events (0 = all).
+	Limit int `json:"limit,omitempty"`
+}
+
+// TraceResult is the session.trace result: the (filtered) JSONL events and the
+// highest turn number seen, so the agent can page forward.
+type TraceResult struct {
+	OK       bool          `json:"ok"`
+	Events   []store.Event `json:"events"`
+	LastTurn int64         `json:"last_turn"`
+}
+
+func (srv *Server) handleSessionTrace(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args SessionTraceArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	rt, rerr := srv.resolveRuntime(args.Handle)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	history := rt.history()
+	var filtered []store.Event
+	var lastTurn int64
+	for _, ev := range history {
+		t := int64(ev.Turn)
+		if t > lastTurn {
+			lastTurn = t
+		}
+		if args.Since > 0 && t < args.Since {
+			continue
+		}
+		if args.Until > 0 && t > args.Until {
+			continue
+		}
+		filtered = append(filtered, ev)
+	}
+	if args.Limit > 0 && len(filtered) > args.Limit {
+		filtered = filtered[len(filtered)-args.Limit:]
+	}
+	return nil, TraceResult{OK: true, Events: filtered, LastTurn: lastTurn}, nil
+}
+
+// ── render.tui ───────────────────────────────────────────────────────────────
+
+// RenderArgs is the shared input to the render.* tools: EITHER a handle (re-render
+// the session's current state, read-only) OR a spec (story_path + state + world,
+// rendered headlessly without any session).
+type RenderArgs struct {
+	Handle    string         `json:"handle,omitempty"`
+	StoryPath string         `json:"story_path,omitempty"`
+	State     string         `json:"state,omitempty"`
+	World     map[string]any `json:"world,omitempty"`
+	Cols      int            `json:"cols,omitempty"`
+	Rows      int            `json:"rows,omitempty"`
+	Theme     string         `json:"theme,omitempty"`
+}
+
+// RenderTUIResult is the render.tui result: just the Frame (read-only re-render).
+type RenderTUIResult struct {
+	OK    bool        `json:"ok"`
+	Frame FrameResult `json:"frame"`
+}
+
+func (srv *Server) handleRenderTUI(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args RenderArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	cols, rows := geometry(args.Cols, args.Rows)
+	frame, rerr := srv.composeRenderFrame(ctx, args, cols, rows)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	return nil, RenderTUIResult{OK: true, Frame: frameResult(frame)}, nil
+}
+
+// ── render.tui_png ───────────────────────────────────────────────────────────
+
+func (srv *Server) handleRenderTUIPNG(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args RenderArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	cols, rows := geometry(args.Cols, args.Rows)
+	frame, rerr := srv.composeRenderFrame(ctx, args, cols, rows)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	var buf bytes.Buffer
+	theme := blocks.ThemeByName(args.Theme)
+	if err := shot.RenderPNG(&buf, frame.ANSI, shot.Options{Theme: theme, Cols: cols, Rows: rows}); err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("render.tui_png: rasterise: %v", err)), nil, nil
+	}
+	return imageResult(req, frame.Text, buf.Bytes(), "image/png"), nil, nil
+}
+
+// ── render.web ───────────────────────────────────────────────────────────────
+
+// registerWebRenderer returns the render.web handler bound to the server's web
+// shot seam. It is a method-returning-closure so the BrowserInvoker/ServerProvider
+// seam (srv.webShot) is injectable for tests without a Chromium or a kitsoki web.
+func (srv *Server) registerWebRenderer() func(context.Context, *mcpsdk.CallToolRequest, RenderArgs) (*mcpsdk.CallToolResult, any, error) {
+	return srv.handleRenderWeb
+}
+
+func (srv *Server) handleRenderWeb(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args RenderArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	shotFn := srv.webShot
+	if shotFn == nil {
+		// No browser-capable seam wired: degrade to text (epic open Q1) rather
+		// than fail — a text-only host still learns this needs a browser.
+		return imageResult(req,
+			"render.web: web rendering needs a browser-capable host (none attached)", nil, ""), nil, nil
+	}
+	spec, rerr := srv.webSpec(args)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	png, err := shotFn(ctx, spec)
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("render.web: %v", err)), nil, nil
+	}
+	// Always include a textual frame; the image rides alongside for a
+	// vision-capable client.
+	text := fmt.Sprintf("render.web: %s @ %s (%d bytes)", spec.story(), spec.stateLabel(), len(png))
+	return imageResult(req, text, png, "image/png"), nil, nil
+}
+
+// ── frame composition (handle | spec) ─────────────────────────────────────────
+
+// composeRenderFrame builds the slice-1 Frame for a render.* call. For a handle
+// it re-renders the session's CURRENT state read-only (no machine advance); for
+// a spec ({story_path, state, world?}) it builds a throwaway runtime, teleports
+// to the state with the world seeded, and composes — without touching any open
+// session.
+func (srv *Server) composeRenderFrame(ctx context.Context, args RenderArgs, cols, rows int) (tui.Frame, *mcpsdk.CallToolResult) {
+	switch {
+	case args.Handle != "":
+		rt, rerr := srv.resolveRuntime(args.Handle)
+		if rerr != nil {
+			return tui.Frame{}, rerr
+		}
+		return rt.frame(cols, rows), nil
+	case args.StoryPath != "":
+		frame, err := specFrame(ctx, args.StoryPath, args.State, args.World, cols, rows)
+		if err != nil {
+			code, msg := AsToolError(err)
+			return tui.Frame{}, buildToolError(code, msg)
+		}
+		return frame, nil
+	default:
+		return tui.Frame{}, buildToolError(ErrBadRequest, "render: provide a handle or a {story_path, state} spec")
+	}
+}
+
+// specFrame renders a headless Frame for (storyPath, state, world) WITHOUT a live
+// session: it builds an ephemeral runtime (fresh temp trace, replay-free — no
+// harness is needed because a spec render never routes free text), teleports to
+// the target state with world seeded as slots, folds the outcome into the
+// composer model, and composes the Frame. The ephemeral runtime is torn down
+// before returning, so a spec render leaves nothing behind and touches no open
+// handle.
+func specFrame(ctx context.Context, storyPath, state string, world map[string]any, cols, rows int) (tui.Frame, error) {
+	tracePath, err := resolveTracePath("")
+	if err != nil {
+		return tui.Frame{}, err
+	}
+	// No harness: a spec render is a pure re-render and never calls orch.Turn.
+	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil)
+	if err != nil {
+		return tui.Frame{}, err
+	}
+	defer rt.Close()
+
+	// When a target state is named, teleport there with the world merged in;
+	// otherwise photograph the initial state the runtime already settled on.
+	if state != "" {
+		out, terr := rt.orch.Teleport(ctx, rt.sid, inbox.TeleportTarget{State: app.StatePath(state), Slots: world})
+		if terr != nil {
+			return tui.Frame{}, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("render spec: teleport to %q: %v", state, terr)}
+		}
+		rt.model = rt.model.ApplyTurnOutcome(out, "", nil)
+	} else if len(world) > 0 {
+		if perr := rt.orch.PatchWorld(ctx, rt.sid, world); perr != nil {
+			return tui.Frame{}, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("render spec: patch world: %v", perr)}
+		}
+		// Re-render the initial state against the patched world.
+		out, verr := rt.orch.CurrentView(ctx, rt.sid)
+		if verr == nil {
+			rt.model = rt.model.ApplyTurnOutcome(out, "", nil)
+		}
+	}
+	return rt.frame(cols, rows), nil
+}
+
+// ── runtime resolution & helpers ─────────────────────────────────────────────
+
+// resolveRuntime resolves a handle to its live driving runtime, returning a
+// structured tool error for an unknown handle or one with no runtime attached
+// (a metadata-only handle never opened for driving).
+func (srv *Server) resolveRuntime(handle string) (*sessionRuntime, *mcpsdk.CallToolResult) {
+	if handle == "" {
+		return nil, buildToolError(ErrBadRequest, "handle is required")
+	}
+	sh, err := srv.sess.ResolveSession(handle)
+	if err != nil {
+		code, msg := AsToolError(err)
+		return nil, buildToolError(code, msg)
+	}
+	if sh.Runtime == nil {
+		return nil, buildToolError(ErrBadRequest, fmt.Sprintf("handle %q has no driving runtime (open it with session.new)", handle))
+	}
+	return sh.Runtime, nil
+}
+
+// geometry resolves the effective (cols, rows), falling back to the drive
+// defaults when the caller omits them.
+func geometry(cols, rows int) (int, int) {
+	if cols < 1 {
+		cols = defaultCols
+	}
+	if rows < 1 {
+		rows = defaultRows
+	}
+	return cols, rows
+}
+
+// turnResponse projects a TurnOutcome + Frame into the {outcome, frame} wire
+// shape. turnErr carries an orchestrator-side failure (e.g. a replay miss) so it
+// surfaces as outcome.error / mode="error" alongside the frame, never as a
+// transport error.
+func turnResponse(out *orchestrator.TurnOutcome, frame tui.Frame, turnErr error) TurnResponse {
+	tr := TurnResult{}
+	if turnErr != nil {
+		tr.Mode = "error"
+		tr.Error = turnErr.Error()
+	}
+	if out != nil {
+		tr.Mode = out.Mode.String()
+		tr.State = string(out.NewState)
+		tr.AllowedIntents = out.AllowedIntents
+		tr.PendingIntent = out.PendingIntent
+		tr.ErrorCode = string(out.ErrorCode)
+		tr.ErrorMessage = out.ErrorMessage
+		tr.GuardHint = out.GuardHint
+		tr.HarnessError = out.HarnessError
+		tr.TurnNumber = int64(out.TurnNumber)
+		for _, sn := range out.SlotsNeeded {
+			tr.SlotsNeeded = append(tr.SlotsNeeded, SlotNeedItem{
+				Name:        sn.Name,
+				Prompt:      sn.Prompt,
+				Description: sn.Description,
+				Type:        sn.Type,
+				Values:      sn.Values,
+			})
+		}
+		if turnErr != nil {
+			// Keep the structured outcome but flag the failure too.
+			tr.Error = turnErr.Error()
+		}
+	}
+	return TurnResponse{OK: turnErr == nil, Outcome: tr, Frame: frameResult(frame)}
+}
+
+// frameResult projects a tui.Frame onto the wire shape.
+func frameResult(f tui.Frame) FrameResult {
+	return FrameResult{
+		Text:   f.Text,
+		ANSI:   f.ANSI,
+		Width:  f.Width,
+		Height: f.Height,
+		Metadata: FrameMetaItem{
+			State:          f.Metadata.State,
+			Mode:           f.Metadata.Mode,
+			AllowedIntents: f.Metadata.AllowedIntents,
+			WorldDigest:    f.Metadata.WorldDigest,
+		},
+	}
+}
+
+// resolveTracePath returns the trace path for a driving handle: the caller's
+// override when set, else a fresh temp .jsonl file. Each session gets its own
+// durable trace (the same JSONL `kitsoki turn --trace` writes).
+func resolveTracePath(override string) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+	f, err := os.CreateTemp("", "kitsoki-studio-*.jsonl")
+	if err != nil {
+		return "", &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("create trace file: %v", err)}
+	}
+	name := f.Name()
+	_ = f.Close()
+	return name, nil
+}
+
+// ── inspect on the runtime ────────────────────────────────────────────────────
+
+// inspect builds the session.inspect snapshot from the live orchestrator —
+// state/world from the journey, the allowed-intent menu from the machine, the
+// current rendered view, and a tail of turn summaries from the trace. It reads
+// the same sources buildInspectOutput (cmd/kitsoki/inspect.go) reads, so the
+// snapshot matches the CLI inspect for that state. Read-only.
+func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int) (InspectResult, error) {
+	j, err := rt.orch.LoadJourney(rt.sid)
+	if err != nil {
+		return InspectResult{}, fmt.Errorf("session.inspect: load journey: %w", err)
+	}
+	allowed := rt.orch.AllowedIntents(j.State, j.World)
+	allowedNames := make([]string, 0, len(allowed))
+	for _, ai := range allowed {
+		allowedNames = append(allowedNames, ai.Name)
+	}
+	view, verr := rt.orch.RenderState(j.State, j.World)
+	if verr != nil {
+		view = fmt.Sprintf("<render error: %v>", verr)
+	}
+	return InspectResult{
+		OK:             true,
+		State:          string(j.State),
+		World:          j.World.Vars,
+		AllowedIntents: allowedNames,
+		LastView:       view,
+		LastTurns:      summariseTrace(rt.history(), lastTurns),
+	}, nil
+}
+
+// summariseTrace folds a JSONL history into one summary per turn, returning the
+// last n. It is the studio twin of cmd/kitsoki summariseTurns — the same event
+// kinds projected to the same fields — so session.inspect's last_turns matches
+// the CLI inspect.
+func summariseTrace(history store.History, n int) []TurnSummaryItem {
+	if n <= 0 {
+		return nil
+	}
+	byTurn := map[int64]*TurnSummaryItem{}
+	var order []int64
+	for _, ev := range history {
+		t := int64(ev.Turn)
+		if t == 0 {
+			continue
+		}
+		ts, ok := byTurn[t]
+		if !ok {
+			ts = &TurnSummaryItem{Turn: t}
+			byTurn[t] = ts
+			order = append(order, t)
+		}
+		var p map[string]any
+		if len(ev.Payload) > 0 {
+			_ = json.Unmarshal(ev.Payload, &p)
+		}
+		switch ev.Kind {
+		case store.TurnStarted:
+			if v, ok := p["input"].(string); ok {
+				ts.Input = v
+			}
+		case store.UserInputReceived:
+			if v, ok := p["input"].(string); ok && ts.Input == "" {
+				ts.Input = v
+			}
+		case store.TransitionApplied:
+			if v, ok := p["intent"].(string); ok && ts.Intent == "" {
+				ts.Intent = v
+			}
+			if v, ok := p["from"].(string); ok {
+				ts.FromState = v
+			}
+			if v, ok := p["to"].(string); ok {
+				ts.ToState = v
+			}
+		case store.TurnEnded:
+			if v, ok := p["outcome"].(string); ok {
+				ts.Outcome = v
+			}
+			if v, ok := p["code"].(string); ok {
+				ts.ErrorCode = v
+			}
+		case store.HostInvoked:
+			if v, ok := p["namespace"].(string); ok {
+				ts.HostCalls = append(ts.HostCalls, v)
+			}
+		}
+	}
+	if len(order) > n {
+		order = order[len(order)-n:]
+	}
+	out := make([]TurnSummaryItem, len(order))
+	for i, t := range order {
+		out[i] = *byTurn[t]
+	}
+	return out
+}
+
+// ── web shot seam ────────────────────────────────────────────────────────────
+
+// WebShotFunc is the injectable render.web seam: given a webshot.Spec it returns
+// a PNG. The production wiring (cmd/kitsoki) builds a webshot.Shot over a real
+// HandlerServer + NodeInvoker; a test injects a stub that returns a synthetic PNG
+// with no browser. Nil means render.web degrades to text (no browser host).
+type WebShotFunc func(ctx context.Context, spec WebRenderSpec) ([]byte, error)
+
+// WebRenderSpec is the studio's render.web target: a story + state + world OR a
+// live handle's session. It is mapped to a webshot.Spec by the production seam;
+// kept as a studio type so the studio package does not force every render.web
+// caller through webshot's exact Spec shape.
+type WebRenderSpec struct {
+	StoryPath string
+	State     string
+	World     map[string]any
+	SessionID string
+}
+
+func (s WebRenderSpec) story() string {
+	if s.StoryPath != "" {
+		return s.StoryPath
+	}
+	return "session:" + s.SessionID
+}
+
+func (s WebRenderSpec) stateLabel() string {
+	if s.State != "" {
+		return s.State
+	}
+	return "current"
+}
+
+// ToWebshotSpec maps the studio render spec onto the webshot package's Spec, the
+// adapter the production WebShotFunc uses. Exposed so cmd/kitsoki can wire the
+// real webshot.Shot without re-deriving the mapping.
+func (s WebRenderSpec) ToWebshotSpec() webshot.Spec {
+	if s.SessionID != "" {
+		return webshot.Spec{SessionID: s.SessionID}
+	}
+	return webshot.Spec{StoryPath: s.StoryPath, State: s.State, World: s.World}
+}
+
+// webSpec resolves a render.web RenderArgs to a WebRenderSpec: a handle maps to
+// its session id (live form), a spec maps to story+state+world.
+func (srv *Server) webSpec(args RenderArgs) (WebRenderSpec, *mcpsdk.CallToolResult) {
+	switch {
+	case args.Handle != "":
+		sh, err := srv.sess.ResolveSession(args.Handle)
+		if err != nil {
+			code, msg := AsToolError(err)
+			return WebRenderSpec{}, buildToolError(code, msg)
+		}
+		if sh.Runtime == nil {
+			return WebRenderSpec{}, buildToolError(ErrBadRequest, "handle has no driving runtime")
+		}
+		return WebRenderSpec{StoryPath: sh.StoryPath, SessionID: string(sh.SID)}, nil
+	case args.StoryPath != "":
+		return WebRenderSpec{StoryPath: args.StoryPath, State: args.State, World: args.World}, nil
+	default:
+		return WebRenderSpec{}, buildToolError(ErrBadRequest, "render.web: provide a handle or a {story_path, state} spec")
+	}
+}
+
+// ── MCP image content gating ──────────────────────────────────────────────────
+
+// imageResult builds a CallToolResult that ALWAYS carries the textual frame and,
+// when the client advertises image support and png is non-empty, an
+// mcpsdk.ImageContent block. A text-only client still gets something (the text);
+// a vision-capable one also sees the screen (epic open Q1 / slice invariant).
+func imageResult(req *mcpsdk.CallToolRequest, text string, png []byte, mime string) *mcpsdk.CallToolResult {
+	content := []mcpsdk.Content{&mcpsdk.TextContent{Text: text}}
+	if len(png) > 0 && clientSupportsImages(req) {
+		content = append(content, &mcpsdk.ImageContent{Data: png, MIMEType: mime})
+	}
+	return &mcpsdk.CallToolResult{Content: content}
+}
+
+// clientSupportsImages reports whether the connected client accepts MCP image
+// content blocks. MCP has no closed "image" capability, so the lean is: image
+// content is part of the base tool-result protocol every spec-compliant client
+// can receive, UNLESS the client opts OUT via the experimental capability
+// {"images": false} (the documented escape hatch for a strictly text-only host).
+// A nil request/session (in-process tests that don't initialize) is treated as
+// image-capable so the image path is exercised by default.
+func clientSupportsImages(req *mcpsdk.CallToolRequest) bool {
+	if req == nil || req.Session == nil {
+		return true
+	}
+	params := req.Session.InitializeParams()
+	if params == nil || params.Capabilities == nil {
+		return true
+	}
+	if v, ok := params.Capabilities.Experimental["images"]; ok {
+		if b, isBool := v.(bool); isBool {
+			return b
+		}
+	}
+	return true
+}
