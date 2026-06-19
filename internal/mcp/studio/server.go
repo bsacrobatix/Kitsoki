@@ -77,6 +77,9 @@ func NewServer(sess *StudioSession) *Server {
 		Description: "List the open studio handles: the driving sessions (id, harness mode, trace path) and the authoring workspace (if one is bound).",
 	}, srv.handleHandles)
 
+	// story.* — the deterministic, LLM-free authoring tools (slice 6).
+	srv.registerStoryTools()
+
 	return srv
 }
 
