@@ -2,17 +2,27 @@
 # agent loop that iterates maker → checker → budget-guard until the goal is
 # *actually met* (a deterministic gate passes) or a budget ceiling is hit.
 #
-# The loop is operator-driven and watchable: each iteration is one visible turn
-# with its maker output, gate verdict, and budget readout. Every iteration is
-# persisted as a numbered artifact so the run is trackable, restartable, and
-# shareable.
+# The loop RUNS ITSELF: the operator kicks it off once (`launch`) and watches it
+# converge. Each step's on_enter makes a change (maker), gates it (checker), and
+# routes on the verdict; a failed gate with budget left re-enters `iterating`
+# with no operator input (the autonomous self-loop). Every iteration streams a
+# breadcrumb and is persisted as a numbered artifact, so the run is watchable,
+# trackable, restartable, and shareable.
+#
+# Autonomy is in-story: iterating (maker) auto-emits `check` → gating (checker),
+# which emits `loop_again` back into iterating. Each iteration is two emit hops,
+# and the engine caps emit_intent chains at EmitIntentMaxDepth (8) per turn — so
+# an autonomous-from-launch run completes in one turn for budgets up to ~3.
+# Larger budgets want the background-job runner (see README → autonomy). This cap
+# is a real engine constraint the story exposes, not papered over.
 #
 # Red-before-green: `launch` does NOT run the maker. It first enters `baseline`,
-# which runs the gate ONCE on the unchanged artifact to prove it can fail. Only a
-# RED baseline (gate fails) lets the operator `proceed` into the maker loop — a
-# GREEN baseline means the gate proves nothing (goal already met, or gate too
-# weak), so no budget is spent. This is why the gate command is rendered verbatim
-# (a `code` block) in `configuring` and `baseline`: the script is the contract.
+# which runs the gate ONCE on the unchanged artifact to prove it can fail. A RED
+# baseline (gate fails) auto-proceeds into the loop; a GREEN baseline means the
+# gate proves nothing (goal already met, or gate too weak), so the loop refuses
+# to spend and rests for the operator. This is why the gate command is rendered
+# verbatim (a `code` block) in `configuring` and `baseline`: the script is the
+# contract.
 #
 # Two interchangeable gate modes (world.gate_mode):
 #   script  — host.run a command; gate passes iff exit_code == 0 (the strongest
@@ -128,13 +138,19 @@ intents:
     description: "Accept that the goal is already met."
     examples: ["accept", "already done", "mark met"]
     priority: 60
-  evaluate:
-    description: "Run the gate on the current iteration."
-    examples: ["evaluate", "check", "run the gate", "test it"]
-    priority: 85
-  # Internal routing intents, emitted from gating.on_enter once the gate result
-  # is bound. Guarded emits (each reads world.gate_ok) force the engine to settle
-  # the gate's binds before routing — the bugfix judge→emit pattern.
+  retry:
+    description: "Re-run the loop step after a maker failure."
+    examples: ["retry", "again"]
+    priority: 60
+  # Internal routing intents, emitted from iterating.on_enter once the gate
+  # result is bound (and from baseline once the baseline gate runs). Guarded
+  # emits (each reads world.gate_ok) force the engine to settle the gate's binds
+  # before routing — the bugfix judge→emit pattern. loop_again re-enters
+  # `iterating`, which is what makes the loop run itself with no operator prod.
+  check:
+    description: "(internal) maker done — run the checker."
+    examples: ["check"]
+    priority: 1
   mark_achieved:
     description: "(internal) goal met."
     examples: ["mark_achieved"]
@@ -153,14 +169,6 @@ intents:
     priority: 1
     slots:
       feedback: { type: string, required: false }
-  baseline_red:
-    description: "(internal) baseline gate failed — RED proven, safe to spend."
-    examples: ["baseline_red"]
-    priority: 1
-  baseline_green:
-    description: "(internal) baseline gate passed — the gate proves nothing yet."
-    examples: ["baseline_green"]
-    priority: 1
   abort:
     description: "Abandon the loop."
     examples: ["abort", "stop", "give up"]

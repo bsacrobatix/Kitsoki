@@ -27,6 +27,7 @@ states:
           gate_exit_code: exit_code
           gate_stdout:    stdout
       - invoke: host.oracle.decide
+        id: "gate-0"   # the baseline review, addressable distinctly from loop gates
         when: "world.gate_mode == 'oracle'"
         with:
           prompt: prompts/gate_review.md
@@ -39,6 +40,12 @@ states:
           gate_ok:     submitted.pass
           gate_reason: submitted.reason
       - set: { baseline_checked: true }
+      # RED (gate fails) → the gate works and there's real work to do, so kick off
+      # the autonomous loop with no operator prod. GREEN → no emit; rest here so
+      # the operator decides (the gate proves nothing). Guard reads gate_ok, which
+      # forces the bind to settle before routing (decision-emit discipline).
+      - when: "world.gate_ok == false"
+        emit_intent: proceed
     view:
       extends: "base"
       blocks:

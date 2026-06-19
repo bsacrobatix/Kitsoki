@@ -1,26 +1,28 @@
-# Gate fails at the iteration ceiling → @exit:exhausted (iteration_budget).
-# iteration (3) >= iteration_budget (3), so after the failed gate the loop stops
-# instead of running a fourth maker pass.
+# Gate keeps failing → @exit:exhausted (iteration_budget). launch runs the loop
+# autonomously; every gate fails, so it iterates to the ceiling (budget 3) and
+# stops rather than running forever. One launch drives the whole run.
 test_kind: flow
 app: ../app.yaml
-initial_state: iterating
-initial_world:
-  goal_text:        "Make the unit tests pass"
-  gate_mode:        "script"
-  gate_command:     "go test ./..."
-  iteration:        3
-  iteration_budget: 3
-  maker_summary:    "still failing one case"
+initial_state: configuring
 
 host_handlers:
-  host.run:           { data: { ok: false, exit_code: 1, stdout: "FAIL: TestParse expected 3 got 4" } }
-  host.oracle.task:   { data: { submitted: { summary: "stub" } } }
+  host.run:           { data: { ok: false, exit_code: 1, stdout: "FAIL: still red" } }
+  host.oracle.task:   { data: { submitted: { summary: "another change" } } }
   host.artifacts_dir: { data: { ok: true } }
 
 turns:
-  - intent: { name: evaluate, slots: {} }
+  - intent:
+      name: configure
+      slots:
+        goal:             "Make the unit tests pass"
+        gate_command:     "go test ./..."
+        gate_mode:        "script"
+        iteration_budget: 3
+    expect_state: configuring
+  - intent: { name: launch, slots: {} }
     expect_state: __exit__exhausted
     expect_world:
       terminal_reason: "iteration_budget"
+      iteration:       3
 
 expect_terminal: true

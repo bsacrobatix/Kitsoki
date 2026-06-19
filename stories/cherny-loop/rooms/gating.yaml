@@ -1,19 +1,18 @@
 states:
+  # gating — the CHECKER half of one autonomous loop step. Entered by iterating's
+  # auto-emitted `check`. on_enter runs the configured checker (deterministic
+  # script or adversarial oracle) and routes on the verdict + budgets via guarded
+  # emit_intents — all of which run with no operator input, so the loop advances
+  # itself. A failed gate with budget left emits `loop_again`, which re-enters
+  # `iterating` (a real state change, so its on_enter — the next maker step —
+  # runs). Goal-met always wins; otherwise a budget guard ends the run.
   gating:
-    description: "Gate — checking the goal"
+    description: "Loop step — checking the goal"
     relevant_world: [gate_mode, gate_ok, gate_exit_code, iteration, iteration_budget, session_cost_usd, cost_budget_usd]
-    # Run the configured checker, then route on the verdict + budgets. The maker
-    # (in `iterating`) cannot grade itself: the checker is either deterministic
-    # code (script) or a separate-context adversarial oracle.
-    #
-    # Routing is a set of mutually-exclusive GUARDED emit_intents — each reads
-    # world.gate_ok, which forces the engine to settle the gate's binds before
-    # routing (the bugfix judge→emit pattern). An unguarded emit would resolve
-    # before the bind lands and always see gate_ok=false.
     on_enter:
       # Script gate — deterministic, free, incorruptible. Passes iff exit 0.
       - invoke: host.run
-        id: "gate-{{ world.iteration }}"   # addressable per iteration (by_call / cassette)
+        id: "gate-{{ world.iteration }}"
         when: "world.gate_mode == 'script'"
         with:
           cmd: "{{ world.gate_command }}"
@@ -24,6 +23,7 @@ states:
           gate_stdout:    stdout
       # Oracle gate — adversarial review for goals no test can encode.
       - invoke: host.oracle.decide
+        id: "gate-{{ world.iteration }}"
         when: "world.gate_mode == 'oracle'"
         with:
           prompt: prompts/gate_review.md
@@ -35,23 +35,19 @@ states:
         bind:
           gate_ok:     submitted.pass
           gate_reason: submitted.reason
-      # Each guard compares gate_ok to a concrete bool, so all four are false
-      # while gate_ok is "" (pre-bind) and exactly one is true post-bind.
-      # 1. Goal met — always wins.
+      - say: "Gate iteration {{ world.iteration }} → {% if world.gate_ok == true %}PASS ✓{% else %}FAIL ✗{% endif %}"
+      # Guarded routing — each reads gate_ok, so all are false pre-bind and
+      # exactly one is true post-bind (the decision-emit discipline).
       - when: "world.gate_ok == true"
         emit_intent: mark_achieved
-      # 2. Cost ceiling (only when enabled). session_cost_usd is the reserved
-      #    engine-maintained $ spend.
       - when: "world.gate_ok == false && world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd"
         emit_intent: mark_cost_exhausted
-      # 3. Iteration ceiling (only if cost did not already fire).
       - when: "world.gate_ok == false && !(world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd) && world.iteration >= world.iteration_budget"
         emit_intent: mark_iter_exhausted
-      # 4. Otherwise loop: hand the gate's failure reason to the next maker turn.
       - when: "world.gate_ok == false && !(world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd) && world.iteration < world.iteration_budget"
         emit_intent: loop_again
         slots:
-          feedback: "{{ world.gate_reason }}{{ world.gate_stdout }}"
+          feedback: "{{ world.gate_stdout }}{{ world.gate_reason }}"
     view:
       extends: "base"
       blocks:
@@ -74,6 +70,8 @@ states:
         - target: "@exit:exhausted"
           effects:
             - set: { terminal_reason: "iteration_budget" }
+      # Re-enter iterating (a real state change) so the next maker step runs —
+      # this is what makes the loop autonomous, carrying the failure forward.
       loop_again:
         - target: iterating
           effects:

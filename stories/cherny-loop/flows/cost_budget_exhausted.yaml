@@ -1,29 +1,34 @@
-# Gate fails and the $ ceiling is breached → @exit:exhausted (cost_budget).
-# session_cost_usd (0.60, the reserved engine-maintained spend; seeded here to
-# simulate prior oracle cost) >= cost_budget_usd (0.50), so the cost guard fires
-# before the iteration ceiling.
+# Gate fails and the $ ceiling is breached → @exit:exhausted (cost_budget). The
+# cost guard wins over the iteration ceiling. session_cost_usd (0.60 — the
+# reserved engine-maintained spend, seeded to simulate prior cost; foldOracleCost
+# ACCUMULATES, so the stub maker's zero-cost call leaves it intact) >=
+# cost_budget_usd (0.50), so the loop stops on the first iteration even though the
+# iteration budget (10) is nowhere near hit.
 test_kind: flow
 app: ../app.yaml
-initial_state: iterating
+initial_state: configuring
 initial_world:
-  goal_text:        "Make the unit tests pass"
-  gate_mode:        "script"
-  gate_command:     "go test ./..."
-  iteration:        2
-  iteration_budget: 10
-  cost_budget_usd:  0.50
   session_cost_usd: 0.60
-  maker_summary:    "expensive attempt"
 
 host_handlers:
   host.run:           { data: { ok: false, exit_code: 1, stdout: "FAIL" } }
-  host.oracle.task:   { data: { submitted: { summary: "stub" } } }
+  host.oracle.task:   { data: { submitted: { summary: "expensive change" } } }
   host.artifacts_dir: { data: { ok: true } }
 
 turns:
-  - intent: { name: evaluate, slots: {} }
+  - intent:
+      name: configure
+      slots:
+        goal:             "Make the unit tests pass"
+        gate_command:     "go test ./..."
+        gate_mode:        "script"
+        iteration_budget: 10
+        cost_budget:      0.50
+    expect_state: configuring
+  - intent: { name: launch, slots: {} }
     expect_state: __exit__exhausted
     expect_world:
       terminal_reason: "cost_budget"
+      iteration:       1
 
 expect_terminal: true

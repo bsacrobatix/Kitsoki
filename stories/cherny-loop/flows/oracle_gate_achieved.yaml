@@ -1,31 +1,34 @@
-# Oracle gate mode: host.oracle.decide adversarially reviews the artifact and
-# returns pass=true → @exit:achieved. Same loop, different (LLM) checker — for
-# goals no script can encode.
+# Oracle gate mode: the checker is host.oracle.decide (adversarial review) rather
+# than a script — for goals no test can encode. launch runs the loop
+# autonomously: the baseline oracle review (gate-0) fails the artifact, iteration
+# 1's maker revises it, and the next review (gate-1) passes → @exit:achieved.
 test_kind: flow
 app: ../app.yaml
-initial_state: iterating
-initial_world:
-  goal_text:        "Write a clear one-page design doc for the cache layer"
-  goal_artifact:    "docs/cache-design.md"
-  gate_mode:        "oracle"
-  iteration:        2
-  iteration_budget: 8
-  maker_summary:    "rewrote the eviction section"
+initial_state: configuring
 
 host_handlers:
   host.oracle.decide:
-    data:
-      submitted:
-        pass:   true
-        reason: "Covers eviction, sizing, and failure modes with examples."
-        fixes:  []
+    by_call:
+      gate-0: { data: { submitted: { pass: false, reason: "Eviction section is missing failure modes.", fixes: ["cover eviction failure modes"] } } }
+      gate-1: { data: { submitted: { pass: true,  reason: "Covers eviction, sizing, and failure modes with examples.", fixes: [] } } }
+  host.oracle.task:
+    by_call:
+      maker-1: { data: { submitted: { summary: "Added the eviction failure-mode subsection" } } }
   host.artifacts_dir: { data: { ok: true } }
 
 turns:
-  - intent: { name: evaluate, slots: {} }
+  - intent:
+      name: configure
+      slots:
+        goal:      "Write a clear one-page design doc for the cache layer"
+        artifact:  "docs/cache-design.md"
+        gate_mode: "oracle"
+    expect_state: configuring
+  - intent: { name: launch, slots: {} }
     expect_state: __exit__achieved
     expect_world:
       goal_achieved:   true
       terminal_reason: "achieved"
+      iteration:       1
 
 expect_terminal: true

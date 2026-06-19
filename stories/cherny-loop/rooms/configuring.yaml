@@ -37,7 +37,7 @@ states:
                 - label: "configure goal=… artifact=… gate_command=… iteration_budget=… cost_budget=…"
                   hint:  "set any subset"
                 - label: "launch"
-                  hint:  "verify the gate is RED, then iterate"
+                  hint:  "verify the gate is RED, then run the loop to completion"
                   when:  "world.goal_text != '' && (world.gate_mode != 'script' || world.gate_command != '')"
                 - label: "✗ launch — set a goal first"
                   when:  "world.goal_text == ''"
