@@ -137,8 +137,14 @@ intents:
   # ── Hub operations ───────────────────────────────────────────────────
   commit:
     description: "Stage and commit changes with an oracle-authored message."
+    # "commit the staged fix"/"…work" are verbatim mined real-session phrasings.
+    # They subset-match BOTH commit ("commit") and stage ("staged"→stage), so
+    # routing resolves them via the leading-verb tie-break (the imperative verb
+    # "commit" leads) — see internal/semroute matchBare. Listed here so the
+    # phrasings are documented vocabulary, not load-bearing for the tie-break.
     examples: ["commit", "commit it", "commit them", "commit this", "ok commit",
-               "commit your work", "commit everything", "single commit"]
+               "commit your work", "commit everything", "single commit",
+               "commit the staged fix", "commit the staged work"]
     priority: 80
 
   merge_into_main:

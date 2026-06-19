@@ -221,6 +221,39 @@ func (m *Matcher) matchBare(allow map[string]struct{}, input string) (Verdict, b
 			MatchKind:    entry.Kind.cacheKind(),
 		}, true
 	default:
+		// Leading-verb tie-break. Bag-of-stems subset matching ignores word
+		// order, so an imperative like "commit the staged fix" ties commit
+		// (via "commit") against stage (via the "staged"→stage stem) even
+		// though a human reads "commit" as the command and "staged fix" as its
+		// object. We recover that signal from the ONE structural cue a typed
+		// command reliably carries: the verb leads. If the input's first
+		// content stem belongs to exactly one tied candidate's matched entry,
+		// that candidate is the command and the others are incidental — resolve
+		// to it at the whole-synonym band. When the leading stem is in zero or
+		// ≥2 candidates' entries the cue is absent or itself ambiguous, so the
+		// tie stands and the disambiguation card below fires (preserving the
+		// "ties signal authored ambiguity the user should disambiguate"
+		// contract for genuinely ambiguous input).
+		if lead := leadingContentStem(input, m.idx.stopExtras); lead != "" {
+			winner, hits := "", 0
+			for _, intentID := range intentOrder {
+				if _, ok := m.idx.entries[matched[intentID]].stemSet[lead]; ok {
+					winner, hits = intentID, hits+1
+				}
+			}
+			if hits == 1 {
+				entry := m.idx.entries[matched[winner]]
+				return Verdict{
+					Intent:       winner,
+					Slots:        map[string]any{},
+					Confidence:   ConfidenceWholeSynonym,
+					MatchReason:  "leading-verb:" + lead,
+					MatchPattern: entry.Source,
+					MatchKind:    entry.Kind.cacheKind(),
+				}, true
+			}
+		}
+
 		// Tie. Build a stable Candidate list ordered by intent id so
 		// the disambiguation card is deterministic.
 		sort.Strings(intentOrder)
@@ -239,6 +272,22 @@ func (m *Matcher) matchBare(allow map[string]struct{}, input string) (Verdict, b
 			MatchReason: fmt.Sprintf("ambiguous:%d", len(cands)),
 		}, true
 	}
+}
+
+// leadingContentStem returns the Norm (Porter2 stem) of the first
+// non-stopword, non-numeric token in input — the imperative verb that
+// opens a typed command. Returns "" when the input has no content token
+// (all stopwords/numbers/empty), which disables the leading-verb
+// tie-break for that input. Uses the same lex pipeline + stopword regime
+// the index was compiled with so the stem matches entry stem sets.
+func leadingContentStem(input string, stopExtras []string) string {
+	for _, tok := range lex.Tokenize(input, stopExtras) {
+		if tok.IsStop || tok.IsNum {
+			continue
+		}
+		return tok.Norm
+	}
+	return ""
 }
 
 // matchTemplates is the Phase-4 path. For each allowed intent that

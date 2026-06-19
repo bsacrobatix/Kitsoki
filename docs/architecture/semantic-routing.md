@@ -80,6 +80,19 @@ If two intents share a synonym, the matcher returns
 `Confidence=0.50` with a `Candidates` list — the orchestrator
 surfaces the existing `AMBIGUOUS_INTENT` disambiguation card.
 
+**Leading-verb tie-break.** Subset matching is order-blind, so an
+imperative whose *object* contains another intent's verb stem ties
+spuriously: `"commit the staged fix"` matches both `commit` (via
+"commit") and `stage` (via "staged"→stage), yet a human reads "commit"
+as the command and "staged fix" as its object. The matcher recovers
+that from the one cue a typed command reliably carries — the verb leads.
+When the input's first content stem belongs to **exactly one** tied
+candidate's matched entry, that candidate wins at 0.90 (`MatchReason:
+leading-verb:<stem>`). When the leading stem is in zero or ≥2
+candidates' entries the cue is absent or itself ambiguous, so the tie
+stands and the disambiguation card fires — the "ties signal authored
+ambiguity" contract is preserved for genuinely ambiguous input.
+
 ### 1.3 Synonym templates
 
 A `{slot_name}` inside a synonym string captures a contiguous run of
