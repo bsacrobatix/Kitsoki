@@ -15,6 +15,10 @@
 #                   NN-<scene>.png) as ground truth instead of extracting. Highest
 #                   fidelity when available.
 #   --out <dir>     artifact dir (default .artifacts/ui-qa/<video-stem>)
+#   --chapters <f>  chapter sidecar for the deterministic pacing scan (default:
+#                   auto-detect <video>.chapters.json next to the MP4)
+#   --pacing-min N  minimum readable on-screen window per chapter, ms (default 1500)
+#   --pacing-strict promote pacing flags from advisory to a blocking gate
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,8 +27,8 @@ demo_scripts="$here/../../kitsoki-ui-demo/scripts"   # reuse the recorder's cont
 video="${1:?usage: qa.sh <video> --feature <f> --scenarios <f> [opts]}"
 shift || true
 
-feature="" scenarios="" frames="" outdir="" model="" max=48
-adv_flag="" strict_flag="" blank_strict_flag=""
+feature="" scenarios="" frames="" outdir="" model="" max=48 chapters="" pacing_min=""
+adv_flag="" strict_flag="" blank_strict_flag="" pacing_strict_flag=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --feature)     feature="$2"; shift 2 ;;
@@ -33,9 +37,12 @@ while [ $# -gt 0 ]; do
     --out)         outdir="$2"; shift 2 ;;
     --model)       model="$2"; shift 2 ;;
     --max-frames)  max="$2"; shift 2 ;;
+    --chapters)    chapters="$2"; shift 2 ;;
+    --pacing-min)  pacing_min="$2"; shift 2 ;;
     --no-adversary) adv_flag="--no-adversary"; shift ;;
     --strict)      strict_flag="--strict"; shift ;;
     --blank-strict) blank_strict_flag="--blank-strict"; shift ;;
+    --pacing-strict) pacing_strict_flag="--pacing-strict"; shift ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
 done
@@ -74,6 +81,23 @@ fi
 blank_scan="$outdir/blank-scan.json"
 "$here/blank-scan.sh" "$frames_dir" --out "$blank_scan" || true
 
+# 2c. Deterministic pacing scan (no LLM) over the chapter sidecar — flags
+#     narrated moments that flash by too fast to read (the WEB_CHAT_PACE=0
+#     fast-validation footgun). Auto-detects <video>.chapters.json beside the MP4
+#     unless --chapters is given. Advisory by default; --pacing-strict blocks.
+pacing_scan=""
+if [ -z "$chapters" ] && [ -f "${video}.chapters.json" ]; then
+  chapters="${video}.chapters.json"
+fi
+if [ -n "$chapters" ] && [ -f "$chapters" ]; then
+  pacing_scan="$outdir/pacing-scan.json"
+  pacing_args=( "$chapters" --out "$pacing_scan" )
+  [ -n "$pacing_min" ] && pacing_args+=( --min-ms "$pacing_min" )
+  "$here/pacing-scan.sh" "${pacing_args[@]}" || true
+else
+  echo "  (no chapter sidecar — pacing scan skipped; pass --chapters to enable)"
+fi
+
 # 3. Grounded, adversarially-verified vision review → verdict.json
 verdict="$outdir/verdict.json"
 review_args=( --frames "$frames_dir" --feature "$feature" \
@@ -84,8 +108,10 @@ review_args=( --frames "$frames_dir" --feature "$feature" \
 
 # 4. Gated report — exit code propagates as the QA gate.
 echo
-"$here/report.sh" "$verdict" --out "$outdir/qa-report.md" $strict_flag \
-  --blank-scan "$blank_scan" $blank_strict_flag
+report_args=( "$verdict" --out "$outdir/qa-report.md" $strict_flag \
+  --blank-scan "$blank_scan" $blank_strict_flag )
+[ -n "$pacing_scan" ] && report_args+=( --pacing-scan "$pacing_scan" $pacing_strict_flag )
+"$here/report.sh" "${report_args[@]}"
 rc=$?
 echo
 echo "QA artifacts in $outdir/ : verdict.json, qa-report.md, contact-sheet.png, frames/"

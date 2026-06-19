@@ -108,6 +108,38 @@ pipeline removes that failure mode structurally, not by hoping the model behaves
    panel) unless `--blank-strict`. Together they stop a silently-broken image
    from passing QA — the LLM catches context, the scan catches what a model
    might gloss over.
+6. **Annotation-consistency check.** A demo must narrate with ONE mechanism
+   throughout — *either* tour popovers (a titled card with a "Step N of M"
+   counter and Back/Next/Skip, anchored to a spotlight ring) *or* banner/caption
+   overlays (a flat title+subtitle strip, no Next affordance). Both styles are
+   legitimate on their own; the invariant is CONSISTENCY, not "must be tour". A
+   single video that MIXES the two — a tour-popover intro that then hands off to
+   banner captions for the feature payload — is the defect (it reads as two demos
+   stitched together, and a scenario set written to bless the captions will never
+   flag it). The review prompt (EVIDENCE RULE 6) classifies the narration style in
+   every frame and, if BOTH styles appear across the video, emits a top-level
+   `annotation_issues[]` (`{frame, styles_seen, issue}`); a single consistent
+   style → empty array. Any `annotation_issues` **block the gate at every effort
+   level** (same treatment as `visual_issues`) and are surfaced in an "Annotation
+   issues" table in `qa-report.md`. A required `annotation-consistent` scenario in
+   the scenario file pins the expectation in the per-step verdict as well.
+7. **Pacing check (deterministic, no LLM).** A demo is only good if each narrated
+   moment stays on screen long enough to read — and the *vision* pass is blind to
+   this: every individual frame still looks correct, so a tour where every popover
+   flashes by in 70ms passes clean (the classic footgun: recording with
+   `WEB_CHAT_PACE=0`, the fast-validation posture, collapses every
+   `dwell(step.dwellMs)` to ~0, yielding a 12-second blur instead of a readable
+   ~80-second walk). `pacing-scan.sh` (pure `jq`) reads the recorder's **chapter
+   sidecar** (`<video>.chapters.json`, emitted by `ChapterRecorder`/`writeChapters`
+   — see [[kitsoki-ui-demo]]), where each tour step carries the `[start_ms,end_ms]`
+   window it actually occupied in the final MP4, and flags any chapter whose
+   duration is below the readable floor (`--pacing-min`, default 1500ms; also a
+   total-span floor). Same video in → same flags out. `qa.sh` auto-detects the
+   sidecar beside the MP4 and runs it on every invocation; flags are **advisory**
+   (surfaced in a "Pacing warnings" table, never block) unless `--pacing-strict`,
+   which promotes them to a blocking gate — the same advisory/strict shape as
+   `blank-scan`. This is the deterministic catch for "the pacing is terrible" that
+   no amount of frame-by-frame vision review can see.
 
 ## Prerequisites
 
@@ -170,17 +202,20 @@ dev env). No `make build` needed — this consumes an existing video/frames.
 
 | Script | Does | LLM? |
 |---|---|---|
-| `qa.sh <video> --feature F --scenarios S [--frames D] [--out D] [--model M] [--max-frames N] [--no-adversary] [--strict] [--blank-strict]` | One-shot wrapper; exit code is the gate | via review |
+| `qa.sh <video> --feature F --scenarios S [--frames D] [--out D] [--model M] [--max-frames N] [--chapters F] [--pacing-min N] [--no-adversary] [--strict] [--blank-strict] [--pacing-strict]` | One-shot wrapper; exit code is the gate | via review |
 | `extract-frames.sh <video> <out-dir> [--scene TH] [--interval S] [--dedup MS] [--max N] [--width W]` | Deterministic scene-change + periodic-floor frames + `frames.json` | no |
 | `blank-scan.sh <frames-dir\|image> [--out scan.json] [--grid WxH] [--quant N] [--min-coverage F] [--empty-coverage F] [--fail-on-find]` | Deterministic monochrome-region detector → `blank-scan.json` (flags any large flat block of one colour, or a near-empty frame) | no |
+| `pacing-scan.sh <chapters.json> [--out scan.json] [--min-ms N] [--min-total-ms N] [--fail-on-find]` | Deterministic chapter-duration detector → `pacing-scan.json` (flags narrated moments that flash by below the readable-window floor) | no |
 | `qa-review.sh --frames D --feature F --scenarios S --out V [--model M] [--no-adversary]` | Read-only vision agent → evidence-cited `verdict.json` + adversarial re-check | **yes** |
-| `report.sh <verdict.json> [--out report.md] [--strict] [--blank-scan scan.json] [--blank-strict]` | `verdict.json` (+ optional scan) → `qa-report.md`; recomputes the gate exit code | no |
+| `report.sh <verdict.json> [--out report.md] [--strict] [--blank-scan scan.json] [--blank-strict] [--pacing-scan scan.json] [--pacing-strict]` | `verdict.json` (+ optional scans) → `qa-report.md`; recomputes the gate exit code | no |
 
 Defaults: review model `claude-opus-4-8` (override `--model claude-sonnet-4-6`
 for faster/cheaper); `--max-frames 48`; `--strict` makes every scenario blocking.
-`qa.sh` always runs `blank-scan.sh` over the frames; its flags are **advisory**
-(surfaced in the report, never block) unless you pass `--blank-strict`. The LLM
-`visual_issues` check (context-aware) always blocks regardless.
+`qa.sh` always runs `blank-scan.sh` over the frames, and `pacing-scan.sh` over the
+chapter sidecar when one is present beside the MP4 (auto-detected, or `--chapters`);
+both scans' flags are **advisory** (surfaced in the report, never block) unless you
+pass `--blank-strict` / `--pacing-strict`. The LLM `visual_issues` and
+`annotation_issues` checks (context-aware) always block regardless.
 
 ## verdict.json shape
 

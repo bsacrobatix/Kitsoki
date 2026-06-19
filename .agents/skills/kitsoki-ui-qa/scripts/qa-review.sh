@@ -157,6 +157,21 @@ EVIDENCE RULES (these make the review trustworthy — follow them exactly):
    state; a silent blank where content belongs is a render bug — flag it.)
    Proactively scan EVERY frame for such dead regions even when no scenario step
    names them, and report each in a top-level "visual_issues" array.
+6. ANNOTATION CONSISTENCY — a demo must use ONE narration mechanism throughout.
+   These videos narrate with EITHER tour popovers (a titled card with a step
+   counter like "Step 3 of 9" and Back / Next / Skip buttons, usually anchored to
+   a spotlight ring) OR banner/caption overlays (a flat title+subtitle strip,
+   typically along an edge, with no Next affordance). EITHER style is fine on its
+   own. MIXING them — tour-popover cards in some frames AND banner/caption
+   overlays in others within the SAME video — is a defect: the video drifts
+   between two annotation styles. Scan EVERY frame and classify the narration
+   style you see (if any). If across the whole frame set you see BOTH a
+   tour-popover style AND a banner/caption style, report each offending frame in a
+   top-level "annotation_issues" array: for each frame name the styles_seen and
+   describe the inconsistency. A video that uses a single consistent style (or a
+   frame with no narration at all) contributes NOTHING to this array — leave it
+   empty in that case. Do NOT flag a video merely for being caption-narrated or
+   merely for being tour-narrated; only flag the MIX of the two.
 
 Compute each scenario's status as the worst of its steps (fail < unsupported <
 pass). Copy each scenario's `id`, `title`, and `required` exactly from the YAML
@@ -170,6 +185,9 @@ OUTPUT: print ONLY a single raw JSON object (no prose, no ``` fences) of shape:
   "frames_reviewed": ["0001-0ms.png"],
   "visual_issues": [
     {"frame":"0003-1200ms.png","region":"<where on screen>","issue":"<blank/broken render observed where content was expected>"}
+  ],
+  "annotation_issues": [
+    {"frame":"0007-5200ms.png","styles_seen":["tour-popover","banner-caption"],"issue":"<the mixed narration styles observed across the video>"}
   ],
   "scenarios": [
     {"id":"...","title":"...","required":true,"status":"pass|fail|unsupported",
