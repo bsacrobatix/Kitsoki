@@ -16,6 +16,7 @@ import * as fs from 'node:fs';
 import { Backend, type StoryHeader } from './backend';
 import { IdeServer } from './ide-server';
 import { IdeTools } from './ide-tools';
+import { DiffController } from './ide-diff';
 import {
   ChatPanel,
   SurfaceViewProvider,
@@ -60,7 +61,9 @@ export function activate(context: vscode.ExtensionContext): void {
   // spawns: the backend reads CLAUDE_CODE_SSE_PORT to dial back into this window
   // for host.ide.* (open the brief/PRD, show refine diffs). Tools are injected
   // (IdeTools) so the server is pure transport.
-  ideServer = new IdeServer(out, new IdeTools(out), {
+  const diff = new DiffController(out);
+  context.subscriptions.push(diff);
+  ideServer = new IdeServer(out, new IdeTools(out, diff), {
     workspaceFolders: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
   });
   context.subscriptions.push({ dispose: () => ideServer?.dispose() });

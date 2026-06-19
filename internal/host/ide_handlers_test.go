@@ -272,6 +272,48 @@ func TestIDEOpenDiff_Connected_NonBlocking(t *testing.T) {
 	}
 }
 
+// open_diff surfaces the editor's accept/reject verdict and forwards the inline
+// comment, so a story can bind data.verdict and branch (publish vs re-refine).
+func TestIDEOpenDiff_SurfacesVerdictAndComment(t *testing.T) {
+	link := &fakeLink{
+		connected: true,
+		results:   map[string]json.RawMessage{"openDiff": envelope(`{"ok":true,"verdict":"rejected"}`, false)},
+	}
+	ctx := host.WithIDELink(context.Background(), link)
+	res, err := host.IDEOpenDiffHandler(ctx, map[string]any{
+		"path": "/a.md", "new_text": "v2", "title": "t", "comment": "tighten the why",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Data["verdict"] != "rejected" {
+		t.Fatalf("verdict: want rejected, got %v", res.Data["verdict"])
+	}
+	if link.lastArgs["comment"] != "tighten the why" {
+		t.Fatalf("comment not forwarded: %v", link.lastArgs)
+	}
+	if link.lastArgs["new_text"] != "v2" {
+		t.Fatalf("new_text not forwarded: %v", link.lastArgs)
+	}
+}
+
+// A connected editor that returns no verdict defaults to "accepted" (the v1
+// proceed-anyway posture) so a non-gating editor still advances the story.
+func TestIDEOpenDiff_DefaultsVerdictAccepted(t *testing.T) {
+	link := &fakeLink{
+		connected: true,
+		results:   map[string]json.RawMessage{"openDiff": envelope(`{"ok":true}`, false)},
+	}
+	ctx := host.WithIDELink(context.Background(), link)
+	res, err := host.IDEOpenDiffHandler(ctx, map[string]any{"path": "/a.md", "new_text": "v2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Data["verdict"] != "accepted" {
+		t.Fatalf("verdict: want accepted default, got %v", res.Data["verdict"])
+	}
+}
+
 // --- Tool-level isError surfaces as Result.Error, not a Go error. ---
 
 func TestIDEHandlers_ToolIsError(t *testing.T) {

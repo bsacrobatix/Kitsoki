@@ -14,6 +14,7 @@
 // the genuine, hand-drivable behaviour.
 
 import * as vscode from 'vscode';
+import type { DiffController } from './ide-diff';
 
 /** A line/character position as the IDE MCP encodes it. */
 interface WirePosition {
@@ -49,7 +50,12 @@ function fromWireRange(raw: unknown): vscode.Range | undefined {
  * concerns (the diff verdict gate) get their own collaborators wired in later.
  */
 export class IdeTools {
-  constructor(private readonly out: vscode.OutputChannel) {}
+  constructor(
+    private readonly out: vscode.OutputChannel,
+    // The diff/verdict gate is injected so the tool surface stays thin; when
+    // absent (e.g. a minimal host) openDiff degrades to an acknowledgement.
+    private readonly diff?: DiffController,
+  ) {}
 
   /**
    * Dispatch one `tools/call` by name. Returns the structured payload the
@@ -100,14 +106,18 @@ export class IdeTools {
   }
 
   /**
-   * openDiff — STUB for this slice: acknowledges the call so the bridge is
-   * exercised end-to-end. The native side-by-side diff, inline comment, and the
-   * accept/reject verdict gate replace this in DiffController.
+   * openDiff — open a native side-by-side diff with the refine feedback as an
+   * inline comment and accept/reject affordances, then BLOCK until the operator
+   * decides. The returned {verdict} is what the Go handler surfaces so the story
+   * branches (publish on accept, re-refine on reject). Without a DiffController
+   * it degrades to a non-blocking ack.
    */
-  private async openDiff(args: Record<string, unknown>): Promise<{ ok: boolean }> {
-    const p = typeof args.path === 'string' ? args.path : '';
-    this.out.appendLine(`[ide] openDiff ${p} (stub)`);
-    return { ok: true };
+  private async openDiff(args: Record<string, unknown>): Promise<unknown> {
+    if (!this.diff) {
+      this.out.appendLine('[ide] openDiff: no diff controller; acknowledging');
+      return { ok: true, verdict: 'accepted' };
+    }
+    return this.diff.open(args);
   }
 
   /**

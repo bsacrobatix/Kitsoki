@@ -65,6 +65,18 @@
         "command": "kitsoki.restartBackend",
         "title": "Kitsoki: Restart Backend",
         "category": "Kitsoki"
+      },
+      {
+        "command": "kitsoki.diff.accept",
+        "title": "Kitsoki: Accept Change",
+        "category": "Kitsoki",
+        "icon": "$(check)"
+      },
+      {
+        "command": "kitsoki.diff.reject",
+        "title": "Kitsoki: Reject Change",
+        "category": "Kitsoki",
+        "icon": "$(x)"
       }
     ],
     "menus": {
@@ -75,13 +87,59 @@
           "group": "navigation"
         }
       ],
+      "editor/title": [
+        {
+          "command": "kitsoki.diff.accept",
+          "when": "resourceScheme == kitsoki-diff && kitsoki.diffPending",
+          "group": "navigation@1"
+        },
+        {
+          "command": "kitsoki.diff.reject",
+          "when": "resourceScheme == kitsoki-diff && kitsoki.diffPending",
+          "group": "navigation@2"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "kitsoki.diff.accept",
+          "when": "commentController == kitsoki.refine",
+          "group": "inline@1"
+        },
+        {
+          "command": "kitsoki.diff.reject",
+          "when": "commentController == kitsoki.refine",
+          "group": "inline@2"
+        }
+      ],
       "commandPalette": [
         {
           "command": "kitsoki.popOutChat",
           "when": "false"
+        },
+        {
+          "command": "kitsoki.diff.accept",
+          "when": "kitsoki.diffPending"
+        },
+        {
+          "command": "kitsoki.diff.reject",
+          "when": "kitsoki.diffPending"
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "kitsoki.diff.accept",
+        "key": "ctrl+alt+y",
+        "mac": "cmd+alt+y",
+        "when": "kitsoki.diffPending"
+      },
+      {
+        "command": "kitsoki.diff.reject",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n",
+        "when": "kitsoki.diffPending"
+      }
+    ],
     "configuration": {
       "title": "Kitsoki",
       "properties": {

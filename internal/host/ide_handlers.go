@@ -10,9 +10,10 @@
 // non-connection error from the link) surfaces as a Go error.
 //
 // The verb→tool mapping and arg/result shapes are documented in
-// docs/architecture/hosts.md ("host.ide.*"). open_diff is non-blocking in v1:
-// it acknowledges the tool call and returns {ok:true}; the editor's
-// accept/reject happens out-of-band and is not captured (epic open question #2).
+// docs/architecture/hosts.md ("host.ide.*"). open_diff is a BLOCKING verdict
+// gate: the editor suspends the tools/call response until the operator accepts
+// or rejects the diff in-editor, so the turn suspends until then; the verdict is
+// surfaced as data.verdict for a story to bind and branch on (publish vs refine).
 package host
 
 import (
@@ -297,23 +298,25 @@ func IDEOpenFileHandler(ctx context.Context, args map[string]any) (Result, error
 
 // IDEOpenDiffHandler implements host.ide.open_diff.
 //
-// Maps to openDiff. NON-BLOCKING in v1: it acknowledges the tool call and
-// returns {ok:true} regardless of what the editor returns later — the
-// accept/reject happens out-of-band in the editor and is not captured (verdict
-// capture is the deferred follow-up, epic open question #2). It does NOT write
-// the file and does NOT suspend the turn.
+// Maps to openDiff. BLOCKING verdict gate: the editor opens a side-by-side diff
+// (the on-disk file vs new_text) and withholds the tools/call response until the
+// operator accepts or rejects it in the editor, so this call (and the turn that
+// dispatched it) SUSPENDS until then — link.CallTool has no timeout and awaits
+// the response. The editor applies new_text on accept. The returned verdict is
+// surfaced as data.verdict so a story can `bind:` it and branch (publish on
+// accept, re-refine on reject). An editor that returns no verdict (older,
+// non-gating) defaults to "accepted" — the v1 proceed-anyway behaviour.
 //
-// Args: path, new_text, title (optional). Result.Data on success:
-// {"ok":true,"connected":true}; not-connected: {"connected":false,"ok":false}.
+// Args: path (required), new_text, title (optional), comment (optional inline
+// feedback shown on the diff). Result.Data on success:
+// {"ok":true,"connected":true,"verdict":"accepted"|"rejected"}; not-connected:
+// {"connected":false,"ok":false}.
 func IDEOpenDiffHandler(ctx context.Context, args map[string]any) (Result, error) {
 	link := IDELinkFromContext(ctx)
 	if link == nil || !link.Connected() {
 		return ideNotConnected(map[string]any{"ok": false}), nil
 	}
 
-	// TODO(schema): openDiff arg keys unverified — pin via manual capture
-	// (slice-1 task 2.5). Best-effort {path,new_text,title}; the stub mirrors
-	// whatever the capture finds.
 	toolArgs := map[string]any{}
 	if p, ok := args["path"].(string); ok && p != "" {
 		toolArgs["path"] = p
@@ -324,6 +327,9 @@ func IDEOpenDiffHandler(ctx context.Context, args map[string]any) (Result, error
 	if t, ok := args["title"].(string); ok && t != "" {
 		toolArgs["title"] = t
 	}
+	if c, ok := args["comment"].(string); ok && c != "" {
+		toolArgs["comment"] = c
+	}
 
 	raw, err := link.CallTool(ctx, "openDiff", toolArgs)
 	if err != nil {
@@ -332,9 +338,17 @@ func IDEOpenDiffHandler(ctx context.Context, args map[string]any) (Result, error
 		}
 		return Result{}, err
 	}
-	_, text, isError := unwrapIDEResult(raw)
+	payload, text, isError := unwrapIDEResult(raw)
 	if isError {
 		return Result{Error: text}, nil
 	}
-	return Result{Data: map[string]any{"connected": true, "ok": true}}, nil
+	// Surface the accept/reject verdict. Default to "accepted" when the editor
+	// returns no verdict so a non-gating editor preserves forward progress.
+	verdict := "accepted"
+	if m, ok := payload.(map[string]any); ok {
+		if v, ok := m["verdict"].(string); ok && v != "" {
+			verdict = v
+		}
+	}
+	return Result{Data: map[string]any{"connected": true, "ok": true, "verdict": verdict}}, nil
 }
