@@ -47,10 +47,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import pricing  # noqa: E402  (shared authoritative price table)
 DEFAULT_RAW = HERE / "examples" / "git-ops" / "raw"
 DEFAULT_CASSETTE = (
     HERE.parent.parent
@@ -70,12 +73,18 @@ DEMO_SESSIONS = [
     ("set up a worktree for the new feature", "sess-worktree"),
 ]
 
-# Sonnet 4.x list price, USD / 1M tokens (2026-06). 5-minute cache TTL tiers.
+# Price defaults come from the shared table (pricing.py) so there is exactly one
+# place to update rates. This estimator models the SYNTHETIC/redacted demo corpus
+# (no telemetry); for REAL transcripts use cost_extract.py, which reads recorded
+# usage and needs no chars/token or cold/warm modelling at all. We default to the
+# Sonnet tier here because the demo's oracle model is Sonnet, but real Claude Code
+# coding sessions usually run on the pricier Opus tier (see the case study).
+_P = pricing.PRICING["claude-sonnet-4"]
 DEFAULTS = dict(
-    price_in=3.0,          # fresh input
-    price_out=15.0,        # output
-    price_cache_write=3.75,  # cache write (5m) = 1.25x input
-    price_cache_read=0.30,   # cache read = 0.10x input
+    price_in=_P.input,            # fresh input
+    price_out=_P.output,          # output
+    price_cache_write=_P.cache_write_5m,  # cache write (5m) = 1.25x input
+    price_cache_read=_P.cache_read,       # cache read = 0.10x input
     chars_per_token=3.8,     # English+code heuristic
     base_tokens=18000,       # system prompt + tool schemas, re-sent every call
     tool_result_floor=450,   # realistic min for a git/file tool result

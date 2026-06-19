@@ -16,7 +16,14 @@ first-fit-decreasing bin-pack -> manifest.
 Output layout (under --out, default /tmp/sm-<tag>):
     traces/<session-id>.txt        one distilled (optionally redacted) trace each
     batches/batch-NN.txt           newline-delimited absolute trace paths, ~--budget bytes each
-    manifest.json                  params + counts + per-batch sizes
+    manifest.json                  params + counts + per-batch sizes + real-cost summary
+    costs.json                     REAL per-session cost from each source jsonl's
+                                   recorded message.usage (cost_extract.py). The
+                                   distilled trace drops telemetry; this captures it
+                                   from the source before it's lost, so every mining
+                                   run carries the genuine $ it cost to produce —
+                                   "real costs for real comparisons" for everything
+                                   mined. Empty/zero for synthetic corpora with no usage.
 
 Stdout ends with `BATCHES=<n>` and `BATCHDIR=<path>` so a caller (skill/workflow)
 can read how many reader agents to spawn.
@@ -31,6 +38,9 @@ import sys
 import shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import cost_extract  # noqa: E402  (real-cost capture from source telemetry)
+
 DISTILL = os.path.join(HERE, "distill.jq")
 REDACT = os.path.join(HERE, "redact.py")
 
@@ -228,6 +238,7 @@ def main():
            (args.min_bytes, args.grep or "-", args.sample, args.max or "-"))
 
     traces = []
+    costs = []  # real per-session cost, captured from source telemetry
     failed = 0
     dropped = 0
     for src in sessions:
@@ -244,6 +255,14 @@ def main():
             os.remove(dst)
             continue
         traces.append((dst, sz))
+        # Capture the REAL cost from the source jsonl's recorded usage before the
+        # distilled trace (telemetry-free) is all that's left. Never raises — a
+        # synthetic/usage-free source simply yields $0 (exact=True, calls=0).
+        try:
+            sc = cost_extract.extract(src)
+            costs.append(cost_extract._session_json(sc))
+        except (OSError, ValueError):
+            pass
 
     bins = binpack(traces, args.budget)
     for i, (tot, paths) in enumerate(bins, 1):
@@ -251,6 +270,26 @@ def main():
             fh.write("\n".join(paths) + "\n")
 
     total_bytes = sum(s for _, s in traces)
+
+    # Real-cost sidecar: per-session genuine $ + an aggregate, from recorded usage.
+    cost_total = round(sum(c["cost_usd"] for c in costs), 6)
+    cost_calls = sum(c["api_calls"] for c in costs)
+    cost_priced = sorted({m for c in costs for m in c["models"]})
+    cost_exact = all(c["exact"] for c in costs)
+    costs_doc = {
+        "note": "REAL cost from each source transcript's recorded message.usage, "
+                "via cost_extract.py + pricing.py. costUSD-null (subscription) "
+                "sources are computed from token counts. $0 == no telemetry "
+                "(synthetic corpus).",
+        "total_cost_usd": cost_total,
+        "total_api_calls": cost_calls,
+        "models": cost_priced,
+        "all_exact": cost_exact,
+        "sessions": sorted(costs, key=lambda c: -c["cost_usd"]),
+    }
+    with open(os.path.join(out, "costs.json"), "w") as fh:
+        json.dump(costs_doc, fh, indent=2)
+
     manifest = {
         "project_dir": proj,
         "out": out,
@@ -265,6 +304,9 @@ def main():
         "dropped_empty": dropped,
         "agent_sessions_dropped": agent_dropped,
         "total_trace_bytes": total_bytes,
+        "real_cost": {"total_usd": cost_total, "api_calls": cost_calls,
+                      "models": cost_priced, "all_exact": cost_exact,
+                      "sidecar": "costs.json"},
         "batches": [{"file": "batches/batch-%02d.txt" % i,
                      "traces": len(p), "bytes": t}
                     for i, (t, p) in enumerate(bins, 1)],
@@ -274,6 +316,9 @@ def main():
 
     eprint("distilled %d traces (%d KB), %d failed, %d near-empty dropped" %
            (len(traces), total_bytes // 1000, failed, dropped))
+    if cost_total > 0:
+        eprint("real cost of mined sessions: $%.2f across %d API calls (costs.json)%s"
+               % (cost_total, cost_calls, "" if cost_exact else " [some fallback-priced]"))
     eprint("%d batches of ~%d KB:" % (len(bins), args.budget // 1000))
     for i, (t, p) in enumerate(bins, 1):
         eprint("  batch-%02d: %d traces, %d KB" % (i, len(p), t // 1000))
