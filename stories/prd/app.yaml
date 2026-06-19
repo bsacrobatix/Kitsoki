@@ -194,6 +194,15 @@ world:
 
   # ── draft + refine ──────────────────────────────────────────────────
   prd_artifact:    { type: object, default: {} }   # task result: { title, summary_markdown, file_path, confidence, needs_clarification, follow_up_questions }
+  # IDE editor-mirror state (rooms/drafting.yaml). prd_draft_doc is the absolute
+  # path host.artifacts_dir wrote the PRD to (opened via host.ide.open_file);
+  # prd_stage_*/prd_diff_verdict back the refine→diff→verdict gate. Declared so a
+  # machine-time template (e.g. prd_stage_artifact.title) resolves to nil
+  # gracefully before the binding host call has run.
+  prd_draft_doc:      { type: string, default: "" }
+  prd_stage_doc:      { type: string, default: "" }
+  prd_stage_artifact: { type: object, default: {} }
+  prd_diff_verdict:   { type: string, default: "" }
   refine_feedback: { type: string, default: "" }
   refine_message:  { type: string, default: "" }   # the operator's last refine/clarify instruction, echoed back in the references + drafting views ("You asked: …") so a refine turn visibly acknowledges what was asked. Set on the refine/clarify arcs, cleared on clean exits.
 

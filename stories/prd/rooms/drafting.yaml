@@ -286,7 +286,7 @@ states:
                     upstream_paths:    "{{ world.upstream_paths }}"
                     clarification_log: "{{ world.clarification_log }}"
                     references:        "{{ world.references }}"
-                    output_path:       "{{ world.prd_workspace }}/004-prd.next.md"
+                    output_path:       "{{ world.prd_workspace }}/004-prd-next.md"
                     workspace:         "{{ world.prd_workspace }}"
                     workdir:           "{{ world.workdir }}"
                     refine_feedback:   "{{ world.refine_feedback }}"
@@ -299,7 +299,7 @@ states:
             - invoke: host.artifacts_dir
               with:
                 artifacts_root: "{{ world.workdir }}/{{ world.prd_workspace }}"
-                thread:         "004-prd.next"
+                thread:         "004-prd-next"
                 mode:           "replace"
                 title:          "{{ world.prd_stage_artifact.title }}"
                 body:           "{{ world.prd_stage_artifact.summary_markdown }}"
