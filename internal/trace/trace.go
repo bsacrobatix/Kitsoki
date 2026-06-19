@@ -93,6 +93,16 @@ const (
 	EvTurnDeterministicHit  = "turn.deterministic_hit"
 	EvTurnDeterministicMiss = "turn.deterministic_miss"
 
+	// Pre-LLM intercept (kitsoki intercept). EvInterceptMatched fires when the
+	// side-effect-free Orchestrator.Classify resolves a verdict via a no-LLM
+	// tier (deterministic / synonym / embedding) and the external gate may
+	// execute; EvInterceptPassed fires when no no-LLM tier matched and the
+	// gate lets the turn proceed to the LLM untouched. Classify itself never
+	// emits these — the intercept gate that calls Classify does — so Classify
+	// stays a pure read.
+	EvInterceptMatched = "intercept.matched"
+	EvInterceptPassed  = "intercept.passed"
+
 	// Semantic routing (semroute; see
 	// docs/architecture/semantic-routing.md). EvTurnSemanticHit
 	// fires when [semroute.Matcher.Match] returns a single-intent
