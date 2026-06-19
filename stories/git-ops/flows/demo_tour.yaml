@@ -3,7 +3,7 @@
 # Drives ONE long feature-branch → integration session end-to-end through the
 # hub-and-spoke, visiting many rooms so the demo is extensive:
 #
-#   idle → branch_ops
+#   idle → branch_ops   (auto-routed at session boot — no `look` turn)
 #   stage → staging (classify; .npmrc flagged suspicious) → add_all (confirm gate)
 #         → confirm_add_all → back → branch_ops
 #   commit → commit (oracle message) → regenerate → accept → back → branch_ops
@@ -15,11 +15,14 @@
 #   worktree_list → list worktrees → back → main_ops
 #   cleanup → remove worktree + branch → main_ops
 #
-# Recorded with `kitsoki web --flow <this> --mode one-shot` so the root `idle`
-# router advances on a single `look` and each turn runs its full emit cascade
+# Recorded with `kitsoki web --flow <this> --mode one-shot`. The root `idle`
+# router auto-routes to branch_ops at session boot (RunInitialOnEnter follows
+# idle's on_enter emit_intent), so the web demo's first user turn is a real
+# `stage` — no `look` kick. `--mode one-shot` runs each turn's full emit cascade
 # (so the conflicting rebase auto-resolves in one turn). Host calls are stubbed
-# here; the kitsoki-ui-demo spec submits the intents. The turns: list mirrors the
-# drive order so this doubles as a CLI flow test.
+# here; the kitsoki-ui-demo spec submits the intents. This CLI flow starts at
+# branch_ops (initial_state below) — where the web demo lands after boot — so its
+# turns: list begins there and doubles as a CLI flow test of the same drive order.
 
 test_kind: flow
 app: ../app.yaml

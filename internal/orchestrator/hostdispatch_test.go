@@ -262,6 +262,63 @@ func TestOrchestrator_RunInitialOnEnter_FiresHostCallAndBinds(t *testing.T) {
 		"RunInitialOnEnter must be a no-op once journey.Turn > 0")
 }
 
+// TestOrchestrator_RunInitialOnEnter_FollowsBootRoute verifies that a
+// button-less router root room auto-routes onward at session boot — the
+// emit_intent on its on_enter is followed even when the emit's value
+// depends on a world key the on_enter's own host call binds (so it can
+// only resolve post-bind).
+//
+// Regression for git-ops: its `idle` router runs detect_context (binds
+// world.route) then `emit_intent: "{{ world.route }}"` to land on the
+// branch/main hub. Before the fix, RunInitialOnEnter ran idle's on_enter
+// host call but never settled the post-bind emit, so a fresh web session
+// sat at the router showing "Detecting…" — despite the room promising
+// "routed to hub automatically" — until a manual kick turn was submitted.
+// The demo papered over this by driving a synthetic `look`; the honest
+// fix routes at boot. After RunInitialOnEnter the session must be on the
+// routed `hub`, at turn 0, with no user turn submitted.
+func TestOrchestrator_RunInitialOnEnter_FollowsBootRoute(t *testing.T) {
+	def, err := app.Load("testdata/initial_onenter_route/app.yaml")
+	require.NoError(t, err)
+
+	m, err := machine.New(def)
+	require.NoError(t, err)
+
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	reg := host.NewRegistry()
+	reg.Register("host.detect", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		// Route to the hub via the `to_hub` synthetic intent.
+		return host.Result{Data: map[string]any{"route": "to_hub", "detected": "feat/x"}}, nil
+	})
+
+	orch := orchestrator.New(def, m, s, noopHarness{}, orchestrator.WithHostRegistry(reg))
+
+	ctx := context.Background()
+	sid, err := orch.NewSession(ctx)
+	require.NoError(t, err)
+
+	// Pre-condition: a freshly created session is still at the router.
+	j0, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	require.Equal(t, "idle", string(j0.State), "session starts at the router root")
+
+	require.NoError(t, orch.RunInitialOnEnter(ctx, sid))
+
+	// The boot emit_intent must have been followed: the session is now on
+	// the routed hub, not the router — with no user turn submitted.
+	j1, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	require.Equal(t, "hub", string(j1.State),
+		"idle's post-bind emit_intent must route the session to the hub at boot")
+	require.Equal(t, app.TurnNumber(0), j1.Turn,
+		"the boot route is session init, not a user turn — turn stays 0")
+	require.Equal(t, "feat/x", j1.World.Vars["detected"],
+		"the hub's world reflects the value bound during the boot route")
+}
+
 // TestOrchestrator_HostDispatchOnError_SelfRedirectDoesNotLoop guards
 // against an infinite loop when a state's on_enter `invoke:` has
 // `on_error: <self>`. The author's intent for self-targeting on_error

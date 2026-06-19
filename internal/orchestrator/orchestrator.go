@@ -651,6 +651,31 @@ func (o *Orchestrator) RunInitialOnEnter(ctx context.Context, sid app.SessionID)
 		}
 	}
 
+	// Follow any boot emit_intent whose value / `when:` depends on a world
+	// key the on_enter host calls just bound — e.g. git-ops idle's
+	// `emit_intent: "{{ world.route }}"`, where the detect_context host call
+	// binds world.route. RunEffectsAndState above ran with the pre-host-call
+	// world, so that emit could not yet resolve; without settling it here the
+	// session sits at the router room despite its on_enter promising an
+	// automatic route ("routed to hub automatically"). The normal turn path
+	// runs this same settle after its host calls (see settlePostBindEmits);
+	// mirroring it here lets a fresh interactive session land on the routed
+	// hub at boot with no user turn. settlePostBindEmits is a no-op (empty
+	// res.Events, state unchanged) for the common case of a story with no
+	// boot emit_intent.
+	res := &machine.TurnResult{NewState: resolved, World: newWorld}
+	if emitErr := o.settlePostBindEmits(ctx, sid, res, nil, 0); emitErr != "" {
+		// settlePostBindEmits already recorded a HarnessError into res.Events
+		// and left res at the known pre-emit resting place. Persist what we
+		// have so the session lands on a real state rather than half-bound
+		// limbo.
+		slog.Warn("orchestrator.run_initial_on_enter.settle_emits_failed",
+			"session", string(sid), "state", string(resolved), "err", emitErr)
+	}
+	events = append(events, res.Events...)
+	newWorld = res.World
+	resolved = res.NewState
+
 	// No events to persist? Nothing to do.
 	if len(events) == 0 {
 		return nil

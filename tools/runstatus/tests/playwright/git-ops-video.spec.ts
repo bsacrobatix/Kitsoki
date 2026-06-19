@@ -13,16 +13,18 @@
  * main. The spec asserts each step's `title` against the live popover so the
  * manifest and video cannot silently drift.
  *
- * DRIVING: git-ops' rooms include the root `idle` router, which renders NO
- * clickable menu (it auto-routes via on_enter) — so it can't be advanced by a
- * button click or a free-text turn in the no-LLM posture. We therefore drive
- * every intent through the SPA's own demo hook `window.__kitsokiSubmitIntent`
- * (added by InteractiveView for exactly this: submit through the view's store
- * path so the chat + InputBar re-render reactively, unlike an out-of-band RPC).
- * `--mode one-shot` runs each turn's full emit cascade so `idle` routes to
- * branch_ops on a single `look`. These drives are PRE-STEP HOOKS (as multi-story
- * advances the PRD pipeline) so each spotlighted state exists before the
- * spotlight lands.
+ * DRIVING: git-ops' root `idle` router renders NO clickable menu — it auto-routes
+ * via its on_enter emit_intent. That route now fires at SESSION BOOT
+ * (RunInitialOnEnter follows the post-bind emit), so a fresh session lands
+ * directly on branch_ops with no kick turn — the FIRST user turn the demo shows
+ * is a real `stage`, not a mechanical `look`. Every subsequent intent is driven
+ * through the SPA's own demo hook `window.__kitsokiSubmitIntent` (added by
+ * InteractiveView for exactly this: submit through the view's store path so the
+ * chat + InputBar re-render reactively, unlike an out-of-band RPC), since the
+ * no-LLM posture has no LLM to interpret free text. `--mode one-shot` runs each
+ * turn's full emit cascade (e.g. the rebase conflict auto-resolves in one turn).
+ * These drives are PRE-STEP HOOKS (as multi-story advances the PRD pipeline) so
+ * each spotlighted state exists before the spotlight lands.
  *
  * Uses a tmp DB (beforeAll/afterAll). ADDR 7753 (distinct from every other spec).
  *
@@ -243,7 +245,11 @@ test.describe("git-ops story walkthrough (live, no-LLM)", () => {
 
         // ── Pre-step setup: advance the git-ops session so the state exists ────
         if (step.id === "gitops-hub") {
-          await drive("look"); // idle → branch_ops (one-shot routes via on_enter)
+          // No kick turn: the session boots straight to branch_ops. git-ops'
+          // idle router auto-routes via its on_enter emit_intent at session
+          // creation (RunInitialOnEnter follows the post-bind route), exactly
+          // as the room promises ("routed to hub automatically"). So the FIRST
+          // user turn the demo shows is a real `stage`, not a mechanical `look`.
           await waitForState(page, "branch_ops", 15000);
           await dwell(page, SETTLE_MS);
         }
