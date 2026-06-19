@@ -47,6 +47,16 @@ On entry, `idle` detects the current branch and worktrees, then routes:
 
 ## Operations
 
+### Command hub (`intercept`)
+
+A branch-agnostic room that groups every command below into one place, each arc
+delegating to its command room (no duplicated git logic). It exists for the
+**pre-LLM intercept gate** (`kitsoki intercept --room intercept`): a stateless,
+no-LLM one-shot classifies a natural phrasing ("rebase this onto main") and runs
+the command directly. The flagship `stories/dev-story/` surfaces the same room by
+importing git-ops. See
+[prompt-intercept.md §6](../../docs/architecture/prompt-intercept.md#6-worked-example--git-ops-command-hub).
+
 ### Feature branch (`branch_ops`)
 
 | Intent | Description |
