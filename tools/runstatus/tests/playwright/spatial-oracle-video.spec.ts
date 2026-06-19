@@ -99,14 +99,15 @@ const ONE_PX_PNG = Buffer.from(
 );
 
 // The checked-in deterministic rrweb fixture — recorded at a FIXED 1280×720
-// viewport (a minimal real kitsoki UI fragment with Run/Refine intent buttons +
-// a chat row). When videoEvents returns it, /review renders the rrweb Replayer
-// (REAL reconstructed UI) under the picker, so a click resolves a real control
-// (intent-btn-run) against the reconstructed DOM — the headline of the feature.
+// viewport: a CONTENT-RICH real kitsoki room (the bugfix story's review surface —
+// the AGENT panel, the ACTIONS intent buttons, the state diagram + trace panels).
+// When videoEvents returns it, /review renders the rrweb Replayer (REAL
+// reconstructed UI) under the picker, so a click resolves a real control
+// (intent-btn-start) against the reconstructed DOM — the headline of the feature.
 const REC_W = 1280;
 const REC_H = 720;
-// The Run button's center in those natural pixels (bbox {x:20,y:664,w:73,h:38}).
-const RUN_CENTER = { x: 57, y: 683 };
+// The Start intent button's center in those natural pixels (bbox {x:20,y:481,w:177,h:47}).
+const START_CENTER = { x: 108, y: 504 };
 const REPLAY_EVENTS = JSON.parse(
   fs.readFileSync(
     path.join(projectRoot, "tests", "fixtures", "spatial-replay.rrweb.json"),
@@ -316,23 +317,33 @@ test("spatial oracle feature-spotlight video", async () => {
     // chip) have their targets present.
     await overlayStep("so-picker", {
       before: async () => {
-        mark("click the Run button");
+        mark("click the Start button");
         const picker = page.getByTestId("spatial-picker");
         const pbox = await picker.boundingBox();
         if (!pbox) throw new Error("picker has no bounding box");
         // position is relative to the picker box, which covers the rendered
         // (scaled) replay exactly — so the fraction of natural pixels equals the
         // box fraction.
+        // The so-picker tour popover can sit over the (left-side) Start button
+        // and intercept the picker click. Drop the popover's pointer-events for
+        // the click (it stays VISIBLE on camera), then restore so its Next works.
+        const popPE = (pe: string) =>
+          page.evaluate((v) => {
+            const p = document.querySelector('[data-testid="tour-popover"]');
+            if (p) (p as HTMLElement).style.pointerEvents = v;
+          }, pe);
+        await popPE("none");
         await picker.click({
           position: {
-            x: (RUN_CENTER.x / REC_W) * pbox.width,
-            y: (RUN_CENTER.y / REC_H) * pbox.height,
+            x: (START_CENTER.x / REC_W) * pbox.width,
+            y: (START_CENTER.y / REC_H) * pbox.height,
           },
         });
+        await popPE("");
         await expect(page.getByTestId("sp-point")).toBeVisible();
         await expect(page.getByTestId("fd-element")).toBeVisible();
         // Resolution against the reconstructed DOM: a REAL app control, not <video>.
-        await expect(page.getByTestId("fd-element")).toContainText("intent-btn-run");
+        await expect(page.getByTestId("fd-element")).toContainText("intent-btn-start");
         await dwell(page, SETTLE_MS);
       },
     });
@@ -394,6 +405,12 @@ test("spatial oracle feature-spotlight video", async () => {
     await expect(page.getByTestId("point-page")).toBeVisible({ timeout: 15000 });
     // Portable narration: caption banner + spotlight box (both pointer-events:none).
     const caption = await makeCaption(page);
+    // The /point window fills most of the viewport, so the default top-centre
+    // caption would cover the frame. Pin it to the bottom margin (below the
+    // composer) for this beat so the reconstructed frame stays fully visible.
+    await page.addStyleTag({
+      content: "#demo-caption{top:auto !important;bottom:26px !important;max-width:80% !important}",
+    });
     const spotlight = await makeSpotlight(page);
     await dwell(page, SETTLE_MS);
 

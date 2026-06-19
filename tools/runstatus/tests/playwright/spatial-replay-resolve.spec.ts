@@ -11,16 +11,17 @@
  *
  * The new RPC here is runstatus.video.events: it returns a CHECKED-IN rrweb
  * fixture (tests/fixtures/spatial-replay.rrweb.json) recorded at a FIXED
- * 1280×720 viewport — a minimal but real kitsoki UI fragment with two intent
- * buttons ([data-testid=intent-btn-run] "Run", intent-btn-refine "Refine") and a
- * chat row. When videoEvents returns events, ReviewPage renders the rrweb
- * Replayer (REAL reconstructed UI) under the picker instead of the opaque
- * <video>; the picker's root is the replay iframe's contentDocument.
+ * 1280×720 viewport — a CONTENT-RICH real kitsoki room: the interactive chat of
+ * the bugfix story (a populated chat transcript, the state diagram + trace
+ * panels, and the ACTIONS intent buttons). When videoEvents returns events,
+ * ReviewPage renders the rrweb Replayer (REAL reconstructed UI) under the picker
+ * instead of the opaque <video>; the picker's root is the replay iframe's
+ * contentDocument.
  *
  * Flow: open /review, flag the scene (selects the flag → mounts ReplayFrame),
- * wait for the replay to render, click over the Run button's location (mapped
- * from the fixture's natural pixels), and assert the resolved element chip
- * contains intent-btn-run with role=button — resolution against the
+ * wait for the replay to render, click over the Start intent button's location
+ * (mapped from the fixture's natural pixels), and assert the resolved element
+ * chip contains intent-btn-start with role=button — resolution against the
  * reconstructed DOM, not the live <video>.
  */
 import { test, expect, type Page } from "@playwright/test";
@@ -38,9 +39,9 @@ const projectRoot = path.resolve(__dirname, "../..");
 // replay iframe's own pixel space, which the picker maps clicks into.
 const REC_W = 1280;
 const REC_H = 720;
-// The Run button's center in those natural pixels (measured from the fixture's
-// reconstructed DOM — bbox {x:20, y:664, w:73, h:38}).
-const RUN_CENTER = { x: 57, y: 683 };
+// The Start intent button's center in those natural pixels (measured from the
+// fixture's reconstructed DOM — bbox {x:20, y:481, w:177, h:47}).
+const START_CENTER = { x: 108, y: 504 };
 
 function startStaticServer(html: string): Promise<{ origin: string; close: () => void }> {
   return new Promise((resolve) => {
@@ -119,7 +120,7 @@ async function setup(page: Page): Promise<{
         break;
       case "runstatus.session.offpath":
         offpathCalls.push(body.params as unknown as OffpathParams);
-        result = { answer: "That's the Run intent button." };
+        result = { answer: "That's the Start intent button." };
         break;
       default:
         result = {};
@@ -137,7 +138,7 @@ async function setup(page: Page): Promise<{
 }
 
 test.describe("spatial resolve against the rrweb-reconstructed DOM", () => {
-  test("click the Run button in the replay → resolves a real app control", async ({
+  test("click the Start intent button in the replay → resolves a real app control", async ({
     page,
   }) => {
     const { offpathCalls, close } = await setup(page);
@@ -157,15 +158,15 @@ test.describe("spatial resolve against the rrweb-reconstructed DOM", () => {
     const picker = page.getByTestId("spatial-picker");
     await expect(picker).toBeVisible({ timeout: 10000 });
 
-    // Click over the Run button's location. position is relative to the picker's
+    // Click over the Start button's location. position is relative to the picker's
     // box, which covers the rendered (scaled) replay exactly — so the fraction of
     // the natural pixels equals the fraction of the picker box.
     const boxRect = await picker.boundingBox();
     if (!boxRect) throw new Error("picker has no bounding box");
     await picker.click({
       position: {
-        x: (RUN_CENTER.x / REC_W) * boxRect.width,
-        y: (RUN_CENTER.y / REC_H) * boxRect.height,
+        x: (START_CENTER.x / REC_W) * boxRect.width,
+        y: (START_CENTER.y / REC_H) * boxRect.height,
       },
     });
 
@@ -173,9 +174,9 @@ test.describe("spatial resolve against the rrweb-reconstructed DOM", () => {
     await expect(page.getByTestId("sp-point")).toBeVisible();
     const chip = page.getByTestId("fd-element");
     await expect(chip).toBeVisible();
-    // Resolution against the reconstructed DOM: the testid'd Run intent button,
+    // Resolution against the reconstructed DOM: the testid'd Start intent button,
     // role=button — NOT the rp-player video (proving the replay-iframe root).
-    await expect(chip).toContainText("intent-btn-run");
+    await expect(chip).toContainText("intent-btn-start");
     await expect(chip).toContainText("button");
 
     // The bundle rides the existing off-path oracle unchanged.
@@ -185,7 +186,7 @@ test.describe("spatial resolve against the rrweb-reconstructed DOM", () => {
     const params = offpathCalls[0];
     expect(params.visual).toBeTruthy();
     expect(params.visual!.element!.selector).toBe(
-      '[data-testid="intent-btn-run"]'
+      '[data-testid="intent-btn-start"]'
     );
     expect(params.visual!.element!.role).toBe("button");
     expect(Array.isArray(params.visual!.element!.bbox)).toBe(true);
