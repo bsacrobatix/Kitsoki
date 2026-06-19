@@ -20,6 +20,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { launchVSCode, packageExtension, saveRecordingAsMp4, type LaunchedVSCode } from './_helpers/launch';
+import { revealTurn, type RevealDeps } from './_helpers/conversation';
 
 const EXT_ROOT = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(EXT_ROOT, '..', '..');
@@ -132,35 +133,52 @@ test('vscode prd demo — brief/PRD in the editor, refine shows a verdict-gated 
 
     const domClick = (loc: ReturnType<FrameLocator['locator']>) =>
       loc.first().evaluate((el) => (el as HTMLElement).click());
-    // Type VISIBLY (char-by-char in record mode) so the viewer sees the operator's
-    // input appear, then dwell on the input AND the reply so the conversation is
-    // followable — never a flashed-past, no-op turn.
-    const typeAndSend = async (textVal: string) => {
+
+    // ── Followable-conversation camera (shared `revealTurn`) ──────────────────
+    // Kitsoki is a conversation engine, so the chat IS the demo. The naive
+    // recording (type → fixed dwell → next turn) is jumpy: ChatTranscript.vue
+    // snaps to the BOTTOM on every message, so a long reply renders with its
+    // opening lines already scrolled off. `revealTurn` reproduces a reader's
+    // follow: ease the new input to the top, hold, then ease DOWN through the
+    // reply so every line passes on-camera and someone can pause. Same technique
+    // the native web tour uses (gears-prd-design.spec.ts). The ACTIONS below only
+    // perform the type/click; `reveal()` owns the camera + dwell.
+    const revealDeps: RevealDeps = {
+      scroller: () => chat.locator('[data-testid="chat-transcript"]').first(),
+      dwell: (ms) => (ms > 0 ? sleep(ms) : Promise.resolve()),
+      paced: (ms) => (RECORD ? Math.round(ms * PACE) : 0),
+    };
+    const reveal = (
+      action: () => Promise<void>,
+      settle: () => Promise<void>,
+      label: string,
+    ) => revealTurn(revealDeps, action, settle, label);
+
+    // Type VISIBLY (char-by-char in record mode) so the viewer sees the operator
+    // compose the message; the camera/dwell is handled by reveal().
+    const sendText = async (textVal: string) => {
       const input = chat.locator('[data-testid="composer-input"]').first();
       await expect(input).toBeVisible({ timeout: 15_000 });
       await input.click();
       await input.fill('');
       await input.pressSequentially(textVal, { delay: RECORD ? 38 : 0 });
-      await dwell(1200); // the typed input rests on screen before it is sent
+      await dwell(900); // the typed input rests on screen before it is sent
       await input.press('Enter');
-      await dwell(1700); // the reply renders + rests so it is readable
     };
-    const clickIntent = async (intent: string) => {
+    const clickBtn = async (intent: string) => {
       const btn = chat.locator(`[data-testid="intent-btn-${intent}"]`).first();
       await expect(btn).toBeVisible({ timeout: 20_000 });
-      await dwell(900);
+      await dwell(700);
       await domClick(btn);
-      await dwell(1500);
     };
-    const fillRefine = async (feedback: string) => {
+    const submitRefine = async (feedback: string) => {
       const form = chat.locator('form[data-intent="core__prd__refine"]').first();
       await expect(form).toBeVisible({ timeout: 20_000 });
       const input = form.locator('input').first();
       await input.click();
       await input.pressSequentially(feedback, { delay: RECORD ? 38 : 0 });
-      await dwell(1400);
+      await dwell(900);
       await domClick(form.locator('button[type="submit"]'));
-      await dwell(1500);
     };
 
     // Dismiss any onboarding/tour overlay so it never sits over the conversation,
@@ -169,35 +187,38 @@ test('vscode prd demo — brief/PRD in the editor, refine shows a verdict-gated 
     await chat.locator('[data-testid="composer-input"]').first().click().catch(() => undefined);
 
     // ── Discovery → drafting (proven gears core__ drive; deterministic, no LLM) ─
+    // Every turn is wrapped in reveal(): the operator's input eases to the top,
+    // holds, then the reply scrolls through — so the whole conversation is
+    // legible and pausable.
     await wait('core.main');
     await shot('a-main');
-    await typeAndSend('prd'); // → core.prd.idle
-    await wait('core.prd.idle');
-    await typeAndSend('I want a notes-service gear for the platform'); // discuss
-    // Wait for the discovery reply to render — `start` distills the conversation,
-    // so it must land before we advance (in fast mode dwell is a no-op).
-    await expect(
-      chat.locator('[data-testid="chat-transcript"]').getByText(/ties to the work/i).first(),
-      'the discovery reply rendered before distilling the idea',
-    ).toBeVisible({ timeout: 30_000 });
-    await dwell(2500);
-    await clickIntent('core__prd__start'); // → search
-    await wait('core.prd.search');
-    await dwell(1800);
-    await clickIntent('core__prd__confirm'); // → clarifying
-    await wait('core.prd.clarifying');
-    await dwell(2000);
-    await typeAndSend('platform engineers; the metric is notes-saved-per-session'); // answer
-    await dwell(2000);
-    await typeAndSend('submit'); // → brief (the brief opens + grows in the editor)
-    await wait('core.prd.brief');
+    await reveal(() => sendText('prd'), () => wait('core.prd.idle'), 'prd-enter');
+    await reveal(
+      () => sendText('I want a notes-service gear for the platform'), // discuss
+      // `start` distills the conversation, so the discovery reply must land first.
+      () =>
+        expect(
+          chat.locator('[data-testid="chat-transcript"]').getByText(/ties to the work/i).first(),
+          'the discovery reply rendered before distilling the idea',
+        ).toBeVisible({ timeout: 30_000 }),
+      'prd-pitch',
+    );
+    await reveal(() => clickBtn('core__prd__start'), () => wait('core.prd.search'), 'prd-start');
+    await reveal(() => clickBtn('core__prd__confirm'), () => wait('core.prd.clarifying'), 'prd-clarify');
+    await reveal(
+      () => sendText('platform engineers; the metric is notes-saved-per-session'), // answer
+      () => wait('core.prd.clarifying'),
+      'prd-answer',
+    );
+    await reveal(
+      () => sendText('submit'), // → brief (the brief opens + grows in the editor)
+      () => wait('core.prd.brief'),
+      'prd-brief',
+    );
     await dwell(3500); // linger on the brief opening in the editor
     await shot('b-brief');
-    await clickIntent('core__prd__confirm'); // → references
-    await wait('core.prd.references');
-    await dwell(1800);
-    await clickIntent('core__prd__confirm'); // → drafting (the PRD is authored + opened)
-    await wait('core.prd.drafting');
+    await reveal(() => clickBtn('core__prd__confirm'), () => wait('core.prd.references'), 'prd-refs');
+    await reveal(() => clickBtn('core__prd__confirm'), () => wait('core.prd.drafting'), 'prd-draft');
 
     // ── The PRD opened in a real editor tab ──────────────────────────────────
     await expect(
@@ -208,11 +229,18 @@ test('vscode prd demo — brief/PRD in the editor, refine shows a verdict-gated 
     await shot('c-draft-in-editor');
 
     // ── Refine → a NATIVE DIFF with the feedback as an inline comment ────────
-    await fillRefine('add a non-goals section and require tenant isolation');
-    await expect(
-      win.locator('.monaco-diff-editor').first(),
-      'refine opens a native side-by-side diff',
-    ).toBeVisible({ timeout: 30_000 });
+    // The refine turn SUSPENDS on the diff verdict; the room emits a `say:`
+    // message first, so reveal() scrolls the chat to show the operator's refine
+    // request + the agent's "review the diff" message before the diff opens.
+    await reveal(
+      () => submitRefine('add a non-goals section and require tenant isolation'),
+      () =>
+        expect(
+          win.locator('.monaco-diff-editor').first(),
+          'refine opens a native side-by-side diff',
+        ).toBeVisible({ timeout: 30_000 }),
+      'prd-refine',
+    );
     await expect(
       win.locator('.review-comment, .comment-body, .monaco-editor .comment-thread').filter({ hasText: /tenant isolation/i }).first(),
       'the refine feedback shows as an inline comment',

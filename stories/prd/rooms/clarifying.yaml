@@ -227,11 +227,19 @@ states:
             # the divider would intermittently see the already-incremented
             # value (Round N+1). Separate effects run in declaration order,
             # which is deterministic.
+            # Render the round's questions as a READABLE bullet list, not the
+            # raw clarifications object — `{{ .question }}` inside a kitsoki
+            # `{{ range }}` block binds each element to the allowed `item` root
+            # (the log-append set-effect can't use a pongo `{% for q %}` loop
+            # var). This keeps the accumulated transcript human-readable instead
+            # of splicing the questions object in as compact JSON, which leaked
+            # a machine format into the operator-facing brief.
             - set:
                 clarification_log: |
                   ── Round {{ world.clarifying_cycle + 1 }} ──
-                  Questions: {{ world.clarifications }}
-                  Answers: {{ world.clarification_answers }}
+                  Questions:
+                  {{ range world.clarifications.questions }}  - {{ .question }}
+                  {{ end }}Answers: {{ world.clarification_answers }}
 
                   {{ world.clarification_log }}
             - set:

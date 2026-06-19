@@ -13,6 +13,7 @@ import type { DataSource } from "../data/source.js";
 import type { LiveSource } from "../data/live-source.js";
 import { appendThought, appendTool, type StreamItem } from "../lib/activity.js";
 import { readOracleUsage } from "../components/oracle/lib.js";
+import { humanizeIntent } from "../lib/intent.js";
 
 /**
  * How a free-text user turn was resolved to an intent — the provenance the
@@ -508,7 +509,10 @@ export const useRunStore = defineStore("run", () => {
       (v) => typeof v === "string" && v.trim() !== ""
     );
     if (values.length > 0) return values.join(" ");
-    return intent;
+    // No authored label and no slot text: a bare intent fire (e.g. an action
+    // button). NEVER echo the raw intent slug (`core__prd__start`) into the
+    // operator's chat bubble — humanise it the same way the button label is.
+    return humanizeIntent(intent);
   }
 
   /**

@@ -191,13 +191,29 @@ EVIDENCE RULES (these make the review trustworthy — follow them exactly):
    (b) enough of each agent RESPONSE is visible to understand what happened — a
        long response MAY be truncated, but a reply clipped to nothing (or never
        shown at all) is a failure;
-   (c) the chat transcript is NOT covered, pushed off-screen, or collapsed to
+   (c) each agent RESPONSE is REVEALED FROM ITS START, not just its tail. A well
+       made conversation video SCROLLS THROUGH each message: across the timeline
+       you should see a long reply's OPENING lines in some frame(s) and later
+       lines in others, as the camera eases down through it. The classic bug is
+       the transcript snapping to the BOTTOM the instant a reply arrives, so only
+       its last lines are ever on-screen and its opening is never shown — if a
+       reply taller than the viewport only ever appears scrolled to its end (its
+       first lines never visible in any frame), that is a failure: it is not
+       followable and the viewer cannot pause to read it from the start;
+   (d) the chat transcript is NOT covered, pushed off-screen, or collapsed to
        unreadability by another panel — a classic bug is a file/PRD/diff editor
-       opening OVER the conversation so the messages are no longer visible.
+       opening OVER the conversation so the messages are no longer visible;
+   (e) NO raw internal intent name is visible as a label. The UI humanises intent
+       labels (buttons, the state-diagram "via …" breadcrumb), so a visible
+       machine slug with double underscores (e.g. "core__prd__start",
+       "bf__accept") is a failure — it means a stale embed or an un-humanised
+       surface leaked the identifier to the operator.
    For any of these, add a "visual_issues" entry naming the frame(s) and the
    missing/obscured content (e.g. "the chat is fully covered by the 004-prd.md
-   editor in 0005-0008 — the user inputs and replies are not visible"), and `fail`
-   any step that depends on seeing the conversation.
+   editor in 0005-0008 — the user inputs and replies are not visible"; or "the
+   reply in 0006-0009 is only ever shown scrolled to its bottom — its opening
+   lines never appear"; or "a button reads 'core__prd__start' in 0004"), and
+   `fail` any step that depends on seeing the conversation.
 8. OCCLUSION / OVERLAPPING OVERLAYS — a floating overlay (a tour coachmark,
    popover, tooltip, toast, or spotlight) that OVERLAPS and obscures the primary
    content — especially the chat — is a failure, not decoration. If a tour label

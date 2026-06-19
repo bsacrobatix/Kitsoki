@@ -149,12 +149,26 @@ conversation. `kitsoki-ui-qa` now **fails** a demo that breaks any of these
   split (chat in one editor column, docs in the next) and minimise the sidebar so
   both read clearly. Verify the chat transcript is visible in EVERY beat where a
   file is open.
-- **Show every user input — slowly.** Each operator input must be on-screen as
-  legible text long enough to read. Type inputs visibly (character-by-character in
-  record mode), then `dwell` on the input AND on the reply before advancing. A
-  reply may be truncated if long, but enough must show to understand what happened.
-  An input that flashes past (a no-op `dwell` between turns) is what makes a demo
-  "jumpy" — pace every turn.
+- **Scroll through every message — reveal, don't snap.** This is the single most
+  important rule for a conversation video, and the one most often gotten wrong.
+  `ChatTranscript.vue` **snaps the scroller to the BOTTOM** on every new message,
+  so a reply taller than the viewport renders with its OPENING lines already
+  scrolled off — the viewer never sees where the message starts, and the camera
+  jumps. **Do not record against that auto-scroll.** Drive the camera the way a
+  person follows a chat: after each turn settles, ease the new operator input to
+  the TOP of the transcript, hold to read it, then ease DOWN through the reply at a
+  readable pace (duration scaling with the reply's height) so every line passes
+  on-camera and someone can pause on any of it. Type inputs visibly
+  (character-by-character in record mode) so the viewer sees the message composed.
+  - **Use the shared helper — never hand-tune dwells per turn.** The canonical
+    implementation is `revealTurn` + `installConversationScroll` in
+    `tools/vscode-kitsoki/tests/_helpers/conversation.ts` (it neuters the
+    auto-scroll-to-bottom and owns the eased scroll); the native web tour has the
+    same technique inline in
+    `tools/runstatus/tests/playwright/gears-prd-design.spec.ts` (`revealTurn`).
+    Wrap EVERY turn in it: `reveal(action, settle, label)`. Fixed `dwell()`s
+    between turns + the component's native snap is exactly what makes a demo
+    "jumpy" — never record that way.
 - **No overlapping tour labels.** A coachmark/popover/tooltip must never sit on top
   of the chat. Dismiss any onboarding/tour overlay before driving, and keep
   spotlight popovers off the conversation.
@@ -164,6 +178,15 @@ conversation. `kitsoki-ui-qa` now **fails** a demo that breaks any of these
   the state-diagram "via …" breadcrumb) are humanised by the UI — keep them that
   way; if a label shows a raw `name`, give the intent a natural `title:` rather
   than papering over it in the spec.
+  - **Rebuild the SPA + binary before you trust the wording (the embed-staging
+    trap).** The humanised labels live in the runstatus SPA, which `kitsoki web`
+    serves from the **go:embed** bundle (`internal/runstatus/web/assets/index.html`).
+    A source fix to `tools/runstatus/src/lib/intent.ts` does **nothing** to a
+    recorded video until you `make build` (rebuilds the SPA → stages the embed →
+    rebuilds `./kitsoki`). If a raw `core__…` name still shows after you "fixed" the
+    wording, the recording almost certainly ran against a **stale embed/binary** —
+    `make build` and re-record before debugging anything else. (See the
+    `web-embed-staging` memory.)
 
 ## Video recording — the correct pattern
 

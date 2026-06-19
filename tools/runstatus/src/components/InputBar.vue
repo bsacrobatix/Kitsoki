@@ -503,7 +503,9 @@ const activeTextIntent = computed<IntentInfo | undefined>(() =>
 const placeholder = computed(() => {
   const it = activeTextIntent.value;
   if (!it) return "Type a message…";
-  return `${it.title || it.name}…`;
+  // Humanise the default text-intent for the placeholder — never leak the raw
+  // slug (`core__prd__discuss…`) onto the composer the operator reads.
+  return `${it.title || humanizeIntent(it.name)}…`;
 });
 
 const draft = ref("");

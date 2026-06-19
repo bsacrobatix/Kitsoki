@@ -152,15 +152,20 @@ pipeline removes that failure mode structurally, not by hoping the model behaves
    viewer FOLLOW the conversation. The review prompt (rules 7–8) reads the frames as
    a timeline and emits a blocking `visual_issues[]` entry when: an operator INPUT
    is never visible as legible text (it flashed by / was sent off-camera); an agent
-   RESPONSE is clipped to nothing or never shown (long replies MAY truncate); the
-   chat transcript is **covered or pushed off-screen** by another panel (a
-   file/PRD/diff editor opening OVER the conversation); or a floating overlay (tour
-   coachmark / popover / tooltip) overlaps and obscures the chat. This is what
-   catches "the video is jumpy, you can't see the user inputs, and the editor hides
-   the chat." Because `visual_issues` always block the gate, a hidden-chat or
-   missing-input demo can never pass — author the demo so the chat stays visible
-   beside the editor and every input dwells long enough to read (see
-   `kitsoki-ui-demo`).
+   RESPONSE is clipped to nothing or never shown (long replies MAY truncate); a
+   long RESPONSE is only ever shown **scrolled to its bottom** so its opening lines
+   never appear (the transcript snapped to the end instead of scrolling THROUGH the
+   message — the #1 "jumpy" cause); a **raw internal intent name** with double
+   underscores (`core__prd__start`) is visible as a label (stale embed / un-humanised
+   surface); the chat transcript is **covered or pushed off-screen** by another
+   panel (a file/PRD/diff editor opening OVER the conversation); or a floating
+   overlay (tour coachmark / popover / tooltip) overlaps and obscures the chat. This
+   is what catches "the video is jumpy, you can't see the user inputs, and the
+   editor hides the chat." Because `visual_issues` always block the gate, such a
+   demo can never pass — author it so each message SCROLLS THROUGH (use the
+   `revealTurn` helper, never fixed dwells over the native auto-scroll), the chat
+   stays visible beside the editor, labels are humanised, and every input is
+   readable (see `kitsoki-ui-demo`).
 
 ## Prerequisites
 
