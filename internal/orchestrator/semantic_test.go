@@ -373,6 +373,90 @@ states:
 		"harness MUST be called: a semantic match on an intent with a required unfilled slot must abdicate to the LLM, not auto-dispatch with empty slots — this is the 2026-05-20 dogfood regression")
 }
 
+// TestSemantic_DroppedContentDefersOptionalSlot pins the trace-accuracy guard:
+// a slot-incapable semantic match (bare-string synonym/example) that routes to
+// an intent declaring an OPTIONAL slot must STILL abdicate to the interpreter
+// when the utterance carried content beyond the matched verb — otherwise the
+// matcher fires the intent with empty slots and silently DROPS the value the
+// user supplied (e.g. "get `go test …` green" → configure with no goal). The
+// recorded route would then misrepresent what the user said. A bare invocation
+// (input == the matched example, no extra content) is not lossy and still fires
+// without the harness.
+func TestSemantic_DroppedContentDefersOptionalSlot(t *testing.T) {
+	t.Parallel()
+
+	const appYAML = `
+app:
+  id: semroute-optional-slot
+  version: 0.1.0
+
+world:
+  goal: { type: string, default: "" }
+
+routing:
+  enabled: true
+
+intents:
+  configure:
+    title: "Configure"
+    # An NL example AND a bare command. The optional goal slot means
+    # RequiresUnfilledSlot is false, so only the dropped-content guard keeps a
+    # content-bearing utterance from firing configure with no goal.
+    examples: ["get the tests green", "configure"]
+    slots:
+      goal: { type: string, required: false }
+
+root: start
+
+states:
+  start:
+    view: "setup"
+    on:
+      configure:
+        - target: ended
+          effects:
+            - set: { goal: "{{ slots.goal ?? world.goal }}" }
+
+  ended:
+    terminal: true
+    view: "done"
+`
+	def, err := app.LoadBytes([]byte(appYAML))
+	require.NoError(t, err)
+	m, err := machine.New(def)
+	require.NoError(t, err)
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	h := &countingHarness{fall: staticHarness{
+		intentName: "configure",
+		slots:      map[string]any{"goal": "make the parser tests green"},
+	}}
+	orch := orchestrator.New(def, m, s, h)
+	ctx := context.Background()
+
+	// 1. Content-bearing utterance matching the NL example: the goal value lives
+	//    in the words the bare-string matcher cannot extract → MUST defer to the
+	//    harness rather than fire configure with an empty goal.
+	sid1, err := orch.NewSession(ctx)
+	require.NoError(t, err)
+	_, err = orch.Turn(ctx, sid1, "please get the parser tests green for the cache module")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, h.calls.Load(),
+		"harness MUST be called: a content-bearing utterance must not fire a slot-bearing intent with dropped slot content")
+
+	// 2. Bare command equal to the example: nothing to extract → fires fast via
+	//    semroute, no harness call.
+	sid2, err := orch.NewSession(ctx)
+	require.NoError(t, err)
+	out, err := orch.Turn(ctx, sid2, "configure")
+	require.NoError(t, err)
+	require.Equal(t, orchestrator.ModeCompleted, out.Mode)
+	require.EqualValues(t, 1, h.calls.Load(),
+		"harness MUST NOT be called again: a bare invocation (no dropped content) still routes via semroute")
+}
+
 // TestSemantic_MissFallsThroughToHarness — routing is enabled but
 // the input shares no stems with any declared synonym; the harness
 // MUST fire.

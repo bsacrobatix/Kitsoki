@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"kitsoki/internal/app"
@@ -165,6 +166,58 @@ func RequiresUnfilledSlot(def *app.AppDef, state app.StatePath, intentID string,
 		return true
 	}
 	return false
+}
+
+// droppedSlotContent reports whether a slot-INCAPABLE semantic match (a
+// bare-string synonym/example or an embedding hit — anything but a slot-filling
+// `template` match) routed to an intent that declares a slot the verdict left
+// unfilled, WHILE the user's utterance carried content beyond the matched
+// pattern. That is the signature of a lossy route: the matcher recognised the
+// verb but silently dropped the value the user supplied (e.g. "get `go test …`
+// green" → configure with NO goal slot). Per the trace-accuracy principle the
+// recorded route must reflect what the user actually said, so TrySemantic
+// abdicates to the interpreter (LLM live, or the replay recording in a no-LLM
+// demo) — the only tier that extracts slots — rather than firing an
+// information-losing call. A BARE invocation (the input is essentially the
+// matched pattern, no extra content) is not lossy and still fires fast.
+//
+// Distinct from RequiresUnfilledSlot, which defers on an unfilled REQUIRED slot
+// at any confidence (a hard MISSING_SLOTS guard); this defers on an unfilled
+// OPTIONAL slot only when content was demonstrably dropped.
+func (o *Orchestrator) droppedSlotContent(state app.StatePath, v semroute.Verdict, input string) bool {
+	// Template matches fill slots from {slot} capture, so they are not lossy.
+	if v.MatchKind == "template" {
+		return false
+	}
+	ix, ok := lookupIntentByPath(o.def, state, v.Intent)
+	if !ok || len(ix.Slots) == 0 {
+		return false
+	}
+	hasUnfilled := false
+	for name := range ix.Slots {
+		if _, filled := v.Slots[name]; !filled {
+			hasUnfilled = true
+			break
+		}
+	}
+	if !hasUnfilled {
+		return false
+	}
+	// Did the utterance carry content beyond the matched pattern? MatchReason is
+	// "<kind>:<pattern>" (e.g. "synonym:head north", "example:go north"); an
+	// embedding hit has no literal pattern, so it never equals the input and is
+	// always treated as content-bearing (it matched semantics, not the verb).
+	pattern := v.MatchReason
+	if i := strings.IndexByte(pattern, ':'); i >= 0 {
+		pattern = pattern[i+1:]
+	}
+	return normalizeForCompare(input) != normalizeForCompare(pattern)
+}
+
+// normalizeForCompare lower-cases, trims, and collapses internal whitespace so a
+// bare-verb utterance compares equal to the synonym/example it matched.
+func normalizeForCompare(s string) string {
+	return strings.Join(strings.Fields(strings.ToLower(s)), " ")
 }
 
 // recordSynonymHit notes a synonym hit against the cache when the
@@ -382,6 +435,19 @@ func (o *Orchestrator) TrySemantic(ctx context.Context, sid app.SessionID, input
 				slog.String("input", input),
 				slog.String("intent", verdict.Intent),
 				slog.String("reason", "matched intent has required slot the matcher cannot fill (Phase 2)"),
+			)
+			return nil, false, nil
+		}
+		// Trace-accuracy guard: a slot-incapable match that routed to a
+		// slot-bearing intent while the utterance carried content beyond the
+		// matched verb dropped the value the user supplied. Abdicate to the
+		// interpreter, which extracts the slot, so the recorded route reflects
+		// what the user actually said rather than an information-losing call.
+		if o.droppedSlotContent(journey.State, verdict, input) {
+			tl.Debug(ctx, trace.EvTurnSemanticMiss,
+				slog.String("input", input),
+				slog.String("intent", verdict.Intent),
+				slog.String("reason", "matched intent has an unfilled slot and the utterance carried dropped content — deferring to the interpreter for slot extraction"),
 			)
 			return nil, false, nil
 		}

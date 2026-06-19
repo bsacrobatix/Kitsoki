@@ -113,13 +113,12 @@ world:
 intents:
   configure:
     description: "Set the goal, gate, and budgets for the loop."
-    # NL goal phrasings are deliberately ABSENT: configure needs slot extraction
-    # (goal/gate_command), which only the interpreter (LLM live, or the replay
-    # recording in the demo) provides — not the example-based semantic router,
-    # which would match a free-text goal and fire configure with NO slots. Keep
-    # only explicit command-style examples here so a natural-language goal misses
-    # semroute and falls through to the interpreter that extracts the slots.
-    examples: ["configure", "set the gate command", "set the iteration budget"]
+    # NL goal phrasings here are SAFE: a content-bearing utterance that matches
+    # one of these would drop its goal/gate value through the slot-incapable
+    # semantic router, so the engine defers it to the interpreter for slot
+    # extraction (orchestrator droppedSlotContent — the trace-accuracy guard).
+    # Bare commands ("configure") still route fast.
+    examples: ["make the tests pass", "get go test ./... green", "configure", "set the gate", "set the iteration budget"]
     priority: 75
     slots:
       goal:             { type: string, required: false }
