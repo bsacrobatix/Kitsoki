@@ -90,11 +90,15 @@ consecutive records, and the cold re-write is a `cache_creation` spike on
 the next turn. `cost_extract.py` detects gaps past the TTL and prices that
 re-write. Real examples from this repo's sessions:
 
+These are genuinely *discrete* actions — the kind where dragging the whole
+prior conversation along is pure overhead, not the point (a resume whose
+intent *is* to reprocess, like "continue", isn't a fair example):
+
 | break | resumed with | cold re-warm (measured) | vs warm |
 |---|---|---|---|
 | **20.2 h** (`a650171f`) | *"just commit on main"* | **$4.22** | 20× ($0.21) |
-| 5.3 h (`55ca3a24`) | *"continue"* | $3.69 | 20× |
-| 1.8 h (`54b43d51`) | *"run the analysis again"* | $0.75 | 20× |
+| 19.0 h (`54b43d51`) | *"fix the PDFs on webview"* | $11.26 | 20× |
+| 19.9 h (`64672ba6`) | *"is it well documented?"* | $1.71 | 20× |
 
 You came back the next morning, typed *"just commit on main"*, and paid
 **$4.22 to re-warm the conversation before git even ran** — re-writing
@@ -102,7 +106,7 @@ You came back the next morning, typed *"just commit on main"*, and paid
 deterministic git operation: **$0** to resume, warm or cold, because there
 is no conversation cache to expire — nothing is fed back through a model.
 The cold-resume penalty isn't a tail risk; it's what you pay every time
-you return to a long-running session.
+you return to a long-running session to do one discrete thing.
 
 ---
 
@@ -148,7 +152,7 @@ turns the dominant cost term to zero.
 | git-ops **story** | 4 operations, any session length, warm or cold | **$0.0955**, flat |
 | Claude Code, **isolated floor** | one `commit this`, fresh session | ~$0.12 |
 | Claude Code, **realistic** | git ops entangled in a working session | $1–$20+ **per turn**, climbing |
-| Claude Code, **cold resume** | one small action after a >1h break | the re-warm alone, measured: $0.75–$4.22 before any work |
+| Claude Code, **cold resume** | one discrete action after a >1h break | the re-warm alone, measured: $1.71–$11.26 before any work |
 | Claude Code, **a full session** | the demo-building session itself | **$546.13** |
 
 The story did the four operations once for less than a single isolated
