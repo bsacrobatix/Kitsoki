@@ -90,7 +90,16 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    const picks = stories.map((s) => ({
+    // Default the picker to the kitsoki-dev dogfood story: discovery orders
+    // stories lexicographically (so 'bugfix' would otherwise sit first and be the
+    // highlighted/Enter default), but kitsoki-dev is the one we almost always want
+    // in the kitsoki repo. Float it to the top; the rest keep their order.
+    const ordered = [...stories].sort((a, b) => {
+      const ak = a.app_id === 'kitsoki-dev' ? 0 : 1;
+      const bk = b.app_id === 'kitsoki-dev' ? 0 : 1;
+      return ak - bk;
+    });
+    const picks = ordered.map((s) => ({
       label: s.title || s.app_id || s.path,
       description: s.active_sessions.length ? `${s.active_sessions.length} active` : '',
       detail: s.path,

@@ -9,11 +9,27 @@
          session-start affordance here (mirrors HomeView's "New session"). -->
     <div v-else-if="!sessionId" class="surface__empty" data-testid="surface-empty">
       <p class="surface__empty-msg">Start a chat to begin.</p>
+      <!-- Multi-story posture (e.g. the kitsoki repo): let the operator PICK the
+           story rather than silently binding the lexicographically-first one
+           (which lands on 'bugfix'). Defaults to the kitsoki-dev dogfood story
+           when present so it's one click away. A single-story embed skips the
+           picker entirely (the lone story is implied). -->
+      <select
+        v-if="stories.length > 1"
+        v-model="selectedStoryPath"
+        class="surface__story-select"
+        data-testid="surface-story-select"
+        :disabled="starting"
+      >
+        <option v-for="s in stories" :key="s.path" :value="s.path">
+          {{ s.title || s.app_id }}
+        </option>
+      </select>
       <button
         type="button"
         class="surface__start"
         data-testid="surface-start-session"
-        :disabled="starting"
+        :disabled="starting || storiesLoading"
         @click="onStart"
       >
         {{ starting ? "Starting…" : "Start a chat" }}
@@ -71,6 +87,7 @@ import { useRunStore } from "../stores/run.js";
 import { createDataSource } from "../data/source.js";
 import type { DataSource } from "../data/source.js";
 import { LiveSource } from "../data/live-source.js";
+import type { StoryHeader } from "../data/live-source.js";
 import ActivityFeed from "../components/ActivityFeed.vue";
 import ChatTranscript from "../components/ChatTranscript.vue";
 import InputBar from "../components/InputBar.vue";
@@ -92,6 +109,14 @@ const error = ref<string | null>(null);
 
 const starting = ref(false);
 const startError = ref<string | null>(null);
+
+// Discovered stories + the operator's selection, populated once when the surface
+// lands in its no-session empty state. Defaults to the kitsoki-dev dogfood story
+// (see ensureStories) so the picker opens on the story we actually want, never
+// the lexicographically-first 'bugfix'.
+const stories = ref<StoryHeader[]>([]);
+const selectedStoryPath = ref<string>("");
+const storiesLoading = ref(false);
 
 const appId = computed(() => store.appDef?.id ?? store.appDef?.name ?? "kitsoki");
 
@@ -120,6 +145,33 @@ async function adopt(id: string | null): Promise<void> {
     // "Loading…" indefinitely instead of offering "Start a chat".
     store.teardown();
     loading.value = false;
+    // Populate the story picker in the background — the empty state renders
+    // immediately; the picker (and the default selection) fill in once the list
+    // lands. The Start button stays disabled until then.
+    void ensureStories();
+  }
+}
+
+/**
+ * Discover the available stories once and seed the default selection. Prefers the
+ * kitsoki-dev dogfood story so the picker opens on the story the operator almost
+ * always wants in the kitsoki repo; falls back to the first discovered story
+ * otherwise. Idempotent — a second call while loaded/loading is a no-op.
+ */
+async function ensureStories(): Promise<void> {
+  if (stories.value.length || storiesLoading.value) return;
+  storiesLoading.value = true;
+  startError.value = null;
+  try {
+    if (!live) live = new LiveSource("/");
+    const list = await live.listStories();
+    stories.value = list;
+    const preferred = list.find((s) => s.app_id === "kitsoki-dev");
+    selectedStoryPath.value = (preferred ?? list[0])?.path ?? "";
+  } catch (e) {
+    startError.value = errMsg(e);
+  } finally {
+    storiesLoading.value = false;
   }
 }
 
@@ -145,23 +197,22 @@ onUnmounted(() => {
 });
 
 /**
- * Start a session when none exists. Chat is the surface that creates sessions,
- * so it discovers the available stories and starts the first one (the typical
- * embed has a single story attached), then adopts the new session — the same
- * runstatus.session.new path HomeView's "New session" uses.
+ * Start a session for the SELECTED story (defaulted to kitsoki-dev by
+ * ensureStories), then adopt the new session — the same runstatus.session.new
+ * path HomeView's "New session" uses. A single-story embed has no visible picker,
+ * but selectedStoryPath is still seeded to that lone story.
  */
 async function onStart(): Promise<void> {
+  const storyPath = selectedStoryPath.value || stories.value[0]?.path;
+  if (!storyPath) {
+    startError.value = "No story available to start a chat.";
+    return;
+  }
   starting.value = true;
   startError.value = null;
   try {
     if (!live) live = new LiveSource("/");
-    const stories = await live.listStories();
-    const story = stories[0];
-    if (!story) {
-      startError.value = "No story available to start a chat.";
-      return;
-    }
-    const id = await live.newSession(story.path);
+    const id = await live.newSession(storyPath);
     await adopt(id);
   } catch (e) {
     startError.value = errMsg(e);
@@ -222,6 +273,16 @@ function errMsg(e: unknown): string {
 
 .surface__empty-msg {
   margin: 0;
+}
+
+.surface__story-select {
+  max-width: 16rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--k-border, #1e293b);
+  background: var(--k-bg-input, #1e293b);
+  color: var(--k-fg, #e2e8f0);
+  font-size: 0.8rem;
 }
 
 .surface__start {
