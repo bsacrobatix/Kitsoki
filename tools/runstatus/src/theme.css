@@ -33,6 +33,21 @@
  *   4. For high-contrast affordances prefer --k-border-contrast.
  */
 
+/*
+ * COMPACT SCALING (VS Code embed only)
+ *   Inside the VS Code webview the SPA reads one step LARGER than the rest of the
+ *   UI. We scale the whole embed down one step with `zoom` rather than a root
+ *   font-size: components mix rem AND hardcoded px (font sizes, padding, gaps),
+ *   and zoom uniformly shrinks BOTH — type and spacing — so everything compacts
+ *   together with no per-component edits. The webview is Chromium, where `zoom`
+ *   is supported. The attribute is set in main.ts when isEmbedded()
+ *   (acquireVsCodeApi present, or ?embed=1); the plain browser never gets it, so
+ *   its sizing is UNCHANGED.
+ */
+:root[data-embedded="true"] {
+  zoom: 0.9;
+}
+
 :root {
   /* ── Surfaces / backgrounds ─────────────────────────────────────────────── */
   /* Editor / app background — the dark slate "desk". */

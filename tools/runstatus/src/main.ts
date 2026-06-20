@@ -11,6 +11,17 @@ import { resolveSurface } from "./surfaces/select.js";
 import { installConsoleCapture } from "./data/console-capture.js";
 import { installErrorCapture, vueErrorHandler } from "./data/error-capture.js";
 import { startSessionCapture } from "./data/session-capture.js";
+import { isEmbedded } from "./lib/embed.js";
+
+// Compact scaling: inside the VS Code webview the SPA reads one step larger than
+// the rest of the UI. Mark the root element so theme.css can zoom the embed down
+// one step (uniformly across rem AND px sizing). Mirrors InteractiveView's embed
+// detection (isEmbedded() or the ?embed=1 demo fallback); the browser is untouched.
+const embedded =
+  isEmbedded() || new URLSearchParams(window.location.search).get("embed") === "1";
+if (embedded) {
+  document.documentElement.setAttribute("data-embedded", "true");
+}
 
 // Bootstrap: parse inlined snapshot JSON (artifact mode).
 // The export-status command injects a <script type="application/json"
