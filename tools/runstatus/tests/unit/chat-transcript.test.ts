@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import ChatTranscript from "../../src/components/ChatTranscript.vue";
 
 // These exercise the agent-text markdown path (the engine ships rendered text;
@@ -246,5 +247,117 @@ describe("ChatTranscript", () => {
     // Literal asterisks preserved; no <strong>.
     expect(userRow.text()).toContain("**a CLI**");
     expect(userRow.find("strong").exists()).toBe(false);
+  });
+});
+
+// jsdom has no layout engine, so scroll metrics and ResizeObserver are absent.
+// We stub the scroller's metrics and a fake ResizeObserver to exercise the
+// auto-follow logic directly — this is the regression net for the popped-out
+// VS Code panel "doesn't scroll reliably" report: late content growth must keep
+// re-pinning to the bottom WHILE the reader is there, and must NOT yank them
+// back once they scroll up to re-read.
+describe("ChatTranscript auto-follow", () => {
+  let roCallback: (() => void) | null;
+  let realRO: typeof globalThis.ResizeObserver | undefined;
+
+  beforeEach(() => {
+    roCallback = null;
+    realRO = globalThis.ResizeObserver;
+    class FakeResizeObserver {
+      constructor(cb: () => void) {
+        roCallback = cb;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    globalThis.ResizeObserver = FakeResizeObserver as unknown as typeof globalThis.ResizeObserver;
+  });
+
+  afterEach(() => {
+    globalThis.ResizeObserver = realRO as typeof globalThis.ResizeObserver;
+  });
+
+  // Give the scroller a deterministic, writable scrollTop and fixed
+  // scrollHeight/clientHeight (the parts jsdom leaves at 0), mirroring how the
+  // demo recorder itself shadows scrollTop on the instance.
+  function stubScroller(
+    el: HTMLElement,
+    metrics: { scrollHeight: number; clientHeight: number }
+  ): { metrics: { scrollHeight: number; clientHeight: number } } {
+    let top = 0;
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v;
+      },
+    });
+    Object.defineProperty(el, "scrollHeight", {
+      configurable: true,
+      get: () => metrics.scrollHeight,
+    });
+    Object.defineProperty(el, "clientHeight", {
+      configurable: true,
+      get: () => metrics.clientHeight,
+    });
+    return { metrics };
+  }
+
+  it("re-pins to the bottom when content grows while the reader is at the bottom", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: { transcript: [{ role: "agent", text: "first" }] },
+    });
+    const el = wrapper.find("[data-testid='chat-transcript']").element as HTMLElement;
+    const { metrics } = stubScroller(el, { scrollHeight: 1000, clientHeight: 300 });
+
+    // A tall reply finishes laying out after it was appended → ResizeObserver
+    // fires. Pinned (default), so the camera follows to the new bottom.
+    expect(roCallback).toBeTruthy();
+    roCallback!();
+    expect(el.scrollTop).toBe(1000);
+
+    // It keeps following each further growth step.
+    metrics.scrollHeight = 1800;
+    roCallback!();
+    expect(el.scrollTop).toBe(1800);
+  });
+
+  it("does NOT yank back to the bottom after the reader scrolls up", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: { transcript: [{ role: "agent", text: "first" }] },
+    });
+    const el = wrapper.find("[data-testid='chat-transcript']").element as HTMLElement;
+    const { metrics } = stubScroller(el, { scrollHeight: 1000, clientHeight: 300 });
+
+    // Reader scrolls up to re-read; the scroll handler unpins.
+    el.scrollTop = 100;
+    el.dispatchEvent(new Event("scroll"));
+
+    // More content arrives — must stay put, not snap to the bottom.
+    metrics.scrollHeight = 2000;
+    roCallback!();
+    expect(el.scrollTop).toBe(100);
+  });
+
+  it("a new user turn re-pins even after the reader had scrolled up", async () => {
+    const wrapper = mount(ChatTranscript, {
+      props: { transcript: [{ role: "agent", text: "first" }] },
+    });
+    const el = wrapper.find("[data-testid='chat-transcript']").element as HTMLElement;
+    stubScroller(el, { scrollHeight: 1200, clientHeight: 300 });
+
+    el.scrollTop = 50;
+    el.dispatchEvent(new Event("scroll")); // unpinned
+
+    // The reader sends a turn of their own — that always brings them down.
+    await wrapper.setProps({
+      transcript: [
+        { role: "agent", text: "first" },
+        { role: "user", text: "next question" },
+      ],
+    });
+    await nextTick();
+    expect(el.scrollTop).toBe(1200);
   });
 });

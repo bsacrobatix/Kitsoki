@@ -1,5 +1,6 @@
 <template>
   <div ref="scrollEl" class="chat-transcript" data-testid="chat-transcript">
+   <div ref="contentEl" class="chat-transcript__inner">
     <div
       v-for="(entry, i) in transcript"
       :key="i"
@@ -94,11 +95,12 @@
         </div>
       </div>
     </div>
+   </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted } from "vue";
+import { ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import type { View } from "../types.js";
 import type { StreamItem } from "../lib/activity.js";
 import type { RoutingInfo } from "../stores/run.js";
@@ -130,6 +132,7 @@ function routingTitle(r: RoutingInfo): string {
 const props = defineProps<{ transcript: ChatEntry[] }>();
 
 const scrollEl = ref<HTMLElement | null>(null);
+const contentEl = ref<HTMLElement | null>(null);
 
 function hasElements(entry: ChatEntry): boolean {
   const els = entry.typedView?.Elements;
@@ -146,31 +149,92 @@ function hasElements(entry: ChatEntry): boolean {
 // leaking to the operator as literal backticks.
 const renderView = renderAgentMarkdown;
 
-async function scrollToBottom() {
-  await nextTick();
+// Auto-follow, reliably. The original code scrolled to the bottom exactly once
+// per appended message (a single nextTick, then `scrollTop = scrollHeight`).
+// That is fine for a short sidebar bubble but breaks in the popped-out editor
+// panel: an agent reply there is tall and lays out in stages (the v-html room
+// view, the typed ViewElements, the activity feed, monospace metrics), so when
+// the one-shot scroll fires the scrollHeight is still short and the camera lands
+// part-way up — the reply opens below the fold and the view looks "stuck". The
+// reliable fix is to (a) keep re-pinning to the bottom while content GROWS, via
+// a ResizeObserver on the inner content, and (b) only do so while the reader is
+// actually at the bottom, so scrolling up to re-read is never yanked back down.
+let pinned = true;
+// Treat "within this many px of the bottom" as pinned — covers sub-pixel
+// rounding and the gap below the last bubble without feeling sticky.
+const NEAR_BOTTOM_PX = 48;
+
+function isAtBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.clientHeight - el.scrollTop <= NEAR_BOTTOM_PX;
+}
+
+// Assigning `scrollTop` (not calling scrollTo) is deliberate: the demo recorder
+// owns the camera by overriding THIS element's scrollTop setter to a no-op
+// (tools/vscode-kitsoki/tests/_helpers/conversation.ts). Keeping the property
+// assignment means recordings stay un-yanked while real sessions still follow.
+function scrollToBottom() {
   const el = scrollEl.value;
   if (el) el.scrollTop = el.scrollHeight;
 }
 
-onMounted(scrollToBottom);
+function onScroll() {
+  const el = scrollEl.value;
+  if (el) pinned = isAtBottom(el);
+}
+
+let ro: ResizeObserver | null = null;
+
+onMounted(() => {
+  const el = scrollEl.value;
+  if (el) el.addEventListener("scroll", onScroll, { passive: true });
+  if (contentEl.value && typeof ResizeObserver !== "undefined") {
+    ro = new ResizeObserver(() => {
+      if (pinned) scrollToBottom();
+    });
+    ro.observe(contentEl.value);
+  }
+  void nextTick(scrollToBottom);
+});
+
+onBeforeUnmount(() => {
+  scrollEl.value?.removeEventListener("scroll", onScroll);
+  ro?.disconnect();
+});
+
 watch(
   () => props.transcript.length,
-  () => {
-    void scrollToBottom();
+  async () => {
+    // A turn the reader just sent always brings them to the bottom; an agent
+    // reply only follows if they were already pinned there.
+    const last = props.transcript[props.transcript.length - 1];
+    if (last?.role === "user") pinned = true;
+    await nextTick();
+    if (pinned) scrollToBottom();
   },
 );
 </script>
 
 <style scoped>
+/* The outer element is the scroll VIEWPORT only — a definite height with
+   overflow. Keeping the flex column on a separate inner element gives the
+   ResizeObserver a node whose size tracks the content (the viewport's own box
+   never changes as messages arrive), which is what makes the auto-follow fire. */
 .chat-transcript {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
   overflow-y: auto;
-  padding: 20px 24px;
   height: 100%;
   box-sizing: border-box;
   background: var(--k-bg-inset, #0f1115);
+}
+
+.chat-transcript__inner {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+  /* Fill the viewport when the transcript is short so the background reads as
+     one surface; grow past it (driving the scroll) once it overflows. */
+  min-height: 100%;
+  box-sizing: border-box;
 }
 
 .chat-row {
