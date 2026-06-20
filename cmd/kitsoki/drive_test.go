@@ -92,7 +92,7 @@ func TestDrive_ReplayNoneReproducesKnownTranscript(t *testing.T) {
 	cmd, out := newDriveCmd(t, script)
 	tracePath := filepath.Join(t.TempDir(), "trace.jsonl")
 
-	err := runDrive(cmd, driveConfig{
+	err := runDrive(cmd, driveCmdConfig{
 		appPath:     cloakAppPath,
 		tracePath:   tracePath,
 		harnessType: "replay",
@@ -143,7 +143,7 @@ func TestDrive_ReplayNoneNoLiveFallthrough(t *testing.T) {
 	vcr, err := harness.NewVCR(harness.VCRModeNone, cloakCassettePath, fail)
 	require.NoError(t, err)
 
-	err = runDrive(cmd, driveConfig{
+	err = runDrive(cmd, driveCmdConfig{
 		appPath:         cloakAppPath,
 		tracePath:       tracePath,
 		harnessType:     "replay",
@@ -180,7 +180,7 @@ func TestDrive_RoundTripRecordThenReplay(t *testing.T) {
 	require.NoError(t, err)
 
 	recCmd, recOut := newDriveCmd(t, "go west\nhang the cloak\n")
-	err = runDrive(recCmd, driveConfig{
+	err = runDrive(recCmd, driveCmdConfig{
 		appPath:         cloakAppPath,
 		tracePath:       filepath.Join(dir, "rec.jsonl"),
 		cassette:        cassette,
@@ -205,7 +205,7 @@ func TestDrive_RoundTripRecordThenReplay(t *testing.T) {
 	require.NoError(t, err)
 
 	repCmd, repOut := newDriveCmd(t, "go west\nhang the cloak\n")
-	err = runDrive(repCmd, driveConfig{
+	err = runDrive(repCmd, driveCmdConfig{
 		appPath:         cloakAppPath,
 		tracePath:       filepath.Join(dir, "rep.jsonl"),
 		cassette:        cassette,
@@ -236,7 +236,7 @@ func TestDrive_StdinFreeTextRouting(t *testing.T) {
 	cmd, out := newDriveCmd(t, "head south\n")
 	tracePath := filepath.Join(t.TempDir(), "trace.jsonl")
 
-	err := runDrive(cmd, driveConfig{
+	err := runDrive(cmd, driveCmdConfig{
 		appPath:     cloakAppPath,
 		tracePath:   tracePath,
 		harnessType: "replay",
@@ -257,7 +257,7 @@ func TestDrive_StdinFreeTextRouting(t *testing.T) {
 // with no cassette is a clear error, not a silent live fall-through.
 func TestDrive_ReplayRequiresCassette(t *testing.T) {
 	cmd, _ := newDriveCmd(t, "go west\n")
-	err := runDrive(cmd, driveConfig{
+	err := runDrive(cmd, driveCmdConfig{
 		appPath:     cloakAppPath,
 		tracePath:   filepath.Join(t.TempDir(), "trace.jsonl"),
 		harnessType: "replay",

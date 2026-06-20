@@ -101,7 +101,7 @@ Examples:
 			if len(args) == 1 {
 				appPath = args[0]
 			}
-			return runDrive(cmd, driveConfig{
+			return runDrive(cmd, driveCmdConfig{
 				appPath:     appPath,
 				tracePath:   tracePath,
 				harnessType: harnessType,
@@ -125,8 +125,8 @@ Examples:
 	return cmd
 }
 
-// driveConfig carries the parsed flags for runDrive.
-type driveConfig struct {
+// driveCmdConfig carries the parsed flags for runDrive.
+type driveCmdConfig struct {
 	appPath     string
 	tracePath   string
 	harnessType string
@@ -142,7 +142,7 @@ type driveConfig struct {
 	harnessOverride harness.Harness
 }
 
-func runDrive(cmd *cobra.Command, cfg driveConfig) error {
+func runDrive(cmd *cobra.Command, cfg driveCmdConfig) error {
 	if cfg.tracePath == "" {
 		return infraError("--trace is required")
 	}
@@ -260,7 +260,7 @@ func runDrive(cmd *cobra.Command, cfg driveConfig) error {
 //     LiveHarness fall-through. Requires a cassette path and live credentials.
 //   - --harness live with --record none and no cassette: a bare LiveHarness
 //     (every turn live; nothing recorded).
-func buildDriveHarness(cfg driveConfig) (harness.Harness, error) {
+func buildDriveHarness(cfg driveCmdConfig) (harness.Harness, error) {
 	mode, err := harness.ParseVCRMode(cfg.recordMode)
 	if err != nil {
 		return nil, infraError("%v", err)
@@ -303,7 +303,7 @@ func buildDriveHarness(cfg driveConfig) (harness.Harness, error) {
 // the app def to give the harness its prompt context. Returns a clear infra
 // error when credentials or the app are unavailable so a headless run fails
 // loudly rather than hanging.
-func newDriveLiveHarness(cfg driveConfig) (harness.Harness, error) {
+func newDriveLiveHarness(cfg driveCmdConfig) (harness.Harness, error) {
 	if cfg.appPath == "" {
 		return nil, infraError("--harness live requires the app.yaml positional argument for prompt context")
 	}
