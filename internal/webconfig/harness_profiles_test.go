@@ -48,7 +48,11 @@ harness_profiles:
 
 func TestLoad_HarnessProfiles_Errors(t *testing.T) {
 	cases := map[string]string{
-		"unset env var is a hard error": `
+		// Unset env on the SELECTED default_profile is fatal — the boot profile
+		// must resolve. (A non-default profile with an unset env is NOT fatal;
+		// see TestLoad_HarnessProfiles_UnsetEnvOnNonDefaultIsDropped.)
+		"unset env var on the default_profile is a hard error": `
+default_profile: synthetic
 harness_profiles:
   synthetic:
     backend: claude
@@ -86,6 +90,39 @@ harness_profiles:
 				t.Fatalf("expected load error for %q", name)
 			}
 		})
+	}
+}
+
+// TestLoad_HarnessProfiles_UnsetEnvOnNonDefaultIsDropped is the regression for
+// the VS Code "backend exited (code 1) before becoming healthy" failure: a
+// secret-bearing profile in a (gitignored) override references an env var that a
+// GUI-launched editor's environment lacks. That must NOT kill config load when
+// the profile isn't the selected default — it is dropped from the usable set and
+// the config loads with the default profile intact. (In the wild: `claude-native`
+// boots while `synthetic-claude` referencing ${SYNTHETIC_API_KEY} is dropped.)
+func TestLoad_HarnessProfiles_UnsetEnvOnNonDefaultIsDropped(t *testing.T) {
+	os.Unsetenv("DEFINITELY_UNSET_KEY_XYZ")
+	p := writeConfig(t, `
+default_profile: claude-native
+harness_profiles:
+  claude-native:
+    backend: claude
+  synthetic-claude:
+    backend: claude
+    env: { ANTHROPIC_AUTH_TOKEN: "${DEFINITELY_UNSET_KEY_XYZ}" }
+`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load must not fail when an unused profile's env var is unset: %v", err)
+	}
+	if _, ok := cfg.HarnessProfiles["synthetic-claude"]; ok {
+		t.Fatal("synthetic-claude should be dropped (its env var is unset)")
+	}
+	if _, ok := cfg.HarnessProfiles["claude-native"]; !ok {
+		t.Fatal("claude-native (the default) must survive and remain usable")
+	}
+	if cfg.DefaultProfile != "claude-native" {
+		t.Fatalf("default_profile = %q, want claude-native", cfg.DefaultProfile)
 	}
 }
 

@@ -439,19 +439,44 @@ func (cfg *WebConfig) resolveRoot(configPath string) error {
 }
 
 // resolveHarnessProfiles validates every declared profile and expands ${VAR}
-// references in env values in place. Fail-fast at load (never at first
-// dispatch), mirroring the providers: contract.
+// references in env values in place. Structural errors (bad backend / model /
+// effort) fail-fast at load. A profile that references an UNSET env var is a
+// special case: it is fatal ONLY when that profile is the selected
+// default_profile (the boot profile must work). A non-selected secret-bearing
+// profile whose env var is absent is dropped from the usable set with a warning
+// instead of killing the whole config — so e.g. a `synthetic-*` profile in a
+// gitignored override never blocks startup in an environment that lacks the key
+// (a GUI-launched VS Code extension host inherits no shell vars; the operator
+// hasn't selected synthetic anyway). Selecting such a profile later surfaces a
+// clean error at switch time. This validates the env lazily-by-selection, never
+// at first dispatch.
 func (cfg *WebConfig) resolveHarnessProfiles() error {
+	var dropped []string
 	for name, p := range cfg.HarnessProfiles {
 		if !validBackends[p.Backend] {
 			return fmt.Errorf("harness_profiles.%s: backend %q is invalid (want claude|copilot|codex)", name, p.Backend)
 		}
+		missingEnv := ""
 		for k, v := range p.Env {
 			expanded, missing := expandEnvVar(v)
 			if missing != "" {
-				return fmt.Errorf("harness_profiles.%s: env var %s referenced in env.%s not set", name, missing, k)
+				// The boot profile MUST resolve — a missing secret there is a
+				// genuine misconfiguration the operator needs to fix now.
+				if name == cfg.DefaultProfile {
+					return fmt.Errorf("harness_profiles.%s: env var %s referenced in env.%s not set", name, missing, k)
+				}
+				missingEnv = missing
+				break
 			}
 			p.Env[k] = expanded
+		}
+		if missingEnv != "" {
+			// Unusable in this environment, but not selected — drop it rather
+			// than fail the load. Logged (never silent) so the absence is
+			// explainable.
+			delete(cfg.HarnessProfiles, name)
+			dropped = append(dropped, fmt.Sprintf("%s (env %s unset)", name, missingEnv))
+			continue
 		}
 		if len(p.Models) > 0 && p.Model != "" && !contains(p.Models, p.Model) {
 			return fmt.Errorf("harness_profiles.%s: model %q is not in its models catalog", name, p.Model)
@@ -470,6 +495,10 @@ func (cfg *WebConfig) resolveHarnessProfiles() error {
 			}
 		}
 		cfg.HarnessProfiles[name] = p
+	}
+	if len(dropped) > 0 {
+		slog.Warn("webconfig: dropped harness profiles with unset env vars (not selected as default_profile; set the var to enable)",
+			"dropped", dropped)
 	}
 	if cfg.DefaultProfile != "" {
 		if _, ok := cfg.HarnessProfiles[cfg.DefaultProfile]; !ok {
