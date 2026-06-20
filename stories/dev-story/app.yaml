@@ -1032,7 +1032,17 @@ imports:
     entry: idle
 
     world_in:
-      workdir:    "{{ world.workdir }}"
+      # Project the hub's workdir, falling back to "." (the cwd — prd's own
+      # standalone default) when the hub leaves it empty (its default). The bare
+      # hub default is "" because the bf/impl pipelines branch on workdir==''
+      # (impl provisions a worktree only when empty); the imported prd instead
+      # composes filesystem paths as "{{workdir}}/{{prd_workspace}}", so an empty
+      # workdir yields "/.artifacts/<slug>" — an mkdir at the filesystem root.
+      # Flow tests masked this by seeding workdir via initial_world; a real or
+      # web-driven run (which does not seed initial_world) exposed it. This is
+      # the same `workdir=='' ? '.'` guard the design_* rooms already use,
+      # applied at the import seam so a real instance's workdir passes through.
+      workdir:    "{{ world.workdir == '' ? '.' : world.workdir }}"
       judge_mode: "{{ world.judge_mode }}"
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
       # Doc-profile passthrough: an external instance (gears-rust) overrides
