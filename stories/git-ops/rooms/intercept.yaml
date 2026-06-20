@@ -72,7 +72,7 @@ states:
               INTEGRATION="{{ world.integration_branch }}"
               AHEAD=$(git rev-list --count "${INTEGRATION}..HEAD" 2>/dev/null || echo 0)
               BEHIND=$(git rev-list --count "HEAD..${INTEGRATION}" 2>/dev/null || echo 0)
-              UNCOMMITTED=$(git status --porcelain 2>/dev/null | grep -c . || echo 0)
+              UNCOMMITTED=$(git status --porcelain 2>/dev/null | grep -c . || true)
               if [ "$UNCOMMITTED" -gt 0 ]; then HAS_UNCOMMITTED=true; else HAS_UNCOMMITTED=false; fi
               MAIN_WT=$(git worktree list --porcelain 2>/dev/null \
                 | awk '/^worktree / {wt=$2} /^branch refs\/heads\/'"$INTEGRATION"'$/ {print wt}')

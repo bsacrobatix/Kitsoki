@@ -92,7 +92,7 @@ states:
             - |
               set -e
               export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
-              DIRTY=$(git status --porcelain 2>/dev/null | grep -c . || echo 0)
+              DIRTY=$(git status --porcelain 2>/dev/null | grep -c . || true)
               GIT_DIR=$(git rev-parse --git-dir 2>/dev/null || echo ".git")
               MERGE_IP=false
               if [ -f "$GIT_DIR/MERGE_HEAD" ] || [ -d "$GIT_DIR/rebase-apply" ] || [ -d "$GIT_DIR/rebase-merge" ]; then

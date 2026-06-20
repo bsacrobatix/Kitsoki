@@ -70,7 +70,7 @@ states:
                     CLASS="integration"
                   else
                     UNIQUE=$(git rev-list --count "${INTEGRATION}..${HEAD}" 2>/dev/null || echo "?")
-                    DIRTY=$(git -C "$WT" status --porcelain 2>/dev/null | grep -c . || echo 0)
+                    DIRTY=$(git -C "$WT" status --porcelain 2>/dev/null | grep -c . || true)
                     AGENT=""
                     if [[ "$WT" == */.worktrees/agent-* ]]; then
                       AGENT="(agent wt)"

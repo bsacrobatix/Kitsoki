@@ -149,8 +149,10 @@ states:
                   - |
                     set -e
                     export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
-                    OUTPUT=$(git rebase --continue --no-edit 2>&1 || true)
-                    EXIT=$?
+                    # || EXIT=$? OUTSIDE the $(): a `|| true` inside would mask
+                    # a failed --continue as ok, falsely reporting resolution.
+                    EXIT=0
+                    OUTPUT=$(git rebase --continue --no-edit 2>&1) || EXIT=$?
                     NEW_CONFLICT=false
                     if echo "$OUTPUT" | grep -qi "CONFLICT\|conflict markers"; then
                       NEW_CONFLICT=true

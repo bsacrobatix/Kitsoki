@@ -62,8 +62,10 @@ states:
             - |
               set -e
               export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
-              OUTPUT=$(git pull --rebase 2>&1 || true)
-              EXIT=$?
+              # || EXIT=$? OUTSIDE the $(): a `|| true` inside would mask a
+              # conflicting pull --rebase as ok, never routing to pull_conflict.
+              EXIT=0
+              OUTPUT=$(git pull --rebase 2>&1) || EXIT=$?
               CONFLICT=false
               if echo "$OUTPUT" | grep -qi "CONFLICT\|conflict markers"; then
                 CONFLICT=true

@@ -50,8 +50,12 @@ states:
                 TAG="${BRANCH}-pre-rebase-backup"
                 git tag -f "$TAG" HEAD 2>/dev/null || true
               fi
-              OUTPUT=$(git rebase "$INTEGRATION" --no-autostash 2>&1 || true)
-              EXIT=$?
+              # || EXIT=$? OUTSIDE the $() — a `|| true` INSIDE the
+              # substitution would force EXIT=0 even on a conflicting rebase,
+              # mis-routing it to on_branch. set -e is not tripped because the
+              # failing assignment is the left side of a || list.
+              EXIT=0
+              OUTPUT=$(git rebase "$INTEGRATION" --no-autostash 2>&1) || EXIT=$?
               MERGE_BASE=$(git merge-base HEAD "$INTEGRATION" 2>/dev/null || echo "")
               if [ $EXIT -eq 0 ]; then
                 jq -n --arg tag "$TAG" --arg out "$OUTPUT" --arg mb "$MERGE_BASE" \

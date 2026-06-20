@@ -110,7 +110,7 @@ states:
               fi
 
               # Stash if target tree is dirty
-              DIRTY=$(git -C "$MAIN_WT" status --porcelain 2>/dev/null | grep -c . || echo 0)
+              DIRTY=$(git -C "$MAIN_WT" status --porcelain 2>/dev/null | grep -c . || true)
               STASH_REF=""
               if [ "$DIRTY" -gt 0 ]; then
                 STASH_OUT=$(git -C "$MAIN_WT" stash push -u -m 'git-ops-wip' 2>&1 || true)
@@ -118,8 +118,10 @@ states:
               fi
 
               # Guard 3: merge with --no-ff in target worktree (no git checkout)
-              MERGE_OUT=$(git -C "$MAIN_WT" merge --no-ff "$BRANCH" 2>&1 || true)
-              MERGE_EXIT=$?
+              # || MERGE_EXIT=$? OUTSIDE the $(): a `|| true` inside would mask
+              # a conflicting merge as success and skip the stash-pop rollback.
+              MERGE_EXIT=0
+              MERGE_OUT=$(git -C "$MAIN_WT" merge --no-ff "$BRANCH" 2>&1) || MERGE_EXIT=$?
               if [ "$MERGE_EXIT" -ne 0 ]; then
                 [ -n "$STASH_REF" ] && git -C "$MAIN_WT" stash pop 2>/dev/null || true
                 jq -n --arg out "$MERGE_OUT" --arg sr "$STASH_REF" \
@@ -132,8 +134,10 @@ states:
 
               # Post-merge build check
               if [ "$BUILD_DISABLED" != "true" ]; then
-                BUILD_OUT=$(bash -c "$BUILD_CMD" 2>&1 || true)
-                BUILD_EXIT=$?
+                # || BUILD_EXIT=$? OUTSIDE the $(): a `|| true` inside would mask
+                # a post-merge build failure as success (no post_merge_test_fail).
+                BUILD_EXIT=0
+                BUILD_OUT=$(bash -c "$BUILD_CMD" 2>&1) || BUILD_EXIT=$?
                 if [ "$BUILD_EXIT" -ne 0 ]; then
                   jq -n --arg out "$BUILD_OUT" --arg sr "$STASH_REF" \
                     '{outcome:"post_merge_test_fail",descendant_ok:true,merge_in_progress:false,last_op_ok:false,last_op_output:$out,stash_ref:$sr,rebase_done:false}'
