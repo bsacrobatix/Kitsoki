@@ -912,3 +912,46 @@ func TestMenu_TemplateMapShape(t *testing.T) {
 	_, ok = tm["blocked"].([]any)
 	require.True(t, ok, "blocked key must be []any even when empty")
 }
+
+// TestWorldFromSchema_SeedsReservedStringGlobals pins the fix for the
+// import-folding divergence where dev-story's `landing` rendered correctly
+// standalone but collapsed to just "Quick actions" when imported under
+// kitsoki-dev's `core` alias. The view gates its banner/intro/footer on
+// `world.last_error == ''`; standalone the room's own `last_error: {default:
+// ""}` made that true, but import folding deliberately drops a child's
+// declaration of a reserved key (it stays bare at every depth), so the folded
+// app never seeded `last_error` and `nil == ''` suppressed every gated
+// element. WorldFromSchema now seeds the engine-owned string reserved keys to
+// "" regardless of declaration — the same discipline the cost vars already use.
+func TestWorldFromSchema_SeedsReservedStringGlobals(t *testing.T) {
+	// A schema that declares NEITHER reserved key — mimics the post-fold app
+	// where the child's reserved-key declarations were dropped.
+	w := machine.WorldFromSchema(app.WorldSchema{
+		"some_key": {Type: "string", Default: "x"},
+	})
+
+	le, ok := w.Vars["last_error"]
+	require.True(t, ok, "last_error must be seeded even when undeclared")
+	require.Equal(t, "", le, `last_error must seed to "" so world.last_error == '' is true at boot`)
+
+	wm, ok := w.Vars[app.WriteModeScopeWorldKey]
+	require.True(t, ok, "write_mode_scope must be seeded even when undeclared")
+	require.Equal(t, "", wm)
+
+	// host_error is a map guarded only via ?? / |default: — left nil.
+	_, hostErrSeeded := w.Vars["host_error"]
+	require.False(t, hostErrSeeded, "host_error must NOT be seeded (map zero left nil)")
+
+	// The cost-var precedent still holds.
+	require.Equal(t, 0.0, w.Vars["session_cost_usd"])
+	require.Equal(t, 0.0, w.Vars["turn_cost_usd"])
+}
+
+// TestWorldFromSchema_StoryDefaultWins confirms the seed only fills an absent
+// key: a story that explicitly declares a reserved key keeps its own default.
+func TestWorldFromSchema_StoryDefaultWins(t *testing.T) {
+	w := machine.WorldFromSchema(app.WorldSchema{
+		"last_error": {Type: "string", Default: "boom"},
+	})
+	require.Equal(t, "boom", w.Vars["last_error"])
+}

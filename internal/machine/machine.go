@@ -2687,5 +2687,23 @@ func WorldFromSchema(schema app.WorldSchema) world.World {
 	if _, ok := w.Vars["turn_cost_usd"]; !ok {
 		w.Vars["turn_cost_usd"] = 0.0
 	}
+	// Reserved, engine-owned string globals (last_error, write_mode_scope; see
+	// app.ReservedWorldKeys). Seeded to "" for the same reason as the cost vars:
+	// a view condition or guard that runs before the engine ever writes the key
+	// (`when: "world.last_error == ''"`) must read "" rather than nil — `nil ==
+	// ''` is false, which silently suppresses every banner/prose gated on the
+	// no-error state. This MUST be seeded here rather than left to the story's
+	// own world block: import folding deliberately drops a child's declaration of
+	// a reserved key (it stays bare at every depth), so a room that declares
+	// `last_error: {default: ""}` and renders correctly standalone would diverge
+	// when imported under an alias (e.g. dev-story's landing under kitsoki-dev).
+	// host_error is a map, guarded only via `?? ''` / `|default:`, so it is
+	// left nil. The seed only fills an absent key.
+	if _, ok := w.Vars["last_error"]; !ok {
+		w.Vars["last_error"] = ""
+	}
+	if _, ok := w.Vars[app.WriteModeScopeWorldKey]; !ok {
+		w.Vars[app.WriteModeScopeWorldKey] = ""
+	}
 	return w
 }
