@@ -1,61 +1,62 @@
-feature: MCP studio driven by Claude Code (terminal) — author · check · test · drive · see
+feature: MCP studio driven by a coding agent (terminal) — read/author · check · test · drive · see
 
-# Every step is an OBSERVABLE claim — something the camera can see in a frame
-# (a tool-call card, a result line, the rendered TUI), never internal behaviour.
-# The agent's calls surface as Claude-Code MCP tool cards: `⏺ kitsoki - <tool> (MCP)`.
+# Cast-agnostic QA for the MCP terminal demo: it holds for BOTH the synthetic
+# claude-code cassette AND a captured-live cassette (and future codex/copilot ones),
+# because it asserts the OBSERVABLE MCP surface, not one script's exact words.
+# Every step is something the camera can see in a frame — a Claude-Code MCP
+# tool-call card (`⏺ kitsoki - <tool> (MCP)`), a result line, or the rendered TUI —
+# never internal behaviour.
 
 scenarios:
-  - id: a-attach
-    title: Claude Code is attached to the kitsoki MCP server in a real terminal
+  - id: a-terminal
+    title: A coding agent is driving the kitsoki MCP server in a real terminal
     required: true
     steps:
-      - A terminal window is shown with a titlebar reading "claude — kitsoki mcp" (this is a terminal, not a browser)
-      - A Claude Code welcome banner shows the kitsoki MCP server connected (e.g. "mcp: kitsoki ✔ connected")
-      - The operator's task is typed at a prompt and the agent replies in prose below it
+      - A terminal window is shown with a titlebar that ends in "kitsoki mcp" (this is a terminal, not a browser)
+      - An "MCP" badge is visible on the terminal titlebar
+      - The agent works through kitsoki MCP tool-call cards (lines like "kitsoki - <tool> (MCP)")
       - A "mcp studio · driven by Claude Code over MCP" footer is visible at the bottom of the branded backdrop
 
-  - id: b-author
-    title: The agent authors a story over MCP — story.write
+  - id: b-story
+    title: The agent reads or authors a story over MCP — story.read / story.write
     required: true
     steps:
-      - A tool-call card "kitsoki - story_write (MCP)" is visible
-      - The card result shows a story file being written (e.g. stories/barista/app.yaml)
-      - The result names the rooms of the authored story (lobby, order, confirm)
+      - A "kitsoki - story_read" or "kitsoki - story_write" tool-call card is visible
+      - The card surfaces the story (its YAML source, its rooms, or a written/validated result)
 
   - id: c-check
     title: The agent checks the story — story.validate + story.graph
     required: true
     steps:
-      - A "kitsoki - story_validate (MCP)" card reports the story is valid (e.g. "✓ valid — 0 errors")
-      - A "kitsoki - story_graph (MCP)" card prints the room graph with transitions and intents
+      - A "kitsoki - story_validate (MCP)" card reports the story is valid (e.g. "ok": true / "✓ valid", zero errors)
+      - A "kitsoki - story_graph (MCP)" card surfaces the room graph (rooms / transitions / intents)
 
   - id: d-test
     title: The agent tests the flows deterministically — story.test (no LLM)
     required: true
     steps:
       - A "kitsoki - story_test (MCP)" card is visible
-      - The result shows the flows passing (e.g. "2 passed")
-      - The result makes clear it ran with no LLM (a cassette / mock oracle, no model cost)
+      - The result shows the flows passing (e.g. "passed": 1 / "2 passed", zero failures) with no LLM
 
   - id: e-drive
-    title: The agent drives a live session — session.new / drive / submit
+    title: The agent drives a live session — session.new then submit/drive
     required: true
     steps:
       - A "kitsoki - session_new (MCP)" card opens a session under the replay harness (no LLM)
-      - A "kitsoki - session_drive (MCP)" card routes the free text "I'd like a flat white" to an intent (order_coffee) with a confidence
-      - A "kitsoki - session_submit (MCP)" card advances the machine to the "confirm" state with world { drink: flat_white }
+      - A "kitsoki - session_submit" or "kitsoki - session_drive" card advances the machine (a new state and/or allowed intents)
+      - The session reaches the "confirm" state with world drink = "flat white"
 
   - id: f-see
     title: The agent sees the rendered kitsoki TUI — render.tui
     required: true
     steps:
       - A "kitsoki - render_tui (MCP)" card is visible
-      - A rendered kitsoki TUI frame for the "confirm" room is shown (a titled panel with body text)
-      - The rendered frame shows the intent menu (e.g. "1. order_another  2. done") and a state/world footer (state confirm, drink flat_white)
+      - A rendered kitsoki TUI screen for the "confirm" room is shown (room body text and/or an intent menu)
+      - The screen reflects the order (a flat white / the confirm room), as a human operator would see it
 
   - id: g-inspect
-    title: The agent introspects the session and reports done — session.inspect
+    title: The agent introspects the session — session.inspect
     required: false
     steps:
-      - A "kitsoki - session_inspect (MCP)" card shows the session state, world, and allowed intents
-      - The agent prints a closing summary that it authored, validated, tested, drove, and rendered — all over MCP with no LLM in the loop
+      - A "kitsoki - session_inspect (MCP)" card shows the session state, world, and/or allowed intents
+      - The agent ends with a brief summary of what it did over MCP

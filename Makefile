@@ -363,7 +363,7 @@ tour-qa: render-tour features-index
 # QA machinery. No-LLM by construction (replays a static cassette). See
 # tools/mcp-demo/README.md.
 MCP_DEMO_DIR := tools/mcp-demo
-.PHONY: mcp-demo-deps mcp-demo-fast mcp-demo mcp-qa
+.PHONY: mcp-demo-deps mcp-demo-fast mcp-demo mcp-demo-live mcp-qa
 
 mcp-demo-deps:
 	cd $(MCP_DEMO_DIR) && pnpm install --silent
@@ -378,6 +378,11 @@ mcp-demo-fast: mcp-demo-deps
 AGENT ?= claude-code
 mcp-demo: mcp-demo-deps
 	cd $(MCP_DEMO_DIR) && MCP_DEMO_AGENT=$(AGENT) pnpm run record
+
+# Record the captured-live cassette (the authentic Claude-Code session, committed)
+# → .artifacts/mcp-demo/claude-code-live.mp4. Still a pure replay, no LLM.
+mcp-demo-live: mcp-demo-deps
+	cd $(MCP_DEMO_DIR) && MCP_DEMO_CAST_JSON=casts/claude-code-live.json pnpm run record
 
 # Vision QA on the recorded demo (kitsoki-ui-qa). GATED: drives the local `claude`
 # CLI for the grounded review — never run automatically (CLAUDE.md LLM policy).

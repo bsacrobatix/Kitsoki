@@ -4,7 +4,7 @@
     "kitsoki": {
       "type": "stdio",
       "command": "go",
-      "args": ["run", "./cmd/kitsoki", "mcp", "--stories-dir", ".artifacts/mcp-demo/capture-ws"]
+      "args": ["run", "./cmd/kitsoki", "mcp", "--stories-dir", "tools/mcp-demo/capture-ws", "--workspace", "tools/mcp-demo/capture-ws/barista/app.yaml"]
     }
   }
 }

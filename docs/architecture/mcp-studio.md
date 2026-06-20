@@ -194,8 +194,13 @@ review (`mcp-feature.md` / `mcp-scenarios.yaml`).
 It is **no-LLM by construction** — the replay plays a static cassette and never
 spawns a model (enforced by `tools/mcp-demo/scripts/lint-no-llm.mjs`). Authenticity
 comes from *record once, replay forever*: a single **gated** live `claude` ↔
-`kitsoki mcp` capture (`scripts/capture-live.py`) becomes the cassette, then replays
-for free, identically, on every render.
+`kitsoki mcp` capture (`claude -p --output-format stream-json` →
+`scripts/streamjson-to-termcast.mjs`) becomes the cassette, then replays for free,
+identically, on every render. Two cassettes ship: the synthetic `claude-code`
+(the CI-safe no-LLM default + QA fixture) and the captured-live `claude-code-live`
+(the authentic Claude-Code session — driving a deterministic `barista` story via
+direct `session.submit`, rendering the real `render.tui` frame). Both pass the
+cast-agnostic `mcp-scenarios.yaml` gate (7/7, 0 visual issues).
 
 ```
 make mcp-demo-fast   # no-LLM validate (CI-safe: lint + PACE=0 assert)

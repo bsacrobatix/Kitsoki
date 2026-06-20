@@ -22,19 +22,20 @@ Numbered because the video QA reads this as a walkthrough. Each is observable on
 screen — a Claude-Code tool-call card (`⏺ kitsoki - <tool> (MCP)`) and its result,
 narrated by a caption banner at the top of the frame.
 
-1. **Claude Code attached to the kitsoki MCP server** — a real terminal window
-   (titlebar `claude — kitsoki mcp`, an `MCP` badge) where the operator's task is
-   typed and the agent acknowledges, on a branded studio backdrop.
-2. **Authoring over MCP** — a `story_write` tool card writing `stories/barista/
-   app.yaml` with rooms `lobby → order → confirm`.
+1. **A coding agent attached to the kitsoki MCP server** — a real terminal window
+   (titlebar ending `kitsoki mcp`, an `MCP` badge) working through tool-call cards
+   on a branded studio backdrop (a `kitsoki · mcp studio · driven by Claude Code
+   over MCP` footer).
+2. **Reading or authoring over MCP** — a `story_read` or `story_write` tool card
+   surfacing the story (its YAML source, or a written/validated result) for the
+   `barista` story (rooms `lobby → order → confirm`).
 3. **Checking it** — a `story_validate` card reporting `✓ valid` and a `story_graph`
    card printing the room graph with its intents.
-4. **Testing the flows** — a `story_test` card showing `2 passed` against a
-   **cassette oracle (no LLM)**.
-5. **Driving a live session** — `session_new` (harness **replay**, no LLM),
-   `session_drive` routing the free text `"I'd like a flat white"` to the
-   `order_coffee` intent with a confidence, and `session_submit` advancing the
-   machine to `confirm` with world `{ drink: flat_white }`.
+4. **Testing the flows** — a `story_test` card showing the flows pass against a
+   **flow/cassette oracle (no LLM)**.
+5. **Driving a live session** — `session_new` (harness **replay**, no LLM), then
+   the agent advances the machine via `session_submit` (a direct intent) or
+   `session_drive` (free text), reaching `confirm` with world `{ drink: flat white }`.
 6. **Seeing the result** — a `render_tui` card followed by the **rendered kitsoki
    TUI** for the `confirm` room (room title, body, the intent menu, the state/world
    footer) — the same screen a human operator would see.

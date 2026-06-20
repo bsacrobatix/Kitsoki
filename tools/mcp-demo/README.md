@@ -35,10 +35,13 @@ tests/
   mcp-terminal.e2e.spec.ts  replays a cast beat-by-beat, films it through the pipeline
   _helpers/                 camera.ts + demo.ts + recorder.ts (shared demo contracts)
 scripts/
-  lint-no-llm.mjs           the no-LLM / camera / chapters gate for this surface
-  capture-live.py           the gated PTY recorder (real claude → asciicast .cast)
-  segment-cast.mjs          asciicast .cast → draft termcast (curate before committing)
-mcp.capture.json            MCP config to register kitsoki mcp for the live capture
+  lint-no-llm.mjs              the no-LLM / camera / chapters gate for this surface
+  streamjson-to-termcast.mjs   claude -p stream-json → draft termcast (the capture path used)
+  capture-live.py              alt: a PTY recorder (real claude → asciicast .cast)
+  segment-cast.mjs             alt: asciicast .cast → draft termcast
+mcp.capture.json            MCP config registering kitsoki mcp for the capture
+                            (binds --stories-dir + --workspace to the demo story)
+casts/claude-code-live.json the captured-live cassette (committed; agent "claude-code-live")
 ```
 
 ## Run it (no LLM)
@@ -81,24 +84,38 @@ MCP_DEMO_AGENT=codex pnpm run record
 
 This is the **only** step that uses a real LLM. Do it deliberately, never in CI
 (AGENTS.md: tests never use a real LLM; live is opt-in). It captures an authentic
-Claude-Code session into a cassette that then replays for free.
+Claude-Code session into a cassette that then replays for free. Kitsoki itself
+stays no-LLM throughout (sessions drive under `harness: replay`); the sole model
+in the loop is the external `claude` agent being recorded.
+
+The reliable path is **headless stream-json** — it yields exact tool names,
+inputs, and kitsoki results, which render faithfully (incl. the real `render.tui`
+frame). Drive against a story whose intents are direct transitions (so the session
+is driven by `session.submit`, no routing cassette / no LLM inside kitsoki); the
+committed cassette was captured against a small deterministic `barista` story.
 
 ```bash
-# from the kitsoki repo root:
-python3 tools/mcp-demo/scripts/capture-live.py \
-  --out tools/mcp-demo/casts/claude-code-live.cast -- \
-  claude --mcp-config tools/mcp-demo/mcp.capture.json \
-         --allowedTools 'mcp__kitsoki__*' \
-         "Build a tiny barista story over the kitsoki MCP server: author it, \
-          validate the graph, run its flows, then drive a session and show the TUI."
+# from the kitsoki repo root — task in a file (see capture/task.txt for the one used):
+claude -p "$(cat tools/mcp-demo/casts/capture-task.txt)" \
+  --mcp-config tools/mcp-demo/mcp.capture.json \
+  --allowedTools 'mcp__kitsoki__*' \
+  --output-format stream-json --verbose \
+  > .artifacts/mcp-demo/capture/claude-stream.jsonl
 
-# segment → curate → commit, then point the spec at it:
-node tools/mcp-demo/scripts/segment-cast.mjs \
-     tools/mcp-demo/casts/claude-code-live.cast > tools/mcp-demo/casts/claude-code-live.json
-#   ↑ curate captions / mark the prompt chunk kind:"type" / tune holdMs
-MCP_DEMO_CAST_JSON=casts/claude-code-live.json pnpm run record
+# stream-json → draft termcast (renders real cards; story.read shows source,
+# render.tui shows the real screen), then point the spec at it:
+node tools/mcp-demo/scripts/streamjson-to-termcast.mjs \
+     .artifacts/mcp-demo/capture/claude-stream.jsonl --agent claude-code-live \
+     > tools/mcp-demo/casts/claude-code-live.json
+#   ↑ curate captions / holdMs / result trims before committing
+cd tools/mcp-demo && MCP_DEMO_CAST_JSON=casts/claude-code-live.json pnpm run record
 ```
 
 Claude Code maps the dotted tool names to `mcp__kitsoki__story_write`,
-`mcp__kitsoki__session_drive`, `mcp__kitsoki__render_tui`, … — hence the
+`mcp__kitsoki__session_submit`, `mcp__kitsoki__render_tui`, … — hence the
 `mcp__kitsoki__*` allowlist (no mid-run permission prompts to pollute the capture).
+
+> Alternative — a verbatim *terminal* capture (rich TUI bytes) rather than
+> stream-json: `scripts/capture-live.py` (a dep-free PTY recorder → asciicast) +
+> `scripts/segment-cast.mjs` (asciicast → draft termcast). Use when you want the
+> exact terminal rendering instead of re-rendered structured events.
