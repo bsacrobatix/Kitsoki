@@ -356,6 +356,49 @@ func TestDogfoodSmoke_AutoStartThroughBugfix(t *testing.T) {
 	}
 }
 
+func TestDogfoodSmoke_TicketSearchFreeTextRoutesToWorkbench(t *testing.T) {
+	repoRoot, _ := setupDogfoodRepo(t)
+	orch, s, sid, oracleCalls := newSmokeOrchestrator(t, repoRoot)
+
+	ctx := context.Background()
+	c, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	_, err := orch.SubmitDirect(c, sid, "core__go_ticket_search", nil)
+	require.NoError(t, err)
+
+	const msg = "we have a bunch of markdown issues in the repo - file them on bsacrobatix/kitsoki on github and we'll be able to use them here"
+	out, err := orch.Turn(c, sid, msg)
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("core.landing"), out.NewState)
+	require.Equal(t, 1, *oracleCalls,
+		"workbench on_enter should process the captured request exactly once")
+
+	journey, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	require.Equal(t, msg, journey.World.Vars["core__landing_request"])
+
+	history, err := s.LoadHistory(sid)
+	require.NoError(t, err)
+	requireDogfoodRoutedBy(t, history, "fallback")
+}
+
+func requireDogfoodRoutedBy(t *testing.T, history []store.Event, want string) {
+	t.Helper()
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Kind != store.TurnStarted {
+			continue
+		}
+		var payload struct {
+			RoutedBy string `json:"routed_by"`
+		}
+		require.NoError(t, json.Unmarshal(history[i].Payload, &payload))
+		require.Equal(t, want, payload.RoutedBy)
+		return
+	}
+	t.Fatalf("no TurnStarted event found")
+}
+
 // TestDogfoodSmoke_StaleWorktreeRecoversOrFailsCleanly verifies the
 // failure-mode the regression actually surfaced in the wild: a stale
 // `.worktrees/<dir>/` from a previous aborted run makes `git worktree
