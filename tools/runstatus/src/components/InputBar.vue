@@ -31,8 +31,9 @@
         type="button"
         class="input-bar__disclose"
         data-testid="input-disclose"
-        :title="`Show ${controlCount} action${controlCount === 1 ? '' : 's'} — or make the panel taller`"
-        @click="expanded = true"
+        :title="`Show ${controlCount} action${controlCount === 1 ? '' : 's'}`"
+        aria-label="Show quick actions"
+        @click="expandControls"
       >
         <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -51,22 +52,7 @@
     </form>
 
     <template v-else>
-    <!-- Expanded inside a short space: offer a way back to the single-line input
-         (otherwise the only way to re-collapse is to grow then shrink the pane). -->
-    <div v-if="compact" class="input-bar__compact-bar">
-      <button
-        type="button"
-        class="input-bar__disclose"
-        data-testid="input-collapse"
-        title="Collapse to a single-line input"
-        @click="expanded = false"
-      >
-        <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"
-            stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
-    </div>
+    <div class="input-bar__expanded">
     <!-- Choice items from typed view: labeled buttons with pre-filled slots.
          When present, these replace the legacy no-slot action buttons since
          choice items subsume them (back/look appear as choice items too). -->
@@ -126,6 +112,21 @@
           </button>
         </form>
       </div>
+      <div class="input-bar__compact-bar">
+        <button
+          type="button"
+          class="input-bar__disclose"
+          data-testid="input-collapse"
+          title="Collapse quick actions"
+          aria-label="Collapse quick actions"
+          @click="collapseControls"
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+      </div>
     </template>
 
     <!-- Form mode: multi-field numeric/text form (mode: form in YAML). -->
@@ -157,6 +158,21 @@
           Submit
         </button>
       </form>
+      <div class="input-bar__compact-bar">
+        <button
+          type="button"
+          class="input-bar__disclose"
+          data-testid="input-collapse"
+          title="Collapse quick actions"
+          aria-label="Collapse quick actions"
+          @click="collapseControls"
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+      </div>
     </template>
 
     <!-- Semantic routing room: no choice items, no form, no text-slot intents.
@@ -205,6 +221,21 @@
         >
           <span class="input-bar__btn-label">{{ intent.title || humanizeIntent(intent.name) }}</span>
           <span v-if="intent.description" class="input-bar__btn-hint">{{ intent.description }}</span>
+        </button>
+      </div>
+      <div v-if="actionIntents.length" class="input-bar__compact-bar">
+        <button
+          type="button"
+          class="input-bar__disclose"
+          data-testid="input-collapse"
+          title="Collapse quick actions"
+          aria-label="Collapse quick actions"
+          @click="collapseControls"
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </button>
       </div>
     </template>
@@ -284,6 +315,7 @@
         Send
       </button>
     </form>
+    </div>
     </template>
   </div>
 </template>
@@ -584,21 +616,36 @@ const COMPACT_EXIT = 460; // grow past this to un-collapse (gap = hysteresis)
 const rootEl = ref<HTMLElement | null>(null);
 const compact = ref(false);
 const expanded = ref(false);
+const manualCollapsed = ref(false);
 let ro: ResizeObserver | null = null;
 
 function applyHeight(h: number): void {
+  // Test mounts and transient hidden hosts can report 0px. Treat that as
+  // "unmeasured" rather than forcing the user into compact mode.
+  if (h <= 0) return;
   if (h <= COMPACT_ENTER) compact.value = true;
   else if (h >= COMPACT_EXIT) compact.value = false;
 }
 
-// Re-collapse whenever the space becomes short again: a manual expand lasts only
-// until the next shrink, so shrinking the pane always returns to the single line.
+// Re-collapse whenever the space becomes short again: a height-driven expand
+// lasts only until the next shrink, so shrinking the pane always returns to the
+// single line. Manual collapse is independent and works at any height.
 watch(compact, (c) => {
   if (c) expanded.value = false;
 });
 
-/** Collapsed = short space and not manually expanded. */
-const collapsed = computed(() => compact.value && !expanded.value);
+/** Collapsed = manually hidden, or short space and not height-expanded. */
+const collapsed = computed(() => hasControls.value && (manualCollapsed.value || (compact.value && !expanded.value)));
+
+function expandControls(): void {
+  manualCollapsed.value = false;
+  expanded.value = true;
+}
+
+function collapseControls(): void {
+  manualCollapsed.value = true;
+  expanded.value = false;
+}
 
 /** Count of structured controls that the collapsed view hides (drives the badge;
  *  no controls → no disclosure icon, just the single-line input). */
@@ -635,6 +682,12 @@ onUnmounted(() => {
   padding: 16px 20px;
   background: var(--k-bg-widget, #14171d);
   border-top: 1px solid var(--k-border-subtle, #2a2f3a);
+}
+
+.input-bar__expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .input-bar__choice-prompt {

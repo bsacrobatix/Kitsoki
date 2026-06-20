@@ -294,6 +294,30 @@ describe("InputBar", () => {
     wrapper.unmount();
   });
 
+  it("choice actions can be manually collapsed and restored at normal height", async () => {
+    const wrapper = mount(InputBar, {
+      props: { intents: [startIntent], typedView: choiceOnlyView },
+    });
+
+    expect(wrapper.find('[data-testid="intent-actions"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="text-floor"]').exists()).toBe(true);
+
+    await wrapper.find('[data-testid="input-collapse"]').trigger("click");
+
+    expect(wrapper.classes()).toContain("input-bar--collapsed");
+    expect(wrapper.find('[data-testid="intent-actions"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="text-floor"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="composer"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="input-disclose"]').exists()).toBe(true);
+
+    await wrapper.find('[data-testid="input-disclose"]').trigger("click");
+
+    expect(wrapper.classes()).not.toContain("input-bar--collapsed");
+    expect(wrapper.find('[data-testid="intent-actions"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="text-floor"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
   it("form present: a free-text floor is shown too", () => {
     const wrapper = mount(InputBar, {
       props: { intents: [], typedView: formOnlyView },
