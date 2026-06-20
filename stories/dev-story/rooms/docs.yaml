@@ -4,13 +4,17 @@
 states:
 
   docs:
-    description: "Docs — write / edit documentation (Wave 3 stub)."
+    description: "Docs — write / edit documentation (coming soon)."
     # Flattened view (no extends/blocks) — `choice:` cannot live inside a
     # `blocks:` map (typed metadata is lost through the inheritance
     # pipeline; see docs/stories/choice-widget.md §3.1). The base.pongo
     # status/heading chrome is dropped on the standalone path.
     view:
-      - prose: "Docs (Wave 3 stub)."
+      - banner:
+          text:     "DOCS"
+          subtitle: "write & edit documentation — coming in a later release"
+          color:    "#6B7280"   # grey — not yet active
+      - prose: "The docs workflow isn't wired up yet — it lands in a later release. Pick another action below, or head back to the workbench."
       - choice:
           mode: single
           prompt: "Actions"
