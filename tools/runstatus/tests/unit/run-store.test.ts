@@ -651,3 +651,78 @@ describe("useRunStore — write-side actions", () => {
     expect(store.transcript.some((e) => e.text.includes("ONE"))).toBe(false);
   });
 });
+
+// ---- chatEntries routing provenance ----------------------------------------
+// chatEntries is the routing-chip's data source: it enriches each user turn
+// with the routed_by/match_type/confidence off turn.start plus the resolved
+// intent off the turn's first machine.transition. The raw transcript stays
+// bare — surfaces MUST bind chatEntries to show the chip (see ChatSurface /
+// InteractiveView, and chat-surface-routing.test.ts).
+function traceEvent(over: Partial<TraceEvent>): TraceEvent {
+  return {
+    time: "2026-01-01T00:00:00Z",
+    level: "info",
+    msg: "",
+    session_id: "sess-1",
+    turn: 0,
+    state_path: "root/idle",
+    attrs: {},
+    ...over,
+  };
+}
+
+describe("run store — chatEntries routing provenance", () => {
+  it("enriches a user turn with routing recovered from the event log", () => {
+    const store = useRunStore();
+    // A free-text user turn (tagged with its turn number, as sendText does).
+    store.transcript = [{ role: "user", text: "commit my work", turn: 1 }];
+    // The provenance the chip needs: tier/reason/confidence on turn.start, and
+    // the resolved intent on the turn's FIRST machine.transition.
+    store.events = [
+      traceEvent({
+        turn: 1,
+        msg: "turn.start",
+        attrs: { routed_by: "semantic", match_type: "leading-verb:commit", confidence: 0.95 },
+      }),
+      traceEvent({ turn: 1, msg: "machine.transition", attrs: { intent: "git.commit" } }),
+    ];
+
+    expect(store.chatEntries[0]!.routing).toEqual({
+      routedBy: "semantic",
+      matchType: "leading-verb:commit",
+      confidence: 0.95,
+      intent: "git.commit",
+    });
+    // The raw transcript is never mutated — only chatEntries carries routing,
+    // which is exactly why a surface binding the raw transcript loses the chip.
+    expect(store.transcript[0]!.routing).toBeUndefined();
+  });
+
+  it("leaves the user turn un-enriched until turn.start lands (chip stays hidden)", () => {
+    const store = useRunStore();
+    store.transcript = [{ role: "user", text: "commit my work", turn: 1 }];
+    // Only the transition has landed — no turn.start yet, so no provenance.
+    store.events = [traceEvent({ turn: 1, msg: "machine.transition", attrs: { intent: "git.commit" } })];
+    expect(store.chatEntries[0]!.routing).toBeUndefined();
+  });
+
+  it("recovers provenance reactively when turn.start arrives a tick later (SSE settle)", async () => {
+    const { nextTick } = await import("vue");
+    const store = useRunStore();
+    store.transcript = [{ role: "user", text: "commit my work", turn: 1 }];
+    store.events = [];
+    expect(store.chatEntries[0]!.routing).toBeUndefined();
+
+    // Events stream in over SSE after the bubble; chatEntries is a computed so
+    // the chip fills in without any imperative refresh.
+    store.events = [
+      traceEvent({ turn: 1, msg: "turn.start", attrs: { routed_by: "deterministic" } }),
+      traceEvent({ turn: 1, msg: "machine.transition", attrs: { intent: "git.commit" } }),
+    ];
+    await nextTick();
+    expect(store.chatEntries[0]!.routing).toMatchObject({
+      routedBy: "deterministic",
+      intent: "git.commit",
+    });
+  });
+});

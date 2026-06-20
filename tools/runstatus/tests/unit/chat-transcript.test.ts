@@ -154,6 +154,41 @@ describe("ChatTranscript", () => {
     expect(wrapper.find(".chat-bubble").classes()).not.toContain("chat-bubble--offramp");
   });
 
+  it("renders the inline routing chip from a user entry's routing provenance", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          {
+            role: "user",
+            text: "commit my work",
+            routing: {
+              routedBy: "semantic",
+              matchType: "leading-verb:commit",
+              confidence: 0.95,
+              intent: "git.commit",
+            },
+          },
+        ],
+      },
+    });
+    const chip = wrapper.find("[data-testid='routing-chip']");
+    expect(chip.exists()).toBe(true);
+    // The chip reads: → intent · TIER · reason · conf.
+    expect(chip.find(".chat-routing__intent").text()).toBe("git.commit");
+    expect(chip.find(".chat-routing__tier").text()).toBe("semantic");
+    expect(chip.find(".chat-routing__reason").text()).toBe("leading-verb:commit");
+    expect(chip.find(".chat-routing__conf").text()).toBe("0.95");
+    // Green deterministic tiers carry a tier-specific class (vs amber --llm).
+    expect(chip.find(".chat-routing__tier").classes()).toContain("chat-routing__tier--semantic");
+  });
+
+  it("omits the routing chip for a plain user entry (no provenance)", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: { transcript: [{ role: "user", text: "commit my work" }] },
+    });
+    expect(wrapper.find("[data-testid='routing-chip']").exists()).toBe(false);
+  });
+
   it("renders user text literally, not as markdown", () => {
     const wrapper = mount(ChatTranscript, {
       props: {

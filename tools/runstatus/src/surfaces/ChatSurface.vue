@@ -53,7 +53,10 @@
       </header>
 
       <section class="surface__chat" aria-label="Conversation" data-testid="chat-section">
-        <ChatTranscript class="surface__transcript" :transcript="store.transcript" />
+        <!-- chatEntries (not raw transcript) so each user turn carries its
+             routing provenance and ChatTranscript can render the inline
+             routing chip — same binding InteractiveView uses. -->
+        <ChatTranscript class="surface__transcript" :transcript="store.chatEntries" />
         <!-- Streaming thinking bubble: visible while a turn is in flight. -->
         <div v-if="pending" class="surface__thinking" data-testid="thinking-bubble">
           <div class="surface__thinking-avatar">A</div>
