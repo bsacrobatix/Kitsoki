@@ -208,6 +208,12 @@ func (o *Orchestrator) DriveToRest(ctx context.Context, intent string, slots map
 		o.logger.Warn("orchestrator: DriveToRest: drive error",
 			slog.String("session_id", string(sid)), slog.String("error", driveErr.Error()),
 			slog.String("outcome", out.Outcome))
+	case last != nil && last.Mode == ModeRejected:
+		// The command was rejected (guard failed / not allowed in the booted
+		// hub — e.g. a feature-branch command while HEAD is on main). It started
+		// NOTHING, so there is nothing to abort and nothing was resolved: report
+		// "rejected" and let the caller fail open to the model. No safe-abort.
+		out.Outcome = "rejected"
 	case last != nil && o.isInterceptDriveRoom(last.NewState):
 		// Settled AT a flagged room ⇒ the sub-flow escalated (resolver could not
 		// resolve). Safe-abort to clean the tree.
@@ -235,8 +241,20 @@ func (o *Orchestrator) DriveToRest(ctx context.Context, intent string, slots map
 		return out, nil
 	}
 
-	// Non-success: safe-abort on a FRESH context (the original budget may be
-	// blown) so the tree returns to a clean tip.
+	// A rejected command started nothing — there is no tree to abort. Close the
+	// record without an abort and let the caller fail open.
+	if out.Outcome == "rejected" {
+		o.logger.Info(trace.EvInterceptAborted,
+			slog.String("session_id", string(sid)),
+			slog.String("outcome", out.Outcome),
+			slog.String("final_state", string(out.FinalState)),
+		)
+		return out, nil
+	}
+
+	// Non-success that may have started work (escalation / budget / error /
+	// panic): safe-abort on a FRESH context (the original budget may be blown)
+	// so the tree returns to a clean tip.
 	abortCtx, cancel := context.WithTimeout(context.Background(), interceptAbortBudget)
 	defer cancel()
 	abortOut, abortErr := o.SubmitDirect(abortCtx, sid, abortIntent, nil)

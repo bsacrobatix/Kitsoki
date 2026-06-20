@@ -266,6 +266,13 @@ func runClaudeHookDrive(ctx context.Context, appPath string, in hookPromptInput,
 		return "", false
 	}
 
+	// A rejected command (guard failed / not allowed in the booted hub) started
+	// nothing and is not a real outcome to show — fail open so the prompt reaches
+	// the model, mirroring the fast path's rejected-execute pass-through.
+	if !out.Resolved && !out.Aborted {
+		return "", false
+	}
+
 	return composeDriveReport(res.Intent, ic.EscapePrefix, out), true
 }
 
