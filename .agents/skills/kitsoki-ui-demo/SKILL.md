@@ -610,6 +610,28 @@ KITSOKI_VSCODE_PACE=2 make vscode-e2e   # slower dwells
 Then QA the produced MP4 — see [[kitsoki-ui-qa]] → "Full-editor (VS Code)
 evidence" (pass the labeled `NN-*.png` via `--frames`).
 
+## Terminal surface (MCP / coding-agent demos)
+
+A demo where an *external coding agent* drives kitsoki over the **MCP** server
+(`kitsoki mcp`) is recorded on a **terminal** surface, not the web SPA: an xterm.js
+terminal **replays a committed `termcast` cassette** and is filmed through the same
+camera / `ChapterRecorder` / `saveVideoAsMp4` contracts as every other demo. Claude
+Code (TUI) is the POC; codex/copilot are additional cassettes. The harness is
+`tools/mcp-demo/` (its `README.md` is the full recipe; the QA contract is the
+`mcp-feature.md` / `mcp-scenarios.yaml` templates).
+
+Same posture as the web demos — **no-LLM by construction**: the replay plays a
+static cassette and never spawns a model (enforced by
+`tools/mcp-demo/scripts/lint-no-llm.mjs`), with a single **gated** live `claude`
+capture producing the cassette (*record once, replay forever*,
+`scripts/capture-live.py`).
+
+```
+make mcp-demo-fast    # no-LLM validate (lint + PACE=0 assert)
+make mcp-demo         # watch-speed record → .artifacts/mcp-demo/<agent>.mp4
+make mcp-qa           # vision QA gate (GATED: local claude CLI)
+```
+
 ## Pointers
 
 - **Full-editor (VS Code) tour spec + launch helper:**

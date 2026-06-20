@@ -181,6 +181,30 @@ servers attach
 session store for driving handles), `--harness replay|live` (default `replay`),
 `--workspace` (an initial authoring workspace bound on boot).
 
+## Demo → QA
+
+The studio surface ships a **tour-driven demo video** of an external coding agent
+driving it end to end — `tools/mcp-demo/` (Claude Code TUI is the POC; codex/copilot
+slot in by swapping a cassette). It generalizes the VS Code demo→QA pipeline
+(`tools/vscode-kitsoki`) to a *terminal* surface: an xterm.js terminal **replays a
+committed `termcast` cassette**, filmed through the shared demo machinery (camera
+1600×900, `ChapterRecorder` sidecar, 25s floor) and gated by the `kitsoki-ui-qa`
+review (`mcp-feature.md` / `mcp-scenarios.yaml`).
+
+It is **no-LLM by construction** — the replay plays a static cassette and never
+spawns a model (enforced by `tools/mcp-demo/scripts/lint-no-llm.mjs`). Authenticity
+comes from *record once, replay forever*: a single **gated** live `claude` ↔
+`kitsoki mcp` capture (`scripts/capture-live.py`) becomes the cassette, then replays
+for free, identically, on every render.
+
+```
+make mcp-demo-fast   # no-LLM validate (CI-safe: lint + PACE=0 assert)
+make mcp-demo        # watch-speed record → .artifacts/mcp-demo/claude-code.mp4
+make mcp-qa          # vision QA (GATED: local claude CLI)
+```
+
+See [`tools/mcp-demo/README.md`](../../tools/mcp-demo/README.md).
+
 ## Non-goals
 
 - **A second view renderer or a hand-rolled web view.** `render.*` capture the

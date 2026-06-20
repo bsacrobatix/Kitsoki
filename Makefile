@@ -357,6 +357,40 @@ tour-qa: render-tour features-index
 		--feature .artifacts/features/qa/$(TOUR).feature.md \
 		--scenarios .artifacts/features/qa/$(TOUR).scenarios.yaml
 
+# ── MCP terminal demo (a coding agent driving kitsoki over MCP; Claude Code POC) ──
+# Generalizes the demo→QA pipeline to a terminal surface: an xterm.js terminal
+# replays a committed termcast cassette, filmed through the shared camera/chapters/
+# QA machinery. No-LLM by construction (replays a static cassette). See
+# tools/mcp-demo/README.md.
+MCP_DEMO_DIR := tools/mcp-demo
+.PHONY: mcp-demo-deps mcp-demo-fast mcp-demo mcp-qa
+
+mcp-demo-deps:
+	cd $(MCP_DEMO_DIR) && pnpm install --silent
+
+# Fast, no-LLM validation (safe in CI): the no-spawn/camera/chapters lint + an
+# assert-only PACE=0 record (throwaway .fast.mp4, never the canonical name).
+mcp-demo-fast: mcp-demo-deps
+	cd $(MCP_DEMO_DIR) && pnpm run lint:no-llm && WEB_CHAT_PACE=0 pnpm exec playwright test
+
+# Watch-speed record → .artifacts/mcp-demo/<agent>.mp4 (+ chapters.json). No LLM:
+# replays the committed cassette. AGENT selects it (default claude-code).
+AGENT ?= claude-code
+mcp-demo: mcp-demo-deps
+	cd $(MCP_DEMO_DIR) && MCP_DEMO_AGENT=$(AGENT) pnpm run record
+
+# Vision QA on the recorded demo (kitsoki-ui-qa). GATED: drives the local `claude`
+# CLI for the grounded review — never run automatically (CLAUDE.md LLM policy).
+MCP_QA_VIDEO ?= .artifacts/mcp-demo/$(AGENT).mp4
+mcp-qa:
+	@rm -rf .artifacts/mcp-demo/frames && mkdir -p .artifacts/mcp-demo/frames
+	@cp .artifacts/mcp-demo/0*-*.png .artifacts/mcp-demo/frames/ 2>/dev/null || true
+	.agents/skills/kitsoki-ui-qa/scripts/qa.sh $(MCP_QA_VIDEO) \
+		--feature .agents/skills/kitsoki-ui-qa/templates/mcp-feature.md \
+		--scenarios .agents/skills/kitsoki-ui-qa/templates/mcp-scenarios.yaml \
+		--frames .artifacts/mcp-demo/frames \
+		--blank-min-coverage 0.18
+
 # demos records every recordable feature demo at watch-speed, incrementally:
 # per-demo content stamps (feature YAML + spec + story inputs + binary) skip
 # anything unchanged. demos-force re-records everything. See
