@@ -182,6 +182,52 @@ describe("ChatTranscript", () => {
     expect(chip.find(".chat-routing__tier").classes()).toContain("chat-routing__tier--semantic");
   });
 
+  it("tints the new workbench fallback tier as a free ($0) deterministic route", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          {
+            role: "user",
+            text: "file a bunch of markdown issues on github",
+            routing: {
+              routedBy: "fallback",
+              matchType: "free_text",
+              intent: "core__work",
+            },
+          },
+        ],
+      },
+    });
+    const chip = wrapper.find("[data-testid='routing-chip']");
+    expect(chip.exists()).toBe(true);
+    const tier = chip.find(".chat-routing__tier");
+    expect(tier.text()).toBe("fallback");
+    // Joins the green/free group (NOT neutral gray) — driven by the free/paid
+    // modifier, not an enumerated tier list, so it never drifts again.
+    expect(tier.classes()).toContain("chat-routing__tier--fallback");
+    expect(tier.classes()).toContain("chat-routing__tier--free");
+    expect(tier.classes()).not.toContain("chat-routing__tier--paid");
+    // The tooltip tells the same cost story as the other deterministic tiers.
+    expect(chip.attributes("title")).toContain("deterministic, no LLM, $0");
+  });
+
+  it("tints the LLM tier as paid (amber), distinct from the free tiers", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          {
+            role: "user",
+            text: "do the thing",
+            routing: { routedBy: "llm", matchType: "oracle.local", intent: "git.commit" },
+          },
+        ],
+      },
+    });
+    const tier = wrapper.find("[data-testid='routing-chip'] .chat-routing__tier");
+    expect(tier.classes()).toContain("chat-routing__tier--paid");
+    expect(tier.classes()).not.toContain("chat-routing__tier--free");
+  });
+
   it("omits the routing chip for a plain user entry (no provenance)", () => {
     const wrapper = mount(ChatTranscript, {
       props: { transcript: [{ role: "user", text: "commit my work" }] },

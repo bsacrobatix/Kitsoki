@@ -75,7 +75,14 @@
           <span class="chat-routing__intent" v-if="entry.routing!.intent"
             >{{ entry.routing!.intent }}</span
           >
-          <span class="chat-routing__tier" :class="`chat-routing__tier--${entry.routing!.routedBy}`"
+          <span
+            class="chat-routing__tier"
+            :class="[
+              `chat-routing__tier--${entry.routing!.routedBy}`,
+              entry.routing!.routedBy === 'llm'
+                ? 'chat-routing__tier--paid'
+                : 'chat-routing__tier--free',
+            ]"
             >{{ entry.routing!.routedBy }}</span
           >
           <span class="chat-routing__reason" v-if="entry.routing!.matchType"
@@ -327,13 +334,17 @@ watch(
   color: #0f1115;
   background: #cbd5e1;
 }
-/* The deterministic tiers are free; tint them green. The LLM tier is the only
-   paid surface; tint it amber so the cost story reads at a glance. */
-.chat-routing__tier--semantic,
-.chat-routing__tier--deterministic,
-.chat-routing__tier--turncache {
+/* Cost story, driven off the one fact that matters: did this turn spend?
+   Every deterministic tier (semantic / deterministic / turncache / default /
+   fallback / slot-fill) is free → tint green. The LLM tier is the only paid
+   surface → amber. Keying the colour on the free/paid modifier (not an
+   enumerated tier list) means a NEW deterministic tier — like the workbench
+   free-form fallback — joins the green group automatically instead of
+   silently rendering neutral. */
+.chat-routing__tier--free {
   background: #bef264;
 }
+.chat-routing__tier--paid,
 .chat-routing__tier--llm {
   background: #fcd34d;
 }
