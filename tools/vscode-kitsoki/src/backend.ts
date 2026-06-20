@@ -8,6 +8,9 @@
 import * as vscode from 'vscode';
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as net from 'node:net';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 export interface BackendConfig {
   binaryPath: string; // "" => "kitsoki" on PATH
@@ -58,6 +61,46 @@ export function allocatePort(): Promise<number> {
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Resolve the kitsoki binary to spawn. An explicit `binaryPath` setting always
+ * wins. Otherwise, when the workspace is a kitsoki checkout, prefer its freshly
+ * built `bin/kitsoki` — that's both the dev-correct (newest) binary AND an
+ * absolute path, so it works regardless of the spawner's PATH. Only when neither
+ * applies do we fall back to bare `kitsoki` (resolved against {@link binaryEnv}'s
+ * augmented PATH).
+ */
+export function resolveBinary(binaryPath: string, cwd: string | undefined): string {
+  if (binaryPath) return binaryPath;
+  if (cwd) {
+    const local = path.join(cwd, 'bin', 'kitsoki');
+    try {
+      if (fs.existsSync(local)) return local;
+    } catch {
+      /* fall through to PATH */
+    }
+  }
+  return 'kitsoki';
+}
+
+/**
+ * Build the child's environment with a PATH that GUI-launched editors lack. On
+ * macOS a Dock/Finder-launched VS Code inherits only the minimal system PATH
+ * (`/usr/bin:/bin:...`), so a `kitsoki` in `~/.local/bin` (or Homebrew) is
+ * invisible and `spawn('kitsoki')` ENOENTs. Append the usual install dirs so a
+ * PATH-installed binary still resolves. A no-op when they're already present.
+ */
+export function binaryEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const extra = [
+    path.join(os.homedir(), '.local', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/local/go/bin',
+  ];
+  const parts = (base.PATH ?? '').split(path.delimiter).filter(Boolean);
+  for (const dir of extra) if (!parts.includes(dir)) parts.push(dir);
+  return { ...base, PATH: parts.join(path.delimiter) };
+}
 
 /**
  * Manages the lifecycle of one `kitsoki web` backend. `start()` is idempotent
@@ -126,7 +169,7 @@ export class Backend {
 
   private async doStart(): Promise<string> {
     const cfg = readConfig();
-    const bin = cfg.binaryPath || 'kitsoki';
+    const bin = resolveBinary(cfg.binaryPath, this.cwd);
     const port = await allocatePort();
     const args = ['web', '--addr', `127.0.0.1:${port}`];
     if (cfg.flow) args.push('--flow', cfg.flow);
@@ -137,7 +180,7 @@ export class Backend {
     // backend's IDE link discovers our lock and dials this window outright (the
     // integrated-terminal fast path). Absent it, the backend runs with no link
     // and host.ide.* return connected:false — the graceful no-IDE posture.
-    const env: NodeJS.ProcessEnv = { ...process.env };
+    const env: NodeJS.ProcessEnv = binaryEnv(process.env);
     const idePort = this.idePortReady ? await this.idePortReady() : undefined;
     if (idePort) {
       env.CLAUDE_CODE_SSE_PORT = String(idePort);
@@ -162,12 +205,24 @@ export class Backend {
         this.starting = undefined;
       }
     });
-    child.on('error', (err) => {
-      this.out.appendLine(`[backend] spawn error: ${err.message}`);
+
+    // A spawn failure (most commonly ENOENT — the binary isn't on the spawner's
+    // PATH) fires 'error', NOT 'exit', so the health poll would otherwise spin
+    // for its full 30s and surface the opaque Node "fetch failed". Race a
+    // promise that rejects on 'error' with an actionable message instead.
+    const spawnFailed = new Promise<never>((_, reject) => {
+      child.once('error', (err) => {
+        const hint =
+          (err as NodeJS.ErrnoException).code === 'ENOENT'
+            ? ` — '${bin}' not found. Build it (\`make build\`) or set the kitsoki.binaryPath setting to an absolute path.`
+            : '';
+        this.out.appendLine(`[backend] spawn error: ${err.message}${hint}`);
+        reject(new Error(`could not launch kitsoki backend: ${err.message}${hint}`));
+      });
     });
 
     const base = `http://127.0.0.1:${port}`;
-    await this.healthPoll(base, child);
+    await Promise.race([this.healthPoll(base, child), spawnFailed]);
     this._base = base;
     this.out.appendLine(`[backend] healthy at ${base}`);
     return base;
