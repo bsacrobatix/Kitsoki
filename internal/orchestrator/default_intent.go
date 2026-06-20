@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"kitsoki/internal/app"
@@ -82,6 +83,124 @@ func (o *Orchestrator) routeViaDefaultIntent(ctx context.Context, sid app.Sessio
 	return outcome, true, nil
 }
 
+func (o *Orchestrator) routeViaFreeFormFallback(ctx context.Context, sid app.SessionID, input string) (*TurnOutcome, bool, error) {
+	if !o.routingEnabled() {
+		return nil, false, nil
+	}
+	cfg, ok := o.effectiveFreeFormFallback()
+	if !ok {
+		return nil, false, nil
+	}
+	intentName := strings.TrimSpace(cfg.Intent)
+	if intentName == "" || strings.TrimSpace(input) == "" {
+		return nil, false, nil
+	}
+	journey, err := o.loadJourney(sid)
+	if err != nil {
+		return nil, false, fmt.Errorf("orchestrator: routeViaFreeFormFallback: load journey: %w", err)
+	}
+	st := lookupStateByPath(o.def, journey.State)
+	if st == nil || st.DefaultIntent != "" || st.OracleOffRamp != nil {
+		return nil, false, nil
+	}
+	if strings.TrimSpace(cfg.State) == string(journey.State) {
+		return nil, false, nil
+	}
+
+	allowedIntents := o.machine.AllowedIntents(journey.State, journey.World)
+	allowedNames := make([]string, len(allowedIntents))
+	for i, ai := range allowedIntents {
+		allowedNames[i] = ai.Name
+	}
+	intentName = resolveIntentAlias(st, intentName)
+	if !containsString(allowedNames, intentName) {
+		return nil, false, nil
+	}
+
+	intentDef, ok := lookupIntentByPath(o.def, journey.State, intentName)
+	if !ok {
+		return nil, false, nil
+	}
+	slotName, ok := singleRequiredStringSlot(intentDef)
+	if !ok {
+		return nil, false, nil
+	}
+
+	turnNum := journey.Turn + 1
+	tl := trace.NewTurnLogger(o.logger, sid, turnNum, journey.State)
+	tl.Debug(ctx, trace.EvTurnDefaultRouted,
+		slog.String("intent", intentName),
+		slog.String("slot", slotName),
+		slog.String("fallback_state", cfg.State),
+	)
+
+	prov := RouteProvenance{Source: "fallback", MatchType: "free_text"}
+	outcome, err := o.SubmitDirectRouted(ctx, sid, intentName, map[string]any{slotName: input}, input, prov)
+	if err != nil {
+		return nil, false, err
+	}
+	return outcome, true, nil
+}
+
+func (o *Orchestrator) effectiveFreeFormFallback() (app.FreeFormFallbackConfig, bool) {
+	if o.def == nil {
+		return app.FreeFormFallbackConfig{}, false
+	}
+	if o.def.Routing != nil && o.def.Routing.FreeFormFallback != nil {
+		cfg := *o.def.Routing.FreeFormFallback
+		return cfg, strings.TrimSpace(cfg.State) != "" || strings.TrimSpace(cfg.Intent) != ""
+	}
+	type candidate struct {
+		path   string
+		intent string
+	}
+	var candidates []candidate
+	walkOrchestratorStates(o.def.States, "", func(path string, s *app.State) {
+		if s == nil || baseOrchestratorStateName(path) != "landing" {
+			return
+		}
+		if _, ok := s.On["work"]; ok {
+			candidates = append(candidates, candidate{path: path, intent: "work"})
+			return
+		}
+		for intentName := range s.On {
+			if strings.HasSuffix(intentName, "__work") {
+				candidates = append(candidates, candidate{path: path, intent: intentName})
+			}
+		}
+	})
+	if len(candidates) == 0 {
+		return app.FreeFormFallbackConfig{}, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].path == candidates[j].path {
+			return candidates[i].intent < candidates[j].intent
+		}
+		return candidates[i].path < candidates[j].path
+	})
+	return app.FreeFormFallbackConfig{State: candidates[0].path, Intent: candidates[0].intent}, true
+}
+
+func walkOrchestratorStates(states map[string]*app.State, prefix string, fn func(path string, s *app.State)) {
+	for name, s := range states {
+		path := name
+		if prefix != "" {
+			path = prefix + "." + name
+		}
+		fn(path, s)
+		if s != nil && len(s.States) > 0 {
+			walkOrchestratorStates(s.States, path, fn)
+		}
+	}
+}
+
+func baseOrchestratorStateName(path string) string {
+	if i := strings.LastIndexByte(path, '.'); i >= 0 {
+		return path[i+1:]
+	}
+	return path
+}
+
 // resolveDefaultIntentName maps a state's authored default_intent to the intent
 // key actually present on the (possibly import-folded) machine and confirms it
 // is allowed this turn. The authored name may be bare ("discuss") while the
@@ -93,15 +212,33 @@ func resolveDefaultIntentName(st *app.State, allowed []string) string {
 	if di == "" {
 		return ""
 	}
-	if mapped, ok := st.IntentAliases[di]; ok && strings.TrimSpace(mapped) != "" {
-		di = mapped
-	}
+	di = resolveIntentAlias(st, di)
 	for _, a := range allowed {
 		if a == di {
 			return di
 		}
 	}
 	return ""
+}
+
+func resolveIntentAlias(st *app.State, name string) string {
+	if st == nil {
+		return strings.TrimSpace(name)
+	}
+	name = strings.TrimSpace(name)
+	if mapped, ok := st.IntentAliases[name]; ok && strings.TrimSpace(mapped) != "" {
+		return mapped
+	}
+	return name
+}
+
+func containsString(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 // singleRequiredStringSlot returns the name of the intent's sole required slot

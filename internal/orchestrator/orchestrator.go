@@ -1006,6 +1006,15 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		} else if hit {
 			return outcome, nil
 		}
+		// App-level free-form fallback: after command-like tiers and any
+		// room-local default sink miss, send unmatched prose from strict/menu
+		// rooms to the configured work-intake intent before the main LLM can
+		// guess a generic navigation intent.
+		if outcome, hit, fallbackErr := o.routeViaFreeFormFallback(ctx, sid, input); fallbackErr != nil {
+			return nil, fallbackErr
+		} else if hit {
+			return outcome, nil
+		}
 	}
 
 	// Serialise foreground turn against any concurrent handleJobTerminal for

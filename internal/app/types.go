@@ -393,11 +393,28 @@ type RoutingConfig struct {
 	// tier dispatches to (see ExtractLLMOnNoMatch). Empty defaults to
 	// "oracle.local" — the convention for the local-model backend.
 	ExtractLLMOracle string `yaml:"extract_llm_oracle,omitempty"`
+	// FreeFormFallback, when set, names a canonical work-intake state+intent
+	// that should receive otherwise-unmatched prose from strict/menu rooms.
+	// The loader copies that intent's transition onto states that do not
+	// already declare a free-text sink or off-ramp, and the orchestrator routes
+	// such unmatched prose there before the main-turn LLM can guess a generic
+	// navigation intent.
+	FreeFormFallback *FreeFormFallbackConfig `yaml:"free_form_fallback,omitempty"`
 	// Embedding configures the shared embedding sidecar used by both
 	// host.oracle.search and the embedding routing tier. When nil or when
 	// both Endpoint and Model are empty, host.oracle.search remains the
 	// no-op sentinel and the embedding routing tier is disabled.
 	Embedding *EmbedConfig `yaml:"embedding,omitempty"`
+}
+
+// FreeFormFallbackConfig declares an app-level catch-all for actionable prose
+// from otherwise menu-shaped rooms.
+type FreeFormFallbackConfig struct {
+	// State is the state that owns the canonical fallback transition.
+	State string `yaml:"state,omitempty"`
+	// Intent is the intent on State that receives the full utterance in its
+	// single required string slot.
+	Intent string `yaml:"intent,omitempty"`
 }
 
 // EmbedConfig is the app.routing.embedding config block. It is shared by the

@@ -809,6 +809,11 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	allStatePaths := make(map[string]struct{})
 	collectStatePaths("", def.States, allStatePaths)
 
+	// App-level free-form fallback: inject the configured work-intake arc into
+	// strict/menu rooms before collecting on: keys and running referential
+	// validation, so every downstream surface sees the same graph.
+	applyFreeFormFallback(def)
+
 	// Collect per-state-path the set of intent names declared in that
 	// state's `on:` block. Used by validateBackgroundEffectAware to
 	// statically verify emit_intent references — an emit_intent on a
@@ -1025,6 +1030,160 @@ func collectStateOnKeys(prefix string, states map[string]*State, out map[string]
 			collectStateOnKeys(path, s.States, out)
 		}
 	}
+}
+
+func applyFreeFormFallback(def *AppDef) {
+	cfg, ok := effectiveFreeFormFallback(def)
+	if !ok {
+		return
+	}
+	statePath := strings.TrimSpace(cfg.State)
+	intentName := strings.TrimSpace(cfg.Intent)
+	if statePath == "" || intentName == "" {
+		return
+	}
+	src, ok := lookupStateInMap(statePath, def.States)
+	if !ok || src == nil || len(src.On[intentName]) == 0 {
+		return
+	}
+	fallbackParent := parentStatePath(statePath)
+	fallback := cloneTransitions(src.On[intentName])
+	walkStates(def.States, "", func(path string, s *State) {
+		if s == nil || path == statePath || s.Terminal {
+			return
+		}
+		if parentStatePath(path) != fallbackParent {
+			return
+		}
+		if s.DefaultIntent != "" || s.OracleOffRamp != nil {
+			return
+		}
+		if s.On == nil {
+			s.On = map[string][]Transition{}
+		}
+		if _, exists := s.On[intentName]; exists {
+			return
+		}
+		s.On[intentName] = cloneTransitions(fallback)
+	})
+}
+
+func effectiveFreeFormFallback(def *AppDef) (FreeFormFallbackConfig, bool) {
+	if def == nil {
+		return FreeFormFallbackConfig{}, false
+	}
+	if def.Routing != nil && def.Routing.FreeFormFallback != nil {
+		cfg := *def.Routing.FreeFormFallback
+		return cfg, strings.TrimSpace(cfg.State) != "" || strings.TrimSpace(cfg.Intent) != ""
+	}
+	type candidate struct {
+		path   string
+		intent string
+	}
+	var candidates []candidate
+	walkStates(def.States, "", func(path string, s *State) {
+		if s == nil || baseStateName(path) != "landing" {
+			return
+		}
+		if _, ok := s.On["work"]; ok {
+			candidates = append(candidates, candidate{path: path, intent: "work"})
+			return
+		}
+		for intentName := range s.On {
+			if strings.HasSuffix(intentName, "__work") {
+				candidates = append(candidates, candidate{path: path, intent: intentName})
+			}
+		}
+	})
+	if len(candidates) == 0 {
+		return FreeFormFallbackConfig{}, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].path == candidates[j].path {
+			return candidates[i].intent < candidates[j].intent
+		}
+		return candidates[i].path < candidates[j].path
+	})
+	return FreeFormFallbackConfig{State: candidates[0].path, Intent: candidates[0].intent}, true
+}
+
+func baseStateName(path string) string {
+	if i := strings.LastIndexByte(path, '.'); i >= 0 {
+		return path[i+1:]
+	}
+	return path
+}
+
+func parentStatePath(path string) string {
+	if i := strings.LastIndexByte(path, '.'); i >= 0 {
+		return path[:i]
+	}
+	return ""
+}
+
+func walkStates(states map[string]*State, prefix string, fn func(path string, s *State)) {
+	for name, s := range states {
+		path := joinPath(prefix, name)
+		fn(path, s)
+		if s != nil && len(s.States) > 0 {
+			walkStates(s.States, path, fn)
+		}
+	}
+}
+
+func cloneTransitions(in []Transition) []Transition {
+	out := make([]Transition, len(in))
+	for i := range in {
+		out[i] = in[i]
+		out[i].Effects = cloneEffects(in[i].Effects)
+		out[i].Emit = append([]string(nil), in[i].Emit...)
+	}
+	return out
+}
+
+func cloneEffects(in []Effect) []Effect {
+	out := make([]Effect, len(in))
+	for i := range in {
+		out[i] = in[i]
+		out[i].Set = cloneAnyMap(in[i].Set)
+		out[i].Increment = cloneIntMap(in[i].Increment)
+		out[i].With = cloneAnyMap(in[i].With)
+		out[i].Bind = cloneStringMap(in[i].Bind)
+	}
+	return out
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneIntMap(in map[string]int) map[string]int {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // intentReachable returns true when `name` appears on `statePath`'s
@@ -2529,7 +2688,68 @@ func validateRouting(file string, def *AppDef, errs *[]error) {
 		if r.SemanticHighBar > 0 && r.SemanticMidBar > 0 && !(r.SemanticHighBar > r.SemanticMidBar) {
 			addErr(fmt.Sprintf("routing.semantic_high_bar (%.4f) must be greater than routing.semantic_mid_bar (%.4f)", r.SemanticHighBar, r.SemanticMidBar))
 		}
+		if r.FreeFormFallback != nil {
+			validateFreeFormFallback(file, def, errs)
+		}
 	}
+}
+
+func validateFreeFormFallback(file string, def *AppDef, errs *[]error) {
+	addErr := func(msg string) {
+		*errs = append(*errs, &ValidationError{File: file, Message: msg})
+	}
+	cfg := def.Routing.FreeFormFallback
+	statePath := strings.TrimSpace(cfg.State)
+	intentName := strings.TrimSpace(cfg.Intent)
+	if statePath == "" {
+		addErr("routing.free_form_fallback.state is required")
+		return
+	}
+	if intentName == "" {
+		addErr("routing.free_form_fallback.intent is required")
+		return
+	}
+	st, ok := lookupStateInMap(statePath, def.States)
+	if !ok || st == nil {
+		addErr(fmt.Sprintf("routing.free_form_fallback.state %q is not declared in states", statePath))
+		return
+	}
+	if _, ok := st.On[intentName]; !ok {
+		addErr(fmt.Sprintf("routing.free_form_fallback.intent %q has no matching on: arc in state %q", intentName, statePath))
+		return
+	}
+	idef, found := intentDefInScope(def, statePath, intentName)
+	if !found {
+		addErr(fmt.Sprintf("routing.free_form_fallback.intent %q is not a declared intent", intentName))
+		return
+	}
+	reqCount, reqString := 0, true
+	for _, sl := range idef.Slots {
+		if !sl.Required {
+			continue
+		}
+		reqCount++
+		if sl.Type != "" && sl.Type != "string" {
+			reqString = false
+		}
+	}
+	if reqCount != 1 || !reqString {
+		addErr(fmt.Sprintf("routing.free_form_fallback.intent %q must declare exactly one required string slot to receive the free-text utterance", intentName))
+	}
+}
+
+func intentDefInScope(def *AppDef, statePath, intentName string) (Intent, bool) {
+	parts := strings.Split(statePath, ".")
+	for i := len(parts); i >= 1; i-- {
+		p := strings.Join(parts[:i], ".")
+		if st, ok := lookupStateInMap(p, def.States); ok && st != nil {
+			if ix, found := st.Intents[intentName]; found {
+				return ix, true
+			}
+		}
+	}
+	ix, ok := def.Intents[intentName]
+	return ix, ok
 }
 
 // validateIntentSynonyms checks one intent's Synonyms list and its slot

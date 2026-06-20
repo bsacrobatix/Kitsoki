@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/host"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
@@ -68,6 +69,79 @@ states:
 	// Fallback routes to quit so a harness-handled turn has a sane outcome.
 	h := &countingHarness{fall: staticHarness{intentName: "quit"}}
 	orch := orchestrator.New(def, m, s, h)
+	sid, err := orch.NewSession(context.Background())
+	require.NoError(t, err)
+	return orch, h, s, sid
+}
+
+func newFreeFormFallbackApp(t *testing.T) (*orchestrator.Orchestrator, *countingHarness, store.Store, app.SessionID) {
+	t.Helper()
+	const appYAML = `
+app:
+  id: freeform-fallback-test
+  version: 0.1.0
+world:
+  landing_request: { type: string, default: "" }
+  landing_note: { type: object, default: {} }
+routing:
+  enabled: true
+intents:
+  work:
+    title: "Work"
+    slots:
+      request: { type: string, required: true }
+  go_main:
+    title: "Home"
+    examples: ["home", "go home"]
+root: tickets
+states:
+  landing:
+    view: "landing request={{ world.landing_request }} summary={{ world.landing_note.summary }}"
+    on_enter:
+      - when: "world.landing_request != ''"
+        invoke: host.oracle.task
+        with:
+          acceptance:
+            schema: schemas/note.json
+          context:
+            prompt: prompts/landing.md
+            args:
+              request: "{{ world.landing_request }}"
+        bind:
+          landing_note: submitted
+    on:
+      work:
+        - target: landing
+          effects:
+            - set:
+                landing_request: "{{ slots.request }}"
+                landing_note: {}
+      go_main:
+        - target: landing
+  tickets:
+    view: "tickets"
+    on:
+      go_main:
+        - target: landing
+`
+	def, err := app.LoadBytes([]byte(appYAML))
+	require.NoError(t, err)
+	m, err := machine.New(def)
+	require.NoError(t, err)
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	h := &countingHarness{fall: staticHarness{intentName: "go_main"}}
+	reg := host.NewRegistry()
+	reg.Register("host.oracle.task", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		return host.Result{Data: map[string]any{
+			"ok": true,
+			"submitted": map[string]any{
+				"summary": "processed by workbench",
+			},
+		}}, nil
+	})
+	orch := orchestrator.New(def, m, s, h, orchestrator.WithHostRegistry(reg))
 	sid, err := orch.NewSession(context.Background())
 	require.NoError(t, err)
 	return orch, h, s, sid
@@ -141,6 +215,45 @@ func TestDefaultIntent_AbsentFallsThroughToHarness(t *testing.T) {
 	require.NoError(t, err)
 	require.Positive(t, h.calls.Load(),
 		"without default_intent, unmatched prose must fall through to the harness")
+}
+
+// TestFreeFormFallback_UnmatchedProseRoutesToWorkbench pins the general
+// defense: a strict/menu room with no default_intent or off-ramp receives the
+// app-level free-form fallback arc, so long actionable prose becomes workbench
+// work instead of giving the main LLM a chance to guess go_main.
+func TestFreeFormFallback_UnmatchedProseRoutesToWorkbench(t *testing.T) {
+	t.Parallel()
+	orch, h, s, sid := newFreeFormFallbackApp(t)
+	ctx := context.Background()
+
+	const msg = "we have a bunch of tickets saved in the repo itself we need to migrate to github"
+	out, err := orch.Turn(ctx, sid, msg)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, h.calls.Load(), "fallback must resolve without the main-turn LLM")
+	require.Equal(t, app.StatePath("landing"), out.NewState)
+	require.Contains(t, out.View, "request="+msg)
+	require.Contains(t, out.View, "summary=processed by workbench")
+
+	history, err := s.LoadHistory(sid)
+	require.NoError(t, err)
+	assertRoutedBy(t, history, "fallback")
+}
+
+// TestFreeFormFallback_NamedNavigationStillWins proves the fallback only catches
+// genuinely unmatched prose; explicit navigation remains semantic/deterministic.
+func TestFreeFormFallback_NamedNavigationStillWins(t *testing.T) {
+	t.Parallel()
+	orch, h, s, sid := newFreeFormFallbackApp(t)
+	ctx := context.Background()
+
+	out, err := orch.Turn(ctx, sid, "home")
+	require.NoError(t, err)
+	require.EqualValues(t, 0, h.calls.Load(), "semantic routing handles named navigation")
+	require.Equal(t, app.StatePath("landing"), out.NewState)
+
+	history, err := s.LoadHistory(sid)
+	require.NoError(t, err)
+	assertRoutedBy(t, history, "semantic")
 }
 
 func assertRoutedBy(t *testing.T, history []store.Event, want string) {
