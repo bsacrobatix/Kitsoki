@@ -43,15 +43,24 @@ now proves routing reaches `conflict`; the loop *past* it is the work here.
 ## What changes
 
 Add a **stateful intercept execution path**: when a gated command would enter a
-multi-turn sub-flow rather than complete in one shot, the gate stops trying to do
-it in-process and instead **hands off to a real, persisted, background-driven
-session** — returning to the agent immediately with a "resolving in the
-background, watch here" report — then drives that session to a settled resting
-place under a generous budget, with a **safe-abort** that never strands the tree.
+multi-turn sub-flow rather than complete in one shot, the gate stops one-shotting
+it and instead **drives a real, persisted session to a settled resting place
+synchronously** — the hook stays blocked for the duration, under a generous budget
+that replaces the 5s fast-path cap — while **surfacing live progress** so the user
+watches the work happen, and with a **safe-abort** that never strands the tree.
+
+The execution is **synchronous, not backgrounded** — deliberately. A conflicting
+rebase leaves the tree mid-rebase: a transient, inconsistent state on which no
+other work can proceed. "Hand off and return control" would be a *false* freedom —
+the agent has nothing useful to do until the tree is whole again — so the honest
+posture is to keep the turn blocked (the user genuinely is waiting) and instead
+spend the design effort on **feedback**, so the wait is not a degraded experience
+versus a normal LLM turn (where the user would see the resolver's tool calls
+stream by). Kitsoki must show the same: which conflict, which round, what ran.
 
 One sentence: *the intercept gate escalates from a stateless one-shot to a
-budgeted, abortable, traced background session the moment the resolved command's
-execution doesn't terminate in one round.*
+budgeted, abortable, traced, progress-surfacing synchronous drive the moment the
+resolved command's execution doesn't terminate in one round.*
 
 ## Impact
 
@@ -77,8 +86,9 @@ execution doesn't terminate in one round.*
 | Kind | Name | Shape | Notes |
 |---|---|---|---|
 | room flag | `intercept_drive: rest` (working name) | `string` enum on a state | marks a room whose entry begins a multi-turn flow the gate must drive to rest, not snapshot after one round. Lets the gate decide handoff structurally instead of guessing. |
-| trace event | `intercept.handoff` | `input`, `intent`, `session_id`, `reason: multi_turn` | the gate handed a recognized command to a background session; the durable pointer the agent's ephemeral report references. |
-| trace event | `intercept.resolved` / `intercept.aborted` | `session_id`, `outcome`, `rounds`, `tokens` | the background flow settled / was safe-aborted; closes the loop opened by `intercept.handoff`. |
+| trace event | `intercept.escalated` (working name) | `input`, `intent`, `session_id`, `reason: multi_turn` | the gate escalated a recognized command from one-shot to a synchronous multi-turn drive against a persisted session; the durable pointer the agent's ephemeral report references and the live-watch surface keys on. |
+| trace event | `intercept.resolved` / `intercept.aborted` | `session_id`, `outcome`, `rounds`, `tokens` | the driven flow settled / was safe-aborted; closes the loop opened by `intercept.escalated`. |
+| progress event | `intercept.progress` (working name) | `session_id`, `round`, `room`, `note` | one per round / host-call while the synchronous drive runs; the feed the live-watch surface and (if Claude streams hook stderr) the in-Claude progress lines render from. |
 
 ## The model
 
@@ -88,8 +98,10 @@ prompt ──▶ Classify ──▶ gate (§2 of prompt-intercept.md)
                           ├─▶ OneShot (stateless, ≤5s, no-LLM)         [unchanged]
                           │
                           │ clean match into a multi-turn / oracle flow
-                          └─▶ create persisted session, drive in background
-                                 │   (SubmitDirect-style settle loop, real harness)
+                          └─▶ create persisted session, drive SYNCHRONOUSLY to rest
+                                 │   (SubmitDirect-style settle loop, real harness;
+                                 │    hook stays blocked; progress streams to the
+                                 │    live-watch surface + the durable trace)
                                  ▼
                       conflict ─resolve(oracle.task)─▶ rebase_continue ─build─▶ conflict_resolved ─▶ branch_ops
                                  │ resolved:false / build_fail / budget / panic
@@ -114,16 +126,17 @@ handoff path reuses it against a persisted session, with a real harness wired so
 The resolution decision is already recorded — `host.oracle.task` emits its
 `oracle.call.*` events with the dispatched prompt and the returned verdict, the
 provenance moat intact. This proposal adds only the **gate-level** record:
-`intercept.handoff` (opened) paired with `intercept.resolved` / `intercept.aborted`
-(closed), so a `kitsoki trace` / web surface can show "kitsoki recognized this
-command, handed it to session X, which resolved 1 conflict in 3 rounds / 42k
-tokens, then merged." These extend the existing `intercept.matched` / `.passed`
+`intercept.escalated` (opened) paired with `intercept.resolved` / `intercept.aborted`
+(closed) plus the per-round `intercept.progress` stream, so a `kitsoki trace` / web
+surface can show "kitsoki recognized this command, drove session X, which resolved
+1 conflict in 3 rounds / 42k tokens, then merged" — live while it runs and as a
+durable record after. These extend the existing `intercept.matched` / `.passed`
 pair ([`trace.go:103`](../../internal/trace/trace.go#L103)) — likely a small
 `tracing` follow-up if the web consumer needs to render them.
 
 ## Engine seams & invariants
 
-- **Handoff trigger.** The gate must distinguish "completes in one round" from
+- **Escalation trigger.** The gate must distinguish "completes in one round" from
   "enters a multi-turn flow" *before* committing to OneShot. Two options (Open
   question 1): structurally, the resolved intent's target room carries
   `intercept_drive: rest`; or empirically, OneShot lands at a non-terminal room
@@ -139,10 +152,71 @@ pair ([`trace.go:103`](../../internal/trace/trace.go#L103)) — likely a small
   never leaves a session it started mid-rebase.** A test asserts the worktree is
   not mid-rebase after an abort (mirrors the
   [stale-worktree dogfood test](../../internal/orchestrator/dogfood_smoke_test.go)).
-- **Budget.** The 5s hook cap is for the *synchronous* fast path. The background
-  flow needs its own budget (wall-clock + token), independent of the hook, with
-  the hook returning immediately once the session is created. A blown budget
-  triggers safe-abort.
+  **Claude-timeout strand risk:** if Claude hits its own hook `timeout` it may
+  kill the hook process outright, leaving no chance to run abort in-process. Two
+  defenses: (a) kitsoki's internal budget must be set strictly *below* the
+  installed Claude `timeout` so kitsoki always reaches safe-abort first; (b) a
+  next-start reconciler (the [stale-worktree dogfood
+  test](../../internal/orchestrator/dogfood_smoke_test.go) already detects a
+  mid-rebase tree) can offer to abort a tree stranded by an out-of-band kill.
+- **Budget — two caps, both must be lifted.** The 5s `hookRunTimeout`
+  ([hook.go:43](../../cmd/kitsoki/hook.go#L43)) is kitsoki's own fast-path cap.
+  *But Claude Code also imposes its own* — a `UserPromptSubmit` hook defaults to a
+  **30s timeout**, after which Claude cancels the process (spike, §"Stderr
+  spike"). So the multi-turn drive needs (a) kitsoki's internal wall-clock + token
+  budget lifted past 5s for this case, **and** (b) `kitsoki hook install` to write
+  a raised `timeout` (e.g. `600`) on the hook entry so Claude doesn't kill it
+  mid-rebase. kitsoki's budget must sit *under* the installed Claude timeout. A
+  blown budget triggers safe-abort; fail-open still governs *setup* (if the
+  session/harness can't be stood up, the prompt passes through untouched). Claude
+  cancelling the hook on its own timeout is itself a strand risk — see safe-abort.
+- **Feedback — the live channel is the kitsoki surface, not Claude's UI.** The
+  spike (§"Stderr spike") settled the mechanism: a blocking `UserPromptSubmit`
+  hook **cannot** stream progress into Claude's transcript — stderr is buffered
+  until exit, and `statusMessage` is a static spinner, not a progress feed. So the
+  only *real-time* play-by-play (the equivalent of watching the LLM's tool calls
+  stream) is surface (2). Two surfaces, with honest scope:
+  - **(1) Final block report — in Claude, on exit.** Extend
+    [`composeInterceptReport`](../../cmd/kitsoki/hook.go) to enumerate *every
+    round's* host-call bullets, so the in-the-moment Claude report is a complete,
+    auditable account ("resolved 2 conflicts over 3 rounds; here's each `git` /
+    `Edit` that ran"). This is what the user sees *inside Claude* — comprehensive,
+    but only at the end.
+  - **(2) Live progress — the persisted session, off to the side.** The drive runs
+    a real, persisted session emitting `intercept.progress` + `oracle.call.*`
+    events in real time, watchable in `kitsoki web` / TUI / `kitsoki trace
+    --follow` **while the hook blocks**. This is the *only* real-time surface, and
+    it lives outside Claude.
+
+  The honest consequence: **inside Claude the user sees a spinner, then a full
+  report**; the live, tool-call-by-tool-call view requires glancing at the kitsoki
+  surface. The synchronous wait is therefore as *auditable* as the LLM turn (more
+  so — every step is recorded), but its in-Claude *liveness* is a spinner, not a
+  stream. Mitigation: the installed hook's `statusMessage` (if it renders during
+  the block — unverified) can carry a one-line "kitsoki resolving conflicts —
+  `kitsoki trace --follow <id>`" pointer so the user knows where the live view is.
+
+## Stderr spike (resolved)
+
+A spike against the official Claude Code hooks reference settled the feedback
+mechanism — the result shaped the synchronous design above:
+
+- **No live stderr.** A `UserPromptSubmit` hook's stderr is **buffered and shown
+  only after the process exits** (the exit-2 path), never streamed line-by-line
+  while it runs. There is no incremental-output channel into Claude's transcript
+  during a blocking hook.
+- **`statusMessage` is a static spinner**, not a progress feed — set once, no
+  mid-execution updates. At best it carries a one-line "watch here" pointer.
+- **Claude imposes a 30s default timeout** on `UserPromptSubmit` hooks,
+  configurable via a `timeout` field on the hook entry — so the installer **must**
+  raise it (e.g. `600`) for the multi-turn case, independent of kitsoki's own cap.
+- **stdout quirks:** `decision:"block"` + `reason` is the path that both bypasses
+  the model and shows text to the user (what kitsoki already uses); plain stdout on
+  exit 0 is currently unreliable (open upstream bugs). Stick with the block path.
+
+Consequence already folded in: live progress = the kitsoki surface (web / TUI /
+`trace --follow`); in-Claude = a spinner during, a complete report on exit; the
+install path raises the Claude `timeout`.
 
 ## Backward compatibility / migration
 
@@ -161,17 +235,23 @@ the prompt passes through to the model untouched.
 - [x] 0.2 Fix host.run multi-line stdout_json binding so routing works un-mocked
 - [x] 0.3 Real-conflict routing test reaches `conflict`
 
-## 1. Handoff trigger
+## 1. Escalation trigger
 - [ ] 1.1 Room flag `intercept_drive: rest` (or chosen mechanism) + load-time invariant
-- [ ] 1.2 Gate branches OneShot → background-session handoff on the flag
-- [ ] 1.3 `intercept.handoff` trace event
+- [ ] 1.2 Gate branches OneShot → synchronous multi-turn drive on the flag
+- [ ] 1.3 `intercept.escalated` trace event
 
-## 2. Background driver
-- [ ] 2.1 Create a persisted session from the gate; drive it via the SubmitDirect
-        settle loop with a REAL harness wired for host.oracle.task
-- [ ] 2.2 Independent wall-clock + token budget (decoupled from the 5s hook cap)
-- [ ] 2.3 Hook returns immediately with a "resolving in background, watch here"
-        report pointing at the session; `intercept.resolved` on completion
+## 2. Synchronous driver + feedback
+- [ ] 2.1 Create a persisted session from the gate; drive it SYNCHRONOUSLY via the
+        SubmitDirect settle loop with a REAL harness wired for host.oracle.task
+- [ ] 2.2 Lift BOTH caps for the multi-turn case: (a) kitsoki's internal
+        wall-clock + token budget past 5s; (b) `kitsoki hook install` writes a
+        raised Claude `timeout` (e.g. 600) on the UserPromptSubmit entry, with
+        kitsoki's budget sitting under it; fail-open still governs setup
+- [ ] 2.3 Multi-round block report — extend composeInterceptReport to enumerate
+        every round's host-call bullets; `intercept.resolved` on completion
+- [ ] 2.4 Live-watch surface (the only real-time channel): per-round
+        `intercept.progress` events on the persisted session (watchable via web /
+        TUI / `kitsoki trace --follow`); optional `statusMessage` "watch here" pointer
 
 ## 3. Safe-abort
 - [ ] 3.1 Any non-success / budget-exhausted / panic path runs the `abort` arc
@@ -202,17 +282,18 @@ tests).
 
 ## Open questions
 
-1. **Handoff trigger** — structural room flag vs. empirical "OneShot didn't
+1. **Escalation trigger** — structural room flag vs. empirical "OneShot didn't
    terminate". *Lean: structural flag* — explicit, load-time-checkable, and it
-   avoids running OneShot's side effects only to discover it should have handed
-   off. The flag also documents which rooms are multi-turn.
-2. **Async surface for the Claude hook** — the `UserPromptSubmit` block is
-   synchronous and ephemeral; the agent can't await minutes. Does the handoff
-   report point the user at `kitsoki web` / `kitsoki trace --turns <session>` for
-   live progress, or does it block briefly then background? *Lean: return
-   immediately, point at the web/trace surface* (the durable record per
-   prompt-intercept.md §5). Confirm the block `reason` can carry a live-watch
-   pointer usefully.
+   avoids running OneShot's side effects only to discover it should have escalated.
+   The flag also documents which rooms are multi-turn.
+2. **Feedback channel during the synchronous block** — *Resolved (spike, below).*
+   Stay synchronous, surface progress, do not background: a conflicting rebase
+   leaves the tree transient, so returning control would be false freedom. The
+   spike settled the in-Claude question — **no live stream is possible** — so the
+   live surface is the persisted kitsoki session (web / TUI / `trace --follow`) and
+   the in-Claude account is the final block report. No further verification needed
+   except whether `statusMessage` renders a one-line live-view pointer during the
+   block (nice-to-have, not load-bearing).
 3. **Budget shape** — a single wall-clock cap, or wall-clock + token (the
    [oracle-capability-model](oracle-capability-model.md) budget surface)? *Lean:
    both, conservative defaults, configurable in the `intercept:` block.*
