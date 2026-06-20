@@ -85,6 +85,10 @@ states:
           pairs:
             Judge: '{{ world.design_brief_decision.verdict }} — {{ world.design_brief_decision.reason }}'
         when: "world.design_brief_decision.verdict != '' ?? false"
+      - prose: "The refiner's open questions above are advisory; the quality-gate asks below are the blockers — settle them to pass the brief check."
+        when: "world.design_brief_decision.verdict == 'clarify' ?? false"
+      - heading: "Quality gate asks (these block a passing brief):"
+        when: "world.design_brief_decision.verdict == 'clarify' ?? false"
       - code: |
           {% for q in world.design_brief_decision.questions %}- {{ q }}
           {% empty %}{% endfor %}

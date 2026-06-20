@@ -120,10 +120,10 @@ states:
             - label:  "confirm"
               hint:   "no overlap — create the workspace and proceed"
               intent: confirm
-            - label:  "override_new"
+            - label:  "new design anyway"
               hint:   "start a NEW design despite the overlap (discouraged)"
               intent: override_new
-            - label:  "regenerate"
+            - label:  "re-scan prior art"
               hint:   "re-run the prior-art scout from scratch"
               intent: regenerate
             - label:  "quit"

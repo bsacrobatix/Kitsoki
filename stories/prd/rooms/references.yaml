@@ -166,12 +166,12 @@ states:
               hint:   "references are right — write the PRD"
               intent: confirm
             - label:  "refine"
-              hint:   "adjust THIS list — add a doc, drop one, re-scope a section (say what to change)"
+              hint:   "adjust THIS list — add a doc, drop one, re-scope a section (e.g. drop the rate-limit doc; also cite docs/auth.md §Tokens)"
               intent: refine
               param:
                 slot:        feedback
                 type:        string
-                placeholder: "e.g. drop the rate-limit doc; also cite docs/auth.md §Tokens"
+                placeholder: "add / drop / re-scope a doc"
                 required:    true
             - label:  "regenerate"
               hint:   "discard the list and search the docs fresh (optionally steer)"

@@ -251,6 +251,7 @@ states:
         - when: "world.drafting_cycle >= world.drafting_budget"
           target: "@exit:abandoned"
           effects:
+            - say: "Drafting budget exhausted — abandoning PRD authoring after {{ world.drafting_cycle }} refine cycle(s)."
             - set:
                 abandon_reason: "drafting_budget_exhausted"
                 status:         "abandoned"

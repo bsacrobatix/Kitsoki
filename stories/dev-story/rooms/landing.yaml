@@ -79,6 +79,16 @@ states:
       - code: '{{ world.landing_note.details|default:"" }}'
         when: "(world.landing_note.details ?? '') != ''"
 
+      # The agent's suggested next steps (e.g. surfaced when a mutating edit
+      # was held read-only pending a write-mode grant). Rendered only when the
+      # array is non-empty so a note without next_steps shows nothing here.
+      - heading: "Next steps"
+        when: "world.landing_note.next_steps"
+      - template: |
+          {% for s in world.landing_note.next_steps %}- {{ s }}
+          {% endfor %}
+        when: "world.landing_note.next_steps"
+
       # The progressive-determinism read-out: how much free-form work has
       # been mined into named structure this session (incremented by the
       # slice-3 apply path; rendered read-only here).
@@ -115,7 +125,7 @@ states:
               hint:   "hand an open PR to pr-refinement"
               intent: go_pr_refinement
               when:   "available('go_pr_refinement')"
-            - label:  "✗ pr — {{ blocked_reason('go_pr_refinement') }}"
+            - label:  "✗ pr (no open PR yet)"
               hint:   "drive a ticket to the PR stage first"
               intent: go_pr_refinement
               when:   "!available('go_pr_refinement')"

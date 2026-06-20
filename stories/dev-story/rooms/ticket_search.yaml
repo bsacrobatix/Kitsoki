@@ -134,7 +134,7 @@ states:
             - label:  "go_bugfix"
               intent: go_bugfix
               hint:   "force the bugfix pipeline regardless of ticket type"
-              when:   "world.ticket_id != ''"
+              when:   "world.ticket_id != '' && world.ticket_type != 'bug'"
             - { label: "go_back", intent: go_back, hint: "return to the previous room" }
             - { label: "go_main", intent: go_main, hint: "back to the engineer's day landing" }
             - { label: "look",    intent: look,    hint: "re-render" }
