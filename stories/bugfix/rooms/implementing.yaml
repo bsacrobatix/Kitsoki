@@ -27,8 +27,8 @@ states:
       - kv:
           pairs:
             Ticket:           "{{ world.ticket_id }} — {{ world.ticket_title }}"
-            Workspace:        '{{ world.workspace_id|default:"(none)" }} ({{ world.workdir|default:"(no path)" }})'
-            "Feature branch": '{{ world.feature_branch|default:"(none)" }}'
+            Workspace:        '{{ world.workspace_id|default:"—" }}{% if world.workdir %}  ·  {{ world.workdir }}{% endif %}'
+            "Feature branch": '{{ world.feature_branch|default:"—" }}'
             Applied:          '{{ world.implement_artifact.summary_title|default:"(pending — agent has not returned yet)" }}'
             Status:           '{% if world.implement_artifact.applied == false %}blocked{% elif world.implement_artifact.summary_title %}applied{% else %}(pending){% endif %}'
             Files:            '{{ world.implement_artifact.files_changed|default:"(none recorded)" }}'
@@ -145,7 +145,11 @@ states:
           files: "{{ world.implement_artifact.files_changed }}"
         on_error: idle
 
-      - say: "Fix applied — {{ world.implement_artifact.summary_title|default:world.propose_fix_artifact.summary_title }}"
+      # Guard on a title being bound: during the autonomous auto-advance
+      # cascade this say fires before either artifact binds, which would emit a
+      # bare "Fix applied — " with a dangling em-dash. Truthiness skips nil/empty.
+      - when: "(world.implement_artifact.summary_title ?? '') != '' || (world.propose_fix_artifact.summary_title ?? '') != ''"
+        say: "Fix applied — {{ world.implement_artifact.summary_title|default:world.propose_fix_artifact.summary_title }}"
     on:
       accept:
         - target: testing

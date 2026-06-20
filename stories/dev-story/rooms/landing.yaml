@@ -89,7 +89,7 @@ states:
       - heading: "Quick actions"
       - choice:
           mode: single
-          prompt: "Quick actions"
+          prompt: ""
           items:
             - label:  "tickets"
               hint:   "search and pick a ticket"
@@ -262,7 +262,7 @@ states:
             - set: { last_error: "" }
         - when: "world.ticket_id == ''"
           target: landing
-          guard_hint: "Pick a ticket first — type `tickets`."
+          guard_hint: "Pick a ticket first — type tickets."
           effects:
             - set:
                 last_error: |
@@ -273,7 +273,7 @@ states:
                   - `workspaces` — resume an in-progress workspace
         - default: true
           target: landing
-          guard_hint: "Ticket has no type set — re-pick from `tickets` so its type is recorded."
+          guard_hint: "Ticket has no type set — re-pick from tickets so its type is recorded."
           effects:
             - set:
                 last_error: |
@@ -290,7 +290,7 @@ states:
             - set: { last_error: "" }
         - default: true
           target: landing
-          guard_hint: "Pick a ticket first — type `tickets`."
+          guard_hint: "Pick a ticket first — type tickets."
           effects:
             - set:
                 last_error: |
@@ -306,7 +306,7 @@ states:
             - set: { last_error: "" }
         - default: true
           target: landing
-          guard_hint: "Pick a ticket first — type `tickets`."
+          guard_hint: "Pick a ticket first — type tickets."
           effects:
             - set:
                 last_error: |
@@ -322,7 +322,7 @@ states:
             - set: { last_error: "" }
         - default: true
           target: landing
-          guard_hint: "Pick a ticket first — type `tickets`."
+          guard_hint: "Pick a ticket first — type tickets."
           effects:
             - set:
                 last_error: |

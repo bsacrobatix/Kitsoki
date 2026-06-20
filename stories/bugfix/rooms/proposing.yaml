@@ -22,7 +22,7 @@ states:
           pairs:
             Ticket:     "{{ world.ticket_id }} — {{ world.ticket_title }}"
             Summary:    '{{ world.propose_fix_artifact.summary_title|default:"(pending)" }}'
-            Confidence: '{{ world.propose_fix_artifact.confidence|default:"(pending)" }}'
+            Confidence: '{% if world.propose_fix_artifact.confidence %}{{ world.propose_fix_artifact.confidence|floatformat:2 }}{% else %}(pending){% endif %}'
       - heading: "Artifact"
       - code: '{{ world.propose_fix_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:

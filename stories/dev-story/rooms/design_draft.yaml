@@ -43,7 +43,7 @@ states:
           pairs:
             Title:      '{{ world.design_artifact.title|default:"(pending)" }}'
             Kind:       '{{ world.design_artifact.kind|default:"(pending)" }}'
-            Confidence: '{{ world.design_artifact.confidence|default:"(pending)" }}'
+            Confidence: '{% if world.design_artifact.confidence %}{{ world.design_artifact.confidence|floatformat:2 }}{% else %}(pending){% endif %}'
       - prose: "⚠ The author flagged that more input is needed — see the follow-ups, then use clarify to revise the brief."
         when:  "world.design_artifact.needs_clarification"
       - code: |

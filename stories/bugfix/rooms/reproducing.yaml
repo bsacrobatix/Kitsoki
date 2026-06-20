@@ -56,7 +56,7 @@ states:
           pairs:
             Ticket:         "{{ world.ticket_id }} — {{ world.ticket_title }}"
             Summary:        '{{ world.reproduction_artifact.summary_title|default:"(pending)" }}'
-            "Bug verified": '{{ world.reproduction_artifact.bug_verified|default:"(pending)" }}'
+            "Bug verified": '{{ world.reproduction_artifact.bug_verified|yesno:"yes,no,(pending)" }}'
       - heading: "Artifact"
       - code: '{{ world.reproduction_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:

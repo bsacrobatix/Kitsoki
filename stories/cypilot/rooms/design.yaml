@@ -93,9 +93,12 @@ states:
             Ticket:        "{{ world.ticket_id }}"
             DESIGN:        '{{ world.design_artifact.summary_title|default:world.design_artifact.id|default:"(unknown)" }}'
             "Validate ok": "{{ world.validate_ok }}"
-            Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-            Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
-            Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - when: "(world.llm_verdict.verdict ?? '') != ''"
+        kv:
+          pairs:
+            Verdict:       '{{ world.llm_verdict.verdict }}'
+            Confidence:    '{{ world.llm_verdict.confidence|floatformat:2 }}'
+            Reason:        '{{ world.llm_verdict.reason }}'
       - heading: "Report"
       - code: '{{ world.validate_report|default:"(no report)" }}'
       - choice:

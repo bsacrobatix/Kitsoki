@@ -69,9 +69,12 @@ states:
             PR:           "{{ world.pr_id }}"
             "Merge SHA":  '{{ world.merge_sha|default:"(unknown)" }}'
             "PR url":     '{{ world.pr_url|default:"(unknown)" }}'
-            Verdict:      '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-            Confidence:   '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
-            Reason:       '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - when: "(world.llm_verdict.verdict ?? '') != ''"
+        kv:
+          pairs:
+            Verdict:      '{{ world.llm_verdict.verdict }}'
+            Confidence:   '{{ world.llm_verdict.confidence|floatformat:2 }}'
+            Reason:       '{{ world.llm_verdict.reason }}'
       - choice:
           mode: single
           prompt: "Actions"

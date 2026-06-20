@@ -92,9 +92,12 @@ states:
             Ticket:        "{{ world.ticket_id }}"
             "Plan path":   '{{ world.decomposition_artifact.plan_path|default:"(none)" }}'
             "Phase count": "{{ world.feature_count }}"
-            Verdict:       '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-            Confidence:    '{{ world.llm_verdict.confidence|default:0 }}'
-            Reason:        '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - when: "(world.llm_verdict.verdict ?? '') != ''"
+        kv:
+          pairs:
+            Verdict:       '{{ world.llm_verdict.verdict }}'
+            Confidence:    '{{ world.llm_verdict.confidence|floatformat:2 }}'
+            Reason:        '{{ world.llm_verdict.reason }}'
       - choice:
           mode: single
           prompt: "Actions"

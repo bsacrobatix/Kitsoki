@@ -98,9 +98,12 @@ states:
             Ticket:         "{{ world.ticket_id }}"
             "Tests passed": '{{ world.code_artifact.tests_passed|default:0 }}'
             "Tests failed": '{{ world.code_artifact.tests_failed|default:0 }}'
-            Verdict:        '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-            Confidence:     '{{ world.llm_verdict.confidence|default:0 }}'
-            Reason:         '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - when: "(world.llm_verdict.verdict ?? '') != ''"
+        kv:
+          pairs:
+            Verdict:        '{{ world.llm_verdict.verdict }}'
+            Confidence:     '{{ world.llm_verdict.confidence|floatformat:2 }}'
+            Reason:         '{{ world.llm_verdict.reason }}'
       - heading: "Artifact"
       - code: '{{ world.code_artifact.summary_markdown|default:"(artifact pending)" }}'
       - choice:

@@ -86,9 +86,12 @@ states:
           pairs:
             PR:           "{{ world.pr_id }}"
             Diagnosis:    '{{ world.diagnose_artifact.summary_title|default:"(pending)" }}'
-            Verdict:      '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-            Confidence:   '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
-            Reason:       '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - when: "(world.llm_verdict.verdict ?? '') != ''"
+        kv:
+          pairs:
+            Verdict:      '{{ world.llm_verdict.verdict }}'
+            Confidence:   '{{ world.llm_verdict.confidence|floatformat:2 }}'
+            Reason:       '{{ world.llm_verdict.reason }}'
       - heading: "Artifact"
       - code: '{{ world.diagnose_artifact.summary_markdown|default:"(artifact pending)" }}'
       - choice:

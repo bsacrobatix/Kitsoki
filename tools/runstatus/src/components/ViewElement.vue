@@ -128,14 +128,38 @@ function isMarkdownPath(value: string): boolean {
   return /\S+\.md$/.test(value.trim());
 }
 
-/** Banner color → CSS modifier class. Falls back to a neutral box. */
+/** A literal hex accent (#rgb / #rrggbb / #rrggbbaa) authored on the banner. */
+const HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const bannerHex = computed<string>(() => {
+  const c = (el.value.Color ?? "").trim();
+  return HEX_RE.test(c) ? c : "";
+});
+
+/** Banner color → CSS modifier class. Named tokens map to a semantic box; a
+ * literal hex accent is honoured inline (see bannerStyle) so the web conveys
+ * the same per-phase colour the TUI's coloured rule does — the hex is authored
+ * in the trace, so rendering it is faithful, not a UI override. */
 const bannerClass = computed(() => {
+  if (bannerHex.value) return "banner--accent";
   const c = (el.value.Color ?? "").toLowerCase();
   if (c === "error" || c === "danger" || c === "red") return "banner--error";
   if (c === "warn" || c === "warning" || c === "amber") return "banner--warn";
   if (c === "success" || c === "ok" || c === "green") return "banner--success";
   if (c === "info" || c === "blue") return "banner--info";
   return "banner--neutral";
+});
+
+/** Inline accent for a hex-coloured banner: the authored colour tints the
+ * border + text and a faint wash of the background, matching the TUI's
+ * per-phase coloured banner rule. Empty for named/absent colours. */
+const bannerStyle = computed<Record<string, string>>(() => {
+  const c = bannerHex.value;
+  if (!c) return {};
+  return {
+    borderColor: c,
+    color: c,
+    background: `color-mix(in srgb, ${c} 8%, var(--k-paper-bg, #f6f7f9))`,
+  };
 });
 </script>
 
@@ -186,6 +210,7 @@ const bannerClass = computed(() => {
     v-else-if="el.Kind === 'banner'"
     class="ve-banner"
     :class="bannerClass"
+    :style="bannerStyle"
     role="note"
   >
     <span v-if="el.Marker" class="ve-banner-marker">{{ el.Marker }}</span>
@@ -410,6 +435,15 @@ const bannerClass = computed(() => {
 }
 
 .banner--neutral {
+  background: var(--k-paper-bg, #f6f7f9);
+  border-color: var(--k-paper-border, #d8dbe2);
+  color: var(--k-paper-fg, #2b303b);
+}
+
+/* A hex-accented banner: the authored colour rides on the inline :style
+ * (bannerStyle). This class only supplies a neutral fallback for the rare
+ * browser without color-mix support; the inline border-color/color win. */
+.banner--accent {
   background: var(--k-paper-bg, #f6f7f9);
   border-color: var(--k-paper-border, #d8dbe2);
   color: var(--k-paper-fg, #2b303b);

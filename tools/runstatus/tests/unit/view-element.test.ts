@@ -119,6 +119,25 @@ describe("ViewElement", () => {
     w.unmount();
   });
 
+  it("honours a literal hex banner colour as an inline accent (TUI parity)", () => {
+    // The bugfix / design pipeline banners carry per-phase hex accents
+    // (#06B6D4 cyan, #3B82F6 blue, #8B5CF6 violet, …). The web must convey the
+    // same colour the TUI's coloured rule does instead of falling back to grey.
+    const w = render({
+      Kind: "banner",
+      Source: "REPRODUCING",
+      Subtitle: "Phase 1 / 7",
+      Color: "#06B6D4",
+    });
+    const b = w.find(".ve-banner");
+    expect(b.classes()).toContain("banner--accent");
+    // Inline style carries the authored hex on border + text.
+    const style = (b.attributes("style") ?? "").toLowerCase();
+    expect(style).toContain("#06b6d4");
+    expect(style).toContain("border-color");
+    w.unmount();
+  });
+
   it("omits choice elements (InputBar renders them as interactive buttons)", () => {
     const w = render({
       Kind: "choice",

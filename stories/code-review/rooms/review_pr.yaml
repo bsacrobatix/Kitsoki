@@ -19,7 +19,7 @@ states:
             PR:         "{{ world.pr_id }} — {{ world.pr_title }}"
             Author:     '{{ world.pr_author|default:"(unknown)" }}'
             Summary:    '{{ world.review_summary_artifact.summary_title|default:"(pending)" }}'
-            Confidence: '{{ world.review_summary_artifact.confidence|default:"(pending)" }}'
+            Confidence: '{% if world.review_summary_artifact.confidence %}{{ world.review_summary_artifact.confidence|floatformat:2 }}{% else %}(pending){% endif %}'
       - heading: "Artifact"
       - code: '{{ world.review_summary_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:
@@ -107,9 +107,12 @@ states:
       - kv:
           pairs:
             PR:         "{{ world.pr_id }} — {{ world.pr_title }}"
-            Verdict:    '{{ world.llm_verdict.verdict|default:"(no LLM verdict)" }}'
-            Confidence: '{{ world.llm_verdict.confidence|default:"(n/a)" }}'
-            Reason:     '{{ world.llm_verdict.reason|default:"(none)" }}'
+      - when: "(world.llm_verdict.verdict ?? '') != ''"
+        kv:
+          pairs:
+            Verdict:    '{{ world.llm_verdict.verdict }}'
+            Confidence: '{{ world.llm_verdict.confidence|floatformat:2 }}'
+            Reason:     '{{ world.llm_verdict.reason }}'
       - heading: "Artifact"
       - code: '{{ world.review_summary_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:

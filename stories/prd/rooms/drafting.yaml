@@ -44,7 +44,7 @@ states:
           pairs:
             PRD:        '{{ world.prd_artifact.file_path|default:"(drafting — writes 004-prd.md into the per-PRD workspace)" }}'
             Title:      '{{ world.prd_artifact.title|default:"(pending)" }}'
-            Confidence: '{{ world.prd_artifact.confidence|default:"(pending)" }}'
+            Confidence: '{% if world.prd_artifact.confidence %}{{ world.prd_artifact.confidence|floatformat:2 }}{% else %}(pending){% endif %}'
       # Published durable path — its own guarded kv (kv pairs are a static
       # map, so a conditional row needs its own element). Bare .md value →
       # clickable in the web UI.
