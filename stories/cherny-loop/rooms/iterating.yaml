@@ -15,13 +15,17 @@ states:
   # budgets want the background-job runner (see README → autonomy).
   iterating:
     description: "Loop step — maker at work"
-    relevant_world: [iteration, iteration_budget, goal_text, goal_artifact, maker_summary, last_gate_failure, session_cost_usd]
+    relevant_world: [iteration, iteration_budget, goal_text, goal_artifact, maker_summary, last_gate_failure, session_cost_usd, worktree_path]
     on_enter:
       - increment: { iteration: 1 }
+      # working_dir pins the maker's cwd to the worktree minted at launch, so its
+      # Edit/Write land in the isolated branch under .worktrees/, never the
+      # operator's checkout. (Reads still see the whole repo.)
       - invoke: host.agent.task
         id: "maker-{{ world.iteration }}"
         with:
           agent: maker
+          working_dir: "{{ world.worktree_path }}"
           acceptance:
             schema: schemas/maker_output.json
           context:

@@ -8,14 +8,17 @@ states:
   # runs). Goal-met always wins; otherwise a budget guard ends the run.
   gating:
     description: "Loop step — checking the goal"
-    relevant_world: [gate_mode, gate_ok, script_gate_ok, agent_gate_ok, gate_exit_code, iteration, iteration_budget, session_cost_usd, cost_budget_usd]
+    relevant_world: [gate_mode, gate_ok, script_gate_ok, agent_gate_ok, gate_exit_code, iteration, iteration_budget, session_cost_usd, cost_budget_usd, worktree_path]
     on_enter:
+      # Both gates run in the worktree (cwd/working_dir), so they check the
+      # maker's actual changes in the isolated branch, not the operator's checkout.
       # Script gate — deterministic, free, incorruptible. Passes iff exit 0.
       - invoke: host.run
         id: "gate-{{ world.iteration }}"
         when: "world.gate_mode == 'script' || world.gate_mode == 'hybrid'"
         with:
           cmd: "{{ world.gate_command }}"
+          cwd: "{{ world.worktree_path }}"
           fail_on_error: false
         bind:
           gate_ok:        ok
@@ -30,6 +33,7 @@ states:
           prompt: prompts/gate_review.md
           schema: schemas/gate_verdict.json
           agent: gate_reviewer
+          working_dir: "{{ world.worktree_path }}"
           args:
             goal:          "{{ world.goal_text }}"
             goal_artifact: "{{ world.goal_artifact }}"

@@ -73,12 +73,17 @@ states:
             - set:
                 goal_text:        "{{ slots.goal ?? world.goal_text }}"
                 goal_artifact:    "{{ slots.artifact ?? world.goal_artifact }}"
-                gate_mode:        "{{ slots.gate_mode ?? (slots.gate_command != nil && slots.gate_command != '' ? 'script' : (world.gate_command != '' ? world.gate_mode : '')) }}"
+                # Normalize natural synonyms ("command"/"cmd"/"shell"/"test") to the
+                # canonical "script" mode so a reasonable-sounding token can't strand
+                # the loop on a gate_mode none of the rooms recognize.
+                gate_mode:        "{{ slots.gate_mode == nil ? (slots.gate_command != nil && slots.gate_command != '' ? 'script' : (world.gate_command != '' ? world.gate_mode : '')) : (slots.gate_mode == 'command' || slots.gate_mode == 'cmd' || slots.gate_mode == 'shell' || slots.gate_mode == 'test' ? 'script' : slots.gate_mode) }}"
                 gate_command:     "{{ slots.gate_command ?? world.gate_command }}"
                 gate_plan_reason:  "{{ slots.gate_mode != nil || slots.gate_command != nil ? 'configured explicitly by the operator' : '' }}"
                 gate_prompt_focus: "{{ slots.gate_mode == 'agent' || slots.gate_mode == 'hybrid' ? world.gate_prompt_focus : '' }}"
                 iteration_budget: "{{ int(slots.iteration_budget ?? world.iteration_budget) }}"
                 cost_budget_usd:  "{{ slots.cost_budget ?? world.cost_budget_usd }}"
+                workspace_branch: "{{ slots.workspace_branch ?? world.workspace_branch }}"
+                workspace_id:     "{{ slots.workspace_id ?? world.workspace_id }}"
             - invoke: host.agent.decide
               id: "gate-plan"
               when: "slots.gate_mode == nil && (slots.gate_command ?? '') == '' && (slots.goal ?? '') != '' && world.gate_command == ''"
@@ -109,6 +114,12 @@ states:
           target: .
           effects:
             - say: "The gate is not planned yet. Send the goal with `configure goal=…` or type it in your own words."
+        # Refuse any mode the rooms don't recognize, rather than letting it strand
+        # the loop in `baseline` with a gate that never runs.
+        - when: "world.gate_mode != 'script' && world.gate_mode != 'agent' && world.gate_mode != 'hybrid'"
+          target: .
+          effects:
+            - say: "Unknown gate mode `{{ world.gate_mode }}`. Use `script`, `agent`, or `hybrid` — or just describe the goal and let the planner choose."
         # Don't go straight to iterating — prove the gate is RED first.
         - target: baseline
       abort:
