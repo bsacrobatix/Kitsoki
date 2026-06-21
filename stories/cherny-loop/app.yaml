@@ -24,13 +24,16 @@
 # verbatim (a `code` block) in `configuring` and `baseline`: the script is the
 # contract.
 #
-# Two interchangeable gate modes (world.gate_mode):
+# Three gate modes (world.gate_mode), with "" meaning "planner decides during configure":
 #   script  — host.run a command; gate passes iff exit_code == 0 (the strongest
 #             maker/checker split: the checker is code, it cannot be talked into
 #             passing, and it costs nothing).  DEFAULT.
 #   agent  — host.agent.decide adversarially reviews the goal artifact; gate
 #             passes iff the verdict's `pass` is true.  For goals no test can
 #             encode (prose quality, design soundness).
+#   hybrid — run the script first AND the agent reviewer; pass only when both
+#             pass. For work where most evidence is deterministic but a small
+#             judgment tail remains.
 #
 # Termination — the loop ALWAYS ends on goal-met OR a budget guard, evaluated
 # every turn after a failed gate:
@@ -54,7 +57,7 @@ app:
 # Bare host calls (no iface wrapping):
 #   host.agent.task     — the maker: edits toward the goal each iteration
 #   host.run             — the script gate (deterministic checker)
-#   host.agent.decide   — the agent gate (adversarial checker)
+#   host.agent.decide   — the gate planner + agent gate (adversarial checker)
 #   host.artifacts_dir   — persist each iteration's record (the run trail)
 hosts:
   - host.agent.task
@@ -75,12 +78,19 @@ agents:
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
 
+  gate_planner:
+    system_prompt: "You choose the cheapest reliable gate for an ad hoc engineering goal. Prefer script gates when the goal names an existing command or an objective command can be written; use agent gates for subjective review; use hybrid when deterministic evidence covers most of the goal but a focused review remains."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob]
+
 world:
   # Configuration (set in `configuring`, or seeded via a warp/flow).
   goal_text:         { type: string, default: "" }    # the purpose, in words
   goal_artifact:     { type: string, default: "" }    # path the maker produces/edits
-  gate_mode:         { type: string, default: "script" }   # script | agent
+  gate_mode:         { type: string, default: "" }    # "" = planner decides during configure; script | agent | hybrid
   gate_command:      { type: string, default: "" }    # script-mode shell command
+  gate_plan_reason:  { type: string, default: "" }    # why the planner chose this gate
+  gate_prompt_focus: { type: string, default: "" }    # extra reviewer rubric for agent/hybrid gates
   anchor_files:      { type: string, default: "" }    # fixed context handed to the maker each turn (ralph reset)
   iteration_budget:  { type: int,    default: 8 }
   cost_budget_usd:   { type: number, default: 0 }     # 0 = disabled
@@ -99,6 +109,8 @@ world:
   # == false) from firing in the pre-bind pass, so they defer to the post-bind
   # pass once the gate has actually run — the bugfix decision-emit discipline.
   gate_ok:           { type: string, default: "" }
+  script_gate_ok:    { type: string, default: "" }
+  agent_gate_ok:     { type: string, default: "" }
   gate_exit_code:    { type: int,    default: 0 }
   gate_stdout:       { type: string, default: "" }    # script gate output
   gate_reason:       { type: string, default: "" }    # agent gate rationale

@@ -8,23 +8,24 @@ states:
   # runs). Goal-met always wins; otherwise a budget guard ends the run.
   gating:
     description: "Loop step — checking the goal"
-    relevant_world: [gate_mode, gate_ok, gate_exit_code, iteration, iteration_budget, session_cost_usd, cost_budget_usd]
+    relevant_world: [gate_mode, gate_ok, script_gate_ok, agent_gate_ok, gate_exit_code, iteration, iteration_budget, session_cost_usd, cost_budget_usd]
     on_enter:
       # Script gate — deterministic, free, incorruptible. Passes iff exit 0.
       - invoke: host.run
         id: "gate-{{ world.iteration }}"
-        when: "world.gate_mode == 'script'"
+        when: "world.gate_mode == 'script' || world.gate_mode == 'hybrid'"
         with:
           cmd: "{{ world.gate_command }}"
           fail_on_error: false
         bind:
           gate_ok:        ok
+          script_gate_ok: ok
           gate_exit_code: exit_code
           gate_stdout:    stdout
       # Agent gate — adversarial review for goals no test can encode.
       - invoke: host.agent.decide
         id: "gate-{{ world.iteration }}"
-        when: "world.gate_mode == 'agent'"
+        when: "world.gate_mode == 'agent' || world.gate_mode == 'hybrid'"
         with:
           prompt: prompts/gate_review.md
           schema: schemas/gate_verdict.json
@@ -32,19 +33,23 @@ states:
           args:
             goal:          "{{ world.goal_text }}"
             goal_artifact: "{{ world.goal_artifact }}"
+            prompt_focus:  "{{ world.gate_prompt_focus }}"
+            script_ok:     "{{ world.script_gate_ok }}"
+            script_output: "{{ world.gate_stdout }}"
         bind:
-          gate_ok:     submitted.pass
-          gate_reason: submitted.reason
+          gate_ok:       submitted.pass
+          agent_gate_ok: submitted.pass
+          gate_reason:   submitted.reason
       - say: "Gate iteration {{ world.iteration }} → {% if world.gate_ok == true %}PASS ✓{% else %}FAIL ✗{% endif %}"
       # Guarded routing — each reads gate_ok, so all are false pre-bind and
       # exactly one is true post-bind (the decision-emit discipline).
-      - when: "world.gate_ok == true"
+      - when: "(world.gate_mode != 'hybrid' && world.gate_ok == true) || (world.gate_mode == 'hybrid' && world.script_gate_ok == true && world.agent_gate_ok == true)"
         emit_intent: mark_achieved
-      - when: "world.gate_ok == false && world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd"
+      - when: "((world.gate_mode != 'hybrid' && world.gate_ok == false) || (world.gate_mode == 'hybrid' && world.script_gate_ok != '' && world.agent_gate_ok != '' && (world.script_gate_ok == false || world.agent_gate_ok == false))) && world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd"
         emit_intent: mark_cost_exhausted
-      - when: "world.gate_ok == false && !(world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd) && world.iteration >= world.iteration_budget"
+      - when: "((world.gate_mode != 'hybrid' && world.gate_ok == false) || (world.gate_mode == 'hybrid' && world.script_gate_ok != '' && world.agent_gate_ok != '' && (world.script_gate_ok == false || world.agent_gate_ok == false))) && !(world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd) && world.iteration >= world.iteration_budget"
         emit_intent: mark_iter_exhausted
-      - when: "world.gate_ok == false && !(world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd) && world.iteration < world.iteration_budget"
+      - when: "((world.gate_mode != 'hybrid' && world.gate_ok == false) || (world.gate_mode == 'hybrid' && world.script_gate_ok != '' && world.agent_gate_ok != '' && (world.script_gate_ok == false || world.agent_gate_ok == false))) && !(world.cost_budget_usd > 0 && world.session_cost_usd >= world.cost_budget_usd) && world.iteration < world.iteration_budget"
         emit_intent: loop_again
         slots:
           feedback: "{{ world.gate_stdout }}{{ world.gate_reason }}"

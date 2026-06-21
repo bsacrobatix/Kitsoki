@@ -17,6 +17,17 @@ min_confidence: 1.00
 
 entries:
   - state: configuring
+    input: "make the story qa guide convincing to a skeptical lead engineer"
+    intent:
+      name: configure
+      slots:
+        goal:             "Make docs/stories/story-qa.md convincing to a skeptical lead engineer"
+        artifact:         "docs/stories/story-qa.md"
+        iteration_budget: 2
+    confidence: 1.00
+    majority_of: 1
+
+  - state: configuring
     input: "the rate limiter tests are flaky — get `go test ./internal/ratelimit` green"
     intent:
       name: configure

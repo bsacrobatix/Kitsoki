@@ -44,7 +44,7 @@ states:
       - say: "Iteration {{ world.iteration }}/{{ world.iteration_budget }} · {{ world.maker_summary }}"
       # Auto-advance to the checker — no operator prod. (Reset the verdict so
       # gating's routing emits defer to its post-bind pass.)
-      - set: { gate_ok: "", gate_stdout: "", gate_reason: "" }
+      - set: { gate_ok: "", script_gate_ok: "", agent_gate_ok: "", gate_stdout: "", gate_reason: "" }
       - emit_intent: check
     view:
       extends: "base"

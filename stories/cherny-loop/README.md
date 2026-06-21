@@ -21,6 +21,10 @@ configuring → baseline ─ RED (auto) ─→ iterating → gating ──┐ (a
 `begin` pass-through turn. **After `launch`, no further prodding is needed**: the
 loop drives itself maker → gate → repeat until a gate passes or a budget stops it.
 
+- **planning** — when the operator gives only a free-form goal, `configure` asks
+  a planner to choose the proof strategy: existing script, script the maker
+  should create, prompt-only review, or **hybrid** (script + focused review).
+  The operator can still configure `gate_command` / `gate_mode` explicitly.
 - **baseline** — before any maker spend, `launch` runs the gate **once on the
   unchanged artifact** to prove it can fail. A **RED** baseline (gate fails)
   **auto-proceeds** into the loop. A **GREEN** baseline (gate passes) means the
@@ -49,16 +53,18 @@ over — larger budgets want a **background-job runner** (`background: true` +
 turn loop with no depth limit. That runner is the documented next step for
 unbounded autonomy.
 
-## Two gate modes (`world.gate_mode`)
+## Gate modes (`world.gate_mode`)
 
 | Mode | Checker | Use for |
 |---|---|---|
-| `script` (default) | `host.run` the command in `gate_command`; pass iff exit 0 | mechanically checkable goals — tests pass, type-checks, lint clean. Deterministic, free, incorruptible. |
+| `script` | `host.run` the command in `gate_command`; pass iff exit 0 | mechanically checkable goals — tests pass, type-checks, lint clean. Deterministic, free, incorruptible. |
 | `agent` | `host.agent.decide` adversarially reviews the artifact; pass iff verdict `pass` | goals no test can encode — prose quality, design soundness. |
+| `hybrid` | `host.run` **and** `host.agent.decide`; pass iff both pass | mostly deterministic work with a small judgment tail — e.g. tests pass and docs are persuasive. |
 
 The script gate is the strongest maker/checker split (code can't be talked into
-passing) and costs nothing, so it is the default. Reach for the agent gate only
-when the goal is subjective.
+passing) and costs nothing. The planner prefers it when it can honestly prove
+the goal, but will use `agent` or `hybrid` when the user's input calls for
+judgment.
 
 ## Termination — goal met OR budget hit
 
@@ -71,6 +77,21 @@ Evaluated every turn after a failed gate, in priority order:
 3. **iteration ceiling** → `@exit:exhausted` — `iteration` ≥ `iteration_budget`
 
 ## Configure & run
+
+For ad hoc work, say the goal first and let the planner pick the right gate
+shape:
+
+```
+make docs/stories/story-qa.md convincing to a skeptical lead engineer
+launch
+```
+
+The first line routes to `configure`, which runs the planner. The planner may
+choose an existing command, a script the maker should create, a prompt-only
+review, or a hybrid gate. If you already know the proof, set
+`gate_command=...` / `gate_mode=...` explicitly.
+
+For mechanically checkable work, configure the script gate explicitly:
 
 ```
 configure goal="Get go test ./internal/ratelimit green" artifact="internal/ratelimit/limiter.go" gate_command="go test ./internal/ratelimit/" iteration_budget=3
@@ -87,8 +108,9 @@ the run trail that makes a loop auditable and resumable.
 
 ## Tests
 
-Deterministic, no-LLM flow fixtures under `flows/` cover: achieved (script +
-agent gates), baseline-green blocking, iteration-budget exhaustion, cost-budget
+Deterministic, no-LLM flow fixtures under `flows/` cover: achieved (script,
+agent, and hybrid gates), free-form recording configuration, planner-selected
+gates, baseline-green blocking, iteration-budget exhaustion, cost-budget
 exhaustion, the feedback-into-next-iteration edge, maker-error recovery, and a
 full multi-iteration run to the ceiling. The fixtures assert host-call contracts
 with `expect_host_calls` / `expect_no_host_calls`, so they prove both the final
@@ -100,6 +122,29 @@ kitsoki test flows stories/cherny-loop/app.yaml
 
 The general story QA runbook uses this story as its worked example:
 [`docs/stories/story-qa.md`](../../docs/stories/story-qa.md).
+
+## Provider profiles
+
+The story is backend-neutral: `host.agent.task` and `host.agent.decide` run
+through the active Kitsoki agent backend/profile. That means the same loop can
+drive native Claude Code, native Codex, or synthetic.new-backed profiles without
+story changes.
+
+Quick local setup:
+
+```
+cp .kitsoki.local.yaml.example .kitsoki.local.yaml
+export SYNTHETIC_API_KEY=syn_...
+kitsoki web --stories-dir stories
+```
+
+Then pick `synthetic-claude`, `synthetic-codex`, `claude-native`, or
+`codex-native` in the web header. In the TUI, use `/provider synthetic-claude`
+or `/provider synthetic-codex`. For `synthetic-codex`, follow the codex provider
+note in [docs/getting-started.md](../../docs/getting-started.md): Codex may need
+a `[model_providers.synthetic]` entry in `~/.codex/config.toml`; environment
+variables alone are not enough when Codex is authenticated through a ChatGPT
+account.
 
 ## Implementation note (engine discipline)
 

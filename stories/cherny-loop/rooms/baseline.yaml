@@ -12,23 +12,24 @@ states:
   # the cheap check that gates the expensive loop.
   baseline:
     description: "Baseline — proving the gate fails first"
-    relevant_world: [gate_mode, gate_command, gate_ok, gate_exit_code, gate_stdout, gate_reason, goal_text, goal_artifact]
+    relevant_world: [gate_mode, gate_command, gate_ok, script_gate_ok, agent_gate_ok, gate_exit_code, gate_stdout, gate_reason, gate_prompt_focus, goal_text, goal_artifact]
     on_enter:
       # Reset last turn's verdict, then run the checker on the UNCHANGED artifact.
-      - set: { gate_ok: "", gate_exit_code: 0, gate_stdout: "", gate_reason: "" }
+      - set: { gate_ok: "", script_gate_ok: "", agent_gate_ok: "", gate_exit_code: 0, gate_stdout: "", gate_reason: "" }
       - invoke: host.run
         id: "gate-0"   # the baseline run, addressable distinctly from the loop gates
-        when: "world.gate_mode == 'script'"
+        when: "world.gate_mode == 'script' || world.gate_mode == 'hybrid'"
         with:
           cmd: "{{ world.gate_command }}"
           fail_on_error: false
         bind:
           gate_ok:        ok
+          script_gate_ok: ok
           gate_exit_code: exit_code
           gate_stdout:    stdout
       - invoke: host.agent.decide
         id: "gate-0"   # the baseline review, addressable distinctly from loop gates
-        when: "world.gate_mode == 'agent'"
+        when: "world.gate_mode == 'agent' || world.gate_mode == 'hybrid'"
         with:
           prompt: prompts/gate_review.md
           schema: schemas/gate_verdict.json
@@ -36,15 +37,19 @@ states:
           args:
             goal:          "{{ world.goal_text }}"
             goal_artifact: "{{ world.goal_artifact }}"
+            prompt_focus:  "{{ world.gate_prompt_focus }}"
+            script_ok:     "{{ world.script_gate_ok }}"
+            script_output: "{{ world.gate_stdout }}"
         bind:
-          gate_ok:     submitted.pass
-          gate_reason: submitted.reason
+          gate_ok:       submitted.pass
+          agent_gate_ok: submitted.pass
+          gate_reason:   submitted.reason
       - set: { baseline_checked: true }
       # RED (gate fails) → the gate works and there's real work to do, so kick off
       # the autonomous loop with no operator prod. GREEN → no emit; rest here so
       # the operator decides (the gate proves nothing). Guard reads gate_ok, which
       # forces the bind to settle before routing (decision-emit discipline).
-      - when: "world.gate_ok == false"
+      - when: "(world.gate_mode != 'hybrid' && world.gate_ok == false) || (world.gate_mode == 'hybrid' && world.script_gate_ok != '' && world.agent_gate_ok != '' && (world.script_gate_ok == false || world.agent_gate_ok == false))"
         emit_intent: proceed
     view:
       extends: "base"
@@ -53,42 +58,50 @@ states:
           # RED — the gate fails as it should. Safe to spend budget.
           - banner:
               text:     "GATE VERIFIED · RED"
-              subtitle: "The gate fails on the unchanged artifact — there is real work to do"
+              subtitle: "The planned gate fails on the unchanged artifact — there is real work to do"
               color:    "#F59E0B"
             when: "world.gate_ok == false"
           - prose: "✗ The gate **fails today** — exactly what we want before iterating. The loop now has a goal it can actually prove it reached."
-            when:  "world.gate_ok == false"
+            when:  "(world.gate_mode != 'hybrid' && world.gate_ok == false) || (world.gate_mode == 'hybrid' && world.script_gate_ok != '' && world.agent_gate_ok != '' && (world.script_gate_ok == false || world.agent_gate_ok == false))"
           # GREEN — the gate passes before any change. It proves nothing.
           - banner:
               text:     "GATE UNPROVEN"
               subtitle: "The gate already passes — it can't prove the loop achieved anything"
               color:    "#EF4444"
-            when: "world.gate_ok == true"
+            when: "(world.gate_mode != 'hybrid' && world.gate_ok == true) || (world.gate_mode == 'hybrid' && world.script_gate_ok == true && world.agent_gate_ok == true)"
           - prose: "⚠ The gate **passes on the unchanged artifact**. Either the goal is already met, or the gate is too weak to encode it. Don't spend budget on a gate that can't fail — strengthen it (`reconfigure`), or `accept` that the goal is genuinely already met."
-            when:  "world.gate_ok == true"
+            when:  "(world.gate_mode != 'hybrid' && world.gate_ok == true) || (world.gate_mode == 'hybrid' && world.script_gate_ok == true && world.agent_gate_ok == true)"
           - heading: "What ran"
+          - kv:
+              pairs:
+                Planned gate: "{{ world.gate_mode }}"
+                Reason:       '{{ world.gate_plan_reason|default:"(configured explicitly)" }}'
+                Focus:        '{{ world.gate_prompt_focus|default:"(goal as written)" }}'
+            when: "world.gate_plan_reason != ''"
           - code: '{{ world.gate_command|default:"(agent reviewer — no shell command)" }}'
-            when: "world.gate_mode == 'script'"
+            when: "world.gate_mode == 'script' || world.gate_mode == 'hybrid'"
           - kv:
               pairs:
                 Gate:      "{{ world.gate_mode }}"
                 Exit code: "{{ world.gate_exit_code }}"
-            when: "world.gate_mode == 'script'"
+                Script:    "{{ world.script_gate_ok }}"
+                Review:    "{{ world.agent_gate_ok }}"
+            when: "world.gate_mode == 'script' || world.gate_mode == 'hybrid'"
           - heading: "Gate output"
           - code: '{{ world.gate_stdout|default:"(no output)" }}'
-            when: "world.gate_mode == 'script'"
+            when: "world.gate_mode == 'script' || world.gate_mode == 'hybrid'"
           - code: '{{ world.gate_reason|default:"(no rationale)" }}'
-            when: "world.gate_mode == 'agent'"
+            when: "world.gate_mode == 'agent' || world.gate_mode == 'hybrid'"
         choices:
           - heading: "Actions"
           - list:
               items:
                 - label: "proceed"
                   hint:  "baseline is RED — run the first maker iteration"
-                  when:  "world.gate_ok == false"
+                  when:  "(world.gate_mode != 'hybrid' && world.gate_ok == false) || (world.gate_mode == 'hybrid' && world.script_gate_ok != '' && world.agent_gate_ok != '' && (world.script_gate_ok == false || world.agent_gate_ok == false))"
                 - label: "accept"
                   hint:  "the goal is genuinely already met"
-                  when:  "world.gate_ok == true"
+                  when:  "(world.gate_mode != 'hybrid' && world.gate_ok == true) || (world.gate_mode == 'hybrid' && world.script_gate_ok == true && world.agent_gate_ok == true)"
                 - label: "reconfigure"
                   hint:  "edit the goal, gate, or budgets"
                 - label: "abort"
@@ -96,7 +109,7 @@ states:
                 - label: "look"
     on:
       proceed:
-        - when: "world.gate_ok == false"
+        - when: "(world.gate_mode != 'hybrid' && world.gate_ok == false) || (world.gate_mode == 'hybrid' && world.script_gate_ok != '' && world.agent_gate_ok != '' && (world.script_gate_ok == false || world.agent_gate_ok == false))"
           target: iterating
           # Hand the baseline failure to the first maker turn — the loop starts
           # already pointed at the gap, not blind.
@@ -109,7 +122,7 @@ states:
           effects:
             - say: "The gate already passes. `reconfigure` to strengthen it, or `accept`."
       accept:
-        - when: "world.gate_ok == true"
+        - when: "(world.gate_mode != 'hybrid' && world.gate_ok == true) || (world.gate_mode == 'hybrid' && world.script_gate_ok == true && world.agent_gate_ok == true)"
           target: "@exit:achieved"
           effects:
             - set: { goal_achieved: true, terminal_reason: "already_met" }

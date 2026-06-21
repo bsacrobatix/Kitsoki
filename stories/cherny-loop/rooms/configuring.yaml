@@ -8,19 +8,23 @@ states:
     # message" is the goal in their own words. (Flat, not extends/base: a `choice`
     # element isn't allowed inside an extends/blocks view, and the base status
     # line — iter/budget/cost — is noise before the loop has launched anyway.)
-    relevant_world: [goal_text, goal_artifact, gate_mode, gate_command, iteration_budget, cost_budget_usd]
+    relevant_world: [goal_text, goal_artifact, gate_mode, gate_command, gate_plan_reason, gate_prompt_focus, iteration_budget, cost_budget_usd]
     view:
       - banner:
           text:     "CONFIGURE"
           subtitle: "Say what you want — then launch"
           color:    "#6366F1"
-      - prose: "A Cherny loop iterates an agent toward a goal until a gate proves it met — or a budget stops it. **Say what you want in your own words** — e.g. \"get `go test ./internal/ratelimit` green\" — and I'll script-gate the loop on that command. `launch` then proves the gate is **RED** (it fails today) before spending anything."
+      - prose: "A Cherny loop iterates an agent toward a goal until a gate proves it met — or a budget stops it. **Say what you want in your own words.** When you describe ad hoc work, the gate planner chooses a script gate, an agent-review gate, or a hybrid of both based on what would actually prove the work is done."
+      - prose: "⚠ {{ world.last_error }}"
+        when:  "world.last_error != ''"
       - heading: "Goal"
       - prose: '{{ world.goal_text|default:"_(not yet chosen — say what you want, or `configure goal=…`)_" }}'
       - kv:
           pairs:
             Artifact under test: '{{ world.goal_artifact|default:"(none — the maker works from the repo)" }}'
       - heading: "The gate"
+      - prose: "**planner** — no gate is locked in yet. Send a goal in your own words and the planner will choose whether this should be verified by a script, a prompt, or both."
+        when:  "world.gate_mode == ''"
       # The gate is the whole point — render the actual command/checker the
       # operator can read and inspect, not a one-line kv value.
       - prose: '**script** — the gate is this command; it passes iff it exits 0:'
@@ -29,6 +33,15 @@ states:
         when:  "world.gate_mode == 'script'"
       - prose: '**agent** — an adversarial reviewer judges the artifact against the goal (for goals no test can encode).'
         when:  "world.gate_mode == 'agent'"
+      - prose: '**hybrid** — the script must pass and the adversarial reviewer must pass.'
+        when:  "world.gate_mode == 'hybrid'"
+      - code: '{{ world.gate_command|default:"# (planner has not chosen a command yet)" }}'
+        when:  "world.gate_mode == 'hybrid'"
+      - kv:
+          pairs:
+            Planner reason: '{{ world.gate_plan_reason|default:"(not planned yet)" }}'
+            Review focus:   '{{ world.gate_prompt_focus|default:"(goal as written)" }}'
+        when: "world.gate_mode == 'agent' || world.gate_mode == 'hybrid'"
       - heading: "Budgets"
       - kv:
           pairs:
@@ -39,15 +52,15 @@ states:
           prompt: "Actions"
           items:
             - label:  "launch"
-              hint:   "verify the gate is RED, then run the loop to completion"
+              hint:   "prove the gate is RED, then run to completion"
               intent: launch
-              when:   "world.goal_text != '' && (world.gate_mode != 'script' || world.gate_command != '')"
+              when:   "world.goal_text != '' && (world.gate_mode == '' || world.gate_mode == 'agent' || world.gate_command != '')"
             - label:  "✗ launch — say what you want first"
               intent: look
               when:   "world.goal_text == ''"
             - label:  "✗ launch — script mode needs a gate command"
               intent: look
-              when:   "world.goal_text != '' && world.gate_mode == 'script' && world.gate_command == ''"
+              when:   "world.goal_text != '' && (world.gate_mode == 'script' || world.gate_mode == 'hybrid') && world.gate_command == ''"
             - label:  "abort"
               hint:   "abandon the loop"
               intent: abort
@@ -60,19 +73,42 @@ states:
             - set:
                 goal_text:        "{{ slots.goal ?? world.goal_text }}"
                 goal_artifact:    "{{ slots.artifact ?? world.goal_artifact }}"
-                gate_mode:        "{{ slots.gate_mode ?? world.gate_mode }}"
+                gate_mode:        "{{ slots.gate_mode ?? (slots.gate_command != nil && slots.gate_command != '' ? 'script' : (world.gate_command != '' ? world.gate_mode : '')) }}"
                 gate_command:     "{{ slots.gate_command ?? world.gate_command }}"
+                gate_plan_reason:  "{{ slots.gate_mode != nil || slots.gate_command != nil ? 'configured explicitly by the operator' : '' }}"
+                gate_prompt_focus: "{{ slots.gate_mode == 'agent' || slots.gate_mode == 'hybrid' ? world.gate_prompt_focus : '' }}"
                 iteration_budget: "{{ int(slots.iteration_budget ?? world.iteration_budget) }}"
                 cost_budget_usd:  "{{ slots.cost_budget ?? world.cost_budget_usd }}"
+            - invoke: host.agent.decide
+              id: "gate-plan"
+              when: "slots.gate_mode == nil && (slots.gate_command ?? '') == '' && (slots.goal ?? '') != '' && world.gate_command == ''"
+              with:
+                prompt: prompts/gate_plan.md
+                schema: schemas/gate_plan.json
+                agent: gate_planner
+                args:
+                  goal:          "{{ slots.goal }}"
+                  goal_artifact: "{{ slots.artifact ?? world.goal_artifact }}"
+              bind:
+                gate_mode:         submitted.gate_mode
+                gate_command:      submitted.gate_command
+                goal_artifact:     submitted.artifact
+                gate_prompt_focus: submitted.prompt_focus
+                gate_plan_reason:  submitted.reason
+              on_error: configuring
       launch:
         - when: "world.goal_text == ''"
           target: .
           effects:
             - say: "Set a goal first: `configure goal=…`."
-        - when: "world.gate_mode == 'script' && world.gate_command == ''"
+        - when: "(world.gate_mode == 'script' || world.gate_mode == 'hybrid') && world.gate_command == ''"
           target: .
           effects:
             - say: "Script mode needs a gate: `configure gate_command=…`."
+        - when: "world.gate_mode == ''"
+          target: .
+          effects:
+            - say: "The gate is not planned yet. Send the goal with `configure goal=…` or type it in your own words."
         # Don't go straight to iterating — prove the gate is RED first.
         - target: baseline
       abort:

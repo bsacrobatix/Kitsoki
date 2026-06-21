@@ -2,8 +2,9 @@
 
 Story QA is the review pass between "the story loads" and "this is ready for
 humans to use." It combines deterministic checks, graph review, rendered-view
-review, and targeted flow hardening. The output is either a short QA report in
-`.context/` or a commit that fixes the story and records what was verified.
+review, skeptical operator walkthroughs, and targeted flow hardening. The output
+is either a short QA report in `.context/` or a commit that fixes the story and
+records what was verified.
 
 Automated QA must not call a live LLM. Use flow fixtures, recordings, cassettes,
 and stubbed host handlers. Live runs are optional exploratory checks and must be
@@ -28,10 +29,14 @@ explicitly requested.
 5. **Probe human-facing views.** Use `kitsoki turn` for important rooms and edge
    states. Check that views are nonblank, show actionable choices, surface errors,
    and do not require a pointless `begin` / `continue` turn.
-6. **Cover failure and guard paths.** Add fixtures for host errors, blocked
+6. **Walk it as a skeptical operator.** Ask what a capable engineer would do if
+   they did not already buy Kitsoki's framing. The first screen must make the
+   next action obvious, accept natural phrasing where the story claims to be
+   free-form, and show why the graph adds value over a plain CLI prompt.
+7. **Cover failure and guard paths.** Add fixtures for host errors, blocked
    launches, budget exhaustion, retry/reconfigure/abort paths, and any branch that
    exists specifically to prevent runaway or costly behavior.
-7. **Record evidence.** Save transient reports or generated artifacts under
+8. **Record evidence.** Save transient reports or generated artifacts under
    `.context/` and `.artifacts/`; keep committed docs focused and reusable.
 
 Useful commands:
@@ -52,6 +57,8 @@ Use this as a minimum bar for an operator story:
 - `root:` is the first useful room; there is no pass-through idle/begin room.
 - Each public exit has at least one flow that reaches it.
 - Each host-backed room has a flow that proves the expected handler fired.
+- Each free-form entry point has an `input:` flow backed by `recording.yaml`, not
+  only structured `intent:` fixtures.
 - Each expensive or stateful host call is either idempotent or covered by a
   reload/re-entry/error fixture.
 - Each guard that protects cost, budget, validity, or safety has a negative flow.
@@ -72,8 +79,9 @@ Scope:
 - Host calls: `host.run` for script gates, `host.agent.decide` for agent gates,
   `host.agent.task` for maker iterations, and `host.artifacts_dir` for iteration
   records.
-- Core promise: one `launch` proves the gate is RED, then runs maker -> gate
-  autonomously until achievement or budget exhaustion.
+- Core promise: one free-form setup turn chooses the right proof strategy, then
+  one `launch` proves the gate is RED and runs maker -> gate autonomously until
+  achievement or budget exhaustion.
 
 QA hardening applied:
 
@@ -81,6 +89,8 @@ QA hardening applied:
 - Happy paths assert the exact host-call sequence via `expect_host_calls`.
 - The baseline-green fixture asserts `host.agent.task` and `host.artifacts_dir`
   do not fire, proving the loop refuses to spend on a gate that already passes.
+- Free-form fixtures prove ad hoc input can be recorded, then planned into an
+  agent gate or a hybrid script-plus-review gate.
 - A maker failure fixture covers `on_error: iterating_error` and retry recovery.
 - The web-tour fixture remains a deterministic no-LLM proof of the autonomous
   multi-iteration path.
