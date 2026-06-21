@@ -100,6 +100,35 @@ launch     # proves the gate is RED, then runs the loop to completion on its own
 
 That's it — `launch` runs the whole loop. No per-iteration prodding.
 
+## Worktree confinement
+
+The maker is an autonomous agent that **edits the repo**, so it must never write
+the operator's checkout directly. On `launch`, `baseline` mints a dedicated git
+worktree under `.worktrees/<workspace_id>` on a throwaway branch
+(`workspace_branch`, default `cherny-loop/run`) via the provider-neutral
+`workspace` host_interface — the **same seam dev-story uses**, default-bound to
+`host.git_worktree`. Every maker turn (`host.agent.task`), every script gate
+(`host.run`), and every agent gate (`host.agent.decide`) then runs with its
+`working_dir` / `cwd` pinned to that worktree. The maker can **read** the rest of
+the repo (cwd doesn't wall off reads); its **writes** land in the isolated
+branch. A failed mint routes to `workspace_error` and the loop refuses to run the
+maker — it never spends in your checkout.
+
+Because the worktree is reused across re-launches (the mint is idempotent on the
+same branch/id), a run is restartable. For parallel loops, set a distinct
+`configure workspace_branch=… workspace_id=…`.
+
+> **Scope note — convention, not an OS jail.** `working_dir` pins the agent's
+> cwd; it confines writes *by convention*, exactly as dev-story documents
+> (`working_dir is NOT a write jail`). Today both backends run with their own
+> sandbox disabled (`claude --permission-mode bypassPermissions`,
+> `codex --dangerously-bypass-approvals-and-sandbox`), so a determined agent
+> writing an absolute / `../` path is not hard-blocked. A true OS-level write
+> guarantee (Seatbelt / namespace wrap of the agent subprocess, reusing
+> `internal/host/validator_sandbox.go`, plus resolving codex's MCP-submit-vs-
+> sandbox conflict) is an engine-layer change tracked separately — it is **not**
+> achievable from story YAML.
+
 ## Tracking / restart / share
 
 Each iteration writes `iteration-<n>` via `host.artifacts_dir` under

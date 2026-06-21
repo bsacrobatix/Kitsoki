@@ -12,15 +12,34 @@ states:
   # the cheap check that gates the expensive loop.
   baseline:
     description: "Baseline — proving the gate fails first"
-    relevant_world: [gate_mode, gate_command, gate_ok, script_gate_ok, agent_gate_ok, gate_exit_code, gate_stdout, gate_reason, gate_prompt_focus, goal_text, goal_artifact]
+    relevant_world: [gate_mode, gate_command, gate_ok, script_gate_ok, agent_gate_ok, gate_exit_code, gate_stdout, gate_reason, gate_prompt_focus, goal_text, goal_artifact, worktree_path, workspace_branch]
     on_enter:
-      # Reset last turn's verdict, then run the checker on the UNCHANGED artifact.
+      # Worktree first — before any gate or maker spend. The maker is an agent
+      # that EDITS the repo, so it must write into an isolated worktree, never
+      # the operator's checkout. Mint it here (idempotent — re-launch / restart
+      # reuses the same branch) and pin every downstream gate + maker call to its
+      # cwd via cwd/working_dir. Reads still see the whole repo; writes are
+      # confined to .worktrees/<workspace_id>. A failed mint routes to
+      # workspace_error rather than letting the loop spend in the wrong tree.
+      - invoke: iface.workspace.create
+        id: "worktree"
+        with:
+          id:   "{{ world.workspace_id }}"
+          name: "{{ world.workspace_branch }}"
+          base: "{{ world.workspace_base }}"
+        bind:
+          worktree_path: path
+        on_error: workspace_error
+      # Reset last turn's verdict, then run the checker on the UNCHANGED artifact
+      # INSIDE the worktree (identical to HEAD on a fresh branch, so a RED
+      # baseline still holds — and it proves RED in the exact tree the maker edits).
       - set: { gate_ok: "", script_gate_ok: "", agent_gate_ok: "", gate_exit_code: 0, gate_stdout: "", gate_reason: "" }
       - invoke: host.run
         id: "gate-0"   # the baseline run, addressable distinctly from the loop gates
         when: "world.gate_mode == 'script' || world.gate_mode == 'hybrid'"
         with:
           cmd: "{{ world.gate_command }}"
+          cwd: "{{ world.worktree_path }}"
           fail_on_error: false
         bind:
           gate_ok:        ok
@@ -34,6 +53,7 @@ states:
           prompt: prompts/gate_review.md
           schema: schemas/gate_verdict.json
           agent: gate_reviewer
+          working_dir: "{{ world.worktree_path }}"
           args:
             goal:          "{{ world.goal_text }}"
             goal_artifact: "{{ world.goal_artifact }}"
@@ -143,3 +163,49 @@ states:
           target: .
           effects:
             - say: "Use `proceed`, `reconfigure`, `accept`, or `abort`."
+
+  # workspace_error — minting the worktree failed (e.g. the branch is checked
+  # out by another worktree, or git is unavailable). The loop REFUSES to run the
+  # maker outside an isolated worktree, so it rests here rather than spending in
+  # the operator's checkout. `reconfigure` lets the operator pick a different
+  # workspace_branch / workspace_id; `retry` re-attempts the mint.
+  workspace_error:
+    description: "Workspace error — could not mint the worktree"
+    relevant_world: [last_error, workspace_branch, workspace_id]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - banner:
+              text:     "WORKSPACE ERROR"
+              subtitle: "The maker only runs in an isolated worktree — none could be minted"
+              color:    "#EF4444"
+          - prose: "Could not create the worktree for branch `{{ world.workspace_branch }}` (id `{{ world.workspace_id }}`). The loop will not run the maker in your checkout."
+          - code: '{{ world.last_error|default:"(no error detail)" }}'
+          - prose: "Common cause: the branch is already checked out by another worktree. Pick a different `workspace_branch` / `workspace_id` and `reconfigure`, or `retry`."
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "retry"
+                  hint:  "re-attempt the worktree mint"
+                - label: "reconfigure"
+                  hint:  "choose a different branch/id"
+                - label: "abort"
+                - label: "look"
+    on:
+      retry:
+        - target: baseline
+      reconfigure:
+        - target: configuring
+      abort:
+        - target: "@exit:abandoned"
+          effects:
+            - set: { terminal_reason: "aborted" }
+      look:
+        - target: .
+      "*":
+        - default: true
+          target: .
+          effects:
+            - say: "Type `retry`, `reconfigure`, or `abort`."
