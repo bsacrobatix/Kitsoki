@@ -44,4 +44,11 @@ const (
 	// This event is the replay anchor for 1.4: a recorded verdict + this
 	// event prove the turn was contextually routed without a live LLM.
 	EvTurnContextRouteDecided = "turn.context_route_decided"
+
+	// EvTurnContextRouteApplied fires after the lane dispatch succeeds for a
+	// help/room_request/meta_edit verdict (slice 2). Expected fields:
+	//
+	//   lane     string  — the LaneKind string (help|work|meta)
+	//   chat_id  string  — the resolved lane chat id
+	EvTurnContextRouteApplied = "turn.context_route_applied"
 )

@@ -9,6 +9,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/host"
+	"kitsoki/internal/roomchat"
 	"kitsoki/internal/semroute"
 	"kitsoki/internal/trace"
 	"kitsoki/internal/turncache"
@@ -242,9 +243,46 @@ func (o *Orchestrator) routeViaContextualRouter(
 		return outcome, true, nil
 
 	default:
-		// help / room_request / meta_edit — group-2 lane stubs (slice 1: no advance).
-		// The decided event is already emitted above. TODO(crr-2): wire lane handlers.
-		return nil, false, nil
+		// help / room_request / meta_edit — resolve the active room lane, append
+		// the utterance, and return a non-advancing outcome (CRR slice 2).
+		// Falls through to the no-advance stub when no chat store is wired.
+		if o.chatStore == nil {
+			return nil, false, nil
+		}
+		var kind roomchat.LaneKind
+		switch verdict.Class {
+		case ClassHelp:
+			kind = roomchat.LaneHelp
+		case ClassRoomRequest:
+			kind = roomchat.LaneWork
+		default: // ClassMetaEdit
+			kind = roomchat.LaneMeta
+		}
+		resolver := roomchat.Resolver{Store: o.chatStore}
+		laneTitle := string(verdict.Class) + " lane"
+		chat, _, resolveErr := resolver.Active(ctx, o.def.App.ID, kind, string(state), laneTitle)
+		if resolveErr != nil {
+			tl.Debug(ctx, trace.EvTurnContextRouteDecided,
+				slog.String("reason", "lane_resolve_error"),
+				slog.String("err", resolveErr.Error()),
+			)
+			return nil, false, nil
+		}
+		if appendErr := resolver.Append(ctx, chat.ID, "user", input); appendErr != nil {
+			tl.Debug(ctx, trace.EvTurnContextRouteDecided,
+				slog.String("reason", "lane_append_error"),
+				slog.String("err", appendErr.Error()),
+			)
+			return nil, false, nil
+		}
+		tl.Debug(ctx, trace.EvTurnContextRouteApplied,
+			slog.String("lane", string(kind)),
+			slog.String("chat_id", chat.ID),
+		)
+		return &TurnOutcome{
+			Mode:     ModeOffPath,
+			NewState: state,
+		}, true, nil
 	}
 }
 
