@@ -1241,6 +1241,7 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		MatchType:  "main-turn",
 		Confidence: harnessConfidence(params),
 	}
+	emitRoutingStream(ctx, turnNum, extractIntentName(params), llmProv)
 	llmProv.stampOn(startPayload)
 	startEvent := newOrchestratorEvent(store.TurnStarted, startPayload, turnNum)
 
@@ -1736,6 +1737,24 @@ func (p RouteProvenance) stampOn(payload map[string]any) {
 	}
 }
 
+func emitRoutingStream(ctx context.Context, turnNum app.TurnNumber, intentName string, prov RouteProvenance) {
+	if prov.Source == "" {
+		return
+	}
+	sink := host.StreamSinkFrom(ctx)
+	if sink == nil {
+		return
+	}
+	sink.OnStreamEvent(ctx, host.StreamEvent{
+		Type:       "routing",
+		Turn:       int64(turnNum),
+		Intent:     intentName,
+		RoutedBy:   prov.Source,
+		MatchType:  prov.MatchType,
+		Confidence: prov.Confidence,
+	})
+}
+
 // SubmitDirectRouted is [SubmitDirectFromInput] plus routing provenance:
 // the resolving tier stamps how the intent was chosen onto the
 // TurnStarted journal event so the persisted trace explains the
@@ -1778,6 +1797,7 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 		slog.String("intent", intentName),
 		slog.String("mode", "submit-direct"),
 	)
+	emitRoutingStream(ctx, turnNum, intentName, prov)
 
 	call := intent.IntentCall{
 		Intent: intentName,

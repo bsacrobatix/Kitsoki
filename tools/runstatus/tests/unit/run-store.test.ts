@@ -557,6 +557,48 @@ describe("useRunStore — write-side actions", () => {
     ]);
   });
 
+  it("shows streamed routing on the user bubble before the turn result completes", async () => {
+    let resolveTurn!: (r: TurnResult) => void;
+    const src = writeSource() as DataSource & { turnStream: unknown };
+    (src as { turnStream: unknown }).turnStream = (
+      _sid: string,
+      _method: string,
+      _params: unknown,
+      onEvent: (ev: {
+        type: string;
+        turn?: number;
+        intent?: string;
+        routed_by?: string;
+        match_type?: string;
+        confidence?: number;
+      }) => void
+    ) => {
+      onEvent({
+        type: "routing",
+        turn: 4,
+        intent: "core.work",
+        routed_by: "fallback",
+        match_type: "free_text",
+      });
+      return new Promise<TurnResult>((resolve) => {
+        resolveTurn = resolve;
+      });
+    };
+
+    const store = useRunStore();
+    const turn = store.sendText(src, "sess-1", "do this ad hoc thing");
+
+    expect(store.chatEntries[0]!.routing).toEqual({
+      routedBy: "fallback",
+      matchType: "free_text",
+      confidence: undefined,
+      intent: "core.work",
+    });
+
+    resolveTurn(turnResult({ turn_number: 4, view: "Workbench ready" }));
+    await turn;
+  });
+
   it("merges consecutive deltas into one thinking item (chunks inline, thoughts as paragraphs)", async () => {
     let resolveTurn!: (r: TurnResult) => void;
     const src = writeSource() as DataSource & { turnStream: unknown };

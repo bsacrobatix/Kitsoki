@@ -76,6 +76,15 @@ type StreamEvent struct {
 	OutputTokens        int
 	CacheReadTokens     int
 	CacheCreationTokens int
+
+	// Routing provenance frames are emitted by the orchestrator as soon as a
+	// free-text turn resolves to a routing tier, before any downstream host or
+	// agent work completes. Type is "routing".
+	Turn       int64
+	Intent     string
+	RoutedBy   string
+	MatchType  string
+	Confidence float64
 }
 
 // StreamSink receives streamed events from agent calls. Implementations

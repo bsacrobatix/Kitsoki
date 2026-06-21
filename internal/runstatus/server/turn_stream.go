@@ -57,6 +57,13 @@ type turnStreamFrame struct {
 
 	// error
 	Message string `json:"message,omitempty"`
+
+	// routing
+	Turn       int64   `json:"turn,omitempty"`
+	Intent     string  `json:"intent,omitempty"`
+	RoutedBy   string  `json:"routed_by,omitempty"`
+	MatchType  string  `json:"match_type,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
 }
 
 func (s *Server) handleTurnStream(w http.ResponseWriter, r *http.Request) {
@@ -169,6 +176,17 @@ loop:
 				break loop
 			}
 			if ev.IsResult {
+				continue
+			}
+			if ev.Type == "routing" {
+				emit(turnStreamFrame{
+					Type:       "routing",
+					Turn:       ev.Turn,
+					Intent:     ev.Intent,
+					RoutedBy:   ev.RoutedBy,
+					MatchType:  ev.MatchType,
+					Confidence: ev.Confidence,
+				})
 				continue
 			}
 			if ev.Type == "assistant" {

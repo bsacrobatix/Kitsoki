@@ -48,7 +48,7 @@ export interface MetaStreamEvent {
 /** One SSE frame from /rpc/turn-stream. Same think/delta split as
  * MetaStreamEvent; the main chat treats both as feed material. */
 export interface TurnStreamEvent {
-  type: "think" | "delta" | "tool" | "done" | "error";
+  type: "think" | "delta" | "tool" | "routing" | "done" | "error";
   // think / delta
   text?: string;
   // tool
@@ -58,6 +58,12 @@ export interface TurnStreamEvent {
   result?: TurnResult;
   // error
   message?: string;
+  // routing
+  turn?: number;
+  intent?: string;
+  routed_by?: string;
+  match_type?: string;
+  confidence?: number;
 }
 import { JsonRpcClient } from "../transport/jsonrpc.js";
 import type { LastRpcError } from "../transport/jsonrpc.js";

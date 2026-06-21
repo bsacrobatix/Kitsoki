@@ -391,7 +391,8 @@ export const useRunStore = defineStore("run", () => {
     live: LiveSource,
     sessionId: string,
     method: "turn" | "submit",
-    params: { input?: string; intent?: string; slots?: Record<string, unknown> }
+    params: { input?: string; intent?: string; slots?: Record<string, unknown> },
+    onRouting?: (routing: RoutingInfo, turn?: number) => void
   ): Promise<{ result: TurnResult; streamedText: string; stream: StreamItem[] }> {
     pendingStream.value = [];
     try {
@@ -410,6 +411,16 @@ export const useRunStore = defineStore("run", () => {
           const next = pendingStream.value.slice();
           appendTool(next, ev.tool, ev.preview ?? "");
           pendingStream.value = next;
+        } else if (ev.type === "routing" && ev.routed_by) {
+          onRouting?.(
+            {
+              routedBy: ev.routed_by,
+              matchType: ev.match_type,
+              confidence: ev.confidence,
+              intent: ev.intent,
+            },
+            ev.turn
+          );
         }
       });
       // Capture the feed before the finally clears the ref (clearing
@@ -473,6 +484,9 @@ export const useRunStore = defineStore("run", () => {
     if ("turnStream" in source) {
       const out = await runTurnStream(source as LiveSource, sessionId, "turn", {
         input: text,
+      }, (routing, turn) => {
+        userEntry.routing = routing;
+        if (typeof turn === "number") userEntry.turn = turn;
       });
       result = out.result;
       capturedStream = out.streamedText;
