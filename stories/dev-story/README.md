@@ -169,6 +169,9 @@ dev rebinds to `host.local_files.ticket`. Same YAML, two providers.
 | Room | Status | Notes |
 |---|---|---|
 | `landing` | **root** | The **free-form workbench** — dev-story's root, replacing the former `main` catalog ([freeform-landing](#the-free-form-workbench-landing) below). A full-tool, Claude-Code-like agent (`landing_agent`) is the resting surface: the operator describes work in their own words (the `work` intent → on_enter `host.agent.task`), read-only by default and gated to a write-mode opt-in (`write_mode: read_only`). Carries `main`'s highest-value navigation forward as quick actions + intents. Declares the [agent off-ramp](../../docs/stories/state-machine.md#11-off-path-the-global-escape-hatch) (`agent_off_ramp.agent: agent_qa`) as its read-only Q&A floor. Every pipeline returns here (`go_main`/`go_back` self-loop). |
+| `applying` | — | The deterministic executor for an accepted ad-hoc [plan](#ad-hoc-structured-plan-proposeacceptrefineapplyverify): re-prompts the `landing_agent` with the **accepted plan as instruction** (`prompts/apply.md`) and binds a **distinct `apply_note`** (binding `landing_note` would let `once:` skip the dispatch), then emits `run_verify`. |
+| `verifying` | — | Runs the accepted plan's **verify gate** (`host.starlark.run` script and/or `gate_reviewer` agent), binds tri-state `verify_ok`, and routes on the post-bind verdict: PASS → `plan_done`, FAIL → `landing` (`last_error` = the gate's reason). Pinned `decider: llm` so the deterministic verdict auto-fires in STAGED mode. |
+| `plan_done` | — | The plan completion read-out (`captured++`); `go_main`/`go_back` return to the workbench. |
 | `ticket_search` | Wave 2 | iface.ticket.search; picks a ticket, then `drive` routes by `ticket_type` (bug → bf, feature → impl, epic → cyp). `pick_ticket` reads the type off the picked row; `go_bugfix` forces bf regardless of type. |
 | `workspace_manager` | Wave 2 | iface.workspace.list. Minimal Wave 2 shape. |
 | `inbox` | Wave 2 | Navigation surface; the runtime's inbox subsystem manages items. |
@@ -213,6 +216,20 @@ the router can't map to an action is answered in place by the read-only
 **agent off-ramp** (`agent_off_ramp.agent: agent_qa`) — the same floor `main`
 declared. The `world.captured` counter (rendered read-only here) is the
 progressive-determinism read-out, incremented by the mining apply path.
+
+#### Ad-hoc structured plan (propose→accept/refine→apply→verify)
+
+When the request is concrete, actionable work, the `landing_agent` proposes a
+**validated, executable `plan`** (one goal, one run-then-verify step, a Starlark
+verify gate) in its close-out note instead of prose. The workbench renders a
+reviewable **plan card**; the operator **Accepts** it (or types an adjustment to
+**refine** it — the `work` sink re-dispatches the planner with the prior plan as
+context), `apply` runs the step under the write-mode grant, then the verify gate
+proves it landed and routes on a **real pass/fail verdict**. The full narrative —
+the rooms (`applying` / `verifying` / `plan_done`), the plan schema (a strict
+subset of cherny-loop's `gate_plan`), the Starlark read-only inspection
+capability, and the no-LLM flow fixtures — is
+[docs/stories/ad-hoc-plan.md](../../docs/stories/ad-hoc-plan.md).
 
 ### Ideas reviewer (`ideas`)
 
@@ -266,8 +283,14 @@ floor), `go_inbox`, `go_agent`, `go_ticket_search`,
 | `bugfix_to_pr.yaml` | The full closed-loop walk: landing → bf.idle → walk every bf room to @exit:done → handoff into pr → walk pr to @exit:merged → land back in `landing` with status="merged" and last_pr_url populated. |
 | `design_to_implementation.yaml` | The publish → implement bridge: design_done → `go_implementation` → impl.idle (on_enter self-provisions the worktree — the fixture seeds NO workspace) → walk the impl pipeline to @exit:done → `landing` with status="merged". |
 | `prd_to_design.yaml` | The PRD → Design walk: landing → `go_prd` → walk the imported prd pipeline to @exit:done → land in `prd_published` (prd__prd_file lifted) → `continue` → the `design` intake, seeded with a pointer to the published PRD. |
+| `plan_propose_render.yaml` | A stubbed planner returns a note *with* a plan → the [ad-hoc plan](#ad-hoc-structured-plan-proposeacceptrefineapplyverify) card + Accept & apply quick action render; `look` re-renders without re-dispatching. |
+| `plan_refine.yaml` | A free-text adjustment re-uses the `work` sink: the prior plan is preserved into `landing_plan_prior` (fed into the re-dispatched prompt) and a revised plan binds — asserts the *dispatched prompt* carries the prior plan. |
+| `plan_apply_verify_green.yaml` | accept → apply → the **real** verify script runs against an inspect cassette (3 ≥ 3) → `{ok:true}` → `plan_done`, `captured++`. Exercises `ctx.probe` on the happy path. |
+| `plan_apply_verify_red.yaml` | Same path, cassette yields 1 (< 3) → real `{ok:false}` → back to `landing`, `last_error` = the script's reason, `captured` unchanged, plan kept for refine. The don't-false-pass case. |
+| `plan_mutation_gate.yaml` | Mutation test: breaking the `verify_ok: ok` bind in `verifying.yaml` makes it fail — proves the verify gate is load-bearing, not decorative. |
+| `plan_apply_staged_livepath.yaml` | The live-shape regression: STAGED mode + a repo-relative `verify.script`. Fails if `decider: llm` is removed from `verifying` (emit chain stalls) or the raw-path fallback is reverted (script read misses). |
 
-These are a sample; the full suite (33 / 33) passes under `kitsoki test flows stories/dev-story/app.yaml`.
+These are a sample; the full suite (45 / 45) passes under `kitsoki test flows stories/dev-story/app.yaml`.
 
 ## Manual TUI walkthrough
 

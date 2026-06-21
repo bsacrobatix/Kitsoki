@@ -113,7 +113,8 @@ named outputs into world. This is the escape hatch for glue that is too fiddly
 for the expr-lang `with:`/guard vocabulary (shaping a payload, deriving several
 fields, calling a plain HTTP API) but too small to justify a bespoke Go
 handler. Unlike `host.run` it is sandboxed, introspectable, and replayable: no
-filesystem, no environment, no subprocess, no clock, no randomness — so a
+environment, no clock, no randomness — and only a narrow read-only filesystem +
+allow-listed-probe surface (`ctx.fs` / `ctx.probe`, below), never a shell — so a
 recorded run replays byte-for-byte.
 
 The authoritative source is `internal/host/starlark/` (the sandbox) and
@@ -169,17 +170,21 @@ domain error (see below).
 
 ### The `ctx` surface (deliberately narrow)
 
-`main` takes one argument, `ctx`, a struct with **exactly three** attributes and
+`main` takes one argument, `ctx`, a struct with **exactly five** attributes and
 nothing else. The narrowness *is* the sandbox: any unknown attribute (e.g.
-`ctx.fs`, `ctx.env`) fails at eval with a clear Starlark "has no `.X` field"
-traceback, surfaced as a domain error. There is no static AST analyzer — the
-fixed `ctx` is the enforcement.
+`ctx.env`) fails at eval with a clear Starlark "has no `.X` field" traceback,
+surfaced as a domain error. There is no static AST analyzer — the fixed `ctx` is
+the enforcement.
 
 ```
 ctx.inputs["name"]                          # dict of the resolved, type-checked inputs
 ctx.world.get("key")                        # read-only world snapshot; None when absent
 ctx.http.get(url, headers={})               # -> response
 ctx.http.post(url, body=..., headers={})    # -> response
+ctx.fs.read(path)                           # -> string (repo-relative, read-only, 1 MiB cap)
+ctx.fs.exists(path)                         # -> bool
+ctx.fs.glob(pattern)                        # -> [path] (sorted, repo-relative)
+ctx.probe(name, args=[])                    # -> {exit: int, out: string} (allow-listed only)
 ```
 
 - `ctx.inputs` is a **dict**, accessed by key (not attribute).
@@ -195,6 +200,45 @@ ctx.http.post(url, body=..., headers={})    # -> response
   (string method) and `.json()` (parses the body to a Starlark value; a parse
   error is a Starlark error). A response is truthy iff its status is in
   `200..299`. A non-2xx status is **not** an error — branch on it in-script.
+
+#### Read-only inspection: `ctx.fs` and `ctx.probe`
+
+`ctx.fs` and `ctx.probe` are the **read-only filesystem + allow-listed-process
+boundary** — the sibling of `ctx.http` for the working tree and a few curated
+probes. They exist so a verify gate can assert against reality ("does this file
+exist", "does `gh issue list` show ≥ N issues") while keeping the determinism +
+record/replay contract intact. `ctx.env` is still absent — there is deliberately
+no environment surface.
+
+- `ctx.fs.read/exists/glob` are **read-only and repo-scoped**: every path is
+  resolved against the run's working directory, cleaned, and rejected if it
+  escapes via `..` or an absolute prefix. There is no write/delete — mutation
+  stays with a write-mode-gated agent step, never the gate. A read is capped at
+  1 MiB.
+- `ctx.probe(name, args=[])` is an **allow-list, not a shell.** `name` must be on
+  a fixed global vocabulary of read-only probes; each maps to a static argv
+  template exec'd directly (no shell, no word-splitting), with `args` substituted
+  positionally. The current allow-list: `gh.issue.list`, `git.status`,
+  `git.ls_files` (see `probeAllowList` in `internal/host/starlark/inspect.go`). A
+  non-zero exit is **not** an error — it is returned in the result's `exit` so a
+  script can branch on a clean failure, exactly like a non-2xx HTTP status; an
+  unknown name is an error.
+
+Both funnel through one `Inspector` interface (`internal/host/starlark/inspect.go`)
+— the inspection-side analogue of `HTTPClient`. It is injected via
+`WithInspector`/`InspectorFromContext` (mirroring `WithHTTP`); the default is a
+**deny-all** inspector so a script that touches the disk without an injected
+inspector fails loud. In production the adapter installs a working-dir-rooted
+inspector; a flow fixture injects a **`ReplayInspector`** backed by an inspect
+cassette, so the *real* script runs with its fs/probe served from disk — no real
+process, fully deterministic, no LLM and no cost. Each call records a body-free
+`{op, target, status}` summary for the trace (full payloads stay in cassettes),
+exactly as HTTP exchanges do.
+
+The worked example is the dev-story ad-hoc plan's verify gate
+([`stories/dev-story/verify/issues_migrated.star`](../../stories/dev-story/verify/issues_migrated.star));
+see [docs/stories/ad-hoc-plan.md](../stories/ad-hoc-plan.md) for the full
+propose → accept → apply → verify story it sits behind.
 
 Predeclared stdlib: `json` and `math` **only** (no `time`, no `random`).
 `FileOptions` are strict defaults (no `set` builtin, no global reassignment, no
@@ -216,8 +260,9 @@ with.inputs ─▶ validate inputs against sidecar (types, required)
                  │  bad shape ─▶ DomainError ─▶ Result.Error ─▶ on_error:
                  ▼
             sandboxed eval: main(ctx)
-                 │   ctx = { inputs, world(read-only), http }
-                 │   ctx.http.* ─▶ HTTPClient (recording in prod / replay in tests)
+                 │   ctx = { inputs, world(read-only), http, fs, probe }
+                 │   ctx.http.*       ─▶ HTTPClient (recording in prod / replay in tests)
+                 │   ctx.fs/ctx.probe ─▶ Inspector  (rooted+allow-listed / replay in tests)
                  ▼
             validate returned dict against sidecar outputs (declared + types)
                  │  bad shape ─▶ DomainError ─▶ Result.Error ─▶ on_error:
