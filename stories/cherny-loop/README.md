@@ -88,12 +88,18 @@ the run trail that makes a loop auditable and resumable.
 ## Tests
 
 Deterministic, no-LLM flow fixtures under `flows/` cover: achieved (script +
-agent gates), iteration-budget exhaustion, cost-budget exhaustion, the
-feedback-into-next-iteration edge, and a full multi-iteration run to the ceiling.
+agent gates), baseline-green blocking, iteration-budget exhaustion, cost-budget
+exhaustion, the feedback-into-next-iteration edge, maker-error recovery, and a
+full multi-iteration run to the ceiling. The fixtures assert host-call contracts
+with `expect_host_calls` / `expect_no_host_calls`, so they prove both the final
+state and the side effects that got there.
 
 ```
 kitsoki test flows stories/cherny-loop/app.yaml
 ```
+
+The general story QA runbook uses this story as its worked example:
+[`docs/stories/story-qa.md`](../../docs/stories/story-qa.md).
 
 ## Implementation note (engine discipline)
 

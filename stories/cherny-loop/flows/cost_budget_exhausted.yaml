@@ -30,5 +30,19 @@ turns:
     expect_world:
       terminal_reason: "cost_budget"
       iteration:       1
+    expect_host_calls:
+      - handler: host.run
+        args: { call: gate-0 }
+        times: 1
+      - handler: host.agent.task
+        args: { call: maker-1 }
+        times: 1
+      - handler: host.artifacts_dir
+        args: { thread: iteration-1 }
+        times: 1
+      - handler: host.run
+        args: { call: gate-1 }
+        times: 1
 
 expect_terminal: true
+expect_no_errors: true

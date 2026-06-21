@@ -26,6 +26,9 @@ way, see [`../architecture/concept.md`](../architecture/concept.md).)
 - **[`authoring.md`](authoring.md)** — the how-to: a minimal `app.yaml`,
   the authoring loop, common patterns and mistakes, synonyms, host
   calls, and scaling a story up.
+- **[`story-qa.md`](story-qa.md)** — the story QA runbook: deterministic
+  flows, graph/render review, host-call contracts, failure-path coverage,
+  and the `stories/cherny-loop` worked case study.
 - **[`imports.md`](imports.md)** — composing apps across files and
   repos via the `imports:` block; aliased namespaces, world
   projection, host rebinding, exits, and the `/warp` operator smoke

@@ -24,5 +24,13 @@ turns:
     expect_world:
       terminal_reason: "iteration_budget"
       iteration:       3
+    expect_host_calls:
+      - handler: host.run
+        times: 4
+      - handler: host.agent.task
+        times: 3
+      - handler: host.artifacts_dir
+        times: 3
 
 expect_terminal: true
+expect_no_errors: true

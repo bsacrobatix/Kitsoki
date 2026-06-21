@@ -34,5 +34,28 @@ turns:
       iteration:         2
       maker_summary:     "Refill tokens by elapsed×rate"
       last_gate_failure: "FAIL: TestAllow_Refill — 0 tokens refilled"
+    expect_host_calls:
+      - handler: host.run
+        args: { call: gate-0 }
+        times: 1
+      - handler: host.agent.task
+        args: { call: maker-1 }
+        times: 1
+      - handler: host.artifacts_dir
+        args: { thread: iteration-1 }
+        times: 1
+      - handler: host.run
+        args: { call: gate-1 }
+        times: 1
+      - handler: host.agent.task
+        args: { call: maker-2 }
+        times: 1
+      - handler: host.artifacts_dir
+        args: { thread: iteration-2 }
+        times: 1
+      - handler: host.run
+        args: { call: gate-2 }
+        times: 1
 
 expect_terminal: true
+expect_no_errors: true
