@@ -293,6 +293,14 @@ watch(
   /* Let the agent card grow to hold the 80-col view. */
   width: 100%;
   box-sizing: border-box;
+  /*
+     A single long agent reply must not consume the whole VS Code webview. Cap
+     the finished bubble against the viewport and let the bubble itself scroll;
+     the transcript viewport still owns normal conversation scrolling.
+   */
+  max-height: clamp(220px, calc(100dvh - 180px), 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .chat-bubble--user {
