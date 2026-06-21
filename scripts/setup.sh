@@ -237,16 +237,25 @@ install_agents() {
 # .git/hooks is shared with linked worktrees, so installing here covers them all.
 # Idempotent: refreshes our own symlinks, never clobbers a real hook a human placed.
 install_git_hooks() {
-	local root src dst common
+	local root src dst common primary
 	root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-	src="$root/scripts/git-hooks"
-	[ -d "$src" ] || { warn "no scripts/git-hooks dir; skipping git hook links"; return; }
 	# Resolve the common git dir so this works whether setup runs from the primary
 	# checkout or a linked worktree.
 	common="$(git -C "$root" rev-parse --git-common-dir 2>/dev/null || true)"
 	[ -n "$common" ] || { warn "not a git repo; skipping git hook links"; return; }
 	case "$common" in /*) ;; *) common="$root/$common" ;; esac
+	common="$(cd "$common" && pwd)"
 	dst="$common/hooks"
+	# Point the symlinks at the PRIMARY checkout's hook scripts, never the (possibly
+	# ephemeral) worktree that setup happens to run from. The common git-dir is
+	# <primary>/.git, so its parent is the primary checkout root. A linked worktree
+	# under .worktrees/ can be deleted later; if a hook symlink pointed into one it
+	# would silently dangle and disarm the reference-transaction guard — which is
+	# exactly how the primary checkout drifted off main once. The primary checkout
+	# is stable, so anchor there.
+	primary="$(cd "$(dirname "$common")" && pwd)"
+	src="$primary/scripts/git-hooks"
+	[ -d "$src" ] || { warn "no scripts/git-hooks dir at $src; skipping git hook links"; return; }
 	mkdir -p "$dst"
 	local n=0 name link rel
 	for hook in "$src"/*; do
