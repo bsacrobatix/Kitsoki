@@ -169,7 +169,10 @@ function errMsg(e: unknown): string {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 0.5rem;
+  /* No gutter: the timeline sits flush in the VS Code panel. A padding ring here
+     plus the timeline's own border read as a second frame duplicating the native
+     panel chrome. */
+  padding: 0;
 }
 .surface__body :deep(.trace-timeline) {
   flex: 1;

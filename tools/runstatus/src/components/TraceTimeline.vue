@@ -1257,10 +1257,15 @@ watch(
   color: var(--k-fg-accent, #7dd3fc);
   font-size: 0.6rem;
 }
-/* In compact mode the (collapsible) filter bar floats over the rows so toggling it
-   never reflows / shrinks the timeline body. */
+/* In compact mode (the docked VS Code surface) the timeline IS the panel: drop
+   the bordered, rounded box so it sits flush against the native VS Code panel
+   chrome instead of drawing a second, redundant frame inside it. (The surrounding
+   gutter is removed in TraceSurface.) The browser's full layout keeps the framed
+   card via the base .trace-timeline rule. */
 .trace-timeline--compact {
   position: relative;
+  border: none;
+  border-radius: 0;
 }
 .trace-timeline--compact .trace-timeline__filters {
   position: absolute;
