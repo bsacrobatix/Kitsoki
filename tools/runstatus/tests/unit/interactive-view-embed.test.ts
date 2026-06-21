@@ -41,6 +41,12 @@ const dataSource = {
 
 vi.mock("../../src/data/source.js", () => ({ createDataSource: () => dataSource }));
 
+vi.mock("vue-router", () => ({
+  useRoute: () => ({ path: "/s/s1/chat", query: {}, params: { sessionId: "s1" } }),
+  useRouter: () => ({ replace: vi.fn() }),
+  RouterLink: { props: ["to"], template: '<a :href="to"><slot /></a>' },
+}));
+
 import InteractiveView from "../../src/views/InteractiveView.vue";
 import { setEmbeddedOverride } from "../../src/lib/embed.js";
 
@@ -53,6 +59,14 @@ const mountOpts = {
       TraceTimeline: true,
       ChatTranscript: true,
       InputBar: true,
+      StoryFreshness: {
+        template: '<div data-testid="story-freshness-widget"></div>',
+      },
+      MetaButton: {
+        props: ["placement"],
+        template:
+          '<div data-testid="meta-launcher" :data-placement="placement || \'floating\'"></div>',
+      },
     },
   },
 };
@@ -77,6 +91,19 @@ describe("InteractiveView — embed (VS Code) layout", () => {
     expect(wrapper.find('[data-testid="hint-graph"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="trace-timeline"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="trace-diagram"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="meta-launcher"]').attributes("data-placement")).toBe("topbar");
+
+    wrapper.unmount();
+  });
+
+  it("keeps the normal web chat topbar free of the embedded Meta launcher", async () => {
+    setEmbeddedOverride(false);
+    const wrapper = mount(InteractiveView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="meta-launcher"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="trace-timeline"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="trace-diagram"]').exists()).toBe(true);
 
     wrapper.unmount();
   });

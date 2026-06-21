@@ -72,6 +72,7 @@
           data-testid="story-freshness-widget"
         />
         <router-link :to="`/s/${sessionId}`" class="iv__observe-link" data-testid="observe-link">Observe ↗</router-link>
+        <MetaButton v-if="embed" placement="topbar" />
       </header>
 
       <!-- Reload warning: shown when the current state was removed by the edit. -->
@@ -184,6 +185,7 @@ import InputBar from "../components/InputBar.vue";
 import StateDiagram from "../components/StateDiagram.vue";
 import TraceTimeline from "../components/TraceTimeline.vue";
 import StoryFreshness from "../components/StoryFreshness.vue";
+import MetaButton from "../components/meta/MetaButton.vue";
 import ProposalsBadge from "../components/ProposalsBadge.vue";
 import { useProposalsStore } from "../stores/proposals.js";
 import type { Proposal } from "../stores/proposals.js";

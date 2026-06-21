@@ -11,12 +11,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
 import MetaButton from "../../src/components/meta/MetaButton.vue";
+import { setEmbeddedOverride } from "../../src/lib/embed.js";
 import { useBugReportStore } from "../../src/stores/bugReport.js";
 
 // MetaButton uses useRoute(); provide a minimal stub so mounting works without
 // a real router.
 vi.mock("vue-router", () => ({
   useRoute: () => ({ params: { sessionId: "pub-1" } }),
+}));
+
+vi.mock("../../src/data/live-source.js", () => ({
+  LiveSource: vi.fn().mockImplementation(() => ({
+    metaModes: vi.fn().mockResolvedValue([]),
+  })),
 }));
 
 function open(wrapper: ReturnType<typeof mount>) {
@@ -30,6 +37,7 @@ describe("MetaButton — Report bug", () => {
   });
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).__KITSOKI_SNAPSHOT__;
+    setEmbeddedOverride(null);
   });
 
   it("clicking Report bug kicks off capture (trigger) and shows the capturing toast", async () => {
@@ -92,5 +100,27 @@ describe("MetaButton — Report bug", () => {
     const wrapper = mount(MetaButton);
     expect(wrapper.find('[data-testid="meta-launcher"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="meta-report-bug"]').exists()).toBe(false);
+  });
+
+  it("keeps the normal web launcher floating", () => {
+    setEmbeddedOverride(false);
+    const wrapper = mount(MetaButton);
+    const launcher = wrapper.get('[data-testid="meta-launcher"]');
+    expect(launcher.attributes("data-placement")).toBe("floating");
+    expect(launcher.classes()).toContain("meta-launcher--floating");
+  });
+
+  it("suppresses the global floating launcher inside the VS Code embed", () => {
+    setEmbeddedOverride(true);
+    const wrapper = mount(MetaButton);
+    expect(wrapper.find('[data-testid="meta-launcher"]').exists()).toBe(false);
+  });
+
+  it("allows the VS Code embed to render the topbar launcher variant", () => {
+    setEmbeddedOverride(true);
+    const wrapper = mount(MetaButton, { props: { placement: "topbar" } });
+    const launcher = wrapper.get('[data-testid="meta-launcher"]');
+    expect(launcher.attributes("data-placement")).toBe("topbar");
+    expect(launcher.classes()).toContain("meta-launcher--topbar");
   });
 });

@@ -1,7 +1,13 @@
 <template>
   <!-- Global meta-mode launcher: a fixed button + a dropdown of modes. Hidden
        in snapshot/artifact mode (no live engine to chat with). -->
-  <div v-if="!isSnapshot" class="meta-launcher" data-testid="meta-launcher">
+  <div
+    v-if="visible"
+    class="meta-launcher"
+    :class="`meta-launcher--${placement}`"
+    :data-placement="placement"
+    data-testid="meta-launcher"
+  >
     <button
       class="meta-launcher__btn"
       data-testid="meta-button"
@@ -123,8 +129,18 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { LiveSource } from "../../data/live-source.js";
+import { isEmbedded } from "../../lib/embed.js";
 import { useMetaStore } from "../../stores/meta.js";
 import { useBugReportStore } from "../../stores/bugReport.js";
+
+const props = withDefaults(
+  defineProps<{
+    placement?: "floating" | "topbar";
+  }>(),
+  {
+    placement: "floating",
+  }
+);
 
 // The three modes the web surface exposes. Availability is decided by the
 // server's advertised mode set for the current scope (story.* need a running
@@ -161,6 +177,14 @@ const bugReport = useBugReportStore();
 const source = new LiveSource("/");
 
 const dropdownOpen = ref(false);
+const placement = computed(() => props.placement);
+const visible = computed(() => {
+  if (isSnapshot) return false;
+  // The global launcher remains a bottom-right affordance in the normal web UI.
+  // VS Code chat embeds render their own topbar launcher, so suppress only the
+  // app-level floating instance there.
+  return props.placement === "topbar" || !isEmbedded();
+});
 
 const sessionId = computed(() => {
   const p = route.params.sessionId;
@@ -250,13 +274,17 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 
 <style scoped>
 .meta-launcher {
+  position: relative;
+  z-index: 900;
+}
+
+.meta-launcher--floating {
   /* Bottom-right floating launcher. Deliberately NOT top-right: the session
      views put their Observe/Drive/Reload controls top-right, and a fixed
      element there would intercept clicks on them. */
   position: fixed;
   bottom: 1rem;
   right: 1rem;
-  z-index: 900;
 }
 
 .meta-launcher__btn {
@@ -276,6 +304,28 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 }
 .meta-launcher__btn:hover {
   background: var(--k-button-hover-bg, #2563eb);
+}
+
+.meta-launcher--topbar {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.meta-launcher--topbar .meta-launcher__btn {
+  height: 1.7rem;
+  border-radius: 4px;
+  padding: 0 0.55rem;
+  background: var(--k-bg-input, #1e293b);
+  border-color: var(--k-border-subtle, #334155);
+  color: var(--k-fg, #e2e8f0);
+  box-shadow: none;
+  font-size: 0.75rem;
+}
+
+.meta-launcher--topbar .meta-launcher__btn:hover {
+  background: var(--k-bg-hover, #273449);
+  border-color: var(--k-border-focus, #3b82f6);
 }
 .meta-launcher__spark {
   font-size: 0.7rem;
@@ -338,6 +388,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   overflow: hidden;
 }
 
+.meta-launcher--topbar .meta-launcher__menu {
+  top: 100%;
+  bottom: auto;
+  margin-top: 0.35rem;
+  margin-bottom: 0;
+}
+
 .meta-launcher__item {
   display: flex;
   flex-direction: column;
@@ -395,6 +452,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   font-size: 0.72rem;
   color: var(--k-fg, #e2e8f0);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.meta-launcher--topbar .meta-launcher__toast {
+  top: 100%;
+  bottom: auto;
+  margin-top: 0.35rem;
+  margin-bottom: 0;
 }
 .meta-launcher__toast-link {
   background: none;
