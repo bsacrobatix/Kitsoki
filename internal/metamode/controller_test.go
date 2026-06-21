@@ -495,6 +495,81 @@ func TestController_Send_ToolAllowlistPassed(t *testing.T) {
 	}
 }
 
+// studioArgs digs the studio server's args out of a captured MCPServers map,
+// or nil if no studio server was attached.
+func studioArgs(servers map[string]any) []any {
+	entry, ok := servers[studioMCPName].(map[string]any)
+	if !ok {
+		return nil
+	}
+	args, _ := entry["args"].([]any)
+	return args
+}
+
+func argsContain(args []any, want string) bool {
+	for _, a := range args {
+		if s, ok := a.(string); ok && s == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestController_Send_AttachesStudioMCP(t *testing.T) {
+	appFile := filepath.Join(t.TempDir(), "app.yaml")
+
+	t.Run("edit mode is read-write", func(t *testing.T) {
+		c, _, agent := newTestController(t)
+		c.AppDef.MetaModes["story"].Tools = nil // edit-capable
+
+		s, err := c.Enter(context.Background(), makeSnapshot("main"), "story")
+		if err != nil {
+			t.Fatalf("Enter: %v", err)
+		}
+		if _, err := c.Send(context.Background(), s, "x", TurnContext{AppFile: appFile}); err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+		args := studioArgs(agent.gotInput.MCPServers)
+		if args == nil {
+			t.Fatal("no studio MCP server attached for edit mode")
+		}
+		if argsContain(args, "--read-only") {
+			t.Errorf("edit mode must not pass --read-only; args = %v", args)
+		}
+	})
+
+	t.Run("ask mode is read-only", func(t *testing.T) {
+		c, _, agent := newTestController(t)
+		c.AppDef.MetaModes["story"].Tools = []string{"Read", "Glob", "Grep"}
+
+		s, err := c.Enter(context.Background(), makeSnapshot("main"), "story")
+		if err != nil {
+			t.Fatalf("Enter: %v", err)
+		}
+		if _, err := c.Send(context.Background(), s, "x", TurnContext{AppFile: appFile}); err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+		args := studioArgs(agent.gotInput.MCPServers)
+		if args == nil {
+			t.Fatal("no studio MCP server attached for ask mode")
+		}
+		if !argsContain(args, "--read-only") {
+			t.Errorf("ask mode must pass --read-only; args = %v", args)
+		}
+	})
+
+	t.Run("no app file → no studio MCP", func(t *testing.T) {
+		c, _, agent := newTestController(t)
+		s, _ := c.Enter(context.Background(), makeSnapshot("main"), "story")
+		if _, err := c.Send(context.Background(), s, "x", TurnContext{}); err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+		if agent.gotInput.MCPServers != nil {
+			t.Errorf("MCPServers should be nil with no AppFile; got %v", agent.gotInput.MCPServers)
+		}
+	})
+}
+
 func TestController_Send_AgentError(t *testing.T) {
 	c, _, agent := newTestController(t)
 	agent.err = errors.New("boom")

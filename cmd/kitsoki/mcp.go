@@ -33,6 +33,7 @@ func mcpCmd() *cobra.Command {
 		dbPath      string
 		harnessType string
 		workspace   string
+		readOnly    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "mcp",
@@ -85,7 +86,11 @@ docs land):
 				}
 			}
 
-			srv := studio.NewServer(sess)
+			var srvOpts []studio.ServerOption
+			if readOnly {
+				srvOpts = append(srvOpts, studio.ReadOnly())
+			}
+			srv := studio.NewServer(sess, srvOpts...)
 
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 			defer cancel()
@@ -103,6 +108,8 @@ docs land):
 		"default harness for driving sessions: replay|live (default replay → no LLM; per-session override on session.new)")
 	cmd.Flags().StringVar(&workspace, "workspace", "",
 		"optional initial authoring workspace (a story dir or app.yaml) bound as the workspace handle on boot")
+	cmd.Flags().BoolVar(&readOnly, "read-only", false,
+		"omit the story-mutating tool (story.write); read + replay-driving tools stay available (the meta-mode Q&A surface)")
 	return cmd
 }
 

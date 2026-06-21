@@ -105,6 +105,12 @@ type AskInput struct {
 	// ToolAllowlist is the agent's declared tool surface. Forwarded as
 	// a visible hint; the handler does not gate by tool name today.
 	ToolAllowlist []string
+	// MCPServers is the mcp_servers map handed to the agent's claude
+	// subprocess (materialised into a --mcp-config file by the handler).
+	// The controller populates it with the studio server scoped to the
+	// story tree so the agent can validate / test / drive the story. Nil
+	// for the no-LLM stub path (which ignores it).
+	MCPServers map[string]any
 	// Cwd is the working directory the claude subprocess runs in, so
 	// its Read/Write/Edit tools land in the right story tree. Empty
 	// means the handler's own resolution rules apply.
@@ -563,6 +569,21 @@ func (c *Controller) sendLocked(ctx context.Context, s *Session, userText string
 		ToolAllowlist:   normaliseToolNames(s.Mode.Tools),
 		Cwd:             resolveCwd(s.Mode, s.Agent, turn.AppFile),
 		ClaudeSessionID: s.Chat.ClaudeSessionID(),
+	}
+
+	// Attach the studio MCP server scoped to the story tree so the agent can
+	// validate / test / drive the story it's reasoning about. Read-only modes
+	// (story.ask → {Read,Glob,Grep}) get a server without story.write so the
+	// Q&A surface cannot edit the story. Built unconditionally — the no-LLM
+	// stub AgentCaller ignores MCPServers, so flows/cassettes are unaffected;
+	// only the real claude adapter spawns it. A binary-resolution failure is
+	// non-fatal: the agent degrades to its plain Read/Edit toolset.
+	if turn.AppFile != "" {
+		if servers, err := studioMCPServers(filepath.Dir(turn.AppFile), !editCapable(in.ToolAllowlist)); err != nil {
+			slog.WarnContext(ctx, "metamode.studio_mcp.skip", "chat_id", chatID, "err", err.Error())
+		} else {
+			in.MCPServers = servers
+		}
 	}
 
 	// Snapshot the story directory tree before the LLM call so we can

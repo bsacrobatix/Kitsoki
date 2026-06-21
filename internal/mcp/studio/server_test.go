@@ -112,6 +112,27 @@ func TestStudioToolsListed(t *testing.T) {
 	}
 	assert.True(t, names["studio.ping"], "studio.ping registered (dotted name accepted)")
 	assert.True(t, names["studio.handles"], "studio.handles registered (dotted name accepted)")
+	assert.True(t, names["story.write"], "story.write registered on a read-write server")
+}
+
+// TestReadOnlyOmitsStoryWrite confirms a server built with ReadOnly() drops
+// story.write (the only story-tree mutation) while keeping the read tools and
+// the replay-driving tools — the meta-mode Q&A surface.
+func TestReadOnlyOmitsStoryWrite(t *testing.T) {
+	ctx := context.Background()
+	srv := studio.NewServer(studio.NewStudioSession(stubBuilder()), studio.ReadOnly())
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := cs.ListTools(ctx, &mcpsdk.ListToolsParams{})
+	require.NoError(t, err)
+	names := map[string]bool{}
+	for _, tool := range res.Tools {
+		names[tool.Name] = true
+	}
+	assert.False(t, names["story.write"], "story.write must be omitted in read-only mode")
+	assert.True(t, names["story.read"], "story.read stays available in read-only mode")
+	assert.True(t, names["story.validate"], "story.validate stays available in read-only mode")
+	assert.True(t, names["session.drive"], "replay session driving stays available in read-only mode")
 }
 
 // ─── 2.2 handle lifecycle ────────────────────────────────────────────────────

@@ -88,9 +88,32 @@ A few habits that keep the conversation tight:
   than incrementally across turns.
 - If the user's intent is ambiguous, ask before editing. Once you
   edit, the change is live.
-- You do not run tests, you do not run scripts, you do not make
-  network calls. You read the tree, you edit YAML / prompts / inline
-  text. The engine and the user do everything else.
+
+# Validating with the studio tools
+
+You have the kitsoki **studio MCP** attached, scoped to this story.
+Prefer it over guessing — these tools are deterministic and free
+(no LLM):
+
+- `mcp__kitsoki__story.validate` — load + validate the story; returns
+  the exact `{file, line, column, message}` invariant errors `kitsoki
+  run` enforces. **Run this after any edit** that touches YAML so you
+  catch a broken transition / missing world var / dangling host
+  before telling the user you're done.
+- `mcp__kitsoki__story.test` — run the story's `flows/*.yaml`
+  deterministic fixtures (replay/cassette, no LLM). Run it when your
+  change could affect behaviour a flow asserts.
+- `mcp__kitsoki__story.graph` — inspect the room graph / a room's
+  detail / its agent contracts (the same computation behind the web
+  editor). Use it to confirm a transition target resolves.
+- `mcp__kitsoki__session.*` + `render.*` — drive a replay session and
+  see what a room renders, when you want to confirm an edit produces
+  the view you intended.
+
+Editing remains your job via Read / Edit / Write (or
+`mcp__kitsoki__story.write`, which writes + re-validates in one
+round-trip). Don't make network calls. Validate before you declare a
+change done.
 
 # Picking the right file
 

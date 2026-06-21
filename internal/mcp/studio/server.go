@@ -56,14 +56,31 @@ type Server struct {
 	// by cmd/kitsoki). Nil → render.web degrades to text (no browser host). A
 	// test injects a stub that returns a synthetic PNG with no Chromium.
 	webShot WebShotFunc
+	// readOnly drops the only story-tree mutation tool (story.write) from the
+	// registry. The read tools (story.read/validate/graph/test), the session
+	// driving tools (session.*, replay-default → no LLM, no story-file
+	// mutation), and the render tools stay available. Used by the meta-mode
+	// Q&A surface (`/meta story ask`), which must not edit the story.
+	readOnly bool
 }
+
+// ServerOption configures a studio Server at construction.
+type ServerOption func(*Server)
+
+// ReadOnly omits the story-mutating tool (story.write) from the registry. Read
+// tools and replay-default session driving stay available — read-only here means
+// "cannot edit the story tree", not "cannot run the story". See Server.readOnly.
+func ReadOnly() ServerOption { return func(s *Server) { s.readOnly = true } }
 
 // NewServer constructs a studio Server over the given StudioSession and registers
 // the studio.ping / studio.handles tools. Pass a session built with NewStudioSession
 // (or one seeded with an initial workspace). The server is ready to call Run or
-// Connect.
-func NewServer(sess *StudioSession) *Server {
+// Connect. Pass ReadOnly() to omit story.write (the Q&A surface).
+func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	srv := &Server{sess: sess}
+	for _, opt := range opts {
+		opt(srv)
+	}
 	srv.mcpSrv = mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    implementationName,
 		Version: Version,

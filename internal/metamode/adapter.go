@@ -243,6 +243,12 @@ func (a *agentAdapter) Ask(ctx context.Context, in AskInput) (AskOutput, error) 
 	if len(in.ToolAllowlist) > 0 {
 		args["__meta_tool_allowlist"] = append([]string(nil), in.ToolAllowlist...)
 	}
+	// Attach the studio MCP server(s) the controller scoped to the story
+	// tree. The handler materialises this into a --mcp-config file for the
+	// duration of the call. Empty/nil → no --mcp-config (the stub path).
+	if len(in.MCPServers) > 0 {
+		args["mcp_servers"] = in.MCPServers
+	}
 	// Thread the per-chat claude session id so turns share Claude-side
 	// memory. The handler mints one when this is empty (e.g. first turn
 	// of a fresh chat) and returns the resolved id in Data, which we

@@ -40,10 +40,14 @@ func (srv *Server) registerStoryTools() {
 		Description: "Read a workspace-scoped file (rooms/*.yaml, prompts, schemas, flows). {path} is relative to the bound workspace dir; absolute paths and `..` escapes outside the workspace are rejected.",
 	}, srv.handleStoryRead)
 
-	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
-		Name:        "story.write",
-		Description: "Write a workspace-scoped file then auto-validate the story. {path, content}; returns {written, validation} where validation is the same {ok, errors[]} as story.validate. Writes are confined to the workspace dir (path escape rejected).",
-	}, srv.handleStoryWrite)
+	// story.write is the only story-tree mutation; a read-only server (the Q&A
+	// surface) omits it so the agent physically cannot edit the story.
+	if !srv.readOnly {
+		mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+			Name:        "story.write",
+			Description: "Write a workspace-scoped file then auto-validate the story. {path, content}; returns {written, validation} where validation is the same {ok, errors[]} as story.validate. Writes are confined to the workspace dir (path escape rejected).",
+		}, srv.handleStoryWrite)
+	}
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "story.validate",
