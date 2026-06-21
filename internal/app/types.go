@@ -791,6 +791,13 @@ type State struct {
 	// Rejected at load time on terminal: true or mode: conversational states.
 	AgentOffRamp *OffRampDef `yaml:"agent_off_ramp,omitempty"`
 
+	// ContextualRouting opts this room into the contextual-routing final tier:
+	// a router that fires AFTER deterministic and LLM tiers miss, classifying
+	// free-text input into one of four classes (intent, help, room_request,
+	// meta_edit). Nil — the default — means the tier is inactive. See
+	// docs/proposals/contextual-room-routing.md.
+	ContextualRouting *ContextualRoutingConfig `yaml:"contextual_routing,omitempty"`
+
 	// IntentAliases records the bare → renamed mapping produced by the
 	// imports rewriter. When this state lives inside one or more import
 	// alias wrappers, every intent that the rewriter renamed (e.g.
@@ -1156,6 +1163,25 @@ type OffRampDef struct {
 // disabled case, so runtime callers normally just nil-check the pointer; this
 // accessor exists for the loader's own normalization pass and for tests.
 func (d *OffRampDef) Enabled() bool { return d != nil && d.enabled }
+
+// ContextualRoutingConfig opts a room into the contextual-routing final tier.
+// When Enabled is true, the orchestrator fires a contextual router on every
+// deterministic + embedding miss, classifying input into one of four route
+// classes (intent | help | room_request | meta_edit). Each non-empty lane
+// field names the backing surface for that class; the loader validates that
+// declared lanes have matching declared intents / agents. See
+// docs/proposals/contextual-room-routing.md.
+type ContextualRoutingConfig struct {
+	// Enabled turns on the contextual router for this room.
+	Enabled bool `yaml:"enabled,omitempty"`
+	// HelpChat names the help-chat agent surface for class=help (group-2 lane; stub in slice 1).
+	HelpChat string `yaml:"help_chat,omitempty"`
+	// RoomChat names the on-path intent for class=room_request routing.
+	// The named intent must have a reachable on: arc in this state.
+	RoomChat string `yaml:"room_chat,omitempty"`
+	// MetaChat names the meta-mode group.verb for class=meta_edit (group-2 lane; stub in slice 1).
+	MetaChat string `yaml:"meta_chat,omitempty"`
+}
 
 // UnmarshalYAML decodes the agent_off_ramp: field from one of two author
 // forms — the bare boolean scalar or the {agent, persona, banner} mapping —

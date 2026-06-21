@@ -1330,6 +1330,26 @@ func validateStates(
 			}
 		}
 
+		// Validate contextual_routing: when enabled, each declared lane must
+		// have a backing intent with a reachable on: arc (room_chat), or a
+		// declared name (help_chat, meta_chat — full cross-reference is group 2).
+		// Mirrors the default_intent cross-reference at loader.go:1300.
+		if cr := s.ContextualRouting; cr != nil && cr.Enabled {
+			if cr.RoomChat == "" && cr.HelpChat == "" && cr.MetaChat == "" {
+				addErr(fmt.Sprintf("state %q: contextual_routing.enabled requires at least one lane (room_chat, help_chat, or meta_chat)", statePath))
+			}
+			if cr.RoomChat != "" {
+				if _, hasArc := s.On[cr.RoomChat]; !hasArc {
+					addErr(fmt.Sprintf("state %q: contextual_routing.room_chat %q has no matching on: arc in this state", statePath, cr.RoomChat))
+				}
+				_, inScope := inScopeIntents[cr.RoomChat]
+				_, inGlobal := globalIntentDefs[cr.RoomChat]
+				if !inScope && !inGlobal {
+					addErr(fmt.Sprintf("state %q: contextual_routing.room_chat %q is not a declared intent", statePath, cr.RoomChat))
+				}
+			}
+		}
+
 		// Validate the typed view payload (Phase A of the view-elements
 		// proposal). Catches unknown element kinds, missing required
 		// element fields, and non-string kv values at load time so authors

@@ -32,4 +32,16 @@ const (
 	// in flight. Fields: state_path, tier (the in-flight tier
 	// name at cancel time). Chip resolves to `[✕ cancelled]`.
 	EvTurnCancelled = "turn.cancelled"
+
+	// EvTurnContextRouteDecided fires when the contextual router commits to
+	// a class+verdict after calling the host helper. Expected fields:
+	//
+	//   class       string  — one of intent|help|room_request|meta_edit
+	//   intent      string  — resolved intent name (class=intent only)
+	//   confidence  float64
+	//   reason      string
+	//
+	// This event is the replay anchor for 1.4: a recorded verdict + this
+	// event prove the turn was contextually routed without a live LLM.
+	EvTurnContextRouteDecided = "turn.context_route_decided"
 )

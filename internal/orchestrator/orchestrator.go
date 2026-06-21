@@ -1728,7 +1728,7 @@ func (o *Orchestrator) SubmitDirect(ctx context.Context, sid app.SessionID, inte
 // explain.
 type RouteProvenance struct {
 	// Source is the routing tier: "deterministic", "semantic",
-	// "turncache", "llm", etc. Empty means "not routed" (omit).
+	// "turncache", "llm", "context_route", etc. Empty means "not routed" (omit).
 	Source string
 	// MatchType is the tier-specific reason, e.g. "display" / "example"
 	// for the deterministic tier or "synonym:cancel" / "example:…" for
@@ -1736,6 +1736,11 @@ type RouteProvenance struct {
 	MatchType string
 	// Confidence is the routing confidence band (0 when not applicable).
 	Confidence float64
+	// ContextRouteClass carries the contextual-router class
+	// (intent|help|room_request|meta_edit) when the contextual tier resolved
+	// this turn. Stamped as "context_route_class" on TurnStarted so the trace
+	// records which class was decided for replay.
+	ContextRouteClass string
 }
 
 // stampOn writes the non-empty provenance fields onto a TurnStarted
@@ -1751,6 +1756,9 @@ func (p RouteProvenance) stampOn(payload map[string]any) {
 	}
 	if p.Confidence > 0 {
 		payload["confidence"] = p.Confidence
+	}
+	if p.ContextRouteClass != "" {
+		payload["context_route_class"] = p.ContextRouteClass
 	}
 }
 

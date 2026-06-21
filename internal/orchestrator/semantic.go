@@ -135,6 +135,119 @@ func (o *Orchestrator) routeViaLLM(ctx context.Context, sid app.SessionID, turn 
 	return host.RunRoutingLLM(llmCtx, input, string(state), allowed)
 }
 
+// routeViaContextualRouter fires when the active room has ContextualRouting.Enabled.
+// It dispatches host.RunContextRouteLLM through the configured agent plugin and
+// parses the resulting verdict:
+//   - class=intent: adapts to semroute.Verdict, calls SubmitDirectRouted, returns outcome.
+//   - class=help/room_request/meta_edit: slice-1 stub — emits decided trace event, no advance.
+//
+// Returns (outcome, true, nil) on a handled dispatch; (nil, false, nil) on a miss or
+// when contextual routing is not applicable to this room.
+func (o *Orchestrator) routeViaContextualRouter(
+	ctx context.Context,
+	sid app.SessionID,
+	turnNum app.TurnNumber,
+	tl *trace.TurnLogger,
+	state app.StatePath,
+	input string,
+	allowedNames []string,
+) (*TurnOutcome, bool, error) {
+	if o.agentRegistry == nil {
+		return nil, false, nil
+	}
+	stateDef := lookupStateByPath(o.def, state)
+	if stateDef == nil || stateDef.ContextualRouting == nil || !stateDef.ContextualRouting.Enabled {
+		return nil, false, nil
+	}
+
+	cr := stateDef.ContextualRouting
+	lanes := make(map[string]string, 3)
+	if cr.HelpChat != "" {
+		lanes["help_chat"] = cr.HelpChat
+	}
+	if cr.RoomChat != "" {
+		lanes["room_chat"] = cr.RoomChat
+	}
+	if cr.MetaChat != "" {
+		lanes["meta_chat"] = cr.MetaChat
+	}
+
+	crCtx := host.WithAgentRegistry(ctx, o.agentRegistry)
+	crCtx = host.WithAgentPluginName(crCtx, o.extractLLMAgent())
+	crCtx = host.WithAgentCallCtx(crCtx, host.AgentCallCtx{
+		SessionID: sid,
+		Turn:      turnNum,
+		StatePath: state,
+	})
+	crCtx = host.WithAgentUsageBox(crCtx)
+
+	raw, ok, err := host.RunContextRouteLLM(crCtx, input, string(state), allowedNames, lanes)
+	if err != nil {
+		tl.Debug(ctx, trace.EvTurnContextRouteDecided,
+			slog.String("reason", "error"),
+			slog.String("err", err.Error()),
+		)
+		return nil, false, nil
+	}
+	if !ok {
+		return nil, false, nil
+	}
+
+	verdict, parseErr := ParseContextRouteVerdict(raw)
+	if parseErr != nil {
+		tl.Debug(ctx, trace.EvTurnContextRouteDecided,
+			slog.String("reason", "parse_error"),
+			slog.String("err", parseErr.Error()),
+		)
+		return nil, false, nil
+	}
+
+	tl.Debug(ctx, trace.EvTurnContextRouteDecided,
+		slog.String("class", string(verdict.Class)),
+		slog.String("intent", verdict.Intent),
+		slog.Float64("confidence", verdict.Confidence),
+		slog.String("reason", verdict.Reason),
+	)
+
+	switch verdict.Class {
+	case ClassIntent:
+		if verdict.Intent == "" {
+			return nil, false, nil
+		}
+		// Guard: intent must be in the allowed set (soundness invariant).
+		inAllowed := false
+		for _, a := range allowedNames {
+			if a == verdict.Intent {
+				inAllowed = true
+				break
+			}
+		}
+		if !inAllowed {
+			return nil, false, nil
+		}
+		slots := verdict.Slots
+		if slots == nil {
+			slots = map[string]any{}
+		}
+		prov := RouteProvenance{
+			Source:            "context_route",
+			MatchType:         "contextual",
+			Confidence:        verdict.Confidence,
+			ContextRouteClass: string(verdict.Class),
+		}
+		outcome, err := o.SubmitDirectRouted(ctx, sid, verdict.Intent, slots, input, prov)
+		if err != nil {
+			return nil, false, err
+		}
+		return outcome, true, nil
+
+	default:
+		// help / room_request / meta_edit — group-2 lane stubs (slice 1: no advance).
+		// The decided event is already emitted above. TODO(crr-2): wire lane handlers.
+		return nil, false, nil
+	}
+}
+
 // RequiresUnfilledSlot returns true when the intent definition (looked
 // up via [lookupIntentByPath]) declares ≥1 required slot that the
 // supplied prefill map does not cover. Used by [TrySemantic] to
@@ -358,6 +471,18 @@ func (o *Orchestrator) TrySemantic(ctx context.Context, sid app.SessionID, input
 		}
 
 		if !embedHit {
+			// Contextual routing: fire BEFORE the LLM tier when the active room
+			// opted into contextual_routing.enabled. On a successful verdict the
+			// contextual router dispatches and returns; on a miss or error it falls
+			// through to the existing LLM tier below.
+			crOutcome, crOK, crErr := o.routeViaContextualRouter(ctx, sid, turnNum, tl, journey.State, input, allowedNames)
+			if crErr != nil {
+				return nil, false, crErr
+			}
+			if crOK {
+				return crOutcome, true, nil
+			}
+
 			// When the app opted into ExtractLLMOnNoMatch, run the LLM tier — backed
 			// by a cheap local model via agent: agent.local — for a schema-bounded
 			// routing attempt before the main-turn LLM. A "none"/out-of-list verdict,

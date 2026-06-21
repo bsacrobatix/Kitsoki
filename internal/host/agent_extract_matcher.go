@@ -216,3 +216,62 @@ func RunRoutingLLM(ctx context.Context, input, state string, allowed []string) (
 		MatchKind:   "llm",
 	}, true, nil
 }
+
+// RunContextRouteLLM is the contextual-routing tier's host helper: it asks an
+// agent (typically a cheap local model via agent: agent.local) to classify input
+// into one of the four context-route classes (intent|help|room_request|meta_edit),
+// returning the raw submission map for the caller to parse via
+// orchestrator.ParseContextRouteVerdict.
+//
+// It dispatches through the same agent plugin seam as RunRoutingLLM, so the
+// caller MUST have injected the registry (WithAgentRegistry), the plugin alias
+// (WithAgentPluginName), and an AgentCallCtx. When no plugin is named the
+// dispatch is a no-op and this returns ok=false.
+func RunContextRouteLLM(ctx context.Context, input, state string, allowedIntents []string, lanes map[string]string) (map[string]any, bool, error) {
+	classes := []string{"intent", "help", "room_request", "meta_edit"}
+
+	schema, err := json.Marshal(map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"class", "confidence"},
+		"properties": map[string]any{
+			"class":      map[string]any{"type": "string", "enum": classes},
+			"intent":     map[string]any{"type": "string"},
+			"confidence": map[string]any{"type": "number"},
+			"reason":     map[string]any{"type": "string"},
+		},
+	})
+	if err != nil {
+		return nil, false, err
+	}
+
+	var b strings.Builder
+	b.WriteString("You are a contextual router. Classify the user's input into exactly one class:\n")
+	b.WriteString("- intent: the input is a command matching one of the allowed intents\n")
+	b.WriteString("- help: the user is asking for help or documentation\n")
+	b.WriteString("- room_request: the user wants to navigate to a different room\n")
+	b.WriteString("- meta_edit: the user wants to edit or configure the application\n")
+	if len(allowedIntents) > 0 {
+		b.WriteString("\nAllowed intents (for class=intent only):\n")
+		for _, name := range allowedIntents {
+			fmt.Fprintf(&b, "- %s\n", name)
+		}
+	}
+	fmt.Fprintf(&b, "\nUser input: %s\n", input)
+
+	res, handled, derr := TryDispatchVerb(ctx, "extract", b.String(), "", "", "", map[string]any{
+		"routing_state": state,
+	}, json.RawMessage(schema))
+	if derr != nil {
+		return nil, false, derr
+	}
+	if !handled {
+		return nil, false, nil
+	}
+
+	sub, _ := res.Data["submission"].(map[string]any)
+	if sub == nil {
+		return nil, false, nil
+	}
+	return sub, true, nil
+}
