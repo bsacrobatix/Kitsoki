@@ -97,7 +97,19 @@
           <div v-if="pending" class="iv__thinking" data-testid="thinking-bubble">
             <div class="iv__thinking-avatar">A</div>
             <div class="iv__thinking-bubble">
+              <div class="iv__thinking-head">
               <div class="iv__thinking-role">Agent</div>
+              <!-- Stop: cancels the agent server-side, not just the frontend. -->
+              <button
+                type="button"
+                class="iv__thinking-stop"
+                data-testid="cancel-agent"
+                :disabled="cancelling"
+                @click="onCancel"
+              >
+                {{ cancelling ? "Stopping…" : "■ Stop" }}
+              </button>
+            </div>
               <!-- The live feed, in arrival order: thinking prose (🧠, like the
                    TUI) interleaved with the tool calls it explains — the same
                    shared ActivityFeed the preserved disclosure and the meta
@@ -177,7 +189,7 @@ import { useRunStore } from "../stores/run.js";
 import { useInboxStore } from "../stores/inbox.js";
 import { createDataSource } from "../data/source.js";
 import type { DataSource } from "../data/source.js";
-import { LiveSource } from "../data/live-source.js";
+import { LiveSource, TurnCancelledError } from "../data/live-source.js";
 import { markAutoNavDone } from "../lib/auto-nav.js";
 import ActivityFeed from "../components/ActivityFeed.vue";
 import ChatTranscript from "../components/ChatTranscript.vue";
@@ -211,6 +223,9 @@ let source: DataSource | null = null;
 // True while a turn is in flight; disables the input so the operator can't
 // fire a second overlapping turn against the live session.
 const pending = ref(false);
+// True between clicking Stop and the turn actually aborting — keeps the button
+// from firing a second cancel and gives the operator immediate feedback.
+const cancelling = ref(false);
 const error = ref<string | null>(null);
 
 const appId = computed(() => store.appDef?.id ?? store.appDef?.name ?? "kitsoki");
@@ -383,9 +398,36 @@ async function runTurn(fn: () => Promise<unknown>): Promise<void> {
   try {
     await fn();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    // A cancelled turn is a clean operator action, not an error: the server
+    // aborted it and persisted nothing, so reset to idle WITHOUT a red toast.
+    if (e instanceof TurnCancelledError) {
+      // no-op — the pending bubble clears in finally and the room is unchanged
+    } else {
+      error.value = e instanceof Error ? e.message : String(e);
+    }
   } finally {
     pending.value = false;
+    cancelling.value = false;
+  }
+}
+
+/**
+ * Stop the in-flight turn. Fires runstatus.session.cancel, which aborts the
+ * agent server-side (not just the frontend); the in-flight turnStream then
+ * rejects with TurnCancelledError and runTurn resets to idle. Guarded so a
+ * double-click can't fire two cancels.
+ */
+async function onCancel(): Promise<void> {
+  if (!source || !pending.value || cancelling.value) return;
+  if (!(source instanceof LiveSource)) return;
+  cancelling.value = true;
+  try {
+    await source.cancelTurn(props.sessionId);
+  } catch {
+    // The cancel RPC itself failing is non-fatal: if the turn is already
+    // finishing, the stream's terminal frame still resets the UI. Re-enable the
+    // button so the operator can retry.
+    cancelling.value = false;
   }
 }
 
@@ -709,13 +751,42 @@ function onEventSelect(index: number): void {
   overflow-wrap: anywhere;
 }
 
+.iv__thinking-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
 .iv__thinking-role {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   opacity: 0.6;
-  margin-bottom: 4px;
+}
+
+.iv__thinking-stop {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--k-danger-border, rgba(248, 113, 113, 0.5));
+  background: var(--k-danger-bg, rgba(248, 113, 113, 0.12));
+  color: var(--k-danger-fg, #fca5a5);
+  cursor: pointer;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+
+.iv__thinking-stop:hover:not(:disabled) {
+  background: var(--k-danger-bg-hover, rgba(248, 113, 113, 0.22));
+}
+
+.iv__thinking-stop:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 /* The live feed rows (🧠 thoughts + tool calls) come from the shared

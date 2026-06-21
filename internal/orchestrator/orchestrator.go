@@ -1388,6 +1388,14 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	})
 	hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
+		// A cancelled execution context (operator hit Stop — see
+		// runstatus.session.cancel) aborts the turn cleanly: persist nothing and
+		// leave the session at its pre-turn state. Without this the turn falls
+		// through to appendEventsAndJournal and bakes the cancelled/partial outcome
+		// into the journal, so every later reopen replays it.
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		tl.Debug(ctx, trace.EvHarnessError, slog.String("host_dispatch_error", hostErr.Error()))
 	}
 	if len(hostEvents) > 0 {
@@ -1450,6 +1458,15 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	// Stamp state_path on events that don't already have one.
 	// Finding 2.1: fall back to InitialState when journey.State is "" so every event has non-empty state_path.
 	stampStatePath(successEvents, journey.State, o.InitialState())
+
+	// Final cancellation chokepoint: if the operator hit Stop while the post-bind
+	// emit recursion or the fallback render was running (after the main host
+	// dispatch returned), bail before persisting so a cancelled turn never lands
+	// in the journal. The host-dispatch guard above catches the common case (Stop
+	// during the agent call itself); this covers the narrow tail.
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 
 	// Site 2: dual-write journal entries for the success turn.
 	jEntries := journalEntriesForEvents(sid, turnNum, time.Now(), successEvents,
@@ -1955,6 +1972,14 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 	})
 	hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
+		// A cancelled execution context (operator hit Stop — see
+		// runstatus.session.cancel) aborts the turn cleanly: persist nothing and
+		// leave the session at its pre-turn state. Without this the turn falls
+		// through to appendEventsAndJournal and bakes the cancelled/partial outcome
+		// into the journal, so every later reopen replays it.
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		tl.Debug(ctx, trace.EvHarnessError, slog.String("host_dispatch_error", hostErr.Error()))
 	}
 	if len(hostEvents) > 0 {
@@ -2329,6 +2354,14 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 	// Success: dispatch host calls then persist events.
 	hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
+		// A cancelled execution context (operator hit Stop — see
+		// runstatus.session.cancel) aborts the turn cleanly: persist nothing and
+		// leave the session at its pre-turn state. Without this the turn falls
+		// through to appendEventsAndJournal and bakes the cancelled/partial outcome
+		// into the journal, so every later reopen replays it.
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		tl.Debug(ctx, trace.EvHarnessError, slog.String("host_dispatch_error", hostErr.Error()))
 	}
 	if len(hostEvents) > 0 {

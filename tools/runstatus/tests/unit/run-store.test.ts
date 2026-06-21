@@ -8,6 +8,7 @@ import { useRunStore } from "../../src/stores/run.js";
 import { SnapshotSource } from "../../src/data/snapshot-source.js";
 import type { Snapshot, TraceEvent, TurnResult } from "../../src/types.js";
 import type { DataSource } from "../../src/data/source.js";
+import { TurnCancelledError } from "../../src/data/live-source.js";
 
 // ---- Write-RPC stub helpers ------------------------------------------------
 // The store's read path doesn't touch the write RPCs; these throwing stubs let
@@ -555,6 +556,33 @@ describe("useRunStore — write-side actions", () => {
       "think:The off-by-one is in the loop bound.",
       "tool:Edit",
     ]);
+  });
+
+  it("sendText over a LiveSource clears the feed and rejects with TurnCancelledError when the turn is cancelled", async () => {
+    const src = writeSource() as DataSource & { turnStream: unknown };
+    (src as { turnStream: unknown }).turnStream = (
+      _sid: string,
+      _method: string,
+      _params: unknown,
+      onEvent: (ev: { type: string; text?: string; tool?: string; preview?: string }) => void
+    ) => {
+      onEvent({ type: "delta", text: "Working on it…" });
+      // Operator hits Stop: the server emits a "cancelled" frame, which
+      // LiveSource.turnStream surfaces as a rejected TurnCancelledError.
+      return Promise.reject(new TurnCancelledError());
+    };
+
+    const store = useRunStore();
+    await expect(store.sendText(src, "sess-1", "do the thing")).rejects.toBeInstanceOf(
+      TurnCancelledError
+    );
+
+    // The live bubble is cleared (no lingering "thinking" spinner) and the
+    // user's message survives — no agent reply was applied.
+    expect(store.pendingStream).toEqual([]);
+    expect(store.transcript).toHaveLength(1);
+    expect(store.transcript[0]!.role).toBe("user");
+    expect(store.transcript[0]!.text).toBe("do the thing");
   });
 
   it("shows streamed routing on the user bubble before the turn result completes", async () => {

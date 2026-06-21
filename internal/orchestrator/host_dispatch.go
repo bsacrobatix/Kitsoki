@@ -313,6 +313,19 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 
 		res, err := o.hosts.Invoke(invokeCtx, hc.Namespace, invokeArgs)
 		batchCost += host.AgentCostFrom(invokeCtx)
+		// Operator cancellation (runstatus.session.cancel) propagates a context
+		// cancel down to the agent subprocess via exec.CommandContext, which
+		// surfaces here as a cancelled ctx + an Invoke error. Abort the WHOLE
+		// on_enter dispatch WITHOUT baking the cancellation into last_error /
+		// host_error or routing through on_error: a cancelled turn must leave the
+		// session at its pre-turn state, never persist "context canceled" into the
+		// view (the same poisoning the turn-stream WithoutCancel guards against for
+		// client disconnects). Returning the error makes Turn drop every event
+		// accumulated so far and persist nothing. Checked before the err/res.Error
+		// branches so cancellation never masquerades as a domain failure.
+		if ctx.Err() != nil {
+			return events, w, "", "", ctx.Err()
+		}
 		if err != nil {
 			// Infrastructure failure (e.g. handler not registered): record and move on.
 			w.Vars["last_error"] = err.Error()

@@ -48,7 +48,7 @@ export interface MetaStreamEvent {
 /** One SSE frame from /rpc/turn-stream. Same think/delta split as
  * MetaStreamEvent; the main chat treats both as feed material. */
 export interface TurnStreamEvent {
-  type: "think" | "delta" | "tool" | "routing" | "done" | "error";
+  type: "think" | "delta" | "tool" | "routing" | "done" | "cancelled" | "error";
   // think / delta
   text?: string;
   // tool
@@ -64,6 +64,20 @@ export interface TurnStreamEvent {
   routed_by?: string;
   match_type?: string;
   confidence?: number;
+}
+
+/**
+ * Thrown by {@link LiveSource.turnStream} when the turn ends with a "cancelled"
+ * frame — i.e. the operator hit Stop and runstatus.session.cancel aborted the
+ * turn server-side. Distinct from a transport/agent error so callers can reset
+ * to idle WITHOUT surfacing a red error: nothing was persisted, the session is
+ * untouched at its pre-turn state.
+ */
+export class TurnCancelledError extends Error {
+  constructor() {
+    super("turn cancelled");
+    this.name = "TurnCancelledError";
+  }
 }
 import { JsonRpcClient } from "../transport/jsonrpc.js";
 import type { LastRpcError } from "../transport/jsonrpc.js";
@@ -342,6 +356,20 @@ export class LiveSource implements DataSource {
     });
   }
 
+  /**
+   * Cancel the in-flight streamed turn for this session (the chat "Stop"
+   * button). Aborts the agent server-side — the running turn observes the
+   * cancel and stops the agent subprocess — rather than only the frontend. The
+   * in-flight turnStream promise rejects with {@link TurnCancelledError} once
+   * the server emits its "cancelled" terminal frame. Resolves with
+   * cancelled:false when no turn was in flight (idempotent).
+   */
+  cancelTurn(sessionId: string): Promise<{ cancelled: boolean }> {
+    return this.client.post<{ cancelled: boolean }>("runstatus.session.cancel", {
+      session_id: sessionId,
+    });
+  }
+
   getHarness(sessionId: string): Promise<HarnessState> {
     return this.client.post<HarnessState>("runstatus.session.harness", {
       session_id: sessionId,
@@ -388,6 +416,12 @@ export class LiveSource implements DataSource {
               throw new Error("turn-stream: ended without done event");
             }
             return { result: ev.result };
+          }
+          if (ev.type === "cancelled") {
+            // Operator hit Stop: the server aborted the turn and persisted
+            // nothing. Reject with a typed error so the store/view reset to idle
+            // without showing a transport error.
+            throw new TurnCancelledError();
           }
           if (ev.type === "error") {
             throw new Error(ev.message ?? "turn-stream error");

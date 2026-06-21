@@ -206,6 +206,24 @@ type Server struct {
 	captureMu    sync.Mutex
 	captureStore map[string]*capSnap
 	captureSeq   uint64
+
+	// activeTurns maps a live session id → the cancel func for its in-flight
+	// streamed turn, so runstatus.session.cancel can abort a running agent (the
+	// "Stop" button in the web chat). The streamed turn runs on a context
+	// deliberately DETACHED from the HTTP request (handleTurnStream's
+	// WithoutCancel), so a client disconnect can't cancel it — this registry is
+	// the ONLY lever that does. Last-write-wins per session (turns are serialised
+	// per session by the orchestrator, so at most one is meaningfully in flight).
+	// Guarded by turnMu. See handleTurnStream / cancelActiveTurn.
+	turnMu      sync.Mutex
+	activeTurns map[string]*activeTurn
+}
+
+// activeTurn is one in-flight streamed turn's cancel handle. Stored by pointer
+// so the release func can compare identity (did a newer turn replace me?)
+// without comparing func values.
+type activeTurn struct {
+	cancel context.CancelFunc
 }
 
 // subscription tracks one SSE stream slot. sent is the number of events already
@@ -337,7 +355,50 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		bugRoot:      cfg.bugRoot,
 		ticketRepo:   cfg.ticketRepo,
 		captureStore: make(map[string]*capSnap),
+		activeTurns:  make(map[string]*activeTurn),
 	}
+}
+
+// registerActiveTurn records cancel as the abort lever for the in-flight
+// streamed turn on session sid (keyed by the session_id the client sent, which
+// it reuses verbatim for runstatus.session.cancel). Returns an unregister func
+// that removes THIS registration (only if it's still the current one) WITHOUT
+// firing cancel — call it on handler exit so a finished turn (or one whose
+// client disconnected) frees its slot without clobbering a newer turn that raced
+// in. Crucially it must NOT cancel: the handler also returns on a client
+// disconnect, and a disconnected turn is meant to run to completion on its
+// detached context (see handleTurnStream's WithoutCancel). The context's cancel
+// is fired only by cancelActiveTurn (operator Stop) or by the turn goroutine's
+// own defer once it finishes.
+func (s *Server) registerActiveTurn(sid string, cancel context.CancelFunc) (unregister func()) {
+	at := &activeTurn{cancel: cancel}
+	s.turnMu.Lock()
+	s.activeTurns[sid] = at
+	s.turnMu.Unlock()
+	return func() {
+		s.turnMu.Lock()
+		if s.activeTurns[sid] == at {
+			delete(s.activeTurns, sid)
+		}
+		s.turnMu.Unlock()
+	}
+}
+
+// cancelActiveTurn aborts the in-flight streamed turn for sid, if any. Returns
+// true when a turn was registered (and thus cancelled). The cancellation
+// propagates down the detached execution context to the agent subprocess
+// (exec.CommandContext → SIGKILL), so the agent actually stops — not just the
+// frontend. Idempotent: a second call after the turn already cleared its slot is
+// a no-op returning false.
+func (s *Server) cancelActiveTurn(sid string) bool {
+	s.turnMu.Lock()
+	at, ok := s.activeTurns[sid]
+	s.turnMu.Unlock()
+	if !ok {
+		return false
+	}
+	at.cancel()
+	return true
 }
 
 // Source supplies the runstatus surface with a view of one session. The server
@@ -847,6 +908,16 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			return nil, serverErr(err)
 		}
 		return harnessState(entry.Driver), nil
+
+	case "runstatus.session.cancel":
+		// Abort the in-flight streamed turn for this session (the web chat "Stop"
+		// button). Cancels the detached execution context registered by
+		// handleTurnStream, which propagates to the agent subprocess so the agent
+		// actually stops. No driver/turn machinery is touched here — the running
+		// turn observes the cancel and aborts cleanly, persisting nothing. Returns
+		// {cancelled:false} when no turn was in flight (idempotent / already done).
+		sid, _ := params["session_id"].(string)
+		return map[string]any{"cancelled": s.cancelActiveTurn(sid)}, nil
 
 	case "runstatus.session.offpath":
 		entry, rerr := s.resolve(params)
