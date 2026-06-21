@@ -34,7 +34,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 
 .PHONY: all setup build install uninstall test test-flows starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
-	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package
+	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
 
 all: build
 
@@ -532,6 +532,27 @@ vscode-package: web
 	cd $(VSCODE_DIR) && pnpm build
 	cd $(VSCODE_DIR) && pnpm dlx @vscode/vsce@^3 package --no-dependencies
 	@echo "[vscode-package] $$(ls -t $(VSCODE_DIR)/*.vsix | head -1)"
+
+# vscode-install-local is the full local refresh loop for the real editor:
+# rebuild the embedded SPA from scratch, install a fresh kitsoki binary, package
+# the extension, then force-install the newest VSIX into the local VS Code.
+# Override CODE_CLI when testing another compatible editor CLI.
+CODE_CLI ?= code
+vscode-install-local: check-deps
+	@command -v $(CODE_CLI) >/dev/null 2>&1 || { \
+		echo "error: $(CODE_CLI) not found — install the VS Code shell command or run CODE_CLI=/path/to/code make vscode-install-local." >&2; \
+		exit 1; }
+	@rm -f $(VSCODE_DIR)/*.vsix
+	$(MAKE) web-clean
+	$(MAKE) install
+	$(MAKE) vscode-package
+	@vsix="$$(ls -t $(VSCODE_DIR)/*.vsix | head -1)"; \
+	if [ -z "$$vsix" ]; then \
+		echo "error: vscode-package did not produce a .vsix" >&2; \
+		exit 1; \
+	fi; \
+	$(CODE_CLI) --install-extension "$$vsix" --force; \
+	echo "[vscode-install-local] installed $$vsix"
 
 # vscode-e2e-fast is the deterministic, no-LLM end-to-end GATE for the VS Code
 # extension: it launches real VS Code 1.96.4, opens the Kitsoki view, asserts the
