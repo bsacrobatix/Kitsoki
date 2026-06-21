@@ -2,7 +2,7 @@
  * Unit tests for src/stores/run.ts
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { useRunStore } from "../../src/stores/run.js";
 import { SnapshotSource } from "../../src/data/snapshot-source.js";
@@ -613,6 +613,38 @@ describe("useRunStore — write-side actions", () => {
     const store = useRunStore();
     await store.sendText(src, "sess-1", "go");
     expect(store.transcript[1]!.text).toBe("Only narration this turn.");
+  });
+
+  it("backfills the completed streamed free-text turn so LLM routing chips render when live events are missed", async () => {
+    const llmTurnStart = traceEvent({
+      turn: 7,
+      msg: "turn.start",
+      attrs: { input: "do the ad hoc work", routed_by: "llm", match_type: "main-turn", confidence: 0.82 },
+    });
+    const transition = traceEvent({
+      turn: 7,
+      msg: "machine.transition",
+      attrs: { intent: "workbench.ad_hoc" },
+    });
+    const getTrace = vi.fn().mockResolvedValue({
+      events: [llmTurnStart, transition],
+      last_turn: 7,
+    });
+
+    const src = writeSource({ getTrace }) as DataSource & { turnStream: unknown };
+    (src as { turnStream: unknown }).turnStream = () =>
+      Promise.resolve(turnResult({ turn_number: 7, view: "Workbench ready" }));
+
+    const store = useRunStore();
+    await store.sendText(src, "sess-1", "do the ad hoc work");
+
+    expect(getTrace).toHaveBeenCalledWith("sess-1", { since_turn: 7 });
+    expect(store.chatEntries[0]!.routing).toEqual({
+      routedBy: "llm",
+      matchType: "main-turn",
+      confidence: 0.82,
+      intent: "workbench.ad_hoc",
+    });
   });
 
   // ---- session-switch isolation (bug: transcripts mixed across sessions) ----

@@ -235,6 +235,35 @@ export const useRunStore = defineStore("run", () => {
     }
   }
 
+  function traceEventKey(e: TraceEvent): string {
+    return JSON.stringify([e.turn, e.msg, e.state_path ?? "", e.attrs ?? {}]);
+  }
+
+  async function backfillTurnTrace(
+    source: DataSource,
+    sessionId: string,
+    turn: number
+  ): Promise<void> {
+    try {
+      const { events: fresh } = await source.getTrace(sessionId, {
+        since_turn: turn,
+      });
+      if (!fresh.length) return;
+
+      const seen = new Set(events.value.map(traceEventKey));
+      for (const e of fresh) {
+        const key = traceEventKey(e);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        events.value.push(e);
+        applyStatePath(e);
+      }
+    } catch {
+      // The transcript and final view are still usable if trace reconciliation
+      // fails; the live subscription/reconnect path can fill in later.
+    }
+  }
+
   /** Stop the live subscription. */
   function teardown(): void {
     _unsubscribe?.();
@@ -454,7 +483,10 @@ export const useRunStore = defineStore("run", () => {
     // Tag the user entry with its turn number so the routing chip can recover
     // provenance from the event log (chatEntries) once the turn.start +
     // transition events land — reactively, surviving the SSE settle lag.
-    if (typeof result.turn_number === "number") userEntry.turn = result.turn_number;
+    if (typeof result.turn_number === "number") {
+      userEntry.turn = result.turn_number;
+      await backfillTurnTrace(source, sessionId, result.turn_number);
+    }
     applyTurnResult(result, capturedStream, capturedItems);
     return result;
   }
