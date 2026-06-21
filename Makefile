@@ -28,7 +28,6 @@ STORY_APPS := $(wildcard stories/*/app.yaml)
 # matching on a fresh checkout. internal/basestories.Materialize extracts it
 # to a content-addressed cache at runtime so `@kitsoki/<name>` resolves with
 # only the binary present. See docs/proposals/kitsoki-as-dependency.md (slice 1).
-BASESTORIES_SRC   := $(shell find stories -type f 2>/dev/null)
 BASESTORIES_DIR   := internal/basestories/stories
 BASESTORIES_STAMP := internal/basestories/.embed-stamp
 
@@ -81,19 +80,28 @@ uninstall:
 	rm -f $(INSTALLDIR)/$(BINARY)
 
 # embed-stories stages the top-level stories/ library into the basestories
-# embed dir so //go:embed ships it in the binary. Incremental: re-stages only
-# when a story source file is newer than the stamp. The copy is deterministic
-# and one-directional (stories/ → internal/basestories/stories/, disjoint
-# trees) so there is no embed-of-cwd / recursive-embed footgun.
-embed-stories: $(BASESTORIES_STAMP)
-
-$(BASESTORIES_STAMP): $(BASESTORIES_SRC)
-	@rm -rf $(BASESTORIES_DIR)
-	@mkdir -p $(BASESTORIES_DIR)
-	@cp -R stories/. $(BASESTORIES_DIR)/
-	@touch $(BASESTORIES_DIR)/.gitkeep
-	@touch $@
-	@echo "staged stories/ -> $(BASESTORIES_DIR)"
+# embed dir so //go:embed ships it in the binary. It avoids a frozen per-file
+# prerequisite list because story fixtures are often renamed during long builds;
+# instead it compares a fresh staged tree and only rewrites the embed dir when
+# content changed. The copy is deterministic and one-directional (stories/ →
+# internal/basestories/stories/, disjoint trees) so there is no embed-of-cwd /
+# recursive-embed footgun.
+embed-stories:
+	@tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/kitsoki-basestories.XXXXXX"); \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	mkdir -p "$$tmp/stories"; \
+	cp -R stories/. "$$tmp/stories"/; \
+	touch "$$tmp/stories/.gitkeep"; \
+	if [ -d "$(BASESTORIES_DIR)" ] && diff -qr "$$tmp/stories" "$(BASESTORIES_DIR)" >/dev/null; then \
+		touch "$(BASESTORIES_STAMP)"; \
+		echo "stories/ already staged in $(BASESTORIES_DIR)"; \
+	else \
+		rm -rf "$(BASESTORIES_DIR)"; \
+		mkdir -p "$(BASESTORIES_DIR)"; \
+		cp -R "$$tmp/stories"/. "$(BASESTORIES_DIR)"/; \
+		touch "$(BASESTORIES_STAMP)"; \
+		echo "staged stories/ -> $(BASESTORIES_DIR)"; \
+	fi
 
 # web bundles the runstatus SPA and stages it into the embed dir. Incremental:
 # only rebuilds when a source file is newer than the staged bundle.
