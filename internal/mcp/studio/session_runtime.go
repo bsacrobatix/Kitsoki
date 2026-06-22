@@ -287,7 +287,7 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: new session: %v", err)}
 	}
 	rt.sid = sid
-	rt.driver = rsserver.OrchestratorDriver{Orch: orch, SID: sid, Jobs: rt.jobStore}
+	rt.driver = rsserver.OrchestratorDriver{Orch: orch, SID: sid, Jobs: rt.jobStore, Chats: rt.chatStore}
 	obs := &studioBackgroundObserver{rt: rt, sid: sid}
 	orch.RegisterObserver(obs)
 	rt.closers = append(rt.closers, func() { orch.UnregisterObserver(obs) })

@@ -152,11 +152,13 @@ function notificationFromWork(item: WorkItem): Notification {
 }
 
 function workKey(item: WorkItem): string {
-  return `${item.kind}:${item.notification_id || item.job_id || item.session_id}`;
+  return `${item.kind}:${item.notification_id || item.job_id || item.drive_id || item.chat_id || item.session_id}`;
 }
 
 function workKind(item: WorkItem): string {
   if (item.kind === "job") return "job";
+  if (item.kind === "pending_drive") return "queued";
+  if (item.kind === "backgrounded_chat") return "chat";
   if (item.kind === "notification") return item.severity || "note";
   return item.kind;
 }

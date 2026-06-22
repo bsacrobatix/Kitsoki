@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"database/sql"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
@@ -25,9 +27,12 @@ import (
 // the httptest server, the JobStore (so a test can post a notification without
 // an LLM), and the orchestrator session id (the teleport target's origin).
 type inboxFixture struct {
-	ts  *httptest.Server
-	js  *jobs.JobStore
-	sid app.SessionID
+	ts       *httptest.Server
+	db       *sql.DB
+	js       *jobs.JobStore
+	chats    *chats.Store
+	sid      app.SessionID
+	publicID string
 }
 
 func buildInboxFixture(t *testing.T) inboxFixture {
@@ -49,6 +54,8 @@ func buildInboxFixture(t *testing.T) inboxFixture {
 
 	js, err := jobs.NewJobStore(s.DB())
 	require.NoError(t, err)
+	chatStore, err := chats.NewStore(s.DB())
+	require.NoError(t, err)
 
 	orch := orchestrator.New(def, m, s, nil,
 		orchestrator.WithJournalWriter(jw),
@@ -68,10 +75,11 @@ func buildInboxFixture(t *testing.T) inboxFixture {
 	orch.SetEventSink(live)
 	require.NoError(t, orch.RunInitialOnEnter(ctx, sid))
 
-	driver := server.OrchestratorDriver{Orch: orch, SID: sid, Jobs: js}
+	driver := server.OrchestratorDriver{Orch: orch, SID: sid, Jobs: js, Chats: chatStore}
+	publicID := "web-session-1"
 	srv := server.NewMulti(&singleInboxProvider{
 		entry: server.Entry{Source: live, Driver: driver},
-		sid:   string(sid),
+		sid:   publicID,
 	}, server.WithPollInterval(20*time.Millisecond))
 
 	// Register the cross-session relay against this session (what web.go does
@@ -80,7 +88,7 @@ func buildInboxFixture(t *testing.T) inboxFixture {
 
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return inboxFixture{ts: ts, js: js, sid: sid}
+	return inboxFixture{ts: ts, db: s.DB(), js: js, chats: chatStore, sid: sid, publicID: publicID}
 }
 
 // singleInboxProvider is a one-session SessionProvider keyed by the
@@ -147,7 +155,7 @@ func TestInbox_ListReadDismiss(t *testing.T) {
 		Notifications []map[string]any `json:"notifications"`
 	}
 	rpcCall(t, f.ts, "runstatus.session.notifications.list",
-		map[string]any{"session_id": string(f.sid)}, &listed)
+		map[string]any{"session_id": f.publicID}, &listed)
 	require.Len(t, listed.Notifications, 1)
 	assert.Equal(t, id, listed.Notifications[0]["ID"])
 	assert.Equal(t, "Background turn ready", listed.Notifications[0]["Title"])
@@ -157,16 +165,16 @@ func TestInbox_ListReadDismiss(t *testing.T) {
 		OK bool `json:"ok"`
 	}
 	rpcCall(t, f.ts, "runstatus.session.notifications.read",
-		map[string]any{"session_id": string(f.sid), "id": id}, &ok)
+		map[string]any{"session_id": f.publicID, "id": id}, &ok)
 	assert.True(t, ok.OK)
 
 	// dismiss → drops out of the list
 	rpcCall(t, f.ts, "runstatus.session.notifications.dismiss",
-		map[string]any{"session_id": string(f.sid), "id": id}, &ok)
+		map[string]any{"session_id": f.publicID, "id": id}, &ok)
 	assert.True(t, ok.OK)
 
 	rpcCall(t, f.ts, "runstatus.session.notifications.list",
-		map[string]any{"session_id": string(f.sid)}, &listed)
+		map[string]any{"session_id": f.publicID}, &listed)
 	assert.Empty(t, listed.Notifications, "dismissed notification should drop out")
 }
 
@@ -178,7 +186,7 @@ func TestInbox_Teleport(t *testing.T) {
 
 	var res turnResultWire
 	rpcCall(t, f.ts, "runstatus.session.teleport",
-		map[string]any{"session_id": string(f.sid), "notification_id": id}, &res)
+		map[string]any{"session_id": f.publicID, "notification_id": id}, &res)
 
 	assert.Equal(t, "foyer", res.State, "teleport should land at the notification's origin state")
 	assert.NotEmpty(t, res.View, "teleport re-renders the destination room")
@@ -197,21 +205,49 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 		CreatedAt:   now.Add(-time.Second),
 		UpdatedAt:   now,
 	}))
+	chat, err := f.chats.Create(context.Background(), "cloak", "agent", "scope", "Review proposal")
+	require.NoError(t, err)
+	_, err = f.chats.Enqueue(context.Background(), chats.EnqueueOptions{
+		ChatID:          chat.ID,
+		Transport:       chats.DriveTransportStateMachine,
+		Actor:           "story",
+		Payload:         "continue the agent task",
+		OriginSessionID: string(f.sid),
+		OriginState:     "foyer",
+	})
+	require.NoError(t, err)
+	bg, err := f.chats.Create(context.Background(), "cloak", "agent", "scope-bg", "Background Claude")
+	require.NoError(t, err)
+	_, err = f.db.ExecContext(context.Background(), `UPDATE chats SET session_id = ? WHERE id = ?`, string(f.sid), bg.ID)
+	require.NoError(t, err)
+	_, err = f.chats.AttachPTY(context.Background(), chats.AttachPTYOptions{ChatID: bg.ID, TmuxSession: "kit-bg"})
+	require.NoError(t, err)
+	_, err = f.chats.DetachPTY(context.Background(), bg.ID)
+	require.NoError(t, err)
 
 	var work server.WorkListResult
 	rpcCall(t, f.ts, "runstatus.work.list", nil, &work)
 	require.Len(t, work.Sessions, 1)
-	assert.Equal(t, string(f.sid), work.Sessions[0].SessionID)
+	assert.Equal(t, f.publicID, work.Sessions[0].SessionID)
 	assert.Equal(t, 1, work.Summary.JobsRunning)
 	assert.Equal(t, 1, work.Summary.NotificationsUnread)
-	assert.Equal(t, 2, work.Summary.Items)
-	require.Len(t, work.Items, 2)
+	assert.Equal(t, 1, work.Summary.PendingDrives)
+	assert.Equal(t, 1, work.Summary.BackgroundedChats)
+	assert.Equal(t, 4, work.Summary.Items)
+	require.Len(t, work.Items, 4)
 	assert.Equal(t, "notification", work.Items[0].Kind)
 	assert.Equal(t, id, work.Items[0].NotificationID)
 	assert.Equal(t, "notification", work.Items[0].ReacquireTool)
+	assert.Equal(t, f.publicID, work.Items[0].SessionID)
+	assert.Equal(t, f.publicID, work.Items[0].ReacquireSessionID)
 	assert.Equal(t, "job", work.Items[1].Kind)
 	assert.Equal(t, "job-running", work.Items[1].JobID)
 	assert.Equal(t, "session", work.Items[1].ReacquireTool)
+	assert.Equal(t, f.publicID, work.Items[1].SessionID)
+	assert.Equal(t, "pending_drive", work.Items[2].Kind)
+	assert.Equal(t, chat.ID, work.Items[2].ChatID)
+	assert.Equal(t, "backgrounded_chat", work.Items[3].Kind)
+	assert.Equal(t, bg.ID, work.Items[3].ChatID)
 }
 
 // TestInbox_TeleportNotTeleportable proves a notification with no destination
@@ -228,7 +264,7 @@ func TestInbox_TeleportNotTeleportable(t *testing.T) {
 	require.NoError(t, f.js.InsertNotification(context.Background(), n))
 
 	code, msg := rpcCallExpectError(t, f.ts, "runstatus.session.teleport",
-		map[string]any{"session_id": string(f.sid), "notification_id": n.ID})
+		map[string]any{"session_id": f.publicID, "notification_id": n.ID})
 	assert.NotZero(t, code)
 	assert.Contains(t, msg, "teleport")
 }

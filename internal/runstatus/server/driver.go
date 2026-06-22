@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/orchestrator"
@@ -109,6 +110,8 @@ type WorkSummary struct {
 	JobsTerminal                int `json:"jobs_terminal"`
 	NotificationsUnread         int `json:"notifications_unread"`
 	NotificationsActionRequired int `json:"notifications_action_required"`
+	PendingDrives               int `json:"pending_drives"`
+	BackgroundedChats           int `json:"backgrounded_chats"`
 }
 
 // WorkItem is one active row in the operator's work queue. Notification rows
@@ -130,6 +133,12 @@ type WorkItem struct {
 	OriginState        string                    `json:"origin_state,omitempty"`
 	ReacquireTool      string                    `json:"reacquire_tool"`
 	ReacquireSessionID string                    `json:"reacquire_session_id,omitempty"`
+	DriveID            string                    `json:"drive_id,omitempty"`
+	ChatID             string                    `json:"chat_id,omitempty"`
+	Actor              string                    `json:"actor,omitempty"`
+	Thread             string                    `json:"thread,omitempty"`
+	TmuxSession        string                    `json:"tmux_session,omitempty"`
+	TmuxHost           string                    `json:"tmux_host,omitempty"`
 }
 
 // OrchestratorDriver adapts a live *orchestrator.Orchestrator + session id to
@@ -142,6 +151,9 @@ type OrchestratorDriver struct {
 	// artifact-mode, read-only surfaces); the inbox methods treat a nil store as
 	// an empty inbox per the nil-safety contract on the [Driver] inbox methods.
 	Jobs *jobs.JobStore
+	// Chats is the optional chat store backing pending chat drives and
+	// tmux-hosted background chats. Nil means the work queue omits chat work.
+	Chats *chats.Store
 }
 
 // ErrNoInbox is returned by Teleport when the session has no JobStore wired, so
@@ -220,73 +232,76 @@ func (d OrchestratorDriver) ListNotifications(ctx context.Context) ([]jobs.Notif
 // failed. Quiet terminal success/cancel rows stay available through the
 // per-session trace/inbox, but do not crowd the global work queue.
 func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
-	if d.Jobs == nil {
-		return SessionWork{}, nil
-	}
-	jobRows, err := d.Jobs.ListBySession(ctx, d.SID)
-	if err != nil {
-		return SessionWork{}, err
-	}
-	notifs, err := d.Jobs.ListNotifications(ctx, d.SID, 0)
-	if err != nil {
-		return SessionWork{}, err
-	}
-	unread, err := d.Jobs.UnreadCount(ctx, d.SID)
-	if err != nil {
-		return SessionWork{}, err
-	}
-
 	out := SessionWork{}
-	for _, j := range jobRows {
-		switch j.Status {
-		case jobs.JobRunning:
-			out.Summary.JobsRunning++
-		case jobs.JobAwaitingInput:
-			out.Summary.JobsAwaitingInput++
-		case jobs.JobDone, jobs.JobFailed, jobs.JobCancelled:
-			out.Summary.JobsTerminal++
+	if d.Jobs != nil {
+		jobRows, err := d.Jobs.ListBySession(ctx, d.SID)
+		if err != nil {
+			return SessionWork{}, err
 		}
-		if !activeWorkJob(j) {
-			continue
+		notifs, err := d.Jobs.ListNotifications(ctx, d.SID, 0)
+		if err != nil {
+			return SessionWork{}, err
 		}
-		out.Items = append(out.Items, WorkItem{
-			Kind:               "job",
-			Priority:           workJobPriority(j),
-			SessionID:          string(d.SID),
-			Title:              j.Kind,
-			Status:             string(j.Status),
-			JobID:              j.ID,
-			CreatedAt:          j.CreatedAt,
-			UpdatedAt:          j.UpdatedAt,
-			OriginState:        string(j.OriginState),
-			ReacquireTool:      "session",
-			ReacquireSessionID: string(d.SID),
-		})
+		unread, err := d.Jobs.UnreadCount(ctx, d.SID)
+		if err != nil {
+			return SessionWork{}, err
+		}
+
+		for _, j := range jobRows {
+			switch j.Status {
+			case jobs.JobRunning:
+				out.Summary.JobsRunning++
+			case jobs.JobAwaitingInput:
+				out.Summary.JobsAwaitingInput++
+			case jobs.JobDone, jobs.JobFailed, jobs.JobCancelled:
+				out.Summary.JobsTerminal++
+			}
+			if !activeWorkJob(j) {
+				continue
+			}
+			out.Items = append(out.Items, WorkItem{
+				Kind:               "job",
+				Priority:           workJobPriority(j),
+				SessionID:          string(d.SID),
+				Title:              j.Kind,
+				Status:             string(j.Status),
+				JobID:              j.ID,
+				CreatedAt:          j.CreatedAt,
+				UpdatedAt:          j.UpdatedAt,
+				OriginState:        string(j.OriginState),
+				ReacquireTool:      "session",
+				ReacquireSessionID: string(d.SID),
+			})
+		}
+		for _, count := range unread {
+			out.Summary.NotificationsUnread += count
+		}
+		out.Summary.NotificationsActionRequired = unread[jobs.SeverityActionRequired]
+		for _, n := range notifs {
+			if n.ReadAt != nil {
+				continue
+			}
+			out.Items = append(out.Items, WorkItem{
+				Kind:               "notification",
+				Priority:           workNotificationPriority(n),
+				SessionID:          string(d.SID),
+				Title:              n.Title,
+				Status:             "unread",
+				NotificationID:     n.ID,
+				Severity:           n.Severity,
+				CreatedAt:          n.CreatedAt,
+				UpdatedAt:          n.CreatedAt,
+				ReadAt:             n.ReadAt,
+				TeleportState:      n.TeleportState,
+				TeleportJobID:      n.TeleportJobID,
+				ReacquireTool:      "notification",
+				ReacquireSessionID: string(d.SID),
+			})
+		}
 	}
-	for _, count := range unread {
-		out.Summary.NotificationsUnread += count
-	}
-	out.Summary.NotificationsActionRequired = unread[jobs.SeverityActionRequired]
-	for _, n := range notifs {
-		if n.ReadAt != nil {
-			continue
-		}
-		out.Items = append(out.Items, WorkItem{
-			Kind:               "notification",
-			Priority:           workNotificationPriority(n),
-			SessionID:          string(d.SID),
-			Title:              n.Title,
-			Status:             "unread",
-			NotificationID:     n.ID,
-			Severity:           n.Severity,
-			CreatedAt:          n.CreatedAt,
-			UpdatedAt:          n.CreatedAt,
-			ReadAt:             n.ReadAt,
-			TeleportState:      n.TeleportState,
-			TeleportJobID:      n.TeleportJobID,
-			ReacquireTool:      "notification",
-			ReacquireSessionID: string(d.SID),
-		})
+	out, err := d.listChatWork(ctx, out)
+	if err != nil {
+		return SessionWork{}, err
 	}
 	sort.SliceStable(out.Items, func(i, j int) bool {
 		a, b := out.Items[i], out.Items[j]
@@ -300,6 +315,69 @@ func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
 		if item.Priority >= 80 {
 			out.Summary.NeedsAttention++
 		}
+	}
+	return out, nil
+}
+
+func (d OrchestratorDriver) listChatWork(ctx context.Context, out SessionWork) (SessionWork, error) {
+	if d.Chats == nil {
+		return out, nil
+	}
+	drives, err := d.Chats.ListDrivesBySession(ctx, string(d.SID),
+		[]chats.DriveStatus{chats.DriveStatusPending, chats.DriveStatusDispatching})
+	if err != nil {
+		return SessionWork{}, err
+	}
+	for _, drive := range drives {
+		out.Summary.PendingDrives++
+		priority := 65
+		if drive.Status == chats.DriveStatusDispatching {
+			priority = 68
+		}
+		out.Items = append(out.Items, WorkItem{
+			Kind:               "pending_drive",
+			Priority:           priority,
+			SessionID:          string(d.SID),
+			Title:              drive.Payload,
+			Status:             string(drive.Status),
+			CreatedAt:          drive.ReceivedAt,
+			UpdatedAt:          drive.ReceivedAt,
+			OriginState:        drive.OriginState,
+			ReacquireTool:      "session",
+			ReacquireSessionID: string(d.SID),
+			DriveID:            drive.DriveID,
+			ChatID:             drive.ChatID,
+			Actor:              drive.Actor,
+			Thread:             drive.Thread,
+		})
+	}
+	ptys, err := d.Chats.ListPTYForHost(ctx)
+	if err != nil {
+		return SessionWork{}, err
+	}
+	for _, pty := range ptys {
+		if pty.Mode != chats.PtyModeBackground {
+			continue
+		}
+		chat, err := d.Chats.Get(ctx, pty.ChatID)
+		if err != nil || chat == nil || chat.SessionID != string(d.SID) {
+			continue
+		}
+		out.Summary.BackgroundedChats++
+		out.Items = append(out.Items, WorkItem{
+			Kind:               "backgrounded_chat",
+			Priority:           60,
+			SessionID:          string(d.SID),
+			Title:              chat.Title,
+			Status:             string(pty.Mode),
+			CreatedAt:          pty.CreatedAt,
+			UpdatedAt:          pty.UpdatedAt,
+			ReacquireTool:      "session",
+			ReacquireSessionID: string(d.SID),
+			ChatID:             pty.ChatID,
+			TmuxSession:        pty.TmuxSession,
+			TmuxHost:           pty.TmuxHost,
+		})
 	}
 	return out, nil
 }

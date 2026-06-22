@@ -141,6 +141,8 @@ export interface WorkSummary {
   jobs_terminal: number;
   notifications_unread: number;
   notifications_action_required: number;
+  pending_drives: number;
+  backgrounded_chats: number;
 }
 
 export interface WorkSession {
@@ -167,6 +169,12 @@ export interface WorkItem {
   origin_state?: string;
   reacquire_tool: "notification" | "session" | string;
   reacquire_session_id?: string;
+  drive_id?: string;
+  chat_id?: string;
+  actor?: string;
+  thread?: string;
+  tmux_session?: string;
+  tmux_host?: string;
 }
 
 export interface WorkListResult {

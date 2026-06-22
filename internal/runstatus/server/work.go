@@ -49,6 +49,12 @@ func (s *Server) listWork(ctx context.Context) (WorkListResult, error) {
 		if err != nil {
 			return WorkListResult{}, err
 		}
+		for i := range work.Items {
+			work.Items[i].SessionID = hdr.SessionID
+			if work.Items[i].ReacquireSessionID != "" {
+				work.Items[i].ReacquireSessionID = hdr.SessionID
+			}
+		}
 		out.Sessions = append(out.Sessions, WorkSessionResult{
 			SessionID:    hdr.SessionID,
 			AppID:        hdr.AppID,
@@ -87,4 +93,6 @@ func addWorkSummary(dst *WorkSummary, src WorkSummary) {
 	dst.JobsTerminal += src.JobsTerminal
 	dst.NotificationsUnread += src.NotificationsUnread
 	dst.NotificationsActionRequired += src.NotificationsActionRequired
+	dst.PendingDrives += src.PendingDrives
+	dst.BackgroundedChats += src.BackgroundedChats
 }
