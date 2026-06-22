@@ -56,7 +56,11 @@
         <!-- chatEntries (not raw transcript) so each user turn carries its
              routing provenance and ChatTranscript can render the inline
              routing chip — same binding InteractiveView uses. -->
-        <ChatTranscript class="surface__transcript" :transcript="store.chatEntries" />
+        <ChatTranscript
+          class="surface__transcript"
+          :transcript="store.chatEntries"
+          @rewind="onRewind"
+        />
         <!-- Streaming thinking bubble: visible while a turn is in flight. -->
         <div v-if="pending" class="surface__thinking" data-testid="thinking-bubble">
           <div class="surface__thinking-avatar">A</div>
@@ -245,6 +249,15 @@ function onSend(text: string, _intentName: string): void {
 function onIntent(name: string, slots: Record<string, unknown>, displayLabel?: string): void {
   if (!source || !sessionId.value) return;
   void runTurn(() => store.submitIntent(source!, sessionId.value!, name, slots, displayLabel));
+}
+
+// Rewind one CRR decision from its route-receipt chip: reverse the route and
+// re-dispatch the original utterance. Routes through runTurn so the in-flight
+// guard + error banner behave exactly like a normal turn; a non-rewindable
+// receipt never reaches here (the chip disables its control).
+function onRewind(decisionId: string): void {
+  if (!source || !sessionId.value) return;
+  void runTurn(() => store.rewindRoute(source!, sessionId.value!, decisionId));
 }
 
 function errMsg(e: unknown): string {

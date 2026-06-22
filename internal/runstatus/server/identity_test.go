@@ -49,6 +49,9 @@ func (d *captureDriver) DismissNotification(context.Context, string) error  { re
 func (d *captureDriver) Teleport(context.Context, string) (*orchestrator.TurnOutcome, error) {
 	return &orchestrator.TurnOutcome{}, nil
 }
+func (d *captureDriver) RewindRoute(context.Context, string, orchestrator.ContextRouteClass, string) (*orchestrator.TurnOutcome, error) {
+	return &orchestrator.TurnOutcome{}, nil
+}
 
 // stubSource is a do-nothing Source — the identity tests only exercise the
 // write RPCs, which read entry.Driver, never entry.Source.

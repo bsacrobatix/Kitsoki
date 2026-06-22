@@ -105,7 +105,11 @@
       <div class="iv__main" :class="{ 'iv__main--embed': embed }">
         <!-- LEFT: conversation -->
         <section class="iv__chat" aria-label="Conversation" data-testid="chat-section">
-          <ChatTranscript class="iv__transcript" :transcript="store.chatEntries" />
+          <ChatTranscript
+            class="iv__transcript"
+            :transcript="store.chatEntries"
+            @rewind="onRewind"
+          />
           <!-- Streaming thinking bubble: visible while a turn is in flight -->
           <div v-if="pending" class="iv__thinking" data-testid="thinking-bubble">
             <div class="iv__thinking-avatar">A</div>
@@ -457,6 +461,15 @@ function onSend(text: string, _intentName: string): void {
 function onIntent(name: string, slots: Record<string, unknown>, displayLabel?: string): void {
   if (!source) return;
   void runTurn(() => store.submitIntent(source!, props.sessionId, name, slots, displayLabel));
+}
+
+// Rewind one CRR decision from its route-receipt chip (re-dispatch under the
+// journaled class). Routes through runTurn for the same in-flight guard +
+// error-banner behaviour as a normal turn; the chip disables the control for
+// non-rewindable (intent-class) receipts so it never reaches here.
+function onRewind(decisionId: string): void {
+  if (!source) return;
+  void runTurn(() => store.rewindRoute(source!, props.sessionId, decisionId));
 }
 
 // ---- trace interactions (mirror RunView observer behavior) ----

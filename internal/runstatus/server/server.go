@@ -1014,6 +1014,33 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return newTurnResult(out, entry.Driver), nil
 
+	case "runstatus.session.rewind_route":
+		// Reverse one contextual-routing (CRR) decision and re-dispatch the
+		// original utterance under new_class. Backs the web route-receipt chip's
+		// "rewind" affordance. The engine reverses the lane classes today; an
+		// intent-class rewind isn't recoverable from the journal yet and returns a
+		// userfacing error (via serverErr) the UI shows in its red banner rather
+		// than a raw 500 — the chip disables the control for intent receipts up
+		// front, so this is the defence-in-depth path.
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		decisionID, _ := params["decision_id"].(string)
+		if decisionID == "" {
+			return nil, &rpcError{Code: codeServerError, Message: "session.rewind_route: missing 'decision_id'"}
+		}
+		newClass, _ := params["new_class"].(string)
+		reason, _ := params["reason"].(string)
+		out, err := entry.Driver.RewindRoute(ctx, decisionID, orchestrator.ContextRouteClass(newClass), reason)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return newTurnResult(out, entry.Driver), nil
+
 	case "runstatus.notifications.subscribe":
 		// Cross-session feed: no session_id — the browser home chrome opens one
 		// of these for the global badge/toast. Returns a subscription_id the

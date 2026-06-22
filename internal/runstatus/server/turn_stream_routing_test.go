@@ -86,6 +86,9 @@ func (routingFrameDriver) DismissNotification(context.Context, string) error { r
 func (routingFrameDriver) Teleport(context.Context, string) (*orchestrator.TurnOutcome, error) {
 	return &orchestrator.TurnOutcome{}, nil
 }
+func (routingFrameDriver) RewindRoute(context.Context, string, orchestrator.ContextRouteClass, string) (*orchestrator.TurnOutcome, error) {
+	return &orchestrator.TurnOutcome{}, nil
+}
 
 func TestTurnStream_RoutingFramePrecedesDone(t *testing.T) {
 	ts := httptest.NewServer(NewWithSource(routingFrameSource{def: &app.AppDef{}}, WithDriver(routingFrameDriver{})).Handler())

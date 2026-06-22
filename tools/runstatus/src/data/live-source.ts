@@ -361,6 +361,27 @@ export class LiveSource implements DataSource {
   }
 
   /**
+   * Rewind one CRR decision (the route-receipt chip's "rewind" affordance):
+   * reverse the route at decisionId and re-dispatch the original utterance,
+   * optionally under newClass. Resolves with the re-dispatched turn. An
+   * intent-class rewind rejects server-side ("not yet implemented") — the chip
+   * disables the control for those receipts so this is the defensive path.
+   */
+  rewindRoute(
+    sessionId: string,
+    decisionId: string,
+    newClass?: string,
+    reason?: string
+  ): Promise<TurnResult> {
+    return this.client.post<TurnResult>("runstatus.session.rewind_route", {
+      session_id: sessionId,
+      decision_id: decisionId,
+      ...(newClass ? { new_class: newClass } : {}),
+      ...(reason ? { reason } : {}),
+    });
+  }
+
+  /**
    * Cancel the in-flight streamed turn for this session (the chat "Stop"
    * button). Aborts the agent server-side — the running turn observes the
    * cancel and stops the agent subprocess — rather than only the frontend. The

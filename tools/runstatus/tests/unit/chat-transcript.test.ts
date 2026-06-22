@@ -291,6 +291,64 @@ describe("ChatTranscript", () => {
     expect(wrapper.find("[data-testid='offramp-chip']").exists()).toBe(true);
   });
 
+  it("emits 'rewind' with the decision_id when the rewind control is clicked on a lane-class receipt", async () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          {
+            role: "agent",
+            text: "Here's how that works…",
+            contextRoute: {
+              class: "help",
+              target_lane: "help",
+              confidence: 0.7,
+              decision_id: "sess-1:3",
+            },
+          },
+        ],
+      },
+    });
+    const btn = wrapper.find("[data-testid='route-rewind-btn']");
+    expect(btn.exists()).toBe(true);
+    // A lane-class receipt is rewindable: the control is enabled.
+    expect(btn.attributes("disabled")).toBeUndefined();
+    await btn.trigger("click");
+    const ev = wrapper.emitted("rewind");
+    expect(ev).toBeTruthy();
+    // It carries exactly the receipt's decision id (the rewind target).
+    expect(ev![0]).toEqual(["sess-1:3"]);
+    wrapper.unmount();
+  });
+
+  it("disables the rewind control for an intent-class receipt (not supported yet) and never emits", async () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          {
+            role: "agent",
+            text: "Workbench ready.",
+            contextRoute: {
+              class: "intent",
+              intent: "git.commit",
+              confidence: 0.82,
+              decision_id: "sess-1:7",
+            },
+          },
+        ],
+      },
+    });
+    const btn = wrapper.find("[data-testid='route-rewind-btn']");
+    expect(btn.exists()).toBe(true);
+    // Intent-class rewind isn't recoverable yet: the control is disabled with an
+    // explanatory tooltip rather than letting the operator trigger a server error.
+    expect(btn.attributes("disabled")).toBeDefined();
+    expect(btn.attributes("title")).toContain("rewind not available for this route yet");
+    // Even a forced click (jsdom fires the handler) is a guarded no-op.
+    await btn.trigger("click");
+    expect(wrapper.emitted("rewind")).toBeFalsy();
+    wrapper.unmount();
+  });
+
   it("omits the route receipt for a non-contextual agent turn", () => {
     const wrapper = mount(ChatTranscript, {
       props: { transcript: [{ role: "agent", text: "A normal room view." }] },

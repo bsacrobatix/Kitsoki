@@ -480,6 +480,54 @@ describe("useRunStore — write-side actions", () => {
     expect(store.transcript[1]!.isOffRamp).toBeUndefined();
   });
 
+  // ---- rewindRoute ----
+  // The route-receipt chip's rewind affordance drives store.rewindRoute, which
+  // reverses one CRR decision and applies the re-dispatched turn. It must call
+  // the source's rewindRoute with the decision id, push a "rewound" marker, and
+  // thread the re-dispatched turn through applyTurnResult.
+  it("rewindRoute calls the source with the decision id, applies the re-dispatched turn", async () => {
+    let captured: { decisionId: string; newClass?: string } | null = null;
+    const redispatched = turnResult({ state: "help-lane", view: "Here's how that works." });
+    const src = writeSource() as DataSource & {
+      rewindRoute: (sid: string, decisionId: string, newClass?: string) => Promise<TurnResult>;
+    };
+    src.rewindRoute = (_sid, decisionId, newClass) => {
+      captured = { decisionId, newClass };
+      return Promise.resolve(redispatched);
+    };
+
+    const store = useRunStore();
+    const out = await store.rewindRoute(src, "sess-1", "sess-1:3");
+
+    expect(captured).toEqual({ decisionId: "sess-1:3", newClass: undefined });
+    expect(out).toEqual(redispatched);
+    // A "rewound" marker precedes the re-dispatched agent reply.
+    expect(store.transcript[0]).toMatchObject({ role: "user" });
+    expect(store.transcript[0]!.text).toContain("sess-1:3");
+    expect(store.transcript[1]).toMatchObject({ role: "agent", text: "Here's how that works." });
+    expect(store.currentStatePath).toBe("help-lane");
+  });
+
+  it("rewindRoute is a no-op on a source without the optional method", async () => {
+    const src = writeSource(); // no rewindRoute
+    const store = useRunStore();
+    const out = await store.rewindRoute(src, "sess-1", "sess-1:3");
+    expect(out).toBeUndefined();
+    expect(store.transcript).toHaveLength(0);
+  });
+
+  it("rewindRoute propagates the engine's rejection (e.g. intent-class not supported)", async () => {
+    const src = writeSource() as DataSource & {
+      rewindRoute: () => Promise<TurnResult>;
+    };
+    src.rewindRoute = () =>
+      Promise.reject(new Error("class=intent rewind requires IntentAccepted recovery; not yet implemented"));
+    const store = useRunStore();
+    await expect(store.rewindRoute(src, "sess-1", "sess-1:7", "intent")).rejects.toThrow(
+      /not yet implemented/
+    );
+  });
+
   it("sendText pushes the raw text as the user entry and applies the result", async () => {
     let capturedInput = "";
     const src = writeSource({

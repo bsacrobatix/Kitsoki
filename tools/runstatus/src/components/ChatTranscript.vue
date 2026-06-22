@@ -59,6 +59,25 @@
               v-if="entry.contextRoute!.confidence"
               >{{ entry.contextRoute!.confidence.toFixed(2) }}</span
             >
+            <!-- Rewind affordance: reverse this one CRR decision and re-dispatch
+                 the original utterance. Disabled for an intent-class receipt —
+                 the engine can't yet recover the original intent from the
+                 journal, so we present a disabled control with an explanatory
+                 tooltip rather than letting the operator trigger a server error. -->
+            <button
+              type="button"
+              class="chat-route-receipt__rewind"
+              data-testid="route-rewind-btn"
+              :disabled="!canRewind(entry.contextRoute!)"
+              :title="
+                canRewind(entry.contextRoute!)
+                  ? `rewind this route (decision ${entry.contextRoute!.decision_id})`
+                  : 'rewind not available for this route yet'
+              "
+              @click="onRewind(entry.contextRoute!)"
+            >
+              ↺ rewind
+            </button>
           </div>
         </div>
         <!-- The turn's preserved thinking/tool feed, collapsed by default so
@@ -178,6 +197,26 @@ function routeReceiptTitle(r: ContextRouteInfo): string {
 }
 
 const props = defineProps<{ transcript: ChatEntry[] }>();
+
+// 'rewind' is emitted with the receipt's decision_id when the operator clicks
+// the rewind affordance on a (rewindable) route receipt; the owning surface
+// drives the run store's rewindRoute action with it.
+const emit = defineEmits<{ rewind: [decisionId: string] }>();
+
+/**
+ * A CRR receipt is rewindable only for the lane classes the engine can reverse
+ * today (help / room_request / meta_edit). An intent-class decision isn't yet
+ * recoverable from the journal, so its rewind control is disabled with a tooltip.
+ */
+function canRewind(r: ContextRouteInfo): boolean {
+  return !!r.decision_id && r.class !== "intent";
+}
+
+/** Emit the rewind request for a rewindable receipt (no-op when disabled). */
+function onRewind(r: ContextRouteInfo): void {
+  if (!canRewind(r)) return;
+  emit("rewind", r.decision_id);
+}
 
 const scrollEl = ref<HTMLElement | null>(null);
 const contentEl = ref<HTMLElement | null>(null);
@@ -426,6 +465,30 @@ watch(
 }
 .chat-route-receipt__arrow {
   opacity: 0.7;
+}
+/* Rewind affordance: a compact text button that sits inside the receipt pill.
+   Disabled (intent-class receipts the engine can't yet reverse) it dims and
+   shows a not-allowed cursor, with the "not available yet" tooltip. */
+.chat-route-receipt__rewind {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #115e59;
+  background: transparent;
+  border: 1px solid #5eead4;
+  border-radius: 999px;
+  padding: 0 6px;
+  margin-left: 2px;
+  cursor: pointer;
+}
+.chat-route-receipt__rewind:hover:not(:disabled) {
+  background: #99f6e4;
+}
+.chat-route-receipt__rewind:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .chat-route-receipt__target {
   font-weight: 700;

@@ -527,6 +527,32 @@ export const useRunStore = defineStore("run", () => {
     return result;
   }
 
+  /**
+   * Rewind one contextual-routing (CRR) decision: reverse the route identified
+   * by decisionId and re-dispatch the original utterance (optionally under a new
+   * class). Pushes a small "rewound …" user marker, then applies the
+   * re-dispatched turn so the transcript reflects the new route. Requires a
+   * source that exposes rewindRoute (the live session); a source without it is a
+   * no-op (the chip hides the control there). Rejects (propagated to the caller)
+   * when the engine can't rewind that route — e.g. an intent-class decision.
+   */
+  async function rewindRoute(
+    source: DataSource,
+    sessionId: string,
+    decisionId: string,
+    newClass?: string,
+    reason?: string
+  ): Promise<TurnResult | undefined> {
+    if (!source.rewindRoute) return undefined;
+    transcript.value.push({
+      role: "user",
+      text: `↺ rewound route ${decisionId}${newClass ? ` → ${newClass}` : ""}`,
+    });
+    const result = await source.rewindRoute(sessionId, decisionId, newClass, reason);
+    applyTurnResult(result);
+    return result;
+  }
+
   /** Set the selected event by index (drives inline row highlight). */
   function selectEvent(index: number): void {
     selectedEventIndex.value = index;
@@ -667,6 +693,7 @@ export const useRunStore = defineStore("run", () => {
     loadInitialView,
     submitIntent,
     sendText,
+    rewindRoute,
     applyTurnResult,
   };
 });

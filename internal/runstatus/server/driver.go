@@ -71,6 +71,16 @@ type Driver interface {
 	// unknown, or it is not teleportable (empty target state) — the surface
 	// renders such items read-only.
 	Teleport(ctx context.Context, notificationID string) (*orchestrator.TurnOutcome, error)
+
+	// RewindRoute reverses one contextual-routing (CRR) decision, identified by
+	// its stable decisionID ("<session_id>:<turn_number>"), and re-dispatches the
+	// original utterance under newClass. It backs the runstatus.session.rewind_route
+	// RPC the web route-receipt chip's "rewind" affordance calls. newClass may be
+	// empty for the lane classes the engine reverses today (help / room_request /
+	// meta_edit), in which case the engine reuses the journaled class; an
+	// intent-class rewind is not yet recoverable from the journal and returns an
+	// explicit error the surface presents gracefully (a disabled control), not a 500.
+	RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string) (*orchestrator.TurnOutcome, error)
 }
 
 // OrchestratorDriver adapts a live *orchestrator.Orchestrator + session id to
@@ -193,6 +203,14 @@ func (d OrchestratorDriver) Teleport(ctx context.Context, notificationID string)
 		return nil, fmt.Errorf("teleport: %w: notification %q has no destination", ErrNotTeleportable, notificationID)
 	}
 	return d.Orch.Teleport(ctx, d.SID, target)
+}
+
+// RewindRoute delegates to Orchestrator.RewindRoute, binding the session id.
+// The engine reverses the CRR decision at decisionID and re-dispatches the
+// original utterance under newClass; class=intent returns a not-yet-implemented
+// error (the original intent isn't recoverable from TurnStarted alone).
+func (d OrchestratorDriver) RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string) (*orchestrator.TurnOutcome, error) {
+	return d.Orch.RewindRoute(ctx, d.SID, decisionID, newClass, reason)
 }
 
 // IntentInfo resolves the intent's slot schema against `state` and derives the
