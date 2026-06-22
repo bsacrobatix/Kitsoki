@@ -22,6 +22,147 @@
     },
     {
       "type": "narrative",
+      "eyebrow": "The category",
+      "body": "Software work is a complex adaptive system.",
+      "lede": "People, agents, tools, artifacts, failures, and feedback loops keep perturbing each other.",
+      "hold": 180,
+      "narration": "Software work is a complex adaptive system: people, agents, tools, artifacts, failures, and feedback loops."
+    },
+    {
+      "type": "book",
+      "title": "Root 1: systems are open",
+      "books": [
+        {
+          "title": "General System Theory",
+          "subtitle": "Foundations, Development, Applications",
+          "authors": "Ludwig von Bertalanffy",
+          "publisher": "George Braziller",
+          "year": "1968",
+          "isbn": "9780807604533",
+          "cover": "assets/books/general-system-theory.jpg",
+          "takeaway": "A useful workflow has a boundary, but it is never sealed off from its environment."
+        }
+      ],
+      "caption": "Kitsoki treats each workflow as a bounded open system: explicit state, explicit inputs, explicit feedback.",
+      "hold": 240,
+      "narration": "Von Bertalanffy gives the first root: workflows need boundaries, but stay open to tools, people, artifacts, and feedback."
+    },
+    {
+      "type": "book",
+      "title": "Root 2: durable systems improve flow",
+      "books": [
+        {
+          "title": "Design in Nature",
+          "subtitle": "How the Constructal Law Governs Evolution",
+          "authors": "Adrian Bejan and J. Peder Zane",
+          "publisher": "Doubleday / Anchor",
+          "year": "2012",
+          "isbn": "9780307744340",
+          "cover": "assets/books/design-in-nature.jpg",
+          "takeaway": "Complex systems persist when their architecture makes currents easier to move."
+        }
+      ],
+      "caption": "Kitsoki is flow architecture for work: route the next useful action, preserve evidence, remove repeated friction.",
+      "hold": 210,
+      "narration": "Bejan and Zane's Constructal Law adds the second root: systems endure by evolving architectures that improve flow."
+    },
+    {
+      "type": "book",
+      "title": "Root 3: cognition is a loop",
+      "books": [
+        {
+          "title": "The Tree of Knowledge",
+          "subtitle": "The Biological Roots of Human Understanding",
+          "authors": "Humberto R. Maturana and Francisco J. Varela",
+          "publisher": "Shambhala",
+          "year": "1992 revised edition",
+          "isbn": "9780877736424",
+          "cover": "assets/books/tree-of-knowledge.jpg",
+          "takeaway": "Knowing is enacted through a self-maintaining loop between agent and environment."
+        }
+      ],
+      "caption": "Kitsoki makes the agent-artifact loop explicit enough to inspect, replay, test, and improve.",
+      "hold": 210,
+      "narration": "Maturana and Varela add the third root: cognition is a self-maintaining loop between agent and environment."
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Flow, boundary, cognition",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 940 760",
+          "nodes": [
+            {
+              "id": "boundary",
+              "label": "Boundary",
+              "sub": "workflow state",
+              "x": 100,
+              "y": 40,
+              "w": 600,
+              "h": 130,
+              "style": "primary"
+            },
+            {
+              "id": "flow",
+              "label": "Flow",
+              "sub": "attention and evidence",
+              "x": 100,
+              "y": 220,
+              "w": 600,
+              "h": 130
+            },
+            {
+              "id": "cognition",
+              "label": "Cognition",
+              "sub": "agent artifact loop",
+              "x": 100,
+              "y": 400,
+              "w": 600,
+              "h": 130
+            },
+            {
+              "id": "kitsoki",
+              "label": "Kitsoki",
+              "sub": "adaptive workflow",
+              "x": 100,
+              "y": 580,
+              "w": 600,
+              "h": 130,
+              "style": "secondary"
+            }
+          ],
+          "edges": [
+            {
+              "from": "boundary",
+              "to": "flow"
+            },
+            {
+              "from": "flow",
+              "to": "cognition"
+            },
+            {
+              "from": "cognition",
+              "to": "kitsoki"
+            },
+            {
+              "from": "kitsoki",
+              "to": "boundary",
+              "label": "updates",
+              "style": "back",
+              "bus": 800,
+              "lift": -15,
+              "land": 15
+            }
+          ]
+        }
+      ],
+      "caption": "Kitsoki makes the adaptive loop explicit: typed boundaries, directed flow, durable memory, and testable feedback.",
+      "hold": 210,
+      "narration": "Kitsoki makes the adaptive loop explicit: typed boundaries, directed flow, durable memory, and testable feedback."
+    },
+    {
+      "type": "narrative",
       "eyebrow": "The setting",
       "body": "You have a workflow. People drive it by chatting where the work already lives.",
       "lede": "A GitHub issue. A Jira ticket. A Slack thread. A CRM record.",
