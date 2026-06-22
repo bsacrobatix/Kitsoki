@@ -44,18 +44,22 @@ func (m HarnessMode) normalize() HarnessMode {
 // reaches it.
 //
 // mode is already normalized (replay|live); recordingPath is the replay
-// recording for replay mode (empty for live). Returning an error fails the open
-// call fast with a structured tool error rather than half-creating a handle.
-type HarnessBuilder func(mode HarnessMode, recordingPath string) (harness.Harness, error)
+// recording for replay mode (empty for live); storyPath is the story directory
+// the session drives (a live builder loads its def for prompt context — replay
+// ignores it). Returning an error fails the open call fast with a structured
+// tool error rather than half-creating a handle.
+type HarnessBuilder func(mode HarnessMode, recordingPath, storyPath string) (harness.Harness, error)
 
-// DefaultHarnessBuilder is the production harness seam. Replay mode builds a
-// ReplayHarness from the recording path (no LLM); live mode is wired by the
-// driving slice (slice 7) and reported as unavailable here so a premature live
-// open fails loudly instead of silently no-op'ing.
-func DefaultHarnessBuilder(mode HarnessMode, recordingPath string) (harness.Harness, error) {
+// DefaultHarnessBuilder is the in-package harness seam. Replay mode builds a
+// ReplayHarness from the recording path (no LLM); live mode is left to a
+// production-injected builder (the studio MCP server wires one that resolves
+// on-disk credentials — cmd/kitsoki studioHarnessBuilder) and reported as
+// unavailable here so the no-LLM default never silently constructs a live
+// harness. storyPath is ignored by the replay branch.
+func DefaultHarnessBuilder(mode HarnessMode, recordingPath, storyPath string) (harness.Harness, error) {
 	switch mode.normalize() {
 	case HarnessLive:
-		return nil, fmt.Errorf("studio: harness:live is not wired in the server core (driving lands in a later slice)")
+		return nil, fmt.Errorf("studio: harness:live requires a live-capable harness builder (none injected; the studio MCP server wires one)")
 	default:
 		if recordingPath == "" {
 			return nil, fmt.Errorf("studio: harness:replay requires a recording path")
@@ -238,7 +242,9 @@ func (ss *StudioSession) OpenSession(p OpenSessionParams) (*SessionHandle, error
 		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session handle %q is already open", key)}
 	}
 
-	h, err := ss.build(mode, p.RecordingPath)
+	// OpenSession is metadata-only (no driving runtime), so there is no story to
+	// load a live def from; pass an empty story path.
+	h, err := ss.build(mode, p.RecordingPath, "")
 	if err != nil {
 		return nil, &openError{Code: ErrHarness, Msg: fmt.Sprintf("build %s harness: %v", mode, err)}
 	}
@@ -293,7 +299,9 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session handle %q is already open", key)}
 	}
 
-	h, err := ss.build(mode, p.RecordingPath)
+	// A driving session carries the story path so a live builder can load the
+	// def for prompt context (replay ignores it).
+	h, err := ss.build(mode, p.RecordingPath, p.StoryPath)
 	if err != nil {
 		return nil, &openError{Code: ErrHarness, Msg: fmt.Sprintf("build %s harness: %v", mode, err)}
 	}

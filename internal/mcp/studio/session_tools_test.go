@@ -51,7 +51,7 @@ func (f *failingLive) Close() error { return nil }
 // builds a real no-LLM ReplayHarness for replay mode (so orch.Turn replays the
 // cassette) and FAILS for live, proving a default-mode handle never reaches live.
 func replayBuilder() studio.HarnessBuilder {
-	return func(mode studio.HarnessMode, recordingPath string) (harness.Harness, error) {
+	return func(mode studio.HarnessMode, recordingPath, _ string) (harness.Harness, error) {
 		if mode == studio.HarnessLive {
 			return nil, errLiveForbidden
 		}
@@ -149,7 +149,7 @@ func TestSessionDrive_NoLiveFallthrough(t *testing.T) {
 	// Inject a builder whose replay harness is a VCR(none) wrapping a FAILING
 	// live — a miss under none-mode must error and never call live.
 	fail := &failingLive{}
-	sess := studio.NewStudioSession(func(mode studio.HarnessMode, rec string) (harness.Harness, error) {
+	sess := studio.NewStudioSession(func(mode studio.HarnessMode, rec, _ string) (harness.Harness, error) {
 		if mode == studio.HarnessLive {
 			return nil, errLiveForbidden
 		}

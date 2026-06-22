@@ -151,7 +151,7 @@ func openProbe(t *testing.T, srv *Server) *SessionHandle {
 
 func probeServer(t *testing.T) *Server {
 	t.Helper()
-	return NewServer(NewStudioSession(func(mode HarnessMode, rec string) (harness.Harness, error) {
+	return NewServer(NewStudioSession(func(mode HarnessMode, rec, _ string) (harness.Harness, error) {
 		return harness.NewReplay(rec)
 	}))
 }

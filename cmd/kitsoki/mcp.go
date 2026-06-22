@@ -6,13 +6,52 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/harness"
 	studio "kitsoki/internal/mcp/studio"
 )
+
+// studioHarnessBuilder is the production studio harness seam. Replay mode
+// delegates to studio.DefaultHarnessBuilder (a no-LLM ReplayHarness over the
+// recording). Live mode loads the driven story's def for prompt context and
+// constructs a direct-API LiveHarness from on-disk credentials — the same
+// resolution `kitsoki drive --harness live` uses — so an MCP-driven
+// session.new(harness:live) routes through a real LLM. The studio core keeps
+// live OUT of its in-package default (DefaultHarnessBuilder refuses it); wiring
+// it here makes "the MCP is the first-class LLM interface" hold without the CLI.
+func studioHarnessBuilder(mode studio.HarnessMode, recordingPath, storyPath string) (harness.Harness, error) {
+	if mode != studio.HarnessLive {
+		return studio.DefaultHarnessBuilder(mode, recordingPath, storyPath)
+	}
+	if storyPath == "" {
+		return nil, fmt.Errorf("studio: harness:live requires a story_path for prompt context")
+	}
+	// session.new accepts either a story directory or an app.yaml; loadAppWithEnv
+	// wants the file, so resolve a directory to its conventional app.yaml entry
+	// (matching the runtime's dir-capable app.Load).
+	appPath := storyPath
+	if fi, statErr := os.Stat(storyPath); statErr == nil && fi.IsDir() {
+		appPath = filepath.Join(storyPath, "app.yaml")
+	}
+	def, err := loadAppWithEnv(appPath)
+	if err != nil {
+		return nil, fmt.Errorf("studio live harness: %w", err)
+	}
+	client, _, err := newLiveClient()
+	if err != nil {
+		return nil, fmt.Errorf("studio live harness: %w", err)
+	}
+	lh, err := harness.NewLive(&client, "", def)
+	if err != nil {
+		return nil, fmt.Errorf("studio live harness: %w", err)
+	}
+	return lh, nil
+}
 
 // mcpCmd starts the kitsoki studio MCP server on stdio. Unlike `kitsoki serve`
 // (which exposes one app's `transition` tool), `kitsoki mcp` exposes the studio
@@ -66,10 +105,11 @@ docs land):
 				dbPath = defaultDBPath()
 			}
 
-			// Build the studio session. A nil HarnessBuilder falls back to the
-			// production DefaultHarnessBuilder (replay → no LLM; live deferred to
-			// the driving slice).
-			sess := studio.NewStudioSession(nil)
+			// Build the studio session with the live-capable production builder:
+			// replay stays no-LLM (DefaultHarnessBuilder), and harness:live
+			// resolves on-disk credentials to a direct-API LiveHarness so the MCP
+			// can drive a real LLM with no CLI.
+			sess := studio.NewStudioSession(studioHarnessBuilder)
 
 			// Optionally bind an initial authoring workspace. Loading is
 			// best-effort: a load/validation error is cached on the handle (so a

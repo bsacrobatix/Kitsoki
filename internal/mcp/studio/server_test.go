@@ -35,7 +35,7 @@ var errLiveForbidden = errors.New("live harness must not be constructed for a de
 // and FAILS for live mode. A default-mode (replay) open succeeds with the stub;
 // any live build errors with errLiveForbidden.
 func stubBuilder() studio.HarnessBuilder {
-	return func(mode studio.HarnessMode, recordingPath string) (harness.Harness, error) {
+	return func(mode studio.HarnessMode, recordingPath, _ string) (harness.Harness, error) {
 		if mode == studio.HarnessLive {
 			return nil, errLiveForbidden
 		}
@@ -262,11 +262,12 @@ func TestNoLiveFallthrough(t *testing.T) {
 // TestDefaultHarnessBuilder_NoLLM confirms the production builder never produces
 // a live harness in the server core and that replay requires a recording.
 func TestDefaultHarnessBuilder_NoLLM(t *testing.T) {
-	// Live is unavailable in the server core (deferred to the driving slice).
-	_, err := studio.DefaultHarnessBuilder(studio.HarnessLive, "")
-	require.Error(t, err, "live harness must not be constructible in the server core")
+	// Live is unavailable in the in-package default (wired by a production
+	// builder in cmd/kitsoki, never silently no-op'd here).
+	_, err := studio.DefaultHarnessBuilder(studio.HarnessLive, "", "")
+	require.Error(t, err, "live harness must not be constructible in the in-package default")
 
 	// Replay without a recording fails fast rather than silently no-LLM-no-op.
-	_, err = studio.DefaultHarnessBuilder(studio.HarnessReplay, "")
+	_, err = studio.DefaultHarnessBuilder(studio.HarnessReplay, "", "")
 	require.Error(t, err, "replay requires a recording path")
 }
