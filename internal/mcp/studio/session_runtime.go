@@ -131,7 +131,7 @@ func (rt *sessionRuntime) Close() {
 // backend (synthetic, codex, …) instead of the static default — the same
 // remap `kitsoki turn --profile` applies. An empty map leaves the session on the
 // legacy default-backend path (selectedProfile is then ignored).
-func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any) (*sessionRuntime, error) {
+func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, resolver app.ImportResolver) (*sessionRuntime, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -175,7 +175,7 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	rt.sink = sink
 	rt.closers = append(rt.closers, func() { _ = sink.Close() })
 
-	def, err := app.Load(storyPath)
+	def, err := app.LoadWithResolver(storyPath, nil, resolver)
 	if err != nil {
 		rt.Close()
 		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: load story %q: %v", storyPath, err)}

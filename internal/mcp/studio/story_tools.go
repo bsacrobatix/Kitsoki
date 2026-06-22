@@ -61,7 +61,7 @@ func (srv *Server) registerStoryTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "story.test",
-		Description: "Run the story's deterministic flow fixtures (testrunner.RunFlows — no LLM, replay/cassette honored). {dir?, flows?}: flows overrides the default <dir>/flows/*.yaml glob. Returns a per-fixture pass/fail report.",
+		Description: "Run the story's deterministic flow fixtures (testrunner.RunFlows — no LLM, replay/cassette honored). {dir?, flows?, recording?, allow_missing_recording?, fail_fast?, verbose?, json?, trace_out?}: flows overrides the default <dir>/flows/*.yaml glob. Returns a per-fixture pass/fail report.",
 	}, srv.handleStoryTest)
 }
 
@@ -145,6 +145,19 @@ type StoryTestArgs struct {
 	Dir string `json:"dir,omitempty"`
 	// Flows overrides the flow glob (default <dir>/flows/*.yaml).
 	Flows string `json:"flows,omitempty"`
+	// Recording overrides the recording path declared in fixture files.
+	Recording string `json:"recording,omitempty"`
+	// AllowMissingRecording treats recording misses as skips rather than failures.
+	AllowMissingRecording bool `json:"allow_missing_recording,omitempty"`
+	// FailFast stops after the first failing fixture.
+	FailFast bool `json:"fail_fast,omitempty"`
+	// Verbose enables per-turn verbose output in the underlying flow runner.
+	Verbose bool `json:"verbose,omitempty"`
+	// JSON writes the full JSON flow report to this path, matching CLI --json.
+	JSON string `json:"json,omitempty"`
+	// TraceOut writes the authoritative JSONL trace to this path, matching CLI
+	// --trace-out. Intended for single-fixture reconstruction.
+	TraceOut string `json:"trace_out,omitempty"`
 }
 
 // StoryTestOK is the story.test result: the per-fixture pass/fail report.
@@ -215,7 +228,7 @@ func (srv *Server) handleStoryWrite(
 	return nil, StoryWriteOK{
 		OK:         true,
 		Written:    args.Path,
-		Validation: validateStory(appPath),
+		Validation: validateStory(appPath, srv.importResolver),
 	}, nil
 }
 
@@ -230,7 +243,7 @@ func (srv *Server) handleStoryValidate(
 	if rerr != nil {
 		return rerr, nil, nil
 	}
-	return nil, validateStory(appPath), nil
+	return nil, validateStory(appPath, srv.importResolver), nil
 }
 
 // handleStoryGraph computes the room graph view. The mode is selected by the
@@ -245,7 +258,7 @@ func (srv *Server) handleStoryGraph(
 	if rerr != nil {
 		return rerr, nil, nil
 	}
-	a, err := loadApp(appPath)
+	a, err := loadApp(appPath, srv.importResolver)
 	if err != nil {
 		return buildToolError(ErrBadRequest, fmt.Sprintf("load story: %v", err)), nil, nil
 	}
@@ -282,7 +295,15 @@ func (srv *Server) handleStoryTest(
 	if glob == "" {
 		glob = filepath.Join(storyDir, "flows", "*.yaml")
 	}
-	report, err := testrunner.RunFlows(ctx, appPath, glob, testrunner.FlowOptions{})
+	report, err := testrunner.RunFlows(ctx, appPath, glob, testrunner.FlowOptions{
+		RecordingOverride:     args.Recording,
+		AllowMissingRecording: args.AllowMissingRecording,
+		FailFast:              args.FailFast,
+		Verbose:               args.Verbose,
+		JSONOut:               args.JSON,
+		TracePath:             args.TraceOut,
+		ImportResolver:        srv.importResolver,
+	})
 	if err != nil {
 		return buildToolError(ErrBadRequest, fmt.Sprintf("run flows: %v", err)), nil, nil
 	}
@@ -350,8 +371,8 @@ func safeJoin(root, rel string) (string, error) {
 // loadApp loads and compiles the story at appPath to an app.App, mirroring the
 // web editor's EditorApp construction (registry.go) so story.graph and the
 // /editor view are the same computation.
-func loadApp(appPath string) (app.App, error) {
-	def, err := app.Load(appPath)
+func loadApp(appPath string, resolver app.ImportResolver) (app.App, error) {
+	def, err := app.LoadWithResolver(appPath, nil, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -360,8 +381,8 @@ func loadApp(appPath string) (app.App, error) {
 
 // validateStory loads the story and projects app.Load's error to the structured
 // {ok, errors[]} result. ok is true exactly when no ValidationError was found.
-func validateStory(appPath string) StoryValidateOK {
-	_, err := app.Load(appPath)
+func validateStory(appPath string, resolver app.ImportResolver) StoryValidateOK {
+	_, err := app.LoadWithResolver(appPath, nil, resolver)
 	if err == nil {
 		return StoryValidateOK{OK: true, Errors: []ValidationItem{}}
 	}

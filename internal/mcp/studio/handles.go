@@ -300,6 +300,9 @@ type OpenDrivingSessionParams struct {
 	// InitialWorld seeds session world vars before the initial on_enter (the
 	// studio twin of a flow fixture's initial_world:). Nil/empty is a no-op.
 	InitialWorld map[string]any
+	// ImportResolver resolves @kitsoki/<name> imports when loading the story for
+	// the driving runtime. Nil keeps the loader's legacy behaviour.
+	ImportResolver app.ImportResolver
 }
 
 // OpenDrivingSession opens a driving-session handle backed by a live runtime: it
@@ -326,11 +329,19 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session handle %q is already open", key)}
 	}
 
-	// A driving session carries the story path so a live builder can load the
-	// def for prompt context (replay ignores it).
-	h, err := ss.build(mode, p.RecordingPath, p.StoryPath)
-	if err != nil {
-		return nil, &openError{Code: ErrHarness, Msg: fmt.Sprintf("build %s harness: %v", mode, err)}
+	// A direct-submit replay session does not need a routing cassette: it can
+	// use the runtime's no-route harness and still accept session.submit calls.
+	// Free-text session.drive will fail loudly through noRouteHarness rather
+	// than falling through to live.
+	var h harness.Harness
+	if !(mode == HarnessReplay && p.RecordingPath == "") {
+		var err error
+		// A driving session carries the story path so a live builder can load the
+		// def for prompt context (replay ignores it).
+		h, err = ss.build(mode, p.RecordingPath, p.StoryPath)
+		if err != nil {
+			return nil, &openError{Code: ErrHarness, Msg: fmt.Sprintf("build %s harness: %v", mode, err)}
+		}
 	}
 
 	// Resolve the session's profile selection: an explicit per-session profile
@@ -343,7 +354,7 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 
 	// newSessionRuntime takes ownership of h: on a returned error h is already
 	// closed; on success rt.Close tears it down.
-	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, ss.harnessProfiles, selectedProfile, p.InitialWorld)
+	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, ss.harnessProfiles, selectedProfile, p.InitialWorld, p.ImportResolver)
 	if err != nil {
 		// h was already closed inside newSessionRuntime on error.
 		return nil, err

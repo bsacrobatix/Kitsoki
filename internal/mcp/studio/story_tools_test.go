@@ -3,6 +3,7 @@ package studio_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -46,6 +47,16 @@ func newStudioWithWorkspace(ctx context.Context, t *testing.T, dir string) *mcps
 	_, err := sess.OpenWorkspace(studio.OpenWorkspaceParams{Dir: dir, Def: def, LoadErr: loadErr})
 	require.NoError(t, err, "open workspace")
 	srv := studio.NewServer(sess)
+	return connectInProcess(ctx, t, srv)
+}
+
+func newStudioWithWorkspaceAndResolver(ctx context.Context, t *testing.T, dir string, resolver app.ImportResolver) *mcpsdk.ClientSession {
+	t.Helper()
+	sess := studio.NewStudioSession(stubBuilder())
+	def, loadErr := app.LoadWithResolver(filepath.Join(dir, "app.yaml"), nil, resolver)
+	_, err := sess.OpenWorkspace(studio.OpenWorkspaceParams{Dir: dir, Def: def, LoadErr: loadErr})
+	require.NoError(t, err, "open workspace")
+	srv := studio.NewServer(sess, studio.WithImportResolver(resolver))
 	return connectInProcess(ctx, t, srv)
 }
 
@@ -199,6 +210,115 @@ func TestStoryTestReproducesFlows(t *testing.T) {
 	for _, r := range got.Results {
 		assert.True(t, r.Passed || r.Skipped, "fixture %s passed or skipped; failures=%v", r.File, r.Failures)
 	}
+}
+
+func TestStoryTestExposesCLIFlowOptions(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(repoRoot(t), "stories", "inbox-demo")
+	cs := newStudioWithWorkspace(ctx, t, dir)
+	outDir := t.TempDir()
+	jsonPath := filepath.Join(outDir, "report.json")
+	tracePath := filepath.Join(outDir, "trace.jsonl")
+
+	var got studio.StoryTestOK
+	callStory(ctx, t, cs, "story.test", map[string]any{
+		"flows":     filepath.Join(dir, "flows", "background_notifies.yaml"),
+		"json":      jsonPath,
+		"trace_out": tracePath,
+		"fail_fast": true,
+		"verbose":   true,
+	}, &got)
+
+	assert.True(t, got.OK, "inbox demo flow should pass; failed=%d", got.Failed)
+	assert.Equal(t, 1, got.Passed)
+	assert.FileExists(t, jsonPath, "story.test should expose CLI --json")
+	assert.FileExists(t, tracePath, "story.test should expose CLI --trace-out")
+
+	var report struct {
+		Passed int `json:"passed"`
+		Failed int `json:"failed"`
+	}
+	raw, err := os.ReadFile(jsonPath)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &report))
+	assert.Equal(t, got.Passed, report.Passed)
+	assert.Equal(t, got.Failed, report.Failed)
+}
+
+func TestStoryValidateUsesInjectedImportResolver(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	childDir := filepath.Join(root, "child")
+	parentDir := filepath.Join(root, "parent")
+	require.NoError(t, os.MkdirAll(childDir, 0o755))
+	require.NoError(t, os.MkdirAll(parentDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(childDir, "app.yaml"), []byte(`app:
+  id: child
+  version: "1"
+root: idle
+world: {}
+states:
+  idle:
+    description: Child idle
+    terminal: true
+`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(parentDir, "app.yaml"), []byte(`app:
+  id: parent
+  version: "1"
+root: main
+world: {}
+imports:
+  c:
+    source: "@kitsoki/child"
+    entry: idle
+states:
+  main:
+    description: Main
+    terminal: true
+`), 0o644))
+	resolver := func(name, _ string, override bool) (string, error) {
+		if !override || name != "child" {
+			return "", nil
+		}
+		return filepath.Join(childDir, "app.yaml"), nil
+	}
+	cs := newStudioWithWorkspaceAndResolver(ctx, t, parentDir, resolver)
+
+	var got studio.StoryValidateOK
+	callStory(ctx, t, cs, "story.validate", nil, &got)
+	assert.True(t, got.OK, "resolver should make @kitsoki/child loadable: %+v", got.Errors)
+}
+
+func TestStoryValidateReportsResolverFailure(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(`app:
+  id: parent
+  version: "1"
+root: main
+world: {}
+imports:
+  c:
+    source: "@kitsoki/missing"
+    entry: idle
+states:
+  main:
+    description: Main
+    terminal: true
+`), 0o644))
+	resolver := func(name, _ string, override bool) (string, error) {
+		if override {
+			return "", fmt.Errorf("missing story %s", name)
+		}
+		return "", nil
+	}
+	cs := newStudioWithWorkspaceAndResolver(ctx, t, dir, resolver)
+
+	var got studio.StoryValidateOK
+	callStory(ctx, t, cs, "story.validate", nil, &got)
+	require.False(t, got.OK)
+	require.NotEmpty(t, got.Errors)
+	assert.Contains(t, got.Errors[0].Message, "missing story missing")
 }
 
 // ─── 2.5 path-escape: story.write ../../etc/x is rejected ─────────────────────

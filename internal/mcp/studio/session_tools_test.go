@@ -182,6 +182,43 @@ func TestSessionDrive_NoLiveFallthrough(t *testing.T) {
 	assert.Equal(t, 0, fail.calls, "replay+none miss must NEVER call the live harness")
 }
 
+func TestSessionNew_ReplayWithoutCassetteAllowsDirectSubmitOnly(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": cloakApp,
+		"harness":    "replay",
+		"trace":      t.TempDir() + "/trace.jsonl",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new without cassette should open for direct submit: %s", contentText(res))
+	var ok studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
+	require.Equal(t, "foyer", ok.State)
+
+	res, err = callTool(ctx, cs, "session.submit", map[string]any{
+		"handle": ok.Handle,
+		"intent": "go",
+		"slots":  map[string]any{"direction": "west"},
+	})
+	require.NoError(t, err)
+	submitted := driveResult(t, res)
+	assert.True(t, submitted.OK)
+	assert.Equal(t, "cloakroom", submitted.Outcome.State)
+
+	res, err = callTool(ctx, cs, "session.drive", map[string]any{
+		"handle": ok.Handle,
+		"input":  "go east",
+	})
+	require.NoError(t, err)
+	driven := driveResult(t, res)
+	assert.False(t, driven.OK)
+	assert.Equal(t, "error", driven.Outcome.Mode)
+	assert.Contains(t, driven.Outcome.Error, "noRouteHarness")
+}
+
 // TestSessionNew_LiveIsOptIn confirms harness:live takes the live builder branch
 // (the only path that reaches it), surfaced as a structured ErrHarness here
 // because the test builder forbids live — proving live is never the default.

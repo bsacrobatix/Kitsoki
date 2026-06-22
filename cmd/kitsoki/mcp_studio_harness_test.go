@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,4 +36,21 @@ func TestStudioHarnessBuilder_ReplayUnchanged(t *testing.T) {
 	// proving the replay branch is reached (not the live one).
 	_, err := studioHarnessBuilder(studio.HarnessReplay, "", "")
 	require.Error(t, err)
+}
+
+func TestStudioImportResolverStoriesDir(t *testing.T) {
+	storiesDir := t.TempDir()
+	storyDir := filepath.Join(storiesDir, "child")
+	require.NoError(t, os.MkdirAll(storyDir, 0o755))
+	appPath := filepath.Join(storyDir, "app.yaml")
+	require.NoError(t, os.WriteFile(appPath, []byte("app:\n  id: child\n  version: \"1\"\nroot: idle\nworld: {}\nstates:\n  idle:\n    description: Idle\n    terminal: true\n"), 0o644))
+
+	resolver := studioImportResolver(storiesDir)
+	got, err := resolver("child", "", true)
+	require.NoError(t, err)
+	require.Equal(t, appPath, got)
+
+	_, err = resolver("missing", "", true)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--stories-dir=")
 }

@@ -17,6 +17,29 @@ import (
 	"kitsoki/internal/webconfig"
 )
 
+// studioImportResolver returns the import resolver used by `kitsoki mcp`.
+// Without --stories-dir it is exactly the CLI resolver used by `kitsoki test
+// flows`; with --stories-dir it treats that directory as an explicit
+// @kitsoki/<name> story root before falling back to the normal embedded-library
+// resolver.
+func studioImportResolver(storiesDir string) app.ImportResolver {
+	base := buildImportResolver()
+	if storiesDir == "" {
+		return base
+	}
+	return func(name, importerDir string, override bool) (string, error) {
+		if override {
+			candidate := filepath.Join(storiesDir, name, "app.yaml")
+			if _, err := os.Stat(candidate); err != nil {
+				return "", fmt.Errorf("--stories-dir=%s: story %q not found (looked for %s): %w",
+					storiesDir, name, candidate, err)
+			}
+			return candidate, nil
+		}
+		return base(name, importerDir, override)
+	}
+}
+
 // studioHarnessBuilder is the production studio harness seam. Replay mode
 // delegates to studio.DefaultHarnessBuilder (a no-LLM ReplayHarness over the
 // recording). Live mode loads the driven story's def for prompt context and
@@ -147,7 +170,10 @@ docs land):
 			// and write rendered assets under the default artifacts dir. The
 			// studio package stays exec/network-free; this is the only production
 			// seam that shells out.
-			srvOpts := []studio.ServerOption{studio.WithIssueFiler(ghIssueFiler)}
+			srvOpts := []studio.ServerOption{
+				studio.WithIssueFiler(ghIssueFiler),
+				studio.WithImportResolver(studioImportResolver(storiesDir)),
+			}
 			if readOnly {
 				srvOpts = append(srvOpts, studio.ReadOnly())
 			}

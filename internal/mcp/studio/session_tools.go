@@ -275,13 +275,14 @@ func (srv *Server) handleSessionNew(
 		return buildToolError(ErrBadRequest, err.Error()), nil, nil
 	}
 	sh, err := srv.sess.OpenDrivingSession(ctx, OpenDrivingSessionParams{
-		Key:           args.Key,
-		Mode:          HarnessMode(args.Harness),
-		RecordingPath: args.Cassette,
-		StoryPath:     args.StoryPath,
-		TracePath:     tracePath,
-		Profile:       args.Profile,
-		InitialWorld:  args.InitialWorld,
+		Key:            args.Key,
+		Mode:           HarnessMode(args.Harness),
+		RecordingPath:  args.Cassette,
+		StoryPath:      args.StoryPath,
+		TracePath:      tracePath,
+		Profile:        args.Profile,
+		InitialWorld:   args.InitialWorld,
+		ImportResolver: srv.importResolver,
 	})
 	if err != nil {
 		code, msg := AsToolError(err)
@@ -318,12 +319,13 @@ func (srv *Server) handleSessionAttach(
 		return buildToolError(ErrBadRequest, err.Error()), nil, nil
 	}
 	sh, err := srv.sess.OpenDrivingSession(ctx, OpenDrivingSessionParams{
-		Key:           args.Key,
-		Mode:          HarnessMode(args.Harness),
-		RecordingPath: args.Cassette,
-		StoryPath:     args.StoryPath,
-		TracePath:     tracePath,
-		Profile:       args.Profile,
+		Key:            args.Key,
+		Mode:           HarnessMode(args.Harness),
+		RecordingPath:  args.Cassette,
+		StoryPath:      args.StoryPath,
+		TracePath:      tracePath,
+		Profile:        args.Profile,
+		ImportResolver: srv.importResolver,
 	})
 	if err != nil {
 		code, msg := AsToolError(err)
@@ -657,7 +659,7 @@ func (srv *Server) composeRenderFrame(ctx context.Context, args RenderArgs, cols
 		}
 		return rt.frame(cols, rows), nil
 	case args.StoryPath != "":
-		frame, err := specFrame(ctx, args.StoryPath, args.State, args.World, cols, rows)
+		frame, err := srv.specFrame(ctx, args.StoryPath, args.State, args.World, cols, rows)
 		if err != nil {
 			code, msg := AsToolError(err)
 			return tui.Frame{}, buildToolError(code, msg)
@@ -675,14 +677,14 @@ func (srv *Server) composeRenderFrame(ctx context.Context, args RenderArgs, cols
 // composer model, and composes the Frame. The ephemeral runtime is torn down
 // before returning, so a spec render leaves nothing behind and touches no open
 // handle.
-func specFrame(ctx context.Context, storyPath, state string, world map[string]any, cols, rows int) (tui.Frame, error) {
+func (srv *Server) specFrame(ctx context.Context, storyPath, state string, world map[string]any, cols, rows int) (tui.Frame, error) {
 	tracePath, err := resolveTracePath("")
 	if err != nil {
 		return tui.Frame{}, err
 	}
 	// No harness, no profiles, no seed: a spec render is a pure re-render and
 	// never calls orch.Turn or dispatches an agent.
-	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "", nil)
+	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "", nil, srv.importResolver)
 	if err != nil {
 		return tui.Frame{}, err
 	}

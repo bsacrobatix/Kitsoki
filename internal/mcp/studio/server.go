@@ -34,6 +34,8 @@ import (
 	"context"
 	"encoding/json"
 
+	"kitsoki/internal/app"
+
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -70,6 +72,9 @@ type Server struct {
 	// artifactsDir is where issue.create writes rendered assets. Empty →
 	// defaultIssueArtifactsDir. See WithArtifactsDir.
 	artifactsDir string
+	// importResolver is the loader/test resolver used for @kitsoki/<name>
+	// imports. It is the MCP twin of the CLI's buildImportResolver seam.
+	importResolver app.ImportResolver
 }
 
 // ServerOption configures a studio Server at construction.
@@ -79,6 +84,12 @@ type ServerOption func(*Server)
 // tools and replay-default session driving stay available — read-only here means
 // "cannot edit the story tree", not "cannot run the story". See Server.readOnly.
 func ReadOnly() ServerOption { return func(s *Server) { s.readOnly = true } }
+
+// WithImportResolver threads the same import-resolution seam used by the CLI
+// into story.* and session.* tools. Nil keeps the loader's legacy behaviour.
+func WithImportResolver(resolver app.ImportResolver) ServerOption {
+	return func(s *Server) { s.importResolver = resolver }
+}
 
 // NewServer constructs a studio Server over the given StudioSession and registers
 // the studio.ping / studio.handles tools. Pass a session built with NewStudioSession
