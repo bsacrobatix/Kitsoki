@@ -12,15 +12,17 @@ import (
 )
 
 // commands_work.go - single-pane TUI "/work": print the active async work
-// queue for this session. This is the terminal counterpart to web
+// queue for this session. "/work --all" broadens background Claude PTY rows to
+// every session on this host. This is the terminal counterpart to web
 // runstatus.work.list and studio.work: one compact place to see unread
 // notifications, active background jobs, queued chat drives, and backgrounded
 // Claude PTYs without leaving the current flow.
-func renderWorkBlock(m RootModel, _ []string) (RootModel, string) {
+func renderWorkBlock(m RootModel, args []string) (RootModel, string) {
 	r := blocks.New(m.transcript.width, m.currentTheme())
 	if m.jobStore == nil && m.chatStore == nil {
 		return m, r.SlashOutput("(work: no job or chat store wired - pass --db for async work tracking)")
 	}
+	allSessions := workAllSessions(args)
 
 	ctx := context.Background()
 	var rows []workRow
@@ -57,7 +59,7 @@ func renderWorkBlock(m RootModel, _ []string) (RootModel, string) {
 			errs = append(errs, "sessions: "+err.Error())
 		} else {
 			var ptyRows []workRow
-			ptyRows, attachTargets = workRowsForPTYs(ctx, m.chatStore, string(m.sid), ptys)
+			ptyRows, attachTargets = workRowsForPTYs(ctx, m.chatStore, string(m.sid), ptys, allSessions)
 			rows = append(rows, ptyRows...)
 		}
 	}
@@ -67,11 +69,18 @@ func renderWorkBlock(m RootModel, _ []string) (RootModel, string) {
 	}
 	m.sessionList = attachTargets
 	if len(rows) == 0 {
+		if allSessions {
+			return m, r.SlashOutput("(work: no active async work across sessions)")
+		}
 		return m, r.SlashOutput("(work: no active async work)")
 	}
 
 	var sb strings.Builder
-	sb.WriteString(r.SlashOutput(fmt.Sprintf("  active work: %d item(s)", len(rows))))
+	label := "active work"
+	if allSessions {
+		label = "active work (all sessions)"
+	}
+	sb.WriteString(r.SlashOutput(fmt.Sprintf("  %s: %d item(s)", label, len(rows))))
 	sb.WriteByte('\n')
 	for i, row := range rows {
 		sb.WriteString(fmt.Sprintf("  %d. %-12s %-15s %s", i+1, row.Kind, row.Status, row.Title))
@@ -91,6 +100,16 @@ func renderWorkBlock(m RootModel, _ []string) (RootModel, string) {
 		sb.WriteString(r.SlashOutput("  use /inbox <n> for notifications; run /sessions list to attach other Claude sessions"))
 	}
 	return m, strings.TrimRight(sb.String(), "\n")
+}
+
+func workAllSessions(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "--all", "-a", "all":
+			return true
+		}
+	}
+	return false
 }
 
 type workRow struct {
@@ -174,7 +193,7 @@ func workRowsForDrives(drives []chats.Drive) []workRow {
 	return out
 }
 
-func workRowsForPTYs(ctx context.Context, cs *chats.Store, sid string, ptys []chats.PtySession) ([]workRow, []chats.PtySession) {
+func workRowsForPTYs(ctx context.Context, cs *chats.Store, sid string, ptys []chats.PtySession, allSessions bool) ([]workRow, []chats.PtySession) {
 	out := make([]workRow, 0, len(ptys))
 	attachTargets := make([]chats.PtySession, 0, len(ptys))
 	for _, p := range ptys {
@@ -182,7 +201,10 @@ func workRowsForPTYs(ctx context.Context, cs *chats.Store, sid string, ptys []ch
 			continue
 		}
 		chat, err := cs.Get(ctx, p.ChatID)
-		if err != nil || chat == nil || chat.SessionID != sid {
+		if err != nil || chat == nil {
+			continue
+		}
+		if !allSessions && chat.SessionID != sid {
 			continue
 		}
 		title := chat.Title
@@ -192,6 +214,13 @@ func workRowsForPTYs(ctx context.Context, cs *chats.Store, sid string, ptys []ch
 		hint := "tmux " + p.TmuxSession
 		if p.LastIdleAt != nil {
 			hint += ", idle " + humanAge(time.Since(*p.LastIdleAt))
+		}
+		if allSessions {
+			if chat.SessionID == sid {
+				hint += ", current session"
+			} else if chat.SessionID != "" {
+				hint += ", session " + chat.SessionID
+			}
 		}
 		attachTargets = append(attachTargets, p)
 		attachIndex := len(attachTargets)

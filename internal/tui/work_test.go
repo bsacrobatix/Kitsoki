@@ -85,6 +85,15 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	_, err = cs.DetachPTY(ctx, bg.ID)
 	require.NoError(t, err)
 
+	other, err := cs.Create(ctx, "cloak", "agent", "other-scope", "Other session Claude")
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE chats SET session_id = ? WHERE id = ?`, "other-session", other.ID)
+	require.NoError(t, err)
+	_, err = cs.AttachPTY(ctx, chats.AttachPTYOptions{ChatID: other.ID, TmuxSession: "kit-other"})
+	require.NoError(t, err)
+	_, err = cs.DetachPTY(ctx, other.ID)
+	require.NoError(t, err)
+
 	m = runTurnBlocking(t, m, "/work")
 	tx := extractTranscript(t, m)
 	require.Contains(t, tx, "active work: 4 item(s)")
@@ -99,12 +108,28 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	require.Contains(t, tx, "chat")
 	require.Contains(t, tx, "Background Claude")
 	require.Contains(t, tx, "/sessions attach 1")
+	require.NotContains(t, tx, "Other session Claude")
 
 	rm, ok := tuipkg.ExtractRootModel(m)
 	require.True(t, ok)
 	cached := tuipkg.CachedSessionListForTest(rm)
 	require.Len(t, cached, 1)
 	require.Equal(t, bg.ID, cached[0].ChatID)
+
+	m = runTurnBlocking(t, m, "/work --all")
+	tx = extractTranscript(t, m)
+	require.Contains(t, tx, "active work (all sessions): 5 item(s)")
+	require.Contains(t, tx, "Background Claude")
+	require.Contains(t, tx, "current session")
+	require.Contains(t, tx, "Other session Claude")
+	require.Contains(t, tx, "session other-session")
+	require.Contains(t, tx, "/sessions attach 2")
+
+	rm, ok = tuipkg.ExtractRootModel(m)
+	require.True(t, ok)
+	cached = tuipkg.CachedSessionListForTest(rm)
+	require.Len(t, cached, 2)
+	require.ElementsMatch(t, []string{bg.ID, other.ID}, []string{cached[0].ChatID, cached[1].ChatID})
 }
 
 func TestWorkSlashNoStores(t *testing.T) {
