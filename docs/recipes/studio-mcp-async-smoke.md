@@ -3,7 +3,8 @@
 Use `kitsoki mcp-test` when you need to verify the studio MCP server without
 reloading an LLM client. This smoke runs a real MCP client over stdio, keeps one
 server-side session handle alive across calls, waits for a background job to
-finish, captures an inbox notification id, and teleports back to the task.
+finish, captures an inbox notification id, teleports back to the task, and
+re-renders the current TUI frame.
 
 The smoke uses only replay/direct session driving and `host.run`; it does not
 call a real LLM.
@@ -66,6 +67,15 @@ go run ./cmd/kitsoki mcp-test \
       "expect": {
         "structuredContent.async.notifications_unread": 1
       }
+    },
+    {
+      "tool": "render.tui",
+      "args": {
+        "handle": "async-teleport"
+      },
+      "expect": {
+        "structuredContent.frame.metadata.state": "running"
+      }
     }
   ]'
 ```
@@ -91,3 +101,10 @@ The expected proof at the end is:
 - `session.inspect.async.notifications_unread == 2`
 - `session.teleport` succeeds using the captured notification id
 - a final `session.inspect` reports `notifications_unread == 1`
+- `render.tui` reports the reacquired frame's state as `running`
+
+`render.web` is a separate browser-capable seam. In the plain `kitsoki mcp`
+stdio server it currently returns a text fallback unless a host injects the
+webshot provider; the studio package still has no-LLM stub coverage for the
+`render.web` MCP tool, but this stdio smoke intentionally gates only the
+currently-wired CLI surface.
