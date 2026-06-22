@@ -218,7 +218,7 @@ path: they capture the existing TUI and web renderers.
 |---|---|---|
 | `render.tui` | the `Frame` `{text, ansi, metadata}` at any width | `tui.ComposeFrame` |
 | `render.tui_png` | the `Frame.text` **+** an MCP image block of the terminal | `internal/tui/shot` raster (ANSI→PNG) |
-| `render.web` | text **+** an MCP image block of the **real** browser view | `internal/webshot` (headless `kitsoki web`) |
+| `render.web` | text **+** an MCP image block of the **real** browser view; optional `assert_text[]` fails the call unless each string appears in the settled page | `internal/webshot` (headless `kitsoki web`) |
 
 The **`Frame`** is the unit of fidelity — "the full screen a human sees" as a
 value, captured once by the TUI's own composer and read by every headless

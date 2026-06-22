@@ -95,6 +95,11 @@ type Spec struct {
 	// route-agnostic so callers can deep-link browser affordances like focused
 	// chat context without teaching webshot about those features.
 	Query map[string]string
+
+	// AssertText, when non-empty, asks the browser helper to verify each string
+	// appears in the rendered document before it screenshots. This keeps MCP
+	// render smokes honest without making the Go side parse pixels.
+	AssertText []string
 }
 
 // live reports whether the spec is the live-session form.
@@ -132,9 +137,10 @@ type ServerProvider interface {
 // CaptureRequest is the browser-invoker's input: the served URL to screenshot,
 // the output file path, and the fixed viewport (capture == render).
 type CaptureRequest struct {
-	URL      string
-	OutPath  string
-	Viewport Viewport
+	URL        string
+	OutPath    string
+	Viewport   Viewport
+	AssertText []string
 }
 
 // BrowserInvoker rasterises a served URL to a PNG written at OutPath. The
@@ -200,9 +206,10 @@ func Shot(ctx context.Context, spec Spec, opts Options) ([]byte, error) {
 	defer removeFile(tmp)
 
 	if err := opts.Browser.Capture(ctx, CaptureRequest{
-		URL:      target,
-		OutPath:  tmp,
-		Viewport: spec.viewport(),
+		URL:        target,
+		OutPath:    tmp,
+		Viewport:   spec.viewport(),
+		AssertText: spec.AssertText,
 	}); err != nil {
 		return nil, fmt.Errorf("webshot: capture: %w", err)
 	}

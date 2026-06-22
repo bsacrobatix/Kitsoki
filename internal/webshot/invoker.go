@@ -66,6 +66,9 @@ func (n *NodeInvoker) Capture(ctx context.Context, req CaptureRequest) error {
 		"--out", req.OutPath,
 		"--viewport", req.Viewport.String(),
 	}
+	for _, text := range req.AssertText {
+		args = append(args, "--assert-text", text)
+	}
 	return runner.Run(ctx, dir, "pnpm", args...)
 }
 

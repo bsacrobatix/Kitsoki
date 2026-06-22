@@ -29,15 +29,17 @@ import (
 // real image to return without launching Chromium. It records the URL it was
 // asked to capture so a test can assert URL construction.
 type stubInvoker struct {
-	gotURL      string
-	gotViewport Viewport
-	calls       int32
+	gotURL        string
+	gotViewport   Viewport
+	gotAssertText []string
+	calls         int32
 }
 
 func (s *stubInvoker) Capture(_ context.Context, req CaptureRequest) error {
 	atomic.AddInt32(&s.calls, 1)
 	s.gotURL = req.URL
 	s.gotViewport = req.Viewport
+	s.gotAssertText = append([]string(nil), req.AssertText...)
 	img := image.NewRGBA(image.Rect(0, 0, req.Viewport.Width, req.Viewport.Height))
 	// Paint one pixel so the PNG is unambiguously non-empty.
 	img.Set(0, 0, color.RGBA{R: 1, A: 255})
@@ -290,6 +292,29 @@ func TestNodeInvoker_BuildsWebShotArgv(t *testing.T) {
 		"--url http://127.0.0.1:9/#/",
 		"--out /tmp/out.png",
 		"--viewport 1600x900",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv %q missing %q", joined, want)
+		}
+	}
+}
+
+func TestNodeInvoker_BuildsAssertTextArgv(t *testing.T) {
+	rec := &recordingRunner{}
+	inv := &NodeInvoker{RepoRoot: "/repo", Runner: rec}
+	err := inv.Capture(context.Background(), CaptureRequest{
+		URL:        "http://127.0.0.1:9/#/",
+		OutPath:    "/tmp/out.png",
+		Viewport:   Viewport{Width: 1600, Height: 900},
+		AssertText: []string{"Active work", "May I edit README.md?"},
+	})
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	joined := strings.Join(rec.args, " ")
+	for _, want := range []string{
+		"--assert-text Active work",
+		"--assert-text May I edit README.md?",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("argv %q missing %q", joined, want)

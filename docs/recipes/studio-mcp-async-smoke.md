@@ -470,7 +470,12 @@ go run ./cmd/kitsoki mcp-test \
         "query": {
           "inbox": "1",
           "proposal": "{\"id\":\"demo-mcp-proposal\",\"kind\":\"write_mode\",\"title\":\"May I edit README.md?\",\"detail\":\"Proposed doc cleanup\"}"
-        }
+        },
+        "assert_text": [
+          "Active work",
+          "May I edit README.md?",
+          "Proposed doc cleanup"
+        ]
       },
       "expect": {
         "content.1.type": "image",
