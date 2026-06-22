@@ -36,6 +36,7 @@ func (HelpCommand) Run(m RootModel, _ []string) (string, RootModel, tea.Cmd) {
 			{"/inbox [<n>]", "list recent notifications; <n> opens one"},
 			{"/inbox sync-github [repo]", "refresh assigned GitHub issues and requested PR reviews"},
 			{"/work [--all]", "list active async work; --all includes every session on this host"},
+			{"/sessions attach <n> --dry-run", "show the cached chat target without attaching"},
 			{"/trace", "print the last turn's routing trace"},
 			{"/viz", "export the state diagram to a DOT file"},
 			{"/input", "restore your prior chat draft (cleared when a choice widget opens)"},

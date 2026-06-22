@@ -348,7 +348,7 @@ involvement.
 | `/attach`                | meta only            | Suspends the TUI and hands the terminal to a live `claude --resume <claude-session-id>` session inside tmux, against the active meta chat. The chat row's `claude_session_id` is minted on first attach (with `--session-id`); subsequent attaches use `--resume`. Detach with the tmux prefix + `d` (default Ctrl-B then d) to return to kitsoki — the tmux session keeps running with claude inside, so the conversation persists across the TUI's lifetime. While attached, the tmux status bar shows `kitsoki ❘ <chat>` on the left and an inbox-count badge on the right (severity-coloured for action-required vs info). See [`claude-code-sessions-proposal.md`](../proposals/claude-code-sessions-proposal.md) §4.2 / §9.3 for the design context. |
 | `/work [--all]`          | on-path or meta      | Prints active async work. Without flags it is scoped to the current Kitsoki session: unread notifications, running/awaiting/failed jobs, queued chat drives, and background Claude chats. `--all` includes those categories across every Kitsoki session on this host and seeds the same numbering cache as `/sessions list`, so `/sessions attach <N>` can switch directly to a background chat. |
 | `/sessions list`         | on-path or meta      | Prints a styled, numbered table of every active claude session on this host (every `chat_pty_sessions` row, attached or background). Columns: `#`, `CHAT`, `MODE` (`attached` or `background`), `IDLE` (`HH:MM:SS` plus `"(Nm ago)"` when stale >5 min), `SCOPE`. The numbering is cached on the TUI so `/sessions attach <N>` can resolve it without typing chat IDs. |
-| `/sessions attach <N>`   | on-path or meta      | Suspends the TUI and attaches to session `<N>` from the most recent `/sessions list` output. Same handoff lifecycle as `/attach` but lets you hop between background claude conversations across chats (including cross-app `self` chats) without leaving the TUI. Detach with the tmux prefix + `d`. |
+| `/sessions attach <N> [--dry-run]` | on-path or meta | Suspends the TUI and attaches to session `<N>` from the most recent `/sessions list` or `/work --all` output. Same handoff lifecycle as `/attach` but lets you hop between background claude conversations across chats (including cross-app `self` chats) without leaving the TUI. Detach with the tmux prefix + `d`. With `--dry-run`, prints the resolved chat/tmux target without attaching, which is useful for headless studio MCP smoke tests. |
 
 Mode dispatch uses exact match on the first slash arg, so a meta
 mode literally named `list`, `new`, `resume`, or `done` would be
@@ -652,7 +652,9 @@ What ships with kitsoki today (formerly under "Limitations"):
   `/work --all` lists every session's active async work, and `/sessions list` gives the
   full active-session table. Both seed `/sessions attach <N>`, so you
   can hop between any active claude sessions — meta or otherwise — by
-  position rather than chat ID. The kitsoki-shipped tmux config
+  position rather than chat ID. Use `/sessions attach <N> --dry-run`
+  to verify the resolved target without handing the terminal to tmux.
+  The kitsoki-shipped tmux config
   (`internal/chatattach/kitsoki-tmux.conf`) gives the attached
   pane a `kitsoki ❘ <chat>` status bar with severity-coloured
   inbox counts on the right; a watcher goroutine refreshes that

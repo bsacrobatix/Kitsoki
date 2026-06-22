@@ -533,6 +533,19 @@ func TestSessionCommand_RendersTUIWorkOverMCP(t *testing.T) {
 		OriginState:     "elsewhere",
 	})
 	require.NoError(t, err)
+	backgroundChat, err := chatStore.Create(ctx, "cloak", "agent-room", "scope-bg", "background session")
+	require.NoError(t, err)
+	_, err = backing.DB().ExecContext(ctx,
+		`UPDATE chats SET session_id = ? WHERE id = ?`,
+		string(sh.SID), backgroundChat.ID)
+	require.NoError(t, err)
+	_, err = chatStore.AttachPTY(ctx, chats.AttachPTYOptions{
+		ChatID:      backgroundChat.ID,
+		TmuxSession: "kitsoki-bg-mcp",
+	})
+	require.NoError(t, err)
+	_, err = chatStore.DetachPTY(ctx, backgroundChat.ID)
+	require.NoError(t, err)
 
 	res, err := callTool(ctx, cs, "session.command", map[string]any{
 		"handle":  handle,
@@ -545,11 +558,26 @@ func TestSessionCommand_RendersTUIWorkOverMCP(t *testing.T) {
 	var rendered studio.RenderTUIResult
 	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &rendered))
 	require.True(t, rendered.OK)
-	assert.Contains(t, rendered.Frame.Text, "active work (all sessions): 2 item(s)")
+	assert.Contains(t, rendered.Frame.Text, "active work (all sessions): 3 item(s)")
 	assert.Contains(t, rendered.Frame.Text, "current queued review")
 	assert.Contains(t, rendered.Frame.Text, "current session")
 	assert.Contains(t, rendered.Frame.Text, "other queued review")
 	assert.Contains(t, rendered.Frame.Text, "session other-session")
+	assert.Contains(t, rendered.Frame.Text, "background session")
+	assert.Contains(t, rendered.Frame.Text, "/sessions attach 1")
+
+	res, err = callTool(ctx, cs, "session.command", map[string]any{
+		"handle":  handle,
+		"command": "/sessions attach 1 --dry-run",
+		"cols":    120,
+		"rows":    35,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.command dry-run attach: %s", contentText(res))
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &rendered))
+	assert.Contains(t, rendered.Frame.Text, "would attach 1")
+	assert.Contains(t, rendered.Frame.Text, "background session")
+	assert.Contains(t, rendered.Frame.Text, "kitsoki-bg-mcp")
 }
 
 func writeBackgroundJobStory(t *testing.T) string {

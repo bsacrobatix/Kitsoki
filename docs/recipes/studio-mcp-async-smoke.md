@@ -195,6 +195,10 @@ TUI `/work`, and the web inbox active-work list all find pending chat drives
 created by ordinary story `host.chat.drive` effects. `session.command` runs the
 real TUI slash dispatcher and returns the rendered frame, so the smoke proves
 the terminal active-work affordance without launching an interactive TUI.
+For backgrounded Claude PTY rows, `/work --all` also seeds the TUI's
+`/sessions attach <N>` cache; studio MCP can verify the selected target with
+`session.command` and `/sessions attach <N> --dry-run` without handing the
+headless process to tmux.
 
 To prove the browser surface too, first stage the embedded runstatus SPA:
 
