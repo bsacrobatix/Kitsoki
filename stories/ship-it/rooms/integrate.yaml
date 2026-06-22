@@ -1,0 +1,112 @@
+# integrate — lost-work-safe integrate of the maker's branch into main.
+#
+# Reuses the slice-1 git-ops integrate mechanism: rebase workspace_branch onto
+# CURRENT main (re-read at entry, never a stored SHA — so a concurrent moved-main
+# is absorbed by replaying the branch), build-check, then merge --no-ff. No
+# blanket `|| true` on load-bearing commands: the real exit binds and a non-zero
+# outcome routes to @exit:needs-human with last_error (never a swallowed success).
+#
+#   integrated → verify         (integrated_sha set)
+#   conflict | build_fail | error → @exit:needs-human (last_error)
+
+states:
+
+  integrate:
+    description: "Rebase the maker's branch onto CURRENT main, build-check, merge."
+    relevant_world: [workspace_branch, base_branch, main_worktree_path,
+                     integrate_outcome, integrated_sha, last_error]
+    view:
+      - prose: "Maker achieved the goal. Integrating branch {{ world.workspace_branch }} into {{ world.base_branch }}."
+      - kv:
+          pairs:
+            Branch:       '{{ world.workspace_branch }} → {{ world.base_branch }}'
+            "Base (now)": 'CURRENT {{ world.base_branch }} (re-read — concurrent moves ok)'
+      - heading: "Integrated"
+        when: "world.integrate_outcome == 'integrated'"
+      - prose: "Rebased onto current {{ world.base_branch }}, build-checked, merged. Merged commit: {{ world.integrated_sha }}."
+        when: "world.integrate_outcome == 'integrated'"
+      - heading: "Integrate failed — needs a human"
+        when: "world.integrate_outcome != '' && world.integrate_outcome != 'integrated'"
+      - prose: "{{ world.last_error }}"
+        when: "world.integrate_outcome != '' && world.integrate_outcome != 'integrated'"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "look"
+              intent: look
+    on_enter:
+      - invoke: host.run
+        id: integrate_exec
+        with:
+          cmd: bash
+          args:
+            - "-c"
+            - |
+              set -e
+              export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
+              INTEGRATION="{{ world.base_branch }}"
+              BRANCH="{{ world.workspace_branch }}"
+              MAIN_WT="{{ world.main_worktree_path }}"
+              BUILD_CMD="go build ./... && go test ./..."
+              BUILD_DISABLED="{{ world.build_check_disabled }}"
+              [ -z "$MAIN_WT" ] && MAIN_WT="."
+
+              if [ -z "$BRANCH" ]; then
+                jq -n '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:"no branch to integrate (maker handoff empty)"}'
+                exit 0
+              fi
+              BASE_SHA=$(git -C "$MAIN_WT" rev-parse "$INTEGRATION" 2>/dev/null || echo "")
+              if [ -z "$BASE_SHA" ]; then
+                jq -n --arg int "$INTEGRATION" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("integration branch "+$int+" not found")}'
+                exit 0
+              fi
+              REBASE_EXIT=0
+              REBASE_OUT=$(git -C "$MAIN_WT" rebase --onto "$BASE_SHA" "$(git -C "$MAIN_WT" merge-base "$BRANCH" "$INTEGRATION")" "$BRANCH" 2>&1) || REBASE_EXIT=$?
+              if [ "$REBASE_EXIT" -ne 0 ]; then
+                git -C "$MAIN_WT" rebase --abort 2>/dev/null || true
+                jq -n --arg out "$REBASE_OUT" '{outcome:"conflict",integrated_sha:"",last_op_ok:false,last_error:$out}'
+                exit 0
+              fi
+              if [ "$BUILD_DISABLED" != "true" ]; then
+                BUILD_EXIT=0
+                BUILD_OUT=$(cd "$MAIN_WT" && bash -c "$BUILD_CMD" 2>&1) || BUILD_EXIT=$?
+                if [ "$BUILD_EXIT" -ne 0 ]; then
+                  jq -n --arg out "$BUILD_OUT" '{outcome:"build_fail",integrated_sha:"",last_op_ok:false,last_error:$out}'
+                  exit 0
+                fi
+              fi
+              git -C "$MAIN_WT" checkout "$INTEGRATION" 2>&1
+              MERGE_EXIT=0
+              MERGE_OUT=$(git -C "$MAIN_WT" merge --no-ff "$BRANCH" -m "integrate: $BRANCH" 2>&1) || MERGE_EXIT=$?
+              if [ "$MERGE_EXIT" -ne 0 ]; then
+                git -C "$MAIN_WT" merge --abort 2>/dev/null || true
+                jq -n --arg out "$MERGE_OUT" '{outcome:"conflict",integrated_sha:"",last_op_ok:false,last_error:$out}'
+                exit 0
+              fi
+              MERGED_SHA=$(git -C "$MAIN_WT" rev-parse HEAD 2>/dev/null || echo "")
+              jq -n --arg sha "$MERGED_SHA" '{outcome:"integrated",integrated_sha:$sha,last_op_ok:true,last_error:""}'
+          cwd: "{{ world.main_worktree_path }}"
+        bind:
+          integrate_outcome: "stdout_json.outcome"
+          integrated_sha:    "stdout_json.integrated_sha"
+          last_error:        "stdout_json.last_error"
+        on_error: integrate
+      # Post-bind routing; guards FALSE under default world.
+      - when: "world.integrate_outcome == 'integrated'"
+        emit_intent: integrated_ok
+      - when: "world.integrate_outcome != '' && world.integrate_outcome != 'integrated'"
+        emit_intent: integrate_failed
+    on:
+      integrated_ok:
+        - target: verify
+          effects:
+            - set:
+                integrated: true
+      integrate_failed:
+        - target: "@exit:needs-human"
+          effects:
+            - set:
+                status: "needs-human"
+      look:
+        - target: .
