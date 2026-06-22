@@ -10,7 +10,7 @@ It is distinct from the narrow per-app server: [`kitsoki serve`](../../internal/
 exposes a single `transition` tool that drives one app's state machine.
 `kitsoki mcp` is the authoring/introspection *control plane* — its state is an
 authoring **workspace** plus zero-or-more live **driving sessions**, exposed as
-the `story.*`, `session.*`, and `render.*` tool families. It is a sibling of
+the `story.*`, `session.*`, `render.*`, and `issue.*` tool families. It is a sibling of
 `kitsoki serve` and the [operator-ask bridge](operator-ask.md): same
 `github.com/modelcontextprotocol/go-sdk`, same `StdioTransport`, same
 `mcp__<server>__<tool>` naming.
@@ -144,6 +144,41 @@ include the textual frame, so a text-only client still gets something.
 Node/Playwright [`web-shot.ts`](../../tools/runstatus/web-shot.ts) invoker,
 injected via `Server.SetWebShot`); with no shot wired it degrades to a text
 result.
+
+### `issue.*` — file a gap (with evidence bundled)
+
+The agent that drives kitsoki through this MCP has no shell and no write tools,
+so when the *studio surface itself* can't do something needed to develop, test,
+run, introspect, trace, or debug a story, it can't reach for `gh`. `issue.create`
+closes that gap from inside the MCP — and, because the studio already produces
+the evidence, it bundles it in.
+([`issue_tools.go`](../../internal/mcp/studio/issue_tools.go).)
+
+| Tool | Shape | Wraps |
+|---|---|---|
+| `issue.create` | `{title, body?, labels?, repo?, handle?, include_trace?, trace_limit?, include_inspect?, assets?} → {url, number, labels[], assets[]}` | render assets → `.artifacts`, bundle a handle's trace + inspect, then the injectable `IssueFiler` (prod: `gh`) |
+
+Three things happen server-side so the agent never handles bytes:
+
+- **assets** — each `assets[]` entry (`kind: tui_png | web | tui_text`, targeting
+  a handle or a `{story_path, state, world}` spec) is rendered through the same
+  `composeRenderFrame` / `shot.RenderPNG` / `webShot` seams `render.*` use,
+  written under the artifacts dir (`.artifacts/mcp-issues/<slug>/`), and
+  referenced in the body **by relative path**. Asset *upload* isn't wired yet —
+  the path is a stopgap reference, flagged with an HTML comment; `IssueResult`
+  already carries the asset list so the upgrade is localized to the filer.
+- **context** — with a `handle` and `include_trace` / `include_inspect`, the
+  session's trace tail (the same `session.trace` returns) and inspect snapshot
+  are folded into the body, so a gap report is reproducible by construction.
+- **file** — the composed `{repo, title, body, labels}` goes to the injected
+  [`IssueFiler`](../../internal/mcp/studio/issue_tools.go) seam. The
+  `source-autonomous` label is always applied (first) so agent-filed issues are
+  filterable. Production (`cmd/kitsoki`) shells to `gh issue create` (and
+  best-effort `gh label create --force source-autonomous`); a test injects a fake
+  that records the request and returns a canned URL — no network, no LLM. With no
+  filer wired the tool returns a structured `ISSUE_UNAVAILABLE`. `issue.create`
+  is allowed in `--read-only` mode (it mutates `.artifacts` + GitHub, not the
+  story tree).
 
 ## Operator-ask — the MCP client *is* the operator
 

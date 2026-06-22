@@ -62,6 +62,14 @@ type Server struct {
 	// mutation), and the render tools stay available. Used by the meta-mode
 	// Q&A surface (`/meta story ask`), which must not edit the story.
 	readOnly bool
+	// issueFiler is the injectable issue.create seam: it files a composed
+	// {repo, title, body, labels} GitHub issue. Nil → issue.create returns
+	// ErrIssueUnavailable. Production (cmd/kitsoki) shells to gh; a test injects
+	// a fake. See WithIssueFiler.
+	issueFiler IssueFiler
+	// artifactsDir is where issue.create writes rendered assets. Empty →
+	// defaultIssueArtifactsDir. See WithArtifactsDir.
+	artifactsDir string
 }
 
 // ServerOption configures a studio Server at construction.
@@ -104,6 +112,9 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	// session.* / render.* — drive a live (replay-default) session and see it
 	// (slice 7).
 	srv.registerSessionTools()
+
+	// issue.* — file a GitHub issue with studio-produced evidence bundled in.
+	srv.registerIssueTools()
 
 	return srv
 }
@@ -192,6 +203,9 @@ const (
 	ErrBadRequest = "BAD_REQUEST"
 	// ErrHarness — the session's harness could not be constructed.
 	ErrHarness = "HARNESS"
+	// ErrIssueUnavailable — issue.create was called on a studio with no issue
+	// filer wired (started without GitHub filing).
+	ErrIssueUnavailable = "ISSUE_UNAVAILABLE"
 )
 
 // buildToolError wraps a code + message into a CallToolResult with IsError=true.

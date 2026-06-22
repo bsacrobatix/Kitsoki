@@ -92,8 +92,9 @@ opt a session into a real LLM.
 
 Tools: the studio.ping liveness probe and studio.handles lister (server core);
 the deterministic story.read/write/validate/graph/test authoring tools; and the
-session.new/attach/drive/submit/continue/inspect/trace driving tools plus
-render.tui/tui_png/web. Driving defaults to harness:replay (no LLM); render.tui
+session.new/attach/drive/submit/continue/inspect/trace driving tools,
+render.tui/tui_png/web, and issue.create (file a GitHub issue via gh, bundling
+rendered assets + a handle's trace/inspect). Driving defaults to harness:replay (no LLM); render.tui
 and render.tui_png return the terminal Frame / PNG, while render.web degrades to
 a text result unless a browser-capable web shot is wired (deferred — it needs a
 served kitsoki web, the hybrid-session-driving concern).
@@ -142,7 +143,11 @@ docs land):
 				}
 			}
 
-			var srvOpts []studio.ServerOption
+			// Wire issue.create to file via gh (the operator's authenticated CLI)
+			// and write rendered assets under the default artifacts dir. The
+			// studio package stays exec/network-free; this is the only production
+			// seam that shells out.
+			srvOpts := []studio.ServerOption{studio.WithIssueFiler(ghIssueFiler)}
 			if readOnly {
 				srvOpts = append(srvOpts, studio.ReadOnly())
 			}
