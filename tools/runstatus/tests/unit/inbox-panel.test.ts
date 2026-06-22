@@ -13,11 +13,17 @@ vi.mock("vue-router", () => ({
 
 const syncGitHubInbox = vi.fn();
 const listWork = vi.fn();
+const jumpMock = vi.hoisted(() => ({
+  jumpToNotification: vi.fn(),
+}));
 vi.mock("../../src/data/live-source.js", () => ({
   LiveSource: vi.fn().mockImplementation(() => ({
     syncGitHubInbox,
     listWork,
   })),
+}));
+vi.mock("../../src/lib/inbox-jump.js", () => ({
+  jumpToNotification: jumpMock.jumpToNotification,
 }));
 
 describe("InboxPanel", () => {
@@ -42,6 +48,8 @@ describe("InboxPanel", () => {
       sessions: [],
       items: [],
     });
+    jumpMock.jumpToNotification.mockReset();
+    jumpMock.jumpToNotification.mockResolvedValue(undefined);
     route.params.sessionId = "web-session-1";
     document.body.innerHTML = "";
   });
@@ -184,7 +192,7 @@ describe("InboxPanel", () => {
     wrapper.unmount();
   });
 
-  it("routes active job work to the session view", async () => {
+  it("routes notification-backed active job work through inbox jump", async () => {
     const inbox = useInboxStore();
     inbox.open = true;
     inbox.workSummary = {
@@ -206,6 +214,60 @@ describe("InboxPanel", () => {
         title: "host.agent.task",
         status: "failed",
         job_id: "job-1",
+        notification_id: "notif-job-1",
+        severity: "error",
+        teleport_state: "foyer",
+        teleport_job_id: "job-1",
+        origin_kind: "job",
+        origin_ref: "job:job-1",
+        reacquire_tool: "notification",
+        reacquire_session_id: "web-session-1",
+      },
+    ];
+
+    const wrapper = mount(InboxPanel, { attachTo: document.body });
+    await flushPromises();
+
+    const rows = document.body.querySelectorAll('[data-testid="work-item"]');
+    expect(rows).toHaveLength(1);
+    expect(document.body.textContent).toContain("jump");
+
+    (rows[0] as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(jumpMock.jumpToNotification).toHaveBeenCalledOnce();
+    expect(jumpMock.jumpToNotification.mock.calls[0]?.[2]).toMatchObject({
+      ID: "notif-job-1",
+      SessionID: "web-session-1",
+      TeleportJobID: "job-1",
+      OriginRef: "job:job-1",
+    });
+    expect(push).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("routes active job work without notification context to the session view", async () => {
+    const inbox = useInboxStore();
+    inbox.open = true;
+    inbox.workSummary = {
+      items: 1,
+      needs_attention: 0,
+      jobs_running: 1,
+      jobs_awaiting_input: 0,
+      jobs_terminal: 0,
+      notifications_unread: 0,
+      notifications_action_required: 0,
+      pending_drives: 0,
+      backgrounded_chats: 0,
+    };
+    inbox.workItems = [
+      {
+        kind: "job",
+        priority: 70,
+        session_id: "web-session-1",
+        title: "host.agent.task",
+        status: "running",
+        job_id: "job-1",
         reacquire_tool: "session",
         reacquire_session_id: "web-session-1",
       },
@@ -223,6 +285,7 @@ describe("InboxPanel", () => {
 
     expect(inbox.open).toBe(false);
     expect(push).toHaveBeenCalledWith("/s/web-session-1");
+    expect(jumpMock.jumpToNotification).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 

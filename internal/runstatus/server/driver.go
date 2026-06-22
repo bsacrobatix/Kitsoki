@@ -304,6 +304,7 @@ func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
 		if err != nil {
 			return SessionWork{}, err
 		}
+		jobNotifications := workJobNotifications(notifs)
 
 		for _, j := range jobRows {
 			switch j.Status {
@@ -317,7 +318,7 @@ func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
 			if !activeWorkJob(j) {
 				continue
 			}
-			out.Items = append(out.Items, WorkItem{
+			item := WorkItem{
 				Kind:               "job",
 				Priority:           workJobPriority(j),
 				SessionID:          string(d.SID),
@@ -329,7 +330,19 @@ func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
 				OriginState:        string(j.OriginState),
 				ReacquireTool:      "session",
 				ReacquireSessionID: string(d.SID),
-			})
+			}
+			if n, ok := jobNotifications[j.ID]; ok {
+				item.NotificationID = n.ID
+				item.Severity = n.Severity
+				item.TeleportState = n.TeleportState
+				item.TeleportSlots = n.TeleportSlots
+				item.TeleportJobID = n.TeleportJobID
+				item.OriginKind = n.OriginKind
+				item.OriginRef = n.OriginRef
+				item.OriginURL = n.OriginURL
+				item.ReacquireTool = "notification"
+			}
+			out.Items = append(out.Items, item)
 		}
 		for _, count := range unread {
 			out.Summary.NotificationsUnread += count
@@ -380,6 +393,26 @@ func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
 		}
 	}
 	return out, nil
+}
+
+func workJobNotifications(notifs []jobs.Notification) map[string]jobs.Notification {
+	out := make(map[string]jobs.Notification)
+	for _, n := range notifs {
+		if n.ReadAt != nil {
+			continue
+		}
+		jobID := n.TeleportJobID
+		if jobID == "" && strings.HasPrefix(n.OriginRef, "job:") {
+			jobID = strings.TrimPrefix(n.OriginRef, "job:")
+		}
+		if jobID == "" {
+			continue
+		}
+		if _, exists := out[jobID]; !exists {
+			out[jobID] = n
+		}
+	}
+	return out
 }
 
 // SyncGitHubInbox imports assigned GitHub issues and requested PR reviews into

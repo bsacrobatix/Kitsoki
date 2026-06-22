@@ -159,7 +159,7 @@ function onSyncGitHub(): void {
 }
 
 async function onWorkItem(item: WorkItem): Promise<void> {
-  if (item.kind === "notification" && item.notification_id) {
+  if (isNotificationBackedWork(item)) {
     await jumpToNotification(router, source, notificationFromWork(item));
     return;
   }
@@ -216,7 +216,7 @@ function workContext(item: WorkItem): string {
 }
 
 function workAction(item: WorkItem): string {
-  if (item.kind === "notification") return "jump";
+  if (isNotificationBackedWork(item)) return "jump";
   if (item.reacquire_tool === "chat.show" || item.chat_id) return "open context";
   return "open session";
 }
@@ -227,6 +227,10 @@ function workRoute(item: WorkItem, sessionId: string): string {
     return `/s/${sessionId}/chat${chat}`;
   }
   return `/s/${sessionId}`;
+}
+
+function isNotificationBackedWork(item: WorkItem): boolean {
+  return !!item.notification_id && (item.kind === "notification" || item.reacquire_tool === "notification");
 }
 
 function onKeydown(e: KeyboardEvent): void {

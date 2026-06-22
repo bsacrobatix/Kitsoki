@@ -258,6 +258,17 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 	}
 	require.NoError(t, f.js.InsertNotification(context.Background(), n))
 	now := time.Now()
+	jobNotification := &jobs.Notification{
+		SessionID:     f.sid,
+		CreatedAt:     now.Add(-500 * time.Millisecond),
+		Severity:      jobs.SeverityInfo,
+		Title:         "Job submitted: host.agent.task",
+		TeleportState: "foyer",
+		TeleportJobID: "job-running",
+		OriginKind:    "job",
+		OriginRef:     "job:job-running",
+	}
+	require.NoError(t, f.js.InsertNotification(context.Background(), jobNotification))
 	require.NoError(t, f.js.UpsertJob(context.Background(), &jobs.Job{
 		ID:          "job-running",
 		SessionID:   f.sid,
@@ -305,13 +316,13 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 	require.Len(t, work.Sessions, 1)
 	assert.Equal(t, f.publicID, work.Sessions[0].SessionID)
 	assert.Equal(t, 1, work.Summary.JobsRunning)
-	assert.Equal(t, 1, work.Summary.NotificationsUnread)
+	assert.Equal(t, 2, work.Summary.NotificationsUnread)
 	assert.Equal(t, 1, work.Summary.PendingDrives)
 	assert.Equal(t, 1, work.Summary.DispatchingDrives)
 	assert.Equal(t, 1, work.Summary.BackgroundedChats)
 	assert.Equal(t, 1, work.Summary.NeedsAttention)
-	assert.Equal(t, 5, work.Summary.Items)
-	require.Len(t, work.Items, 5)
+	assert.Equal(t, 6, work.Summary.Items)
+	require.Len(t, work.Items, 6)
 	assert.Equal(t, "notification", work.Items[0].Kind)
 	assert.Equal(t, n.ID, work.Items[0].NotificationID)
 	assert.Equal(t, "notification", work.Items[0].ReacquireTool)
@@ -324,7 +335,9 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 	assert.Equal(t, "https://github.com/acme/repo/pull/42", work.Items[0].OriginURL)
 	assert.Equal(t, "job", work.Items[1].Kind)
 	assert.Equal(t, "job-running", work.Items[1].JobID)
-	assert.Equal(t, "session", work.Items[1].ReacquireTool)
+	assert.Equal(t, jobNotification.ID, work.Items[1].NotificationID)
+	assert.Equal(t, "notification", work.Items[1].ReacquireTool)
+	assert.Equal(t, "job:job-running", work.Items[1].OriginRef)
 	assert.Equal(t, f.publicID, work.Items[1].SessionID)
 	assert.Equal(t, "pending_drive", work.Items[2].Kind)
 	assert.Equal(t, dispatchingChat.ID, work.Items[2].ChatID)
@@ -340,6 +353,8 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 	assert.Equal(t, bg.ID, work.Items[4].ChatID)
 	assert.Equal(t, "chat.show", work.Items[4].ReacquireTool)
 	assert.Equal(t, f.publicID, work.Items[4].ReacquireSessionID)
+	assert.Equal(t, "notification", work.Items[5].Kind)
+	assert.Equal(t, jobNotification.ID, work.Items[5].NotificationID)
 }
 
 func TestWorkList_DoesNotTreatPassiveNotificationsAsAttention(t *testing.T) {
