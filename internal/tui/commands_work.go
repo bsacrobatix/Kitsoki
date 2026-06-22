@@ -447,6 +447,7 @@ func workRowsForProposals(state MineState) []workRow {
 		}
 		hintParts = append(hintParts,
 			fmt.Sprintf("/mine accept %s", p.ID),
+			fmt.Sprintf("/mine refine %s", p.ID),
 			fmt.Sprintf("/mine dismiss %s", p.ID),
 		)
 		out = append(out, workRow{

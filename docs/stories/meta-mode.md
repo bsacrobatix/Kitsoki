@@ -655,10 +655,10 @@ What ships with kitsoki today (formerly under "Limitations"):
   failed chat drives include `/chat show <id>` for focused context before a tmux
   pane exists; background PTY rows seed `/sessions attach <N>` so you can hop
   between active claude sessions — meta or otherwise — by position rather than
-  chat ID. Proposal-review rows include `/mine accept <id>` / `/mine dismiss
-  <id>` hints and stay scoped to the current TUI session. Use `/sessions attach
-  <N> --dry-run` to verify the resolved target without handing the terminal to
-  tmux.
+  chat ID. Proposal-review rows include `/mine accept <id>` / `/mine refine
+  <id>` / `/mine dismiss <id>` hints and stay scoped to the current TUI session.
+  Use `/sessions attach <N> --dry-run` to verify the resolved target without
+  handing the terminal to tmux.
   The kitsoki-shipped tmux config
   (`internal/chatattach/kitsoki-tmux.conf`) gives the attached
   pane a `kitsoki ❘ <chat>` status bar with severity-coloured

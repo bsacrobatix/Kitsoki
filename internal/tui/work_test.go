@@ -336,6 +336,7 @@ func TestWorkSlashListsProposalReviewWorkWithoutStores(t *testing.T) {
 	require.Contains(t, work, "May I edit README.md?")
 	require.Contains(t, work, "README.md")
 	require.Contains(t, work, "/mine accept p-write")
+	require.Contains(t, work, "/mine refine p-write")
 	require.Contains(t, work, "/mine dismiss p-write")
 	require.Contains(t, work, "structure")
 	require.Contains(t, work, "Capture render gate")

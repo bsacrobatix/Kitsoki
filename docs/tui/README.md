@@ -86,7 +86,7 @@ room-switch commands. Notable families:
 | `/jump` | `commands_jump.go` | Navigate to background-completion events |
 | `/ide [connect\|disconnect\|status]` | `commands_ide.go` | Connect/disconnect the live editor link; ambient selection rides each turn |
 | `/open <path>` | `commands_open.go` | Open an artifact (resolved against the run's cwd) in `$EDITOR` or the OS default — the terminal-agnostic fallback for `.md` links |
-| `/mine [status\|pause\|resume\|now\|scope\|queue\|accept\|dismiss]` | `mine_command.go` | The operator intercom to the [ambient miner](../architecture/ambient-mining.md): read its watermark/queue/scope, pause/resume it, force a pass, or accept/dismiss a queued proposal by id |
+| `/mine [status\|pause\|resume\|now\|scope\|queue\|accept\|refine\|dismiss]` | `mine_command.go` | The operator intercom to the [ambient miner](../architecture/ambient-mining.md): read its watermark/queue/scope, pause/resume it, force a pass, or accept/refine/dismiss a queued proposal by id |
 
 > **Reload parity.** `/reload` hot-reloads the running story's `app.yaml` in
 > place (re-validate, swap the `AppDef`, re-fire `on_enter`). The web UI's
@@ -140,9 +140,9 @@ an in-flight LLM call.
   hide-when-zero) — it never changes `m.mode` and never interrupts a turn.
   Each queued item opens in the **same operator-question card**
   (`operator_question.go`, `ModeOperatorQuestion`) the operator already
-  answers, with one accept/refine/dismiss gesture; `/mine accept|dismiss <id>`
-  is the scriptable CLI alias for that gesture. The badge appears only when
-  the miner is enabled and the queue is non-empty.
+  answers, with one accept/refine/dismiss gesture; `/mine accept|refine|dismiss
+  <id>` is the scriptable CLI alias for that gesture. The badge appears only
+  when the miner is enabled and the queue is non-empty.
 
 ## Editor awareness: `/ide`
 

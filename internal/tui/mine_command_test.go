@@ -193,9 +193,9 @@ func TestMineCommand_QueueListsBothKinds(t *testing.T) {
 	assert.Contains(t, body, "no pending")
 }
 
-// TestMineCommand_AcceptDismissById drives the CLI alias for the card gesture —
-// the same recorded verdict path a scripted flow uses without the modal.
-func TestMineCommand_AcceptDismissById(t *testing.T) {
+// TestMineCommand_DecideById drives the CLI alias for the card gesture — the
+// same recorded verdict path a scripted flow uses without the modal.
+func TestMineCommand_DecideById(t *testing.T) {
 	t.Parallel()
 	f := newFakeMiner(MineState{Enabled: true, Queue: sampleQueue()})
 	m := mineTestModel(f)
@@ -203,6 +203,10 @@ func TestMineCommand_AcceptDismissById(t *testing.T) {
 	body, _, _ := MineCommand{}.Run(m, []string{"accept", "p1"})
 	assert.Contains(t, body, "accepted proposal p1")
 	assert.Equal(t, "accept", f.decided["p1"])
+
+	body, _, _ = MineCommand{}.Run(m, []string{"refine", "p2"})
+	assert.Contains(t, body, "refined proposal p2")
+	assert.Equal(t, "refine", f.decided["p2"])
 
 	body, _, _ = MineCommand{}.Run(m, []string{"dismiss", "p3"})
 	assert.Contains(t, body, "dismissed proposal p3")
@@ -221,7 +225,7 @@ func TestMineCommand_NilServiceDegrades(t *testing.T) {
 	m := RootModel{}
 	m.transcript = newTranscriptModel(80, 24)
 
-	for _, verb := range [][]string{{"pause"}, {"resume"}, {"now"}, {"scope", "x"}, {"accept", "p1"}, {"dismiss", "p1"}} {
+	for _, verb := range [][]string{{"pause"}, {"resume"}, {"now"}, {"scope", "x"}, {"accept", "p1"}, {"refine", "p1"}, {"dismiss", "p1"}} {
 		body, _, cmd := MineCommand{}.Run(m, verb)
 		assert.Containsf(t, body, "not wired", "%v should degrade with a hint\n%s", verb, body)
 		assert.Nilf(t, cmd, "%v should not dispatch a cmd without a service", verb)
