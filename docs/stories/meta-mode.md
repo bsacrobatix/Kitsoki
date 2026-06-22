@@ -516,6 +516,13 @@ The chats store schema is the same one agent and other chat-shaped
 flows already use — see `internal/chats/` for the persistence
 contract.
 
+**Room chat lanes** (the contextual routing tier's three non-intent lane
+classes) reuse this same store with `room:<kind>` keys
+(`room:help`, `room:work`, `room:meta`) in place of `meta:<modeName>`.
+The keying scheme and active-row semantics are identical; the substrate
+is `internal/roomchat/`. See
+[`semantic-routing.md` §7.2](../architecture/semantic-routing.md#72-room-chat-lanes).
+
 ---
 
 ## 9. Where the implementation lives

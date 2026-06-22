@@ -14,14 +14,16 @@ implementation lives in [`internal/semroute/`](../../internal/semroute)
 Every foreground turn runs the tiers in order and stops at the first
 that resolves:
 
-| Tier            | Entry point          | Confidence | Trace event              | Chip |
-|-----------------|----------------------|------------|--------------------------|------|
-| Deterministic   | `TryDeterministic`   | 1.00       | `turn.deterministic_hit` | `▣`  |
-| Synonym (bare)  | `TrySemantic`        | 0.90       | `turn.semantic_hit`      | `⌁`  |
-| Synonym template| `TrySemantic`        | 0.80 / 0.65| `turn.semantic_hit`      | `◐`  |
-| Turn cache      | `tryTurnCache`       | varies     | `turn.turncache_hit`     | `⟲`  |
-| Default intent  | `routeViaDefaultIntent` | 1.00    | `turn.default_routed`    | `⤳`  |
-| LLM             | `harness.RunTurn`    | varies     | `turn.llm_routed`        | `✦`  |
+| Tier                 | Entry point                       | Confidence    | Trace event                       | Chip |
+|----------------------|-----------------------------------|---------------|-----------------------------------|------|
+| Deterministic        | `TryDeterministic`                | 1.00          | `turn.deterministic_hit`          | `▣`  |
+| Synonym (bare)       | `TrySemantic`                     | 0.90          | `turn.semantic_hit`               | `⌁`  |
+| Synonym template     | `TrySemantic`                     | 0.80 / 0.65   | `turn.semantic_hit`               | `◐`  |
+| Turn cache           | `tryTurnCache`                    | varies        | `turn.turncache_hit`              | `⟲`  |
+| Default intent       | `routeViaDefaultIntent`           | 1.00          | `turn.default_routed`             | `⤳`  |
+| Embedding (opt-in)   | `routeViaEmbeddingTier`           | varies        | `turn.embedding_hit`              | `◉`  |
+| Contextual (opt-in)  | `routeViaContextualRouter`        | varies        | `turn.context_route_decided`      | `⊕`  |
+| LLM                  | `harness.RunTurn`                 | varies        | `turn.llm_routed`                 | `✦`  |
 
 The default-intent tier only runs when the current state declares one;
 otherwise the stack falls straight through to the LLM.
@@ -482,6 +484,100 @@ same pattern as `agent.local`; see
 [`docs/architecture/embeddings.md`](embeddings.md) for the full substrate
 reference.
 
+## 7. Contextual routing tier
+
+The **contextual routing tier** fires after all deterministic, synonym, turn-cache, and embedding tiers miss, on any state that has opted in with `contextual_routing: {enabled: true}`. Where earlier tiers resolve *which declared intent* an utterance matches, the contextual router distinguishes four richer outcome classes before falling back to the raw LLM:
+
+| Class | Meaning | Outcome |
+|---|---|---|
+| `intent` | The utterance maps to a declared on-path intent (with optional slots). | State machine advances identically to a synonym hit. |
+| `help` | A question about how to use the story, current room, or kitsoki. | Appended to the room's help lane. State/world unchanged. |
+| `room_request` | Free-form work belonging in the room's operating context. | Appended to the room's work lane. State/world unchanged. |
+| `meta_edit` | A request to edit story, room, prompts, routing, or kitsoki behaviour. | Appended to the room's meta lane. State/world unchanged. |
+
+Only `class=intent` advances the FSM. Lane classes (`help`, `room_request`, `meta_edit`) route the utterance into a persistent room chat lane without changing state or world. The tier is strictly opt-in — states without `contextual_routing: {enabled: true}` are unaffected.
+
+### 7.1 Enabling the tier
+
+```yaml
+states:
+  landing:
+    contextual_routing:
+      enabled: true
+      help_chat:  story.ask           # class=help → story.ask meta mode
+      room_chat:  work                # class=room_request → work lane
+      meta_chat:  story.edit          # class=meta_edit → story.edit meta mode
+      pending_plan_path: landing_note.plan  # enables plan-continuation guard (§7.3)
+      plan_accept_intent: accept_plan # default "accept_plan"
+      plan_refine_intent: work        # default "work"
+```
+
+All three lane fields are optional. The contextual router only offers classes for declared lanes; load-time validation rejects a class whose backing surface is not declared.
+
+### 7.2 Room chat lanes
+
+The three non-intent classes dispatch to **room chat lanes** backed by the same chat store that persists meta-mode conversations (`internal/chats/`). The key tuple is:
+
+```
+(app_id, "room:<kind>", state_path)
+```
+
+mirroring meta-mode's `(app_id, "meta:<modeName>", state_path)`. See [`internal/roomchat/lane.go`](../../internal/roomchat/lane.go). The three lane kinds are `LaneHelp`, `LaneWork`, and `LaneMeta`. `VerbForLane` selects the agent verb:
+
+- `LaneHelp` / `LaneMeta` → always `host.agent.ask` (read-only).
+- `LaneWork` with `write_mode: readonly` → `host.agent.ask`.
+- `LaneWork` otherwise → `host.agent.task`.
+
+The active lane is the most-recent non-archived row for `(app_id, room, state_path)`, created lazily on first use. A `/meta new`-style reset is available via `roomchat.Resolver.StartNew`.
+
+### 7.3 Plan-continuation guard
+
+When `pending_plan_path` is set and the world contains a non-empty map at that path, the contextual router **short-circuits the LLM** with a deterministic classification:
+
+- **Affirmation** (`ok`, `yes`, `go`, `apply it`, …) → routes to `plan_accept_intent` at confidence 1.0. Trace: `turn.context_route_decided` with `reason: plan_affirmation`.
+- **Any other content** → routes to `plan_refine_intent`, filling its single required string slot at confidence 1.0. Trace: `turn.context_route_decided` with `reason: plan_refine`.
+
+This keeps plan acceptance and refinement no-LLM and replayable, and prevents a `default_intent` from consuming an affirmation intended for the pending plan.
+
+### 7.4 Route receipt
+
+Every contextual routing decision emits `turn.context_route_decided` and — for lane dispatches — `turn.context_route_applied`, and produces a `ContextRouteReceipt` on `TurnOutcome.ContextRoute`:
+
+```go
+// internal/orchestrator/context_route.go
+type ContextRouteReceipt struct {
+    Class        string            // intent | help | room_request | meta_edit
+    Intent       string            // populated for class=intent
+    Reason       string            // model's stated rationale
+    Confidence   float64           // [0, 1]
+    TargetChatID string            // populated for lane classes
+    TargetLane   string            // "help" | "work" | "meta"
+    Alternatives []ContextRouteAlt // next-best classes considered
+    DecisionID   string            // "<session_id>:<turn_number>" — rewind target
+}
+```
+
+The `DecisionID` is the stable handle for rewind; TUI/web reads the receipt to render the route badge and alternative actions.
+
+### 7.5 Rewind and override
+
+`Orchestrator.RewindRoute(sid, decisionID, newClass, reason)` reverses one routing decision ([`internal/orchestrator/rewind.go`](../../internal/orchestrator/rewind.go)):
+
+1. Parse `decisionID` → `turnN`.
+2. Recover the original utterance and old class from the `TurnStarted` event at `turnN`.
+3. Replay event history up to (but not including) `turnN` via `store.BuildJourneyUntil` to get the pre-turn state/world.
+4. Re-snapshot at `turnN` with the pre-turn world so `LoadHistory` skips the overridden events without deleting them.
+5. Re-dispatch the utterance under `newClass`: lane classes append to the chosen lane; `class=intent` rewind requires `IntentAccepted` event recovery and is not yet implemented.
+6. Append a `turn.context_route_overridden` event at `turnN+1`.
+
+Rewind is **one-decision deep and foreground-only** in v1 — it does not attempt to rewrite concurrent background lanes or chain multiple decisions.
+
+### 7.6 No-LLM replay
+
+When a trace contains a `turn.context_route_decided` event, replay re-uses the recorded verdict instead of invoking the contextual router LLM — the same approach the turn cache uses for ordinary LLM routing. The flow tests in `internal/orchestrator/context_route_*_test.go` cover all four verdict classes plus rewind deterministically via cassettes.
+
+**Code:** [`internal/orchestrator/context_route.go`](../../internal/orchestrator/context_route.go) (types + parser), [`internal/orchestrator/semantic.go`](../../internal/orchestrator/semantic.go) `routeViaContextualRouter`, [`internal/roomchat/`](../../internal/roomchat/) (lane substrate), [`internal/orchestrator/rewind.go`](../../internal/orchestrator/rewind.go) (one-decision rewind).
+
 ## 8. See also
 
 - [`architecture.md`](overview.md) §3 — where the routing tiers
@@ -492,6 +588,10 @@ reference.
   reference (agent-split Phase 5 handler).
 - [`prompt-intercept.md`](prompt-intercept.md) — the pre-LLM intercept
   gate, another consumer of these no-LLM tiers via `Orchestrator.Classify`.
+- [`meta-mode.md`](../stories/meta-mode.md) §8 — meta-mode chat
+  persistence; room chat lanes (§7.2) use the same store with `room:<kind>`
+  keys.
 - `internal/slotparse/` godoc — every typed parser's exact contract.
 - `internal/semroute/` godoc — the matcher, template compiler, and
   Aho-Corasick wiring.
+- `internal/roomchat/` — room chat lane substrate (§7.2).

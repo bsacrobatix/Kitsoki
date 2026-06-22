@@ -1088,6 +1088,10 @@ the usual `OffPathQuestion` / `OffPathAnswer`; there is no
 (`stories/dev-story/rooms/main.yaml`). Full design narrative:
 [`architecture.md` §9](architecture.md#9-agent-rooms-meta-and-off-path).
 
+### Contextual routing — a routing tier, not a transition
+
+A state can opt into a **contextual routing tier** (`contextual_routing: {enabled: true}`) that sits between the embedding tier and the LLM in the routing stack. It classifies the utterance into four classes (`intent`, `help`, `room_request`, `meta_edit`) and dispatches accordingly. Crucially, the three lane classes — `help`, `room_request`, `meta_edit` — route into a persistent room chat **without advancing the state machine**: state and world stay unchanged, and the FSM's next-turn menu is still the same room's intents. Only `class=intent` produces a real state-machine transition. Contextual routing is a routing decision inside the orchestrator's `translate` step, not a state node or edge in the app graph. See [`semantic-routing.md` §7](../architecture/semantic-routing.md#7-contextual-routing-tier).
+
 ---
 
 ## 12. Worked example: one turn through Cloak of Darkness
