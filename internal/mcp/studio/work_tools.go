@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -133,7 +134,7 @@ func (srv *Server) work(ctx context.Context, args WorkArgs) (WorkResult, error) 
 		})
 		addSummary(&out.Summary, async)
 		out.Items = append(out.Items, workItemsForNotifications(sh, string(j.State), notifications, args.IncludeQuiet)...)
-		out.Items = append(out.Items, workItemsForJobs(sh, string(j.State), jobRows, args.IncludeQuiet)...)
+		out.Items = append(out.Items, workItemsForJobs(sh, string(j.State), jobRows, notifications, args.IncludeQuiet)...)
 		out.Items = append(out.Items, workItemsForPendingDrives(sh, string(j.State), pendingDrives)...)
 		out.Items = append(out.Items, workItemsForBackgroundedChats(sh, string(j.State), backgroundedChats)...)
 	}
@@ -248,8 +249,9 @@ func workItemNeedsAttention(item WorkItem) bool {
 	}
 }
 
-func workItemsForJobs(sh *SessionHandle, state string, jobRows []JobInspectItem, includeQuiet bool) []WorkItem {
+func workItemsForJobs(sh *SessionHandle, state string, jobRows []JobInspectItem, notifications []InboxInspectItem, includeQuiet bool) []WorkItem {
 	out := make([]WorkItem, 0, len(jobRows))
+	jobNotifications := workJobNotifications(notifications)
 	for _, j := range jobRows {
 		priority := jobPriority(j)
 		if priority < 80 && !isActiveJob(j) && !includeQuiet {
@@ -273,6 +275,32 @@ func workItemsForJobs(sh *SessionHandle, state string, jobRows []JobInspectItem,
 				Args: map[string]any{"handle": sh.Key},
 			},
 		})
+		if n, ok := jobNotifications[j.ID]; ok {
+			out[len(out)-1].Reacquire = WorkReacquire{
+				Tool: "session.teleport",
+				Args: map[string]any{"handle": sh.Key, "notification_id": n.ID},
+			}
+		}
+	}
+	return out
+}
+
+func workJobNotifications(notifications []InboxInspectItem) map[string]InboxInspectItem {
+	out := make(map[string]InboxInspectItem)
+	for _, n := range notifications {
+		if n.ReadAtUnixMilli != 0 {
+			continue
+		}
+		jobID := n.TeleportJobID
+		if jobID == "" && strings.HasPrefix(n.OriginRef, "job:") {
+			jobID = strings.TrimPrefix(n.OriginRef, "job:")
+		}
+		if jobID == "" {
+			continue
+		}
+		if _, exists := out[jobID]; !exists {
+			out[jobID] = n
+		}
 	}
 	return out
 }

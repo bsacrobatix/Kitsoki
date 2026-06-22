@@ -80,8 +80,9 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 		Severity:      jobs.SeveritySuccess,
 		Title:         "Background check complete",
 		TeleportState: "foyer",
+		TeleportJobID: "job-running",
 		OriginKind:    "job",
-		OriginRef:     "job:done",
+		OriginRef:     "job:job-running",
 	}))
 	require.NoError(t, js.UpsertJob(ctx, &jobs.Job{
 		ID:          "job-other",
@@ -167,6 +168,7 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	require.NotContains(t, tx, "job-other")
 	require.Contains(t, tx, "job")
 	require.Contains(t, tx, "host.agent.task")
+	requireContainsNear(t, currentWork, "host.agent.task", "/inbox")
 	require.Contains(t, tx, "dispatching")
 	require.Contains(t, tx, "dispatching review")
 	require.Contains(t, tx, "queued")

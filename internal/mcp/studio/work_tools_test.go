@@ -245,8 +245,9 @@ func TestStudioWorkShowsRunningJobs(t *testing.T) {
 	}
 	require.NotEmpty(t, runningJob.JobID)
 	assert.Equal(t, "slow-work", runningJob.Handle)
-	assert.Equal(t, "session.inspect", runningJob.Reacquire.Tool)
+	assert.Equal(t, "session.teleport", runningJob.Reacquire.Tool)
 	assert.Equal(t, "slow-work", runningJob.Reacquire.Args["handle"])
+	assert.NotEmpty(t, runningJob.Reacquire.Args["notification_id"])
 }
 
 func TestStudioWorkChatReacquireCarriesSessionContext(t *testing.T) {

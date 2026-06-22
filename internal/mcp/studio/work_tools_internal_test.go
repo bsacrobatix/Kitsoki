@@ -39,6 +39,30 @@ func TestWorkItemsForNotificationsPreservesExternalContext(t *testing.T) {
 	assert.Equal(t, "notif-1", got.Reacquire.Args["notification_id"])
 }
 
+func TestWorkItemsForJobsUseMatchingNotificationTeleport(t *testing.T) {
+	sh := &SessionHandle{Key: "async-work", SID: "sid-1"}
+	items := workItemsForJobs(sh, "running", []JobInspectItem{
+		{ID: "job-awaiting", Kind: "host.agent.task", Status: jobs.JobAwaitingInput},
+		{ID: "job-failed", Kind: "host.agent.task", Status: jobs.JobFailed},
+		{ID: "job-running", Kind: "host.agent.task", Status: jobs.JobRunning},
+	}, []InboxInspectItem{
+		{ID: "notif-awaiting", TeleportJobID: "job-awaiting", OriginKind: "job", OriginRef: "job:job-awaiting"},
+		{ID: "notif-failed", OriginKind: "job", OriginRef: "job:job-failed"},
+	}, false)
+
+	require.Len(t, items, 3)
+	byJob := map[string]WorkItem{}
+	for _, item := range items {
+		byJob[item.JobID] = item
+	}
+	assert.Equal(t, "session.teleport", byJob["job-awaiting"].Reacquire.Tool)
+	assert.Equal(t, "notif-awaiting", byJob["job-awaiting"].Reacquire.Args["notification_id"])
+	assert.Equal(t, "session.teleport", byJob["job-failed"].Reacquire.Tool)
+	assert.Equal(t, "notif-failed", byJob["job-failed"].Reacquire.Args["notification_id"])
+	assert.Equal(t, "session.inspect", byJob["job-running"].Reacquire.Tool)
+	assert.Equal(t, "async-work", byJob["job-running"].Reacquire.Args["handle"])
+}
+
 func TestWorkItemNeedsAttentionUsesInterventionSemantics(t *testing.T) {
 	assert.True(t, workItemNeedsAttention(WorkItem{
 		Kind:     "notification",

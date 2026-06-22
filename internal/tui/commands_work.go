@@ -32,6 +32,21 @@ func renderWorkBlock(m RootModel, args []string) (RootModel, string) {
 	var errs []string
 
 	if m.jobStore != nil {
+		var notifs []jobs.Notification
+		if allSessions {
+			var err error
+			notifs, err = m.jobStore.ListNotificationsAll(ctx, 20)
+			if err != nil {
+				errs = append(errs, "notifications: "+err.Error())
+			}
+		} else {
+			var err error
+			notifs, err = m.jobStore.ListNotifications(ctx, m.sid, 20)
+			if err != nil {
+				errs = append(errs, "notifications: "+err.Error())
+			}
+		}
+
 		var jobRows []jobs.Job
 		var err error
 		if allSessions {
@@ -42,18 +57,10 @@ func renderWorkBlock(m RootModel, args []string) (RootModel, string) {
 		if err != nil {
 			errs = append(errs, "jobs: "+err.Error())
 		} else {
-			rows = append(rows, workRowsForJobs(jobRows, m.sid, allSessions)...)
+			rows = append(rows, workRowsForJobs(jobRows, notifs, m.sid, allSessions)...)
 		}
 
-		var notifs []jobs.Notification
-		if allSessions {
-			notifs, err = m.jobStore.ListNotificationsAll(ctx, 20)
-		} else {
-			notifs, err = m.jobStore.ListNotifications(ctx, m.sid, 20)
-		}
-		if err != nil {
-			errs = append(errs, "notifications: "+err.Error())
-		} else {
+		if len(notifs) > 0 {
 			rows = append(rows, workRowsForNotifications(notifs, m.sid, allSessions)...)
 		}
 	}
@@ -145,8 +152,9 @@ type workRow struct {
 	AttachTarget *chats.PtySession
 }
 
-func workRowsForJobs(jobRows []jobs.Job, sid app.SessionID, allSessions bool) []workRow {
+func workRowsForJobs(jobRows []jobs.Job, notifs []jobs.Notification, sid app.SessionID, allSessions bool) []workRow {
 	out := make([]workRow, 0, len(jobRows))
+	jobInboxIndexes := workJobInboxIndexes(notifs, sid)
 	for _, j := range jobRows {
 		switch j.Status {
 		case jobs.JobRunning, jobs.JobAwaitingInput, jobs.JobFailed:
@@ -160,6 +168,9 @@ func workRowsForJobs(jobRows []jobs.Job, sid app.SessionID, allSessions bool) []
 		hint := "job " + j.ID
 		if j.OriginState != "" {
 			hint += " from " + string(j.OriginState)
+		}
+		if idx := jobInboxIndexes[j.ID]; idx > 0 {
+			hint += fmt.Sprintf("; /inbox %d", idx)
 		}
 		if allSessions {
 			hint += workSessionHint(j.SessionID, sid)
@@ -176,6 +187,33 @@ func workRowsForJobs(jobRows []jobs.Job, sid app.SessionID, allSessions bool) []
 		})
 	}
 	return out
+}
+
+func workJobInboxIndexes(notifs []jobs.Notification, sid app.SessionID) map[string]int {
+	indexes := make(map[string]int)
+	next := 1
+	for _, n := range notifs {
+		if n.SessionID != sid || n.ReadAt != nil {
+			continue
+		}
+		if jobID := notificationJobID(n); jobID != "" {
+			if _, exists := indexes[jobID]; !exists {
+				indexes[jobID] = next
+			}
+		}
+		next++
+	}
+	return indexes
+}
+
+func notificationJobID(n jobs.Notification) string {
+	if n.TeleportJobID != "" {
+		return n.TeleportJobID
+	}
+	if strings.HasPrefix(n.OriginRef, "job:") {
+		return strings.TrimPrefix(n.OriginRef, "job:")
+	}
+	return ""
 }
 
 func workRowsForNotifications(notifs []jobs.Notification, sid app.SessionID, allSessions bool) []workRow {
