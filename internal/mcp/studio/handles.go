@@ -183,8 +183,8 @@ func (ss *StudioSession) SetHarnessProfiles(profiles map[string]orchestrator.Har
 }
 
 // SetChatStore seeds the concrete chat store used by driving sessions for
-// chat-aware host calls and read-side async reacquisition (pending drives and
-// backgrounded PTY chats). Nil disables chat surfacing.
+// chat-aware host calls and read-side async reacquisition (pending/dispatching/
+// failed drives and backgrounded PTY chats). Nil disables chat surfacing.
 func (ss *StudioSession) SetChatStore(store *chats.Store) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()

@@ -121,7 +121,7 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	// studio.work — global async/reacquisition queue across open handles.
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "studio.work",
-		Description: "Read-only prioritized work queue across all open driving handles. Returns async jobs, unread notifications, pending drives, and backgrounded chats with reacquisition hints.",
+		Description: "Read-only prioritized work queue across all open driving handles. Returns async jobs, unread notifications, pending/dispatching/failed chat drives, backgrounded chats, and parked operator questions with reacquisition hints.",
 	}, srv.handleWork)
 
 	// story.* — the deterministic, LLM-free authoring tools (slice 6).

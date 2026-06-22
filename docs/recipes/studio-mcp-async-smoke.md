@@ -351,13 +351,13 @@ go run ./cmd/kitsoki mcp-test \
 ```
 
 This smoke exercises the session-origin stamping that lets `studio.work`,
-TUI `/work`, and the web inbox active-work list all find pending chat drives
-created by ordinary story `host.chat.drive` effects. `session.command` runs the
-real TUI slash dispatcher and returns the rendered frame, so the smoke proves
-the terminal active-work affordance without launching an interactive TUI. TUI
-`/work` prints `/chat show <id>` for queued/dispatching chat drives, and
-`/chat show` gives the same focused async chat context that `chat.show` exposes
-over MCP.
+TUI `/work`, and the web inbox active-work list all find pending or failed chat
+drives created by ordinary story `host.chat.drive` effects. `session.command`
+runs the real TUI slash dispatcher and returns the rendered frame, so the smoke
+proves the terminal active-work affordance without launching an interactive TUI.
+TUI `/work` prints `/chat show <id>` for queued/dispatching/failed chat drives,
+and `/chat show` gives the same focused async chat context that `chat.show`
+exposes over MCP.
 
 For the operator-ask fallback path, `session.drive` may return
 `awaiting_operator` instead of settling the turn. While that turn is parked,

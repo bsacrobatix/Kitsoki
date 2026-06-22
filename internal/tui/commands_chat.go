@@ -14,8 +14,8 @@ import (
 const chatShowMessageLimit = 5
 
 // ChatCommand implements read-only chat transcript inspection for async work.
-// It gives queued/dispatching chat drives a TUI reacquire path comparable to
-// web/runstatus chat.show without attaching to a tmux PTY.
+// It gives queued/dispatching/failed chat drives a TUI reacquire path comparable
+// to web/runstatus chat.show without attaching to a tmux PTY.
 type ChatCommand struct{}
 
 func (ChatCommand) Name() string { return "/chat" }

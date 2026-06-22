@@ -14,12 +14,12 @@ import (
 )
 
 // commands_work.go - single-pane TUI "/work": print the active async work
-// queue for this session. "/work --all" broadens jobs, notifications, queued or
-// dispatching drives, and background Claude PTYs across sessions. This is the
-// terminal counterpart to web runstatus.work.list and studio.work: one compact
-// place to see unread notifications, active background jobs, queued or
-// dispatching chat drives, and backgrounded Claude PTYs without leaving the
-// current flow.
+// queue for this session. "/work --all" broadens jobs, notifications, queued,
+// dispatching, or failed drives, and background Claude PTYs across sessions.
+// This is the terminal counterpart to web runstatus.work.list and studio.work:
+// one compact place to see unread notifications, active background jobs,
+// queued/dispatching/failed chat drives, and backgrounded Claude PTYs without
+// leaving the current flow.
 func renderWorkBlock(m RootModel, args []string) (RootModel, string) {
 	r := blocks.New(m.transcript.width, m.currentTheme())
 	if m.jobStore == nil && m.chatStore == nil {

@@ -177,7 +177,7 @@ session's job IDs, kinds, statuses, origin states, errors, clarification schema,
 and timestamps;
 `notifications[]` shows active inbox rows, including `action_required` items and
 teleport job/state fields. When a chat store is wired, `pending_drives[]` shows
-pending/dispatching chat-input-queue rows owned by the session, and
+pending/dispatching/failed chat-input-queue rows owned by the session, and
 `backgrounded_chats[]` shows tmux-hosted chats left in `pty_background` mode.
 This is the structured MCP surface for an external agent to inspect the chosen
 handle after `studio.work` has ranked the global queue, notice required operator
