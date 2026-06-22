@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -10,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	studio "kitsoki/internal/mcp/studio"
+	"kitsoki/internal/webshot"
 )
 
 // TestMCPAttachEntry_RoundTrips covers slice task 2.4: the emitted .mcp.json
@@ -68,6 +72,44 @@ func TestMCPCmd_Registered(t *testing.T) {
 	require.NotNil(t, mcp, "root command tree must include `mcp`")
 }
 
+func TestMCPWebShotFunc_RendersLiveStudioHandle(t *testing.T) {
+	ctx := context.Background()
+	sess := studio.NewStudioSession(nil)
+	sh, err := sess.OpenDrivingSession(ctx, studio.OpenDrivingSessionParams{
+		Key:       "web",
+		StoryPath: "../../testdata/apps/cloak/app.yaml",
+		TracePath: filepath.Join(t.TempDir(), "trace.jsonl"),
+	})
+	require.NoError(t, err)
+
+	repoRoot := t.TempDir()
+	helper := filepath.Join(repoRoot, "tools", "runstatus", "web-shot.ts")
+	require.NoError(t, os.MkdirAll(filepath.Dir(helper), 0o755))
+	require.NoError(t, os.WriteFile(helper, []byte("// test helper\n"), 0o644))
+
+	browser := &fakeWebShotBrowser{png: []byte("png")}
+	fn := mcpWebShotFuncWithOptions(sess, mcpWebShotOptions{
+		RepoRoot: repoRoot,
+		Browser:  browser,
+		Server: func(h http.Handler) webshot.ServerProvider {
+			require.NotNil(t, h)
+			return fakeWebShotServer{base: "http://127.0.0.1:12345"}
+		},
+	})
+
+	png, err := fn(ctx, studio.WebRenderSpec{SessionID: string(sh.SID)})
+	require.NoError(t, err)
+	assert.Equal(t, []byte("png"), png)
+	assert.Equal(t, "http://127.0.0.1:12345#/s/"+string(sh.SID), browser.url)
+}
+
+func TestMCPWebShotFunc_RejectsSpecForm(t *testing.T) {
+	fn := mcpWebShotFuncWithOptions(studio.NewStudioSession(nil), mcpWebShotOptions{})
+	_, err := fn(context.Background(), studio.WebRenderSpec{StoryPath: "stories/bugfix", State: "idle"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "supports live handles")
+}
+
 func TestMCPTestCmd_Registered(t *testing.T) {
 	root := newRootCmd()
 	var found bool
@@ -82,6 +124,24 @@ func TestMCPTestCmd_Registered(t *testing.T) {
 		}
 	}
 	require.True(t, found, "root command tree must include `mcp-test`")
+}
+
+type fakeWebShotServer struct {
+	base string
+}
+
+func (s fakeWebShotServer) Serve(context.Context) (string, func(), error) {
+	return s.base, func() {}, nil
+}
+
+type fakeWebShotBrowser struct {
+	png []byte
+	url string
+}
+
+func (b *fakeWebShotBrowser) Capture(_ context.Context, req webshot.CaptureRequest) error {
+	b.url = req.URL
+	return os.WriteFile(req.OutPath, b.png, 0o644)
 }
 
 func TestMCPTestServerArgs_DefaultsMirrorMCPCmd(t *testing.T) {

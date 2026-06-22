@@ -38,6 +38,7 @@ import (
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/runstatus"
 	rsserver "kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
 	"kitsoki/internal/tui"
@@ -570,3 +571,44 @@ func (rt *sessionRuntime) history() store.History {
 	}
 	return rt.sink.History()
 }
+
+// AppDef implements runstatus/server.Source for the browser surface used by
+// render.web.
+func (rt *sessionRuntime) AppDef() *app.AppDef { return rt.def }
+
+// Events implements runstatus/server.Source without rendering the diagram.
+func (rt *sessionRuntime) Events() ([]runstatus.TraceEvent, error) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.sink == nil {
+		return nil, nil
+	}
+	h := rt.sink.History()
+	evs := make([]runstatus.TraceEvent, len(h))
+	for i := range h {
+		evs[i] = runstatus.ToTraceEvent(h[i])
+	}
+	runstatus.AggregateTaskDetails(evs)
+	return evs, nil
+}
+
+// Snapshot implements runstatus/server.Source for the live browser view. It
+// reads the same JSONL sink the studio runtime writes, under rt.mu because the
+// sink is not concurrency-safe.
+func (rt *sessionRuntime) Snapshot() (runstatus.Snapshot, error) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.sink == nil {
+		return runstatus.Snapshot{}, nil
+	}
+	snap, err := runstatus.FromSink(rt.sink, rt.def, string(rt.sid))
+	if err != nil {
+		return snap, err
+	}
+	if snap.Session.CurrentState == "" && rt.def != nil {
+		snap.Session.CurrentState = string(app.Compile(rt.def).InitialState())
+	}
+	return snap, nil
+}
+
+var _ rsserver.Source = (*sessionRuntime)(nil)

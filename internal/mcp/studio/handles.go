@@ -160,6 +160,7 @@ type StudioSession struct {
 	harnessProfiles map[string]orchestrator.HarnessProfile
 	defaultProfile  string
 	chatStore       *chats.Store
+	currentSID      string
 }
 
 // SetHarnessProfiles seeds the operator-declared harness profiles new driving
@@ -383,6 +384,7 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 		Runtime:       rt,
 	}
 	ss.sessions[key] = sh
+	ss.currentSID = string(rt.sid)
 	return sh, nil
 }
 
@@ -418,6 +420,9 @@ func (ss *StudioSession) CloseSession(key string) error {
 		_ = sh.Harness.Close()
 	}
 	delete(ss.sessions, key)
+	if ss.currentSID == string(sh.SID) {
+		ss.currentSID = ""
+	}
 	return nil
 }
 

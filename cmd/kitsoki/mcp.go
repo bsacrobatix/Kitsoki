@@ -4,17 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/harness"
+	"kitsoki/internal/kitrepo"
 	studio "kitsoki/internal/mcp/studio"
+	rsserver "kitsoki/internal/runstatus/server"
 	"kitsoki/internal/webconfig"
+	"kitsoki/internal/webshot"
 )
 
 // studioImportResolver returns the import resolver used by `kitsoki mcp`.
@@ -118,9 +123,9 @@ the deterministic story.read/write/validate/graph/test authoring tools; and the
 session.new/attach/drive/submit/continue/inspect/trace driving tools,
 render.tui/tui_png/web, and issue.create (file a GitHub issue via gh, bundling
 rendered assets + a handle's trace/inspect). Driving defaults to harness:replay (no LLM); render.tui
-and render.tui_png return the terminal Frame / PNG, while render.web degrades to
-a text result unless a browser-capable web shot is wired (deferred — it needs a
-served kitsoki web, the hybrid-session-driving concern).
+and render.tui_png return the terminal Frame / PNG, while render.web screenshots
+the current browser view for a live handle when the local web-shot helper and
+Playwright dependencies are available.
 
 Attach by adding to a client's .mcp.json (see 'kitsoki docs' once the studio
 docs land):
@@ -184,6 +189,7 @@ docs land):
 				srvOpts = append(srvOpts, studio.ReadOnly())
 			}
 			srv := studio.NewServer(sess, srvOpts...)
+			srv.SetWebShot(mcpWebShotFunc(sess, ""))
 
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 			defer cancel()
@@ -230,4 +236,56 @@ func mcpAttachEntry(command, storiesDir string) map[string]any {
 // JSON — the snippet a user pastes into a client's config.
 func mcpAttachJSON(command, storiesDir string) ([]byte, error) {
 	return json.MarshalIndent(mcpAttachEntry(command, storiesDir), "", "  ")
+}
+
+type mcpWebShotOptions struct {
+	RepoRoot      string
+	Browser       webshot.BrowserInvoker
+	Server        func(http.Handler) webshot.ServerProvider
+	HealthTimeout time.Duration
+}
+
+func mcpWebShotFunc(sess *studio.StudioSession, repoRoot string) studio.WebShotFunc {
+	return mcpWebShotFuncWithOptions(sess, mcpWebShotOptions{RepoRoot: repoRoot})
+}
+
+func mcpWebShotFuncWithOptions(sess *studio.StudioSession, opts mcpWebShotOptions) studio.WebShotFunc {
+	return func(ctx context.Context, spec studio.WebRenderSpec) ([]byte, error) {
+		wsSpec := spec.ToWebshotSpec()
+		if wsSpec.SessionID == "" {
+			return nil, fmt.Errorf("kitsoki mcp render.web currently supports live handles; use kitsoki web-shot with a no-LLM flow for story/state screenshots")
+		}
+		repoRoot := opts.RepoRoot
+		if repoRoot == "" {
+			repoRoot = os.Getenv(kitrepo.EnvVar)
+		}
+		if repoRoot == "" {
+			repoRoot = kitrepo.Resolve()
+		}
+		if repoRoot == "" {
+			return nil, fmt.Errorf("could not locate the kitsoki checkout for tools/runstatus/web-shot.ts; set %s", kitrepo.EnvVar)
+		}
+		helper := filepath.Join(repoRoot, "tools", "runstatus", "web-shot.ts")
+		if _, err := os.Stat(helper); err != nil {
+			return nil, fmt.Errorf("web-shot helper not found at %s: %w", helper, err)
+		}
+
+		provider := studio.NewRunstatusProvider(sess)
+		handler := rsserver.NewMulti(provider).Handler()
+		serverFactory := opts.Server
+		if serverFactory == nil {
+			serverFactory = func(h http.Handler) webshot.ServerProvider {
+				return &webshot.HandlerServer{Handler: h, HealthTimeout: opts.HealthTimeout}
+			}
+		}
+		browser := opts.Browser
+		if browser == nil {
+			browser = &webshot.NodeInvoker{RepoRoot: repoRoot}
+		}
+		return webshot.Shot(ctx, wsSpec, webshot.Options{
+			Server:        serverFactory(handler),
+			Browser:       browser,
+			HealthTimeout: opts.HealthTimeout,
+		})
+	}
 }

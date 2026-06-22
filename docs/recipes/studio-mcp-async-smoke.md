@@ -103,8 +103,42 @@ The expected proof at the end is:
 - a final `session.inspect` reports `notifications_unread == 1`
 - `render.tui` reports the reacquired frame's state as `running`
 
-`render.web` is a separate browser-capable seam. In the plain `kitsoki mcp`
-stdio server it currently returns a text fallback unless a host injects the
-webshot provider; the studio package still has no-LLM stub coverage for the
-`render.web` MCP tool, but this stdio smoke intentionally gates only the
-currently-wired CLI surface.
+To prove the browser surface too, first stage the embedded runstatus SPA:
+
+```sh
+make web
+```
+
+Then run a focused live-handle web render smoke:
+
+```sh
+GOCACHE="$PWD/.cache/go-build" \
+go run ./cmd/kitsoki mcp-test \
+  --list-tools=false \
+  --timeout 60s \
+  --server-arg mcp \
+  --server-arg --stories-dir --server-arg ./stories \
+  --server-arg --db --server-arg .artifacts/mcp-test/render-web.db \
+  --calls '[
+    {
+      "tool": "session.new",
+      "args": {
+        "story_path": "testdata/apps/cloak/app.yaml",
+        "key": "web-smoke"
+      }
+    },
+    {
+      "tool": "render.web",
+      "args": {
+        "handle": "web-smoke"
+      }
+    }
+  ]'
+```
+
+This uses the same stdio MCP server, serves the open studio handle through the
+runstatus web handler, and returns a `render.web` text result plus an MCP
+`image/png` block when the client accepts images. It requires the local
+Playwright helper dependencies under `tools/runstatus`; story/state screenshots
+without a live handle still belong to `kitsoki web-shot` with an explicit
+no-LLM flow.

@@ -262,15 +262,15 @@ func TestNodeInvoker_BuildsWebShotArgv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	if rec.dir != "/repo" {
-		t.Errorf("cwd = %q, want /repo", rec.dir)
+	if rec.dir != filepath.Join("/repo", "tools", "runstatus") {
+		t.Errorf("cwd = %q, want /repo/tools/runstatus", rec.dir)
 	}
 	if rec.name != "pnpm" {
 		t.Errorf("command = %q, want pnpm", rec.name)
 	}
 	joined := strings.Join(rec.args, " ")
 	for _, want := range []string{
-		filepath.Join("tools", "runstatus", "web-shot.ts"),
+		"web-shot.ts",
 		"--url http://127.0.0.1:9/#/",
 		"--out /tmp/out.png",
 		"--viewport 1600x900",

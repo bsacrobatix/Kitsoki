@@ -164,10 +164,12 @@ the `webshot` seam are documented in
 Image blocks are gated on client capability: `render.tui_png` / `render.web`
 attach an image block when the client advertises image support and **always**
 include the textual frame, so a text-only client still gets something.
-`render.web` requires a browser-capable host (the served `kitsoki web` + the
-Node/Playwright [`web-shot.ts`](../../tools/runstatus/web-shot.ts) invoker,
-injected via `Server.SetWebShot`); with no shot wired it degrades to a text
-result.
+`kitsoki mcp` wires `render.web` for live handles by serving the open studio
+session through the same runstatus web handler and screenshotting it with the
+Node/Playwright [`web-shot.ts`](../../tools/runstatus/web-shot.ts) invoker.
+That path needs a staged runstatus SPA (`make web`) and local Playwright
+dependencies. Story/state spec screenshots still belong to `kitsoki web-shot`,
+where a no-LLM flow or host cassette can define the deterministic web session.
 
 ### `issue.*` — file a gap (with evidence bundled)
 

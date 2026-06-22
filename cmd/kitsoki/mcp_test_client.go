@@ -202,6 +202,9 @@ func runStudioMCPTest(ctx context.Context, opts studioMCPTestOptions, out io.Wri
 	if err := enc.Encode(report); err != nil {
 		return fmt.Errorf("mcp-test: encode report: %w", err)
 	}
+	if !report.OK {
+		return fmt.Errorf("mcp-test: one or more tool calls returned errors")
+	}
 	return nil
 }
 
