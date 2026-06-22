@@ -102,7 +102,15 @@ thought.
   room-scoped meta edit. Adds persistent room chat lanes, route receipts, and
   one-decision rewind so operators can correct a bad routing choice. Builds on
   the in-progress ad-hoc structured-plan workbench and existing meta modes.
-  Nothing implemented yet.
+  Runtime slices shipped; remaining work is TUI/web controls for receipts,
+  switch-route, and rewind plus optional extra flow fixtures.
+- [`multi-hop-contextual-routing.md`](multi-hop-contextual-routing.md) —
+  (runtime) extend the contextual routing tier with an opt-in `route_plan`
+  verdict for bounded cross-room commands: leave the current room, execute a
+  validated intent in another room, optionally return, and surface one plan
+  receipt/rewind target so bad-route correction can restore the conversation to
+  the pre-plan state and choose a different interpretation. Nothing implemented
+  yet.
 - [`ai-collaboration-proposal.md`](ai-collaboration-proposal.md) —
   one remaining AI-collaborator surface (per-state `loading_view`).
   Three v1 surfaces shipped (`docs/architecture/developer-guide.md` §6);
