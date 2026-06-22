@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/chats"
+	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/orchestrator"
@@ -92,6 +94,48 @@ type Driver interface {
 // omit it and simply contribute no work rows.
 type WorkLister interface {
 	ListWork(ctx context.Context) (SessionWork, error)
+}
+
+// GitHubInboxSyncer is an optional live-session extension for importing
+// GitHub issue/PR work into the session inbox. Read-only trace surfaces omit it.
+type GitHubInboxSyncer interface {
+	SyncGitHubInbox(ctx context.Context, opts GitHubInboxSyncOptions) (GitHubInboxSyncResult, error)
+}
+
+// GitHubInboxSyncOptions controls GitHub issue/PR inbox discovery for one
+// runstatus session.
+type GitHubInboxSyncOptions struct {
+	Repo            string
+	IncludeIssues   bool
+	IncludePRs      bool
+	Assignee        string
+	ReviewRequested string
+	Limit           int
+	TeleportState   string
+}
+
+// GitHubInboxSyncResult is the JSON-RPC result from
+// runstatus.session.inbox.sync_github.
+type GitHubInboxSyncResult struct {
+	OK        bool                        `json:"ok"`
+	SessionID string                      `json:"session_id"`
+	Fetched   int                         `json:"fetched"`
+	Inserted  int                         `json:"inserted"`
+	Skipped   int                         `json:"skipped"`
+	Items     []GitHubInboxSyncResultItem `json:"items"`
+}
+
+// GitHubInboxSyncResultItem is one imported or skipped GitHub row.
+type GitHubInboxSyncResultItem struct {
+	NotificationID string         `json:"notification_id"`
+	Kind           string         `json:"kind"`
+	Number         string         `json:"number"`
+	Title          string         `json:"title"`
+	URL            string         `json:"url,omitempty"`
+	Inserted       bool           `json:"inserted"`
+	OriginRef      string         `json:"origin_ref"`
+	TeleportState  string         `json:"teleport_state"`
+	TeleportSlots  map[string]any `json:"teleport_slots,omitempty"`
 }
 
 // SessionWork is the per-session async queue returned by [WorkLister].
@@ -325,6 +369,70 @@ func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
 		if item.Priority >= 80 {
 			out.Summary.NeedsAttention++
 		}
+	}
+	return out, nil
+}
+
+// SyncGitHubInbox imports assigned GitHub issues and requested PR reviews into
+// this session's inbox using the same idempotent notification contract as the
+// CLI and studio MCP tools.
+func (d OrchestratorDriver) SyncGitHubInbox(ctx context.Context, opts GitHubInboxSyncOptions) (GitHubInboxSyncResult, error) {
+	if d.Jobs == nil {
+		return GitHubInboxSyncResult{}, fmt.Errorf("github inbox sync: no job store configured")
+	}
+	includeIssues := opts.IncludeIssues
+	includePRs := opts.IncludePRs
+	if !includeIssues && !includePRs {
+		includeIssues = true
+		includePRs = true
+	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	teleportState := strings.TrimSpace(opts.TeleportState)
+	if teleportState == "" {
+		teleportState = "inbox"
+	}
+	items, err := host.ListGitHubInboxItems(ctx, host.GitHubInboxOptions{
+		Repo:            opts.Repo,
+		IncludeIssues:   includeIssues,
+		IncludePRs:      includePRs,
+		Assignee:        opts.Assignee,
+		ReviewRequested: opts.ReviewRequested,
+		Limit:           limit,
+	})
+	if err != nil {
+		return GitHubInboxSyncResult{}, err
+	}
+	out := GitHubInboxSyncResult{
+		OK:        true,
+		SessionID: string(d.SID),
+		Fetched:   len(items),
+		Items:     make([]GitHubInboxSyncResultItem, 0, len(items)),
+	}
+	for _, item := range items {
+		n := inbox.NewGitHubNotification(d.SID, opts.Repo, teleportState, item)
+		inserted, err := d.Jobs.InsertExternalNotificationOnce(ctx, n)
+		if err != nil {
+			return GitHubInboxSyncResult{}, fmt.Errorf("github inbox sync: insert notification for %s #%s: %w", item.Kind, item.Number, err)
+		}
+		if inserted {
+			out.Inserted++
+		} else {
+			out.Skipped++
+		}
+		out.Items = append(out.Items, GitHubInboxSyncResultItem{
+			NotificationID: n.ID,
+			Kind:           item.Kind,
+			Number:         item.Number,
+			Title:          item.Title,
+			URL:            item.URL,
+			Inserted:       inserted,
+			OriginRef:      n.OriginRef,
+			TeleportState:  n.TeleportState,
+			TeleportSlots:  n.TeleportSlots,
+		})
 	}
 	return out, nil
 }

@@ -15,6 +15,13 @@
             <span v-if="inbox.unread > 0" class="inbox-panel__count">{{ inbox.unread }}</span>
           </span>
           <button
+            class="inbox-panel__sync"
+            data-testid="inbox-sync-github"
+            title="Refresh assigned GitHub issues and requested PR reviews"
+            :disabled="!currentSessionId || inbox.githubSyncing"
+            @click="onSyncGitHub"
+          >{{ inbox.githubSyncing ? "Syncing…" : "Sync GitHub" }}</button>
+          <button
             class="inbox-panel__close"
             data-testid="inbox-close"
             title="Close (Esc)"
@@ -23,6 +30,13 @@
         </div>
 
         <div class="inbox-panel__body">
+          <div
+            v-if="inbox.githubSyncError"
+            class="inbox-panel__error"
+            data-testid="inbox-sync-error"
+          >
+            {{ inbox.githubSyncError }}
+          </div>
           <section
             v-if="inbox.workItems.length > 0"
             class="work-section"
@@ -104,8 +118,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onMounted, onUnmounted } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { LiveSource } from "../data/live-source.js";
 import type { Notification, WorkItem } from "../data/live-source.js";
 import { useInboxStore } from "../stores/inbox.js";
@@ -114,7 +128,13 @@ import { jumpToNotification } from "../lib/inbox-jump.js";
 
 const inbox = useInboxStore();
 const router = useRouter();
+const route = useRoute();
 const source = new LiveSource("/");
+
+const currentSessionId = computed(() => {
+  const raw = route.params.sessionId;
+  return typeof raw === "string" ? raw : "";
+});
 
 async function onJump(n: Notification): Promise<void> {
   await jumpToNotification(router, source, n);
@@ -122,6 +142,11 @@ async function onJump(n: Notification): Promise<void> {
 
 function onDismiss(n: Notification): void {
   void inbox.dismiss(source, n.SessionID, n.ID);
+}
+
+function onSyncGitHub(): void {
+  if (!currentSessionId.value) return;
+  void inbox.syncGitHub(source, currentSessionId.value);
 }
 
 async function onWorkItem(item: WorkItem): Promise<void> {
@@ -227,6 +252,21 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   cursor: pointer;
   font-size: 0.9rem;
 }
+.inbox-panel__sync {
+  margin-left: auto;
+  margin-right: 0.45rem;
+  border: 1px solid var(--k-border, #334155);
+  background: var(--k-bg-input, #101826);
+  color: var(--k-fg, #e2e8f0);
+  border-radius: 6px;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.inbox-panel__sync:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
 .inbox-panel__close:hover {
   color: var(--k-fg, #e2e8f0);
 }
@@ -234,6 +274,11 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 .inbox-panel__body {
   flex: 1;
   overflow: auto;
+}
+.inbox-panel__error {
+  margin: 0.55rem 0.7rem 0;
+  color: var(--k-error-fg, #fecaca);
+  font-size: 0.75rem;
 }
 .work-section {
   border-bottom: 1px solid var(--k-border, #16202e);

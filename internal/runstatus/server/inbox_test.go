@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/chats"
+	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
@@ -190,6 +192,54 @@ func TestInbox_Teleport(t *testing.T) {
 
 	assert.Equal(t, "foyer", res.State, "teleport should land at the notification's origin state")
 	assert.NotEmpty(t, res.View, "teleport re-renders the destination room")
+}
+
+func TestInbox_SyncGitHubFeedsWebWork(t *testing.T) {
+	f := buildInboxFixture(t)
+	restore := host.SetExecRunnerForTest(func(_ context.Context, _ string, name string, args ...string) (string, string, int, error) {
+		key := name + " " + strings.Join(args, " ")
+		switch key {
+		case "gh --version":
+			return "gh version 2.x\n", "", 0, nil
+		case "gh issue list --repo acme/repo --state open --assignee @me --limit 100 --json number,title,assignees,url":
+			return `[{"number":7,"title":"Assigned issue","url":"https://github.com/acme/repo/issues/7","assignees":[{"login":"brad"}]}]`, "", 0, nil
+		case "gh pr list --repo acme/repo --state open --review-requested @me --limit 100 --json number,title,author,url":
+			return `[{"number":42,"title":"Review this","url":"https://github.com/acme/repo/pull/42","author":{"login":"alice"}}]`, "", 0, nil
+		default:
+			return "", "unexpected command: " + key, 1, nil
+		}
+	})
+	defer restore()
+
+	var synced server.GitHubInboxSyncResult
+	rpcCall(t, f.ts, "runstatus.session.inbox.sync_github",
+		map[string]any{"session_id": f.publicID, "repo": "acme/repo"}, &synced)
+	assert.True(t, synced.OK)
+	assert.Equal(t, 2, synced.Fetched)
+	assert.Equal(t, 2, synced.Inserted)
+	assert.Equal(t, 0, synced.Skipped)
+	require.Len(t, synced.Items, 2)
+	assert.Equal(t, "github:acme/repo/issue/7", synced.Items[0].OriginRef)
+	assert.Equal(t, "github:acme/repo/pr/42", synced.Items[1].OriginRef)
+
+	var work server.WorkListResult
+	rpcCall(t, f.ts, "runstatus.work.list", nil, &work)
+	assert.Equal(t, 2, work.Summary.NotificationsUnread)
+	assert.Equal(t, 2, work.Summary.NotificationsActionRequired)
+	require.Len(t, work.Items, 2)
+	urls := map[string]bool{}
+	for _, item := range work.Items {
+		assert.Equal(t, "notification", item.Kind)
+		urls[item.OriginURL] = true
+	}
+	assert.True(t, urls["https://github.com/acme/repo/pull/42"])
+	assert.True(t, urls["https://github.com/acme/repo/issues/7"])
+
+	var second server.GitHubInboxSyncResult
+	rpcCall(t, f.ts, "runstatus.session.inbox.sync_github",
+		map[string]any{"session_id": f.publicID, "repo": "acme/repo"}, &second)
+	assert.Equal(t, 0, second.Inserted)
+	assert.Equal(t, 2, second.Skipped)
 }
 
 func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {

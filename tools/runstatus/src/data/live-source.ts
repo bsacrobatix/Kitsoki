@@ -188,6 +188,37 @@ export interface WorkListResult {
   items: WorkItem[];
 }
 
+export interface GitHubInboxSyncItem {
+  notification_id: string;
+  kind: "issue" | "pr" | string;
+  number: string;
+  title: string;
+  url?: string;
+  inserted: boolean;
+  origin_ref: string;
+  teleport_state: string;
+  teleport_slots?: Record<string, unknown>;
+}
+
+export interface GitHubInboxSyncResult {
+  ok: boolean;
+  session_id: string;
+  fetched: number;
+  inserted: number;
+  skipped: number;
+  items: GitHubInboxSyncItem[];
+}
+
+export interface GitHubInboxSyncOptions {
+  repo?: string;
+  include_issues?: boolean;
+  include_prs?: boolean;
+  assignee?: string;
+  review_requested?: string;
+  limit?: number;
+  teleport_state?: string;
+}
+
 /**
  * One choice in an operator question (mcp `OperatorAskOption`). json-tagged on
  * the wire, so these are the literal field names the backend emits.
@@ -251,6 +282,16 @@ export class LiveSource implements DataSource {
 
   listWork(): Promise<WorkListResult> {
     return this.client.post<WorkListResult>("runstatus.work.list", {});
+  }
+
+  syncGitHubInbox(
+    sessionId: string,
+    opts: GitHubInboxSyncOptions = {}
+  ): Promise<GitHubInboxSyncResult> {
+    return this.client.post<GitHubInboxSyncResult>(
+      "runstatus.session.inbox.sync_github",
+      { session_id: sessionId, ...opts }
+    );
   }
 
   getSession(sessionId: string): Promise<SessionHeader> {

@@ -33,6 +33,8 @@ export const useInboxStore = defineStore("inbox", () => {
   const workSummary = ref<WorkSummary | null>(null);
   const workLoading = ref(false);
   const workError = ref("");
+  const githubSyncing = ref(false);
+  const githubSyncError = ref("");
   const open = ref(false);
   // The most recent push, surfaced as a transient toast (success /
   // action_required only). Cleared when the toast auto-dismisses or is acted on.
@@ -118,6 +120,23 @@ export const useInboxStore = defineStore("inbox", () => {
     }
   }
 
+  async function syncGitHub(
+    source: LiveSource,
+    sessionId: string,
+    repo?: string
+  ): Promise<void> {
+    githubSyncing.value = true;
+    githubSyncError.value = "";
+    try {
+      await source.syncGitHubInbox(sessionId, repo ? { repo } : {});
+      await refreshWork(source);
+    } catch (err) {
+      githubSyncError.value = err instanceof Error ? err.message : String(err);
+    } finally {
+      githubSyncing.value = false;
+    }
+  }
+
   /**
    * Mark one notification read. Optimistically decrements unread (and clears a
    * pending action_required) before the RPC; reconciles on the response (the
@@ -183,6 +202,8 @@ export const useInboxStore = defineStore("inbox", () => {
     workSummary,
     workLoading,
     workError,
+    githubSyncing,
+    githubSyncError,
     // getters
     hasNeedsAttention,
     activeWorkCount,
@@ -194,6 +215,7 @@ export const useInboxStore = defineStore("inbox", () => {
     close,
     clearToast,
     refreshWork,
+    syncGitHub,
     markRead,
     dismiss,
   };

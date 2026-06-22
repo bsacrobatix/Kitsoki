@@ -1004,6 +1004,48 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return map[string]any{"ok": true}, nil
 
+	case "runstatus.session.inbox.sync_github":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		syncer, ok := entry.Driver.(GitHubInboxSyncer)
+		if !ok {
+			return nil, readOnlyErr(method)
+		}
+		includeIssues := true
+		if v, ok := params["include_issues"].(bool); ok {
+			includeIssues = v
+		}
+		includePRs := true
+		if v, ok := params["include_prs"].(bool); ok {
+			includePRs = v
+		}
+		if !includeIssues && !includePRs {
+			return nil, &rpcError{Code: codeServerError, Message: "inbox.sync_github: at least one of include_issues or include_prs must be true"}
+		}
+		limit, _ := intParam(params, "limit")
+		repo, _ := params["repo"].(string)
+		assignee, _ := params["assignee"].(string)
+		reviewRequested, _ := params["review_requested"].(string)
+		teleportState, _ := params["teleport_state"].(string)
+		out, err := syncer.SyncGitHubInbox(ctx, GitHubInboxSyncOptions{
+			Repo:            repo,
+			IncludeIssues:   includeIssues,
+			IncludePRs:      includePRs,
+			Assignee:        assignee,
+			ReviewRequested: reviewRequested,
+			Limit:           limit,
+			TeleportState:   teleportState,
+		})
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return out, nil
+
 	case "runstatus.session.teleport":
 		entry, rerr := s.resolve(params)
 		if rerr != nil {

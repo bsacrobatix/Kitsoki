@@ -5,18 +5,44 @@ import InboxPanel from "../../src/components/InboxPanel.vue";
 import { useInboxStore } from "../../src/stores/inbox.js";
 
 const push = vi.fn();
+const route = { params: { sessionId: "web-session-1" } };
 vi.mock("vue-router", () => ({
   useRouter: () => ({ push }),
+  useRoute: () => route,
 }));
 
+const syncGitHubInbox = vi.fn();
+const listWork = vi.fn();
 vi.mock("../../src/data/live-source.js", () => ({
-  LiveSource: vi.fn().mockImplementation(() => ({})),
+  LiveSource: vi.fn().mockImplementation(() => ({
+    syncGitHubInbox,
+    listWork,
+  })),
 }));
 
 describe("InboxPanel", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     push.mockReset();
+    syncGitHubInbox.mockReset();
+    syncGitHubInbox.mockResolvedValue({ ok: true, fetched: 0, inserted: 0, skipped: 0, items: [] });
+    listWork.mockReset();
+    listWork.mockResolvedValue({
+      summary: {
+        items: 0,
+        needs_attention: 0,
+        jobs_running: 0,
+        jobs_awaiting_input: 0,
+        jobs_terminal: 0,
+        notifications_unread: 0,
+        notifications_action_required: 0,
+        pending_drives: 0,
+        backgrounded_chats: 0,
+      },
+      sessions: [],
+      items: [],
+    });
+    route.params.sessionId = "web-session-1";
     document.body.innerHTML = "";
   });
 
@@ -124,6 +150,23 @@ describe("InboxPanel", () => {
     expect(document.body.textContent).toContain("https://github.com/acme/repo/pull/42");
     expect(document.body.textContent).toContain("action_required");
 
+    wrapper.unmount();
+  });
+
+  it("syncs GitHub inbox work for the current session", async () => {
+    const inbox = useInboxStore();
+    inbox.open = true;
+
+    const wrapper = mount(InboxPanel, { attachTo: document.body });
+    await flushPromises();
+
+    const button = document.body.querySelector('[data-testid="inbox-sync-github"]') as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    button.click();
+    await flushPromises();
+
+    expect(syncGitHubInbox).toHaveBeenCalledWith("web-session-1", {});
+    expect(listWork).toHaveBeenCalled();
     wrapper.unmount();
   });
 });

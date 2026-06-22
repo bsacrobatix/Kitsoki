@@ -135,6 +135,21 @@ describe("LiveSource", () => {
     expect(body.method).toBe("runstatus.work.list");
   });
 
+  it("syncGitHubInbox calls the session GitHub inbox RPC", async () => {
+    fetchMock.mockResolvedValueOnce(
+      rpcOk({ ok: true, session_id: "s1", fetched: 1, inserted: 1, skipped: 0, items: [] })
+    );
+    const src = new LiveSource("/");
+    const result = await src.syncGitHubInbox("s1", { repo: "acme/repo" });
+    expect(result.inserted).toBe(1);
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string; params: { session_id: string; repo: string } };
+    expect(body.method).toBe("runstatus.session.inbox.sync_github");
+    expect(body.params.session_id).toBe("s1");
+    expect(body.params.repo).toBe("acme/repo");
+  });
+
   it("getSession calls runstatus.session.get with session_id", async () => {
     const header = { session_id: "s1", app_id: "app", current_state: "root/a", turn: 1, started_at: "t", terminal: false };
     fetchMock.mockResolvedValueOnce(rpcOk(header));
