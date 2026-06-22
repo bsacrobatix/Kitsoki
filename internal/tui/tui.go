@@ -3830,6 +3830,13 @@ func (m RootModel) handleMenuSystemChoice(msg menuSystemChoiceMsg) (tea.Model, t
 		return m.startMetaMode(msg.modeName)
 	case menuActionMetaSessions:
 		return m.openSessionsPanel()
+	case menuActionHelp:
+		// Same block `/help` produces, surfaced from the Esc menu.
+		body, next, cmd := HelpCommand{}.Run(m, nil)
+		next.transcript.AppendBlock(body)
+		return next, cmd
+	case menuActionWorld:
+		return m.openWorldView()
 	}
 	return m, nil
 }
@@ -4230,9 +4237,11 @@ func (m RootModel) updateMenuFromAllowed(allowedNames []string, w interface{}) R
 // now?" and the user has no way to know that a bare Enter triggers
 // the room's default action (typically `continue`).
 //
-// The placeholder reads "↵ <intent> · what now?" when there's a
-// primary entry to advertise; falls back to "what now?" otherwise
-// (e.g. a terminal state where no action is in the menu).
+// The placeholder reads "↵ <intent> · describe what you want, or /help"
+// when there's a primary entry to advertise; falls back to "describe
+// what you want, or /help" otherwise (e.g. a terminal state where no
+// action is in the menu) — a new user gets both the NL-typing signal
+// and the /help discoverability cue.
 //
 // No-op when the prompt is in a mode that owns its own placeholder
 // — meta-mode ("meta chat — /onpath to return") and the game-over
@@ -4247,14 +4256,14 @@ func (m *RootModel) refreshPromptPlaceholder() {
 	}
 	def := m.menu.SelectedEntry()
 	if def == nil {
-		m.prompt.Placeholder = "what now?"
+		m.prompt.Placeholder = "describe what you want, or /help"
 		return
 	}
 	label := def.Intent
 	if def.Display != "" {
 		label = def.Display
 	}
-	m.prompt.Placeholder = "↵ " + label + " · what now?"
+	m.prompt.Placeholder = "↵ " + label + " · describe what you want, or /help"
 }
 
 func (m RootModel) updateLocation(out *orchestrator.TurnOutcome) RootModel {
@@ -4590,6 +4599,13 @@ func footerFrameworkLine(m RootModel) string {
 	}
 	return strings.Join(parts, " · ")
 }
+
+// discoverabilityHint is the persistent first-run cue re-advertised on
+// every frame, so a user isn't stranded once the welcome banner (which
+// lists /help, /world, …) scrolls off. Rendered on its own faint line in
+// the bottom chrome rather than the status row, so it never crowds out
+// the high-signal location/mode content on narrow terminals.
+const discoverabilityHint = "? help · Esc menu"
 
 // ideFooterChipTemplate is the pongo2 source for the IDE footer indicator.
 // Rendered only when connected so the chip is hidden/off otherwise — no

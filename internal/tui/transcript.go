@@ -195,12 +195,10 @@ func (m *transcriptModel) queue(body string) {
 	if w := m.queueWrapWidth(); w > 0 {
 		body = ansi.Hardwrap(body, w, true)
 	}
-	// DEBUG: Warn if queue indicator leaks to scrollback
-	if strings.Contains(body, "⏳") {
-		slog.Warn("BUG: Queue indicator queued to scrollback (should only appear in View)",
-			"caller", "transcript.queue",
-			"sample", truncate(body, 60))
-	}
+	// Invariant: the live spinner/queue indicator (⏳) must never reach
+	// scrollback — it belongs to the View() bottom region only. This is
+	// guarded by a test (TestTranscriptQueue_NoIndicatorLeak) rather than
+	// a live-path slog.Warn, so the prod queue() stays free of BUG noise.
 	m.pending = append(m.pending, body)
 }
 

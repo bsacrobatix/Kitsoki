@@ -106,6 +106,16 @@ func SimulateSlowHarnessTurnStart(m RootModel) RootModel {
 	return m
 }
 
+// SimulateMetaTurnInFlight puts the model into ModeMeta with the
+// meta-mode turn marked in-flight, so the meta "agent is thinking…"
+// caption renders without driving a real meta turn. Used by the
+// cancel-copy frame test.
+func SimulateMetaTurnInFlight(m RootModel) RootModel {
+	m.mode = ModeMeta
+	m.metaMode.inFlight = true
+	return m
+}
+
 // CancelInFlight calls the in-flight cancel func if set. Returns true if it was called.
 func CancelInFlight(m RootModel) bool {
 	if m.inFlightCancel != nil {
@@ -186,6 +196,14 @@ func MenuSystemActive(m RootModel) bool { return m.menuSystem.IsActive() }
 
 // MenuSystemView returns the rendered overlay (empty when inactive).
 func MenuSystemView(m RootModel) string { return m.menuSystem.View() }
+
+// OpenMenuSystemForTest activates the Esc menu overlay so its rendered
+// rows can be asserted without simulating the Esc keypress sequence.
+func OpenMenuSystemForTest(m *RootModel) { m.menuSystem.Open() }
+
+// PromptPlaceholderForTest exposes the prompt textarea's placeholder so
+// tests can assert the first-run typing/help hint.
+func PromptPlaceholderForTest(m RootModel) string { return m.prompt.Placeholder }
 
 // ── Sessions panel test helpers ───────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -134,7 +135,10 @@ func (m RootModel) enterOffPath() (tea.Model, tea.Cmd) {
 	m.transcript.AppendSystem(m.offPath.Banner())
 	m.transcript.AppendSystem(fmt.Sprintf("(type %s to return to your journey)", exitCmd))
 	if err := m.orch.MarkOffPathEntered(m.sid, m.currentState); err != nil {
-		m.transcript.AppendSystem(fmt.Sprintf("(off-path: log entry failed: %v)", err))
+		// Persistence detail is an internal concern — log it instead of
+		// leaking it into the player-facing transcript. The mode switch
+		// already succeeded regardless of the log write.
+		slog.Warn("off-path: log entry failed", "err", err, "sid", m.sid, "state", m.currentState)
 	}
 	return m, nil
 }
@@ -149,13 +153,15 @@ func (m RootModel) exitOffPath() (tea.Model, tea.Cmd) {
 	m.offPath, _ = m.offPath.Update(exitOffPathMsg{})
 	m.location, _ = m.location.Update(offPathToggled{on: false})
 	m.transcript, _ = m.transcript.Update(offPathToggled{on: false})
-	m.prompt.Placeholder = "what now?"
+	m.prompt.Placeholder = "describe what you want, or /help"
 	// Restore the on-path prefix glyph + violet bold style.
 	setPromptPrefix(&m.prompt, promptPrefixOnPath)
 	setPromptStyle(&m.prompt, promptStyle)
 	m.transcript.AppendSystem("(returned to on-path mode)")
 	if err := m.orch.MarkOffPathExited(m.sid, m.currentState); err != nil {
-		m.transcript.AppendSystem(fmt.Sprintf("(off-path: log exit failed: %v)", err))
+		// Internal persistence detail — log it rather than leak it to the
+		// player. The mode switch back to on-path already succeeded.
+		slog.Warn("off-path: log exit failed", "err", err, "sid", m.sid, "state", m.currentState)
 	}
 	return m, nil
 }

@@ -175,7 +175,7 @@ func composePromptAndBanner(m RootModel) (promptLine, bannerLine string) {
 	case ModeMeta:
 		if m.metaMode.inFlight {
 			promptLine = prefix + m.spinner.View() + " " +
-				lipgloss.NewStyle().Foreground(colorMuted).Render("agent is thinking… (Esc to cancel)")
+				lipgloss.NewStyle().Foreground(colorMuted).Render("agent is thinking… (Ctrl+C or Esc to cancel)")
 		} else {
 			promptLine = m.prompt.View()
 		}
@@ -217,6 +217,14 @@ func composeChromeParts(m RootModel, width int, promptLine, bannerLine string) [
 				Italic(true).
 				Render(line2))
 	}
+	// Faint, right-aligned discoverability hint just above the status
+	// row. On its own line so it never competes with the location/mode
+	// content for status-row width on narrow terminals.
+	hint := lipgloss.NewStyle().Foreground(colorMuted).Render(discoverabilityHint)
+	parts = append(parts, lipgloss.NewStyle().
+		Width(width).
+		Align(lipgloss.Right).
+		Render(hint))
 	parts = append(parts, r.StatusRow(footerFrameworkLine(m), modeLabel(m.mode)))
 	return parts
 }

@@ -80,7 +80,7 @@ const (
 // SetWidth and SetHeight before the first View().
 func newPromptTextarea() textarea.Model {
 	ta := textarea.New()
-	ta.Placeholder = "what now?"
+	ta.Placeholder = "describe what you want, or /help"
 	ta.CharLimit = promptCharLimit
 	ta.ShowLineNumbers = false
 	ta.MaxHeight = promptMaxHeight
