@@ -751,13 +751,17 @@ func TestRenderWeb_StubNoLLM(t *testing.T) {
 	cs := connectInProcess(ctx, t, srv)
 	handle := openCloak(ctx, t, cs)
 
-	res, err := callTool(ctx, cs, "render.web", map[string]any{"handle": handle})
+	res, err := callTool(ctx, cs, "render.web", map[string]any{
+		"handle": handle,
+		"query":  map[string]string{"chat": "chat-123"},
+	})
 	require.NoError(t, err)
 	require.False(t, res.IsError, "render.web: %s", contentText(res))
 
 	img := imageContent(t, res)
 	assert.Equal(t, stubPNG, img.Data, "render.web returns the stub PNG as an image block")
 	assert.NotEmpty(t, gotSpec.SessionID, "the stub saw the handle's live session id")
+	assert.Equal(t, map[string]string{"chat": "chat-123"}, gotSpec.Query, "render.web forwards route query params")
 }
 
 // ─── 2.5 render.* are read-only ──────────────────────────────────────────────
@@ -802,13 +806,19 @@ func TestRender_ReadOnly(t *testing.T) {
 // form); a spec maps to StoryPath/State/World (spec form). The two forms are
 // mutually exclusive — exactly webshot.Spec's "exactly one source" rule.
 func TestWebRenderSpec_ToWebshotSpec(t *testing.T) {
-	live := studio.WebRenderSpec{StoryPath: "stories/cloak", SessionID: "sid-123"}.ToWebshotSpec()
+	live := studio.WebRenderSpec{
+		StoryPath: "stories/cloak",
+		SessionID: "sid-123",
+		Query:     map[string]string{"chat": "chat-456"},
+	}.ToWebshotSpec()
 	assert.Equal(t, "sid-123", live.SessionID, "live form → webshot SessionID")
 	assert.Empty(t, live.StoryPath, "live form omits StoryPath")
+	assert.Equal(t, map[string]string{"chat": "chat-456"}, live.Query, "live form preserves route query")
 
-	spec := studio.WebRenderSpec{StoryPath: "stories/cloak", State: "bar.lit", World: map[string]any{"lit": true}}.ToWebshotSpec()
+	spec := studio.WebRenderSpec{StoryPath: "stories/cloak", State: "bar.lit", World: map[string]any{"lit": true}, Query: map[string]string{"embed": "1"}}.ToWebshotSpec()
 	assert.Equal(t, "stories/cloak", spec.StoryPath, "spec form → webshot StoryPath")
 	assert.Equal(t, "bar.lit", spec.State)
+	assert.Equal(t, map[string]string{"embed": "1"}, spec.Query, "spec form preserves route query")
 	assert.Empty(t, spec.SessionID, "spec form omits SessionID")
 }
 

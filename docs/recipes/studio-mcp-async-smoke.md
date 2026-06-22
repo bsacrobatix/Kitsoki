@@ -182,7 +182,9 @@ To prove the browser surface too, first stage the embedded runstatus SPA:
 make web
 ```
 
-Then run a focused live-handle web render smoke:
+Then run a focused live-handle web render smoke. This uses the chat id captured
+from `studio.work` as a `render.web` hash-query deep link, so the browser shot
+lands on the same focused async chat context the web active-work panel opens:
 
 ```sh
 GOCACHE="$PWD/.cache/go-build" \
@@ -196,14 +198,33 @@ go run ./cmd/kitsoki mcp-test \
     {
       "tool": "session.new",
       "args": {
-        "story_path": "testdata/apps/cloak/app.yaml",
-        "key": "web-smoke"
+        "story_path": "testdata/apps/chat_drive_work/app.yaml",
+        "key": "web-chat-smoke"
+      }
+    },
+    {
+      "tool": "session.submit",
+      "args": {
+        "handle": "web-chat-smoke",
+        "intent": "queue"
+      }
+    },
+    {
+      "tool": "studio.work",
+      "expect": {
+        "structuredContent.items.0.reacquire.tool": "chat.show"
+      },
+      "save": {
+        "chat_id": "structuredContent.items.0.chat_id"
       }
     },
     {
       "tool": "render.web",
       "args": {
-        "handle": "web-smoke"
+        "handle": "web-chat-smoke",
+        "query": {
+          "chat": "${chat_id}"
+        }
       }
     }
   ]'
@@ -211,7 +232,9 @@ go run ./cmd/kitsoki mcp-test \
 
 This uses the same stdio MCP server, serves the open studio handle through the
 runstatus web handler, and returns a `render.web` text result plus an MCP
-`image/png` block when the client accepts images. It requires the local
+`image/png` block when the client accepts images. The `query` object is appended
+to the SPA hash route, so other web deep links can be smoke-tested the same way.
+It requires the local
 Playwright helper dependencies under `tools/runstatus`; story/state screenshots
 without a live handle still belong to `kitsoki web-shot` with an explicit
 no-LLM flow.

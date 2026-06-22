@@ -97,10 +97,10 @@ func TestMCPWebShotFunc_RendersLiveStudioHandle(t *testing.T) {
 		},
 	})
 
-	png, err := fn(ctx, studio.WebRenderSpec{SessionID: string(sh.SID)})
+	png, err := fn(ctx, studio.WebRenderSpec{SessionID: string(sh.SID), Query: map[string]string{"chat": "chat-123"}})
 	require.NoError(t, err)
 	assert.Equal(t, []byte("png"), png)
-	assert.Equal(t, "http://127.0.0.1:12345#/s/"+string(sh.SID), browser.url)
+	assert.Equal(t, "http://127.0.0.1:12345#/s/"+string(sh.SID)+"?chat=chat-123", browser.url)
 }
 
 func TestMCPWebShotFunc_RejectsSpecForm(t *testing.T) {

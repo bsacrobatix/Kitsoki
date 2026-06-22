@@ -116,6 +116,22 @@ func TestShot_ReturnsPNGOfKnownState(t *testing.T) {
 	}
 }
 
+func TestTargetURL_AppendsHashQuery(t *testing.T) {
+	got, err := TargetURL("http://127.0.0.1:12345", Spec{
+		SessionID: "sid-123",
+		Query: map[string]string{
+			"chat":  "chat-456",
+			"embed": "1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("TargetURL: %v", err)
+	}
+	if want := "http://127.0.0.1:12345#/s/sid-123?chat=chat-456&embed=1"; got != want {
+		t.Fatalf("TargetURL = %q, want %q", got, want)
+	}
+}
+
 // TestShot_NoLLMPosture asserts a shot performs NO live harness/agent work:
 // the only endpoint the boot/health/capture path hits on the served handler is
 // GET / (health), and no agent/LLM-shaped path is ever touched. The

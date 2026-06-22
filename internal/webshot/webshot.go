@@ -90,6 +90,11 @@ type Spec struct {
 
 	// Viewport overrides [DefaultViewport] when non-zero.
 	Viewport Viewport
+
+	// Query appends SPA query parameters to the hash route. It is intentionally
+	// route-agnostic so callers can deep-link browser affordances like focused
+	// chat context without teaching webshot about those features.
+	Query map[string]string
 }
 
 // live reports whether the spec is the live-session form.
@@ -215,8 +220,7 @@ func Shot(ctx context.Context, spec Spec, opts Options) ([]byte, error) {
 // TargetURL builds the SPA URL to screenshot for spec against base. The SPA uses
 // hash routing (createWebHashHistory, tools/runstatus/src/router.ts), so the
 // live-session surface is base + "#/s/<id>" and the spec form is the home
-// surface base + "#/". A live spec's State, if set, is appended as a query the
-// SPA may honour for deep-linking; it never changes the route.
+// surface base + "#/".
 func TargetURL(base string, spec Spec) (string, error) {
 	if base == "" {
 		return "", errors.New("webshot: empty server base URL")
@@ -234,6 +238,13 @@ func TargetURL(base string, spec Spec) (string, error) {
 		u.Fragment = "/s/" + spec.SessionID
 	} else {
 		u.Fragment = "/"
+	}
+	if len(spec.Query) > 0 {
+		q := url.Values{}
+		for k, v := range spec.Query {
+			q.Set(k, v)
+		}
+		u.Fragment += "?" + q.Encode()
 	}
 	return u.String(), nil
 }

@@ -113,7 +113,7 @@ func (srv *Server) registerSessionTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "render.web",
-		Description: "Render the REAL kitsoki web view of a state to a PNG. {handle | story_path+state+world?}. Returns text plus an MCP image block for vision-capable clients. READ-ONLY. Requires a browser-capable host (degrades to text otherwise).",
+		Description: "Render the REAL kitsoki web view of a state to a PNG. {handle | story_path+state+world?, query?}. Returns text plus an MCP image block for vision-capable clients. READ-ONLY. Requires a browser-capable host (degrades to text otherwise).",
 	}, srv.registerWebRenderer())
 }
 
@@ -676,13 +676,14 @@ func (srv *Server) handleSessionTrace(
 // the session's current state, read-only) OR a spec (story_path + state + world,
 // rendered headlessly without any session).
 type RenderArgs struct {
-	Handle    string         `json:"handle,omitempty"`
-	StoryPath string         `json:"story_path,omitempty"`
-	State     string         `json:"state,omitempty"`
-	World     map[string]any `json:"world,omitempty"`
-	Cols      int            `json:"cols,omitempty"`
-	Rows      int            `json:"rows,omitempty"`
-	Theme     string         `json:"theme,omitempty"`
+	Handle    string            `json:"handle,omitempty"`
+	StoryPath string            `json:"story_path,omitempty"`
+	State     string            `json:"state,omitempty"`
+	World     map[string]any    `json:"world,omitempty"`
+	Query     map[string]string `json:"query,omitempty"`
+	Cols      int               `json:"cols,omitempty"`
+	Rows      int               `json:"rows,omitempty"`
+	Theme     string            `json:"theme,omitempty"`
 }
 
 // RenderTUIResult is the render.tui result: just the Frame (read-only re-render).
@@ -1235,6 +1236,7 @@ type WebRenderSpec struct {
 	State     string
 	World     map[string]any
 	SessionID string
+	Query     map[string]string
 }
 
 func (s WebRenderSpec) story() string {
@@ -1256,9 +1258,9 @@ func (s WebRenderSpec) stateLabel() string {
 // real webshot.Shot without re-deriving the mapping.
 func (s WebRenderSpec) ToWebshotSpec() webshot.Spec {
 	if s.SessionID != "" {
-		return webshot.Spec{SessionID: s.SessionID}
+		return webshot.Spec{SessionID: s.SessionID, Query: s.Query}
 	}
-	return webshot.Spec{StoryPath: s.StoryPath, State: s.State, World: s.World}
+	return webshot.Spec{StoryPath: s.StoryPath, State: s.State, World: s.World, Query: s.Query}
 }
 
 // webSpec resolves a render.web RenderArgs to a WebRenderSpec: a handle maps to
@@ -1274,9 +1276,9 @@ func (srv *Server) webSpec(args RenderArgs) (WebRenderSpec, *mcpsdk.CallToolResu
 		if sh.Runtime == nil {
 			return WebRenderSpec{}, buildToolError(ErrBadRequest, "handle has no driving runtime")
 		}
-		return WebRenderSpec{StoryPath: sh.StoryPath, SessionID: string(sh.SID)}, nil
+		return WebRenderSpec{StoryPath: sh.StoryPath, SessionID: string(sh.SID), Query: args.Query}, nil
 	case args.StoryPath != "":
-		return WebRenderSpec{StoryPath: args.StoryPath, State: args.State, World: args.World}, nil
+		return WebRenderSpec{StoryPath: args.StoryPath, State: args.State, World: args.World, Query: args.Query}, nil
 	default:
 		return WebRenderSpec{}, buildToolError(ErrBadRequest, "render.web: provide a handle or a {story_path, state} spec")
 	}
