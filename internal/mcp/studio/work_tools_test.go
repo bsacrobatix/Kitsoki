@@ -323,4 +323,14 @@ func TestStudioWorkChatReacquireCarriesSessionContext(t *testing.T) {
 	assert.Equal(t, backgroundChat.ID, bg.Reacquire.Args["chat_id"])
 	assert.Equal(t, "chat-work", bg.Reacquire.Args["handle"])
 	assert.Equal(t, string(sh.SID), bg.Reacquire.Args["session_id"])
+
+	res, err = callTool(ctx, cs, "chat.show", pending.Reacquire.Args)
+	require.NoError(t, err)
+	require.False(t, res.IsError, "chat.show: %s", contentText(res))
+	var shown studio.ChatShowResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &shown))
+	require.NotNil(t, shown.Context)
+	assert.Equal(t, "chat-work", shown.Context.Handle)
+	assert.Equal(t, string(sh.SID), shown.Context.SessionID)
+	assert.Equal(t, queuedChat.ID, shown.Chat.ID)
 }

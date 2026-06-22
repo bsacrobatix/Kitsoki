@@ -32,9 +32,19 @@ type ChatShowArgs struct {
 // ChatShowResult is the read-only focused context for one chat thread.
 type ChatShowResult struct {
 	OK       bool              `json:"ok"`
+	Context  *ChatShowContext  `json:"context,omitempty"`
 	Chat     ChatInspectItem   `json:"chat"`
 	PTY      *ChatPTYItem      `json:"pty,omitempty"`
 	Messages []ChatMessageItem `json:"messages,omitempty"`
+}
+
+// ChatShowContext echoes the Kitsoki session context used to focus a chat from
+// a global work queue. Some pending chat-drive rows carry the session on the
+// drive rather than on the chat record, so chat.show preserves the explicit
+// reacquire args instead of making clients rediscover them from chat metadata.
+type ChatShowContext struct {
+	Handle    string `json:"handle,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // ChatInspectItem is a compact projection of chat metadata.
@@ -95,6 +105,10 @@ func (srv *Server) handleChatShow(
 	if err != nil {
 		return buildToolError(ErrBadRequest, fmt.Sprintf("chat.show: get chat: %v", err)), nil, nil
 	}
+	reacquireContext, err := srv.chatShowContext(args, chat)
+	if err != nil {
+		return buildToolError(ErrBadRequest, err.Error()), nil, nil
+	}
 	messages, err := store.Transcript(ctx, args.ChatID, args.SinceSeq)
 	if err != nil {
 		return buildToolError(ErrBadRequest, fmt.Sprintf("chat.show: transcript: %v", err)), nil, nil
@@ -107,10 +121,39 @@ func (srv *Server) handleChatShow(
 	}
 	return nil, ChatShowResult{
 		OK:       true,
+		Context:  reacquireContext,
 		Chat:     inspectChat(chat),
 		PTY:      inspectChatPTY(pty),
 		Messages: inspectChatMessages(messages),
 	}, nil
+}
+
+func (srv *Server) chatShowContext(args ChatShowArgs, chat *chats.Chat) (*ChatShowContext, error) {
+	ctx := &ChatShowContext{
+		Handle:    args.Handle,
+		SessionID: args.SessionID,
+	}
+	if ctx.Handle != "" {
+		sh, err := srv.sess.ResolveSession(ctx.Handle)
+		if err != nil {
+			return nil, fmt.Errorf("chat.show: resolve handle %q: %v", ctx.Handle, err)
+		}
+		resolvedSID := string(sh.SID)
+		if ctx.SessionID != "" && ctx.SessionID != resolvedSID {
+			return nil, fmt.Errorf("chat.show: handle %q is session %q, not %q", ctx.Handle, resolvedSID, ctx.SessionID)
+		}
+		ctx.SessionID = resolvedSID
+	}
+	if ctx.SessionID == "" && chat != nil {
+		ctx.SessionID = chat.SessionID
+	}
+	if chat != nil && chat.SessionID != "" && ctx.SessionID != "" && chat.SessionID != ctx.SessionID {
+		return nil, fmt.Errorf("chat.show: chat %q belongs to session %q, not %q", chat.ID, chat.SessionID, ctx.SessionID)
+	}
+	if ctx.Handle == "" && ctx.SessionID == "" {
+		return nil, nil
+	}
+	return ctx, nil
 }
 
 func (srv *Server) chatStore() *chats.Store {

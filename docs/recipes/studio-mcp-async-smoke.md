@@ -160,15 +160,20 @@ go run ./cmd/kitsoki mcp-test \
         "structuredContent.items.0.reacquire.args.handle": "chat-drive-smoke"
       },
       "save": {
-        "chat_id": "structuredContent.items.0.chat_id"
+        "chat_id": "structuredContent.items.0.chat_id",
+        "session_id": "structuredContent.items.0.reacquire.args.session_id"
       }
     },
     {
       "tool": "chat.show",
       "args": {
-        "chat_id": "${chat_id}"
+        "chat_id": "${chat_id}",
+        "handle": "chat-drive-smoke",
+        "session_id": "${session_id}"
       },
       "expect": {
+        "structuredContent.context.handle": "chat-drive-smoke",
+        "structuredContent.context.session_id": "${session_id}",
         "structuredContent.chat.title": "Async MCP chat"
       }
     },
