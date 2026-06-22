@@ -318,6 +318,10 @@ const focusedChatPreview = computed<ChatMessageItem[]>(() =>
   (focusedChat.value?.messages ?? []).slice(-3)
 );
 
+function canListWork(candidate: DataSource | null): candidate is DataSource & Pick<LiveSource, "listWork"> {
+  return typeof (candidate as Partial<Pick<LiveSource, "listWork">> | null)?.listWork === "function";
+}
+
 function onFreshnessReloaded(prevStateExists: boolean): void {
   reloadWarning.value = prevStateExists ? null : "current state removed; staying put";
 }
@@ -514,6 +518,9 @@ async function runTurn(fn: () => Promise<unknown>): Promise<void> {
   } finally {
     pending.value = false;
     cancelling.value = false;
+    if (canListWork(source)) {
+      await inbox.refreshWork(source);
+    }
   }
 }
 

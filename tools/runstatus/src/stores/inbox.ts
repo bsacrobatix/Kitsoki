@@ -107,7 +107,9 @@ export const useInboxStore = defineStore("inbox", () => {
     toast.value = null;
   }
 
-  async function refreshWork(source: LiveSource | null = liveSource): Promise<void> {
+  async function refreshWork(
+    source: Pick<LiveSource, "listWork"> | null = liveSource
+  ): Promise<void> {
     if (!source) return;
     workLoading.value = true;
     workError.value = "";

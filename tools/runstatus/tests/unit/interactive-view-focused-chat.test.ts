@@ -36,6 +36,44 @@ const dataSource = {
         turn_number: 0,
       }),
   ),
+  submit: vi.fn(
+    (): Promise<TurnResult> =>
+      Promise.resolve({
+        mode: "transitioned",
+        state: "queued",
+        view: "Queued",
+        typed_view: { Source: "", Elements: [] },
+        allowed_intents: [],
+        intents: [],
+        turn_number: 1,
+      }),
+  ),
+  listWork: vi.fn().mockResolvedValue({
+    summary: {
+      items: 1,
+      needs_attention: 0,
+      jobs_running: 0,
+      jobs_awaiting_input: 0,
+      jobs_terminal: 0,
+      notifications_unread: 0,
+      notifications_action_required: 0,
+      pending_drives: 1,
+      backgrounded_chats: 0,
+    },
+    sessions: [],
+    items: [
+      {
+        kind: "pending_drive",
+        priority: 65,
+        session_id: "s1",
+        title: "Queued subagent",
+        status: "pending",
+        reacquire_tool: "chat.show",
+        reacquire_session_id: "s1",
+        chat_id: "chat-queued",
+      },
+    ],
+  }),
 };
 
 vi.mock("../../src/data/source.js", () => ({
@@ -81,6 +119,8 @@ describe("InteractiveView focused chat context", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     showChat.mockReset();
+    dataSource.submit.mockClear();
+    dataSource.listWork.mockClear();
     showChat.mockResolvedValue({
       ok: true,
       chat: {
@@ -124,6 +164,31 @@ describe("InteractiveView focused chat context", () => {
 
     await wrapper.find('[data-testid="focused-chat-close"]').trigger("click");
     expect(replace).toHaveBeenCalledWith({ path: "/s/s1/chat", query: {} });
+    wrapper.unmount();
+  });
+
+  it("refreshes active work after a submitted turn", async () => {
+    route.query = {};
+    const wrapper = mount(InteractiveView, {
+      ...mountOpts,
+      global: {
+        ...mountOpts.global,
+        stubs: {
+          ...mountOpts.global.stubs,
+          InputBar: {
+            template:
+              '<button data-testid="submit-queue" @click="$emit(\'intent\', \'queue\', {}, \'Queue\')">queue</button>',
+          },
+        },
+      },
+    });
+    await flushPromises();
+
+    await wrapper.find('[data-testid="submit-queue"]').trigger("click");
+    await flushPromises();
+
+    expect(dataSource.submit).toHaveBeenCalledWith("s1", "queue", {});
+    expect(dataSource.listWork).toHaveBeenCalledTimes(1);
     wrapper.unmount();
   });
 });
