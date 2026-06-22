@@ -97,7 +97,14 @@ func (p *singleInboxProvider) Get(id string) (server.Entry, bool) {
 	}
 	return server.Entry{}, false
 }
-func (p *singleInboxProvider) List() []runstatus.SessionHeader { return nil }
+func (p *singleInboxProvider) List() []runstatus.SessionHeader {
+	return []runstatus.SessionHeader{{
+		SessionID:    p.sid,
+		AppID:        "cloak",
+		CurrentState: "foyer",
+		StartedAt:    time.Now(),
+	}}
+}
 
 // The provider must satisfy server.SessionProvider; only Get matters for the
 // inbox RPC tests — the rest are inert stubs.
@@ -175,6 +182,36 @@ func TestInbox_Teleport(t *testing.T) {
 
 	assert.Equal(t, "foyer", res.State, "teleport should land at the notification's origin state")
 	assert.NotEmpty(t, res.View, "teleport re-renders the destination room")
+}
+
+func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
+	f := buildInboxFixture(t)
+	id := f.postNotification(t, "Background turn ready")
+	now := time.Now()
+	require.NoError(t, f.js.UpsertJob(context.Background(), &jobs.Job{
+		ID:          "job-running",
+		SessionID:   f.sid,
+		Kind:        "host.agent.task",
+		Status:      jobs.JobRunning,
+		OriginState: "foyer",
+		CreatedAt:   now.Add(-time.Second),
+		UpdatedAt:   now,
+	}))
+
+	var work server.WorkListResult
+	rpcCall(t, f.ts, "runstatus.work.list", nil, &work)
+	require.Len(t, work.Sessions, 1)
+	assert.Equal(t, string(f.sid), work.Sessions[0].SessionID)
+	assert.Equal(t, 1, work.Summary.JobsRunning)
+	assert.Equal(t, 1, work.Summary.NotificationsUnread)
+	assert.Equal(t, 2, work.Summary.Items)
+	require.Len(t, work.Items, 2)
+	assert.Equal(t, "notification", work.Items[0].Kind)
+	assert.Equal(t, id, work.Items[0].NotificationID)
+	assert.Equal(t, "notification", work.Items[0].ReacquireTool)
+	assert.Equal(t, "job", work.Items[1].Kind)
+	assert.Equal(t, "job-running", work.Items[1].JobID)
+	assert.Equal(t, "session", work.Items[1].ReacquireTool)
 }
 
 // TestInbox_TeleportNotTeleportable proves a notification with no destination

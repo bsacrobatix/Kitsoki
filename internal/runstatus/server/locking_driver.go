@@ -107,6 +107,16 @@ func (d *lockingDriver) Teleport(ctx context.Context, notificationID string) (*o
 	return out, err
 }
 
+// ListWork is read-only current-state inspection, so it forwards unlocked like
+// ListNotifications. Drivers without the optional WorkLister extension
+// contribute an empty work set.
+func (d *lockingDriver) ListWork(ctx context.Context) (SessionWork, error) {
+	if wl, ok := d.Driver.(WorkLister); ok {
+		return wl.ListWork(ctx)
+	}
+	return SessionWork{}, nil
+}
+
 // RewindRoute re-baselines the session via a snapshot and re-dispatches a turn,
 // so it mutates session state and must serialise under the same writer lock as
 // the other turn-driving methods (rather than being promoted unlocked).

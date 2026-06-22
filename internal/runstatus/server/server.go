@@ -29,6 +29,7 @@
 //	runstatus.session.reload     {session_id}                        → {ok, prev_state_exists}
 //	runstatus.session.staleness  {session_id}                        → {stale, diff}
 //	runstatus.sessions.list      {}                                  → []SessionHeader
+//	runstatus.work.list          {}                                  → {summary, sessions[], items[]}
 //	runstatus.session.get        {session_id}                        → SessionHeader
 //	runstatus.session.app        {session_id}                        → AppDef
 //	runstatus.session.mermaid    {session_id, detail?}               → {source, node_map}
@@ -675,6 +676,13 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 	// ── Provider-level (registry) ──────────────────────────────────────────
 	case "runstatus.sessions.list":
 		return s.provider.List(), nil
+
+	case "runstatus.work.list":
+		out, err := s.listWork(ctx)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return out, nil
 
 	case "runstatus.stories.list":
 		return s.provider.ListStories(), nil

@@ -133,6 +133,48 @@ export interface NotificationFrame {
   needs_attention: number;
 }
 
+export interface WorkSummary {
+  items: number;
+  needs_attention: number;
+  jobs_running: number;
+  jobs_awaiting_input: number;
+  jobs_terminal: number;
+  notifications_unread: number;
+  notifications_action_required: number;
+}
+
+export interface WorkSession {
+  session_id: string;
+  app_id?: string;
+  current_state?: string;
+  work: WorkSummary;
+}
+
+export interface WorkItem {
+  kind: "notification" | "job" | string;
+  priority: number;
+  session_id: string;
+  title?: string;
+  status?: string;
+  notification_id?: string;
+  job_id?: string;
+  severity?: Notification["Severity"];
+  created_at?: string;
+  updated_at?: string;
+  read_at?: string | null;
+  teleport_state?: string;
+  teleport_job_id?: string;
+  origin_state?: string;
+  reacquire_tool: "notification" | "session" | string;
+  reacquire_session_id?: string;
+}
+
+export interface WorkListResult {
+  summary: WorkSummary;
+  sessions: WorkSession[];
+  items: WorkItem[];
+}
+
 /**
  * One choice in an operator question (mcp `OperatorAskOption`). json-tagged on
  * the wire, so these are the literal field names the backend emits.
@@ -192,6 +234,10 @@ export class LiveSource implements DataSource {
 
   listSessions(): Promise<SessionHeader[]> {
     return this.client.post<SessionHeader[]>("runstatus.sessions.list", {});
+  }
+
+  listWork(): Promise<WorkListResult> {
+    return this.client.post<WorkListResult>("runstatus.work.list", {});
   }
 
   getSession(sessionId: string): Promise<SessionHeader> {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -81,6 +83,53 @@ type Driver interface {
 	// intent-class rewind is not yet recoverable from the journal and returns an
 	// explicit error the surface presents gracefully (a disabled control), not a 500.
 	RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string) (*orchestrator.TurnOutcome, error)
+}
+
+// WorkLister is an optional read-only extension for Drivers that can expose the
+// session's current async work queue. The web server type-asserts it for the
+// runstatus.work.list RPC; read-only or test drivers without a JobStore can
+// omit it and simply contribute no work rows.
+type WorkLister interface {
+	ListWork(ctx context.Context) (SessionWork, error)
+}
+
+// SessionWork is the per-session async queue returned by [WorkLister].
+type SessionWork struct {
+	Summary WorkSummary `json:"summary"`
+	Items   []WorkItem  `json:"items,omitempty"`
+}
+
+// WorkSummary gives the browser a cheap global signal before it renders the
+// detailed rows.
+type WorkSummary struct {
+	Items                       int `json:"items"`
+	NeedsAttention              int `json:"needs_attention"`
+	JobsRunning                 int `json:"jobs_running"`
+	JobsAwaitingInput           int `json:"jobs_awaiting_input"`
+	JobsTerminal                int `json:"jobs_terminal"`
+	NotificationsUnread         int `json:"notifications_unread"`
+	NotificationsActionRequired int `json:"notifications_action_required"`
+}
+
+// WorkItem is one active row in the operator's work queue. Notification rows
+// can teleport; job rows reacquire the owning session.
+type WorkItem struct {
+	Kind               string                    `json:"kind"`
+	Priority           int                       `json:"priority"`
+	SessionID          string                    `json:"session_id"`
+	Title              string                    `json:"title,omitempty"`
+	Status             string                    `json:"status,omitempty"`
+	NotificationID     string                    `json:"notification_id,omitempty"`
+	JobID              string                    `json:"job_id,omitempty"`
+	Severity           jobs.NotificationSeverity `json:"severity,omitempty"`
+	CreatedAt          time.Time                 `json:"created_at,omitempty"`
+	UpdatedAt          time.Time                 `json:"updated_at,omitempty"`
+	ReadAt             *time.Time                `json:"read_at,omitempty"`
+	TeleportState      string                    `json:"teleport_state,omitempty"`
+	TeleportJobID      string                    `json:"teleport_job_id,omitempty"`
+	OriginState        string                    `json:"origin_state,omitempty"`
+	ReacquireTool      string                    `json:"reacquire_tool"`
+	ReacquireSessionID string                    `json:"reacquire_session_id,omitempty"`
 }
 
 // OrchestratorDriver adapts a live *orchestrator.Orchestrator + session id to
@@ -164,6 +213,127 @@ func (d OrchestratorDriver) ListNotifications(ctx context.Context) ([]jobs.Notif
 		return nil, nil
 	}
 	return d.Jobs.ListNotifications(ctx, d.SID, 0)
+}
+
+// ListWork returns active async work for this session. By default it includes
+// unread notifications plus jobs that are still running, awaiting input, or
+// failed. Quiet terminal success/cancel rows stay available through the
+// per-session trace/inbox, but do not crowd the global work queue.
+func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
+	if d.Jobs == nil {
+		return SessionWork{}, nil
+	}
+	jobRows, err := d.Jobs.ListBySession(ctx, d.SID)
+	if err != nil {
+		return SessionWork{}, err
+	}
+	notifs, err := d.Jobs.ListNotifications(ctx, d.SID, 0)
+	if err != nil {
+		return SessionWork{}, err
+	}
+	unread, err := d.Jobs.UnreadCount(ctx, d.SID)
+	if err != nil {
+		return SessionWork{}, err
+	}
+
+	out := SessionWork{}
+	for _, j := range jobRows {
+		switch j.Status {
+		case jobs.JobRunning:
+			out.Summary.JobsRunning++
+		case jobs.JobAwaitingInput:
+			out.Summary.JobsAwaitingInput++
+		case jobs.JobDone, jobs.JobFailed, jobs.JobCancelled:
+			out.Summary.JobsTerminal++
+		}
+		if !activeWorkJob(j) {
+			continue
+		}
+		out.Items = append(out.Items, WorkItem{
+			Kind:               "job",
+			Priority:           workJobPriority(j),
+			SessionID:          string(d.SID),
+			Title:              j.Kind,
+			Status:             string(j.Status),
+			JobID:              j.ID,
+			CreatedAt:          j.CreatedAt,
+			UpdatedAt:          j.UpdatedAt,
+			OriginState:        string(j.OriginState),
+			ReacquireTool:      "session",
+			ReacquireSessionID: string(d.SID),
+		})
+	}
+	for _, count := range unread {
+		out.Summary.NotificationsUnread += count
+	}
+	out.Summary.NotificationsActionRequired = unread[jobs.SeverityActionRequired]
+	for _, n := range notifs {
+		if n.ReadAt != nil {
+			continue
+		}
+		out.Items = append(out.Items, WorkItem{
+			Kind:               "notification",
+			Priority:           workNotificationPriority(n),
+			SessionID:          string(d.SID),
+			Title:              n.Title,
+			Status:             "unread",
+			NotificationID:     n.ID,
+			Severity:           n.Severity,
+			CreatedAt:          n.CreatedAt,
+			UpdatedAt:          n.CreatedAt,
+			ReadAt:             n.ReadAt,
+			TeleportState:      n.TeleportState,
+			TeleportJobID:      n.TeleportJobID,
+			ReacquireTool:      "notification",
+			ReacquireSessionID: string(d.SID),
+		})
+	}
+	sort.SliceStable(out.Items, func(i, j int) bool {
+		a, b := out.Items[i], out.Items[j]
+		if a.Priority != b.Priority {
+			return a.Priority > b.Priority
+		}
+		return a.UpdatedAt.After(b.UpdatedAt)
+	})
+	out.Summary.Items = len(out.Items)
+	for _, item := range out.Items {
+		if item.Priority >= 80 {
+			out.Summary.NeedsAttention++
+		}
+	}
+	return out, nil
+}
+
+func activeWorkJob(j jobs.Job) bool {
+	return j.Status == jobs.JobRunning || j.Status == jobs.JobAwaitingInput || j.Status == jobs.JobFailed
+}
+
+func workJobPriority(j jobs.Job) int {
+	switch j.Status {
+	case jobs.JobAwaitingInput:
+		return 96
+	case jobs.JobFailed:
+		return 90
+	case jobs.JobRunning:
+		return 70
+	default:
+		return 25
+	}
+}
+
+func workNotificationPriority(n jobs.Notification) int {
+	switch n.Severity {
+	case jobs.SeverityActionRequired:
+		return 100
+	case jobs.SeverityError:
+		return 92
+	case jobs.SeverityWarn:
+		return 88
+	case jobs.SeveritySuccess:
+		return 84
+	default:
+		return 80
+	}
 }
 
 // MarkNotificationRead is a no-op without a JobStore.

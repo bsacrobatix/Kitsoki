@@ -4,6 +4,9 @@ import type {
   LiveSource,
   Notification,
   NotificationFrame,
+  WorkItem,
+  WorkListResult,
+  WorkSummary,
 } from "../data/live-source.js";
 
 /**
@@ -26,15 +29,21 @@ export const useInboxStore = defineStore("inbox", () => {
   const notifications = ref<Notification[]>([]);
   const unread = ref(0);
   const needsAttention = ref(0);
+  const workItems = ref<WorkItem[]>([]);
+  const workSummary = ref<WorkSummary | null>(null);
+  const workLoading = ref(false);
+  const workError = ref("");
   const open = ref(false);
   // The most recent push, surfaced as a transient toast (success /
   // action_required only). Cleared when the toast auto-dismisses or is acted on.
   const toast = ref<Notification | null>(null);
 
   let unsubscribe: (() => void) | null = null;
+  let liveSource: LiveSource | null = null;
 
   // ---- getters ----
   const hasNeedsAttention = computed(() => needsAttention.value > 0);
+  const activeWorkCount = computed(() => workSummary.value?.items ?? 0);
 
   // ---- actions ----
 
@@ -44,7 +53,9 @@ export const useInboxStore = defineStore("inbox", () => {
    */
   function init(source: LiveSource): void {
     if (unsubscribe) return;
+    liveSource = source;
     unsubscribe = source.subscribeNotifications((frame) => onFrame(frame));
+    void refreshWork();
   }
 
   /** Tear down the feed (e.g. on app unmount / hot reload). */
@@ -53,6 +64,7 @@ export const useInboxStore = defineStore("inbox", () => {
       unsubscribe();
       unsubscribe = null;
     }
+    liveSource = null;
   }
 
   /** Handle one SSE push: prepend the item, take the fresh counts. */
@@ -73,11 +85,13 @@ export const useInboxStore = defineStore("inbox", () => {
     // The frame's counts are fresh (folded from $inbox by the backend).
     unread.value = frame.unread;
     needsAttention.value = frame.needs_attention;
+    void refreshWork();
   }
 
   /** Toggle the inbox panel open/closed. */
   function toggle(): void {
     open.value = !open.value;
+    if (open.value) void refreshWork();
   }
 
   function close(): void {
@@ -87,6 +101,21 @@ export const useInboxStore = defineStore("inbox", () => {
   /** Dismiss the active toast (auto-dismiss timer or click handled elsewhere). */
   function clearToast(): void {
     toast.value = null;
+  }
+
+  async function refreshWork(source: LiveSource | null = liveSource): Promise<void> {
+    if (!source) return;
+    workLoading.value = true;
+    workError.value = "";
+    try {
+      const result: WorkListResult = await source.listWork();
+      workItems.value = result.items ?? [];
+      workSummary.value = result.summary ?? null;
+    } catch (err) {
+      workError.value = err instanceof Error ? err.message : String(err);
+    } finally {
+      workLoading.value = false;
+    }
   }
 
   /**
@@ -150,8 +179,13 @@ export const useInboxStore = defineStore("inbox", () => {
     needsAttention,
     open,
     toast,
+    workItems,
+    workSummary,
+    workLoading,
+    workError,
     // getters
     hasNeedsAttention,
+    activeWorkCount,
     // actions
     init,
     teardown,
@@ -159,6 +193,7 @@ export const useInboxStore = defineStore("inbox", () => {
     toggle,
     close,
     clearToast,
+    refreshWork,
     markRead,
     dismiss,
   };

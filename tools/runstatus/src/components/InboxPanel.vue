@@ -23,9 +23,46 @@
         </div>
 
         <div class="inbox-panel__body">
-          <p v-if="inbox.notifications.length === 0" class="inbox-panel__empty">
+          <section
+            v-if="inbox.workItems.length > 0"
+            class="work-section"
+            aria-label="Active work"
+          >
+            <div class="work-section__header">
+              <span>Active work</span>
+              <span class="work-section__count">{{ inbox.activeWorkCount }}</span>
+            </div>
+            <button
+              v-for="item in inbox.workItems"
+              :key="workKey(item)"
+              class="work-item"
+              :class="`work-item--${item.kind}`"
+              data-testid="work-item"
+              @click="onWorkItem(item)"
+            >
+              <span class="work-item__kind">{{ workKind(item) }}</span>
+              <span class="work-item__main">
+                <span class="work-item__title">{{ item.title || "(untitled)" }}</span>
+                <span class="work-item__meta">
+                  <span>{{ item.status || item.kind }}</span>
+                  <span v-if="item.updated_at">{{ relativeTime(item.updated_at) }}</span>
+                </span>
+              </span>
+            </button>
+          </section>
+
+          <p
+            v-if="inbox.workItems.length === 0 && inbox.notifications.length === 0"
+            class="inbox-panel__empty"
+          >
             No notifications yet — a background turn that finishes will land here.
           </p>
+          <div
+            v-if="inbox.notifications.length > 0"
+            class="inbox-panel__subhead"
+          >
+            Notifications
+          </div>
           <div
             v-for="n in inbox.notifications"
             :key="n.ID"
@@ -68,7 +105,7 @@
 import { onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { LiveSource } from "../data/live-source.js";
-import type { Notification } from "../data/live-source.js";
+import type { Notification, WorkItem } from "../data/live-source.js";
 import { useInboxStore } from "../stores/inbox.js";
 import { severityGlyph, severityColor, relativeTime } from "../lib/severity.js";
 import { jumpToNotification } from "../lib/inbox-jump.js";
@@ -83,6 +120,45 @@ async function onJump(n: Notification): Promise<void> {
 
 function onDismiss(n: Notification): void {
   void inbox.dismiss(source, n.SessionID, n.ID);
+}
+
+async function onWorkItem(item: WorkItem): Promise<void> {
+  if (item.kind === "notification" && item.notification_id) {
+    await jumpToNotification(router, source, notificationFromWork(item));
+    return;
+  }
+  const sid = item.reacquire_session_id || item.session_id;
+  if (!sid) return;
+  inbox.close();
+  await router.push(`/s/${sid}/chat`);
+}
+
+function notificationFromWork(item: WorkItem): Notification {
+  return {
+    ID: item.notification_id || "",
+    SessionID: item.session_id,
+    CreatedAt: item.created_at || new Date().toISOString(),
+    Severity: item.severity || "info",
+    Title: item.title || "",
+    Body: "",
+    TeleportState: item.teleport_state || "",
+    TeleportSlots: null,
+    TeleportProposalID: "",
+    TeleportJobID: item.teleport_job_id || "",
+    OriginKind: "work",
+    OriginRef: item.job_id || item.notification_id || "",
+    ReadAt: item.read_at ?? null,
+  };
+}
+
+function workKey(item: WorkItem): string {
+  return `${item.kind}:${item.notification_id || item.job_id || item.session_id}`;
+}
+
+function workKind(item: WorkItem): string {
+  if (item.kind === "job") return "job";
+  if (item.kind === "notification") return item.severity || "note";
+  return item.kind;
 }
 
 function onKeydown(e: KeyboardEvent): void {
@@ -154,11 +230,77 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   flex: 1;
   overflow: auto;
 }
+.work-section {
+  border-bottom: 1px solid var(--k-border, #16202e);
+}
+.work-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.7rem 0.25rem;
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.work-section__count {
+  color: var(--k-fg, #e2e8f0);
+  font-weight: 600;
+}
+.work-item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  border: 0;
+  border-top: 1px solid var(--k-border, #16202e);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.work-item:hover {
+  background: var(--k-bg-hover, #16263a);
+}
+.work-item__kind {
+  min-width: 3.7rem;
+  color: var(--k-fg-accent, #60a5fa);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.work-item--notification .work-item__kind {
+  color: var(--k-warning, #fb923c);
+}
+.work-item__main {
+  min-width: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+.work-item__title {
+  font-size: 0.78rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.work-item__meta {
+  display: inline-flex;
+  gap: 0.45rem;
+  color: var(--k-fg-muted, #64748b);
+  font-size: 0.68rem;
+}
 .inbox-panel__empty {
   color: var(--k-fg-subtle, #475569);
   font-size: 0.78rem;
   font-style: italic;
   padding: 1rem;
+}
+.inbox-panel__subhead {
+  padding: 0.5rem 0.7rem 0.25rem;
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .inbox-item {
