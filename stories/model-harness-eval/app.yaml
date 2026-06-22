@@ -1,0 +1,77 @@
+app:
+  id: model-harness-eval
+  version: 0.1.0
+  title: "Model harness eval reporter"
+  author: "Kitsoki"
+  license: "CC0"
+
+hosts:
+  - host.agent.task
+
+agents:
+  reporter:
+    system_prompt: "You prepare Kitsoki model/harness selection proposals from local evidence. Given an operator question, inspect the effective configured harness profiles, run only no-cost evidence collection, aggregate reports with tools/session-mining/eval_pilot_report.py, recommend the fastest, cheapest, and best configured option, then apply the requested local/project/story override. When running from a worktree, treat /Users/brad/code/Kitsoki/.kitsoki.local.yaml as the machine-local override source of truth unless args.override_path says otherwise. Do not call live LLM providers or spend tokens for benchmark collection; if live provider evidence is missing, report the gap and use accepted local evidence plus conservative rationale."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Bash, Edit, Write]
+    bash_profile:
+      commands: [bash, go, mkdir, python3, sed, find, rg]
+    external_side_effect: false
+
+world:
+  question:        { type: string, default: "" }
+  workdir:         { type: string, default: "." }
+  apply_mode:      { type: string, default: "local" }
+  override_path:   { type: string, default: "/Users/brad/code/Kitsoki/.kitsoki.local.yaml" }
+  target_story:    { type: string, default: "" }
+  target_call:     { type: string, default: "" }
+  output_root:     { type: string, default: ".artifacts/model-harness-eval" }
+  markdown_path:   { type: string, default: ".context/model-harness-eval.md" }
+  deck_path:       { type: string, default: ".artifacts/model-harness-eval/index.html" }
+  summary_path:    { type: string, default: ".artifacts/model-harness-eval/summary.json" }
+  refine_feedback: { type: string, default: "" }
+  report_artifact: { type: object, default: {} }
+  status:          { type: string, default: "idle" }
+
+intents:
+  start:
+    description: "Ask the reporter to prepare model/harness evaluation artifacts."
+    examples: ["evaluate the harnesses", "compare the models", "build the report", "run the eval pilot"]
+    priority: 90
+    slots:
+      question: { type: string, required: true }
+      apply_mode: { type: string, required: false }
+      override_path: { type: string, required: false }
+      target_story: { type: string, required: false }
+      target_call: { type: string, required: false }
+  accept:
+    description: "Accept the generated report and move to the done view."
+    examples: ["accept", "looks good", "done", "continue"]
+    priority: 80
+  refine:
+    description: "Regenerate the report with specific feedback."
+    examples: ["refine", "rerun", "try again"]
+    priority: 70
+    slots:
+      feedback: { type: string, required: true }
+  restart:
+    description: "Restart with a new overall question."
+    examples: ["restart", "new question", "start over"]
+    priority: 60
+    slots:
+      question: { type: string, required: false }
+  quit:
+    description: "Abandon the report run."
+    examples: ["quit", "abort", "stop"]
+    priority: 40
+  look:
+    description: "Re-render the current view."
+    examples: ["look", "status", "show me"]
+    priority: 10
+
+exports:
+  intents: [start, accept, refine, restart, quit, look]
+
+root: idle
+
+include:
+  - rooms/*.yaml

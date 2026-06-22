@@ -706,6 +706,11 @@ intents:
     description: "Open the ideas reviewer — reconcile the backlog and pick something to propose."
     examples: ["ideas", "review ideas", "idea backlog", "reconcile ideas", "what should I work on", "writer's block"]
     priority: 31
+  go_model_eval:
+    title: "Model Harness Eval"
+    description: "Prepare model/harness evaluation reports from local evidence."
+    examples: ["model eval", "harness eval", "compare models", "evaluate harnesses", "model harness report"]
+    priority: 31
   go_deploy:
     title: "Deploy"
     description: "Open the deploy room."
@@ -1513,6 +1518,10 @@ imports:
         to: landing
         set:
           status: "abandoned"
+
+  model_eval:
+    source: ../model-harness-eval
+    entry: idle
 
 # Day-level rooms live in rooms/*.yaml.
 include:

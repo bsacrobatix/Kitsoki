@@ -1,0 +1,50 @@
+states:
+  idle:
+    description: "Waiting for an evaluation question."
+    relevant_world: [question, apply_mode, override_path, target_story, target_call, output_root, markdown_path, deck_path, summary_path, status]
+    view:
+      - banner:
+          text: "MODEL HARNESS EVAL"
+          subtitle: "Ask a broad question; the reporter proposes a model/harness winner and applies an override."
+          color: "#0F766E"
+      - prose: "Provide an overall question about model/harness effectiveness, speed, cost, readiness, coverage, and which configured option should become the default."
+      - kv:
+          pairs:
+            Apply mode: "{{ world.apply_mode }}"
+            Override: "{{ world.override_path }}"
+            Markdown: "{{ world.markdown_path }}"
+            Deck: "{{ world.deck_path }}"
+            Summary: "{{ world.summary_path }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "start question=..."
+              hint: "prepare report artifacts for the question"
+              intent: start
+              param: { slot: question, type: string, placeholder: "what should this eval answer?", required: true }
+            - label: "look"
+              intent: look
+    on:
+      start:
+        - target: reporting
+          effects:
+            - set:
+                question: "{{ slots.question }}"
+                apply_mode: "{{ slots.apply_mode ?? world.apply_mode }}"
+                override_path: "{{ slots.override_path ?? world.override_path }}"
+                target_story: "{{ slots.target_story ?? world.target_story }}"
+                target_call: "{{ slots.target_call ?? world.target_call }}"
+                refine_feedback: ""
+                report_artifact: {}
+                status: "running"
+      restart:
+        - target: idle
+          effects:
+            - set:
+                question: "{{ slots.question ?? '' }}"
+                refine_feedback: ""
+                report_artifact: {}
+                status: "idle"
+      look:
+        - target: .

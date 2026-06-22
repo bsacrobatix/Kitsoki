@@ -207,6 +207,9 @@ states:
             - label:  "idea"
               hint:   "draft an ad hoc proposal — no ticket needed"
               intent: go_idea
+            - label:  "model eval"
+              hint:   "prepare model/harness effectiveness, speed, and cost reports"
+              intent: go_model_eval
             - label:  "inbox"
               hint:   "read notifications ({{ world.inbox_unread }} unread)"
               intent: go_inbox
@@ -392,6 +395,10 @@ states:
           effects:
             - set: { prev_state: "landing" }
             - set: { last_error: "" }
+      go_model_eval:
+        - target: model_eval
+          effects:
+            - set: { prev_state: "landing" }
       go_code_review:
         - target: code_review
           effects:
