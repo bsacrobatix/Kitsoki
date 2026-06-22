@@ -134,6 +134,9 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	// chat.* — read-side drill-down for async chat/subagent context.
 	srv.registerChatTools()
 
+	// inbox.* — external intake into the per-session inbox.
+	srv.registerInboxTools()
+
 	// issue.* — file a GitHub issue with studio-produced evidence bundled in.
 	srv.registerIssueTools()
 

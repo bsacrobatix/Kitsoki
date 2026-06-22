@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"kitsoki/internal/app"
 	"kitsoki/internal/host"
+	inboxmodel "kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
 )
 
@@ -86,7 +86,7 @@ skipped.`,
 			reportItems := make([]map[string]any, 0, len(items))
 			insertedCount := 0
 			for _, item := range items {
-				n := githubInboxNotification(sid, repo, teleportState, item)
+				n := inboxmodel.NewGitHubNotification(sid, repo, teleportState, item)
 				inserted, err := js.InsertExternalNotificationOnce(ctx, n)
 				if err != nil {
 					return fmt.Errorf("insert notification for %s #%s: %w", item.Kind, item.Number, err)
@@ -129,44 +129,4 @@ skipped.`,
 	cmd.Flags().IntVar(&limit, "limit", 100, "maximum issues and PRs to fetch per query")
 	cmd.Flags().StringVar(&teleportState, "teleport-state", "inbox", "state to open when reacquiring imported notifications")
 	return cmd
-}
-
-func githubInboxNotification(sid app.SessionID, repo, teleportState string, item host.GitHubInboxItem) *jobs.Notification {
-	title := fmt.Sprintf("GitHub %s #%s", item.Kind, item.Number)
-	body := item.Title
-	slots := map[string]any{}
-	switch item.Kind {
-	case "pr":
-		title = fmt.Sprintf("PR #%s needs review: %s", item.Number, item.Title)
-		slots["pr_id"] = item.Number
-		slots["pr_title"] = item.Title
-		slots["pr_author"] = item.Author
-	case "issue":
-		title = fmt.Sprintf("Issue #%s assigned: %s", item.Number, item.Title)
-		slots["ticket_id"] = item.Number
-		slots["ticket_title"] = item.Title
-		slots["ticket_author"] = item.Author
-	}
-	if item.URL != "" {
-		body = strings.TrimSpace(body + "\n\n" + item.URL)
-	}
-	return &jobs.Notification{
-		SessionID:     sid,
-		Severity:      jobs.SeverityActionRequired,
-		Title:         title,
-		Body:          body,
-		TeleportState: teleportState,
-		TeleportSlots: slots,
-		OriginKind:    "external",
-		OriginRef:     githubInboxOriginRef(repo, item),
-		OriginURL:     item.URL,
-	}
-}
-
-func githubInboxOriginRef(repo string, item host.GitHubInboxItem) string {
-	base := "github:"
-	if repo = strings.TrimSpace(repo); repo != "" {
-		base += repo + "/"
-	}
-	return fmt.Sprintf("%s%s/%s", base, item.Kind, item.Number)
 }
