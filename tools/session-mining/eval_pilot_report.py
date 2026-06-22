@@ -624,10 +624,11 @@ def render_markdown(summary, intent_summaries=None, coverage_summaries=None, rea
         w("")
     w("## Dataset coverage")
     w("")
-    w("| story | call | planned profiles | measured profiles | missing profiles |")
-    w("|---|---|---|---|---|")
+    w("| dataset | story | call | planned profiles | measured profiles | missing profiles |")
+    w("|---|---|---|---|---|---|")
     for row in coverage:
-        w("| `%s` | `%s` | %s | %s | %s |" % (
+        w("| `%s` | `%s` | `%s` | %s | %s | %s |" % (
+            row["path"],
             row["story"],
             row["call"],
             ", ".join("`%s`" % p for p in row["profiles"]) or "-",
