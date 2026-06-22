@@ -124,3 +124,49 @@ func TestMetaStream_FinalAnswerNotShownAsThinking(t *testing.T) {
 	require.NotContains(t, visible, finalAnswer,
 		"the final answer must NOT be echoed as thinking — the room presents it")
 }
+
+// TestMetaStream_OnPathNoActivityIsSilent pins the negative half of the
+// on-path tool-call-visibility contract: an on-path (ModeAwaitingLLM,
+// non-meta) turn that streams NO agent activity — no tool calls, no
+// intermediate thoughts, only a terminal text answer — must leave the
+// transcript free of any activity breadcrumb. The on-path streaming
+// surface reuses meta-mode's observer, so without this guard a future
+// change could start leaking a spurious "thinking"/tool line into every
+// silent direct turn (deterministic routes, guard bounces, etc.).
+//
+// Concretely: the only assistant text is the final answer (dropped on
+// `result`, presented by the room), so no tool glyph (▸), no thinking
+// glyph (🧠), and no muted arrow breadcrumb (→) should appear.
+func TestMetaStream_OnPathNoActivityIsSilent(t *testing.T) {
+	forceTrueColor(t)
+	orch, sid := setupCloak(t)
+	m := buildModel(t, orch, sid)
+	rm, ok := tuipkg.ExtractRootModel(m)
+	require.True(t, ok)
+	rm = resizeForTest(rm, 100, 24)
+	tuipkg.SetModeForTest(&rm, tuipkg.ModeAwaitingLLM)
+	tuipkg.ClearTranscriptPendingForTest(&rm)
+
+	const finalAnswer = "Opened the door; you're now in the foyer."
+
+	feed := func(ev host.StreamEvent) {
+		next, _ := rm.Update(tuipkg.MetaStreamMsg{Event: ev})
+		rm, ok = tuipkg.ExtractRootModel(next)
+		require.True(t, ok)
+	}
+
+	// A turn with no tool calls and no intermediate narration: just the
+	// terminal answer, then `result`. Mirrors a deterministic/direct
+	// route whose on_enter agent (if any) said its piece in one shot.
+	feed(host.StreamEvent{Type: "assistant", Text: finalAnswer})
+	feed(host.StreamEvent{Type: "result", IsResult: true})
+
+	visible := stripStyles(tuipkg.GetTranscriptContent(rm))
+
+	require.NotContains(t, visible, "▸",
+		"a turn with no tool calls must not render a tool breadcrumb")
+	require.NotContains(t, visible, "🧠",
+		"a turn with no intermediate thought must not render a thinking line")
+	require.NotContains(t, visible, finalAnswer,
+		"the terminal answer is the room's to present, never an activity line")
+}
