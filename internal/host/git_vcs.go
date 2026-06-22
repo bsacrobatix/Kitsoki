@@ -126,6 +126,15 @@ func gitCommit(ctx context.Context, workdir string, args map[string]any) (Result
 	if strings.TrimSpace(message) == "" {
 		return Result{Error: "git.commit: message argument is required"}, nil
 	}
+	// stage_all: when true, run `git add -A` first so new untracked files are
+	// included in the commit (analogous to `git commit -A` but also covers
+	// deletions). Takes precedence over the files list and the -a fallback.
+	stageAll, _ := args["stage_all"].(bool)
+	if stageAll {
+		if _, addStderr, addCode, addErr := cliExec(ctx, workdir, "git", "add", "-A"); addErr != nil || addCode != 0 {
+			return Result{Error: fmt.Sprintf("git.commit: stage_all: %s", strings.TrimSpace(addStderr))}, nil
+		}
+	}
 	// Optional files list; when empty, fall back to `git commit -a`.
 	// Tolerate two states that aren't really failures from the
 	// pipeline's perspective:
@@ -180,8 +189,8 @@ func gitCommit(ctx context.Context, workdir string, args map[string]any) (Result
 		}
 	}
 	commitArgs := []string{"commit", "-m", message}
-	if len(filesAny) == 0 {
-		// No explicit files → assume -a so authors can use the
+	if len(filesAny) == 0 && !stageAll {
+		// No explicit files and no stage_all → assume -a so authors can use the
 		// fast-path on a dirty tree.
 		commitArgs = []string{"commit", "-a", "-m", message}
 	}

@@ -1,13 +1,15 @@
-# The loop converges to GREEN → @exit:achieved. launch proves the gate is RED
-# (baseline gate-0 fails), auto-proceeds, and iteration 1's maker change makes
-# the gate pass (gate-1 exit 0) → the loop terminates with the goal met. One
-# launch, no operator prodding.
+# achieved_with_commit — asserts iface.vcs.commit fires before @exit:achieved.
+#
+# The maker's work is ONLY useful if it is committed to workspace_branch.
+# The maker runs with read-only bash, so the commit is a story invoke
+# (iface.vcs.commit → host.git) in gating.on_enter, conditional on gate-pass
+# + worktree_path set. This flow proves the commit fires (host.git.commit once,
+# in the maker's worktree) and commit_sha is bound in world.
 test_kind: flow
 app: ../app.yaml
 initial_state: configuring
 
 host_handlers:
-  # Worktree minted at launch (iface.workspace.create -> host.git_worktree).
   host.git_worktree: { data: { ok: true, path: ".worktrees/cherny-loop" } }
   host.run:
     by_call:
@@ -17,8 +19,8 @@ host_handlers:
     by_call:
       maker-1: { data: { submitted: { summary: "Initialize the bucket with tokens=burst" } } }
   host.artifacts_dir: { data: { ok: true } }
-  # iface.vcs.commit → host.git: commit the maker's work before @exit:achieved.
-  host.git: { data: { ok: true, sha: "abc1234" } }
+  # The commit call — fired by iface.vcs.commit → host.git once the gate passes.
+  host.git: { data: { ok: true, sha: "def5678" } }
 
 turns:
   - intent:
@@ -34,18 +36,11 @@ turns:
       goal_achieved:   true
       terminal_reason: "achieved"
       iteration:       1
+      commit_sha:      "def5678"
     expect_host_calls:
-      - handler: host.run
-        args: { call: gate-0 }
-        times: 1
-      - handler: host.agent.task
-        args: { call: maker-1 }
-        times: 1
-      - handler: host.artifacts_dir
-        args: { thread: iteration-1 }
-        times: 1
-      - handler: host.run
-        args: { call: gate-1 }
+      # The commit fired once in the maker's worktree.
+      - handler: host.git.commit
+        args: { workdir: ".worktrees/cherny-loop" }
         times: 1
 
 expect_terminal: true

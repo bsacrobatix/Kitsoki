@@ -17,6 +17,8 @@ host_handlers:
     by_call:
       maker-1: { data: { submitted: { summary: "Added the eviction failure-mode subsection" } } }
   host.artifacts_dir: { data: { ok: true } }
+  # iface.vcs.commit → host.git: commit the maker's work before @exit:achieved.
+  host.git: { data: { ok: true, sha: "abc1234" } }
 
 turns:
   - intent:

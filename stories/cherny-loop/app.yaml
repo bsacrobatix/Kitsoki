@@ -64,6 +64,7 @@ hosts:
   - host.agent.decide
   - host.run
   - host.artifacts_dir
+  - host.git
 
 # Worktree confinement — the maker is an autonomous agent that EDITS the repo,
 # so it must never write the operator's checkout directly. `launch` mints a
@@ -80,6 +81,17 @@ hosts:
 # outside the worktree even for absolute / ../ paths) is an engine-layer change
 # tracked separately; see README → "Worktree confinement".
 host_interfaces:
+  # vcs — version control. The commit op stages and commits the maker's
+  # changes to workspace_branch before exiting @exit:achieved. Mirrors the
+  # same iface.vcs.commit surface as stories/bugfix. Default: host.git.
+  vcs:
+    description: "Version-control abstraction (git / GitHub / Bitbucket)."
+    operations:
+      commit:
+        input:  { workdir: string, message: string, files: list, stage_all: bool }
+        output: { ok: bool, sha: string }
+    default: host.git
+
   workspace:
     description: "Working-copy manager. Local: git worktree."
     operations:
@@ -145,6 +157,9 @@ world:
   last_gate_failure: { type: string, default: "" }    # fed to the next maker turn
   maker_summary:     { type: string, default: "" }    # the maker's one-line report
   terminal_reason:   { type: string, default: "" }    # achieved | iteration_budget | cost_budget | aborted
+
+  # Commit result (bound after the maker's work is committed on @exit:achieved).
+  commit_sha:        { type: string, default: "" }
 
   # Gate result (bound from the checker each turn). gate_ok is intentionally a
   # tri-state: "" = not yet evaluated this turn, true/false once the checker
@@ -218,6 +233,10 @@ intents:
   mark_achieved:
     description: "(internal) goal met."
     examples: ["mark_achieved"]
+    priority: 1
+  mark_committed:
+    description: "(internal) commit done → @exit:achieved."
+    examples: []
     priority: 1
   mark_cost_exhausted:
     description: "(internal) cost ceiling hit."

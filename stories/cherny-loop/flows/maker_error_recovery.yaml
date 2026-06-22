@@ -19,6 +19,8 @@ host_handlers:
       maker-2:
         data: { submitted: { summary: "Retry with the missing guard condition" } }
   host.artifacts_dir: { data: { ok: true } }
+  # iface.vcs.commit → host.git: commit the maker's work before @exit:achieved.
+  host.git: { data: { ok: true, sha: "abc1234" } }
 
 turns:
   - intent:
