@@ -19,6 +19,8 @@ host_handlers:
     by_call:
       maker-1: { data: { submitted: { summary: "Initialize the bucket with tokens=burst" } } }
   host.artifacts_dir: { data: { ok: true } }
+  # iface.vcs.commit → host.git: commit the maker's work before @exit:achieved.
+  host.git: { data: { ok: true, sha: "abc1234" } }
 
 turns:
   - intent:
@@ -52,6 +54,10 @@ turns:
       # Loop gate ran INSIDE the worktree.
       - handler: host.run
         args: { call: gate-1, cwd: ".worktrees/cherny-loop" }
+        times: 1
+      # Commit ran INSIDE the worktree (workdir pinned to worktree_path).
+      - handler: host.git.commit
+        args: { workdir: ".worktrees/cherny-loop" }
         times: 1
 
 expect_terminal: true

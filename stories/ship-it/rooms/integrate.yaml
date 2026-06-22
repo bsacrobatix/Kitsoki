@@ -57,7 +57,7 @@ states:
               # Empty ⇒ fall back to MAIN_WT (the pre-2026-06-22 behaviour, which
               # only worked when the branch was not checked out anywhere).
               WORKTREE="{{ world.worktree_path }}"
-              BUILD_CMD="go build ./... && go test ./..."
+              BUILD_CMD="{{ world.gate_command }}"
               BUILD_DISABLED="{{ world.build_check_disabled }}"
               [ -z "$MAIN_WT" ] && MAIN_WT="."
               [ -z "$WORKTREE" ] && WORKTREE="$MAIN_WT"

@@ -141,7 +141,7 @@ imports:
       achieved:
         to: integrate
         set:
-          worktree_path:    "{{ world.worktree_path }}"
+          worktree_path:    "{{ world.maker__worktree_path }}"
           workspace_branch: "{{ world.workspace_branch }}"
       # Budget/abandon → needs-human with the real terminal reason + last gate failure.
       exhausted:

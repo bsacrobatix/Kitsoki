@@ -68,7 +68,13 @@ states:
                 - label: "look"
     on:
       mark_achieved:
-        - target: "@exit:achieved"
+        # Commit the maker's work to workspace_branch before exiting.
+        # The maker runs with read-only bash, so the commit is a story invoke
+        # (iface.vcs.commit → host.git). `committing` is a thin intermediate
+        # state so the invoke fires at the right time (on_enter of a new state,
+        # after all gating binds are settled — unlike in gating.on_enter where
+        # the invoke's `when:` would see pre-bind gate_ok).
+        - target: committing
           effects:
             - set: { goal_achieved: true, terminal_reason: "achieved" }
       mark_cost_exhausted:
@@ -97,3 +103,47 @@ states:
           target: .
           effects:
             - say: "Gating…"
+
+  # committing — thin intermediate state that commits the maker's work to
+  # workspace_branch before @exit:achieved. Entered only via mark_achieved,
+  # so goal_achieved + terminal_reason are already set. The invoke runs in
+  # on_enter (post-bind world), which is why the commit is here rather than
+  # in gating.on_enter (where gate_ok would still be pre-bind at machine time).
+  committing:
+    description: "Commit the maker's work before exiting"
+    relevant_world: [worktree_path, maker_summary, commit_sha]
+    on_enter:
+      - invoke: iface.vcs.commit
+        id: "commit-achieved"
+        when: "world.worktree_path != ''"
+        with:
+          workdir: "{{ world.worktree_path }}"
+          message: "{{ world.maker_summary }}"
+          files: []
+          stage_all: true
+        bind:
+          commit_sha: sha
+      - emit_intent: mark_committed
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Committing maker's work…"
+        choices:
+          - list:
+              items:
+                - label: "look"
+    on:
+      mark_committed:
+        - target: "@exit:achieved"
+          effects:
+            # Re-pin terminal_reason on the direct exit arc so imports that
+            # inspect exit-arc effects (not on_enter binds) see it set.
+            # Mirrors the import-safe re-pin discipline in ship-it/integrate.yaml.
+            - set: { terminal_reason: "achieved" }
+      abort:
+        - target: "@exit:abandoned"
+          effects:
+            - set: { terminal_reason: "aborted" }
+      look:
+        - target: .
