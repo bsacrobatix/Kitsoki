@@ -278,6 +278,7 @@ const embed = computed(() => isEmbedded() || route?.query?.embed === "1");
 // One DataSource for the lifetime of the view (subscribe + write RPCs).
 let source: DataSource | null = null;
 let githubInboxTimer: ReturnType<typeof setInterval> | null = null;
+let focusedChatSeq = 0;
 
 // True while a turn is in flight; disables the input so the operator can't
 // fire a second overlapping turn against the live session.
@@ -402,27 +403,35 @@ async function maybeShowChatFromQuery(sessionId: string): Promise<void> {
   const raw = route.query.chat;
   const chatID = Array.isArray(raw) ? raw[0] : raw;
   if (!chatID || typeof chatID !== "string") {
+    focusedChatSeq += 1;
     focusedChat.value = null;
     focusedChatID.value = "";
     focusedChatError.value = null;
     focusedChatLoading.value = false;
     return;
   }
+  const seq = ++focusedChatSeq;
   focusedChatID.value = chatID;
   focusedChatLoading.value = true;
   focusedChatError.value = null;
   const live = new LiveSource("/");
   try {
-    focusedChat.value = await live.showChat(sessionId, chatID);
+    const result = await live.showChat(sessionId, chatID);
+    if (seq !== focusedChatSeq) return;
+    focusedChat.value = result;
   } catch (e) {
+    if (seq !== focusedChatSeq) return;
     focusedChat.value = null;
     focusedChatError.value = e instanceof Error ? e.message : String(e);
   } finally {
-    focusedChatLoading.value = false;
+    if (seq === focusedChatSeq) {
+      focusedChatLoading.value = false;
+    }
   }
 }
 
 async function clearFocusedChat(): Promise<void> {
+  focusedChatSeq += 1;
   focusedChat.value = null;
   focusedChatID.value = "";
   focusedChatError.value = null;

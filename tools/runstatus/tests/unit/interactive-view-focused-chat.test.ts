@@ -184,6 +184,80 @@ describe("InteractiveView focused chat context", () => {
     wrapper.unmount();
   });
 
+  it("keeps the newest focused chat response when session switches race", async () => {
+    let resolveFirst: (value: unknown) => void = () => {};
+    let resolveSecond: (value: unknown) => void = () => {};
+    showChat
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+
+    const wrapper = mount(InteractiveView, mountOpts);
+    await flushPromises();
+    expect(showChat).toHaveBeenCalledWith("s1", "chat-1");
+
+    await wrapper.setProps({ sessionId: "s2" });
+    await flushPromises();
+    expect(showChat).toHaveBeenCalledWith("s2", "chat-1");
+
+    resolveSecond({
+      ok: true,
+      context: { session_id: "s2" },
+      chat: {
+        id: "chat-1",
+        app_id: "demo",
+        room: "agent",
+        scope_key: "scope",
+        title: "Newer focused chat",
+        status: "active",
+        created_at_unix_micro: 1,
+        updated_at_unix_micro: 2,
+        last_active_at_unix_micro: 3,
+      },
+      messages: [
+        { chat_id: "chat-1", seq: 0, role: "assistant", content: "newer context", created_at_unix_micro: 4 },
+      ],
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="focused-chat"]').text()).toContain("Newer focused chat");
+    expect(wrapper.find('[data-testid="focused-chat"]').text()).toContain("session s2");
+
+    resolveFirst({
+      ok: true,
+      context: { session_id: "s1" },
+      chat: {
+        id: "chat-1",
+        app_id: "demo",
+        room: "agent",
+        scope_key: "scope",
+        title: "Stale focused chat",
+        status: "active",
+        created_at_unix_micro: 1,
+        updated_at_unix_micro: 2,
+        last_active_at_unix_micro: 3,
+      },
+      messages: [
+        { chat_id: "chat-1", seq: 0, role: "assistant", content: "stale context", created_at_unix_micro: 4 },
+      ],
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="focused-chat"]').text()).toContain("Newer focused chat");
+    expect(wrapper.find('[data-testid="focused-chat"]').text()).not.toContain("Stale focused chat");
+    expect(wrapper.find('[data-testid="focused-chat"]').text()).not.toContain("stale context");
+    wrapper.unmount();
+  });
+
   it("refreshes active work after a submitted turn", async () => {
     route.query = {};
     const wrapper = mount(InteractiveView, {
