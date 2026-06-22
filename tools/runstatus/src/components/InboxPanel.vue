@@ -281,11 +281,12 @@ function notificationFromWork(item: WorkItem): Notification {
 }
 
 function workKey(item: WorkItem): string {
-  return `${item.kind}:${item.notification_id || item.job_id || item.drive_id || item.chat_id || item.session_id}`;
+  return `${item.kind}:${item.notification_id || item.job_id || item.drive_id || item.chat_id || item.question_id || item.proposal_id || item.session_id}`;
 }
 
 function workKind(item: WorkItem): string {
   if (item.kind === "operator_question") return "question";
+  if (item.kind === "mining_proposal") return "proposal";
   if (item.kind === "job") return "job";
   if (item.kind === "pending_drive") {
     return item.status === "dispatching" ? "dispatching" : "queued";
@@ -297,6 +298,14 @@ function workKind(item: WorkItem): string {
 }
 
 function workContext(item: WorkItem): string {
+  if (item.kind === "mining_proposal") {
+    const parts: string[] = [];
+    if (item.proposal_kind) parts.push(item.proposal_kind);
+    if (item.proposal_target) parts.push(item.proposal_target);
+    if (item.rung) parts.push(`rung ${item.rung}`);
+    if (item.draft_path) parts.push(item.draft_path);
+    return parts.join(" | ");
+  }
   if (item.kind !== "pending_drive" && item.kind !== "backgrounded_chat") return "";
 
   const parts: string[] = [];
@@ -311,6 +320,7 @@ function workContext(item: WorkItem): string {
 
 function workAction(item: WorkItem): string {
   if (item.kind === "operator_question") return "answer";
+  if (item.kind === "mining_proposal") return "review";
   if (isNotificationBackedWork(item)) return "jump";
   if (item.reacquire_tool === "chat.show" || item.chat_id) return "open context";
   return "open session";

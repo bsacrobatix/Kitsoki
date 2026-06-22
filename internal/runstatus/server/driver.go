@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/render/elements"
+	"kitsoki/internal/store"
 )
 
 // Driver is the write side of the runstatus surface: the server calls it to
@@ -167,6 +169,7 @@ type WorkSummary struct {
 	FailedDrives                int `json:"failed_drives"`
 	BackgroundedChats           int `json:"backgrounded_chats"`
 	OperatorQuestions           int `json:"operator_questions"`
+	MiningProposals             int `json:"mining_proposals"`
 }
 
 // WorkItem is one active row in the operator's work queue. Notification rows
@@ -198,6 +201,11 @@ type WorkItem struct {
 	DriveID            string                           `json:"drive_id,omitempty"`
 	ChatID             string                           `json:"chat_id,omitempty"`
 	QuestionID         string                           `json:"question_id,omitempty"`
+	ProposalID         string                           `json:"proposal_id,omitempty"`
+	ProposalKind       string                           `json:"proposal_kind,omitempty"`
+	ProposalTarget     string                           `json:"proposal_target,omitempty"`
+	DraftPath          string                           `json:"draft_path,omitempty"`
+	Rung               int                              `json:"rung,omitempty"`
 	Questions          []kitsokimcp.OperatorAskQuestion `json:"questions,omitempty"`
 	Actor              string                           `json:"actor,omitempty"`
 	Thread             string                           `json:"thread,omitempty"`
@@ -218,6 +226,9 @@ type OrchestratorDriver struct {
 	// Chats is the optional chat store backing pending chat drives and
 	// tmux-hosted background chats. Nil means the work queue omits chat work.
 	Chats *chats.Store
+	// TraceHistory reads the live session trace. It is optional so read-only
+	// tests and trace-less surfaces can omit mining proposal work.
+	TraceHistory func() store.History
 }
 
 // ErrNoInbox is returned by Teleport when the session has no JobStore wired, so
@@ -389,6 +400,7 @@ func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
 	if err != nil {
 		return SessionWork{}, err
 	}
+	out = d.listMiningProposalWork(out)
 	sort.SliceStable(out.Items, func(i, j int) bool {
 		a, b := out.Items[i], out.Items[j]
 		if a.Priority != b.Priority {
@@ -403,6 +415,99 @@ func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
 		}
 	}
 	return out, nil
+}
+
+func (d OrchestratorDriver) listMiningProposalWork(out SessionWork) SessionWork {
+	if d.TraceHistory == nil {
+		return out
+	}
+	proposals := pendingMiningProposals(d.TraceHistory())
+	out.Summary.MiningProposals += len(proposals)
+	for _, proposal := range proposals {
+		bodyParts := make([]string, 0, 3)
+		if proposal.Target != "" {
+			bodyParts = append(bodyParts, "target="+proposal.Target)
+		}
+		if proposal.Rung != 0 {
+			bodyParts = append(bodyParts, fmt.Sprintf("rung=%d", proposal.Rung))
+		}
+		if proposal.DraftPath != "" {
+			bodyParts = append(bodyParts, "draft="+proposal.DraftPath)
+		}
+		title := strings.TrimSpace(fmt.Sprintf("%s proposal", proposal.Kind))
+		if title == "proposal" {
+			title = "Mining proposal"
+		}
+		out.Items = append(out.Items, WorkItem{
+			Kind:               "mining_proposal",
+			Priority:           58,
+			SessionID:          string(d.SID),
+			Title:              title,
+			Body:               strings.Join(bodyParts, "; "),
+			Status:             "awaiting_review",
+			UpdatedAt:          proposal.RaisedAt,
+			ReacquireTool:      "session",
+			ReacquireSessionID: string(d.SID),
+			ProposalID:         proposal.RecipeID,
+			ProposalKind:       proposal.Kind,
+			ProposalTarget:     proposal.Target,
+			DraftPath:          proposal.DraftPath,
+			Rung:               proposal.Rung,
+		})
+	}
+	return out
+}
+
+type miningProposalWorkItem struct {
+	RecipeID  string
+	Kind      string
+	Target    string
+	Priority  float64
+	Rung      int
+	DraftPath string
+	RaisedAt  time.Time
+}
+
+func pendingMiningProposals(history store.History) []miningProposalWorkItem {
+	if len(history) == 0 {
+		return nil
+	}
+	byRecipe := make(map[string]miningProposalWorkItem)
+	var order []string
+	for _, ev := range history {
+		switch ev.Kind {
+		case store.MiningProposalRaised:
+			var payload store.MiningProposalRaisedPayload
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil || payload.RecipeID == "" {
+				continue
+			}
+			if _, exists := byRecipe[payload.RecipeID]; !exists {
+				order = append(order, payload.RecipeID)
+			}
+			byRecipe[payload.RecipeID] = miningProposalWorkItem{
+				RecipeID:  payload.RecipeID,
+				Kind:      payload.Kind,
+				Target:    payload.Target,
+				Priority:  payload.Priority,
+				Rung:      payload.Rung,
+				DraftPath: payload.DraftPath,
+				RaisedAt:  ev.Ts,
+			}
+		case store.MiningProposalDecided:
+			var payload store.MiningProposalDecidedPayload
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil || payload.RecipeID == "" {
+				continue
+			}
+			delete(byRecipe, payload.RecipeID)
+		}
+	}
+	out := make([]miningProposalWorkItem, 0, len(byRecipe))
+	for _, recipeID := range order {
+		if item, ok := byRecipe[recipeID]; ok {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func jobClarificationPrompt(j jobs.Job) string {

@@ -448,6 +448,58 @@ describe("InboxPanel", () => {
     wrapper.unmount();
   });
 
+  it("renders trace-backed mining proposals from backend active work", async () => {
+    const inbox = useInboxStore();
+    inbox.open = true;
+    inbox.workSummary = {
+      items: 1,
+      needs_attention: 0,
+      jobs_running: 0,
+      jobs_awaiting_input: 0,
+      jobs_terminal: 0,
+      notifications_unread: 0,
+      notifications_action_required: 0,
+      pending_drives: 0,
+      backgrounded_chats: 0,
+      mining_proposals: 1,
+    };
+    inbox.workItems = [
+      {
+        kind: "mining_proposal",
+        priority: 58,
+        session_id: "web-session-1",
+        title: "intent proposal",
+        body: "target=dev-story; rung=2; draft=.artifacts/mining/recipe-pending",
+        status: "awaiting_review",
+        proposal_id: "recipe-pending",
+        proposal_kind: "intent",
+        proposal_target: "dev-story",
+        draft_path: ".artifacts/mining/recipe-pending",
+        rung: 2,
+        reacquire_tool: "session",
+        reacquire_session_id: "web-session-1",
+      },
+    ];
+
+    const wrapper = mount(InboxPanel, { attachTo: document.body });
+    await flushPromises();
+
+    const rows = document.body.querySelectorAll('[data-testid="work-item"]');
+    expect(rows).toHaveLength(1);
+    expect(document.body.textContent).toContain("proposal");
+    expect(document.body.textContent).toContain("intent proposal");
+    expect(document.body.textContent).toContain("target=dev-story");
+    expect(document.body.textContent).toContain("intent | dev-story | rung 2 | .artifacts/mining/recipe-pending");
+    expect(document.body.textContent).toContain("review");
+
+    (rows[0] as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(inbox.open).toBe(false);
+    expect(push).toHaveBeenCalledWith("/s/web-session-1");
+    wrapper.unmount();
+  });
+
   it("routes active job work without notification context to the session view", async () => {
     const inbox = useInboxStore();
     inbox.open = true;

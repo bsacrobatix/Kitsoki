@@ -432,17 +432,20 @@ indistinguishable from a TUI one in the trace.
 
 - **Global badge** (`components/InboxBadge.vue`) — the larger of unread
   notification count and active-work item count, plus queued proposal-review
-  items, in the chrome on every screen. Attention color appears when either the
-  notification feed, active-work summary, or proposal queue reports work that
-  needs intervention. Active-work attention is limited to unread
-  `action_required` notifications, unanswered operator questions,
-  awaiting-input or failed jobs, failed subagent drives, and write-mode approval
-  proposals; passive `success` / `info` rows and low-stakes structure proposals
-  remain listed and jumpable without coloring the badge.
+  items, in the chrome on every screen. Backend trace-backed mining proposals
+  are part of active work; locally queued web proposals are added by the web
+  proposal store. Attention color appears when either the notification feed,
+  active-work summary, or proposal queue reports work that needs intervention.
+  Active-work attention is limited to unread `action_required` notifications,
+  unanswered operator questions, awaiting-input or failed jobs, failed subagent
+  drives, and write-mode approval proposals; passive `success` / `info` rows
+  and low-stakes structure proposals remain listed and jumpable without coloring
+  the badge.
 - **`InboxPanel.vue`** — opens on badge click: first the prioritized active-work
   queue from `runstatus.work.list` (notifications, jobs, queued/dispatching
-  drives, failed drives, backgrounded chats, and unanswered operator questions),
-  merged with the web proposal queue's review items, then notification history.
+  drives, failed drives, backgrounded chats, unanswered operator questions, and
+  trace-backed mining proposals), merged with the web proposal queue's review
+  items, then notification history.
   Rows show the next action explicitly: **jump** for notifications and
   notification-backed jobs, **open context** for chat-backed work including
   failed subagent drives, **answer** for forwarded operator questions,

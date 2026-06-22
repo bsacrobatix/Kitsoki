@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,7 @@ type inboxFixture struct {
 	db       *sql.DB
 	js       *jobs.JobStore
 	chats    *chats.Store
+	live     *server.LiveSession
 	sid      app.SessionID
 	publicID string
 }
@@ -77,7 +79,7 @@ func buildInboxFixture(t *testing.T) inboxFixture {
 	orch.SetEventSink(live)
 	require.NoError(t, orch.RunInitialOnEnter(ctx, sid))
 
-	driver := server.OrchestratorDriver{Orch: orch, SID: sid, Jobs: js, Chats: chatStore}
+	driver := server.OrchestratorDriver{Orch: orch, SID: sid, Jobs: js, Chats: chatStore, TraceHistory: live.History}
 	publicID := "web-session-1"
 	srv := server.NewMulti(&singleInboxProvider{
 		entry: server.Entry{Source: live, Driver: driver},
@@ -90,7 +92,7 @@ func buildInboxFixture(t *testing.T) inboxFixture {
 
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return inboxFixture{ts: ts, db: s.DB(), js: js, chats: chatStore, sid: sid, publicID: publicID}
+	return inboxFixture{ts: ts, db: s.DB(), js: js, chats: chatStore, live: live, sid: sid, publicID: publicID}
 }
 
 // singleInboxProvider is a one-session SessionProvider keyed by the
@@ -378,6 +380,59 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 	assert.Equal(t, jobNotification.ID, work.Items[6].NotificationID)
 }
 
+func TestWorkList_SurfacesTraceBackedMiningProposals(t *testing.T) {
+	f := buildInboxFixture(t)
+	require.NoError(t, appendMiningEvent(f.live, 1, time.Unix(10, 0), store.MiningProposalRaised, store.MiningProposalRaisedPayload{
+		RecipeID:  "recipe-accepted",
+		Kind:      "binding",
+		Target:    "root-instance",
+		Priority:  0.91,
+		Rung:      1,
+		DraftPath: ".artifacts/mining/recipe-accepted",
+	}))
+	require.NoError(t, appendMiningEvent(f.live, 2, time.Unix(20, 0), store.MiningProposalRaised, store.MiningProposalRaisedPayload{
+		RecipeID:  "recipe-pending",
+		Kind:      "intent",
+		Target:    "dev-story",
+		Priority:  0.72,
+		Rung:      2,
+		DraftPath: ".artifacts/mining/recipe-pending",
+	}))
+	require.NoError(t, appendMiningEvent(f.live, 3, time.Unix(30, 0), store.MiningProposalDecided, store.MiningProposalDecidedPayload{
+		RecipeID:   "recipe-accepted",
+		Verdict:    store.MiningVerdictAccept,
+		By:         store.MiningByHuman,
+		FlowsGreen: true,
+	}))
+
+	var work server.WorkListResult
+	rpcCall(t, f.ts, "runstatus.work.list", nil, &work)
+	assert.Equal(t, 1, work.Summary.MiningProposals)
+	assert.Equal(t, 1, work.Summary.Items)
+	assert.Equal(t, 0, work.Summary.NeedsAttention)
+	require.Len(t, work.Items, 1)
+	got := work.Items[0]
+	assert.Equal(t, "mining_proposal", got.Kind)
+	assert.Equal(t, "recipe-pending", got.ProposalID)
+	assert.Equal(t, "intent", got.ProposalKind)
+	assert.Equal(t, "dev-story", got.ProposalTarget)
+	assert.Equal(t, ".artifacts/mining/recipe-pending", got.DraftPath)
+	assert.Equal(t, 2, got.Rung)
+	assert.Equal(t, "session", got.ReacquireTool)
+	assert.Equal(t, f.publicID, got.ReacquireSessionID)
+	assert.Contains(t, got.Body, "target=dev-story")
+
+	require.NoError(t, appendMiningEvent(f.live, 4, time.Unix(40, 0), store.MiningProposalDecided, store.MiningProposalDecidedPayload{
+		RecipeID: "recipe-pending",
+		Verdict:  store.MiningVerdictReject,
+		By:       store.MiningByHuman,
+	}))
+	var after server.WorkListResult
+	rpcCall(t, f.ts, "runstatus.work.list", nil, &after)
+	assert.Equal(t, 0, after.Summary.MiningProposals)
+	assert.Empty(t, after.Items)
+}
+
 func TestWorkList_DoesNotTreatPassiveNotificationsAsAttention(t *testing.T) {
 	f := buildInboxFixture(t)
 	now := time.Now()
@@ -408,6 +463,19 @@ func TestWorkList_DoesNotTreatPassiveNotificationsAsAttention(t *testing.T) {
 	assert.Equal(t, "job-running", work.Items[0].JobID)
 	assert.Equal(t, "notification", work.Items[1].Kind)
 	assert.Equal(t, jobs.SeveritySuccess, work.Items[1].Severity)
+}
+
+func appendMiningEvent(sink store.EventSink, turn int64, ts time.Time, kind store.EventKind, payload any) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return sink.Append(store.Event{
+		Turn:    app.TurnNumber(turn),
+		Ts:      ts,
+		Kind:    kind,
+		Payload: raw,
+	})
 }
 
 func TestWorkList_AwaitingJobShowsClarificationPrompt(t *testing.T) {

@@ -115,6 +115,7 @@ func addWorkSummary(dst *WorkSummary, src WorkSummary) {
 	dst.FailedDrives += src.FailedDrives
 	dst.BackgroundedChats += src.BackgroundedChats
 	dst.OperatorQuestions += src.OperatorQuestions
+	dst.MiningProposals += src.MiningProposals
 }
 
 func workItemForOperatorQuestion(q pendingQuestion) WorkItem {

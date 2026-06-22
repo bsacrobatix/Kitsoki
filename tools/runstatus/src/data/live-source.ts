@@ -146,6 +146,7 @@ export interface WorkSummary {
   failed_drives?: number;
   backgrounded_chats: number;
   operator_questions?: number;
+  mining_proposals?: number;
 }
 
 export interface WorkSession {
@@ -180,6 +181,11 @@ export interface WorkItem {
   drive_id?: string;
   chat_id?: string;
   question_id?: string;
+  proposal_id?: string;
+  proposal_kind?: string;
+  proposal_target?: string;
+  draft_path?: string;
+  rung?: number;
   questions?: OperatorQuestion[];
   actor?: string;
   thread?: string;
