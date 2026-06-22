@@ -54,6 +54,17 @@ the session to the state/world before step 1, records the override, and
 re-dispatches the original utterance under the operator's selected
 interpretation.
 
+Execution policy follows the operator's current attention:
+
+- if the resolved work stays in the active room, append it to that room's
+  existing input/chat queue and keep the operator in place;
+- if the route leaves the active room, detach the origin room's pending work
+  into a background room task, move the foreground session to the new room, and
+  post an inbox notification when the background room reaches idle or completes;
+- if the plan explicitly returns to the origin room before yielding to the
+  operator, it is still one foreground plan and does not post a background
+  notification unless a step chose async/background execution.
+
 ## Impact
 
 - **Code seams:** extend `ContextRouteVerdict` /
@@ -61,7 +72,9 @@ interpretation.
   plans from `routeViaContextualRouter` in `internal/orchestrator/semantic.go:164`;
   generalize `Orchestrator.RewindRoute` from one foreground decision at
   `internal/orchestrator/rewind.go:37`; surface plan receipts through the
-  existing runstatus `context_route` wire shape.
+  existing runstatus `context_route` wire shape; reuse the chat input queue
+  behind `host.chat.drive` and the existing `internal/inbox` notification
+  substrate for room work that continues after the user leaves.
 - **Vocabulary:** one new contextual verdict class, one plan step shape, and
   plan-level trace events. No new story effect or host call.
 - **Stories affected:** only states that opt in to contextual routing and route
@@ -82,6 +95,8 @@ interpretation.
 | trace event | `turn.context_route_plan_decided` | `{decision_id, origin, steps, reason, confidence, alternatives}` | recorded before execution |
 | trace event | `turn.context_route_plan_step` | `{decision_id, index, from, intent, to, slots}` | recorded after each validated step applies |
 | trace event | `turn.context_route_plan_overridden` | `{from_decision_id, old_plan, new_class|new_plan, reason}` | plan-level correction event |
+| trace event | `turn.context_route_room_queued` | `{decision_id, room, queue_id, foreground}` | recorded when a same-room request is queued |
+| trace event | `turn.context_route_room_backgrounded` | `{decision_id, origin, target, queue_id, notification_id?}` | recorded when leaving a room lets origin work continue in background |
 
 ## The model
 
@@ -117,6 +132,36 @@ declared route back. If there is no declared return route, the plan is invalid
 unless `allow_return: snapshot` is explicitly enabled later; v1 leans against
 snapshot-return because it would skip story-authored transitions.
 
+## Room queue and background policy
+
+Multi-hop routing should not make the operator wait in the wrong place. The
+runtime separates routing from where unfinished room work lives:
+
+| Resolved target | Foreground state after turn | Work execution | Completion signal |
+|---|---|---|---|
+| Same room | unchanged | enqueue on the active room/chat queue | normal room output |
+| Different room, origin still running | target room | origin room continues as background room task | inbox notification |
+| Different room, no origin work pending | target room | no background task | route receipt only |
+| Plan returns before yielding | final/origin room from validated steps | foreground plan | route receipt only |
+
+"Stays in the same room" means the selected class or route plan does not change
+the foreground state. The input is queued through the existing chat-drive shape
+rather than injected directly into a busy agent, preserving FIFO behavior and
+the current room's lock discipline.
+
+"Leaves the room" means the foreground state after the plan is not the origin
+state while origin-scoped work remains pending or running. In that case the
+origin room gets a background-room task record tied to the plan `DecisionID`.
+When that task reaches terminal status or needs attention, it writes through the
+existing inbox path so the operator sees the badge wherever they are. Selecting
+the inbox item should teleport/attach back to the background room with enough
+context to review the result and then return to the current foreground room.
+
+This borrows the already-documented distinction from the chats proposal: the
+room/chat queue is incoming work to dispatch, while the inbox is outgoing
+notification to the human. Multi-hop routing should not create a second queue or
+a second notification surface.
+
 ## Decision recording
 
 `route_plan` needs stronger recording than a single intent receipt because the
@@ -127,8 +172,13 @@ The trace records:
 - the proposed plan before execution, including origin state/world hash,
   confidence, reason, alternatives, and step list;
 - each applied step after validation, including state before/after and slots;
+- same-room queue decisions and background-room detach decisions, including
+  queue/task ids;
 - the final plan receipt attached to the turn outcome;
-- any override event, with `from_decision_id` pointing at the original plan.
+- completion notifications for background room tasks via the existing inbox
+  trace path;
+- any override event, with `from_decision_id` pointing at the original plan or
+  queued background task.
 
 Replay never calls the LLM for an already-recorded plan. It replays the recorded
 steps through the same deterministic validation path and fails loudly if the
@@ -161,6 +211,8 @@ Load-time invariants:
 - `route_plans.enabled` requires `contextual_routing.enabled`.
 - `max_steps` must be positive and capped at a small bound, default 4.
 - plan support requires a store capable of snapshots and route override events.
+- same-room queueing requires a room/chat queue; leaving-room background
+  execution requires a job/chat task record that can post to inbox.
 - UI "switch route" can only be immediate when the original plan made no world
   mutation; otherwise it must use full rewind.
 
@@ -200,7 +252,12 @@ without a real LLM.
       state+intent+slot transition before applying any step.
 - [ ] 2.2 Implement the deterministic plan runner using the same transition
       machinery as foreground routed intents.
-- [ ] 2.3 Emit plan-decided, plan-step, and plan-overridden trace events.
+- [ ] 2.3 Implement same-room queueing through the existing chat/room queue
+      contract rather than direct injection into a busy room.
+- [ ] 2.4 Implement leaving-room background continuation and inbox completion
+      notifications for origin room work.
+- [ ] 2.5 Emit plan-decided, plan-step, room-queued, room-backgrounded, and
+      plan-overridden trace events.
 
 ## 3. Correction UX
 - [ ] 3.1 Extend route receipts to render the whole path and alternatives.
@@ -214,9 +271,11 @@ without a real LLM.
 - [ ] 4.2 No-LLM orchestrator tests with stub contextual-router verdicts:
       valid two-hop route, valid route+return, invalid missing edge, invalid
       slot, and over-`max_steps` rejection.
-- [ ] 4.3 Flow fixtures/cassettes for the dogfood story exercising a cross-room
+- [ ] 4.3 Queue/background tests: same-room input queues FIFO; leaving the room
+      backgrounds origin work; terminal background work posts one inbox item.
+- [ ] 4.4 Flow fixtures/cassettes for the dogfood story exercising a cross-room
       route, bad-route rewind, and alternative interpretation.
-- [ ] 4.4 Replay test proving recorded route plans do not call a live LLM.
+- [ ] 4.5 Replay test proving recorded route plans do not call a live LLM.
 
 ## 5. Adopt + document
 - [ ] 5.1 Enable route plans in one dogfood room where cross-room commands are
@@ -235,6 +294,8 @@ verification set is:
 - flow fixtures that replay recorded `route_plan` decisions without model calls;
 - runstatus unit tests that prove the plan receipt renders and the rewind RPC
   passes the plan `DecisionID`.
+- inbox/job-store assertions proving background room completion increments
+  `$inbox` and opens the completed room task.
 
 ## Open questions
 
@@ -246,6 +307,10 @@ verification set is:
 3. How much of the target room's intent surface should be exposed to the LLM?
    *Lean: only a bounded neighborhood from the story graph plus intent summaries,
    not the entire app prompt.*
+4. Should background room tasks use `host.chat.drive` rows directly or a thinner
+   room-task table that can later delegate to chat drives? *Lean: reuse
+   `host.chat.drive` where the room already has a chat, add only the minimal
+   room-task wrapper needed for inbox teleport metadata.*
 
 ## Non-goals
 
