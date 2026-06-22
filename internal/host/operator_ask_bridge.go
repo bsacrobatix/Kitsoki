@@ -29,6 +29,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	kitsokimcp "kitsoki/internal/mcp"
@@ -69,6 +70,74 @@ type operatorAskListener struct {
 	timeout   time.Duration
 }
 
+type pipeListener struct {
+	conns  chan net.Conn
+	closed chan struct{}
+}
+
+func newPipeListener() *pipeListener {
+	return &pipeListener{
+		conns:  make(chan net.Conn),
+		closed: make(chan struct{}),
+	}
+}
+
+func (l *pipeListener) Accept() (net.Conn, error) {
+	select {
+	case conn := <-l.conns:
+		return conn, nil
+	case <-l.closed:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *pipeListener) Close() error {
+	select {
+	case <-l.closed:
+	default:
+		close(l.closed)
+	}
+	return nil
+}
+
+func (l *pipeListener) Addr() net.Addr { return pipeAddr("operator-ask-memory") }
+
+func (l *pipeListener) Dial() (net.Conn, error) {
+	client, server := net.Pipe()
+	select {
+	case l.conns <- server:
+		return client, nil
+	case <-l.closed:
+		_ = client.Close()
+		_ = server.Close()
+		return nil, net.ErrClosed
+	}
+}
+
+type pipeAddr string
+
+func (a pipeAddr) Network() string { return "pipe" }
+func (a pipeAddr) String() string  { return string(a) }
+
+var operatorAskListenerStarter = startOperatorAskListener
+
+func operatorAskSocketDirs() []string {
+	if dir := os.Getenv("KITSOKI_OPERATOR_ASK_SOCKET_DIR"); dir != "" {
+		return []string{dir}
+	}
+	candidates := []string{os.TempDir(), "/private/tmp", "/tmp"}
+	out := make([]string, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, dir := range candidates {
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		out = append(out, dir)
+	}
+	return out
+}
+
 // startOperatorAskListener binds a unix socket and serves it until close() (or
 // ctx cancellation). Each connection carries one question→answer exchange routed
 // to prompter. timeout bounds each operator wait; zero uses operatorAskWaitTimeout.
@@ -79,14 +148,32 @@ func startOperatorAskListener(ctx context.Context, prompter OperatorPrompter, se
 	if timeout <= 0 {
 		timeout = operatorAskWaitTimeout
 	}
-	// os.TempDir() (not t.TempDir()) plus a TRUNCATED uuid keeps the path under
-	// the macOS ~104-char sun_path limit while staying collision-safe across
-	// concurrent calls (a full uuid would push os.TempDir()+name to the limit).
-	sockPath := filepath.Join(os.TempDir(), "kitsoki-opask-"+newUUID()[:12]+".sock")
-	ln, err := net.Listen("unix", sockPath)
-	if err != nil {
-		return nil, fmt.Errorf("operator-ask: listen %q: %w", sockPath, err)
+	// A short temp base plus a truncated uuid keeps the path under the macOS
+	// ~104-char sun_path limit. Sandboxed macOS test runners can expose
+	// os.TempDir() or /tmp paths that reject Unix socket bind, so try the known
+	// writable short bases before failing.
+	var (
+		sockPath string
+		ln       net.Listener
+		errs     []string
+	)
+	for _, dir := range operatorAskSocketDirs() {
+		candidate := filepath.Join(dir, "kitsoki-opask-"+newUUID()[:12]+".sock")
+		var err error
+		ln, err = net.Listen("unix", candidate)
+		if err == nil {
+			sockPath = candidate
+			break
+		}
+		errs = append(errs, fmt.Sprintf("%s: %v", candidate, err))
 	}
+	if ln == nil {
+		return nil, fmt.Errorf("operator-ask: listen: %s", strings.Join(errs, "; "))
+	}
+	return startOperatorAskListenerOn(ctx, ln, sockPath, prompter, sessionID, timeout), nil
+}
+
+func startOperatorAskListenerOn(ctx context.Context, ln net.Listener, sockPath string, prompter OperatorPrompter, sessionID string, timeout time.Duration) *operatorAskListener {
 	l := &operatorAskListener{ln: ln, sockPath: sockPath, prompter: prompter, sessionID: sessionID, timeout: timeout}
 	// Close the listener when the dispatch ctx is cancelled so a parked turn
 	// (operator never answers, session torn down) unblocks.
@@ -95,7 +182,7 @@ func startOperatorAskListener(ctx context.Context, prompter OperatorPrompter, se
 		defer stop()
 		l.serve(ctx)
 	}()
-	return l, nil
+	return l
 }
 
 // close stops the accept loop and removes the socket file.
@@ -198,7 +285,10 @@ func wireToOperatorQuestions(in []kitsokimcp.OperatorAskQuestion) []OperatorQues
 // operator.question.asked/answered trace events as the TUI/web surfaces, because
 // it routes through the identical listener — no in-package duplication of the
 // wire/trace logic.
-type OperatorAskListenerForTest struct{ l *operatorAskListener }
+type OperatorAskListenerForTest struct {
+	l    *operatorAskListener
+	dial func() (net.Conn, error)
+}
 
 // StartOperatorAskListenerForTest binds the real per-call operator-ask listener
 // over prompter and returns an exported handle. Intended only for tests in other
@@ -209,12 +299,33 @@ func StartOperatorAskListenerForTest(ctx context.Context, prompter OperatorPromp
 	if err != nil {
 		return nil, err
 	}
-	return &OperatorAskListenerForTest{l: l}, nil
+	return &OperatorAskListenerForTest{l: l, dial: func() (net.Conn, error) {
+		return net.Dial("unix", l.sockPath)
+	}}, nil
+}
+
+// StartOperatorAskListenerInMemoryForTest serves the same operator-ask listener
+// over net.Pipe instead of a filesystem Unix socket. It is for tests in
+// sandboxed environments where Unix socket bind is unavailable.
+func StartOperatorAskListenerInMemoryForTest(ctx context.Context, prompter OperatorPrompter, sessionID string, timeout time.Duration) (*OperatorAskListenerForTest, error) {
+	if prompter == nil {
+		return nil, fmt.Errorf("operator-ask: nil prompter")
+	}
+	if timeout <= 0 {
+		timeout = operatorAskWaitTimeout
+	}
+	ln := newPipeListener()
+	l := startOperatorAskListenerOn(ctx, ln, "in-memory", prompter, sessionID, timeout)
+	return &OperatorAskListenerForTest{l: l, dial: ln.Dial}, nil
 }
 
 // SockPath is the unix socket the listener is bound to (dial it as the grandchild
 // mcp-operator-ask server does).
 func (h *OperatorAskListenerForTest) SockPath() string { return h.l.sockPath }
+
+// Dial opens a client connection to the test listener. Real listener handles
+// dial their Unix socket; in-memory handles return the client end of net.Pipe.
+func (h *OperatorAskListenerForTest) Dial() (net.Conn, error) { return h.dial() }
 
 // Close stops the listener and removes the socket file.
 func (h *OperatorAskListenerForTest) Close() { h.l.close() }
@@ -237,7 +348,7 @@ func attachOperatorAsk(ctx context.Context, cliArgs, tools []string) (outArgs, o
 	}
 
 	sessionID := kitsokiSessionIDFromCtx(ctx)
-	l, lerr := startOperatorAskListener(ctx, prompter, sessionID, 0)
+	l, lerr := operatorAskListenerStarter(ctx, prompter, sessionID, 0)
 	if lerr != nil {
 		slog.WarnContext(ctx, "operator-ask: listener unavailable; agent will run without the ask tool", "error", lerr)
 		return cliArgs, tools, noop, nil

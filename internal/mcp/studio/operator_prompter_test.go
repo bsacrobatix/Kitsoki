@@ -370,11 +370,11 @@ func TestStudioPrompter_TraceViaHostListener(t *testing.T) {
 	prompter := newStudioOperatorPrompter(&scriptedTransport{
 		answers: map[string]any{probeQuestion: "Postgres"},
 	})
-	l, err := host.StartOperatorAskListenerForTest(context.Background(), prompter, "studio-sess", time.Minute)
+	l, err := host.StartOperatorAskListenerInMemoryForTest(context.Background(), prompter, "studio-sess", time.Minute)
 	require.NoError(t, err)
 	defer l.Close()
 
-	resp := dialOperatorAsk(t, l.SockPath(), kitsokimcp.OperatorAskRequest{
+	resp := dialOperatorAsk(t, l.Dial, kitsokimcp.OperatorAskRequest{
 		Questions: []kitsokimcp.OperatorAskQuestion{{
 			Question: probeQuestion, Header: "Backend",
 			Options: []kitsokimcp.OperatorAskOption{{Label: "Postgres"}, {Label: "SQLite"}},
@@ -439,11 +439,11 @@ func textOf(res *mcpsdk.CallToolResult) string {
 	return ""
 }
 
-// dialOperatorAsk sends one request to the host listener socket and reads one
-// response, mirroring what the mcp-operator-ask grandchild does on the wire.
-func dialOperatorAsk(t *testing.T, sock string, req kitsokimcp.OperatorAskRequest) kitsokimcp.OperatorAskResponse {
+// dialOperatorAsk sends one request to the host listener and reads one response,
+// mirroring what the mcp-operator-ask grandchild does on the wire.
+func dialOperatorAsk(t *testing.T, dial func() (net.Conn, error), req kitsokimcp.OperatorAskRequest) kitsokimcp.OperatorAskResponse {
 	t.Helper()
-	conn, err := net.Dial("unix", sock)
+	conn, err := dial()
 	require.NoError(t, err)
 	defer conn.Close()
 	payload, _ := json.Marshal(req)

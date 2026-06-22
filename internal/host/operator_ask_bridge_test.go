@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,11 +31,11 @@ func captureSlog(t *testing.T) *bytes.Buffer {
 	return buf
 }
 
-// dialAsk sends one request to the listener socket and reads one response,
-// mirroring what the mcp-operator-ask grandchild does on the wire.
-func dialAsk(t *testing.T, sock string, req kitsokimcp.OperatorAskRequest) kitsokimcp.OperatorAskResponse {
+// dialAsk sends one request to the listener and reads one response, mirroring
+// what the mcp-operator-ask grandchild does on the wire.
+func dialAsk(t *testing.T, dial func() (net.Conn, error), req kitsokimcp.OperatorAskRequest) kitsokimcp.OperatorAskResponse {
 	t.Helper()
-	conn, err := net.Dial("unix", sock)
+	conn, err := dial()
 	require.NoError(t, err)
 	defer conn.Close()
 	payload, _ := json.Marshal(req)
@@ -47,14 +48,46 @@ func dialAsk(t *testing.T, sock string, req kitsokimcp.OperatorAskRequest) kitso
 	return resp
 }
 
+func TestOperatorAskListener_UsesSocketSafeTempDir(t *testing.T) {
+	t.Setenv("KITSOKI_OPERATOR_ASK_SOCKET_DIR", "")
+	l, err := startOperatorAskListener(context.Background(), &fakePrompter{}, "s", time.Minute)
+	if err != nil {
+		t.Skipf("unix socket bind unavailable in this sandbox: %v", err)
+	}
+	defer l.close()
+
+	found := false
+	for _, dir := range operatorAskSocketDirs() {
+		if strings.HasPrefix(l.sockPath, dir+string(os.PathSeparator)) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "socket path should use a configured candidate dir: %s", l.sockPath)
+}
+
+func TestOperatorAskListener_RespectsSocketDirOverride(t *testing.T) {
+	dir, err := os.MkdirTemp("/private/tmp", "ks-opask")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Setenv("KITSOKI_OPERATOR_ASK_SOCKET_DIR", dir)
+
+	l, err := startOperatorAskListener(context.Background(), &fakePrompter{}, "s", time.Minute)
+	if err != nil {
+		t.Skipf("unix socket bind unavailable in this sandbox: %v", err)
+	}
+	defer l.close()
+	assert.True(t, strings.HasPrefix(l.sockPath, dir+string(os.PathSeparator)), "socket path should use override dir: %s", l.sockPath)
+}
+
 func TestOperatorAskListener_RoundTrip(t *testing.T) {
 	logBuf := captureSlog(t)
 	fake := &fakePrompter{answers: map[string]any{"Which env?": "prod"}}
-	l, err := startOperatorAskListener(context.Background(), fake, "sess-9", time.Minute)
+	l, err := StartOperatorAskListenerInMemoryForTest(context.Background(), fake, "sess-9", time.Minute)
 	require.NoError(t, err)
-	defer l.close()
+	defer l.Close()
 
-	resp := dialAsk(t, l.sockPath, kitsokimcp.OperatorAskRequest{
+	resp := dialAsk(t, l.Dial, kitsokimcp.OperatorAskRequest{
 		Questions: []kitsokimcp.OperatorAskQuestion{{
 			Question:    "Which env?",
 			Header:      "Env",
@@ -89,11 +122,11 @@ func TestOperatorAskListener_RoundTrip(t *testing.T) {
 func TestOperatorAskListener_PrompterErrorBecomesErrorFrame(t *testing.T) {
 	logBuf := captureSlog(t)
 	fake := &fakePrompter{err: errors.New("operator cancelled")}
-	l, err := startOperatorAskListener(context.Background(), fake, "s", time.Minute)
+	l, err := StartOperatorAskListenerInMemoryForTest(context.Background(), fake, "s", time.Minute)
 	require.NoError(t, err)
-	defer l.close()
+	defer l.Close()
 
-	resp := dialAsk(t, l.sockPath, kitsokimcp.OperatorAskRequest{
+	resp := dialAsk(t, l.Dial, kitsokimcp.OperatorAskRequest{
 		Questions: []kitsokimcp.OperatorAskQuestion{{Question: "q", Options: []kitsokimcp.OperatorAskOption{{Label: "a"}}}},
 	})
 	assert.Equal(t, "operator cancelled", resp.Error)
@@ -111,7 +144,9 @@ func TestOperatorAskListener_PrompterErrorBecomesErrorFrame(t *testing.T) {
 
 func TestOperatorAskListener_CloseRemovesSocket(t *testing.T) {
 	l, err := startOperatorAskListener(context.Background(), &fakePrompter{}, "s", time.Minute)
-	require.NoError(t, err)
+	if err != nil {
+		t.Skipf("unix socket bind unavailable in this sandbox: %v", err)
+	}
 	_, statErr := os.Stat(l.sockPath)
 	require.NoError(t, statErr, "socket should exist while listening")
 	l.close()
@@ -121,14 +156,13 @@ func TestOperatorAskListener_CloseRemovesSocket(t *testing.T) {
 
 func TestOperatorAskListener_CtxCancelUnblocks(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	l, err := startOperatorAskListener(ctx, &fakePrompter{}, "s", time.Minute)
+	l, err := StartOperatorAskListenerInMemoryForTest(ctx, &fakePrompter{}, "s", time.Minute)
 	require.NoError(t, err)
-	defer l.close()
-	sock := l.sockPath
+	defer l.Close()
 	cancel()
 	// AfterFunc closes the listener; a subsequent dial should fail promptly.
 	require.Eventually(t, func() bool {
-		_, derr := net.Dial("unix", sock)
+		_, derr := l.Dial()
 		return derr != nil
 	}, time.Second, 10*time.Millisecond, "listener must stop accepting after ctx cancel")
 }
@@ -148,6 +182,16 @@ func TestAttachOperatorAsk_NoopWhenNoOperator(t *testing.T) {
 }
 
 func TestAttachOperatorAsk_WiresToolWhenInteractive(t *testing.T) {
+	prevStarter := operatorAskListenerStarter
+	operatorAskListenerStarter = func(ctx context.Context, prompter OperatorPrompter, sessionID string, timeout time.Duration) (*operatorAskListener, error) {
+		ln := newPipeListener()
+		if timeout <= 0 {
+			timeout = operatorAskWaitTimeout
+		}
+		return startOperatorAskListenerOn(ctx, ln, "in-memory", prompter, sessionID, timeout), nil
+	}
+	t.Cleanup(func() { operatorAskListenerStarter = prevStarter })
+
 	ctx := WithKitsokiSessionID(
 		WithOperatorPrompter(context.Background(), &fakePrompter{}),
 		"sess-42",
