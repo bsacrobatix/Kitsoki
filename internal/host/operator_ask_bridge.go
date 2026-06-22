@@ -129,7 +129,16 @@ func operatorAskSocketDirs() []string {
 	out := make([]string, 0, len(candidates))
 	seen := map[string]bool{}
 	for _, dir := range candidates {
-		if dir == "" || seen[dir] {
+		if dir == "" {
+			continue
+		}
+		// Normalize: macOS os.TempDir() ($TMPDIR) carries a TRAILING SLASH
+		// (/var/folders/.../T/), so a downstream `dir + "/"` prefix check would
+		// become a double-slash that never matches the filepath.Join-cleaned
+		// socket path. Clean strips it so the candidate dir and the bound socket
+		// path agree (and so dedup catches /tmp vs /tmp/).
+		dir = filepath.Clean(dir)
+		if seen[dir] {
 			continue
 		}
 		seen[dir] = true
