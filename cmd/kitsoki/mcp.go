@@ -14,6 +14,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/harness"
 	studio "kitsoki/internal/mcp/studio"
+	"kitsoki/internal/webconfig"
 )
 
 // studioHarnessBuilder is the production studio harness seam. Replay mode
@@ -110,6 +111,18 @@ docs land):
 			// resolves on-disk credentials to a direct-API LiveHarness so the MCP
 			// can drive a real LLM with no CLI.
 			sess := studio.NewStudioSession(studioHarnessBuilder)
+
+			// Seed operator-declared harness profiles (synthetic, codex, …) from
+			// the project webconfig so a session.new(profile:…) can route a live
+			// session's agent dispatch through a named backend — the studio twin of
+			// `kitsoki turn --profile`. Best-effort: a missing/invalid config leaves
+			// the session on the legacy default-backend path rather than aborting
+			// boot (a story.* / replay session needs no profiles).
+			if webCfg, cfgErr := webconfig.Load(webconfig.DefaultConfigFile); cfgErr == nil {
+				if profiles, defaultProfile := harnessProfilesFromConfig(webCfg); len(profiles) > 0 {
+					sess.SetHarnessProfiles(profiles, defaultProfile)
+				}
+			}
 
 			// Optionally bind an initial authoring workspace. Loading is
 			// best-effort: a load/validation error is cached on the handle (so a

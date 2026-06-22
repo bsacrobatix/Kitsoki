@@ -55,12 +55,12 @@ const (
 func (srv *Server) registerSessionTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.new",
-		Description: "Open a new driving session for a story. {story_path, harness?:replay|live, cassette?, trace?}. Defaults to harness:replay (no LLM); a replay miss is a hard error, never a silent live call. Returns {handle, state}.",
+		Description: "Open a new driving session for a story. {story_path, harness?:replay|live, cassette?, trace?, profile?}. Defaults to harness:replay (no LLM); a replay miss is a hard error, never a silent live call. profile selects a configured harness backend (synthetic, codex, …) for a live session. Returns {handle, state}.",
 	}, srv.handleSessionNew)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.attach",
-		Description: "Co-drive an existing keyed session via the external-attach bridge. {story_path, key, harness?, cassette?, trace?}. Returns {handle, state}.",
+		Description: "Co-drive an existing keyed session via the external-attach bridge. {story_path, key, harness?, cassette?, trace?, profile?}. Returns {handle, state}.",
 	}, srv.handleSessionAttach)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -122,6 +122,10 @@ type SessionNewArgs struct {
 	Trace string `json:"trace,omitempty"`
 	// Key requests a specific handle key (default: auto-assigned s<N>).
 	Key string `json:"key,omitempty"`
+	// Profile selects the operator-declared harness profile (synthetic, codex, …)
+	// the live session routes agent dispatch through. Empty → the server's default
+	// profile; ignored when no profiles are configured.
+	Profile string `json:"profile,omitempty"`
 }
 
 // SessionAttachArgs is the input to session.attach.
@@ -131,6 +135,8 @@ type SessionAttachArgs struct {
 	Harness   string `json:"harness,omitempty"`
 	Cassette  string `json:"cassette,omitempty"`
 	Trace     string `json:"trace,omitempty"`
+	// Profile selects the harness profile (see SessionNewArgs.Profile).
+	Profile string `json:"profile,omitempty"`
 }
 
 // SessionOpenOK is the session.new / session.attach result.
@@ -270,6 +276,7 @@ func (srv *Server) handleSessionNew(
 		RecordingPath: args.Cassette,
 		StoryPath:     args.StoryPath,
 		TracePath:     tracePath,
+		Profile:       args.Profile,
 	})
 	if err != nil {
 		code, msg := AsToolError(err)
@@ -311,6 +318,7 @@ func (srv *Server) handleSessionAttach(
 		RecordingPath: args.Cassette,
 		StoryPath:     args.StoryPath,
 		TracePath:     tracePath,
+		Profile:       args.Profile,
 	})
 	if err != nil {
 		code, msg := AsToolError(err)
@@ -667,8 +675,9 @@ func specFrame(ctx context.Context, storyPath, state string, world map[string]an
 	if err != nil {
 		return tui.Frame{}, err
 	}
-	// No harness: a spec render is a pure re-render and never calls orch.Turn.
-	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil)
+	// No harness, no profiles: a spec render is a pure re-render and never calls
+	// orch.Turn or dispatches an agent.
+	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "")
 	if err != nil {
 		return tui.Frame{}, err
 	}

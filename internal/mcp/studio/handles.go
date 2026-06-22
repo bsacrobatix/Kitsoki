@@ -10,6 +10,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/harness"
+	"kitsoki/internal/orchestrator"
 	rsserver "kitsoki/internal/runstatus/server"
 )
 
@@ -149,6 +150,25 @@ type StudioSession struct {
 	sessions  map[string]*SessionHandle
 	nextID    int
 	build     HarnessBuilder
+
+	// harnessProfiles are the operator-declared backends a driving session may
+	// route agent dispatch through (set once at boot via SetHarnessProfiles from
+	// the loaded webconfig); defaultProfile is the selection a session starts on
+	// when session.new omits an explicit profile. Empty map ⇒ legacy
+	// default-backend path (the WithHarnessProfiles no-op contract).
+	harnessProfiles map[string]orchestrator.HarnessProfile
+	defaultProfile  string
+}
+
+// SetHarnessProfiles seeds the operator-declared harness profiles new driving
+// sessions may select. Called once at server boot (cmd/kitsoki wires the loaded
+// webconfig); a session.new(profile:…) then routes its agent dispatch through
+// the named backend. Safe to call before any session opens.
+func (ss *StudioSession) SetHarnessProfiles(profiles map[string]orchestrator.HarnessProfile, defaultProfile string) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	ss.harnessProfiles = profiles
+	ss.defaultProfile = defaultProfile
 }
 
 // NewStudioSession constructs an empty StudioSession. A nil builder falls back to
@@ -273,6 +293,10 @@ type OpenDrivingSessionParams struct {
 	StoryPath string
 	// TracePath is the JSONL trace the runtime writes through. Required.
 	TracePath string
+	// Profile selects the harness profile the session routes agent dispatch
+	// through. Empty falls back to the session's default profile (SetHarnessProfiles);
+	// when no profiles are declared it is ignored (legacy default-backend path).
+	Profile string
 }
 
 // OpenDrivingSession opens a driving-session handle backed by a live runtime: it
@@ -306,9 +330,17 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 		return nil, &openError{Code: ErrHarness, Msg: fmt.Sprintf("build %s harness: %v", mode, err)}
 	}
 
+	// Resolve the session's profile selection: an explicit per-session profile
+	// wins, else the boot-time default. Both are no-ops when no profiles are
+	// declared (the map is empty).
+	selectedProfile := p.Profile
+	if selectedProfile == "" {
+		selectedProfile = ss.defaultProfile
+	}
+
 	// newSessionRuntime takes ownership of h: on a returned error h is already
 	// closed; on success rt.Close tears it down.
-	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h)
+	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, ss.harnessProfiles, selectedProfile)
 	if err != nil {
 		// h was already closed inside newSessionRuntime on error.
 		return nil, err

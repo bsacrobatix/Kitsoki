@@ -113,7 +113,12 @@ func (rt *sessionRuntime) Close() {
 //
 // h is owned by the runtime on success (Close tears it down) and on every error
 // path (h is closed before returning), so the caller must NOT close it.
-func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness) (*sessionRuntime, error) {
+// profiles/selectedProfile seed orchestrator.WithHarnessProfiles so an
+// MCP-driven session can route its agent dispatch through an operator-declared
+// backend (synthetic, codex, …) instead of the static default — the same
+// remap `kitsoki turn --profile` applies. An empty map leaves the session on the
+// legacy default-backend path (selectedProfile is then ignored).
+func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string) (*sessionRuntime, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -201,12 +206,20 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	}
 	rt.closers = append(rt.closers, func() { _ = agentReg.Close() })
 
-	orch := orchestrator.New(def, m, s, h,
+	orchOpts := []orchestrator.Option{
 		orchestrator.WithHostRegistry(hostReg),
 		orchestrator.WithEventSink(sink),
 		orchestrator.WithEventSinkAuthority(true),
 		orchestrator.WithAgentRegistry(agentReg),
-	)
+	}
+	// A non-empty profile map routes agent dispatch (host.agent.*) through the
+	// declared backend; selectedProfile becomes the session's initial selection.
+	// Empty leaves the legacy default-backend path untouched (the no-op contract
+	// of WithHarnessProfiles), so replay/flow sessions are unaffected.
+	if len(profiles) > 0 {
+		orchOpts = append(orchOpts, orchestrator.WithHarnessProfiles(profiles, selectedProfile))
+	}
+	orch := orchestrator.New(def, m, s, h, orchOpts...)
 	rt.orch = orch
 
 	sid, err := orch.NewSession(ctx)
