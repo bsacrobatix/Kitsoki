@@ -8,6 +8,7 @@ test_kind: flow
 app: ../app.yaml
 initial_state: idle
 initial_world:
+  bugfix_exit: "open-PR"   # legacy PR-handoff tail (slice 4 default is direct-ship)
   ticket_id:        "TKT-003"
   ticket_title:    "Inbox count off by one"
   thread:          "TKT-003"

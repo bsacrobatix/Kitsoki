@@ -28,12 +28,55 @@ import via `entry: idle`.
 
 | Name | Description | `requires:` keys | Typical world_out |
 |---|---|---|---|
-| `done` | Pipeline succeeded; hand off to pr-refinement. | `done_artifact` | Parent stories project `done_artifact` into their own `pr_id` / `pr_url` after pr-refinement runs. |
+| `done` | open-PR exit: pipeline succeeded; hand off to pr-refinement. | `done_artifact` | Parent stories project `done_artifact` into their own `pr_id` / `pr_url` after pr-refinement runs. |
 | `abandoned` | User or LLM bailed (`quit`). | (none) | Parent stories usually route to a `main` / inbox state. |
+| `shipped` | direct-ship exit: the fix integrated to local main, the regression gate re-verified GREEN on the merged commit, worktree cleaned up. | `shipped_sha` | The self-hosting loop (no PR). |
+| `needs-human` | direct-ship exit: an integrate/verify/cleanup failure, or a regression gate that was never RED pre-fix / isn't GREEN on merged main. | `last_error` | Carries the real error; never a swallowed false success. |
 
-Standalone (no parent) load synthesises `__exit__done` and
-`__exit__abandoned` terminals so `kitsoki run` and `kitsoki test flows`
-both terminate cleanly.
+Standalone (no parent) load synthesises `__exit__done`,
+`__exit__abandoned`, `__exit__shipped`, and `__exit__needs-human`
+terminals so `kitsoki run` and `kitsoki test flows` both terminate cleanly.
+
+## The exit slot — direct-ship vs open-PR (delivery-loop slice 4)
+
+The pipeline ends one of two ways, chosen by the **`bugfix_exit`** world key:
+
+- **`direct-ship`** (default — the self-hosting loop): instead of the weaker
+  `validating → PR-handoff` tail, bugfix **composes the shared
+  [`ship-it`](../ship-it/) tail** — `integrate → verify → cleanup → report` —
+  landing the fix on **local main**. The tail is **imported, not copied**
+  (`imports.tail`, `entry: integrate`): ship-it's lost-work-safe `integrate`
+  (rebase onto CURRENT main + build-check + merge), its independent `verify`
+  (re-run the gate on the MERGED commit), and its no-swallowed `cleanup` are
+  reused verbatim. bugfix's maker rooms (`reproducing → … → testing`) feed the
+  tail at `integrate` exactly as cherny-loop's `@exit:achieved` feeds ship-it —
+  the same `worktree_path` / `workspace_branch` handoff seam. Exits `@exit:shipped`
+  on a green merged-commit re-verify, `@exit:needs-human` (with `last_error`) on
+  any failure.
+- **`open-PR`**: today's behaviour — walk `reviewing → validating → done` and
+  hand the close-out artifact to pr-refinement. Parent stories that want the PR
+  tail (`dev-story`, `gears-bugfix`) pin `bugfix_exit: open-PR` via `world_in`.
+
+### RED→GREEN regression gate
+
+The bugfix-specific discipline ship-it does **not** cover: the regression test
+must **FAIL before the fix and PASS after**. The `testing` room runs the
+configured `gate_command` on the **pre-fix snapshot** (`HEAD~1` of the feature
+branch, materialised in a throwaway detached worktree — never mutating the maker
+worktree) and records `regression_red_pre_fix`. The shared `verify` room re-runs
+the **identical** gate on the **merged commit** and records GREEN. A fix whose
+regression test was **never RED pre-fix** (a *characterization* test, not a
+regression test), or **isn't GREEN on merged main**, routes to
+`@exit:needs-human` — never `@exit:shipped`. Same gate, two evaluation sites:
+RED before the fix, GREEN after.
+
+### Direct-ship flows (no-LLM)
+
+| Flow | Proves |
+|---|---|
+| `bugfix_ships_direct` | maker → testing (regression gate RED pre-fix) → imported ship-it tail (integrate → re-verify GREEN on merged commit → cleanup) → `@exit:shipped`. The tail is reused, not reinvented. |
+| `bugfix_regression_gate_red_then_green` | the characterization-test trap: a gate that PASSES pre-fix was never RED → `@exit:needs-human`, never shipped. |
+| `bugfix_needs_human_on_merged_red` | trust-the-gate: legit RED→fix, clean integrate, but the SAME gate RED on the merged commit → `@exit:needs-human` (`shipped_sha` never set). |
 
 ### Visible rooms
 

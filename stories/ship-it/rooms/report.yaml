@@ -29,7 +29,12 @@ states:
       ship_done:
         - target: "@exit:shipped"
           effects:
+            # Re-pin shipped_sha (set by verify on the green re-verify) on the
+            # exit arc so @exit:shipped.requires:[shipped_sha] sees an explicit
+            # set — keeps ship-it importable as a tail. Same discipline as
+            # bugfix/done re-pinning done_artifact.
             - set:
-                status: "shipped"
+                status:      "shipped"
+                shipped_sha: "{{ world.shipped_sha }}"
       look:
         - target: .

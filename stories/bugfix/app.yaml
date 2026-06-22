@@ -58,6 +58,13 @@ hosts:
   # system difftool. The reviewing room's `review_externally` arc drives it; the
   # verdict routes advance/redo. See docs/architecture/hosts.md#hostdiffopen.
   - host.diff.open
+  # host.run — the pre-fix regression gate (testing room) + the ship-it tail's
+  # integrate/verify/cleanup host.run sites (imported as `tail`).
+  - host.run
+  # The ship-it tail import declares these; unioned at load so the imported
+  # integrate/verify/cleanup rooms resolve their host bindings.
+  - host.git_worktree
+  - host.artifacts_dir
 
 # Persona table (agent-split proposal §3.5).
 #
@@ -249,6 +256,36 @@ world:
   # ── Pipeline control ──────────────────────────────────────────────────
   bugfix_mode:      { type: string, default: "full" }            # full | quick
 
+  # ── Exit slot (slice 4 — bugfix convergence) ───────────────────────────
+  # The bug-fix pipeline ends one of two ways:
+  #
+  #   direct-ship — compose the ship-it tail (integrate → re-verify the
+  #                 regression gate on the MERGED commit → cleanup) and land
+  #                 the fix on LOCAL main. @exit:shipped on green; @exit:needs-human
+  #                 on any integrate/verify/cleanup failure OR a regression gate
+  #                 that was never RED pre-fix. This is the self-hosting loop.
+  #   open-PR     — today's behaviour: walk reviewing → validating → done and hand
+  #                 the close-out artifact to pr-refinement (parent stories lift
+  #                 @exit:done). For human-review flows.
+  #
+  # Default direct-ship for the self-hosting loop. Parent stories that want the
+  # PR-handoff tail (dev-story, gears-bugfix) project bugfix_exit: open-PR via
+  # world_in. See stories/bugfix/README.md (the exit slot + RED→GREEN gate).
+  bugfix_exit:      { type: string, default: "direct-ship" }     # direct-ship | open-PR
+
+  # ── RED→GREEN regression gate (slice 4) ────────────────────────────────
+  # The bugfix-specific discipline ship-it does NOT cover: the regression test
+  # must FAIL before the fix and PASS after. The testing room runs the gate on
+  # the PRE-FIX snapshot and records whether it was RED there (regression_red_pre_fix);
+  # the shared ship-it verify room re-runs the SAME gate on the MERGED commit and
+  # records GREEN (verify_ok). A fix whose regression test was never RED pre-fix
+  # (a characterization test), or isn't GREEN on merged main, routes to
+  # @exit:needs-human — never @exit:shipped. See stories/bugfix/README.md.
+  gate_command:           { type: string, default: "" }    # the deterministic regression gate (re-run on merged commit)
+  regression_red_pre_fix: { type: bool,   default: false } # the gate FAILED on the pre-fix snapshot (RED)
+  regression_pre_fix_log: { type: string, default: "" }    # the pre-fix gate's output tail (audit)
+  regression_gate_checked: { type: bool,  default: false } # the pre-fix gate actually ran (vs skipped)
+
   # ── CI command profile (provider-neutral retargeting) ───────────────────
   # The ci interface defaults to host.local, whose run_tests/build default to
   # `go test ./...` / `go build ./...`. An instance targeting a non-Go repo
@@ -339,6 +376,15 @@ world:
   review_reviewed:      { type: bool,   default: false } # did any surface actually show the diff?
   review_changed_files: { type: list,   default: [] }    # paths handed to the diff surface
 
+  # ── ship-it tail handoff (slice 4 — direct-ship) ─────────────────────
+  # The maker→tail seam, identical to cherny-loop's @exit:achieved handoff that
+  # ship-it's `integrate` room reads. bugfix's implementing/testing rooms leave
+  # the worktree + branch populated; the ship-it tail import projects these into
+  # the tail's own world (worktree_path / workspace_branch / gate_command).
+  worktree_path:    { type: string, default: "" }   # the bugfix worktree (== workdir); set when entering the tail
+  shipped_sha:      { type: string, default: "" }   # the merged commit, set after a green re-verify
+  last_error:       { type: string, default: "" }   # the real failure on any needs-human arc
+
   # ── Story-level "done" sink for standalone runs ──────────────────────
   status:           { type: string, default: "open" }
 
@@ -426,6 +472,17 @@ intents:
     description: "The diff surface produced no accept/reject (view-only difftool, or none available) — fall back to the inline review choice."
     examples: [review_inconclusive]
     priority: 1
+  # ── direct-ship routing (slice 4). Internal guarded emits from testing's
+  # accept arc: ship_direct enters the ship-it tail import; gate_not_red routes
+  # to @exit:needs-human when the regression test was never RED pre-fix. ──────
+  ship_direct:
+    description: "(internal) regression test was RED pre-fix → enter the ship-it tail (integrate → re-verify → cleanup)."
+    examples: []
+    priority: 1
+  gate_not_red:
+    description: "(internal) the regression gate was never RED on the pre-fix snapshot (a characterization test) → needs-human, never shipped."
+    examples: []
+    priority: 1
 
 # Intents exposed to importing parent stories. Wave 2 (dev-story hub)
 # `intents.import: [start, proceed, accept, refine, restart_from, quit]`
@@ -439,12 +496,64 @@ exports:
 # `__exit__done` and `__exit__abandoned` terminals.
 exits:
   done:
-    description: "Pipeline succeeded; ready to hand off to pr-refinement."
+    description: "Pipeline succeeded (open-PR exit); ready to hand off to pr-refinement."
     requires: [done_artifact]
   abandoned:
     description: "User or LLM bailed."
   pick_ticket:
     description: "Operator wants to (re-)pick a ticket. Parent should route back to its ticket picker; no abandonment, no artifact required."
+  # ── direct-ship exits (slice 4) — the shared ship-it tail terminals ──────
+  shipped:
+    description: "direct-ship: the fix integrated to local main, the regression gate re-verified GREEN on the merged commit, worktree cleaned up."
+    requires: [shipped_sha]
+  needs-human:
+    description: "direct-ship: an integrate/verify/cleanup failure, or a regression gate that was never RED pre-fix or isn't GREEN on merged main. Carries the real error."
+    requires: [last_error]
+
+# ── The shared ship-it tail (slice 4 — compose, don't reinvent) ──────────
+#
+# direct-ship composes ship-it's integrate → verify → cleanup → report tail
+# instead of bugfix's weaker validating → PR-handoff. The tail is IMPORTED, not
+# copied: ship-it's `integrate` room (lost-work-safe rebase onto CURRENT main +
+# build-check + merge), its `verify` room (re-run the IDENTICAL regression gate
+# on the MERGED commit), and its `cleanup` room are reused verbatim. The maker
+# rooms (reproducing → proposing → implementing → testing) feed the tail at
+# `integrate` exactly as cherny-loop's @exit:achieved feeds ship-it — the same
+# worktree_path / workspace_branch handoff seam.
+#
+# Entered at `integrate` (NOT ship-it's `configure` root), so the cherny-loop
+# maker ship-it would otherwise run is bypassed — bugfix IS the maker here. The
+# regression gate's RED-pre-fix half is recorded by bugfix's `testing` room
+# (regression_red_pre_fix); the GREEN-post-fix half is the tail's `verify`.
+imports:
+  tail:
+    source: ../ship-it
+    entry: integrate
+    # Project bugfix's maker handoff → the ship-it tail's world. gate_command is
+    # the regression gate (same command verify re-runs on the merged commit);
+    # workspace_branch/worktree_path are the maker's worktree; main_worktree_path
+    # is "." (the integration tree, where integrate/verify/cleanup run).
+    world_in:
+      gate_command:       "{{ world.gate_command }}"
+      workspace_id:       "{{ world.workspace_id }}"
+      workspace_branch:   "{{ world.feature_branch }}"
+      worktree_path:      "{{ world.worktree_path }}"
+      base_branch:        "{{ world.base_branch }}"
+      main_worktree_path: "."
+      brief:              "{{ world.ticket_id }} — {{ world.ticket_title }}"
+    exits:
+      # ship-it's @exit:shipped → bugfix @exit:shipped, carrying the merged sha up.
+      shipped:
+        to: "@exit:shipped"
+        set:
+          shipped_sha: "{{ world.tail__shipped_sha }}"
+          status:      "shipped"
+      # ship-it's @exit:needs-human → bugfix @exit:needs-human, carrying the error.
+      needs-human:
+        to: "@exit:needs-human"
+        set:
+          last_error: "{{ world.tail__last_error }}"
+          status:     "needs-human"
 
 # Root state — the operator-controlled entry point. Children fold this into
 # `bf` (or similar alias) and `entry: idle` enters here.

@@ -31,6 +31,10 @@ hosts:
   - host.agent.decide
   - host.agent.task
   - host.diff.open
+  # slice 4: bugfix now declares host.run + host.artifacts_dir (its shipped tail
+  # import). `hosts: declared` on the bf import requires the parent list them.
+  - host.run
+  - host.artifacts_dir
 
 imports:
   bf:
@@ -54,6 +58,9 @@ imports:
       base_branch:     "{{ world.base_branch }}"
       feature_branch:  "{{ world.feature_branch }}"
       bugfix_mode:     "{{ world.bugfix_mode }}"
+      # PR-handoff tail: this demo ends at the PR-ready close-out (@exit:done),
+      # not slice 4's direct-ship-to-local-main tail. Pin open-PR.
+      bugfix_exit:     "open-PR"
       judge_mode:      "{{ world.judge_mode }}"
       test_cmd:        "{{ world.test_cmd }}"
       build_cmd:       "{{ world.build_cmd }}"
@@ -66,6 +73,11 @@ imports:
       done:        { to: shipped }
       abandoned:   { to: shipped }
       pick_ticket: { to: shipped }
+      # slice 4: bf's direct-ship terminals. This demo pins bugfix_exit: open-PR
+      # so neither fires; the loader requires every child exit be mapped. Both
+      # land in the demo's close-out read-out.
+      shipped:     { to: shipped }
+      needs-human: { to: shipped }
 
 # Instance world — the gh-4115 / gears-rust profile (the demo's pre-set context).
 world:

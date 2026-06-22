@@ -28,6 +28,7 @@ test_kind: flow
 app: ../app.yaml
 initial_state: testing
 initial_world:
+  bugfix_exit: "open-PR"   # legacy PR-handoff tail (slice 4 default is direct-ship)
   ticket_id:   "TKT-999"
   ticket_title: "Round-trip sentinel test"
   thread:      "TKT-999"

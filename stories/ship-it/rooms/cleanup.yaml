@@ -67,7 +67,10 @@ states:
       cleanup_failed:
         - target: "@exit:needs-human"
           effects:
+            # Re-pin last_error (bound on_enter) on the exit arc — same discipline
+            # as integrate_failed; keeps ship-it importable as a tail.
             - set:
-                status: "needs-human"
+                status:     "needs-human"
+                last_error: "{{ world.last_error }}"
       look:
         - target: .

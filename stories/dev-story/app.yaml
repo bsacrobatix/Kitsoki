@@ -1245,6 +1245,9 @@ imports:
       base_branch:     "{{ world.base_branch }}"
       feature_branch:  "{{ world.feature_branch }}"
       bugfix_mode:     "{{ world.bugfix_mode }}"
+      # dev-story hands bf's @exit:done to the pr-refinement import — the PR
+      # tail, not slice 4's direct-ship-to-local-main tail. Pin open-PR.
+      bugfix_exit:     "open-PR"
       judge_mode:      "{{ world.judge_mode }}"
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
 
@@ -1272,6 +1275,18 @@ imports:
         to: landing
         set:
           status: "abandoned"
+      # slice 4 added bf's direct-ship terminals (shipped / needs-human). This
+      # hub pins bugfix_exit: open-PR, so neither fires in practice — but the
+      # loader requires every child exit be mapped. shipped lands like a merge;
+      # needs-human lands like an abandon (carrying the error).
+      shipped:
+        to: landing
+        set:
+          status: "shipped"
+      needs-human:
+        to: landing
+        set:
+          status: "needs-human"
       # `change_ticket` on bf.idle fires this. Land in ticket_search
       # so the operator can search/pick; `go_bugfix` re-enters bf with
       # the new ticket_id projected via world_in:.

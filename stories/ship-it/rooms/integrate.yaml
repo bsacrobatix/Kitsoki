@@ -48,9 +48,19 @@ states:
               INTEGRATION="{{ world.base_branch }}"
               BRANCH="{{ world.workspace_branch }}"
               MAIN_WT="{{ world.main_worktree_path }}"
+              # The maker worktree that HOLDS the branch. The rebase must run
+              # there — a git branch can be checked out in only one worktree, so
+              # rebasing $BRANCH in $MAIN_WT fails with "already used by worktree"
+              # whenever the maker worktree still exists (it always does at
+              # integrate time — cleanup runs AFTER verify). Rebasing in the
+              # worktree that owns the branch is the lost-work-safe primitive.
+              # Empty ⇒ fall back to MAIN_WT (the pre-2026-06-22 behaviour, which
+              # only worked when the branch was not checked out anywhere).
+              WORKTREE="{{ world.worktree_path }}"
               BUILD_CMD="go build ./... && go test ./..."
               BUILD_DISABLED="{{ world.build_check_disabled }}"
               [ -z "$MAIN_WT" ] && MAIN_WT="."
+              [ -z "$WORKTREE" ] && WORKTREE="$MAIN_WT"
 
               if [ -z "$BRANCH" ]; then
                 jq -n '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:"no branch to integrate (maker handoff empty)"}'
@@ -61,21 +71,20 @@ states:
                 jq -n --arg int "$INTEGRATION" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("integration branch "+$int+" not found")}'
                 exit 0
               fi
+              # Rebase the branch onto CURRENT integration HEAD, IN ITS OWN
+              # worktree. merge-base is computed against the live INTEGRATION ref
+              # (re-read here, so a concurrent moved-main is absorbed).
+              MB=$(git -C "$WORKTREE" merge-base "$BRANCH" "$INTEGRATION" 2>/dev/null || echo "")
               REBASE_EXIT=0
-              REBASE_OUT=$(git -C "$MAIN_WT" rebase --onto "$BASE_SHA" "$(git -C "$MAIN_WT" merge-base "$BRANCH" "$INTEGRATION")" "$BRANCH" 2>&1) || REBASE_EXIT=$?
+              REBASE_OUT=$(git -C "$WORKTREE" rebase --onto "$BASE_SHA" "$MB" "$BRANCH" 2>&1) || REBASE_EXIT=$?
               if [ "$REBASE_EXIT" -ne 0 ]; then
-                git -C "$MAIN_WT" rebase --abort 2>/dev/null || true
+                git -C "$WORKTREE" rebase --abort 2>/dev/null || true
                 jq -n --arg out "$REBASE_OUT" '{outcome:"conflict",integrated_sha:"",last_op_ok:false,last_error:$out}'
                 exit 0
               fi
-              if [ "$BUILD_DISABLED" != "true" ]; then
-                BUILD_EXIT=0
-                BUILD_OUT=$(cd "$MAIN_WT" && bash -c "$BUILD_CMD" 2>&1) || BUILD_EXIT=$?
-                if [ "$BUILD_EXIT" -ne 0 ]; then
-                  jq -n --arg out "$BUILD_OUT" '{outcome:"build_fail",integrated_sha:"",last_op_ok:false,last_error:$out}'
-                  exit 0
-                fi
-              fi
+              # Merge the rebased branch into INTEGRATION in MAIN_WT (merge does
+              # NOT check out the source branch, so no worktree-lock conflict).
+              PRE_MERGE_SHA=$(git -C "$MAIN_WT" rev-parse "$INTEGRATION" 2>/dev/null || echo "")
               git -C "$MAIN_WT" checkout "$INTEGRATION" 2>&1
               MERGE_EXIT=0
               MERGE_OUT=$(git -C "$MAIN_WT" merge --no-ff "$BRANCH" -m "integrate: $BRANCH" 2>&1) || MERGE_EXIT=$?
@@ -83,6 +92,18 @@ states:
                 git -C "$MAIN_WT" merge --abort 2>/dev/null || true
                 jq -n --arg out "$MERGE_OUT" '{outcome:"conflict",integrated_sha:"",last_op_ok:false,last_error:$out}'
                 exit 0
+              fi
+              # Build-check the MERGED result (the merge is the thing we ship). On
+              # failure, reset INTEGRATION back to its pre-merge SHA so a build_fail
+              # leaves no half-integrated commit on the integration branch.
+              if [ "$BUILD_DISABLED" != "true" ]; then
+                BUILD_EXIT=0
+                BUILD_OUT=$(cd "$MAIN_WT" && bash -c "$BUILD_CMD" 2>&1) || BUILD_EXIT=$?
+                if [ "$BUILD_EXIT" -ne 0 ]; then
+                  [ -n "$PRE_MERGE_SHA" ] && git -C "$MAIN_WT" reset --hard "$PRE_MERGE_SHA" 2>/dev/null || true
+                  jq -n --arg out "$BUILD_OUT" '{outcome:"build_fail",integrated_sha:"",last_op_ok:false,last_error:$out}'
+                  exit 0
+                fi
               fi
               MERGED_SHA=$(git -C "$MAIN_WT" rev-parse HEAD 2>/dev/null || echo "")
               jq -n --arg sha "$MERGED_SHA" '{outcome:"integrated",integrated_sha:$sha,last_op_ok:true,last_error:""}'
@@ -106,7 +127,14 @@ states:
       integrate_failed:
         - target: "@exit:needs-human"
           effects:
+            # last_error was bound on_enter (the host.run failure); re-pin it on
+            # the exit arc so the @exit:needs-human.requires:[last_error] gate
+            # sees an explicit set — the same discipline bugfix/done re-pins
+            # done_artifact with. This also makes ship-it importable as a tail
+            # (the import-time exit-requires check inspects only the exit arc's
+            # own effects, not on_enter binds). See docs/stories/ship-it.md.
             - set:
-                status: "needs-human"
+                status:     "needs-human"
+                last_error: "{{ world.last_error }}"
       look:
         - target: .
