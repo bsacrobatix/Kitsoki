@@ -1,21 +1,18 @@
-# happy_path — the deterministic delivery half: integrate (clean) → verify
+# happy_path — the deterministic delivery tail: integrate (clean) → verify
 # (green on the MERGED commit) → cleanup → @exit:shipped.
 #
-# The maker (cherny-loop) is mocked by SEEDING its achieved handoff: the flow
+# The parent maker is mocked by SEEDING its achieved handoff: the flow
 # starts at `integrate` with worktree_path + workspace_branch + brief +
-# gate_command already in world, exactly as cherny's @exit:achieved leaves them.
-# (The configure → ship → maker entry + the @exit:achieved → integrate exit
-# projection are proven by maker_entry.yaml; cherny's autonomous loop hits the
-# engine's EmitIntentMaxDepth cap when chained under the import, so the maker is
-# mocked here per the QA plan — "the maker mocked via cassette/stub".)
+# gate_command already in world, exactly as a parent's maker @exit:achieved
+# leaves them.
 #
-# This is the trust-the-gate beat end to end: the SAME gate_command is re-run on
-# the MERGED commit (not the branch), green, then the worktree is removed and the
-# brief ships with shipped_sha set.
+# This is the trust-the-gate beat end to end: the SAME gate_command is re-run
+# on the MERGED commit (not the branch), green, then the worktree is removed
+# and the brief ships with shipped_sha set.
 
 test_kind: flow
 app: ../app.yaml
-initial_state: configure
+initial_state: bootstrap
 initial_world:
   brief:              "Fix the rate-limit burst off-by-one"
   gate_command:       "go test ./internal/ratelimit/"
@@ -23,7 +20,7 @@ initial_world:
   main_worktree_path: "."
   workspace_id:       burst-fix
   workspace_branch:   burst-fix
-  worktree_path:      ".worktrees/burst-fix"   # the maker's @exit:achieved handoff (mocked)
+  worktree_path:      ".worktrees/burst-fix"
 
 host_handlers:
   host.run:
@@ -49,10 +46,9 @@ host_handlers:
             last_error: ""
 
 turns:
-  # integrate_existing enters integrate freshly → its on_enter runs the
-  # rebase+build+merge (mocked clean), then the autonomous chain carries
-  # integrate → verify → cleanup → report → @exit:shipped in one turn.
-  - intent: { name: integrate_existing, slots: {} }
+  # begin transitions bootstrap → integrate, firing on_enter → the autonomous
+  # chain carries integrate → verify → cleanup → report → @exit:shipped in one turn.
+  - intent: { name: begin, slots: {} }
     expect_state: __exit__shipped
     expect_world:
       status:            shipped

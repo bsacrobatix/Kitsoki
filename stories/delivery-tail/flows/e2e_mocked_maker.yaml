@@ -1,19 +1,20 @@
-# e2e_mocked_maker — THE headline no-LLM proof of the delivery loop.
+# e2e_mocked_maker — THE headline no-LLM proof of the delivery tail.
 #
-# The full single-brief loop with the maker mocked via its worktree handoff
-# (the @exit:achieved seam: worktree_path + workspace_branch in world, exactly
-# as cherny-loop leaves them). Asserts the deterministic host-call sequence:
+# The full delivery tail with the maker mocked via its worktree handoff
+# (the @exit:achieved seam: worktree_path + workspace_branch in world).
+# Asserts the deterministic host-call sequence:
 #   integrate (rebase onto current main + build-check + merge) →
 #   re-verify the IDENTICAL gate on the MERGED commit (GREEN) →
 #   cleanup (remove worktree + branch) → @exit:shipped, shipped_sha set.
 #
-# Same gate_command, two evaluation sites: the maker's branch (mocked green) and
-# the merged commit (verify-rerun, asserted here). This is the trust-the-gate
-# discipline: "passes on main", not just "passed in the branch". Zero LLM.
+# Same gate_command, two evaluation sites: the maker's branch (mocked green)
+# and the merged commit (verify-rerun, asserted here). This is the
+# trust-the-gate discipline: "passes on main", not just "passed in the
+# branch". Zero LLM.
 
 test_kind: flow
 app: ../app.yaml
-initial_state: configure
+initial_state: bootstrap
 initial_world:
   brief:              "Fix the rate-limit burst off-by-one"
   gate_command:       "go test ./internal/ratelimit/"
@@ -21,7 +22,7 @@ initial_world:
   main_worktree_path: "."
   workspace_id:       burst-fix
   workspace_branch:   burst-fix
-  worktree_path:      ".worktrees/burst-fix"   # the mocked maker's @exit:achieved handoff
+  worktree_path:      ".worktrees/burst-fix"
 
 host_handlers:
   host.run:
@@ -49,7 +50,7 @@ host_handlers:
             last_error: ""
 
 turns:
-  - intent: { name: integrate_existing, slots: {} }
+  - intent: { name: begin, slots: {} }
     expect_state: __exit__shipped
     expect_world:
       status:            shipped

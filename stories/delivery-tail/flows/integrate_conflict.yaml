@@ -1,11 +1,11 @@
 # integrate_conflict — integrate hits an unresolvable conflict → @exit:needs-human
-# with the REAL last_error (no swallowed success). Leans on slice 1's
+# with the REAL last_error (no swallowed success). Leans on the
 # no-swallowed-failure discipline: a non-zero integrate binds the conflict
 # outcome and routes out, never reporting integrated.
 
 test_kind: flow
 app: ../app.yaml
-initial_state: configure
+initial_state: bootstrap
 initial_world:
   brief:              "Fix the rate-limit burst off-by-one"
   gate_command:       "go test ./internal/ratelimit/"
@@ -29,7 +29,7 @@ host_handlers:
             last_error:     "CONFLICT (content): Merge conflict in internal/ratelimit/bucket.go\nerror: could not apply a1b2c3d"
 
 turns:
-  - intent: { name: integrate_existing, slots: {} }
+  - intent: { name: begin, slots: {} }
     expect_state: __exit__needs-human
     expect_world:
       status:            needs-human
