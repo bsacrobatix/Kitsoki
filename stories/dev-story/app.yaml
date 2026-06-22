@@ -41,9 +41,10 @@
 # # What is NOT here (later waves)
 #
 #   - `stories/cypilot/` import — Wave 4.
-#   - LLM-driven `deploy`, `incident`, `observability`, `docs` rooms —
-#     Wave 2 ships these as STUBS that route back to main; their real
-#     content lands in later waves.
+#   - `deploy`, `observability`, `docs` rooms — Wave 2 ships these as
+#     STUBS that route back to main; their real content lands in later
+#     waves. (`incident` is now a real on-call response loop — see
+#     rooms/incident.yaml.)
 
 app:
   id: dev-story
@@ -421,6 +422,40 @@ world:
   agent_question:     { type: string, default: "" }
   agent_answer:       { type: string, default: "" }
 
+  # ── Incident response / on-call loop (rooms/incident.yaml) ─────────
+  # The alert → triage → mitigate|escalate|monitor → postmortem loop. The
+  # operator pastes a production alert; the on-call agent classifies it
+  # (severity + recommended action) via host.agent.decide; the loop routes
+  # on the recommendation. mitigate runs a recorded mitigation action and
+  # writes a blameless postmortem; escalate pages the owning team (a
+  # transport post + inbox mirror) and writes the postmortem; monitor parks
+  # the alert. Every host the loop touches is already in the allow-list
+  # (host.agent.decide / host.agent.task / host.run / host.transport.post /
+  # host.inbox.add), so flow fixtures stub the agent calls and assert the
+  # deterministic routing with no LLM.
+  #
+  # incident_alert:   the operator's pasted alert text (the `report_incident`
+  #                   slot, captured on entry to the triage step).
+  # incident_triage:  the decide verdict — { severity, summary, recommendation,
+  #                   suspected_cause, mitigation }. recommendation is the
+  #                   tri-state "" until bound, so the post-bind routing emits
+  #                   (which compare == 'mitigate' / 'escalate' / 'monitor')
+  #                   defer to the post-bind pass (the cherny decision-emit
+  #                   discipline). schemas/incident-triage.json.
+  # incident_action:  the recorded mitigation / escalation action result
+  #                   (host.run stdout), shown in the read-out.
+  # incident_postmortem: the writer's close-out note — { summary, file_path,
+  #                   follow_ups }. schemas/incident-postmortem.json.
+  # incident_status:  "" | mitigated | escalated | monitoring | resolved — the
+  #                   loop's terminal disposition, surfaced in the read-out.
+  # incident_path:    the postmortem markdown path (relative to workdir).
+  incident_alert:       { type: string, default: "" }
+  incident_triage:      { type: object, default: {} }
+  incident_action:      { type: string, default: "" }
+  incident_postmortem:  { type: object, default: {} }
+  incident_status:      { type: string, default: "" }
+  incident_path:        { type: string, default: "docs/incidents" }
+
   # ── Design pipeline (rooms/design*.yaml) ───────────────────────
   # 4-stage pipeline: intake → search → refine → draft+publish.
   # Per-session scratch dir is `design_workspace` — NOT world.workdir
@@ -588,9 +623,57 @@ intents:
     priority: 27
   go_incident:
     title: "Incident"
-    description: "Open the incident room."
-    examples: [incident, "on call"]
+    description: "Open the incident room — triage a production alert."
+    examples: [incident, "on call", "we have an outage", "production is down", "page received"]
     priority: 26
+
+  # ── Incident response / on-call loop (rooms/incident.yaml) ─────────
+  # report_incident captures the pasted alert and enters triage. mitigate /
+  # escalate / monitor are BUTTON-ONLY (examples: [] ⇒ the semantic router
+  # never binds them from free text) — the operator picks the disposition
+  # from the triaged read-out, or the post-bind guarded emit auto-routes on
+  # the agent's recommendation. write_postmortem closes the loop.
+  report_incident:
+    title: "Report Incident"
+    description: "Paste a production alert to triage — severity, blast radius, recommended action."
+    examples: ["disk full on db-primary", "5xx spiking in checkout", "alert: queue backed up", "report an incident", "triage this alert"]
+    priority: 84
+    slots:
+      alert: { type: string, required: true, description: "The alert text / page to triage." }
+  mitigate:
+    title: "Mitigate"
+    description: "Apply the recommended mitigation now (a known fix — rollback, restart, flag flip)."
+    examples: []
+    priority: 50
+  escalate:
+    title: "Escalate"
+    description: "Page the owning team / human on-call — the loop can't safely mitigate."
+    examples: []
+    priority: 50
+  watch:
+    title: "Monitor"
+    description: "Park the alert and watch — no action warranted yet."
+    examples: []
+    priority: 50
+  write_postmortem:
+    title: "Write Postmortem"
+    description: "Write a short, blameless postmortem now the incident is resolved."
+    examples: []
+    priority: 50
+  # Internal routing intents — fired by the triage room's post-bind guarded
+  # emits once the recommendation binds (the cherny decision-emit discipline).
+  triage_mitigate:
+    description: "(internal) triage recommended mitigate — route to the mitigation step."
+    examples: []
+    priority: 1
+  triage_escalate:
+    description: "(internal) triage recommended escalate — route to the escalation step."
+    examples: []
+    priority: 1
+  triage_monitor:
+    description: "(internal) triage recommended monitor — park the alert."
+    examples: []
+    priority: 1
   go_docs:
     title: "Docs"
     description: "Open the docs room."

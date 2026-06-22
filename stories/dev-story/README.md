@@ -181,7 +181,56 @@ dev rebinds to `host.local_files.ticket`. Same YAML, two providers.
 | `prd_published` | — | PRD → Design landing room (see [PRD → Design walk](#prd--design-walk)). |
 | `ideas` | — | Ideas-backlog reviewer (see below). |
 | `code_review` | Wave 3 stub | Reserves the room; imports `stories/code-review/` in Wave 3. |
-| `deploy`, `observability`, `incident`, `docs` | Wave 3 stubs | Routing-back-to-`landing` placeholders. |
+| `incident*` | Wave 3 | **On-call response loop** — alert → triage → mitigate \| escalate \| monitor → postmortem ([incident-response](#incident-response-loop-incident) below). |
+| `deploy`, `observability`, `docs` | Wave 3 stubs | Routing-back-to-`landing` placeholders. |
+
+### Incident-response loop (`incident`)
+
+Reached from `landing` via `go_incident`. The former dead-end stub is now a real
+**on-call response loop** ([`rooms/incident.yaml`](./rooms/incident.yaml)): the
+engineer pastes a production alert, the on-call agent triages it, and the loop
+routes deterministically on the recommendation.
+
+```
+incident (intake) ── report_incident ──▶ incident_triaging
+                                           │ on_enter host.agent.decide
+                                           │ binds incident_triage (severity +
+                                           │ summary + recommendation)
+                                           ▼
+                                       incident_triaged  (the verdict)
+                                           ├─ mitigate ▶ incident_mitigating ─▶ incident_resolved
+                                           ├─ escalate ▶ incident_escalating ─▶ incident_resolved
+                                           └─ watch    ▶ incident (parked, status=monitoring)
+                                       incident_resolved
+                                           └─ write_postmortem ▶ incident_postmortem ─▶ landing
+```
+
+- **Triage** runs `host.agent.decide` (`gate_reviewer` persona,
+  `prompts/incident_triage.md`, `schemas/incident-triage.json`) and binds a
+  `{ severity (sev1|sev2|sev3), summary, recommendation, suspected_cause,
+  mitigation }` verdict. The recommendation is unset until the decide binds, so
+  the post-bind guarded emits **auto-route** on it (the cherny decision-emit
+  discipline) — and the room is `decider: llm`-pinned so STAGED mode (kitsoki
+  web) fires the deterministic route instead of stalling for a human.
+- **Mitigate** runs the recorded mitigation action (`host.run` argv mode — an
+  instance rebinds this to a real runbook executor) and advances to the
+  resolved read-out.
+- **Escalate** posts the page out-of-band (`iface.transport.post` — default
+  `host.append_to_file`, an instance rebinds to PagerDuty / Slack) and mirrors
+  it into the operator's inbox (`host.inbox.add`).
+- **Watch** parks the alert back at intake (`incident_status=monitoring`); a
+  fresh `report_incident` re-arms triage cleanly.
+- **Postmortem** runs the `landing_agent` (`host.agent.task`,
+  `prompts/incident_postmortem.md`, `schemas/incident-postmortem.json`) under
+  the same read-only → write-mode opt-in posture as `applying.yaml`, writing a
+  blameless write-up to `docs/incidents/`.
+
+Every host the loop touches is already in dev-story's allow-list or is an iface
+default, so the whole loop is **no-LLM-gateable**: the three flow fixtures
+(`incident_mitigate` / `incident_escalate` / `incident_monitor_park`) stub the
+two agent calls and assert the deterministic routing — severity-based
+dispositions, the recorded mitigation action, the page + inbox mirror, the
+postmortem write — with no real LLM.
 
 ### The free-form workbench (`landing`)
 
@@ -269,7 +318,10 @@ floor), `go_inbox`, `go_agent`, `go_ticket_search`,
 `go_workspace_manager`, `go_standup`, `go_code_review`, `go_deploy`,
 `go_observability`, `go_incident`, `go_docs`, `go_bugfix`,
 `go_pr_refinement`, `search_tickets`, `pick_ticket`, `ask_question`,
-`summarize_day`, `proceed`, `quit`, `look`.
+`summarize_day`, `proceed`, `quit`, `look`. The incident loop adds
+`report_incident` (slot `alert`), `mitigate`, `escalate`, `watch`, and
+`write_postmortem` (the three dispositions + the two button-only disposition
+verbs are scoped to the incident rooms).
 
 ## Flows
 
@@ -289,6 +341,9 @@ floor), `go_inbox`, `go_agent`, `go_ticket_search`,
 | `plan_apply_verify_red.yaml` | Same path, cassette yields 1 (< 3) → real `{ok:false}` → back to `landing`, `last_error` = the script's reason, `captured` unchanged, plan kept for refine. The don't-false-pass case. |
 | `plan_mutation_gate.yaml` | Mutation test: breaking the `verify_ok: ok` bind in `verifying.yaml` makes it fail — proves the verify gate is load-bearing, not decorative. |
 | `plan_apply_staged_livepath.yaml` | The live-shape regression: STAGED mode + a repo-relative `verify.script`. Fails if `decider: llm` is removed from `verifying` (emit chain stalls) or the raw-path fallback is reverted (script read misses). |
+| `incident_mitigate.yaml` | The on-call happy path: alert → triage (recommend mitigate) → auto-route → apply the recorded mitigation (`host.run`) → resolved → postmortem (`host.agent.task`) → landing. Asserts the triage decide fired, the mitigation action recorded, and the postmortem bound. |
+| `incident_escalate.yaml` | The sev1 escalation branch: triage (recommend escalate) → page out-of-band (`iface.transport.post`) + inbox mirror (`host.inbox.add`) → resolved → postmortem. Asserts both out-of-band calls fired and `incident_status=escalated`. |
+| `incident_monitor_park.yaml` | The low-severity edge: triage (recommend monitor) → `watch` parks the alert back at intake (`status=monitoring`, no action) → a fresh `report_incident` re-arms triage, proving the park is not a dead end. |
 
 These are a sample; the full suite (45 / 45) passes under `kitsoki test flows stories/dev-story/app.yaml`.
 
