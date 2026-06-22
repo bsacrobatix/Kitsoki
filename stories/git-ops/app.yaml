@@ -90,6 +90,11 @@ world:
   integrate_outcome:        { type: string, default: "" }
   last_error:               { type: string, default: "" }
   integrated_sha:           { type: string, default: "" }
+  # Raw host.run result markers — empty by default, set ONLY post-host (templated
+  # string binds applied post-dispatch). The integrate no-JSON guard hinges on
+  # run_exit being non-empty so it can't fire on the pre-bind default world.
+  run_exit:                 { type: string, default: "" }
+  run_stdout:               { type: string, default: "" }
 
 intents:
   # ── Routing (internal; emitted by on_enter) ─────────────────────────
@@ -143,6 +148,10 @@ intents:
     priority: 95
   integrated:
     description: "Internal routing: integrate succeeded (rebase+build+merge clean)."
+    examples: []
+    priority: 95
+  integrate_aborted:
+    description: "Internal routing: integrate produced no JSON result (host abort) — re-render with a synthesized last_error, never a blank stall."
     examples: []
     priority: 95
   cleanup_done:
