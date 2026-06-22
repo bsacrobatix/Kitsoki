@@ -190,6 +190,140 @@ func TestJobStore_Notifications(t *testing.T) {
 	}
 }
 
+func TestJobStore_InsertExternalNotificationOnce(t *testing.T) {
+	db := openTestDB(t)
+	js, err := jobs.NewJobStore(db)
+	if err != nil {
+		t.Fatalf("NewJobStore: %v", err)
+	}
+	ctx := context.Background()
+
+	first := &jobs.Notification{
+		SessionID:     "sess-1",
+		Severity:      jobs.SeverityActionRequired,
+		Title:         "PR #42 needs review",
+		Body:          "Review requested by alice.",
+		TeleportState: "inbox",
+		TeleportSlots: map[string]any{"pr_id": "42", "pr_title": "Add tests"},
+		OriginRef:     "github:pr/42",
+		OriginURL:     "https://github.com/acme/repo/pull/42",
+	}
+	inserted, err := js.InsertExternalNotificationOnce(ctx, first)
+	if err != nil {
+		t.Fatalf("InsertExternalNotificationOnce(first): %v", err)
+	}
+	if !inserted {
+		t.Fatalf("expected first poll result to insert")
+	}
+	if first.ID == "" {
+		t.Fatalf("expected inserted notification ID")
+	}
+
+	duplicate := &jobs.Notification{
+		SessionID:     "sess-1",
+		Severity:      jobs.SeverityActionRequired,
+		Title:         "PR #42 needs review again",
+		TeleportState: "inbox",
+		OriginRef:     "github:pr/42",
+		OriginURL:     "https://github.com/acme/repo/pull/42",
+	}
+	inserted, err = js.InsertExternalNotificationOnce(ctx, duplicate)
+	if err != nil {
+		t.Fatalf("InsertExternalNotificationOnce(duplicate): %v", err)
+	}
+	if inserted {
+		t.Fatalf("expected duplicate poll result to be ignored")
+	}
+	if duplicate.ID != first.ID {
+		t.Fatalf("expected duplicate to return existing ID %q, got %q", first.ID, duplicate.ID)
+	}
+
+	notifs, err := js.ListNotifications(ctx, "sess-1", 10)
+	if err != nil {
+		t.Fatalf("ListNotifications: %v", err)
+	}
+	if len(notifs) != 1 {
+		t.Fatalf("expected one stored notification, got %d", len(notifs))
+	}
+	if notifs[0].OriginKind != "external" || notifs[0].OriginURL != first.OriginURL {
+		t.Fatalf("expected external origin and URL to round trip, got kind=%q url=%q", notifs[0].OriginKind, notifs[0].OriginURL)
+	}
+	if got := notifs[0].TeleportSlots["pr_id"]; got != "42" {
+		t.Fatalf("expected teleport slot pr_id=42, got %#v", got)
+	}
+
+	counts, err := js.UnreadCount(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("UnreadCount: %v", err)
+	}
+	if counts[jobs.SeverityActionRequired] != 1 {
+		t.Fatalf("expected one unread action-required notification, got %v", counts)
+	}
+}
+
+func TestJobStore_InsertExternalNotificationOnce_DedupesReadAndDismissedRows(t *testing.T) {
+	db := openTestDB(t)
+	js, err := jobs.NewJobStore(db)
+	if err != nil {
+		t.Fatalf("NewJobStore: %v", err)
+	}
+	ctx := context.Background()
+
+	n := &jobs.Notification{
+		SessionID:     "sess-1",
+		Severity:      jobs.SeverityActionRequired,
+		Title:         "Issue #7 assigned",
+		TeleportState: "inbox",
+		OriginRef:     "github:issue/7",
+	}
+	inserted, err := js.InsertExternalNotificationOnce(ctx, n)
+	if err != nil {
+		t.Fatalf("InsertExternalNotificationOnce(first): %v", err)
+	}
+	if !inserted {
+		t.Fatalf("expected first poll result to insert")
+	}
+	if err := js.MarkNotificationRead(ctx, n.ID); err != nil {
+		t.Fatalf("MarkNotificationRead: %v", err)
+	}
+	if err := js.DismissNotification(ctx, n.ID); err != nil {
+		t.Fatalf("DismissNotification: %v", err)
+	}
+
+	again := &jobs.Notification{
+		SessionID:     "sess-1",
+		Severity:      jobs.SeverityActionRequired,
+		Title:         "Issue #7 assigned",
+		TeleportState: "inbox",
+		OriginRef:     "github:issue/7",
+	}
+	inserted, err = js.InsertExternalNotificationOnce(ctx, again)
+	if err != nil {
+		t.Fatalf("InsertExternalNotificationOnce(after dismiss): %v", err)
+	}
+	if inserted {
+		t.Fatalf("expected dismissed external row to remain deduped")
+	}
+	if again.ID != n.ID {
+		t.Fatalf("expected existing dismissed row ID %q, got %q", n.ID, again.ID)
+	}
+
+	notifs, err := js.ListNotifications(ctx, "sess-1", 10)
+	if err != nil {
+		t.Fatalf("ListNotifications: %v", err)
+	}
+	if len(notifs) != 0 {
+		t.Fatalf("expected dismissed duplicate to stay hidden, got %d rows", len(notifs))
+	}
+	got, err := js.GetNotification(ctx, n.ID)
+	if err != nil {
+		t.Fatalf("GetNotification: %v", err)
+	}
+	if got == nil || got.ReadAt == nil || got.OriginKind != "external" {
+		t.Fatalf("expected read external notification to remain resolvable, got %+v", got)
+	}
+}
+
 // TestJobStore_InsertNotification_DefaultsCreatedAt is a regression test for the
 // zero-CreatedAt mis-sort bug. The inbox.PostJobNotification path inserts a
 // notification WITHOUT setting CreatedAt (it leaves the zero value). Before the
@@ -217,9 +351,9 @@ func TestJobStore_InsertNotification_DefaultsCreatedAt(t *testing.T) {
 	// First: an info notification, CreatedAt deliberately left ZERO (mirrors
 	// inbox.PostJobNotification, which does not set it).
 	info := &jobs.Notification{
-		SessionID: "sess-1",
-		Severity:  jobs.SeverityInfo,
-		Title:     "Job started",
+		SessionID:  "sess-1",
+		Severity:   jobs.SeverityInfo,
+		Title:      "Job started",
 		OriginKind: "job",
 	}
 	if err := js.InsertNotification(ctx, info); err != nil {
@@ -233,9 +367,9 @@ func TestJobStore_InsertNotification_DefaultsCreatedAt(t *testing.T) {
 
 	// Second: the success notification, also with CreatedAt left ZERO.
 	success := &jobs.Notification{
-		SessionID: "sess-1",
-		Severity:  jobs.SeveritySuccess,
-		Title:     "Job done",
+		SessionID:  "sess-1",
+		Severity:   jobs.SeveritySuccess,
+		Title:      "Job done",
 		OriginKind: "job",
 	}
 	if err := js.InsertNotification(ctx, success); err != nil {

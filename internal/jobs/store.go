@@ -62,6 +62,10 @@ type JobStore struct {
 	journalWriter journal.Writer
 }
 
+type notificationExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
 // JobStoreOption is a functional option for constructing a JobStore.
 type JobStoreOption func(*JobStore)
 
@@ -344,6 +348,59 @@ func scanJobs(rows *sql.Rows) ([]Job, error) {
 // world.patch that follows. The notifications table persists independently and
 // is the canonical source of truth for the notification row itself.
 func (js *JobStore) InsertNotification(ctx context.Context, n *Notification) error {
+	return insertNotification(ctx, js.db, n)
+}
+
+// InsertExternalNotificationOnce inserts an external notification unless the
+// same session already has a row with the same origin_kind + origin_ref. It is
+// intended for polling integrations (GitHub issues, PR review requests, etc.)
+// where every refresh sees the same external object again.
+//
+// The returned bool is true only when a new row was inserted. On a duplicate,
+// n.ID is populated with the existing row id so callers can still correlate the
+// poll result with stored inbox state.
+func (js *JobStore) InsertExternalNotificationOnce(ctx context.Context, n *Notification) (bool, error) {
+	if n.OriginKind == "" {
+		n.OriginKind = "external"
+	}
+	if n.OriginKind != "external" {
+		return false, fmt.Errorf("jobs.InsertExternalNotificationOnce: origin_kind must be external, got %q", n.OriginKind)
+	}
+	if n.OriginRef == "" {
+		return false, fmt.Errorf("jobs.InsertExternalNotificationOnce: origin_ref is required")
+	}
+
+	tx, err := js.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	var existingID string
+	err = tx.QueryRowContext(ctx, `
+		SELECT id FROM notifications
+		WHERE session_id=? AND origin_kind=? AND origin_ref=?
+		ORDER BY created_at DESC
+		LIMIT 1`,
+		string(n.SessionID), n.OriginKind, n.OriginRef,
+	).Scan(&existingID)
+	if err == nil {
+		n.ID = existingID
+		return false, tx.Commit()
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if err := insertNotification(ctx, tx, n); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func insertNotification(ctx context.Context, exec notificationExecer, n *Notification) error {
 	if n.ID == "" {
 		n.ID = ulid.New()
 	}
@@ -365,7 +422,7 @@ func (js *JobStore) InsertNotification(ctx context.Context, n *Notification) err
 		teleportSlotsJSON = b
 	}
 
-	_, err := js.db.ExecContext(ctx, `
+	_, err := exec.ExecContext(ctx, `
 		INSERT INTO notifications
 		  (id, session_id, created_at, severity, title, body,
 		   teleport_state, teleport_slots, teleport_proposal_id, teleport_job_id,
@@ -430,7 +487,7 @@ func (js *JobStore) ListNotifications(ctx context.Context, sessionID app.Session
 	q := `
 		SELECT id, session_id, created_at, read_at, severity, title, body,
 		       teleport_state, teleport_slots, teleport_proposal_id, teleport_job_id,
-		       origin_kind, origin_ref
+		       origin_kind, origin_ref, origin_url
 		FROM notifications
 		WHERE session_id=? AND dismissed_at IS NULL
 		ORDER BY created_at DESC`
@@ -453,12 +510,13 @@ func (js *JobStore) ListNotifications(ctx context.Context, sessionID app.Session
 		var readAtMs sql.NullInt64
 		var teleportSlotsJSON sql.NullString
 		var teleportProposalID, teleportJobID sql.NullString
+		var originURL sql.NullString
 		if err := rows.Scan(
 			&n.ID, (*string)(&n.SessionID), &createdAtMs, &readAtMs,
 			(*string)(&n.Severity), &n.Title, &n.Body,
 			&n.TeleportState, &teleportSlotsJSON,
 			&teleportProposalID, &teleportJobID,
-			&n.OriginKind, &n.OriginRef,
+			&n.OriginKind, &n.OriginRef, &originURL,
 		); err != nil {
 			return nil, err
 		}
@@ -474,6 +532,7 @@ func (js *JobStore) ListNotifications(ctx context.Context, sessionID app.Session
 				slog.Warn("jobs.ListNotifications: unmarshal teleport_slots failed; leaving empty", "id", n.ID, "err", uerr)
 			}
 		}
+		n.OriginURL = originURL.String
 		out = append(out, n)
 	}
 	return out, rows.Err()
@@ -484,22 +543,24 @@ func (js *JobStore) ListNotifications(ctx context.Context, sessionID app.Session
 // an already-read item). Returns (nil, nil) when no row matches.
 func (js *JobStore) GetNotification(ctx context.Context, id string) (*Notification, error) {
 	row := js.db.QueryRowContext(ctx, `
-		SELECT id, session_id, created_at, severity, title, body,
+		SELECT id, session_id, created_at, read_at, severity, title, body,
 		       teleport_state, teleport_slots, teleport_proposal_id, teleport_job_id,
-		       origin_kind, origin_ref
+		       origin_kind, origin_ref, origin_url
 		FROM notifications
 		WHERE id=?`, id)
 
 	var n Notification
 	var createdAtMs int64
+	var readAtMs sql.NullInt64
 	var teleportSlotsJSON sql.NullString
 	var teleportProposalID, teleportJobID sql.NullString
+	var originURL sql.NullString
 	err := row.Scan(
-		&n.ID, (*string)(&n.SessionID), &createdAtMs,
+		&n.ID, (*string)(&n.SessionID), &createdAtMs, &readAtMs,
 		(*string)(&n.Severity), &n.Title, &n.Body,
 		&n.TeleportState, &teleportSlotsJSON,
 		&teleportProposalID, &teleportJobID,
-		&n.OriginKind, &n.OriginRef,
+		&n.OriginKind, &n.OriginRef, &originURL,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -508,8 +569,13 @@ func (js *JobStore) GetNotification(ctx context.Context, id string) (*Notificati
 		return nil, err
 	}
 	n.CreatedAt = time.UnixMilli(createdAtMs)
+	if readAtMs.Valid {
+		t := time.UnixMilli(readAtMs.Int64)
+		n.ReadAt = &t
+	}
 	n.TeleportProposalID = teleportProposalID.String
 	n.TeleportJobID = teleportJobID.String
+	n.OriginURL = originURL.String
 	if teleportSlotsJSON.Valid {
 		if uerr := json.Unmarshal([]byte(teleportSlotsJSON.String), &n.TeleportSlots); uerr != nil {
 			slog.Warn("jobs.GetNotification: unmarshal teleport_slots failed; leaving empty", "id", n.ID, "err", uerr)
