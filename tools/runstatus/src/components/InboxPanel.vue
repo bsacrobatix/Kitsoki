@@ -166,8 +166,7 @@ async function onWorkItem(item: WorkItem): Promise<void> {
   const sid = item.reacquire_session_id || item.session_id;
   if (!sid) return;
   inbox.close();
-  const chat = item.chat_id ? `?chat=${encodeURIComponent(item.chat_id)}` : "";
-  await router.push(`/s/${sid}/chat${chat}`);
+  await router.push(workRoute(item, sid));
 }
 
 function notificationFromWork(item: WorkItem): Notification {
@@ -220,6 +219,14 @@ function workAction(item: WorkItem): string {
   if (item.kind === "notification") return "jump";
   if (item.reacquire_tool === "chat.show" || item.chat_id) return "open context";
   return "open session";
+}
+
+function workRoute(item: WorkItem, sessionId: string): string {
+  if (item.reacquire_tool === "chat.show" || item.chat_id) {
+    const chat = item.chat_id ? `?chat=${encodeURIComponent(item.chat_id)}` : "";
+    return `/s/${sessionId}/chat${chat}`;
+  }
+  return `/s/${sessionId}`;
 }
 
 function onKeydown(e: KeyboardEvent): void {

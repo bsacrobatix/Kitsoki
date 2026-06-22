@@ -184,6 +184,48 @@ describe("InboxPanel", () => {
     wrapper.unmount();
   });
 
+  it("routes active job work to the session view", async () => {
+    const inbox = useInboxStore();
+    inbox.open = true;
+    inbox.workSummary = {
+      items: 1,
+      needs_attention: 1,
+      jobs_running: 0,
+      jobs_awaiting_input: 0,
+      jobs_terminal: 1,
+      notifications_unread: 0,
+      notifications_action_required: 0,
+      pending_drives: 0,
+      backgrounded_chats: 0,
+    };
+    inbox.workItems = [
+      {
+        kind: "job",
+        priority: 90,
+        session_id: "web-session-1",
+        title: "host.agent.task",
+        status: "failed",
+        job_id: "job-1",
+        reacquire_tool: "session",
+        reacquire_session_id: "web-session-1",
+      },
+    ];
+
+    const wrapper = mount(InboxPanel, { attachTo: document.body });
+    await flushPromises();
+
+    const rows = document.body.querySelectorAll('[data-testid="work-item"]');
+    expect(rows).toHaveLength(1);
+    expect(document.body.textContent).toContain("open session");
+
+    (rows[0] as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(inbox.open).toBe(false);
+    expect(push).toHaveBeenCalledWith("/s/web-session-1");
+    wrapper.unmount();
+  });
+
   it("syncs GitHub inbox work for the current session", async () => {
     const inbox = useInboxStore();
     inbox.open = true;
