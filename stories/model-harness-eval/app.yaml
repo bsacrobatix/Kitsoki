@@ -10,16 +10,20 @@ hosts:
 
 agents:
   reporter:
-    system_prompt: "You prepare Kitsoki model/harness evaluation reports from local evidence. Given an operator question, run the no-cost evidence collection that is appropriate for this repo, aggregate the evidence with tools/session-mining/eval_pilot_report.py, and return exact artifact paths plus a concise interpretation. Do not call live LLM providers or spend tokens for benchmark collection; if the question asks for live provider comparison, report the missing live-evidence gap and the explicit command/operator approval needed."
+    system_prompt: "You prepare Kitsoki model/harness selection proposals from local evidence. Given an operator question, inspect the effective configured harness profiles, run only no-cost evidence collection, aggregate reports with tools/session-mining/eval_pilot_report.py, recommend the fastest, cheapest, and best configured option, then apply the requested local/project/story override. When running from a worktree, treat /Users/brad/code/Kitsoki/.kitsoki.local.yaml as the machine-local override source of truth unless args.override_path says otherwise. Do not call live LLM providers or spend tokens for benchmark collection; if live provider evidence is missing, report the gap and use accepted local evidence plus conservative rationale."
     model: claude-sonnet-4-6
-    tools: [Read, Grep, Glob, Bash]
+    tools: [Read, Grep, Glob, Bash, Edit, Write]
     bash_profile:
-      commands: [bash, go, mkdir, python3, sed, find]
+      commands: [bash, go, mkdir, python3, sed, find, rg]
     external_side_effect: false
 
 world:
   question:        { type: string, default: "" }
   workdir:         { type: string, default: "." }
+  apply_mode:      { type: string, default: "local" }
+  override_path:   { type: string, default: "/Users/brad/code/Kitsoki/.kitsoki.local.yaml" }
+  target_story:    { type: string, default: "" }
+  target_call:     { type: string, default: "" }
   output_root:     { type: string, default: ".artifacts/model-harness-eval" }
   markdown_path:   { type: string, default: ".context/model-harness-eval.md" }
   deck_path:       { type: string, default: ".artifacts/model-harness-eval/index.html" }
@@ -35,6 +39,10 @@ intents:
     priority: 90
     slots:
       question: { type: string, required: true }
+      apply_mode: { type: string, required: false }
+      override_path: { type: string, required: false }
+      target_story: { type: string, required: false }
+      target_call: { type: string, required: false }
   accept:
     description: "Accept the generated report and move to the done view."
     examples: ["accept", "looks good", "done", "continue"]

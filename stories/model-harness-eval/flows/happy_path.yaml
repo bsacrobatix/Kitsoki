@@ -3,6 +3,8 @@ app: ../app.yaml
 initial_state: idle
 initial_world:
   workdir: "."
+  apply_mode: "local"
+  override_path: "/Users/brad/code/Kitsoki/.kitsoki.local.yaml"
   output_root: ".artifacts/model-harness-eval"
   markdown_path: ".context/model-harness-eval.md"
   deck_path: ".artifacts/model-harness-eval/index.html"
@@ -20,6 +22,59 @@ host_handlers:
             deck_path: ".artifacts/model-harness-eval/index.html"
             summary_path: ".artifacts/model-harness-eval/summary.json"
             status: "complete"
+            configured_options:
+              - profile: "claude-native"
+                backend: "claude"
+                model: "opus"
+                effort: "medium"
+                source: "baseline"
+                models: ["opus", "sonnet", "haiku"]
+                efforts: ["low", "medium", "high", "xhigh", "max"]
+              - profile: "synthetic-claude"
+                backend: "claude"
+                model: "syn:large:text"
+                source: "local"
+                models: ["syn:large:text", "syn:small:text"]
+              - profile: "synthetic-codex"
+                backend: "codex"
+                model: "syn:large:text"
+                source: "local"
+                models: ["syn:large:text", "syn:small:text"]
+              - profile: "codex-native"
+                backend: "codex"
+                model: "gpt-5-codex"
+                source: "local"
+                models: ["gpt-5-codex", "gpt-5"]
+            recommendations:
+              fastest:
+                profile: "synthetic-codex"
+                model: "syn:small:text"
+                rationale: "Fastest inferred option among configured lightweight models; live latency samples were not run in the no-cost flow."
+                evidence_status: "inferred"
+              cheapest:
+                profile: "synthetic-codex"
+                model: "syn:small:text"
+                rationale: "Cheapest inferred option because the synthetic small model is the configured low-cost candidate; no paid live cost samples were run."
+                evidence_status: "inferred"
+                avg_cost_usd: 0
+              best:
+                profile: "codex-native"
+                model: "gpt-5-codex"
+                rationale: "Best inferred option for real coding-agent tasks among configured native harnesses; direct benchmark evidence remains a gap."
+                evidence_status: "inferred"
+              selected:
+                profile: "codex-native"
+                model: "gpt-5-codex"
+                rationale: "Selected as the default because the operator asked for real-case usefulness, not just cheapest synthetic test throughput."
+                evidence_status: "inferred"
+            override:
+              mode: "local"
+              path: "/Users/brad/code/Kitsoki/.kitsoki.local.yaml"
+              applied: true
+              selected_profile: "codex-native"
+              selected_model: "gpt-5-codex"
+              summary: "Set the main-checkout local default_profile to codex-native while preserving intercept and harness_profiles."
+              diff_summary: "Added or updated default_profile: codex-native in /Users/brad/code/Kitsoki/.kitsoki.local.yaml."
             commands_run:
               - "go run ./cmd/kitsoki test intents stories/oregon-trail/app.yaml --harness static --json .artifacts/model-harness-eval/intent-reports/oregon-trail.json"
               - "bash tools/session-mining/examples/git-ops/run.sh --keep .artifacts/model-harness-eval/git-ops-coverage"
@@ -37,13 +92,15 @@ host_handlers:
 
               Question: How do the available model harnesses perform on real cases?
 
-              The report used accepted local eval evidence, the Oregon Trail static intent suite, and the git-ops transcript coverage flagship. It produced Markdown, deck, and JSON artifacts. Live provider-backed comparisons remain a readiness gap and require explicit operator approval.
+              Fastest and cheapest: synthetic-codex / syn:small:text, inferred from the configured lightweight synthetic option. Best and selected: codex-native / gpt-5-codex for real coding-agent work. The main-checkout local override was applied at /Users/brad/code/Kitsoki/.kitsoki.local.yaml. Live provider-backed comparisons remain a readiness gap and require explicit operator approval.
 
 turns:
   - intent:
       name: start
       slots:
         question: "How do the available model harnesses perform on real cases?"
+        apply_mode: "local"
+        override_path: "/Users/brad/code/Kitsoki/.kitsoki.local.yaml"
     expect_state: reporting
     expect_world:
       status: "ready"

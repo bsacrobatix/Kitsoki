@@ -1,15 +1,22 @@
 states:
   reporting:
     description: "Preparing evaluation report artifacts."
-    relevant_world: [question, output_root, markdown_path, deck_path, summary_path, refine_feedback, report_artifact, status]
+    relevant_world: [question, apply_mode, override_path, target_story, target_call, output_root, markdown_path, deck_path, summary_path, refine_feedback, report_artifact, status]
     view:
       - banner:
           text: "REPORTING"
-          subtitle: "The reporter is collecting local evidence and rendering artifacts."
+          subtitle: "The reporter is collecting local evidence, ranking configured options, and applying the requested override."
           color: "#2563EB"
       - kv:
           pairs:
             Question: "{{ world.question }}"
+            Apply mode: "{{ world.apply_mode }}"
+            Override: "{{ world.report_artifact.override.path|default:world.override_path }}"
+            Fastest: '{{ world.report_artifact.recommendations.fastest.profile|default:"(pending)" }} / {{ world.report_artifact.recommendations.fastest.model|default:"" }}'
+            Cheapest: '{{ world.report_artifact.recommendations.cheapest.profile|default:"(pending)" }} / {{ world.report_artifact.recommendations.cheapest.model|default:"" }}'
+            Best: '{{ world.report_artifact.recommendations.best.profile|default:"(pending)" }} / {{ world.report_artifact.recommendations.best.model|default:"" }}'
+            Selected: '{{ world.report_artifact.recommendations.selected.profile|default:"(pending)" }} / {{ world.report_artifact.recommendations.selected.model|default:"" }}'
+            Applied: '{{ world.report_artifact.override.applied|default:false }}'
             Markdown: '{{ world.report_artifact.markdown_path|default:world.markdown_path }}'
             Deck: '{{ world.report_artifact.deck_path|default:world.deck_path }}'
             Summary: '{{ world.report_artifact.summary_path|default:world.summary_path }}'
@@ -46,6 +53,10 @@ states:
             args:
               question: "{{ world.question }}"
               refine_feedback: "{{ world.refine_feedback }}"
+              apply_mode: "{{ world.apply_mode }}"
+              override_path: "{{ world.override_path }}"
+              target_story: "{{ world.target_story }}"
+              target_call: "{{ world.target_call }}"
               output_root: "{{ world.output_root }}"
               markdown_path: "{{ world.markdown_path }}"
               deck_path: "{{ world.deck_path }}"
@@ -73,4 +84,3 @@ states:
             - set: { status: "abandoned" }
       look:
         - target: .
-

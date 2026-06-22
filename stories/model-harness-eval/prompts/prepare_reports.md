@@ -4,13 +4,36 @@ Prepare model/harness evaluation artifacts for this operator question:
 
 {% if args.refine_feedback %}Refine feedback from the operator: {{ args.refine_feedback }}{% endif %}
 
+Override request:
+
+- Apply mode: `{{ args.apply_mode }}`
+- Override path: `{{ args.override_path }}`
+- Target story: `{{ args.target_story }}`
+- Target call: `{{ args.target_call }}`
+
 Write or refresh these artifacts:
 
 - Markdown report: `{{ args.markdown_path }}`
 - Slide-style HTML deck: `{{ args.deck_path }}`
 - Machine summary JSON: `{{ args.summary_path }}`
 
-Use the reusable offline pilot process in `docs/testing/model-harness-eval-pilot.md`.
+Use the reusable offline pilot process in `docs/testing/model-harness-eval-pilot.md`,
+then extend the result into a concrete selection proposal and override.
+
+Configuration discovery:
+
+1. Read the checked-in `.kitsoki.yaml`.
+2. Read the machine-local override from `{{ args.override_path }}`. When this
+   story is run from a worktree, the default is
+   `/Users/brad/code/Kitsoki/.kitsoki.local.yaml`; use that main-checkout file
+   as the source of truth for configured local profiles instead of a worktree
+   copy.
+3. Merge the two conceptually using Kitsoki's documented rules: local scalar
+   values win, local harness profiles are added by name, and a local profile
+   replaces a baseline profile of the same name whole.
+4. List every effective configured option in `configured_options`, including
+   profile, backend, default model, model catalog, effort, effort catalog, and
+   whether the option came from baseline or local config.
 
 Default no-cost evidence collection:
 
@@ -27,12 +50,43 @@ Do not call live LLM providers or run a paid live benchmark matrix. If the
 operator's question asks for live provider performance, answer from accepted
 local evidence and list the missing live collection step as a limitation.
 
+Selection proposal:
+
+- Recommend `fastest`, `cheapest`, `best`, and `selected`.
+- Prefer measured eval report data when it exists. Include median, p5, p95, pass
+  rate, and cost fields from evidence when available.
+- When evidence is missing for a configured option, set `evidence_status` to
+  `missing` or `inferred` and say exactly what is missing. Do not invent
+  measurements.
+- If only static/no-cost evidence exists, make a conservative selection from the
+  configured options and explain the tradeoff. For this machine, synthetic
+  profiles are local test/provider options, `codex-native` is the native Codex
+  profile, and `claude-native` is the checked-in baseline. Choose the option
+  that best satisfies the operator's question, not merely the current default.
+- The Markdown report and HTML deck must include a plain recommendation section:
+  fastest, cheapest, best, selected, why, and the override applied.
+
+Override application:
+
+- `local`: update `{{ args.override_path }}` so new Kitsoki sessions use the
+  selected profile/model/effort by default. Preserve unrelated keys such as
+  `intercept:` and existing `harness_profiles:`. Do not write secrets. If the
+  file does not exist, create a minimal local override.
+- `project`: update the project override path named by `{{ args.override_path }}`.
+  If no path is provided, return `status: "blocked"` and do not guess.
+- `author`: update the base story call-site `selection:` only when
+  `{{ args.target_story }}` and `{{ args.target_call }}` identify a real story
+  and call. Otherwise return `status: "blocked"` with the missing target. Use
+  call-site `selection:` metadata, not a local profile default, for author mode.
+
 Return a JSON object matching `schemas/report_artifact.json`. Every count and
 path must be read from the generated files or command results; do not invent
 numbers. `summary_markdown` should include:
 
 - the question answered;
-- the headline result;
+- the headline recommendation;
+- fastest, cheapest, best, and selected configured options;
+- the override path and whether it was applied;
 - effectiveness/speed/cost evidence available;
 - intent-suite and transcript-coverage results;
 - missing evidence/readiness gaps;

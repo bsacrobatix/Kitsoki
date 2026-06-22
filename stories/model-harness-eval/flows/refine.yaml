@@ -3,12 +3,30 @@ app: ../app.yaml
 initial_state: reporting
 initial_world:
   question: "Compare current harnesses."
+  apply_mode: "local"
+  override_path: "/Users/brad/code/Kitsoki/.kitsoki.local.yaml"
   report_artifact:
     question: "Compare current harnesses."
     markdown_path: ".context/model-harness-eval.md"
     deck_path: ".artifacts/model-harness-eval/index.html"
     summary_path: ".artifacts/model-harness-eval/summary.json"
     status: "complete"
+    configured_options:
+      - profile: "claude-native"
+        backend: "claude"
+        model: "opus"
+    recommendations:
+      fastest: { profile: "claude-native", model: "haiku", rationale: "Previous fastest placeholder.", evidence_status: "inferred" }
+      cheapest: { profile: "claude-native", model: "haiku", rationale: "Previous cheapest placeholder.", evidence_status: "inferred" }
+      best: { profile: "claude-native", model: "opus", rationale: "Previous best placeholder.", evidence_status: "inferred" }
+      selected: { profile: "claude-native", model: "opus", rationale: "Previous selected placeholder.", evidence_status: "inferred" }
+    override:
+      mode: "local"
+      path: "/Users/brad/code/Kitsoki/.kitsoki.local.yaml"
+      applied: true
+      selected_profile: "claude-native"
+      selected_model: "opus"
+      summary: "Previous override placeholder."
     summary_markdown: "## Existing report\n\nA sufficiently long existing summary body that should be cleared before the refined reporter pass runs again."
 
 host_handlers:
@@ -23,10 +41,50 @@ host_handlers:
             deck_path: ".artifacts/model-harness-eval/index.html"
             summary_path: ".artifacts/model-harness-eval/summary.json"
             status: "partial"
+            configured_options:
+              - profile: "claude-native"
+                backend: "claude"
+                model: "opus"
+                effort: "medium"
+                source: "baseline"
+                models: ["opus", "sonnet", "haiku"]
+              - profile: "codex-native"
+                backend: "codex"
+                model: "gpt-5-codex"
+                source: "local"
+                models: ["gpt-5-codex", "gpt-5"]
+            recommendations:
+              fastest:
+                profile: "claude-native"
+                model: "haiku"
+                rationale: "Fastest inferred configured native option after putting readiness gaps first."
+                evidence_status: "inferred"
+              cheapest:
+                profile: "claude-native"
+                model: "haiku"
+                rationale: "Cheapest inferred configured native option after putting readiness gaps first."
+                evidence_status: "inferred"
+              best:
+                profile: "codex-native"
+                model: "gpt-5-codex"
+                rationale: "Best inferred real-task option, with live eval evidence still missing."
+                evidence_status: "inferred"
+              selected:
+                profile: "codex-native"
+                model: "gpt-5-codex"
+                rationale: "Selected for real coding-agent cases while recording missing live benchmark evidence."
+                evidence_status: "inferred"
+            override:
+              mode: "local"
+              path: "/Users/brad/code/Kitsoki/.kitsoki.local.yaml"
+              applied: true
+              selected_profile: "codex-native"
+              selected_model: "gpt-5-codex"
+              summary: "Updated main-checkout local default_profile to codex-native."
             summary_markdown: |
               ## Refined report
 
-              The refined pass includes readiness gaps first, then the model/harness table. This is a long enough schema-valid body for the artifact contract.
+              Readiness gaps come first, then the model/harness table. Fastest and cheapest are inferred from lightweight configured options; best and selected are codex-native / gpt-5-codex for real coding-agent tasks. The local override result is recorded at /Users/brad/code/Kitsoki/.kitsoki.local.yaml.
             limitations: ["Still no live provider benchmark evidence."]
 
 turns:
