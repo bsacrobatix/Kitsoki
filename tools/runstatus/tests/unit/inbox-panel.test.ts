@@ -71,7 +71,7 @@ describe("InboxPanel", () => {
         session_id: "web-session-1",
         title: "continue the agent task",
         status: "pending",
-        reacquire_tool: "session",
+        reacquire_tool: "chat.show",
         reacquire_session_id: "web-session-1",
         drive_id: "drive-1",
         chat_id: "chat-1",
@@ -84,7 +84,7 @@ describe("InboxPanel", () => {
         session_id: "web-session-1",
         title: "Background Claude",
         status: "pty_background",
-        reacquire_tool: "session",
+        reacquire_tool: "chat.show",
         reacquire_session_id: "web-session-1",
         chat_id: "chat-2",
         tmux_session: "kit-bg",
@@ -108,6 +108,7 @@ describe("InboxPanel", () => {
     expect(document.body.textContent).toContain("chat chat-2");
     expect(document.body.textContent).toContain("tmux kit-bg");
     expect(document.body.textContent).toContain("devbox");
+    expect(inbox.workItems[1]?.reacquire_tool).toBe("chat.show");
 
     (rows[1] as HTMLButtonElement).click();
     await flushPromises();

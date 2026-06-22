@@ -313,8 +313,12 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 	assert.Equal(t, f.publicID, work.Items[1].SessionID)
 	assert.Equal(t, "pending_drive", work.Items[2].Kind)
 	assert.Equal(t, chat.ID, work.Items[2].ChatID)
+	assert.Equal(t, "chat.show", work.Items[2].ReacquireTool)
+	assert.Equal(t, f.publicID, work.Items[2].ReacquireSessionID)
 	assert.Equal(t, "backgrounded_chat", work.Items[3].Kind)
 	assert.Equal(t, bg.ID, work.Items[3].ChatID)
+	assert.Equal(t, "chat.show", work.Items[3].ReacquireTool)
+	assert.Equal(t, f.publicID, work.Items[3].ReacquireSessionID)
 }
 
 func TestChatShow_SurfacesFocusedAsyncChatContext(t *testing.T) {

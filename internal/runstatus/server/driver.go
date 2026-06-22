@@ -166,7 +166,8 @@ type WorkSummary struct {
 }
 
 // WorkItem is one active row in the operator's work queue. Notification rows
-// can teleport; job rows reacquire the owning session.
+// can teleport, job rows reacquire the owning session, and chat-backed rows
+// reacquire focused context through runstatus.chat.show.
 type WorkItem struct {
 	Kind               string                    `json:"kind"`
 	Priority           int                       `json:"priority"`
@@ -468,7 +469,7 @@ func (d OrchestratorDriver) listChatWork(ctx context.Context, out SessionWork) (
 			CreatedAt:          drive.ReceivedAt,
 			UpdatedAt:          drive.ReceivedAt,
 			OriginState:        drive.OriginState,
-			ReacquireTool:      "session",
+			ReacquireTool:      "chat.show",
 			ReacquireSessionID: string(d.SID),
 			DriveID:            drive.DriveID,
 			ChatID:             drive.ChatID,
@@ -497,7 +498,7 @@ func (d OrchestratorDriver) listChatWork(ctx context.Context, out SessionWork) (
 			Status:             string(pty.Mode),
 			CreatedAt:          pty.CreatedAt,
 			UpdatedAt:          pty.UpdatedAt,
-			ReacquireTool:      "session",
+			ReacquireTool:      "chat.show",
 			ReacquireSessionID: string(d.SID),
 			ChatID:             pty.ChatID,
 			TmuxSession:        pty.TmuxSession,

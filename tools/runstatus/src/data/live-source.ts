@@ -172,7 +172,7 @@ export interface WorkItem {
   origin_ref?: string;
   origin_url?: string;
   origin_state?: string;
-  reacquire_tool: "notification" | "session" | string;
+  reacquire_tool: "notification" | "session" | "chat.show" | string;
   reacquire_session_id?: string;
   drive_id?: string;
   chat_id?: string;

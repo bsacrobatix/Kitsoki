@@ -123,7 +123,7 @@ describe("LiveSource", () => {
           backgrounded_chats: 0,
         },
         sessions: [],
-        items: [{ kind: "pending_drive", priority: 65, session_id: "s1", reacquire_tool: "session" }],
+        items: [{ kind: "pending_drive", priority: 65, session_id: "s1", reacquire_tool: "chat.show" }],
       })
     );
     const src = new LiveSource("/");
