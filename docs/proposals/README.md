@@ -209,11 +209,11 @@ thought.
   OpenAI-compatible HTTP, with grammar-forced schema-valid output, for
   routing and small `decide` verdicts. Nothing implemented yet; spike (§0)
   required before committing.
-- [`agent-contract-eval.md`](agent-contract-eval.md) — schema-conformance
-  linting of cassette/flow mocks (Layer 1, offline) plus a per-call-site
-  correctness eval (Layer 2, gated): `{input, expected}` datasets scored as a
-  correctness % across backends (Claude vs free llama.cpp), so a call site can
-  be routed to the cheap backend with evidence. Produces the measurement
+- [`agent-contract-eval.md`](agent-contract-eval.md) — task-adherence
+  benchmark for bounded agent call sites: offline contract/toolbox conformance,
+  gated live model matrices across Claude, Codex, local, and synthetic profiles,
+  evidence-based `profile/model/effort` pinning, and TUI/web surfaces that show
+  why a task is using a given model. Produces the measurement
   `local-model-agent.md` consumes. Nothing implemented yet.
 - `agent-off-ramp.md` — a per-room `agent_off_ramp:` opt-in: when free text
   maps to no declared intent, hand the turn to an agent `converse` answer

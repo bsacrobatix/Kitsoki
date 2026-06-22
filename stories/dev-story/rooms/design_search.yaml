@@ -167,15 +167,27 @@ states:
                 design_change_target:    ""
 
       # Overlap found: continue an existing draft. No new folder is created —
-      # the existing draft's directory becomes the workspace, and refine
-      # scaffolds/amends the brief in place.
+      # an in-progress draft directory becomes the workspace. Accepted proposal
+      # files keep design_change_target pointed at the file and get a scratch
+      # workspace for 001/004 artifacts.
       change_existing:
         - target: design_refine
           effects:
             - set:
                 design_overlap_decision: "change_existing"
                 design_change_target:    "{{ slots.target }}"
-                design_workspace:        "{{ slots.target }}"
+            - invoke: host.run
+              id: amend_workspace
+              with:
+                cmd: python3
+                args:
+                  - "stories/dev-story/scripts/design_amend_workspace.py"
+                  - "{{ slots.target }}"
+                  - "{{ world.design_slug }}"
+              bind:
+                design_slug:      "stdout_json.slug"
+                design_workspace: "stdout_json.workspace"
+              on_error: design_search
 
       # Override: create a new proposal despite the overlap (recorded for audit).
       override_new:

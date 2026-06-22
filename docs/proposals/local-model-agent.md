@@ -6,7 +6,9 @@ tests, opt-in wiring, make targets, docs, **real download pins, and a verified
 end-to-end zero-touch fetch+cache+inference run** all landed (see "What
 shipped"). Throughput is now measured (former Open Question 3). **Two** items
 remain before this proposal is deleted: the calibrated no_match → routing verdict
-mapping, and a live A/B against `agent.claude` inside a real story.
+mapping, and a live A/B against `agent.claude` inside a real story. The broader
+benchmarking and evidence-based promotion mechanism now lives in
+[`agent-contract-eval.md`](agent-contract-eval.md).
 **Kind:**   runtime
 **Epic:**   — standalone
 
@@ -67,8 +69,11 @@ Landed in code:
           extra env. Managed mode now zero-touch on both platforms.
 - [ ] 3.2 Live A/B: point one real story's decide gate (e.g. the pr-refinement
           merge judge) at agent.local behind a flag and compare against
-          agent.claude. The fetchable model now exists (3.3), so this is
-          unblocked. NOTE the calibration gap surfaced by the e2e: the 1.5B
+          agent.claude. Treat this as the local-backend pilot for
+          agent-contract-eval.md's task-adherence benchmark: same bounded
+          examples, same schema/toolbox conformance, same pass-rate and
+          latency/cost evidence. The fetchable model now exists (3.3), so this
+          is unblocked. NOTE the calibration gap surfaced by the e2e: the 1.5B
           returns confidence as a percentage unless the prompt states the 0..1
           scale — the decide prompt must specify field scales, and out-of-range
           output correctly trips ValidateSubmission → the agent.claude fallback.
