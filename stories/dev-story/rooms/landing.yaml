@@ -35,17 +35,30 @@ states:
     relevant_world: [ticket_id, ticket_title, ticket_type, last_pr_url, status, inbox_unread, workdir, feature_branch, captured, landing_request, landing_note]
 
     # Free-text sink (docs/architecture/semantic-routing.md §1.5). Prose
-    # the match tiers don't claim — a fresh request OR a continuation like
-    # "ok go ahead" / "do it" — routes deterministically (no LLM) to the
-    # `work` agent, filling its required `request` slot with the whole
-    # utterance. This is what makes the workbench a real thread: the
-    # routeViaDefaultIntent tier runs BEFORE the LLM/off-ramp path, so
-    # affirmations reach the write-capable workbench agent instead of
-    # being grabbed by a navigation example (the `drive: "go"` mis-route)
-    # or deflected to the read-only off-ramp. The off-ramp below remains
-    # declared as the read-only floor for any path this sink doesn't cover.
+    # the match tiers don't claim — a fresh request — routes
+    # deterministically (no LLM) to the `work` agent, filling its required
+    # `request` slot with the whole utterance. Affirmations while a plan is
+    # pending are intercepted BEFORE this sink by the pending-plan guard in
+    # `contextual_routing` (below), which routes them deterministically to
+    # `accept_plan` without an LLM call. Content-bearing follow-ups also hit
+    # the contextual guard and route to `work` (refine) with a recorded
+    # decision. The off-ramp below remains declared as the read-only floor
+    # for any path neither sink covers.
     # See .context/landing-onpath-offpath-bail.md slice C.
     default_intent: work
+
+    # Contextual routing (CRR slice 3): when a plan is pending at
+    # landing_note.plan, the pending-plan guard intercepts free-text input
+    # BEFORE default_intent fires — a bare affirmation routes to accept_plan
+    # (deterministic, no LLM) and content-bearing input routes to work
+    # (refine, also deterministic). This removes the prompt-only workaround
+    # that asked the workbench agent to infer "ok go ahead" as acceptance.
+    contextual_routing:
+      enabled: true
+      room_chat: work
+      plan_accept_intent: accept_plan
+      plan_refine_intent: work
+      pending_plan_path: landing_note.plan
 
     # Read-only → write-mode opt-in. Completes agent-write-mode-opt-in.md
     # Task 3.1 by opting the landing into the already-landed gate. Valid on

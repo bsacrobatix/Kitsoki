@@ -128,6 +128,24 @@ func (rw *childRewriter) rewriteState(s *State) {
 		s.DefaultIntent = rw.rewriteIntentRef(s.DefaultIntent)
 	}
 
+	// ContextualRouting intent refs (room_chat, plan_accept_intent,
+	// plan_refine_intent) are intent references exactly like DefaultIntent:
+	// authored bare, must be prefixed on import so they match the renamed On:
+	// arcs in the folded state. Without this, loader cross-reference validation
+	// fails on imported stories because the bare name no longer appears in On:
+	// or inScopeIntents after folding.
+	if cr := s.ContextualRouting; cr != nil {
+		if cr.RoomChat != "" {
+			cr.RoomChat = rw.rewriteIntentRef(cr.RoomChat)
+		}
+		if cr.PlanAcceptIntent != "" {
+			cr.PlanAcceptIntent = rw.rewriteIntentRef(cr.PlanAcceptIntent)
+		}
+		if cr.PlanRefineIntent != "" {
+			cr.PlanRefineIntent = rw.rewriteIntentRef(cr.PlanRefineIntent)
+		}
+	}
+
 	// OnEnter.
 	for i := range s.OnEnter {
 		rw.rewriteEffect(&s.OnEnter[i])

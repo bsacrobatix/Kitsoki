@@ -13,6 +13,7 @@ import (
 	"kitsoki/internal/semroute"
 	"kitsoki/internal/trace"
 	"kitsoki/internal/turncache"
+	"kitsoki/internal/world"
 )
 
 // Matcher returns the per-app semantic-routing [*semroute.Matcher],
@@ -136,6 +137,30 @@ func (o *Orchestrator) routeViaLLM(ctx context.Context, sid app.SessionID, turn 
 	return host.RunRoutingLLM(llmCtx, input, string(state), allowed)
 }
 
+// pendingPlan resolves a dotted world path (e.g. "landing_note.plan") and
+// reports whether a non-empty map is present at that path. Supports exactly
+// two components (key.field); a single-component path treats the whole key as
+// the value. Returns (nil, false) for an empty path, a missing key, or a
+// non-map / empty-map value.
+func pendingPlan(w world.World, path string) (map[string]any, bool) {
+	if path == "" {
+		return nil, false
+	}
+	dot := strings.IndexByte(path, '.')
+	if dot < 0 {
+		v, ok := w.Get(path).(map[string]any)
+		return v, ok && len(v) > 0
+	}
+	topKey := path[:dot]
+	restKey := path[dot+1:]
+	parent, ok := w.Get(topKey).(map[string]any)
+	if !ok || len(parent) == 0 {
+		return nil, false
+	}
+	plan, ok := parent[restKey].(map[string]any)
+	return plan, ok && len(plan) > 0
+}
+
 // routeViaContextualRouter fires when the active room has ContextualRouting.Enabled.
 // It dispatches host.RunContextRouteLLM through the configured agent plugin and
 // parses the resulting verdict:
@@ -162,6 +187,77 @@ func (o *Orchestrator) routeViaContextualRouter(
 	}
 
 	cr := stateDef.ContextualRouting
+
+	// Pending-plan guard (CRR slice 3): when a plan is present at the configured
+	// path, classify the utterance deterministically — no LLM call — so the
+	// affirmation→accept / content→refine hot path is replayable and recorded.
+	// This fires BEFORE the LLM call below, so default_intent: work never grabs
+	// an affirmation while a plan is pending (the guard short-circuits TrySemantic
+	// with a hit, preventing routeViaDefaultIntent from running).
+	if planPath := cr.PendingPlanPath; planPath != "" {
+		journey, journeyErr := o.loadJourney(sid)
+		if journeyErr != nil {
+			return nil, false, fmt.Errorf("routeViaContextualRouter: load journey: %w", journeyErr)
+		}
+		if _, hasPlan := pendingPlan(journey.World, planPath); hasPlan {
+			acceptIntent := cr.PlanAcceptIntent
+			if acceptIntent == "" {
+				acceptIntent = "accept_plan"
+			}
+			refineIntent := cr.PlanRefineIntent
+			if refineIntent == "" {
+				refineIntent = "work"
+			}
+
+			if IsAffirmation(input) {
+				// Affirmation: route to plan_accept_intent — advances the machine.
+				prov := RouteProvenance{
+					Source:     "pending_plan_affirmation",
+					MatchType:  "deterministic",
+					Confidence: 1.0,
+				}
+				tl.Debug(ctx, trace.EvTurnContextRouteDecided,
+					slog.String("class", string(ClassIntent)),
+					slog.String("intent", acceptIntent),
+					slog.Float64("confidence", 1.0),
+					slog.String("reason", "plan_affirmation"),
+				)
+				outcome, err := o.SubmitDirectRouted(ctx, sid, acceptIntent, map[string]any{}, input, prov)
+				if err != nil {
+					return nil, false, err
+				}
+				return outcome, true, nil
+			}
+
+			// Content-bearing follow-up: route to plan_refine_intent, capturing
+			// the utterance into its single required string slot.
+			slotName := ""
+			if ix, ok := lookupIntentByPath(o.def, state, refineIntent); ok {
+				slotName, _ = singleRequiredStringSlot(ix)
+			}
+			slots := map[string]any{}
+			if slotName != "" {
+				slots[slotName] = input
+			}
+			prov := RouteProvenance{
+				Source:     "pending_plan_refine",
+				MatchType:  "deterministic",
+				Confidence: 1.0,
+			}
+			tl.Debug(ctx, trace.EvTurnContextRouteDecided,
+				slog.String("class", string(ClassIntent)),
+				slog.String("intent", refineIntent),
+				slog.Float64("confidence", 1.0),
+				slog.String("reason", "plan_refine"),
+			)
+			outcome, err := o.SubmitDirectRouted(ctx, sid, refineIntent, slots, input, prov)
+			if err != nil {
+				return nil, false, err
+			}
+			return outcome, true, nil
+		}
+	}
+
 	lanes := make(map[string]string, 3)
 	if cr.HelpChat != "" {
 		lanes["help_chat"] = cr.HelpChat

@@ -18,14 +18,6 @@ In a previous turn of this same workbench session you reported:
 {{ args.prior_details }}
 </details>
 {% endif %}
-
-Treat the request above as a continuation of this thread when it reads as
-one — a short affirmation like "ok go ahead", "do it", "yes", "continue",
-or a follow-up that only makes sense against what you just proposed means
-*carry out / build on the work you described*, not start over. If instead
-it's a clearly new, unrelated request, just handle it fresh — the prior
-note is context, not an obligation. Either way, do not simply repeat the
-prior note back: the operator has already seen it.
 {% endif %}{% if args.prior_plan.goal %}
 ## The plan you last proposed
 

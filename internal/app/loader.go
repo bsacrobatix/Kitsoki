@@ -1348,6 +1348,26 @@ func validateStates(
 					addErr(fmt.Sprintf("state %q: contextual_routing.room_chat %q is not a declared intent", statePath, cr.RoomChat))
 				}
 			}
+			if cr.PlanAcceptIntent != "" {
+				if _, hasArc := s.On[cr.PlanAcceptIntent]; !hasArc {
+					addErr(fmt.Sprintf("state %q: contextual_routing.plan_accept_intent %q has no matching on: arc in this state", statePath, cr.PlanAcceptIntent))
+				}
+				_, inScope := inScopeIntents[cr.PlanAcceptIntent]
+				_, inGlobal := globalIntentDefs[cr.PlanAcceptIntent]
+				if !inScope && !inGlobal {
+					addErr(fmt.Sprintf("state %q: contextual_routing.plan_accept_intent %q is not a declared intent", statePath, cr.PlanAcceptIntent))
+				}
+			}
+			if cr.PlanRefineIntent != "" {
+				if _, hasArc := s.On[cr.PlanRefineIntent]; !hasArc {
+					addErr(fmt.Sprintf("state %q: contextual_routing.plan_refine_intent %q has no matching on: arc in this state", statePath, cr.PlanRefineIntent))
+				}
+				_, inScope := inScopeIntents[cr.PlanRefineIntent]
+				_, inGlobal := globalIntentDefs[cr.PlanRefineIntent]
+				if !inScope && !inGlobal {
+					addErr(fmt.Sprintf("state %q: contextual_routing.plan_refine_intent %q is not a declared intent", statePath, cr.PlanRefineIntent))
+				}
+			}
 		}
 
 		// Validate the typed view payload (Phase A of the view-elements

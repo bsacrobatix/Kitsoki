@@ -685,6 +685,61 @@ type VarDef struct {
 	Values  []string `yaml:"values,omitempty"` // for enum types
 }
 
+// UnmarshalYAML implements goccy/go-yaml's BytesUnmarshaler. Accepts two author
+// forms:
+//
+//   - Standard schema form: { type: string, default: "" } — the usual authoring
+//     style; decoded field by field.
+//   - Inline default form: any YAML value that does NOT contain a "type",
+//     "default", or "values" key. The whole value is stored as the variable's
+//     Default directly. This lets test app YAMLs seed rich initial world state:
+//
+//     world:
+//       landing_note:
+//         plan:
+//           goal: "Migrate issues."
+//
+//     is equivalent to: landing_note: { default: { plan: { goal: "..." } } }
+func (v *VarDef) UnmarshalYAML(data []byte) error {
+	// Probe: decode to a raw map to inspect which keys are present.
+	var probe map[string]any
+	if goyaml.Unmarshal(data, &probe) == nil {
+		_, hasType := probe["type"]
+		_, hasDefault := probe["default"]
+		_, hasValues := probe["values"]
+		if hasType || hasDefault || hasValues {
+			// Standard schema form — decode through a shadow alias to avoid
+			// infinite recursion while still validating field names.
+			type varDefShadow struct {
+				Type    string   `yaml:"type"`
+				Default any      `yaml:"default,omitempty"`
+				Values  []string `yaml:"values,omitempty"`
+			}
+			var s varDefShadow
+			if err := goyaml.Unmarshal(data, &s); err != nil {
+				return err
+			}
+			v.Type = s.Type
+			v.Default = s.Default
+			v.Values = s.Values
+			return nil
+		}
+		// No recognised schema keys → inline default value (e.g. a rich
+		// nested object like { plan: { goal: ... } }).
+		if len(probe) > 0 {
+			v.Default = probe
+		}
+		return nil
+	}
+	// Not a mapping — scalar or sequence; treat as the default value.
+	var def any
+	if err := goyaml.Unmarshal(data, &def); err != nil {
+		return err
+	}
+	v.Default = def
+	return nil
+}
+
 // WorldSchema is the compiled schema of all world variables.
 type WorldSchema map[string]VarDef
 
@@ -1181,6 +1236,17 @@ type ContextualRoutingConfig struct {
 	RoomChat string `yaml:"room_chat,omitempty"`
 	// MetaChat names the meta-mode group.verb for class=meta_edit (group-2 lane; stub in slice 1).
 	MetaChat string `yaml:"meta_chat,omitempty"`
+	// PendingPlanPath is the dotted world path (e.g. "landing_note.plan") where the
+	// pending plan object lives. When non-empty and the value at that path is a
+	// non-empty map, the affirmation→accept / content→refine guard fires deterministically
+	// before any LLM call. Default: "landing_note.plan" (applied by the orchestrator).
+	PendingPlanPath string `yaml:"pending_plan_path,omitempty"`
+	// PlanAcceptIntent names the intent to route to when a bare affirmation is
+	// received while a plan is pending. When empty, defaults to "accept_plan".
+	PlanAcceptIntent string `yaml:"plan_accept_intent,omitempty"`
+	// PlanRefineIntent names the intent to route to when content-bearing input
+	// is received while a plan is pending. When empty, defaults to "work".
+	PlanRefineIntent string `yaml:"plan_refine_intent,omitempty"`
 }
 
 // UnmarshalYAML decodes the agent_off_ramp: field from one of two author
