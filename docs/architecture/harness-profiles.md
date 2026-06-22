@@ -63,7 +63,7 @@ default_profile: claude-native          # the profile new sessions start on
 harness_profiles:
   claude-native:                        # your native Anthropic Claude Code subscription
     backend: claude                     # (ambient auth; the default — no secrets)
-    model: sonnet
+    model: opus
     models: [opus, sonnet, haiku]       # claude's short model names
     effort: medium
     efforts: [low, medium, high, xhigh, max]   # claude supports --effort
