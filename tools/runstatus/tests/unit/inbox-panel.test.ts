@@ -108,6 +108,7 @@ describe("InboxPanel", () => {
     expect(document.body.textContent).toContain("chat chat-2");
     expect(document.body.textContent).toContain("tmux kit-bg");
     expect(document.body.textContent).toContain("devbox");
+    expect(document.body.textContent).toContain("open context");
     expect(inbox.workItems[1]?.reacquire_tool).toBe("chat.show");
 
     (rows[1] as HTMLButtonElement).click();
@@ -161,6 +162,7 @@ describe("InboxPanel", () => {
     expect(document.body.textContent).toContain("Review this");
     expect(document.body.textContent).toContain("https://github.com/acme/repo/pull/42");
     expect(document.body.textContent).toContain("action_required");
+    expect(document.body.textContent).toContain("jump");
 
     wrapper.unmount();
   });

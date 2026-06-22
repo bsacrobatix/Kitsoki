@@ -70,6 +70,7 @@
                 <span class="work-item__meta">
                   <span>{{ item.status || item.kind }}</span>
                   <span v-if="item.updated_at">{{ relativeTime(item.updated_at) }}</span>
+                  <span class="work-item__action">{{ workAction(item) }}</span>
                 </span>
               </span>
             </button>
@@ -211,6 +212,12 @@ function workContext(item: WorkItem): string {
   if (item.tmux_session) parts.push(`tmux ${item.tmux_session}`);
   if (item.tmux_host) parts.push(item.tmux_host);
   return parts.join(" | ");
+}
+
+function workAction(item: WorkItem): string {
+  if (item.kind === "notification") return "jump";
+  if (item.reacquire_tool === "chat.show" || item.chat_id) return "open context";
+  return "open session";
 }
 
 function onKeydown(e: KeyboardEvent): void {
@@ -382,9 +389,14 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 }
 .work-item__meta {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
   color: var(--k-fg-muted, #64748b);
   font-size: 0.68rem;
+}
+.work-item__action {
+  color: var(--k-fg-accent, #60a5fa);
+  font-weight: 650;
 }
 .inbox-panel__empty {
   color: var(--k-fg-subtle, #475569);
