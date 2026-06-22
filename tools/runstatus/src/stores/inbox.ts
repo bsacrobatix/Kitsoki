@@ -47,6 +47,7 @@ export const useInboxStore = defineStore("inbox", () => {
   let unsubscribe: (() => void) | null = null;
   let liveSource: LiveSource | null = null;
   let workRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let workRefreshSeq = 0;
 
   // ---- getters ----
   const hasNeedsAttention = computed(() => needsAttention.value > 0);
@@ -125,16 +126,21 @@ export const useInboxStore = defineStore("inbox", () => {
     source: Pick<LiveSource, "listWork"> | null = liveSource
   ): Promise<void> {
     if (!source) return;
+    const seq = ++workRefreshSeq;
     workLoading.value = true;
     workError.value = "";
     try {
       const result: WorkListResult = await source.listWork();
+      if (seq !== workRefreshSeq) return;
       workItems.value = result.items ?? [];
       workSummary.value = result.summary ?? null;
     } catch (err) {
+      if (seq !== workRefreshSeq) return;
       workError.value = err instanceof Error ? err.message : String(err);
     } finally {
-      workLoading.value = false;
+      if (seq === workRefreshSeq) {
+        workLoading.value = false;
+      }
     }
   }
 

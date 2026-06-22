@@ -12,6 +12,7 @@ import type {
   LiveSource,
   Notification,
   NotificationFrame,
+  WorkItem,
   WorkListResult,
 } from "../../src/data/live-source.js";
 
@@ -77,6 +78,28 @@ function fakeSource(overrides: Record<string, unknown> = {}): LiveSource {
     dismissNotification: vi.fn().mockResolvedValue({ ok: true }),
     ...overrides,
   } as unknown as LiveSource;
+}
+
+function workResult(
+  over: Partial<WorkListResult["summary"]> = {},
+  items: WorkItem[] = []
+): WorkListResult {
+  return {
+    summary: {
+      items: items.length,
+      needs_attention: 0,
+      jobs_running: 0,
+      jobs_awaiting_input: 0,
+      jobs_terminal: 0,
+      notifications_unread: 0,
+      notifications_action_required: 0,
+      pending_drives: 0,
+      backgrounded_chats: 0,
+      ...over,
+    },
+    sessions: [],
+    items,
+  };
 }
 
 describe("inbox store", () => {
@@ -209,6 +232,88 @@ describe("inbox store", () => {
     inbox.teardown();
     await vi.advanceTimersByTimeAsync(15_000);
     expect(src.listWork).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the newest active-work refresh when responses arrive out of order", async () => {
+    const inbox = useInboxStore();
+    let resolveFirst: (value: WorkListResult) => void = () => {};
+    let resolveSecond: (value: WorkListResult) => void = () => {};
+    const src = fakeSource({
+      listWork: vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<WorkListResult>((resolve) => {
+              resolveFirst = resolve;
+            })
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise<WorkListResult>((resolve) => {
+              resolveSecond = resolve;
+            })
+        ),
+    });
+
+    const first = inbox.refreshWork(src);
+    const second = inbox.refreshWork(src);
+
+    resolveSecond(
+      workResult({ items: 2, pending_drives: 2 }, [
+        {
+          kind: "pending_drive",
+          priority: 65,
+          session_id: "web-session-1",
+          title: "newer queued work",
+          status: "pending",
+          reacquire_tool: "chat.show",
+          reacquire_session_id: "web-session-1",
+          drive_id: "drive-new",
+          chat_id: "chat-new",
+        },
+        {
+          kind: "backgrounded_chat",
+          priority: 60,
+          session_id: "web-session-1",
+          title: "newer background chat",
+          status: "pty_background",
+          reacquire_tool: "chat.show",
+          reacquire_session_id: "web-session-1",
+          chat_id: "chat-bg",
+        },
+      ])
+    );
+    await second;
+
+    expect(inbox.activeWorkCount).toBe(2);
+    expect(inbox.workItems.map((item) => item.title)).toEqual([
+      "newer queued work",
+      "newer background chat",
+    ]);
+
+    resolveFirst(
+      workResult({ items: 1, pending_drives: 1 }, [
+        {
+          kind: "pending_drive",
+          priority: 65,
+          session_id: "web-session-1",
+          title: "stale queued work",
+          status: "pending",
+          reacquire_tool: "chat.show",
+          reacquire_session_id: "web-session-1",
+          drive_id: "drive-old",
+          chat_id: "chat-old",
+        },
+      ])
+    );
+    await first;
+
+    expect(inbox.activeWorkCount).toBe(2);
+    expect(inbox.workItems.map((item) => item.title)).toEqual([
+      "newer queued work",
+      "newer background chat",
+    ]);
+    expect(inbox.workLoading).toBe(false);
   });
 
   it("syncGitHub records counts and refreshes active work", async () => {
