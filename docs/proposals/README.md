@@ -60,6 +60,18 @@ thought.
 
 ## Current proposals
 
+- [`session-mining-backend-generalization.md`](session-mining-backend-generalization.md)
+  — **epic.** Generalize session mining from Claude Code-shaped ingestion into a
+  backend-normal corpus for Claude Code, Codex, kitsoki traces, and imported
+  JSONL. The shared substrate provides source adapters, canonical sessions,
+  evidence indexes, reusable analysis drivers, route-feedback mining, and
+  no-LLM fixture seams for examples, scenarios, story coverage, and progressive
+  determinism. One focused child proposal is split out:
+  - [`kitsoki-trace-pattern-matching.md`](kitsoki-trace-pattern-matching.md)
+    (tracing) — deterministic pattern matching over kitsoki JSONL traces:
+    typed event tokens, bounded path windows, directly-follows graphs,
+    cycle-aware path signatures, route-feedback aggregation, and exact
+    structural verification for promoted candidates.
 - [`stories-as-trainable-models.md`](stories-as-trainable-models.md) — **epic.**
   Reframe a kitsoki story as a quasi-deterministic, **trainable** model of a
   domain: forward pass = running a session, training set = the event log, but the
