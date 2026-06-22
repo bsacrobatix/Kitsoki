@@ -24,6 +24,7 @@ func TestHelpCommandLists(t *testing.T) {
 		"room switches",
 		"system",
 		"/help",
+		"/chat show",
 		"/intents",
 		"/work [--all]",
 		"/world",
@@ -33,6 +34,16 @@ func TestHelpCommandLists(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("/help missing %q in output\n---\n%s", want, body)
 		}
+	}
+}
+
+func TestChatScopeDisplayStripsSessionPrefix(t *testing.T) {
+	t.Parallel()
+	if got := chatScopeDisplay("\x00session=session-1\x00mcp-smoke"); got != "mcp-smoke" {
+		t.Fatalf("chatScopeDisplay session scoped = %q, want mcp-smoke", got)
+	}
+	if got := chatScopeDisplay("plain-scope"); got != "plain-scope" {
+		t.Fatalf("chatScopeDisplay plain = %q, want plain-scope", got)
 	}
 }
 

@@ -28,6 +28,7 @@ func (HelpCommand) Run(m RootModel, _ []string) (string, RootModel, tea.Cmd) {
 		{"chat blocks", []row{
 			{"/help", "this list"},
 			{"/ideas <text>", "jot an idea to ideas.md without interrupting the conversation"},
+			{"/chat show <id>", "show focused async chat context without attaching"},
 			{"/intents [<n>]", "print available intents; <n> dispatches by index"},
 			{"/intents auto on|off", "auto-print intents after each turn"},
 			{"/provider [<name|n>]", "list harness profiles; <name|n> switches the backend/provider (next turn)"},

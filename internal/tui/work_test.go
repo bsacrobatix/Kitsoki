@@ -104,6 +104,10 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 		OriginState:     "foyer",
 	})
 	require.NoError(t, err)
+	_, err = cs.AppendMessage(ctx, chat.ID, "user", "please review the proposal", nil)
+	require.NoError(t, err)
+	_, err = cs.AppendMessage(ctx, chat.ID, "assistant", "queued review context is ready", nil)
+	require.NoError(t, err)
 
 	dispatchingChat, err := cs.Create(ctx, "cloak", "agent", "scope-dispatching", "Dispatching review")
 	require.NoError(t, err)
@@ -167,6 +171,7 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	require.Contains(t, tx, "dispatching review")
 	require.Contains(t, tx, "queued")
 	require.Contains(t, tx, "continue queued review")
+	requireContainsNear(t, currentWork, "continue queued review", "/chat show "+chat.ID)
 	require.NotContains(t, tx, "continue other queued review")
 	require.Contains(t, tx, "chat")
 	require.Contains(t, tx, "Background Claude")
@@ -209,6 +214,14 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	cached = tuipkg.CachedSessionListForTest(rm)
 	require.Len(t, cached, 2)
 	require.ElementsMatch(t, []string{bg.ID, other.ID}, []string{cached[0].ChatID, cached[1].ChatID})
+
+	m = runTurnBlocking(t, m, "/chat show "+chat.ID)
+	tx = extractTranscript(t, m)
+	require.Contains(t, tx, "chat context")
+	require.Contains(t, tx, "Review proposal")
+	require.Contains(t, tx, "scope")
+	require.Contains(t, tx, "please review the proposal")
+	require.Contains(t, tx, "queued review context is ready")
 }
 
 func transcriptAfter(t *testing.T, text, marker string) string {

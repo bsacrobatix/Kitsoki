@@ -522,6 +522,10 @@ func TestSessionCommand_RendersTUIWorkOverMCP(t *testing.T) {
 		OriginState:     "foyer",
 	})
 	require.NoError(t, err)
+	_, err = chatStore.AppendMessage(ctx, currentChat.ID, "user", "review the queued MCP task", nil)
+	require.NoError(t, err)
+	_, err = chatStore.AppendMessage(ctx, currentChat.ID, "assistant", "focused context is ready", nil)
+	require.NoError(t, err)
 	otherChat, err := chatStore.Create(ctx, "cloak", "agent-room", "scope-b", "other queued")
 	require.NoError(t, err)
 	_, err = chatStore.Enqueue(ctx, chats.EnqueueOptions{
@@ -561,10 +565,25 @@ func TestSessionCommand_RendersTUIWorkOverMCP(t *testing.T) {
 	assert.Contains(t, rendered.Frame.Text, "active work (all sessions): 3 item(s)")
 	assert.Contains(t, rendered.Frame.Text, "current queued review")
 	assert.Contains(t, rendered.Frame.Text, "current session")
+	assert.Contains(t, rendered.Frame.Text, "/chat show "+currentChat.ID)
 	assert.Contains(t, rendered.Frame.Text, "other queued review")
 	assert.Contains(t, rendered.Frame.Text, "session other-session")
 	assert.Contains(t, rendered.Frame.Text, "background session")
 	assert.Contains(t, rendered.Frame.Text, "/sessions attach 1")
+
+	res, err = callTool(ctx, cs, "session.command", map[string]any{
+		"handle":  handle,
+		"command": "/chat show " + currentChat.ID,
+		"cols":    120,
+		"rows":    35,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.command chat show: %s", contentText(res))
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &rendered))
+	assert.Contains(t, rendered.Frame.Text, "chat context")
+	assert.Contains(t, rendered.Frame.Text, "current queued")
+	assert.Contains(t, rendered.Frame.Text, "review the queued MCP task")
+	assert.Contains(t, rendered.Frame.Text, "focused context is ready")
 
 	res, err = callTool(ctx, cs, "session.command", map[string]any{
 		"handle":  handle,

@@ -143,9 +143,9 @@ new state, allowed intents, slots needed) **and** the rendered `Frame` — so th
 agent reasons on metadata and *sees* the screen in one call.
 
 `session.command` exists for TUI-only operator surfaces that are not
-orchestrator turns, especially smoke-testing `/work --all` through MCP. It uses
-the live TUI slash dispatcher and rejects commands that return an asynchronous
-terminal side effect, such as attaching to tmux.
+orchestrator turns, especially smoke-testing `/work --all` and `/chat show
+<id>` through MCP. It uses the live TUI slash dispatcher and rejects commands
+that return an asynchronous terminal side effect, such as attaching to tmux.
 
 `session.inspect` also carries compact per-handle background-job and inbox projections.
 `async` summarizes running, awaiting-input, terminal, unread, and unread

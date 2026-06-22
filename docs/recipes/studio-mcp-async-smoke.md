@@ -186,7 +186,17 @@ go run ./cmd/kitsoki mcp-test \
         "command": "/work --all"
       },
       "expect_contains": {
-        "structuredContent.frame.text": "review the queued MCP smoke task"
+        "structuredContent.frame.text": "/chat show ${chat_id}"
+      }
+    },
+    {
+      "tool": "session.command",
+      "args": {
+        "handle": "chat-drive-smoke",
+        "command": "/chat show ${chat_id}"
+      },
+      "expect_contains": {
+        "structuredContent.frame.text": "Async MCP chat"
       }
     }
   ]'
@@ -196,7 +206,10 @@ This smoke exercises the session-origin stamping that lets `studio.work`,
 TUI `/work`, and the web inbox active-work list all find pending chat drives
 created by ordinary story `host.chat.drive` effects. `session.command` runs the
 real TUI slash dispatcher and returns the rendered frame, so the smoke proves
-the terminal active-work affordance without launching an interactive TUI.
+the terminal active-work affordance without launching an interactive TUI. TUI
+`/work` prints `/chat show <id>` for queued/dispatching chat drives, and
+`/chat show` gives the same focused async chat context that `chat.show` exposes
+over MCP.
 For backgrounded Claude PTY rows, `/work --all` also seeds the TUI's
 `/sessions attach <N>` cache; studio MCP can verify the selected target with
 `session.command` and `/sessions attach <N> --dry-run` without handing the

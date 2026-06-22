@@ -258,6 +258,7 @@ func workRowsForDrives(drives []chats.Drive, sid string, allSessions bool) []wor
 				hint += ", session " + d.OriginSessionID
 			}
 		}
+		hint += "; /chat show " + d.ChatID
 		out = append(out, workRow{
 			Kind:      workDriveKind(d.Status),
 			Status:    string(d.Status),
