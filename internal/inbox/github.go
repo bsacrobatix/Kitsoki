@@ -2,6 +2,7 @@ package inbox
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"kitsoki/internal/app"
@@ -46,8 +47,23 @@ func NewGitHubNotification(sid app.SessionID, repo, teleportState string, item h
 // GitHubOriginRef returns the stable dedupe key for a GitHub inbox item.
 func GitHubOriginRef(repo string, item host.GitHubInboxItem) string {
 	base := "github:"
-	if repo = strings.TrimSpace(repo); repo != "" {
+	if repo = strings.TrimSpace(repo); repo == "" {
+		repo = githubRepoFromURL(item.URL)
+	}
+	if repo != "" {
 		base += repo + "/"
 	}
 	return fmt.Sprintf("%s%s/%s", base, item.Kind, item.Number)
+}
+
+func githubRepoFromURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !strings.EqualFold(u.Hostname(), "github.com") {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return parts[0] + "/" + parts[1]
 }

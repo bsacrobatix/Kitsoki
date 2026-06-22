@@ -174,7 +174,7 @@ func TestInboxClockInjection_SyntheticPollSyncsGitHubOnThrottle(t *testing.T) {
 	ns, err := js.ListNotifications(context.Background(), rm.SessionIDForTest(), 20)
 	require.NoError(t, err)
 	require.Len(t, ns, 1)
-	require.Equal(t, "github:issue/7", ns[0].OriginRef)
+	require.Equal(t, "github:acme/repo/issue/7", ns[0].OriginRef)
 
 	updated, cmd = m.Update(tuipkg.InboxPollMsg())
 	require.NotNil(t, cmd)
