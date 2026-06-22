@@ -90,6 +90,16 @@ type Spec struct {
 
 	// Viewport overrides [DefaultViewport] when non-zero.
 	Viewport Viewport
+
+	// Query appends SPA query parameters to the hash route. It is intentionally
+	// route-agnostic so callers can deep-link browser affordances like focused
+	// chat context without teaching webshot about those features.
+	Query map[string]string
+
+	// AssertText, when non-empty, asks the browser helper to verify each string
+	// appears in the rendered document before it screenshots. This keeps MCP
+	// render smokes honest without making the Go side parse pixels.
+	AssertText []string
 }
 
 // live reports whether the spec is the live-session form.
@@ -127,9 +137,10 @@ type ServerProvider interface {
 // CaptureRequest is the browser-invoker's input: the served URL to screenshot,
 // the output file path, and the fixed viewport (capture == render).
 type CaptureRequest struct {
-	URL      string
-	OutPath  string
-	Viewport Viewport
+	URL        string
+	OutPath    string
+	Viewport   Viewport
+	AssertText []string
 }
 
 // BrowserInvoker rasterises a served URL to a PNG written at OutPath. The
@@ -195,9 +206,10 @@ func Shot(ctx context.Context, spec Spec, opts Options) ([]byte, error) {
 	defer removeFile(tmp)
 
 	if err := opts.Browser.Capture(ctx, CaptureRequest{
-		URL:      target,
-		OutPath:  tmp,
-		Viewport: spec.viewport(),
+		URL:        target,
+		OutPath:    tmp,
+		Viewport:   spec.viewport(),
+		AssertText: spec.AssertText,
 	}); err != nil {
 		return nil, fmt.Errorf("webshot: capture: %w", err)
 	}
@@ -215,8 +227,7 @@ func Shot(ctx context.Context, spec Spec, opts Options) ([]byte, error) {
 // TargetURL builds the SPA URL to screenshot for spec against base. The SPA uses
 // hash routing (createWebHashHistory, tools/runstatus/src/router.ts), so the
 // live-session surface is base + "#/s/<id>" and the spec form is the home
-// surface base + "#/". A live spec's State, if set, is appended as a query the
-// SPA may honour for deep-linking; it never changes the route.
+// surface base + "#/".
 func TargetURL(base string, spec Spec) (string, error) {
 	if base == "" {
 		return "", errors.New("webshot: empty server base URL")
@@ -234,6 +245,13 @@ func TargetURL(base string, spec Spec) (string, error) {
 		u.Fragment = "/s/" + spec.SessionID
 	} else {
 		u.Fragment = "/"
+	}
+	if len(spec.Query) > 0 {
+		q := url.Values{}
+		for k, v := range spec.Query {
+			q.Set(k, v)
+		}
+		u.Fragment += "?" + q.Encode()
 	}
 	return u.String(), nil
 }

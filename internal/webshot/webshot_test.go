@@ -29,15 +29,17 @@ import (
 // real image to return without launching Chromium. It records the URL it was
 // asked to capture so a test can assert URL construction.
 type stubInvoker struct {
-	gotURL      string
-	gotViewport Viewport
-	calls       int32
+	gotURL        string
+	gotViewport   Viewport
+	gotAssertText []string
+	calls         int32
 }
 
 func (s *stubInvoker) Capture(_ context.Context, req CaptureRequest) error {
 	atomic.AddInt32(&s.calls, 1)
 	s.gotURL = req.URL
 	s.gotViewport = req.Viewport
+	s.gotAssertText = append([]string(nil), req.AssertText...)
 	img := image.NewRGBA(image.Rect(0, 0, req.Viewport.Width, req.Viewport.Height))
 	// Paint one pixel so the PNG is unambiguously non-empty.
 	img.Set(0, 0, color.RGBA{R: 1, A: 255})
@@ -113,6 +115,22 @@ func TestShot_ReturnsPNGOfKnownState(t *testing.T) {
 	}
 	if atomic.LoadInt32(&inv.calls) != 1 {
 		t.Errorf("browser invoked %d times, want 1", inv.calls)
+	}
+}
+
+func TestTargetURL_AppendsHashQuery(t *testing.T) {
+	got, err := TargetURL("http://127.0.0.1:12345", Spec{
+		SessionID: "sid-123",
+		Query: map[string]string{
+			"chat":  "chat-456",
+			"embed": "1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("TargetURL: %v", err)
+	}
+	if want := "http://127.0.0.1:12345#/s/sid-123?chat=chat-456&embed=1"; got != want {
+		t.Fatalf("TargetURL = %q, want %q", got, want)
 	}
 }
 
@@ -262,18 +280,41 @@ func TestNodeInvoker_BuildsWebShotArgv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	if rec.dir != "/repo" {
-		t.Errorf("cwd = %q, want /repo", rec.dir)
+	if rec.dir != filepath.Join("/repo", "tools", "runstatus") {
+		t.Errorf("cwd = %q, want /repo/tools/runstatus", rec.dir)
 	}
 	if rec.name != "pnpm" {
 		t.Errorf("command = %q, want pnpm", rec.name)
 	}
 	joined := strings.Join(rec.args, " ")
 	for _, want := range []string{
-		filepath.Join("tools", "runstatus", "web-shot.ts"),
+		"web-shot.ts",
 		"--url http://127.0.0.1:9/#/",
 		"--out /tmp/out.png",
 		"--viewport 1600x900",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv %q missing %q", joined, want)
+		}
+	}
+}
+
+func TestNodeInvoker_BuildsAssertTextArgv(t *testing.T) {
+	rec := &recordingRunner{}
+	inv := &NodeInvoker{RepoRoot: "/repo", Runner: rec}
+	err := inv.Capture(context.Background(), CaptureRequest{
+		URL:        "http://127.0.0.1:9/#/",
+		OutPath:    "/tmp/out.png",
+		Viewport:   Viewport{Width: 1600, Height: 900},
+		AssertText: []string{"Active work", "May I edit README.md?"},
+	})
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	joined := strings.Join(rec.args, " ")
+	for _, want := range []string{
+		"--assert-text Active work",
+		"--assert-text May I edit README.md?",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("argv %q missing %q", joined, want)

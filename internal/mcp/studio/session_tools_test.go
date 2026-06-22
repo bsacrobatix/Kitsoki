@@ -21,6 +21,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"os"
 	"testing"
 	"time"
 
@@ -28,8 +29,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
+	"kitsoki/internal/jobs"
 	studio "kitsoki/internal/mcp/studio"
+	"kitsoki/internal/store"
 )
 
 const (
@@ -64,6 +68,13 @@ func replayBuilder() studio.HarnessBuilder {
 func newReplayServer(t *testing.T) (*studio.Server, *studio.StudioSession) {
 	t.Helper()
 	sess := studio.NewStudioSession(replayBuilder())
+	return studio.NewServer(sess), sess
+}
+
+func newReplayServerWithChatStore(t *testing.T, chatStore *chats.Store) (*studio.Server, *studio.StudioSession) {
+	t.Helper()
+	sess := studio.NewStudioSession(replayBuilder())
+	sess.SetChatStore(chatStore)
 	return studio.NewServer(sess), sess
 }
 
@@ -268,6 +279,492 @@ func TestSessionSubmit_StreamsProgressNotifications(t *testing.T) {
 	assert.Contains(t, got, "session.submit: completed for "+handle+" at cloakroom")
 }
 
+func TestSessionSubmit_BackgroundJobCompletesOverMCP(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+	appPath := writeBackgroundJobStory(t)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": appPath,
+		"harness":    "replay",
+		"trace":      t.TempDir() + "/trace.jsonl",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new: %s", contentText(res))
+	var ok studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
+
+	res, err = callTool(ctx, cs, "session.submit", map[string]any{
+		"handle": ok.Handle,
+		"intent": "enter",
+		"cols":   100,
+		"rows":   30,
+	})
+	require.NoError(t, err)
+	submitted := driveResult(t, res)
+	require.True(t, submitted.OK)
+	require.Equal(t, "running", submitted.Outcome.State)
+	require.Equal(t, "running", submitted.Frame.Metadata.State)
+	require.NotContains(t, submitted.Frame.Text, "mcp-bg-done")
+
+	var inspected studio.InspectResult
+	require.Eventually(t, func() bool {
+		res, err := callTool(ctx, cs, "session.inspect", map[string]any{"handle": ok.Handle})
+		if err != nil || res.IsError {
+			return false
+		}
+		if err := json.Unmarshal([]byte(contentText(res)), &inspected); err != nil {
+			return false
+		}
+		if inspected.World["result"] != "mcp-bg-done" {
+			return false
+		}
+		if len(inspected.Jobs) != 1 || inspected.Jobs[0].Status != jobs.JobDone {
+			return false
+		}
+		severities := map[jobs.NotificationSeverity]bool{}
+		for _, n := range inspected.Notifications {
+			severities[n.Severity] = true
+		}
+		return severities[jobs.SeverityInfo] && severities[jobs.SeveritySuccess]
+	}, 3*time.Second, 25*time.Millisecond)
+	require.Len(t, inspected.Jobs, 1)
+	assert.Equal(t, "host.run", inspected.Jobs[0].Kind)
+	assert.Equal(t, "running", inspected.Jobs[0].OriginState)
+	assert.Equal(t, inspected.Jobs[0].ID, inspected.World["last_job_id"])
+	assert.NotZero(t, inspected.Jobs[0].CreatedAtUnixMilli)
+	assert.NotZero(t, inspected.Jobs[0].FinishedAtUnixMilli)
+
+	require.GreaterOrEqual(t, len(inspected.Notifications), 2)
+	var completion studio.InboxInspectItem
+	for _, n := range inspected.Notifications {
+		if n.Severity == jobs.SeveritySuccess {
+			completion = n
+			break
+		}
+	}
+	require.NotEmpty(t, completion.ID)
+	assert.Equal(t, inspected.Jobs[0].ID, completion.TeleportJobID)
+	assert.Equal(t, "job", completion.OriginKind)
+	assert.NotZero(t, completion.CreatedAtUnixMilli)
+
+	res, err = callTool(ctx, cs, "render.tui", map[string]any{
+		"handle": ok.Handle,
+		"cols":   100,
+		"rows":   30,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "render.tui: %s", contentText(res))
+	var rendered studio.RenderTUIResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &rendered))
+	assert.Contains(t, rendered.Frame.Text, "mcp-bg-done")
+}
+
+func TestSessionSubmit_BackgroundJobVisibleWhileRunningOverMCP(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+	appPath := writeSlowBackgroundJobStory(t)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": appPath,
+		"harness":    "replay",
+		"trace":      t.TempDir() + "/trace.jsonl",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new: %s", contentText(res))
+	var ok studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
+
+	res, err = callTool(ctx, cs, "session.submit", map[string]any{
+		"handle": ok.Handle,
+		"intent": "enter",
+	})
+	require.NoError(t, err)
+	require.True(t, driveResult(t, res).OK)
+
+	var running studio.InspectResult
+	require.Eventually(t, func() bool {
+		res, err := callTool(ctx, cs, "session.inspect", map[string]any{"handle": ok.Handle})
+		if err != nil || res.IsError {
+			return false
+		}
+		if err := json.Unmarshal([]byte(contentText(res)), &running); err != nil {
+			return false
+		}
+		return len(running.Jobs) == 1 && running.Jobs[0].Status == jobs.JobRunning
+	}, time.Second, 10*time.Millisecond)
+
+	require.Len(t, running.Jobs, 1)
+	assert.Equal(t, "host.run", running.Jobs[0].Kind)
+	assert.Equal(t, "running", running.Jobs[0].OriginState)
+	assert.Equal(t, 1, running.Async.JobsTotal)
+	assert.Equal(t, 1, running.Async.JobsRunning)
+	assert.Equal(t, 0, running.Async.JobsTerminal)
+	assert.Equal(t, running.Jobs[0].ID, running.World["last_job_id"])
+	assert.NotZero(t, running.Jobs[0].CreatedAtUnixMilli)
+	assert.Zero(t, running.Jobs[0].FinishedAtUnixMilli)
+
+	var done studio.InspectResult
+	require.Eventually(t, func() bool {
+		res, err := callTool(ctx, cs, "session.inspect", map[string]any{"handle": ok.Handle})
+		if err != nil || res.IsError {
+			return false
+		}
+		if err := json.Unmarshal([]byte(contentText(res)), &done); err != nil {
+			return false
+		}
+		return done.World["result"] == "slow-bg-done" &&
+			len(done.Jobs) == 1 &&
+			done.Jobs[0].Status == jobs.JobDone
+	}, 3*time.Second, 25*time.Millisecond)
+	assert.Equal(t, 0, done.Async.JobsRunning)
+	assert.Equal(t, 1, done.Async.JobsTerminal)
+}
+
+func TestSessionInspect_SurfacesChatAsyncWorkOverMCP(t *testing.T) {
+	ctx := context.Background()
+	backing, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = backing.Close() })
+	chatStore, err := chats.NewStore(backing.DB())
+	require.NoError(t, err)
+	srv, sess := newReplayServerWithChatStore(t, chatStore)
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": cloakApp,
+		"harness":    "replay",
+		"trace":      t.TempDir() + "/trace.jsonl",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new: %s", contentText(res))
+	var opened studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &opened))
+	sh, err := sess.ResolveSession(opened.Handle)
+	require.NoError(t, err)
+	sid := string(sh.SID)
+
+	queuedChat, err := chatStore.Create(ctx, "cloak", "agent-room", "scope-a", "queued work")
+	require.NoError(t, err)
+	pending, err := chatStore.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          queuedChat.ID,
+		Transport:       chats.DriveTransportMCP,
+		Actor:           "studio-test",
+		Payload:         "review this proposal",
+		OriginSessionID: sid,
+		OriginState:     "lobby",
+	})
+	require.NoError(t, err)
+	dispatching, err := chatStore.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          queuedChat.ID,
+		Transport:       chats.DriveTransportStateMachine,
+		Actor:           "story",
+		Payload:         "continue implementation",
+		OriginSessionID: sid,
+		OriginState:     "running",
+	})
+	require.NoError(t, err)
+	_, err = chatStore.ClaimDrive(ctx, dispatching.DriveID)
+	require.NoError(t, err)
+
+	failed, err := chatStore.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          queuedChat.ID,
+		Transport:       chats.DriveTransportStateMachine,
+		Actor:           "story",
+		Payload:         "failed proposal review",
+		OriginSessionID: sid,
+		OriginState:     "foyer",
+	})
+	require.NoError(t, err)
+	_, err = chatStore.ClaimDrive(ctx, failed.DriveID)
+	require.NoError(t, err)
+	require.NoError(t, chatStore.MarkDriveFailed(ctx, failed.DriveID, "claude exited 1"))
+	_, err = chatStore.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          queuedChat.ID,
+		Transport:       chats.DriveTransportMCP,
+		Actor:           "other",
+		Payload:         "not this session",
+		OriginSessionID: "other-session",
+	})
+	require.NoError(t, err)
+
+	backgroundChat, err := chatStore.Create(ctx, "cloak", "agent-room", "scope-bg", "backgrounded work")
+	require.NoError(t, err)
+	_, err = backing.DB().ExecContext(ctx,
+		`UPDATE chats SET session_id = ? WHERE id = ?`,
+		sid, backgroundChat.ID)
+	require.NoError(t, err)
+	_, err = chatStore.AppendMessage(ctx, backgroundChat.ID, "user", "what is the async status?", nil)
+	require.NoError(t, err)
+	_, err = chatStore.AppendMessage(ctx, backgroundChat.ID, "assistant", "still running in the background", map[string]any{"source": "test"})
+	require.NoError(t, err)
+	_, err = chatStore.AttachPTY(ctx, chats.AttachPTYOptions{
+		ChatID:         backgroundChat.ID,
+		TmuxSession:    "kitsoki-bg-test",
+		PermissionMode: "acceptEdits",
+		WorkspacePath:  "/tmp/kitsoki-bg-test",
+	})
+	require.NoError(t, err)
+	_, err = chatStore.DetachPTY(ctx, backgroundChat.ID)
+	require.NoError(t, err)
+	require.NoError(t, chatStore.MarkPTYIdle(ctx, backgroundChat.ID))
+
+	res, err = callTool(ctx, cs, "session.inspect", map[string]any{"handle": opened.Handle})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.inspect: %s", contentText(res))
+	var inspected studio.InspectResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &inspected))
+
+	require.Len(t, inspected.PendingDrives, 3)
+	assert.Equal(t, 1, inspected.Async.PendingDrives)
+	assert.Equal(t, 1, inspected.Async.DispatchingDrives)
+	assert.Equal(t, 1, inspected.Async.FailedDrives)
+	assert.Equal(t, pending.DriveID, inspected.PendingDrives[0].DriveID)
+	assert.Equal(t, chats.DriveStatusPending, inspected.PendingDrives[0].Status)
+	assert.Equal(t, "review this proposal", inspected.PendingDrives[0].Payload)
+	assert.Equal(t, dispatching.DriveID, inspected.PendingDrives[1].DriveID)
+	assert.Equal(t, chats.DriveStatusDispatching, inspected.PendingDrives[1].Status)
+	assert.NotZero(t, inspected.PendingDrives[1].DispatchedAtUnixMicro)
+	assert.Equal(t, failed.DriveID, inspected.PendingDrives[2].DriveID)
+	assert.Equal(t, chats.DriveStatusFailed, inspected.PendingDrives[2].Status)
+	assert.Equal(t, "claude exited 1", inspected.PendingDrives[2].ErrorMessage)
+	assert.NotZero(t, inspected.PendingDrives[2].CompletedAtUnixMicro)
+
+	require.Len(t, inspected.BackgroundedChats, 1)
+	assert.Equal(t, 1, inspected.Async.BackgroundedChats)
+	bg := inspected.BackgroundedChats[0]
+	assert.Equal(t, backgroundChat.ID, bg.ChatID)
+	assert.Equal(t, "kitsoki-bg-test", bg.TmuxSession)
+	assert.Equal(t, "acceptEdits", bg.PermissionMode)
+	assert.Equal(t, "/tmp/kitsoki-bg-test", bg.WorkspacePath)
+	assert.NotZero(t, bg.UpdatedAtUnixMicro)
+	assert.NotZero(t, bg.LastIdleAtUnixMicro)
+
+	res, err = callTool(ctx, cs, "chat.show", map[string]any{
+		"chat_id":   backgroundChat.ID,
+		"since_seq": 1,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "chat.show: %s", contentText(res))
+	var shown studio.ChatShowResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &shown))
+	require.True(t, shown.OK)
+	assert.Equal(t, backgroundChat.ID, shown.Chat.ID)
+	assert.Equal(t, "backgrounded work", shown.Chat.Title)
+	assert.Equal(t, "scope-bg", shown.Chat.DisplayScopeKey)
+	assert.Equal(t, sid, shown.Chat.SessionID)
+	require.NotNil(t, shown.PTY)
+	assert.Equal(t, "kitsoki-bg-test", shown.PTY.TmuxSession)
+	assert.Equal(t, string(chats.PtyModeBackground), shown.PTY.Mode)
+	require.Len(t, shown.Messages, 1)
+	assert.Equal(t, 1, shown.Messages[0].Seq)
+	assert.Equal(t, "assistant", shown.Messages[0].Role)
+	assert.Equal(t, "still running in the background", shown.Messages[0].Content)
+	assert.Equal(t, "test", shown.Messages[0].Metadata["source"])
+}
+
+func TestSessionCommand_RendersTUIWorkOverMCP(t *testing.T) {
+	ctx := context.Background()
+	backing, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = backing.Close() })
+	chatStore, err := chats.NewStore(backing.DB())
+	require.NoError(t, err)
+	srv, sess := newReplayServerWithChatStore(t, chatStore)
+	cs := connectInProcess(ctx, t, srv)
+	handle := openCloak(ctx, t, cs)
+	sh, err := sess.ResolveSession(handle)
+	require.NoError(t, err)
+
+	currentChat, err := chatStore.Create(ctx, "cloak", "agent-room", "scope-a", "current queued")
+	require.NoError(t, err)
+	_, err = chatStore.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          currentChat.ID,
+		Transport:       chats.DriveTransportStateMachine,
+		Actor:           "story",
+		Payload:         "current queued review",
+		OriginSessionID: string(sh.SID),
+		OriginState:     "foyer",
+	})
+	require.NoError(t, err)
+	_, err = chatStore.AppendMessage(ctx, currentChat.ID, "user", "review the queued MCP task", nil)
+	require.NoError(t, err)
+	_, err = chatStore.AppendMessage(ctx, currentChat.ID, "assistant", "focused context is ready", nil)
+	require.NoError(t, err)
+	otherChat, err := chatStore.Create(ctx, "cloak", "agent-room", "scope-b", "other queued")
+	require.NoError(t, err)
+	_, err = chatStore.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          otherChat.ID,
+		Transport:       chats.DriveTransportStateMachine,
+		Actor:           "story",
+		Payload:         "other queued review",
+		OriginSessionID: "other-session",
+		OriginState:     "elsewhere",
+	})
+	require.NoError(t, err)
+	backgroundChat, err := chatStore.Create(ctx, "cloak", "agent-room", "scope-bg", "background session")
+	require.NoError(t, err)
+	_, err = backing.DB().ExecContext(ctx,
+		`UPDATE chats SET session_id = ? WHERE id = ?`,
+		string(sh.SID), backgroundChat.ID)
+	require.NoError(t, err)
+	_, err = chatStore.AttachPTY(ctx, chats.AttachPTYOptions{
+		ChatID:      backgroundChat.ID,
+		TmuxSession: "kitsoki-bg-mcp",
+	})
+	require.NoError(t, err)
+	_, err = chatStore.DetachPTY(ctx, backgroundChat.ID)
+	require.NoError(t, err)
+
+	res, err := callTool(ctx, cs, "session.command", map[string]any{
+		"handle":  handle,
+		"command": "/work --all",
+		"cols":    120,
+		"rows":    35,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.command: %s", contentText(res))
+	var rendered studio.RenderTUIResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &rendered))
+	require.True(t, rendered.OK)
+	assert.Contains(t, rendered.Frame.Text, "active work (all sessions): 3 item(s)")
+	assert.Contains(t, rendered.Frame.Text, "current queued review")
+	assert.Contains(t, rendered.Frame.Text, "current session")
+	assert.Contains(t, rendered.Frame.Text, "/chat show "+currentChat.ID)
+	assert.Contains(t, rendered.Frame.Text, "other queued review")
+	assert.Contains(t, rendered.Frame.Text, "session other-session")
+	assert.Contains(t, rendered.Frame.Text, "background session")
+	assert.Contains(t, rendered.Frame.Text, "/sessions attach 1")
+
+	res, err = callTool(ctx, cs, "session.command", map[string]any{
+		"handle":  handle,
+		"command": "/chat show " + currentChat.ID,
+		"cols":    120,
+		"rows":    35,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.command chat show: %s", contentText(res))
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &rendered))
+	assert.Contains(t, rendered.Frame.Text, "chat context")
+	assert.Contains(t, rendered.Frame.Text, "current queued")
+	assert.Contains(t, rendered.Frame.Text, "review the queued MCP task")
+	assert.Contains(t, rendered.Frame.Text, "focused context is ready")
+
+	res, err = callTool(ctx, cs, "session.command", map[string]any{
+		"handle":  handle,
+		"command": "/sessions attach 1 --dry-run",
+		"cols":    120,
+		"rows":    35,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.command dry-run attach: %s", contentText(res))
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &rendered))
+	assert.Contains(t, rendered.Frame.Text, "would attach 1")
+	assert.Contains(t, rendered.Frame.Text, "background session")
+	assert.Contains(t, rendered.Frame.Text, "kitsoki-bg-mcp")
+}
+
+func writeBackgroundJobStory(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	appPath := dir + "/app.yaml"
+	const body = `app:
+  id: studio-background-job-test
+  version: 0.1.0
+  title: "Studio Background Job Test"
+
+hosts:
+  - host.run
+
+world:
+  result: { type: string, default: "" }
+  last_job_id: { type: string, default: "" }
+
+intents:
+  enter:
+    title: "Enter"
+
+root: lobby
+
+states:
+  lobby:
+    view: |
+      Lobby.
+    on:
+      enter:
+        - target: running
+
+  running:
+    view: |
+      Running.
+      Result: {{ world.result }}
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "sleep 0.1; printf mcp-bg-done"
+        background: true
+        bind:
+          last_job_id: job_id
+        on_complete:
+          - set:
+              result: "{{ world.last_job_result.stdout }}"
+          - say: "Background complete: {{ world.result }}"
+`
+	require.NoError(t, os.WriteFile(appPath, []byte(body), 0o644))
+	return appPath
+}
+
+func writeSlowBackgroundJobStory(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	appPath := dir + "/app.yaml"
+	const body = `app:
+  id: studio-background-job-running-test
+  version: 0.1.0
+  title: "Studio Background Job Running Test"
+
+hosts:
+  - host.run
+
+world:
+  result: { type: string, default: "" }
+  last_job_id: { type: string, default: "" }
+
+intents:
+  enter:
+    title: "Enter"
+
+root: lobby
+
+states:
+  lobby:
+    view: |
+      Lobby.
+    on:
+      enter:
+        - target: running
+
+  running:
+    view: |
+      Running.
+      Result: {{ world.result }}
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "sleep 1; printf slow-bg-done"
+        background: true
+        bind:
+          last_job_id: job_id
+        on_complete:
+          - set:
+              result: "{{ world.last_job_result.stdout }}"
+`
+	require.NoError(t, os.WriteFile(appPath, []byte(body), 0o644))
+	return appPath
+}
+
 // TestSessionNew_LiveIsOptIn confirms harness:live takes the live builder branch
 // (the only path that reaches it), surfaced as a structured ErrHarness here
 // because the test builder forbids live — proving live is never the default.
@@ -422,13 +919,19 @@ func TestRenderWeb_StubNoLLM(t *testing.T) {
 	cs := connectInProcess(ctx, t, srv)
 	handle := openCloak(ctx, t, cs)
 
-	res, err := callTool(ctx, cs, "render.web", map[string]any{"handle": handle})
+	res, err := callTool(ctx, cs, "render.web", map[string]any{
+		"handle":      handle,
+		"query":       map[string]string{"chat": "chat-123"},
+		"assert_text": []string{"Focused context"},
+	})
 	require.NoError(t, err)
 	require.False(t, res.IsError, "render.web: %s", contentText(res))
 
 	img := imageContent(t, res)
 	assert.Equal(t, stubPNG, img.Data, "render.web returns the stub PNG as an image block")
 	assert.NotEmpty(t, gotSpec.SessionID, "the stub saw the handle's live session id")
+	assert.Equal(t, map[string]string{"chat": "chat-123"}, gotSpec.Query, "render.web forwards route query params")
+	assert.Equal(t, []string{"Focused context"}, gotSpec.AssertText, "render.web forwards text assertions")
 }
 
 // ─── 2.5 render.* are read-only ──────────────────────────────────────────────
@@ -473,13 +976,22 @@ func TestRender_ReadOnly(t *testing.T) {
 // form); a spec maps to StoryPath/State/World (spec form). The two forms are
 // mutually exclusive — exactly webshot.Spec's "exactly one source" rule.
 func TestWebRenderSpec_ToWebshotSpec(t *testing.T) {
-	live := studio.WebRenderSpec{StoryPath: "stories/cloak", SessionID: "sid-123"}.ToWebshotSpec()
+	live := studio.WebRenderSpec{
+		StoryPath:  "stories/cloak",
+		SessionID:  "sid-123",
+		Query:      map[string]string{"chat": "chat-456"},
+		AssertText: []string{"Focused context"},
+	}.ToWebshotSpec()
 	assert.Equal(t, "sid-123", live.SessionID, "live form → webshot SessionID")
 	assert.Empty(t, live.StoryPath, "live form omits StoryPath")
+	assert.Equal(t, map[string]string{"chat": "chat-456"}, live.Query, "live form preserves route query")
+	assert.Equal(t, []string{"Focused context"}, live.AssertText, "live form preserves text assertions")
 
-	spec := studio.WebRenderSpec{StoryPath: "stories/cloak", State: "bar.lit", World: map[string]any{"lit": true}}.ToWebshotSpec()
+	spec := studio.WebRenderSpec{StoryPath: "stories/cloak", State: "bar.lit", World: map[string]any{"lit": true}, Query: map[string]string{"embed": "1"}, AssertText: []string{"Bar"}}.ToWebshotSpec()
 	assert.Equal(t, "stories/cloak", spec.StoryPath, "spec form → webshot StoryPath")
 	assert.Equal(t, "bar.lit", spec.State)
+	assert.Equal(t, map[string]string{"embed": "1"}, spec.Query, "spec form preserves route query")
+	assert.Equal(t, []string{"Bar"}, spec.AssertText, "spec form preserves text assertions")
 	assert.Empty(t, spec.SessionID, "spec form omits SessionID")
 }
 

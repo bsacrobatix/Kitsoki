@@ -9,7 +9,9 @@ package studio
 //   - session.drive   — free text → orch.Turn (the ONE interpretive seam).
 //   - session.submit  — a chosen intent + slots → orch.SubmitDirect.
 //   - session.continue— missing slots for a pending clarify → orch.ContinueTurn.
-//   - session.inspect — state / world / allowed_intents / last_view / last_turns.
+//   - session.teleport— inbox notification -> orch.Teleport, marking it read.
+//   - session.inspect — state / world / allowed_intents / last_view / jobs / inbox / last_turns.
+//   - session.command — run a safe TUI slash command and return its frame.
 //   - session.trace   — the session's JSONL trace events.
 //   - render.tui      — the slice-1 Frame {text, ansi, metadata} at any width.
 //   - render.tui_png  — the slice-3 ANSI→PNG rasteriser, as an MCP image block.
@@ -32,8 +34,10 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
+	"kitsoki/internal/jobs"
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
@@ -90,9 +94,19 @@ func (srv *Server) registerSessionTools() {
 	}, srv.handleSessionStatus)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.teleport",
+		Description: "Reacquire an inbox notification by teleporting the session to its saved target. {handle, notification_id, cols?, rows?}. Marks the notification read and returns {outcome, frame}.",
+	}, srv.handleSessionTeleport)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.inspect",
-		Description: "Read-only snapshot of a driving handle: {handle, omit_world?, max_value_len?} → {state, world, allowed_intents, last_view, last_turns[]}. Never advances the machine. omit_world:true drops the world map entirely; max_value_len:N truncates each world value to N chars (with '…' marker).",
+		Description: "Read-only snapshot of a driving handle: {handle, omit_world?, max_value_len?} → {state, world, allowed_intents, last_view, async, jobs[], notifications[], pending_drives[], backgrounded_chats[], operator_questions[], mining_proposals[], last_turns[]}. Never advances the machine. omit_world:true drops the world map entirely; max_value_len:N truncates each world value to N chars (with '…' marker).",
 	}, srv.handleSessionInspect)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.command",
+		Description: "Run a TUI slash command against a driving handle and return the rendered frame. {handle, command, cols?, rows?}. Rejects slash commands that require async terminal side effects.",
+	}, srv.handleSessionCommand)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.trace",
@@ -111,7 +125,7 @@ func (srv *Server) registerSessionTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "render.web",
-		Description: "Render the REAL kitsoki web view of a state to a PNG. {handle | story_path+state+world?}. Returns text plus an MCP image block for vision-capable clients. READ-ONLY. Requires a browser-capable host (degrades to text otherwise).",
+		Description: "Render the REAL kitsoki web view of a state to a PNG. {handle | story_path+state+world?, query?, assert_text?}. Returns text plus an MCP image block for vision-capable clients. READ-ONLY. Requires a browser-capable host (degrades to text otherwise).",
 	}, srv.registerWebRenderer())
 }
 
@@ -180,6 +194,14 @@ type SessionContinueArgs struct {
 	Slots  map[string]any `json:"slots"`
 	Cols   int            `json:"cols,omitempty"`
 	Rows   int            `json:"rows,omitempty"`
+}
+
+// SessionCommandArgs is the input to session.command.
+type SessionCommandArgs struct {
+	Handle  string `json:"handle"`
+	Command string `json:"command"`
+	Cols    int    `json:"cols,omitempty"`
+	Rows    int    `json:"rows,omitempty"`
 }
 
 // TurnResult is the structured TurnOutcome projection returned alongside the
@@ -261,6 +283,14 @@ type SessionAnswerArgs struct {
 	Answers    map[string]any `json:"answers"`
 	Cols       int            `json:"cols,omitempty"`
 	Rows       int            `json:"rows,omitempty"`
+}
+
+// SessionTeleportArgs is the input to session.teleport.
+type SessionTeleportArgs struct {
+	Handle         string `json:"handle"`
+	NotificationID string `json:"notification_id"`
+	Cols           int    `json:"cols,omitempty"`
+	Rows           int    `json:"rows,omitempty"`
 }
 
 // ── session.new / attach ─────────────────────────────────────────────────────
@@ -487,6 +517,23 @@ func (srv *Server) handleSessionContinue(
 	return nil, turnResponse(out, frame, rt.lastTurnErr), nil
 }
 
+func (srv *Server) handleSessionTeleport(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args SessionTeleportArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	if args.NotificationID == "" {
+		return buildToolError(ErrBadRequest, "session.teleport: notification_id is required"), nil, nil
+	}
+	rt, rerr := srv.resolveRuntime(args.Handle)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	cols, rows := geometry(args.Cols, args.Rows)
+	out, frame := rt.teleport(ctx, args.NotificationID, cols, rows)
+	return nil, turnResponse(out, frame, rt.lastTurnErr), nil
+}
+
 // ── inspect / trace ──────────────────────────────────────────────────────────
 
 // SessionStatusArgs is the input to session.status.
@@ -521,12 +568,126 @@ type SessionInspectArgs struct {
 // come from the same orchestrator reads buildInspectOutput uses (LoadJourney +
 // AllowedIntents), so it matches the CLI inspect for that state.
 type InspectResult struct {
-	OK             bool              `json:"ok"`
-	State          string            `json:"state"`
-	World          map[string]any    `json:"world,omitempty"`
-	AllowedIntents []string          `json:"allowed_intents"`
-	LastView       string            `json:"last_view"`
-	LastTurns      []TurnSummaryItem `json:"last_turns"`
+	OK                bool                   `json:"ok"`
+	State             string                 `json:"state"`
+	World             map[string]any         `json:"world,omitempty"`
+	AllowedIntents    []string               `json:"allowed_intents"`
+	LastView          string                 `json:"last_view"`
+	Async             AsyncInspectSummary    `json:"async"`
+	Jobs              []JobInspectItem       `json:"jobs,omitempty"`
+	Notifications     []InboxInspectItem     `json:"notifications,omitempty"`
+	PendingDrives     []PendingDriveItem     `json:"pending_drives,omitempty"`
+	BackgroundedChats []BackgroundedChatItem `json:"backgrounded_chats,omitempty"`
+	OperatorQuestions []OperatorQuestionItem `json:"operator_questions,omitempty"`
+	MiningProposals   []MiningProposalItem   `json:"mining_proposals,omitempty"`
+	LastTurns         []TurnSummaryItem      `json:"last_turns"`
+}
+
+// AsyncInspectSummary gives clients a cheap priority signal before they inspect
+// the detailed job/notification rows.
+type AsyncInspectSummary struct {
+	JobsTotal                   int `json:"jobs_total"`
+	JobsRunning                 int `json:"jobs_running"`
+	JobsAwaitingInput           int `json:"jobs_awaiting_input"`
+	JobsTerminal                int `json:"jobs_terminal"`
+	NotificationsTotal          int `json:"notifications_total"`
+	NotificationsUnread         int `json:"notifications_unread"`
+	NotificationsActionRequired int `json:"notifications_action_required"`
+	PendingDrives               int `json:"pending_drives"`
+	DispatchingDrives           int `json:"dispatching_drives"`
+	FailedDrives                int `json:"failed_drives"`
+	BackgroundedChats           int `json:"backgrounded_chats"`
+	OperatorQuestions           int `json:"operator_questions"`
+	MiningProposals             int `json:"mining_proposals"`
+}
+
+// JobInspectItem is a compact, structured projection of one background job.
+// It lets MCP clients see running, awaiting-input, and terminal work without
+// scraping the TUI frame or decoding trace internals.
+type JobInspectItem struct {
+	ID                  string                    `json:"id"`
+	Kind                string                    `json:"kind"`
+	Status              jobs.JobStatus            `json:"status"`
+	OriginState         string                    `json:"origin_state"`
+	OriginProposalID    string                    `json:"origin_proposal_id,omitempty"`
+	Error               string                    `json:"error,omitempty"`
+	RetryCount          int                       `json:"retry_count,omitempty"`
+	ClarificationSchema *jobs.ClarificationSchema `json:"clarification_schema,omitempty"`
+	CreatedAtUnixMilli  int64                     `json:"created_at_unix_milli"`
+	UpdatedAtUnixMilli  int64                     `json:"updated_at_unix_milli"`
+	StartedAtUnixMilli  int64                     `json:"started_at_unix_milli,omitempty"`
+	FinishedAtUnixMilli int64                     `json:"finished_at_unix_milli,omitempty"`
+}
+
+// InboxInspectItem is a compact projection of one non-dismissed inbox
+// notification for the session, newest first.
+type InboxInspectItem struct {
+	ID                 string                    `json:"id"`
+	Severity           jobs.NotificationSeverity `json:"severity"`
+	Title              string                    `json:"title"`
+	Body               string                    `json:"body,omitempty"`
+	CreatedAtUnixMilli int64                     `json:"created_at_unix_milli"`
+	ReadAtUnixMilli    int64                     `json:"read_at_unix_milli,omitempty"`
+	TeleportState      string                    `json:"teleport_state,omitempty"`
+	TeleportSlots      map[string]any            `json:"teleport_slots,omitempty"`
+	TeleportProposalID string                    `json:"teleport_proposal_id,omitempty"`
+	TeleportJobID      string                    `json:"teleport_job_id,omitempty"`
+	OriginKind         string                    `json:"origin_kind"`
+	OriginRef          string                    `json:"origin_ref"`
+	OriginURL          string                    `json:"origin_url,omitempty"`
+}
+
+// PendingDriveItem is one pending or dispatching chat-input-queue row owned by
+// this session. These are resumable async chat turns.
+type PendingDriveItem struct {
+	DriveID               string               `json:"drive_id"`
+	ChatID                string               `json:"chat_id"`
+	Transport             chats.DriveTransport `json:"transport"`
+	Status                chats.DriveStatus    `json:"status"`
+	Actor                 string               `json:"actor,omitempty"`
+	Thread                string               `json:"thread,omitempty"`
+	CorrelationID         string               `json:"correlation_id,omitempty"`
+	Payload               string               `json:"payload,omitempty"`
+	ErrorMessage          string               `json:"error_message,omitempty"`
+	OriginState           string               `json:"origin_state,omitempty"`
+	ReceivedAtUnixMicro   int64                `json:"received_at_unix_micro"`
+	DispatchedAtUnixMicro int64                `json:"dispatched_at_unix_micro,omitempty"`
+	CompletedAtUnixMicro  int64                `json:"completed_at_unix_micro,omitempty"`
+}
+
+// BackgroundedChatItem is one tmux-hosted chat that remains alive in
+// pty_background mode and belongs to this session.
+type BackgroundedChatItem struct {
+	ChatID              string `json:"chat_id"`
+	TmuxSession         string `json:"tmux_session"`
+	TmuxHost            string `json:"tmux_host"`
+	PermissionMode      string `json:"permission_mode,omitempty"`
+	WorkspacePath       string `json:"workspace_path,omitempty"`
+	UpdatedAtUnixMicro  int64  `json:"updated_at_unix_micro"`
+	LastIdleAtUnixMicro int64  `json:"last_idle_at_unix_micro,omitempty"`
+}
+
+// OperatorQuestionItem is one parked operator-ask fallback question batch for
+// this session. MCP clients can answer it with Reacquire.Tool and Args.
+type OperatorQuestionItem struct {
+	QuestionID         string                           `json:"question_id"`
+	Questions          []kitsokimcp.OperatorAskQuestion `json:"questions"`
+	CreatedAtUnixMicro int64                            `json:"created_at_unix_micro,omitempty"`
+	Reacquire          WorkReacquire                    `json:"reacquire"`
+}
+
+// MiningProposalItem is one trace-backed proposal awaiting review. It is folded
+// from mining.proposal_raised minus any later mining.proposal_decided event.
+type MiningProposalItem struct {
+	RecipeID          string        `json:"recipe_id"`
+	Kind              string        `json:"kind,omitempty"`
+	Target            string        `json:"target,omitempty"`
+	Priority          float64       `json:"priority,omitempty"`
+	Rung              int           `json:"rung,omitempty"`
+	DraftPath         string        `json:"draft_path,omitempty"`
+	RaisedTurn        int64         `json:"raised_turn,omitempty"`
+	RaisedAtUnixMicro int64         `json:"raised_at_unix_micro,omitempty"`
+	Reacquire         WorkReacquire `json:"reacquire"`
 }
 
 // TurnSummaryItem collapses one turn's events into a one-line record (the same
@@ -572,7 +733,7 @@ func (srv *Server) handleSessionInspect(
 	if lastTurns <= 0 {
 		lastTurns = 5
 	}
-	out, err := rt.inspect(ctx, lastTurns)
+	out, err := rt.inspect(ctx, lastTurns, args.Handle)
 	if err != nil {
 		return buildToolError(ErrBadRequest, err.Error()), nil, nil
 	}
@@ -583,6 +744,23 @@ func (srv *Server) handleSessionInspect(
 		out.World = truncateWorldValues(out.World, args.MaxValueLen)
 	}
 	return nil, out, nil
+}
+
+func (srv *Server) handleSessionCommand(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args SessionCommandArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	rt, rerr := srv.resolveRuntime(args.Handle)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	cols, rows := geometry(args.Cols, args.Rows)
+	frame, err := rt.slash(args.Command, cols, rows)
+	if err != nil {
+		return buildToolError(ErrBadRequest, err.Error()), nil, nil
+	}
+	return nil, RenderTUIResult{OK: true, Frame: frameResult(frame)}, nil
 }
 
 // SessionTraceArgs is the input to session.trace.
@@ -667,13 +845,15 @@ func (srv *Server) handleSessionTrace(
 // the session's current state, read-only) OR a spec (story_path + state + world,
 // rendered headlessly without any session).
 type RenderArgs struct {
-	Handle    string         `json:"handle,omitempty"`
-	StoryPath string         `json:"story_path,omitempty"`
-	State     string         `json:"state,omitempty"`
-	World     map[string]any `json:"world,omitempty"`
-	Cols      int            `json:"cols,omitempty"`
-	Rows      int            `json:"rows,omitempty"`
-	Theme     string         `json:"theme,omitempty"`
+	Handle     string            `json:"handle,omitempty"`
+	StoryPath  string            `json:"story_path,omitempty"`
+	State      string            `json:"state,omitempty"`
+	World      map[string]any    `json:"world,omitempty"`
+	Query      map[string]string `json:"query,omitempty"`
+	AssertText []string          `json:"assert_text,omitempty"`
+	Cols       int               `json:"cols,omitempty"`
+	Rows       int               `json:"rows,omitempty"`
+	Theme      string            `json:"theme,omitempty"`
 }
 
 // RenderTUIResult is the render.tui result: just the Frame (read-only re-render).
@@ -791,7 +971,7 @@ func (srv *Server) specFrame(ctx context.Context, storyPath, state string, world
 	}
 	// No harness, no profiles, no seed: a spec render is a pure re-render and
 	// never calls orch.Turn or dispatches an agent.
-	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "", nil, srv.importResolver)
+	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "", nil, srv.importResolver, nil, nil)
 	if err != nil {
 		return tui.Frame{}, err
 	}
@@ -997,10 +1177,9 @@ func truncateWorldValues(world map[string]any, maxLen int) map[string]any {
 
 // inspect builds the session.inspect snapshot from the live orchestrator —
 // state/world from the journey, the allowed-intent menu from the machine, the
-// current rendered view, and a tail of turn summaries from the trace. It reads
-// the same sources buildInspectOutput (cmd/kitsoki/inspect.go) reads, so the
-// snapshot matches the CLI inspect for that state. Read-only.
-func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int) (InspectResult, error) {
+// current rendered view, background jobs, inbox notifications, and a tail of
+// turn summaries from the trace. Read-only.
+func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int, handle string) (InspectResult, error) {
 	j, err := rt.orch.LoadJourney(rt.sid)
 	if err != nil {
 		return InspectResult{}, fmt.Errorf("session.inspect: load journey: %w", err)
@@ -1014,14 +1193,323 @@ func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int) (InspectRe
 	if verr != nil {
 		view = fmt.Sprintf("<render error: %v>", verr)
 	}
+	jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, asyncErr := rt.inspectAsync(ctx)
+	if asyncErr != nil {
+		return InspectResult{}, asyncErr
+	}
+	operatorQuestions := rt.pendingOperatorQuestions()
+	miningProposals := pendingMiningProposals(handle, rt.history())
 	return InspectResult{
-		OK:             true,
-		State:          string(j.State),
-		World:          j.World.Vars,
-		AllowedIntents: allowedNames,
-		LastView:       view,
-		LastTurns:      summariseTrace(rt.history(), lastTurns),
+		OK:                true,
+		State:             string(j.State),
+		World:             j.World.Vars,
+		AllowedIntents:    allowedNames,
+		LastView:          view,
+		Async:             summarizeAsync(jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, operatorQuestions, miningProposals),
+		Jobs:              jobs,
+		Notifications:     notifications,
+		PendingDrives:     pendingDrives,
+		BackgroundedChats: backgroundedChats,
+		OperatorQuestions: inspectOperatorQuestions(handle, operatorQuestions),
+		MiningProposals:   miningProposals,
+		LastTurns:         summariseTrace(rt.history(), lastTurns),
 	}, nil
+}
+
+func (rt *sessionRuntime) inspectAsync(ctx context.Context) ([]JobInspectItem, []InboxInspectItem, map[jobs.NotificationSeverity]int, []PendingDriveItem, []BackgroundedChatItem, error) {
+	var (
+		jobItems          []JobInspectItem
+		notificationItems []InboxInspectItem
+		unreadCounts      map[jobs.NotificationSeverity]int
+		pendingDriveItems []PendingDriveItem
+		backgroundedChats []BackgroundedChatItem
+	)
+	if rt.jobStore == nil {
+		return nil, nil, nil, nil, nil, nil
+	}
+	jobRows, err := rt.jobStore.ListBySession(ctx, rt.sid)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("session.inspect: list jobs: %w", err)
+	}
+	notifRows, err := rt.jobStore.ListNotifications(ctx, rt.sid, 0)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("session.inspect: list notifications: %w", err)
+	}
+	unreadCounts, err = rt.jobStore.UnreadCount(ctx, rt.sid)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("session.inspect: count unread notifications: %w", err)
+	}
+	jobItems = inspectJobs(jobRows)
+	notificationItems = inspectNotifications(notifRows)
+	if rt.chatStore != nil {
+		driveRows, err := rt.chatStore.ListDrivesBySession(ctx, string(rt.sid),
+			activeDriveStatuses())
+		if err != nil {
+			return nil, nil, nil, nil, nil, fmt.Errorf("session.inspect: list pending drives: %w", err)
+		}
+		pendingDriveItems = inspectPendingDrives(driveRows)
+
+		ptyRows, err := rt.chatStore.ListPTYForHost(ctx)
+		if err != nil {
+			return nil, nil, nil, nil, nil, fmt.Errorf("session.inspect: list backgrounded chats: %w", err)
+		}
+		backgroundedChats = rt.inspectBackgroundedChats(ctx, ptyRows)
+	}
+	return jobItems, notificationItems, unreadCounts, pendingDriveItems, backgroundedChats, nil
+}
+
+func inspectJobs(in []jobs.Job) []JobInspectItem {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]JobInspectItem, 0, len(in))
+	for _, j := range in {
+		item := JobInspectItem{
+			ID:                  j.ID,
+			Kind:                j.Kind,
+			Status:              j.Status,
+			OriginState:         string(j.OriginState),
+			OriginProposalID:    j.OriginProposalID,
+			Error:               j.Error,
+			RetryCount:          j.RetryCount,
+			ClarificationSchema: clarificationSchema(j.ClarificationSchema),
+			CreatedAtUnixMilli:  j.CreatedAt.UnixMilli(),
+			UpdatedAtUnixMilli:  j.UpdatedAt.UnixMilli(),
+		}
+		if j.StartedAt != nil {
+			item.StartedAtUnixMilli = j.StartedAt.UnixMilli()
+		}
+		if j.FinishedAt != nil {
+			item.FinishedAtUnixMilli = j.FinishedAt.UnixMilli()
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func clarificationSchema(raw any) *jobs.ClarificationSchema {
+	switch v := raw.(type) {
+	case nil:
+		return nil
+	case jobs.ClarificationSchema:
+		return &v
+	case *jobs.ClarificationSchema:
+		return v
+	case map[string]any:
+		schema := jobs.ClarificationSchema{Fields: map[string]string{}}
+		if prompt, ok := v["prompt"].(string); ok {
+			schema.Prompt = prompt
+		}
+		if fields, ok := v["fields"].(map[string]any); ok {
+			for name, typ := range fields {
+				if text, ok := typ.(string); ok {
+					schema.Fields[name] = text
+				}
+			}
+		}
+		return &schema
+	default:
+		return nil
+	}
+}
+
+func inspectNotifications(in []jobs.Notification) []InboxInspectItem {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]InboxInspectItem, 0, len(in))
+	for _, n := range in {
+		item := InboxInspectItem{
+			ID:                 n.ID,
+			Severity:           n.Severity,
+			Title:              n.Title,
+			Body:               n.Body,
+			CreatedAtUnixMilli: n.CreatedAt.UnixMilli(),
+			TeleportState:      n.TeleportState,
+			TeleportSlots:      n.TeleportSlots,
+			TeleportProposalID: n.TeleportProposalID,
+			TeleportJobID:      n.TeleportJobID,
+			OriginKind:         n.OriginKind,
+			OriginRef:          n.OriginRef,
+			OriginURL:          n.OriginURL,
+		}
+		if n.ReadAt != nil {
+			item.ReadAtUnixMilli = n.ReadAt.UnixMilli()
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func inspectPendingDrives(in []chats.Drive) []PendingDriveItem {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]PendingDriveItem, 0, len(in))
+	for _, d := range in {
+		item := PendingDriveItem{
+			DriveID:             d.DriveID,
+			ChatID:              d.ChatID,
+			Transport:           d.Transport,
+			Status:              d.Status,
+			Actor:               d.Actor,
+			Thread:              d.Thread,
+			CorrelationID:       d.CorrelationID,
+			Payload:             d.Payload,
+			ErrorMessage:        d.ErrorMessage,
+			OriginState:         d.OriginState,
+			ReceivedAtUnixMicro: d.ReceivedAt.UnixMicro(),
+		}
+		if d.DispatchedAt != nil {
+			item.DispatchedAtUnixMicro = d.DispatchedAt.UnixMicro()
+		}
+		if d.CompletedAt != nil {
+			item.CompletedAtUnixMicro = d.CompletedAt.UnixMicro()
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func (rt *sessionRuntime) inspectBackgroundedChats(ctx context.Context, in []chats.PtySession) []BackgroundedChatItem {
+	if len(in) == 0 || rt.chatStore == nil {
+		return nil
+	}
+	out := make([]BackgroundedChatItem, 0, len(in))
+	for _, p := range in {
+		if p.Mode != chats.PtyModeBackground {
+			continue
+		}
+		ch, err := rt.chatStore.Get(ctx, p.ChatID)
+		if err != nil || ch == nil || ch.SessionID != string(rt.sid) {
+			continue
+		}
+		item := BackgroundedChatItem{
+			ChatID:             p.ChatID,
+			TmuxSession:        p.TmuxSession,
+			TmuxHost:           p.TmuxHost,
+			PermissionMode:     p.PermissionMode,
+			WorkspacePath:      p.WorkspacePath,
+			UpdatedAtUnixMicro: p.UpdatedAt.UnixMicro(),
+		}
+		if p.LastIdleAt != nil {
+			item.LastIdleAtUnixMicro = p.LastIdleAt.UnixMicro()
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, unreadNotifications map[jobs.NotificationSeverity]int, pendingDrives []PendingDriveItem, backgroundedChats []BackgroundedChatItem, operatorQuestions []pendingQuestion, miningProposals []MiningProposalItem) AsyncInspectSummary {
+	out := AsyncInspectSummary{
+		JobsTotal:          len(jobRows),
+		NotificationsTotal: len(notifications),
+		BackgroundedChats:  len(backgroundedChats),
+		OperatorQuestions:  len(operatorQuestions),
+		MiningProposals:    len(miningProposals),
+	}
+	for _, j := range jobRows {
+		switch j.Status {
+		case jobs.JobRunning:
+			out.JobsRunning++
+		case jobs.JobAwaitingInput:
+			out.JobsAwaitingInput++
+		case jobs.JobDone, jobs.JobFailed, jobs.JobCancelled:
+			out.JobsTerminal++
+		}
+	}
+	for _, count := range unreadNotifications {
+		out.NotificationsUnread += count
+	}
+	out.NotificationsActionRequired = unreadNotifications[jobs.SeverityActionRequired]
+	for _, d := range pendingDrives {
+		switch d.Status {
+		case chats.DriveStatusPending:
+			out.PendingDrives++
+		case chats.DriveStatusDispatching:
+			out.DispatchingDrives++
+		case chats.DriveStatusFailed:
+			out.FailedDrives++
+		}
+	}
+	return out
+}
+
+func pendingMiningProposals(handle string, history store.History) []MiningProposalItem {
+	if len(history) == 0 {
+		return nil
+	}
+	byRecipe := make(map[string]MiningProposalItem)
+	var order []string
+	for _, ev := range history {
+		switch ev.Kind {
+		case store.MiningProposalRaised:
+			var payload store.MiningProposalRaisedPayload
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil || payload.RecipeID == "" {
+				continue
+			}
+			if _, exists := byRecipe[payload.RecipeID]; !exists {
+				order = append(order, payload.RecipeID)
+			}
+			byRecipe[payload.RecipeID] = MiningProposalItem{
+				RecipeID:          payload.RecipeID,
+				Kind:              payload.Kind,
+				Target:            payload.Target,
+				Priority:          payload.Priority,
+				Rung:              payload.Rung,
+				DraftPath:         payload.DraftPath,
+				RaisedTurn:        int64(ev.Turn),
+				RaisedAtUnixMicro: ev.Ts.UnixMicro(),
+				Reacquire: WorkReacquire{
+					Tool: "session.inspect",
+					Args: map[string]any{"handle": handle, "last_turns": 10},
+				},
+			}
+		case store.MiningProposalDecided:
+			var payload store.MiningProposalDecidedPayload
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil || payload.RecipeID == "" {
+				continue
+			}
+			delete(byRecipe, payload.RecipeID)
+		}
+	}
+	out := make([]MiningProposalItem, 0, len(byRecipe))
+	for _, recipeID := range order {
+		if item, ok := byRecipe[recipeID]; ok {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func (rt *sessionRuntime) pendingOperatorQuestions() []pendingQuestion {
+	if rt == nil || rt.inFlight == nil {
+		return nil
+	}
+	return rt.inFlight.snapshotPending()
+}
+
+func inspectOperatorQuestions(handle string, questions []pendingQuestion) []OperatorQuestionItem {
+	out := make([]OperatorQuestionItem, 0, len(questions))
+	for _, q := range questions {
+		out = append(out, OperatorQuestionItem{
+			QuestionID:         q.id,
+			Questions:          hostToWireOperatorQuestions(q.questions),
+			CreatedAtUnixMicro: q.createdAt.UnixMicro(),
+			Reacquire: WorkReacquire{
+				Tool: "session.answer",
+				Args: map[string]any{
+					"handle":      handle,
+					"question_id": q.id,
+				},
+			},
+		})
+	}
+	return out
+}
+
+func activeDriveStatuses() []chats.DriveStatus {
+	return []chats.DriveStatus{chats.DriveStatusPending, chats.DriveStatusDispatching, chats.DriveStatusFailed}
 }
 
 // summariseTrace folds a JSONL history into one summary per turn, returning the
@@ -1104,10 +1592,12 @@ type WebShotFunc func(ctx context.Context, spec WebRenderSpec) ([]byte, error)
 // kept as a studio type so the studio package does not force every render.web
 // caller through webshot's exact Spec shape.
 type WebRenderSpec struct {
-	StoryPath string
-	State     string
-	World     map[string]any
-	SessionID string
+	StoryPath  string
+	State      string
+	World      map[string]any
+	SessionID  string
+	Query      map[string]string
+	AssertText []string
 }
 
 func (s WebRenderSpec) story() string {
@@ -1129,9 +1619,9 @@ func (s WebRenderSpec) stateLabel() string {
 // real webshot.Shot without re-deriving the mapping.
 func (s WebRenderSpec) ToWebshotSpec() webshot.Spec {
 	if s.SessionID != "" {
-		return webshot.Spec{SessionID: s.SessionID}
+		return webshot.Spec{SessionID: s.SessionID, Query: s.Query, AssertText: s.AssertText}
 	}
-	return webshot.Spec{StoryPath: s.StoryPath, State: s.State, World: s.World}
+	return webshot.Spec{StoryPath: s.StoryPath, State: s.State, World: s.World, Query: s.Query, AssertText: s.AssertText}
 }
 
 // webSpec resolves a render.web RenderArgs to a WebRenderSpec: a handle maps to
@@ -1147,9 +1637,9 @@ func (srv *Server) webSpec(args RenderArgs) (WebRenderSpec, *mcpsdk.CallToolResu
 		if sh.Runtime == nil {
 			return WebRenderSpec{}, buildToolError(ErrBadRequest, "handle has no driving runtime")
 		}
-		return WebRenderSpec{StoryPath: sh.StoryPath, SessionID: string(sh.SID)}, nil
+		return WebRenderSpec{StoryPath: sh.StoryPath, SessionID: string(sh.SID), Query: args.Query, AssertText: args.AssertText}, nil
 	case args.StoryPath != "":
-		return WebRenderSpec{StoryPath: args.StoryPath, State: args.State, World: args.World}, nil
+		return WebRenderSpec{StoryPath: args.StoryPath, State: args.State, World: args.World, Query: args.Query, AssertText: args.AssertText}, nil
 	default:
 		return WebRenderSpec{}, buildToolError(ErrBadRequest, "render.web: provide a handle or a {story_path, state} spec")
 	}

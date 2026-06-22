@@ -430,19 +430,41 @@ indistinguishable from a TUI one in the trace.
 
 ### The surfaces
 
-- **Global badge** (`components/InboxBadge.vue`) — the unread count in the
-  chrome on every screen; severity color when any item `needs_attention`,
-  mirroring the TUI's `$inbox.needs_attention` projection (`internal/tui/inbox.go`).
-- **`InboxPanel.vue`** — opens on badge click: per item a severity glyph, title,
-  relative time, and **jump** + **dismiss** affordances. A notification whose
-  origin session is no longer live degrades to a non-jumping, read-only item
-  (teleport returns a typed error).
+- **Global badge** (`components/InboxBadge.vue`) — the larger of unread
+  notification count and active-work item count, plus queued proposal-review
+  items, in the chrome on every screen. Backend trace-backed mining proposals
+  are part of active work; locally queued web proposals are added by the web
+  proposal store. Attention color appears when either the notification feed,
+  active-work summary, or proposal queue reports work that needs intervention.
+  Active-work attention is limited to unread `action_required` notifications,
+  unanswered operator questions, awaiting-input or failed jobs, failed subagent
+  drives, and write-mode approval proposals; passive `success` / `info` rows
+  and low-stakes structure proposals remain listed and jumpable without coloring
+  the badge.
+- **`InboxPanel.vue`** — opens on badge click: first the prioritized active-work
+  queue from `runstatus.work.list` (notifications, jobs, queued/dispatching
+  drives, failed drives, backgrounded chats, unanswered operator questions, and
+  trace-backed mining proposals), merged with the web proposal queue's review
+  items, then notification history.
+  Rows show the next action explicitly: **jump** for notifications and
+  notification-backed jobs, **open context** for chat-backed work including
+  failed subagent drives, **answer** for forwarded operator questions,
+  **review** for proposals, and **open session** for job rows that have no
+  matching unread notification yet.
+  Awaiting-input job rows show their clarification prompt in the row body unless
+  a linked notification supplies a more specific body. Operator-question rows
+  reopen the same blocking answer modal used by the live question SSE feed.
+  Notification history keeps **dismiss** affordances; an origin session that is
+  no longer live degrades to a non-jumping, read-only item (teleport returns a
+  typed error). The panel's **Sync GitHub** action uses the same idempotent
+  intake path as background polling and reports new/existing/error feedback.
 - **`InboxToast.vue`** — transient, shown only on a `success` / `action_required`
   push; auto-dismisses; click = the same jump as a panel item.
 
 The store is `stores/inbox.ts` (Pinia): it subscribes to the notification feed,
-holds the unread list + counts, and reconciles `read` / `dismiss` against the
-RPC result.
+holds the unread list + counts, refreshes `runstatus.work.list` while mounted,
+runs idempotent GitHub sync when requested, and reconciles `read` / `dismiss`
+against the RPC result.
 
 ### Deep-link
 
@@ -451,6 +473,16 @@ The link carries the **notification id**, not encoded state/slots, so it can't
 forge a teleport — `InteractiveView.vue` resolves it on mount via
 `session.teleport`, applies the resulting room, marks the notification read,
 then clears the param (a refresh doesn't re-teleport). The link is shareable.
+
+`#/s/<sessionId>/chat?inbox=1` opens the global inbox panel directly. It is a
+testability and reacquisition affordance: `render.web` and bookmarked live
+sessions can land with the active-work queue visible without synthesizing a
+badge click.
+
+For deterministic demo/render paths, `#/s/<sessionId>/chat?proposal=<json>`
+seeds the web proposal queue from a URL-encoded proposal object, then clears
+only the `proposal` query key. Combine it with `inbox=1` to open the
+active-work panel on a proposal-review row in `render.web` without a real miner.
 
 ### v1 scope & limits
 

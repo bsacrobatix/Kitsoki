@@ -48,10 +48,9 @@ func (ExecRunner) Run(ctx context.Context, dir, name string, args ...string) err
 	return nil
 }
 
-// Capture shells `pnpm exec tsx tools/runstatus/web-shot.ts --url … --out …
-// --viewport WxH` under RepoRoot. pnpm exec resolves tsx + the helper's
-// @playwright/test from the tools/runstatus workspace, matching how the skills
-// run their specs.
+// Capture shells `pnpm exec tsx web-shot.ts --url … --out … --viewport WxH`
+// under RepoRoot/tools/runstatus. pnpm exec resolves tsx + @playwright/test
+// from that workspace package, matching how the skills run their specs.
 func (n *NodeInvoker) Capture(ctx context.Context, req CaptureRequest) error {
 	if n.RepoRoot == "" {
 		return fmt.Errorf("webshot: NodeInvoker.RepoRoot is required")
@@ -60,14 +59,17 @@ func (n *NodeInvoker) Capture(ctx context.Context, req CaptureRequest) error {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	script := filepath.Join("tools", "runstatus", "web-shot.ts")
+	dir := filepath.Join(n.RepoRoot, "tools", "runstatus")
 	args := []string{
-		"exec", "tsx", script,
+		"exec", "tsx", "web-shot.ts",
 		"--url", req.URL,
 		"--out", req.OutPath,
 		"--viewport", req.Viewport.String(),
 	}
-	return runner.Run(ctx, n.RepoRoot, "pnpm", args...)
+	for _, text := range req.AssertText {
+		args = append(args, "--assert-text", text)
+	}
+	return runner.Run(ctx, dir, "pnpm", args...)
 }
 
 // tempPNGPath returns a fresh temp .png path the invoker writes to and Shot

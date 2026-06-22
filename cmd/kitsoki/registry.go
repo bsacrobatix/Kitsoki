@@ -273,7 +273,7 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 		sid:           sid,
 		sessionDir:    filepath.Dir(tracePath),
 		source:        live,
-		driver:        server.OrchestratorDriver{Orch: orch, SID: sid, Jobs: rt.JobStore},
+		driver:        server.OrchestratorDriver{Orch: orch, SID: sid, Jobs: rt.JobStore, Chats: rt.ChatStore, TraceHistory: live.History},
 		sink:          sink,
 	}
 
@@ -434,7 +434,7 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	lock := func(lctx context.Context, fn func() error) error {
 		return rt.Store.WithWriterLock(lctx, lockedSID, fn)
 	}
-	driver := server.NewLockingDriver(server.OrchestratorDriver{Orch: orch, SID: sid, Jobs: rt.JobStore}, lock)
+	driver := server.NewLockingDriver(server.OrchestratorDriver{Orch: orch, SID: sid, Jobs: rt.JobStore, Chats: rt.ChatStore, TraceHistory: live.History}, lock)
 
 	id := uuid.NewString()
 	e := &entry{

@@ -105,6 +105,45 @@
       <div class="iv__main" :class="{ 'iv__main--embed': embed }">
         <!-- LEFT: conversation -->
         <section class="iv__chat" aria-label="Conversation" data-testid="chat-section">
+          <div
+            v-if="focusedChat || focusedChatLoading || focusedChatError"
+            class="iv__focused-chat"
+            data-testid="focused-chat"
+          >
+            <div class="iv__focused-chat-head">
+              <span class="iv__focused-chat-label">Subagent</span>
+              <strong>{{ focusedChat?.chat.title || focusedChatID || "Loading chat" }}</strong>
+              <button
+                type="button"
+                class="iv__focused-chat-close"
+                data-testid="focused-chat-close"
+                title="Close focused chat context"
+                @click="clearFocusedChat"
+              >close</button>
+            </div>
+            <div v-if="focusedChatLoading" class="iv__focused-chat-muted">Loading focused context...</div>
+            <div v-else-if="focusedChatError" class="iv__focused-chat-error">{{ focusedChatError }}</div>
+            <template v-else-if="focusedChat">
+              <div class="iv__focused-chat-meta">
+                <span v-if="focusedChat.context?.session_id">session {{ focusedChat.context.session_id }}</span>
+                <span v-if="focusedChatScope">scope {{ focusedChatScope }}</span>
+                <span>chat {{ focusedChat.chat.id }}</span>
+                <span>{{ focusedChat.chat.status }}</span>
+                <span v-if="focusedChat.pty">tmux {{ focusedChat.pty.tmux_session }}</span>
+                <span v-if="focusedChat.pty?.mode">{{ focusedChat.pty.mode }}</span>
+              </div>
+              <div v-if="focusedChat.messages?.length" class="iv__focused-chat-messages">
+                <div
+                  v-for="m in focusedChatPreview"
+                  :key="m.seq"
+                  class="iv__focused-chat-message"
+                >
+                  <span class="iv__focused-chat-role">{{ m.role }}</span>
+                  <span class="iv__focused-chat-content">{{ m.content }}</span>
+                </div>
+              </div>
+            </template>
+          </div>
           <ChatTranscript
             class="iv__transcript"
             :transcript="store.chatEntries"
@@ -207,6 +246,7 @@ import { useInboxStore } from "../stores/inbox.js";
 import { createDataSource } from "../data/source.js";
 import type { DataSource } from "../data/source.js";
 import { LiveSource, TurnCancelledError } from "../data/live-source.js";
+import type { ChatMessageItem, ChatShowResult } from "../data/live-source.js";
 import { markAutoNavDone } from "../lib/auto-nav.js";
 import ActivityFeed from "../components/ActivityFeed.vue";
 import ChatTranscript from "../components/ChatTranscript.vue";
@@ -222,6 +262,8 @@ import { fmtTokens, fmtCost } from "../components/agent/lib.js";
 import { isEmbedded } from "../lib/embed.js";
 import type { NodeRef } from "../types.js";
 
+const GITHUB_INBOX_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
 const props = defineProps<{ sessionId: string }>();
 const store = useRunStore();
 const route = useRoute();
@@ -236,6 +278,8 @@ const embed = computed(() => isEmbedded() || route?.query?.embed === "1");
 
 // One DataSource for the lifetime of the view (subscribe + write RPCs).
 let source: DataSource | null = null;
+let githubInboxTimer: ReturnType<typeof setInterval> | null = null;
+let focusedChatSeq = 0;
 
 // True while a turn is in flight; disables the input so the operator can't
 // fire a second overlapping turn against the live session.
@@ -272,6 +316,29 @@ function shortModel(m: string): string {
 }
 
 const reloadWarning = ref<string | null>(null);
+const focusedChat = ref<ChatShowResult | null>(null);
+const focusedChatLoading = ref(false);
+const focusedChatError = ref<string | null>(null);
+const focusedChatID = ref("");
+const focusedChatPreview = computed<ChatMessageItem[]>(() =>
+  (focusedChat.value?.messages ?? []).slice(-3)
+);
+const focusedChatScope = computed(() => {
+  const chat = focusedChat.value?.chat;
+  if (!chat) return "";
+  return chat.display_scope_key || chat.scope_key || "";
+});
+
+function canListWork(candidate: DataSource | null): candidate is DataSource & Pick<LiveSource, "listWork"> {
+  return typeof (candidate as Partial<Pick<LiveSource, "listWork">> | null)?.listWork === "function";
+}
+
+function canSyncGitHubInbox(
+  candidate: DataSource | null,
+): candidate is DataSource & Pick<LiveSource, "syncGitHubInbox" | "listWork"> {
+  const partial = candidate as Partial<Pick<LiveSource, "syncGitHubInbox" | "listWork">> | null;
+  return typeof partial?.syncGitHubInbox === "function" && typeof partial.listWork === "function";
+}
 
 function onFreshnessReloaded(prevStateExists: boolean): void {
   reloadWarning.value = prevStateExists ? null : "current state removed; staying put";
@@ -288,7 +355,26 @@ async function loadSession(sessionId: string): Promise<void> {
   // opening agent transcript entry.
   await store.hydrate(source, sessionId);
   await store.loadInitialView(source, sessionId);
+  await maybeSeedProposalsFromQuery();
   await maybeTeleportFromQuery(sessionId);
+  await maybeShowChatFromQuery(sessionId);
+  startGitHubInboxPolling(sessionId);
+}
+
+function startGitHubInboxPolling(sessionId: string): void {
+  stopGitHubInboxPolling();
+  if (!canSyncGitHubInbox(source)) return;
+  void inbox.syncGitHub(source, sessionId, undefined, { silent: true });
+  githubInboxTimer = setInterval(() => {
+    if (!canSyncGitHubInbox(source)) return;
+    void inbox.syncGitHub(source, sessionId, undefined, { silent: true });
+  }, GITHUB_INBOX_REFRESH_INTERVAL_MS);
+}
+
+function stopGitHubInboxPolling(): void {
+  if (!githubInboxTimer) return;
+  clearInterval(githubInboxTimer);
+  githubInboxTimer = null;
 }
 
 /**
@@ -316,6 +402,70 @@ async function maybeTeleportFromQuery(sessionId: string): Promise<void> {
   // Clear the param so a page refresh doesn't re-fire the teleport.
   const q = { ...route.query };
   delete q.notif;
+  await router.replace({ path: route.path, query: q });
+}
+
+async function maybeShowChatFromQuery(sessionId: string): Promise<void> {
+  if (!route) return;
+  const raw = route.query.chat;
+  const chatID = Array.isArray(raw) ? raw[0] : raw;
+  if (!chatID || typeof chatID !== "string") {
+    focusedChatSeq += 1;
+    focusedChat.value = null;
+    focusedChatID.value = "";
+    focusedChatError.value = null;
+    focusedChatLoading.value = false;
+    return;
+  }
+  const seq = ++focusedChatSeq;
+  focusedChatID.value = chatID;
+  focusedChatLoading.value = true;
+  focusedChatError.value = null;
+  const live = new LiveSource("/");
+  try {
+    const result = await live.showChat(sessionId, chatID);
+    if (seq !== focusedChatSeq) return;
+    focusedChat.value = result;
+  } catch (e) {
+    if (seq !== focusedChatSeq) return;
+    focusedChat.value = null;
+    focusedChatError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    if (seq === focusedChatSeq) {
+      focusedChatLoading.value = false;
+    }
+  }
+}
+
+async function maybeSeedProposalsFromQuery(): Promise<void> {
+  if (!route || !router) return;
+  const raw = route.query.proposal;
+  const encoded = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  if (encoded.length === 0) return;
+
+  for (const item of encoded) {
+    if (typeof item !== "string") continue;
+    try {
+      proposals.push(JSON.parse(item) as Proposal);
+    } catch {
+      /* malformed query seed — ignore (deterministic render/demo path only) */
+    }
+  }
+
+  const q = { ...route.query };
+  delete q.proposal;
+  await router.replace({ path: route.path, query: q });
+}
+
+async function clearFocusedChat(): Promise<void> {
+  focusedChatSeq += 1;
+  focusedChat.value = null;
+  focusedChatID.value = "";
+  focusedChatError.value = null;
+  focusedChatLoading.value = false;
+  if (!route || !router) return;
+  const q = { ...route.query };
+  delete q.chat;
   await router.replace({ path: route.path, query: q });
 }
 
@@ -393,7 +543,15 @@ watch(
   }
 );
 
+watch(
+  () => route?.query?.chat,
+  () => {
+    void maybeShowChatFromQuery(props.sessionId);
+  }
+);
+
 onUnmounted(() => {
+  stopGitHubInboxPolling();
   store.teardown();
   proposals.teardown();
   delete (window as unknown as { __kitsokiSubmitIntent?: unknown }).__kitsokiSubmitIntent;
@@ -425,6 +583,9 @@ async function runTurn(fn: () => Promise<unknown>): Promise<void> {
   } finally {
     pending.value = false;
     cancelling.value = false;
+    if (canListWork(source)) {
+      await inbox.refreshWork(source);
+    }
   }
 }
 
@@ -665,6 +826,92 @@ function onEventSelect(index: number): void {
 .iv__transcript {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+.iv__focused-chat {
+  flex-shrink: 0;
+  padding: 0.55rem 0.8rem;
+  background: #111827;
+  border-bottom: 1px solid var(--k-border, #1e293b);
+  display: grid;
+  gap: 0.3rem;
+}
+
+.iv__focused-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  font-size: 0.78rem;
+}
+
+.iv__focused-chat-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.iv__focused-chat-label {
+  color: var(--k-fg-accent, #60a5fa);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.iv__focused-chat-close {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  color: var(--k-fg-muted, #94a3b8);
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 0;
+}
+
+.iv__focused-chat-close:hover {
+  color: var(--k-fg, #e2e8f0);
+  text-decoration: underline;
+}
+
+.iv__focused-chat-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  color: var(--k-fg-muted, #94a3b8);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.68rem;
+}
+
+.iv__focused-chat-messages {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.iv__focused-chat-message {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: 0.45rem;
+  font-size: 0.72rem;
+}
+
+.iv__focused-chat-role {
+  color: var(--k-fg-muted, #94a3b8);
+  font-weight: 650;
+}
+
+.iv__focused-chat-content {
+  min-width: 0;
+  color: var(--k-fg, #dbeafe);
+  overflow-wrap: anywhere;
+}
+
+.iv__focused-chat-muted {
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.72rem;
+}
+
+.iv__focused-chat-error {
+  color: var(--k-error, #fca5a5);
+  font-size: 0.72rem;
 }
 
 .iv__done-note {

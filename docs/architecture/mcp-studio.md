@@ -10,7 +10,8 @@ It is distinct from the narrow per-app server: [`kitsoki serve`](../../internal/
 exposes a single `transition` tool that drives one app's state machine.
 `kitsoki mcp` is the authoring/introspection *control plane* — its state is an
 authoring **workspace** plus zero-or-more live **driving sessions**, exposed as
-the `story.*`, `session.*`, `render.*`, and `issue.*` tool families. It is a sibling of
+the `studio.*`, `story.*`, `session.*`, `chat.*`, `render.*`, and `issue.*`
+tool families. It is a sibling of
 `kitsoki serve` and the [operator-ask bridge](operator-ask.md): same
 `github.com/modelcontextprotocol/go-sdk`, same `StdioTransport`, same
 `mcp__<server>__<tool>` naming.
@@ -69,6 +70,13 @@ reaches it (`TestServer_NoLiveFallthrough`). A session opts into `live` (or VCR
 so the agent — and the human watching it — knows when an LLM is in the loop. A
 replay miss is a **hard error**, never a silent live fallthrough.
 
+For deterministic host-side integration tests, `kitsoki mcp --flow <fixture>`
+loads the fixture's `host_handlers:` and installs those stubs into every future
+driving session. This mirrors the no-LLM `kitsoki web --flow` posture for host
+calls while still driving the session through real studio MCP stdio tools.
+The MCP flow posture is intentionally narrow today: it supports `host_handlers`
+stubs, not `host_cassette` or Starlark cassette fields.
+
 `story.validate` and `story.test` are deterministic by construction.
 
 ## Tool surface
@@ -76,7 +84,53 @@ replay miss is a **hard error**, never a silent live fallthrough.
 Tools keep the dotted `family.verb` name; the SDK exposes each to the client as
 `mcp__kitsoki__<name>`. Two liveness tools — `studio.ping` (`→ {ok, version}`)
 and `studio.handles` (`→ {sessions[], workspace?}`) — prove transport and attach
-before any domain tool runs.
+before any domain tool runs. `studio.work` adds the global async queue across
+open handles, so an external agent can ask "what needs attention now?" without
+inspecting every session one by one.
+
+### `studio.*` — attach & reacquire globally
+
+| Tool | Shape | Purpose |
+|---|---|---|
+| `studio.ping` | `{}` → `{ok, version}` | liveness probe |
+| `studio.handles` | `{}` → `{sessions[], workspace?}` | list open handles |
+| `studio.work` | `{include_quiet?, limit?}` → `{summary, sessions[], items[]}` | prioritized async work queue across all open driving handles |
+
+`studio.work.items[]` includes unread inbox notifications, running or
+awaiting-input jobs, failed jobs, pending/dispatching/failed chat drives,
+backgrounded tmux chats, parked operator-ask questions waiting on
+`session.answer`, and trace-backed mining proposals awaiting review. Each item
+carries the source `handle`, session/story metadata, stable IDs, a priority, and
+a `reacquire` hint naming the next MCP tool call (`session.teleport`,
+`session.inspect`, `session.answer`, or `chat.show`). By default it omits read
+notifications and quiet terminal jobs; pass
+`include_quiet:true` when you need the full non-dismissed history. The queue is
+sorted by intervention priority: passive `success` / `info` notifications stay
+visible and reacquirable, but rank below active jobs/chats/questions and do not
+increase `summary.needs_attention`.
+`limit` pages only `items[]`; `summary.items` and `summary.needs_attention`
+continue to describe the full queue so clients can show accurate global badges.
+
+When a job row has a matching unread job-origin notification, `studio.work`
+returns `reacquire.tool: "session.teleport"` with that notification id so the
+client can jump directly to the saved origin context. Awaiting-input job rows
+also carry the clarification prompt as the item `body` when no more specific
+notification body is available. Job rows without a matching unread notification
+keep the broader `session.inspect` fallback. Failed chat-drive rows return
+`reacquire.tool: "chat.show"` with the failed chat id and failure text, so
+clients can reopen the focused subagent context.
+
+When a driven turn parks on the operator-ask fallback, `studio.work` returns an
+`operator_question` row with `question_id`, the original `questions[]`, and
+`reacquire.tool: "session.answer"`. The client supplies the chosen answers to
+that hint's `{handle, question_id}` to resume the parked turn. The row disappears
+after the turn is answered or times out.
+
+When the trace contains `mining.proposal_raised` without a later matching
+`mining.proposal_decided`, `studio.work` returns a `mining_proposal` row with
+`proposal_id`, proposal kind/target, rung, draft path, and `reacquire.tool:
+"session.inspect"`. This makes proposal-review work discoverable to a fresh MCP
+client without scraping the web inbox's frontend proposal queue.
 
 ### `story.*` — author (deterministic, LLM-free)
 
@@ -111,12 +165,57 @@ deterministic direct path or a read.
 | `session.continue` | `{handle, slots} → {outcome, frame}` | `ContinueTurn` — supply missing slots |
 | `session.answer` | `{handle, question_id, answers} → {outcome, frame} \| {awaiting_operator}` | resume a parked operator-ask (see below) |
 | `session.status` | `{handle} → {state, allowed_intents, status?, last_error?, exit?}` | compact, overflow-proof snapshot — **never embeds world**; reads only the well-known keys `status`/`last_error`/`exit` from the world. Use instead of `session.inspect` when the world may hold multi-KB LLM artifacts. |
-| `session.inspect` | `{handle, omit_world?, max_value_len?} → {state, world, allowed_intents, last_view, last_turns[]}` | `buildInspectOutput` (read-only); `omit_world:true` drops world entirely; `max_value_len:N` truncates each value to N chars with `…` |
+| `session.teleport` | `{handle, notification_id} → {outcome, frame}` | jump to an inbox notification's saved target and mark it read |
+| `session.inspect` | `{handle, omit_world?, max_value_len?} → {state, world, allowed_intents, last_view, async, jobs[], notifications[], pending_drives[], backgrounded_chats[], operator_questions[], mining_proposals[], last_turns[]}` | `buildInspectOutput` + session JobStore / ChatStore / trace side channel (read-only); `omit_world:true` drops world entirely; `max_value_len:N` truncates each value to N chars with `…` |
+| `session.command` | `{handle, command, cols?, rows?} → {frame}` | run a deterministic TUI slash command such as `/work --all` against the handle |
 | `session.trace` | `{handle, since?, until?, limit?, truncate_payload?, kinds?} → {events[], last_turn}` | the session's JSONL trace (read-only); `truncate_payload:N` caps event payloads; `kinds` filters to specific event kinds |
+| `chat.show` | `{chat_id, handle?, session_id?, since_seq?} → {context?, chat, pty?, messages[]}` | read-only focused context for a selected async chat/subagent; `chat.display_scope_key` is the operator-facing scope label |
 
 Every drive/submit/continue returns **both** the structured `TurnOutcome` (mode,
 new state, allowed intents, slots needed) **and** the rendered `Frame` — so the
 agent reasons on metadata and *sees* the screen in one call.
+
+`session.command` exists for TUI-only operator surfaces that are not
+orchestrator turns, especially smoke-testing `/work --all` and `/chat show
+<id>` through MCP. It uses the live TUI slash dispatcher and rejects commands
+that return an asynchronous terminal side effect, such as attaching to tmux.
+
+`session.inspect` also carries compact per-handle background-job and inbox
+projections. `async` summarizes running, awaiting-input, terminal, unread,
+unread action-required, and operator-question counts; `jobs[]` shows the
+session's job IDs, kinds, statuses, origin states, errors, clarification schema,
+and timestamps;
+`notifications[]` shows active inbox rows, including `action_required` items and
+teleport job/state fields. When a chat store is wired, `pending_drives[]` shows
+pending/dispatching/failed chat-input-queue rows owned by the session, and
+`backgrounded_chats[]` shows tmux-hosted chats left in `pty_background` mode,
+and `operator_questions[]` shows parked operator-ask fallback batches with the
+same `questions[]`, `question_id`, and `session.answer` reacquire hint as
+`studio.work`. `mining_proposals[]` folds the trace's
+`mining.proposal_raised` / `mining.proposal_decided` side-channel events into
+currently pending proposal-review rows. This is the structured MCP surface for
+an external agent to inspect the chosen handle after `studio.work` has ranked
+the global queue, notice required operator input, and reacquire or switch to the
+task through `session.teleport`, `chat.show`, or `session.answer` without
+scraping the TUI frame or decoding trace events.
+
+Story-authored `host.chat.drive` effects are stamped with the originating
+session and state before the host handler enqueues the drive, so ordinary
+state-machine chat work appears in these same `pending_drives[]` and
+`studio.work.items[]` surfaces without fixture-only store seeding.
+
+When the selected async item is chat-backed, `chat.show` drills into the
+focused context: chat metadata, the transcript slice, and any recorded tmux PTY
+state. That gives an MCP client the same "switch attention to this subagent"
+context that `session.inspect.backgrounded_chats[]` points at, without shelling
+out to `kitsoki chat show`. When the client follows a `studio.work` reacquire
+hint, it can pass the hint's `handle` and `session_id` through unchanged;
+`chat.show` validates that the chat belongs to that session and echoes the
+focused context back in `context`.
+
+For a copy-paste smoke test of the async path, including background completion,
+inbox notification capture, and `session.teleport`, see
+[`../recipes/studio-mcp-async-smoke.md`](../recipes/studio-mcp-async-smoke.md).
 
 ### `render.*` — see (read-only)
 
@@ -129,7 +228,7 @@ path: they capture the existing TUI and web renderers.
 |---|---|---|
 | `render.tui` | the `Frame` `{text, ansi, metadata}` at any width | `tui.ComposeFrame` |
 | `render.tui_png` | the `Frame.text` **+** an MCP image block of the terminal | `internal/tui/shot` raster (ANSI→PNG) |
-| `render.web` | text **+** an MCP image block of the **real** browser view | `internal/webshot` (headless `kitsoki web`) |
+| `render.web` | text **+** an MCP image block of the **real** browser view; optional `assert_text[]` fails the call unless each string appears in the settled page | `internal/webshot` (headless `kitsoki web`) |
 
 The **`Frame`** is the unit of fidelity — "the full screen a human sees" as a
 value, captured once by the TUI's own composer and read by every headless
@@ -141,10 +240,12 @@ the `webshot` seam are documented in
 Image blocks are gated on client capability: `render.tui_png` / `render.web`
 attach an image block when the client advertises image support and **always**
 include the textual frame, so a text-only client still gets something.
-`render.web` requires a browser-capable host (the served `kitsoki web` + the
-Node/Playwright [`web-shot.ts`](../../tools/runstatus/web-shot.ts) invoker,
-injected via `Server.SetWebShot`); with no shot wired it degrades to a text
-result.
+`kitsoki mcp` wires `render.web` for live handles by serving the open studio
+session through the same runstatus web handler and screenshotting it with the
+Node/Playwright [`web-shot.ts`](../../tools/runstatus/web-shot.ts) invoker.
+That path needs a staged runstatus SPA (`make web`) and local Playwright
+dependencies. Story/state spec screenshots still belong to `kitsoki web-shot`,
+where a no-LLM flow or host cassette can define the deterministic web session.
 
 ### `issue.*` — file a gap (with evidence bundled)
 

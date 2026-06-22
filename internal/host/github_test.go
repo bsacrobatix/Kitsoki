@@ -95,6 +95,65 @@ func TestGitHubTicket_Search_Happy(t *testing.T) {
 	}
 }
 
+func TestListGitHubInboxItems_Happy(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
+	fr.responses["gh issue list --repo acme/repo --state open --assignee @me --limit 25 --json number,title,assignees,url"] = fakeResp{
+		stdout: `[{"number":7,"title":"Assigned issue","url":"https://github.com/acme/repo/issues/7","assignees":[{"login":"brad"}]}]`,
+	}
+	fr.responses["gh pr list --repo acme/repo --state open --review-requested @me --limit 25 --json number,title,author,url"] = fakeResp{
+		stdout: `[{"number":42,"title":"Review this","url":"https://github.com/acme/repo/pull/42","author":{"login":"alice"}}]`,
+	}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	items, err := host.ListGitHubInboxItems(context.Background(), host.GitHubInboxOptions{
+		Repo:          "acme/repo",
+		IncludeIssues: true,
+		IncludePRs:    true,
+		Limit:         25,
+	})
+	if err != nil {
+		t.Fatalf("ListGitHubInboxItems: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d (%+v)", len(items), items)
+	}
+	if items[0].Kind != "issue" || items[0].Number != "7" || items[0].Author != "brad" {
+		t.Fatalf("issue projection: %+v", items[0])
+	}
+	if items[1].Kind != "pr" || items[1].Number != "42" || items[1].Author != "alice" {
+		t.Fatalf("pr projection: %+v", items[1])
+	}
+}
+
+func TestListGitHubInboxItems_CustomFilters(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
+	fr.responses["gh issue list --state open --assignee octo --limit 5 --json number,title,assignees,url"] = fakeResp{
+		stdout: `[]`,
+	}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	items, err := host.ListGitHubInboxItems(context.Background(), host.GitHubInboxOptions{
+		IncludeIssues: true,
+		Assignee:      "octo",
+		Limit:         5,
+	})
+	if err != nil {
+		t.Fatalf("ListGitHubInboxItems: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected no items, got %+v", items)
+	}
+	for _, cmd := range fr.calls {
+		if strings.Contains(cmd, "pr list") {
+			t.Fatalf("did not expect PR query when IncludePRs=false: %v", fr.calls)
+		}
+	}
+}
+
 func TestGitHubTicket_Search_BadJSON(t *testing.T) {
 	fr := newFakeRunner()
 	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}

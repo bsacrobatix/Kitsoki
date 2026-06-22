@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -247,6 +248,10 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		// world, so a later `set:` cannot clobber these args — see
 		// dispatchRerenderWorld.
 		invokeArgs, fellBack := rerenderHostArgs(hc, dispatchRerenderWorld(hc, dispatchBinds, w))
+		invokeArgs, err := o.prepareHostInvokeArgs(sid, state, hc, invokeArgs)
+		if err != nil {
+			return events, w, "", "", err
+		}
 
 		// HostDispatched records the *actual* args the handler is about
 		// to receive (post-rerender), so the event trace is honest even
@@ -562,6 +567,26 @@ func redirectDepthFromCtx(ctx context.Context) int {
 		return v
 	}
 	return 0
+}
+
+func (o *Orchestrator) prepareHostInvokeArgs(sid app.SessionID, state app.StatePath, hc machine.HostInvocation, args map[string]any) (map[string]any, error) {
+	if hc.Namespace != "host.chat.drive" {
+		return args, nil
+	}
+	out := make(map[string]any, len(args)+3)
+	for k, v := range args {
+		out[k] = v
+	}
+	out["__origin_session_id"] = string(sid)
+	out["__origin_state"] = string(state)
+	if len(hc.OnComplete) > 0 {
+		b, err := json.Marshal(hc.OnComplete)
+		if err != nil {
+			return nil, fmt.Errorf("host.chat.drive: marshal on_complete: %w", err)
+		}
+		out["__on_complete"] = string(b)
+	}
+	return out, nil
 }
 
 // enterRedirectState runs the on_enter chain for the named error state and

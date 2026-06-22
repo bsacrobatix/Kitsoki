@@ -26,7 +26,7 @@ import (
 //     scope/now). A nil service degrades every control verb to a polite hint,
 //     so the surface compiles and renders before the runtime lands.
 //   - MineCommand — the `/mine` ChatBlockCommand (status|pause|resume|now|
-//     scope|queue|accept|dismiss), mirroring ProviderCommand/ModelCommand.
+//     scope|queue|accept|refine|dismiss), mirroring ProviderCommand/ModelCommand.
 //   - proposalsBadge — the footer chip (`proposals: N`), rendered through a
 //     pongo2 template exactly like ideFooterChip, hide-when-zero.
 //
@@ -217,10 +217,11 @@ func ProposalAsOperatorQuestion(p MineProposal) host.OperatorQuestion {
 //	/mine scope <d>  add/remove a transcript dir; echoes the resulting set
 //	/mine queue      list pending proposals (id, kind, target) — one list
 //	/mine accept <id> accept by id (headless apply, same recorded verdict)
+//	/mine refine <id> request refinement by id (recorded refinement signal)
 //	/mine dismiss <id> dismiss by id (recorded negative signal)
 //
-// accept/dismiss by id are a CLI alias for the card gesture — same code path —
-// so a scripted flow can drive the loop without the modal.
+// accept/refine/dismiss by id are CLI aliases for the card gesture — same code
+// path — so a scripted flow can drive the loop without the modal.
 type MineCommand struct{}
 
 func (MineCommand) Name() string { return "/mine" }
@@ -270,7 +271,7 @@ func (MineCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) 
 	case "queue":
 		return mineQueueBlock(m), m, nil
 
-	case "accept", "dismiss":
+	case "accept", "refine", "dismiss":
 		verdict := strings.ToLower(args[0])
 		if len(args) < 2 {
 			return blockSlashLine(m, fmt.Sprintf("(mine: usage — /mine %s <proposal-id>; run /mine queue to list ids)", verdict)), m, nil
@@ -287,7 +288,7 @@ func (MineCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) 
 		return blockSlashLine(m, fmt.Sprintf("(mine: %s proposal %s)", verdictPastTense(verdict), id)), m, nil
 
 	default:
-		return blockSlashLine(m, fmt.Sprintf("(mine: unknown sub-command %q — try status, pause, resume, now, scope, queue, accept, dismiss)", args[0])), m, nil
+		return blockSlashLine(m, fmt.Sprintf("(mine: unknown sub-command %q — try status, pause, resume, now, scope, queue, accept, refine, dismiss)", args[0])), m, nil
 	}
 }
 
@@ -319,6 +320,7 @@ func mineHelpBlock(m RootModel) string {
 		"/mine scope <dir>   — add/remove a transcript dir",
 		"/mine queue         — list pending proposals",
 		"/mine accept <id>   — accept a proposal by id",
+		"/mine refine <id>   — ask for a refined proposal by id",
 		"/mine dismiss <id>  — dismiss a proposal by id",
 	}
 	return blockSlashLine(m, strings.Join(lines, "\n"))
@@ -370,6 +372,8 @@ func verdictPastTense(verdict string) string {
 	switch verdict {
 	case "accept":
 		return "accepted"
+	case "refine":
+		return "refined"
 	case "dismiss":
 		return "dismissed"
 	default:

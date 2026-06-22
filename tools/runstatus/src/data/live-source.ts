@@ -133,6 +133,152 @@ export interface NotificationFrame {
   needs_attention: number;
 }
 
+export interface WorkSummary {
+  items: number;
+  needs_attention: number;
+  jobs_running: number;
+  jobs_awaiting_input: number;
+  jobs_terminal: number;
+  notifications_unread: number;
+  notifications_action_required: number;
+  pending_drives: number;
+  dispatching_drives?: number;
+  failed_drives?: number;
+  backgrounded_chats: number;
+  operator_questions?: number;
+  mining_proposals?: number;
+}
+
+export interface WorkSession {
+  session_id: string;
+  app_id?: string;
+  current_state?: string;
+  work: WorkSummary;
+}
+
+export interface WorkItem {
+  kind: "notification" | "job" | string;
+  priority: number;
+  session_id: string;
+  title?: string;
+  body?: string;
+  status?: string;
+  notification_id?: string;
+  job_id?: string;
+  severity?: Notification["Severity"];
+  created_at?: string;
+  updated_at?: string;
+  read_at?: string | null;
+  teleport_state?: string;
+  teleport_slots?: Record<string, unknown> | null;
+  teleport_job_id?: string;
+  origin_kind?: string;
+  origin_ref?: string;
+  origin_url?: string;
+  origin_state?: string;
+  reacquire_tool: "notification" | "session" | "chat.show" | string;
+  reacquire_session_id?: string;
+  drive_id?: string;
+  chat_id?: string;
+  question_id?: string;
+  proposal_id?: string;
+  proposal_kind?: string;
+  proposal_target?: string;
+  draft_path?: string;
+  rung?: number;
+  questions?: OperatorQuestion[];
+  actor?: string;
+  thread?: string;
+  tmux_session?: string;
+  tmux_host?: string;
+}
+
+export interface WorkListResult {
+  summary: WorkSummary;
+  sessions: WorkSession[];
+  items: WorkItem[];
+}
+
+export interface ChatInspectItem {
+  id: string;
+  app_id: string;
+  room: string;
+  scope_key: string;
+  display_scope_key?: string;
+  title: string;
+  status: string;
+  claude_session_id?: string;
+  parent_chat_id?: string;
+  session_id?: string;
+  created_at_unix_micro: number;
+  updated_at_unix_micro: number;
+  last_active_at_unix_micro: number;
+}
+
+export interface ChatPTYItem {
+  chat_id: string;
+  tmux_session: string;
+  tmux_host: string;
+  mode: string;
+  permission_mode?: string;
+  workspace_path?: string;
+  created_at_unix_micro: number;
+  updated_at_unix_micro: number;
+  last_idle_at_unix_micro?: number;
+}
+
+export interface ChatMessageItem {
+  chat_id: string;
+  seq: number;
+  role: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  created_at_unix_micro: number;
+}
+
+export interface ChatShowContext {
+  session_id?: string;
+}
+
+export interface ChatShowResult {
+  ok: boolean;
+  context?: ChatShowContext;
+  chat: ChatInspectItem;
+  pty?: ChatPTYItem;
+  messages?: ChatMessageItem[];
+}
+
+export interface GitHubInboxSyncItem {
+  notification_id: string;
+  kind: "issue" | "pr" | string;
+  number: string;
+  title: string;
+  url?: string;
+  inserted: boolean;
+  origin_ref: string;
+  teleport_state: string;
+  teleport_slots?: Record<string, unknown>;
+}
+
+export interface GitHubInboxSyncResult {
+  ok: boolean;
+  session_id: string;
+  fetched: number;
+  inserted: number;
+  skipped: number;
+  items: GitHubInboxSyncItem[];
+}
+
+export interface GitHubInboxSyncOptions {
+  repo?: string;
+  include_issues?: boolean;
+  include_prs?: boolean;
+  assignee?: string;
+  review_requested?: string;
+  limit?: number;
+  teleport_state?: string;
+}
+
 /**
  * One choice in an operator question (mcp `OperatorAskOption`). json-tagged on
  * the wire, so these are the literal field names the backend emits.
@@ -192,6 +338,28 @@ export class LiveSource implements DataSource {
 
   listSessions(): Promise<SessionHeader[]> {
     return this.client.post<SessionHeader[]>("runstatus.sessions.list", {});
+  }
+
+  listWork(): Promise<WorkListResult> {
+    return this.client.post<WorkListResult>("runstatus.work.list", {});
+  }
+
+  showChat(sessionId: string, chatId: string, sinceSeq = 0): Promise<ChatShowResult> {
+    return this.client.post<ChatShowResult>("runstatus.chat.show", {
+      session_id: sessionId,
+      chat_id: chatId,
+      since_seq: sinceSeq,
+    });
+  }
+
+  syncGitHubInbox(
+    sessionId: string,
+    opts: GitHubInboxSyncOptions = {}
+  ): Promise<GitHubInboxSyncResult> {
+    return this.client.post<GitHubInboxSyncResult>(
+      "runstatus.session.inbox.sync_github",
+      { session_id: sessionId, ...opts }
+    );
   }
 
   getSession(sessionId: string): Promise<SessionHeader> {

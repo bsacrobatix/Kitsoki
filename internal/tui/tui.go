@@ -38,12 +38,15 @@ import (
 	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/render"
+	"kitsoki/internal/store"
 	"kitsoki/internal/trace"
 	"kitsoki/internal/tui/blocks"
 	"kitsoki/internal/userfacing"
 	"kitsoki/internal/viz"
 	"kitsoki/internal/world"
 )
+
+const githubInboxPollInterval = 5 * time.Minute
 
 // Mode describes which interaction mode the TUI is currently in.
 type Mode int
@@ -237,7 +240,8 @@ type RootModel struct {
 
 	// lastNotifications is the most-recent polling snapshot, used to build
 	// the status-line badge without re-querying the database on every View().
-	lastNotifications []jobs.Notification
+	lastNotifications   []jobs.Notification
+	lastGitHubInboxSync time.Time
 
 	// minerService is the ambient miner's control seam (ad-hoc-workbench slice
 	// 4). When non-nil, /mine drives pause/resume/scope/now/decide through it
@@ -250,6 +254,12 @@ type RootModel struct {
 	// queue + miner status the footer badge and /mine status read when no
 	// service is wired (or as the post-decision echo cache when one is).
 	mineStateValue MineState
+
+	// traceHistory reads the session event history for read-only surfaces such
+	// as /work. It is optional; production wires the SQLite store history and
+	// studio tests can wire JSONL history. When omitted, trace-backed proposal
+	// rows are simply absent and the miner-service queue remains authoritative.
+	traceHistory func() (store.History, error)
 
 	// lastCtrlC is the time the most recent Ctrl+C was pressed, used to
 	// detect a double-tap quit. Zero means no recent press (or the window
@@ -468,6 +478,13 @@ func WithJobStore(js *jobs.JobStore) RootModelOption {
 // else.
 func WithChatStore(cs *chats.Store) RootModelOption {
 	return func(m *RootModel) { m.chatStore = cs }
+}
+
+// WithTraceHistory wires a read-only event-history source into the RootModel.
+// /work uses it to surface trace-backed mining proposals even when a miner
+// service snapshot is not available.
+func WithTraceHistory(fn func() (store.History, error)) RootModelOption {
+	return func(m *RootModel) { m.traceHistory = fn }
 }
 
 // WithIDEDenyList seeds the kitsoki-side deny list that gates ambient editor
@@ -957,11 +974,16 @@ func (m RootModel) scheduleInboxPoll(delay time.Duration) tea.Cmd {
 
 // pollInbox reads notifications from the job store and returns an inboxRefreshed
 // message.  Runs inline (called from the Update goroutine via tea.Cmd).
-func (m RootModel) pollInbox() tea.Msg {
+func (m RootModel) pollInbox(syncGitHub bool) tea.Msg {
 	if m.jobStore == nil {
 		return nil
 	}
 	ctx := context.Background()
+	if syncGitHub {
+		if _, err := syncGitHubInboxNotifications(ctx, m.jobStore, m.sid, ""); err != nil {
+			slog.Debug("tui: github inbox sync skipped", "err", err)
+		}
+	}
 	ns, err := m.jobStore.ListNotifications(ctx, m.sid, 20)
 	if err != nil {
 		slog.Warn("tui: inbox poll error", "err", err)
@@ -1161,7 +1183,12 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.jobStore == nil {
 			return m, nil
 		}
-		return m, func() tea.Msg { return m.pollInbox() }
+		now := m.inboxClock().Now()
+		syncGitHub := m.lastGitHubInboxSync.IsZero() || now.Sub(m.lastGitHubInboxSync) >= githubInboxPollInterval
+		if syncGitHub {
+			m.lastGitHubInboxSync = now
+		}
+		return m, func() tea.Msg { return m.pollInbox(syncGitHub) }
 
 	case inboxRefreshed:
 		// Single-pane redesign: print a transcript line for each
@@ -1506,7 +1533,7 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg {
 					ctx := context.Background()
 					_ = js.MarkNotificationRead(ctx, nID)
-					return m.pollInbox()
+					return m.pollInbox(false)
 				}
 			}
 			return m, nil
@@ -1970,6 +1997,13 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		}
 		return next, cmd
 
+	case "/chat":
+		body, next, cmd := ChatCommand{}.Run(m, parts[1:])
+		if body != "" {
+			next.transcript.AppendBlock(body)
+		}
+		return next, cmd
+
 	case "/provider":
 		body, next, cmd := ProviderCommand{}.Run(m, parts[1:])
 		if body != "" {
@@ -2056,8 +2090,17 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		// Single-pane redesign: print the inbox inline as a chat
 		// block. The legacy panel toggle is preserved for back-compat
 		// until phase 3 deletes the panel.
-		m.transcript.AppendBlock(renderInboxBlock(m, parts[1:]))
+		var block string
+		var cmd tea.Cmd
+		m, block, cmd = renderInboxBlock(m, parts[1:])
+		m.transcript.AppendBlock(block)
 		m.inbox.ToggleExpanded()
+		return m, cmd
+
+	case "/work":
+		var block string
+		m, block = renderWorkBlock(m, parts[1:])
+		m.transcript.AppendBlock(block)
 		return m, nil
 
 	case "/meta":

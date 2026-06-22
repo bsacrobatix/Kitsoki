@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/chathost"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	"kitsoki/internal/machine"
@@ -53,6 +55,100 @@ func TestOrchestrator_HostDispatchBindsAndRefreshesView(t *testing.T) {
 	require.Equal(t, app.StatePath("probe"), out.NewState)
 	require.True(t, strings.Contains(out.View, "hello world"),
 		"expected refreshed view to include bound value, got: %q", out.View)
+}
+
+func TestOrchestrator_HostChatDriveGetsSessionOrigin(t *testing.T) {
+	const appYAML = `
+app:
+  id: chat-drive-origin-test
+  version: 0.1.0
+  title: "Chat drive origin test"
+
+hosts:
+  - host.chat.create
+  - host.chat.drive
+
+world:
+  chat_id: { type: string, default: "" }
+  drive_id: { type: string, default: "" }
+
+intents:
+  begin: { title: "Begin" }
+
+root: lobby
+
+states:
+  lobby:
+    view: "Lobby"
+    on:
+      begin:
+        - target: queued
+
+  queued:
+    view: "Queued {{ world.drive_id }}"
+    on_enter:
+      - invoke: host.chat.create
+        with:
+          app: "chat-drive-origin-test"
+          room: "agent"
+          scope_key: "smoke"
+          title: "Async agent"
+        bind:
+          chat_id: chat_id
+      - invoke: host.chat.drive
+        with:
+          chat_id: "{{ world.chat_id }}"
+          payload: "review the proposed patch"
+          transport: "state_machine"
+          actor: "story"
+          thread: "issue-7"
+          await: false
+        bind:
+          drive_id: drive_id
+`
+	def, err := app.LoadBytes([]byte(appYAML))
+	require.NoError(t, err)
+	m, err := machine.New(def)
+	require.NoError(t, err)
+
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	chatStore, err := chats.NewStore(s.DB())
+	require.NoError(t, err)
+
+	reg := host.NewRegistry()
+	host.RegisterBuiltins(reg)
+	orch := orchestrator.New(def, m, s, noopHarness{},
+		orchestrator.WithHostRegistry(reg),
+		orchestrator.WithChatStore(chathost.NewAdapter(chatStore)),
+		orchestrator.WithChatsConcrete(chatStore),
+	)
+
+	ctx := context.Background()
+	sid, err := orch.NewSession(ctx)
+	require.NoError(t, err)
+	out, err := orch.SubmitDirect(ctx, sid, "begin", map[string]any{})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("queued"), out.NewState)
+	journey, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	chatID, _ := journey.World.Vars["chat_id"].(string)
+	driveID, _ := journey.World.Vars["drive_id"].(string)
+	require.NotEmpty(t, chatID)
+	require.NotEmpty(t, driveID)
+
+	drives, err := chatStore.ListDrivesBySession(ctx, string(sid), []chats.DriveStatus{chats.DriveStatusPending})
+	require.NoError(t, err)
+	require.Len(t, drives, 1)
+	drive := drives[0]
+	require.Equal(t, driveID, drive.DriveID)
+	require.Equal(t, chatID, drive.ChatID)
+	require.Equal(t, string(sid), drive.OriginSessionID)
+	require.Equal(t, "queued", drive.OriginState)
+	require.Equal(t, "review the proposed patch", drive.Payload)
+	require.Equal(t, "story", drive.Actor)
+	require.Equal(t, "issue-7", drive.Thread)
 }
 
 // TestOrchestrator_HostDispatchedFlushedLiveBeforeInvoke pins the observability

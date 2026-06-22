@@ -78,13 +78,15 @@ room-switch commands. Notable families:
 | `/actions [n]` | `commands_actions.go` | Renders/selects the room's action menu |
 | `/world` | `commands_world.go` | Hierarchical world viewer |
 | `/trace` | `commands_trace.go` | The routing pipeline trace for recent turns |
-| `/inbox` | `commands_inbox.go` | Inline notification list |
+| `/inbox [n\|all\|sync-github]` | `commands_inbox.go` | Inline notification list, open item `n`, show all rows, or refresh GitHub issue/PR intake |
+| `/work [--all]` | `commands_work.go` | List active async work, including queued and trace-backed proposal review; `--all` broadens jobs/chats across every session on this host |
+| `/chat show <id>` | `commands_chat.go` | Focused async chat context for queued/dispatching work without attaching to tmux |
 | `/provider [name\|n]` | `commands_harness.go` | List/switch the [harness profile](../architecture/harness-profiles.md) (backend/provider); takes effect next turn |
 | `/model [id\|n]` | `commands_harness.go` | List/switch the active profile's model; takes effect next turn |
 | `/jump` | `commands_jump.go` | Navigate to background-completion events |
 | `/ide [connect\|disconnect\|status]` | `commands_ide.go` | Connect/disconnect the live editor link; ambient selection rides each turn |
 | `/open <path>` | `commands_open.go` | Open an artifact (resolved against the run's cwd) in `$EDITOR` or the OS default — the terminal-agnostic fallback for `.md` links |
-| `/mine [status\|pause\|resume\|now\|scope\|queue\|accept\|dismiss]` | `mine_command.go` | The operator intercom to the [ambient miner](../architecture/ambient-mining.md): read its watermark/queue/scope, pause/resume it, force a pass, or accept/dismiss a queued proposal by id |
+| `/mine [status\|pause\|resume\|now\|scope\|queue\|accept\|refine\|dismiss]` | `mine_command.go` | The operator intercom to the [ambient miner](../architecture/ambient-mining.md): read its watermark/queue/scope, pause/resume it, force a pass, or accept/refine/dismiss a queued proposal by id |
 
 > **Reload parity.** `/reload` hot-reloads the running story's `app.yaml` in
 > place (re-validate, swap the `AppDef`, re-fire `on_enter`). The web UI's
@@ -122,7 +124,10 @@ an in-flight LLM call.
   off-path `#`, slot-filling `?`, awaiting-LLM `…`).
 - **Menu / inbox** (`menu.go`, `inbox.go`) — the action menu and
   notification list, surfaced inline as blocks and via `/actions` /
-  `/inbox`.
+  `/inbox`. When a job store is wired, the inbox poller also checks GitHub
+  assigned issues and requested PR reviews every five minutes through the
+  idempotent external-notification path; `/inbox sync-github [repo]` is the
+  immediate manual refresh and prints inserted/skipped counts.
 - **Meta-mode** (`metamode.go`, with `internal/metamode/`) — a sidebar
   agent conversation rendered into the same pane with a distinct theme
   accent; you enter with `/meta …` and return with `/meta done`. See
@@ -135,9 +140,12 @@ an in-flight LLM call.
   hide-when-zero) — it never changes `m.mode` and never interrupts a turn.
   Each queued item opens in the **same operator-question card**
   (`operator_question.go`, `ModeOperatorQuestion`) the operator already
-  answers, with one accept/refine/dismiss gesture; `/mine accept|dismiss <id>`
-  is the scriptable CLI alias for that gesture. The badge appears only when
-  the miner is enabled and the queue is non-empty.
+  answers, with one accept/refine/dismiss gesture; `/mine accept|refine|dismiss
+  <id>` is the scriptable CLI alias for that gesture. The badge appears only
+  when the miner is enabled and the queue is non-empty. `/work` also folds
+  trace-backed `mining.proposal_raised` rows that have no matching
+  `mining.proposal_decided` event, so a resumed or MCP-driven TUI frame can
+  list proposal-review work even before the miner service snapshot is refreshed.
 
 ## Editor awareness: `/ide`
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"kitsoki/internal/chats"
 	"kitsoki/internal/jobs"
 )
 
@@ -24,7 +25,9 @@ func TestHelpCommandLists(t *testing.T) {
 		"room switches",
 		"system",
 		"/help",
+		"/chat show",
 		"/intents",
+		"/work [--all]",
 		"/world",
 		"/meta",
 		"/quit",
@@ -32,6 +35,16 @@ func TestHelpCommandLists(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("/help missing %q in output\n---\n%s", want, body)
 		}
+	}
+}
+
+func TestChatScopeDisplayStripsSessionPrefix(t *testing.T) {
+	t.Parallel()
+	if got := chats.DisplayScopeKey("\x00session=session-1\x00mcp-smoke"); got != "mcp-smoke" {
+		t.Fatalf("DisplayScopeKey session scoped = %q, want mcp-smoke", got)
+	}
+	if got := chats.DisplayScopeKey("plain-scope"); got != "plain-scope" {
+		t.Fatalf("DisplayScopeKey plain = %q, want plain-scope", got)
 	}
 }
 
@@ -136,6 +149,24 @@ func TestNewInboxNotificationsDetectsAdded(t *testing.T) {
 	}
 	if got[0].ID != "c" || got[1].ID != "d" {
 		t.Errorf("expected [c,d], got %v", []string{got[0].ID, got[1].ID})
+	}
+}
+
+func TestInboxNotificationHintIncludesBodyAndOriginURL(t *testing.T) {
+	t.Parallel()
+	got := inboxNotificationHint(jobs.Notification{
+		Body:      "Review requested by alice.\n\nhttps://github.com/acme/repo/pull/42",
+		OriginURL: "https://github.com/acme/repo/pull/42",
+	})
+	if got != "Review requested by alice. - https://github.com/acme/repo/pull/42" {
+		t.Fatalf("hint = %q", got)
+	}
+
+	got = inboxNotificationHint(jobs.Notification{
+		OriginURL: "https://github.com/acme/repo/issues/7",
+	})
+	if got != "https://github.com/acme/repo/issues/7" {
+		t.Fatalf("url-only hint = %q", got)
 	}
 }
 

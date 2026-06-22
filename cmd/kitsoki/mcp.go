@@ -4,17 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
+	"github.com/goccy/go-yaml"
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/harness"
+	"kitsoki/internal/host"
+	"kitsoki/internal/kitrepo"
 	studio "kitsoki/internal/mcp/studio"
+	rsserver "kitsoki/internal/runstatus/server"
+	"kitsoki/internal/testrunner"
 	"kitsoki/internal/webconfig"
+	"kitsoki/internal/webshot"
 )
 
 // studioImportResolver returns the import resolver used by `kitsoki mcp`.
@@ -99,6 +107,7 @@ func mcpCmd() *cobra.Command {
 		dbPath      string
 		harnessType string
 		workspace   string
+		flowPath    string
 		readOnly    bool
 	)
 	cmd := &cobra.Command{
@@ -118,9 +127,9 @@ the deterministic story.read/write/validate/graph/test authoring tools; and the
 session.new/attach/drive/submit/continue/inspect/trace driving tools,
 render.tui/tui_png/web, and issue.create (file a GitHub issue via gh, bundling
 rendered assets + a handle's trace/inspect). Driving defaults to harness:replay (no LLM); render.tui
-and render.tui_png return the terminal Frame / PNG, while render.web degrades to
-a text result unless a browser-capable web shot is wired (deferred — it needs a
-served kitsoki web, the hybrid-session-driving concern).
+and render.tui_png return the terminal Frame / PNG, while render.web screenshots
+the current browser view for a live handle when the local web-shot helper and
+Playwright dependencies are available.
 
 Attach by adding to a client's .mcp.json (see 'kitsoki docs' once the studio
 docs land):
@@ -138,6 +147,33 @@ docs land):
 			// resolves on-disk credentials to a direct-API LiveHarness so the MCP
 			// can drive a real LLM with no CLI.
 			sess := studio.NewStudioSession(studioHarnessBuilder)
+			chatStore, chatCleanup, chatErr := openChatStore(dbPath)
+			if chatErr != nil {
+				return fmt.Errorf("mcp: open chat store: %w", chatErr)
+			}
+			defer chatCleanup()
+			sess.SetChatStore(chatStore)
+			if flowPath != "" {
+				abs, aerr := filepath.Abs(flowPath)
+				if aerr != nil {
+					return fmt.Errorf("resolve --flow path: %w", aerr)
+				}
+				data, rerr := os.ReadFile(abs)
+				if rerr != nil {
+					return fmt.Errorf("read --flow %q: %w", flowPath, rerr)
+				}
+				var fixture testrunner.FlowFixture
+				if uerr := yaml.Unmarshal(data, &fixture); uerr != nil {
+					return fmt.Errorf("parse --flow %q: %w", flowPath, uerr)
+				}
+				if fixture.HostCassette != "" || fixture.StarlarkHTTPCassette != "" || fixture.StarlarkInspectCassette != "" {
+					return fmt.Errorf("mcp --flow currently supports host_handlers stubs only; use a flow without host_cassette or starlark cassettes")
+				}
+				sess.SetHostRegistryConfigurer(func(reg *host.Registry) error {
+					testrunner.RegisterHostStubs(reg, fixture.HostHandlers)
+					return nil
+				})
+			}
 
 			// Seed operator-declared harness profiles (synthetic, codex, …) from
 			// the project webconfig so a session.new(profile:…) can route a live
@@ -178,6 +214,7 @@ docs land):
 				srvOpts = append(srvOpts, studio.ReadOnly())
 			}
 			srv := studio.NewServer(sess, srvOpts...)
+			srv.SetWebShot(mcpWebShotFunc(sess, ""))
 
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 			defer cancel()
@@ -195,6 +232,8 @@ docs land):
 		"default harness for driving sessions: replay|live (default replay → no LLM; per-session override on session.new)")
 	cmd.Flags().StringVar(&workspace, "workspace", "",
 		"optional initial authoring workspace (a story dir or app.yaml) bound as the workspace handle on boot")
+	cmd.Flags().StringVar(&flowPath, "flow", "",
+		"deterministic flow fixture whose host_handlers stub host.* calls for every driving session (no LLM)")
 	cmd.Flags().BoolVar(&readOnly, "read-only", false,
 		"omit the story-mutating tool (story.write); read + replay-driving tools stay available (the meta-mode Q&A surface)")
 	return cmd
@@ -224,4 +263,56 @@ func mcpAttachEntry(command, storiesDir string) map[string]any {
 // JSON — the snippet a user pastes into a client's config.
 func mcpAttachJSON(command, storiesDir string) ([]byte, error) {
 	return json.MarshalIndent(mcpAttachEntry(command, storiesDir), "", "  ")
+}
+
+type mcpWebShotOptions struct {
+	RepoRoot      string
+	Browser       webshot.BrowserInvoker
+	Server        func(http.Handler) webshot.ServerProvider
+	HealthTimeout time.Duration
+}
+
+func mcpWebShotFunc(sess *studio.StudioSession, repoRoot string) studio.WebShotFunc {
+	return mcpWebShotFuncWithOptions(sess, mcpWebShotOptions{RepoRoot: repoRoot})
+}
+
+func mcpWebShotFuncWithOptions(sess *studio.StudioSession, opts mcpWebShotOptions) studio.WebShotFunc {
+	return func(ctx context.Context, spec studio.WebRenderSpec) ([]byte, error) {
+		wsSpec := spec.ToWebshotSpec()
+		if wsSpec.SessionID == "" {
+			return nil, fmt.Errorf("kitsoki mcp render.web currently supports live handles; use kitsoki web-shot with a no-LLM flow for story/state screenshots")
+		}
+		repoRoot := opts.RepoRoot
+		if repoRoot == "" {
+			repoRoot = os.Getenv(kitrepo.EnvVar)
+		}
+		if repoRoot == "" {
+			repoRoot = kitrepo.Resolve()
+		}
+		if repoRoot == "" {
+			return nil, fmt.Errorf("could not locate the kitsoki checkout for tools/runstatus/web-shot.ts; set %s", kitrepo.EnvVar)
+		}
+		helper := filepath.Join(repoRoot, "tools", "runstatus", "web-shot.ts")
+		if _, err := os.Stat(helper); err != nil {
+			return nil, fmt.Errorf("web-shot helper not found at %s: %w", helper, err)
+		}
+
+		provider := studio.NewRunstatusProvider(sess)
+		handler := rsserver.NewMulti(provider).Handler()
+		serverFactory := opts.Server
+		if serverFactory == nil {
+			serverFactory = func(h http.Handler) webshot.ServerProvider {
+				return &webshot.HandlerServer{Handler: h, HealthTimeout: opts.HealthTimeout}
+			}
+		}
+		browser := opts.Browser
+		if browser == nil {
+			browser = &webshot.NodeInvoker{RepoRoot: repoRoot}
+		}
+		return webshot.Shot(ctx, wsSpec, webshot.Options{
+			Server:        serverFactory(handler),
+			Browser:       browser,
+			HealthTimeout: opts.HealthTimeout,
+		})
+	}
 }

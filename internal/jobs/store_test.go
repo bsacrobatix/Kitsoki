@@ -190,6 +190,246 @@ func TestJobStore_Notifications(t *testing.T) {
 	}
 }
 
+func TestJobStore_ListByStatusAcrossSessions(t *testing.T) {
+	db := openTestDB(t)
+	js, err := jobs.NewJobStore(db)
+	if err != nil {
+		t.Fatalf("NewJobStore: %v", err)
+	}
+	now := time.Now()
+	for _, j := range []*jobs.Job{
+		{
+			ID:        "job-current",
+			SessionID: "sess-1",
+			Kind:      "host.run",
+			Status:    jobs.JobRunning,
+			Payload:   map[string]any{"n": 1},
+			CreatedAt: now.Add(-2 * time.Minute),
+			UpdatedAt: now.Add(-1 * time.Minute),
+		},
+		{
+			ID:        "job-other",
+			SessionID: "sess-2",
+			Kind:      "host.agent.task",
+			Status:    jobs.JobAwaitingInput,
+			Payload:   map[string]any{"n": 2},
+			CreatedAt: now.Add(-3 * time.Minute),
+			UpdatedAt: now,
+		},
+		{
+			ID:        "job-done",
+			SessionID: "sess-3",
+			Kind:      "host.done",
+			Status:    jobs.JobDone,
+			Payload:   map[string]any{"n": 3},
+			CreatedAt: now.Add(-4 * time.Minute),
+			UpdatedAt: now,
+		},
+	} {
+		if err := js.UpsertJob(context.Background(), j); err != nil {
+			t.Fatalf("UpsertJob(%s): %v", j.ID, err)
+		}
+	}
+
+	got, err := js.ListByStatus(context.Background(), []jobs.JobStatus{jobs.JobRunning, jobs.JobAwaitingInput})
+	if err != nil {
+		t.Fatalf("ListByStatus: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d jobs, want 2: %+v", len(got), got)
+	}
+	if got[0].ID != "job-other" || got[0].SessionID != "sess-2" {
+		t.Fatalf("first job = %+v, want job-other with session", got[0])
+	}
+	if got[1].ID != "job-current" || got[1].SessionID != "sess-1" {
+		t.Fatalf("second job = %+v, want job-current with session", got[1])
+	}
+}
+
+func TestJobStore_ListNotificationsAll(t *testing.T) {
+	db := openTestDB(t)
+	js, err := jobs.NewJobStore(db)
+	if err != nil {
+		t.Fatalf("NewJobStore: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now()
+	current := &jobs.Notification{
+		SessionID: "sess-1",
+		CreatedAt: now.Add(-time.Minute),
+		Severity:  jobs.SeverityInfo,
+		Title:     "Current note",
+	}
+	other := &jobs.Notification{
+		SessionID: "sess-2",
+		CreatedAt: now,
+		Severity:  jobs.SeverityActionRequired,
+		Title:     "Other needs input",
+	}
+	dismissed := &jobs.Notification{
+		SessionID: "sess-3",
+		CreatedAt: now.Add(time.Minute),
+		Severity:  jobs.SeverityWarn,
+		Title:     "Dismissed",
+	}
+	for _, n := range []*jobs.Notification{current, other, dismissed} {
+		if err := js.InsertNotification(ctx, n); err != nil {
+			t.Fatalf("InsertNotification(%s): %v", n.Title, err)
+		}
+	}
+	if err := js.DismissNotification(ctx, dismissed.ID); err != nil {
+		t.Fatalf("DismissNotification: %v", err)
+	}
+
+	got, err := js.ListNotificationsAll(ctx, 0)
+	if err != nil {
+		t.Fatalf("ListNotificationsAll: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d notifications, want 2: %+v", len(got), got)
+	}
+	if got[0].ID != other.ID || got[0].SessionID != "sess-2" {
+		t.Fatalf("first notification = %+v, want other with session", got[0])
+	}
+	if got[1].ID != current.ID || got[1].SessionID != "sess-1" {
+		t.Fatalf("second notification = %+v, want current with session", got[1])
+	}
+}
+
+func TestJobStore_InsertExternalNotificationOnce(t *testing.T) {
+	db := openTestDB(t)
+	js, err := jobs.NewJobStore(db)
+	if err != nil {
+		t.Fatalf("NewJobStore: %v", err)
+	}
+	ctx := context.Background()
+
+	first := &jobs.Notification{
+		SessionID:     "sess-1",
+		Severity:      jobs.SeverityActionRequired,
+		Title:         "PR #42 needs review",
+		Body:          "Review requested by alice.",
+		TeleportState: "inbox",
+		TeleportSlots: map[string]any{"pr_id": "42", "pr_title": "Add tests"},
+		OriginRef:     "github:pr/42",
+		OriginURL:     "https://github.com/acme/repo/pull/42",
+	}
+	inserted, err := js.InsertExternalNotificationOnce(ctx, first)
+	if err != nil {
+		t.Fatalf("InsertExternalNotificationOnce(first): %v", err)
+	}
+	if !inserted {
+		t.Fatalf("expected first poll result to insert")
+	}
+	if first.ID == "" {
+		t.Fatalf("expected inserted notification ID")
+	}
+
+	duplicate := &jobs.Notification{
+		SessionID:     "sess-1",
+		Severity:      jobs.SeverityActionRequired,
+		Title:         "PR #42 needs review again",
+		TeleportState: "inbox",
+		OriginRef:     "github:pr/42",
+		OriginURL:     "https://github.com/acme/repo/pull/42",
+	}
+	inserted, err = js.InsertExternalNotificationOnce(ctx, duplicate)
+	if err != nil {
+		t.Fatalf("InsertExternalNotificationOnce(duplicate): %v", err)
+	}
+	if inserted {
+		t.Fatalf("expected duplicate poll result to be ignored")
+	}
+	if duplicate.ID != first.ID {
+		t.Fatalf("expected duplicate to return existing ID %q, got %q", first.ID, duplicate.ID)
+	}
+
+	notifs, err := js.ListNotifications(ctx, "sess-1", 10)
+	if err != nil {
+		t.Fatalf("ListNotifications: %v", err)
+	}
+	if len(notifs) != 1 {
+		t.Fatalf("expected one stored notification, got %d", len(notifs))
+	}
+	if notifs[0].OriginKind != "external" || notifs[0].OriginURL != first.OriginURL {
+		t.Fatalf("expected external origin and URL to round trip, got kind=%q url=%q", notifs[0].OriginKind, notifs[0].OriginURL)
+	}
+	if got := notifs[0].TeleportSlots["pr_id"]; got != "42" {
+		t.Fatalf("expected teleport slot pr_id=42, got %#v", got)
+	}
+
+	counts, err := js.UnreadCount(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("UnreadCount: %v", err)
+	}
+	if counts[jobs.SeverityActionRequired] != 1 {
+		t.Fatalf("expected one unread action-required notification, got %v", counts)
+	}
+}
+
+func TestJobStore_InsertExternalNotificationOnce_DedupesReadAndDismissedRows(t *testing.T) {
+	db := openTestDB(t)
+	js, err := jobs.NewJobStore(db)
+	if err != nil {
+		t.Fatalf("NewJobStore: %v", err)
+	}
+	ctx := context.Background()
+
+	n := &jobs.Notification{
+		SessionID:     "sess-1",
+		Severity:      jobs.SeverityActionRequired,
+		Title:         "Issue #7 assigned",
+		TeleportState: "inbox",
+		OriginRef:     "github:issue/7",
+	}
+	inserted, err := js.InsertExternalNotificationOnce(ctx, n)
+	if err != nil {
+		t.Fatalf("InsertExternalNotificationOnce(first): %v", err)
+	}
+	if !inserted {
+		t.Fatalf("expected first poll result to insert")
+	}
+	if err := js.MarkNotificationRead(ctx, n.ID); err != nil {
+		t.Fatalf("MarkNotificationRead: %v", err)
+	}
+	if err := js.DismissNotification(ctx, n.ID); err != nil {
+		t.Fatalf("DismissNotification: %v", err)
+	}
+
+	again := &jobs.Notification{
+		SessionID:     "sess-1",
+		Severity:      jobs.SeverityActionRequired,
+		Title:         "Issue #7 assigned",
+		TeleportState: "inbox",
+		OriginRef:     "github:issue/7",
+	}
+	inserted, err = js.InsertExternalNotificationOnce(ctx, again)
+	if err != nil {
+		t.Fatalf("InsertExternalNotificationOnce(after dismiss): %v", err)
+	}
+	if inserted {
+		t.Fatalf("expected dismissed external row to remain deduped")
+	}
+	if again.ID != n.ID {
+		t.Fatalf("expected existing dismissed row ID %q, got %q", n.ID, again.ID)
+	}
+
+	notifs, err := js.ListNotifications(ctx, "sess-1", 10)
+	if err != nil {
+		t.Fatalf("ListNotifications: %v", err)
+	}
+	if len(notifs) != 0 {
+		t.Fatalf("expected dismissed duplicate to stay hidden, got %d rows", len(notifs))
+	}
+	got, err := js.GetNotification(ctx, n.ID)
+	if err != nil {
+		t.Fatalf("GetNotification: %v", err)
+	}
+	if got == nil || got.ReadAt == nil || got.OriginKind != "external" {
+		t.Fatalf("expected read external notification to remain resolvable, got %+v", got)
+	}
+}
+
 // TestJobStore_InsertNotification_DefaultsCreatedAt is a regression test for the
 // zero-CreatedAt mis-sort bug. The inbox.PostJobNotification path inserts a
 // notification WITHOUT setting CreatedAt (it leaves the zero value). Before the
@@ -217,9 +457,9 @@ func TestJobStore_InsertNotification_DefaultsCreatedAt(t *testing.T) {
 	// First: an info notification, CreatedAt deliberately left ZERO (mirrors
 	// inbox.PostJobNotification, which does not set it).
 	info := &jobs.Notification{
-		SessionID: "sess-1",
-		Severity:  jobs.SeverityInfo,
-		Title:     "Job started",
+		SessionID:  "sess-1",
+		Severity:   jobs.SeverityInfo,
+		Title:      "Job started",
 		OriginKind: "job",
 	}
 	if err := js.InsertNotification(ctx, info); err != nil {
@@ -233,9 +473,9 @@ func TestJobStore_InsertNotification_DefaultsCreatedAt(t *testing.T) {
 
 	// Second: the success notification, also with CreatedAt left ZERO.
 	success := &jobs.Notification{
-		SessionID: "sess-1",
-		Severity:  jobs.SeveritySuccess,
-		Title:     "Job done",
+		SessionID:  "sess-1",
+		Severity:   jobs.SeveritySuccess,
+		Title:      "Job done",
 		OriginKind: "job",
 	}
 	if err := js.InsertNotification(ctx, success); err != nil {

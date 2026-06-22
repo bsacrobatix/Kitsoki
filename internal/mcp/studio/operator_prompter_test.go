@@ -186,7 +186,7 @@ func TestStudioOperatorAsk_FallbackProtocol(t *testing.T) {
 	require.Nil(t, pq2)
 	require.NoError(t, res.err, "the turn completed cleanly")
 
-	ins, err := sh.Runtime.inspect(context.Background(), 5)
+	ins, err := sh.Runtime.inspect(context.Background(), 5, sh.Key)
 	require.NoError(t, err)
 	assert.Equal(t, "Postgres", ins.World["answer"], "the story branched on the operator's answer")
 }
@@ -217,12 +217,49 @@ func TestStudioOperatorAsk_FallbackOverMCP(t *testing.T) {
 	require.Len(t, driveResp.AwaitingOperator.Questions, 1)
 	assert.Equal(t, probeQuestion, driveResp.AwaitingOperator.Questions[0].Question)
 
+	var work WorkResult
+	res, err = cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "studio.work",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "studio.work: %s", textOf(res))
+	require.NoError(t, json.Unmarshal([]byte(textOf(res)), &work))
+	assert.Equal(t, 1, work.Summary.OperatorQuestions)
+	assert.Equal(t, 1, work.Summary.NeedsAttention)
+	require.Len(t, work.Items, 1)
+	assert.Equal(t, "operator_question", work.Items[0].Kind)
+	assert.Equal(t, "awaiting_answer", work.Items[0].Status)
+	assert.Equal(t, qid, work.Items[0].QuestionID)
+	assert.Equal(t, probeQuestion, work.Items[0].Body)
+	require.Len(t, work.Items[0].Questions, 1)
+	assert.Equal(t, probeQuestion, work.Items[0].Questions[0].Question)
+	assert.Equal(t, "session.answer", work.Items[0].Reacquire.Tool)
+	assert.Equal(t, "s1", work.Items[0].Reacquire.Args["handle"])
+	assert.Equal(t, qid, work.Items[0].Reacquire.Args["question_id"])
+
+	var inspect InspectResult
+	res, err = cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "session.inspect",
+		Arguments: map[string]any{"handle": "s1"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.inspect: %s", textOf(res))
+	require.NoError(t, json.Unmarshal([]byte(textOf(res)), &inspect))
+	assert.Equal(t, 1, inspect.Async.OperatorQuestions)
+	require.Len(t, inspect.OperatorQuestions, 1)
+	assert.Equal(t, qid, inspect.OperatorQuestions[0].QuestionID)
+	require.Len(t, inspect.OperatorQuestions[0].Questions, 1)
+	assert.Equal(t, probeQuestion, inspect.OperatorQuestions[0].Questions[0].Question)
+	assert.Equal(t, "session.answer", inspect.OperatorQuestions[0].Reacquire.Tool)
+	assert.Equal(t, "s1", inspect.OperatorQuestions[0].Reacquire.Args["handle"])
+	assert.Equal(t, qid, inspect.OperatorQuestions[0].Reacquire.Args["question_id"])
+
 	// session.answer → settled outcome
 	var ansResp TurnResponse
 	res, err = cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
-		Name: "session.answer",
+		Name: work.Items[0].Reacquire.Tool,
 		Arguments: map[string]any{
-			"handle": "s1", "question_id": qid,
+			"handle": work.Items[0].Reacquire.Args["handle"], "question_id": work.Items[0].Reacquire.Args["question_id"],
 			"answers": map[string]any{probeQuestion: "SQLite"},
 		},
 	})
@@ -232,6 +269,14 @@ func TestStudioOperatorAsk_FallbackOverMCP(t *testing.T) {
 	require.Nil(t, ansResp.AwaitingOperator, "the turn settled, no further question")
 	assert.Equal(t, "probe", ansResp.Outcome.State)
 	assert.Contains(t, ansResp.Frame.Text, "SQLite", "the view branched on the answer")
+
+	res, err = cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "studio.work",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "studio.work after answer: %s", textOf(res))
+	require.NoError(t, json.Unmarshal([]byte(textOf(res)), &work))
+	assert.Equal(t, 0, work.Summary.OperatorQuestions)
 }
 
 // TestStudioOperatorAsk_AnswerUnknownQuestion proves session.answer fails fast
@@ -348,7 +393,7 @@ func TestStudioOperatorAsk_TimeoutDegrades(t *testing.T) {
 		t.Fatal("parked turn hung: a timed-out operator-ask must degrade, not block forever")
 	}
 
-	ins, err := sh.Runtime.inspect(context.Background(), 5)
+	ins, err := sh.Runtime.inspect(context.Background(), 5, sh.Key)
 	require.NoError(t, err)
 	assert.Contains(t, ins.World["answer"], "degraded", "the story proceeded without the operator")
 }

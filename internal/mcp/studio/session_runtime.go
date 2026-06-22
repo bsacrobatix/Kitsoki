@@ -24,15 +24,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/agent"
 	"kitsoki/internal/app"
+	"kitsoki/internal/chathost"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
+	"kitsoki/internal/inbox"
+	"kitsoki/internal/jobs"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/runstatus"
 	rsserver "kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
 	"kitsoki/internal/tui"
@@ -82,12 +89,20 @@ type sessionRuntime struct {
 	sink  *store.JSONLSink
 	sid   app.SessionID
 	model tui.RootModel
+	mu    sync.Mutex
+	// modelTurn is the highest persisted turn folded into model. It prevents
+	// read-only render refreshes from appending duplicate transcript entries.
+	modelTurn app.TurnNumber
 
 	// driver binds the orchestrator + sid to the runstatus Driver API so the
 	// session tools call the exact same Turn/SubmitDirect/ContinueTurn seam the
 	// web surface drives (internal/runstatus/server/driver.go). This is the
 	// "OrchestratorDriver directly" path the proposal names.
 	driver rsserver.Driver
+
+	jobStore  *jobs.JobStore
+	scheduler jobs.Scheduler
+	chatStore *chats.Store
 
 	// lastTurnErr is the orchestrator error from the most recent
 	// drive/submit/continue (nil on success). turnResponse surfaces it as
@@ -102,6 +117,21 @@ type sessionRuntime struct {
 	inFlight *suspendBroker
 
 	closers []func()
+}
+
+type studioBackgroundObserver struct {
+	rt  *sessionRuntime
+	sid app.SessionID
+}
+
+func (o *studioBackgroundObserver) OnBackgroundTurn(sid app.SessionID, outcome *orchestrator.TurnOutcome) {
+	if o == nil || o.rt == nil || sid != o.sid || outcome == nil {
+		return
+	}
+	o.rt.mu.Lock()
+	defer o.rt.mu.Unlock()
+	o.rt.model = o.rt.model.ApplyTurnOutcome(outcome, "(background)", nil)
+	o.rt.modelTurn = outcome.TurnNumber
 }
 
 // Close tears down the runtime in reverse construction order (LIFO), mirroring
@@ -131,7 +161,7 @@ func (rt *sessionRuntime) Close() {
 // backend (synthetic, codex, …) instead of the static default — the same
 // remap `kitsoki turn --profile` applies. An empty map leaves the session on the
 // legacy default-backend path (selectedProfile is then ignored).
-func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, resolver app.ImportResolver) (*sessionRuntime, error) {
+func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, resolver app.ImportResolver, chatStore *chats.Store, configureHosts HostRegistryConfigurer) (*sessionRuntime, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -198,6 +228,15 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	}
 	rt.closers = append(rt.closers, func() { _ = s.Close() })
 
+	jobStore, err := jobs.NewJobStore(s.DB())
+	if err != nil {
+		rt.Close()
+		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: open job store: %v", err)}
+	}
+	rt.jobStore = jobStore
+	rt.scheduler = jobs.NewScheduler(jobStore)
+	rt.chatStore = chatStore
+
 	hostReg := host.NewRegistry()
 	host.RegisterBuiltins(hostReg)
 	// Test-only injection seam: a flow/cassette test registers an extra host
@@ -206,6 +245,12 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	// dispatching a real claude -p sub-agent. Nil in production.
 	if registerExtraHostCaps != nil {
 		registerExtraHostCaps(hostReg)
+	}
+	if configureHosts != nil {
+		if err := configureHosts(hostReg); err != nil {
+			rt.Close()
+			return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: configure host registry: %v", err)}
+		}
 	}
 	if err := hostReg.ValidateAllowList(def.Hosts); err != nil {
 		rt.Close()
@@ -224,6 +269,14 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 		orchestrator.WithEventSink(sink),
 		orchestrator.WithEventSinkAuthority(true),
 		orchestrator.WithAgentRegistry(agentReg),
+		orchestrator.WithScheduler(rt.scheduler),
+		orchestrator.WithJobStore(rt.jobStore),
+	}
+	if chatStore != nil {
+		orchOpts = append(orchOpts,
+			orchestrator.WithChatStore(chathost.NewAdapter(chatStore)),
+			orchestrator.WithChatsConcrete(chatStore),
+		)
 	}
 	// A non-empty profile map routes agent dispatch (host.agent.*) through the
 	// declared backend; selectedProfile becomes the session's initial selection.
@@ -241,7 +294,10 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: new session: %v", err)}
 	}
 	rt.sid = sid
-	rt.driver = rsserver.OrchestratorDriver{Orch: orch, SID: sid}
+	rt.driver = rsserver.OrchestratorDriver{Orch: orch, SID: sid, Jobs: rt.jobStore, Chats: rt.chatStore, TraceHistory: rt.history}
+	obs := &studioBackgroundObserver{rt: rt, sid: sid}
+	orch.RegisterObserver(obs)
+	rt.closers = append(rt.closers, func() { orch.UnregisterObserver(obs) })
 
 	if err := orch.RecordEffectiveStory(ctx, sid); err != nil {
 		rt.Close()
@@ -279,12 +335,15 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: run initial on_enter: %v", err)}
 	}
 
-	model, err := newComposerModel(orch, sid)
+	model, err := newComposerModel(orch, sid, rt.jobStore, rt.chatStore, rt.history)
 	if err != nil {
 		rt.Close()
 		return nil, &openError{Code: ErrBadRequest, Msg: err.Error()}
 	}
 	rt.model = model
+	if j, jerr := orch.LoadJourney(sid); jerr == nil {
+		rt.modelTurn = j.Turn
+	}
 
 	return rt, nil
 }
@@ -294,7 +353,7 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 // journey, renders the initial typed view, and constructs a RootModel with no
 // app path (edit mode disabled) so a drive folds outcomes through the same
 // ApplyTurnOutcome path the live TUI runs.
-func newComposerModel(orch *orchestrator.Orchestrator, sid app.SessionID) (tui.RootModel, error) {
+func newComposerModel(orch *orchestrator.Orchestrator, sid app.SessionID, jobStore *jobs.JobStore, chatStore *chats.Store, historyFn func() store.History) (tui.RootModel, error) {
 	j, err := orch.LoadJourney(sid)
 	if err != nil {
 		return tui.RootModel{}, fmt.Errorf("session: load journey: %w", err)
@@ -303,8 +362,15 @@ func newComposerModel(orch *orchestrator.Orchestrator, sid app.SessionID) (tui.R
 	if err != nil {
 		return tui.RootModel{}, fmt.Errorf("session: render initial view: %w", err)
 	}
+	var traceHistory func() (store.History, error)
+	if historyFn != nil {
+		traceHistory = func() (store.History, error) { return historyFn(), nil }
+	}
 	return tui.NewRootModel(orch, sid, "", initialView,
 		tui.WithInitialTypedView(typedView, env, rr),
+		tui.WithJobStore(jobStore),
+		tui.WithChatStore(chatStore),
+		tui.WithTraceHistory(traceHistory),
 	), nil
 }
 
@@ -316,8 +382,35 @@ func newComposerModel(orch *orchestrator.Orchestrator, sid app.SessionID) (tui.R
 func (rt *sessionRuntime) drive(ctx context.Context, input string, cols, rows int) (*orchestrator.TurnOutcome, tui.Frame) {
 	out, err := rt.driver.Turn(ctx, input)
 	rt.lastTurnErr = err
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
 	rt.model = rt.model.ApplyTurnOutcome(out, input, err)
+	if out != nil {
+		rt.modelTurn = out.TurnNumber
+	}
 	return out, tui.ComposeFrame(&rt.model, cols, rows)
+}
+
+// slash routes a TUI slash command through the same RootModel dispatcher the
+// live terminal uses, then returns the recomposed frame. Commands that produce a
+// tea.Cmd are rejected because a headless MCP render cannot safely execute
+// terminal side effects such as tmux attach.
+func (rt *sessionRuntime) slash(command string, cols, rows int) (tui.Frame, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return tui.Frame{}, fmt.Errorf("session.command: command is required")
+	}
+	if !strings.HasPrefix(command, "/") {
+		return tui.Frame{}, fmt.Errorf("session.command: command must start with /")
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	next, cmd := rt.model.RunSlashCommand(command)
+	if cmd != nil {
+		return tui.Frame{}, fmt.Errorf("session.command: %q produced an async TUI command and cannot run headlessly", command)
+	}
+	rt.model = next
+	return tui.ComposeFrame(&rt.model, cols, rows), nil
 }
 
 // driveElicit routes free text through the turn loop with an operator prompter
@@ -403,7 +496,12 @@ func (rt *sessionRuntime) resumeSuspendable(ctx context.Context, questionID stri
 func (rt *sessionRuntime) submit(ctx context.Context, intent string, slots map[string]any, cols, rows int) (*orchestrator.TurnOutcome, tui.Frame) {
 	out, err := rt.driver.SubmitDirect(ctx, intent, slots)
 	rt.lastTurnErr = err
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
 	rt.model = rt.model.ApplyTurnOutcome(out, "", err)
+	if out != nil {
+		rt.modelTurn = out.TurnNumber
+	}
 	return out, tui.ComposeFrame(&rt.model, cols, rows)
 }
 
@@ -412,7 +510,49 @@ func (rt *sessionRuntime) submit(ctx context.Context, intent string, slots map[s
 func (rt *sessionRuntime) cont(ctx context.Context, slots map[string]any, cols, rows int) (*orchestrator.TurnOutcome, tui.Frame) {
 	out, err := rt.driver.ContinueTurn(ctx, slots)
 	rt.lastTurnErr = err
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
 	rt.model = rt.model.ApplyTurnOutcome(out, "", err)
+	if out != nil {
+		rt.modelTurn = out.TurnNumber
+	}
+	return out, tui.ComposeFrame(&rt.model, cols, rows)
+}
+
+// teleport resolves a stored inbox notification to its target and jumps the
+// session there, mirroring the TUI's action-required banner and /jump path.
+func (rt *sessionRuntime) teleport(ctx context.Context, notificationID string, cols, rows int) (*orchestrator.TurnOutcome, tui.Frame) {
+	var out *orchestrator.TurnOutcome
+	var err error
+	if rt.jobStore == nil {
+		err = fmt.Errorf("session.teleport: no job store configured")
+	} else {
+		n, nerr := rt.jobStore.GetNotification(ctx, notificationID)
+		if nerr != nil {
+			err = fmt.Errorf("session.teleport: resolve notification %q: %w", notificationID, nerr)
+		} else if n == nil {
+			err = fmt.Errorf("session.teleport: unknown notification %q", notificationID)
+		} else {
+			target := inbox.FromNotification(*n)
+			if target.State == "" {
+				err = fmt.Errorf("session.teleport: notification %q has no teleport target", notificationID)
+			} else {
+				out, err = rt.orch.Teleport(ctx, rt.sid, target)
+				if err == nil {
+					if markErr := rt.jobStore.MarkNotificationRead(ctx, notificationID); markErr != nil {
+						err = fmt.Errorf("session.teleport: mark notification %q read: %w", notificationID, markErr)
+					}
+				}
+			}
+		}
+	}
+	rt.lastTurnErr = err
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.model = rt.model.ApplyTurnOutcome(out, "(teleport)", err)
+	if out != nil {
+		rt.modelTurn = out.TurnNumber
+	}
 	return out, tui.ComposeFrame(&rt.model, cols, rows)
 }
 
@@ -421,7 +561,40 @@ func (rt *sessionRuntime) cont(ctx context.Context, slots map[string]any, cols, 
 // composer model as-is (the last settled paint), so "look at this" can never
 // mutate state, world, or the trace (principle of least surprise).
 func (rt *sessionRuntime) frame(cols, rows int) tui.Frame {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.refreshFromJourneyLocked()
 	return tui.ComposeFrame(&rt.model, cols, rows)
+}
+
+func (rt *sessionRuntime) refreshFromJourneyLocked() {
+	if rt.orch == nil {
+		return
+	}
+	j, err := rt.orch.LoadJourney(rt.sid)
+	if err != nil {
+		return
+	}
+	if j.Turn <= rt.modelTurn {
+		return
+	}
+	allowed := rt.orch.AllowedIntents(j.State, j.World)
+	allowedNames := make([]string, 0, len(allowed))
+	for _, ai := range allowed {
+		allowedNames = append(allowedNames, ai.Name)
+	}
+	view, err := rt.orch.RenderState(j.State, j.World)
+	if err != nil {
+		return
+	}
+	rt.model = rt.model.ApplyTurnOutcome(&orchestrator.TurnOutcome{
+		Mode:           orchestrator.ModeTransitioned,
+		View:           view,
+		NewState:       j.State,
+		AllowedIntents: allowedNames,
+		TurnNumber:     j.Turn,
+	}, "(refresh)", nil)
+	rt.modelTurn = j.Turn
 }
 
 // history returns the JSONL trace events recorded so far, in append order, for
@@ -433,3 +606,44 @@ func (rt *sessionRuntime) history() store.History {
 	}
 	return rt.sink.History()
 }
+
+// AppDef implements runstatus/server.Source for the browser surface used by
+// render.web.
+func (rt *sessionRuntime) AppDef() *app.AppDef { return rt.def }
+
+// Events implements runstatus/server.Source without rendering the diagram.
+func (rt *sessionRuntime) Events() ([]runstatus.TraceEvent, error) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.sink == nil {
+		return nil, nil
+	}
+	h := rt.sink.History()
+	evs := make([]runstatus.TraceEvent, len(h))
+	for i := range h {
+		evs[i] = runstatus.ToTraceEvent(h[i])
+	}
+	runstatus.AggregateTaskDetails(evs)
+	return evs, nil
+}
+
+// Snapshot implements runstatus/server.Source for the live browser view. It
+// reads the same JSONL sink the studio runtime writes, under rt.mu because the
+// sink is not concurrency-safe.
+func (rt *sessionRuntime) Snapshot() (runstatus.Snapshot, error) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.sink == nil {
+		return runstatus.Snapshot{}, nil
+	}
+	snap, err := runstatus.FromSink(rt.sink, rt.def, string(rt.sid))
+	if err != nil {
+		return snap, err
+	}
+	if snap.Session.CurrentState == "" && rt.def != nil {
+		snap.Session.CurrentState = string(app.Compile(rt.def).InitialState())
+	}
+	return snap, nil
+}
+
+var _ rsserver.Source = (*sessionRuntime)(nil)

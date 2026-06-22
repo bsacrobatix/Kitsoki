@@ -10,7 +10,8 @@
 //
 // This is the keystone of the facade: the server, the handle model, the tool
 // registry, and the no-LLM default. It ships a trivial studio.ping/studio.handles
-// pair so the transport, attach config, and handle lifecycle are verifiable
+// pair plus a read-only studio.work queue so the transport, attach config, and
+// handle lifecycle are verifiable
 // end-to-end before the domain tools (story.* slice 6, session.*/render.* slice 7)
 // plug into the same registry. No interpretive act (free-text routing, any live
 // harness call) happens in the server core — those belong to a session handle's
@@ -117,12 +118,24 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 		Description: "List the open studio handles: the driving sessions (id, harness mode, trace path) and the authoring workspace (if one is bound).",
 	}, srv.handleHandles)
 
+	// studio.work — global async/reacquisition queue across open handles.
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "studio.work",
+		Description: "Read-only prioritized work queue across all open driving handles. Returns async jobs, unread notifications, pending/dispatching/failed chat drives, backgrounded chats, and parked operator questions with reacquisition hints.",
+	}, srv.handleWork)
+
 	// story.* — the deterministic, LLM-free authoring tools (slice 6).
 	srv.registerStoryTools()
 
 	// session.* / render.* — drive a live (replay-default) session and see it
 	// (slice 7).
 	srv.registerSessionTools()
+
+	// chat.* — read-side drill-down for async chat/subagent context.
+	srv.registerChatTools()
+
+	// inbox.* — external intake into the per-session inbox.
+	srv.registerInboxTools()
 
 	// issue.* — file a GitHub issue with studio-produced evidence bundled in.
 	srv.registerIssueTools()

@@ -30,6 +30,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"kitsoki/internal/host"
 	kitsokimcp "kitsoki/internal/mcp"
@@ -42,6 +43,7 @@ import (
 type pendingQuestion struct {
 	id        string
 	questions []host.OperatorQuestion
+	createdAt time.Time
 	answerCh  chan map[string]any // buffered (cap 1); answer() sends, ask() drains
 }
 
@@ -89,6 +91,7 @@ func (b *suspendBroker) park(questions []host.OperatorQuestion) *pendingQuestion
 	pq := &pendingQuestion{
 		id:        fmt.Sprintf("oq-%d", b.seq),
 		questions: questions,
+		createdAt: time.Now(),
 		answerCh:  make(chan map[string]any, 1),
 	}
 	b.pending[pq.id] = pq
@@ -123,8 +126,26 @@ func (b *suspendBroker) finish(res turnResult) {
 		return
 	}
 	b.finished = true
+	b.pending = map[string]*pendingQuestion{}
 	b.mu.Unlock()
 	b.doneCh <- res
+}
+
+func (b *suspendBroker) snapshotPending() []pendingQuestion {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.finished {
+		return nil
+	}
+	out := make([]pendingQuestion, 0, len(b.pending))
+	for _, p := range b.pending {
+		out = append(out, pendingQuestion{
+			id:        p.id,
+			questions: append([]host.OperatorQuestion(nil), p.questions...),
+			createdAt: p.createdAt,
+		})
+	}
+	return out
 }
 
 // waitNext blocks until either the turn completes or the next question parks,

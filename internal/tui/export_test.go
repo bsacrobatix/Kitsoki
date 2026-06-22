@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
 	"kitsoki/internal/expr"
 	"kitsoki/internal/intent"
@@ -215,6 +216,13 @@ func SessionsPanelActive(m RootModel) bool { return m.sessionsPanel.IsActive() }
 
 // SessionsPanelView returns the rendered overlay (empty when inactive).
 func SessionsPanelView(m RootModel) string { return m.sessionsPanel.View() }
+
+// CachedSessionListForTest returns the current /sessions attach cache.
+func CachedSessionListForTest(m RootModel) []chats.PtySession {
+	out := make([]chats.PtySession, len(m.sessionList))
+	copy(out, m.sessionList)
+	return out
+}
 
 // MetaSessionChatID returns the chat ID of the currently-active meta
 // session, or "" when no /meta overlay is open. Used by the
@@ -547,6 +555,9 @@ func SetRoutingObserverForTest(m *RootModel, obs *RoutingObserver) {
 // by rooms_test.go to assert navigation landed in the expected room
 // without poking at unexported fields from the _test package.
 func (m RootModel) CurrentStateForTest() app.StatePath { return m.currentState }
+
+// SessionIDForTest returns the app session id owned by the model.
+func (m RootModel) SessionIDForTest() app.SessionID { return m.sid }
 
 // ActiveRoomForTest returns the active room key — useful for
 // asserting which transcript buffer is currently bound to
