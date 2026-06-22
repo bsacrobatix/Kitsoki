@@ -25,7 +25,7 @@ describe("InboxPanel", () => {
     setActivePinia(createPinia());
     push.mockReset();
     syncGitHubInbox.mockReset();
-    syncGitHubInbox.mockResolvedValue({ ok: true, fetched: 0, inserted: 0, skipped: 0, items: [] });
+    syncGitHubInbox.mockResolvedValue({ ok: true, fetched: 2, inserted: 1, skipped: 1, items: [] });
     listWork.mockReset();
     listWork.mockResolvedValue({
       summary: {
@@ -167,6 +167,7 @@ describe("InboxPanel", () => {
 
     expect(syncGitHubInbox).toHaveBeenCalledWith("web-session-1", {});
     expect(listWork).toHaveBeenCalled();
+    expect(document.body.textContent).toContain("GitHub sync: 1 new, 1 existing");
     wrapper.unmount();
   });
 });

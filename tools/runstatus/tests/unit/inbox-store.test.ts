@@ -65,6 +65,14 @@ function fakeSource(overrides: Record<string, unknown> = {}): LiveSource {
       items: [],
     } satisfies WorkListResult),
     subscribeNotifications: vi.fn().mockReturnValue(vi.fn()),
+    syncGitHubInbox: vi.fn().mockResolvedValue({
+      ok: true,
+      session_id: "s1",
+      fetched: 0,
+      inserted: 0,
+      skipped: 0,
+      items: [],
+    }),
     readNotification: vi.fn().mockResolvedValue({ ok: true }),
     dismissNotification: vi.fn().mockResolvedValue({ ok: true }),
     ...overrides,
@@ -148,6 +156,52 @@ describe("inbox store", () => {
 
     expect(inbox.open).toBe(true);
     expect(src.listWork).toHaveBeenCalledTimes(2);
+  });
+
+  it("syncGitHub records counts and refreshes active work", async () => {
+    const inbox = useInboxStore();
+    const src = fakeSource({
+      syncGitHubInbox: vi.fn().mockResolvedValue({
+        ok: true,
+        session_id: "s1",
+        fetched: 2,
+        inserted: 1,
+        skipped: 1,
+        items: [],
+      }),
+    });
+
+    await inbox.syncGitHub(src, "s1", "acme/repo");
+
+    expect(src.syncGitHubInbox).toHaveBeenCalledWith("s1", { repo: "acme/repo" });
+    expect(src.listWork).toHaveBeenCalledTimes(1);
+    expect(inbox.githubSyncError).toBe("");
+    expect(inbox.githubSyncLast?.inserted).toBe(1);
+    expect(inbox.githubSyncLast?.skipped).toBe(1);
+  });
+
+  it("syncGitHub records errors and clears stale success", async () => {
+    const inbox = useInboxStore();
+    const src = fakeSource({
+      syncGitHubInbox: vi.fn().mockResolvedValue({
+        ok: true,
+        session_id: "s1",
+        fetched: 1,
+        inserted: 1,
+        skipped: 0,
+        items: [],
+      }),
+    });
+    await inbox.syncGitHub(src, "s1");
+    expect(inbox.githubSyncLast?.inserted).toBe(1);
+
+    const failing = fakeSource({
+      syncGitHubInbox: vi.fn().mockRejectedValue(new Error("gh auth required")),
+    });
+    await inbox.syncGitHub(failing, "s1");
+
+    expect(inbox.githubSyncLast).toBeNull();
+    expect(inbox.githubSyncError).toBe("gh auth required");
   });
 
   it("a second frame prepends (newest first) and takes the fresh counts", () => {

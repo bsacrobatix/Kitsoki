@@ -7,6 +7,7 @@ import type {
   WorkItem,
   WorkListResult,
   WorkSummary,
+  GitHubInboxSyncResult,
 } from "../data/live-source.js";
 
 /**
@@ -35,6 +36,7 @@ export const useInboxStore = defineStore("inbox", () => {
   const workError = ref("");
   const githubSyncing = ref(false);
   const githubSyncError = ref("");
+  const githubSyncLast = ref<GitHubInboxSyncResult | null>(null);
   const open = ref(false);
   // The most recent push, surfaced as a transient toast (success /
   // action_required only). Cleared when the toast auto-dismisses or is acted on.
@@ -127,8 +129,9 @@ export const useInboxStore = defineStore("inbox", () => {
   ): Promise<void> {
     githubSyncing.value = true;
     githubSyncError.value = "";
+    githubSyncLast.value = null;
     try {
-      await source.syncGitHubInbox(sessionId, repo ? { repo } : {});
+      githubSyncLast.value = await source.syncGitHubInbox(sessionId, repo ? { repo } : {});
       await refreshWork(source);
     } catch (err) {
       githubSyncError.value = err instanceof Error ? err.message : String(err);
@@ -204,6 +207,7 @@ export const useInboxStore = defineStore("inbox", () => {
     workError,
     githubSyncing,
     githubSyncError,
+    githubSyncLast,
     // getters
     hasNeedsAttention,
     activeWorkCount,

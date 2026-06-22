@@ -37,6 +37,13 @@
           >
             {{ inbox.githubSyncError }}
           </div>
+          <div
+            v-else-if="inbox.githubSyncLast"
+            class="inbox-panel__sync-status"
+            data-testid="inbox-sync-status"
+          >
+            GitHub sync: {{ inbox.githubSyncLast.inserted }} new, {{ inbox.githubSyncLast.skipped }} existing
+          </div>
           <section
             v-if="inbox.workItems.length > 0"
             class="work-section"
@@ -278,6 +285,11 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 .inbox-panel__error {
   margin: 0.55rem 0.7rem 0;
   color: var(--k-error-fg, #fecaca);
+  font-size: 0.75rem;
+}
+.inbox-panel__sync-status {
+  margin: 0.55rem 0.7rem 0;
+  color: var(--k-fg-muted, #94a3b8);
   font-size: 0.75rem;
 }
 .work-section {
