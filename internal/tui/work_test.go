@@ -96,6 +96,20 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	dispatchingChat, err := cs.Create(ctx, "cloak", "agent", "scope-dispatching", "Dispatching review")
+	require.NoError(t, err)
+	dispatchingDrive, err := cs.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          dispatchingChat.ID,
+		Transport:       chats.DriveTransportStateMachine,
+		Actor:           "story",
+		Payload:         "dispatching review",
+		OriginSessionID: string(sid),
+		OriginState:     "foyer",
+	})
+	require.NoError(t, err)
+	_, err = cs.ClaimDrive(ctx, dispatchingDrive.DriveID)
+	require.NoError(t, err)
+
 	otherQueued, err := cs.Create(ctx, "cloak", "agent", "other-queue", "Other queued review")
 	require.NoError(t, err)
 	_, err = cs.Enqueue(ctx, chats.EnqueueOptions{
@@ -128,8 +142,8 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 
 	m = runTurnBlocking(t, m, "/work")
 	tx := extractTranscript(t, m)
-	currentWork := transcriptAfter(t, tx, "active work: 4 item(s)")
-	require.Contains(t, tx, "active work: 4 item(s)")
+	currentWork := transcriptAfter(t, tx, "active work: 5 item(s)")
+	require.Contains(t, tx, "active work: 5 item(s)")
 	require.Contains(t, tx, "notification")
 	require.Contains(t, tx, "Review PR #42")
 	require.Contains(t, tx, "github:acme/repo/pr/42")
@@ -139,6 +153,8 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	require.NotContains(t, tx, "job-other")
 	require.Contains(t, tx, "job")
 	require.Contains(t, tx, "host.agent.task")
+	require.Contains(t, tx, "dispatching")
+	require.Contains(t, tx, "dispatching review")
 	require.Contains(t, tx, "queued")
 	require.Contains(t, tx, "continue queued review")
 	require.NotContains(t, tx, "continue other queued review")
@@ -147,7 +163,8 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	require.Contains(t, tx, "/sessions attach 1")
 	require.NotContains(t, tx, "Other session Claude")
 	requireBefore(t, currentWork, "Review PR #42", "host.agent.task")
-	requireBefore(t, currentWork, "host.agent.task", "continue queued review")
+	requireBefore(t, currentWork, "host.agent.task", "dispatching review")
+	requireBefore(t, currentWork, "dispatching review", "continue queued review")
 	requireBefore(t, currentWork, "continue queued review", "Background Claude")
 
 	rm, ok := tuipkg.ExtractRootModel(m)
@@ -158,12 +175,13 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 
 	m = runTurnBlocking(t, m, "/work --all")
 	tx = extractTranscript(t, m)
-	allWork := transcriptAfter(t, tx, "active work (all sessions): 8 item(s)")
-	require.Contains(t, tx, "active work (all sessions): 8 item(s)")
+	allWork := transcriptAfter(t, tx, "active work (all sessions): 9 item(s)")
+	require.Contains(t, tx, "active work (all sessions): 9 item(s)")
 	require.Contains(t, tx, "Other PR #99")
 	require.Contains(t, tx, "job-other")
 	require.Contains(t, tx, "Background Claude")
 	require.Contains(t, tx, "current session")
+	require.Contains(t, tx, "dispatching review")
 	require.Contains(t, tx, "continue other queued review")
 	require.Contains(t, tx, "Other session Claude")
 	require.Contains(t, tx, "session other-session")

@@ -14,11 +14,12 @@ import (
 )
 
 // commands_work.go - single-pane TUI "/work": print the active async work
-// queue for this session. "/work --all" broadens jobs, notifications, queued
-// drives, and background Claude PTYs across sessions. This is the terminal
-// counterpart to web runstatus.work.list and studio.work: one compact place to
-// see unread notifications, active background jobs, queued chat drives, and
-// backgrounded Claude PTYs without leaving the current flow.
+// queue for this session. "/work --all" broadens jobs, notifications, queued or
+// dispatching drives, and background Claude PTYs across sessions. This is the
+// terminal counterpart to web runstatus.work.list and studio.work: one compact
+// place to see unread notifications, active background jobs, queued or
+// dispatching chat drives, and backgrounded Claude PTYs without leaving the
+// current flow.
 func renderWorkBlock(m RootModel, args []string) (RootModel, string) {
 	r := blocks.New(m.transcript.width, m.currentTheme())
 	if m.jobStore == nil && m.chatStore == nil {
@@ -258,7 +259,7 @@ func workRowsForDrives(drives []chats.Drive, sid string, allSessions bool) []wor
 			}
 		}
 		out = append(out, workRow{
-			Kind:      "queued",
+			Kind:      workDriveKind(d.Status),
 			Status:    string(d.Status),
 			Title:     title,
 			Hint:      hint,
@@ -269,6 +270,13 @@ func workRowsForDrives(drives []chats.Drive, sid string, allSessions bool) []wor
 		})
 	}
 	return out
+}
+
+func workDriveKind(status chats.DriveStatus) string {
+	if status == chats.DriveStatusDispatching {
+		return "dispatching"
+	}
+	return "queued"
 }
 
 func workRowsForPTYs(ctx context.Context, cs *chats.Store, sid string, ptys []chats.PtySession, allSessions bool) []workRow {
