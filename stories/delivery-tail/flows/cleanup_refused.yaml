@@ -1,10 +1,10 @@
 # cleanup_refused — integrate clean, re-verify green, but cleanup fails (the
 # worktree remove is refused) → @exit:needs-human with last_error. No false
-# "shipped" on a refused cleanup (leans on slice 1's no-swallowed-failure).
+# "shipped" on a refused cleanup (no-swallowed-failure discipline).
 
 test_kind: flow
 app: ../app.yaml
-initial_state: configure
+initial_state: bootstrap
 initial_world:
   brief:              "Fix the rate-limit burst off-by-one"
   gate_command:       "go test ./internal/ratelimit/"
@@ -37,7 +37,7 @@ host_handlers:
             last_error: "worktree remove refused: .worktrees/burst-fix contains modified or untracked files, use --force to delete it"
 
 turns:
-  - intent: { name: integrate_existing, slots: {} }
+  - intent: { name: begin, slots: {} }
     expect_state: __exit__needs-human
     expect_world:
       status:          needs-human

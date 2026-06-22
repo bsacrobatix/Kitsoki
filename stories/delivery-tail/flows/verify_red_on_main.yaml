@@ -1,11 +1,11 @@
 # verify_red_on_main — THE trust-the-gate-not-the-agent case. The maker's gate
 # was green in the branch, integrate is clean, but the IDENTICAL gate re-run on
 # the MERGED commit is RED → @exit:needs-human, last_error = the gate tail.
-# A red here means the merge broke main; ship-it never ships it.
+# A red here means the merge broke main; delivery-tail never ships it.
 
 test_kind: flow
 app: ../app.yaml
-initial_state: configure
+initial_state: bootstrap
 initial_world:
   brief:              "Fix the rate-limit burst off-by-one"
   gate_command:       "go test ./internal/ratelimit/"
@@ -36,7 +36,7 @@ host_handlers:
           stdout: "--- FAIL: TestAllow_Burst (0.00s)\n    bucket drained one token early after merge"
 
 turns:
-  - intent: { name: integrate_existing, slots: {} }
+  - intent: { name: begin, slots: {} }
     expect_state: __exit__needs-human
     expect_world:
       status:            needs-human

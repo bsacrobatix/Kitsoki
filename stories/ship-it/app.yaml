@@ -74,35 +74,6 @@ intents:
     description: "Abandon the brief → needs-human."
     examples: ["quit", "abandon", "stop", "bail"]
     priority: 50
-  # Internal routing intents (post-bind guarded emits).
-  integrated_ok:
-    description: "(internal) integrate succeeded → verify."
-    examples: []
-    priority: 1
-  integrate_failed:
-    description: "(internal) integrate conflict/build-fail → needs-human."
-    examples: []
-    priority: 1
-  verify_green:
-    description: "(internal) re-verify green on merged commit → cleanup."
-    examples: []
-    priority: 1
-  verify_red:
-    description: "(internal) re-verify RED on merged commit → needs-human."
-    examples: []
-    priority: 1
-  cleaned_ok:
-    description: "(internal) cleanup removed cleanly → report."
-    examples: []
-    priority: 1
-  cleanup_failed:
-    description: "(internal) cleanup refused → needs-human."
-    examples: []
-    priority: 1
-  ship_done:
-    description: "(internal) report rendered → @exit:shipped."
-    examples: []
-    priority: 1
   look:
     description: "Re-render the current room."
     examples: ["look", "status"]
@@ -137,9 +108,9 @@ imports:
       workspace_branch: "{{ world.workspace_branch }}"
       workspace_base:   "{{ world.base_branch }}"
     exits:
-      # @exit:achieved → integrate, carrying the worktree handoff seam up.
+      # @exit:achieved → tail (delivery-tail's integrate), carrying the worktree handoff seam up.
       achieved:
-        to: integrate
+        to: tail
         set:
           worktree_path:    "{{ world.maker__worktree_path }}"
           workspace_branch: "{{ world.workspace_branch }}"
@@ -153,6 +124,34 @@ imports:
         to: "@exit:needs-human"
         set:
           last_error: "maker abandoned ({{ world.terminal_reason }}): {{ world.last_gate_failure }}"
+          status:     "needs-human"
+
+  # The delivery tail — the shared neutral integrate → verify → cleanup → report
+  # pipeline. Entered at `integrate` after the maker achieves (or after
+  # integrate_existing skips the maker). ship-it projects the brief + gate + the
+  # maker's worktree handoff seam into the tail's world.
+  tail:
+    source: ../delivery-tail
+    entry: integrate
+    world_in:
+      worktree_path:        "{{ world.worktree_path }}"
+      workspace_branch:     "{{ world.workspace_branch }}"
+      gate_command:         "{{ world.gate_command }}"
+      base_branch:          "{{ world.base_branch }}"
+      main_worktree_path:   "{{ world.main_worktree_path }}"
+      build_check_disabled: "{{ world.build_check_disabled }}"
+      workspace_id:         "{{ world.workspace_id }}"
+      brief:                "{{ world.brief }}"
+    exits:
+      shipped:
+        to: "@exit:shipped"
+        set:
+          shipped_sha: "{{ world.tail__shipped_sha }}"
+          status:      "shipped"
+      needs-human:
+        to: "@exit:needs-human"
+        set:
+          last_error: "{{ world.tail__last_error }}"
           status:     "needs-human"
 
 include:

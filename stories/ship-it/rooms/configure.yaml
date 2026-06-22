@@ -49,7 +49,7 @@ states:
       # pre-seeded worktree is identical to integrating after a real maker run.
       integrate_existing:
         - when: "world.worktree_path != '' && world.gate_command != ''"
-          target: integrate
+          target: tail
         - target: configure
           effects:
             - say: "Set worktree_path and gate_command first (no maker handoff present)."

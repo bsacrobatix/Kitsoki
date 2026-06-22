@@ -527,9 +527,9 @@ exits:
 # (regression_red_pre_fix); the GREEN-post-fix half is the tail's `verify`.
 imports:
   tail:
-    source: ../ship-it
+    source: ../delivery-tail
     entry: integrate
-    # Project bugfix's maker handoff → the ship-it tail's world. gate_command is
+    # Project bugfix's maker handoff → the delivery-tail's world. gate_command is
     # the regression gate (same command verify re-runs on the merged commit);
     # workspace_branch/worktree_path are the maker's worktree; main_worktree_path
     # is "." (the integration tree, where integrate/verify/cleanup run).
