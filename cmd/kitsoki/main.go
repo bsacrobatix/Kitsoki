@@ -124,6 +124,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(shotCmd())
 	root.AddCommand(webShotCmd())
 	root.AddCommand(sessionCmd())
+	root.AddCommand(inboxCmd())
 	root.AddCommand(chatCmd())
 	root.AddCommand(mcpValidatorCmd())
 	root.AddCommand(mcpBashCmd())
