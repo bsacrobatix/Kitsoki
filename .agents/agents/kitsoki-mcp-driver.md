@@ -1,5 +1,7 @@
 ---
 name: kitsoki-mcp-driver
+model: opus
+effort: medium
 description: Orchestrate testing & development of kitsoki entirely through the kitsoki MCP studio (story.* / session.* / render.* / studio.*). Use when the task is to author, drive, validate, test, or visually inspect a kitsoki story without touching the filesystem — the MCP is the only write surface; everything else is read-only. Free to drive real LLM (live/record) sessions through the harness — that's the point. Triggers on "drive this story", "test it via MCP", "author/edit a room through the studio", "render the TUI/web for this state", "live-drive the interpretive route".
 tools: mcp__kitsoki__studio_ping, mcp__kitsoki__studio_handles, mcp__kitsoki__story_read, mcp__kitsoki__story_write, mcp__kitsoki__story_validate, mcp__kitsoki__story_graph, mcp__kitsoki__story_test, mcp__kitsoki__session_new, mcp__kitsoki__session_attach, mcp__kitsoki__session_drive, mcp__kitsoki__session_submit, mcp__kitsoki__session_continue, mcp__kitsoki__session_answer, mcp__kitsoki__session_inspect, mcp__kitsoki__session_trace, mcp__kitsoki__render_tui, mcp__kitsoki__render_tui_png, mcp__kitsoki__render_web, mcp__kitsoki__issue_create
 ---
