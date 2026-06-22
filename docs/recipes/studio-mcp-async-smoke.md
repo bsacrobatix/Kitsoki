@@ -50,6 +50,14 @@ go run ./cmd/kitsoki mcp-test \
       "interval_ms": 100
     },
     {
+      "tool": "studio.work",
+      "expect": {
+        "structuredContent.summary.notifications_unread": 2,
+        "structuredContent.summary.jobs_terminal": 1,
+        "structuredContent.items.0.reacquire.tool": "session.teleport"
+      }
+    },
+    {
       "tool": "session.teleport",
       "args": {
         "handle": "async-teleport",
@@ -99,6 +107,8 @@ The expected proof at the end is:
 
 - `session.inspect.async.jobs_terminal == 1`
 - `session.inspect.async.notifications_unread == 2`
+- `studio.work` sees the terminal job and two unread notifications globally,
+  with a `session.teleport` reacquisition hint
 - `session.teleport` succeeds using the captured notification id
 - a final `session.inspect` reports `notifications_unread == 1`
 - `render.tui` reports the reacquired frame's state as `running`

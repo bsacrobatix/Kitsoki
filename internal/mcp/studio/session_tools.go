@@ -550,6 +550,7 @@ type InboxInspectItem struct {
 	Title              string                    `json:"title"`
 	Body               string                    `json:"body,omitempty"`
 	CreatedAtUnixMilli int64                     `json:"created_at_unix_milli"`
+	ReadAtUnixMilli    int64                     `json:"read_at_unix_milli,omitempty"`
 	TeleportState      string                    `json:"teleport_state,omitempty"`
 	TeleportSlots      map[string]any            `json:"teleport_slots,omitempty"`
 	TeleportProposalID string                    `json:"teleport_proposal_id,omitempty"`
@@ -1041,7 +1042,7 @@ func inspectNotifications(in []jobs.Notification) []InboxInspectItem {
 	}
 	out := make([]InboxInspectItem, 0, len(in))
 	for _, n := range in {
-		out = append(out, InboxInspectItem{
+		item := InboxInspectItem{
 			ID:                 n.ID,
 			Severity:           n.Severity,
 			Title:              n.Title,
@@ -1053,7 +1054,11 @@ func inspectNotifications(in []jobs.Notification) []InboxInspectItem {
 			TeleportJobID:      n.TeleportJobID,
 			OriginKind:         n.OriginKind,
 			OriginRef:          n.OriginRef,
-		})
+		}
+		if n.ReadAt != nil {
+			item.ReadAtUnixMilli = n.ReadAt.UnixMilli()
+		}
+		out = append(out, item)
 	}
 	return out
 }

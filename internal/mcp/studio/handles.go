@@ -467,6 +467,32 @@ func (ss *StudioSession) Snapshot() HandlesSnapshot {
 	return snap
 }
 
+// DrivingSessions returns the open handles that have a live driving runtime,
+// ordered the same way as studio.handles. The returned slice is a point-in-time
+// copy of handle pointers; callers must not mutate the handles. Runtime reads
+// happen outside the StudioSession mutex so global tools can inspect multiple
+// sessions without blocking handle lifecycle longer than needed.
+func (ss *StudioSession) DrivingSessions() []*SessionHandle {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	keys := make([]string, 0, len(ss.sessions))
+	for k := range ss.sessions {
+		keys = append(keys, k)
+	}
+	sortSessionKeys(keys)
+
+	out := make([]*SessionHandle, 0, len(keys))
+	for _, k := range keys {
+		sh := ss.sessions[k]
+		if sh.Runtime == nil {
+			continue
+		}
+		out = append(out, sh)
+	}
+	return out
+}
+
 // sortSessionKeys orders handle keys so auto-assigned "s<N>" keys sort
 // numerically (s2 before s10) and caller-supplied keys sort lexically after.
 // Stable, deterministic output for tests and human reading.

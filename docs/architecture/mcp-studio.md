@@ -10,7 +10,8 @@ It is distinct from the narrow per-app server: [`kitsoki serve`](../../internal/
 exposes a single `transition` tool that drives one app's state machine.
 `kitsoki mcp` is the authoring/introspection *control plane* — its state is an
 authoring **workspace** plus zero-or-more live **driving sessions**, exposed as
-the `story.*`, `session.*`, `render.*`, and `issue.*` tool families. It is a sibling of
+the `studio.*`, `story.*`, `session.*`, `chat.*`, `render.*`, and `issue.*`
+tool families. It is a sibling of
 `kitsoki serve` and the [operator-ask bridge](operator-ask.md): same
 `github.com/modelcontextprotocol/go-sdk`, same `StdioTransport`, same
 `mcp__<server>__<tool>` naming.
@@ -76,7 +77,25 @@ replay miss is a **hard error**, never a silent live fallthrough.
 Tools keep the dotted `family.verb` name; the SDK exposes each to the client as
 `mcp__kitsoki__<name>`. Two liveness tools — `studio.ping` (`→ {ok, version}`)
 and `studio.handles` (`→ {sessions[], workspace?}`) — prove transport and attach
-before any domain tool runs.
+before any domain tool runs. `studio.work` adds the global async queue across
+open handles, so an external agent can ask "what needs attention now?" without
+inspecting every session one by one.
+
+### `studio.*` — attach & reacquire globally
+
+| Tool | Shape | Purpose |
+|---|---|---|
+| `studio.ping` | `{}` → `{ok, version}` | liveness probe |
+| `studio.handles` | `{}` → `{sessions[], workspace?}` | list open handles |
+| `studio.work` | `{include_quiet?, limit?}` → `{summary, sessions[], items[]}` | prioritized async work queue across all open driving handles |
+
+`studio.work.items[]` includes unread inbox notifications, running or
+awaiting-input jobs, failed jobs, pending/dispatching chat drives, and
+backgrounded tmux chats. Each item carries the source `handle`, session/story
+metadata, stable IDs, a priority, and a `reacquire` hint naming the next MCP
+tool call (`session.teleport`, `session.inspect`, or `chat.show`). By default it
+omits read notifications and quiet terminal jobs; pass `include_quiet:true` when
+you need the full non-dismissed history.
 
 ### `story.*` — author (deterministic, LLM-free)
 
@@ -119,7 +138,7 @@ Every drive/submit/continue returns **both** the structured `TurnOutcome` (mode,
 new state, allowed intents, slots needed) **and** the rendered `Frame` — so the
 agent reasons on metadata and *sees* the screen in one call.
 
-`session.inspect` also carries compact background-job and inbox projections.
+`session.inspect` also carries compact per-handle background-job and inbox projections.
 `async` summarizes running, awaiting-input, terminal, unread, and unread
 action-required counts; `jobs[]` shows the session's job IDs, kinds, statuses,
 origin states, errors, and timestamps; `notifications[]` shows active inbox
@@ -127,9 +146,10 @@ rows, including `action_required` items and teleport job/state fields. When a
 chat store is wired, `pending_drives[]` shows pending/dispatching
 chat-input-queue rows owned by the session, and `backgrounded_chats[]` shows
 tmux-hosted chats left in `pty_background` mode. This is the structured MCP
-surface for an external agent to rank async work, notice required operator
-input, and reacquire or switch to the task through `session.teleport` without
-scraping the TUI frame or decoding trace events.
+surface for an external agent to inspect the chosen handle after `studio.work`
+has ranked the global queue, notice required operator input, and reacquire or
+switch to the task through `session.teleport` without scraping the TUI frame or
+decoding trace events.
 
 When the selected async item is chat-backed, `chat.show` drills into the
 focused context: chat metadata, the transcript slice, and any recorded tmux PTY

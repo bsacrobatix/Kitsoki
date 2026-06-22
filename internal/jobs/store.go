@@ -145,11 +145,11 @@ func (js *JobStore) UpsertJob(ctx context.Context, j *Job) error {
 		body := mustJobJSON(map[string]any{
 			"ops": []map[string]any{
 				{"op": "add", "path": "", "value": map[string]any{
-					"id":                  j.ID,
-					"kind":                j.Kind,
-					"status":              string(j.Status),
-					"origin_state":        string(j.OriginState),
-					"origin_proposal_id":  j.OriginProposalID,
+					"id":                 j.ID,
+					"kind":               j.Kind,
+					"status":             string(j.Status),
+					"origin_state":       string(j.OriginState),
+					"origin_proposal_id": j.OriginProposalID,
 				}},
 			},
 		})
@@ -425,10 +425,10 @@ func (js *JobStore) UnreadCount(ctx context.Context, sessionID app.SessionID) (m
 	return out, rows.Err()
 }
 
-// ListNotifications returns unread, non-dismissed notifications for a session.
+// ListNotifications returns non-dismissed notifications for a session.
 func (js *JobStore) ListNotifications(ctx context.Context, sessionID app.SessionID, limit int) ([]Notification, error) {
 	q := `
-		SELECT id, session_id, created_at, severity, title, body,
+		SELECT id, session_id, created_at, read_at, severity, title, body,
 		       teleport_state, teleport_slots, teleport_proposal_id, teleport_job_id,
 		       origin_kind, origin_ref
 		FROM notifications
@@ -450,10 +450,11 @@ func (js *JobStore) ListNotifications(ctx context.Context, sessionID app.Session
 	for rows.Next() {
 		var n Notification
 		var createdAtMs int64
+		var readAtMs sql.NullInt64
 		var teleportSlotsJSON sql.NullString
 		var teleportProposalID, teleportJobID sql.NullString
 		if err := rows.Scan(
-			&n.ID, (*string)(&n.SessionID), &createdAtMs,
+			&n.ID, (*string)(&n.SessionID), &createdAtMs, &readAtMs,
 			(*string)(&n.Severity), &n.Title, &n.Body,
 			&n.TeleportState, &teleportSlotsJSON,
 			&teleportProposalID, &teleportJobID,
@@ -462,6 +463,10 @@ func (js *JobStore) ListNotifications(ctx context.Context, sessionID app.Session
 			return nil, err
 		}
 		n.CreatedAt = time.UnixMilli(createdAtMs)
+		if readAtMs.Valid {
+			t := time.UnixMilli(readAtMs.Int64)
+			n.ReadAt = &t
+		}
 		n.TeleportProposalID = teleportProposalID.String
 		n.TeleportJobID = teleportJobID.String
 		if teleportSlotsJSON.Valid {

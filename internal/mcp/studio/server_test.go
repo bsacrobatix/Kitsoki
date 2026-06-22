@@ -112,6 +112,7 @@ func TestStudioToolsListed(t *testing.T) {
 	}
 	assert.True(t, names["studio.ping"], "studio.ping registered (dotted name accepted)")
 	assert.True(t, names["studio.handles"], "studio.handles registered (dotted name accepted)")
+	assert.True(t, names["studio.work"], "studio.work registered (dotted name accepted)")
 	assert.True(t, names["story.write"], "story.write registered on a read-write server")
 }
 
