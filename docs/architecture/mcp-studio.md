@@ -110,7 +110,7 @@ deterministic direct path or a read.
 | `session.submit` | `{handle, intent, slots?} → {outcome, frame}` | `SubmitDirect` — pick a menu intent |
 | `session.continue` | `{handle, slots} → {outcome, frame}` | `ContinueTurn` — supply missing slots |
 | `session.answer` | `{handle, question_id, answers} → {outcome, frame} \| {awaiting_operator}` | resume a parked operator-ask (see below) |
-| `session.inspect` | `{handle} → {state, world, allowed_intents, last_view, async, jobs[], notifications[], last_turns[]}` | `buildInspectOutput` + session JobStore (read-only) |
+| `session.inspect` | `{handle} → {state, world, allowed_intents, last_view, async, jobs[], notifications[], pending_drives[], backgrounded_chats[], last_turns[]}` | `buildInspectOutput` + session JobStore / ChatStore (read-only) |
 | `session.trace` | `{handle, since?, until?, limit?} → {events[], last_turn}` | the session's JSONL trace (read-only) |
 
 Every drive/submit/continue returns **both** the structured `TurnOutcome` (mode,
@@ -121,10 +121,12 @@ agent reasons on metadata and *sees* the screen in one call.
 `async` summarizes running, awaiting-input, terminal, and action-required
 counts; `jobs[]` shows the session's job IDs, kinds, statuses, origin states,
 errors, and timestamps; `notifications[]` shows active inbox rows, including
-`action_required` items and teleport job/state fields. This is the structured
-MCP surface for an external agent to rank async work, notice required operator
-input, and reacquire the task without scraping the TUI frame or decoding trace
-events.
+`action_required` items and teleport job/state fields. When a chat store is
+wired, `pending_drives[]` shows pending/dispatching chat-input-queue rows owned
+by the session, and `backgrounded_chats[]` shows tmux-hosted chats left in
+`pty_background` mode. This is the structured MCP surface for an external agent
+to rank async work, notice required operator input, and reacquire or switch to
+the task without scraping the TUI frame or decoding trace events.
 
 ### `render.*` — see (read-only)
 

@@ -32,6 +32,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
 	kitsokimcp "kitsoki/internal/mcp"
@@ -465,15 +466,17 @@ type SessionInspectArgs struct {
 // come from the same orchestrator reads buildInspectOutput uses (LoadJourney +
 // AllowedIntents), so it matches the CLI inspect for that state.
 type InspectResult struct {
-	OK             bool                `json:"ok"`
-	State          string              `json:"state"`
-	World          map[string]any      `json:"world"`
-	AllowedIntents []string            `json:"allowed_intents"`
-	LastView       string              `json:"last_view"`
-	Async          AsyncInspectSummary `json:"async"`
-	Jobs           []JobInspectItem    `json:"jobs,omitempty"`
-	Notifications  []InboxInspectItem  `json:"notifications,omitempty"`
-	LastTurns      []TurnSummaryItem   `json:"last_turns"`
+	OK                bool                   `json:"ok"`
+	State             string                 `json:"state"`
+	World             map[string]any         `json:"world"`
+	AllowedIntents    []string               `json:"allowed_intents"`
+	LastView          string                 `json:"last_view"`
+	Async             AsyncInspectSummary    `json:"async"`
+	Jobs              []JobInspectItem       `json:"jobs,omitempty"`
+	Notifications     []InboxInspectItem     `json:"notifications,omitempty"`
+	PendingDrives     []PendingDriveItem     `json:"pending_drives,omitempty"`
+	BackgroundedChats []BackgroundedChatItem `json:"backgrounded_chats,omitempty"`
+	LastTurns         []TurnSummaryItem      `json:"last_turns"`
 }
 
 // AsyncInspectSummary gives clients a cheap priority signal before they inspect
@@ -485,6 +488,9 @@ type AsyncInspectSummary struct {
 	JobsTerminal                int `json:"jobs_terminal"`
 	NotificationsTotal          int `json:"notifications_total"`
 	NotificationsActionRequired int `json:"notifications_action_required"`
+	PendingDrives               int `json:"pending_drives"`
+	DispatchingDrives           int `json:"dispatching_drives"`
+	BackgroundedChats           int `json:"backgrounded_chats"`
 }
 
 // JobInspectItem is a compact, structured projection of one background job.
@@ -518,6 +524,34 @@ type InboxInspectItem struct {
 	TeleportJobID      string                    `json:"teleport_job_id,omitempty"`
 	OriginKind         string                    `json:"origin_kind"`
 	OriginRef          string                    `json:"origin_ref"`
+}
+
+// PendingDriveItem is one pending or dispatching chat-input-queue row owned by
+// this session. These are resumable async chat turns.
+type PendingDriveItem struct {
+	DriveID               string               `json:"drive_id"`
+	ChatID                string               `json:"chat_id"`
+	Transport             chats.DriveTransport `json:"transport"`
+	Status                chats.DriveStatus    `json:"status"`
+	Actor                 string               `json:"actor,omitempty"`
+	Thread                string               `json:"thread,omitempty"`
+	CorrelationID         string               `json:"correlation_id,omitempty"`
+	Payload               string               `json:"payload,omitempty"`
+	OriginState           string               `json:"origin_state,omitempty"`
+	ReceivedAtUnixMicro   int64                `json:"received_at_unix_micro"`
+	DispatchedAtUnixMicro int64                `json:"dispatched_at_unix_micro,omitempty"`
+}
+
+// BackgroundedChatItem is one tmux-hosted chat that remains alive in
+// pty_background mode and belongs to this session.
+type BackgroundedChatItem struct {
+	ChatID              string `json:"chat_id"`
+	TmuxSession         string `json:"tmux_session"`
+	TmuxHost            string `json:"tmux_host"`
+	PermissionMode      string `json:"permission_mode,omitempty"`
+	WorkspacePath       string `json:"workspace_path,omitempty"`
+	UpdatedAtUnixMicro  int64  `json:"updated_at_unix_micro"`
+	LastIdleAtUnixMicro int64  `json:"last_idle_at_unix_micro,omitempty"`
 }
 
 // TurnSummaryItem collapses one turn's events into a one-line record (the same
@@ -732,7 +766,7 @@ func (srv *Server) specFrame(ctx context.Context, storyPath, state string, world
 	}
 	// No harness, no profiles, no seed: a spec render is a pure re-render and
 	// never calls orch.Turn or dispatches an agent.
-	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "", nil, srv.importResolver)
+	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "", nil, srv.importResolver, nil)
 	if err != nil {
 		return tui.Frame{}, err
 	}
@@ -880,36 +914,60 @@ func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int) (InspectRe
 	if verr != nil {
 		view = fmt.Sprintf("<render error: %v>", verr)
 	}
-	jobs, notifications, asyncErr := rt.inspectAsync(ctx)
+	jobs, notifications, pendingDrives, backgroundedChats, asyncErr := rt.inspectAsync(ctx)
 	if asyncErr != nil {
 		return InspectResult{}, asyncErr
 	}
 	return InspectResult{
-		OK:             true,
-		State:          string(j.State),
-		World:          j.World.Vars,
-		AllowedIntents: allowedNames,
-		LastView:       view,
-		Async:          summarizeAsync(jobs, notifications),
-		Jobs:           jobs,
-		Notifications:  notifications,
-		LastTurns:      summariseTrace(rt.history(), lastTurns),
+		OK:                true,
+		State:             string(j.State),
+		World:             j.World.Vars,
+		AllowedIntents:    allowedNames,
+		LastView:          view,
+		Async:             summarizeAsync(jobs, notifications, pendingDrives, backgroundedChats),
+		Jobs:              jobs,
+		Notifications:     notifications,
+		PendingDrives:     pendingDrives,
+		BackgroundedChats: backgroundedChats,
+		LastTurns:         summariseTrace(rt.history(), lastTurns),
 	}, nil
 }
 
-func (rt *sessionRuntime) inspectAsync(ctx context.Context) ([]JobInspectItem, []InboxInspectItem, error) {
+func (rt *sessionRuntime) inspectAsync(ctx context.Context) ([]JobInspectItem, []InboxInspectItem, []PendingDriveItem, []BackgroundedChatItem, error) {
+	var (
+		jobItems          []JobInspectItem
+		notificationItems []InboxInspectItem
+		pendingDriveItems []PendingDriveItem
+		backgroundedChats []BackgroundedChatItem
+	)
 	if rt.jobStore == nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 	jobRows, err := rt.jobStore.ListBySession(ctx, rt.sid)
 	if err != nil {
-		return nil, nil, fmt.Errorf("session.inspect: list jobs: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("session.inspect: list jobs: %w", err)
 	}
 	notifRows, err := rt.jobStore.ListNotifications(ctx, rt.sid, 0)
 	if err != nil {
-		return nil, nil, fmt.Errorf("session.inspect: list notifications: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("session.inspect: list notifications: %w", err)
 	}
-	return inspectJobs(jobRows), inspectNotifications(notifRows), nil
+	jobItems = inspectJobs(jobRows)
+	notificationItems = inspectNotifications(notifRows)
+	if rt.chatStore != nil {
+		driveRows, err := rt.chatStore.ListDrivesBySession(ctx, string(rt.sid),
+			[]chats.DriveStatus{chats.DriveStatusPending, chats.DriveStatusDispatching})
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("session.inspect: list pending drives: %w", err)
+		}
+		pendingDriveItems = inspectPendingDrives(driveRows)
+
+		ptyRows, err := rt.chatStore.ListPTYForHost(ctx)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("session.inspect: list backgrounded chats: %w", err)
+		}
+		backgroundedChats = rt.inspectBackgroundedChats(ctx, ptyRows)
+	}
+	return jobItems, notificationItems, pendingDriveItems, backgroundedChats, nil
 }
 
 func inspectJobs(in []jobs.Job) []JobInspectItem {
@@ -963,10 +1021,66 @@ func inspectNotifications(in []jobs.Notification) []InboxInspectItem {
 	return out
 }
 
-func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem) AsyncInspectSummary {
+func inspectPendingDrives(in []chats.Drive) []PendingDriveItem {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]PendingDriveItem, 0, len(in))
+	for _, d := range in {
+		item := PendingDriveItem{
+			DriveID:             d.DriveID,
+			ChatID:              d.ChatID,
+			Transport:           d.Transport,
+			Status:              d.Status,
+			Actor:               d.Actor,
+			Thread:              d.Thread,
+			CorrelationID:       d.CorrelationID,
+			Payload:             d.Payload,
+			OriginState:         d.OriginState,
+			ReceivedAtUnixMicro: d.ReceivedAt.UnixMicro(),
+		}
+		if d.DispatchedAt != nil {
+			item.DispatchedAtUnixMicro = d.DispatchedAt.UnixMicro()
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func (rt *sessionRuntime) inspectBackgroundedChats(ctx context.Context, in []chats.PtySession) []BackgroundedChatItem {
+	if len(in) == 0 || rt.chatStore == nil {
+		return nil
+	}
+	out := make([]BackgroundedChatItem, 0, len(in))
+	for _, p := range in {
+		if p.Mode != chats.PtyModeBackground {
+			continue
+		}
+		ch, err := rt.chatStore.Get(ctx, p.ChatID)
+		if err != nil || ch == nil || ch.SessionID != string(rt.sid) {
+			continue
+		}
+		item := BackgroundedChatItem{
+			ChatID:             p.ChatID,
+			TmuxSession:        p.TmuxSession,
+			TmuxHost:           p.TmuxHost,
+			PermissionMode:     p.PermissionMode,
+			WorkspacePath:      p.WorkspacePath,
+			UpdatedAtUnixMicro: p.UpdatedAt.UnixMicro(),
+		}
+		if p.LastIdleAt != nil {
+			item.LastIdleAtUnixMicro = p.LastIdleAt.UnixMicro()
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, pendingDrives []PendingDriveItem, backgroundedChats []BackgroundedChatItem) AsyncInspectSummary {
 	out := AsyncInspectSummary{
 		JobsTotal:          len(jobRows),
 		NotificationsTotal: len(notifications),
+		BackgroundedChats:  len(backgroundedChats),
 	}
 	for _, j := range jobRows {
 		switch j.Status {
@@ -981,6 +1095,14 @@ func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem) 
 	for _, n := range notifications {
 		if n.Severity == jobs.SeverityActionRequired {
 			out.NotificationsActionRequired++
+		}
+	}
+	for _, d := range pendingDrives {
+		switch d.Status {
+		case chats.DriveStatusPending:
+			out.PendingDrives++
+		case chats.DriveStatusDispatching:
+			out.DispatchingDrives++
 		}
 	}
 	return out

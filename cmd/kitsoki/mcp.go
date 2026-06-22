@@ -138,6 +138,12 @@ docs land):
 			// resolves on-disk credentials to a direct-API LiveHarness so the MCP
 			// can drive a real LLM with no CLI.
 			sess := studio.NewStudioSession(studioHarnessBuilder)
+			chatStore, chatCleanup, chatErr := openChatStore(dbPath)
+			if chatErr != nil {
+				return fmt.Errorf("mcp: open chat store: %w", chatErr)
+			}
+			defer chatCleanup()
+			sess.SetChatStore(chatStore)
 
 			// Seed operator-declared harness profiles (synthetic, codex, …) from
 			// the project webconfig so a session.new(profile:…) can route a live

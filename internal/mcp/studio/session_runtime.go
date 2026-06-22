@@ -30,6 +30,8 @@ import (
 
 	"kitsoki/internal/agent"
 	"kitsoki/internal/app"
+	"kitsoki/internal/chathost"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
@@ -97,6 +99,7 @@ type sessionRuntime struct {
 
 	jobStore  *jobs.JobStore
 	scheduler jobs.Scheduler
+	chatStore *chats.Store
 
 	// lastTurnErr is the orchestrator error from the most recent
 	// drive/submit/continue (nil on success). turnResponse surfaces it as
@@ -155,7 +158,7 @@ func (rt *sessionRuntime) Close() {
 // backend (synthetic, codex, …) instead of the static default — the same
 // remap `kitsoki turn --profile` applies. An empty map leaves the session on the
 // legacy default-backend path (selectedProfile is then ignored).
-func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, resolver app.ImportResolver) (*sessionRuntime, error) {
+func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, resolver app.ImportResolver, chatStore *chats.Store) (*sessionRuntime, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -229,6 +232,7 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	}
 	rt.jobStore = jobStore
 	rt.scheduler = jobs.NewScheduler(jobStore)
+	rt.chatStore = chatStore
 
 	hostReg := host.NewRegistry()
 	host.RegisterBuiltins(hostReg)
@@ -258,6 +262,12 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 		orchestrator.WithAgentRegistry(agentReg),
 		orchestrator.WithScheduler(rt.scheduler),
 		orchestrator.WithJobStore(rt.jobStore),
+	}
+	if chatStore != nil {
+		orchOpts = append(orchOpts,
+			orchestrator.WithChatStore(chathost.NewAdapter(chatStore)),
+			orchestrator.WithChatsConcrete(chatStore),
+		)
 	}
 	// A non-empty profile map routes agent dispatch (host.agent.*) through the
 	// declared backend; selectedProfile becomes the session's initial selection.

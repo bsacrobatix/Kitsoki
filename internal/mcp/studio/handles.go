@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/orchestrator"
 	rsserver "kitsoki/internal/runstatus/server"
@@ -158,6 +159,7 @@ type StudioSession struct {
 	// default-backend path (the WithHarnessProfiles no-op contract).
 	harnessProfiles map[string]orchestrator.HarnessProfile
 	defaultProfile  string
+	chatStore       *chats.Store
 }
 
 // SetHarnessProfiles seeds the operator-declared harness profiles new driving
@@ -169,6 +171,15 @@ func (ss *StudioSession) SetHarnessProfiles(profiles map[string]orchestrator.Har
 	defer ss.mu.Unlock()
 	ss.harnessProfiles = profiles
 	ss.defaultProfile = defaultProfile
+}
+
+// SetChatStore seeds the concrete chat store used by driving sessions for
+// chat-aware host calls and read-side async reacquisition (pending drives and
+// backgrounded PTY chats). Nil disables chat surfacing.
+func (ss *StudioSession) SetChatStore(store *chats.Store) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	ss.chatStore = store
 }
 
 // NewStudioSession constructs an empty StudioSession. A nil builder falls back to
@@ -354,7 +365,7 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 
 	// newSessionRuntime takes ownership of h: on a returned error h is already
 	// closed; on success rt.Close tears it down.
-	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, ss.harnessProfiles, selectedProfile, p.InitialWorld, p.ImportResolver)
+	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, ss.harnessProfiles, selectedProfile, p.InitialWorld, p.ImportResolver, ss.chatStore)
 	if err != nil {
 		// h was already closed inside newSessionRuntime on error.
 		return nil, err

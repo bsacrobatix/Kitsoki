@@ -29,9 +29,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/jobs"
 	studio "kitsoki/internal/mcp/studio"
+	"kitsoki/internal/store"
 )
 
 const (
@@ -66,6 +68,13 @@ func replayBuilder() studio.HarnessBuilder {
 func newReplayServer(t *testing.T) (*studio.Server, *studio.StudioSession) {
 	t.Helper()
 	sess := studio.NewStudioSession(replayBuilder())
+	return studio.NewServer(sess), sess
+}
+
+func newReplayServerWithChatStore(t *testing.T, chatStore *chats.Store) (*studio.Server, *studio.StudioSession) {
+	t.Helper()
+	sess := studio.NewStudioSession(replayBuilder())
+	sess.SetChatStore(chatStore)
 	return studio.NewServer(sess), sess
 }
 
@@ -364,6 +373,104 @@ func TestSessionSubmit_BackgroundJobVisibleWhileRunningOverMCP(t *testing.T) {
 	}, 3*time.Second, 25*time.Millisecond)
 	assert.Equal(t, 0, done.Async.JobsRunning)
 	assert.Equal(t, 1, done.Async.JobsTerminal)
+}
+
+func TestSessionInspect_SurfacesChatAsyncWorkOverMCP(t *testing.T) {
+	ctx := context.Background()
+	backing, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = backing.Close() })
+	chatStore, err := chats.NewStore(backing.DB())
+	require.NoError(t, err)
+	srv, sess := newReplayServerWithChatStore(t, chatStore)
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": cloakApp,
+		"harness":    "replay",
+		"trace":      t.TempDir() + "/trace.jsonl",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new: %s", contentText(res))
+	var opened studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &opened))
+	sh, err := sess.ResolveSession(opened.Handle)
+	require.NoError(t, err)
+	sid := string(sh.SID)
+
+	queuedChat, err := chatStore.Create(ctx, "cloak", "agent-room", "scope-a", "queued work")
+	require.NoError(t, err)
+	pending, err := chatStore.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          queuedChat.ID,
+		Transport:       chats.DriveTransportMCP,
+		Actor:           "studio-test",
+		Payload:         "review this proposal",
+		OriginSessionID: sid,
+		OriginState:     "lobby",
+	})
+	require.NoError(t, err)
+	dispatching, err := chatStore.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          queuedChat.ID,
+		Transport:       chats.DriveTransportStateMachine,
+		Actor:           "story",
+		Payload:         "continue implementation",
+		OriginSessionID: sid,
+		OriginState:     "running",
+	})
+	require.NoError(t, err)
+	_, err = chatStore.ClaimDrive(ctx, dispatching.DriveID)
+	require.NoError(t, err)
+	_, err = chatStore.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          queuedChat.ID,
+		Transport:       chats.DriveTransportMCP,
+		Actor:           "other",
+		Payload:         "not this session",
+		OriginSessionID: "other-session",
+	})
+	require.NoError(t, err)
+
+	backgroundChat, err := chatStore.Create(ctx, "cloak", "agent-room", "scope-bg", "backgrounded work")
+	require.NoError(t, err)
+	_, err = backing.DB().ExecContext(ctx,
+		`UPDATE chats SET session_id = ? WHERE id = ?`,
+		sid, backgroundChat.ID)
+	require.NoError(t, err)
+	_, err = chatStore.AttachPTY(ctx, chats.AttachPTYOptions{
+		ChatID:         backgroundChat.ID,
+		TmuxSession:    "kitsoki-bg-test",
+		PermissionMode: "acceptEdits",
+		WorkspacePath:  "/tmp/kitsoki-bg-test",
+	})
+	require.NoError(t, err)
+	_, err = chatStore.DetachPTY(ctx, backgroundChat.ID)
+	require.NoError(t, err)
+	require.NoError(t, chatStore.MarkPTYIdle(ctx, backgroundChat.ID))
+
+	res, err = callTool(ctx, cs, "session.inspect", map[string]any{"handle": opened.Handle})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.inspect: %s", contentText(res))
+	var inspected studio.InspectResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &inspected))
+
+	require.Len(t, inspected.PendingDrives, 2)
+	assert.Equal(t, 1, inspected.Async.PendingDrives)
+	assert.Equal(t, 1, inspected.Async.DispatchingDrives)
+	assert.Equal(t, pending.DriveID, inspected.PendingDrives[0].DriveID)
+	assert.Equal(t, chats.DriveStatusPending, inspected.PendingDrives[0].Status)
+	assert.Equal(t, "review this proposal", inspected.PendingDrives[0].Payload)
+	assert.Equal(t, dispatching.DriveID, inspected.PendingDrives[1].DriveID)
+	assert.Equal(t, chats.DriveStatusDispatching, inspected.PendingDrives[1].Status)
+	assert.NotZero(t, inspected.PendingDrives[1].DispatchedAtUnixMicro)
+
+	require.Len(t, inspected.BackgroundedChats, 1)
+	assert.Equal(t, 1, inspected.Async.BackgroundedChats)
+	bg := inspected.BackgroundedChats[0]
+	assert.Equal(t, backgroundChat.ID, bg.ChatID)
+	assert.Equal(t, "kitsoki-bg-test", bg.TmuxSession)
+	assert.Equal(t, "acceptEdits", bg.PermissionMode)
+	assert.Equal(t, "/tmp/kitsoki-bg-test", bg.WorkspacePath)
+	assert.NotZero(t, bg.UpdatedAtUnixMicro)
+	assert.NotZero(t, bg.LastIdleAtUnixMicro)
 }
 
 func writeBackgroundJobStory(t *testing.T) string {
