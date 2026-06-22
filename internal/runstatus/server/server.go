@@ -30,6 +30,7 @@
 //	runstatus.session.staleness  {session_id}                        → {stale, diff}
 //	runstatus.sessions.list      {}                                  → []SessionHeader
 //	runstatus.work.list          {}                                  → {summary, sessions[], items[]}
+//	runstatus.chat.show          {session_id, chat_id, since_seq?}   → {ok, chat, pty?, messages[]}
 //	runstatus.session.get        {session_id}                        → SessionHeader
 //	runstatus.session.app        {session_id}                        → AppDef
 //	runstatus.session.mermaid    {session_id, detail?}               → {source, node_map}
@@ -679,6 +680,26 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 
 	case "runstatus.work.list":
 		out, err := s.listWork(ctx)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return out, nil
+
+	case "runstatus.chat.show":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		chatID, _ := params["chat_id"].(string)
+		if chatID == "" {
+			return nil, &rpcError{Code: codeServerError, Message: "chat.show: missing 'chat_id'"}
+		}
+		sinceSeq, _ := intParam(params, "since_seq")
+		cs, ok := entry.Driver.(ChatShower)
+		if !ok {
+			return nil, readOnlyErr(method)
+		}
+		out, err := cs.ShowChat(ctx, chatID, sinceSeq)
 		if err != nil {
 			return nil, serverErr(err)
 		}

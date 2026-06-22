@@ -96,6 +96,13 @@ type WorkLister interface {
 	ListWork(ctx context.Context) (SessionWork, error)
 }
 
+// ChatShower is an optional read-only extension for Drivers that can expose a
+// focused chat transcript for async reacquisition. It backs runstatus.chat.show,
+// the web equivalent of the studio MCP chat.show tool.
+type ChatShower interface {
+	ShowChat(ctx context.Context, chatID string, sinceSeq int) (ChatShowResult, error)
+}
+
 // GitHubInboxSyncer is an optional live-session extension for importing
 // GitHub issue/PR work into the session inbox. Read-only trace surfaces omit it.
 type GitHubInboxSyncer interface {

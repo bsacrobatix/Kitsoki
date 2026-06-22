@@ -165,7 +165,8 @@ async function onWorkItem(item: WorkItem): Promise<void> {
   const sid = item.reacquire_session_id || item.session_id;
   if (!sid) return;
   inbox.close();
-  await router.push(`/s/${sid}/chat`);
+  const chat = item.chat_id ? `?chat=${encodeURIComponent(item.chat_id)}` : "";
+  await router.push(`/s/${sid}/chat${chat}`);
 }
 
 function notificationFromWork(item: WorkItem): Notification {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	"kitsoki/internal/orchestrator"
 )
@@ -115,6 +116,16 @@ func (d *lockingDriver) ListWork(ctx context.Context) (SessionWork, error) {
 		return wl.ListWork(ctx)
 	}
 	return SessionWork{}, nil
+}
+
+// ShowChat is read-only current-state inspection, so it forwards unlocked like
+// ListWork. Drivers without the optional ChatShower extension report the same
+// no-store shape as a read-only surface.
+func (d *lockingDriver) ShowChat(ctx context.Context, chatID string, sinceSeq int) (ChatShowResult, error) {
+	if cs, ok := d.Driver.(ChatShower); ok {
+		return cs.ShowChat(ctx, chatID, sinceSeq)
+	}
+	return ChatShowResult{}, fmt.Errorf("chat.show: no chat store configured")
 }
 
 // RewindRoute re-baselines the session via a snapshot and re-dispatches a turn,

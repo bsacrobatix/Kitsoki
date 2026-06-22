@@ -188,6 +188,49 @@ export interface WorkListResult {
   items: WorkItem[];
 }
 
+export interface ChatInspectItem {
+  id: string;
+  app_id: string;
+  room: string;
+  scope_key: string;
+  title: string;
+  status: string;
+  claude_session_id?: string;
+  parent_chat_id?: string;
+  session_id?: string;
+  created_at_unix_micro: number;
+  updated_at_unix_micro: number;
+  last_active_at_unix_micro: number;
+}
+
+export interface ChatPTYItem {
+  chat_id: string;
+  tmux_session: string;
+  tmux_host: string;
+  mode: string;
+  permission_mode?: string;
+  workspace_path?: string;
+  created_at_unix_micro: number;
+  updated_at_unix_micro: number;
+  last_idle_at_unix_micro?: number;
+}
+
+export interface ChatMessageItem {
+  chat_id: string;
+  seq: number;
+  role: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  created_at_unix_micro: number;
+}
+
+export interface ChatShowResult {
+  ok: boolean;
+  chat: ChatInspectItem;
+  pty?: ChatPTYItem;
+  messages?: ChatMessageItem[];
+}
+
 export interface GitHubInboxSyncItem {
   notification_id: string;
   kind: "issue" | "pr" | string;
@@ -282,6 +325,14 @@ export class LiveSource implements DataSource {
 
   listWork(): Promise<WorkListResult> {
     return this.client.post<WorkListResult>("runstatus.work.list", {});
+  }
+
+  showChat(sessionId: string, chatId: string, sinceSeq = 0): Promise<ChatShowResult> {
+    return this.client.post<ChatShowResult>("runstatus.chat.show", {
+      session_id: sessionId,
+      chat_id: chatId,
+      since_seq: sinceSeq,
+    });
   }
 
   syncGitHubInbox(

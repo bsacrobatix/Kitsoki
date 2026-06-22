@@ -317,6 +317,49 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 	assert.Equal(t, bg.ID, work.Items[3].ChatID)
 }
 
+func TestChatShow_SurfacesFocusedAsyncChatContext(t *testing.T) {
+	f := buildInboxFixture(t)
+	chat, err := f.chats.Create(context.Background(), "cloak", "agent", "scope-bg", "Background Claude")
+	require.NoError(t, err)
+	_, err = f.db.ExecContext(context.Background(), `UPDATE chats SET session_id = ? WHERE id = ?`, string(f.sid), chat.ID)
+	require.NoError(t, err)
+	_, err = f.chats.AppendMessage(context.Background(), chat.ID, "user", "check the flaky test", nil)
+	require.NoError(t, err)
+	_, err = f.chats.AppendMessage(context.Background(), chat.ID, "assistant", "the failure is in setup", map[string]any{"tool": "go test"})
+	require.NoError(t, err)
+	_, err = f.chats.AttachPTY(context.Background(), chats.AttachPTYOptions{
+		ChatID:         chat.ID,
+		TmuxSession:    "kit-bg",
+		PermissionMode: "acceptEdits",
+		WorkspacePath:  "/tmp/work",
+	})
+	require.NoError(t, err)
+	_, err = f.chats.DetachPTY(context.Background(), chat.ID)
+	require.NoError(t, err)
+
+	var out server.ChatShowResult
+	rpcCall(t, f.ts, "runstatus.chat.show",
+		map[string]any{"session_id": f.publicID, "chat_id": chat.ID}, &out)
+
+	assert.True(t, out.OK)
+	assert.Equal(t, chat.ID, out.Chat.ID)
+	assert.Equal(t, "Background Claude", out.Chat.Title)
+	assert.Equal(t, string(f.sid), out.Chat.SessionID)
+	require.NotNil(t, out.PTY)
+	assert.Equal(t, "kit-bg", out.PTY.TmuxSession)
+	assert.Equal(t, "pty_background", out.PTY.Mode)
+	require.Len(t, out.Messages, 2)
+	assert.Equal(t, "check the flaky test", out.Messages[0].Content)
+	assert.Equal(t, "the failure is in setup", out.Messages[1].Content)
+	assert.Equal(t, map[string]any{"tool": "go test"}, out.Messages[1].Metadata)
+
+	var since server.ChatShowResult
+	rpcCall(t, f.ts, "runstatus.chat.show",
+		map[string]any{"session_id": f.publicID, "chat_id": chat.ID, "since_seq": 1}, &since)
+	require.Len(t, since.Messages, 1)
+	assert.Equal(t, 1, since.Messages[0].Seq)
+}
+
 // TestInbox_TeleportNotTeleportable proves a notification with no destination
 // state surfaces as a transport error (the surface renders it read-only).
 func TestInbox_TeleportNotTeleportable(t *testing.T) {

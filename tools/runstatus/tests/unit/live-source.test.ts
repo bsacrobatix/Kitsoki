@@ -135,6 +135,37 @@ describe("LiveSource", () => {
     expect(body.method).toBe("runstatus.work.list");
   });
 
+  it("showChat calls runstatus.chat.show with session and chat ids", async () => {
+    fetchMock.mockResolvedValueOnce(
+      rpcOk({
+        ok: true,
+        chat: {
+          id: "chat-1",
+          app_id: "demo",
+          room: "agent",
+          scope_key: "scope",
+          title: "Background Claude",
+          status: "active",
+          created_at_unix_micro: 1,
+          updated_at_unix_micro: 2,
+          last_active_at_unix_micro: 3,
+        },
+        messages: [{ chat_id: "chat-1", seq: 1, role: "assistant", content: "done", created_at_unix_micro: 4 }],
+      })
+    );
+    const src = new LiveSource("/");
+    const result = await src.showChat("s1", "chat-1", 1);
+    expect(result.chat.title).toBe("Background Claude");
+    expect(result.messages?.[0]?.content).toBe("done");
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string; params: { session_id: string; chat_id: string; since_seq: number } };
+    expect(body.method).toBe("runstatus.chat.show");
+    expect(body.params.session_id).toBe("s1");
+    expect(body.params.chat_id).toBe("chat-1");
+    expect(body.params.since_seq).toBe(1);
+  });
+
   it("syncGitHubInbox calls the session GitHub inbox RPC", async () => {
     fetchMock.mockResolvedValueOnce(
       rpcOk({ ok: true, session_id: "s1", fetched: 1, inserted: 1, skipped: 0, items: [] })

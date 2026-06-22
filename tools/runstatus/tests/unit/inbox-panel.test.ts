@@ -113,7 +113,7 @@ describe("InboxPanel", () => {
     await flushPromises();
 
     expect(inbox.open).toBe(false);
-    expect(push).toHaveBeenCalledWith("/s/web-session-1/chat");
+    expect(push).toHaveBeenCalledWith("/s/web-session-1/chat?chat=chat-2");
     wrapper.unmount();
   });
 
