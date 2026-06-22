@@ -249,7 +249,7 @@ func (js *JobStore) UpdateJobStatus(ctx context.Context, id JobID, status JobSta
 func (js *JobStore) GetJob(ctx context.Context, id JobID) (*Job, error) {
 	rows, err := js.db.QueryContext(ctx, `
 		SELECT id, kind, status, origin_state, origin_proposal_id,
-		       payload, error, retry_count, created_at, updated_at, started_at, finished_at
+		       payload, error, clarification_schema, retry_count, created_at, updated_at, started_at, finished_at
 		FROM jobs WHERE id=?`, id)
 	if err != nil {
 		return nil, err
@@ -269,7 +269,7 @@ func (js *JobStore) GetJob(ctx context.Context, id JobID) (*Job, error) {
 func (js *JobStore) ListJobsByStatus(ctx context.Context, sessionID app.SessionID, status JobStatus) ([]Job, error) {
 	rows, err := js.db.QueryContext(ctx, `
 		SELECT id, kind, status, origin_state, origin_proposal_id,
-		       payload, error, retry_count, created_at, updated_at, started_at, finished_at
+		       payload, error, clarification_schema, retry_count, created_at, updated_at, started_at, finished_at
 		FROM jobs WHERE session_id=? AND status=? ORDER BY created_at DESC`,
 		string(sessionID), string(status))
 	if err != nil {
@@ -287,7 +287,7 @@ func (js *JobStore) ListJobsByStatus(ctx context.Context, sessionID app.SessionI
 func (js *JobStore) ListBySession(ctx context.Context, sessionID app.SessionID) ([]Job, error) {
 	rows, err := js.db.QueryContext(ctx, `
 		SELECT id, kind, status, origin_state, origin_proposal_id,
-		       payload, error, retry_count, created_at, updated_at, started_at, finished_at
+		       payload, error, clarification_schema, retry_count, created_at, updated_at, started_at, finished_at
 		FROM jobs WHERE session_id=? ORDER BY created_at ASC`,
 		string(sessionID))
 	if err != nil {
@@ -305,7 +305,7 @@ func (js *JobStore) ListByStatus(ctx context.Context, statuses []JobStatus) ([]J
 		return nil, fmt.Errorf("jobs.ListByStatus: at least one status is required")
 	}
 	q := `SELECT id, session_id, kind, status, origin_state, origin_proposal_id,
-	             payload, error, retry_count, created_at, updated_at, started_at, finished_at
+	             payload, error, clarification_schema, retry_count, created_at, updated_at, started_at, finished_at
 	      FROM jobs
 	      WHERE status IN (` + placeholders(len(statuses)) + `)
 	      ORDER BY updated_at DESC, created_at DESC`
@@ -338,6 +338,7 @@ func scanJobRows(rows *sql.Rows, includeSession bool) ([]Job, error) {
 			originProposalID sql.NullString
 			payloadJSON      string
 			errStr           sql.NullString
+			clarificationStr sql.NullString
 			createdAtMs      int64
 			updatedAtMs      int64
 			startedAtMs      sql.NullInt64
@@ -347,13 +348,13 @@ func scanJobRows(rows *sql.Rows, includeSession bool) ([]Job, error) {
 		if includeSession {
 			err = rows.Scan(
 				&j.ID, (*string)(&j.SessionID), &j.Kind, &status, (*string)(&j.OriginState), &originProposalID,
-				&payloadJSON, &errStr, &j.RetryCount,
+				&payloadJSON, &errStr, &clarificationStr, &j.RetryCount,
 				&createdAtMs, &updatedAtMs, &startedAtMs, &finishedAtMs,
 			)
 		} else {
 			err = rows.Scan(
 				&j.ID, &j.Kind, &status, (*string)(&j.OriginState), &originProposalID,
-				&payloadJSON, &errStr, &j.RetryCount,
+				&payloadJSON, &errStr, &clarificationStr, &j.RetryCount,
 				&createdAtMs, &updatedAtMs, &startedAtMs, &finishedAtMs,
 			)
 		}
@@ -364,6 +365,14 @@ func scanJobRows(rows *sql.Rows, includeSession bool) ([]Job, error) {
 		j.OriginProposalID = originProposalID.String
 		if uerr := json.Unmarshal([]byte(payloadJSON), &j.Payload); uerr != nil {
 			slog.Warn("jobs.scanJobs: unmarshal payload failed; leaving payload empty", "id", j.ID, "err", uerr)
+		}
+		if clarificationStr.Valid && clarificationStr.String != "" {
+			var schema ClarificationSchema
+			if uerr := json.Unmarshal([]byte(clarificationStr.String), &schema); uerr != nil {
+				slog.Warn("jobs.scanJobs: unmarshal clarification schema failed; leaving empty", "id", j.ID, "err", uerr)
+			} else {
+				j.ClarificationSchema = schema
+			}
 		}
 		j.Error = errStr.String
 		j.CreatedAt = time.UnixMilli(createdAtMs)

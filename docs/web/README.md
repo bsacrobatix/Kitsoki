@@ -443,7 +443,9 @@ indistinguishable from a TUI one in the trace.
   Rows show the next action explicitly: **jump** for notifications and
   notification-backed jobs, **open context** for chat-backed work including
   failed subagent drives, and **open session** for job rows that have no
-  matching unread notification yet.
+  matching unread notification yet. Awaiting-input job rows show their
+  clarification prompt in the row body unless a linked notification supplies a
+  more specific body.
   Notification history keeps **dismiss** affordances; an origin session that is
   no longer live degrades to a non-jumping, read-only item (teleport returns a
   typed error). The panel's **Sync GitHub** action uses the same idempotent

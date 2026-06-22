@@ -269,6 +269,7 @@ func workItemsForJobs(sh *SessionHandle, state string, jobRows []JobInspectItem,
 			StoryPath:          sh.StoryPath,
 			State:              state,
 			Title:              j.Kind,
+			Body:               jobClarificationPrompt(j),
 			Status:             string(j.Status),
 			JobID:              j.ID,
 			CreatedAtUnixMilli: j.CreatedAtUnixMilli,
@@ -280,6 +281,9 @@ func workItemsForJobs(sh *SessionHandle, state string, jobRows []JobInspectItem,
 			},
 		})
 		if n, ok := jobNotifications[j.ID]; ok {
+			if n.Body != "" {
+				out[len(out)-1].Body = n.Body
+			}
 			out[len(out)-1].Reacquire = WorkReacquire{
 				Tool: "session.teleport",
 				Args: map[string]any{"handle": sh.Key, "notification_id": n.ID},
@@ -287,6 +291,13 @@ func workItemsForJobs(sh *SessionHandle, state string, jobRows []JobInspectItem,
 		}
 	}
 	return out
+}
+
+func jobClarificationPrompt(j JobInspectItem) string {
+	if j.Status != jobs.JobAwaitingInput || j.ClarificationSchema == nil {
+		return ""
+	}
+	return j.ClarificationSchema.Prompt
 }
 
 func workJobNotifications(notifications []InboxInspectItem) map[string]InboxInspectItem {

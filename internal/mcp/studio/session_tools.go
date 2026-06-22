@@ -544,17 +544,18 @@ type AsyncInspectSummary struct {
 // It lets MCP clients see running, awaiting-input, and terminal work without
 // scraping the TUI frame or decoding trace internals.
 type JobInspectItem struct {
-	ID                  string         `json:"id"`
-	Kind                string         `json:"kind"`
-	Status              jobs.JobStatus `json:"status"`
-	OriginState         string         `json:"origin_state"`
-	OriginProposalID    string         `json:"origin_proposal_id,omitempty"`
-	Error               string         `json:"error,omitempty"`
-	RetryCount          int            `json:"retry_count,omitempty"`
-	CreatedAtUnixMilli  int64          `json:"created_at_unix_milli"`
-	UpdatedAtUnixMilli  int64          `json:"updated_at_unix_milli"`
-	StartedAtUnixMilli  int64          `json:"started_at_unix_milli,omitempty"`
-	FinishedAtUnixMilli int64          `json:"finished_at_unix_milli,omitempty"`
+	ID                  string                    `json:"id"`
+	Kind                string                    `json:"kind"`
+	Status              jobs.JobStatus            `json:"status"`
+	OriginState         string                    `json:"origin_state"`
+	OriginProposalID    string                    `json:"origin_proposal_id,omitempty"`
+	Error               string                    `json:"error,omitempty"`
+	RetryCount          int                       `json:"retry_count,omitempty"`
+	ClarificationSchema *jobs.ClarificationSchema `json:"clarification_schema,omitempty"`
+	CreatedAtUnixMilli  int64                     `json:"created_at_unix_milli"`
+	UpdatedAtUnixMilli  int64                     `json:"updated_at_unix_milli"`
+	StartedAtUnixMilli  int64                     `json:"started_at_unix_milli,omitempty"`
+	FinishedAtUnixMilli int64                     `json:"finished_at_unix_milli,omitempty"`
 }
 
 // InboxInspectItem is a compact projection of one non-dismissed inbox
@@ -1051,15 +1052,16 @@ func inspectJobs(in []jobs.Job) []JobInspectItem {
 	out := make([]JobInspectItem, 0, len(in))
 	for _, j := range in {
 		item := JobInspectItem{
-			ID:                 j.ID,
-			Kind:               j.Kind,
-			Status:             j.Status,
-			OriginState:        string(j.OriginState),
-			OriginProposalID:   j.OriginProposalID,
-			Error:              j.Error,
-			RetryCount:         j.RetryCount,
-			CreatedAtUnixMilli: j.CreatedAt.UnixMilli(),
-			UpdatedAtUnixMilli: j.UpdatedAt.UnixMilli(),
+			ID:                  j.ID,
+			Kind:                j.Kind,
+			Status:              j.Status,
+			OriginState:         string(j.OriginState),
+			OriginProposalID:    j.OriginProposalID,
+			Error:               j.Error,
+			RetryCount:          j.RetryCount,
+			ClarificationSchema: clarificationSchema(j.ClarificationSchema),
+			CreatedAtUnixMilli:  j.CreatedAt.UnixMilli(),
+			UpdatedAtUnixMilli:  j.UpdatedAt.UnixMilli(),
 		}
 		if j.StartedAt != nil {
 			item.StartedAtUnixMilli = j.StartedAt.UnixMilli()
@@ -1070,6 +1072,32 @@ func inspectJobs(in []jobs.Job) []JobInspectItem {
 		out = append(out, item)
 	}
 	return out
+}
+
+func clarificationSchema(raw any) *jobs.ClarificationSchema {
+	switch v := raw.(type) {
+	case nil:
+		return nil
+	case jobs.ClarificationSchema:
+		return &v
+	case *jobs.ClarificationSchema:
+		return v
+	case map[string]any:
+		schema := jobs.ClarificationSchema{Fields: map[string]string{}}
+		if prompt, ok := v["prompt"].(string); ok {
+			schema.Prompt = prompt
+		}
+		if fields, ok := v["fields"].(map[string]any); ok {
+			for name, typ := range fields {
+				if text, ok := typ.(string); ok {
+					schema.Fields[name] = text
+				}
+			}
+		}
+		return &schema
+	default:
+		return nil
+	}
 }
 
 func inspectNotifications(in []jobs.Notification) []InboxInspectItem {

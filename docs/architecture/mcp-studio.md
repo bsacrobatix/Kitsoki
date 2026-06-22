@@ -102,10 +102,12 @@ reacquirable, but rank below active jobs/chats and do not increase
 
 When a job row has a matching unread job-origin notification, `studio.work`
 returns `reacquire.tool: "session.teleport"` with that notification id so the
-client can jump directly to the saved origin context. Job rows without a
-matching unread notification keep the broader `session.inspect` fallback.
-Failed chat-drive rows return `reacquire.tool: "chat.show"` with the failed
-chat id and failure text, so clients can reopen the focused subagent context.
+client can jump directly to the saved origin context. Awaiting-input job rows
+also carry the clarification prompt as the item `body` when no more specific
+notification body is available. Job rows without a matching unread notification
+keep the broader `session.inspect` fallback. Failed chat-drive rows return
+`reacquire.tool: "chat.show"` with the failed chat id and failure text, so
+clients can reopen the focused subagent context.
 
 ### `story.*` — author (deterministic, LLM-free)
 
@@ -154,18 +156,18 @@ orchestrator turns, especially smoke-testing `/work --all` and `/chat show
 <id>` through MCP. It uses the live TUI slash dispatcher and rejects commands
 that return an asynchronous terminal side effect, such as attaching to tmux.
 
-`session.inspect` also carries compact per-handle background-job and inbox projections.
-`async` summarizes running, awaiting-input, terminal, unread, and unread
-action-required counts; `jobs[]` shows the session's job IDs, kinds, statuses,
-origin states, errors, and timestamps; `notifications[]` shows active inbox
-rows, including `action_required` items and teleport job/state fields. When a
-chat store is wired, `pending_drives[]` shows pending/dispatching
-chat-input-queue rows owned by the session, and `backgrounded_chats[]` shows
-tmux-hosted chats left in `pty_background` mode. This is the structured MCP
-surface for an external agent to inspect the chosen handle after `studio.work`
-has ranked the global queue, notice required operator input, and reacquire or
-switch to the task through `session.teleport` without scraping the TUI frame or
-decoding trace events.
+`session.inspect` also carries compact per-handle background-job and inbox
+projections. `async` summarizes running, awaiting-input, terminal, unread, and
+unread action-required counts; `jobs[]` shows the session's job IDs, kinds,
+statuses, origin states, errors, clarification schema, and timestamps;
+`notifications[]` shows active inbox rows, including `action_required` items and
+teleport job/state fields. When a chat store is wired, `pending_drives[]` shows
+pending/dispatching chat-input-queue rows owned by the session, and
+`backgrounded_chats[]` shows tmux-hosted chats left in `pty_background` mode.
+This is the structured MCP surface for an external agent to inspect the chosen
+handle after `studio.work` has ranked the global queue, notice required operator
+input, and reacquire or switch to the task through `session.teleport` without
+scraping the TUI frame or decoding trace events.
 
 Story-authored `host.chat.drive` effects are stamped with the originating
 session and state before the host handler enqueues the drive, so ordinary

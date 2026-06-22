@@ -325,6 +325,7 @@ func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
 				Priority:           workJobPriority(j),
 				SessionID:          string(d.SID),
 				Title:              j.Kind,
+				Body:               jobClarificationPrompt(j),
 				Status:             string(j.Status),
 				JobID:              j.ID,
 				CreatedAt:          j.CreatedAt,
@@ -334,6 +335,9 @@ func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
 				ReacquireSessionID: string(d.SID),
 			}
 			if n, ok := jobNotifications[j.ID]; ok {
+				if n.Body != "" {
+					item.Body = n.Body
+				}
 				item.NotificationID = n.ID
 				item.Severity = n.Severity
 				item.TeleportState = n.TeleportState
@@ -395,6 +399,43 @@ func (d OrchestratorDriver) ListWork(ctx context.Context) (SessionWork, error) {
 		}
 	}
 	return out, nil
+}
+
+func jobClarificationPrompt(j jobs.Job) string {
+	if j.Status != jobs.JobAwaitingInput {
+		return ""
+	}
+	schema := clarificationSchema(j.ClarificationSchema)
+	if schema == nil {
+		return ""
+	}
+	return schema.Prompt
+}
+
+func clarificationSchema(raw any) *jobs.ClarificationSchema {
+	switch v := raw.(type) {
+	case nil:
+		return nil
+	case jobs.ClarificationSchema:
+		return &v
+	case *jobs.ClarificationSchema:
+		return v
+	case map[string]any:
+		schema := jobs.ClarificationSchema{Fields: map[string]string{}}
+		if prompt, ok := v["prompt"].(string); ok {
+			schema.Prompt = prompt
+		}
+		if fields, ok := v["fields"].(map[string]any); ok {
+			for name, typ := range fields {
+				if text, ok := typ.(string); ok {
+					schema.Fields[name] = text
+				}
+			}
+		}
+		return &schema
+	default:
+		return nil
+	}
 }
 
 func workJobNotifications(notifs []jobs.Notification) map[string]jobs.Notification {

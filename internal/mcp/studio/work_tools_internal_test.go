@@ -42,11 +42,19 @@ func TestWorkItemsForNotificationsPreservesExternalContext(t *testing.T) {
 func TestWorkItemsForJobsUseMatchingNotificationTeleport(t *testing.T) {
 	sh := &SessionHandle{Key: "async-work", SID: "sid-1"}
 	items := workItemsForJobs(sh, "running", []JobInspectItem{
-		{ID: "job-awaiting", Kind: "host.agent.task", Status: jobs.JobAwaitingInput},
+		{
+			ID:     "job-awaiting",
+			Kind:   "host.agent.task",
+			Status: jobs.JobAwaitingInput,
+			ClarificationSchema: &jobs.ClarificationSchema{
+				Prompt: "Which environment should I use?",
+				Fields: map[string]string{"answer": "string"},
+			},
+		},
 		{ID: "job-failed", Kind: "host.agent.task", Status: jobs.JobFailed},
 		{ID: "job-running", Kind: "host.agent.task", Status: jobs.JobRunning},
 	}, []InboxInspectItem{
-		{ID: "notif-awaiting", TeleportJobID: "job-awaiting", OriginKind: "job", OriginRef: "job:job-awaiting"},
+		{ID: "notif-awaiting", Body: "Pick staging or prod.", TeleportJobID: "job-awaiting", OriginKind: "job", OriginRef: "job:job-awaiting"},
 		{ID: "notif-failed", OriginKind: "job", OriginRef: "job:job-failed"},
 	}, false)
 
@@ -57,10 +65,28 @@ func TestWorkItemsForJobsUseMatchingNotificationTeleport(t *testing.T) {
 	}
 	assert.Equal(t, "session.teleport", byJob["job-awaiting"].Reacquire.Tool)
 	assert.Equal(t, "notif-awaiting", byJob["job-awaiting"].Reacquire.Args["notification_id"])
+	assert.Equal(t, "Pick staging or prod.", byJob["job-awaiting"].Body)
 	assert.Equal(t, "session.teleport", byJob["job-failed"].Reacquire.Tool)
 	assert.Equal(t, "notif-failed", byJob["job-failed"].Reacquire.Args["notification_id"])
 	assert.Equal(t, "session.inspect", byJob["job-running"].Reacquire.Tool)
 	assert.Equal(t, "async-work", byJob["job-running"].Reacquire.Args["handle"])
+}
+
+func TestInspectJobsPreservesClarificationSchema(t *testing.T) {
+	got := inspectJobs([]jobs.Job{{
+		ID:     "job-awaiting",
+		Kind:   "host.run",
+		Status: jobs.JobAwaitingInput,
+		ClarificationSchema: jobs.ClarificationSchema{
+			Prompt: "Which environment should I use?",
+			Fields: map[string]string{"answer": "string"},
+		},
+	}})
+
+	require.Len(t, got, 1)
+	require.NotNil(t, got[0].ClarificationSchema)
+	assert.Equal(t, "Which environment should I use?", got[0].ClarificationSchema.Prompt)
+	assert.Equal(t, map[string]string{"answer": "string"}, got[0].ClarificationSchema.Fields)
 }
 
 func TestWorkItemNeedsAttentionUsesInterventionSemantics(t *testing.T) {

@@ -410,6 +410,32 @@ func TestWorkList_DoesNotTreatPassiveNotificationsAsAttention(t *testing.T) {
 	assert.Equal(t, jobs.SeveritySuccess, work.Items[1].Severity)
 }
 
+func TestWorkList_AwaitingJobShowsClarificationPrompt(t *testing.T) {
+	f := buildInboxFixture(t)
+	now := time.Now()
+	require.NoError(t, f.js.UpsertJob(context.Background(), &jobs.Job{
+		ID:        "job-awaiting",
+		SessionID: f.sid,
+		Kind:      "host.run",
+		Status:    jobs.JobRunning,
+		CreatedAt: now.Add(-time.Minute),
+		UpdatedAt: now,
+	}))
+	require.NoError(t, f.js.RequestClarification(context.Background(), "job-awaiting", jobs.ClarificationSchema{
+		Prompt: "Which environment should I use?",
+		Fields: map[string]string{"answer": "string"},
+	}))
+
+	var work server.WorkListResult
+	rpcCall(t, f.ts, "runstatus.work.list", nil, &work)
+	assert.Equal(t, 1, work.Summary.JobsAwaitingInput)
+	assert.Equal(t, 1, work.Summary.NeedsAttention)
+	require.Len(t, work.Items, 1)
+	assert.Equal(t, "job", work.Items[0].Kind)
+	assert.Equal(t, "job-awaiting", work.Items[0].JobID)
+	assert.Equal(t, "Which environment should I use?", work.Items[0].Body)
+}
+
 func TestChatShow_SurfacesFocusedAsyncChatContext(t *testing.T) {
 	f := buildInboxFixture(t)
 	chat, err := f.chats.Create(context.Background(), "cloak", "agent", "scope-bg", "Background Claude")

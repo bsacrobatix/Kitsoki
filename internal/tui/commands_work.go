@@ -172,6 +172,9 @@ func workRowsForJobs(jobRows []jobs.Job, notifs []jobs.Notification, sid app.Ses
 		if idx := jobInboxIndexes[j.ID]; idx > 0 {
 			hint += fmt.Sprintf("; /inbox %d", idx)
 		}
+		if prompt := jobClarificationPrompt(j); prompt != "" {
+			hint += "; " + prompt
+		}
 		if allSessions {
 			hint += workSessionHint(j.SessionID, sid)
 		}
@@ -187,6 +190,43 @@ func workRowsForJobs(jobRows []jobs.Job, notifs []jobs.Notification, sid app.Ses
 		})
 	}
 	return out
+}
+
+func jobClarificationPrompt(j jobs.Job) string {
+	if j.Status != jobs.JobAwaitingInput {
+		return ""
+	}
+	schema := clarificationSchema(j.ClarificationSchema)
+	if schema == nil {
+		return ""
+	}
+	return schema.Prompt
+}
+
+func clarificationSchema(raw any) *jobs.ClarificationSchema {
+	switch v := raw.(type) {
+	case nil:
+		return nil
+	case jobs.ClarificationSchema:
+		return &v
+	case *jobs.ClarificationSchema:
+		return v
+	case map[string]any:
+		schema := jobs.ClarificationSchema{Fields: map[string]string{}}
+		if prompt, ok := v["prompt"].(string); ok {
+			schema.Prompt = prompt
+		}
+		if fields, ok := v["fields"].(map[string]any); ok {
+			for name, typ := range fields {
+				if text, ok := typ.(string); ok {
+					schema.Fields[name] = text
+				}
+			}
+		}
+		return &schema
+	default:
+		return nil
+	}
 }
 
 func workJobInboxIndexes(notifs []jobs.Notification, sid app.SessionID) map[string]int {

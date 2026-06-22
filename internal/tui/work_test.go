@@ -88,10 +88,14 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 		ID:          "job-other",
 		SessionID:   "other-session",
 		Kind:        "host.agent.task",
-		Status:      jobs.JobAwaitingInput,
+		Status:      jobs.JobRunning,
 		OriginState: "foyer",
 		CreatedAt:   now.Add(-90 * time.Second),
 		UpdatedAt:   now.Add(-10 * time.Second),
+	}))
+	require.NoError(t, js.RequestClarification(ctx, "job-other", jobs.ClarificationSchema{
+		Prompt: "Which environment should I use?",
+		Fields: map[string]string{"answer": "string"},
 	}))
 
 	chat, err := cs.Create(ctx, "cloak", "agent", "scope", "Review proposal")
@@ -216,6 +220,7 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	require.Contains(t, tx, "active work (all sessions): 11 item(s)")
 	require.Contains(t, tx, "Other PR #99")
 	require.Contains(t, tx, "job-other")
+	requireContainsNear(t, allWork, "job-other", "Which environment should I use?")
 	require.Contains(t, tx, "Background Claude")
 	require.Contains(t, tx, "current session")
 	require.Contains(t, tx, "dispatching review")
