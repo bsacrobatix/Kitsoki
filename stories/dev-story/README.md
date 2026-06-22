@@ -182,7 +182,9 @@ dev rebinds to `host.local_files.ticket`. Same YAML, two providers.
 | `ideas` | — | Ideas-backlog reviewer (see below). |
 | `code_review` | Wave 3 stub | Reserves the room; imports `stories/code-review/` in Wave 3. |
 | `incident*` | Wave 3 | **On-call response loop** — alert → triage → mitigate \| escalate \| monitor → postmortem ([incident-response](#incident-response-loop-incident) below). |
-| `deploy`, `observability`, `docs` | Wave 3 stubs | Routing-back-to-`landing` placeholders. |
+| `deploy*` | Wave 3 | **Release loop** — target → preflight gate → ship → verify \| rollback ([deploy](#deploy-loop-deploy) below). |
+| `observability*` | Wave 3 | **Monitoring loop** — signal → query → triage → alert \| annotate \| clear ([observability](#observability-loop-observability) below). |
+| `docs*` | Wave 3 | **Documentation loop** — target → draft → review → publish \| revise ([docs](#docs-loop-docs) below). |
 
 ### Incident-response loop (`incident`)
 
@@ -231,6 +233,119 @@ default, so the whole loop is **no-LLM-gateable**: the three flow fixtures
 two agent calls and assert the deterministic routing — severity-based
 dispositions, the recorded mitigation action, the page + inbox mirror, the
 postmortem write — with no real LLM.
+
+### Deploy loop (`deploy`)
+
+Reached from `landing` via `go_deploy`. The former dead-end stub is now a real
+**release loop** ([`rooms/deploy.yaml`](./rooms/deploy.yaml)): the engineer names
+a deploy target, the loop runs preflight checks, an agent gates the result
+(go/no-go), and on ship it deploys, verifies the new release, and rolls back
+automatically if the probe is red.
+
+```
+deploy (intake) ── start_deploy ──▶ deploy_preflighting
+                                      │ on_enter host.run preflight
+                                      │ + host.agent.decide gate (go|no_go)
+                                      ▼
+                                  deploy_gated  (the verdict)
+                                      ├─ ship   ▶ deploy_shipping ─▶ deploy_verifying
+                                      └─ cancel ▶ deploy (parked, status=cancelled)
+                                  deploy_verifying
+                                      │ on_enter host.run verify-probe
+                                      │ + host.agent.decide health (healthy|unhealthy)
+                                      ├─ healthy   ▶ deploy_succeeded ─▶ landing
+                                      └─ unhealthy ▶ deploy_rolling_back ─▶ deploy_succeeded ─▶ landing
+```
+
+- **Preflight gate** runs the recorded preflight (`host.run` argv mode — an
+  instance rebinds to a real test/working-tree/migration check) then
+  `host.agent.decide` (`gate_reviewer`, `prompts/deploy_gate.md`,
+  `schemas/deploy-gate.json`) and binds a `{ verdict (go|no_go), summary,
+  blocking }` verdict. The verdict auto-routes via post-bind guarded emits (the
+  cherny discipline); `decider: llm`-pinned for STAGED mode. The `ship`
+  affordance is hidden on a `no_go` gate.
+- **Ship** runs the recorded deploy action (`host.run`) and advances to
+  verification — the red-after-green discipline: prove the release is good,
+  don't assume.
+- **Verify** runs the recorded probe (`host.run`) + a health gate
+  (`host.agent.decide`, `schemas/deploy-health.json` → `verdict
+  (healthy|unhealthy)`) and routes: healthy → succeeded; unhealthy →
+  rolling back. The rollback action clears `deploy_action` on entry so its
+  `once:` guard re-arms (the ship step already bound it).
+- **Cancel** parks the deploy back at intake; a fresh `start_deploy` re-arms
+  the preflight + gate cleanly.
+
+Three flow fixtures (`deploy_succeed` / `deploy_rollback` / `deploy_no_go`) stub
+the two decides and assert the deterministic routing — the go/no-go gate, the
+recorded ship action, the health-based succeed/rollback split, the no-go park —
+with no real LLM. The host.run steps run REAL `printf` so the recorded actions
+are asserted for real.
+
+### Observability loop (`observability`)
+
+Reached from `landing` via `go_observability`. The former stub is now a real
+**monitoring loop** ([`rooms/observability.yaml`](./rooms/observability.yaml)):
+the engineer names a signal / dashboard, the loop queries it, an agent triages
+the reading, and the loop routes on the disposition.
+
+```
+observability (intake) ── query_signal ──▶ observability_querying
+                                             │ on_enter host.run query
+                                             │ + host.agent.decide triage
+                                             ▼
+                                         observability_triaged  (the verdict)
+                                             ├─ raise_alert ▶ observability_alerting   ─▶ observability_done
+                                             ├─ annotate    ▶ observability_annotating ─▶ observability_done
+                                             └─ clear        ▶ observability (parked, status=clear)
+```
+
+- **Triage** runs the recorded query (`host.run`) then `host.agent.decide`
+  (`gate_reviewer`, `prompts/obs_triage.md`, `schemas/obs-triage.json`) and
+  binds a `{ disposition (alert|annotate|clear), summary, detail }` verdict. The
+  disposition auto-routes via post-bind guarded emits; `decider: llm`-pinned.
+- **Alert** posts the signal out-of-band (`iface.transport.post` — default
+  `host.append_to_file`, an instance rebinds to PagerDuty / Slack) and mirrors
+  it into the inbox (`host.inbox.add`).
+- **Annotate** runs the recorded annotation action (`host.run` — an instance
+  rebinds to a dashboard-annotation API) and does NOT page.
+- **Clear** parks the signal at intake; a fresh `query_signal` re-arms triage.
+
+Three flow fixtures (`observability_alert` / `observability_annotate` /
+`observability_clear_park`) stub the decide and assert the deterministic routing
+— the out-of-band alert + inbox mirror, the recorded annotation, the clear park
++ re-triage — with no real LLM.
+
+### Docs loop (`docs`)
+
+Reached from `landing` via `go_docs`. The former stub is now a real
+**documentation loop** ([`rooms/docs.yaml`](./rooms/docs.yaml)): the engineer
+names a doc target, the writer drafts it, the operator reviews the close-out
+note and either publishes (announces it out-of-band) or revises (re-drafts).
+
+```
+docs (intake) ── draft_doc ──▶ docs_drafting
+                                 │ on_enter host.agent.task (write_mode read_only)
+                                 │ binds docs_draft { summary, file_path, headings }
+                                 ▼
+                             docs_review  (the close-out note)
+                                 ├─ publish_doc ▶ docs_publishing ─▶ docs_published ─▶ landing
+                                 └─ revise_doc  ▶ docs (re-draft, status=revising)
+```
+
+- **Draft** runs the doc writer (`host.agent.task`, `landing_agent`,
+  `prompts/docs_draft.md`, `schemas/docs-draft.json`) under the same read-only →
+  write-mode opt-in posture as `incident_postmortem` / `applying` — headless it
+  stays read-only and reports what it would write. Binds the close-out note and
+  advances to review.
+- **Publish** announces the doc out-of-band (`iface.transport.post`) and lands
+  on the published read-out.
+- **Revise** parks back at intake (`status=revising`, the prior draft retained
+  so the operator sees what they're revising); a fresh `draft_doc` clears the
+  draft and re-arms the writer.
+
+Two flow fixtures (`docs_publish` / `docs_revise`) stub the writer task and
+assert the deterministic routing — the draft bind, the publish announcement, the
+revise re-arm — with no real LLM.
 
 ### The free-form workbench (`landing`)
 
@@ -321,7 +436,12 @@ floor), `go_inbox`, `go_agent`, `go_ticket_search`,
 `summarize_day`, `proceed`, `quit`, `look`. The incident loop adds
 `report_incident` (slot `alert`), `mitigate`, `escalate`, `watch`, and
 `write_postmortem` (the three dispositions + the two button-only disposition
-verbs are scoped to the incident rooms).
+verbs are scoped to the incident rooms). The deploy loop adds `start_deploy`
+(slot `target`), `ship`, `cancel_deploy`; the observability loop adds
+`query_signal` (slot `signal`), `raise_alert`, `annotate_signal`,
+`clear_signal`; the docs loop adds `draft_doc` (slot `target`), `publish_doc`,
+`revise_doc` (each loop's disposition verbs are button-only and scoped to its
+rooms; the post-bind guarded emit auto-routes on the agent's verdict).
 
 ## Flows
 
@@ -344,8 +464,16 @@ verbs are scoped to the incident rooms).
 | `incident_mitigate.yaml` | The on-call happy path: alert → triage (recommend mitigate) → auto-route → apply the recorded mitigation (`host.run`) → resolved → postmortem (`host.agent.task`) → landing. Asserts the triage decide fired, the mitigation action recorded, and the postmortem bound. |
 | `incident_escalate.yaml` | The sev1 escalation branch: triage (recommend escalate) → page out-of-band (`iface.transport.post`) + inbox mirror (`host.inbox.add`) → resolved → postmortem. Asserts both out-of-band calls fired and `incident_status=escalated`. |
 | `incident_monitor_park.yaml` | The low-severity edge: triage (recommend monitor) → `watch` parks the alert back at intake (`status=monitoring`, no action) → a fresh `report_incident` re-arms triage, proving the park is not a dead end. |
+| `deploy_succeed.yaml` | The release happy path: target → preflight (go) → ship → verify (healthy) → succeeded → landing. Stubs the two decides; runs REAL `host.run` for preflight/ship/probe. |
+| `deploy_rollback.yaml` | The red-after-green branch: preflight go → ship → verify (UNHEALTHY) → rollback → rolled_back read-out. Proves the verify gate is load-bearing — a bad release does not silently stay shipped. |
+| `deploy_no_go.yaml` | The blocked-gate branch: preflight (no_go) → `cancel_deploy` parks the deploy → a fresh `start_deploy` re-gates cleanly. |
+| `observability_alert.yaml` | The page-now branch: signal → query → triage (alert) → page out-of-band (`iface.transport.post`) + inbox mirror (`host.inbox.add`) → done. |
+| `observability_annotate.yaml` | The notable-not-paging branch: triage (annotate) → recorded dashboard note (`host.run`) → done; asserts no page (no transport/inbox calls). |
+| `observability_clear_park.yaml` | The nominal edge: triage (clear) → `clear_signal` parks the signal → a fresh `query_signal` re-triages cleanly. |
+| `docs_publish.yaml` | The documentation happy path: target → draft (`host.agent.task`, write-mode opt-in) → review → publish (`iface.transport.post`) → published → landing. |
+| `docs_revise.yaml` | The revise edge: draft → `revise_doc` parks back at intake (`status=revising`, draft retained) → a fresh `draft_doc` re-arms the writer. |
 
-These are a sample; the full suite (45 / 45) passes under `kitsoki test flows stories/dev-story/app.yaml`.
+These are a sample; the full suite (59 / 59) passes under `kitsoki test flows stories/dev-story/app.yaml`.
 
 ## Manual TUI walkthrough
 

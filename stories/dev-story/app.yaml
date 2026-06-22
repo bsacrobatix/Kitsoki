@@ -41,10 +41,19 @@
 # # What is NOT here (later waves)
 #
 #   - `stories/cypilot/` import — Wave 4.
-#   - `deploy`, `observability`, `docs` rooms — Wave 2 ships these as
-#     STUBS that route back to main; their real content lands in later
-#     waves. (`incident` is now a real on-call response loop — see
-#     rooms/incident.yaml.)
+#
+# # Wave 3 room loops (filled — formerly stubs)
+#
+#   The `incident` / `deploy` / `observability` / `docs` rooms are now real
+#   multi-room loops (see rooms/{incident,deploy,observability,docs}.yaml):
+#     - incident:      alert → triage → mitigate|escalate|monitor → postmortem
+#     - deploy:        target → preflight gate → ship → verify|rollback
+#     - observability: signal → query → triage → alert|annotate|clear
+#     - docs:          target → draft → review → publish|revise
+#   Each reuses only EXISTING hosts (host.run / host.agent.decide /
+#   host.agent.task / host.inbox.add / iface.transport.post) so the whole set
+#   stays no-LLM-gateable; flow fixtures stub the agent calls and assert the
+#   deterministic routing.
 
 app:
   id: dev-story
@@ -456,6 +465,92 @@ world:
   incident_status:      { type: string, default: "" }
   incident_path:        { type: string, default: "docs/incidents" }
 
+  # ── Deploy loop (rooms/deploy.yaml) ────────────────────────────────
+  # The select → preflight → go/no-go gate → ship → verify | rollback loop.
+  # The operator names a deploy target; the loop runs preflight checks
+  # (host.run), gates them (host.agent.decide → go|no_go), and on ship
+  # deploys (host.run), verifies the new release (host.run +
+  # host.agent.decide → healthy?), and rolls back deterministically on a red
+  # probe. Every host the loop touches is already in the allow-list
+  # (host.run / host.agent.decide), so flow fixtures stub the decides + the
+  # host.run steps and assert the deterministic routing with no LLM.
+  #
+  # deploy_target:    the operator's named target environment (the
+  #                   `start_deploy` slot, captured on entry to preflight).
+  # deploy_preflight: the recorded preflight check output (host.run stdout),
+  #                   fed into the gate decide.
+  # deploy_gate:      the gate verdict — { verdict (go|no_go), summary,
+  #                   blocking }. verdict is the tri-state "" until bound, so
+  #                   the post-bind routing emits (which compare == 'go' /
+  #                   'no_go') defer to the post-bind pass (the cherny
+  #                   decision-emit discipline). schemas/deploy-gate.json.
+  # deploy_action:    the recorded ship / rollback action result (host.run
+  #                   stdout), shown in the read-out.
+  # deploy_probe:     the recorded verification probe output (host.run
+  #                   stdout), fed into the health decide.
+  # deploy_health:    the post-deploy health verdict — { verdict
+  #                   (healthy|unhealthy), summary }. verdict is unset until the
+  #                   decide binds, so the post-bind routing emits defer to the
+  #                   post-bind pass. schemas/deploy-health.json.
+  # deploy_status:    "" | cancelled | shipped | succeeded | rolled_back — the
+  #                   loop's disposition, surfaced in the read-out.
+  deploy_target:        { type: string, default: "" }
+  deploy_preflight:     { type: string, default: "" }
+  deploy_gate:          { type: object, default: {} }
+  deploy_action:        { type: string, default: "" }
+  deploy_probe:         { type: string, default: "" }
+  deploy_health:        { type: object, default: {} }
+  deploy_status:        { type: string, default: "" }
+
+  # ── Observability loop (rooms/observability.yaml) ──────────────────
+  # The pick signal → query → triage → alert | annotate | clear loop. The
+  # operator picks a signal/dashboard; the loop queries it (host.run), an
+  # agent triages the query result (host.agent.decide → alert|annotate|clear),
+  # and the loop routes on the verdict — alert posts out-of-band
+  # (iface.transport.post) + mirrors to the inbox (host.inbox.add), annotate
+  # records a dashboard note (host.run), clear parks the signal. Every host is
+  # already in the allow-list, so flow fixtures stub the decide + host.run
+  # steps and assert the deterministic routing with no LLM.
+  #
+  # obs_signal:    the operator's picked signal / dashboard (the `query_signal`
+  #                slot, captured on entry to the query step).
+  # obs_query:     the recorded query result (host.run stdout), fed into the
+  #                triage decide.
+  # obs_triage:    the triage verdict — { disposition (alert|annotate|clear),
+  #                summary, detail }. disposition is the tri-state "" until
+  #                bound (the cherny decision-emit discipline).
+  #                schemas/obs-triage.json.
+  # obs_action:    the recorded alert / annotation action result (the
+  #                transport message id, or the host.run annotation stdout).
+  # obs_status:    "" | alerted | annotated | clear — the loop's disposition.
+  obs_signal:           { type: string, default: "" }
+  obs_query:            { type: string, default: "" }
+  obs_triage:           { type: object, default: {} }
+  obs_action:           { type: string, default: "" }
+  obs_status:           { type: string, default: "" }
+
+  # ── Docs loop (rooms/docs.yaml) ────────────────────────────────────
+  # The pick target → draft → review → publish | revise loop. The operator
+  # names a doc target; the writer drafts it (host.agent.task, under the
+  # read-only → write-mode opt-in posture); the operator reviews the close-out
+  # note and publishes (announces it out-of-band via iface.transport.post) or
+  # revises (re-drafts). Every host is already in the allow-list / an iface
+  # default, so flow fixtures stub the writer task and assert the deterministic
+  # routing with no LLM.
+  #
+  # docs_target:  the operator's named doc target (the `draft_doc` slot,
+  #               captured on entry to drafting).
+  # docs_draft:   the writer's close-out note — { summary, file_path, headings }.
+  #               schemas/docs-draft.json.
+  # docs_action:  the publish announcement result (the transport message id).
+  # docs_status:  "" | drafted | revising | published — the loop's disposition.
+  # docs_path:    the doc markdown path the writer targets (relative to workdir).
+  docs_target:          { type: string, default: "" }
+  docs_draft:           { type: object, default: {} }
+  docs_action:          { type: string, default: "" }
+  docs_status:          { type: string, default: "" }
+  docs_path:            { type: string, default: "docs" }
+
   # ── Design pipeline (rooms/design*.yaml) ───────────────────────
   # 4-stage pipeline: intake → search → refine → draft+publish.
   # Per-session scratch dir is `design_workspace` — NOT world.workdir
@@ -674,6 +769,133 @@ intents:
     description: "(internal) triage recommended monitor — park the alert."
     examples: []
     priority: 1
+
+  # ── Deploy loop (rooms/deploy.yaml) ────────────────────────────────
+  # start_deploy captures the target and enters preflight. ship / cancel_deploy
+  # are BUTTON-ONLY (examples: [] ⇒ the semantic router never binds them from
+  # free text) — the operator picks the disposition from the gated read-out, or
+  # the post-bind guarded emit auto-routes on the agent's verdict.
+  start_deploy:
+    title: "Start Deploy"
+    description: "Name a deploy target to run preflight and ship a release."
+    examples: ["deploy to staging", "ship to prod", "release to prod-us-east", "deploy staging"]
+    priority: 84
+    slots:
+      target: { type: string, required: true, description: "The deploy target environment." }
+  ship:
+    title: "Ship"
+    description: "Deploy to the target now — preflight is clean."
+    examples: []
+    priority: 50
+  cancel_deploy:
+    title: "Cancel Deploy"
+    description: "Park the deploy — don't ship."
+    examples: []
+    priority: 50
+  # Internal routing intents — fired by the preflight / verify rooms' post-bind
+  # guarded emits once the verdict binds (the cherny decision-emit discipline).
+  gate_go:
+    description: "(internal) preflight gate said go — route to the ship choice."
+    examples: []
+    priority: 1
+  gate_block:
+    description: "(internal) preflight gate said no_go — route to the blocked read-out."
+    examples: []
+    priority: 1
+  run_verify_deploy:
+    description: "(internal) the deploy landed — run the health verification."
+    examples: []
+    priority: 1
+  deploy_healthy:
+    description: "(internal) the new release is healthy — keep it."
+    examples: []
+    priority: 1
+  deploy_unhealthy:
+    description: "(internal) the new release is unhealthy — roll back."
+    examples: []
+    priority: 1
+  rollback_done:
+    description: "(internal) the rollback landed — show the read-out."
+    examples: []
+    priority: 1
+
+  # ── Observability loop (rooms/observability.yaml) ──────────────────
+  # query_signal captures the picked signal and enters the query step.
+  # raise_alert / annotate_signal / clear_signal are BUTTON-ONLY — the operator
+  # picks the disposition from the triaged read-out, or the post-bind guarded
+  # emit auto-routes on the agent's verdict.
+  query_signal:
+    title: "Query Signal"
+    description: "Pick a signal / dashboard to query and triage."
+    examples: ["check the error rate", "query checkout latency", "look at the queue depth", "pull the 5xx dashboard"]
+    priority: 83
+    slots:
+      signal: { type: string, required: true, description: "The signal / dashboard to query." }
+  raise_alert:
+    title: "Alert"
+    description: "Page the owning team about this signal — it crossed a threshold."
+    examples: []
+    priority: 50
+  annotate_signal:
+    title: "Annotate"
+    description: "Record a dashboard annotation for this signal — notable but not page-worthy."
+    examples: []
+    priority: 50
+  clear_signal:
+    title: "Clear"
+    description: "Park the signal — it's nominal, no action needed."
+    examples: []
+    priority: 50
+  # Internal routing intents — fired by the query room's post-bind guarded emits
+  # once the disposition binds (the cherny decision-emit discipline).
+  obs_alert:
+    description: "(internal) triage said alert — route to the alert step."
+    examples: []
+    priority: 1
+  obs_annotate:
+    description: "(internal) triage said annotate — route to the annotation step."
+    examples: []
+    priority: 1
+  obs_clear:
+    description: "(internal) triage said clear — park the signal."
+    examples: []
+    priority: 1
+  obs_action_done:
+    description: "(internal) the alert / annotation landed — show the read-out."
+    examples: []
+    priority: 1
+
+  # ── Docs loop (rooms/docs.yaml) ────────────────────────────────────
+  # draft_doc captures the target and enters drafting. publish_doc / revise_doc
+  # are BUTTON-ONLY — the operator picks the disposition from the review
+  # read-out.
+  draft_doc:
+    title: "Draft Doc"
+    description: "Name a documentation target to draft."
+    examples: ["document the inbox host", "draft docs for the deploy runbook", "write docs for the router", "document this package"]
+    priority: 82
+    slots:
+      target: { type: string, required: true, description: "The documentation target to draft." }
+  publish_doc:
+    title: "Publish Doc"
+    description: "Announce the drafted doc out-of-band."
+    examples: []
+    priority: 50
+  revise_doc:
+    title: "Revise Doc"
+    description: "Re-draft the doc with changes."
+    examples: []
+    priority: 50
+  # Internal routing intents — fired by the drafting / publishing rooms' emits.
+  draft_ready:
+    description: "(internal) the draft bound — show the review read-out."
+    examples: []
+    priority: 1
+  doc_published:
+    description: "(internal) the doc announcement landed — show the read-out."
+    examples: []
+    priority: 1
+
   go_docs:
     title: "Docs"
     description: "Open the docs room."
