@@ -137,6 +137,14 @@ states:
         - target: worktree_list
       cleanup:
         - target: cleanup
+      integrate:
+        - target: integrate
+          effects:
+            - set:
+                integrate_branch: '{{ slots.branch ?? world.current_branch }}'
+                force_cleanup:    "{{ slots.force }}"
+                integrate_outcome: ""
+                last_error:        ""
       quit:
         - target: done
       look:

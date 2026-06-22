@@ -78,10 +78,45 @@ importing git-ops. See
 | `merge_branch` | Merge a named branch with same guards as `merge_into_main`. |
 | `worktree_create` | Create a new linked worktree under `.worktrees/`. |
 | `worktree_list` | List and classify existing worktrees. |
-| `cleanup` | Remove worktree and branch. |
+| `cleanup` | Remove the **named** worktree and branch (operand-as-slot). |
+| `integrate` | Lost-work-safe: rebase a branch onto **current** main, build-check, merge. |
 | `stage` | Classify and stage changes. |
 | `commit` | Agent-authored conventional commit message. |
 | `undo` | Undo last commit. |
+
+`merge_branch branch=<name>` also accepts the branch as a slot and skips the
+picker when given.
+
+### `cleanup` — operand-as-slot, no swallowed failures
+
+`remove_all` / `remove_worktree` take their target from the `worktree` slot
+(`remove_all worktree=.worktrees/foo`), not ambient `world.worktree_path`. The
+branch to delete is resolved **from the worktree itself**
+(`git -C <wt> rev-parse --abbrev-ref HEAD`), never from the ambient
+`current_branch` (the branch-leak root cause). The remove scripts drop the
+blanket `|| true`; the real exit binds to `last_op_ok` and `last_op_outcome`
+only flips to `"cleaned"` for a remove the bind saw succeed — a failed/no-op
+remove **never** reports a false `"cleaned"` (the smoking gun). `force=true`
+upgrades to `git worktree remove --force` + `git branch -D`; an unmerged branch
+under a non-force remove leaves the worktree gone and routes to a
+`confirm_force_delete` interstitial.
+
+`stories/git-ops/tests/mutation_failure_surfacing.sh` re-introduces the
+false-success bug and asserts `cleanup_noop_is_not_cleaned` then FAILS —
+proving the surfacing is load-bearing, not decorative.
+
+### `integrate` — lost-work-safe single-shot
+
+`integrate branch=<name>` (or the current branch) rebases the feature branch
+onto **current** main, re-read at room entry (never a stored SHA), runs the
+build check, and merges `--no-ff`. A concurrent session that moved main between
+maker-start and integrate is **absorbed** — the rebase replays the branch on
+top of the new HEAD rather than dropping its commits. A rebase/merge conflict
+the auto-rebase can't resolve aborts the partial rebase, leaves the tree clean,
+and surfaces `last_error` (no swallowed success). A build failure on the
+integrated tree surfaces `last_error` as `build_fail`.
+`stories/git-ops/tests/integrate_moved_main.sh` proves the no-lost-work
+replay against a real throwaway repo.
 
 ### Conflict resolution
 

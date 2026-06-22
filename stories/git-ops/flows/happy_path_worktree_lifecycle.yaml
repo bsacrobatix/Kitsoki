@@ -60,7 +60,10 @@ host_handlers:
         data:
           ok:        true
           exit_code: 0
-          stdout:    "Removed worktree .worktrees/add-login and branch add-login"
+          stdout_json:
+            outcome:        cleaned
+            last_op_ok:     true
+            last_op_output: "Removed worktree .worktrees/add-login; branch add-login deleted"
 
 turns:
   - intent: { name: worktree_create, slots: {} }

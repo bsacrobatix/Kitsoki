@@ -82,6 +82,14 @@ world:
   descendant_ok:            { type: bool,   default: false }
   add_path:                 { type: string, default: "" }
   suspicious_confirmed:     { type: bool,   default: false }
+  # cleanup operand-as-slot (git-ops-smoothing slice 1)
+  worktree:                 { type: string, default: "" }
+  force_cleanup:            { type: string, default: "" }
+  # integrate arc (lost-work-safe rebase-onto-current-main)
+  integrate_branch:         { type: string, default: "" }
+  integrate_outcome:        { type: string, default: "" }
+  last_error:               { type: string, default: "" }
+  integrated_sha:           { type: string, default: "" }
 
 intents:
   # ── Routing (internal; emitted by on_enter) ─────────────────────────
@@ -131,6 +139,14 @@ intents:
     priority: 95
   undo_done:
     description: "Internal routing: undo operation complete."
+    examples: []
+    priority: 95
+  integrated:
+    description: "Internal routing: integrate succeeded (rebase+build+merge clean)."
+    examples: []
+    priority: 95
+  cleanup_done:
+    description: "Internal routing: a cleanup removed cleanly; leave for the hub."
     examples: []
     priority: 95
 
@@ -263,18 +279,36 @@ intents:
     priority: 65
 
   remove_worktree:
-    description: "Remove the worktree but keep the branch."
+    description: "Remove the named worktree but keep the branch."
     examples: ["remove worktree", "remove tree", "delete worktree"]
     priority: 65
     slots:
-      path: { type: string, required: false }
+      path:     { type: string, required: false }
+      worktree: { type: string, required: false }
+      force:    { type: string, required: false }
 
   remove_all:
-    description: "Remove both the worktree and its branch."
+    description: "Remove the named worktree and its branch."
     examples: ["remove all", "remove both", "delete both", "clean up branch and worktree"]
     priority: 65
     slots:
-      path: { type: string, required: false }
+      path:     { type: string, required: false }
+      worktree: { type: string, required: false }
+      force:    { type: string, required: false }
+
+  confirm_force_delete:
+    description: "Confirm force-deleting an unmerged branch after the -d refusal."
+    examples: ["force delete", "yes delete it", "delete anyway", "force"]
+    priority: 90
+
+  integrate:
+    description: "Lost-work-safe integrate: rebase a branch onto CURRENT main, build-check, then merge."
+    examples: ["integrate", "integrate branch", "integrate this branch",
+               "rebase onto current main and merge", "land safely"]
+    priority: 80
+    slots:
+      branch: { type: string, required: false }
+      force:  { type: string, required: false }
 
   prune:
     description: "Run git worktree prune to clear stale refs."

@@ -129,10 +129,22 @@ states:
       pull:
         - target: pull
       merge_branch:
-        - target: merge_branch_pick
+        # Operand-as-slot: when branch= is given, skip the picker and go
+        # straight to merge_exec (git-ops-smoothing task 1.2).
+        - when: "slots.branch != '' && slots.branch != nil"
+          target: merge_exec
           effects:
             - set:
-                merge_branch_name: "{{ slots.branch ?? '' }}"
+                merge_branch_name: "{{ slots.branch }}"
+        - target: merge_branch_pick
+      integrate:
+        - target: integrate
+          effects:
+            - set:
+                integrate_branch: '{{ slots.branch ?? world.current_branch }}'
+                force_cleanup:    "{{ slots.force }}"
+                integrate_outcome: ""
+                last_error:        ""
       worktree_create:
         - target: worktree_create
           effects:
