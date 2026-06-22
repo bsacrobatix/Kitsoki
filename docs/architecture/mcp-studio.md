@@ -110,8 +110,9 @@ deterministic direct path or a read.
 | `session.submit` | `{handle, intent, slots?} → {outcome, frame}` | `SubmitDirect` — pick a menu intent |
 | `session.continue` | `{handle, slots} → {outcome, frame}` | `ContinueTurn` — supply missing slots |
 | `session.answer` | `{handle, question_id, answers} → {outcome, frame} \| {awaiting_operator}` | resume a parked operator-ask (see below) |
-| `session.inspect` | `{handle} → {state, world, allowed_intents, last_view, last_turns[]}` | `buildInspectOutput` (read-only) |
-| `session.trace` | `{handle, since?, until?, limit?} → {events[], last_turn}` | the session's JSONL trace (read-only) |
+| `session.status` | `{handle} → {state, allowed_intents, status?, last_error?, exit?}` | compact, overflow-proof snapshot — **never embeds world**; reads only the well-known keys `status`/`last_error`/`exit` from the world. Use instead of `session.inspect` when the world may hold multi-KB LLM artifacts. |
+| `session.inspect` | `{handle, omit_world?, max_value_len?} → {state, world, allowed_intents, last_view, last_turns[]}` | `buildInspectOutput` (read-only); `omit_world:true` drops world entirely; `max_value_len:N` truncates each value to N chars with `…` |
+| `session.trace` | `{handle, since?, until?, limit?, truncate_payload?, kinds?} → {events[], last_turn}` | the session's JSONL trace (read-only); `truncate_payload:N` caps event payloads; `kinds` filters to specific event kinds |
 
 Every drive/submit/continue returns **both** the structured `TurnOutcome` (mode,
 new state, allowed intents, slots needed) **and** the rendered `Frame` — so the

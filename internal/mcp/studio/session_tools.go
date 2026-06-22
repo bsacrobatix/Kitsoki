@@ -84,13 +84,18 @@ func (srv *Server) registerSessionTools() {
 	}, srv.handleSessionAnswer)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.status",
+		Description: "Compact, overflow-proof snapshot of a driving handle: {handle} → {state, allowed_intents, status?, last_error?, exit?}. Never embeds world or rendered views. status/last_error/exit are read from well-known world keys when present. Use this instead of session.inspect when the world may hold large LLM artifacts.",
+	}, srv.handleSessionStatus)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.inspect",
-		Description: "Read-only snapshot of a driving handle: {handle} → {state, world, allowed_intents, last_view, last_turns[]}. Never advances the machine.",
+		Description: "Read-only snapshot of a driving handle: {handle, omit_world?, max_value_len?} → {state, world, allowed_intents, last_view, last_turns[]}. Never advances the machine. omit_world:true drops the world map entirely; max_value_len:N truncates each world value to N chars (with '…' marker).",
 	}, srv.handleSessionInspect)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.trace",
-		Description: "Read the handle's JSONL trace events. {handle, since?, until?, limit?} → {events[], last_turn}. since/until filter by turn number; limit keeps the last N. Read-only.",
+		Description: "Read the handle's JSONL trace events. {handle, since?, until?, limit?, truncate_payload?, kinds?} → {events[], last_turn}. since/until filter by turn number; limit keeps the last N; truncate_payload:N caps each event payload to N chars; kinds filters to specific event kinds. Read-only.",
 	}, srv.handleSessionTrace)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -454,10 +459,32 @@ func (srv *Server) handleSessionContinue(
 
 // ── inspect / trace ──────────────────────────────────────────────────────────
 
+// SessionStatusArgs is the input to session.status.
+type SessionStatusArgs struct {
+	Handle string `json:"handle"`
+}
+
+// SessionStatusResult is the compact session.status snapshot. It never embeds
+// the full world — only the well-known keys (status, last_error, exit) when
+// present — so it stays small regardless of how large the world grows.
+type SessionStatusResult struct {
+	OK             bool     `json:"ok"`
+	State          string   `json:"state"`
+	AllowedIntents []string `json:"allowed_intents"`
+	// Status is world["status"] when present (a story-level status string).
+	Status string `json:"status,omitempty"`
+	// LastError is world["last_error"] when present (the last agent/host error).
+	LastError string `json:"last_error,omitempty"`
+	// Exit is world["exit"] when present (a story-level exit/completion marker).
+	Exit any `json:"exit,omitempty"`
+}
+
 // SessionInspectArgs is the input to session.inspect.
 type SessionInspectArgs struct {
-	Handle    string `json:"handle"`
-	LastTurns int    `json:"last_turns,omitempty"`
+	Handle      string `json:"handle"`
+	LastTurns   int    `json:"last_turns,omitempty"`
+	OmitWorld   bool   `json:"omit_world,omitempty"`
+	MaxValueLen int    `json:"max_value_len,omitempty"`
 }
 
 // InspectResult is the session.inspect snapshot. State/world/allowed_intents
@@ -466,7 +493,7 @@ type SessionInspectArgs struct {
 type InspectResult struct {
 	OK             bool              `json:"ok"`
 	State          string            `json:"state"`
-	World          map[string]any    `json:"world"`
+	World          map[string]any    `json:"world,omitempty"`
 	AllowedIntents []string          `json:"allowed_intents"`
 	LastView       string            `json:"last_view"`
 	LastTurns      []TurnSummaryItem `json:"last_turns"`
@@ -483,6 +510,23 @@ type TurnSummaryItem struct {
 	Outcome   string   `json:"outcome,omitempty"`
 	ErrorCode string   `json:"error_code,omitempty"`
 	HostCalls []string `json:"host_calls,omitempty"`
+}
+
+// handleSessionStatus returns the compact status snapshot — never the full world.
+func (srv *Server) handleSessionStatus(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args SessionStatusArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	rt, rerr := srv.resolveRuntime(args.Handle)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	result, err := rt.status(ctx)
+	if err != nil {
+		return buildToolError(ErrBadRequest, err.Error()), nil, nil
+	}
+	return nil, result, nil
 }
 
 func (srv *Server) handleSessionInspect(
@@ -502,6 +546,12 @@ func (srv *Server) handleSessionInspect(
 	if err != nil {
 		return buildToolError(ErrBadRequest, err.Error()), nil, nil
 	}
+	// Apply optional projections.
+	if args.OmitWorld {
+		out.World = nil
+	} else if args.MaxValueLen > 0 {
+		out.World = truncateWorldValues(out.World, args.MaxValueLen)
+	}
 	return nil, out, nil
 }
 
@@ -513,6 +563,11 @@ type SessionTraceArgs struct {
 	Until int64 `json:"until,omitempty"`
 	// Limit keeps only the last N matching events (0 = all).
 	Limit int `json:"limit,omitempty"`
+	// TruncatePayload caps each event's raw JSON payload to N bytes (appending
+	// "…" when truncated). Zero means no truncation.
+	TruncatePayload int `json:"truncate_payload,omitempty"`
+	// Kinds filters to events whose Kind is in this list. Empty means all kinds.
+	Kinds []string `json:"kinds,omitempty"`
 }
 
 // TraceResult is the session.trace result: the (filtered) JSONL events and the
@@ -533,6 +588,14 @@ func (srv *Server) handleSessionTrace(
 		return rerr, nil, nil
 	}
 	history := rt.history()
+	// Build a set of allowed kinds for fast lookup (nil = all).
+	var kindSet map[string]bool
+	if len(args.Kinds) > 0 {
+		kindSet = make(map[string]bool, len(args.Kinds))
+		for _, k := range args.Kinds {
+			kindSet[k] = true
+		}
+	}
 	var filtered []store.Event
 	var lastTurn int64
 	for _, ev := range history {
@@ -545,6 +608,20 @@ func (srv *Server) handleSessionTrace(
 		}
 		if args.Until > 0 && t > args.Until {
 			continue
+		}
+		if kindSet != nil && !kindSet[string(ev.Kind)] {
+			continue
+		}
+		if args.TruncatePayload > 0 && len(ev.Payload) > args.TruncatePayload {
+			// Encode the truncated portion as a valid JSON string (not a raw JSON
+			// fragment) so the result is always valid JSON when marshalled.
+			truncated := string(ev.Payload[:args.TruncatePayload]) + "…"
+			encoded, merr := json.Marshal(truncated)
+			if merr == nil {
+				trunc := ev
+				trunc.Payload = encoded
+				ev = trunc
+			}
 		}
 		filtered = append(filtered, ev)
 	}
@@ -813,6 +890,73 @@ func resolveTracePath(override string) (string, error) {
 }
 
 // ── inspect on the runtime ────────────────────────────────────────────────────
+
+// status builds the compact session.status snapshot. It reads state and
+// allowed intents from the orchestrator (same sources as inspect), then reads
+// only the well-known keys status/last_error/exit from the world — never the
+// full world map — so the result stays small regardless of world size.
+func (rt *sessionRuntime) status(ctx context.Context) (SessionStatusResult, error) {
+	j, err := rt.orch.LoadJourney(rt.sid)
+	if err != nil {
+		return SessionStatusResult{}, fmt.Errorf("session.status: load journey: %w", err)
+	}
+	allowed := rt.orch.AllowedIntents(j.State, j.World)
+	allowedNames := make([]string, 0, len(allowed))
+	for _, ai := range allowed {
+		allowedNames = append(allowedNames, ai.Name)
+	}
+	result := SessionStatusResult{
+		OK:             true,
+		State:          string(j.State),
+		AllowedIntents: allowedNames,
+	}
+	// Read only the well-known world keys.
+	if v, ok := j.World.Vars["status"]; ok {
+		if s, isStr := v.(string); isStr {
+			result.Status = s
+		}
+	}
+	if v, ok := j.World.Vars["last_error"]; ok {
+		if s, isStr := v.(string); isStr {
+			result.LastError = s
+		}
+	}
+	if v, ok := j.World.Vars["exit"]; ok {
+		result.Exit = v
+	}
+	return result, nil
+}
+
+// truncateWorldValues returns a copy of the world map where each string value
+// longer than maxLen is trimmed to maxLen characters with an ellipsis appended.
+// Non-string values are marshalled to JSON first, then trimmed the same way.
+func truncateWorldValues(world map[string]any, maxLen int) map[string]any {
+	if world == nil {
+		return nil
+	}
+	out := make(map[string]any, len(world))
+	for k, v := range world {
+		var s string
+		switch tv := v.(type) {
+		case string:
+			s = tv
+		default:
+			b, err := json.Marshal(v)
+			if err != nil {
+				out[k] = v
+				continue
+			}
+			s = string(b)
+		}
+		if len([]rune(s)) > maxLen {
+			runes := []rune(s)[:maxLen]
+			out[k] = string(runes) + "…"
+		} else {
+			out[k] = s
+		}
+	}
+	return out
+}
 
 // inspect builds the session.inspect snapshot from the live orchestrator —
 // state/world from the journey, the allowed-intent menu from the machine, the
