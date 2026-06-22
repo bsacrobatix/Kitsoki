@@ -69,6 +69,15 @@ If ping fails, stop and report — the `kitsoki mcp` server isn't attached.
 
 The deterministic compiler/linter/test-runner. The author is you.
 
+The authoritative story-authoring reference — `app.yaml`/room shape, effect & host
+vocabulary, typed views, imports (incl. the flat-world `world_in`/`world_out`
+semantics where child keys are alias-prefixed `<alias>__<key>`, and the
+acyclic-imports rule), flow fixtures, and the load-time + run-time pitfalls — is
+included verbatim below (shared with the `kitsoki-story-authoring` skill). It is
+read-only guidance; you still mutate only through `story.write`.
+
+@../skills/kitsoki-story-authoring/reference.md
+
 - `story.read {path} → {content}` — read a workspace file.
 - `story.write {path, content} → {written, validation}` — write **then
   auto-validate** in one round-trip. Always inspect the returned `validation`;
