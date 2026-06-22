@@ -116,6 +116,11 @@ go run ./cmd/kitsoki mcp-test \
   ]'
 ```
 
+Live web and TUI sessions also poll this same GitHub intake path every five
+minutes while a session is open. This MCP smoke calls `inbox.sync_github`
+explicitly so the proof is deterministic and does not wait on a wall-clock
+poll interval.
+
 Expected proof:
 
 - `inbox.sync_github` inserts one assigned issue and one review-requested PR.

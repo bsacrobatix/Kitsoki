@@ -78,7 +78,7 @@ room-switch commands. Notable families:
 | `/actions [n]` | `commands_actions.go` | Renders/selects the room's action menu |
 | `/world` | `commands_world.go` | Hierarchical world viewer |
 | `/trace` | `commands_trace.go` | The routing pipeline trace for recent turns |
-| `/inbox` | `commands_inbox.go` | Inline notification list |
+| `/inbox [n\|all\|sync-github]` | `commands_inbox.go` | Inline notification list, open item `n`, show all rows, or refresh GitHub issue/PR intake |
 | `/provider [name\|n]` | `commands_harness.go` | List/switch the [harness profile](../architecture/harness-profiles.md) (backend/provider); takes effect next turn |
 | `/model [id\|n]` | `commands_harness.go` | List/switch the active profile's model; takes effect next turn |
 | `/jump` | `commands_jump.go` | Navigate to background-completion events |
@@ -122,7 +122,10 @@ an in-flight LLM call.
   off-path `#`, slot-filling `?`, awaiting-LLM `…`).
 - **Menu / inbox** (`menu.go`, `inbox.go`) — the action menu and
   notification list, surfaced inline as blocks and via `/actions` /
-  `/inbox`.
+  `/inbox`. When a job store is wired, the inbox poller also checks GitHub
+  assigned issues and requested PR reviews every five minutes through the
+  idempotent external-notification path; `/inbox sync-github [repo]` is the
+  immediate manual refresh and prints inserted/skipped counts.
 - **Meta-mode** (`metamode.go`, with `internal/metamode/`) — a sidebar
   agent conversation rendered into the same pane with a distinct theme
   accent; you enter with `/meta …` and return with `/meta done`. See
