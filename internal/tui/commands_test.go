@@ -25,6 +25,7 @@ func TestHelpCommandLists(t *testing.T) {
 		"system",
 		"/help",
 		"/intents",
+		"/work [--all]",
 		"/world",
 		"/meta",
 		"/quit",
