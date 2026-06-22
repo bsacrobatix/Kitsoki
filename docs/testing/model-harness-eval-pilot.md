@@ -58,6 +58,17 @@ The report groups candidates by `call`, `profile`, `backend`, `provider`,
 The p5/median/p95 values are computed across the loaded report files. If only
 one report exists for a candidate, all three values are identical. As more live
 matrix reports are imported, the same command starts showing real variability.
+Cells with no samples render as `-` so a missing measurement is never confused
+with a genuine zero.
+
+Each candidate's measured medians are independently re-checked against the
+adherence bar (`min_pass_rate`, `max_p95_latency_ms`, `max_avg_cost_usd`)
+declared by its dataset, surfaced in the "Adherence-bar compliance" section. A
+row marked as a `divergence` passed the upstream report's own `pass` flag yet
+still violates the declared bar — for example a candidate the report accepted
+whose average cost exceeds the dataset's cost ceiling. This keeps the report's
+verdict tied to the contract the dataset declares rather than to the trust of
+each imported report.
 
 When `--intent-root` is provided, the same report also ingests
 `kitsoki test intents --json` outputs and shows fixture pass rates, run pass

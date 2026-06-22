@@ -54,6 +54,8 @@ task:
     max_p95_latency_ms: 8000
     max_avg_cost_usd: 0.002
 """)
+        # A non-agent_eval YAML living in an evals/ dir must be ignored.
+        write(os.path.join(d, "stories", "pilot", "evals", "notes.yaml"), "kind: notes\nfoo: bar\n")
         write(os.path.join(d, "stories", "pilot", "intents", "route.yaml"), """
 test_kind: intents
 fixtures:
@@ -199,19 +201,38 @@ fixtures:
             coverage_summaries,
         )
 
-        check(len(datasets) == 1, "one dataset discovered")
+        check(len(datasets) == 1, "one dataset discovered (non-agent_eval yaml ignored)")
+        ds0 = datasets[0]
+        check(ds0["min_pass_rate"] == 0.95, "declared min_pass_rate parsed")
+        check(ds0["max_p95_latency_ms"] == 8000, "declared max_p95_latency_ms parsed")
+        check(ds0["max_avg_cost_usd"] == 0.002, "declared max_avg_cost_usd parsed")
+        check(epr.inline_list("profiles: [a, b, c]\n", "profiles") == ["a", "b", "c"], "inline list parsed")
+        block_text = "matrix:\n  profiles:\n    - a\n    - b\n  repeat: 3\n"
+        check(epr.inline_list(block_text, "profiles") == ["a", "b"], "block-style list parsed")
+        check(epr.inline_list("models:\n  - x  # note\n", "models") == ["x"], "block item trailing comment stripped")
         check(len(reports) == 2, "two reports discovered")
         check(len(summary["candidates"]) == 2, "two aggregate candidates")
         syn = next(c for c in summary["candidates"] if c["profile"] == "synthetic-codex")
         check(abs(syn["pass_rate"] - 0.5) < 0.0001, "pass observation rate aggregated")
         check(abs(syn["comparator_pass_rate"]["median"] - 0.9) < 0.0001, "median comparator is interpolated")
         check(syn["examples_run"] == 20, "examples summed")
+        # synthetic-codex passes its cost/latency ceilings but its 0.5 pass rate
+        # is below the declared 0.95 bar — and the report still marked a run pass.
+        check(syn["meets_declared_bar"] is False, "synthetic violates declared bar")
+        check(syn["bar_divergence"] is True, "synthetic bar divergence flagged")
+        check(any("pass rate" in v for v in syn["bar_violations"]), "pass-rate violation reported")
+        claude = next(c for c in summary["candidates"] if c["profile"] == "claude")
+        # claude meets pass-rate/latency but its $0.004 avg cost exceeds the $0.002 ceiling.
+        check(claude["meets_declared_bar"] is False, "claude violates declared cost bar")
+        check(any("avg cost" in v for v in claude["bar_violations"]), "cost violation reported")
         check(summary["confidence_rows"], "confidence rows extracted")
         sweep_065 = next(r for r in summary["confidence_sweeps"] if r["profile"] == "synthetic-codex" and abs(r["threshold"] - 0.65) < 0.0001)
         check(sweep_065["accepted"] == 2, "threshold sweep accepted count")
         check(sweep_065["false_accepts"] == 1, "threshold sweep false accepts count")
         sweep_090 = next(r for r in summary["confidence_sweeps"] if r["profile"] == "synthetic-codex" and abs(r["threshold"] - 0.90) < 0.0001)
         check(sweep_090["accepted"] == 1 and sweep_090["false_accepts"] == 0, "higher threshold reduces false accepts")
+        sweep_100 = next(r for r in summary["confidence_sweeps"] if r["profile"] == "synthetic-codex" and abs(r["threshold"] - 1.00) < 0.0001)
+        check(sweep_100["accepted"] == 0 and sweep_100["precision"] is None, "precision is None when nothing is accepted")
         cov = summary["coverage"][0]
         check(cov["measured_profiles"] == ["claude", "synthetic-codex"], "measured profiles collected")
         check(cov["missing_profiles"] == ["codex-native"], "missing profile reported")
@@ -234,6 +255,8 @@ fixtures:
         check("Transcript-derived coverage jobs" in md, "markdown includes coverage section")
         check("Intent-suite readiness gaps" in md, "markdown includes intent readiness gaps")
         check("Coverage-mining readiness gaps" in md, "markdown includes coverage readiness gaps")
+        check("Adherence-bar compliance" in md, "markdown includes bar compliance section")
+        check("divergence" in md, "markdown flags a bar divergence")
         deck = epr.render_deck(summary, intent_summaries, coverage_summaries, readiness)
         check("<section" in deck and "Pilot loop" in deck, "deck renders slide sections")
 

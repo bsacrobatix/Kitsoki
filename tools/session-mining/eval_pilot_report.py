@@ -155,7 +155,9 @@ def find_datasets(root):
         for name in files:
             if name.endswith((".yaml", ".yml")):
                 path = os.path.join(base, name)
-                datasets.append(read_dataset_stub(path))
+                stub = read_dataset_stub(path)
+                if stub is not None:
+                    datasets.append(stub)
     return sorted(datasets, key=lambda d: d["path"])
 
 
@@ -166,6 +168,8 @@ def read_dataset_stub(path):
             text = fh.read()
     except OSError:
         pass
+    if first_scalar(text, "kind") != "agent_eval":
+        return None
     story = "?"
     parts = path.split(os.sep)
     if "stories" in parts:
@@ -207,11 +211,32 @@ def first_float(text, key):
         return 0.0
 
 
+def _clean_item(value):
+    return value.strip().strip('"').strip("'")
+
+
 def inline_list(text, key):
-    match = re.search(r"(?m)^\s*%s:\s*\[([^\]]*)\]" % re.escape(key), text)
-    if not match:
+    """Parse a YAML list value for `key`, supporting inline and block styles."""
+    inline = re.search(r"(?m)^\s*%s:\s*\[([^\]]*)\]" % re.escape(key), text)
+    if inline:
+        return [_clean_item(p) for p in inline.group(1).split(",") if p.strip()]
+    header = re.search(r"(?m)^(\s*)%s:\s*(?:#.*)?$" % re.escape(key), text)
+    if not header:
         return []
-    return [p.strip().strip('"').strip("'") for p in match.group(1).split(",") if p.strip()]
+    base_indent = len(header.group(1))
+    items = []
+    # header.end() lands just after `key:` on the same line; skip that remainder.
+    for line in text[header.end():].split("\n")[1:]:
+        if not line.strip():
+            break
+        indent = len(line) - len(line.lstrip())
+        stripped = line.strip()
+        if indent <= base_indent or not stripped.startswith("- "):
+            break
+        item = _clean_item(re.sub(r"\s+#.*$", "", stripped[2:]))
+        if item:
+            items.append(item)
+    return items
 
 
 def candidate_key(call, candidate):
@@ -244,19 +269,77 @@ def median(values):
 
 
 def fmt_pct(v):
+    if v is None:
+        return "-"
     return "%.0f%%" % (100.0 * v)
 
 
 def fmt_ms(v):
-    if not v:
+    if v is None:
         return "-"
     return "%dms" % round(v)
 
 
 def fmt_usd(v):
-    if not v:
-        return "$0"
+    if v is None:
+        return "-"
     return "$%.4f" % v
+
+
+_STAT_FMT = {"pct": fmt_pct, "ms": fmt_ms, "usd": fmt_usd}
+
+
+def stat_cell(stat, kind):
+    """Format a single statistic, distinguishing no-data ("-") from a real zero."""
+    if not isinstance(stat, dict) or not stat.get("n"):
+        return "-"
+    return _STAT_FMT[kind](stat.get("median"))
+
+
+def stat_triple(stat, kind):
+    """Format median/p5/p95 for a statistic, or "-" cells when no samples exist."""
+    if not isinstance(stat, dict) or not stat.get("n"):
+        return "- / - / -"
+    fmt = _STAT_FMT[kind]
+    return "%s / %s / %s" % (fmt(stat.get("median")), fmt(stat.get("p5")), fmt(stat.get("p95")))
+
+
+def fmt_bar(min_pass_rate, max_p95_latency_ms, max_avg_cost_usd):
+    """Render a dataset's declared adherence bar, with "-" for unset thresholds."""
+    return " / ".join([
+        fmt_pct(min_pass_rate) if min_pass_rate else "-",
+        fmt_ms(max_p95_latency_ms) if max_p95_latency_ms else "-",
+        fmt_usd(max_avg_cost_usd) if max_avg_cost_usd else "-",
+    ])
+
+
+def evaluate_bar(candidate, bar):
+    """Compare a candidate's measured medians against a dataset's declared bar.
+
+    Returns (meets, violations). meets is None when no bar threshold is declared
+    or when the relevant measurement is missing, so callers can distinguish
+    "satisfies the contract" from "no contract to check".
+    """
+    if not bar:
+        return None, []
+    min_pass = bar.get("min_pass_rate") or 0.0
+    max_lat = bar.get("max_p95_latency_ms") or 0
+    max_cost = bar.get("max_avg_cost_usd") or 0.0
+    if not (min_pass or max_lat or max_cost):
+        return None, []
+    violations = []
+    if min_pass and candidate["pass_rate"] < min_pass:
+        violations.append("pass rate %s < min %s" % (
+            fmt_pct(candidate["pass_rate"]), fmt_pct(min_pass)))
+    lat = candidate["p95_latency_ms"]
+    if max_lat and lat.get("n") and lat["median"] > max_lat:
+        violations.append("p95 latency %s > max %s" % (
+            fmt_ms(lat["median"]), fmt_ms(max_lat)))
+    cost = candidate["avg_cost_usd"]
+    if max_cost and cost.get("n") and cost["median"] > max_cost:
+        violations.append("avg cost %s > max %s" % (
+            fmt_usd(cost["median"]), fmt_usd(max_cost)))
+    return len(violations) == 0, violations
 
 
 def summarize(datasets, reports):
@@ -325,6 +408,15 @@ def summarize(datasets, reports):
                 if isinstance(value, (int, float)):
                     row[field].append(float(value))
 
+    bars = {
+        ds["call"]: {
+            "min_pass_rate": ds.get("min_pass_rate", 0.0),
+            "max_p95_latency_ms": ds.get("max_p95_latency_ms", 0),
+            "max_avg_cost_usd": ds.get("max_avg_cost_usd", 0.0),
+        }
+        for ds in datasets
+    }
+
     candidates = []
     for row in by_key.values():
         summary = dict(row)
@@ -345,6 +437,14 @@ def summarize(datasets, reports):
                 "p95": pct(values, 0.95),
                 "n": len(values),
             }
+        bar = bars.get(summary["call"])
+        meets, violations = evaluate_bar(summary, bar)
+        summary["declared_bar"] = bar
+        summary["meets_declared_bar"] = meets
+        summary["bar_violations"] = violations
+        # The report's own `pass` flag can disagree with the declared dataset
+        # bar (e.g. a row marked passing that still exceeds the cost ceiling).
+        summary["bar_divergence"] = bool(violations) and summary["pass_rate"] > 0
         candidates.append(summary)
 
     candidates.sort(key=lambda c: (
@@ -464,7 +564,7 @@ def summarize_confidence_sweeps(rows):
                 "rejected": rejected,
                 "true_accepts": len(true_accepts),
                 "false_accepts": len(false_accepts),
-                "precision": len(true_accepts) / len(accepted) if accepted else 1.0,
+                "precision": len(true_accepts) / len(accepted) if accepted else None,
                 "coverage": len(accepted) / len(items) if items else 0.0,
             })
     return sweeps
@@ -617,20 +717,21 @@ def render_markdown(summary, intent_summaries=None, coverage_summaries=None, rea
             w("")
             w("Across all loaded evidence, the strongest aggregate candidate by acceptance-bar pass rate, comparator score, cost, and latency is `%s/%s` on `%s` with median comparator %s, median p95 latency %s, and median average cost %s." % (
                 best["profile"], best["model"], best["call"],
-                fmt_pct(best["comparator_pass_rate"]["median"]),
-                fmt_ms(best["p95_latency_ms"]["median"]),
-                fmt_usd(best["avg_cost_usd"]["median"]),
+                stat_cell(best["comparator_pass_rate"], "pct"),
+                stat_cell(best["p95_latency_ms"], "ms"),
+                stat_cell(best["avg_cost_usd"], "usd"),
             ))
         w("")
     w("## Dataset coverage")
     w("")
-    w("| dataset | story | call | planned profiles | measured profiles | missing profiles |")
-    w("|---|---|---|---|---|---|")
+    w("| dataset | story | call | declared bar (min pass / max p95 / max cost) | planned profiles | measured profiles | missing profiles |")
+    w("|---|---|---|---|---|---|---|")
     for row in coverage:
-        w("| `%s` | `%s` | `%s` | %s | %s | %s |" % (
+        w("| `%s` | `%s` | `%s` | %s | %s | %s | %s |" % (
             row["path"],
             row["story"],
             row["call"],
+            fmt_bar(row.get("min_pass_rate"), row.get("max_p95_latency_ms"), row.get("max_avg_cost_usd")),
             ", ".join("`%s`" % p for p in row["profiles"]) or "-",
             ", ".join("`%s`" % p for p in row["measured_profiles"]) or "-",
             ", ".join("`%s`" % p for p in row["missing_profiles"]) or "-",
@@ -738,10 +839,7 @@ def render_markdown(summary, intent_summaries=None, coverage_summaries=None, rea
     w("| call | profile/model | effort | observations | examples run | acceptance-bar pass rate | effectiveness median/p5/p95 | p95 latency median/p5/p95 | avg cost median/p5/p95 |")
     w("|---|---|---|--:|--:|--:|---|---|---|")
     for c in candidates:
-        eff = c["comparator_pass_rate"]
-        lat = c["p95_latency_ms"]
-        cost = c["avg_cost_usd"]
-        w("| `%s` | `%s/%s` | `%s` | %d | %d | %s | %s / %s / %s | %s / %s / %s | %s / %s / %s |" % (
+        w("| `%s` | `%s/%s` | `%s` | %d | %d | %s | %s | %s | %s |" % (
             c["call"],
             c["profile"],
             c["model"],
@@ -749,19 +847,42 @@ def render_markdown(summary, intent_summaries=None, coverage_summaries=None, rea
             c["observations"],
             c["examples_run"],
             fmt_pct(c["pass_rate"]),
-            fmt_pct(eff["median"]),
-            fmt_pct(eff["p5"]),
-            fmt_pct(eff["p95"]),
-            fmt_ms(lat["median"]),
-            fmt_ms(lat["p5"]),
-            fmt_ms(lat["p95"]),
-            fmt_usd(cost["median"]),
-            fmt_usd(cost["p5"]),
-            fmt_usd(cost["p95"]),
+            stat_triple(c["comparator_pass_rate"], "pct"),
+            stat_triple(c["p95_latency_ms"], "ms"),
+            stat_triple(c["avg_cost_usd"], "usd"),
         ))
     w("")
     w("`acceptance-bar pass rate` is the share of candidate summary rows that passed the eval's configured bar. It is not the per-example success rate; use `effectiveness median/p5/p95` for comparator success across examples.")
     w("")
+    w("## Adherence-bar compliance")
+    w("")
+    checked = [c for c in candidates if c.get("meets_declared_bar") is not None]
+    if not checked:
+        w("No loaded dataset declared an adherence bar (`min_pass_rate`, `max_p95_latency_ms`, or `max_avg_cost_usd`) that could be checked against measured candidates.")
+        w("")
+    else:
+        w("Measured candidate medians are re-checked against the bar declared in each dataset. A `divergence` row passed the upstream report's own check but still violates the declared bar.")
+        w("")
+        w("| call | profile/model | declared bar | measured pass / p95 / cost | verdict |")
+        w("|---|---|---|---|---|")
+        for c in checked:
+            bar = c["declared_bar"] or {}
+            measured = "%s / %s / %s" % (
+                fmt_pct(c["pass_rate"]),
+                stat_cell(c["p95_latency_ms"], "ms"),
+                stat_cell(c["avg_cost_usd"], "usd"),
+            )
+            if c["meets_declared_bar"]:
+                verdict = "meets bar"
+            else:
+                verdict = ("**divergence** — " if c["bar_divergence"] else "violates — ") + "; ".join(c["bar_violations"])
+            w("| `%s` | `%s/%s` | %s | %s | %s |" % (
+                c["call"], c["profile"], c["model"],
+                fmt_bar(bar.get("min_pass_rate"), bar.get("max_p95_latency_ms"), bar.get("max_avg_cost_usd")),
+                measured,
+                verdict,
+            ))
+        w("")
     w("## Failure samples")
     w("")
     if not summary["failures"]:
@@ -805,10 +926,7 @@ def render_deck(summary, intent_summaries=None, coverage_summaries=None, readine
     decision = (summary.get("decisions") or [None])[0]
     rows = []
     for c in candidates[:8]:
-        eff = c["comparator_pass_rate"]
-        lat = c["p95_latency_ms"]
-        cost = c["avg_cost_usd"]
-        rows.append("<tr><td>%s</td><td>%s/%s</td><td>%s</td><td>%d</td><td>%d</td><td>%s</td><td>%s / %s / %s</td><td>%s / %s / %s</td><td>%s / %s / %s</td></tr>" % (
+        rows.append("<tr><td>%s</td><td>%s/%s</td><td>%s</td><td>%d</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
             html.escape(c["call"]),
             html.escape(c["profile"]),
             html.escape(c["model"]),
@@ -816,15 +934,9 @@ def render_deck(summary, intent_summaries=None, coverage_summaries=None, readine
             c["observations"],
             c["examples_run"],
             fmt_pct(c["pass_rate"]),
-            fmt_pct(eff["median"]),
-            fmt_pct(eff["p5"]),
-            fmt_pct(eff["p95"]),
-            fmt_ms(lat["median"]),
-            fmt_ms(lat["p5"]),
-            fmt_ms(lat["p95"]),
-            fmt_usd(cost["median"]),
-            fmt_usd(cost["p5"]),
-            fmt_usd(cost["p95"]),
+            html.escape(stat_triple(c["comparator_pass_rate"], "pct")),
+            html.escape(stat_triple(c["p95_latency_ms"], "ms")),
+            html.escape(stat_triple(c["avg_cost_usd"], "usd")),
         ))
     missing = []
     for row in summary["coverage"]:
@@ -958,7 +1070,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   </ol>
 </section>
 </main>
-<div class="pager"><span id="idx">1</span>/<span id="count">5</span> - arrow keys</div>
+<div class="pager"><span id="idx">1</span>/<span id="count">-</span> - arrow keys</div>
 <script>
 const slides = [...document.querySelectorAll('section')];
 let index = 0;
