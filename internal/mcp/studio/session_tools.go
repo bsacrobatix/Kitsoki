@@ -538,6 +538,7 @@ type AsyncInspectSummary struct {
 	DispatchingDrives           int `json:"dispatching_drives"`
 	FailedDrives                int `json:"failed_drives"`
 	BackgroundedChats           int `json:"backgrounded_chats"`
+	OperatorQuestions           int `json:"operator_questions"`
 }
 
 // JobInspectItem is a compact, structured projection of one background job.
@@ -994,7 +995,7 @@ func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int) (InspectRe
 		World:             j.World.Vars,
 		AllowedIntents:    allowedNames,
 		LastView:          view,
-		Async:             summarizeAsync(jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats),
+		Async:             summarizeAsync(jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, rt.pendingOperatorQuestions()),
 		Jobs:              jobs,
 		Notifications:     notifications,
 		PendingDrives:     pendingDrives,
@@ -1187,11 +1188,12 @@ func (rt *sessionRuntime) inspectBackgroundedChats(ctx context.Context, in []cha
 	return out
 }
 
-func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, unreadNotifications map[jobs.NotificationSeverity]int, pendingDrives []PendingDriveItem, backgroundedChats []BackgroundedChatItem) AsyncInspectSummary {
+func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, unreadNotifications map[jobs.NotificationSeverity]int, pendingDrives []PendingDriveItem, backgroundedChats []BackgroundedChatItem, operatorQuestions []pendingQuestion) AsyncInspectSummary {
 	out := AsyncInspectSummary{
 		JobsTotal:          len(jobRows),
 		NotificationsTotal: len(notifications),
 		BackgroundedChats:  len(backgroundedChats),
+		OperatorQuestions:  len(operatorQuestions),
 	}
 	for _, j := range jobRows {
 		switch j.Status {
@@ -1218,6 +1220,13 @@ func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, 
 		}
 	}
 	return out
+}
+
+func (rt *sessionRuntime) pendingOperatorQuestions() []pendingQuestion {
+	if rt == nil || rt.inFlight == nil {
+		return nil
+	}
+	return rt.inFlight.snapshotPending()
 }
 
 func activeDriveStatuses() []chats.DriveStatus {

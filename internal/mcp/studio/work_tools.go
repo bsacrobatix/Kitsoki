@@ -10,6 +10,7 @@ import (
 
 	"kitsoki/internal/chats"
 	"kitsoki/internal/jobs"
+	kitsokimcp "kitsoki/internal/mcp"
 )
 
 // WorkArgs is the input to studio.work.
@@ -43,6 +44,7 @@ type WorkSummary struct {
 	DispatchingDrives           int `json:"dispatching_drives"`
 	FailedDrives                int `json:"failed_drives"`
 	BackgroundedChats           int `json:"backgrounded_chats"`
+	OperatorQuestions           int `json:"operator_questions"`
 }
 
 // WorkSessionSummary is one open driving session's async headline.
@@ -56,38 +58,40 @@ type WorkSessionSummary struct {
 
 // WorkItem is one global work-queue row. Higher Priority sorts first.
 type WorkItem struct {
-	Kind                string                    `json:"kind"`
-	Priority            int                       `json:"priority"`
-	Handle              string                    `json:"handle"`
-	SessionID           string                    `json:"session_id"`
-	StoryPath           string                    `json:"story_path,omitempty"`
-	State               string                    `json:"state,omitempty"`
-	Title               string                    `json:"title,omitempty"`
-	Body                string                    `json:"body,omitempty"`
-	Status              string                    `json:"status,omitempty"`
-	NotificationID      string                    `json:"notification_id,omitempty"`
-	JobID               string                    `json:"job_id,omitempty"`
-	DriveID             string                    `json:"drive_id,omitempty"`
-	ChatID              string                    `json:"chat_id,omitempty"`
-	Severity            jobs.NotificationSeverity `json:"severity,omitempty"`
-	CreatedAtUnixMilli  int64                     `json:"created_at_unix_milli,omitempty"`
-	UpdatedAtUnixMilli  int64                     `json:"updated_at_unix_milli,omitempty"`
-	ReadAtUnixMilli     int64                     `json:"read_at_unix_milli,omitempty"`
-	TeleportState       string                    `json:"teleport_state,omitempty"`
-	TeleportSlots       map[string]any            `json:"teleport_slots,omitempty"`
-	TeleportJobID       string                    `json:"teleport_job_id,omitempty"`
-	OriginKind          string                    `json:"origin_kind,omitempty"`
-	OriginRef           string                    `json:"origin_ref,omitempty"`
-	OriginURL           string                    `json:"origin_url,omitempty"`
-	OriginState         string                    `json:"origin_state,omitempty"`
-	Actor               string                    `json:"actor,omitempty"`
-	Thread              string                    `json:"thread,omitempty"`
-	TmuxSession         string                    `json:"tmux_session,omitempty"`
-	TmuxHost            string                    `json:"tmux_host,omitempty"`
-	WorkspacePath       string                    `json:"workspace_path,omitempty"`
-	ReceivedAtUnixMicro int64                     `json:"received_at_unix_micro,omitempty"`
-	UpdatedAtUnixMicro  int64                     `json:"updated_at_unix_micro,omitempty"`
-	Reacquire           WorkReacquire             `json:"reacquire"`
+	Kind                string                           `json:"kind"`
+	Priority            int                              `json:"priority"`
+	Handle              string                           `json:"handle"`
+	SessionID           string                           `json:"session_id"`
+	StoryPath           string                           `json:"story_path,omitempty"`
+	State               string                           `json:"state,omitempty"`
+	Title               string                           `json:"title,omitempty"`
+	Body                string                           `json:"body,omitempty"`
+	Status              string                           `json:"status,omitempty"`
+	NotificationID      string                           `json:"notification_id,omitempty"`
+	JobID               string                           `json:"job_id,omitempty"`
+	DriveID             string                           `json:"drive_id,omitempty"`
+	ChatID              string                           `json:"chat_id,omitempty"`
+	QuestionID          string                           `json:"question_id,omitempty"`
+	Questions           []kitsokimcp.OperatorAskQuestion `json:"questions,omitempty"`
+	Severity            jobs.NotificationSeverity        `json:"severity,omitempty"`
+	CreatedAtUnixMilli  int64                            `json:"created_at_unix_milli,omitempty"`
+	UpdatedAtUnixMilli  int64                            `json:"updated_at_unix_milli,omitempty"`
+	ReadAtUnixMilli     int64                            `json:"read_at_unix_milli,omitempty"`
+	TeleportState       string                           `json:"teleport_state,omitempty"`
+	TeleportSlots       map[string]any                   `json:"teleport_slots,omitempty"`
+	TeleportJobID       string                           `json:"teleport_job_id,omitempty"`
+	OriginKind          string                           `json:"origin_kind,omitempty"`
+	OriginRef           string                           `json:"origin_ref,omitempty"`
+	OriginURL           string                           `json:"origin_url,omitempty"`
+	OriginState         string                           `json:"origin_state,omitempty"`
+	Actor               string                           `json:"actor,omitempty"`
+	Thread              string                           `json:"thread,omitempty"`
+	TmuxSession         string                           `json:"tmux_session,omitempty"`
+	TmuxHost            string                           `json:"tmux_host,omitempty"`
+	WorkspacePath       string                           `json:"workspace_path,omitempty"`
+	ReceivedAtUnixMicro int64                            `json:"received_at_unix_micro,omitempty"`
+	UpdatedAtUnixMicro  int64                            `json:"updated_at_unix_micro,omitempty"`
+	Reacquire           WorkReacquire                    `json:"reacquire"`
 }
 
 // WorkReacquire names the next MCP tool call for focusing the selected item.
@@ -125,7 +129,8 @@ func (srv *Server) work(ctx context.Context, args WorkArgs) (WorkResult, error) 
 		if err != nil {
 			return WorkResult{}, err
 		}
-		async := summarizeAsync(jobRows, notifications, unread, pendingDrives, backgroundedChats)
+		operatorQuestions := rt.pendingOperatorQuestions()
+		async := summarizeAsync(jobRows, notifications, unread, pendingDrives, backgroundedChats, operatorQuestions)
 		out.Sessions = append(out.Sessions, WorkSessionSummary{
 			Handle:    sh.Key,
 			SessionID: string(sh.SID),
@@ -138,6 +143,7 @@ func (srv *Server) work(ctx context.Context, args WorkArgs) (WorkResult, error) 
 		out.Items = append(out.Items, workItemsForJobs(sh, string(j.State), jobRows, notifications, args.IncludeQuiet)...)
 		out.Items = append(out.Items, workItemsForPendingDrives(sh, string(j.State), pendingDrives)...)
 		out.Items = append(out.Items, workItemsForBackgroundedChats(sh, string(j.State), backgroundedChats)...)
+		out.Items = append(out.Items, workItemsForOperatorQuestions(sh, string(j.State), operatorQuestions)...)
 	}
 
 	sort.SliceStable(out.Items, func(i, j int) bool {
@@ -181,6 +187,7 @@ func addSummary(sum *WorkSummary, async AsyncInspectSummary) {
 	sum.DispatchingDrives += async.DispatchingDrives
 	sum.FailedDrives += async.FailedDrives
 	sum.BackgroundedChats += async.BackgroundedChats
+	sum.OperatorQuestions += async.OperatorQuestions
 }
 
 func workItemsForNotifications(sh *SessionHandle, state string, notifications []InboxInspectItem, includeQuiet bool) []WorkItem {
@@ -247,6 +254,8 @@ func workItemNeedsAttention(item WorkItem) bool {
 	case "job":
 		return item.Status == string(jobs.JobAwaitingInput) || item.Status == string(jobs.JobFailed)
 	case "failed_drive":
+		return true
+	case "operator_question":
 		return true
 	default:
 		return false
@@ -433,6 +442,46 @@ func workItemsForBackgroundedChats(sh *SessionHandle, state string, chats []Back
 	return out
 }
 
+func workItemsForOperatorQuestions(sh *SessionHandle, state string, questions []pendingQuestion) []WorkItem {
+	out := make([]WorkItem, 0, len(questions))
+	for _, q := range questions {
+		wireQuestions := hostToWireOperatorQuestions(q.questions)
+		title := "Agent question"
+		body := ""
+		if len(wireQuestions) > 0 {
+			if wireQuestions[0].Header != "" {
+				title = wireQuestions[0].Header
+			}
+			body = wireQuestions[0].Question
+			if len(wireQuestions) > 1 {
+				body = strings.TrimSpace(fmt.Sprintf("%s (+%d more)", body, len(wireQuestions)-1))
+			}
+		}
+		out = append(out, WorkItem{
+			Kind:               "operator_question",
+			Priority:           98,
+			Handle:             sh.Key,
+			SessionID:          string(sh.SID),
+			StoryPath:          sh.StoryPath,
+			State:              state,
+			Title:              title,
+			Body:               body,
+			Status:             "awaiting_answer",
+			QuestionID:         q.id,
+			Questions:          wireQuestions,
+			UpdatedAtUnixMicro: q.createdAt.UnixMicro(),
+			Reacquire: WorkReacquire{
+				Tool: "session.answer",
+				Args: map[string]any{
+					"handle":      sh.Key,
+					"question_id": q.id,
+				},
+			},
+		})
+	}
+	return out
+}
+
 func itemUpdatedAt(item WorkItem) int64 {
 	switch {
 	case item.UpdatedAtUnixMilli != 0:
@@ -456,6 +505,8 @@ func itemID(item WorkItem) string {
 		return item.JobID
 	case item.DriveID != "":
 		return item.DriveID
+	case item.QuestionID != "":
+		return item.QuestionID
 	case item.ChatID != "":
 		return item.ChatID
 	default:

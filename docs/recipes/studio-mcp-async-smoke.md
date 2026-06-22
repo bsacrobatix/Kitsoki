@@ -358,6 +358,15 @@ the terminal active-work affordance without launching an interactive TUI. TUI
 `/work` prints `/chat show <id>` for queued/dispatching chat drives, and
 `/chat show` gives the same focused async chat context that `chat.show` exposes
 over MCP.
+
+For the operator-ask fallback path, `session.drive` may return
+`awaiting_operator` instead of settling the turn. While that turn is parked,
+`studio.work` also reports an `operator_question` row with the same
+`question_id`, `questions[]`, and a `reacquire.tool` of `session.answer`. This
+means a client can recover a missed parked question from the global work queue
+and resume it by calling the row's `{handle, question_id}` with its chosen
+answers.
+
 For backgrounded Claude PTY rows, `/work --all` also seeds the TUI's
 `/sessions attach <N>` cache; studio MCP can verify the selected target with
 `session.command` and `/sessions attach <N> --dry-run` without handing the

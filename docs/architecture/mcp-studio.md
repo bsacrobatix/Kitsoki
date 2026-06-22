@@ -97,15 +97,16 @@ inspecting every session one by one.
 | `studio.work` | `{include_quiet?, limit?}` → `{summary, sessions[], items[]}` | prioritized async work queue across all open driving handles |
 
 `studio.work.items[]` includes unread inbox notifications, running or
-awaiting-input jobs, failed jobs, pending/dispatching/failed chat drives, and
-backgrounded tmux chats. Each item carries the source `handle`, session/story
-metadata, stable IDs, a priority, and a `reacquire` hint naming the next MCP
-tool call (`session.teleport`, `session.inspect`, or `chat.show`). By default it
-omits read notifications and quiet terminal jobs; pass `include_quiet:true` when
-you need the full non-dismissed history. The queue is sorted by intervention
-priority: passive `success` / `info` notifications stay visible and
-reacquirable, but rank below active jobs/chats and do not increase
-`summary.needs_attention`.
+awaiting-input jobs, failed jobs, pending/dispatching/failed chat drives,
+backgrounded tmux chats, and parked operator-ask questions waiting on
+`session.answer`. Each item carries the source `handle`, session/story metadata,
+stable IDs, a priority, and a `reacquire` hint naming the next MCP tool call
+(`session.teleport`, `session.inspect`, `session.answer`, or `chat.show`). By
+default it omits read notifications and quiet terminal jobs; pass
+`include_quiet:true` when you need the full non-dismissed history. The queue is
+sorted by intervention priority: passive `success` / `info` notifications stay
+visible and reacquirable, but rank below active jobs/chats/questions and do not
+increase `summary.needs_attention`.
 
 When a job row has a matching unread job-origin notification, `studio.work`
 returns `reacquire.tool: "session.teleport"` with that notification id so the
@@ -115,6 +116,12 @@ notification body is available. Job rows without a matching unread notification
 keep the broader `session.inspect` fallback. Failed chat-drive rows return
 `reacquire.tool: "chat.show"` with the failed chat id and failure text, so
 clients can reopen the focused subagent context.
+
+When a driven turn parks on the operator-ask fallback, `studio.work` returns an
+`operator_question` row with `question_id`, the original `questions[]`, and
+`reacquire.tool: "session.answer"`. The client supplies the chosen answers to
+that hint's `{handle, question_id}` to resume the parked turn. The row disappears
+after the turn is answered or times out.
 
 ### `story.*` — author (deterministic, LLM-free)
 
@@ -164,9 +171,10 @@ orchestrator turns, especially smoke-testing `/work --all` and `/chat show
 that return an asynchronous terminal side effect, such as attaching to tmux.
 
 `session.inspect` also carries compact per-handle background-job and inbox
-projections. `async` summarizes running, awaiting-input, terminal, unread, and
-unread action-required counts; `jobs[]` shows the session's job IDs, kinds,
-statuses, origin states, errors, clarification schema, and timestamps;
+projections. `async` summarizes running, awaiting-input, terminal, unread,
+unread action-required, and operator-question counts; `jobs[]` shows the
+session's job IDs, kinds, statuses, origin states, errors, clarification schema,
+and timestamps;
 `notifications[]` shows active inbox rows, including `action_required` items and
 teleport job/state fields. When a chat store is wired, `pending_drives[]` shows
 pending/dispatching chat-input-queue rows owned by the session, and
