@@ -112,6 +112,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(testCmd())
 	root.AddCommand(serveCmd())
 	root.AddCommand(mcpCmd())
+	root.AddCommand(mcpTestCmd())
 	root.AddCommand(renderCmd())
 	root.AddCommand(docsCmd())
 	root.AddCommand(recordCmd())
