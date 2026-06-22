@@ -217,6 +217,18 @@ func (rw *childRewriter) rewriteEffect(eff *Effect) {
 	eff.When = rw.rewriteExpr(eff.When)
 	eff.Say = rw.rewriteExpr(eff.Say)
 
+	// id: the author-assigned call-site id is threaded into host args under
+	// the reserved `call` key (machine.applyEffectsTraced) and re-rendered at
+	// dispatch time, so it may carry world.X templates — e.g. cherny-loop's
+	// gating gate `id: "gate-{{ world.iteration }}"`, which addresses the
+	// cassette's by_call: gate-1 stub. Under an import the world key is folded
+	// to world.maker__iteration, so an UN-rewritten id renders against the
+	// (absent) bare key and yields an unmatched call id — the host result
+	// never binds, gate_ok stays unset, and the gating emit chain stalls. This
+	// is the import-compound "maker stalls at gating" bug. Rewrite it like any
+	// other world.X-bearing template.
+	eff.Id = rw.rewriteExpr(eff.Id)
+
 	// emit_intent: the value is a template (e.g.
 	// "{{ world.llm_verdict.intent }}") whose evaluation result names
 	// the intent to dispatch. world.X refs inside MUST be rewritten so

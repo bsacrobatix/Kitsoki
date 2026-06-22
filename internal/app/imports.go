@@ -487,6 +487,35 @@ func foldChild(parent *AppDef, alias string, imp *ImportDef, child *AppDef, file
 	}
 	parent.States[alias] = wrapper
 
+	// 6a. Re-entry reset: synthesise on_enter setters that re-seed every
+	// child world key to its schema default. The import compound is a
+	// flattened path+world overlay with no first-class per-entry "instance":
+	// the active state path resets to the entry child statelessly, but the
+	// child's prefixed world keys (maker__iteration, maker__goal_achieved,
+	// maker__terminal_reason, …) otherwise persist their terminal values from
+	// a prior pass. A parent that drives the import to @exit and then RE-ENTERS
+	// it for the next item would then run the sub-story's first room against
+	// stale "already done" flags and no-op. Re-seeding defaults on every enter
+	// makes each entry a fresh instance. On the first entry this is a no-op
+	// (the keys were already seeded to these defaults at session boot via
+	// WorldFromSchema). Reserved engine globals stay flat and are skipped.
+	// These fire BEFORE the world_in projection below so projected inputs win.
+	for _, ck := range sortedKeys(child.World) {
+		if _, reserved := ReservedWorldKeys[ck]; reserved {
+			continue
+		}
+		def := child.World[ck].Default
+		if def == nil {
+			continue // no declared default → nothing deterministic to reset to
+		}
+		// A world_in input is operator/parent-projected on entry; the world_in
+		// setter (added next) overwrites it anyway, so skip the redundant reset.
+		if _, isInput := imp.WorldIn[ck]; isInput {
+			continue
+		}
+		wrapper.OnEnter = append(wrapper.OnEnter, Effect{Set: map[string]any{alias + "__" + ck: def}})
+	}
+
 	// 6. world_in: synthesise on_enter setters on the wrapper. They fire
 	// when a transition enters the compound, before the initial child is
 	// entered, so the child sees the projected world from the first turn.

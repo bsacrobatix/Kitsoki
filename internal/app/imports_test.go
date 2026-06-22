@@ -131,6 +131,32 @@ func TestImports_StateRewriting(t *testing.T) {
 	require.Contains(t, working.View.SourceString(), "world.sub__ticket_id", "override.states view is rewritten by the same pass that handles child states")
 }
 
+// TestImports_EffectIdTemplateRewritten confirms an effect's `id:` template
+// (threaded into host args under the reserved `call` key and re-rendered at
+// dispatch) has its world.X refs rewritten under fold. Regression: an
+// un-rewritten id like cherny-loop's gating gate `id: "gate-{{ world.iteration
+// }}"` rendered against the absent bare key under an import, producing an
+// unmatched call id so the host result never bound and the emit chain stalled
+// (the import-compound "maker stalls at gating" bug). The sub_story's
+// `processing` on_enter invoke carries `id: "work-{{ world.ticket_id }}"`.
+func TestImports_EffectIdTemplateRewritten(t *testing.T) {
+	def, err := Load("../../testdata/apps/imports_smoke/parent/app.yaml")
+	require.NoError(t, err)
+
+	processing := def.States["sub"].States["processing"]
+	require.NotNil(t, processing)
+	require.NotEmpty(t, processing.OnEnter)
+	var gotID string
+	for _, eff := range processing.OnEnter {
+		if eff.Invoke == "host.run" && eff.Id != "" {
+			gotID = eff.Id
+			break
+		}
+	}
+	require.Equal(t, "work-{{ world.sub__ticket_id }}", gotID,
+		"effect id template must be rewritten to the prefixed world key under fold")
+}
+
 // TestImports_OnCompleteTargetRewritten confirms that a `target:` carried
 // by an on_complete: effect (the transition a finishing background job
 // dispatches) is rewritten under fold exactly like an ordinary transition
@@ -219,9 +245,19 @@ func TestImports_WorldIn(t *testing.T) {
 	require.Equal(t, "compound", wrapper.Type)
 	require.Equal(t, "idle", wrapper.Initial)
 	require.NotEmpty(t, wrapper.OnEnter, "wrapper should carry world_in on_enter")
-	first := wrapper.OnEnter[0]
-	require.NotNil(t, first.Set)
-	v, ok := first.Set["sub__ticket_id"]
+	// The wrapper OnEnter holds re-entry default-reset setters (so a re-entered
+	// import is a fresh instance) followed by the world_in projection setters.
+	// Find the world_in setter by key rather than position.
+	var v any
+	var ok bool
+	for _, eff := range wrapper.OnEnter {
+		if eff.Set != nil {
+			if got, has := eff.Set["sub__ticket_id"]; has {
+				v, ok = got, true
+				break
+			}
+		}
+	}
 	require.True(t, ok, "world_in should write sub__ticket_id")
 	require.Equal(t, "{{ world.current_ticket }}", v, "expression authored in parent scope is preserved")
 }

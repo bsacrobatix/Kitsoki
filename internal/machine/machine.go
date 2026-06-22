@@ -1855,7 +1855,15 @@ func (m *machineImpl) isDecisionGate(ctx context.Context, state string, w world.
 	emitTargets := make(map[string]struct{}, len(cs.s.OnEnter))
 	for _, eff := range cs.s.OnEnter {
 		if n := strings.TrimSpace(eff.EmitIntent); n != "" {
-			emitTargets[n] = struct{}{}
+			// Under an import, the on_enter `emit_intent:` value stays the
+			// bare child name (e.g. `mark_achieved`) while the state's `on:`
+			// arc keys — what allowedIntentNames returns — are rewritten to
+			// the aliased form (`maker__mark_achieved`). Resolve the emit
+			// name through the same IntentAliases walk the dispatcher uses so
+			// the membership test below matches; otherwise every forward emit
+			// is misclassified "operator-only" and the chain wrongly stalls at
+			// the gate (e.g. cherny-loop's `gating` imported into ship-it).
+			emitTargets[m.resolveEmittedIntentName(state, n)] = struct{}{}
 		}
 	}
 	env := expr.Env{Slots: map[string]any{}, World: w.Vars, Event: map[string]any{}}

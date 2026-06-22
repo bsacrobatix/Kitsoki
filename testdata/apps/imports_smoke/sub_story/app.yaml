@@ -81,6 +81,7 @@ states:
       Processing {{ world.ticket_id }}.
     on_enter:
       - invoke: host.run
+        id: "work-{{ world.ticket_id }}"
         with: { cmd: "echo working" }
         background: true
         on_complete:
