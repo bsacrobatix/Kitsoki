@@ -43,15 +43,18 @@ func studioHarnessBuilder(mode studio.HarnessMode, recordingPath, storyPath stri
 	if err != nil {
 		return nil, fmt.Errorf("studio live harness: %w", err)
 	}
-	client, _, err := newLiveClient()
+	// Build the claude-CLI routing harness (the same one `kitsoki web` builds):
+	// it authenticates via the claude subscription / CLI — no direct-API key — and
+	// the per-session harness profile remaps host.agent dispatch each turn
+	// (host_dispatch wraps the dispatch ctx WithActiveProfile). Free-text routing
+	// is unused by explicit-intent (maker) driving, so a live session opens on
+	// subscription auth alone, where the SDK direct-API path needed an ANTHROPIC_*
+	// key the machine may not have. buildHarness lives in this package.
+	h, err := buildHarness("claude", "", "", "", "", def)
 	if err != nil {
 		return nil, fmt.Errorf("studio live harness: %w", err)
 	}
-	lh, err := harness.NewLive(&client, "", def)
-	if err != nil {
-		return nil, fmt.Errorf("studio live harness: %w", err)
-	}
-	return lh, nil
+	return h, nil
 }
 
 // mcpCmd starts the kitsoki studio MCP server on stdio. Unlike `kitsoki serve`
