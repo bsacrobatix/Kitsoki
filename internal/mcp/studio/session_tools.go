@@ -32,6 +32,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/orchestrator"
@@ -351,6 +352,11 @@ func (srv *Server) handleSessionDrive(
 	req *mcpsdk.CallToolRequest,
 	args SessionDriveArgs,
 ) (*mcpsdk.CallToolResult, any, error) {
+	progress := newMCPProgress(req, "session.drive")
+	progress.Start(ctx, args.Handle)
+	if progress != nil {
+		ctx = host.WithStreamSink(ctx, progress)
+	}
 	rt, rerr := srv.resolveRuntime(args.Handle)
 	if rerr != nil {
 		return rerr, nil, nil
@@ -365,16 +371,20 @@ func (srv *Server) handleSessionDrive(
 	if ss := serverSessionOf(req); clientSupportsElicitation(ss) {
 		prompter := newStudioOperatorPrompter(&elicitTransport{ss: ss})
 		out, frame := rt.driveElicit(ctx, args.Input, cols, rows, prompter)
+		progress.Done(ctx, args.Handle, turnOutcomeState(out))
 		return nil, turnResponse(out, frame, rt.lastTurnErr), nil
 	}
 
 	res, pq, turnDone, err := rt.driveSuspendable(ctx, args.Input, cols, rows)
 	if err != nil {
+		progress.Error(ctx, args.Handle, err)
 		return buildToolError(ErrBadRequest, fmt.Sprintf("session.drive: %v", err)), nil, nil
 	}
 	if !turnDone {
+		progress.AwaitingOperator(ctx, args.Handle)
 		return nil, awaitingResponse(pq), nil
 	}
+	progress.Done(ctx, args.Handle, turnOutcomeState(res.outcome))
 	return nil, turnResponse(res.outcome, res.frame, res.err), nil
 }
 
@@ -396,6 +406,11 @@ func (srv *Server) handleSessionAnswer(
 	req *mcpsdk.CallToolRequest,
 	args SessionAnswerArgs,
 ) (*mcpsdk.CallToolResult, any, error) {
+	progress := newMCPProgress(req, "session.answer")
+	progress.Start(ctx, args.Handle)
+	if progress != nil {
+		ctx = host.WithStreamSink(ctx, progress)
+	}
 	if args.QuestionID == "" {
 		return buildToolError(ErrBadRequest, "session.answer: question_id is required"), nil, nil
 	}
@@ -408,14 +423,17 @@ func (srv *Server) handleSessionAnswer(
 	}
 	res, pq, turnDone, ok, err := rt.resumeSuspendable(ctx, args.QuestionID, args.Answers)
 	if err != nil {
+		progress.Error(ctx, args.Handle, err)
 		return buildToolError(ErrBadRequest, fmt.Sprintf("session.answer: %v", err)), nil, nil
 	}
 	if !ok {
 		return buildToolError(ErrBadRequest, fmt.Sprintf("session.answer: no turn awaiting question_id %q on this handle", args.QuestionID)), nil, nil
 	}
 	if !turnDone {
+		progress.AwaitingOperator(ctx, args.Handle)
 		return nil, awaitingResponse(pq), nil
 	}
+	progress.Done(ctx, args.Handle, turnOutcomeState(res.outcome))
 	return nil, turnResponse(res.outcome, res.frame, res.err), nil
 }
 
@@ -431,6 +449,11 @@ func (srv *Server) handleSessionSubmit(
 	req *mcpsdk.CallToolRequest,
 	args SessionSubmitArgs,
 ) (*mcpsdk.CallToolResult, any, error) {
+	progress := newMCPProgress(req, "session.submit")
+	progress.Start(ctx, args.Handle)
+	if progress != nil {
+		ctx = host.WithStreamSink(ctx, progress)
+	}
 	if args.Intent == "" {
 		return buildToolError(ErrBadRequest, "session.submit: intent is required"), nil, nil
 	}
@@ -440,6 +463,7 @@ func (srv *Server) handleSessionSubmit(
 	}
 	cols, rows := geometry(args.Cols, args.Rows)
 	out, frame := rt.submit(ctx, args.Intent, args.Slots, cols, rows)
+	progress.Done(ctx, args.Handle, turnOutcomeState(out))
 	return nil, turnResponse(out, frame, rt.lastTurnErr), nil
 }
 
@@ -448,12 +472,18 @@ func (srv *Server) handleSessionContinue(
 	req *mcpsdk.CallToolRequest,
 	args SessionContinueArgs,
 ) (*mcpsdk.CallToolResult, any, error) {
+	progress := newMCPProgress(req, "session.continue")
+	progress.Start(ctx, args.Handle)
+	if progress != nil {
+		ctx = host.WithStreamSink(ctx, progress)
+	}
 	rt, rerr := srv.resolveRuntime(args.Handle)
 	if rerr != nil {
 		return rerr, nil, nil
 	}
 	cols, rows := geometry(args.Cols, args.Rows)
 	out, frame := rt.cont(ctx, args.Slots, cols, rows)
+	progress.Done(ctx, args.Handle, turnOutcomeState(out))
 	return nil, turnResponse(out, frame, rt.lastTurnErr), nil
 }
 
@@ -818,6 +848,13 @@ func geometry(cols, rows int) (int, int) {
 		rows = defaultRows
 	}
 	return cols, rows
+}
+
+func turnOutcomeState(out *orchestrator.TurnOutcome) string {
+	if out == nil {
+		return ""
+	}
+	return string(out.NewState)
 }
 
 // turnResponse projects a TurnOutcome + Frame into the {outcome, frame} wire
