@@ -111,6 +111,8 @@ The expected proof at the end is:
 - `session.inspect.async.notifications_unread == 2`
 - `studio.work` sees the terminal job and two unread notifications globally,
   with a `session.teleport` reacquisition hint
+- passive `success` / `info` notifications remain visible in `studio.work` but
+  report `needs_attention == false` and lower priorities than active jobs/chats
 - `session.teleport` succeeds using the captured notification id
 - a final `session.inspect` reports `notifications_unread == 1`
 - `render.tui` reports the reacquired frame's state as `running`

@@ -95,7 +95,10 @@ backgrounded tmux chats. Each item carries the source `handle`, session/story
 metadata, stable IDs, a priority, and a `reacquire` hint naming the next MCP
 tool call (`session.teleport`, `session.inspect`, or `chat.show`). By default it
 omits read notifications and quiet terminal jobs; pass `include_quiet:true` when
-you need the full non-dismissed history.
+you need the full non-dismissed history. The queue is sorted by intervention
+priority: passive `success` / `info` notifications stay visible and
+reacquirable, but rank below active jobs/chats and do not increase
+`summary.needs_attention`.
 
 ### `story.*` — author (deterministic, LLM-free)
 

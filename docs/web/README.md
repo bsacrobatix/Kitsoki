@@ -430,19 +430,29 @@ indistinguishable from a TUI one in the trace.
 
 ### The surfaces
 
-- **Global badge** (`components/InboxBadge.vue`) — the unread count in the
-  chrome on every screen; severity color when any item `needs_attention`,
-  mirroring the TUI's `$inbox.needs_attention` projection (`internal/tui/inbox.go`).
-- **`InboxPanel.vue`** — opens on badge click: per item a severity glyph, title,
-  relative time, and **jump** + **dismiss** affordances. A notification whose
-  origin session is no longer live degrades to a non-jumping, read-only item
-  (teleport returns a typed error).
+- **Global badge** (`components/InboxBadge.vue`) — the larger of unread
+  notification count and active-work item count in the chrome on every screen.
+  Attention color appears when either the notification feed or active-work
+  summary reports work that needs intervention. Active-work attention is limited
+  to unread `action_required` notifications plus awaiting-input or failed jobs;
+  passive `success` / `info` rows remain listed and jumpable without coloring
+  the badge.
+- **`InboxPanel.vue`** — opens on badge click: first the prioritized active-work
+  queue from `runstatus.work.list` (notifications, jobs, queued/dispatching
+  drives, and backgrounded chats), then notification history. Rows show the next
+  action explicitly: **jump** for notifications, **open context** for
+  chat-backed work, and **open session** for job/session reacquisition.
+  Notification history keeps **dismiss** affordances; an origin session that is
+  no longer live degrades to a non-jumping, read-only item (teleport returns a
+  typed error). The panel's **Sync GitHub** action uses the same idempotent
+  intake path as background polling and reports new/existing/error feedback.
 - **`InboxToast.vue`** — transient, shown only on a `success` / `action_required`
   push; auto-dismisses; click = the same jump as a panel item.
 
 The store is `stores/inbox.ts` (Pinia): it subscribes to the notification feed,
-holds the unread list + counts, and reconciles `read` / `dismiss` against the
-RPC result.
+holds the unread list + counts, refreshes `runstatus.work.list` while mounted,
+runs idempotent GitHub sync when requested, and reconciles `read` / `dismiss`
+against the RPC result.
 
 ### Deep-link
 
