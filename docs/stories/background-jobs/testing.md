@@ -2,6 +2,11 @@
 
 How to test the background-job lifecycle deterministically with flow fixtures.
 
+For a real studio MCP smoke that starts a background job, polls
+`session.inspect`, captures an inbox notification id, and calls
+`session.teleport`, see
+[`../../recipes/studio-mcp-async-smoke.md`](../../recipes/studio-mcp-async-smoke.md).
+
 ## The orchestrator path (auto-upgrade)
 
 When a flow fixture declares any of the following, the test runner automatically

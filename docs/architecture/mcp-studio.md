@@ -137,6 +137,10 @@ state. That gives an MCP client the same "switch attention to this subagent"
 context that `session.inspect.backgrounded_chats[]` points at, without shelling
 out to `kitsoki chat show`.
 
+For a copy-paste smoke test of the async path, including background completion,
+inbox notification capture, and `session.teleport`, see
+[`../recipes/studio-mcp-async-smoke.md`](../recipes/studio-mcp-async-smoke.md).
+
 ### `render.*` — see (read-only)
 
 `render.*` re-render a state the agent already reached, or an explicit
