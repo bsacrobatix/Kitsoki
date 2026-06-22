@@ -488,6 +488,7 @@ go run ./cmd/kitsoki mcp-test \
   ]'
 ```
 
-This is a browser-surface proof: proposal rows are currently merged into the
-web inbox from the web proposal queue, not returned by backend
-`runstatus.work.list` or MCP `studio.work`.
+This is a browser-surface proof for seeded web proposal rows. Real trace-backed
+mining proposals are discoverable through MCP `session.inspect.mining_proposals`
+and `studio.work` `mining_proposal` rows, but this browser query seam still
+validates the web proposal queue rather than backend `runstatus.work.list`.

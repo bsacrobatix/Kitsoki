@@ -522,6 +522,7 @@ type InspectResult struct {
 	PendingDrives     []PendingDriveItem     `json:"pending_drives,omitempty"`
 	BackgroundedChats []BackgroundedChatItem `json:"backgrounded_chats,omitempty"`
 	OperatorQuestions []OperatorQuestionItem `json:"operator_questions,omitempty"`
+	MiningProposals   []MiningProposalItem   `json:"mining_proposals,omitempty"`
 	LastTurns         []TurnSummaryItem      `json:"last_turns"`
 }
 
@@ -540,6 +541,7 @@ type AsyncInspectSummary struct {
 	FailedDrives                int `json:"failed_drives"`
 	BackgroundedChats           int `json:"backgrounded_chats"`
 	OperatorQuestions           int `json:"operator_questions"`
+	MiningProposals             int `json:"mining_proposals"`
 }
 
 // JobInspectItem is a compact, structured projection of one background job.
@@ -615,6 +617,20 @@ type OperatorQuestionItem struct {
 	Questions          []kitsokimcp.OperatorAskQuestion `json:"questions"`
 	CreatedAtUnixMicro int64                            `json:"created_at_unix_micro,omitempty"`
 	Reacquire          WorkReacquire                    `json:"reacquire"`
+}
+
+// MiningProposalItem is one trace-backed proposal awaiting review. It is folded
+// from mining.proposal_raised minus any later mining.proposal_decided event.
+type MiningProposalItem struct {
+	RecipeID          string        `json:"recipe_id"`
+	Kind              string        `json:"kind,omitempty"`
+	Target            string        `json:"target,omitempty"`
+	Priority          float64       `json:"priority,omitempty"`
+	Rung              int           `json:"rung,omitempty"`
+	DraftPath         string        `json:"draft_path,omitempty"`
+	RaisedTurn        int64         `json:"raised_turn,omitempty"`
+	RaisedAtUnixMicro int64         `json:"raised_at_unix_micro,omitempty"`
+	Reacquire         WorkReacquire `json:"reacquire"`
 }
 
 // TurnSummaryItem collapses one turn's events into a one-line record (the same
@@ -1001,18 +1017,20 @@ func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int, handle str
 		return InspectResult{}, asyncErr
 	}
 	operatorQuestions := rt.pendingOperatorQuestions()
+	miningProposals := pendingMiningProposals(handle, rt.history())
 	return InspectResult{
 		OK:                true,
 		State:             string(j.State),
 		World:             j.World.Vars,
 		AllowedIntents:    allowedNames,
 		LastView:          view,
-		Async:             summarizeAsync(jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, operatorQuestions),
+		Async:             summarizeAsync(jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, operatorQuestions, miningProposals),
 		Jobs:              jobs,
 		Notifications:     notifications,
 		PendingDrives:     pendingDrives,
 		BackgroundedChats: backgroundedChats,
 		OperatorQuestions: inspectOperatorQuestions(handle, operatorQuestions),
+		MiningProposals:   miningProposals,
 		LastTurns:         summariseTrace(rt.history(), lastTurns),
 	}, nil
 }
@@ -1201,12 +1219,13 @@ func (rt *sessionRuntime) inspectBackgroundedChats(ctx context.Context, in []cha
 	return out
 }
 
-func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, unreadNotifications map[jobs.NotificationSeverity]int, pendingDrives []PendingDriveItem, backgroundedChats []BackgroundedChatItem, operatorQuestions []pendingQuestion) AsyncInspectSummary {
+func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, unreadNotifications map[jobs.NotificationSeverity]int, pendingDrives []PendingDriveItem, backgroundedChats []BackgroundedChatItem, operatorQuestions []pendingQuestion, miningProposals []MiningProposalItem) AsyncInspectSummary {
 	out := AsyncInspectSummary{
 		JobsTotal:          len(jobRows),
 		NotificationsTotal: len(notifications),
 		BackgroundedChats:  len(backgroundedChats),
 		OperatorQuestions:  len(operatorQuestions),
+		MiningProposals:    len(miningProposals),
 	}
 	for _, j := range jobRows {
 		switch j.Status {
@@ -1230,6 +1249,53 @@ func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, 
 			out.DispatchingDrives++
 		case chats.DriveStatusFailed:
 			out.FailedDrives++
+		}
+	}
+	return out
+}
+
+func pendingMiningProposals(handle string, history store.History) []MiningProposalItem {
+	if len(history) == 0 {
+		return nil
+	}
+	byRecipe := make(map[string]MiningProposalItem)
+	var order []string
+	for _, ev := range history {
+		switch ev.Kind {
+		case store.MiningProposalRaised:
+			var payload store.MiningProposalRaisedPayload
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil || payload.RecipeID == "" {
+				continue
+			}
+			if _, exists := byRecipe[payload.RecipeID]; !exists {
+				order = append(order, payload.RecipeID)
+			}
+			byRecipe[payload.RecipeID] = MiningProposalItem{
+				RecipeID:          payload.RecipeID,
+				Kind:              payload.Kind,
+				Target:            payload.Target,
+				Priority:          payload.Priority,
+				Rung:              payload.Rung,
+				DraftPath:         payload.DraftPath,
+				RaisedTurn:        int64(ev.Turn),
+				RaisedAtUnixMicro: ev.Ts.UnixMicro(),
+				Reacquire: WorkReacquire{
+					Tool: "session.inspect",
+					Args: map[string]any{"handle": handle, "last_turns": 10},
+				},
+			}
+		case store.MiningProposalDecided:
+			var payload store.MiningProposalDecidedPayload
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil || payload.RecipeID == "" {
+				continue
+			}
+			delete(byRecipe, payload.RecipeID)
+		}
+	}
+	out := make([]MiningProposalItem, 0, len(byRecipe))
+	for _, recipeID := range order {
+		if item, ok := byRecipe[recipeID]; ok {
+			out = append(out, item)
 		}
 	}
 	return out

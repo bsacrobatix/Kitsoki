@@ -1,12 +1,16 @@
 package studio
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/store"
 )
 
 func TestWorkItemsForNotificationsPreservesExternalContext(t *testing.T) {
@@ -123,4 +127,88 @@ func TestWorkPrioritiesKeepPassiveNotificationsBelowActiveWork(t *testing.T) {
 		notificationPriority(InboxInspectItem{Severity: jobs.SeveritySuccess}))
 	assert.Greater(t, 60,
 		notificationPriority(InboxInspectItem{Severity: jobs.SeverityInfo}))
+}
+
+func TestPendingMiningProposalsFoldTraceDecisions(t *testing.T) {
+	history := store.History{
+		miningEvent(t, 1, time.Unix(10, 0), store.MiningProposalRaised, store.MiningProposalRaisedPayload{
+			RecipeID:  "recipe-accepted",
+			Kind:      "binding",
+			Target:    "root-instance",
+			Priority:  0.91,
+			Rung:      1,
+			DraftPath: ".artifacts/mining/recipe-accepted",
+		}),
+		miningEvent(t, 2, time.Unix(20, 0), store.MiningProposalRaised, store.MiningProposalRaisedPayload{
+			RecipeID:  "recipe-pending",
+			Kind:      "intent",
+			Target:    "dev-story",
+			Priority:  0.72,
+			Rung:      2,
+			DraftPath: ".artifacts/mining/recipe-pending",
+		}),
+		miningEvent(t, 3, time.Unix(30, 0), store.MiningProposalDecided, store.MiningProposalDecidedPayload{
+			RecipeID:   "recipe-accepted",
+			Verdict:    store.MiningVerdictAccept,
+			By:         store.MiningByHuman,
+			FlowsGreen: true,
+		}),
+	}
+
+	got := pendingMiningProposals("mine-handle", history)
+	require.Len(t, got, 1)
+	assert.Equal(t, "recipe-pending", got[0].RecipeID)
+	assert.Equal(t, "intent", got[0].Kind)
+	assert.Equal(t, "dev-story", got[0].Target)
+	assert.Equal(t, 0.72, got[0].Priority)
+	assert.Equal(t, int64(2), got[0].RaisedTurn)
+	assert.Equal(t, int64(20_000_000), got[0].RaisedAtUnixMicro)
+	assert.Equal(t, "session.inspect", got[0].Reacquire.Tool)
+	assert.Equal(t, "mine-handle", got[0].Reacquire.Args["handle"])
+	assert.Equal(t, 10, got[0].Reacquire.Args["last_turns"])
+}
+
+func TestWorkItemsForMiningProposals(t *testing.T) {
+	sh := &SessionHandle{
+		Key:       "mine-handle",
+		SID:       "sid-1",
+		StoryPath: "stories/dev-story/app.yaml",
+	}
+	items := workItemsForMiningProposals(sh, "idle", []MiningProposalItem{{
+		RecipeID:          "recipe-pending",
+		Kind:              "intent",
+		Target:            "dev-story",
+		Rung:              2,
+		DraftPath:         ".artifacts/mining/recipe-pending",
+		RaisedAtUnixMicro: 123_000,
+		Reacquire: WorkReacquire{
+			Tool: "session.inspect",
+			Args: map[string]any{"handle": "mine-handle", "last_turns": 10},
+		},
+	}})
+
+	require.Len(t, items, 1)
+	got := items[0]
+	assert.Equal(t, "mining_proposal", got.Kind)
+	assert.Equal(t, "awaiting_review", got.Status)
+	assert.Equal(t, "recipe-pending", got.ProposalID)
+	assert.Equal(t, "intent", got.ProposalKind)
+	assert.Equal(t, "dev-story", got.ProposalTarget)
+	assert.Equal(t, ".artifacts/mining/recipe-pending", got.DraftPath)
+	assert.Equal(t, 2, got.Rung)
+	assert.Equal(t, int64(123_000), got.UpdatedAtUnixMicro)
+	assert.Equal(t, "session.inspect", got.Reacquire.Tool)
+	assert.False(t, workItemNeedsAttention(got))
+}
+
+func miningEvent(t *testing.T, turn int64, ts time.Time, kind store.EventKind, payload any) store.Event {
+	t.Helper()
+	raw, err := json.Marshal(payload)
+	require.NoError(t, err)
+	return store.Event{
+		Turn:    app.TurnNumber(turn),
+		Ts:      ts,
+		Kind:    kind,
+		Payload: raw,
+	}
 }

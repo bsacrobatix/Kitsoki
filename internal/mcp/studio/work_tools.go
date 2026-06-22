@@ -45,6 +45,7 @@ type WorkSummary struct {
 	FailedDrives                int `json:"failed_drives"`
 	BackgroundedChats           int `json:"backgrounded_chats"`
 	OperatorQuestions           int `json:"operator_questions"`
+	MiningProposals             int `json:"mining_proposals"`
 }
 
 // WorkSessionSummary is one open driving session's async headline.
@@ -72,6 +73,11 @@ type WorkItem struct {
 	DriveID             string                           `json:"drive_id,omitempty"`
 	ChatID              string                           `json:"chat_id,omitempty"`
 	QuestionID          string                           `json:"question_id,omitempty"`
+	ProposalID          string                           `json:"proposal_id,omitempty"`
+	ProposalKind        string                           `json:"proposal_kind,omitempty"`
+	ProposalTarget      string                           `json:"proposal_target,omitempty"`
+	DraftPath           string                           `json:"draft_path,omitempty"`
+	Rung                int                              `json:"rung,omitempty"`
 	Questions           []kitsokimcp.OperatorAskQuestion `json:"questions,omitempty"`
 	Severity            jobs.NotificationSeverity        `json:"severity,omitempty"`
 	CreatedAtUnixMilli  int64                            `json:"created_at_unix_milli,omitempty"`
@@ -130,7 +136,8 @@ func (srv *Server) work(ctx context.Context, args WorkArgs) (WorkResult, error) 
 			return WorkResult{}, err
 		}
 		operatorQuestions := rt.pendingOperatorQuestions()
-		async := summarizeAsync(jobRows, notifications, unread, pendingDrives, backgroundedChats, operatorQuestions)
+		miningProposals := pendingMiningProposals(sh.Key, rt.history())
+		async := summarizeAsync(jobRows, notifications, unread, pendingDrives, backgroundedChats, operatorQuestions, miningProposals)
 		out.Sessions = append(out.Sessions, WorkSessionSummary{
 			Handle:    sh.Key,
 			SessionID: string(sh.SID),
@@ -144,6 +151,7 @@ func (srv *Server) work(ctx context.Context, args WorkArgs) (WorkResult, error) 
 		out.Items = append(out.Items, workItemsForPendingDrives(sh, string(j.State), pendingDrives)...)
 		out.Items = append(out.Items, workItemsForBackgroundedChats(sh, string(j.State), backgroundedChats)...)
 		out.Items = append(out.Items, workItemsForOperatorQuestions(sh, string(j.State), operatorQuestions)...)
+		out.Items = append(out.Items, workItemsForMiningProposals(sh, string(j.State), miningProposals)...)
 	}
 
 	sort.SliceStable(out.Items, func(i, j int) bool {
@@ -188,6 +196,7 @@ func addSummary(sum *WorkSummary, async AsyncInspectSummary) {
 	sum.FailedDrives += async.FailedDrives
 	sum.BackgroundedChats += async.BackgroundedChats
 	sum.OperatorQuestions += async.OperatorQuestions
+	sum.MiningProposals += async.MiningProposals
 }
 
 func workItemsForNotifications(sh *SessionHandle, state string, notifications []InboxInspectItem, includeQuiet bool) []WorkItem {
@@ -482,6 +491,45 @@ func workItemsForOperatorQuestions(sh *SessionHandle, state string, questions []
 	return out
 }
 
+func workItemsForMiningProposals(sh *SessionHandle, state string, proposals []MiningProposalItem) []WorkItem {
+	out := make([]WorkItem, 0, len(proposals))
+	for _, p := range proposals {
+		title := strings.TrimSpace(fmt.Sprintf("%s proposal", p.Kind))
+		if p.Kind == "" {
+			title = "Mining proposal"
+		}
+		bodyParts := make([]string, 0, 3)
+		if p.Target != "" {
+			bodyParts = append(bodyParts, "target="+p.Target)
+		}
+		if p.Rung != 0 {
+			bodyParts = append(bodyParts, fmt.Sprintf("rung=%d", p.Rung))
+		}
+		if p.DraftPath != "" {
+			bodyParts = append(bodyParts, "draft="+p.DraftPath)
+		}
+		out = append(out, WorkItem{
+			Kind:               "mining_proposal",
+			Priority:           58,
+			Handle:             sh.Key,
+			SessionID:          string(sh.SID),
+			StoryPath:          sh.StoryPath,
+			State:              state,
+			Title:              title,
+			Body:               strings.Join(bodyParts, "; "),
+			Status:             "awaiting_review",
+			ProposalID:         p.RecipeID,
+			ProposalKind:       p.Kind,
+			ProposalTarget:     p.Target,
+			DraftPath:          p.DraftPath,
+			Rung:               p.Rung,
+			UpdatedAtUnixMicro: p.RaisedAtUnixMicro,
+			Reacquire:          p.Reacquire,
+		})
+	}
+	return out
+}
+
 func itemUpdatedAt(item WorkItem) int64 {
 	switch {
 	case item.UpdatedAtUnixMilli != 0:
@@ -507,6 +555,8 @@ func itemID(item WorkItem) string {
 		return item.DriveID
 	case item.QuestionID != "":
 		return item.QuestionID
+	case item.ProposalID != "":
+		return item.ProposalID
 	case item.ChatID != "":
 		return item.ChatID
 	default:

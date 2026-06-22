@@ -98,11 +98,12 @@ inspecting every session one by one.
 
 `studio.work.items[]` includes unread inbox notifications, running or
 awaiting-input jobs, failed jobs, pending/dispatching/failed chat drives,
-backgrounded tmux chats, and parked operator-ask questions waiting on
-`session.answer`. Each item carries the source `handle`, session/story metadata,
-stable IDs, a priority, and a `reacquire` hint naming the next MCP tool call
-(`session.teleport`, `session.inspect`, `session.answer`, or `chat.show`). By
-default it omits read notifications and quiet terminal jobs; pass
+backgrounded tmux chats, parked operator-ask questions waiting on
+`session.answer`, and trace-backed mining proposals awaiting review. Each item
+carries the source `handle`, session/story metadata, stable IDs, a priority, and
+a `reacquire` hint naming the next MCP tool call (`session.teleport`,
+`session.inspect`, `session.answer`, or `chat.show`). By default it omits read
+notifications and quiet terminal jobs; pass
 `include_quiet:true` when you need the full non-dismissed history. The queue is
 sorted by intervention priority: passive `success` / `info` notifications stay
 visible and reacquirable, but rank below active jobs/chats/questions and do not
@@ -124,6 +125,12 @@ When a driven turn parks on the operator-ask fallback, `studio.work` returns an
 `reacquire.tool: "session.answer"`. The client supplies the chosen answers to
 that hint's `{handle, question_id}` to resume the parked turn. The row disappears
 after the turn is answered or times out.
+
+When the trace contains `mining.proposal_raised` without a later matching
+`mining.proposal_decided`, `studio.work` returns a `mining_proposal` row with
+`proposal_id`, proposal kind/target, rung, draft path, and `reacquire.tool:
+"session.inspect"`. This makes proposal-review work discoverable to a fresh MCP
+client without scraping the web inbox's frontend proposal queue.
 
 ### `story.*` — author (deterministic, LLM-free)
 
@@ -158,7 +165,7 @@ deterministic direct path or a read.
 | `session.continue` | `{handle, slots} → {outcome, frame}` | `ContinueTurn` — supply missing slots |
 | `session.answer` | `{handle, question_id, answers} → {outcome, frame} \| {awaiting_operator}` | resume a parked operator-ask (see below) |
 | `session.teleport` | `{handle, notification_id} → {outcome, frame}` | jump to an inbox notification's saved target and mark it read |
-| `session.inspect` | `{handle} → {state, world, allowed_intents, last_view, async, jobs[], notifications[], pending_drives[], backgrounded_chats[], operator_questions[], last_turns[]}` | `buildInspectOutput` + session JobStore / ChatStore (read-only) |
+| `session.inspect` | `{handle} → {state, world, allowed_intents, last_view, async, jobs[], notifications[], pending_drives[], backgrounded_chats[], operator_questions[], mining_proposals[], last_turns[]}` | `buildInspectOutput` + session JobStore / ChatStore / trace side channel (read-only) |
 | `session.command` | `{handle, command, cols?, rows?} → {frame}` | run a deterministic TUI slash command such as `/work --all` against the handle |
 | `session.trace` | `{handle, since?, until?, limit?} → {events[], last_turn}` | the session's JSONL trace (read-only) |
 | `chat.show` | `{chat_id, handle?, session_id?, since_seq?} → {context?, chat, pty?, messages[]}` | read-only focused context for a selected async chat/subagent; `chat.display_scope_key` is the operator-facing scope label |
@@ -183,11 +190,13 @@ pending/dispatching/failed chat-input-queue rows owned by the session, and
 `backgrounded_chats[]` shows tmux-hosted chats left in `pty_background` mode,
 and `operator_questions[]` shows parked operator-ask fallback batches with the
 same `questions[]`, `question_id`, and `session.answer` reacquire hint as
-`studio.work`. This is the structured MCP surface for an external agent to
-inspect the chosen handle after `studio.work` has ranked the global queue,
-notice required operator input, and reacquire or switch to the task through
-`session.teleport`, `chat.show`, or `session.answer` without scraping the TUI
-frame or decoding trace events.
+`studio.work`. `mining_proposals[]` folds the trace's
+`mining.proposal_raised` / `mining.proposal_decided` side-channel events into
+currently pending proposal-review rows. This is the structured MCP surface for
+an external agent to inspect the chosen handle after `studio.work` has ranked
+the global queue, notice required operator input, and reacquire or switch to the
+task through `session.teleport`, `chat.show`, or `session.answer` without
+scraping the TUI frame or decoding trace events.
 
 Story-authored `host.chat.drive` effects are stamped with the originating
 session and state before the host handler enqueues the drive, so ordinary
