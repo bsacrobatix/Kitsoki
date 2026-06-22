@@ -369,6 +369,19 @@ thought.
   `agent.decide` judges feasibility + completeness, and a coordination board
   dispatches each brief into the `impl` import one at a time with a human gate.
   Nothing implemented yet.
+- [`delivery-loop.md`](delivery-loop.md) — **epic.** Turn the hand-run
+  delivery pattern (scoped brief → background maker in an isolated worktree →
+  deterministic gate → lost-work-safe integrate → independent re-verify on the
+  *merged* commit → cleanup, fanned out behind a merge-lock) into kitsoki
+  stories. Three slices (0/3): **git-ops smoothing**
+  ([`git-ops-smoothing.md`](git-ops-smoothing.md), story — operand-as-slot, stop
+  swallowing failures, force/confirm cleanup, one-shot rebase-onto-moved-main),
+  **ship-it** ([`ship-it.md`](ship-it.md), story — imports cherny-loop + git-ops
+  + a new independent `verify` room, chaining configure→maker→integrate→re-verify
+  →cleanup→`shipped`\|`needs-human`), and **fleet** ([`fleet.md`](fleet.md), story
+  — fans ship-it over a `decomposition.yaml` brief list behind a merge-lock).
+  Consumes [`work-decomposition.md`](work-decomposition.md)'s output and lands its
+  deferred parallel-fan-out non-goal. Nothing implemented yet.
 - [`hybrid-session-driving.md`](hybrid-session-driving.md) — **runtime.** Let
   `kitsoki web` drive a live session (e.g. `stories/bugfix`) from the browser
   while Jira/Bitbucket keep receiving artifacts write-only. Decouples *driving*
