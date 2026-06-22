@@ -162,6 +162,7 @@ type WorkSummary struct {
 	NotificationsUnread         int `json:"notifications_unread"`
 	NotificationsActionRequired int `json:"notifications_action_required"`
 	PendingDrives               int `json:"pending_drives"`
+	DispatchingDrives           int `json:"dispatching_drives"`
 	BackgroundedChats           int `json:"backgrounded_chats"`
 }
 
@@ -455,10 +456,12 @@ func (d OrchestratorDriver) listChatWork(ctx context.Context, out SessionWork) (
 		return SessionWork{}, err
 	}
 	for _, drive := range drives {
-		out.Summary.PendingDrives++
 		priority := 65
 		if drive.Status == chats.DriveStatusDispatching {
+			out.Summary.DispatchingDrives++
 			priority = 68
+		} else {
+			out.Summary.PendingDrives++
 		}
 		out.Items = append(out.Items, WorkItem{
 			Kind:               "pending_drive",

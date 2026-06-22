@@ -94,5 +94,6 @@ func addWorkSummary(dst *WorkSummary, src WorkSummary) {
 	dst.NotificationsUnread += src.NotificationsUnread
 	dst.NotificationsActionRequired += src.NotificationsActionRequired
 	dst.PendingDrives += src.PendingDrives
+	dst.DispatchingDrives += src.DispatchingDrives
 	dst.BackgroundedChats += src.BackgroundedChats
 }

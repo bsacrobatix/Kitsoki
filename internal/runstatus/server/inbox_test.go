@@ -278,6 +278,19 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 		OriginState:     "foyer",
 	})
 	require.NoError(t, err)
+	dispatchingChat, err := f.chats.Create(context.Background(), "cloak", "agent", "scope-dispatching", "Dispatching Claude")
+	require.NoError(t, err)
+	dispatching, err := f.chats.Enqueue(context.Background(), chats.EnqueueOptions{
+		ChatID:          dispatchingChat.ID,
+		Transport:       chats.DriveTransportStateMachine,
+		Actor:           "story",
+		Payload:         "already dispatching",
+		OriginSessionID: string(f.sid),
+		OriginState:     "foyer",
+	})
+	require.NoError(t, err)
+	_, err = f.chats.ClaimDrive(context.Background(), dispatching.DriveID)
+	require.NoError(t, err)
 	bg, err := f.chats.Create(context.Background(), "cloak", "agent", "scope-bg", "Background Claude")
 	require.NoError(t, err)
 	_, err = f.db.ExecContext(context.Background(), `UPDATE chats SET session_id = ? WHERE id = ?`, string(f.sid), bg.ID)
@@ -294,9 +307,10 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 	assert.Equal(t, 1, work.Summary.JobsRunning)
 	assert.Equal(t, 1, work.Summary.NotificationsUnread)
 	assert.Equal(t, 1, work.Summary.PendingDrives)
+	assert.Equal(t, 1, work.Summary.DispatchingDrives)
 	assert.Equal(t, 1, work.Summary.BackgroundedChats)
-	assert.Equal(t, 4, work.Summary.Items)
-	require.Len(t, work.Items, 4)
+	assert.Equal(t, 5, work.Summary.Items)
+	require.Len(t, work.Items, 5)
 	assert.Equal(t, "notification", work.Items[0].Kind)
 	assert.Equal(t, n.ID, work.Items[0].NotificationID)
 	assert.Equal(t, "notification", work.Items[0].ReacquireTool)
@@ -312,13 +326,19 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 	assert.Equal(t, "session", work.Items[1].ReacquireTool)
 	assert.Equal(t, f.publicID, work.Items[1].SessionID)
 	assert.Equal(t, "pending_drive", work.Items[2].Kind)
-	assert.Equal(t, chat.ID, work.Items[2].ChatID)
+	assert.Equal(t, dispatchingChat.ID, work.Items[2].ChatID)
+	assert.Equal(t, string(chats.DriveStatusDispatching), work.Items[2].Status)
 	assert.Equal(t, "chat.show", work.Items[2].ReacquireTool)
 	assert.Equal(t, f.publicID, work.Items[2].ReacquireSessionID)
-	assert.Equal(t, "backgrounded_chat", work.Items[3].Kind)
-	assert.Equal(t, bg.ID, work.Items[3].ChatID)
+	assert.Equal(t, "pending_drive", work.Items[3].Kind)
+	assert.Equal(t, chat.ID, work.Items[3].ChatID)
+	assert.Equal(t, string(chats.DriveStatusPending), work.Items[3].Status)
 	assert.Equal(t, "chat.show", work.Items[3].ReacquireTool)
 	assert.Equal(t, f.publicID, work.Items[3].ReacquireSessionID)
+	assert.Equal(t, "backgrounded_chat", work.Items[4].Kind)
+	assert.Equal(t, bg.ID, work.Items[4].ChatID)
+	assert.Equal(t, "chat.show", work.Items[4].ReacquireTool)
+	assert.Equal(t, f.publicID, work.Items[4].ReacquireSessionID)
 }
 
 func TestChatShow_SurfacesFocusedAsyncChatContext(t *testing.T) {
