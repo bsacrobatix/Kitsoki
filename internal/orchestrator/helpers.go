@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"kitsoki/internal/app"
@@ -408,6 +409,11 @@ func (o *Orchestrator) RunIntentWithInput(ctx context.Context, sid app.SessionID
 	}
 	if hostRedirect != "" {
 		result.NewState = hostRedirect
+		if msg, ok := result.World.Vars["last_error"].(string); ok && msg != "" {
+			if !strings.Contains(result.View, msg) {
+				result.View = appendErrorBanner(result.View, msg)
+			}
+		}
 	}
 
 	// Post-bind emit_intent dispatch — see settlePostBindEmits doc.

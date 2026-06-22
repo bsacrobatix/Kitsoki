@@ -1412,6 +1412,21 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	// turn-end logic targets the redirected state, not the original.
 	if hostRedirect != "" {
 		result.NewState = hostRedirect
+
+		// Usability safety-net: an on_error: redirect routed this turn to a
+		// destination room. If that room's view does not itself surface the
+		// failure (most stories don't reference {{ world.last_error }}), the
+		// operator would see a silently re-rendered room with no clue why the
+		// turn bounced. Append a concise, consistently-formatted banner so the
+		// reason is ALWAYS visible. Gated on (redirect happened AND last_error
+		// is set), and skipped when the view already shows the error text, so
+		// it never fires on success and never double-shows for the good
+		// citizens that already render last_error.
+		if msg, ok := result.World.Vars["last_error"].(string); ok && msg != "" {
+			if !strings.Contains(result.View, msg) {
+				result.View = appendErrorBanner(result.View, msg)
+			}
+		}
 	}
 
 	// Post-bind emit_intent dispatch (see settlePostBindEmits doc).
@@ -3094,6 +3109,19 @@ func projectContextFor(def *app.AppDef) host.ProjectContext {
 // convertBashProfile translates an app-layer BashProfileDecl into the
 // host-layer BashProfile. The two types are structurally identical; the
 // separation keeps the host package free of an app import.
+// errorBannerFormat is the single, consistent shape for the on_error redirect
+// banner the runtime appends when a redirected room does not surface the
+// failure itself. Kept as one format so every story bounce looks identical.
+const errorBannerFormat = "⚠ Action failed: %s"
+
+func appendErrorBanner(view, msg string) string {
+	banner := fmt.Sprintf(errorBannerFormat, msg)
+	if view == "" {
+		return banner
+	}
+	return view + "\n\n" + banner
+}
+
 func convertBashProfile(d *app.BashProfileDecl) *host.BashProfile {
 	if d == nil {
 		return nil

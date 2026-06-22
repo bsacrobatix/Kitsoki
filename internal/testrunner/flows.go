@@ -1646,14 +1646,16 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 		}
 
 		tr.NewState = currentState
-		// Re-render against the post-completion state/world so view
-		// assertions match what `kitsoki session show` returns — the
-		// outcome.View captured at machine.Turn time is stale once a
-		// host-call cascade or on_complete chain advances the state.
-		if v, rErr := rig.orch.RenderState(currentState, currentWorld); rErr == nil {
-			tr.View = v
-		} else {
+		// Use the outcome view when available — it reflects runtime-injected
+		// content (e.g. the on_error redirect error banner) that a bare
+		// template re-render cannot reproduce. Fall back to re-rendering
+		// against the post-completion state/world when the outcome has no
+		// view (e.g. clock-only turns or turns where the view was not yet
+		// captured at return time).
+		if outcome.View != "" {
 			tr.View = outcome.View
+		} else if v, rErr := rig.orch.RenderState(currentState, currentWorld); rErr == nil {
+			tr.View = v
 		}
 		tr.Events = outcome.Events
 
