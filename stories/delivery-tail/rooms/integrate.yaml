@@ -6,15 +6,30 @@
 # blanket `|| true` on load-bearing commands: the real exit binds and a non-zero
 # outcome routes to @exit:needs-human with last_error (never a swallowed success).
 #
+# Hardening (dt-integrate-buildcheck):
+#   #8  gate-string collision — the operator gate is passed as a POSITIONAL
+#       parameter ($1) to `bash -c`, never interpolated into the script's text.
+#       The template substitutes it into an already-parsed YAML argv scalar, so
+#       embedded quotes/$-vars survive verbatim; `bash -c "$GATE_CMD"` then runs
+#       it EXACTLY as verify.yaml runs `cmd: "{{ world.gate_command }}"`.
+#   #9  blank last_error — defense in depth: (a) an EXIT trap guarantees the bash
+#       always emits JSON even on a set -e abort; (b) the room binds the raw
+#       exit_code/stdout and, when no JSON outcome is produced, routes to
+#       @exit:needs-human with a synthesized last_error (never a featureless stall).
+#   #checkout — the checkout exit is captured (like rebase/merge); a failed
+#       checkout emits a clear error instead of a generic abort.
+#
 #   integrated → verify         (integrated_sha set)
 #   conflict | build_fail | error → @exit:needs-human (last_error)
+#   no JSON (abort)               → @exit:needs-human (synthesized last_error)
 
 states:
 
   integrate:
     description: "Rebase the maker's branch onto CURRENT main, build-check, merge."
     relevant_world: [workspace_branch, base_branch, main_worktree_path,
-                     integrate_outcome, integrated_sha, last_error]
+                     integrate_outcome, integrated_sha, last_error,
+                     run_exit, run_stdout]
     view:
       - prose: "Maker achieved the goal. Integrating branch {{ world.workspace_branch }} into {{ world.base_branch }}."
       - kv:
@@ -45,6 +60,18 @@ states:
             - |
               set -e
               export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
+              # The operator gate arrives as $1 (a positional param to `bash -c`),
+              # NOT interpolated into this script's text — so quotes and $-vars in
+              # the gate survive verbatim (#8). Assigning "$1" to a var is safe:
+              # it is a single already-formed string, never re-parsed.
+              GATE_CMD="$1"
+              EMITTED=0
+              # emit JSON then stop — host.run binds stdout_json.* from this.
+              emit() { jq -n "$@"; EMITTED=1; exit 0; }
+              # Guarantee stdout ALWAYS carries JSON, even on an unexpected
+              # `set -e` abort, so the room never stalls with a blank last_error
+              # (#9a). The trap exits 0 so host.run sees success → binds fire.
+              trap 'rc=$?; if [ "$EMITTED" != "1" ]; then jq -n --arg rc "$rc" "{outcome:\"error\",integrated_sha:\"\",last_op_ok:false,last_error:(\"integrate aborted before completing (exit \"+\$rc+\")\")}"; fi; exit 0' EXIT
               INTEGRATION="{{ world.base_branch }}"
               BRANCH="{{ world.workspace_branch }}"
               MAIN_WT="{{ world.main_worktree_path }}"
@@ -52,24 +79,18 @@ states:
               # there — a git branch can be checked out in only one worktree, so
               # rebasing $BRANCH in $MAIN_WT fails with "already used by worktree"
               # whenever the maker worktree still exists (it always does at
-              # integrate time — cleanup runs AFTER verify). Rebasing in the
-              # worktree that owns the branch is the lost-work-safe primitive.
-              # Empty ⇒ fall back to MAIN_WT (the pre-2026-06-22 behaviour, which
-              # only worked when the branch was not checked out anywhere).
+              # integrate time — cleanup runs AFTER verify). Empty ⇒ MAIN_WT.
               WORKTREE="{{ world.worktree_path }}"
-              BUILD_CMD="{{ world.gate_command }}"
               BUILD_DISABLED="{{ world.build_check_disabled }}"
               [ -z "$MAIN_WT" ] && MAIN_WT="."
               [ -z "$WORKTREE" ] && WORKTREE="$MAIN_WT"
 
               if [ -z "$BRANCH" ]; then
-                jq -n '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:"no branch to integrate (maker handoff empty)"}'
-                exit 0
+                emit --arg e "no branch to integrate (maker handoff empty)" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:$e}'
               fi
               BASE_SHA=$(git -C "$MAIN_WT" rev-parse "$INTEGRATION" 2>/dev/null || echo "")
               if [ -z "$BASE_SHA" ]; then
-                jq -n --arg int "$INTEGRATION" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("integration branch "+$int+" not found")}'
-                exit 0
+                emit --arg int "$INTEGRATION" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("integration branch "+$int+" not found")}'
               fi
               # Rebase the branch onto CURRENT integration HEAD, IN ITS OWN
               # worktree. merge-base is computed against the live INTEGRATION ref
@@ -79,45 +100,70 @@ states:
               REBASE_OUT=$(git -C "$WORKTREE" rebase --onto "$BASE_SHA" "$MB" "$BRANCH" 2>&1) || REBASE_EXIT=$?
               if [ "$REBASE_EXIT" -ne 0 ]; then
                 git -C "$WORKTREE" rebase --abort 2>/dev/null || true
-                jq -n --arg out "$REBASE_OUT" '{outcome:"conflict",integrated_sha:"",last_op_ok:false,last_error:$out}'
-                exit 0
+                emit --arg out "$REBASE_OUT" '{outcome:"conflict",integrated_sha:"",last_op_ok:false,last_error:$out}'
               fi
               # Merge the rebased branch into INTEGRATION in MAIN_WT (merge does
               # NOT check out the source branch, so no worktree-lock conflict).
               PRE_MERGE_SHA=$(git -C "$MAIN_WT" rev-parse "$INTEGRATION" 2>/dev/null || echo "")
-              git -C "$MAIN_WT" checkout "$INTEGRATION" 2>&1
+              # Capture the checkout exit (#checkout): a failed checkout emits a
+              # clear error rather than tripping the trap's generic message.
+              CO_EXIT=0
+              CO_OUT=$(git -C "$MAIN_WT" checkout "$INTEGRATION" 2>&1) || CO_EXIT=$?
+              if [ "$CO_EXIT" -ne 0 ]; then
+                emit --arg out "$CO_OUT" --arg int "$INTEGRATION" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("could not checkout "+$int+": "+$out)}'
+              fi
               MERGE_EXIT=0
               MERGE_OUT=$(git -C "$MAIN_WT" merge --no-ff "$BRANCH" -m "integrate: $BRANCH" 2>&1) || MERGE_EXIT=$?
               if [ "$MERGE_EXIT" -ne 0 ]; then
                 git -C "$MAIN_WT" merge --abort 2>/dev/null || true
-                jq -n --arg out "$MERGE_OUT" '{outcome:"conflict",integrated_sha:"",last_op_ok:false,last_error:$out}'
-                exit 0
+                emit --arg out "$MERGE_OUT" '{outcome:"conflict",integrated_sha:"",last_op_ok:false,last_error:$out}'
               fi
-              # Build-check the MERGED result (the merge is the thing we ship). On
-              # failure, reset INTEGRATION back to its pre-merge SHA so a build_fail
-              # leaves no half-integrated commit on the integration branch.
+              # Build-check the MERGED result (the merge is the thing we ship). The
+              # gate ($GATE_CMD = $1) runs VERBATIM via `bash -c`, exactly as
+              # verify.yaml runs it (#8) — no quote-stripping, no $-expansion of the
+              # gate text. On failure, reset INTEGRATION to its pre-merge SHA so no
+              # half-integrated commit lingers.
               if [ "$BUILD_DISABLED" != "true" ]; then
                 BUILD_EXIT=0
-                BUILD_OUT=$(cd "$MAIN_WT" && bash -c "$BUILD_CMD" 2>&1) || BUILD_EXIT=$?
+                BUILD_OUT=$(cd "$MAIN_WT" && bash -c "$GATE_CMD" 2>&1) || BUILD_EXIT=$?
                 if [ "$BUILD_EXIT" -ne 0 ]; then
                   [ -n "$PRE_MERGE_SHA" ] && git -C "$MAIN_WT" reset --hard "$PRE_MERGE_SHA" 2>/dev/null || true
-                  jq -n --arg out "$BUILD_OUT" '{outcome:"build_fail",integrated_sha:"",last_op_ok:false,last_error:$out}'
-                  exit 0
+                  emit --arg out "$BUILD_OUT" '{outcome:"build_fail",integrated_sha:"",last_op_ok:false,last_error:$out}'
                 fi
               fi
               MERGED_SHA=$(git -C "$MAIN_WT" rev-parse HEAD 2>/dev/null || echo "")
-              jq -n --arg sha "$MERGED_SHA" '{outcome:"integrated",integrated_sha:$sha,last_op_ok:true,last_error:""}'
+              emit --arg sha "$MERGED_SHA" '{outcome:"integrated",integrated_sha:$sha,last_op_ok:true,last_error:""}'
+            # $0 (script name) then $1 = the gate, passed as a verbatim argv
+            # element. The template substitutes into this already-parsed YAML
+            # scalar at runtime, so the gate is NEVER part of the script's text.
+            - "kitsoki-integrate"
+            - "{{ world.gate_command }}"
           cwd: "{{ world.main_worktree_path }}"
         bind:
           integrate_outcome: "stdout_json.outcome"
           integrated_sha:    "stdout_json.integrated_sha"
           last_error:        "stdout_json.last_error"
+          # Raw result marker — a templated bind so it is a STRING that is empty
+          # by default and only set AFTER the host runs (binds are applied
+          # post-dispatch). The on_enter emit guards are evaluated twice — once
+          # pre-bind during the effect walk and once post-bind — so the no-JSON
+          # guard MUST hinge on a marker that is empty pre-bind, else it fires on
+          # the default world before the host has even run (#9b).
+          run_exit:          "{{ string(result.exit_code) }}"
+          run_stdout:        "stdout"
         on_error: integrate
       # Post-bind routing; guards FALSE under default world.
       - when: "world.integrate_outcome == 'integrated'"
         emit_intent: integrated_ok
       - when: "world.integrate_outcome != '' && world.integrate_outcome != 'integrated'"
         emit_intent: integrate_failed
+      # The host RAN (run_exit is set post-bind) but bound NO JSON outcome ⇒ the
+      # run produced no parseable result (host.run failure, OOM-kill, jq missing).
+      # Route to needs-human with a synthesized last_error — never a featureless
+      # stall (#9b). The `run_exit != ''` clause keeps this from firing on the
+      # default (pre-bind) world during the on_enter effect walk.
+      - when: "world.run_exit != '' && world.integrate_outcome == ''"
+        emit_intent: integrate_aborted
     on:
       integrated_ok:
         - target: verify
@@ -136,5 +182,13 @@ states:
             - set:
                 status:     "needs-human"
                 last_error: "{{ world.last_error }}"
+      integrate_aborted:
+        - target: "@exit:needs-human"
+          effects:
+            # Synthesize a non-blank last_error from the raw run so the exit gate
+            # is satisfied and the operator sees the real failure tail (#9b).
+            - set:
+                status:     "needs-human"
+                last_error: "integrate produced no result (exit {{ world.run_exit }}): {{ world.run_stdout }}"
       look:
         - target: .
