@@ -703,6 +703,10 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if err != nil {
 			return nil, serverErr(err)
 		}
+		sessionID, _ := params["session_id"].(string)
+		if sessionID != "" {
+			out.Context = &ChatShowContext{SessionID: sessionID}
+		}
 		return out, nil
 
 	case "runstatus.stories.list":

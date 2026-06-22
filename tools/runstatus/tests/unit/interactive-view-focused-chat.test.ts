@@ -123,6 +123,9 @@ describe("InteractiveView focused chat context", () => {
     dataSource.listWork.mockClear();
     showChat.mockResolvedValue({
       ok: true,
+      context: {
+        session_id: "s1",
+      },
       chat: {
         id: "chat-1",
         app_id: "demo",
@@ -158,6 +161,7 @@ describe("InteractiveView focused chat context", () => {
 
     expect(showChat).toHaveBeenCalledWith("s1", "chat-1");
     expect(wrapper.find('[data-testid="focused-chat"]').text()).toContain("Background Claude");
+    expect(wrapper.find('[data-testid="focused-chat"]').text()).toContain("session s1");
     expect(wrapper.find('[data-testid="focused-chat"]').text()).toContain("tmux kit-bg");
     expect(wrapper.find('[data-testid="focused-chat"]').text()).toContain("check the flaky test");
     expect(wrapper.find('[data-testid="focused-chat"]').text()).toContain("the failure is in setup");

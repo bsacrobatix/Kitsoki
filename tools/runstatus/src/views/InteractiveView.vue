@@ -125,6 +125,7 @@
             <div v-else-if="focusedChatError" class="iv__focused-chat-error">{{ focusedChatError }}</div>
             <template v-else-if="focusedChat">
               <div class="iv__focused-chat-meta">
+                <span v-if="focusedChat.context?.session_id">session {{ focusedChat.context.session_id }}</span>
                 <span>chat {{ focusedChat.chat.id }}</span>
                 <span>{{ focusedChat.chat.status }}</span>
                 <span v-if="focusedChat.pty">tmux {{ focusedChat.pty.tmux_session }}</span>

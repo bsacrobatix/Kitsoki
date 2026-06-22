@@ -224,8 +224,13 @@ export interface ChatMessageItem {
   created_at_unix_micro: number;
 }
 
+export interface ChatShowContext {
+  session_id?: string;
+}
+
 export interface ChatShowResult {
   ok: boolean;
+  context?: ChatShowContext;
   chat: ChatInspectItem;
   pty?: ChatPTYItem;
   messages?: ChatMessageItem[];

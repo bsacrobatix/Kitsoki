@@ -346,6 +346,8 @@ func TestChatShow_SurfacesFocusedAsyncChatContext(t *testing.T) {
 		map[string]any{"session_id": f.publicID, "chat_id": chat.ID}, &out)
 
 	assert.True(t, out.OK)
+	require.NotNil(t, out.Context)
+	assert.Equal(t, f.publicID, out.Context.SessionID)
 	assert.Equal(t, chat.ID, out.Chat.ID)
 	assert.Equal(t, "Background Claude", out.Chat.Title)
 	assert.Equal(t, string(f.sid), out.Chat.SessionID)

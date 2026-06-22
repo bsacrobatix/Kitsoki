@@ -11,9 +11,15 @@ import (
 // ChatShowResult is the read-only focused context for one async chat thread.
 type ChatShowResult struct {
 	OK       bool              `json:"ok"`
+	Context  *ChatShowContext  `json:"context,omitempty"`
 	Chat     ChatInspectItem   `json:"chat"`
 	PTY      *ChatPTYItem      `json:"pty,omitempty"`
 	Messages []ChatMessageItem `json:"messages,omitempty"`
+}
+
+// ChatShowContext identifies the browser-facing session that focused this chat.
+type ChatShowContext struct {
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // ChatInspectItem is a compact projection of chat metadata.
