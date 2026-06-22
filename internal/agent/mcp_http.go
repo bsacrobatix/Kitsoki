@@ -115,6 +115,16 @@ func NewMCPHTTP(endpoint, tool string, headers map[string]string) *MCPHTTPAgent 
 	}
 }
 
+// WithHTTPClient replaces the HTTP client used for MCP calls. It is a test seam
+// for callers that need to validate request/response handling without opening a
+// loopback listener. Nil is ignored.
+func (o *MCPHTTPAgent) WithHTTPClient(client *http.Client) *MCPHTTPAgent {
+	if client != nil {
+		o.client = client
+	}
+	return o
+}
+
 // Ask sends an MCP tools/call request to the configured HTTP endpoint.
 // The AskRequest is encoded as the tool's arguments. The response must contain
 // a JSON-encoded AskResponse in the first content item's text field.

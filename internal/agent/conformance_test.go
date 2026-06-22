@@ -9,10 +9,17 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 // referenceSubmission is the byte-identical submission expected from all transports.
 // It is what the echo_agent binary and the HTTP handler both return in the
@@ -75,9 +82,8 @@ func TestConformance_InProcessVsSubprocessVsHTTP(t *testing.T) {
 	}
 
 	// ── 3. MCP-over-HTTP agent ───────────────────────────────────────────────
-	httpAgent, httpSrv := buildEchoHTTPServer(t)
+	httpAgent := buildEchoHTTPAgent(t)
 	defer httpAgent.Close()
-	defer httpSrv.Close()
 
 	httpResp, err := httpAgent.Ask(context.Background(), req)
 	if err != nil {
@@ -109,21 +115,28 @@ func TestConformance_InProcessVsSubprocessVsHTTP(t *testing.T) {
 	t.Logf("http Meta: %v", httpResp.Meta)
 }
 
-// buildEchoHTTPServer starts an httptest.Server that implements the same echo
-// agent behaviour as echo_agent (subprocess). Returns the MCPHTTPAgent and
-// the test server (caller must defer Close on both).
-func buildEchoHTTPServer(t *testing.T) (*MCPHTTPAgent, *httptest.Server) {
+// buildEchoHTTPAgent returns an MCPHTTPAgent backed by a fake RoundTripper that
+// implements the same echo agent behaviour as echo_agent (subprocess).
+func buildEchoHTTPAgent(t *testing.T) *MCPHTTPAgent {
 	t.Helper()
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		var req jsonrpcRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "bad request", http.StatusBadRequest)
-			return
+			return &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Status:     "400 Bad Request",
+				Body:       io.NopCloser(strings.NewReader("bad request")),
+				Request:    r,
+			}, nil
 		}
 		var params mcpToolCallParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
-			http.Error(w, "bad params", http.StatusBadRequest)
-			return
+			return &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Status:     "400 Bad Request",
+				Body:       io.NopCloser(strings.NewReader("bad params")),
+				Request:    r,
+			}, nil
 		}
 		var askReq AskRequest
 		_ = json.Unmarshal(params.Arguments, &askReq)
@@ -148,14 +161,16 @@ func buildEchoHTTPServer(t *testing.T) (*MCPHTTPAgent, *httptest.Server) {
 				Content: []mcpContentItem{{Type: "text", Text: string(respBytes)}},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(rpcResp); err != nil {
-			t.Logf("encode response: %v", err)
-		}
-	})
-	srv := httptest.NewServer(handler)
-	o := NewMCPHTTP(srv.URL, "ask", nil)
-	return o, srv
+		raw, _ := json.Marshal(rpcResp)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(string(raw))),
+			Request:    r,
+		}, nil
+	})}
+	return NewMCPHTTP("https://mcp.test", "ask", nil).WithHTTPClient(client)
 }
 
 // TestConformance_MetaFieldsNotInSubmission verifies that the Meta fields from
@@ -196,13 +211,10 @@ func TestConformance_MetaFieldsNotInSubmission(t *testing.T) {
 // plugins into a Registry, resolving agent.subprocess and agent.http
 // produces agents that work correctly.
 func TestConformance_InProcessVsHTTP_RegistryLookup(t *testing.T) {
-	_, httpSrv := buildEchoHTTPServer(t)
-	defer httpSrv.Close()
-
 	decls := map[string]*PluginDecl{
 		"agent.fixer": {
 			Plugin:   "mcp_http",
-			Endpoint: httpSrv.URL,
+			Endpoint: "https://mcp.test",
 			Tool:     "ask",
 		},
 	}
@@ -215,6 +227,11 @@ func TestConformance_InProcessVsHTTP_RegistryLookup(t *testing.T) {
 	o, resolveErr := reg.Resolve("agent.fixer")
 	if resolveErr != nil {
 		t.Fatalf("Resolve: %v", resolveErr)
+	}
+	if httpAgent, ok := o.(*MCPHTTPAgent); ok {
+		httpAgent.WithHTTPClient(buildEchoHTTPAgent(t).client)
+	} else {
+		t.Fatalf("Resolve returned %T, want *MCPHTTPAgent", o)
 	}
 
 	resp, askErr := o.Ask(context.Background(), conformanceRequest())

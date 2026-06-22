@@ -6,7 +6,7 @@
 // (request shape → Submission → schema validity) without a live model,
 // subprocess, or download — budgeted in ms.
 //
-// The default test is httptest-backed and deterministic. A live A/B variant
+// The default test is fake-HTTP-backed and deterministic. A live A/B variant
 // (against a real llama-server) is gated behind KITSOKI_PROBE_LOCAL_MODEL=1 so
 // the suite never spends money or spins up a model by default (memory: no LLM
 // tests by default).
@@ -16,8 +16,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 )
@@ -57,21 +55,12 @@ func TestLocalLLMDecideProbe(t *testing.T) {
 		t.Fatalf("premise: judge_verdict must be in-subset, got: %v", subErr)
 	}
 
-	// Fake llama-server: returns a fixed OpenAI chat-completions body whose
-	// assistant content is probeVerdict.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		resp := chatResponse{
-			Choices: []chatChoice{{Message: chatMessage{Role: "assistant", Content: probeVerdict}}},
-			Usage:   chatUsage{PromptTokens: 120, CompletionTokens: 24},
-		}
-		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer srv.Close()
-
 	// grammar:true + in-subset schema → response_format json_schema is attached,
 	// exactly as a real decide call would build it.
-	o := NewLocalLLM("qwen2.5-1.5b", 0, "", true, srv.URL, nil)
+	o := newLocalLLMForTest(&localChatHandler{
+		content: probeVerdict,
+		usage:   chatUsage{PromptTokens: 120, CompletionTokens: 24},
+	}, "qwen2.5-1.5b", true)
 	defer o.Close()
 
 	req := sampleRequest()
@@ -102,17 +91,9 @@ func TestLocalLLMDecideProbe(t *testing.T) {
 	// Negative sub-case: an off-schema content through the SAME transport must be
 	// caught by ValidateSubmission — proving the validity assertion above is not
 	// vacuous.
-	badSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		resp := chatResponse{
-			Choices: []chatChoice{{Message: chatMessage{Role: "assistant",
-				Content: `{"verdict":"definitely","intent":"accept","reason":"x","confidence":2.0}`}}},
-		}
-		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer badSrv.Close()
-
-	bad := NewLocalLLM("qwen2.5-1.5b", 0, "", true, badSrv.URL, nil)
+	bad := newLocalLLMForTest(&localChatHandler{
+		content: `{"verdict":"definitely","intent":"accept","reason":"x","confidence":2.0}`,
+	}, "qwen2.5-1.5b", true)
 	defer bad.Close()
 	badResp, err := bad.Ask(context.Background(), req)
 	if err != nil {
@@ -142,17 +123,10 @@ func TestLocalLLMSlugProbe_CodeFence(t *testing.T) {
 	// Simulate a model that wraps its JSON in a code fence (the bug).
 	fencedContent := "```json\n{\"slug\":\"virtual-pets\",\"rationale\":\"interactive pet companion\"}\n```"
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		resp := chatResponse{
-			Choices: []chatChoice{{Message: chatMessage{Role: "assistant", Content: fencedContent}}},
-			Usage:   chatUsage{PromptTokens: 80, CompletionTokens: 18},
-		}
-		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer srv.Close()
-
-	o := NewLocalLLM("qwen2.5-1.5b", 0, "", true, srv.URL, nil)
+	o := newLocalLLMForTest(&localChatHandler{
+		content: fencedContent,
+		usage:   chatUsage{PromptTokens: 80, CompletionTokens: 18},
+	}, "qwen2.5-1.5b", true)
 	defer o.Close()
 
 	req := sampleRequest()

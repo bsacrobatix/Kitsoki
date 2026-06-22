@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -18,6 +17,11 @@ type fakeEndpoint struct{ base string }
 func (f *fakeEndpoint) EnsureRunning(_ context.Context) (string, error) { return f.base, nil }
 func (f *fakeEndpoint) Close() error                                    { return nil }
 
+func newLocalEmbedderForTest(model string, rt http.RoundTripper) *LocalEmbedder {
+	return NewLocalEmbedder(model, &fakeEndpoint{base: "https://embed.test"}).
+		WithHTTPClient(&http.Client{Transport: rt})
+}
+
 func TestLocalEmbedderBasic(t *testing.T) {
 	// Canned response: 2 vectors, 4 dimensions each.
 	canned := embedResponse{
@@ -27,17 +31,26 @@ func TestLocalEmbedderBasic(t *testing.T) {
 		},
 		Model: "test-model",
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rt := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/v1/embeddings" {
-			http.NotFound(w, r)
-			return
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Status:     "404 Not Found",
+				Body:       io.NopCloser(strings.NewReader("not found")),
+				Request:    r,
+			}, nil
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(canned)
-	}))
-	defer srv.Close()
+		raw, _ := json.Marshal(canned)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(string(raw))),
+			Request:    r,
+		}, nil
+	})
 
-	e := NewLocalEmbedder("test-model", &fakeEndpoint{base: srv.URL})
+	e := newLocalEmbedderForTest("test-model", rt)
 	vecs, err := e.Embed(context.Background(), []string{"hello", "world"}, embed.Document)
 	if err != nil {
 		t.Fatalf("Embed: %v", err)
@@ -67,7 +80,7 @@ func TestLocalEmbedderPrefixNomic(t *testing.T) {
 		tc := tc
 		t.Run(tc.wantPrefix, func(t *testing.T) {
 			var capturedInput []string
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rt := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				body, _ := io.ReadAll(r.Body)
 				var req embedRequest
 				_ = json.Unmarshal(body, &req)
@@ -77,12 +90,17 @@ func TestLocalEmbedderPrefixNomic(t *testing.T) {
 					Data:  []embedData{{Index: 0, Embedding: []float32{1, 0, 0, 0}}},
 					Model: model,
 				}
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(resp)
-			}))
-			defer srv.Close()
+				raw, _ := json.Marshal(resp)
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(string(raw))),
+					Request:    r,
+				}, nil
+			})
 
-			e := NewLocalEmbedder(model, &fakeEndpoint{base: srv.URL})
+			e := newLocalEmbedderForTest(model, rt)
 			_, err := e.Embed(context.Background(), []string{"apple"}, tc.role)
 			if err != nil {
 				t.Fatalf("Embed: %v", err)
@@ -113,7 +131,7 @@ func TestLocalEmbedderPrefixBgeSmall(t *testing.T) {
 		tc := tc
 		t.Run(tc.desc, func(t *testing.T) {
 			var capturedInput []string
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rt := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				body, _ := io.ReadAll(r.Body)
 				var req embedRequest
 				_ = json.Unmarshal(body, &req)
@@ -123,12 +141,17 @@ func TestLocalEmbedderPrefixBgeSmall(t *testing.T) {
 					Data:  []embedData{{Index: 0, Embedding: []float32{1, 0, 0, 0}}},
 					Model: model,
 				}
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(resp)
-			}))
-			defer srv.Close()
+				raw, _ := json.Marshal(resp)
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(string(raw))),
+					Request:    r,
+				}, nil
+			})
 
-			e := NewLocalEmbedder(model, &fakeEndpoint{base: srv.URL})
+			e := newLocalEmbedderForTest(model, rt)
 			_, err := e.Embed(context.Background(), []string{"apple"}, tc.role)
 			if err != nil {
 				t.Fatalf("Embed: %v", err)

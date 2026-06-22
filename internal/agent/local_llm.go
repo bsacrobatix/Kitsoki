@@ -173,6 +173,16 @@ func NewLocalLLM(model string, port int, serverBin string, grammar bool, endpoin
 	}
 }
 
+// WithHTTPClient replaces the HTTP client used for endpoint calls. It is a test
+// seam for callers that need to validate request/response handling without
+// opening a loopback listener. Nil is ignored.
+func (o *LocalLLMAgent) WithHTTPClient(client *http.Client) *LocalLLMAgent {
+	if client != nil {
+		o.client = client
+	}
+	return o
+}
+
 // Ask sends the rendered prompt to the local model and returns its
 // schema-shaped reply. It does not validate the Submission — ValidateSubmission
 // is the sole authority — but it does record in Meta whether grammar was

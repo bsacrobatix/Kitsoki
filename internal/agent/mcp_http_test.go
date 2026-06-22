@@ -70,6 +70,41 @@ func (h *mcpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func (h *mcpHandler) RoundTrip(r *http.Request) (*http.Response, error) {
+	if h.delay > 0 {
+		select {
+		case <-time.After(h.delay):
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		}
+	}
+	copy := *h
+	copy.delay = 0
+	return handlerRoundTrip(http.HandlerFunc(copy.ServeHTTP), r)
+}
+
+type handlerRoundTripper struct {
+	handler http.Handler
+}
+
+func (h handlerRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	return handlerRoundTrip(h.handler, r)
+}
+
+func handlerRoundTrip(handler http.Handler, r *http.Request) (*http.Response, error) {
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, r)
+	return rr.Result(), nil
+}
+
+func newMCPHTTPForTest(tool string, headers map[string]string, rt http.RoundTripper) *MCPHTTPAgent {
+	return NewMCPHTTP("https://mcp.test", tool, headers).WithHTTPClient(&http.Client{Transport: rt})
+}
+
+func newMCPHTTPForHandler(tool string, headers map[string]string, handler http.Handler) *MCPHTTPAgent {
+	return newMCPHTTPForTest(tool, headers, handlerRoundTripper{handler: handler})
+}
+
 // TestMCPHTTPHappyPath verifies a successful agent call over HTTP.
 func TestMCPHTTPHappyPath(t *testing.T) {
 	t.Parallel()
@@ -81,10 +116,7 @@ func TestMCPHTTPHappyPath(t *testing.T) {
 			Meta:       map[string]any{"transport": "mcp_http"},
 		},
 	}
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	o := NewMCPHTTP(srv.URL, "ask", nil)
+	o := newMCPHTTPForTest("ask", nil, handler)
 	defer o.Close()
 
 	resp, err := o.Ask(context.Background(), sampleRequest())
@@ -104,19 +136,14 @@ func TestMCPHTTPHappyPath(t *testing.T) {
 func TestMCPHTTPConnectionRefused(t *testing.T) {
 	t.Parallel()
 
-	// Use a port that's definitely not listening.
-	// Find an available port then close the listener immediately so it's free.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := ln.Addr().String()
-	ln.Close()
-
-	o := NewMCPHTTP("http://"+addr, "ask", nil)
+	o := NewMCPHTTP("http://127.0.0.1:9", "ask", nil).WithHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+		}),
+	})
 	defer o.Close()
 
-	_, err = o.Ask(context.Background(), sampleRequest())
+	_, err := o.Ask(context.Background(), sampleRequest())
 	if err == nil {
 		t.Fatal("expected error for connection refused, got nil")
 	}
@@ -128,19 +155,11 @@ func TestMCPHTTPConnectionRefused(t *testing.T) {
 func TestMCPHTTPTLSFailure(t *testing.T) {
 	t.Parallel()
 
-	// Create a TLS test server but use a plain http.Client (no TLS skip).
-	// The client will fail the TLS handshake because the server cert is
-	// self-signed.
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	// MCPHTTPAgent uses a plain http.Transport (no TLS skip), so the
-	// self-signed cert will fail verification.
-	o := NewMCPHTTP(srv.URL, "ask", nil)
-	// Override the transport to NOT skip TLS so the test fails as expected.
-	// The default transport doesn't skip TLS, which is what we want.
+	o := NewMCPHTTP("https://mcp.test", "ask", nil).WithHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return nil, errors.New("tls: failed to verify certificate")
+		}),
+	})
 	defer o.Close()
 
 	_, tlsErr := o.Ask(context.Background(), sampleRequest())
@@ -168,10 +187,7 @@ func TestMCPHTTPSlowResponseDeadline(t *testing.T) {
 			Submission: json.RawMessage(`{"ok":true}`),
 		},
 	}
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	o := NewMCPHTTP(srv.URL, "ask", nil)
+	o := newMCPHTTPForTest("ask", nil, handler)
 	defer o.Close()
 
 	req := sampleRequest()
@@ -195,10 +211,7 @@ func TestMCPHTTPContextCancel(t *testing.T) {
 			Submission: json.RawMessage(`{"ok":true}`),
 		},
 	}
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	o := NewMCPHTTP(srv.URL, "ask", nil)
+	o := newMCPHTTPForTest("ask", nil, handler)
 	defer o.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
@@ -216,10 +229,7 @@ func TestMCPHTTP4xxError(t *testing.T) {
 	t.Parallel()
 
 	handler := &mcpHandler{httpStatus: http.StatusUnauthorized}
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	o := NewMCPHTTP(srv.URL, "ask", nil)
+	o := newMCPHTTPForTest("ask", nil, handler)
 	defer o.Close()
 
 	_, err := o.Ask(context.Background(), sampleRequest())
@@ -234,10 +244,7 @@ func TestMCPHTTP5xxError(t *testing.T) {
 	t.Parallel()
 
 	handler := &mcpHandler{httpStatus: http.StatusServiceUnavailable}
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	o := NewMCPHTTP(srv.URL, "ask", nil)
+	o := newMCPHTTPForTest("ask", nil, handler)
 	defer o.Close()
 
 	_, err := o.Ask(context.Background(), sampleRequest())
@@ -255,10 +262,7 @@ func TestMCPHTTPRPCError(t *testing.T) {
 	handler := &mcpHandler{
 		rpcError: &jsonrpcErrorObj{Code: -32000, Message: "agent crashed"},
 	}
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	o := NewMCPHTTP(srv.URL, "ask", nil)
+	o := newMCPHTTPForTest("ask", nil, handler)
 	defer o.Close()
 
 	_, err := o.Ask(context.Background(), sampleRequest())
@@ -278,10 +282,7 @@ func TestMCPHTTPToolError(t *testing.T) {
 	t.Parallel()
 
 	handler := &mcpHandler{isToolError: true}
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	o := NewMCPHTTP(srv.URL, "ask", nil)
+	o := newMCPHTTPForTest("ask", nil, handler)
 	defer o.Close()
 
 	_, err := o.Ask(context.Background(), sampleRequest())
@@ -310,12 +311,9 @@ func TestMCPHTTPHeaders(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(rpcResp)
 	})
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	o := NewMCPHTTP(srv.URL, "ask", map[string]string{
+	o := newMCPHTTPForHandler("ask", map[string]string{
 		"Authorization": "Bearer test-token-xyz",
-	})
+	}, handler)
 	defer o.Close()
 
 	_, err := o.Ask(context.Background(), sampleRequest())
@@ -352,11 +350,8 @@ func TestMCPHTTPDefaultTool(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(rpcResp)
 	})
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
 	// Pass empty tool name — should default to "ask".
-	o := NewMCPHTTP(srv.URL, "", nil)
+	o := newMCPHTTPForHandler("", nil, handler)
 	defer o.Close()
 
 	_, err := o.Ask(context.Background(), sampleRequest())
@@ -375,10 +370,7 @@ func TestMCPHTTPClose(t *testing.T) {
 	handler := &mcpHandler{
 		response: AskResponse{Submission: json.RawMessage(`{"ok":true}`)},
 	}
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	o := NewMCPHTTP(srv.URL, "ask", nil)
+	o := newMCPHTTPForTest("ask", nil, handler)
 
 	if _, err := o.Ask(context.Background(), sampleRequest()); err != nil {
 		t.Fatalf("Ask: %v", err)
@@ -418,10 +410,7 @@ func TestMCPHTTPRequestShape(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(rpcResp)
 	})
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	o := NewMCPHTTP(srv.URL, "ask", nil)
+	o := newMCPHTTPForHandler("ask", nil, handler)
 	defer o.Close()
 
 	if _, err := o.Ask(context.Background(), sampleRequest()); err != nil {

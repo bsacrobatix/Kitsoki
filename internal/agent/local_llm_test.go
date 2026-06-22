@@ -1,21 +1,22 @@
 // local_llm_test.go covers the local-model OpenAI HTTP transport in endpoint
-// mode against an httptest.Server — no live model, no subprocess, no download.
+// mode against a fake RoundTripper — no live model, no subprocess, no download.
 
 package agent
 
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-// localChatHandler is a configurable httptest handler emulating a llama.cpp
+// localChatHandler is a configurable RoundTripper emulating a llama.cpp
 // /v1/chat/completions endpoint. It captures the decoded request body so tests
 // can assert what local_llm sent.
 type localChatHandler struct {
@@ -30,17 +31,20 @@ type localChatHandler struct {
 }
 
 // lastRequest returns the most recently decoded request body. It is mutex-guarded
-// because ServeHTTP runs on the httptest server goroutine while the test reads on
-// its own goroutine; the HTTP round-trip is not a race-detector sync edge.
+// because RoundTrip can run concurrently with the test reader.
 func (h *localChatHandler) lastRequest() chatRequest {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.gotRequest
 }
 
-func (h *localChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *localChatHandler) RoundTrip(r *http.Request) (*http.Response, error) {
 	if h.delay > 0 {
-		time.Sleep(h.delay)
+		select {
+		case <-time.After(h.delay):
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		}
 	}
 	h.mu.Lock()
 	_ = json.NewDecoder(r.Body).Decode(&h.gotRequest)
@@ -50,18 +54,35 @@ func (h *localChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if status == 0 {
 		status = http.StatusOK
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+
+	header := http.Header{"Content-Type": []string{"application/json"}}
 	if status >= 400 {
-		w.Write([]byte(`{"error":"boom"}`))
-		return
+		return &http.Response{
+			StatusCode: status,
+			Status:     http.StatusText(status),
+			Header:     header,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"boom"}`)),
+			Request:    r,
+		}, nil
 	}
 
 	resp := chatResponse{Usage: h.usage}
 	if !h.omitChoice {
 		resp.Choices = []chatChoice{{Message: chatMessage{Role: "assistant", Content: h.content}}}
 	}
-	json.NewEncoder(w).Encode(resp)
+	raw, _ := json.Marshal(resp)
+	return &http.Response{
+		StatusCode: status,
+		Status:     http.StatusText(status),
+		Header:     header,
+		Body:       io.NopCloser(strings.NewReader(string(raw))),
+		Request:    r,
+	}, nil
+}
+
+func newLocalLLMForTest(h *localChatHandler, model string, grammar bool) *LocalLLMAgent {
+	return NewLocalLLM(model, 0, "", grammar, "https://local-llm.test", nil).
+		WithHTTPClient(&http.Client{Transport: h})
 }
 
 // TestLocalLLMOptInNoFetchAtConstruction is the opt-in guarantee with teeth:
@@ -110,10 +131,7 @@ func TestLocalLLMHappyPath(t *testing.T) {
 		content: wantSubmission,
 		usage:   chatUsage{PromptTokens: 42, CompletionTokens: 7},
 	}
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	o := NewLocalLLM("qwen2.5-1.5b", 0, "", false, srv.URL, nil)
+	o := newLocalLLMForTest(h, "qwen2.5-1.5b", false)
 	defer o.Close()
 
 	resp, err := o.Ask(context.Background(), sampleRequest())
@@ -151,10 +169,7 @@ func TestLocalLLMGrammarApplied(t *testing.T) {
 	t.Parallel()
 
 	h := &localChatHandler{content: `{"verdict":"pass"}`}
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	o := NewLocalLLM("m", 0, "", true, srv.URL, nil)
+	o := newLocalLLMForTest(h, "m", true)
 	defer o.Close()
 
 	req := sampleRequest()
@@ -185,10 +200,7 @@ func TestLocalLLMGrammarSkippedOutOfSubset(t *testing.T) {
 	t.Parallel()
 
 	h := &localChatHandler{content: `{"x":1}`}
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	o := NewLocalLLM("m", 0, "", true, srv.URL, nil)
+	o := newLocalLLMForTest(h, "m", true)
 	defer o.Close()
 
 	req := sampleRequest()
@@ -212,10 +224,7 @@ func TestLocalLLMDeadlineExceeded(t *testing.T) {
 	t.Parallel()
 
 	h := &localChatHandler{content: `{"ok":true}`, delay: 200 * time.Millisecond}
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	o := NewLocalLLM("m", 0, "", false, srv.URL, nil)
+	o := newLocalLLMForTest(h, "m", false)
 	defer o.Close()
 
 	req := sampleRequest()
@@ -234,10 +243,7 @@ func TestLocalLLMContextAlreadyDone(t *testing.T) {
 	t.Parallel()
 
 	h := &localChatHandler{content: `{"ok":true}`}
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	o := NewLocalLLM("m", 0, "", false, srv.URL, nil)
+	o := newLocalLLMForTest(h, "m", false)
 	defer o.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -255,10 +261,7 @@ func TestLocalLLM4xxError(t *testing.T) {
 	t.Parallel()
 
 	h := &localChatHandler{httpStatus: http.StatusBadRequest}
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	o := NewLocalLLM("m", 0, "", false, srv.URL, nil)
+	o := newLocalLLMForTest(h, "m", false)
 	defer o.Close()
 
 	_, err := o.Ask(context.Background(), sampleRequest())
@@ -274,10 +277,7 @@ func TestLocalLLMNoChoices(t *testing.T) {
 	t.Parallel()
 
 	h := &localChatHandler{omitChoice: true}
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	o := NewLocalLLM("m", 0, "", false, srv.URL, nil)
+	o := newLocalLLMForTest(h, "m", false)
 	defer o.Close()
 
 	_, err := o.Ask(context.Background(), sampleRequest())
@@ -293,10 +293,7 @@ func TestLocalLLMEmptyContent(t *testing.T) {
 	t.Parallel()
 
 	h := &localChatHandler{content: ""}
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	o := NewLocalLLM("m", 0, "", false, srv.URL, nil)
+	o := newLocalLLMForTest(h, "m", false)
 	defer o.Close()
 
 	_, err := o.Ask(context.Background(), sampleRequest())
@@ -326,7 +323,7 @@ func TestStripCodeFence(t *testing.T) {
 
 // TestLocalLLMTranscript verifies the happy-path response populates an
 // "openai-chat" Transcript with the request/assistant/result triple and usage
-// tokens — without a real model (the httptest stub stands in for the wire).
+// tokens — without a real model (the fake RoundTripper stands in for the wire).
 func TestLocalLLMTranscript(t *testing.T) {
 	t.Parallel()
 
@@ -334,10 +331,7 @@ func TestLocalLLMTranscript(t *testing.T) {
 		content: `{"verdict":"pass"}`,
 		usage:   chatUsage{PromptTokens: 42, CompletionTokens: 7},
 	}
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	o := NewLocalLLM("qwen2.5-1.5b", 0, "", false, srv.URL, nil)
+	o := newLocalLLMForTest(h, "qwen2.5-1.5b", false)
 	defer o.Close()
 
 	resp, err := o.Ask(context.Background(), sampleRequest())
@@ -393,10 +387,7 @@ func TestLocalLLMEndpointModeClose(t *testing.T) {
 	t.Parallel()
 
 	h := &localChatHandler{content: `{"ok":true}`}
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	o := NewLocalLLM("m", 0, "", false, srv.URL, nil)
+	o := newLocalLLMForTest(h, "m", false)
 	if _, err := o.Ask(context.Background(), sampleRequest()); err != nil {
 		t.Fatalf("Ask: %v", err)
 	}

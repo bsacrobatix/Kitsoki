@@ -79,6 +79,16 @@ func NewLocalEmbedder(model string, s localSidecar) *LocalEmbedder {
 	}
 }
 
+// WithHTTPClient replaces the HTTP client used for embedding calls. It is a
+// test seam for request/response validation without a loopback listener. Nil is
+// ignored.
+func (e *LocalEmbedder) WithHTTPClient(client *http.Client) *LocalEmbedder {
+	if client != nil {
+		e.client = client
+	}
+	return e
+}
+
 // Embed implements embed.Embedder. It applies the model+role prefix to each
 // text, POSTs to base+"/v1/embeddings", and returns the response vectors in
 // input order. The vectors are not re-normalized — llama-server with

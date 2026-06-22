@@ -24,10 +24,11 @@ package host_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kitsoki/internal/agent"
@@ -118,16 +119,21 @@ func TestAgentDecideHandler_PluginPath_SchemaFileResolved(t *testing.T) {
 	// Fake llama-server: returns the valid submission wrapped in a code fence —
 	// the exact output shape that caused the dogfood regression.
 	fenced := "```json\n{\"slug\":\"virtual-pets\"}\n```"
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := json.Marshal(map[string]any{
 			"choices": []map[string]any{{"message": map[string]any{"role": "assistant", "content": fenced}}},
 			"usage":   map[string]any{"prompt_tokens": 20, "completion_tokens": 8},
 		})
-	}))
-	defer srv.Close()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(string(body))),
+			Request:    r,
+		}, nil
+	})}
 
-	localLLM := agent.NewLocalLLM("qwen2.5-1.5b", 0, "", false, srv.URL, nil)
+	localLLM := agent.NewLocalLLM("qwen2.5-1.5b", 0, "", false, "https://llm.test", nil).WithHTTPClient(client)
 	defer localLLM.Close()
 
 	reg := agent.NewRegistry()
