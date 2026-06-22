@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/host"
 	inboxmodel "kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
@@ -58,26 +59,9 @@ func syncGitHubInbox(m RootModel, r *blocks.Renderer, args []string) (RootModel,
 		repo = strings.TrimSpace(args[0])
 	}
 	ctx := context.Background()
-	items, err := host.ListGitHubInboxItems(ctx, host.GitHubInboxOptions{
-		Repo:          repo,
-		IncludeIssues: true,
-		IncludePRs:    true,
-		Limit:         100,
-	})
+	result, err := syncGitHubInboxNotifications(ctx, m.jobStore, m.sid, repo)
 	if err != nil {
 		return m, r.SlashOutput("(inbox sync-github: " + err.Error() + ")")
-	}
-
-	inserted := 0
-	for _, item := range items {
-		n := inboxmodel.NewGitHubNotification(m.sid, repo, "inbox", item)
-		ok, err := m.jobStore.InsertExternalNotificationOnce(ctx, n)
-		if err != nil {
-			return m, r.SlashOutput(fmt.Sprintf("(inbox sync-github: insert %s #%s: %v)", item.Kind, item.Number, err))
-		}
-		if ok {
-			inserted++
-		}
 	}
 
 	ns, err := m.jobStore.ListNotifications(ctx, m.sid, 20)
@@ -88,12 +72,45 @@ func syncGitHubInbox(m RootModel, r *blocks.Renderer, args []string) (RootModel,
 	m.inbox, _ = m.inbox.Update(inboxRefreshed{notifications: ns})
 
 	var sb strings.Builder
-	sb.WriteString(r.SlashOutput(fmt.Sprintf("  github sync: fetched %d, inserted %d, skipped %d", len(items), inserted, len(items)-inserted)))
+	sb.WriteString(r.SlashOutput(fmt.Sprintf("  github sync: fetched %d, inserted %d, skipped %d", result.Fetched, result.Inserted, result.Skipped)))
 	if list := renderInboxList(r, ns, true); list != "" {
 		sb.WriteString("\n")
 		sb.WriteString(list)
 	}
 	return m, strings.TrimRight(sb.String(), "\n")
+}
+
+type githubInboxSyncResult struct {
+	Fetched  int
+	Inserted int
+	Skipped  int
+}
+
+func syncGitHubInboxNotifications(ctx context.Context, store *jobs.JobStore, sid app.SessionID, repo string) (githubInboxSyncResult, error) {
+	items, err := host.ListGitHubInboxItems(ctx, host.GitHubInboxOptions{
+		Repo:          repo,
+		IncludeIssues: true,
+		IncludePRs:    true,
+		Limit:         100,
+	})
+	if err != nil {
+		return githubInboxSyncResult{}, err
+	}
+
+	result := githubInboxSyncResult{Fetched: len(items)}
+	for _, item := range items {
+		n := inboxmodel.NewGitHubNotification(sid, repo, "inbox", item)
+		ok, err := store.InsertExternalNotificationOnce(ctx, n)
+		if err != nil {
+			return githubInboxSyncResult{}, fmt.Errorf("insert %s #%s: %w", item.Kind, item.Number, err)
+		}
+		if ok {
+			result.Inserted++
+		} else {
+			result.Skipped++
+		}
+	}
+	return result, nil
 }
 
 func renderInboxList(r *blocks.Renderer, notifs []jobs.Notification, unreadOnly bool) string {

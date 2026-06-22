@@ -556,6 +556,9 @@ func SetRoutingObserverForTest(m *RootModel, obs *RoutingObserver) {
 // without poking at unexported fields from the _test package.
 func (m RootModel) CurrentStateForTest() app.StatePath { return m.currentState }
 
+// SessionIDForTest returns the app session id owned by the model.
+func (m RootModel) SessionIDForTest() app.SessionID { return m.sid }
+
 // ActiveRoomForTest returns the active room key — useful for
 // asserting which transcript buffer is currently bound to
 // m.transcript after a state change.

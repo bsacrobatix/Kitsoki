@@ -45,6 +45,8 @@ import (
 	"kitsoki/internal/world"
 )
 
+const githubInboxPollInterval = 5 * time.Minute
+
 // Mode describes which interaction mode the TUI is currently in.
 type Mode int
 
@@ -237,7 +239,8 @@ type RootModel struct {
 
 	// lastNotifications is the most-recent polling snapshot, used to build
 	// the status-line badge without re-querying the database on every View().
-	lastNotifications []jobs.Notification
+	lastNotifications   []jobs.Notification
+	lastGitHubInboxSync time.Time
 
 	// minerService is the ambient miner's control seam (ad-hoc-workbench slice
 	// 4). When non-nil, /mine drives pause/resume/scope/now/decide through it
@@ -957,11 +960,16 @@ func (m RootModel) scheduleInboxPoll(delay time.Duration) tea.Cmd {
 
 // pollInbox reads notifications from the job store and returns an inboxRefreshed
 // message.  Runs inline (called from the Update goroutine via tea.Cmd).
-func (m RootModel) pollInbox() tea.Msg {
+func (m RootModel) pollInbox(syncGitHub bool) tea.Msg {
 	if m.jobStore == nil {
 		return nil
 	}
 	ctx := context.Background()
+	if syncGitHub {
+		if _, err := syncGitHubInboxNotifications(ctx, m.jobStore, m.sid, ""); err != nil {
+			slog.Debug("tui: github inbox sync skipped", "err", err)
+		}
+	}
 	ns, err := m.jobStore.ListNotifications(ctx, m.sid, 20)
 	if err != nil {
 		slog.Warn("tui: inbox poll error", "err", err)
@@ -1161,7 +1169,12 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.jobStore == nil {
 			return m, nil
 		}
-		return m, func() tea.Msg { return m.pollInbox() }
+		now := m.inboxClock().Now()
+		syncGitHub := m.lastGitHubInboxSync.IsZero() || now.Sub(m.lastGitHubInboxSync) >= githubInboxPollInterval
+		if syncGitHub {
+			m.lastGitHubInboxSync = now
+		}
+		return m, func() tea.Msg { return m.pollInbox(syncGitHub) }
 
 	case inboxRefreshed:
 		// Single-pane redesign: print a transcript line for each
@@ -1506,7 +1519,7 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg {
 					ctx := context.Background()
 					_ = js.MarkNotificationRead(ctx, nID)
-					return m.pollInbox()
+					return m.pollInbox(false)
 				}
 			}
 			return m, nil
