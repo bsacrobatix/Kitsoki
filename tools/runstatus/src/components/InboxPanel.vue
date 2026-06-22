@@ -66,6 +66,7 @@
                 <span class="work-item__title">{{ item.title || "(untitled)" }}</span>
                 <span v-if="item.body" class="work-item__body">{{ item.body }}</span>
                 <span v-if="item.origin_url" class="work-item__origin">{{ item.origin_url }}</span>
+                <span v-if="workContext(item)" class="work-item__context">{{ workContext(item) }}</span>
                 <span class="work-item__meta">
                   <span>{{ item.status || item.kind }}</span>
                   <span v-if="item.updated_at">{{ relativeTime(item.updated_at) }}</span>
@@ -196,6 +197,19 @@ function workKind(item: WorkItem): string {
   if (item.kind === "backgrounded_chat") return "chat";
   if (item.kind === "notification") return item.severity || "note";
   return item.kind;
+}
+
+function workContext(item: WorkItem): string {
+  if (item.kind !== "pending_drive" && item.kind !== "backgrounded_chat") return "";
+
+  const parts: string[] = [];
+  if (item.chat_id) parts.push(`chat ${item.chat_id}`);
+  if (item.drive_id) parts.push(`drive ${item.drive_id}`);
+  if (item.actor) parts.push(item.actor);
+  if (item.thread) parts.push(item.thread);
+  if (item.tmux_session) parts.push(`tmux ${item.tmux_session}`);
+  if (item.tmux_host) parts.push(item.tmux_host);
+  return parts.join(" | ");
 }
 
 function onKeydown(e: KeyboardEvent): void {
@@ -346,7 +360,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   overflow-wrap: anywhere;
 }
 .work-item__body,
-.work-item__origin {
+.work-item__origin,
+.work-item__context {
   font-size: 0.7rem;
   color: var(--k-fg-muted, #94a3b8);
   overflow-wrap: anywhere;
@@ -359,6 +374,10 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 }
 .work-item__origin {
   color: var(--k-fg-accent, #60a5fa);
+}
+.work-item__context {
+  color: var(--k-fg-muted, #94a3b8);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 .work-item__meta {
   display: inline-flex;

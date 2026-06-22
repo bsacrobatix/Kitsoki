@@ -75,6 +75,8 @@ describe("InboxPanel", () => {
         reacquire_session_id: "web-session-1",
         drive_id: "drive-1",
         chat_id: "chat-1",
+        actor: "claude",
+        thread: "thread-1",
       },
       {
         kind: "backgrounded_chat",
@@ -85,6 +87,8 @@ describe("InboxPanel", () => {
         reacquire_tool: "session",
         reacquire_session_id: "web-session-1",
         chat_id: "chat-2",
+        tmux_session: "kit-bg",
+        tmux_host: "devbox",
       },
     ];
 
@@ -97,6 +101,13 @@ describe("InboxPanel", () => {
     expect(document.body.textContent).toContain("chat");
     expect(document.body.textContent).toContain("continue the agent task");
     expect(document.body.textContent).toContain("Background Claude");
+    expect(document.body.textContent).toContain("chat chat-1");
+    expect(document.body.textContent).toContain("drive drive-1");
+    expect(document.body.textContent).toContain("claude");
+    expect(document.body.textContent).toContain("thread-1");
+    expect(document.body.textContent).toContain("chat chat-2");
+    expect(document.body.textContent).toContain("tmux kit-bg");
+    expect(document.body.textContent).toContain("devbox");
 
     (rows[1] as HTMLButtonElement).click();
     await flushPromises();
