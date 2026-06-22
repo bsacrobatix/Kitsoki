@@ -151,6 +151,11 @@ has ranked the global queue, notice required operator input, and reacquire or
 switch to the task through `session.teleport` without scraping the TUI frame or
 decoding trace events.
 
+Story-authored `host.chat.drive` effects are stamped with the originating
+session and state before the host handler enqueues the drive, so ordinary
+state-machine chat work appears in these same `pending_drives[]` and
+`studio.work.items[]` surfaces without fixture-only store seeding.
+
 When the selected async item is chat-backed, `chat.show` drills into the
 focused context: chat metadata, the transcript slice, and any recorded tmux PTY
 state. That gives an MCP client the same "switch attention to this subagent"

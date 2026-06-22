@@ -113,6 +113,69 @@ The expected proof at the end is:
 - a final `session.inspect` reports `notifications_unread == 1`
 - `render.tui` reports the reacquired frame's state as `running`
 
+## Chat-backed work smoke
+
+Use this variant to prove the Claude-style subagent queue path: a state-machine
+room creates a persistent chat, enqueues a non-awaited `host.chat.drive`, then
+`studio.work` returns that pending drive with a `chat.show` reacquisition hint.
+No dispatcher or real agent is required.
+
+```sh
+GOCACHE="$PWD/.cache/go-build" \
+go run ./cmd/kitsoki mcp-test \
+  --list-tools=false \
+  --timeout 20s \
+  --server-arg mcp \
+  --server-arg --stories-dir --server-arg ./stories \
+  --server-arg --db --server-arg .artifacts/mcp-test/chat-drive-work.db \
+  --calls '[
+    {
+      "tool": "session.new",
+      "args": {
+        "story_path": "testdata/apps/chat_drive_work/app.yaml",
+        "key": "chat-drive-smoke"
+      },
+      "expect": {
+        "structuredContent.state": "idle"
+      }
+    },
+    {
+      "tool": "session.submit",
+      "args": {
+        "handle": "chat-drive-smoke",
+        "intent": "queue"
+      },
+      "expect": {
+        "structuredContent.outcome.state": "queued"
+      }
+    },
+    {
+      "tool": "studio.work",
+      "expect": {
+        "structuredContent.summary.pending_drives": 1,
+        "structuredContent.items.0.kind": "pending_drive",
+        "structuredContent.items.0.reacquire.tool": "chat.show"
+      },
+      "save": {
+        "chat_id": "structuredContent.items.0.chat_id"
+      }
+    },
+    {
+      "tool": "chat.show",
+      "args": {
+        "chat_id": "${chat_id}"
+      },
+      "expect": {
+        "structuredContent.chat.title": "Async MCP chat"
+      }
+    }
+  ]'
+```
+
+This smoke exercises the session-origin stamping that lets `studio.work`,
+TUI `/work`, and the web inbox active-work list all find pending chat drives
+created by ordinary story `host.chat.drive` effects.
+
 To prove the browser surface too, first stage the embedded runstatus SPA:
 
 ```sh
