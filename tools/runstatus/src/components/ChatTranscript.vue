@@ -36,6 +36,30 @@
           >
             ↪ off path
           </div>
+          <!-- Contextual-routing receipt: this agent turn was resolved by the
+               CRR (contextual-routing) tier — the final routing tier that fires
+               after deterministic + embedding miss. The chip names the lane /
+               intent it landed in and marks the tier as "contextual" so an
+               operator can tell a CRR decision apart from a normal transition.
+               It also carries the stable decision_id (the rewind target) in its
+               title, ahead of the rewind control's RPC being exposed. -->
+          <div
+            v-if="entry.role === 'agent' && entry.contextRoute"
+            class="chat-route-receipt"
+            data-testid="route-receipt"
+            :title="routeReceiptTitle(entry.contextRoute!)"
+          >
+            <span class="chat-route-receipt__arrow">⤳</span>
+            <span class="chat-route-receipt__target"
+              >{{ routeTarget(entry.contextRoute!) }}</span
+            >
+            <span class="chat-route-receipt__tier">contextual</span>
+            <span
+              class="chat-route-receipt__conf"
+              v-if="entry.contextRoute!.confidence"
+              >{{ entry.contextRoute!.confidence.toFixed(2) }}</span
+            >
+          </div>
         </div>
         <!-- The turn's preserved thinking/tool feed, collapsed by default so
              the final view leads but the activity that produced it stays one
@@ -101,7 +125,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
-import type { View } from "../types.js";
+import type { View, ContextRouteInfo } from "../types.js";
 import type { StreamItem } from "../lib/activity.js";
 import type { RoutingInfo } from "../stores/run.js";
 import ActivityDisclosure from "./ActivityDisclosure.vue";
@@ -118,6 +142,11 @@ export interface ChatEntry {
   isOffRamp?: boolean;
   /** Routing provenance for a free-text user turn (renders the routing chip). */
   routing?: RoutingInfo;
+  /**
+   * The contextual-routing receipt, set on an agent bubble when the CRR tier
+   * resolved this turn (renders the "⤳ … · contextual" route receipt chip).
+   */
+  contextRoute?: ContextRouteInfo;
 }
 
 /** Tooltip: the full routing story in one line. */
@@ -126,6 +155,25 @@ function routingTitle(r: RoutingInfo): string {
   if (r.matchType) bits.push(`(${r.matchType})`);
   if (r.confidence) bits.push(`confidence ${r.confidence.toFixed(2)}`);
   if (r.routedBy !== "llm") bits.push("— deterministic, no LLM, $0");
+  return bits.join(" ");
+}
+
+/**
+ * routeTarget names what a CRR decision landed on: the matched intent for an
+ * intent-class route, otherwise the lane (help / room_request / meta_edit) the
+ * non-intent class resolved to. Falls back to the bare class.
+ */
+function routeTarget(r: ContextRouteInfo): string {
+  if (r.class === "intent" && r.intent) return r.intent;
+  return r.target_lane || r.class;
+}
+
+/** Tooltip: the full contextual-routing story + the decision id (rewind target). */
+function routeReceiptTitle(r: ContextRouteInfo): string {
+  const bits = [`contextually routed to "${routeTarget(r)}" (class: ${r.class})`];
+  if (r.confidence) bits.push(`confidence ${r.confidence.toFixed(2)}`);
+  if (r.reason) bits.push(`— ${r.reason}`);
+  bits.push(`[decision ${r.decision_id}]`);
   return bits.join(" ");
 }
 
@@ -357,6 +405,43 @@ watch(
   border-radius: 999px;
   padding: 2px 9px;
   box-shadow: 0 1px 2px rgba(124, 58, 237, 0.3);
+}
+
+/* Contextual-routing receipt chip on the agent role row: a compact pill reading
+   "⤳ target · contextual · conf". Sits beside the role label so a CRR decision
+   is read alongside the speaker. Teal-tinted to set the contextual tier apart
+   from the user-side routing chip and the violet off-path chip. */
+.chat-route-receipt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.2;
+  color: #115e59;
+  background: #d1faf3;
+  border: 1px solid #5eead4;
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.chat-route-receipt__arrow {
+  opacity: 0.7;
+}
+.chat-route-receipt__target {
+  font-weight: 700;
+}
+.chat-route-receipt__tier {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 600;
+  font-size: 9.5px;
+  background: #0d9488;
+  color: #fff;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.chat-route-receipt__conf {
+  opacity: 0.75;
 }
 
 .chat-role {

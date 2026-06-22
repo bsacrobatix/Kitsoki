@@ -262,6 +262,25 @@ type turnResult struct {
 	GuardHint     string                  `json:"guard_hint,omitempty"`
 	HarnessError  string                  `json:"harness_error,omitempty"`
 	TurnNumber    int                     `json:"turn_number"`
+	// ContextRoute is the contextual-routing receipt for a turn the CRR tier
+	// resolved (nil for deterministic/semantic/LLM turns). It carries the
+	// matched class/intent, the contextual confidence, and a stable DecisionID
+	// so the web surface can show a "routed to … · contextual" receipt chip.
+	ContextRoute *contextRouteInfo `json:"context_route,omitempty"`
+}
+
+// contextRouteInfo is the wire shape of orchestrator.ContextRouteReceipt — the
+// queryable record of one contextual-routing decision, surfaced to the browser
+// so an operator can see (and, in a later slice, rewind) the route. The
+// DecisionID is "<session_id>:<turn_number>", the stable rewind target.
+type contextRouteInfo struct {
+	Class        string  `json:"class"`
+	Intent       string  `json:"intent,omitempty"`
+	Reason       string  `json:"reason,omitempty"`
+	Confidence   float64 `json:"confidence"`
+	TargetChatID string  `json:"target_chat_id,omitempty"`
+	TargetLane   string  `json:"target_lane,omitempty"`
+	DecisionID   string  `json:"decision_id"`
 }
 
 // intentInfo is one entry in turnResult.Intents — the per-intent menu metadata
@@ -315,6 +334,17 @@ func newTurnResult(out *orchestrator.TurnOutcome, resolver Driver) turnResult {
 		GuardHint:      out.GuardHint,
 		HarnessError:   out.HarnessError,
 		TurnNumber:     int(out.TurnNumber),
+	}
+	if cr := out.ContextRoute; cr != nil {
+		tr.ContextRoute = &contextRouteInfo{
+			Class:        cr.Class,
+			Intent:       cr.Intent,
+			Reason:       cr.Reason,
+			Confidence:   cr.Confidence,
+			TargetChatID: cr.TargetChatID,
+			TargetLane:   cr.TargetLane,
+			DecisionID:   cr.DecisionID,
+		}
 	}
 	if resolver != nil {
 		for _, name := range out.AllowedIntents {

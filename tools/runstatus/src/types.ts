@@ -307,4 +307,29 @@ export interface TurnResult {
   guard_hint?: string;
   harness_error?: string;
   turn_number: number;
+  /**
+   * The contextual-routing receipt for a turn the CRR (contextual-routing)
+   * tier resolved — absent for deterministic/semantic/LLM turns. Carries the
+   * matched class/intent, the contextual confidence, and a stable decision_id
+   * ("<session_id>:<turn>") that is the rewind target. Surfaced as the route
+   * receipt chip on the agent bubble. See internal/orchestrator
+   * ContextRouteReceipt and docs/architecture/semantic-routing.md §7.
+   */
+  context_route?: ContextRouteInfo;
+}
+
+/**
+ * ContextRouteInfo is the wire shape of the orchestrator's
+ * ContextRouteReceipt: the queryable record of one contextual-routing
+ * decision. `class` is one of intent | help | room_request | meta_edit;
+ * `target_lane` names the lane a non-intent class landed in.
+ */
+export interface ContextRouteInfo {
+  class: string;
+  intent?: string;
+  reason?: string;
+  confidence: number;
+  target_chat_id?: string;
+  target_lane?: string;
+  decision_id: string;
 }

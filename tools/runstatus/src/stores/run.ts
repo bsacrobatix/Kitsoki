@@ -8,6 +8,7 @@ import type {
   IntentInfo,
   View,
   HarnessProfileInfo,
+  ContextRouteInfo,
 } from "../types.js";
 import type { DataSource, ConnectionState } from "../data/source.js";
 import type { LiveSource } from "../data/live-source.js";
@@ -62,6 +63,12 @@ export interface TranscriptEntry {
   turn?: number;
   /** Routing provenance, resolved reactively from events (see chatEntries). */
   routing?: RoutingInfo;
+  /**
+   * The contextual-routing receipt, set on an AGENT bubble when the CRR tier
+   * resolved this turn. Renders the "routed to … · contextual" receipt chip in
+   * the agent bubble; absent for deterministic/semantic/LLM turns.
+   */
+  contextRoute?: ContextRouteInfo;
 }
 
 // StreamItem (the ordered feed shape) moved to lib/activity.ts so the meta
@@ -367,6 +374,9 @@ export const useRunStore = defineStore("run", () => {
         // Mark an off-ramp answer so the bubble renders distinctly. The state
         // is unchanged, so the menu / allowed-intents UI persists alongside it.
         ...(result.mode === "offpath" ? { isOffRamp: true } : {}),
+        // Carry the CRR receipt so the bubble shows a "routed to … · contextual"
+        // chip when the contextual-routing tier resolved this turn.
+        ...(result.context_route ? { contextRoute: result.context_route } : {}),
       });
     }
   }

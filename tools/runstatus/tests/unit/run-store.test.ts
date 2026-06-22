@@ -875,3 +875,42 @@ describe("useRunStore — SSE connection state", () => {
     expect(store.connectionState).toBe("connected");
   });
 });
+
+describe("useRunStore — applyTurnResult threads the CRR route receipt", () => {
+  it("carries context_route onto the agent bubble so the receipt chip renders", () => {
+    const store = useRunStore();
+    const result: TurnResult = {
+      mode: "transitioned",
+      state: "workbench",
+      view: "Workbench ready.",
+      turn_number: 7,
+      context_route: {
+        class: "intent",
+        intent: "git.commit",
+        confidence: 0.82,
+        decision_id: "sess-1:7",
+      },
+    };
+    store.applyTurnResult(result);
+    const agent = store.transcript.find((e) => e.role === "agent");
+    expect(agent).toBeDefined();
+    expect(agent!.contextRoute).toEqual(result.context_route);
+    // chatEntries passes the agent entry through unchanged, so the receipt
+    // reaches the ChatTranscript component.
+    const lastChat = store.chatEntries[store.chatEntries.length - 1];
+    expect(lastChat!.contextRoute?.decision_id).toBe("sess-1:7");
+  });
+
+  it("leaves contextRoute unset for a non-contextual turn", () => {
+    const store = useRunStore();
+    store.applyTurnResult({
+      mode: "transitioned",
+      state: "lobby",
+      view: "A normal room view.",
+      turn_number: 2,
+    });
+    const agent = store.transcript.find((e) => e.role === "agent");
+    expect(agent).toBeDefined();
+    expect(agent!.contextRoute).toBeUndefined();
+  });
+});

@@ -236,6 +236,68 @@ describe("ChatTranscript", () => {
     expect(wrapper.find("[data-testid='routing-chip']").exists()).toBe(false);
   });
 
+  it("renders the contextual-routing receipt chip on an intent-class agent bubble", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          {
+            role: "agent",
+            text: "Workbench ready.",
+            contextRoute: {
+              class: "intent",
+              intent: "git.commit",
+              reason: "user asked to save progress",
+              confidence: 0.82,
+              decision_id: "sess-1:7",
+            },
+          },
+        ],
+      },
+    });
+    const chip = wrapper.find("[data-testid='route-receipt']");
+    expect(chip.exists()).toBe(true);
+    // Target is the matched intent for an intent-class route…
+    expect(chip.find(".chat-route-receipt__target").text()).toBe("git.commit");
+    // …and the tier is marked "contextual" so it reads apart from a normal route.
+    expect(chip.find(".chat-route-receipt__tier").text()).toBe("contextual");
+    expect(chip.find(".chat-route-receipt__conf").text()).toBe("0.82");
+    // The decision id (the rewind target) rides in the tooltip.
+    expect(chip.attributes("title")).toContain("sess-1:7");
+    expect(chip.attributes("title")).toContain("git.commit");
+  });
+
+  it("names the lane (not the bare class) for a non-intent CRR route", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          {
+            role: "agent",
+            text: "Here's how that works…",
+            isOffRamp: true,
+            contextRoute: {
+              class: "help",
+              target_lane: "help",
+              confidence: 0.7,
+              decision_id: "sess-1:3",
+            },
+          },
+        ],
+      },
+    });
+    const chip = wrapper.find("[data-testid='route-receipt']");
+    expect(chip.exists()).toBe(true);
+    expect(chip.find(".chat-route-receipt__target").text()).toBe("help");
+    // The off-path chip and the route receipt coexist on the same role row.
+    expect(wrapper.find("[data-testid='offramp-chip']").exists()).toBe(true);
+  });
+
+  it("omits the route receipt for a non-contextual agent turn", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: { transcript: [{ role: "agent", text: "A normal room view." }] },
+    });
+    expect(wrapper.find("[data-testid='route-receipt']").exists()).toBe(false);
+  });
+
   it("renders user text literally, not as markdown", () => {
     const wrapper = mount(ChatTranscript, {
       props: {
