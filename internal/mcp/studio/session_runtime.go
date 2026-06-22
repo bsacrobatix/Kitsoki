@@ -20,6 +20,7 @@ package studio
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,6 +44,18 @@ import (
 // the in-context OperatorPrompter. Production leaves it nil — a studio runtime
 // uses only host.RegisterBuiltins.
 var registerExtraHostCaps func(reg *host.Registry)
+
+// mustSeedJSON marshals an initial_world seed payload (a {"set":{k:v}} map of
+// JSON-serialisable values). A marshal failure is a programmer error (the values
+// came from a decoded JSON tool arg), so it panics rather than silently dropping
+// a seed.
+func mustSeedJSON(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic("studio: seed initial world: marshal: " + err.Error())
+	}
+	return b
+}
 
 // noRouteHarness is a placeholder harness for a runtime that never routes free
 // text — the spec-render path (render.tui/png/web on a {story_path, state}
@@ -118,7 +131,7 @@ func (rt *sessionRuntime) Close() {
 // backend (synthetic, codex, …) instead of the static default — the same
 // remap `kitsoki turn --profile` applies. An empty map leaves the session on the
 // legacy default-backend path (selectedProfile is then ignored).
-func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string) (*sessionRuntime, error) {
+func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any) (*sessionRuntime, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -233,6 +246,30 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	if err := orch.RecordEffectiveStory(ctx, sid); err != nil {
 		rt.Close()
 		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: record effective story: %v", err)}
+	}
+
+	// Seed initial_world (the studio twin of a flow fixture's initial_world:)
+	// BEFORE the initial on_enter, so the first state observes the seeded vars —
+	// e.g. a ticket seeded into the bugfix pipeline for a headless drive. The
+	// JSONL sink is the event authority here (WithEventSinkAuthority), so the seed
+	// EffectApplied events MUST go to the sink, not the in-memory store; only then
+	// does LoadJourney replay them into the world. Undeclared keys are dropped by
+	// the schema-bound world (the same contract as a flow's initial_world).
+	if len(initialWorld) > 0 {
+		var seedEvents []store.Event
+		for k, v := range initialWorld {
+			seedEvents = append(seedEvents, store.Event{
+				Kind:    store.EffectApplied,
+				Turn:    0,
+				Payload: mustSeedJSON(map[string]any{"set": map[string]any{k: v}}),
+			})
+		}
+		for _, ev := range seedEvents {
+			if seedErr := sink.Append(ev); seedErr != nil {
+				rt.Close()
+				return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: seed initial world: %v", seedErr)}
+			}
+		}
 	}
 
 	// Run the initial state's on_enter chain so the first frame and the session

@@ -55,7 +55,7 @@ const (
 func (srv *Server) registerSessionTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.new",
-		Description: "Open a new driving session for a story. {story_path, harness?:replay|live, cassette?, trace?, profile?}. Defaults to harness:replay (no LLM); a replay miss is a hard error, never a silent live call. profile selects a configured harness backend (synthetic, codex, …) for a live session. Returns {handle, state}.",
+		Description: "Open a new driving session for a story. {story_path, harness?:replay|live, cassette?, trace?, profile?}. Defaults to harness:replay (no LLM); a replay miss is a hard error, never a silent live call. profile selects a configured harness backend (synthetic, codex, …) for a live session. initial_world seeds story world vars for a headless parameterized drive. Returns {handle, state}.",
 	}, srv.handleSessionNew)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -126,6 +126,10 @@ type SessionNewArgs struct {
 	// the live session routes agent dispatch through. Empty → the server's default
 	// profile; ignored when no profiles are configured.
 	Profile string `json:"profile,omitempty"`
+	// InitialWorld seeds session world vars before the first on_enter — the studio
+	// twin of a flow fixture's initial_world:. Parameterizes a story for a headless
+	// drive (e.g. seeding a ticket into the bugfix pipeline). Omit for none.
+	InitialWorld map[string]any `json:"initial_world,omitempty"`
 }
 
 // SessionAttachArgs is the input to session.attach.
@@ -277,6 +281,7 @@ func (srv *Server) handleSessionNew(
 		StoryPath:     args.StoryPath,
 		TracePath:     tracePath,
 		Profile:       args.Profile,
+		InitialWorld:  args.InitialWorld,
 	})
 	if err != nil {
 		code, msg := AsToolError(err)
@@ -675,9 +680,9 @@ func specFrame(ctx context.Context, storyPath, state string, world map[string]an
 	if err != nil {
 		return tui.Frame{}, err
 	}
-	// No harness, no profiles: a spec render is a pure re-render and never calls
-	// orch.Turn or dispatches an agent.
-	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "")
+	// No harness, no profiles, no seed: a spec render is a pure re-render and
+	// never calls orch.Turn or dispatches an agent.
+	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "", nil)
 	if err != nil {
 		return tui.Frame{}, err
 	}

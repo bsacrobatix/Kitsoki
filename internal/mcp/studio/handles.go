@@ -297,6 +297,9 @@ type OpenDrivingSessionParams struct {
 	// through. Empty falls back to the session's default profile (SetHarnessProfiles);
 	// when no profiles are declared it is ignored (legacy default-backend path).
 	Profile string
+	// InitialWorld seeds session world vars before the initial on_enter (the
+	// studio twin of a flow fixture's initial_world:). Nil/empty is a no-op.
+	InitialWorld map[string]any
 }
 
 // OpenDrivingSession opens a driving-session handle backed by a live runtime: it
@@ -340,7 +343,7 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 
 	// newSessionRuntime takes ownership of h: on a returned error h is already
 	// closed; on success rt.Close tears it down.
-	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, ss.harnessProfiles, selectedProfile)
+	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, ss.harnessProfiles, selectedProfile, p.InitialWorld)
 	if err != nil {
 		// h was already closed inside newSessionRuntime on error.
 		return nil, err
