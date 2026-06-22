@@ -62,8 +62,8 @@ describe("InboxPanel", () => {
     const inbox = useInboxStore();
     inbox.open = true;
     inbox.workSummary = {
-      items: 3,
-      needs_attention: 0,
+      items: 4,
+      needs_attention: 1,
       jobs_running: 0,
       jobs_awaiting_input: 0,
       jobs_terminal: 0,
@@ -71,9 +71,23 @@ describe("InboxPanel", () => {
       notifications_action_required: 0,
       pending_drives: 1,
       dispatching_drives: 1,
+      failed_drives: 1,
       backgrounded_chats: 1,
     };
     inbox.workItems = [
+      {
+        kind: "failed_drive",
+        priority: 94,
+        session_id: "web-session-1",
+        title: "failed agent task",
+        body: "claude exited 1",
+        status: "failed",
+        reacquire_tool: "chat.show",
+        reacquire_session_id: "web-session-1",
+        drive_id: "drive-failed",
+        chat_id: "chat-failed",
+        actor: "claude",
+      },
       {
         kind: "pending_drive",
         priority: 65,
@@ -117,7 +131,10 @@ describe("InboxPanel", () => {
     await flushPromises();
 
     const rows = document.body.querySelectorAll('[data-testid="work-item"]');
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
+    expect(document.body.textContent).toContain("failed");
+    expect(document.body.textContent).toContain("failed agent task");
+    expect(document.body.textContent).toContain("claude exited 1");
     expect(document.body.textContent).toContain("queued");
     expect(document.body.textContent).toContain("dispatching");
     expect(document.body.textContent).toContain("chat");
@@ -136,11 +153,11 @@ describe("InboxPanel", () => {
     expect(document.body.textContent).toContain("open context");
     expect(inbox.workItems[2]?.reacquire_tool).toBe("chat.show");
 
-    (rows[2] as HTMLButtonElement).click();
+    (rows[0] as HTMLButtonElement).click();
     await flushPromises();
 
     expect(inbox.open).toBe(false);
-    expect(push).toHaveBeenCalledWith("/s/web-session-1/chat?chat=chat-2");
+    expect(push).toHaveBeenCalledWith("/s/web-session-1/chat?chat=chat-failed");
     wrapper.unmount();
   });
 

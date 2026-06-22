@@ -41,6 +41,7 @@ type WorkSummary struct {
 	NotificationsActionRequired int `json:"notifications_action_required"`
 	PendingDrives               int `json:"pending_drives"`
 	DispatchingDrives           int `json:"dispatching_drives"`
+	FailedDrives                int `json:"failed_drives"`
 	BackgroundedChats           int `json:"backgrounded_chats"`
 }
 
@@ -178,6 +179,7 @@ func addSummary(sum *WorkSummary, async AsyncInspectSummary) {
 	sum.NotificationsActionRequired += async.NotificationsActionRequired
 	sum.PendingDrives += async.PendingDrives
 	sum.DispatchingDrives += async.DispatchingDrives
+	sum.FailedDrives += async.FailedDrives
 	sum.BackgroundedChats += async.BackgroundedChats
 }
 
@@ -244,6 +246,8 @@ func workItemNeedsAttention(item WorkItem) bool {
 		return item.ReadAtUnixMilli == 0 && item.Severity == jobs.SeverityActionRequired
 	case "job":
 		return item.Status == string(jobs.JobAwaitingInput) || item.Status == string(jobs.JobFailed)
+	case "failed_drive":
+		return true
 	default:
 		return false
 	}
@@ -328,17 +332,22 @@ func workItemsForPendingDrives(sh *SessionHandle, state string, drives []Pending
 	out := make([]WorkItem, 0, len(drives))
 	for _, d := range drives {
 		priority := 65
+		kind := "pending_drive"
 		if d.Status == chats.DriveStatusDispatching {
 			priority = 68
+		} else if d.Status == chats.DriveStatusFailed {
+			kind = "failed_drive"
+			priority = 94
 		}
 		out = append(out, WorkItem{
-			Kind:                "pending_drive",
+			Kind:                kind,
 			Priority:            priority,
 			Handle:              sh.Key,
 			SessionID:           string(sh.SID),
 			StoryPath:           sh.StoryPath,
 			State:               state,
 			Title:               d.Payload,
+			Body:                d.ErrorMessage,
 			Status:              string(d.Status),
 			DriveID:             d.DriveID,
 			ChatID:              d.ChatID,
@@ -346,6 +355,7 @@ func workItemsForPendingDrives(sh *SessionHandle, state string, drives []Pending
 			Actor:               d.Actor,
 			Thread:              d.Thread,
 			ReceivedAtUnixMicro: d.ReceivedAtUnixMicro,
+			UpdatedAtUnixMicro:  driveUpdatedAtUnixMicro(d),
 			Reacquire: WorkReacquire{
 				Tool: "chat.show",
 				Args: map[string]any{
@@ -357,6 +367,16 @@ func workItemsForPendingDrives(sh *SessionHandle, state string, drives []Pending
 		})
 	}
 	return out
+}
+
+func driveUpdatedAtUnixMicro(d PendingDriveItem) int64 {
+	if d.CompletedAtUnixMicro != 0 {
+		return d.CompletedAtUnixMicro
+	}
+	if d.DispatchedAtUnixMicro != 0 {
+		return d.DispatchedAtUnixMicro
+	}
+	return d.ReceivedAtUnixMicro
 }
 
 func workItemsForBackgroundedChats(sh *SessionHandle, state string, chats []BackgroundedChatItem) []WorkItem {

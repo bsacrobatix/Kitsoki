@@ -163,6 +163,7 @@ type WorkSummary struct {
 	NotificationsActionRequired int `json:"notifications_action_required"`
 	PendingDrives               int `json:"pending_drives"`
 	DispatchingDrives           int `json:"dispatching_drives"`
+	FailedDrives                int `json:"failed_drives"`
 	BackgroundedChats           int `json:"backgrounded_chats"`
 }
 
@@ -485,26 +486,32 @@ func (d OrchestratorDriver) listChatWork(ctx context.Context, out SessionWork) (
 		return out, nil
 	}
 	drives, err := d.Chats.ListDrivesBySession(ctx, string(d.SID),
-		[]chats.DriveStatus{chats.DriveStatusPending, chats.DriveStatusDispatching})
+		[]chats.DriveStatus{chats.DriveStatusPending, chats.DriveStatusDispatching, chats.DriveStatusFailed})
 	if err != nil {
 		return SessionWork{}, err
 	}
 	for _, drive := range drives {
 		priority := 65
+		kind := "pending_drive"
 		if drive.Status == chats.DriveStatusDispatching {
 			out.Summary.DispatchingDrives++
 			priority = 68
+		} else if drive.Status == chats.DriveStatusFailed {
+			out.Summary.FailedDrives++
+			kind = "failed_drive"
+			priority = 94
 		} else {
 			out.Summary.PendingDrives++
 		}
 		out.Items = append(out.Items, WorkItem{
-			Kind:               "pending_drive",
+			Kind:               kind,
 			Priority:           priority,
 			SessionID:          string(d.SID),
 			Title:              drive.Payload,
+			Body:               drive.ErrorMessage,
 			Status:             string(drive.Status),
 			CreatedAt:          drive.ReceivedAt,
-			UpdatedAt:          drive.ReceivedAt,
+			UpdatedAt:          driveUpdatedAt(drive),
 			OriginState:        drive.OriginState,
 			ReacquireTool:      "chat.show",
 			ReacquireSessionID: string(d.SID),
@@ -545,6 +552,16 @@ func (d OrchestratorDriver) listChatWork(ctx context.Context, out SessionWork) (
 	return out, nil
 }
 
+func driveUpdatedAt(drive chats.Drive) time.Time {
+	if drive.CompletedAt != nil {
+		return *drive.CompletedAt
+	}
+	if drive.DispatchedAt != nil {
+		return *drive.DispatchedAt
+	}
+	return drive.ReceivedAt
+}
+
 func activeWorkJob(j jobs.Job) bool {
 	return j.Status == jobs.JobRunning || j.Status == jobs.JobAwaitingInput || j.Status == jobs.JobFailed
 }
@@ -583,6 +600,8 @@ func workItemNeedsAttention(item WorkItem) bool {
 		return item.ReadAt == nil && item.Severity == jobs.SeverityActionRequired
 	case "job":
 		return item.Status == string(jobs.JobAwaitingInput) || item.Status == string(jobs.JobFailed)
+	case "failed_drive":
+		return true
 	default:
 		return false
 	}

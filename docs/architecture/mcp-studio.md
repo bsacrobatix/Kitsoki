@@ -90,7 +90,7 @@ inspecting every session one by one.
 | `studio.work` | `{include_quiet?, limit?}` → `{summary, sessions[], items[]}` | prioritized async work queue across all open driving handles |
 
 `studio.work.items[]` includes unread inbox notifications, running or
-awaiting-input jobs, failed jobs, pending/dispatching chat drives, and
+awaiting-input jobs, failed jobs, pending/dispatching/failed chat drives, and
 backgrounded tmux chats. Each item carries the source `handle`, session/story
 metadata, stable IDs, a priority, and a `reacquire` hint naming the next MCP
 tool call (`session.teleport`, `session.inspect`, or `chat.show`). By default it
@@ -104,6 +104,8 @@ When a job row has a matching unread job-origin notification, `studio.work`
 returns `reacquire.tool: "session.teleport"` with that notification id so the
 client can jump directly to the saved origin context. Job rows without a
 matching unread notification keep the broader `session.inspect` fallback.
+Failed chat-drive rows return `reacquire.tool: "chat.show"` with the failed
+chat id and failure text, so clients can reopen the focused subagent context.
 
 ### `story.*` — author (deterministic, LLM-free)
 

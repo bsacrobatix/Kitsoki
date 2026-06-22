@@ -284,6 +284,21 @@ func TestStudioWorkChatReacquireCarriesSessionContext(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	failedChat, err := chatStore.Create(ctx, "cloak", "agent-room", "scope-failed", "failed review")
+	require.NoError(t, err)
+	failedDrive, err := chatStore.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          failedChat.ID,
+		Transport:       chats.DriveTransportStateMachine,
+		Actor:           "story",
+		Payload:         "failed async work",
+		OriginSessionID: string(sh.SID),
+		OriginState:     "foyer",
+	})
+	require.NoError(t, err)
+	_, err = chatStore.ClaimDrive(ctx, failedDrive.DriveID)
+	require.NoError(t, err)
+	require.NoError(t, chatStore.MarkDriveFailed(ctx, failedDrive.DriveID, "claude exited 1"))
+
 	backgroundChat, err := chatStore.Create(ctx, "cloak", "agent-room", "scope-bg", "backgrounded review")
 	require.NoError(t, err)
 	_, err = backing.DB().ExecContext(ctx,
@@ -304,7 +319,9 @@ func TestStudioWorkChatReacquireCarriesSessionContext(t *testing.T) {
 	var work studio.WorkResult
 	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &work))
 	assert.Equal(t, 1, work.Summary.PendingDrives)
+	assert.Equal(t, 1, work.Summary.FailedDrives)
 	assert.Equal(t, 1, work.Summary.BackgroundedChats)
+	assert.Equal(t, 1, work.Summary.NeedsAttention)
 
 	byKind := map[string]studio.WorkItem{}
 	for _, item := range work.Items {
@@ -317,6 +334,15 @@ func TestStudioWorkChatReacquireCarriesSessionContext(t *testing.T) {
 	assert.Equal(t, queuedChat.ID, pending.Reacquire.Args["chat_id"])
 	assert.Equal(t, "chat-work", pending.Reacquire.Args["handle"])
 	assert.Equal(t, string(sh.SID), pending.Reacquire.Args["session_id"])
+
+	failed := byKind["failed_drive"]
+	require.NotEmpty(t, failed.ChatID)
+	assert.Equal(t, failedDrive.DriveID, failed.DriveID)
+	assert.Equal(t, "claude exited 1", failed.Body)
+	assert.Equal(t, "chat.show", failed.Reacquire.Tool)
+	assert.Equal(t, failedChat.ID, failed.Reacquire.Args["chat_id"])
+	assert.Equal(t, "chat-work", failed.Reacquire.Args["handle"])
+	assert.Equal(t, string(sh.SID), failed.Reacquire.Args["session_id"])
 
 	bg := byKind["backgrounded_chat"]
 	require.NotEmpty(t, bg.ChatID)

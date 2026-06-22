@@ -143,6 +143,7 @@ export interface WorkSummary {
   notifications_action_required: number;
   pending_drives: number;
   dispatching_drives?: number;
+  failed_drives?: number;
   backgrounded_chats: number;
 }
 

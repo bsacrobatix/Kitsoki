@@ -197,6 +197,7 @@ function workKind(item: WorkItem): string {
   if (item.kind === "pending_drive") {
     return item.status === "dispatching" ? "dispatching" : "queued";
   }
+  if (item.kind === "failed_drive") return "failed";
   if (item.kind === "backgrounded_chat") return "chat";
   if (item.kind === "notification") return item.severity || "note";
   return item.kind;

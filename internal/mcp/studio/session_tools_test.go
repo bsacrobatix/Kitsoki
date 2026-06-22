@@ -420,6 +420,19 @@ func TestSessionInspect_SurfacesChatAsyncWorkOverMCP(t *testing.T) {
 	require.NoError(t, err)
 	_, err = chatStore.ClaimDrive(ctx, dispatching.DriveID)
 	require.NoError(t, err)
+
+	failed, err := chatStore.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          queuedChat.ID,
+		Transport:       chats.DriveTransportStateMachine,
+		Actor:           "story",
+		Payload:         "failed proposal review",
+		OriginSessionID: sid,
+		OriginState:     "foyer",
+	})
+	require.NoError(t, err)
+	_, err = chatStore.ClaimDrive(ctx, failed.DriveID)
+	require.NoError(t, err)
+	require.NoError(t, chatStore.MarkDriveFailed(ctx, failed.DriveID, "claude exited 1"))
 	_, err = chatStore.Enqueue(ctx, chats.EnqueueOptions{
 		ChatID:          queuedChat.ID,
 		Transport:       chats.DriveTransportMCP,
@@ -456,15 +469,20 @@ func TestSessionInspect_SurfacesChatAsyncWorkOverMCP(t *testing.T) {
 	var inspected studio.InspectResult
 	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &inspected))
 
-	require.Len(t, inspected.PendingDrives, 2)
+	require.Len(t, inspected.PendingDrives, 3)
 	assert.Equal(t, 1, inspected.Async.PendingDrives)
 	assert.Equal(t, 1, inspected.Async.DispatchingDrives)
+	assert.Equal(t, 1, inspected.Async.FailedDrives)
 	assert.Equal(t, pending.DriveID, inspected.PendingDrives[0].DriveID)
 	assert.Equal(t, chats.DriveStatusPending, inspected.PendingDrives[0].Status)
 	assert.Equal(t, "review this proposal", inspected.PendingDrives[0].Payload)
 	assert.Equal(t, dispatching.DriveID, inspected.PendingDrives[1].DriveID)
 	assert.Equal(t, chats.DriveStatusDispatching, inspected.PendingDrives[1].Status)
 	assert.NotZero(t, inspected.PendingDrives[1].DispatchedAtUnixMicro)
+	assert.Equal(t, failed.DriveID, inspected.PendingDrives[2].DriveID)
+	assert.Equal(t, chats.DriveStatusFailed, inspected.PendingDrives[2].Status)
+	assert.Equal(t, "claude exited 1", inspected.PendingDrives[2].ErrorMessage)
+	assert.NotZero(t, inspected.PendingDrives[2].CompletedAtUnixMicro)
 
 	require.Len(t, inspected.BackgroundedChats, 1)
 	assert.Equal(t, 1, inspected.Async.BackgroundedChats)

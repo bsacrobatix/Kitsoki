@@ -124,6 +124,21 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	_, err = cs.ClaimDrive(ctx, dispatchingDrive.DriveID)
 	require.NoError(t, err)
 
+	failedChat, err := cs.Create(ctx, "cloak", "agent", "scope-failed", "Failed review")
+	require.NoError(t, err)
+	failedDrive, err := cs.Enqueue(ctx, chats.EnqueueOptions{
+		ChatID:          failedChat.ID,
+		Transport:       chats.DriveTransportStateMachine,
+		Actor:           "story",
+		Payload:         "failed review",
+		OriginSessionID: string(sid),
+		OriginState:     "foyer",
+	})
+	require.NoError(t, err)
+	_, err = cs.ClaimDrive(ctx, failedDrive.DriveID)
+	require.NoError(t, err)
+	require.NoError(t, cs.MarkDriveFailed(ctx, failedDrive.DriveID, "claude exited 1"))
+
 	otherQueued, err := cs.Create(ctx, "cloak", "agent", "other-queue", "Other queued review")
 	require.NoError(t, err)
 	_, err = cs.Enqueue(ctx, chats.EnqueueOptions{
@@ -156,8 +171,8 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 
 	m = runTurnBlocking(t, m, "/work")
 	tx := extractTranscript(t, m)
-	currentWork := transcriptAfter(t, tx, "active work: 6 item(s)")
-	require.Contains(t, tx, "active work: 6 item(s)")
+	currentWork := transcriptAfter(t, tx, "active work: 7 item(s)")
+	require.Contains(t, tx, "active work: 7 item(s)")
 	require.Contains(t, tx, "notification")
 	require.Contains(t, tx, "Review PR #42")
 	require.Contains(t, tx, "Background check complete")
@@ -171,6 +186,9 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	requireContainsNear(t, currentWork, "host.agent.task", "/inbox")
 	require.Contains(t, tx, "dispatching")
 	require.Contains(t, tx, "dispatching review")
+	require.Contains(t, tx, "failed review")
+	require.Contains(t, tx, "claude exited 1")
+	requireContainsNear(t, currentWork, "failed review", "/chat show "+failedChat.ID)
 	require.Contains(t, tx, "queued")
 	require.Contains(t, tx, "continue queued review")
 	requireContainsNear(t, currentWork, "continue queued review", "/chat show "+chat.ID)
@@ -180,6 +198,7 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	require.Contains(t, tx, "/sessions attach 1")
 	require.NotContains(t, tx, "Other session Claude")
 	requireBefore(t, currentWork, "Review PR #42", "host.agent.task")
+	requireBefore(t, currentWork, "failed review", "host.agent.task")
 	requireBefore(t, currentWork, "host.agent.task", "dispatching review")
 	requireBefore(t, currentWork, "dispatching review", "continue queued review")
 	requireBefore(t, currentWork, "continue queued review", "Background Claude")
@@ -193,13 +212,14 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 
 	m = runTurnBlocking(t, m, "/work --all")
 	tx = extractTranscript(t, m)
-	allWork := transcriptAfter(t, tx, "active work (all sessions): 10 item(s)")
-	require.Contains(t, tx, "active work (all sessions): 10 item(s)")
+	allWork := transcriptAfter(t, tx, "active work (all sessions): 11 item(s)")
+	require.Contains(t, tx, "active work (all sessions): 11 item(s)")
 	require.Contains(t, tx, "Other PR #99")
 	require.Contains(t, tx, "job-other")
 	require.Contains(t, tx, "Background Claude")
 	require.Contains(t, tx, "current session")
 	require.Contains(t, tx, "dispatching review")
+	require.Contains(t, tx, "failed review")
 	require.Contains(t, tx, "continue other queued review")
 	require.Contains(t, tx, "Other session Claude")
 	require.Contains(t, tx, "session other-session")

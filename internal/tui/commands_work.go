@@ -66,7 +66,7 @@ func renderWorkBlock(m RootModel, args []string) (RootModel, string) {
 	}
 
 	if m.chatStore != nil {
-		statuses := []chats.DriveStatus{chats.DriveStatusPending, chats.DriveStatusDispatching}
+		statuses := []chats.DriveStatus{chats.DriveStatusPending, chats.DriveStatusDispatching, chats.DriveStatusFailed}
 		var drives []chats.Drive
 		var err error
 		if allSessions {
@@ -296,6 +296,9 @@ func workRowsForDrives(drives []chats.Drive, sid string, allSessions bool) []wor
 				hint += ", session " + d.OriginSessionID
 			}
 		}
+		if d.Status == chats.DriveStatusFailed && d.ErrorMessage != "" {
+			hint += "; " + d.ErrorMessage
+		}
 		hint += "; /chat show " + d.ChatID
 		out = append(out, workRow{
 			Kind:      workDriveKind(d.Status),
@@ -312,10 +315,14 @@ func workRowsForDrives(drives []chats.Drive, sid string, allSessions bool) []wor
 }
 
 func workDriveKind(status chats.DriveStatus) string {
-	if status == chats.DriveStatusDispatching {
+	switch status {
+	case chats.DriveStatusDispatching:
 		return "dispatching"
+	case chats.DriveStatusFailed:
+		return "failed"
+	default:
+		return "queued"
 	}
-	return "queued"
 }
 
 func workRowsForPTYs(ctx context.Context, cs *chats.Store, sid string, ptys []chats.PtySession, allSessions bool) []workRow {
@@ -422,8 +429,12 @@ func workNotificationPriority(severity jobs.NotificationSeverity) int {
 }
 
 func workDrivePriority(status chats.DriveStatus) int {
-	if status == chats.DriveStatusDispatching {
+	switch status {
+	case chats.DriveStatusFailed:
+		return 94
+	case chats.DriveStatusDispatching:
 		return 68
+	default:
+		return 65
 	}
-	return 65
 }

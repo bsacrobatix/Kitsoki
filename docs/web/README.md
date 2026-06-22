@@ -439,10 +439,11 @@ indistinguishable from a TUI one in the trace.
   the badge.
 - **`InboxPanel.vue`** — opens on badge click: first the prioritized active-work
   queue from `runstatus.work.list` (notifications, jobs, queued/dispatching
-  drives, and backgrounded chats), then notification history. Rows show the next
-  action explicitly: **jump** for notifications and notification-backed jobs,
-  **open context** for chat-backed work, and **open session** for job rows that
-  have no matching unread notification yet.
+  drives, failed drives, and backgrounded chats), then notification history.
+  Rows show the next action explicitly: **jump** for notifications and
+  notification-backed jobs, **open context** for chat-backed work including
+  failed subagent drives, and **open session** for job rows that have no
+  matching unread notification yet.
   Notification history keeps **dismiss** affordances; an origin session that is
   no longer live degrades to a non-jumping, read-only item (teleport returns a
   typed error). The panel's **Sync GitHub** action uses the same idempotent

@@ -536,6 +536,7 @@ type AsyncInspectSummary struct {
 	NotificationsActionRequired int `json:"notifications_action_required"`
 	PendingDrives               int `json:"pending_drives"`
 	DispatchingDrives           int `json:"dispatching_drives"`
+	FailedDrives                int `json:"failed_drives"`
 	BackgroundedChats           int `json:"backgrounded_chats"`
 }
 
@@ -585,9 +586,11 @@ type PendingDriveItem struct {
 	Thread                string               `json:"thread,omitempty"`
 	CorrelationID         string               `json:"correlation_id,omitempty"`
 	Payload               string               `json:"payload,omitempty"`
+	ErrorMessage          string               `json:"error_message,omitempty"`
 	OriginState           string               `json:"origin_state,omitempty"`
 	ReceivedAtUnixMicro   int64                `json:"received_at_unix_micro"`
 	DispatchedAtUnixMicro int64                `json:"dispatched_at_unix_micro,omitempty"`
+	CompletedAtUnixMicro  int64                `json:"completed_at_unix_micro,omitempty"`
 }
 
 // BackgroundedChatItem is one tmux-hosted chat that remains alive in
@@ -1026,7 +1029,7 @@ func (rt *sessionRuntime) inspectAsync(ctx context.Context) ([]JobInspectItem, [
 	notificationItems = inspectNotifications(notifRows)
 	if rt.chatStore != nil {
 		driveRows, err := rt.chatStore.ListDrivesBySession(ctx, string(rt.sid),
-			[]chats.DriveStatus{chats.DriveStatusPending, chats.DriveStatusDispatching})
+			activeDriveStatuses())
 		if err != nil {
 			return nil, nil, nil, nil, nil, fmt.Errorf("session.inspect: list pending drives: %w", err)
 		}
@@ -1112,11 +1115,15 @@ func inspectPendingDrives(in []chats.Drive) []PendingDriveItem {
 			Thread:              d.Thread,
 			CorrelationID:       d.CorrelationID,
 			Payload:             d.Payload,
+			ErrorMessage:        d.ErrorMessage,
 			OriginState:         d.OriginState,
 			ReceivedAtUnixMicro: d.ReceivedAt.UnixMicro(),
 		}
 		if d.DispatchedAt != nil {
 			item.DispatchedAtUnixMicro = d.DispatchedAt.UnixMicro()
+		}
+		if d.CompletedAt != nil {
+			item.CompletedAtUnixMicro = d.CompletedAt.UnixMicro()
 		}
 		out = append(out, item)
 	}
@@ -1178,9 +1185,15 @@ func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, 
 			out.PendingDrives++
 		case chats.DriveStatusDispatching:
 			out.DispatchingDrives++
+		case chats.DriveStatusFailed:
+			out.FailedDrives++
 		}
 	}
 	return out
+}
+
+func activeDriveStatuses() []chats.DriveStatus {
+	return []chats.DriveStatus{chats.DriveStatusPending, chats.DriveStatusDispatching, chats.DriveStatusFailed}
 }
 
 // summariseTrace folds a JSONL history into one summary per turn, returning the
