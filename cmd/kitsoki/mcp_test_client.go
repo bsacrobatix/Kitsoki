@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"reflect"
+	"strings"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -43,7 +45,7 @@ with a JSON array to run a handle-preserving workflow in one MCP client session.
 Examples:
   kitsoki mcp-test --stories-dir ./stories
   kitsoki mcp-test --tool story.validate --tool-args '{"dir":"stories/bugfix"}'
-  kitsoki mcp-test --calls '[{"tool":"session.new","args":{"story_path":"testdata/apps/cloak/app.yaml","key":"smoke"}},{"tool":"session.inspect","args":{"handle":"smoke"}}]'`,
+  kitsoki mcp-test --calls '[{"tool":"session.new","args":{"story_path":"testdata/apps/cloak/app.yaml","key":"smoke"}},{"tool":"session.inspect","args":{"handle":"smoke"},"expect":{"structuredContent.state":"foyer"}}]'`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if timeout <= 0 {
@@ -76,6 +78,12 @@ Examples:
 				for i, call := range calls {
 					if call.Name == "" {
 						return fmt.Errorf("mcp-test: --calls[%d].tool is required", i)
+					}
+					if call.Retries < 0 {
+						return fmt.Errorf("mcp-test: --calls[%d].retries must be non-negative", i)
+					}
+					if call.IntervalMS < 0 {
+						return fmt.Errorf("mcp-test: --calls[%d].interval_ms must be non-negative", i)
 					}
 				}
 			}
@@ -126,8 +134,11 @@ type studioMCPTestOptions struct {
 }
 
 type studioMCPTestCall struct {
-	Name string         `json:"tool"`
-	Args map[string]any `json:"args,omitempty"`
+	Name       string         `json:"tool"`
+	Args       map[string]any `json:"args,omitempty"`
+	Expect     map[string]any `json:"expect,omitempty"`
+	Retries    int            `json:"retries,omitempty"`
+	IntervalMS int            `json:"interval_ms,omitempty"`
 }
 
 type studioMCPTestReport struct {
@@ -138,9 +149,10 @@ type studioMCPTestReport struct {
 }
 
 type studioMCPToolReport struct {
-	Name    string                 `json:"name"`
-	IsError bool                   `json:"is_error"`
-	Result  map[string]interface{} `json:"result"`
+	Name     string                 `json:"name"`
+	IsError  bool                   `json:"is_error"`
+	Attempts int                    `json:"attempts,omitempty"`
+	Result   map[string]interface{} `json:"result"`
 }
 
 func studioMCPTestServerArgs(override []string, storiesDir, workspace string, readOnly bool) []string {
@@ -205,53 +217,158 @@ func runStudioMCPTestSession(ctx context.Context, cs *mcpsdk.ClientSession, opts
 	}
 
 	calls := []struct {
-		name string
-		args map[string]any
+		name       string
+		args       map[string]any
+		expect     map[string]any
+		retries    int
+		intervalMS int
 	}{
 		{name: "studio.ping"},
 		{name: "studio.handles"},
 	}
 	if opts.ToolName != "" {
 		calls = []struct {
-			name string
-			args map[string]any
+			name       string
+			args       map[string]any
+			expect     map[string]any
+			retries    int
+			intervalMS int
 		}{{name: opts.ToolName, args: opts.ToolArgs}}
 	} else if len(opts.Calls) > 0 {
 		calls = make([]struct {
-			name string
-			args map[string]any
+			name       string
+			args       map[string]any
+			expect     map[string]any
+			retries    int
+			intervalMS int
 		}, 0, len(opts.Calls))
 		for _, call := range opts.Calls {
 			calls = append(calls, struct {
-				name string
-				args map[string]any
-			}{name: call.Name, args: call.Args})
+				name       string
+				args       map[string]any
+				expect     map[string]any
+				retries    int
+				intervalMS int
+			}{name: call.Name, args: call.Args, expect: call.Expect, retries: call.Retries, intervalMS: call.IntervalMS})
 		}
 	}
 	for _, call := range calls {
-		res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
-			Name:      call.name,
-			Arguments: call.args,
-		})
+		result, isError, attempts, err := runStudioMCPTestCall(ctx, cs, call.name, call.args, call.expect, call.retries, call.intervalMS)
 		if err != nil {
-			return report, fmt.Errorf("mcp-test: tools/call %s: %w", call.name, err)
-		}
-		raw, err := json.Marshal(res)
-		if err != nil {
-			return report, fmt.Errorf("mcp-test: marshal %s result: %w", call.name, err)
-		}
-		var result map[string]interface{}
-		if err := json.Unmarshal(raw, &result); err != nil {
-			return report, fmt.Errorf("mcp-test: decode %s result: %w", call.name, err)
+			return report, err
 		}
 		report.ToolRuns = append(report.ToolRuns, studioMCPToolReport{
-			Name:    call.name,
-			IsError: res.IsError,
-			Result:  result,
+			Name:     call.name,
+			IsError:  isError,
+			Attempts: attempts,
+			Result:   result,
 		})
-		if res.IsError {
+		if isError {
 			report.OK = false
 		}
 	}
 	return report, nil
+}
+
+func runStudioMCPTestCall(ctx context.Context, cs *mcpsdk.ClientSession, name string, args map[string]any, expect map[string]any, retries, intervalMS int) (map[string]interface{}, bool, int, error) {
+	attempts := 0
+	maxAttempts := retries + 1
+	var lastResult map[string]interface{}
+	var lastIsError bool
+	var lastErr error
+	for attempts < maxAttempts {
+		attempts++
+		res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+			Name:      name,
+			Arguments: args,
+		})
+		if err != nil {
+			lastErr = fmt.Errorf("mcp-test: tools/call %s: %w", name, err)
+		} else {
+			lastIsError = res.IsError
+			lastResult, lastErr = decodeMCPToolResult(name, res)
+			if lastErr == nil && len(expect) > 0 {
+				lastErr = assertMCPExpectations(name, lastResult, expect)
+			}
+			if lastErr == nil {
+				return lastResult, lastIsError, attempts, nil
+			}
+		}
+		if attempts >= maxAttempts {
+			break
+		}
+		wait := time.Duration(intervalMS) * time.Millisecond
+		if wait <= 0 {
+			wait = 100 * time.Millisecond
+		}
+		select {
+		case <-ctx.Done():
+			return lastResult, lastIsError, attempts, ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+	if lastErr != nil {
+		return lastResult, lastIsError, attempts, lastErr
+	}
+	return lastResult, lastIsError, attempts, nil
+}
+
+func decodeMCPToolResult(name string, res *mcpsdk.CallToolResult) (map[string]interface{}, error) {
+	raw, err := json.Marshal(res)
+	if err != nil {
+		return nil, fmt.Errorf("mcp-test: marshal %s result: %w", name, err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("mcp-test: decode %s result: %w", name, err)
+	}
+	return result, nil
+}
+
+func assertMCPExpectations(name string, result map[string]interface{}, expect map[string]any) error {
+	for path, want := range expect {
+		got, ok := lookupDotPath(result, path)
+		if !ok {
+			return fmt.Errorf("mcp-test: %s expectation %q missing", name, path)
+		}
+		if !jsonEqual(got, want) {
+			return fmt.Errorf("mcp-test: %s expectation %q: got %v, want %v", name, path, got, want)
+		}
+	}
+	return nil
+}
+
+func lookupDotPath(root any, path string) (any, bool) {
+	if path == "" {
+		return root, true
+	}
+	cur := root
+	for _, part := range strings.Split(path, ".") {
+		m, ok := cur.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		cur, ok = m[part]
+		if !ok {
+			return nil, false
+		}
+	}
+	return cur, true
+}
+
+func jsonEqual(got, want any) bool {
+	var gotNorm any
+	var wantNorm any
+	gotBytes, gotErr := json.Marshal(got)
+	wantBytes, wantErr := json.Marshal(want)
+	if gotErr != nil || wantErr != nil {
+		return reflect.DeepEqual(got, want)
+	}
+	if err := json.Unmarshal(gotBytes, &gotNorm); err != nil {
+		return reflect.DeepEqual(got, want)
+	}
+	if err := json.Unmarshal(wantBytes, &wantNorm); err != nil {
+		return reflect.DeepEqual(got, want)
+	}
+	return reflect.DeepEqual(gotNorm, wantNorm)
 }

@@ -165,6 +165,9 @@ func TestRunStudioMCPTestSession_SequentialCallsShareSession(t *testing.T) {
 				Args: map[string]any{
 					"handle": "workflow-smoke",
 				},
+				Expect: map[string]any{
+					"structuredContent.state": "cloakroom",
+				},
 			},
 		},
 	})
@@ -178,10 +181,35 @@ func TestRunStudioMCPTestSession_SequentialCallsShareSession(t *testing.T) {
 	assert.False(t, report.ToolRuns[0].IsError)
 	assert.False(t, report.ToolRuns[1].IsError)
 	assert.False(t, report.ToolRuns[2].IsError)
+	assert.Equal(t, 1, report.ToolRuns[2].Attempts)
 
 	structured, ok := report.ToolRuns[2].Result["structuredContent"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "cloakroom", structured["state"])
+}
+
+func TestRunStudioMCPTestSession_ExpectationFailureFailsRun(t *testing.T) {
+	ctx := context.Background()
+	srv := studio.NewServer(studio.NewStudioSession(nil))
+	cs := connectStudioTestClient(ctx, t, srv)
+
+	_, err := runStudioMCPTestSession(ctx, cs, studioMCPTestOptions{
+		ServerCommand: "kitsoki",
+		ServerArgs:    []string{"mcp"},
+		ListTools:     false,
+		Calls: []studioMCPTestCall{
+			{
+				Name: "studio.ping",
+				Expect: map[string]any{
+					"structuredContent.version": "not-the-version",
+				},
+				Retries:    1,
+				IntervalMS: 1,
+			},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `studio.ping expectation "structuredContent.version"`)
 }
 
 // cobraCommandStub is a presence marker for the registration test (the real
