@@ -166,7 +166,8 @@ func TestRunStudioMCPTestSession_SequentialCallsShareSession(t *testing.T) {
 					"handle": "workflow-smoke",
 				},
 				Expect: map[string]any{
-					"structuredContent.state": "cloakroom",
+					"structuredContent.state":             "cloakroom",
+					"structuredContent.allowed_intents.0": "go",
 				},
 			},
 		},
@@ -186,6 +187,45 @@ func TestRunStudioMCPTestSession_SequentialCallsShareSession(t *testing.T) {
 	structured, ok := report.ToolRuns[2].Result["structuredContent"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "cloakroom", structured["state"])
+}
+
+func TestRunStudioMCPTestSession_SaveFeedsLaterCall(t *testing.T) {
+	ctx := context.Background()
+	srv := studio.NewServer(studio.NewStudioSession(nil))
+	cs := connectStudioTestClient(ctx, t, srv)
+
+	report, err := runStudioMCPTestSession(ctx, cs, studioMCPTestOptions{
+		ServerCommand: "kitsoki",
+		ServerArgs:    []string{"mcp"},
+		ListTools:     false,
+		Calls: []studioMCPTestCall{
+			{
+				Name: "session.new",
+				Args: map[string]any{
+					"story_path": "../../testdata/apps/cloak/app.yaml",
+					"key":        "saved-handle",
+				},
+				Save: map[string]string{
+					"handle": "structuredContent.handle",
+				},
+			},
+			{
+				Name: "session.inspect",
+				Args: map[string]any{
+					"handle": "${handle}",
+				},
+				Expect: map[string]any{
+					"structuredContent.state": "foyer",
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	assert.True(t, report.OK)
+	require.Len(t, report.ToolRuns, 2)
+	assert.Equal(t, "session.inspect", report.ToolRuns[1].Name)
+	assert.False(t, report.ToolRuns[1].IsError)
 }
 
 func TestRunStudioMCPTestSession_ExpectationFailureFailsRun(t *testing.T) {

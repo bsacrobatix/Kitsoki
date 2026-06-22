@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,7 +47,8 @@ with a JSON array to run a handle-preserving workflow in one MCP client session.
 Examples:
   kitsoki mcp-test --stories-dir ./stories
   kitsoki mcp-test --tool story.validate --tool-args '{"dir":"stories/bugfix"}'
-  kitsoki mcp-test --calls '[{"tool":"session.new","args":{"story_path":"testdata/apps/cloak/app.yaml","key":"smoke"}},{"tool":"session.inspect","args":{"handle":"smoke"},"expect":{"structuredContent.state":"foyer"}}]'`,
+  kitsoki mcp-test --calls '[{"tool":"session.new","args":{"story_path":"testdata/apps/cloak/app.yaml","key":"smoke"}},{"tool":"session.inspect","args":{"handle":"smoke"},"expect":{"structuredContent.state":"foyer"}}]'
+  kitsoki mcp-test --calls '[{"tool":"session.inspect","args":{"handle":"smoke"},"save":{"notification_id":"structuredContent.notifications.0.id"}},{"tool":"session.teleport","args":{"handle":"smoke","notification_id":"${notification_id}"}}]'`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if timeout <= 0 {
@@ -134,11 +137,12 @@ type studioMCPTestOptions struct {
 }
 
 type studioMCPTestCall struct {
-	Name       string         `json:"tool"`
-	Args       map[string]any `json:"args,omitempty"`
-	Expect     map[string]any `json:"expect,omitempty"`
-	Retries    int            `json:"retries,omitempty"`
-	IntervalMS int            `json:"interval_ms,omitempty"`
+	Name       string            `json:"tool"`
+	Args       map[string]any    `json:"args,omitempty"`
+	Expect     map[string]any    `json:"expect,omitempty"`
+	Save       map[string]string `json:"save,omitempty"`
+	Retries    int               `json:"retries,omitempty"`
+	IntervalMS int               `json:"interval_ms,omitempty"`
 }
 
 type studioMCPTestReport struct {
@@ -220,6 +224,7 @@ func runStudioMCPTestSession(ctx context.Context, cs *mcpsdk.ClientSession, opts
 		name       string
 		args       map[string]any
 		expect     map[string]any
+		save       map[string]string
 		retries    int
 		intervalMS int
 	}{
@@ -231,6 +236,7 @@ func runStudioMCPTestSession(ctx context.Context, cs *mcpsdk.ClientSession, opts
 			name       string
 			args       map[string]any
 			expect     map[string]any
+			save       map[string]string
 			retries    int
 			intervalMS int
 		}{{name: opts.ToolName, args: opts.ToolArgs}}
@@ -239,6 +245,7 @@ func runStudioMCPTestSession(ctx context.Context, cs *mcpsdk.ClientSession, opts
 			name       string
 			args       map[string]any
 			expect     map[string]any
+			save       map[string]string
 			retries    int
 			intervalMS int
 		}, 0, len(opts.Calls))
@@ -247,15 +254,30 @@ func runStudioMCPTestSession(ctx context.Context, cs *mcpsdk.ClientSession, opts
 				name       string
 				args       map[string]any
 				expect     map[string]any
+				save       map[string]string
 				retries    int
 				intervalMS int
-			}{name: call.Name, args: call.Args, expect: call.Expect, retries: call.Retries, intervalMS: call.IntervalMS})
+			}{name: call.Name, args: call.Args, expect: call.Expect, save: call.Save, retries: call.Retries, intervalMS: call.IntervalMS})
 		}
 	}
+	vars := map[string]string{}
 	for _, call := range calls {
-		result, isError, attempts, err := runStudioMCPTestCall(ctx, cs, call.name, call.args, call.expect, call.retries, call.intervalMS)
+		args, err := expandMCPTestValue(call.args, vars)
 		if err != nil {
 			return report, err
+		}
+		expect, err := expandMCPTestValue(call.expect, vars)
+		if err != nil {
+			return report, err
+		}
+		result, isError, attempts, err := runStudioMCPTestCall(ctx, cs, call.name, asStringAnyMap(args), asStringAnyMap(expect), call.retries, call.intervalMS)
+		if err != nil {
+			return report, err
+		}
+		if len(call.save) > 0 {
+			if err := saveMCPTestVars(call.name, result, call.save, vars); err != nil {
+				return report, err
+			}
 		}
 		report.ToolRuns = append(report.ToolRuns, studioMCPToolReport{
 			Name:     call.name,
@@ -344,16 +366,95 @@ func lookupDotPath(root any, path string) (any, bool) {
 	}
 	cur := root
 	for _, part := range strings.Split(path, ".") {
-		m, ok := cur.(map[string]interface{})
-		if !ok {
-			return nil, false
-		}
-		cur, ok = m[part]
-		if !ok {
+		switch typed := cur.(type) {
+		case map[string]interface{}:
+			next, ok := typed[part]
+			if !ok {
+				return nil, false
+			}
+			cur = next
+		case []interface{}:
+			idx, err := strconv.Atoi(part)
+			if err != nil || idx < 0 || idx >= len(typed) {
+				return nil, false
+			}
+			cur = typed[idx]
+		default:
 			return nil, false
 		}
 	}
 	return cur, true
+}
+
+func saveMCPTestVars(tool string, result map[string]interface{}, save map[string]string, vars map[string]string) error {
+	for name, path := range save {
+		if name == "" {
+			return fmt.Errorf("mcp-test: %s save name is empty", tool)
+		}
+		value, ok := lookupDotPath(result, path)
+		if !ok {
+			return fmt.Errorf("mcp-test: %s save %q path %q missing", tool, name, path)
+		}
+		vars[name] = fmt.Sprint(value)
+	}
+	return nil
+}
+
+func expandMCPTestValue(v any, vars map[string]string) (any, error) {
+	switch typed := v.(type) {
+	case nil:
+		return nil, nil
+	case string:
+		return expandMCPTestString(typed, vars)
+	case map[string]interface{}:
+		out := make(map[string]any, len(typed))
+		for k, v := range typed {
+			expanded, err := expandMCPTestValue(v, vars)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = expanded
+		}
+		return out, nil
+	case []interface{}:
+		out := make([]any, 0, len(typed))
+		for _, v := range typed {
+			expanded, err := expandMCPTestValue(v, vars)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, expanded)
+		}
+		return out, nil
+	default:
+		return v, nil
+	}
+}
+
+func expandMCPTestString(s string, vars map[string]string) (string, error) {
+	var missing string
+	out := mcpTestVarPattern.ReplaceAllStringFunc(s, func(match string) string {
+		name := strings.TrimSuffix(strings.TrimPrefix(match, "${"), "}")
+		if value, ok := vars[name]; ok {
+			return value
+		}
+		missing = name
+		return ""
+	})
+	if missing != "" {
+		return "", fmt.Errorf("mcp-test: unknown saved value %q", missing)
+	}
+	return out, nil
+}
+
+var mcpTestVarPattern = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
+
+func asStringAnyMap(v any) map[string]any {
+	if v == nil {
+		return nil
+	}
+	m, _ := v.(map[string]any)
+	return m
 }
 
 func jsonEqual(got, want any) bool {
