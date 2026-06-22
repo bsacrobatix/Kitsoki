@@ -45,14 +45,31 @@
             GitHub sync: {{ inbox.githubSyncLast.inserted }} new, {{ inbox.githubSyncLast.skipped }} existing
           </div>
           <section
-            v-if="inbox.workItems.length > 0"
+            v-if="panelActiveWorkCount > 0"
             class="work-section"
             aria-label="Active work"
           >
             <div class="work-section__header">
               <span>Active work</span>
-              <span class="work-section__count">{{ inbox.activeWorkCount }}</span>
+              <span class="work-section__count">{{ panelActiveWorkCount }}</span>
             </div>
+            <button
+              v-for="proposal in proposalApprovalItems"
+              :key="`proposal:${proposal.id}`"
+              class="work-item work-item--proposal"
+              data-testid="work-item"
+              @click="onProposalItem(proposal.id)"
+            >
+              <span class="work-item__kind">{{ proposal.kind === "write_mode" ? "approval" : "proposal" }}</span>
+              <span class="work-item__main">
+                <span class="work-item__title">{{ proposal.title || "(untitled)" }}</span>
+                <span v-if="proposal.detail" class="work-item__body">{{ proposal.detail }}</span>
+                <span class="work-item__meta">
+                  <span>{{ proposal.kind }}</span>
+                  <span class="work-item__action">review</span>
+                </span>
+              </span>
+            </button>
             <button
               v-for="item in inbox.workItems"
               :key="workKey(item)"
@@ -74,10 +91,27 @@
                 </span>
               </span>
             </button>
+            <button
+              v-for="proposal in proposalStructureItems"
+              :key="`proposal:${proposal.id}`"
+              class="work-item work-item--proposal"
+              data-testid="work-item"
+              @click="onProposalItem(proposal.id)"
+            >
+              <span class="work-item__kind">proposal</span>
+              <span class="work-item__main">
+                <span class="work-item__title">{{ proposal.title || "(untitled)" }}</span>
+                <span v-if="proposal.detail" class="work-item__body">{{ proposal.detail }}</span>
+                <span class="work-item__meta">
+                  <span>{{ proposal.kind }}</span>
+                  <span class="work-item__action">review</span>
+                </span>
+              </span>
+            </button>
           </section>
 
           <p
-            v-if="inbox.workItems.length === 0 && inbox.notifications.length === 0"
+            v-if="panelActiveWorkCount === 0 && inbox.notifications.length === 0"
             class="inbox-panel__empty"
           >
             No notifications yet — a background turn that finishes will land here.
@@ -133,14 +167,26 @@ import { LiveSource } from "../data/live-source.js";
 import type { Notification, WorkItem } from "../data/live-source.js";
 import { useInboxStore } from "../stores/inbox.js";
 import { useOperatorQuestionStore } from "../stores/operatorQuestions.js";
+import { useProposalsStore } from "../stores/proposals.js";
 import { severityGlyph, severityColor, relativeTime } from "../lib/severity.js";
 import { jumpToNotification } from "../lib/inbox-jump.js";
 
 const inbox = useInboxStore();
 const operatorQuestions = useOperatorQuestionStore();
+const proposals = useProposalsStore();
 const router = useRouter();
 const route = useRoute();
 const source = new LiveSource("/");
+
+const panelActiveWorkCount = computed(
+  () => inbox.activeWorkCount + proposals.count
+);
+const proposalApprovalItems = computed(() =>
+  proposals.queue.filter((proposal) => proposal.kind === "write_mode")
+);
+const proposalStructureItems = computed(() =>
+  proposals.queue.filter((proposal) => proposal.kind !== "write_mode")
+);
 
 const currentSessionId = computed(() => {
   const raw = route.params.sessionId;
@@ -173,6 +219,26 @@ function onDismiss(n: Notification): void {
 function onSyncGitHub(): void {
   if (!currentSessionId.value) return;
   void inbox.syncGitHub(source, currentSessionId.value);
+}
+
+function onProposalItem(proposalID: string): void {
+  const index = proposals.queue.findIndex((p) => p.id === proposalID);
+  if (index < 0) return;
+  const proposal = proposals.queue[index];
+  if (!proposal) return;
+  operatorQuestions.onFrame({
+    session_id: "",
+    question_id: proposal.id,
+    questions: [
+      {
+        question: proposal.detail ? `${proposal.title}\n${proposal.detail}` : proposal.title,
+        header: proposal.kind === "write_mode" ? "May I edit?" : "Capture as structure?",
+        options: [{ label: "accept" }, { label: "refine" }, { label: "dismiss" }],
+      },
+    ],
+  });
+  proposals.queue.splice(index, 1);
+  inbox.close();
 }
 
 async function onWorkItem(item: WorkItem): Promise<void> {

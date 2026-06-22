@@ -7,32 +7,40 @@
     <button
       class="inbox-badge"
       data-testid="inbox-badge"
-      :class="{ 'inbox-badge--attention': inbox.chromeNeedsAttention }"
-      :data-needs-attention="inbox.chromeNeedsAttention ? 'true' : 'false'"
+      :class="{ 'inbox-badge--attention': chromeNeedsAttention }"
+      :data-needs-attention="chromeNeedsAttention ? 'true' : 'false'"
       :data-unread="inbox.unread"
       :data-active-work="inbox.activeWorkCount"
-      :title="`Inbox — ${inbox.chromeCount} active`"
-      :aria-label="`Inbox, ${inbox.chromeCount} active`"
+      :data-proposals="proposals.count"
+      :title="`Inbox — ${chromeCount} active`"
+      :aria-label="`Inbox, ${chromeCount} active`"
       @click="inbox.toggle()"
     >
       <span class="inbox-badge__bell">🔔</span>
       <span
-        v-if="inbox.chromeCount > 0"
+        v-if="chromeCount > 0"
         class="inbox-badge__count"
         data-testid="inbox-badge-count"
-      >{{ inbox.chromeCount }}</span>
+      >{{ chromeCount }}</span>
     </button>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import { useInboxStore } from "../stores/inbox.js";
+import { useProposalsStore } from "../stores/proposals.js";
 
 const isSnapshot =
   (globalThis as typeof globalThis & { __KITSOKI_SNAPSHOT__?: unknown })
     .__KITSOKI_SNAPSHOT__ !== undefined;
 
 const inbox = useInboxStore();
+const proposals = useProposalsStore();
+const chromeCount = computed(() => inbox.chromeCount + proposals.count);
+const chromeNeedsAttention = computed(
+  () => inbox.chromeNeedsAttention || proposals.attention
+);
 </script>
 
 <style scoped>

@@ -431,20 +431,23 @@ indistinguishable from a TUI one in the trace.
 ### The surfaces
 
 - **Global badge** (`components/InboxBadge.vue`) — the larger of unread
-  notification count and active-work item count in the chrome on every screen.
-  Attention color appears when either the notification feed or active-work
-  summary reports work that needs intervention. Active-work attention is limited
-  to unread `action_required` notifications, unanswered operator questions,
-  awaiting-input or failed jobs, and failed subagent drives; passive `success` /
-  `info` rows remain listed and jumpable without coloring the badge.
+  notification count and active-work item count, plus queued proposal-review
+  items, in the chrome on every screen. Attention color appears when either the
+  notification feed, active-work summary, or proposal queue reports work that
+  needs intervention. Active-work attention is limited to unread
+  `action_required` notifications, unanswered operator questions,
+  awaiting-input or failed jobs, failed subagent drives, and write-mode approval
+  proposals; passive `success` / `info` rows and low-stakes structure proposals
+  remain listed and jumpable without coloring the badge.
 - **`InboxPanel.vue`** — opens on badge click: first the prioritized active-work
   queue from `runstatus.work.list` (notifications, jobs, queued/dispatching
-  drives, failed drives, backgrounded chats, and unanswered operator questions),
-  then notification history.
+  drives, failed drives, backgrounded chats, unanswered operator questions, and
+  queued proposal-review items), then notification history.
   Rows show the next action explicitly: **jump** for notifications and
   notification-backed jobs, **open context** for chat-backed work including
-  failed subagent drives, **answer** for forwarded operator questions, and
-  **open session** for job rows that have no matching unread notification yet.
+  failed subagent drives, **answer** for forwarded operator questions,
+  **review** for proposals, and **open session** for job rows that have no
+  matching unread notification yet.
   Awaiting-input job rows show their clarification prompt in the row body unless
   a linked notification supplies a more specific body. Operator-question rows
   reopen the same blocking answer modal used by the live question SSE feed.

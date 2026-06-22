@@ -4,6 +4,7 @@ import { setActivePinia, createPinia } from "pinia";
 import InboxPanel from "../../src/components/InboxPanel.vue";
 import { useInboxStore } from "../../src/stores/inbox.js";
 import { useOperatorQuestionStore } from "../../src/stores/operatorQuestions.js";
+import { useProposalsStore } from "../../src/stores/proposals.js";
 
 const push = vi.fn();
 const route = { params: { sessionId: "web-session-1" }, query: {} as Record<string, string> };
@@ -262,6 +263,86 @@ describe("InboxPanel", () => {
     expect(questions.active?.question_id).toBe("q-7");
     expect(questions.active?.questions[0]?.question).toBe("Which environment?");
     expect(push).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("surfaces queued proposals in the global active work panel", async () => {
+    const inbox = useInboxStore();
+    const proposals = useProposalsStore();
+    const questions = useOperatorQuestionStore();
+    inbox.open = true;
+    proposals.push({
+      id: "demo-proposal-1",
+      kind: "write_mode",
+      title: "Edit docs proposal",
+      detail: "Allow the agent to patch docs/proposals/example.md",
+    });
+
+    const wrapper = mount(InboxPanel, { attachTo: document.body });
+    await flushPromises();
+
+    const row = document.body.querySelector('[data-testid="work-item"]') as HTMLButtonElement;
+    expect(row).not.toBeNull();
+    expect(document.body.textContent).toContain("Active work");
+    expect(document.body.textContent).toContain("1");
+    expect(document.body.textContent).toContain("approval");
+    expect(document.body.textContent).toContain("Edit docs proposal");
+    expect(document.body.textContent).toContain("Allow the agent to patch docs/proposals/example.md");
+    expect(document.body.textContent).toContain("review");
+
+    row.click();
+    await flushPromises();
+
+    expect(inbox.open).toBe(false);
+    expect(proposals.count).toBe(0);
+    expect(questions.active?.question_id).toBe("demo-proposal-1");
+    expect(questions.active?.questions[0]?.header).toBe("May I edit?");
+    expect(questions.active?.questions[0]?.question).toContain("Edit docs proposal");
+    expect(push).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("keeps low-stakes structure proposals below backend active work", async () => {
+    const inbox = useInboxStore();
+    const proposals = useProposalsStore();
+    inbox.open = true;
+    inbox.workSummary = {
+      items: 1,
+      needs_attention: 1,
+      jobs_running: 0,
+      jobs_awaiting_input: 0,
+      jobs_terminal: 0,
+      notifications_unread: 1,
+      notifications_action_required: 1,
+      pending_drives: 0,
+      backgrounded_chats: 0,
+    };
+    inbox.workItems = [
+      {
+        kind: "notification",
+        priority: 100,
+        session_id: "web-session-1",
+        title: "PR #42 needs review",
+        status: "unread",
+        notification_id: "notif-pr-42",
+        severity: "action_required",
+        reacquire_tool: "notification",
+        reacquire_session_id: "web-session-1",
+      },
+    ];
+    proposals.push({
+      id: "demo-structure-1",
+      kind: "structure",
+      title: "Capture route idea",
+    });
+
+    const wrapper = mount(InboxPanel, { attachTo: document.body });
+    await flushPromises();
+
+    const rows = Array.from(document.body.querySelectorAll('[data-testid="work-item"]'));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain("PR #42 needs review");
+    expect(rows[1]?.textContent).toContain("Capture route idea");
     wrapper.unmount();
   });
 
