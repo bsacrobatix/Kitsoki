@@ -465,14 +465,26 @@ type SessionInspectArgs struct {
 // come from the same orchestrator reads buildInspectOutput uses (LoadJourney +
 // AllowedIntents), so it matches the CLI inspect for that state.
 type InspectResult struct {
-	OK             bool               `json:"ok"`
-	State          string             `json:"state"`
-	World          map[string]any     `json:"world"`
-	AllowedIntents []string           `json:"allowed_intents"`
-	LastView       string             `json:"last_view"`
-	Jobs           []JobInspectItem   `json:"jobs,omitempty"`
-	Notifications  []InboxInspectItem `json:"notifications,omitempty"`
-	LastTurns      []TurnSummaryItem  `json:"last_turns"`
+	OK             bool                `json:"ok"`
+	State          string              `json:"state"`
+	World          map[string]any      `json:"world"`
+	AllowedIntents []string            `json:"allowed_intents"`
+	LastView       string              `json:"last_view"`
+	Async          AsyncInspectSummary `json:"async"`
+	Jobs           []JobInspectItem    `json:"jobs,omitempty"`
+	Notifications  []InboxInspectItem  `json:"notifications,omitempty"`
+	LastTurns      []TurnSummaryItem   `json:"last_turns"`
+}
+
+// AsyncInspectSummary gives clients a cheap priority signal before they inspect
+// the detailed job/notification rows.
+type AsyncInspectSummary struct {
+	JobsTotal                   int `json:"jobs_total"`
+	JobsRunning                 int `json:"jobs_running"`
+	JobsAwaitingInput           int `json:"jobs_awaiting_input"`
+	JobsTerminal                int `json:"jobs_terminal"`
+	NotificationsTotal          int `json:"notifications_total"`
+	NotificationsActionRequired int `json:"notifications_action_required"`
 }
 
 // JobInspectItem is a compact, structured projection of one background job.
@@ -878,6 +890,7 @@ func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int) (InspectRe
 		World:          j.World.Vars,
 		AllowedIntents: allowedNames,
 		LastView:       view,
+		Async:          summarizeAsync(jobs, notifications),
 		Jobs:           jobs,
 		Notifications:  notifications,
 		LastTurns:      summariseTrace(rt.history(), lastTurns),
@@ -946,6 +959,29 @@ func inspectNotifications(in []jobs.Notification) []InboxInspectItem {
 			OriginKind:         n.OriginKind,
 			OriginRef:          n.OriginRef,
 		})
+	}
+	return out
+}
+
+func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem) AsyncInspectSummary {
+	out := AsyncInspectSummary{
+		JobsTotal:          len(jobRows),
+		NotificationsTotal: len(notifications),
+	}
+	for _, j := range jobRows {
+		switch j.Status {
+		case jobs.JobRunning:
+			out.JobsRunning++
+		case jobs.JobAwaitingInput:
+			out.JobsAwaitingInput++
+		case jobs.JobDone, jobs.JobFailed, jobs.JobCancelled:
+			out.JobsTerminal++
+		}
+	}
+	for _, n := range notifications {
+		if n.Severity == jobs.SeverityActionRequired {
+			out.NotificationsActionRequired++
+		}
 	}
 	return out
 }

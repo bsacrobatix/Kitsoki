@@ -304,6 +304,68 @@ func TestSessionSubmit_BackgroundJobCompletesOverMCP(t *testing.T) {
 	assert.Contains(t, rendered.Frame.Text, "mcp-bg-done")
 }
 
+func TestSessionSubmit_BackgroundJobVisibleWhileRunningOverMCP(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+	appPath := writeSlowBackgroundJobStory(t)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": appPath,
+		"harness":    "replay",
+		"trace":      t.TempDir() + "/trace.jsonl",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new: %s", contentText(res))
+	var ok studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
+
+	res, err = callTool(ctx, cs, "session.submit", map[string]any{
+		"handle": ok.Handle,
+		"intent": "enter",
+	})
+	require.NoError(t, err)
+	require.True(t, driveResult(t, res).OK)
+
+	var running studio.InspectResult
+	require.Eventually(t, func() bool {
+		res, err := callTool(ctx, cs, "session.inspect", map[string]any{"handle": ok.Handle})
+		if err != nil || res.IsError {
+			return false
+		}
+		if err := json.Unmarshal([]byte(contentText(res)), &running); err != nil {
+			return false
+		}
+		return len(running.Jobs) == 1 && running.Jobs[0].Status == jobs.JobRunning
+	}, time.Second, 10*time.Millisecond)
+
+	require.Len(t, running.Jobs, 1)
+	assert.Equal(t, "host.run", running.Jobs[0].Kind)
+	assert.Equal(t, "running", running.Jobs[0].OriginState)
+	assert.Equal(t, 1, running.Async.JobsTotal)
+	assert.Equal(t, 1, running.Async.JobsRunning)
+	assert.Equal(t, 0, running.Async.JobsTerminal)
+	assert.Equal(t, running.Jobs[0].ID, running.World["last_job_id"])
+	assert.NotZero(t, running.Jobs[0].CreatedAtUnixMilli)
+	assert.Zero(t, running.Jobs[0].FinishedAtUnixMilli)
+
+	var done studio.InspectResult
+	require.Eventually(t, func() bool {
+		res, err := callTool(ctx, cs, "session.inspect", map[string]any{"handle": ok.Handle})
+		if err != nil || res.IsError {
+			return false
+		}
+		if err := json.Unmarshal([]byte(contentText(res)), &done); err != nil {
+			return false
+		}
+		return done.World["result"] == "slow-bg-done" &&
+			len(done.Jobs) == 1 &&
+			done.Jobs[0].Status == jobs.JobDone
+	}, 3*time.Second, 25*time.Millisecond)
+	assert.Equal(t, 0, done.Async.JobsRunning)
+	assert.Equal(t, 1, done.Async.JobsTerminal)
+}
+
 func writeBackgroundJobStory(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -349,6 +411,55 @@ states:
           - set:
               result: "{{ world.last_job_result.stdout }}"
           - say: "Background complete: {{ world.result }}"
+`
+	require.NoError(t, os.WriteFile(appPath, []byte(body), 0o644))
+	return appPath
+}
+
+func writeSlowBackgroundJobStory(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	appPath := dir + "/app.yaml"
+	const body = `app:
+  id: studio-background-job-running-test
+  version: 0.1.0
+  title: "Studio Background Job Running Test"
+
+hosts:
+  - host.run
+
+world:
+  result: { type: string, default: "" }
+  last_job_id: { type: string, default: "" }
+
+intents:
+  enter:
+    title: "Enter"
+
+root: lobby
+
+states:
+  lobby:
+    view: |
+      Lobby.
+    on:
+      enter:
+        - target: running
+
+  running:
+    view: |
+      Running.
+      Result: {{ world.result }}
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "sleep 1; printf slow-bg-done"
+        background: true
+        bind:
+          last_job_id: job_id
+        on_complete:
+          - set:
+              result: "{{ world.last_job_result.stdout }}"
 `
 	require.NoError(t, os.WriteFile(appPath, []byte(body), 0o644))
 	return appPath
