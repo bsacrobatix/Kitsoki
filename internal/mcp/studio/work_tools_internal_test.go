@@ -62,3 +62,14 @@ func TestWorkItemNeedsAttentionUsesInterventionSemantics(t *testing.T) {
 		Status: string(jobs.JobRunning),
 	}))
 }
+
+func TestWorkPrioritiesKeepPassiveNotificationsBelowActiveWork(t *testing.T) {
+	assert.Greater(t, notificationPriority(InboxInspectItem{Severity: jobs.SeverityActionRequired}),
+		jobPriority(JobInspectItem{Status: jobs.JobAwaitingInput}))
+	assert.Greater(t, jobPriority(JobInspectItem{Status: jobs.JobAwaitingInput}),
+		jobPriority(JobInspectItem{Status: jobs.JobFailed}))
+	assert.Greater(t, jobPriority(JobInspectItem{Status: jobs.JobRunning}),
+		notificationPriority(InboxInspectItem{Severity: jobs.SeveritySuccess}))
+	assert.Greater(t, 60,
+		notificationPriority(InboxInspectItem{Severity: jobs.SeverityInfo}))
+}

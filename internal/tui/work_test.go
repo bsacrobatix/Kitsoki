@@ -74,6 +74,15 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 		OriginRef:     "github:acme/repo/pr/99",
 		OriginURL:     "https://github.com/acme/repo/pull/99",
 	}))
+	require.NoError(t, js.InsertNotification(ctx, &jobs.Notification{
+		SessionID:     sid,
+		CreatedAt:     now.Add(-5 * time.Second),
+		Severity:      jobs.SeveritySuccess,
+		Title:         "Background check complete",
+		TeleportState: "foyer",
+		OriginKind:    "job",
+		OriginRef:     "job:done",
+	}))
 	require.NoError(t, js.UpsertJob(ctx, &jobs.Job{
 		ID:          "job-other",
 		SessionID:   "other-session",
@@ -142,10 +151,11 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 
 	m = runTurnBlocking(t, m, "/work")
 	tx := extractTranscript(t, m)
-	currentWork := transcriptAfter(t, tx, "active work: 5 item(s)")
-	require.Contains(t, tx, "active work: 5 item(s)")
+	currentWork := transcriptAfter(t, tx, "active work: 6 item(s)")
+	require.Contains(t, tx, "active work: 6 item(s)")
 	require.Contains(t, tx, "notification")
 	require.Contains(t, tx, "Review PR #42")
+	require.Contains(t, tx, "Background check complete")
 	require.Contains(t, tx, "github:acme/repo/pr/42")
 	require.Contains(t, tx, "https://github.com/acme/repo/pull/42")
 	require.Contains(t, tx, "/inbox 1")
@@ -166,6 +176,7 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	requireBefore(t, currentWork, "host.agent.task", "dispatching review")
 	requireBefore(t, currentWork, "dispatching review", "continue queued review")
 	requireBefore(t, currentWork, "continue queued review", "Background Claude")
+	requireBefore(t, currentWork, "Background Claude", "Background check complete")
 
 	rm, ok := tuipkg.ExtractRootModel(m)
 	require.True(t, ok)
@@ -175,8 +186,8 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 
 	m = runTurnBlocking(t, m, "/work --all")
 	tx = extractTranscript(t, m)
-	allWork := transcriptAfter(t, tx, "active work (all sessions): 9 item(s)")
-	require.Contains(t, tx, "active work (all sessions): 9 item(s)")
+	allWork := transcriptAfter(t, tx, "active work (all sessions): 10 item(s)")
+	require.Contains(t, tx, "active work (all sessions): 10 item(s)")
 	require.Contains(t, tx, "Other PR #99")
 	require.Contains(t, tx, "job-other")
 	require.Contains(t, tx, "Background Claude")
@@ -189,7 +200,8 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	requireBefore(t, allWork, "Other PR #99", "job-other")
 	requireBefore(t, allWork, "Review PR #42", "job-running")
 	requireBefore(t, allWork, "job-other", "job-running")
-	requireContainsNear(t, allWork, "Review PR #42", "/inbox 1")
+	requireBefore(t, allWork, "Other session Claude", "Background check complete")
+	requireContainsNear(t, allWork, "Review PR #42", "/inbox 2")
 	requireNotContainsNear(t, allWork, "Other PR #99", "/inbox")
 
 	rm, ok = tuipkg.ExtractRootModel(m)

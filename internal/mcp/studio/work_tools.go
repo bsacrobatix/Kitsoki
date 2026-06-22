@@ -231,9 +231,9 @@ func notificationPriority(n InboxInspectItem) int {
 	case jobs.SeverityWarn:
 		return 88
 	case jobs.SeveritySuccess:
-		return 84
+		return 50
 	default:
-		return 80
+		return 45
 	}
 }
 

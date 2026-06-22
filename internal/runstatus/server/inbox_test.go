@@ -344,23 +344,34 @@ func TestWorkList_SurfacesGlobalActiveWork(t *testing.T) {
 
 func TestWorkList_DoesNotTreatPassiveNotificationsAsAttention(t *testing.T) {
 	f := buildInboxFixture(t)
+	now := time.Now()
 	n := &jobs.Notification{
 		SessionID:     f.sid,
-		CreatedAt:     time.Now(),
+		CreatedAt:     now,
 		Severity:      jobs.SeveritySuccess,
 		Title:         "Job done",
 		TeleportState: "inbox",
 	}
 	require.NoError(t, f.js.InsertNotification(context.Background(), n))
+	require.NoError(t, f.js.UpsertJob(context.Background(), &jobs.Job{
+		ID:        "job-running",
+		SessionID: f.sid,
+		Kind:      "host.agent.task",
+		Status:    jobs.JobRunning,
+		CreatedAt: now.Add(-time.Minute),
+		UpdatedAt: now.Add(-time.Second),
+	}))
 
 	var work server.WorkListResult
 	rpcCall(t, f.ts, "runstatus.work.list", nil, &work)
 	assert.Equal(t, 1, work.Summary.NotificationsUnread)
 	assert.Equal(t, 0, work.Summary.NotificationsActionRequired)
 	assert.Equal(t, 0, work.Summary.NeedsAttention)
-	require.Len(t, work.Items, 1)
-	assert.Equal(t, "notification", work.Items[0].Kind)
-	assert.Equal(t, jobs.SeveritySuccess, work.Items[0].Severity)
+	require.Len(t, work.Items, 2)
+	assert.Equal(t, "job", work.Items[0].Kind)
+	assert.Equal(t, "job-running", work.Items[0].JobID)
+	assert.Equal(t, "notification", work.Items[1].Kind)
+	assert.Equal(t, jobs.SeveritySuccess, work.Items[1].Severity)
 }
 
 func TestChatShow_SurfacesFocusedAsyncChatContext(t *testing.T) {

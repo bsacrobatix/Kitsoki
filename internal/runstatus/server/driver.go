@@ -537,9 +537,9 @@ func workNotificationPriority(n jobs.Notification) int {
 	case jobs.SeverityWarn:
 		return 88
 	case jobs.SeveritySuccess:
-		return 84
+		return 50
 	default:
-		return 80
+		return 45
 	}
 }
 
