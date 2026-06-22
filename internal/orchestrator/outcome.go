@@ -98,6 +98,9 @@ type TurnOutcome struct {
 	PendingSlots map[string]any
 	// TurnNumber is the turn that just completed.
 	TurnNumber app.TurnNumber
+	// ContextRoute is the routing receipt for a contextually-routed turn
+	// (nil for deterministic/semantic/LLM turns). Surfaced to TUI/web.
+	ContextRoute *ContextRouteReceipt
 	// HarnessError is the (optional) human-readable description of an
 	// orchestrator-side dispatch loop failure that fired during this turn
 	// — e.g. settlePostBindEmits hit its recursion cap, or

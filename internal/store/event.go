@@ -267,6 +267,11 @@ const (
 	// MiningProposalRaised). Additive optional payload, so older cassettes replay
 	// unchanged. See docs/architecture/ambient-mining.md.
 	MiningPassRan EventKind = "mining.pass_ran"
+
+	// TurnContextRouteOverridden is recorded when the operator rewinds/switches a
+	// contextual routing decision via RewindRoute. Fields: from_decision_id,
+	// old_class, new_class, reason. Replay folds it as a no-op (annotation-only).
+	TurnContextRouteOverridden EventKind = "turn.context_route_overridden"
 )
 
 // Event is one row in the append-only event log.

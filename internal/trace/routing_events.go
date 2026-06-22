@@ -51,4 +51,13 @@ const (
 	//   lane     string  — the LaneKind string (help|work|meta)
 	//   chat_id  string  — the resolved lane chat id
 	EvTurnContextRouteApplied = "turn.context_route_applied"
+
+	// EvTurnContextRouteOverridden fires when the operator rewinds/switches a
+	// contextual route via RewindRoute. Expected fields:
+	//
+	//   from_decision_id  string  — the decision id that was overridden
+	//   old_class         string  — the original routing class
+	//   new_class         string  — the replacement routing class
+	//   reason            string  — operator-supplied reason for the override
+	EvTurnContextRouteOverridden = "turn.context_route_overridden"
 )

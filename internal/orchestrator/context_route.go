@@ -55,6 +55,20 @@ type ContextRouteVerdict struct {
 	Alternatives []ContextRouteAlt `json:"alternatives,omitempty"`
 }
 
+// ContextRouteReceipt is the compact, queryable record of one contextual
+// routing decision, surfaced to TUI/web and persisted on the turn outcome.
+// DecisionID is "<session_id>:<turn_number>" and is used as a stable rewind target.
+type ContextRouteReceipt struct {
+	Class        string            `json:"class"`
+	Intent       string            `json:"intent,omitempty"`
+	Reason       string            `json:"reason,omitempty"`
+	Confidence   float64           `json:"confidence"`
+	TargetChatID string            `json:"target_chat_id,omitempty"`
+	TargetLane   string            `json:"target_lane,omitempty"`
+	Alternatives []ContextRouteAlt `json:"alternatives,omitempty"`
+	DecisionID   string            `json:"decision_id"`
+}
+
 // ParseContextRouteVerdict parses a raw submission map (as decoded from JSON)
 // into a ContextRouteVerdict. It rejects any class value outside the four
 // recognised classes (intent | help | room_request | meta_edit) — including an
@@ -82,6 +96,19 @@ func ParseContextRouteVerdict(raw map[string]any) (ContextRouteVerdict, error) {
 	}
 	if slots, ok := raw["slots"].(map[string]any); ok {
 		v.Slots = slots
+	}
+	if alts, ok := raw["alternatives"].([]any); ok {
+		for _, a := range alts {
+			m, ok := a.(map[string]any)
+			if !ok {
+				continue
+			}
+			alt := ContextRouteAlt{}
+			alt.Class = ContextRouteClass(func() string { s, _ := m["class"].(string); return s }())
+			alt.Intent, _ = m["intent"].(string)
+			alt.Confidence, _ = m["confidence"].(float64)
+			v.Alternatives = append(v.Alternatives, alt)
+		}
 	}
 	return v, nil
 }

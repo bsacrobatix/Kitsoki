@@ -174,6 +174,25 @@ func BuildJourney(def *app.AppDef, initialState app.StatePath, initialWorld worl
 	return js, nil
 }
 
+// BuildJourneyUntil is like BuildJourney but stops before folding any event
+// whose turn number is >= beforeTurn. It is used by the rewind path to
+// reconstruct the pre-dispatch state for a given turn without modifying the
+// event log.
+//
+// Pass the same initialState/initialWorld as you would to BuildJourney — the
+// same snapshot-relative contract applies: history should already be the events
+// returned by LoadHistory (i.e. events after the latest snapshot), and
+// initialState/initialWorld should be initialised from that snapshot.
+func BuildJourneyUntil(def *app.AppDef, initialState app.StatePath, initialWorld world.World, history History, beforeTurn app.TurnNumber) (*JourneyState, error) {
+	filtered := make(History, 0, len(history))
+	for _, ev := range history {
+		if ev.Turn < beforeTurn {
+			filtered = append(filtered, ev)
+		}
+	}
+	return BuildJourney(def, initialState, initialWorld, filtered)
+}
+
 // effectPayload is the JSON structure for an EffectApplied event payload.
 type effectPayload struct {
 	Set       map[string]any `json:"set,omitempty"`

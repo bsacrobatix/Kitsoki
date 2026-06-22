@@ -336,6 +336,14 @@ func (o *Orchestrator) routeViaContextualRouter(
 		if err != nil {
 			return nil, false, err
 		}
+		outcome.ContextRoute = &ContextRouteReceipt{
+			Class:        string(ClassIntent),
+			Intent:       verdict.Intent,
+			Reason:       verdict.Reason,
+			Confidence:   verdict.Confidence,
+			Alternatives: verdict.Alternatives,
+			DecisionID:   fmt.Sprintf("%s:%d", sid, outcome.TurnNumber),
+		}
 		return outcome, true, nil
 
 	default:
@@ -378,6 +386,15 @@ func (o *Orchestrator) routeViaContextualRouter(
 		return &TurnOutcome{
 			Mode:     ModeOffPath,
 			NewState: state,
+			ContextRoute: &ContextRouteReceipt{
+				Class:        string(verdict.Class),
+				Reason:       verdict.Reason,
+				Confidence:   verdict.Confidence,
+				Alternatives: verdict.Alternatives,
+				TargetChatID: chat.ID,
+				TargetLane:   string(kind),
+				DecisionID:   fmt.Sprintf("%s:%d", sid, turnNum),
+			},
 		}, true, nil
 	}
 }

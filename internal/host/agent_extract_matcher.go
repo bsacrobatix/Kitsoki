@@ -239,6 +239,21 @@ func RunContextRouteLLM(ctx context.Context, input, state string, allowedIntents
 			"intent":     map[string]any{"type": "string"},
 			"confidence": map[string]any{"type": "number"},
 			"reason":     map[string]any{"type": "string"},
+			// alternatives carries lower-confidence competing verdicts so the
+			// operator can inspect what the router considered before deciding.
+			"alternatives": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"required":             []string{"class", "confidence"},
+					"properties": map[string]any{
+						"class":      map[string]any{"type": "string"},
+						"intent":     map[string]any{"type": "string"},
+						"confidence": map[string]any{"type": "number"},
+					},
+				},
+			},
 		},
 	})
 	if err != nil {
