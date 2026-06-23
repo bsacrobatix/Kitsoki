@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/host"
@@ -43,7 +44,33 @@ func (srv *Server) registerHostTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name: "host.run",
 		Description: "Run a command against a worktree directory and return its exit code + combined output, OUTSIDE any live session — the standalone gate-runner. Use it to independently re-confirm a committed tip is GREEN (e.g. cmd:\"go test ./...\" or a story's gate_command) rather than trusting an agent's self-report. {dir (required, the working directory — a worktree path), cmd (required, a shell command unless args is given), args? ([]any → exec cmd directly, no shell), timeout? (seconds as number, or a Go duration string like \"5m\")} → {ok, exit_code, stdout}. A non-zero exit is data (ok:false), not an error. Same semantics as a story's host.run effect.",
+		// HostRunArgs.Timeout is a polymorphic `any` (number-of-seconds OR a Go
+		// duration string), which the jsonschema reflector emits as the bare
+		// boolean schema `true`. Claude Code's tools/list validator rejects a
+		// non-object property schema ("Invalid input") and then drops the ENTIRE
+		// tool list for the session — so this one `any` field silently strands
+		// every kitsoki tool from any attached agent. Pre-build the schema and
+		// replace `timeout` with a valid object schema (no `type:` ⇒ still
+		// accepts number|string, just expressed as an object, not a boolean).
+		// Regression: TestHostRun_TimeoutSchemaIsObject.
+		InputSchema: hostRunInputSchema(),
 	}, srv.handleHostRun)
+}
+
+// hostRunInputSchema reflects HostRunArgs and patches the polymorphic `timeout`
+// property so it is a valid JSON-Schema object rather than the bare boolean
+// `true` the reflector emits for an `any` field. See the call site for why a
+// boolean property schema breaks Claude Code's tool-list fetch.
+func hostRunInputSchema() *jsonschema.Schema {
+	schema, err := jsonschema.For[HostRunArgs](nil)
+	if err != nil {
+		// Construction-time, like the SDK's own AddTool schema panics.
+		panic(fmt.Errorf("host.run: build input schema: %w", err))
+	}
+	schema.Properties["timeout"] = &jsonschema.Schema{
+		Description: "Wall-clock cap. A bare number is seconds; a string is a Go duration (\"90s\", \"5m\"). Omit for uncapped.",
+	}
+	return schema
 }
 
 // HostRunArgs is the input to host.run.
