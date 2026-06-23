@@ -57,6 +57,26 @@ func assertHermeticSettingSources(t *testing.T, path string, args []string) {
 	}
 }
 
+// assertStrictMCPConfig asserts the agent argv carries --strict-mcp-config, so the
+// subprocess uses ONLY the MCP servers kitsoki attaches via --mcp-config and ignores
+// the working_dir's project .mcp.json. Without it, a failing project MCP server in a
+// maker worktree silently drops the validator (`submit`) tool — the P0 that discarded
+// correct maker output. See appendStrictMCPConfigFlag in agents.go.
+func assertStrictMCPConfig(t *testing.T, path string, args []string) {
+	t.Helper()
+	if len(args) == 0 {
+		t.Fatalf("%s: runner was never invoked (no argv captured)", path)
+	}
+	for _, a := range args {
+		if a == "--strict-mcp-config" {
+			return
+		}
+	}
+	t.Errorf("%s: claude argv missing `--strict-mcp-config`; the working_dir's "+
+		"project .mcp.json could interfere and drop the validator `submit` tool. "+
+		"argv: %v", path, args)
+}
+
 func TestAgentSettingSources_Ask(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -74,6 +94,7 @@ func TestAgentSettingSources_Ask(t *testing.T) {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 	assertHermeticSettingSources(t, "ask (buildBaseCLIArgs)", captured)
+	assertStrictMCPConfig(t, "ask (buildBaseCLIArgs)", captured)
 }
 
 func TestAgentSettingSources_ConverseNoChat(t *testing.T) {
@@ -87,6 +108,7 @@ func TestAgentSettingSources_ConverseNoChat(t *testing.T) {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 	assertHermeticSettingSources(t, "converse (non-chat path)", captured)
+	assertStrictMCPConfig(t, "converse (non-chat path)", captured)
 }
 
 func TestAgentSettingSources_ConverseChat(t *testing.T) {
@@ -109,4 +131,5 @@ func TestAgentSettingSources_ConverseChat(t *testing.T) {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 	assertHermeticSettingSources(t, "converse (chat path — interviewer)", captured)
+	assertStrictMCPConfig(t, "converse (chat path — interviewer)", captured)
 }

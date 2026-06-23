@@ -165,6 +165,7 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 		"--permission-mode", permMode,
 	}
 	cliArgs = appendSettingSourcesFlag(cliArgs)
+	cliArgs = appendStrictMCPConfigFlag(cliArgs)
 	cliArgs, _ = appendComposedSystemPrompt(ctx, cliArgs, sysprompt.Converse, systemPrompt, agent.InheritClaudeDefault)
 	if strings.TrimSpace(agent.Model) != "" {
 		cliArgs = append(cliArgs, "--model", agent.Model)
@@ -353,6 +354,7 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 		"--permission-mode", permMode,
 	}
 	cliArgs = appendSettingSourcesFlag(cliArgs)
+	cliArgs = appendStrictMCPConfigFlag(cliArgs)
 	if firstTurn {
 		cliArgs = append(cliArgs, "--session-id", claudeSID)
 	} else {

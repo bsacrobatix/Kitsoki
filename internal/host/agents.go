@@ -508,6 +508,27 @@ func appendSettingSourcesFlag(cliArgs []string) []string {
 	return append(cliArgs, "--setting-sources", agentSettingSources)
 }
 
+// appendStrictMCPConfigFlag pins --strict-mcp-config so the agent subprocess uses
+// ONLY the MCP servers kitsoki attaches via --mcp-config (the structured-output
+// `submit` validator and, when present, the operator-ask bridge) and IGNORES every
+// other MCP source — crucially the working_dir's project .mcp.json.
+//
+// Without it, a maker whose working_dir is a `.worktrees/<branch>` checkout of a
+// repo that ships a tracked `.mcp.json` (this one does) loads that project MCP
+// server alongside the validator. When that project server is failing/contended,
+// claude's documented project-vs---mcp-config interference (anthropics/claude-code
+// #4938, #17299) silently DROPS the validator from the live tool set, so the maker
+// reports `No such tool available: submit`, burns all acceptance attempts, and the
+// (correct) work is discarded. The interference init-races, so it bit long maker
+// runs but not short ones. Strict mode removes the variable entirely.
+//
+// Applied at the same hermetic sites as appendSettingSourcesFlag; it is additive to
+// argv and orthogonal to the --mcp-config entries (it only suppresses NON-flag MCP
+// sources), so the validator + operator-ask servers kitsoki passes survive.
+func appendStrictMCPConfigFlag(cliArgs []string) []string {
+	return append(cliArgs, "--strict-mcp-config")
+}
+
 // appendDefaultCwd returns workingDir if non-empty, otherwise returns
 // agent.DefaultCwd. Implements the per-call working_dir wins rule.
 func appendDefaultCwd(workingDir string, agent Agent) string {
