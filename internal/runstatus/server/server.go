@@ -994,6 +994,34 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return map[string]any{"answer": answer}, nil
 
+	case "runstatus.artifact.semantic":
+		// Read an artifact's sibling `<name>.semantic.json` sidecar (the
+		// producer-declared clickable-element envelope) so the web annotator's
+		// SemanticOverlay can offer semantic-element picks. We resolve the opaque
+		// handle to its on-disk path via the same ArtifactResolver the /artifact
+		// route uses, then read the sidecar beside it. kitsoki stays
+		// producer-AGNOSTIC: the parsed envelope (plugin + opaque element refs) is
+		// returned verbatim. A handle with no sidecar (or an unknown handle)
+		// resolves to null so the annotator falls back to the dom_node/region
+		// picker — never an error (the FrameResolver/SemanticSidecar graceful
+		// posture). READ-ONLY: no session driver required.
+		handle, _ := params["handle"].(string)
+		if strings.TrimSpace(handle) == "" {
+			return nil, &rpcError{Code: -32602, Message: "handle is required"}
+		}
+		absPath, _, found := s.resolveArtifact(handle)
+		if !found {
+			return nil, nil
+		}
+		sc, ok, err := host.DiskSemanticSidecarReader{}.ReadSemanticSidecar(absPath)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		if !ok || len(sc.Elements) == 0 {
+			return nil, nil
+		}
+		return sc, nil
+
 	// ── Inbox (background-job notifications) ────────────────────────────────
 	case "runstatus.session.notifications.list":
 		entry, rerr := s.resolve(params)
@@ -1624,6 +1652,12 @@ func visualAmbientFromParams(m map[string]any) host.VisualAmbient {
 			}
 		}
 		v.Element = &e
+	}
+	// v2: the discriminated anchor (annotation_anchor.go). Absent or unkinded ⇒
+	// zero anchor; host.VisualAmbient.normalizedAnchor synthesizes one from the v1
+	// flat fields above so a legacy surface that sends no `anchor` still works.
+	if an, ok := m["anchor"].(map[string]any); ok {
+		v.Anchor = host.AnchorFromParams(an)
 	}
 	return v
 }

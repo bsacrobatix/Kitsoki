@@ -196,6 +196,71 @@ func TestAgentConverse_RecordsVisualInput(t *testing.T) {
 	}
 }
 
+// TestAgentConverse_RecordsSemanticAnchor proves the v2 generalization end-to-end:
+// a semantic_element anchor (no frame, no DOM element — a producer-declared pick)
+// records as `input.visual.anchor.target` on the AgentCalled event, ref verbatim,
+// schema_version stamped. No frame_handle ⇒ no FrameResolver needed.
+func TestAgentConverse_RecordsSemanticAnchor(t *testing.T) {
+	t.Parallel()
+
+	sink := &memSink{}
+	ctx := host.WithAgentCallCtx(context.Background(), host.AgentCallCtx{
+		SessionID: app.SessionID("sem-sess"),
+		Turn:      app.TurnNumber(1),
+		StatePath: app.StatePath("offpath"),
+	})
+	ctx = host.WithAgentEventSink(ctx, sink)
+	ctx = host.WithClaudeRunner(ctx, host.FakeConverse("that title scene reads well"))
+	ctx = host.WithVisualAmbient(ctx, host.VisualAmbient{
+		MediaHandle: "art:slidey-out",
+		Anchor: host.AnnotationAnchor{
+			Kind: host.AnchorSemanticElement,
+			SemanticElement: &host.AnchorSemanticElementTarget{
+				Plugin: "slidey",
+				Ref:    "scene-3.title",
+			},
+		},
+	})
+
+	res, err := host.AgentConverseHandler(ctx, map[string]any{"question": "is this scene clear?"})
+	if err != nil {
+		t.Fatalf("AgentConverseHandler: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %q", res.Error)
+	}
+
+	called := firstEventOfKind(t, sink, store.AgentCalled)
+	var payload host.AgentCalledPayload
+	if err := json.Unmarshal(called.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal AgentCalled payload: %v", err)
+	}
+	var input struct {
+		Visual struct {
+			SchemaVersion int `json:"schema_version"`
+			Anchor        struct {
+				Target struct {
+					Kind   string `json:"kind"`
+					Plugin string `json:"plugin"`
+					Ref    string `json:"ref"`
+				} `json:"target"`
+			} `json:"anchor"`
+		} `json:"visual"`
+	}
+	if err := json.Unmarshal(payload.Input, &input); err != nil {
+		t.Fatalf("unmarshal input.visual: %v", err)
+	}
+	if input.Visual.SchemaVersion != host.VisualSchemaVersion {
+		t.Errorf("schema_version = %d, want %d", input.Visual.SchemaVersion, host.VisualSchemaVersion)
+	}
+	if input.Visual.Anchor.Target.Kind != "semantic_element" {
+		t.Errorf("anchor.target.kind = %q, want semantic_element", input.Visual.Anchor.Target.Kind)
+	}
+	if input.Visual.Anchor.Target.Ref != "scene-3.title" {
+		t.Errorf("anchor.target.ref = %q, want scene-3.title (verbatim)", input.Visual.Anchor.Target.Ref)
+	}
+}
+
 func TestAgentConverse_NoVisual_Unchanged(t *testing.T) {
 	t.Parallel()
 

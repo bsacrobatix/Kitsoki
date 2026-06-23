@@ -75,6 +75,11 @@ type VisualAmbient struct {
 	// Route is the UI route/URL the operator was on when they pointed, for
 	// human context in the preamble.
 	Route string `json:"route"`
+	// Anchor is the v2 discriminated annotation target (see annotation_anchor.go).
+	// A v2 surface attaches it explicitly; a v1 surface leaves it zero and the
+	// normalization synthesizes one from the flat fields (normalizedAnchor). It is
+	// ADDITIVE — the legacy fields above are still recorded byte-identically.
+	Anchor AnnotationAnchor `json:"anchor,omitempty"`
 }
 
 // VisualSchemaVersion is the schema version stamped on the recorded
@@ -82,7 +87,12 @@ type VisualAmbient struct {
 // template-facing `args.visual` shape: the recorded block is the auditable
 // decision INPUT, so it carries an explicit version that lets the shape evolve
 // without breaking older traces (docs/tracing/trace-format.md, input.visual).
-const VisualSchemaVersion = 1
+//
+// v2 adds the discriminated `anchor` block (annotation_anchor.go) alongside every
+// v1 flat field. The bump is back-compatible: a v2 reader still finds the legacy
+// frame_handle/point/element/t_ms keys, and a v1 bundle is normalized into a
+// dom_node/frame anchor so the recorded shape is a strict superset of v1.
+const VisualSchemaVersion = 2
 
 // recordedMap renders the ambient context as the structured `input.visual`
 // block recorded on the agent call event — the auditable record of what the
@@ -111,6 +121,11 @@ func (a VisualAmbient) recordedMap() map[string]any {
 			},
 		}
 	}
+	// v2: the discriminated anchor, additive alongside the legacy keys. A v1
+	// bundle synthesizes one (dom_node/frame) so the block always carries it.
+	if anchor := a.normalizedAnchor().asMap(); anchor != nil {
+		m["anchor"] = anchor
+	}
 	return m
 }
 
@@ -132,6 +147,11 @@ func (a VisualAmbient) asMap() map[string]any {
 			"bbox":     a.Element.Bbox,
 		}
 	}
+	// v2: expose the discriminated anchor so a prompt can reference
+	// `{{ args.visual.anchor.target.kind }}` while the legacy keys above stay live.
+	if anchor := a.normalizedAnchor().asMap(); anchor != nil {
+		m["anchor"] = anchor
+	}
 	return m
 }
 
@@ -144,7 +164,7 @@ type visualAmbientKey struct{}
 // screen context, so the surfaces that don't attach a bundle never need a
 // separate ctx branch.
 func WithVisualAmbient(ctx context.Context, a VisualAmbient) context.Context {
-	if a.FrameHandle == "" && a.Element == nil {
+	if a.FrameHandle == "" && a.Element == nil && a.Anchor.Kind == "" {
 		return ctx
 	}
 	return context.WithValue(ctx, visualAmbientKey{}, a)
@@ -212,7 +232,7 @@ func recordedVisualInput(ctx context.Context) (block map[string]any, ok bool, er
 	if !present {
 		return nil, false, nil
 	}
-	if fh := strings.TrimSpace(amb.FrameHandle); fh != "" {
+	if fh := amb.anchorFrameHandle(); fh != "" {
 		if fr := frameResolverFromCtx(ctx); fr != nil && !fr.ResolveFrame(fh) {
 			return nil, false, fmt.Errorf(
 				"visual frame_handle %q does not resolve to a recorded artifact (dangling frame reference)", fh)
