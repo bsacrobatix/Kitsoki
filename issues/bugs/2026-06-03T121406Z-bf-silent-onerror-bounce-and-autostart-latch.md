@@ -1,9 +1,10 @@
 ---
+# triage-marathon: ALREADY-FIXED in main — 65f8f218 — on_error redirect failures surfaced in view
 id: 2026-06-03T121406Z-bf-silent-onerror-bounce-and-autostart-latch
 title: "Bugfix pipeline silently bounces to idle on workspace/git failure; autostart latch permanently disables recovery"
 target: kitsoki
 filed_at: 2026-06-03T12:14:06Z
-status: open
+status: fixed
 severity: P1
 component: orchestrator
 kitsoki_rev: 153c3d6

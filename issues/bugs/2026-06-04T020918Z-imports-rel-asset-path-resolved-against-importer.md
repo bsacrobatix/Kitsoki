@@ -1,9 +1,10 @@
 ---
+# triage-marathon: ALREADY-FIXED in main — 31c96b09 — per-session validator schema resolution
 id: 2026-06-04T020918Z-imports-rel-asset-path-resolved-against-importer
 title: "imported room's relative host-call asset paths (schema/prompt) resolve against the importing app's dir, not the defining story's"
 target: kitsoki
 filed_at: 2026-06-04T02:09:18Z
-status: open
+status: fixed
 severity: P1
 component: runtime
 kitsoki_rev: 2df6142

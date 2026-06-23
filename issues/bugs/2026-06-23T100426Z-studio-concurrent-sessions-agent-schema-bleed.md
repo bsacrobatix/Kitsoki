@@ -3,11 +3,11 @@ id: 2026-06-23T100426Z-studio-concurrent-sessions-agent-schema-bleed
 title: "Concurrent live driver sessions in one studio process cross-contaminate host.agent.task acceptance-schema resolution (story dir bleeds between sessions)"
 target: kitsoki
 filed_at: 2026-06-23T10:04:26Z
-status: open
+status: fixed
 severity: P1
 component: mcp
 kitsoki_rev: 8cd8657f
-trace_ref: ".artifacts/dogfood/bugfix-live-trace.jsonl"
+trace_ref: "fixed: per-call renderer resolution; regression TestAgentAskWithMCP_SchemaResolvesAgainstPerCallRenderer (host pkg, green)"
 external: {}
 assignee: ""
 related:

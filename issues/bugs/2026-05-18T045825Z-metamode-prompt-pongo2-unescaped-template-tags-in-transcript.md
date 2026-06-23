@@ -1,10 +1,11 @@
 ---
+# triage-marathon: ALREADY-FIXED in main — 224cea6e/8133a50d — {% verbatim %} wrap in metamode adapter
 id: 2026-05-18T045825Z-metamode-prompt-pongo2-unescaped-template-tags-in-transcript
 title: "metamode: prompt render fails with pongo2 EOF when transcript/view contains '{{' or '{%' (story-author edit turn dies)"
 target: kitsoki
 filed_at: 2026-05-18T04:58:25Z
 filed_by: cloud-user
-status: open
+status: fixed
 severity: P1
 component: metamode
 kitsoki_rev: 3ff850e

@@ -71,3 +71,23 @@ P2 (not P0/P1): no data loss or wrong result — purely a visibility gap, and
 the most common trigger (the ctx-cancel bug) is now fixed. Still worth fixing
 because any future background-job failure mode will reproduce the "looks hung"
 report.
+
+---
+
+## Triage verdict (dogfood marathon, live triage-only mode) — STILL-LIVE (conf 0.8)
+
+Resolved from UNCLEAR by driving `stories/bugfix` in the new **triage-only mode** (live, claude-native, $1.80).
+
+**Root cause:** the web run store `tools/runstatus/src/stores/run.ts` SSE subscription
+(`hydrate()` L286–295) only does `events.push(e); applyStatePath(e)` — it never refreshes
+`currentView` (L116). `currentView` is written solely by `applyTurnResult` (L418, RPC-driven),
+`loadInitialView` (L457, once), `rehydrate` (L396, meta-mode), `resetSessionState` (L364). A
+scheduler-driven `background_completion` turn fires none of these → operator stays on the stale
+`…executing` view, so `world.last_error` never surfaces. The server relay
+`notifications.go OnBackgroundTurn` (L151–196, wired `web.go:241`) only feeds the cross-session
+inbox badge, NOT a destination-view re-render; `turn_stream.go handleTurnStream` emits the `done`
+view frame only on the request path. No regression test pins a view refresh on background completion.
+
+**Suggested action:** refetch `source.view()` in the run store when a `turn.end` with
+`outcome=background_completion` / new landed state arrives over SSE (mirror the TUI's
+re-render-on-completion); add a regression test asserting `currentView` updates without an inbound RPC turn.

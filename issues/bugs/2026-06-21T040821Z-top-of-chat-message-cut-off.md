@@ -1,4 +1,5 @@
 ---
+# triage-marathon: ALREADY-FIXED in main — 131dc049 — first-agent-message scroll fix + regression test
 # --- identity ------------------------------------------------
 id: "2026-06-21T040821Z-top-of-chat-message-cut-off"
 title: "Top of chat message cut off"
@@ -7,7 +8,7 @@ filed_at: 2026-06-21T04:08:21Z
 
 # --- classification ------------------------------------------
 severity: "med"
-status: "open"
+status: fixed
 labels: []
 
 # --- evidence ------------------------------------------------

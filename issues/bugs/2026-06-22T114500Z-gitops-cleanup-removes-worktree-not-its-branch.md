@@ -1,11 +1,12 @@
 ---
+# triage-marathon: ALREADY-FIXED in main — 73e256a4 — cleanup deletes worktree_branch_name not integration branch
 assignee: ""
 component: stories/git-ops
 external: {}
 filed_at: "2026-06-22T11:45:00Z"
 id: 2026-06-22T114500Z-gitops-cleanup-removes-worktree-not-its-branch
 severity: P3
-status: open
+status: fixed
 target: kitsoki
 title: git-ops cleanup/remove_all deletes world.current_branch (the hub's branch, e.g. main) instead of the removed worktree's branch, so the branch leaks
 url: issues/bugs/2026-06-22T114500Z-gitops-cleanup-removes-worktree-not-its-branch.md
