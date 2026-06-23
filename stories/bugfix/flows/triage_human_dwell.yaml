@@ -25,13 +25,13 @@ host_handlers:
       submitted:
         verdict:          "STILL-LIVE"
         confidence:       0.84
-        summary_title:    "STILL-LIVE — hardcoded go gate still overrides gate_command"
-        evidence:         "stories/delivery-tail/rooms/integrate.yaml runs `go build ./... && go test ./...` with no reference to world.gate_command; the configured gate is ignored."
-        summary_markdown: "The buggy behavior is still present: the integrate room hardcodes a Go build/test gate and never consults the operator-configured gate_command. A non-Go project would have its gate silently ignored. Recommend driving the full bugfix pipeline to parameterize the gate."
+        summary_title:    "STILL-LIVE — cited handler still reads the buggy field (illustrative fixture)"
+        evidence:         "internal/example/foo.go:42 the cited function still reads cfg.legacyField as the report describes; no regression test pins the fix. (Illustrative stub — not a claim about any real ticket.)"
+        summary_markdown: "Hypothetical STILL-LIVE verdict used only to exercise the human-mode dwell + manual-accept path; illustrative content, not a claim about any real ticket."
         suggested_action: "drive the full bugfix pipeline"
         fixed_in_ref:     null
         involved_components:
-          - { name: "stories/delivery-tail/rooms/integrate.yaml", reason: "hardcoded go gate" }
+          - { name: "internal/example/foo.go", reason: "cited buggy field still read (illustrative)" }
 
 turns:
   # triage → triaging (verdict bound, no auto-accept in human mode).

@@ -1,9 +1,10 @@
 ---
+# triage-marathon: ALREADY-FIXED in main — integrate moved to stories/delivery-tail/rooms/integrate.yaml; runs world.gate_command verbatim as $1; live bugfix drive self-terminated
 component: stories/ship-it
 filed_at: "2026-06-22T14:30:00Z"
 id: 2026-06-22T143000Z-ship-it-integrate-hardcoded-build-check
 severity: P2
-status: open
+status: fixed
 target: kitsoki
 title: ship-it integrate hardcodes `go build ./... && go test ./...` post-merge build-check instead of the configured gate — blocks integration on unrelated reds + couples ship-it to Go
 url: issues/bugs/2026-06-22T143000Z-ship-it-integrate-hardcoded-build-check.md
