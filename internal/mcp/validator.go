@@ -169,18 +169,12 @@ func NewValidatorServer(cfg ValidatorConfig) (*ValidatorServer, error) {
 		return nil, fmt.Errorf("mcp.NewValidatorServer: top-level schema type must be \"object\" (got %q)", t)
 	}
 
-	compiler := jsonschema.NewCompiler()
-	// Register custom semantic formats (e.g. JQL) and switch the compiler
-	// from annotation-only to assertion mode so format errors surface as
-	// kind.Format failures through BasicOutput like any other constraint.
-	compiler.RegisterFormat(&jsonschema.Format{Name: "jql", Validate: validateJQL})
-	compiler.AssertFormat()
-	if err := compiler.AddResource("validator-schema.json", probe); err != nil {
-		return nil, fmt.Errorf("mcp.NewValidatorServer: register schema: %w", err)
-	}
-	compiled, err := compiler.Compile("validator-schema.json")
+	// Compile via the shared helper so the validator MCP server and the
+	// host.agent.decide recovery path enforce byte-for-byte identical schema
+	// semantics (same jql format registration + assertion mode).
+	compiled, err := CompileSchema(cfg.SchemaJSON)
 	if err != nil {
-		return nil, fmt.Errorf("mcp.NewValidatorServer: compile schema: %w", err)
+		return nil, fmt.Errorf("mcp.NewValidatorServer: %w", err)
 	}
 
 	// Validate post-cmd arg keys at parse time so a key with spaces (or other
@@ -599,6 +593,43 @@ func errorResult(text string) *mcpsdk.CallToolResult {
 			&mcpsdk.TextContent{Text: text},
 		},
 	}
+}
+
+// CompileSchema compiles a JSON Schema document into a reusable validator.
+// It registers the custom "jql" semantic format and switches the compiler into
+// assertion mode (AssertFormat) so format violations surface as ordinary
+// validation failures — identical to the setup NewValidatorServer uses.
+//
+// Shared so the validator MCP server and the host.agent.decide code-block
+// recovery path validate against one implementation rather than drifting. A
+// non-object or unparsable schema returns an error.
+func CompileSchema(schemaJSON []byte) (*jsonschema.Schema, error) {
+	if len(schemaJSON) == 0 {
+		return nil, fmt.Errorf("mcp.CompileSchema: schemaJSON is required")
+	}
+	var probe any
+	if err := json.Unmarshal(schemaJSON, &probe); err != nil {
+		return nil, fmt.Errorf("mcp.CompileSchema: parse schema: %w", err)
+	}
+	compiler := jsonschema.NewCompiler()
+	compiler.RegisterFormat(&jsonschema.Format{Name: "jql", Validate: validateJQL})
+	compiler.AssertFormat()
+	if err := compiler.AddResource("validator-schema.json", probe); err != nil {
+		return nil, fmt.Errorf("mcp.CompileSchema: register schema: %w", err)
+	}
+	compiled, err := compiler.Compile("validator-schema.json")
+	if err != nil {
+		return nil, fmt.Errorf("mcp.CompileSchema: compile schema: %w", err)
+	}
+	return compiled, nil
+}
+
+// FormatValidationError renders a schema validation error into the same
+// LLM-facing message the validator MCP server returns inline. Exported so the
+// host.agent.decide recovery path can reuse identical wording when it rejects a
+// schema-invalid recovered verdict.
+func FormatValidationError(err error) string {
+	return formatValidationError(err)
 }
 
 // formatValidationError renders a jsonschema.ValidationError into a

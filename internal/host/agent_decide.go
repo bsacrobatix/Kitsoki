@@ -38,6 +38,8 @@ import (
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/render/sourcecolor"
 	"kitsoki/internal/sysprompt"
+
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // mutationTools is shared with agent_ask.go and now covers decide too.
@@ -289,6 +291,13 @@ func AgentDecideHandler(ctx context.Context, args map[string]any) (Result, error
 	if validatorBlockPresent {
 		sandboxOpts = &vopts
 	}
+	// Resolve the schema to its raw JSON so the retry loop can compile it once
+	// and validate any code-block-recovered verdict before trusting it (the
+	// recovery path otherwise bypasses the mcp-validator's only schema check).
+	var loopSchemaJSON json.RawMessage
+	if schemaBytes, readErr := os.ReadFile(strings.TrimSpace(schemaArg)); readErr == nil {
+		loopSchemaJSON = json.RawMessage(schemaBytes)
+	}
 	res := runDecideWithValidatorRetryLoop(ctx, decideLoopParams{
 		Bin:                  bin,
 		BaseCLIArgs:          cliArgs,
@@ -296,6 +305,7 @@ func AgentDecideHandler(ctx context.Context, args map[string]any) (Result, error
 		WorkingDir:           workingDir,
 		ValidatorOutputPath:  validatorOutputPath,
 		ValidatorStatePath:   validatorStateFilePath,
+		SchemaJSON:           loopSchemaJSON,
 		MaxOuterIterations:   decideMaxOuterIterations,
 		ValidatorMaxRetries:  effectiveMaxRetries,
 		SandboxValidatorOpts: sandboxOpts,
@@ -499,6 +509,12 @@ type decideLoopParams struct {
 	WorkingDir          string
 	ValidatorOutputPath string
 	ValidatorStatePath  string
+	// SchemaJSON is the raw JSON Schema the verdict must satisfy. When set, the
+	// loop compiles it once and validates any verdict recovered from a fenced
+	// code block (the submit-tool-bypass path) against it BEFORE writing the
+	// output file — so an empty {} or schema-invalid object is rejected and
+	// retried instead of silently accepted.
+	SchemaJSON          json.RawMessage
 	MaxOuterIterations  int
 	ValidatorMaxRetries int
 	// SandboxValidatorOpts, when non-nil and PostCmd is set, causes the loop to
@@ -521,11 +537,27 @@ func runDecideWithValidatorRetryLoop(ctx context.Context, p decideLoopParams) Re
 
 	sessionID := newUUID()
 
+	// Compile the schema once so the code-block recovery path can validate a
+	// bypassed verdict against it. If the schema is absent or fails to compile
+	// the recovery path falls back to its prior (unvalidated) behaviour rather
+	// than hard-failing the whole call.
+	var compiledSchema *jsonschema.Schema
+	if len(p.SchemaJSON) > 0 {
+		if cs, cerr := kitsokimcp.CompileSchema(p.SchemaJSON); cerr == nil {
+			compiledSchema = cs
+		} else {
+			slog.WarnContext(ctx, "agent.decide: schema compile failed; code-block recovery validation disabled", "err", cerr)
+		}
+	}
+
 	var lastStdout string
 	var lastExitCode int
 	var lastStderr string
 	var lastInfraErr error
 	var sandboxLastRejection string
+	// recoveryReject holds the schema-rejection reason for a code-block verdict
+	// that failed validation, so the next --resume nudge can surface it.
+	var recoveryReject string
 
 	// Agent-action-transcript boundary events (proposal "decide submit → validate
 	// → nudge cycle"). The accumulating tee in runClaudeStreamJSON already folds
@@ -580,6 +612,10 @@ func runDecideWithValidatorRetryLoop(ctx context.Context, p decideLoopParams) Re
 			_, _, stateLastErr := kitsokimcp.ReadStateFile(p.ValidatorStatePath)
 			nudgeErr := stateLastErr
 			rejectSource := "schema"
+			if strings.TrimSpace(nudgeErr) == "" && strings.TrimSpace(recoveryReject) != "" {
+				nudgeErr = recoveryReject
+				rejectSource = "schema"
+			}
 			if strings.TrimSpace(nudgeErr) == "" && strings.TrimSpace(sandboxLastRejection) != "" {
 				nudgeErr = sandboxLastRejection
 				rejectSource = "semantic"
@@ -641,6 +677,22 @@ func runDecideWithValidatorRetryLoop(ctx context.Context, p decideLoopParams) Re
 			// markdown code block. If so, treat it as a successful submit so
 			// we don't burn an outer iteration on something recoverable.
 			if extracted := extractJSONFromCodeBlock(lastStdout); extracted != nil {
+				// The validator MCP subprocess is normally the ONLY place schema
+				// validation runs. This recovery path writes straight to the
+				// output file, bypassing it — so re-run the identical schema check
+				// HERE before trusting the payload. An empty {} or a verdict missing
+				// required fields must be rejected (nudge + retry), never silently
+				// written and accepted as a recovered verdict.
+				if compiledSchema != nil {
+					if verr := compiledSchema.Validate(extracted); verr != nil {
+						recoveryReject = kitsokimcp.FormatValidationError(verr)
+						slog.WarnContext(ctx, "agent.decide: recovered code-block verdict failed schema validation; nudging for a valid submit", "err", recoveryReject)
+						// Do NOT write the output file; continue so the model gets
+						// another attempt. If the outer budget exhausts, the tail
+						// path returns a non-empty Error → routes to on_error.
+						continue
+					}
+				}
 				b, _ := json.Marshal(extracted)
 				_ = os.WriteFile(p.ValidatorOutputPath, b, 0o600)
 				slog.WarnContext(ctx, "agent.decide: model bypassed submit tool — recovered verdict from code block in stdout; consider adding validator: to enforce tool use")
@@ -773,6 +825,14 @@ func runDecideSandboxValidator(ctx context.Context, validatorOutputPath string, 
 }
 
 // buildDecideResult assembles a Result from a decide run outcome.
+//
+// Schema validation of a captured payload is NOT re-run here: the normal
+// validator-MCP path has already enforced the schema in its subprocess, and the
+// code-block recovery path validates its extracted verdict against the compiled
+// schema BEFORE writing the output file (see runDecideWithValidatorRetryLoop).
+// Re-validating here would double-check the MCP path against a schema the test
+// harness's fake validator does not itself enforce, rejecting payloads the
+// validator already accepted — so the only schema gate stays at the write sites.
 func buildDecideResult(stdout string, exitCode int, stderr, validatorOutputPath, sessionID, errMsg string) Result {
 	res := Result{
 		Data: map[string]any{
