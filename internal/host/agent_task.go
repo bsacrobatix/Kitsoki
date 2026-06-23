@@ -267,7 +267,7 @@ func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) 
 	// Build the MCP config if we have a validator to attach.
 	var mcpConfigPath string
 	if outputFile != "" {
-		mcpCfg, validatorCfg, vcErr := buildTaskValidatorMCPConfig(acceptance, outputFile)
+		mcpCfg, validatorCfg, vcErr := buildTaskValidatorMCPConfig(ctx, acceptance, outputFile)
 		if vcErr != nil {
 			return Result{Error: "host.agent.task: build validator MCP config: " + vcErr.Error()}, nil
 		}
@@ -301,7 +301,7 @@ func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		defer os.Remove(stateFilePath)
 		if outputFile != "" {
 			// Re-build with state file path.
-			mcpCfg2, _, vcErr2 := buildTaskValidatorMCPConfigWithState(acceptance, outputFile, stateFilePath)
+			mcpCfg2, _, vcErr2 := buildTaskValidatorMCPConfigWithState(ctx, acceptance, outputFile, stateFilePath)
 			if vcErr2 == nil && mcpCfg2 != "" {
 				// Replace the config.
 				os.Remove(mcpConfigPath)
@@ -573,20 +573,23 @@ func attachTaskValidator(bin string, acceptance taskAcceptanceOptions) (string, 
 // buildTaskValidatorMCPConfig builds an MCP config file containing the
 // kitsoki mcp-validator entry for the task's acceptance schema + optional
 // post_cmd. Returns (configFilePath, validatorEntry, error).
-func buildTaskValidatorMCPConfig(acceptance taskAcceptanceOptions, outputFile string) (string, map[string]any, error) {
-	return buildTaskValidatorMCPConfigWithState(acceptance, outputFile, "")
+func buildTaskValidatorMCPConfig(ctx context.Context, acceptance taskAcceptanceOptions, outputFile string) (string, map[string]any, error) {
+	return buildTaskValidatorMCPConfigWithState(ctx, acceptance, outputFile, "")
 }
 
 // buildTaskValidatorMCPConfigWithState is the same but includes a state file
-// path for the validator's retry-state persistence across resumptions.
-func buildTaskValidatorMCPConfigWithState(acceptance taskAcceptanceOptions, outputFile, stateFilePath string) (string, map[string]any, error) {
+// path for the validator's retry-state persistence across resumptions. ctx
+// carries the per-call prompt renderer so the acceptance schema resolves against
+// THIS session's story dir (isolated per concurrent driving session), not the
+// process-global KITSOKI_APP_DIR — see buildValidatorMCPServer's doc.
+func buildTaskValidatorMCPConfigWithState(ctx context.Context, acceptance taskAcceptanceOptions, outputFile, stateFilePath string) (string, map[string]any, error) {
 	opts := validatorOptions{
 		PostCmd:       acceptance.PostCmd,
 		PostCmdArgs:   acceptance.PostCmdArgs,
 		MaxRetries:    acceptance.MaxRetries,
 		StateFilePath: stateFilePath,
 	}
-	validatorEntry, err := buildValidatorMCPServer(acceptance.SchemaPath, outputFile, opts)
+	validatorEntry, err := buildValidatorMCPServer(ctx, acceptance.SchemaPath, outputFile, opts)
 	if err != nil {
 		return "", nil, err
 	}

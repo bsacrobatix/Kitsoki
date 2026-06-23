@@ -267,7 +267,7 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 			}
 		}()
 
-		validatorEntry, buildErr := buildValidatorMCPServer(schemaPath, submittedOutputPath, validatorOptions{})
+		validatorEntry, buildErr := buildValidatorMCPServer(ctx, schemaPath, submittedOutputPath, validatorOptions{})
 		if buildErr != nil {
 			return Result{Error: fmt.Sprintf("host.agent.ask: build validator MCP server: %v", buildErr)}, nil
 		}
