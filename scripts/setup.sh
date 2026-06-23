@@ -234,6 +234,8 @@ install_agents() {
 # Link scripts/git-hooks/* → .git/hooks/* (relative symlinks) so git itself
 # enforces the repo's hooks. The reference-transaction guard pins the primary
 # checkout to its default branch — see scripts/git-hooks/reference-transaction.
+# prepare-commit-msg auto-appends a DCO Signed-off-by so the upstream cncf/dco2
+# check never goes red — see scripts/git-hooks/prepare-commit-msg.
 # .git/hooks is shared with linked worktrees, so installing here covers them all.
 # Idempotent: refreshes our own symlinks, never clobbers a real hook a human placed.
 install_git_hooks() {
