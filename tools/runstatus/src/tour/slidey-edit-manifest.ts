@@ -135,7 +135,7 @@ export const SLIDEY_EDIT_TOUR_STEPS: readonly TourStep[] = [
     route: "any",
     target: "aa-slidey",
     title: "Poster-backed semantic overlay",
-    body: "The deck is an MP4, so its frames aren't an addressable still — instead the annotator floats a SemanticOverlay over a poster image sized to the producer's natural 1920×1080 frame. Each box comes straight from the deck's .semantic.json sidecar.",
+    body: "A slidey deck is a multi-scene render with a semantic sidecar, so its pixels aren't an addressable still — whether it's rendered to MP4, PDF, or static HTML. Instead the annotator floats a SemanticOverlay over a poster image sized to the producer's natural 1920×1080 frame. Each box comes straight from the deck's .semantic.json sidecar.",
     placement: "right",
     kind: "explain",
     advance: "next",

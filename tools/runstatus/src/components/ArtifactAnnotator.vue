@@ -376,12 +376,13 @@ watch(
       />
     </div>
 
-    <!-- slidey: a still poster backdrop + the semantic overlay (sidecar). The
-         deck is an mp4 whose frames aren't an addressable still, so the overlay
-         floats over a poster image sized to the producer's natural frame; the
-         markers are positioned as a percent of that natural space (so they
-         track the still at any CSS scale). When no sidecar resolves, fall back
-         to the iframe + live-DOM picker (dom_node). -->
+    <!-- slidey: a still poster backdrop + the semantic overlay (sidecar). A
+         slidey deck is a multi-scene render (mp4 / pdf / html) whose pixels
+         aren't an addressable still, so the overlay floats over a poster image
+         sized to the producer's natural frame; the markers are positioned as a
+         percent of that natural space (so they track the still at any CSS
+         scale). When no sidecar resolves, fall back to the iframe + live-DOM
+         picker (dom_node). -->
     <div v-else-if="mediaKind === 'slidey'" class="aa-stage" data-testid="aa-slidey">
       <template v-if="semanticMap">
         <img
