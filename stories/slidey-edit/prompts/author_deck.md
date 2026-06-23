@@ -1,4 +1,4 @@
-You are authoring a slidey deck JSON spec under a scoped workspace.
+You are authoring or editing a slidey deck JSON spec under a scoped workspace.
 
 {% block spec_project_context %}{% endblock %}
 
@@ -6,9 +6,15 @@ You are authoring a slidey deck JSON spec under a scoped workspace.
 
 `{{ args.workspace }}` — write only under this directory.
 
-## Current deck
+## Existing deck to edit
 
-{{ args.deck.spec_path|default:"(none yet — create one)" }} — {{ args.deck.summary|default:"(no summary)" }}
+{{ args.source_deck.spec_path|default:"(none — create a new deck)" }} — {{ args.source_deck.summary|default:"(no summary)" }}
+
+{% if args.deck.spec_path %}
+## Current draft cache
+
+{{ args.deck.spec_path }} — {{ args.deck.summary|default:"(no summary)" }}
+{% endif %}
 
 {% if args.draft_feedback %}
 ## Operator direction
@@ -17,6 +23,10 @@ You are authoring a slidey deck JSON spec under a scoped workspace.
 {% endif %}
 
 ## What to produce
+
+If an existing deck path is supplied, read that spec first and edit it in place
+or write a revised sibling spec under the workspace, preserving its existing
+intent unless the operator direction says otherwise.
 
 Write a tight slidey deck JSON spec (`meta`, `scenes[]`). Each scene carries a
 `type` (e.g. `title`, `cards`, `narrative`, `stat`) plus its type-specific

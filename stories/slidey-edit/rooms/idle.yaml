@@ -1,25 +1,30 @@
-# idle — the deck-to-edit is baked in world.deck; `start` drafts it.
+# idle — choose whether to create a fresh deck or edit an existing deck spec.
 #
-# A real session would pick or create a deck here; the baked world points at
-# the pre-rendered explainer deck so `kitsoki tour`/web drives straight in.
+# The baked world points at the pre-rendered explainer deck so `kitsoki tour`/web
+# can still drive straight in. `start` creates a fresh draft. `edit_existing`
+# preserves the operator-supplied spec path as source_deck while clearing deck so
+# drafting's once: author/edit pass runs.
 
 states:
 
   idle:
-    description: "Slidey deck editor. Start to draft the deck, then render and review."
-    relevant_world: [deck, cycle]
+    description: "Slidey deck editor. Start a new deck or edit an existing deck, then render and review."
+    relevant_world: [deck, source_deck, cycle]
     view:
       - heading: "Slidey deck editor"
       - kv:
           pairs:
-            Deck:    '{{ world.deck.spec_path|default:"(none)" }}'
-            Summary: '{{ world.deck.summary|default:"(pending)" }}'
-      - prose: "Draft the deck, render it to a deck video, then annotate the rendered frame and refine the exact scene you pointed at."
+            Current deck:  '{{ world.deck.spec_path|default:"(none)" }}'
+            Existing deck: '{{ world.source_deck.spec_path|default:"(not selected)" }}'
+            Summary:       '{{ world.deck.summary|default:"(pending)" }}'
+      - prose: "Create a new deck or point at an existing slidey JSON spec, render it to a deck video, then annotate the rendered frame and refine the exact scene you pointed at."
       - heading: "Actions"
       - list:
           items:
             - label: "start"
-              hint:  "draft the deck and advance to render"
+              hint:  "draft a new deck and advance to render"
+            - label: "edit_existing spec_path=…"
+              hint:  "edit an existing slidey JSON spec"
             - label: "quit"
               hint:  "abandon the editor"
             - label: "look"
@@ -31,6 +36,18 @@ states:
                 draft_feedback: "{{ slots.feedback ?? '' }}"
                 # Clear the deck so drafting's once: author pass runs fresh
                 # (the baked default seeds idle's view; start re-authors).
+                deck: {}
+                source_deck: {}
+      edit_existing:
+        - target: drafting
+          effects:
+            - set:
+                source_deck:
+                  spec_path: "{{ slots.spec_path }}"
+                  summary: "{{ slots.summary ?? 'Existing slidey deck' }}"
+                draft_feedback: "{{ slots.feedback ?? '' }}"
+                # deck is the drafting result/cache. Clear it so once: does
+                # not mistake the existing input deck for completed output.
                 deck: {}
       quit:
         - target: "@exit:abandoned"

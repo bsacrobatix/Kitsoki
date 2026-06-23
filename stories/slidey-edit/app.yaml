@@ -8,7 +8,7 @@
 # edits the EXACT scene the anchor points at.
 #
 # Rooms:  idle → drafting → rendering → reviewing → refining → done
-#   idle       deterministic: bake/confirm the deck spec to edit
+#   idle       deterministic: choose create-new or an existing deck spec to edit
 #   drafting   interpretive:  ONE host.agent.task authors/edits the deck JSON (mocked)
 #   rendering  deterministic: host.slidey.render → mp4 + .semantic.json sidecar; bind the media handle
 #   reviewing  deterministic: media(deck) inline + invite an anchored annotation
@@ -54,6 +54,7 @@ world:
   # spec_path is baked at the pre-rendered deck so `kitsoki tour`/web can drive
   # the loop without authoring (tour-needs-baked-world lesson).
   deck:             { type: object, default: { spec_path: "stories/slidey-edit/baked/deck.json", summary: "Spatial-annotation explainer deck (3 scenes)." } }
+  source_deck:      { type: object, default: {} }   # existing deck passed into drafting; deck remains the draft output/cache
   draft_feedback:   { type: string, default: "" }
 
   # ── render outputs ──────────────────────────────────────────────────────────
@@ -84,6 +85,23 @@ intents:
     priority: 80
     slots:
       feedback: { type: string, required: false }
+  edit_existing:
+    description: "Edit an existing slidey deck JSON spec and advance to render."
+    examples: ["edit_existing spec_path=docs/decks/overview.slidey.json", "edit existing deck", "revise docs/decks/overview.json"]
+    priority: 82
+    slots:
+      spec_path:
+        type: string
+        required: true
+        description: "Path to the existing slidey JSON spec."
+      summary:
+        type: string
+        required: false
+        description: "Short human summary of the deck being edited."
+      feedback:
+        type: string
+        required: false
+        description: "Initial edit direction for the drafter."
 
   # ── drafting / refining checkpoints ─────────────────────────────────────────
   accept:
