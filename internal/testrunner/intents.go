@@ -15,6 +15,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/harness"
+	"kitsoki/internal/host"
 	"kitsoki/internal/intent"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/world"
@@ -99,6 +100,8 @@ type InputResult struct {
 	PassRate          float64
 	BelowMin          bool
 	DurationMillis    int64
+	CostUSD           float64
+	FirstUsage        map[string]any `json:",omitempty"`
 	FirstError        string         `json:",omitempty"`
 	FirstActualIntent string         `json:",omitempty"`
 	FirstActualSlots  map[string]any `json:",omitempty"`
@@ -124,6 +127,7 @@ type IntentReport struct {
 	TotalInputs      int
 	TotalRuns        int
 	DurationMillis   int64
+	CostUSD          float64
 	HarnessType      string `json:",omitempty"`
 	HarnessModel     string `json:",omitempty"`
 	AgentBackend     string `json:",omitempty"`
@@ -335,7 +339,10 @@ func RunIntents(ctx context.Context, appPath string, opts IntentOptions) (*Inten
 					if ir.FirstActualIntent == "" {
 						ir.FirstActualIntent = result.Intent
 						ir.FirstActualSlots = result.Slots
+						ir.FirstUsage = result.Usage
 					}
+					ir.CostUSD += result.CostUSD
+					report.CostUSD += result.CostUSD
 					if result.Passed {
 						ir.Passed++
 					}
@@ -466,15 +473,18 @@ func (ir *InputResult) RunCount(runs int) {
 }
 
 type intentRunResult struct {
-	Passed bool
-	Intent string
-	Slots  map[string]any
+	Passed  bool
+	Intent  string
+	Slots   map[string]any
+	Usage   map[string]any
+	CostUSD float64
 }
 
 // runOneIntent runs a single intent routing check and returns true if it passed.
 func runOneIntent(ctx context.Context, h harness.Harness, m machine.Machine, def *app.AppDef, state, input string, fix IntentFixture) (intentRunResult, error) {
 	initialWorld := machine.WorldFromSchema(def.World)
-	params, err := h.RunTurn(ctx, harness.TurnInput{
+	runCtx := host.WithAgentUsageBox(ctx)
+	params, err := h.RunTurn(runCtx, harness.TurnInput{
 		StatePath:      app.StatePath(state),
 		UserText:       input,
 		World:          initialWorld,
@@ -495,7 +505,12 @@ func runOneIntent(ctx context.Context, h harness.Harness, m machine.Machine, def
 		}
 		return intentRunResult{}, err
 	}
-	result := intentRunResult{Intent: call.Intent, Slots: call.Slots}
+	result := intentRunResult{
+		Intent:  call.Intent,
+		Slots:   call.Slots,
+		Usage:   host.AgentUsageFrom(runCtx),
+		CostUSD: host.AgentCostFrom(runCtx),
+	}
 
 	// Run validation on the machine.
 	vr := m.Validate(app.StatePath(state), initialWorld, call)

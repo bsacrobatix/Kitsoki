@@ -640,6 +640,9 @@ func (m *machineImpl) lookupIntent(cur app.StatePath, name string) (app.Intent, 
 
 // validateSlots validates the provided slot values against the intent's slot schema.
 func validateSlots(intentDef app.Intent, slots world.Slots) *intent.ValidationError {
+	if slots == nil {
+		slots = world.Slots{}
+	}
 	var missing []string
 	for slotName, slotDef := range intentDef.Slots {
 		val, present := slots[slotName]

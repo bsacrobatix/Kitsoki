@@ -1,5 +1,5 @@
 {
-  "_comment": "Corrected routing-model benchmark case study. This deck intentionally reports negative/blocked results instead of estimated savings.",
+  "_comment": "Corrected routing-model benchmark case study with real Haiku, Opus, Synthetic small, and Codex default fixture results.",
   "meta": {
     "mode": "pitch",
     "title": "Routing Model Benchmarks",
@@ -12,47 +12,47 @@
     {
       "type": "title",
       "title": "Routing Model Benchmarks",
-      "subtitle": "Real fixture results, not estimated savings",
+      "subtitle": "Real room fixture results",
       "hold": 220
     },
     {
       "type": "narrative",
       "eyebrow": "Correction",
-      "lede": "The previous report was not acceptable evidence.",
-      "body": "It mixed mined corpus counts, existing eval-pilot artifacts, and model-price estimates. The corrected case study only treats live fixture runs as benchmark evidence.",
+      "lede": "The earlier report was not benchmark evidence.",
+      "body": "This version uses live kitsoki test intents runs against the same Oregon Trail room fixture. The result is negative: no tested model passes the room threshold.",
       "hold": 360
     },
     {
       "type": "table",
-      "title": "Actual Fixture Outcome",
-      "columns": ["Candidate", "Fixture", "Calls", "Pass rate", "Status"],
+      "title": "Live Fixture Results",
+      "columns": ["Candidate", "Pass rate", "Elapsed", "Avg latency", "Measured cost"],
       "rows": [
-        ["Codex default", "general_store.reviewing / refine_purchase", "7", "2/7", "real run, failed threshold"],
-        ["Haiku", "attempted", "0 valid", "n/a", "blocked: Claude/Anthropic auth"],
-        ["gpt-5-mini", "smoke", "0 valid", "n/a", "blocked: account rejects model"],
-        ["syn:small:text", "smoke", "0 valid", "n/a", "blocked: account rejects model"]
+        ["Claude Haiku", "2/7", "141.053s", "20.150s", "$0.250849"],
+        ["Claude Opus", "2/7", "102.057s", "14.580s", "$1.897333"],
+        ["Synthetic small", "1/7", "39.792s", "5.685s", "not emitted"],
+        ["Codex default", "1/7", "58.676s", "8.382s", "$0 reported"]
       ],
       "hold": 420
     },
     {
       "type": "narrative",
-      "eyebrow": "What Failed",
-      "lede": "The real Codex run chose the right intent name but missed slot fidelity.",
-      "body": "Five failed inputs submitted refine_purchase with slots that did not satisfy the authored fixture contract. Room routing benchmarks must score slots, not just intent labels.",
+      "eyebrow": "Failure Mode",
+      "lede": "The models usually found the right intent name.",
+      "body": "They failed because the validated slot payloads did not match the room contract. Routing benchmarks must score the full intent call, not just the label.",
       "hold": 360
     },
     {
       "type": "narrative",
-      "eyebrow": "Runner Fixed",
-      "lede": "The fixture path now supports real model-backed routing runs.",
-      "body": "kitsoki test intents can run --harness claude, --agent codex, and --profile from .kitsoki.yaml/.kitsoki.local.yaml. Reports include harness metadata, elapsed time, actual intent, actual slots, and errors.",
+      "eyebrow": "Synthetic Path",
+      "lede": "Synthetic small runs through the live Anthropic-compatible profile.",
+      "body": "The corrected command is --harness live --profile synthetic-claude --claude-model syn:small:text. Running syn:small:text through Codex/ChatGPT is the wrong provider path.",
       "hold": 360
     },
     {
       "type": "narrative",
       "eyebrow": "Decision",
-      "lede": "Do not promote a cheaper router yet.",
-      "body": "The mechanism is still valid: deterministic tiers first, cheapest passing room model second, stronger fallback on uncertainty. This benchmark says the candidate evidence is not ready.",
+      "lede": "Do not promote a cheaper router for this room.",
+      "body": "The cost-saving mechanism remains valid, but this room needs prompt/schema work or a different routing strategy before model promotion.",
       "hold": 400
     }
   ]

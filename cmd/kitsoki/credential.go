@@ -69,6 +69,31 @@ func hasAnthropicCredential() bool {
 // live harness. The returned source describes which credential won (for debug
 // logging); err is [errNoAnthropicCredential] when none was found.
 func newLiveClient() (anthropic.Client, string, error) {
+	return newLiveClientWithEnv(nil)
+}
+
+func newLiveClientWithEnv(env map[string]string) (anthropic.Client, string, error) {
+	var opts []option.RequestOption
+	source := ""
+	if v := env["ANTHROPIC_API_KEY"]; v != "" {
+		opts = append(opts, option.WithAPIKey(v))
+		source = "profile env.ANTHROPIC_API_KEY"
+	} else if v := env["ANTHROPIC_AUTH_TOKEN"]; v != "" {
+		opts = append(opts, option.WithAuthToken(v))
+		source = "profile env.ANTHROPIC_AUTH_TOKEN"
+	}
+	if v := env["ANTHROPIC_BASE_URL"]; v != "" {
+		opts = append(opts, option.WithBaseURL(v))
+		if source == "" {
+			source = "profile env.ANTHROPIC_BASE_URL"
+		} else {
+			source += " + ANTHROPIC_BASE_URL"
+		}
+	}
+	if len(opts) > 0 {
+		return anthropic.NewClient(opts...), source, nil
+	}
+
 	cred, ok := resolveAnthropicCredential()
 	if !ok {
 		return anthropic.Client{}, "", errNoAnthropicCredential

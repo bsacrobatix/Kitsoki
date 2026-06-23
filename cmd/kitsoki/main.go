@@ -964,12 +964,12 @@ func buildHarnessWithActiveProfile(harnessType, claudeModel, agentBackend, recor
 		return harness.NewReplay(recordingPath)
 
 	case "live":
-		client, source, err := newLiveClient()
+		client, source, err := newLiveClientWithEnv(activeProfile.Provider.Env)
 		if err != nil {
 			return nil, err
 		}
 		slog.Debug("harness/live: credential resolved", "source", source)
-		return harness.NewLive(&client, "", def)
+		return harness.NewLive(&client, claudeModel, def)
 
 	case "recording":
 		if recordingPath != "" {

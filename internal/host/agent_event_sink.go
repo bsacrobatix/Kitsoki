@@ -161,6 +161,27 @@ func AgentCostFrom(ctx context.Context) float64 {
 	return b.cost
 }
 
+// AgentUsageFrom returns the token usage object recorded into the per-call
+// usage box in ctx, or nil when no usage was recorded. The returned map is a
+// shallow copy so callers can persist benchmark/report data without holding the
+// box lock or mutating shared state.
+func AgentUsageFrom(ctx context.Context) map[string]any {
+	b := agentUsageBoxFrom(ctx)
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.usage == nil {
+		return nil
+	}
+	out := make(map[string]any, len(b.usage))
+	for k, v := range b.usage {
+		out[k] = v
+	}
+	return out
+}
+
 // agentUsageMeta builds the AgentReturned.Meta map from the usage box in ctx,
 // or returns nil when no usage was recorded (so Meta stays omitempty). The
 // shape is {"usage": {…claude usage object…}, "cost_usd": <float>}.
