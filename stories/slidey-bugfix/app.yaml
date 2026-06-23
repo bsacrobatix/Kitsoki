@@ -68,6 +68,9 @@ imports:
       shipped:          { to: shipped }
       needs-human:      { to: shipped }
       not-reproducible: { to: shipped }
+      # bf triage-only mode terminal (unreachable here — full mode — but the
+      # loader requires every child exit be mapped).
+      triaged:          { to: shipped }
 
 # Instance world — the slidey cards-timing-drift profile (the demo's pre-set context).
 world:

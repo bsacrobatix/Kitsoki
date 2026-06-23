@@ -1437,6 +1437,15 @@ imports:
         set:
           status:     "not-reproducible"
           last_error: "{{ world.bf__last_error }}"
+      # bf's triage-only mode (bugfix_mode: triage) ends here: a standardized
+      # verdict was produced without attempting a fix. This hub runs bf in
+      # full/open-PR mode so triaged never fires in practice, but the loader
+      # requires every child exit be mapped. Land back at landing carrying the
+      # verdict; a human picks the next move (fix it for real, or close).
+      triaged:
+        to: landing
+        set:
+          status: "triaged"
       # `change_ticket` on bf.idle fires this. Land in ticket_search
       # so the operator can search/pick; `go_bugfix` re-enters bf with
       # the new ticket_id projected via world_in:.

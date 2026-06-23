@@ -95,6 +95,10 @@ states:
                 body:     "{{ world.triage_verdict.summary_markdown }}"
                 phase_id: "triaging_{{ world.ticket_id }}"
             - set:
+                # Echo the on_enter-bound verdict so the @exit:triaged
+                # `requires: [triage_verdict]` static check is satisfied on this
+                # transition (no-op at runtime — the value is already bound).
+                triage_verdict:  "{{ world.triage_verdict }}"
                 status:          "triaged"
                 refine_feedback: ""
 
