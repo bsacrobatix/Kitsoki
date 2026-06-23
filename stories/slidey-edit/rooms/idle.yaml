@@ -12,12 +12,12 @@ states:
     relevant_world: [deck, source_deck, cycle]
     view:
       - heading: "Slidey deck editor"
+      - prose: "Nothing's been rendered yet. Start a new deck from scratch, or point at an existing slidey JSON spec to edit. Either way you'll render it to a deck video, then annotate the rendered frame and refine the exact scene you pointed at."
       - kv:
           pairs:
-            Current deck:  '{{ world.deck.spec_path|default:"(none)" }}'
-            Existing deck: '{{ world.source_deck.spec_path|default:"(not selected)" }}'
-            Summary:       '{{ world.deck.summary|default:"(pending)" }}'
-      - prose: "Create a new deck or point at an existing slidey JSON spec, render it to a deck video, then annotate the rendered frame and refine the exact scene you pointed at."
+            Sample deck:    '{{ world.deck.spec_path|default:"(none)" }}'
+            Existing deck:  '{{ world.source_deck.spec_path|default:"(not selected)" }}'
+            Sample summary: '{{ world.deck.summary|default:"(pending)" }}'
       - heading: "Actions"
       - list:
           items:
