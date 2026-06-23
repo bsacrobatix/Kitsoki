@@ -375,6 +375,25 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 	// Resolve the session's profile selection: an explicit per-session profile
 	// wins, else the boot-time default. Both are no-ops when no profiles are
 	// declared (the map is empty).
+	//
+	// A live session with no explicit profile is the silent-synthetic landmine:
+	// the boot-time default may be a synthetic/emulated backend, and the caller
+	// (a maker agent) would believe a real LLM is backing the session until agent
+	// rooms return empty output and acceptance fails several turns later. When
+	// profiles ARE declared, fail loud rather than fall back — the caller must
+	// name the backend they want. The legacy single-default path (no profiles
+	// declared, len==0) is untouched, and replay/default sessions are unaffected.
+	if mode == HarnessLive && p.Profile == "" && len(ss.harnessProfiles) > 0 {
+		return nil, &openError{
+			Code: ErrBadRequest,
+			Msg: fmt.Sprintf(
+				"harness:live requires an explicit profile= when backends are declared "+
+					"(no profile given; boot default is %q, which may be synthetic). "+
+					"Pass one of the declared profiles to select a real LLM backend.",
+				ss.defaultProfile,
+			),
+		}
+	}
 	selectedProfile := p.Profile
 	if selectedProfile == "" {
 		selectedProfile = ss.defaultProfile
