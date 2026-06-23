@@ -812,6 +812,119 @@ func TestDogfoodSmoke_FullBugfixPipeline(t *testing.T) {
 	step("validating", "core__bf__accept", "core.bf.done")
 }
 
+// TestDogfoodSmoke_DoneRefusesUncommittedWork is the END-TO-END proof of the
+// lost-work guard, against a REAL git worktree with the REAL host.run handler
+// (no stubs for the clean-tree check). It reproduces the exact incident shape:
+// a maker room left work in the worktree that no room committed, so the
+// committed tip is broken/partial while the working tree looks green.
+//
+// Flow: drive the bugfix pipeline to validating (worktree clean — the
+// testing room's stage_all commit swept it), THEN write an UNTRACKED file into
+// the maker worktree (simulating a test/fix the maker wrote but never
+// committed), THEN accept into done. done.on_enter runs `git status
+// --porcelain` for real and binds worktree_dirty=true; the accept guard then
+// routes bf → @exit:needs-human (which dev-story maps to core.landing with
+// status=needs-human), NOT @exit:done (→ core.pr.*).
+//
+// This closes the gap the flow fixtures can't: they stub the dirty result, so
+// they prove the guard ROUTES correctly but not that host.run DETECTS dirt in
+// the live folded-story path. If world.workdir were empty here (the guard's
+// on-enter check is guarded on workdir != ''), the file injection would have no
+// effect and the test would land at core.pr.* — failing loudly. So this also
+// asserts the guard is actually wired in the dogfood path, not silently dead.
+func TestDogfoodSmoke_DoneRefusesUncommittedWork(t *testing.T) {
+	repoRoot, ticketID := setupDogfoodRepo(t)
+	orch, _, sid, _ := newSmokeOrchestratorWithCIStub(t, repoRoot)
+
+	ctx := context.Background()
+	step := func(label, intent string, want app.StatePath) {
+		t.Helper()
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		out, err := orch.SubmitDirect(c, sid, intent, nil)
+		require.NoError(t, err, "%s: SubmitDirect(%s)", label, intent)
+		require.NotNil(t, out, "%s: nil out", label)
+		require.Equal(t, want, out.NewState,
+			"%s: %s should land at %q; got %q", label, intent, want, out.NewState)
+	}
+
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		require.NoError(t, orch.RunInitialOnEnter(c, sid))
+		cancel()
+	}
+	{
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		_, err := orch.Teleport(c, sid, inbox.TeleportTarget{
+			State: app.StatePath("core.landing"),
+			Slots: seedDogfoodWorld(ticketID),
+		})
+		require.NoError(t, err)
+		cancel()
+	}
+
+	// Drive to validating (worktree is clean here).
+	step("kickoff", "core__go_bugfix", "core.bf.reproducing")
+	step("reproducing", "core__bf__accept", "core.bf.proposing")
+	step("proposing", "core__bf__accept", "core.bf.implementing")
+	step("implementing", "core__bf__accept", "core.bf.testing")
+	step("testing", "core__bf__accept", "core.bf.reviewing")
+	step("reviewing", "core__bf__accept", "core.bf.validating")
+
+	// CRUX: the guard's on-enter check is guarded on world.workdir != ''. If
+	// the dogfood path never projects workdir, the guard is silently dead.
+	// Assert it IS set before relying on the injection below. world.workdir is
+	// a repo-relative path (host.run executes in the repo-root cwd, so
+	// `git -C .worktrees/...` resolves); the absolute path is for file I/O here.
+	workdirRel := filepath.Join(".worktrees", "bf-"+ticketID)
+	workdirAbs := filepath.Join(repoRoot, workdirRel)
+	{
+		journey, err := orch.LoadJourney(sid)
+		require.NoError(t, err)
+		require.Equal(t, workdirRel, journey.World.Vars["core__bf__workdir"],
+			"world.workdir must be the maker worktree for the clean-tree guard to fire; "+
+				"if empty the guard is dead in the dogfood path")
+	}
+
+	// Inject lost work: an UNTRACKED file no room committed. This is the
+	// incident — the working tree looks green to CI but the commit is partial.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(workdirAbs, "uncommitted_lostwork_test.go"),
+		[]byte("package app\n// the maker wrote this test but never committed it\n"),
+		0o644,
+	), "must be able to write the uncommitted file into the maker worktree")
+
+	// accept into done: done.on_enter runs the REAL git status check (real
+	// host.run, real git) and binds worktree_dirty=true.
+	step("validating", "core__bf__accept", "core.bf.done")
+	{
+		journey, err := orch.LoadJourney(sid)
+		require.NoError(t, err)
+		require.Equal(t, true, journey.World.Vars["core__bf__worktree_dirty"],
+			"done.on_enter's real git status check must detect the uncommitted file")
+		require.Equal(t, "?? uncommitted_lostwork_test.go", journey.World.Vars["core__bf__worktree_dirty_files"],
+			"the porcelain listing of the lost work must be captured for the operator")
+	}
+
+	// accept at done: the guard fires → bf @exit:needs-human → dev-story
+	// lands at core.landing (NOT core.pr.* which is the @exit:done handoff).
+	{
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		out, err := orch.SubmitDirect(c, sid, "core__bf__accept", nil)
+		cancel()
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.Equal(t, app.StatePath("core.landing"), out.NewState,
+			"a dirty worktree must route bf to needs-human (→ core.landing), "+
+				"NOT ship via @exit:done (→ core.pr.*); got %q", out.NewState)
+
+		journey, err := orch.LoadJourney(sid)
+		require.NoError(t, err)
+		require.Equal(t, "needs-human", journey.World.Vars["core__status"],
+			"the needs-human exit projection must set status=needs-human")
+	}
+}
+
 // TestDogfoodSmoke_FullImplementationPipeline drives the implementation
 // pipeline (small-task / feature flow) end-to-end:
 // go_implementation → review_task → write_code → test → review →
@@ -1160,6 +1273,14 @@ func newSmokeOrchestratorWithCIStub(t *testing.T, repoRoot string) (*orchestrato
 	reg.Register("host.local_files.ticket", host.LocalFilesTicketHandler)
 	reg.Register("host.git", host.GitVCSHandler)
 	reg.Register("host.git_worktree", host.GitWorktreeHandler)
+	// host.run (real handler): the testing room's regression gate and the done
+	// room's lost-work clean-tree check shell out via host.run. kitsoki-dev
+	// declares it in its hosts allow-list; without it here those checks return
+	// "no handler registered" — an infrastructure failure that the done check's
+	// degrade-to-clean (no on_error) would silently swallow, leaving the guard
+	// dead. Registering the real handler against the temp repo lets the guard
+	// actually run git status. (TestDogfoodSmoke_DoneRefusesUncommittedWork.)
+	reg.Register("host.run", host.RunHandler)
 	reg.Register("host.append_to_file", host.AppendFileTransportHandler)
 	reg.Register("host.inbox.add", host.InboxAddHandler)
 
