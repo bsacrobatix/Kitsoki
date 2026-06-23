@@ -18,7 +18,7 @@ import (
 
 // LiveConfig holds optional knobs for the LiveHarness.
 type LiveConfig struct {
-	// MaxTokens caps the response size. Default 512.
+	// MaxTokens caps the response size. Default 2048.
 	MaxTokens int64
 	// Temperature controls LLM randomness. Default 0 (deterministic envelope).
 	Temperature float64
@@ -71,7 +71,7 @@ func NewLive(client *anthropic.Client, model string, appDef *app.AppDef) (*LiveH
 		model = string(anthropic.ModelClaudeSonnet4_5)
 	}
 	cfg := LiveConfig{
-		MaxTokens:   512,
+		MaxTokens:   2048,
 		Temperature: 0,
 		MaxRetries:  3,
 	}

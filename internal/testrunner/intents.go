@@ -483,12 +483,16 @@ type intentRunResult struct {
 // runOneIntent runs a single intent routing check and returns true if it passed.
 func runOneIntent(ctx context.Context, h harness.Harness, m machine.Machine, def *app.AppDef, state, input string, fix IntentFixture) (intentRunResult, error) {
 	initialWorld := machine.WorldFromSchema(def.World)
+	allowed := allowedIntentNames(m, app.StatePath(state), initialWorld)
+	if len(allowed) == 0 {
+		return intentRunResult{}, fmt.Errorf("state %q has no allowed intents; fixture may reference a stale or invalid state", state)
+	}
 	runCtx := host.WithAgentUsageBox(ctx)
 	params, err := h.RunTurn(runCtx, harness.TurnInput{
 		StatePath:      app.StatePath(state),
 		UserText:       input,
 		World:          initialWorld,
-		AllowedIntents: allowedIntentNames(m, app.StatePath(state), initialWorld),
+		AllowedIntents: allowed,
 	})
 	if err != nil {
 		// A harness error might itself be an expected failure.

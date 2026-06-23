@@ -678,8 +678,8 @@ intents:
     priority: 18
   go_ticket_search:
     title: "Tickets"
-    description: "Open ticket search (provider-neutral)."
-    examples: ["tickets", "ticket search", "find ticket"]
+    description: "Open ticket search when the operator asks to list, search, choose, or find tickets. Do not use for requests to fix bugs directly."
+    examples: ["tickets", "ticket search", "find ticket", "show tickets", "what's a good ticket to work on?"]
     priority: 40
   go_workspace_manager:
     title: "Workspaces"
@@ -966,8 +966,8 @@ intents:
     priority: 60
   go_bugfix:
     title: "Fix Bug"
-    description: "Hand off to the bugfix sub-story for the picked ticket."
-    examples: ["fix bug", "bugfix", "work on bug"]
+    description: "Start the bugfix path when the operator asks to fix, debug, investigate, or work on bugs. If no ticket is picked yet, the landing room will ask them to pick one first."
+    examples: ["fix bug", "bugfix", "work on bug", "fix bugs", "i want to fix a bug", "i want to work on some bugs"]
     priority: 55
   go_pr_refinement:
     title: "PR Refinement"

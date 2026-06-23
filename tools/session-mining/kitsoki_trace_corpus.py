@@ -18,6 +18,20 @@ from pathlib import Path
 from typing import Any
 
 
+CONTEXT_DEPENDENT_INPUTS = {
+    "do it",
+    "go ahead",
+    "ok",
+    "ok do it",
+    "ok go ahead",
+    "okay",
+    "okay do it",
+    "okay go ahead",
+    "yes",
+    "yep",
+}
+
+
 def default_sessions_root() -> Path:
     return Path.home() / ".kitsoki" / "sessions"
 
@@ -52,6 +66,14 @@ def app_for_path(root: Path, path: Path) -> str:
         return path.relative_to(root).parts[0]
     except Exception:
         return path.parent.name
+
+
+def normalized_input(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def is_context_dependent_input(value: Any) -> bool:
+    return normalized_input(value) in CONTEXT_DEPENDENT_INPUTS
 
 
 def build_samples(root: Path, trace_files: list[Path], include_empty: bool) -> list[dict[str, Any]]:
@@ -104,6 +126,7 @@ def build_samples(root: Path, trace_files: list[Path], include_empty: bool) -> l
                     },
                     "route_labeled": bool(transition_payload.get("intent") or payload.get("intent")),
                     "has_transition": transition_event is not None,
+                    "context_dependent": is_context_dependent_input(user_input),
                 }
             )
     return samples
@@ -168,6 +191,7 @@ def write_summary(path: Path, root: Path, args: argparse.Namespace, samples: lis
         "include_empty": args.include_empty,
         "routing_samples": len(samples),
         "routing_samples_non_empty": sum(1 for row in samples if str(row.get("input") or "").strip()),
+        "routing_samples_context_dependent": sum(1 for row in samples if row.get("context_dependent")),
         "routing_samples_by_app": dict(sorted(by_app.items())),
         "routing_non_empty_by_app": dict(sorted(non_empty_by_app.items())),
         "top_intents": by_intent.most_common(30),
@@ -175,6 +199,7 @@ def write_summary(path: Path, root: Path, args: argparse.Namespace, samples: lis
         "embedded_transcript_prompts_by_app": dict(sorted(Counter(row["app"] for row in prompts).items())),
         "limits": [
             "routing_samples are gold-labeled from Kitsoki turn.input + machine.transition pairs",
+            "intent fixtures exclude context-dependent confirmation inputs by default because their gold route depends on prior room/world context",
             "embedded transcript prompts are real model-decision prompts but are not router labels",
         ],
     }
@@ -190,9 +215,11 @@ def yaml_scalar(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def write_intent_fixtures(out_dir: Path, samples: list[dict[str, Any]]) -> int:
+def write_intent_fixtures(out_dir: Path, samples: list[dict[str, Any]], include_contextual: bool = False) -> int:
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for sample in samples:
+        if sample.get("context_dependent") and not include_contextual:
+            continue
         expected = sample.get("expected")
         if not isinstance(expected, dict) or not expected.get("intent"):
             continue
@@ -211,6 +238,7 @@ def write_intent_fixtures(out_dir: Path, samples: list[dict[str, Any]]) -> int:
         lines = [
             "# Generated from real Kitsoki EventSink traces by tools/session-mining/kitsoki_trace_corpus.py.",
             "# Review before committing; generated fixtures intentionally preserve observed routing outputs.",
+            "# Context-dependent confirmations are excluded by default; rerun with --include-contextual-fixtures to include them.",
             "test_kind: intents",
             f"app: {yaml_scalar(app)}",
             f"state: {yaml_scalar(state)}",
@@ -247,6 +275,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-empty", action="store_true", help="include empty/menu-driven turn.input samples")
     parser.add_argument("--include-transcripts", action="store_true", help="also export embedded Claude transcript user prompts")
     parser.add_argument("--emit-intent-fixtures", action="store_true", help="write kitsoki test intents YAML fixtures grouped by app and state")
+    parser.add_argument("--include-contextual-fixtures", action="store_true", help="include context-dependent confirmations in generated intent fixtures")
     parser.add_argument("--out-dir", type=Path, required=True)
     return parser.parse_args()
 
@@ -268,7 +297,7 @@ def main() -> int:
         write_jsonl(out_dir / "embedded-transcript-prompts.jsonl", prompts)
     fixture_files = 0
     if args.emit_intent_fixtures:
-        fixture_files = write_intent_fixtures(out_dir, samples)
+        fixture_files = write_intent_fixtures(out_dir, samples, include_contextual=args.include_contextual_fixtures)
     write_summary(out_dir / "summary.json", root, args, samples, prompts)
 
     print(f"routing_samples={len(samples)}")

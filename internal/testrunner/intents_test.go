@@ -154,3 +154,33 @@ func TestIntentsDryRun(t *testing.T) {
 	// Dry run produces an empty report.
 	require.Empty(t, report.Fixtures)
 }
+
+func TestIntentsInvalidStateFailsBeforeHarness(t *testing.T) {
+	fixturePath := filepath.Join(t.TempDir(), "stale.yaml")
+	require.NoError(t, os.WriteFile(fixturePath, []byte(`
+test_kind: intents
+app: cloak-of-darkness
+state: does.not.exist
+defaults:
+  runs: 1
+  min_pass_rate: 1.0
+fixtures:
+  - id: stale-state
+    intent:
+      name: look
+      slots: {}
+    inputs:
+      - "look"
+`), 0o644))
+
+	report, err := testrunner.RunIntents(context.Background(), cloakAppPath, testrunner.IntentOptions{
+		Glob:              fixturePath,
+		HarnessType:       "static",
+		StaticHarnessImpl: testrunner.NewEmptyStaticHarness(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, report.TotalFailed)
+	require.Len(t, report.Fixtures, 1)
+	require.Len(t, report.Fixtures[0].Inputs, 1)
+	require.Contains(t, report.Fixtures[0].Inputs[0].FirstError, `state "does.not.exist" has no allowed intents`)
+}

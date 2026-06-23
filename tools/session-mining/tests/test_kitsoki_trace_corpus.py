@@ -62,6 +62,23 @@ class KitsokiTraceCorpusTest(unittest.TestCase):
                                 "to": "core.ticket_search",
                             },
                         },
+                        {
+                            "kind": "turn.input",
+                            "turn": 3,
+                            "state_path": "core.landing",
+                            "payload": {"input": "ok go ahead", "intent": "core__drive"},
+                        },
+                        {
+                            "kind": "machine.transition",
+                            "turn": 3,
+                            "state_path": "core.landing",
+                            "payload": {
+                                "from": "core.landing",
+                                "intent": "core__drive",
+                                "slots": {},
+                                "to": "core.bf.idle",
+                            },
+                        },
                     ],
                 )
 
@@ -69,12 +86,13 @@ class KitsokiTraceCorpusTest(unittest.TestCase):
                 non_empty = corpus.build_samples(tmp_path, files, include_empty=False)
                 all_samples = corpus.build_samples(tmp_path, files, include_empty=True)
 
-                self.assertEqual(len(non_empty), 1)
+                self.assertEqual(len(non_empty), 2)
                 self.assertEqual(non_empty[0]["input"], "tickets")
                 self.assertEqual(non_empty[0]["expected"]["intent"], "core__go_ticket_search")
                 self.assertIs(non_empty[0]["route_labeled"], True)
+                self.assertIs(non_empty[1]["context_dependent"], True)
 
-                self.assertEqual(len(all_samples), 2)
+                self.assertEqual(len(all_samples), 3)
                 self.assertEqual(all_samples[1]["input"], "")
                 self.assertEqual(all_samples[1]["expected"]["slots"], {"n": 3})
 
@@ -83,6 +101,17 @@ class KitsokiTraceCorpusTest(unittest.TestCase):
                 main_fixture = tmp_path / "out" / "intent-fixtures" / "kitsoki-dev" / "core.main.yaml"
                 self.assertIn("test_kind: intents", main_fixture.read_text(encoding="utf-8"))
                 self.assertIn('name: "core__go_ticket_search"', main_fixture.read_text(encoding="utf-8"))
+                landing_fixture = tmp_path / "out" / "intent-fixtures" / "kitsoki-dev" / "core.landing.yaml"
+                self.assertFalse(landing_fixture.exists())
+
+                fixture_count = corpus.write_intent_fixtures(
+                    tmp_path / "out-with-context",
+                    all_samples,
+                    include_contextual=True,
+                )
+                self.assertEqual(fixture_count, 3)
+                landing_fixture = tmp_path / "out-with-context" / "intent-fixtures" / "kitsoki-dev" / "core.landing.yaml"
+                self.assertIn('name: "core__drive"', landing_fixture.read_text(encoding="utf-8"))
 
     def test_build_transcript_prompts_are_not_route_labeled(self):
         from tempfile import TemporaryDirectory
