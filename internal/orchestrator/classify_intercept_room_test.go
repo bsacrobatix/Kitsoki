@@ -60,3 +60,36 @@ func TestClassify_GitOpsInterceptRoom(t *testing.T) {
 		require.False(t, matched, "expected %q to pass through (no match)", in)
 	}
 }
+
+func TestClassify_DogfoodWorkspaceCleanupNaturalLanguage(t *testing.T) {
+	t.Parallel()
+
+	def, err := app.Load("../../stories/kitsoki-dev/app.yaml")
+	require.NoError(t, err)
+	m, err := machine.New(def)
+	require.NoError(t, err)
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	// nil harness: workspace cleanup prose should be caught by the no-LLM route
+	// before the room's free-form workbench fallback can invoke an agent.
+	orch := orchestrator.New(def, m, s, nil)
+
+	ctx := context.Background()
+	state := app.StatePath("core.workspace_manager")
+	w := orch.InitialWorld()
+
+	for _, in := range []string{
+		"scan cleanup using main as the base branch",
+		"scan_cleanup main",
+		"clean up merged worktrees",
+	} {
+		verdict, matched, cErr := orch.Classify(ctx, state, w, in)
+		require.NoError(t, cErr, "Classify(%q)", in)
+		require.True(t, matched, "expected %q to route without the workbench fallback", in)
+		require.Equal(t, "core__cleanup_workspaces_main", verdict.Intent,
+			"input %q resolved to the wrong intent", in)
+		require.Empty(t, verdict.Slots, "default-main cleanup phrases must not depend on slot extraction")
+	}
+}

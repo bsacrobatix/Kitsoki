@@ -101,6 +101,7 @@ turns:
 
   - intent: { name: accept, slots: {} }
     expect_state: workspace_cleanup_done
+    expect_view_matches: "Deleted:\\s+2[\\s\\S]*Skipped:\\s+1"
     expect_host_calls:
       - handler: host.git_worktree.cleanup_apply
     expect_world:

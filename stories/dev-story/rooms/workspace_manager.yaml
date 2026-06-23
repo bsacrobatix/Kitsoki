@@ -59,6 +59,18 @@ states:
                 cleanup_skipped:     []
                 cleanup_errors:      []
                 cleanup_recommended: 0
+      cleanup_workspaces_main:
+        - target: workspace_cleanup_review
+          effects:
+            - set:
+                cleanup_base:        "main"
+                cleanup_filter:      ""
+                cleanup_status:      ""
+                cleanup_candidates:  []
+                cleanup_deleted:     []
+                cleanup_skipped:     []
+                cleanup_errors:      []
+                cleanup_recommended: 0
       go_back:
         - target: "{{ world.prev_state }}"
       go_main:
@@ -146,8 +158,8 @@ states:
       - kv:
           pairs:
             Status: '{{ world.cleanup_status|default:"done" }}'
-            Deleted: "{{ len(world.cleanup_deleted) }}"
-            Skipped: "{{ len(world.cleanup_skipped) }}"
+            Deleted: "{{ world.cleanup_deleted|length }}"
+            Skipped: "{{ world.cleanup_skipped|length }}"
       - code: |
           {% if world.cleanup_deleted %}{% for d in world.cleanup_deleted %}deleted {{ d.branch }}{% if d.path %}  {{ d.path }}{% endif %}
           {% endfor %}{% else %}(nothing deleted){% endif %}

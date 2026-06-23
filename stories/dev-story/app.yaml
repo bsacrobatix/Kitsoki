@@ -1244,9 +1244,17 @@ intents:
     title: "Cleanup Workspaces"
     description: "Scan for merged worktrees and branches that are safe to delete."
     examples: ["cleanup worktrees", "clean up workspaces", "delete merged branches", "prune dead worktrees"]
+    synonyms: ["scan cleanup using {base} as the base branch", "scan_cleanup {base}"]
     priority: 72
     slots:
       base: { type: string, required: false, description: "base branch to check merged candidates against" }
+
+  cleanup_workspaces_main:
+    title: "Cleanup Workspaces From Main"
+    description: "Scan for merged worktrees and branches that are safe to delete using main as the base branch."
+    examples: ["scan cleanup", "scan_cleanup", "scan cleanup using main as the base branch", "scan_cleanup main", "clean up merged worktrees"]
+    synonyms: ["clean up merged worktrees"]
+    priority: 73
 
   proceed:
     title: "Proceed"
