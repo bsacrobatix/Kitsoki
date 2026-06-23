@@ -76,8 +76,9 @@ imports:
       # slice 4: bf's direct-ship terminals. This demo pins bugfix_exit: open-PR
       # so neither fires; the loader requires every child exit be mapped. Both
       # land in the demo's close-out read-out.
-      shipped:     { to: shipped }
-      needs-human: { to: shipped }
+      shipped:          { to: shipped }
+      needs-human:      { to: shipped }
+      not-reproducible: { to: shipped }
 
 # Instance world — the gh-4115 / gears-rust profile (the demo's pre-set context).
 world:

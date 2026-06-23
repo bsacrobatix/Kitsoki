@@ -1026,7 +1026,11 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 	// a `decider: human` pin), stop BEFORE firing this state's emits —
 	// drop them, rest here, and record why. One-shot mode (and `decider:
 	// llm` pins) skip this and advance as before.
-	if m.isStagedGate(ctx, curState, w, staged) {
+	// depth>0 guard: the origin state (depth=0) is the state *dispatching*
+	// the emits, not a state the chain has arrived at. Post-bind emits are
+	// deterministic consequences of a host call's binding and must not be
+	// blocked at the origin state regardless of staged mode.
+	if depth > 0 && m.isStagedGate(ctx, curState, w, staged) {
 		m.logger.DebugContext(ctx, trace.EvIntentEmitted,
 			slog.String("state", curState),
 			slog.String("kind", "staged_gate_stop"),

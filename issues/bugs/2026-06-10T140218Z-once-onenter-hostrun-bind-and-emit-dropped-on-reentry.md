@@ -3,7 +3,7 @@ id:        2026-06-10T140218Z-once-onenter-hostrun-bind-and-emit-dropped-on-reen
 title:     "once: on_enter host.run drops its bind + post-bind emit_intent on room re-entry"
 target:    kitsoki
 filed_at:  2026-06-10T14:02:18Z
-status:    open
+status:    fixed
 severity:  P1
 component: runtime
 kitsoki_rev: ""
