@@ -34,6 +34,16 @@ command -v jq >/dev/null 2>&1 || { echo "record-demos: jq is required" >&2; exit
 [ -f "$INDEX" ] || { echo "record-demos: $INDEX missing — run: make features-index" >&2; exit 2; }
 [ -x "$BIN" ] || { echo "record-demos: $BIN missing — run: make build && cp ./kitsoki bin/kitsoki" >&2; exit 2; }
 
+# A restored .artifacts cache may carry a stale generated feature index. Refresh
+# it after cache restore and before any skip/record decisions.
+(cd "$RUNSTATUS_DIR" && pnpm exec tsx scripts/features/generate.ts --index >/dev/null)
+
+TOUR_CHROME_PATH="${KITSOKI_TOUR_CHROME_PATH:-}"
+if [ -z "$TOUR_CHROME_PATH" ] && command -v node >/dev/null 2>&1; then
+	TOUR_CHROME_PATH="$(cd "$RUNSTATUS_DIR" && node -e 'try { const { chromium } = require("@playwright/test"); process.stdout.write(chromium.executablePath()); } catch {}' 2>/dev/null || true)"
+	[ -x "$TOUR_CHROME_PATH" ] || TOUR_CHROME_PATH=""
+fi
+
 if command -v sha256sum >/dev/null 2>&1; then SHA="sha256sum"; else SHA="shasum -a 256"; fi
 
 if jq -e '.features[] | select(.id == "mockup-video" or .id == "review") | select(.demo != null and .demo.external == false)' "$INDEX" >/dev/null; then
@@ -77,7 +87,9 @@ while IFS=$'\t' read -r id profile renderer specName artifactDir video yaml spec
 	ok=0
 	for attempt in 1 2; do
 		if [ "$renderer" = "binary" ]; then
-			if KITSOKI_DEMO_PROFILE="$profile" WEB_CHAT_PACE=1 "$BIN" tour --feature "$id" --out "$artifactDir"; then
+			tour_args=(tour --feature "$id" --out "$artifactDir")
+			[ -n "$TOUR_CHROME_PATH" ] && tour_args+=(--chrome-path "$TOUR_CHROME_PATH")
+			if KITSOKI_DEMO_PROFILE="$profile" WEB_CHAT_PACE=1 "$BIN" "${tour_args[@]}"; then
 				ok=1
 				break
 			fi
