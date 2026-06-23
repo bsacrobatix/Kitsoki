@@ -31,7 +31,7 @@ states:
             "Feature branch": '{{ world.feature_branch|default:"—" }}'
             Applied:          '{{ world.implement_artifact.summary_title|default:"(pending — agent has not returned yet)" }}'
             Status:           '{% if world.implement_artifact.applied == false %}blocked{% elif world.implement_artifact.summary_title %}applied{% else %}(pending){% endif %}'
-            Files:            '{{ world.implement_artifact.files_changed|default:"(none recorded)" }}'
+            Files:            '{{ world.implement_artifact.files_changed|join:", "|default:"(none recorded)" }}'
       - heading: "Artifact"
       - code: '{{ world.implement_artifact.summary_markdown|default:"(no implementation body — agent pending or failed)" }}'
       - heading: "Blockers"
@@ -123,7 +123,11 @@ states:
               workdir:          "{{ world.workdir }}"
               fix_description:  "{{ world.propose_fix_artifact.fix_description }}"
               root_cause:       "{{ world.propose_fix_artifact.root_cause }}"
-              affected_files:   "{{ world.propose_fix_artifact.affected_files }}"
+              # join the list into a readable string — args are expr-lang
+              # (not pongo2), so use join(arr, glue); `?? []` keeps it
+              # nil-safe when no proposal artifact has bound yet (raw
+              # interpolation stringified the []interface{} as a Go type dump).
+              affected_files:   '{{ join(world.propose_fix_artifact.affected_files ?? [], ", ") }}'
               refine_feedback:  "{{ world.refine_feedback }}"
               cycle:            "{{ world.cycle }}"
         bind:
