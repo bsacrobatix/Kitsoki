@@ -244,6 +244,12 @@ export const useRunStore = defineStore("run", () => {
 
   // ---- internal ----
   let _unsubscribe: (() => void) | null = null;
+  // Guards maybeRefreshViewOnBackgroundCompletion against duplicate/late
+  // turn.end events: the SSE callback can see the same completion event more
+  // than once (reconnect replay, backfill). We refresh+push at most once per
+  // background-completion turn, and never overlap two refreshes in flight.
+  let _bgCompletionRefreshInFlight = false;
+  const _bgCompletionRefreshedTurns = new Set<number>();
   // True once any machine.state_entered event has been observed. Until then we
   // fall back to a raw state_path; after, only state_entered events move the
   // current state (turn.end is stamped with the turn's STARTING state, so it
@@ -288,6 +294,7 @@ export const useRunStore = defineStore("run", () => {
       (e: TraceEvent) => {
         events.value.push(e);
         applyStatePath(e);
+        maybeRefreshViewOnBackgroundCompletion(source, sessionId, e);
       },
       (state) => {
         connectionState.value = state;
@@ -314,6 +321,63 @@ export const useRunStore = defineStore("run", () => {
     if (!_seenStateEntered && e.state_path) {
       currentStatePath.value = e.state_path;
     }
+  }
+
+  /**
+   * Surface a scheduler-driven background_completion turn over the live SSE
+   * stream. Such a turn is NOT driven by any inbound write RPC — it arrives
+   * entirely over the subscription, so none of the RPC write paths
+   * (applyTurnResult / loadInitialView / rehydrate) ever run and currentView
+   * stays frozen at the pre-completion "…executing" view while the failure
+   * `say` / `world.last_error` sit unread in the event log (the session "looks
+   * hung").
+   *
+   * The completion turn ends with a terminal `turn.end` stamped
+   * outcome=background_completion (after machine.state_entered /
+   * world.update last_error / machine.say have already been pushed). On that
+   * event we pull the freshly-landed room view and mirror it into currentView /
+   * currentStatePath / terminal, then push a single agent transcript entry so
+   * the destination state's failure narration reaches the operator — exactly
+   * mirroring how the TUI re-renders on completion (AttachOrchestratorObserver).
+   *
+   * Guarded against the callback seeing repeated/late events (de-dupe by turn
+   * number + an in-flight flag), and a transient view RPC failure is swallowed
+   * so it can't break the stream.
+   */
+  function maybeRefreshViewOnBackgroundCompletion(
+    source: DataSource,
+    sessionId: string,
+    e: TraceEvent
+  ): void {
+    if (e.msg !== "turn.end" || e.attrs?.outcome !== "background_completion") {
+      return;
+    }
+    if (_bgCompletionRefreshInFlight) return;
+    if (typeof e.turn === "number" && _bgCompletionRefreshedTurns.has(e.turn)) {
+      return;
+    }
+    if (typeof e.turn === "number") _bgCompletionRefreshedTurns.add(e.turn);
+    _bgCompletionRefreshInFlight = true;
+    void source
+      .view(sessionId)
+      .then((result) => {
+        currentView.value = result;
+        if (result.state) currentStatePath.value = result.state;
+        terminal.value = result.mode === "completed";
+        const text = agentText(result);
+        const hasElements = (result.typed_view?.Elements?.length ?? 0) > 0;
+        if (text || hasElements) {
+          transcript.value.push({
+            role: "agent",
+            text,
+            typedView: result.typed_view,
+          });
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        _bgCompletionRefreshInFlight = false;
+      });
   }
 
   function traceEventKey(e: TraceEvent): string {
@@ -350,6 +414,8 @@ export const useRunStore = defineStore("run", () => {
     _unsubscribe?.();
     _unsubscribe = null;
     _seenStateEntered = false;
+    _bgCompletionRefreshInFlight = false;
+    _bgCompletionRefreshedTurns.clear();
   }
 
   /**
