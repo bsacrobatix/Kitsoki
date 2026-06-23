@@ -101,11 +101,18 @@ code-writing LLM off a click. The one interpretive step — the oracle's answer 
 is recorded as a decision, with the ambient that shaped it recorded alongside
 as `input.visual`.
 
+## Beyond rrweb — the anchor union
+
+This page describes the v1 rrweb/live-DOM seam. The flat bundle here is now the
+v1 case of a discriminated **anchor union** that generalises annotation to png,
+mp4, static HTML, and slidey decks (region drawing, time-ranges, semantic
+elements) through one producer-agnostic contract — see
+[artifact-annotation](artifact-annotation.md). The bundle stays forward-compatible:
+a v1 payload (flat `point`/`element`) normalises into the union unchanged.
+
 ## Non-goals
 
-- **Arbitrary / external media** — v1 resolves elements against kitsoki's own
-  rendered DOM only; the pixel/vision fallback for a DOM-less frame is deferred.
-  The bundle is forward-compatible (`Element` may be absent).
 - **A vision-model dependency** — element resolution is textual; the frame path
-  is optional grounding.
+  is optional grounding. (A pixel/vision fallback for a DOM-less region remains
+  bundle-data only — kitsoki records the region but runs no LLM hit-test.)
 - **A web-tier write path** — guidance is read-only (shared decision 1).
