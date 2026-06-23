@@ -92,6 +92,17 @@ agents:
     bash_profile: read-only
     external_side_effect: false
 
+  # triager — triage-only mode. Read-only assessment of whether the reported
+  # bug STILL EXISTS in the current working tree, emitting a standardized
+  # verdict (ALREADY-FIXED | STILL-LIVE | PARTIAL | UNCLEAR) with concrete code
+  # evidence. No worktree, no fix, no judge — the verdict IS the deliverable.
+  triager:
+    system_prompt: "You are a bug triage analyst. Read the reported bug, then inspect the current codebase (the cited files/functions, the Suggested-fix section, and any regression test) to determine whether the defect still exists in the working tree. Emit a standardized triage verdict citing concrete code evidence (file:line, function name, or a regression test) — never prose alone."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Bash]
+    bash_profile: read-only
+    external_side_effect: false
+
   proposer:
     system_prompt: "You are a senior engineer performing code analysis. Read the codebase, analyse the reproduction evidence, and produce a structured fix proposal or close-out summary."
     model: claude-sonnet-4-6
@@ -288,6 +299,17 @@ world:
   # (a characterization test), or isn't GREEN on merged main, routes to
   # @exit:needs-human — never @exit:shipped. See stories/bugfix/README.md.
   gate_command:           { type: string, default: "" }    # the deterministic regression gate (re-run on merged commit)
+  # default_landing_gate — the gate the delivery tail re-runs on the MERGED commit
+  # when the ticket carries NO repro_command (gate_command empty). Landing should
+  # never ship blind: even without a bug-specific regression test we re-prove the
+  # build + suite pass on main. Instances retarget it (kitsoki-dev pins the story
+  # flow suite for story fixes; a Rust repo pins cargo). The never-RED trap is
+  # enforced ONLY when a real regression gate (gate_command) was configured.
+  default_landing_gate:   { type: string, default: "go build ./... && go test ./..." }
+  # landing_gate — what the tail actually re-verifies: the regression gate when a
+  # repro_command is present, else default_landing_gate. Computed in the testing
+  # room's direct-ship landing arm and projected into the tail's gate_command.
+  landing_gate:           { type: string, default: "" }
   regression_red_pre_fix: { type: bool,   default: false } # the gate FAILED on the pre-fix snapshot (RED)
   regression_pre_fix_log: { type: string, default: "" }    # the pre-fix gate's output tail (audit)
   regression_gate_checked: { type: bool,  default: false } # the pre-fix gate actually ran (vs skipped)
@@ -383,6 +405,7 @@ world:
   abandon_reason:      { type: string, default: "" }
 
   # ── Per-room artifacts (objects; each holds {summary_title, summary_markdown, …}) ─
+  triage_verdict:            { type: object, default: {} }  # triage-only mode: standardized verdict (schemas/triage_verdict.json)
   reproduction_artifact:     { type: object, default: {} }
   propose_fix_artifact:      { type: object, default: {} }
   implement_artifact:        { type: object, default: {} }  # implementing agent output (files_changed, applied, blockers)
@@ -474,6 +497,13 @@ intents:
     description: "Default — walk all phases. Set bugfix_mode=full and start from reproducing."
     examples: [full_pipeline, "full", "all phases"]
     priority: 75
+  # Triage-only: a read-only verdict on whether the bug still exists in the
+  # current tree (no worktree, no fix). Cheap pre-flight before committing the
+  # full maker pipeline to a ticket. Terminal: @exit:triaged carrying the verdict.
+  triage:
+    description: "Triage-only: assess whether the bug still exists in the current tree and emit a standardized verdict (ALREADY-FIXED | STILL-LIVE | PARTIAL | UNCLEAR). No fix pipeline."
+    examples: [triage, "assess", "is it still a bug", "verdict only", "just triage"]
+    priority: 75
   change_ticket:
     description: "From idle: hand control back to the parent's ticket picker so the operator can choose a (different) ticket before starting."
     examples: [change_ticket, "pick ticket", "find ticket", "tickets"]
@@ -525,7 +555,7 @@ intents:
 # lifts these into the parent's bare intent table so an operator can
 # drive the imported pipeline without typing the `bf__` prefix.
 exports:
-  intents: [start, accept, refine, restart_from, jump_to, quick_fix, skip_to_pr, full_pipeline, change_ticket, quit, look]
+  intents: [start, accept, refine, restart_from, jump_to, quick_fix, skip_to_pr, full_pipeline, triage, change_ticket, quit, look]
 
 # Named return points. A parent story (dev-story / kitsoki-dev / cyber-devstory)
 # maps each to one of its own states. Standalone load synthesises
@@ -538,6 +568,10 @@ exits:
     description: "User or LLM bailed."
   pick_ticket:
     description: "Operator wants to (re-)pick a ticket. Parent should route back to its ticket picker; no abandonment, no artifact required."
+  # ── triage-only exit ─────────────────────────────────────────────────────
+  triaged:
+    description: "Triage-only mode produced a standardized verdict on whether the bug still exists. Carries world.triage_verdict; no fix was attempted."
+    requires: [triage_verdict]
   # ── direct-ship exits (slice 4) — the shared ship-it tail terminals ──────
   shipped:
     description: "direct-ship: the fix integrated to local main, the regression gate re-verified GREEN on the merged commit, worktree cleaned up."
@@ -574,7 +608,9 @@ imports:
     # workspace_branch/worktree_path are the maker's worktree; main_worktree_path
     # is "." (the integration tree, where integrate/verify/cleanup run).
     world_in:
-      gate_command:       "{{ world.gate_command }}"
+      # The tail re-verifies landing_gate on the merged commit: the regression
+      # gate when the ticket had a repro_command, else default_landing_gate.
+      gate_command:       "{{ world.landing_gate }}"
       workspace_id:       "{{ world.workspace_id }}"
       workspace_branch:   "{{ world.feature_branch }}"
       worktree_path:      "{{ world.worktree_path }}"
