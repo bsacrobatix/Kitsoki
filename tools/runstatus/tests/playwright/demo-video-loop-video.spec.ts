@@ -144,6 +144,20 @@ test("demo-video loop feature-tour video", async () => {
       }
       await expect(titleEl).toHaveText(step.title, { timeout: 12000 });
 
+      // Drive the trace to TELL this beat's story: expand the proving rows and
+      // pulse the specific fields (window.__tourTrace, exposed by TraceTimeline),
+      // or clear the focus on steps that don't narrate the trace. This is what
+      // makes the trace panel communicate instead of showing collapsed rows.
+      await page.evaluate((t) => {
+        const api = (window as unknown as {
+          __tourTrace?: { focus: (o: unknown) => number; reset: () => void };
+        }).__tourTrace;
+        if (!api) return;
+        if (t) api.focus(t);
+        else api.reset();
+      }, (step.trace ?? null) as unknown);
+      await page.waitForTimeout(350);
+
       chapters.open(step.id, step.title, CHAPTER_SOURCE);
       await dwell(page, step.dwellMs ?? 3000);
       await shot(page, step.id);

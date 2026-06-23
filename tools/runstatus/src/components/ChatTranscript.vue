@@ -9,7 +9,7 @@
       :data-testid="`chat-row-${entry.role}`"
     >
       <div class="chat-avatar" :class="`chat-avatar--${entry.role}`">
-        {{ entry.role === "user" ? "U" : "A" }}
+        {{ entry.role === "user" ? "U" : entry.role === "narration" ? "⚙" : "A" }}
       </div>
       <div
         class="chat-bubble"
@@ -28,7 +28,7 @@
              normal room transition and from a rejection — at a glance, in the
              same header line. The menu still shows because state is unchanged. -->
         <div class="chat-role-row">
-          <div class="chat-role">{{ entry.role === "user" ? "You" : "Agent" }}</div>
+          <div class="chat-role">{{ entry.role === "user" ? "You" : entry.role === "narration" ? "Loop" : "Agent" }}</div>
           <div
             v-if="entry.role === 'agent' && entry.isOffRamp"
             class="chat-offramp-chip"
@@ -152,7 +152,7 @@ import ViewElement from "./ViewElement.vue";
 import { renderAgentMarkdown } from "../lib/markdown.js";
 
 export interface ChatEntry {
-  role: "user" | "agent";
+  role: "user" | "agent" | "narration";
   text: string;
   typedView?: View;
   /** The turn's preserved thinking/tool feed (collapsed activity section). */
@@ -365,6 +365,21 @@ watch(
   background: var(--k-fg-subtle, #475569);
 }
 
+/* Narration ("Loop") avatar: a machine `say:` breadcrumb from a self-driving
+   run. Tinted violet (the loop/automation accent) to set it apart from the
+   operator (blue) and the agent (slate) at a glance. */
+.chat-avatar--narration {
+  background: #7c3aed;
+  font-size: 15px;
+}
+
+/* Narration row: left-aligned like the agent, but a slim machine breadcrumb —
+   not a full room-view card. */
+.chat-row--narration {
+  align-self: flex-start;
+  max-width: 88%;
+}
+
 .chat-bubble {
   border-radius: 12px;
   padding: 10px 14px;
@@ -406,6 +421,25 @@ watch(
   color: var(--k-paper-fg, #1f2430);
   border: 1px solid var(--k-paper-border, #d8dbe2);
   border-bottom-left-radius: 4px;
+}
+
+/* Narration ("Loop") bubble: a machine `say:` breadcrumb surfaced from the
+   event log so a self-driving run still reads as a conversation. A compact,
+   slightly translucent dark card with a violet left rule — distinct from the
+   light agent room-view card and the blue operator bubble, so a viewer (and
+   vision-QA) reads it as automated progress, not operator chat. */
+.chat-bubble--narration {
+  background: #171a2b;
+  color: #e6e8f5;
+  border: 1px solid #2c2f48;
+  border-left: 3px solid #8b5cf6;
+  border-bottom-left-radius: 4px;
+  font-size: 13.5px;
+  box-shadow: 0 1px 2px rgba(124, 92, 246, 0.18);
+}
+.chat-bubble--narration .chat-role {
+  color: #c4b5fd;
+  opacity: 0.95;
 }
 
 /* Off-ramp ("offpath") agent bubble: a free-form converse answer that did NOT

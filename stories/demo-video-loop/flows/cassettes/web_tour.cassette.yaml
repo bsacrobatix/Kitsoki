@@ -63,7 +63,7 @@ episodes:
       data:
         ok: true
         exit_code: 0
-        stdout: "video gate PASS — canonical demo-video-loop-demo.mp4, 41.0s ≥ 25s, 8 frames, no ERROR.txt, written this turn"
+        stdout: "video gate PASS (round 1) — canonical demo-video-loop-demo.mp4, 58.3s ≥ 25s, 8 frames, no ERROR.txt, written this turn"
   - id: qa-1
     match: { handler: host.run, call: qa-1 }
     response:
@@ -114,7 +114,7 @@ episodes:
       data:
         ok: true
         exit_code: 0
-        stdout: "video gate PASS — canonical demo-video-loop-demo.mp4, 41.0s ≥ 25s, 8 frames, no ERROR.txt, written this turn"
+        stdout: "video gate PASS (round 2) — re-recorded demo-video-loop-demo.mp4, 58.3s ≥ 25s, 8 frames, no ERROR.txt, written this turn"
   - id: qa-2
     match: { handler: host.run, call: qa-2 }
     response:

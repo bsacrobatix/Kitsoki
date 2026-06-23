@@ -38,7 +38,13 @@ export interface RoutingInfo {
 
 /** One entry of the conversational transcript shown beside the trace. */
 export interface TranscriptEntry {
-  role: "user" | "agent";
+  /**
+   * "user"/"agent" are operator-driven turn bubbles. "narration" is a machine
+   * `say:` breadcrumb surfaced from the event log so a SELF-DRIVING run (one
+   * that cascades to terminal on entry with no operator turn) still shows
+   * meaningful, followable progress in the conversation — not only in the trace.
+   */
+  role: "user" | "agent" | "narration";
   text: string;
   /** The agent's typed view for this turn (when the result carried one). */
   typedView?: View;
@@ -168,16 +174,73 @@ export const useRunStore = defineStore("run", () => {
     return info;
   }
 
+  // narrationByTurn buckets every `machine.say` breadcrumb by the turn it fired
+  // in, preserving event order within a turn. A self-driving room (one that
+  // cascades through several states on a single engine step via emit_intent)
+  // emits all its narration under one turn (the initial RunInitialOnEnter is
+  // turn 0), so this is what lets that whole autonomous run read as a
+  // conversation instead of vanishing into the trace timeline.
+  const narrationByTurn = computed<Map<number, TranscriptEntry[]>>(() => {
+    const byTurn = new Map<number, TranscriptEntry[]>();
+    for (const e of events.value) {
+      if (e.msg !== "machine.say") continue;
+      const text = typeof e.attrs.text === "string" ? e.attrs.text : "";
+      if (!text) continue;
+      const bucket = byTurn.get(e.turn) ?? [];
+      bucket.push({ role: "narration", text });
+      byTurn.set(e.turn, bucket);
+    }
+    return byTurn;
+  });
+
   // chatEntries is the transcript enriched with each user turn's routing
-  // provenance, resolved reactively from the event log. Recomputes as events
-  // stream in over SSE, so the routing chip fills in a tick after the bubble.
-  const chatEntries = computed<TranscriptEntry[]>(() =>
-    transcript.value.map((e) => {
-      if (e.role !== "user" || e.turn == null) return e;
-      const routing = readTurnRouting(e.turn);
-      return routing ? { ...e, routing } : e;
-    })
-  );
+  // provenance AND interleaved with machine `say:` narration, resolved
+  // reactively from the event log (recomputes as events stream in over SSE).
+  //
+  // Why narration is merged here: a story may advance with NO operator input —
+  // the demo-video-loop self-drives maker→QA→loop to terminal the moment the
+  // session is created. The operator transcript then holds only the opening
+  // view, so the conversation column would otherwise be empty and the run's
+  // progress would live only in the developer trace. We surface each `say:`
+  // breadcrumb as a distinct "narration" bubble so EVERY conversation provides
+  // meaningful, followable feedback as it progresses, even when no input is
+  // required. Placement: a turn's narration is flushed right AFTER that turn's
+  // agent bubble (so an operator turn reads "you → agent → what it did"); a
+  // self-driving run's turn-0 narration is flushed BEFORE the opening view so
+  // the journey reads top-to-bottom with the landed (often terminal) view last.
+  const chatEntries = computed<TranscriptEntry[]>(() => {
+    const byTurn = narrationByTurn.value;
+    const out: TranscriptEntry[] = [];
+    const flushed = new Set<number>();
+    const flush = (turn: number): void => {
+      if (flushed.has(turn)) return;
+      flushed.add(turn);
+      const bucket = byTurn.get(turn);
+      if (bucket) out.push(...bucket);
+    };
+
+    // Turn-0 narration (a self-driving cascade, or a root on_enter greeting)
+    // leads the conversation, ahead of the opening room-view bubble.
+    flush(0);
+
+    let curTurn = 0;
+    for (const e of transcript.value) {
+      if (e.role === "user") {
+        if (e.turn != null) curTurn = e.turn;
+        const routing = e.turn != null ? readTurnRouting(e.turn) : undefined;
+        out.push(routing ? { ...e, routing } : e);
+      } else {
+        // An agent bubble pairs with the turn opened by the preceding user
+        // message; emit it, then flush that turn's narration after it.
+        out.push(e);
+        flush(curTurn);
+      }
+    }
+    // Any narration in turns past the last rendered bubble (rare) trails at the
+    // end so nothing the machine said is dropped from the conversation.
+    for (const turn of [...byTurn.keys()].sort((a, b) => a - b)) flush(turn);
+    return out;
+  });
 
   // ---- internal ----
   let _unsubscribe: (() => void) | null = null;

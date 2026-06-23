@@ -111,4 +111,21 @@ export interface TourStep {
    * (e.g. "right") instead of centered over the content.
    */
   dim?: boolean;
+
+  /**
+   * Optional trace-storytelling for this beat: drive the live TraceTimeline to
+   * EXPAND the rows that prove this step and PULSE the specific fields that
+   * matter, so the trace panel narrates alongside the conversation instead of
+   * showing a wall of collapsed rows. Applied via window.__tourTrace by the
+   * video spec (and any renderer that opts in); the live operator overlay
+   * ignores it. `match` expands every row whose searchable text (msg + attrs +
+   * the merged host call's args/return + narration) contains a substring;
+   * `exclude` disambiguates (e.g. two identical-looking gate rows across rounds);
+   * `highlight` pulses fields inside the expanded bodies that contain a term.
+   */
+  trace?: {
+    match: string | string[];
+    exclude?: string;
+    highlight?: string[];
+  };
 }

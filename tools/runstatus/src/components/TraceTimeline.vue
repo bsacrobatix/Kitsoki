@@ -264,7 +264,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, watch, nextTick } from "vue";
+import { ref, computed, reactive, watch, nextTick, onMounted, onUnmounted } from "vue";
 import type { TraceEvent, AnnotationEntry } from "../types.js";
 import EventDetail from "./EventDetail.vue";
 import WorldDiffViewer from "./WorldDiffViewer.vue";
@@ -1145,6 +1145,131 @@ function toggleRowExpand(index: number): void {
   }
 }
 
+// ── Tour-driven trace focus (window.__tourTrace) ─────────────────────────────
+// A self-driving run's progress lives in the trace as terse, collapsed rows that
+// "don't communicate anything" until expanded. So a tour (the demo-video-loop
+// video) can drive the timeline to TELL THE STORY: expand the specific rows for
+// a beat (the maker task, the video gate, the QA gate, the verdict) and pulse the
+// specific fields that matter (an exit_code, a PASS/FAIL stdout, the verdict).
+// This is render-time driving data only — the live operator UI is untouched.
+//
+// The match is over a row's FULL searchable text (msg + attrs + the merged host
+// call's args/return + narration), so a focus can target a row by what it
+// actually did ("video gate PASS", "QA FAIL", "qa.sh") rather than a brittle
+// index. Highlighted fields are matched the same way within the expanded bodies.
+function rowSearchText(row: AnnotatedEvent): string {
+  const parts: string[] = [row.event.msg];
+  try { parts.push(JSON.stringify(row.event.attrs)); } catch { /* unserialisable */ }
+  if (row.harnessCall) {
+    parts.push(row.harnessCall.namespace);
+    try {
+      parts.push(JSON.stringify(row.harnessCall.args));
+      parts.push(JSON.stringify(row.harnessCall.data));
+    } catch { /* unserialisable */ }
+  }
+  if (row.narration != null) parts.push(row.narration);
+  if (row.agent) {
+    parts.push("agent." + row.agent.verb);
+    // The maker is an agent row; its submitted summary / output lives in the
+    // merged complete event's attrs, so include it (a beat targets the maker by
+    // what it returned, e.g. "recorded the demo-video-loop tour").
+    const merged = row.agent.merged ?? row.agent.complete;
+    if (merged?.attrs) {
+      try { parts.push(JSON.stringify(merged.attrs)); } catch { /* unserialisable */ }
+    }
+  }
+  return parts.join(" ").toLowerCase();
+}
+
+function clearFieldHighlight(): void {
+  const root = bodyRef.value;
+  if (!root) return;
+  root
+    .querySelectorAll(".trace-timeline__field-hl")
+    .forEach((el) => el.classList.remove("trace-timeline__field-hl"));
+}
+
+function applyFieldHighlight(terms: string[]): void {
+  clearFieldHighlight();
+  const root = bodyRef.value;
+  if (!root || terms.length === 0) return;
+  const lowered = terms.map((t) => t.toLowerCase());
+  // Leaf text elements across the detail renderers (EventDetail, HostBuiltinDetail,
+  // HostCliDetail, AgentDetail) — `pre`/`code` catch the JSON/stdout blocks, the
+  // explicit classes catch chips/badges/values, so a highlight term lands on the
+  // smallest element that carries it regardless of which renderer drew the row.
+  const candidates = root.querySelectorAll<HTMLElement>(
+    ".trace-timeline__row.expanded pre," +
+      ".trace-timeline__row.expanded code," +
+      ".trace-timeline__row.expanded .event-detail__val," +
+      ".trace-timeline__row.expanded .hbd__pre," +
+      ".trace-timeline__row.expanded .hbd__chip," +
+      ".trace-timeline__row.expanded .hbd__badge," +
+      ".trace-timeline__row.expanded .trace-timeline__say-text",
+  );
+  let firstHit: HTMLElement | null = null;
+  candidates.forEach((el) => {
+    const txt = (el.textContent ?? "").toLowerCase();
+    if (lowered.some((t) => txt.includes(t))) {
+      el.classList.add("trace-timeline__field-hl");
+      if (!firstHit) firstHit = el;
+    }
+  });
+  (firstHit as HTMLElement | null)?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+}
+
+interface TraceFocusOpts {
+  /** Expand every row whose searchable text contains ANY of these substrings. */
+  match?: string | string[];
+  /** Skip rows whose searchable text contains this substring (disambiguation). */
+  exclude?: string;
+  /** Pulse fields inside the expanded bodies whose text contains these terms. */
+  highlight?: string[];
+}
+
+function applyTraceFocus(opts: TraceFocusOpts): number {
+  const matches = (Array.isArray(opts.match) ? opts.match : opts.match ? [opts.match] : [])
+    .map((s) => s.toLowerCase())
+    .filter(Boolean);
+  const exclude = opts.exclude?.toLowerCase();
+  // Show all groups so a matched row is never hidden inside a collapsed
+  // phase/turn (this trace is small; for the demo that is exactly right).
+  collapsedPhases.clear();
+  collapsedTurns.clear();
+  expandedRows.clear();
+  const hits: number[] = [];
+  for (const row of filteredEvents.value) {
+    const text = rowSearchText(row);
+    if (exclude && text.includes(exclude)) continue;
+    if (matches.length && matches.some((m) => text.includes(m))) {
+      expandedRows.add(row.index);
+      hits.push(row.index);
+    }
+  }
+  void nextTick().then(() => {
+    const root = bodyRef.value;
+    if (root && hits.length) {
+      const el = root.querySelector<HTMLElement>(`[data-event-index="${hits[0]}"]`);
+      el?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    }
+    applyFieldHighlight(opts.highlight ?? []);
+  });
+  return hits.length;
+}
+
+onMounted(() => {
+  (window as unknown as { __tourTrace?: unknown }).__tourTrace = {
+    focus: (opts: TraceFocusOpts) => applyTraceFocus(opts ?? {}),
+    reset: () => {
+      expandedRows.clear();
+      clearFieldHighlight();
+    },
+  };
+});
+onUnmounted(() => {
+  delete (window as unknown as { __tourTrace?: unknown }).__tourTrace;
+});
+
 async function copyRow(row: AnnotatedEvent): Promise<void> {
   let payload: unknown;
   if (row.harnessCall) {
@@ -1774,6 +1899,14 @@ watch(
   border-top: 1px solid var(--k-border, #1e293b);
 }
 
+/* Tour field highlight: a steady amber spotlight on the one field a beat is
+   narrating (an exit_code, a PASS/FAIL stdout, the verdict). Steady (not a quick
+   pulse) so it reads in any captured frame; a brief grow-in adds life on screen
+   without risking a frame that misses it. Applied/cleared by window.__tourTrace. */
+/* Tour field highlight lives in a GLOBAL style block below — the highlighted
+   leaf elements belong to child detail components (EventDetail / HostBuiltinDetail),
+   which this component's scoped CSS cannot reach. */
+
 .trace-timeline__attrs-header {
   display: flex;
   justify-content: space-between;
@@ -1833,5 +1966,30 @@ watch(
   font-weight: 600;
   cursor: default;
   white-space: nowrap;
+}
+</style>
+
+<!-- Tour field highlight (GLOBAL, unscoped): window.__tourTrace adds
+     .trace-timeline__field-hl to a leaf field inside an expanded row's detail
+     body. Those bodies are rendered by child components (EventDetail /
+     HostBuiltinDetail / AgentDetail), so this component's scoped CSS can't style
+     them — the rule must be global. A steady amber spotlight (not a quick pulse)
+     so it reads in any captured demo frame; a brief grow-in adds life on screen. -->
+<style>
+.trace-timeline__field-hl {
+  background: rgba(251, 191, 36, 0.22) !important;
+  outline: 3px solid #f59e0b !important;
+  outline-offset: 2px;
+  border-radius: 5px;
+  box-shadow: 0 0 0 5px rgba(251, 191, 36, 0.18), 0 0 26px rgba(251, 191, 36, 0.55) !important;
+  color: #fde68a !important;
+  animation: trace-field-hl-in 0.5s ease-out;
+}
+.trace-timeline__field-hl * {
+  color: #fde68a !important;
+}
+@keyframes trace-field-hl-in {
+  from { box-shadow: 0 0 0 14px rgba(251, 191, 36, 0); }
+  to { box-shadow: 0 0 0 5px rgba(251, 191, 36, 0.18), 0 0 26px rgba(251, 191, 36, 0.55); }
 }
 </style>
