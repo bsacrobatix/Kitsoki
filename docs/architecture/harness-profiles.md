@@ -75,8 +75,8 @@ harness_profiles:
 harness_profiles:
   synthetic-claude:                     # claude-code pointed at synthetic.new
     backend: claude                     # base URL omits /v1 (claude appends /v1/messages)
-    model: syn:large:text               # syn: aliases route to the latest model
-    models: [syn:large:text, syn:small:text]   # static fallback
+    model: hf:zai-org/GLM-5.2
+    models: [hf:zai-org/GLM-5.2]        # static fallback
     models_endpoint: https://api.synthetic.new/openai/v1/models  # the full always-on list
     env:
       ANTHROPIC_BASE_URL: https://api.synthetic.new/anthropic
@@ -84,8 +84,8 @@ harness_profiles:
 
   synthetic-codex:                      # the codex CLI pointed at synthetic.new
     backend: codex                      # OpenAI base URL includes /v1
-    model: syn:large:text
-    models: [syn:large:text, syn:small:text]
+    model: hf:zai-org/GLM-5.2
+    models: [hf:zai-org/GLM-5.2]
     models_endpoint: https://api.synthetic.new/openai/v1/models
     env:
       OPENAI_BASE_URL: https://api.synthetic.new/openai/v1
@@ -104,7 +104,7 @@ harness_profiles:
 | Field | Meaning |
 |---|---|
 | `backend` | `claude \| copilot \| codex`; empty ⇒ `claude`. Ignored when `plugin` is set. |
-| `model` | default `--model` for the profile; an explicit per-effect/agent model still wins. |
+| `model` | default `--model` for the profile; when the profile is active it supersedes story-local agent model defaults so the selected provider receives a compatible model id. |
 | `models` | static catalog the `/model` command and web dropdown list. When set, the model pick must be a member (of the full catalog, incl. fetched — below). |
 | `models_endpoint` | OpenAI/Anthropic `/models` URL (e.g. `https://api.synthetic.new/openai/v1/models`); its always-on model ids are **fetched and merged** into the catalog at selection time (auth from this profile's env), so the full live list is offered — not a hand-maintained subset. A fetch failure falls back to `models`. Cached per profile. |
 | `effort` | default reasoning effort (`low\|medium\|high\|xhigh\|max`), applied where the backend/model supports it (`claude --effort`). |
@@ -142,14 +142,14 @@ Both drive the same orchestrator API — `Profiles()`, `Selection()`,
 ### Resolution & precedence
 
 The selection is held per session behind a mutex and **resolved once per
-dispatch**. Precedence (highest first), preserving today's mental model:
+dispatch**. Precedence (highest first):
 
-> per-effect `with: { model / provider }` › agent default › **active profile** › flag-derived static default
+> per-effect `with: { provider }` / named story provider › **active profile model/env** › agent model default › flag-derived static default
 
-So a story/effect that pins `model: opus` or names a `provider:` still wins over
-the operator's profile — the profile only fills what the call left blank, and is
-installed as an implicit, lowest-precedence provider (`applyProvider` in
-`internal/host/agents.go`).
+So an operator-selected profile like `synthetic-claude` can replace story-pinned
+Claude model names with the profile's compatible `hf:` model id. A call that
+explicitly names a story `provider:` still selects that provider instead of the
+session profile (`applyProvider` in `internal/host/agents.go`).
 
 ### Next-turn semantics
 
@@ -180,8 +180,8 @@ The three providers the feature targets, end to end:
 
    (synthetic.new's Anthropic-compatible base is `https://api.synthetic.new/anthropic`
    — claude-code appends `/v1/messages` — and the OpenAI-compatible base is
-   `https://api.synthetic.new/openai/v1`. Use the `syn:` model aliases
-   (`syn:large:text`, `syn:small:text`) to track the latest models.)
+   `https://api.synthetic.new/openai/v1`. Use explicit `hf:` model ids
+   (for example `hf:zai-org/GLM-5.2`) to avoid rejected alias names.)
 
 2. **Native Anthropic Claude Code** — `claude-native`: ambient auth, nothing to
    set. Verified live: a real `kitsoki turn` routes free text → intent with the

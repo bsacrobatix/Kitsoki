@@ -126,7 +126,7 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	ctx = host.WithProviders(ctx, providersForContext(o.def))
 	// Resolve the live harness selection once for this dispatch: the active
 	// profile chooses the backend to fork and the env/model default (installed as
-	// the lowest-precedence provider via WithActiveProfile). No profile selected
+	// the operator-selected provider via WithActiveProfile). No profile selected
 	// ⇒ the static backend and a no-op active profile (legacy path, byte-identical).
 	backendName, activeProfile := o.resolveSelection(o.agentBackendName)
 	ctx = host.WithAgentBackendNamed(ctx, backendName)
@@ -790,7 +790,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	ctx = host.WithProviders(ctx, providersForContext(o.def))
 	// Resolve the live harness selection once for this dispatch: the active
 	// profile chooses the backend to fork and the env/model default (installed as
-	// the lowest-precedence provider via WithActiveProfile). No profile selected
+	// the operator-selected provider via WithActiveProfile). No profile selected
 	// ⇒ the static backend and a no-op active profile (legacy path, byte-identical).
 	backendName, activeProfile := o.resolveSelection(o.agentBackendName)
 	ctx = host.WithAgentBackendNamed(ctx, backendName)

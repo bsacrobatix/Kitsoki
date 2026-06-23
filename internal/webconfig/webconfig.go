@@ -250,8 +250,9 @@ type HarnessProfile struct {
 	// Backend selects which coding-agent CLI is forked: claude|copilot|codex.
 	// Empty ⇒ claude. Ignored when Plugin is set.
 	Backend string `yaml:"backend,omitempty"`
-	// Model is the default --model for this profile (an explicit per-effect or
-	// agent model still wins). Optional.
+	// Model is the default --model for this profile. For the active session
+	// profile, it supersedes story-local agent model defaults so the selected
+	// provider receives a compatible model id. Optional.
 	Model string `yaml:"model,omitempty"`
 	// Models is the catalog the /model command and web dropdown list. Optional;
 	// when set, Model (and any operator model selection) must be a member.

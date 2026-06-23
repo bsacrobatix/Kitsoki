@@ -29,16 +29,18 @@ func TestApplyProvider_ActiveProfileFallback(t *testing.T) {
 	}
 }
 
-// An explicit agent model wins over the active profile (the profile is the
-// lowest-precedence default — a story that pins a model still gets it).
-func TestApplyProvider_AgentModelBeatsProfile(t *testing.T) {
+// An active harness profile is the operator-selected provider/model for the
+// session, so it supersedes story-local model defaults. Otherwise selecting
+// synthetic-claude would still pass pinned Claude model names like
+// claude-sonnet-4-6 to the synthetic endpoint.
+func TestApplyProvider_ActiveProfileModelBeatsAgentModel(t *testing.T) {
 	ctx := WithActiveProfile(context.Background(), ActiveProfile{
 		Name:     "synthetic-claude",
 		Provider: Provider{Model: "profile-model"},
 	})
 	_, agent := applyProvider(ctx, map[string]any{}, Agent{Model: "opus"})
-	if agent.Model != "opus" {
-		t.Fatalf("agent model should win over profile: got %q", agent.Model)
+	if agent.Model != "profile-model" {
+		t.Fatalf("active profile model should win over agent default: got %q", agent.Model)
 	}
 }
 

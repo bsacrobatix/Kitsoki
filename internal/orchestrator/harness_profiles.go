@@ -17,8 +17,9 @@ type HarnessProfile struct {
 	Name string
 	// Backend is claude|copilot|codex (empty ⇒ claude). Ignored when Plugin set.
 	Backend string
-	// Model is the default --model for the profile; an explicit per-effect/agent
-	// model still wins over it.
+	// Model is the default --model for the profile. For the active session
+	// profile, it supersedes story-local agent model defaults so the selected
+	// provider receives a compatible model id.
 	Model string
 	// Models is the static catalog /model and the web dropdown list. Optional.
 	Models []string

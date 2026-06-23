@@ -164,8 +164,8 @@ func AgentProviderEnvFromCtx(ctx context.Context) map[string]string {
 // When a provider resolves:
 //   - its Env is installed via WithAgentProviderEnv so the claude exec layer
 //     merges it onto the subprocess environment, and
-//   - when the agent declares no explicit Model, the provider's Model becomes
-//     the agent's effective model (an explicit agent/effect model still wins).
+//   - the provider's Model becomes the agent's effective model for active
+//     harness profiles. Named story providers still only fill blank models.
 //
 // An unknown provider name (no providers map, or a name absent from it) is a
 // no-op here — load-time validation already rejects unknown static references;
@@ -178,13 +178,14 @@ func applyProvider(ctx context.Context, args map[string]any, agent Agent) (conte
 	}
 	if name == "" {
 		// No explicit provider on this call: fall back to the session's active
-		// harness profile (the lowest-precedence default). An explicit agent
-		// model still wins — the profile only fills what the call left blank.
+		// harness profile. This is an operator-selected backend/model for the
+		// session, so it supersedes story-local model defaults that may name a
+		// provider-specific model invalid for the selected endpoint.
 		if prof, ok := ActiveProfileFromContext(ctx); ok {
-			if strings.TrimSpace(agent.Model) == "" && strings.TrimSpace(prof.Provider.Model) != "" {
+			if strings.TrimSpace(prof.Provider.Model) != "" {
 				agent.Model = prof.Provider.Model
 			}
-			if strings.TrimSpace(agent.Effort) == "" && strings.TrimSpace(prof.Provider.Effort) != "" {
+			if strings.TrimSpace(prof.Provider.Effort) != "" {
 				agent.Effort = prof.Provider.Effort
 			}
 			ctx = WithAgentProviderEnv(ctx, prof.Provider.Env)
@@ -210,14 +211,15 @@ func applyProvider(ctx context.Context, args map[string]any, agent Agent) (conte
 }
 
 // activeProfileKey carries the session's active harness profile (a Provider plus
-// its name) down to applyProvider as the lowest-precedence default.
+// its name) down to applyProvider as the operator-selected session default.
 type activeProfileKey struct{}
 
 // ActiveProfile is the resolved harness profile in effect for a session: a
 // Provider (env + model + effort) plus the profile Name (recorded in traces).
 // It is installed per-dispatch by the orchestrator from the live selection and
 // consulted by applyProvider only when an agent call names no explicit
-// provider — so a story/effect that pins a provider or model always wins.
+// provider. The profile's model supersedes story-local model defaults so
+// provider-specific model names do not leak to the selected endpoint.
 type ActiveProfile struct {
 	Name     string
 	Provider Provider

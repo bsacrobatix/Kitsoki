@@ -25,12 +25,12 @@ harness_profiles:
   # claude-code pointed at synthetic.new (Anthropic-compatible endpoint).
   # claude-code appends /v1/messages, so the base URL omits /v1.
   # models_endpoint pulls the FULL always-on model list at selection time, so you
-  # get every synthetic model — not just the syn: aliases. `model` seeds the
+  # get every synthetic model — beyond this static hf: fallback. `model` seeds the
   # default; `models` is a static fallback if the endpoint can't be reached.
   synthetic-claude:
     backend: claude
-    model: syn:large:text                 # GLM-5.1 (large text)
-    models: [syn:large:text, syn:small:text]
+    model: hf:zai-org/GLM-5.2
+    models: [hf:zai-org/GLM-5.2]
     models_endpoint: https://api.synthetic.new/openai/v1/models
     env:
       ANTHROPIC_BASE_URL: https://api.synthetic.new/anthropic
@@ -43,8 +43,8 @@ harness_profiles:
   # env alone is not enough. (codex-native below needs none of this.)
   synthetic-codex:
     backend: codex
-    model: syn:large:text
-    models: [syn:large:text, syn:small:text]
+    model: hf:zai-org/GLM-5.2
+    models: [hf:zai-org/GLM-5.2]
     models_endpoint: https://api.synthetic.new/openai/v1/models
     env:
       OPENAI_BASE_URL: https://api.synthetic.new/openai/v1
