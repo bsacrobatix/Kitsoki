@@ -137,6 +137,71 @@ func TestGitWorktree_Create_Happy(t *testing.T) {
 	}
 }
 
+func TestGitWorktree_Create_EmptyRepoAnchorsAtGitTopLevel(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["git rev-parse --show-toplevel"] = fakeResp{stdout: "/repo\n"}
+	fr.responses["git worktree add -b feature/x /repo/.worktrees/feature-x main"] = fakeResp{}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitWorktreeHandler(context.Background(), map[string]any{
+		"op":   "create",
+		"name": "feature/x",
+		"base": "main",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if res.Data["path"] != "/repo/.worktrees/feature-x" {
+		t.Fatalf("path: %v", res.Data["path"])
+	}
+	var sawRevParse, sawAdd bool
+	for _, c := range fr.calls {
+		if c == "git rev-parse --show-toplevel" {
+			sawRevParse = true
+		}
+		if c == "git worktree add -b feature/x /repo/.worktrees/feature-x main" {
+			sawAdd = true
+		}
+	}
+	if !sawRevParse {
+		t.Fatalf("expected git toplevel probe, got %v", fr.calls)
+	}
+	if !sawAdd {
+		t.Fatalf("expected worktree add anchored under git toplevel, got %v", fr.calls)
+	}
+}
+
+func TestGitWorktree_Create_EmptyRepoResolveFailure(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["git rev-parse --show-toplevel"] = fakeResp{
+		stderr: "fatal: not a git repository",
+		code:   128,
+	}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitWorktreeHandler(context.Background(), map[string]any{
+		"op":   "create",
+		"name": "feature/x",
+		"base": "main",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if !strings.Contains(res.Error, "not a git repository") {
+		t.Fatalf("expected repo resolution error, got: %s", res.Error)
+	}
+	for _, c := range fr.calls {
+		if strings.Contains(c, "worktree add") {
+			t.Fatalf("should not create a worktree after repo resolution failure: %v", fr.calls)
+		}
+	}
+}
+
 // Authors that bind `workspace_id` from world state pass it as `id:` so
 // the on-disk dir basename matches what `sync` looks up by. Without
 // honouring `id:`, the dir is derived from `name` (slashes flattened)

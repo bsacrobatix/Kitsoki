@@ -104,6 +104,10 @@ func worktreeCreate(ctx context.Context, repo string, args map[string]any) (Resu
 	if strings.TrimSpace(name) == "" {
 		return Result{Error: "workspace.create: name argument is required"}, nil
 	}
+	resolvedRepo, repoErr := resolveWorktreeRepo(ctx, repo)
+	if repoErr != "" {
+		return Result{Error: "workspace.create: " + repoErr}, nil
+	}
 	base, _ := args["base"].(string)
 	// Explicit `id:` (from world.workspace_id) wins; fall back to the
 	// slashes-flattened branch for callers that only supply `name`.
@@ -117,14 +121,14 @@ func worktreeCreate(ctx context.Context, repo string, args map[string]any) (Resu
 	if strings.TrimSpace(id) == "" {
 		id = strings.ReplaceAll(name, "/", "-")
 	}
-	path := filepath.Join(repo, ".worktrees", id)
+	path := filepath.Join(resolvedRepo, ".worktrees", id)
 
 	// Idempotency: if a worktree is already registered at our path
 	// with our target branch, treat as success. This keeps re-entry
 	// to bf.idle (e.g. after a process restart that lost
 	// bf_autostart_attempted=true) from failing on a workspace that
 	// already exists from a prior run.
-	if existing, ok := findWorktreeByPath(ctx, repo, path); ok {
+	if existing, ok := findWorktreeByPath(ctx, resolvedRepo, path); ok {
 		if existing.Branch == name {
 			return Result{Data: map[string]any{"ok": true, "path": path}}, nil
 		}
@@ -137,7 +141,7 @@ func worktreeCreate(ctx context.Context, repo string, args map[string]any) (Resu
 	if base != "" {
 		gitArgs = append(gitArgs, base)
 	}
-	_, stderr, code, err := cliExec(ctx, repo, "git", gitArgs...)
+	_, stderr, code, err := cliExec(ctx, resolvedRepo, "git", gitArgs...)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("workspace.create: exec: %v", err)}, nil
 	}
@@ -153,7 +157,7 @@ func worktreeCreate(ctx context.Context, repo string, args map[string]any) (Resu
 	// to a fresh worktree at our path instead.
 	if branchExistsError(stderr, name) {
 		retryArgs := []string{"worktree", "add", path, name}
-		_, retryStderr, retryCode, retryErr := cliExec(ctx, repo, "git", retryArgs...)
+		_, retryStderr, retryCode, retryErr := cliExec(ctx, resolvedRepo, "git", retryArgs...)
 		if retryErr != nil {
 			return Result{Error: fmt.Sprintf("workspace.create: exec (reattach): %v", retryErr)}, nil
 		}
@@ -172,6 +176,42 @@ func worktreeCreate(ctx context.Context, repo string, args map[string]any) (Resu
 	}
 
 	return Result{Error: fmt.Sprintf("workspace.create: %s", strings.TrimSpace(stderr))}, nil
+}
+
+// resolveWorktreeRepo returns the absolute git toplevel used to anchor
+// .worktrees/<id>. An omitted repo used to mean "whatever cwd the kitsoki
+// process currently has", which made browser/server sessions return relative
+// paths that later agent calls could not chdir into. Resolve through git so the
+// worktree path is anchored to the repository that owns the running story.
+func resolveWorktreeRepo(ctx context.Context, repo string) (string, string) {
+	repo = strings.TrimSpace(repo)
+	if repo != "" {
+		abs, err := filepath.Abs(repo)
+		if err != nil {
+			return "", fmt.Sprintf("resolve repo %q: %v", repo, err)
+		}
+		return abs, ""
+	}
+	stdout, stderr, code, err := cliExec(ctx, "", "git", "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Sprintf("resolve repo: %v", err)
+	}
+	if code != 0 {
+		msg := strings.TrimSpace(stderr)
+		if msg == "" {
+			msg = "git rev-parse --show-toplevel failed"
+		}
+		return "", msg
+	}
+	root := strings.TrimSpace(stdout)
+	if root == "" {
+		return "", "git rev-parse --show-toplevel returned an empty path"
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Sprintf("resolve repo %q: %v", root, err)
+	}
+	return abs, ""
 }
 
 // findWorktreeByPath returns the worktreeInfo registered for the
