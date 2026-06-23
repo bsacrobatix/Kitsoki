@@ -142,6 +142,41 @@ async function driveComposer(
 }
 
 /**
+ * Drive the location-tied `refine`, then WAIT for the whole loop to close back
+ * to reviewing: refine → refining → (auto rerender) → rendering → (auto accept)
+ * → reviewing, with the cycle advanced. The stubbed host calls make the cascade
+ * near-instant, and the refining→reviewing error path would ALSO land on
+ * reviewing — so the hard proof the loop genuinely RE-RENDERED (not error-
+ * bounced) is the reviewing view's `Cycle` kv reading `1`. Poll for that.
+ */
+async function driveRefineAndCloseLoop(page: Page, value: string): Promise<void> {
+  diag(`driveRefineAndCloseLoop "${value}"`);
+  const form = page
+    .locator(`form[data-testid="composer"][data-active-intent="refine"]`)
+    .first();
+  await expect(form).toBeVisible({ timeout: 15000 });
+  const input = form.getByTestId("composer-input").first();
+  await input.evaluate((el, v) => {
+    const t = el as HTMLTextAreaElement;
+    t.value = v;
+    t.dispatchEvent(new Event("input", { bubbles: true }));
+  }, value);
+  await dwell(page, 600);
+  await form.evaluate((el) => (el as HTMLFormElement).requestSubmit());
+  // The deterministic settle point: back at reviewing.
+  await expectState(page, "reviewing");
+  // Hard proof the rerender loop ran (cycle advanced 0 → 1), distinguishing the
+  // closed loop from a refining→reviewing error bounce. The reviewing room
+  // renders `Cycle: {{ world.cycle }}` as a kv pair (<dt>Cycle</dt><dd>1</dd>).
+  await expect(
+    page.locator(".ve-kv").filter({ hasText: "Cycle" }).first(),
+  ).toContainText("1", { timeout: 15000 });
+  // The re-rendered deck media is back on the reviewing surface.
+  await expect(page.getByTestId("media-element").first()).toBeVisible({ timeout: 15000 });
+  await dwell(page, SETTLE_MS);
+}
+
+/**
  * Open the unified ArtifactAnnotator on the deck media: click `media-annotate`,
  * which probes the semantic sidecar (bridged) and — because the deck HAS one —
  * opens the slidey substrate (`aa-slidey` → `aa-slidey-poster` + the
@@ -273,6 +308,15 @@ test("slidey-edit annotate → refine feature-tour video", async () => {
       if (step.id === "se-overlay") {
         await openAnnotator(page);
       }
+      // se-loop-closed proves the refine loop closed: assert the badge reads
+      // `reviewing` BEFORE its narration screenshot, so the captured frame is the
+      // hard evidence the QA gate cites (state=reviewing after refine).
+      if (step.id === "se-loop-closed") {
+        // current-state is the state-NAME badge (state-badge is the live/terminal
+        // indicator). Assert it reads `reviewing` before the narration screenshot
+        // so the captured frame is the hard evidence the QA gate cites.
+        await expectState(page, "reviewing");
+      }
 
       // Honor DOM-presence preconditions.
       if (step.waitForTarget) {
@@ -333,22 +377,20 @@ test("slidey-edit annotate → refine feature-tour video", async () => {
           await dwell(page, SETTLE_MS);
         }
         if (step.id === "se-refine") {
-          // Close the annotator panel so the refine param-form composer is the
-          // clear focus, then drive the location-tied refine.
+          // Close the annotator panel so the refine composer is the clear focus,
+          // then drive the location-tied refine AND wait for the whole loop to
+          // close back to reviewing with the cycle advanced (the proof the
+          // rerender ran, not an error bounce). se-loop-closed then narrates the
+          // settled `reviewing` badge.
           await page
             .getByTestId("media-annotate-close")
             .first()
             .evaluate((el) => (el as HTMLElement).click())
             .catch(() => undefined);
           await dwell(page, SETTLE_MS);
-          // refine → refining → (auto) reviewing: the deterministic settle point
-          // is back at reviewing with the deck re-rendered. The location-tied
-          // anchor (the marker we picked) is what the reviser edits.
-          await driveComposer(
+          await driveRefineAndCloseLoop(
             page,
-            "refine",
             "tighten the callout I pointed at and add a one-line example beneath it",
-            "reviewing",
           );
         }
         await page.getByTestId("tour-next").click();
