@@ -1,7 +1,15 @@
 # Story: dev-story project init — onboard a project, fine-tune the loop
 
-**Status:** Draft v1. Nothing implemented yet. The report schema is drafted +
-proven (`notes/project-profile.schema.json`, validated in §Verification).
+**Status:** Draft v1. A deterministic dev-story onboarding spine now works:
+`go_init` and raw `onboard ...` requests run local discovery, render a reviewed
+profile, and apply `.kitsoki.yaml`, `.kitsoki/project-profile.yaml`, and a
+`stories/<id>-dev/` instance only after accept. `flows/init_slidey_dogfood.yaml`
+uses Slidey as the first external dogfood target and stubs discovery/apply with
+no LLM. Mining, profile synthesis, schema validation, readiness verification,
+and the full report loop are still pending. Slidey has also been hand-onboarded
+with a materialized `stories/slidey-dev/` instance and
+`.kitsoki/project-profile.yaml`. The report schema is drafted + proven
+(`notes/project-profile.schema.json`, validated in §Verification).
 **Kind:**   story
 **Epic:**   — standalone <!-- becomes an epic if Open question 1 (first-class dev-server lifecycle) is taken — that slice is runtime -->
 
@@ -280,19 +288,21 @@ JSON twin is throwaway under `.artifacts/` (gitignored).
 ## 0. Design review (this document)
 - [ ] 0.1 Agree the profile shape + propose-then-confirm gate + profile→instance compile
 - [ ] 0.2 Resolve Open questions (esp. #1 dev-server lifecycle: one-shot vs first-class host)
-- [ ] 0.3 Hand-author a second profile for a NON-kitsoki repo (a foreign frontend) against the
+- [x] 0.3 Hand-author a second profile for a NON-kitsoki repo (a foreign frontend) against the
           schema; adjust the schema from friction, not theory
+          (Slidey: `/Users/brad/code/slidey/.kitsoki/project-profile.yaml`
+          plus `stories/slidey-dev/app.yaml`)
 
-## 1. Deterministic spine (no rooms yet)
-- [ ] 1.1 scripts/discover.py + a fixture repo; golden-output test
+## 1. Deterministic spine
+- [x] 1.1 scripts/init_discover.py + Slidey flow fixture coverage
 - [ ] 1.2 scripts/profile_validate.py (pinned schema) + good/bad table tests
-- [ ] 1.3 scripts/apply_profile.py: render instance + merge .kitsoki.yaml + gitignore block + dirs; idempotency test
+- [x] 1.3 scripts/init_apply.py: render instance + merge .kitsoki.yaml + gitignore block + dirs
 - [ ] 1.4 scripts/readiness.sh: boot→probe→teardown against a toy server
 
 ## 2. The init phase
-- [ ] 2.1 init_* rooms + prompts + project_profiler/init_judge agents + go_init intent
+- [x] 2.1 init_discover/init_review/init_apply/init_done rooms + go_init intent
 - [ ] 2.2 Probe each room (kitsoki turn …); lock the graph
-- [ ] 2.3 Flow fixtures pass (smoke, happy_path, decline, refine_loop, budget_exhausted, verify_failure)
+- [ ] 2.3 Flow fixtures pass (done: Slidey mocked happy path + refine; pending: decline, budget_exhausted, verify_failure)
 - [ ] 2.4 Host cassette for a recorded end-to-end (discover + mine + synthesize + verify), no live LLM
 
 ## 3. Live + document

@@ -572,6 +572,28 @@ world:
   docs_status:          { type: string, default: "" }
   docs_path:            { type: string, default: "docs" }
 
+  # ── Project onboarding (rooms/init.yaml) ──────────────────────────
+  # Deterministic no-LLM project init: discover a target repo, render the
+  # profile for review, then apply the config only after explicit accept.
+  init_request:          { type: string, default: "" }
+  init_discovery:        { type: object, default: {} }
+  init_run_ok:           { type: bool, default: false }
+  init_run_output:       { type: string, default: "" }
+  init_target_path:      { type: string, default: "" }
+  init_project_id:       { type: string, default: "" }
+  init_project_title:    { type: string, default: "" }
+  init_stack:            { type: string, default: "" }
+  init_dev_command:      { type: string, default: "" }
+  init_test_command:     { type: string, default: "" }
+  init_build_command:    { type: string, default: "" }
+  init_conventions:      { type: string, default: "hybrid" }
+  init_tracker:          { type: string, default: "none" }
+  init_profile_status:   { type: string, default: "draft" }
+  init_feedback:         { type: string, default: "" }
+  init_apply_result:     { type: object, default: {} }
+  init_apply_ok:         { type: bool, default: false }
+  init_apply_output:     { type: string, default: "" }
+
   # ── Design pipeline (rooms/design*.yaml) ───────────────────────
   # 4-stage pipeline: intake → search → refine → draft+publish.
   # Per-session scratch dir is `design_workspace` — NOT world.workdir
@@ -754,6 +776,11 @@ intents:
     title: "Model Harness Eval"
     description: "Prepare model/harness evaluation reports from local evidence."
     examples: ["model eval", "harness eval", "compare models", "evaluate harnesses", "model harness report"]
+    priority: 31
+  go_init:
+    title: "Project Onboarding"
+    description: "Discover a project profile and review it before onboarding writes happen."
+    examples: ["onboard this project", "project onboarding", "init project", "set up kitsoki for this repo"]
     priority: 31
   go_deploy:
     title: "Deploy"
@@ -942,6 +969,30 @@ intents:
     priority: 1
   doc_published:
     description: "(internal) the doc announcement landed — show the read-out."
+    examples: []
+    priority: 1
+
+  confirm_init:
+    title: "Accept Onboarding Profile"
+    description: "Accept and apply the reviewed onboarding profile."
+    examples: ["accept", "confirm", "looks good", "approve onboarding profile"]
+    priority: 50
+  revise_init:
+    title: "Revise Onboarding Profile"
+    description: "Record feedback for the next onboarding profile draft."
+    examples: ["revise", "change onboarding profile", "update profile"]
+    priority: 50
+    slots:
+      feedback:
+        type: string
+        required: true
+        description: "What should change in the onboarding profile."
+  init_discovered:
+    description: "(internal) project discovery completed — show the profile review."
+    examples: []
+    priority: 1
+  init_applied:
+    description: "(internal) onboarding apply completed — show the result."
     examples: []
     priority: 1
 

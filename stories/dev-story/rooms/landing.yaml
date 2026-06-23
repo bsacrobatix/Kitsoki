@@ -213,6 +213,9 @@ states:
             - label:  "model eval"
               hint:   "prepare model/harness effectiveness, speed, and cost reports"
               intent: go_model_eval
+            - label:  "onboard"
+              hint:   "discover a project profile, review it, then apply local setup"
+              intent: go_init
             - label:  "inbox"
               hint:   "read notifications ({{ world.inbox_unread }} unread)"
               intent: go_inbox
@@ -285,6 +288,26 @@ states:
       # fresh request. `request` is required so the semantic router falls
       # through to the LLM router and captures the whole utterance.
       work:
+        # Onboarding command escape hatch. landing's default_intent captures
+        # unmatched prose into `work` before an LLM router runs, so natural
+        # utterances like "onboard ~/code/slidey" need a deterministic arm here
+        # or they dispatch the general workbench agent. Keep this narrow: only
+        # leading onboarding verbs route to the project onboarding flow.
+        - when: "hasPrefix(lower(trim(slots.request)), 'onboard') || hasPrefix(lower(trim(slots.request)), 'project onboarding') || hasPrefix(lower(trim(slots.request)), 'init project')"
+          target: init_discover
+          effects:
+            - set:
+                init_request:        "{{ slots.request }}"
+                init_discovery:      {}
+                init_run_ok:         false
+                init_run_output:     ""
+                init_apply_result:   {}
+                init_apply_ok:       false
+                init_apply_output:   ""
+                init_profile_status: "discovering"
+                init_feedback:       ""
+                last_error:          ""
+                prev_state:          "landing"
         - target: landing
           effects:
             # Preserve the prior note BEFORE clearing landing_note so the
@@ -402,6 +425,21 @@ states:
         - target: model_eval
           effects:
             - set: { prev_state: "landing" }
+      go_init:
+        - target: init_discover
+          effects:
+            - set:
+                prev_state:          "landing"
+                last_error:          ""
+                init_request:        ""
+                init_discovery:      {}
+                init_run_ok:         false
+                init_run_output:     ""
+                init_apply_result:   {}
+                init_apply_ok:       false
+                init_apply_output:   ""
+                init_profile_status: "discovering"
+                init_feedback:       ""
       go_code_review:
         - target: code_review
           effects:
