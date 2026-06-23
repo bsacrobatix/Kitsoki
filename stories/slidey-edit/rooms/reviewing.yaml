@@ -32,7 +32,13 @@ states:
           handle:  "{{ world.deck_handle }}"
           kind:    video
           caption: "{{ world.deck.summary }}"
+        when: "world.deck_handle != ''"
+      - prose: "⚠️  Render failed — there's no deck to show. The renderer reported:\n\n    {{ world.last_error }}\n\nFix the render, then `rerender` to try again (or `refine` to edit the spec first)."
+        when: "world.deck_handle == '' && world.last_error != ''"
+      - prose: "(no deck rendered yet — `rerender` to render the current spec)"
+        when: "world.deck_handle == '' && world.last_error == ''"
       - prose: "Use **Open in review** on the deck above to point at a scene element, draw a region, or drop a point, leave an instruction, and dispatch it — then `refine` here to edit the exact scene you pointed at."
+        when: "world.deck_handle != ''"
       - heading: "Actions"
       - list:
           items:
