@@ -577,8 +577,10 @@ func tryLLMResolver(ctx context.Context, ea ExtractArgs, lc *ExtractLLMConfig, b
 	workingDir = appendDefaultCwd(workingDir, agent)
 
 	// Attach mcp-validator with the extraction schema (M5). The LLM must call
-	// submit(); the validator writes the parsed payload to a tempfile.
-	resolvedSchema := resolvePromptPath(ea.SchemaPath)
+	// submit(); the validator writes the parsed payload to a tempfile. The schema
+	// path is resolved inside buildValidatorMCPServer through the per-call prompt
+	// renderer (story-dir isolated per concurrent session), not the process-global
+	// KITSOKI_APP_DIR — see that function's doc and the concurrent-session bug.
 	submitFile, sfErr := os.CreateTemp("", "kitsoki-extract-submit-*.json")
 	if sfErr != nil {
 		return nil, "", false, fmt.Errorf("extract.llm: create submit tempfile: %w", sfErr)
@@ -589,7 +591,7 @@ func tryLLMResolver(ctx context.Context, ea ExtractArgs, lc *ExtractLLMConfig, b
 	_ = os.Remove(submittedOutputPath)
 	defer func() { _ = os.Remove(submittedOutputPath) }()
 
-	validatorEntry, vErr := buildValidatorMCPServer(resolvedSchema, submittedOutputPath, validatorOptions{MaxRetries: extractLLMMaxRetries})
+	validatorEntry, vErr := buildValidatorMCPServer(ctx, ea.SchemaPath, submittedOutputPath, validatorOptions{MaxRetries: extractLLMMaxRetries})
 	if vErr != nil {
 		return nil, "", false, fmt.Errorf("extract.llm: build validator MCP server: %w", vErr)
 	}

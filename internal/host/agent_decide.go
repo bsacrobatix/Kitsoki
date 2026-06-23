@@ -224,13 +224,13 @@ func AgentDecideHandler(ctx context.Context, args map[string]any) (Result, error
 			}
 			// Add the state file path to vopts so the sandbox loop can read state.
 			vopts.StateFilePath = validatorStateFilePath
-			validatorEntry, vErr := buildValidatorMCPServer(schemaArg, validatorOutputPath, schemaOnlyOpts)
+			validatorEntry, vErr := buildValidatorMCPServer(ctx, schemaArg, validatorOutputPath, schemaOnlyOpts)
 			if vErr != nil {
 				return Result{Error: fmt.Sprintf("host.agent.decide: %v", vErr)}, nil
 			}
 			mcpServers["validator"] = validatorEntry
 		} else {
-			validatorEntry, vErr := buildValidatorMCPServer(schemaArg, validatorOutputPath, vopts)
+			validatorEntry, vErr := buildValidatorMCPServer(ctx, schemaArg, validatorOutputPath, vopts)
 			if vErr != nil {
 				return Result{Error: fmt.Sprintf("host.agent.decide: %v", vErr)}, nil
 			}

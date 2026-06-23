@@ -15,6 +15,7 @@ import (
 
 	"kitsoki/internal/agents"
 	"kitsoki/internal/host"
+	"kitsoki/internal/render"
 	"kitsoki/internal/render/sourcecolor"
 )
 
@@ -508,6 +509,76 @@ func TestAgentAskWithMCP_SchemaResolvedAgainstAppDir(t *testing.T) {
 	args, _ := v["args"].([]any)
 	require.GreaterOrEqual(t, len(args), 3)
 	assert.Equal(t, filepath.Join(appDir, "schemas/p.json"), sourcecolor.Strip(args[2].(string)))
+}
+
+// TestAgentAskWithMCP_SchemaResolvesAgainstPerCallRenderer is the regression
+// test for the P1 concurrent-session schema-bleed bug
+// (issues/bugs/2026-06-23T100426Z-studio-concurrent-sessions-agent-schema-bleed.md).
+//
+// In a single `kitsoki mcp` studio process running TWO live driving sessions,
+// each `session.new(harness:live)` calls loadAppWithEnv → os.Setenv(KITSOKI_APP_DIR,
+// <that session's story dir>). So whichever session was created/loaded LAST owns the
+// PROCESS-GLOBAL env var. When an EARLIER session then dispatches host.agent.task,
+// its acceptance.schema (a story-relative path) must still resolve against ITS OWN
+// story dir — carried per-dispatch by the injected prompt renderer (WithPromptRenderer,
+// built from def.BaseDir) — not against the contaminated global env.
+//
+// This test models the bleed directly at the resolution seam: the global env points
+// at story B (the "other" concurrent session), while the per-call prompt renderer is
+// rooted at story A (this session). Story A and story B each have a schemas/p.json,
+// but only A's is the correct base for this dispatch. The handler must resolve the
+// relative `schema:` against story A.
+//
+// Before the fix buildValidatorMCPServer used resolvePromptPath (global-env only),
+// so it resolved against story B → wrong path (RED). After the fix it resolves through
+// the per-call renderer first → story A (GREEN).
+func TestAgentAskWithMCP_SchemaResolvesAgainstPerCallRenderer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-oneshot-mcp.sh requires bash")
+	}
+	t.Setenv(host.AgentBinEnv, fakeOneShotMCPBin(t))
+	t.Setenv("KITSOKI_BIN", "/usr/local/bin/kitsoki")
+
+	// Story A: this session's story dir (carried per-call by the renderer).
+	storyA := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(storyA, "schemas"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(storyA, "schemas", "p.json"), []byte(`{"type":"object"}`), 0o644))
+
+	// Story B: a DIFFERENT concurrently-active session's story dir. It also has a
+	// schemas/p.json, so resolving against it "succeeds" silently — exactly how the
+	// live bug produced a wrong-but-existing-looking base. The global env points here,
+	// simulating story B's session.new having run most recently.
+	storyB := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(storyB, "schemas"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(storyB, "schemas", "p.json"), []byte(`{"type":"object"}`), 0o644))
+	t.Setenv(host.AppDirEnv, storyB)
+
+	// The per-call renderer is rooted at THIS session's story dir (story A) — the
+	// orchestrator injects exactly this via WithPromptRenderer (built from def.BaseDir).
+	pr, err := render.NewPromptRenderer(render.PromptPath{Story: storyA}, true)
+	require.NoError(t, err)
+
+	promptPath := filepath.Join(storyA, "p.md")
+	require.NoError(t, os.WriteFile(promptPath, []byte("x"), 0o644))
+
+	ctx := host.WithPromptRenderer(context.Background(), pr)
+	res, err := host.AgentAskWithMCPHandler(ctx, map[string]any{
+		"prompt_path":   promptPath,
+		"schema":        "schemas/p.json", // story-relative
+		"output_format": "json",
+	})
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
+	parsed, _ := res.Data["stdout_json"].(map[string]any)
+	body, _ := parsed["mcp_body"].(map[string]any)
+	servers, _ := body["mcpServers"].(map[string]any)
+	v, _ := servers["validator"].(map[string]any)
+	args, _ := v["args"].([]any)
+	require.GreaterOrEqual(t, len(args), 3)
+	resolved := sourcecolor.Strip(args[2].(string))
+	assert.Equal(t, filepath.Join(storyA, "schemas", "p.json"), resolved,
+		"schema must resolve against this session's story dir (renderer), not the "+
+			"globally-last-loaded session's KITSOKI_APP_DIR (the concurrent-session bleed)")
 }
 
 // TestAgentAskWithMCP_SubmittedBindCapturesValidatedPayload verifies the

@@ -177,12 +177,20 @@ func parseValidatorOptions(args map[string]any) (validatorOptions, string) {
 // buildValidatorMCPServer constructs an mcp_servers entry that runs
 // `kitsoki mcp-validator --schema <abs-path> [--output <path>]
 // [--post-cmd ... --post-cmd-arg k=v ... --max-retries N --state-file <path>]`.
-// The schema path is resolved against KITSOKI_APP_DIR if relative, mirroring
-// resolvePromptPath. When outputPath is non-empty the validator will
-// write each successful submit's payload to that file (atomic, last-call
-// wins) so the parent can recover the canonical JSON.
-func buildValidatorMCPServer(schemaPath, outputPath string, opts validatorOptions) (map[string]any, error) {
-	resolved := resolvePromptPath(schemaPath)
+//
+// A relative schema path is resolved through resolvePromptPathCtx: the per-call
+// prompt renderer (WithPromptRenderer, rooted at THIS dispatch's story dir) wins,
+// falling back to KITSOKI_APP_DIR only when no renderer is in ctx (CLI one-shots /
+// tests / legacy). This is load-bearing for concurrent driving sessions in one
+// studio process: each session.new(harness:live) overwrites the process-global
+// KITSOKI_APP_DIR, so resolving against the env alone would let one session's story
+// dir bleed into another's agent dispatch (issues/bugs/2026-06-23T100426Z-studio-
+// concurrent-sessions-agent-schema-bleed.md). The renderer is per-dispatch, so it
+// isolates each session's schema base. When outputPath is non-empty the validator
+// will write each successful submit's payload to that file (atomic, last-call wins)
+// so the parent can recover the canonical JSON.
+func buildValidatorMCPServer(ctx context.Context, schemaPath, outputPath string, opts validatorOptions) (map[string]any, error) {
+	resolved := resolvePromptPathCtx(ctx, schemaPath)
 	if _, err := os.Stat(resolved); err != nil {
 		return nil, fmt.Errorf("schema %q not found: %w", resolved, err)
 	}
@@ -205,7 +213,7 @@ func buildValidatorMCPServer(schemaPath, outputPath string, opts validatorOption
 			cliArgs = append(cliArgs, "--post-cmd-arg", kv.Key+"="+kv.Value)
 		}
 		if opts.PostCmdCwd != "" {
-			cwd := resolvePromptPath(opts.PostCmdCwd)
+			cwd := resolvePromptPathCtx(ctx, opts.PostCmdCwd)
 			cliArgs = append(cliArgs, "--post-cmd-cwd", cwd)
 		}
 	}
@@ -738,7 +746,7 @@ func agentAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, a
 				vopts.StateFilePath = validatorStateFilePath
 			}
 
-			validatorEntry, vErr := buildValidatorMCPServer(schemaArg, validatorOutputPath, vopts)
+			validatorEntry, vErr := buildValidatorMCPServer(ctx, schemaArg, validatorOutputPath, vopts)
 			if vErr != nil {
 				return Result{Error: fmt.Sprintf("host.agent.ask_with_mcp: %v", vErr)}, nil
 			}

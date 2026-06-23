@@ -74,7 +74,7 @@ func AskStructured(ctx context.Context, opts AskStructuredOptions) (json.RawMess
 	_ = os.Remove(outputPath)
 	defer os.Remove(outputPath)
 
-	validatorEntry, err := buildValidatorMCPServer(schemaPath, outputPath, validatorOptions{MaxRetries: opts.MaxRetries})
+	validatorEntry, err := buildValidatorMCPServer(ctx, schemaPath, outputPath, validatorOptions{MaxRetries: opts.MaxRetries})
 	if err != nil {
 		return nil, fmt.Errorf("host.ask_structured: build validator entry: %w", err)
 	}
