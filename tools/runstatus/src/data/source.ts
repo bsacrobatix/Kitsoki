@@ -297,6 +297,17 @@ export interface DataSource {
    */
   artifactUrl(handle: string, maxDim?: number): string;
 
+  /**
+   * Resolve a URL for a media handle's sibling poster still (`<stem>.poster.png`
+   * beside the media) — the fixed-frame backdrop the annotator's `slidey` path
+   * floats its SemanticOverlay over (a slideshow/video has no addressable still).
+   * Live mode returns `/artifact/<handle>/poster` (the server serves the sibling
+   * by the SAME handle); snapshot mode returns the sibling path under
+   * `artifacts/`. Optional: a source without a poster convention omits it, and
+   * the annotator falls back to `artifactUrl(handle)`.
+   */
+  artifactPosterUrl?(handle: string): string;
+
   // ── Video feedback mode (/review) ──────────────────────────────────────────
 
   /** Read a video's chapter sidecar (empty array when none). */

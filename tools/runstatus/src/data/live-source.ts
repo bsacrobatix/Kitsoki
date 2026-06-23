@@ -799,6 +799,14 @@ export class LiveSource implements DataSource {
     return maxDim && maxDim > 0 ? `${base}?max=${maxDim}` : base;
   }
 
+  /** The media handle's sibling poster still: `/artifact/<handle>/poster` — the
+   *  server serves `<stem>.poster.png` beside the media keyed by the same handle.
+   *  The handle is encoded as one path segment (so '#' rides as %23); the
+   *  `/poster` suffix is appended after it. */
+  artifactPosterUrl(handle: string): string {
+    return `/artifact/${encodeURIComponent(handle)}/poster`;
+  }
+
   // ── Video feedback mode (/review) ──────────────────────────────────────────
 
   async videoChapters(

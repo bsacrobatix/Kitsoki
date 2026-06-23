@@ -29,7 +29,7 @@ import type {
 } from "../lib/annotationAnchor.js";
 import type { SemanticElementTarget } from "../lib/annotationAnchor.js";
 import { normalizeAnchor, regionToTarget } from "../lib/annotationAnchor.js";
-import type { SemanticMap } from "../lib/semanticPlugins.js";
+import type { SemanticMap, SemanticSidecar } from "../lib/semanticPlugins.js";
 import { toSemanticMap } from "../lib/semanticPlugins.js";
 import type { RrwebEvent } from "../data/session-capture.js";
 import SpatialPicker from "./SpatialPicker.vue";
@@ -46,6 +46,14 @@ const props = defineProps<{
   mediaHandle: string;
   /** Which media kind to render. */
   mediaKind: MediaKind;
+  /**
+   * Optional still-image backdrop handle for the `slidey` path. A slideshow is
+   * emitted as an mp4 (or html) whose pixels aren't an addressable still, so a
+   * sidecar-bearing deck floats its SemanticOverlay over a poster/frame image of
+   * the producer's frame instead of an <iframe>/<video>. Defaults to
+   * `mediaHandle` (correct when the media itself is an image).
+   */
+  posterHandle?: string;
   /** The route the capture happens on (rides on the emitted anchor). */
   route?: string;
   /** Optional recorded rrweb events for the rrweb kind (else fetched lazily). */
@@ -180,22 +188,49 @@ function onIframeLoad(): void {
   iframeRoot.value = iframe.value?.contentDocument ?? null;
 }
 
-// ── slidey: an iframe + the semantic overlay (sidecar-driven) ────────────────
-const semanticMap = ref<SemanticMap | null>(null);
+// ── slidey: a still backdrop + the semantic overlay (sidecar-driven) ─────────
+/** The raw sidecar envelope (null until fetched / when none exists). Kept raw
+ *  so the overlay map is derived REACTIVELY against `naturalSize`: the boxes are
+ *  in the producer's natural pixels, and the backdrop poster's load reports the
+ *  true pixel space, so the markers reposition once the still measures itself. */
+const semanticSidecar = ref<SemanticSidecar | null>(null);
 const semanticError = ref<string | null>(null);
+
+/** The overlay map, recomputed whenever the sidecar or the measured natural
+ *  size changes (the poster <img> sets naturalSize on load). */
+const semanticMap = computed<SemanticMap | null>(() =>
+  semanticSidecar.value
+    ? toSemanticMap(semanticSidecar.value, props.mediaHandle, naturalSize.value)
+    : null
+);
+
+/** The backdrop still URL for the slidey overlay: a poster/frame image of the
+ *  deck. A slideshow's base artifact (an mp4) isn't an addressable still, so the
+ *  caller passes a poster handle and we resolve its sibling poster URL
+ *  (`/artifact/<handle>/poster`). When the media IS itself an image (no distinct
+ *  poster handle), the media's own URL is the backdrop. */
+const slideyBackdropUrl = computed(() => {
+  const posterHandle = props.posterHandle ?? props.mediaHandle;
+  // The media itself is the still (a png deck): use its plain artifact URL.
+  if (posterHandle === props.mediaHandle && props.mediaKind === "png") {
+    return imgUrl(posterHandle);
+  }
+  // A video/slideshow-backed deck: resolve the sibling poster still, falling
+  // back to the plain artifact URL when the source has no poster convention.
+  return props.ds.artifactPosterUrl
+    ? props.ds.artifactPosterUrl(posterHandle)
+    : imgUrl(posterHandle);
+});
 
 async function loadSemantic(): Promise<void> {
   if (!props.ds.semanticMap) return;
   try {
     const env = await props.ds.semanticMap(props.sessionId, props.mediaHandle);
     if (env && env.elements.length > 0) {
-      // Adapt the wire envelope into the overlay map with the media's natural
-      // size; the iframe has no intrinsic-size signal, so the boxes are
-      // expressed against the configured naturalSize (the producer's frame).
-      semanticMap.value = toSemanticMap(env, props.mediaHandle, naturalSize.value);
+      semanticSidecar.value = env;
     }
   } catch (e) {
-    // No sidecar ⇒ fall back to the iframe + SpatialPicker (dom_node) path.
+    // No sidecar ⇒ fall back to the still + SpatialPicker (dom_node) path.
     semanticError.value = e instanceof Error ? e.message : String(e);
   }
 }
@@ -211,7 +246,7 @@ onMounted(() => {
 watch(
   () => [props.mediaHandle, props.mediaKind],
   () => {
-    semanticMap.value = null;
+    semanticSidecar.value = null;
     stillHandle.value = props.mediaKind === "png" ? props.mediaHandle : null;
     if (props.mediaKind === "rrweb") void loadReplay();
     if (props.mediaKind === "slidey") void loadSemantic();
@@ -341,28 +376,38 @@ watch(
       />
     </div>
 
-    <!-- slidey: an iframe + the semantic overlay (sidecar). When no sidecar
-         resolves, fall back to the live-DOM picker (dom_node). -->
+    <!-- slidey: a still poster backdrop + the semantic overlay (sidecar). The
+         deck is an mp4 whose frames aren't an addressable still, so the overlay
+         floats over a poster image sized to the producer's natural frame; the
+         markers are positioned as a percent of that natural space (so they
+         track the still at any CSS scale). When no sidecar resolves, fall back
+         to the iframe + live-DOM picker (dom_node). -->
     <div v-else-if="mediaKind === 'slidey'" class="aa-stage" data-testid="aa-slidey">
-      <iframe
-        ref="iframe"
-        class="aa-media aa-iframe"
-        data-testid="aa-slidey-iframe"
-        :src="imgUrl(mediaHandle)"
-        @load="onIframeLoad"
-      />
-      <SemanticOverlay
-        v-if="semanticMap"
-        :map="semanticMap"
-        @pick="onSemanticPick"
-      />
-      <SpatialPicker
-        v-else
-        :natural-width="naturalSize.width"
-        :natural-height="naturalSize.height"
-        :root="iframeRoot"
-        @pick="onPickerBundle"
-      />
+      <template v-if="semanticMap">
+        <img
+          class="aa-media"
+          data-testid="aa-slidey-poster"
+          :src="slideyBackdropUrl"
+          alt="deck frame"
+          @load="onImgLoad"
+        />
+        <SemanticOverlay :map="semanticMap" @pick="onSemanticPick" />
+      </template>
+      <template v-else>
+        <iframe
+          ref="iframe"
+          class="aa-media aa-iframe"
+          data-testid="aa-slidey-iframe"
+          :src="imgUrl(mediaHandle)"
+          @load="onIframeLoad"
+        />
+        <SpatialPicker
+          :natural-width="naturalSize.width"
+          :natural-height="naturalSize.height"
+          :root="iframeRoot"
+          @pick="onPickerBundle"
+        />
+      </template>
     </div>
   </div>
 </template>

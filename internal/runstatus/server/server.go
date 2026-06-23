@@ -1978,8 +1978,16 @@ func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// Reject any path that contains a slash after the prefix — we only serve
-	// flat handle IDs, not sub-paths.
+	// A `/artifact/<id>/poster` request serves the sibling `<stem>.poster.png`
+	// still beside the media (a slideshow/video's annotation backdrop), keyed by
+	// the SAME opaque handle as the media itself — no separate journal entry. The
+	// only sub-path we accept is this `/poster` suffix; anything else is a flat
+	// handle ID and a stray slash is a 404 (we don't serve arbitrary sub-paths).
+	poster := false
+	if rest, ok := strings.CutSuffix(id, "/poster"); ok {
+		poster = true
+		id = rest
+	}
 	if strings.Contains(id, "/") {
 		http.NotFound(w, r)
 		return
@@ -1990,6 +1998,14 @@ func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		http.NotFound(w, r)
 		return
+	}
+
+	// Redirect a poster request to the sibling `<stem>.poster.png` on disk; the
+	// media handle resolves the media path, the poster lives beside it. When no
+	// poster exists the request 404s (the annotator then has no still backdrop).
+	if poster {
+		absPath = host.PosterSidecarPath(absPath)
+		mime = "image/png"
 	}
 
 	// Path-traversal guard: the resolved path must be an absolute path and must

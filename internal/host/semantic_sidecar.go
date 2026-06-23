@@ -101,6 +101,16 @@ func SemanticSidecarPath(artifactPath string) string {
 	return strings.TrimSuffix(artifactPath, ext) + ".semantic.json"
 }
 
+// PosterSidecarPath returns the sibling poster-frame path for a rendered
+// artifact: the artifact path with its final extension replaced by
+// `.poster.png`. For `dir/out.mp4` it returns `dir/out.poster.png`. A producer
+// (slidey today) emits this still alongside a slideshow/video so a semantic
+// overlay can float over a fixed frame rather than the un-addressable media.
+func PosterSidecarPath(artifactPath string) string {
+	ext := filepath.Ext(artifactPath)
+	return strings.TrimSuffix(artifactPath, ext) + ".poster.png"
+}
+
 // DiskSemanticSidecarReader reads `<name>.semantic.json` from the filesystem
 // beside the artifact. The zero value is usable. This is the default production
 // reader; tests inject a SemanticSidecarReaderFunc over a temp dir instead.

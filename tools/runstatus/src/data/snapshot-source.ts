@@ -262,6 +262,15 @@ export class SnapshotSource implements DataSource {
     return `./artifacts/${handle}`;
   }
 
+  /** The sibling poster still for a media handle: `<stem>.poster.png` under
+   *  artifacts/. A content-addressed handle (`deck#abc` / `deck.mp4`) maps to
+   *  `deck.poster.png`, mirroring host.PosterSidecarPath. */
+  artifactPosterUrl(handle: string): string {
+    const base = handle.split("/").pop() ?? handle;
+    const stem = base.split("#")[0].replace(/\.[^.]+$/, "");
+    return `./artifacts/${stem}.poster.png`;
+  }
+
   // ── Video feedback mode (/review) ──────────────────────────────────────────
   // A static snapshot is read-only and has no server to grab stills or persist
   // notes: chapters are unavailable (the sidecar is not bundled) and the
