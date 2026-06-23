@@ -148,16 +148,17 @@ function structuralPath(el: Element): string {
       parts.unshift("body");
       break;
     }
-    const parent = cur.parentElement;
+    const node: Element = cur;
+    const parent = node.parentElement;
     if (!parent) {
       parts.unshift(tag);
       break;
     }
     // Index among same-tag siblings (1-based, matching :nth-of-type).
     const sameTag = Array.from(parent.children).filter(
-      (c) => c.tagName === cur!.tagName
+      (c: Element) => c.tagName === node.tagName
     );
-    const idx = sameTag.indexOf(cur) + 1;
+    const idx = sameTag.indexOf(node) + 1;
     parts.unshift(sameTag.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
     cur = parent;
   }
