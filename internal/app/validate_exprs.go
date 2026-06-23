@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"kitsoki/internal/expr"
@@ -171,4 +172,185 @@ func firstWord(s string) string {
 		return s[:idx]
 	}
 	return s
+}
+
+// ── view ↔ on_enter bind-target fallback diagnostic ──────────────────────────
+//
+// The bug: a state's inline view reads a world key whose value is only filled
+// in by an on_enter `invoke:` … `bind:` host call (e.g. `world.feature_branch_diff`).
+// The first view frame can render against a PRE-bind world snapshot, so the
+// schema default (e.g. "(pending)") leaks into frame one. The runtime now
+// defends this (machine.Turn skips the pre-bind render when host calls will
+// bind), but the template is still fragile: it loads with zero diagnostic even
+// though it only renders correctly because the runtime happens to defend the
+// frame. validateViewBindFallbacks restores an authoring-time signal — an
+// advisory (NON-FATAL) warning — so the author knows to add an explicit
+// `?? "(pending)"` fallback (or `| default(...)` filter) rather than relying on
+// the runtime's frame defence.
+//
+// Limitation: states whose view uses an external standalone template
+// (`View.TemplateFile`) are skipped — that template body is not inline-scannable
+// from the AppDef, so no diagnostic is emitted for it.
+
+// viewBindFallbackWarning is one advisory finding: state StatePath's inline view
+// references the on_enter bind-target world key Key without a fallback operator.
+type viewBindFallbackWarning struct {
+	StatePath string
+	Key       string
+}
+
+// message renders the human-readable advisory line for a finding.
+func (w viewBindFallbackWarning) message() string {
+	return fmt.Sprintf("state %q: view references on_enter bind-target world.%s "+
+		"without a fallback; add a `?? \"(pending)\"` fallback (or a `| default(...)` "+
+		"filter), or rely on the post-bind re-render", w.StatePath, w.Key)
+}
+
+// validateViewBindFallbacks emits advisory (NON-FATAL) warnings when a state's
+// inline view template references an on_enter `invoke`/`bind` target world key
+// without a fallback operator. It is invoked from validateDef alongside the
+// other validate* passes, but — unlike them — it does NOT append to errs: these
+// are warnings, not load errors, so a fragile template still loads. The errs
+// parameter is accepted only to match the validate*-pass call signature.
+func validateViewBindFallbacks(file string, def *AppDef, _ *[]error) {
+	for _, w := range collectViewBindFallbackWarnings("", def.States) {
+		slog.Warn("view references an on_enter bind-target without a fallback; "+
+			"a pre-bind frame would render its schema default",
+			"file", file, "state", w.StatePath, "key", w.Key,
+			"hint", "add a `?? \"(pending)\"` fallback or rely on the post-bind re-render")
+	}
+}
+
+// collectViewBindFallbackWarnings walks the state tree (recursing into nested
+// States) collecting findings. For each state it (1) gathers every on_enter
+// bind-target world key, (2) scans the inline view text, and (3) flags any
+// bind-target referenced without a fallback. States using an external
+// TemplateFile are skipped (not inline-scannable). Findings are returned in a
+// stable order (states sorted, then keys sorted).
+func collectViewBindFallbackWarnings(prefix string, states map[string]*State) []viewBindFallbackWarning {
+	var out []viewBindFallbackWarning
+	for _, name := range sortedKeys(states) {
+		s := states[name]
+		if s == nil {
+			continue
+		}
+		statePath := joinPath(prefix, name)
+
+		// Skip external standalone templates — not inline-scannable.
+		if s.View.TemplateFile == "" {
+			targets := map[string]struct{}{}
+			collectBindTargets(s.OnEnter, targets)
+			if len(targets) > 0 {
+				if text := inlineViewText(s.View); text != "" {
+					for _, key := range sortedKeys(targets) {
+						if referencesBindTargetWithoutFallback(text, key) {
+							out = append(out, viewBindFallbackWarning{StatePath: statePath, Key: key})
+						}
+					}
+				}
+			}
+		}
+
+		if len(s.States) > 0 {
+			out = append(out, collectViewBindFallbackWarnings(statePath, s.States)...)
+		}
+	}
+	return out
+}
+
+// collectBindTargets walks effs (and their nested OnComplete/Effects chains)
+// accumulating, into the set, every world-key bind target — the keys of
+// Effect.Bind — for effects that carry an Invoke. Mirrors the runtime's notion
+// of "this host call fills these world keys".
+func collectBindTargets(effs []Effect, into map[string]struct{}) {
+	for _, eff := range effs {
+		if eff.Invoke != "" {
+			for worldKey := range eff.Bind {
+				into[worldKey] = struct{}{}
+			}
+		}
+		collectBindTargets(eff.OnComplete, into)
+		collectBindTargets(eff.Effects, into)
+	}
+}
+
+// inlineViewText concatenates every inline-scannable template body of a View:
+// its legacy scalar Source, the Source of each element in Elements, and the
+// Source of each element nested inside Blocks. The pieces are joined with
+// newlines so a reference at the end of one piece can't accidentally fuse with
+// the start of the next.
+func inlineViewText(v View) string {
+	var parts []string
+	if v.Source != "" {
+		parts = append(parts, v.Source)
+	}
+	for _, el := range v.Elements {
+		if el.Source != "" {
+			parts = append(parts, el.Source)
+		}
+	}
+	for _, blockName := range sortedKeys(v.Blocks) {
+		for _, el := range v.Blocks[blockName] {
+			if el.Source != "" {
+				parts = append(parts, el.Source)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// referencesBindTargetWithoutFallback reports whether text references the world
+// key in one of the bare forms — `world.<key>`, `world["<key>"]`, or
+// `world['<key>']` — that is NOT immediately followed (modulo whitespace) by a
+// fallback: the `??` operator or a `| default(...)` filter. A single fragile
+// reference is enough to flag the key.
+func referencesBindTargetWithoutFallback(text, key string) bool {
+	refs := []string{
+		"world." + key,
+		`world["` + key + `"]`,
+		`world['` + key + `']`,
+		"world[`" + key + "`]",
+	}
+	dotForm := "world." + key
+	for _, ref := range refs {
+		from := 0
+		for {
+			idx := strings.Index(text[from:], ref)
+			if idx < 0 {
+				break
+			}
+			pos := from + idx
+			end := pos + len(ref)
+			from = end // advance past this occurrence for the next scan
+
+			// For the dot form, guard against matching a longer identifier
+			// (world.feature_x when key is "feature") or a nested member
+			// access (world.feature.diff) — neither is a bare reference to key.
+			if ref == dotForm && end < len(text) {
+				if c := text[end]; c == '_' || c == '.' || isIdentByte(c) {
+					continue
+				}
+			}
+
+			rest := strings.TrimLeft(text[end:], " \t\r\n")
+			if strings.HasPrefix(rest, "??") {
+				continue // `?? …` fallback present
+			}
+			if strings.HasPrefix(rest, "|") {
+				after := strings.TrimLeft(rest[1:], " \t\r\n")
+				if strings.HasPrefix(after, "default") {
+					continue // `| default(…)` filter present
+				}
+			}
+			// No fallback guarding this reference.
+			return true
+		}
+	}
+	return false
+}
+
+// isIdentByte reports whether c can appear inside an expr-lang identifier
+// (used to avoid matching a key as a prefix of a longer identifier).
+func isIdentByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }

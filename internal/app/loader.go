@@ -875,6 +875,15 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	// validate_exprs.go.
 	validateExprs(file, def, &errs)
 
+	// ── 7a''. view ↔ on_enter bind-target fallback advisory ───────────────────
+	// Emit a NON-FATAL warning when a state's inline view reads a world key that
+	// is only filled by an on_enter invoke/bind host call without an explicit
+	// fallback (`?? …` / `| default(…)`). The runtime now defends the first
+	// frame (machine.Turn skips the pre-bind render when host calls will bind),
+	// but a fallback-less template is still fragile — this restores the
+	// authoring-time signal. Does NOT append to errs. See validate_exprs.go.
+	validateViewBindFallbacks(file, def, &errs)
+
 	// Validate the engine-driven decider config (execution-modes proposal).
 	if d := def.Decider; d != nil {
 		if strings.TrimSpace(d.Agent) == "" {

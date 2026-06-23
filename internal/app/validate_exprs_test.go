@@ -171,3 +171,128 @@ states:
 	require.Contains(t, msg, "guard when", "both failures should be reported: %v", err)
 	require.Contains(t, msg, `set "b"`, "both failures should be reported: %v", err)
 }
+
+// ── view ↔ on_enter bind-target fallback diagnostic ──────────────────────────
+//
+// These exercise collectViewBindFallbackWarnings directly (the function backing
+// the non-fatal validateViewBindFallbacks advisory pass): a view that reads an
+// on_enter invoke/bind target world key without a `??`/`| default(...)`
+// fallback warns; the same key guarded by a fallback does not; and a world key
+// that is NOT a bind target never warns even without a fallback.
+
+// TestViewBindFallback_TableDriven covers the three core cases from the
+// proposal plus the external-template skip limitation.
+func TestViewBindFallback_TableDriven(t *testing.T) {
+	cases := []struct {
+		name      string
+		state     *State
+		wantWarns []string // bind-target keys expected to warn (empty = none)
+	}{
+		{
+			name: "bind target referenced without fallback warns",
+			state: &State{
+				OnEnter: []Effect{{
+					Invoke: "host.diff",
+					Bind:   map[string]string{"feature_branch_diff": "diff"},
+				}},
+				View: LegacyView("Diff:\n{{ world.feature_branch_diff }}"),
+			},
+			wantWarns: []string{"feature_branch_diff"},
+		},
+		{
+			name: "bind target with ?? fallback does not warn",
+			state: &State{
+				OnEnter: []Effect{{
+					Invoke: "host.diff",
+					Bind:   map[string]string{"feature_branch_diff": "diff"},
+				}},
+				View: LegacyView(`Diff:
+{{ world.feature_branch_diff ?? "(pending)" }}`),
+			},
+			wantWarns: nil,
+		},
+		{
+			name: "bind target with default filter does not warn",
+			state: &State{
+				OnEnter: []Effect{{
+					Invoke: "host.diff",
+					Bind:   map[string]string{"feature_branch_diff": "diff"},
+				}},
+				View: LegacyView(`{{ world.feature_branch_diff | default("(pending)") }}`),
+			},
+			wantWarns: nil,
+		},
+		{
+			name: "non-bind world key without fallback does not warn",
+			state: &State{
+				OnEnter: []Effect{{
+					Invoke: "host.diff",
+					Bind:   map[string]string{"feature_branch_diff": "diff"},
+				}},
+				// References a different (non-bind-target) key.
+				View: LegacyView("{{ world.some_other_key }}"),
+			},
+			wantWarns: nil,
+		},
+		{
+			name: "external template file is skipped (not inline-scannable)",
+			state: &State{
+				OnEnter: []Effect{{
+					Invoke: "host.diff",
+					Bind:   map[string]string{"feature_branch_diff": "diff"},
+				}},
+				View: View{TemplateFile: "diff.pongo"},
+			},
+			wantWarns: nil,
+		},
+		{
+			name: "no invoke means no bind target collected",
+			state: &State{
+				// Bind without Invoke is not a host-call bind target.
+				OnEnter: []Effect{{
+					Bind: map[string]string{"feature_branch_diff": "diff"},
+				}},
+				View: LegacyView("{{ world.feature_branch_diff }}"),
+			},
+			wantWarns: nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			states := map[string]*State{"s": tc.state}
+			got := collectViewBindFallbackWarnings("", states)
+			var gotKeys []string
+			for _, w := range got {
+				require.Equal(t, "s", w.StatePath)
+				gotKeys = append(gotKeys, w.Key)
+			}
+			require.ElementsMatch(t, tc.wantWarns, gotKeys,
+				"warnings mismatch: %#v", got)
+		})
+	}
+}
+
+// TestViewBindFallback_LoadsNonFatal proves the advisory never aborts the load:
+// an app with a fallback-less view over a bind-target key still loads cleanly.
+func TestViewBindFallback_LoadsNonFatal(t *testing.T) {
+	const yamlSrc = `
+app:
+  id: view-bind-fallback
+  version: 0.1.0
+world:
+  feature_branch_diff: { type: string, default: "(pending)" }
+intents:
+  go: {}
+root: start
+states:
+  start:
+    on_enter:
+      - invoke: host.diff
+        bind:
+          feature_branch_diff: diff
+    view: "{{ world.feature_branch_diff }}"
+`
+	_, err := LoadBytes([]byte(yamlSrc))
+	require.NoError(t, err, "fallback-less view must load (warning is non-fatal)")
+}

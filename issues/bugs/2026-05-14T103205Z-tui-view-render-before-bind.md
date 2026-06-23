@@ -3,11 +3,11 @@ id: 2026-05-14T103205Z-tui-view-render-before-bind
 title: "TUI view templates render BEFORE on_enter binds — first frame shows '(pending)' even when host call already returned"
 target: kitsoki
 filed_at: 2026-05-14T10:32:05Z
-status: open
+status: fixed
 severity: P2
 component: tui
 kitsoki_rev: 75c4f11
-trace_ref: ""
+trace_ref: "031c8bda — advisory lint; runtime fix predates in main"
 external: {}
 assignee: ""
 url: "issues/bugs/2026-05-14T103205Z-tui-view-render-before-bind.md"
