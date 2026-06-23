@@ -109,6 +109,37 @@ The loop is mostly **self-driving** via internal routing intents emitted from
 Both rooms end with a catch-all default (`"*"`) that holds the room and nudges
 the operator — the loop never silently bounces.
 
+## Self-driving runs read as a conversation (not just a trace)
+
+This loop advances with **no operator input** — it cascades maker → video gate →
+QA → loop → terminal the moment the session is created. So its progress is narrated
+with `say:` breadcrumbs (`Iteration 1/5 · …`, `QA iteration 1 → FAIL ✗ — looping
+back …`, `QA iteration 2 → PASS ✓`). The web InteractiveView surfaces those
+`machine.say` breadcrumbs as **conversation bubbles** (a distinct "Loop" role —
+see `tools/runstatus/src/stores/run.ts` `chatEntries` + `ChatTranscript`), so an
+autonomous run is **followable as a conversation**, not only as rows in the
+developer trace. This is the runtime side of the kitsoki-ui-qa principle that
+*every conversation must provide meaningful feedback as it progresses, even when
+no operator input is required* (kitsoki-ui-qa SKILL §8 / EVIDENCE RULE 9).
+
+The tour demo of this story (`tools/runstatus/.../demo-video-loop-video.spec.ts` +
+`src/tour/demo-video-loop-manifest.ts`) stays on that conversation surface and
+additionally drives the trace to **tell the story**: each beat expands the proving
+rows (the maker's submission, the video gate, the QA gate) and pulses the field
+that matters (an `exit_code`, the PASS/FAIL stdout) via `window.__tourTrace`
+(exposed by `TraceTimeline`). The deterministic, no-LLM demo passes its own
+`qa.sh --strict` gate.
+
+## Refine an existing video, not just create one
+
+`video_expectation` (input contract above) drives the maker's mode: `new` authors
+a demo from scratch; `update` (or `auto` when a canonical `<slug>.mp4` already
+exists) **refines the existing cut** — editing only what the gate/QA feedback names
+and re-recording so the file is fresh this turn. Refinement is also intrinsic to
+the loop: every loop-back iteration hands the QA report to the maker as feedback,
+so iteration ≥ 2 is by definition a refine. The `flows/refine_existing.yaml`
+fixture exercises the `update` input mode end-to-end (no LLM).
+
 ## Host requirements
 
 | Host call | Used for |
@@ -194,9 +225,10 @@ go run ./cmd/kitsoki test flows stories/demo-video-loop/app.yaml
 The flow fixtures under `flows/` assert host-call contracts with
 `expect_host_calls` / `expect_no_host_calls`, so they prove both the final state
 and the side effects (which gate ran, with which `id:`) that got there — covering
-the happy path (video gate → QA pass → `@exit:achieved`), the video-gate-fail
-loop-back, the QA-fail loop-back carrying the report, budget exhaustion (cost and
-iteration), and maker-error recovery via `retry`.
+the happy path (video gate → QA pass → `@exit:achieved`), the **refine** input
+mode (`video_expectation: update`), the video-gate-fail loop-back, the QA-fail
+loop-back carrying the report, budget exhaustion (cost and iteration), and
+maker-error recovery via `retry`.
 
 ## Grounded in real history
 

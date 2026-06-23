@@ -28,6 +28,24 @@ Slug: `{{ args.feature_slug }}`  ·  expectation: `{{ args.video_expectation }}`
 Address every blocking scenario / gate reason above before anything else. Do not
 re-shoot beats that already passed; close the specific gap the feedback names.
 
+## Refine an existing video vs. create from scratch
+
+Read `expectation` and the worktree before deciding:
+
+- **`update`** (or **`auto`** when a canonical `<slug>.mp4` already exists): you
+  are **refining an existing demo**. Start from the current cut + its manifest /
+  spec / scenarios — change only what the feedback (QA report or gate reason)
+  names, then RE-RECORD so the file is rewritten this turn (the gate requires a
+  fresh mtime, which a real re-record satisfies). Do **not** rebuild the demo from
+  zero or discard beats that already passed.
+- **`new`** (or **`auto`** with no existing canonical video): author the demo from
+  scratch — manifest/spec, feature.md + scenarios.yaml, then record.
+
+Either way the output contract is identical (a fresh, valid canonical `<slug>.mp4`
+plus its frames/chapters/QA inputs); refining just means you EDIT toward it rather
+than starting over. On every loop-back iteration after the first you are, by
+definition, refining — apply the same discipline.
+
 {% block spec_instructions %}
 ## How to produce the deliverable (the hard-won procedure)
 
