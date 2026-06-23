@@ -596,7 +596,21 @@ func (m *transcriptModel) renderViewWith(v app.View, env expr.Env, rr *render.Ap
 	if rr != nil {
 		leafRR = rr
 	}
-	out, err := elements.RenderAll(v, env, wrap, m.renderGlamour, leafRR)
+	// Legacy scalar `view:` interception. app.LegacyView normalises the
+	// hand-authored markdown to one {Kind:"template"} element that renders
+	// through renderGlamour — which uses WithPreservedNewLines and so caps
+	// pure prose at the author's hand-wrap column (it never grows on a wide
+	// panel). Split the source into blank-line blocks and route pure-prose
+	// blocks through the reflowing `prose` element while leaving structured
+	// blocks (lists, headings, indented examples) on the Glamour path. The
+	// original view is kept for the on-error SourceString fallback.
+	renderView := v
+	if v.Source != "" && len(v.Elements) == 1 && v.Elements[0].Kind == "template" {
+		if split := elements.SplitLegacyView(v.Source); len(split) > 0 {
+			renderView = app.View{Source: v.Source, Elements: split}
+		}
+	}
+	out, err := elements.RenderAll(renderView, env, wrap, m.renderGlamour, leafRR)
 	if err != nil {
 		// On a render error fall back to the raw source — better to show
 		// the un-styled template body than to drop the turn entirely.
