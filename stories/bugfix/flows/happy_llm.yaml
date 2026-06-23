@@ -41,6 +41,11 @@ host_handlers:
     data: { ok: true, sha: "abc123", diff: "diff --git a/x b/x\n", files: [] }
   host.local:
     data: { ok: true, log: "PASS: 12 tests", passed: 12, failed: 0 }
+  # done room's lost-work clean-tree check (host.run done_clean_tree_check):
+  # report a clean worktree so accept reaches @exit:done. A dirty tree would
+  # route to @exit:needs-human — see flows/done_refuses_dirty_tree.yaml.
+  host.run:
+    data: { ok: true, exit_code: 0, stdout_json: { dirty: false, files: "" } }
 
   # In `llm` mode every merged room ALSO fires host.agent.decide
   # via the `judge_<phase>.md` prompt from on_enter. The runtime can't

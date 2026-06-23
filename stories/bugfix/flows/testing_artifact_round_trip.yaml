@@ -58,6 +58,16 @@ host_handlers:
       failed: 0
       log:    "ok    kitsoki/... [stub]"
 
+  # vcs iface (iface.vcs.commit → host.git) — testing room now commits the
+  # test_author's work (lost-work guard) after binding the artifact.
+  host.git:
+    data: { ok: true, sha: "abc", diff: "" }
+
+  # done room's lost-work clean-tree check (host.run done_clean_tree_check):
+  # clean tree so the close-out proceeds normally.
+  host.run:
+    data: { ok: true, exit_code: 0, stdout_json: { dirty: false, files: "" } }
+
   # agent.decide — safety-net stub so the builtin never shells out.
   # judge_mode=human means the when: condition is false; this stub guards
   # against any unexpected fallthrough to the real claude binary.

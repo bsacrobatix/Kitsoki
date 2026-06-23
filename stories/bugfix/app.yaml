@@ -162,7 +162,12 @@ host_interfaces:
         input:  { workdir: string }
         output: { diff: string, files: list }
       commit:
-        input:  { workdir: string, message: string, files: list }
+        # stage_all: when true the handler runs `git add -A` first, so NEW
+        # untracked files (e.g. a test the test_author wrote) AND deletions
+        # are captured — `files:` and the `-a` fallback both miss untracked.
+        # The testing room sets this so a test-phase edit can never be
+        # stranded uncommitted (the lost-work split). See git_vcs.go.
+        input:  { workdir: string, message: string, files: list, stage_all: bool }
         output: { ok: bool, sha: string }
       push:
         input:  { workdir: string, remote: string }
@@ -285,6 +290,18 @@ world:
   regression_red_pre_fix: { type: bool,   default: false } # the gate FAILED on the pre-fix snapshot (RED)
   regression_pre_fix_log: { type: string, default: "" }    # the pre-fix gate's output tail (audit)
   regression_gate_checked: { type: bool,  default: false } # the pre-fix gate actually ran (vs skipped)
+
+  # ── Lost-work guard (clean-tree invariant) ──────────────────────────────
+  # The maker rooms mutate the worktree (implementer writes the fix,
+  # test_author writes/repairs tests). Every such edit MUST land in a commit
+  # before an exit — `git rebase`/`merge` move only committed content, so an
+  # uncommitted/untracked file would ship an empty or partial shell while the
+  # working tree (which the gates read) looks green. The `done` room re-reads
+  # `git status --porcelain` and routes a dirty tree to @exit:needs-human
+  # rather than @exit:done — the open-PR analogue of the integrate room's
+  # existing direct-ship guard (delivery-tail/rooms/integrate.yaml).
+  worktree_dirty:        { type: bool,   default: false }  # done's git-status check found uncommitted/untracked work
+  worktree_dirty_files:  { type: string, default: "" }     # the porcelain listing (carried into last_error)
 
   # ── CI command profile (provider-neutral retargeting) ───────────────────
   # The ci interface defaults to host.local, whose run_tests/build default to

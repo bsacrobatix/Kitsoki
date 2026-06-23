@@ -96,6 +96,47 @@ states:
           done_artifact: submitted
         on_error: idle
 
+      # ── Lost-work guard: the open-PR clean-tree invariant ──────────────
+      # Re-read the maker worktree's git status. The accept arc below refuses
+      # to fire @exit:done if anything is uncommitted/untracked — the open-PR
+      # analogue of the direct-ship integrate room's guard
+      # (delivery-tail/rooms/integrate.yaml). Without this, a room that
+      # mutated the worktree without committing (the test_author lost-work
+      # split) would hand off a broken/partial committed tip while the dirty
+      # working tree looked green. Runs AFTER the done agent so an agent that
+      # itself wrote files is caught too. Guarded on a worktree existing so
+      # narrative-only dogfood walks (no isolated worktree) skip it.
+      - when: "world.workdir != ''"
+        invoke: host.run
+        id: done_clean_tree_check
+        with:
+          cmd: bash
+          args:
+            - "-c"
+            - |
+              export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
+              WT="{{ world.workdir }}"
+              # `git -C` targets the worktree; NO cwd: is set so a missing/odd
+              # worktree dir can't make exec fail to start (which would bounce
+              # via on_error). A worktree that doesn't exist → git errors →
+              # 2>/dev/null → DIRTY="" → reported clean (nothing to lose).
+              DIRTY=$(git -C "$WT" status --porcelain 2>/dev/null || echo "")
+              if [ -n "$DIRTY" ]; then
+                jq -n --arg files "$DIRTY" '{dirty:true,files:$files}'
+              else
+                jq -n '{dirty:false,files:""}'
+              fi
+        bind:
+          worktree_dirty:       "stdout_json.dirty"
+          worktree_dirty_files: "stdout_json.files"
+        # NO on_error: this check is a non-critical backstop whose only output
+        # is binding worktree_dirty for the accept guard below. If git/host.run
+        # can't run, worktree_dirty stays at its default (false) and the close-
+        # out proceeds — degrade to "assume clean" rather than bounce the whole
+        # room to idle (which would strand the done artifact). The PRIMARY
+        # lost-work fix is the testing room's stage_all commit; this guard only
+        # hardens the open-PR handoff when git IS readable.
+
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
         invoke: host.agent.decide
         with:
@@ -124,6 +165,18 @@ states:
       # re-pin done_artifact (it was bound on_enter) so the requires
       # gate sees an explicit set.
       accept:
+        # LOST-WORK GUARD (open-PR): refuse to hand off if the maker worktree
+        # has uncommitted/untracked work. The committed tip is what a parent's
+        # pr-refinement / merge will carry — shipping it with the real fix or
+        # a new test stranded in the working tree is the exact bug this guards
+        # against. Fail loud to @exit:needs-human (mirrors the direct-ship
+        # integrate guard) rather than silently shipping a partial tip.
+        - when: "world.worktree_dirty"
+          target: "@exit:needs-human"
+          effects:
+            - set:
+                last_error: "refusing to hand off: the maker worktree has uncommitted work — it was never committed, so the committed tip is broken or partial while the working tree looks green. Commit it on the branch first:\n{{ world.worktree_dirty_files }}"
+                status:     "needs-human"
         # Close out: post the artifact to the transport, transition the
         # upstream ticket to resolved, then fire @exit:done.
         # @exit:done.requires: [done_artifact] is checked statically

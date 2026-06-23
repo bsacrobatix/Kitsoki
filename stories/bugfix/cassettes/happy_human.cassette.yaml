@@ -45,6 +45,16 @@ episodes:
       data: { ok: true, log: "PASS: 12 tests", passed: 12, failed: 0 }
     replay: any
 
+  # done room's lost-work clean-tree check (host.run done_clean_tree_check):
+  # a clean worktree so accept reaches @exit:done. A dirty tree routes to
+  # @exit:needs-human — see flows/done_refuses_dirty_tree.yaml.
+  - id: run_any
+    match:
+      handler: host.run
+    response:
+      data: { ok: true, exit_code: 0, stdout_json: { dirty: false, files: "" } }
+    replay: any
+
 # appended by KITSOKI_CASSETTE_RECORD
   - id: recorded_host.agent.task_idle
     match:

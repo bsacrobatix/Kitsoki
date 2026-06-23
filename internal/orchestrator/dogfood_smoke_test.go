@@ -215,6 +215,11 @@ func newSmokeOrchestrator(t *testing.T, repoRoot string) (*orchestrator.Orchestr
 	reg.Register("host.git", host.GitVCSHandler)
 	reg.Register("host.local", host.LocalCIHandler)
 	reg.Register("host.git_worktree", host.GitWorktreeHandler)
+	// host.run: the testing room's pre-fix regression gate and the done
+	// room's lost-work clean-tree check both shell out via host.run. Real
+	// handler against the temp repo — git status reports a clean worktree
+	// (the agent stub writes no files), so done's guard proceeds to bf.done.
+	reg.Register("host.run", host.RunHandler)
 	reg.Register("host.append_to_file", host.AppendFileTransportHandler)
 	reg.Register("host.inbox.add", host.InboxAddHandler)
 
