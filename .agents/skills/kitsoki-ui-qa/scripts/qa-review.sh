@@ -227,6 +227,30 @@ EVIDENCE RULES (these make the review trustworthy — follow them exactly):
    content — especially the chat — is a failure, not decoration. If a tour label
    sits on top of the conversation so messages/inputs are hidden behind it, add a
    "visual_issues" entry naming the frame and the obscured content.
+9. PROGRESS LEGIBILITY ON THE RIGHT SURFACE — a demo of a feature USED by a human
+   (an agent doing work, a loop running, a flow progressing) must let the viewer
+   FOLLOW that work on the product's CONVERSATION surface — the chat transcript of
+   messages/bubbles where the operator and the agent/machine speak. EVERY
+   conversation must provide meaningful feedback AS IT PROGRESSES, EVEN WHEN NO
+   OPERATOR INPUT IS REQUIRED: an autonomous / self-driving run (one that advances
+   with no human turn) must still narrate its progress as readable conversation
+   messages — each step (what it is doing, a result, a verdict, a transition)
+   appearing as a legible bubble — not merely advance silently. A demo that shows
+   the run ONLY through the developer-facing TRACE/OBSERVER — a state diagram plus
+   an event/timeline list of rows like `host.run`, `world.update`, `machine.say`,
+   turn counters — while the conversation surface stays empty (or is never shown),
+   is the WRONG SURFACE for proving human usage: the auditor's trace is not the
+   product experience. Reading the frames as a TIMELINE, if the scenarios/feature
+   describe usage/a-conversation/a-loop progressing but across the whole demo you
+   only ever see the trace/observer (state-diagram + event rows) and never a
+   conversation of readable progress messages, add a blocking "visual_issues"
+   entry (e.g. "the run is shown only as a trace/state-diagram + event timeline in
+   0003–0009; the conversation surface is empty — no progress messages, so the
+   feature is not shown being used") and mark every usage/progress/conversation
+   scenario `fail`. EXCEPTION — do NOT flag this when the FEATURE ITSELF IS the
+   trace/observer/state-diagram (e.g. the run viewer, the timeline, the diagram is
+   literally what the bug/plan is about); there the trace IS the correct, expected
+   surface. Decide which case you are in from the feature file, not from a default.
 
 Compute each scenario's status as the worst of its steps (fail < unsupported <
 pass). Copy each scenario's `id`, `title`, and `required` exactly from the YAML

@@ -166,6 +166,25 @@ pipeline removes that failure mode structurally, not by hoping the model behaves
    `revealTurn` helper, never fixed dwells over the native auto-scroll), the chat
    stays visible beside the editor, labels are humanised, and every input is
    readable (see `kitsoki-ui-demo`).
+8. **Right-surface + progress-legibility check.** A demo of a feature *used by a
+   human* must prove it on the product's **conversation** surface — and **every
+   conversation must provide meaningful feedback as it progresses, even when no
+   operator input is required**. An autonomous / self-driving run (one that
+   advances with no human turn — e.g. a loop that cascades to terminal on entry)
+   must still narrate each step as readable conversation messages, not advance
+   silently. The footgun this catches: a demo that shows the run ONLY through the
+   developer-facing **trace/observer** (the state diagram + an event timeline of
+   `host.run` / `world.update` / `machine.say` rows) while the conversation pane
+   stays empty. The auditor's trace is not the product experience; proving "the
+   feature works" on the trace alone is the WRONG SURFACE. The review prompt
+   (EVIDENCE RULE 9) reads the frames as a timeline and, when the feature/scenarios
+   describe usage/a-loop/a-conversation but only the trace ever appears, emits a
+   blocking `visual_issues` entry and fails every usage scenario. The one
+   exception is a feature that genuinely *is* the trace/observer/diagram (the run
+   viewer itself) — there the trace is the correct surface, decided from the
+   feature file, not a default. (Runtime side: a self-driving kitsoki run surfaces
+   its `say:` breadcrumbs as conversation bubbles so this feedback exists to film —
+   see the demo-video-loop story.)
 
 ## Prerequisites
 
