@@ -18,11 +18,15 @@ You are authoring a slidey deck JSON spec under a scoped workspace.
 
 ## What to produce
 
-Write a tight slidey deck JSON spec (`title`, `theme`, `scenes[]`). Each scene
-carries an `id`, a `type`, a `heading`/`narration`, and a list of named
-`elements` (each with an `id`, a `role`, and `text`) — the named elements are
-what a reviewer will later point at on the rendered frame, so name them
-meaningfully. One idea per scene.
+Write a tight slidey deck JSON spec (`meta`, `scenes[]`). Each scene carries a
+`type` (e.g. `title`, `cards`, `narrative`, `stat`) plus its type-specific
+fields and optional `narration`. The slidey renderer auto-derives the
+addressable semantic elements per scene type — a `title` scene exposes
+`eyebrow`/`title`/`subtitle`, a `cards` scene exposes `title`/`card_<i>`, a
+`narrative` scene exposes `eyebrow`/`body`/`lede` — each addressable by the
+opaque `<sceneIndex>/<el>` ref (e.g. `1/card_0`) a reviewer points at on the
+rendered frame. One idea per scene.
 
 Submit the deck object: `spec_path` (the JSON you wrote), a one-line `summary`,
-and (if you edited an existing deck) the `edited` source_refs.
+and (if you edited an existing deck) the `edited` element refs (the opaque
+`<scene>/<el>` form).

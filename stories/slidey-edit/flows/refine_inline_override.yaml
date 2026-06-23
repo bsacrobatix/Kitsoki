@@ -17,9 +17,9 @@ initial_world:
   annotation:
     anchor:
       kind: "semantic_element"
-      source_ref: { kind: "slidey", spec_path: "stories/slidey-edit/baked/deck.json", scene_id: "the-loop", element_id: "loop-callout" }
-      label: 'scene the-loop · callout "feedback is location-tied"'
-    instruction: "Make the callout bolder and add a one-line example beneath it."
+      semantic_element: { plugin: "slidey", ref: "1/card_0", bbox: [140, 518, 535, 114] }
+      label: "Scene 1 · card 0"
+    instruction: "Make the semantic_element card stand out and add a one-line example beneath it."
     frame_handle: "slidey-edit#1"
   addressed: { items: [] }
   cycle: 0
@@ -33,25 +33,25 @@ host_handlers:
           annotation:
             anchor:
               kind: "semantic_element"
-              source_ref: { kind: "slidey", spec_path: "stories/slidey-edit/baked/deck.json", scene_id: "the-loop", element_id: "loop-callout" }
-              label: 'scene the-loop · callout "feedback is location-tied"'
-            instruction: "Make the callout bolder and add a one-line example beneath it."
+              semantic_element: { plugin: "slidey", ref: "1/card_0", bbox: [140, 518, 535, 114] }
+              label: "Scene 1 · card 0"
+            instruction: "Make the semantic_element card stand out and add a one-line example beneath it."
             frame_handle: "slidey-edit#1"
       accumulate_addressed:
         data:
           addressed:
             items:
               - deck_handle: "slidey-edit#1"
-                anchor_label: 'scene the-loop · callout "feedback is location-tied"'
-                instruction: "Shrink the callout and move it under the bullets."
-                edited: ["scene:the-loop/loop-callout"]
+                anchor_label: "Scene 1 · card 0"
+                instruction: "Shrink the card and move it under the title."
+                edited: ["1/card_0"]
 
   host.agent.task:
     by_call:
       refine_deck:
         data:
           ok: true
-          submitted: { spec_path: "stories/slidey-edit/baked/deck.json", summary: "Resized + repositioned the callout.", edited: ["scene:the-loop/loop-callout"] }
+          submitted: { spec_path: "stories/slidey-edit/baked/deck.json", summary: "Resized + repositioned the semantic_element card.", edited: ["1/card_0"] }
 
   host.slidey.render:
     by_call:
@@ -68,16 +68,16 @@ host_handlers:
 turns:
   # refine with an inline instruction → refining (anchor kept, instruction
   # overridden) → re-render → reviewing. refine_feedback carried the override.
-  - intent: { name: refine, slots: { feedback: "Shrink the callout and move it under the bullets." } }
+  - intent: { name: refine, slots: { feedback: "Shrink the card and move it under the title." } }
     expect_state: reviewing
     expect_world:
       cycle: 1
       addressed:
         items:
           - deck_handle: "slidey-edit#1"
-            anchor_label: 'scene the-loop · callout "feedback is location-tied"'
-            instruction: "Shrink the callout and move it under the bullets."
-            edited: ["scene:the-loop/loop-callout"]
+            anchor_label: "Scene 1 · card 0"
+            instruction: "Shrink the card and move it under the title."
+            edited: ["1/card_0"]
     expect_host_calls:
       - handler: host.agent.task
         args: { call: "refine_deck" }

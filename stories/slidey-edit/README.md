@@ -49,27 +49,33 @@ The reviewing → refining handoff carries an **annotation bundle** in
 ```yaml
 annotation:
   anchor:                       # the AnnotationAnchor union
-    kind: semantic_element      # semantic_element | region | point
-    source_ref:                 # for semantic_element: which scene element
-      kind: slidey
-      spec_path: stories/slidey-edit/baked/deck.json
-      scene_id: the-loop
-      element_id: loop-callout
-    label: 'scene the-loop · callout "feedback is location-tied"'
-  instruction: "Make the callout bolder…"
+    kind: semantic_element      # semantic_element | region | dom_node
+    semantic_element:           # the canonical semantic_element target
+      plugin: slidey            # the producer (kitsoki stays plugin-agnostic)
+      ref: "1/card_0"           # OPAQUE "<sceneIndex>/<el>" string, round-tripped verbatim
+      bbox: [140, 518, 535, 114]  # the element's box on the rendered frame
+    label: "Scene 1 · card 0"
+  instruction: "Make the semantic_element card stand out…"
   frame_handle: "slidey-edit#1"
 ```
 
-This mirrors the `args.visual.anchor` shape a capturing surface attaches (the
-generalized `VisualAmbient`). The refine prompt prefers the live
+This is the exact `semantic_element` target shape a real pick serializes (see
+`.context/unified-artifact-annotation.md` and `host.AnchorSemanticElementTarget`):
+`ref` is an OPAQUE string of the form `<sceneIndex>/<el>` (NOT an object) that
+kitsoki round-trips verbatim back to slidey; slidey splits it on `/` to recover
+the scene/element. It mirrors the `args.visual.anchor` shape a capturing surface
+attaches (the generalized `VisualAmbient`). The refine prompt prefers the live
 `args.visual.anchor` when present and falls back to the explicit `annotation`
 arg. An inline `refine feedback="…"` overrides the *instruction* while keeping
 the *anchor* (where the operator pointed).
 
-The `.semantic.json` sidecar (`baked/deck.semantic.json`) is the producer-side
-map of named scene elements → bounding `region` [x,y,w,h] + `time_range` on the
-rendered frame, so a `region`/`point` anchor resolves to the dominant element it
-overlaps. It is the semantic cousin of the slidey chapter sidecar.
+The `.semantic.json` sidecar (`baked/deck.semantic.json`) is the **real**
+canonical output of rendering `baked/deck.json` through slidey: the producer's
+map of `{ ref, label, selector, bbox:[x,y,w,h], t_ms }` per addressable element,
+so a `region` anchor resolves to the dominant element it overlaps. The seeded
+demo anchor (`1/card_0`, bbox `[140,518,535,114]`) is a genuine element from this
+sidecar, and `baked/deck.poster.png` is a real rendered frame, so the annotation
+overlay's box aligns with the pixels.
 
 ## Baked demo artifacts
 
@@ -77,10 +83,14 @@ overlaps. It is the semantic cousin of the slidey chapter sidecar.
 media** without invoking slidey live (and so `kitsoki tour`/web can drive the
 loop without authoring — the *tour needs a baked world* lesson):
 
-- `deck.json` — the deck spec (3 scenes, named elements).
-- `deck.mp4` — pre-rendered deck video (≈5 KB, ffmpeg-generated).
-- `deck.poster.png` — a poster still.
-- `deck.semantic.json` — the semantic sidecar.
+- `deck.json` — the deck spec: 3 slidey scenes (`title` → `cards` → `narrative`)
+  whose types emit semantic elements. Rendered at 1920×1080.
+- `deck.mp4` — a small (~50 KB) deck video assembled from the REAL rendered
+  frames (the final frame of each scene, held ~2s; 1280×720, ffmpeg-concat).
+- `deck.poster.png` — a REAL rendered frame (scene 1, the "One anchor union"
+  cards row — where the seeded anchor lives), so overlay bboxes align.
+- `deck.semantic.json` — the canonical semantic sidecar, the REAL output of
+  rendering `deck.json` through slidey (real `ref`s + real `bbox`es).
 
 The render host calls are **stubbed** in the flows/cassette to point at these
 files; `host.artifacts_dir` runs for real under `kitsoki web --flow` so the

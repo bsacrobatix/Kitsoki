@@ -7,7 +7,7 @@
   "properties": {
     "spec_path": { "type": "string", "description": "Path to the deck JSON spec — the render entrypoint." },
     "summary":   { "type": "string", "description": "One-line human summary of what was authored/edited." },
-    "edited":    { "type": "array", "items": { "type": "string" }, "description": "Refine pass only: the scene/element source_refs edited this pass." }
+    "edited":    { "type": "array", "items": { "type": "string" }, "description": "Refine pass only: the opaque semantic-element refs (slidey '<scene>/<el>' form, e.g. '1/card_0') edited this pass." }
   },
   "additionalProperties": true
 }

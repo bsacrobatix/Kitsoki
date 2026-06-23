@@ -3,10 +3,10 @@
 # element the anchor points at, then re-renders the before/after.
 #
 # Posture mirrors happy_path (all host calls stubbed by invoke id). The reviewing
-# room seeds a default annotation (semantic_element on scene the-loop /
-# loop-callout); `refine` carries it into refining, whose task edits that
-# element. Asserts (a) the anchor reached the refine task and (b) the addressed
-# record captured the anchor label.
+# room seeds a default annotation (semantic_element ref "1/card_0" — scene 1's
+# "semantic_element" card); `refine` carries it into refining, whose task edits
+# that element. Asserts (a) the anchor reached the refine task and (b) the
+# addressed record captured the anchor label.
 
 test_kind: flow
 app: ../app.yaml
@@ -30,8 +30,8 @@ host_handlers:
           ok: true
           submitted:
             spec_path: "stories/slidey-edit/baked/deck.json"
-            summary: "Bolded the location-tied callout on scene the-loop and added an example line."
-            edited: ["scene:the-loop/loop-callout"]
+            summary: "Emphasized the semantic_element card (scene 1, card 0) and added an example line."
+            edited: ["1/card_0"]
 
   host.slidey.render:
     by_call:
@@ -48,18 +48,18 @@ host_handlers:
           annotation:
             anchor:
               kind: "semantic_element"
-              source_ref: { kind: "slidey", spec_path: "stories/slidey-edit/baked/deck.json", scene_id: "the-loop", element_id: "loop-callout" }
-              label: 'scene the-loop · callout "feedback is location-tied"'
-            instruction: "Make the callout bolder and add a one-line example beneath it."
+              semantic_element: { plugin: "slidey", ref: "1/card_0", bbox: [140, 518, 535, 114] }
+              label: "Scene 1 · card 0"
+            instruction: "Make the semantic_element card stand out and add a one-line example beneath it."
             frame_handle: "slidey-edit#1"
       accumulate_addressed:
         data:
           addressed:
             items:
               - deck_handle: "slidey-edit#1"
-                anchor_label: 'scene the-loop · callout "feedback is location-tied"'
-                instruction: "Make the callout bolder and add a one-line example beneath it."
-                edited: ["scene:the-loop/loop-callout"]
+                anchor_label: "Scene 1 · card 0"
+                instruction: "Make the semantic_element card stand out and add a one-line example beneath it."
+                edited: ["1/card_0"]
 
   host.artifacts_dir:
     by_call:
@@ -78,9 +78,9 @@ turns:
       annotation:
         anchor:
           kind: "semantic_element"
-          source_ref: { kind: "slidey", spec_path: "stories/slidey-edit/baked/deck.json", scene_id: "the-loop", element_id: "loop-callout" }
-          label: 'scene the-loop · callout "feedback is location-tied"'
-        instruction: "Make the callout bolder and add a one-line example beneath it."
+          semantic_element: { plugin: "slidey", ref: "1/card_0", bbox: [140, 518, 535, 114] }
+          label: "Scene 1 · card 0"
+        instruction: "Make the semantic_element card stand out and add a one-line example beneath it."
         frame_handle: "slidey-edit#1"
 
   # refine (no inline feedback) → refining → task edits the anchored scene
@@ -94,9 +94,9 @@ turns:
       addressed:
         items:
           - deck_handle: "slidey-edit#1"
-            anchor_label: 'scene the-loop · callout "feedback is location-tied"'
-            instruction: "Make the callout bolder and add a one-line example beneath it."
-            edited: ["scene:the-loop/loop-callout"]
+            anchor_label: "Scene 1 · card 0"
+            instruction: "Make the semantic_element card stand out and add a one-line example beneath it."
+            edited: ["1/card_0"]
     expect_host_calls:
       - handler: host.agent.task
         args: { call: "refine_deck" }

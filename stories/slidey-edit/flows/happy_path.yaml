@@ -39,9 +39,9 @@ host_handlers:
           annotation:
             anchor:
               kind: "semantic_element"
-              source_ref: { kind: "slidey", spec_path: "stories/slidey-edit/baked/deck.json", scene_id: "the-loop", element_id: "loop-callout" }
-              label: 'scene the-loop · callout "feedback is location-tied"'
-            instruction: "Make the callout bolder and add a one-line example beneath it."
+              semantic_element: { plugin: "slidey", ref: "1/card_0", bbox: [140, 518, 535, 114] }
+              label: "Scene 1 · card 0"
+            instruction: "Make the semantic_element card stand out and add a one-line example beneath it."
             frame_handle: "slidey-edit#1"
 
   host.artifacts_dir:
