@@ -90,6 +90,13 @@ states:
             # Title-first to match the row format above; ID trails in
             # parentheses so a quick glance lands on the human label.
             Picked: '{% if world.ticket_id %}{{ world.ticket_title|default:"(no title)" }}  ({{ world.ticket_id }}){% else %}(none — pick one below){% endif %}'
+      # Source / identity line (P5) — only rendered for a GitHub-Issue-backed
+      # ticket (ticket_source=github), surfacing the original local-bug-file
+      # id so the local↔issue mapping is visible instead of eyeball-matched.
+      - kv:
+          pairs:
+            Source: 'GitHub issue #{{ world.ticket_id }}{% if world.ticket_legacy_id %}  (filed locally as {{ world.ticket_legacy_id }}){% endif %}'
+        when: "world.ticket_source == 'github'"
       - choice:
           mode: single
           prompt: "Actions"
@@ -211,6 +218,13 @@ states:
                 # slice) so the `reproducing` room runs it RED-first. Absent ⇒
                 # "" ⇒ bf falls through to the LLM-only reproducer.
                 gate_command: repro_command
+                # Source / identity (P5). host.gh.ticket emits source=github
+                # and lifts legacy_id (the original issues/bugs/<iso>.md id)
+                # out of the ```kitsoki metadata block; the local-files
+                # provider leaves both unset. Bound here so the view can show
+                # the local↔issue mapping instead of a title eyeball-match.
+                ticket_source:    source
+                ticket_legacy_id: legacy_id
               on_error: idle
       # Hand off to the bugfix sub-story for the picked ticket.
       # bf.idle's on_enter auto-emits `start` when entered with a

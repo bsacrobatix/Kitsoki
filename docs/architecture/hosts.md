@@ -1753,8 +1753,8 @@ GitHub in tests). Implementation:
 | op | gh call | Returns |
 |---|---|---|
 | `create` | `gh issue create --repo … --title … --body … --label …` | `{id, number, url, warning?}` |
-| `search` | `gh issue list --search …` | `{tickets: [{id,title,status,priority,assignee,url}]}` |
-| `get` | `gh issue view … --json …` | `{id,title,body,status,…,comments, kitsoki_meta?}` |
+| `search` | `gh issue list --search …` | `{tickets: [{id,title,status,priority,assignee,url,type,source}]}` |
+| `get` | `gh issue view … --json …` | `{id,title,body,status,…,type,source,legacy_id?,comments, kitsoki_meta?}` |
 | `comment` | `gh issue comment … --body …` | `{ok, comment_id}` |
 | `transition` | `gh issue close` / `gh issue reopen` | `{ok}` |
 | `list_mine` | `gh issue list --assignee …` | `{tickets: […]}` |
@@ -1790,8 +1790,24 @@ body and `get` parses back out (`kitsoki_meta`):
 trace_ref: trace://…
 kitsoki_rev: 33f80d2
 filed_by: brad
+legacy_id: 2026-06-19T120000Z-esc-hang
 ```
 ````
+
+`get` also lifts `legacy_id` (when present) to a **top-level** field on the
+result, alongside `source: "github"`, so a consumer can show the local-bug-file
+↔ GitHub-issue identity without reaching into the nested `kitsoki_meta` map. The
+dev-story ticket view renders this as a `Source:` line (`internal/host/github.go`
+`ghTicketGet`; `stories/dev-story/rooms/ticket_search.yaml`).
+
+**Ticket type.** GitHub Issues has no native ticket-type field, but dev-story's
+`drive` arc routes on `ticket_type == 'bug'|'feature'|'epic'`. So `search` / `get`
+/ `list_mine` classify `type` from the issue's labels (a `bug` / `feature`
+(or `enhancement`) / `epic` label — or the `kind:`/`type:`-prefixed variants),
+with a title-keyword fallback, defaulting to `bug` (never `""`). Returning a
+concrete type is load-bearing: an empty type silently falls through dev-story's
+type guards to a no-op self-loop, so a GitHub-sourced ticket always classifies to
+*some* pipeline (`ghClassifyType` in `internal/host/github.go`).
 
 ### Filing a bug with evidence
 

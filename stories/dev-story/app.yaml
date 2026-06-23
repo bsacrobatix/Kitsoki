@@ -419,6 +419,16 @@ world:
   # run it RED-first. Empty (no repro_command on the ticket) ⇒ bf falls through
   # to the LLM-only reproducer. See stories/bugfix (bugfix-repro-gate slice).
   gate_command:        { type: string, default: "" }
+  # ── Ticket source / identity (P5) ─────────────────────────────────
+  # Surfaced by ticket_search so a GitHub-Issue-backed ticket reveals its
+  # origin and its original local-bug-file id (the local↔issue mapping an
+  # operator otherwise has to eyeball-match by title). Both are bound from
+  # iface.ticket.get at pick time; host.gh.ticket emits `source: github`
+  # on every row and lifts `legacy_id` out of the ```kitsoki metadata block
+  # (see internal/host/github.go). The local-files provider leaves them ""
+  # (its id IS the local id), so the identity line only shows for GitHub.
+  ticket_source:       { type: string, default: "" }
+  ticket_legacy_id:    { type: string, default: "" }
   # The main room calls iface.ticket.list_mine on enter and stashes
   # the result here so the view can render a "tickets in your queue"
   # block without the operator having to type `tickets`.
