@@ -116,6 +116,58 @@ func TestRegistry_NewSessionRoundTrip(t *testing.T) {
 	assert.Equal(t, []string{sid}, stories[0].ActiveSessions, "the live session must show on its story")
 }
 
+// TestRegistry_NewSessionHonorsFlowSeed proves GAP 1: a `kitsoki web --flow`
+// session (a base whose Flow fixture carries initial_state / initial_world)
+// STARTS at the seeded state with the seeded world, exactly as `test flows` and
+// `record` do — while the empty-fixture base still starts at the root.
+func TestRegistry_NewSessionHonorsFlowSeed(t *testing.T) {
+	storiesDir, appPath := writeStory(t, "mini", []byte(minimalStory))
+
+	base := deterministicBase(t)
+	base.Flow = &testrunner.FlowFixture{
+		InitialState: "hall",
+		InitialWorld: map[string]any{"visited": true},
+	}
+	reg := NewRegistry(webconfig.WebConfig{}, []string{storiesDir}, base)
+	t.Cleanup(reg.Close)
+
+	ctx := context.Background()
+	sid, err := reg.NewSession(ctx, appPath)
+	require.NoError(t, err)
+
+	entry, ok := reg.Get(sid)
+	require.True(t, ok)
+	snap, err := entry.Source.Snapshot()
+	require.NoError(t, err)
+	assert.Equal(t, "hall", snap.Session.CurrentState, "flow session must START at fixture initial_state")
+
+	// World is not on the snapshot header; assert the seed via the journey.
+	reg.mu.Lock()
+	re := reg.sessions[sid]
+	reg.mu.Unlock()
+	require.NotNil(t, re)
+	journey, err := re.rt.Orch.LoadJourney(re.sid)
+	require.NoError(t, err)
+	assert.Equal(t, true, journey.World.Vars["visited"], "flow session must seed initial_world")
+}
+
+// TestRegistry_NewSessionNoFlowSeedStartsAtRoot proves the default (empty
+// fixture) web session is unchanged by GAP 1: it still starts at the root state
+// with default world.
+func TestRegistry_NewSessionNoFlowSeedStartsAtRoot(t *testing.T) {
+	storiesDir, appPath := writeStory(t, "mini", []byte(minimalStory))
+	reg := NewRegistry(webconfig.WebConfig{}, []string{storiesDir}, deterministicBase(t))
+	t.Cleanup(reg.Close)
+
+	sid, err := reg.NewSession(context.Background(), appPath)
+	require.NoError(t, err)
+	entry, ok := reg.Get(sid)
+	require.True(t, ok)
+	snap, err := entry.Source.Snapshot()
+	require.NoError(t, err)
+	assert.Equal(t, "foyer", snap.Session.CurrentState, "no-flow session starts at root")
+}
+
 // TestRegistry_GetUnknown proves an unknown id resolves to ok=false (the server
 // turns this into a structured not-found error rather than a nil-deref).
 func TestRegistry_GetUnknown(t *testing.T) {

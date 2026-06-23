@@ -22,6 +22,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -38,9 +39,11 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/metamode"
+	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
+	"kitsoki/internal/testrunner"
 	"kitsoki/internal/webconfig"
 )
 
@@ -225,6 +228,18 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 		return "", fmt.Errorf("create session: %w", err)
 	}
 
+	// In flow posture (--flow / --host-cassette), honor the fixture's
+	// initial_state / initial_world exactly as `test flows` and `record` do:
+	// teleport the freshly created session onto the fixture's starting state and
+	// seed its world keys before any frame is observed. Gated on a fixture being
+	// present so default (no-flow) web sessions still start at the app root.
+	// Returns the effective initial state so the LiveSession + the first frame
+	// reflect the seed (it is orch.InitialState() when no seed applied).
+	initialState, err := seedFlowInitialState(orch, rt.Store, sid, r.base.Flow)
+	if err != nil {
+		return "", fmt.Errorf("seed flow initial state: %w", err)
+	}
+
 	tracePath := store.DefaultTracePath(def.App.ID, "web", string(sid))
 	if mkErr := os.MkdirAll(filepath.Dir(tracePath), 0o755); mkErr != nil {
 		return "", fmt.Errorf("create trace directory: %w", mkErr)
@@ -243,7 +258,7 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 	// Wrap the sink so the orchestrator's appends and the HTTP server's reads
 	// share one lock — the JSONLSink underneath is not safe for concurrent
 	// Append + History (mirrors web.go).
-	live := server.NewLiveSession(sink, def, string(sid), string(orch.InitialState()))
+	live := server.NewLiveSession(sink, def, string(sid), string(initialState))
 	orch.SetEventSink(live)
 	// Bind the cassette deferred agent sink now that the real sink is ready.
 	if rt.DeferredAgentSink != nil {
@@ -878,3 +893,77 @@ var (
 	_ server.ExternalAttachProvider = (*SessionRegistry)(nil)
 	_ server.CurrentSessionProvider = (*SessionRegistry)(nil)
 )
+
+// seedFlowInitialState honors a flow fixture's initial_state / initial_world on
+// a freshly created web session, mirroring what `kitsoki test flows` and
+// `kitsoki record` do (internal/testrunner.seedInitialState,
+// cmd/kitsoki/record.go). It is the runtime fix for `kitsoki web --flow`
+// previously ignoring the fixture seed: a conversation-driven dev-story tour
+// can now START at the fixture's state with its world pre-seeded.
+//
+// It writes synthetic turn-0 seed events — a TransitionApplied to teleport the
+// journey onto initial_state, and one EffectApplied per initial_world key — and
+// arms any Timeout declared on the seeded state. The orchestrator's loadJourney
+// replays the event log, so persisting these before any turn (and before
+// on_enter / the first observed frame) bootstraps the session exactly as the
+// seed path does.
+//
+// fixture == nil (no --flow / --host-cassette) or an empty seed is a no-op:
+// the session keeps starting at orch.InitialState(), so default web behavior is
+// unchanged. Returns the effective initial state (the seeded state when one was
+// applied, else orch.InitialState()) so the caller stamps the LiveSession and
+// first frame with it.
+func seedFlowInitialState(orch *orchestrator.Orchestrator, st store.Store, sid app.SessionID, fixture *testrunner.FlowFixture) (app.StatePath, error) {
+	if fixture == nil || (fixture.InitialState == "" && len(fixture.InitialWorld) == 0) {
+		return orch.InitialState(), nil
+	}
+
+	var events []store.Event
+	if fixture.InitialState != "" {
+		events = append(events, store.Event{
+			Kind: store.TransitionApplied,
+			Turn: 0,
+			Payload: mustSeedJSON(map[string]any{
+				"from":   "",
+				"to":     fixture.InitialState,
+				"intent": "__seed__",
+			}),
+		})
+	}
+	for k, v := range fixture.InitialWorld {
+		events = append(events, store.Event{
+			Kind:    store.EffectApplied,
+			Turn:    0,
+			Payload: mustSeedJSON(map[string]any{"set": map[string]any{k: v}}),
+		})
+	}
+
+	if fixture.InitialState != "" {
+		for i := range events {
+			if events[i].StatePath == "" {
+				events[i].StatePath = app.StatePath(fixture.InitialState)
+			}
+		}
+	}
+
+	sink := store.NewStoreSinkAdapter(st, sid)
+	if err := sink.AppendBatch(events); err != nil {
+		return "", err
+	}
+
+	// Arm any Timeout on the seeded state, matching seedInitialState — seed
+	// events bypass the normal transition path that would otherwise arm it.
+	if fixture.InitialState != "" {
+		orch.ArmTimeoutForInitialState(sid, app.StatePath(fixture.InitialState))
+		return app.StatePath(fixture.InitialState), nil
+	}
+	return orch.InitialState(), nil
+}
+
+func mustSeedJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(fmt.Sprintf("seedFlowInitialState: marshal: %v", err))
+	}
+	return b
+}
