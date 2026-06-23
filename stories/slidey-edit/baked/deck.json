@@ -1,0 +1,39 @@
+{
+  "title": "Spatial Annotation — Deck v1",
+  "theme": "midnight",
+  "scenes": [
+    {
+      "id": "title",
+      "type": "title",
+      "heading": "Spatial Annotation",
+      "subheading": "Point at the deck, not the prose",
+      "narration": "Annotation now works on any rendered artifact — png, mp4, rrweb, html, and slidey decks.",
+      "elements": [
+        { "id": "title-heading", "role": "heading", "text": "Spatial Annotation" },
+        { "id": "title-sub", "role": "subheading", "text": "Point at the deck, not the prose" }
+      ]
+    },
+    {
+      "id": "the-anchor",
+      "type": "bullets",
+      "heading": "One anchor union",
+      "narration": "A single AnnotationAnchor union ties operator feedback to an exact place in the artifact.",
+      "elements": [
+        { "id": "anchor-heading", "role": "heading", "text": "One anchor union" },
+        { "id": "anchor-bullet-1", "role": "bullet", "text": "semantic_element — a named element in the deck" },
+        { "id": "anchor-bullet-2", "role": "bullet", "text": "region — a drawn box on the frame" },
+        { "id": "anchor-bullet-3", "role": "bullet", "text": "point — a single click" }
+      ]
+    },
+    {
+      "id": "the-loop",
+      "type": "bullets",
+      "heading": "Annotate then refine",
+      "narration": "The anchored note flows into a refine pass that edits the exact scene element it points at.",
+      "elements": [
+        { "id": "loop-heading", "role": "heading", "text": "Annotate then refine" },
+        { "id": "loop-callout", "role": "callout", "text": "feedback is location-tied" }
+      ]
+    }
+  ]
+}

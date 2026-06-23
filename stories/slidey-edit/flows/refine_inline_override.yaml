@@ -1,0 +1,85 @@
+# refine_inline_override — an inline `refine feedback="…"` overrides the baked
+# annotation's instruction while keeping the anchor (where the operator pointed).
+# Demonstrates that location (anchor) and instruction are separable: the same
+# scene element is targeted, with a different directive.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: reviewing
+initial_world:
+  workspace: "stories/slidey-edit/baked"
+  deck: { spec_path: "stories/slidey-edit/baked/deck.json", summary: "deck" }
+  deck_handle: "slidey-edit#1"
+  semantic_handle: "slidey-semantic#1"
+  # The annotation the reviewing on_enter seeds (or a live surface attaches).
+  # Set here because a flow that starts AT initial_state=reviewing does not fire
+  # that room's on_enter.
+  annotation:
+    anchor:
+      kind: "semantic_element"
+      source_ref: { kind: "slidey", spec_path: "stories/slidey-edit/baked/deck.json", scene_id: "the-loop", element_id: "loop-callout" }
+      label: 'scene the-loop · callout "feedback is location-tied"'
+    instruction: "Make the callout bolder and add a one-line example beneath it."
+    frame_handle: "slidey-edit#1"
+  addressed: { items: [] }
+  cycle: 0
+  refine_budget: 6
+
+host_handlers:
+  host.starlark.run:
+    by_call:
+      seed_annotation:
+        data:
+          annotation:
+            anchor:
+              kind: "semantic_element"
+              source_ref: { kind: "slidey", spec_path: "stories/slidey-edit/baked/deck.json", scene_id: "the-loop", element_id: "loop-callout" }
+              label: 'scene the-loop · callout "feedback is location-tied"'
+            instruction: "Make the callout bolder and add a one-line example beneath it."
+            frame_handle: "slidey-edit#1"
+      accumulate_addressed:
+        data:
+          addressed:
+            items:
+              - deck_handle: "slidey-edit#1"
+                anchor_label: 'scene the-loop · callout "feedback is location-tied"'
+                instruction: "Shrink the callout and move it under the bullets."
+                edited: ["scene:the-loop/loop-callout"]
+
+  host.agent.task:
+    by_call:
+      refine_deck:
+        data:
+          ok: true
+          submitted: { spec_path: "stories/slidey-edit/baked/deck.json", summary: "Resized + repositioned the callout.", edited: ["scene:the-loop/loop-callout"] }
+
+  host.slidey.render:
+    by_call:
+      render_deck:
+        data: { ok: true, path: "stories/slidey-edit/baked/deck.mp4", semantic_path: "stories/slidey-edit/baked/deck.semantic.json" }
+
+  host.artifacts_dir:
+    by_call:
+      emit_deck:
+        data: { ok: true, handle: { id: "slidey-edit#1", kind: "video", mime: "video/mp4" } }
+      emit_semantic:
+        data: { ok: true, handle: { id: "slidey-semantic#1", kind: "data", mime: "application/json" } }
+
+turns:
+  # refine with an inline instruction → refining (anchor kept, instruction
+  # overridden) → re-render → reviewing. refine_feedback carried the override.
+  - intent: { name: refine, slots: { feedback: "Shrink the callout and move it under the bullets." } }
+    expect_state: reviewing
+    expect_world:
+      cycle: 1
+      addressed:
+        items:
+          - deck_handle: "slidey-edit#1"
+            anchor_label: 'scene the-loop · callout "feedback is location-tied"'
+            instruction: "Shrink the callout and move it under the bullets."
+            edited: ["scene:the-loop/loop-callout"]
+    expect_host_calls:
+      - handler: host.agent.task
+        args: { call: "refine_deck" }
+
+expect_no_errors: true
