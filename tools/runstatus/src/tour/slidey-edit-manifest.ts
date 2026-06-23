@@ -75,6 +75,34 @@ export const SLIDEY_EDIT_TOUR_STEPS: readonly TourStep[] = [
     dwellMs: 4000,
   },
 
+  // ── Author: the operator's request (shown typed, on camera) ─────────────────
+  {
+    id: "se-author",
+    route: "any",
+    target: "composer-input",
+    title: "Author the deck",
+    body: "Type the request in the composer — a short explainer deck. The text you see here IS the input the run receives; kitsoki authors a 3-scene slidey spec from it, then we accept it to render.",
+    placement: "top",
+    kind: "explain",
+    advance: "next",
+    waitForTarget: "composer-input",
+    dwellMs: 6000,
+  },
+
+  // ── Drafting: review the authored plan BEFORE rendering ─────────────────────
+  {
+    id: "se-drafting",
+    route: "any",
+    target: "current-state",
+    title: "Review the authored deck",
+    body: "kitsoki authored a 3-scene deck spec from your request — the Summary above shows what it built. Review the plan, then accept the `accept → rendering` step to render it to a real MP4. Nothing is approved sight-unseen: you read the plan here, and you'll review the rendered deck next.",
+    placement: "bottom",
+    kind: "explain",
+    advance: "next",
+    waitForTarget: "current-state",
+    dwellMs: 6000,
+  },
+
   // ── Reviewing: the rendered deck ────────────────────────────────────────────
   {
     id: "se-reviewing",
@@ -143,14 +171,14 @@ export const SLIDEY_EDIT_TOUR_STEPS: readonly TourStep[] = [
   {
     id: "se-refine",
     route: "any",
-    target: "current-state",
-    title: "Refine the exact scene",
-    body: "Now refine. The reviser receives the location-tied anchor and edits the scene element behind it — never a guess at what you meant. We type the instruction and dispatch it; the run drops into `refining`, the reviser edits the anchored scene, and it re-renders the before/after.",
-    placement: "bottom",
+    target: "composer-input",
+    title: "Type the refinement",
+    body: "Back in review, type what to change — you can read the instruction being composed here. The reviser receives BOTH your words AND the location-tied anchor from the marker you clicked, so it edits the exact scene element you pointed at, never a guess. Dispatch it and the run drops into `refining`, edits the anchored scene, and re-renders.",
+    placement: "top",
     kind: "explain",
     advance: "next",
-    waitForTarget: "current-state",
-    dwellMs: 6000,
+    waitForTarget: "composer-input",
+    dwellMs: 7000,
   },
   {
     id: "se-loop-closed",

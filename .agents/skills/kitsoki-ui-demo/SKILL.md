@@ -147,6 +147,33 @@ A demo of someone USING kitsoki is worthless if a viewer can't follow the
 conversation. `kitsoki-ui-qa` now **fails** a demo that breaks any of these
 (rules 7–8 there), so author for them up front — don't fix it by hand after:
 
+- **SHOW EVERY USER INPUT being typed, then HOLD it on screen — the #1 recurring
+  defect.** The reflex is to set the value atomically (`input.fill(value)`,
+  `el.value = value` + `dispatchEvent('input')`) and submit a beat later — the
+  input then *flashes* and the viewer never sees what was asked. This applies to
+  **every** operator input: a chat message, a slot value, a **free-text
+  instruction / refinement**, a search query — NOT just the first message. For
+  each input:
+  1. **Type it character-by-character** —
+     `input.pressSequentially(value, { delay })` with a pace-scaled per-char delay
+     (e.g. `42 * WEB_CHAT_PACE` ms → 0 under the fast gate, readable in record
+     mode). Never `fill()` / `el.value =` for a demo input.
+  2. **Leave the input COMPOSED-BUT-UNSENT across the narration screenshot** (scroll
+     the composer into view first), so the captured frame literally shows the
+     operator's words. Drive in two phases — **type in the pre-step, submit in the
+     post-step** (after the dwell/shot), never type-and-submit in one breath.
+  3. **Frame each meaningful input with its own beat** anchored to `composer-input`
+     (e.g. an "Author the deck" step AND a separate "Type the refinement" step) so
+     the popover narrates *what* is being asked while it is on screen. A gesture
+     buried in a pre-step hook with no beat is invisible.
+  4. **Never submit via a page hook (`__kitsokiSubmitIntent`) without first showing
+     the operator type it.** The hook is for *deterministic routing* of a
+     semantic/free-text room, not a substitute for the visible input — type the
+     words, hold, THEN route via the hook.
+  Worked reference: `slidey-edit-video.spec.ts` (`composeVisibly` + `submitComposed`
+  — type → hold across the shot → submit in the post-step; one beat per input).
+  This is distinct from the response-scroll rule below: SHOW THE INPUT, then SCROLL
+  THE RESPONSE.
 - **Keep the chat visible — never let it be covered.** When the operator opens a
   document (the brief/PRD/diff via `host.ide.*`, or any file), it must appear
   BESIDE the conversation, not ON it. The extension already opens host.ide docs in

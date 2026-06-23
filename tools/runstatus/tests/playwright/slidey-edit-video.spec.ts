@@ -37,7 +37,7 @@
  * NOTE: the harness suppresses Playwright stdout, so per-step progress and any
  * failure context is also written to .artifacts/slidey-edit/ERROR.txt.
  */
-import { test, expect, chromium, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { test, expect, chromium, type Browser, type BrowserContext, type Page, type Locator } from "@playwright/test";
 import path from "path";
 import fs from "fs";
 import {
@@ -109,70 +109,42 @@ async function expectState(page: Page, state: string): Promise<void> {
   await expect(page.getByTestId("current-state")).toHaveText(state, { timeout: 15000 });
 }
 
+// Per-character typing delay, pace-scaled: 0 under WEB_CHAT_PACE=0 (fast
+// validate, no dwells), ~42ms/char at the default watch pace so the viewer reads
+// each input being COMPOSED rather than appearing atomically. The #1 demo
+// legibility bug — and the one the operator hit here — is setting the textarea
+// via el.value / fill(): the input then flashes and you never see what was asked.
+// Type it for real instead.
+const PACE = Number(process.env.WEB_CHAT_PACE ?? "1");
+const TYPE_DELAY_MS = 42 * (Number.isFinite(PACE) ? PACE : 1);
+
 /**
- * Drive a single text-slot intent through the legacy composer the room renders
- * when it has exactly one text intent (`form[data-testid="composer"]` carrying
- * `data-active-intent="<intent>"`, with a `composer-input` textarea + Send).
- * Both `start` at idle (optional `feedback`) and `refine` at reviewing render
- * this way. The Send button is disabled until the textarea has a value, so we
- * fire the input event first (enabling it), then submit the form. DOM-level so
- * the overlay backdrop never intercepts. Asserts the resulting current-state.
+ * Type `value` into a room composer textarea VISIBLY and leave it
+ * composed-but-UNSENT, so the step's narration screenshot captures the operator's
+ * input on screen. Scrolls the input into view, focuses it, types
+ * character-by-character (real keystrokes → real input events, so Send enables),
+ * then HOLDS so the line is readable. Returns the form for a later submit.
+ * `intent` selects the room's legacy composer (`form[data-active-intent=…]`).
  */
-async function driveComposer(
-  page: Page,
-  intent: string,
-  value: string,
-  expectStateName: string,
-): Promise<void> {
-  diag(`driveComposer ${intent}="${value}" → ${expectStateName}`);
+async function composeVisibly(page: Page, intent: string, value: string): Promise<Locator> {
+  diag(`composeVisibly ${intent}="${value}"`);
   const form = page
     .locator(`form[data-testid="composer"][data-active-intent="${intent}"]`)
     .first();
   await expect(form).toBeVisible({ timeout: 15000 });
   const input = form.getByTestId("composer-input").first();
-  await input.evaluate((el, v) => {
-    const t = el as HTMLTextAreaElement;
-    t.value = v;
-    t.dispatchEvent(new Event("input", { bubbles: true }));
-  }, value);
-  await dwell(page, 600);
-  await form.evaluate((el) => (el as HTMLFormElement).requestSubmit());
-  await expectState(page, expectStateName);
-  await dwell(page, 600);
+  await input.scrollIntoViewIfNeeded().catch(() => undefined);
+  await input.click().catch(() => undefined);
+  await input.fill("");
+  await input.pressSequentially(value, { delay: TYPE_DELAY_MS });
+  await dwell(page, SETTLE_MS); // hold on the composed input so it reads
+  return form;
 }
 
-/**
- * Drive the location-tied `refine`, then WAIT for the whole loop to close back
- * to reviewing: refine → refining → (auto rerender) → rendering → (auto accept)
- * → reviewing, with the cycle advanced. The stubbed host calls make the cascade
- * near-instant, and the refining→reviewing error path would ALSO land on
- * reviewing — so the hard proof the loop genuinely RE-RENDERED (not error-
- * bounced) is the reviewing view's `Cycle` kv reading `1`. Poll for that.
- */
-async function driveRefineAndCloseLoop(page: Page, value: string): Promise<void> {
-  diag(`driveRefineAndCloseLoop "${value}"`);
-  const form = page
-    .locator(`form[data-testid="composer"][data-active-intent="refine"]`)
-    .first();
-  await expect(form).toBeVisible({ timeout: 15000 });
-  const input = form.getByTestId("composer-input").first();
-  await input.evaluate((el, v) => {
-    const t = el as HTMLTextAreaElement;
-    t.value = v;
-    t.dispatchEvent(new Event("input", { bubbles: true }));
-  }, value);
-  await dwell(page, 600);
+/** Submit a previously-composed form and assert the resulting state. */
+async function submitComposed(page: Page, form: Locator, expectStateName: string): Promise<void> {
   await form.evaluate((el) => (el as HTMLFormElement).requestSubmit());
-  // The deterministic settle point: back at reviewing.
-  await expectState(page, "reviewing");
-  // Hard proof the rerender loop ran (cycle advanced 0 → 1), distinguishing the
-  // closed loop from a refining→reviewing error bounce. The reviewing room
-  // renders `Cycle: {{ world.cycle }}` as a kv pair (<dt>Cycle</dt><dd>1</dd>).
-  await expect(
-    page.locator(".ve-kv").filter({ hasText: "Cycle" }).first(),
-  ).toContainText("1", { timeout: 15000 });
-  // The re-rendered deck media is back on the reviewing surface.
-  await expect(page.getByTestId("media-element").first()).toBeVisible({ timeout: 15000 });
+  await expectState(page, expectStateName);
   await dwell(page, SETTLE_MS);
 }
 
@@ -248,6 +220,10 @@ test("slidey-edit annotate → refine feature-tour video", async () => {
   const chapters = new ChapterRecorder();
 
   let sessionId = "";
+  // Composers typed (visibly) in a step's pre-step block and submitted in its
+  // post-step block, AFTER the narration screenshot has captured the input.
+  let startForm: Locator | null = null;
+  let refineForm: Locator | null = null;
 
   try {
     // ── 1. Open the home story library and start the tour ON it ──────────────
@@ -278,30 +254,34 @@ test("slidey-edit annotate → refine feature-tour video", async () => {
       }
 
       // ── Pre-step setup: stage the surface a step spotlights BEFORE it shows ──
-      // se-reviewing is the first interactive beat: drive the run idle → drafting
-      // → reviewing so the deck media is present for the whole annotate walk.
-      if (step.id === "se-reviewing") {
+      // se-author is the first interactive beat: TYPE the deck request into the
+      // idle `start` composer and leave it composed-but-unsent, so this step's
+      // narration screenshot shows the operator's input on screen (the submit +
+      // accept happen in the post-step block below, after the shot).
+      if (step.id === "se-author") {
         await expectState(page, "idle");
-        // idle is a normal room: `start` is its single text intent (optional
-        // `feedback`) → the legacy composer (textarea + Send). Drive it on-camera.
-        await driveComposer(page, "start", "author a tight 3-scene explainer deck", "drafting");
-        // drafting is INTERPRETIVE (a host.agent.task authors the deck) and
-        // renders the free-text SEMANTIC composer — no intent buttons, and the
-        // semantic router is non-deterministic without an LLM. Drive the verified
-        // explicit `accept` through THIS view's own store path via the
-        // __kitsokiSubmitIntent test hook (the same technique dev-story-bugfix
-        // uses for its semantic triage room), so the chat re-renders reactively.
-        // accept → rendering → (auto emit_intent accept) → reviewing.
-        diag("se-reviewing: submit accept via __kitsokiSubmitIntent (drafting is semantic)");
-        await page.evaluate(async () => {
-          await (window as unknown as {
-            __kitsokiSubmitIntent?: (n: string, s?: Record<string, unknown>) => Promise<void>;
-          }).__kitsokiSubmitIntent?.("accept", {});
-        });
-        await expectState(page, "reviewing");
-        // The reviewing room renders the deck media element (handle slidey-edit#1).
-        await expect(page.getByTestId("media-element").first()).toBeVisible({ timeout: 15000 });
+        startForm = await composeVisibly(
+          page,
+          "start",
+          "author a tight 3-scene explainer deck",
+        );
+      }
+      // se-refine: back at reviewing, CLOSE the annotator panel so the refine
+      // composer is the clear focus, then TYPE the refinement instruction and
+      // leave it composed-but-unsent for this step's screenshot (submit + close
+      // the loop in the post-step block).
+      if (step.id === "se-refine") {
+        await page
+          .getByTestId("media-annotate-close")
+          .first()
+          .evaluate((el) => (el as HTMLElement).click())
+          .catch(() => undefined);
         await dwell(page, SETTLE_MS);
+        refineForm = await composeVisibly(
+          page,
+          "refine",
+          "tighten the callout I pointed at and add a one-line example beneath it",
+        );
       }
       // se-overlay/se-markers/se-pick spotlight the annotator substrate — open it
       // (and let the poster + sidecar markers draw) just before se-overlay.
@@ -376,22 +356,50 @@ test("slidey-edit annotate → refine feature-tour video", async () => {
           ).toBeVisible({ timeout: 15000 });
           await dwell(page, SETTLE_MS);
         }
-        if (step.id === "se-refine") {
-          // Close the annotator panel so the refine composer is the clear focus,
-          // then drive the location-tied refine AND wait for the whole loop to
-          // close back to reviewing with the cycle advanced (the proof the
-          // rerender ran, not an error bounce). se-loop-closed then narrates the
-          // settled `reviewing` badge.
-          await page
-            .getByTestId("media-annotate-close")
-            .first()
-            .evaluate((el) => (el as HTMLElement).click())
-            .catch(() => undefined);
+        if (step.id === "se-author" && startForm) {
+          // The operator's request was typed (visibly) in the pre-step and shown
+          // in this step's screenshot. Submit it → drafting, where the next beat
+          // (se-drafting) lets the viewer READ the authored plan before anything
+          // is approved. No second typed message here: accept is a single button
+          // click on the drafting plan, not a "looks good" message about a deck
+          // the viewer hasn't seen yet.
+          await submitComposed(page, startForm, "drafting");
+          startForm = null;
+        }
+        if (step.id === "se-drafting") {
+          // The operator typed ONE request and has now READ the authored plan
+          // (this beat's screenshot shows the drafting Summary). Accept it to
+          // render — drafting is interpretive (the state-diagram pill is a viz,
+          // not a submit, and the semantic composer is non-deterministic without
+          // an LLM), so the demo drives the verified explicit `accept` intent
+          // through the store (drafting:accept → rendering → reviewing), exactly
+          // as a flow fixture's `intent: accept` would. NO second typed message:
+          // acceptance is a single advance AFTER the plan was reviewed, so the
+          // viewer never sees two prompts in a row before the deck appears.
+          diag("se-drafting: accept the reviewed plan via __kitsokiSubmitIntent");
+          await page.evaluate(async () => {
+            await (window as unknown as {
+              __kitsokiSubmitIntent?: (n: string, s?: Record<string, unknown>) => Promise<void>;
+            }).__kitsokiSubmitIntent?.("accept", {});
+          });
+          await expectState(page, "reviewing");
+          await expect(page.getByTestId("media-element").first()).toBeVisible({ timeout: 15000 });
           await dwell(page, SETTLE_MS);
-          await driveRefineAndCloseLoop(
-            page,
-            "tighten the callout I pointed at and add a one-line example beneath it",
-          );
+        }
+        if (step.id === "se-refine" && refineForm) {
+          // The refinement instruction was typed (visibly) in the pre-step and
+          // shown in this step's screenshot. Submit it, then WAIT for the whole
+          // loop to close back to reviewing with the cycle advanced — the proof
+          // the rerender ran (not a refining→reviewing error bounce). The
+          // reviewing room renders `Cycle: {{ world.cycle }}` as a kv pair.
+          await refineForm.evaluate((el) => (el as HTMLFormElement).requestSubmit());
+          refineForm = null;
+          await expectState(page, "reviewing");
+          await expect(
+            page.locator(".ve-kv").filter({ hasText: "Cycle" }).first(),
+          ).toContainText("1", { timeout: 15000 });
+          await expect(page.getByTestId("media-element").first()).toBeVisible({ timeout: 15000 });
+          await dwell(page, SETTLE_MS);
         }
         await page.getByTestId("tour-next").click();
         await dwell(page, 700);
