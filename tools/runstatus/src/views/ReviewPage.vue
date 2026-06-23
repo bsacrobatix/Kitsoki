@@ -21,6 +21,8 @@ import { createDataSource } from "../data/source.js";
 import type { Chapter, VisualBundle } from "../data/source.js";
 import type { Flag } from "../lib/flags.js";
 import type { ResolvedElement } from "../lib/resolveElement.js";
+import type { AnnotationAnchor } from "../lib/annotationAnchor.js";
+import { normalizeAnchor } from "../lib/annotationAnchor.js";
 import { dominantChapter } from "../lib/flags.js";
 import type { RrwebEvent } from "../data/session-capture.js";
 import ChapterTimeline from "../components/ChapterTimeline.vue";
@@ -217,6 +219,33 @@ function visualFor(f: Flag): VisualBundle | undefined {
   };
 }
 
+/**
+ * anchorFor builds the v2 unified AnnotationAnchor for a flag (the generalization
+ * of visualFor). The reviewed media is rrweb-backed when `hasReplay`, else a
+ * plain mp4; the picked point/element normalizes into a dom_node (or region)
+ * target via normalizeAnchor, and the flag's time window rides as the still's
+ * t_ms through the back-compat projection. Undefined when the flag carries no
+ * spatial pick (then the question is a plain off-path turn).
+ */
+function anchorFor(f: Flag): AnnotationAnchor | undefined {
+  if (!f.point && !f.element && !f.frame_handle) return undefined;
+  const meta = {
+    media_handle: video.value || undefined,
+    media_kind: (hasReplay.value ? "rrweb" : "mp4") as "rrweb" | "mp4",
+    frame_handle: f.frame_handle ?? undefined,
+    route: `/review/${props.sessionId}`,
+  };
+  // A picked point/element normalizes into the discriminated target; a flag with
+  // only a captured still (no pick) anchors at the time window instead.
+  if (f.point || f.element) {
+    return normalizeAnchor(
+      { point: f.point ?? { x: 0, y: 0 }, element: f.element },
+      meta
+    );
+  }
+  return { ...meta, target: { kind: "time_range", start_ms: f.start_ms } };
+}
+
 function onUpdateInstruction(value: string) {
   if (selectedFlag.value) selectedFlag.value.instruction = value;
 }
@@ -227,7 +256,14 @@ async function onSendChat(input: string) {
   chats[f.id].push({ role: "user", text: input });
   chatBusy.value = true;
   try {
-    const { answer } = await ds.offpath(props.sessionId, input, visualFor(f));
+    // Pass both the back-compat visual bundle and the v2 unified anchor; the
+    // server lifts whichever it reads into the agent ambient.
+    const { answer } = await ds.offpath(
+      props.sessionId,
+      input,
+      visualFor(f),
+      anchorFor(f)
+    );
     chats[f.id].push({ role: "assistant", text: answer });
   } catch (e) {
     chats[f.id].push({
@@ -249,6 +285,9 @@ async function dispatchFlag(f: Flag) {
         : { start_ms: f.start_ms },
     frame_handle: f.frame_handle ?? undefined,
     instruction: f.instruction.trim(),
+    // The v2 unified anchor ties this feedback to its exact location; the
+    // back-compat time_range/frame_handle stay populated above.
+    anchor: anchorFor(f),
   });
   f.sent = true;
 }

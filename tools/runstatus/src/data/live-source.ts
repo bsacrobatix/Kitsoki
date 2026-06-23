@@ -81,6 +81,7 @@ export class TurnCancelledError extends Error {
 }
 import { JsonRpcClient } from "../transport/jsonrpc.js";
 import type { LastRpcError } from "../transport/jsonrpc.js";
+import { serializeAnchor } from "../lib/annotationAnchor.js";
 import { createTransport } from "../transport/transport.js";
 import type { RpcTransport } from "../transport/transport.js";
 
@@ -524,7 +525,8 @@ export class LiveSource implements DataSource {
   offpath(
     sessionId: string,
     input: string,
-    visual?: import("./source.js").VisualBundle
+    visual?: import("./source.js").VisualBundle,
+    anchor?: import("../lib/annotationAnchor.js").AnnotationAnchor
   ): Promise<{ answer: string }> {
     return this.client.post<{ answer: string }>("runstatus.session.offpath", {
       session_id: sessionId,
@@ -534,7 +536,30 @@ export class LiveSource implements DataSource {
       // array; flatten the resolver's {x,y,width,height} into it here so the
       // wire shape matches host.VisualAmbient exactly.
       ...(visual ? { visual: visualParams(visual) } : {}),
+      // The v2 unified annotation anchor rides alongside (the backend slice
+      // lifts the richer discriminated target into the agent ambient). The
+      // component anchor is projected to the on-wire AnchorWire shape
+      // host.AnchorFromParams decodes (kind + sibling-named target, bbox/path as
+      // positional arrays) — UI-only fields are dropped here.
+      ...(serializeAnchorParam(anchor) ? { anchor: serializeAnchorParam(anchor) } : {}),
     });
+  }
+
+  /**
+   * Read an artifact's semantic sidecar via runstatus.artifact.semantic. The
+   * server resolves `<name>.semantic.json` next to the media and returns the
+   * generic element map, or `{ elements: [] }` / a 404-shaped null when there is
+   * no sidecar — the annotator then falls back to the dom_node picker.
+   */
+  async semanticMap(
+    sessionId: string,
+    handle: string
+  ): Promise<import("../lib/semanticPlugins.js").SemanticSidecar | null> {
+    const res = await this.client.post<
+      import("../lib/semanticPlugins.js").SemanticSidecar | null
+    >("runstatus.artifact.semantic", { session_id: sessionId, handle });
+    if (!res || !res.elements || res.elements.length === 0) return null;
+    return res;
   }
 
   /**
@@ -822,9 +847,15 @@ export class LiveSource implements DataSource {
     sessionId: string,
     note: import("./source.js").FeedbackNote
   ): Promise<{ ok: boolean }> {
+    // The note's component-facing `anchor` is projected to the on-wire shape
+    // (kind + sibling-named target) so the server decodes it the same way as the
+    // offpath `anchor` param; the back-compat time_range/frame_handle stay.
+    const { anchor, ...rest } = note;
+    const wire = serializeAnchorParam(anchor);
     return this.client.post("runstatus.feedback.add", {
       session_id: sessionId,
-      ...note,
+      ...rest,
+      ...(wire ? { anchor: wire } : {}),
     });
   }
 
@@ -1319,4 +1350,18 @@ function visualParams(
     };
   }
   return out;
+}
+
+/**
+ * serializeAnchorParam projects the component AnnotationAnchor into the on-wire
+ * AnchorWire object host.AnchorFromParams decodes (kind + sibling-named target).
+ * Returns undefined when there is no anchor or no target (the server then
+ * synthesizes one from the flat visual fields). UI-only fields (point, label,
+ * id) are dropped by serializeAnchor.
+ */
+function serializeAnchorParam(
+  anchor?: import("../lib/annotationAnchor.js").AnnotationAnchor
+): import("../lib/annotationAnchor.js").AnchorWire | undefined {
+  if (!anchor) return undefined;
+  return serializeAnchor(anchor) ?? undefined;
 }
