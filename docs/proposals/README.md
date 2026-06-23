@@ -385,7 +385,9 @@ thought.
   confirm:** on confirm it compiles the profile to a generated dev-story instance
   (`stories/<id>-dev/`, generalizing the `kitsoki-dev`/`gears-rust` binding),
   adopts conventions, and verifies the loop (boot → readiness → tests →
-  golden-path UI). Composes existing hosts only. Nothing implemented yet.
+  golden-path UI). Composes existing hosts only. Initial no-write `go_init`
+  profile review slice is in progress with Slidey as the dogfood target;
+  discovery/mining/apply/verify remain unimplemented.
 - [`work-decomposition.md`](work-decomposition.md) — **story.** A new
   `stories/decompose/` sub-story imported into dev-story: hand it an accepted
   proposal (or epic + children) and an interactive discovery conversation
