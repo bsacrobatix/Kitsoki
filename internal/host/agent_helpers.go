@@ -117,6 +117,7 @@ func buildBaseCLIArgs(ctx context.Context, verb sysprompt.Verb, args map[string]
 		"--permission-mode", "bypassPermissions",
 	}
 	cliArgs = appendSettingSourcesFlag(cliArgs)
+	cliArgs = appendDisableSlashCommandsFlag(cliArgs)
 	cliArgs = appendStrictMCPConfigFlag(cliArgs)
 	cliArgs, _ = appendComposedSystemPrompt(ctx, cliArgs, verb,
 		effectiveSystemPrompt(args, agent), agent.InheritClaudeDefault)

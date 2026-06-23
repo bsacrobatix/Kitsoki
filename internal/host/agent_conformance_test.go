@@ -190,6 +190,7 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		"-p",
 		"--permission-mode", "bypassPermissions",
 		"--setting-sources", "project,local",
+		"--disable-slash-commands",
 		"--append-system-prompt", "SYS-PROMPT",
 		"--model", "some-model",
 		"--effort", "low",
@@ -245,7 +246,7 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		}
 
 		// Claude-only flags must be gone.
-		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--effort", "--verbose", "--append-system-prompt", "--mcp-config ", "stream-json"} {
+		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--disable-slash-commands", "--effort", "--verbose", "--append-system-prompt", "--mcp-config ", "stream-json"} {
 			if strings.Contains(got, dropped) {
 				t.Errorf("copilot args still contain dropped flag %q: %v", dropped, inv.Args)
 			}
@@ -274,6 +275,7 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 			"-p",
 			"--permission-mode", "bypassPermissions",
 			"--setting-sources", "project,local",
+			"--disable-slash-commands",
 			"--append-system-prompt", "SYS-PROMPT",
 			"--model", "some-model",
 			"--effort", "low",
@@ -315,7 +317,7 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		}
 
 		// Claude-only flags must be gone.
-		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--effort", "--verbose", "--append-system-prompt", "--mcp-config", "stream-json", "--output-format"} {
+		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--disable-slash-commands", "--effort", "--verbose", "--append-system-prompt", "--mcp-config", "stream-json", "--output-format"} {
 			if strings.Contains(got, dropped) {
 				t.Errorf("codex args still contain dropped flag %q: %v", dropped, inv.Args)
 			}

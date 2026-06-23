@@ -103,7 +103,8 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 		}
 
 		switch flag {
-		case "-p", "--verbose", "--exclude-dynamic-system-prompt-sections", "--no-session-persistence":
+		case "-p", "--verbose", "--exclude-dynamic-system-prompt-sections", "--no-session-persistence",
+			"--disable-slash-commands":
 			// Dropped: no codex equivalent (or supplied differently).
 		case "--permission-mode", "--setting-sources", "--effort",
 			"--allowedTools", "--disallowedTools":

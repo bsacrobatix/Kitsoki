@@ -2,8 +2,8 @@ package host_test
 
 // Hermetic agent isolation: every claude-CLI invocation a story makes must
 // pin --setting-sources to a set that EXCLUDES the operator's user-global
-// configuration, so a globally-enabled Claude Code plugin/skill can never
-// hijack a story's agent.
+// configuration and disable slash commands/skills, so a globally-enabled or
+// project-local Claude Code plugin/skill can never hijack a story's agent.
 //
 // Regression of record: with BMAD-METHOD enabled in ~/.claude/settings.json
 // (enabledPlugins), the prd story's `interviewer` converse call stopped
@@ -77,6 +77,21 @@ func assertStrictMCPConfig(t *testing.T, path string, args []string) {
 		"argv: %v", path, args)
 }
 
+func assertSkillsDisabled(t *testing.T, path string, args []string) {
+	t.Helper()
+	if len(args) == 0 {
+		t.Fatalf("%s: runner was never invoked (no argv captured)", path)
+	}
+	for _, a := range args {
+		if a == "--disable-slash-commands" {
+			return
+		}
+	}
+	t.Errorf("%s: claude argv missing `--disable-slash-commands`; a story "+
+		"agent could stop to discover or invoke skills instead of following "+
+		"the story prompt. argv: %v", path, args)
+}
+
 func TestAgentSettingSources_Ask(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -94,6 +109,7 @@ func TestAgentSettingSources_Ask(t *testing.T) {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 	assertHermeticSettingSources(t, "ask (buildBaseCLIArgs)", captured)
+	assertSkillsDisabled(t, "ask (buildBaseCLIArgs)", captured)
 	assertStrictMCPConfig(t, "ask (buildBaseCLIArgs)", captured)
 }
 
@@ -108,6 +124,7 @@ func TestAgentSettingSources_ConverseNoChat(t *testing.T) {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 	assertHermeticSettingSources(t, "converse (non-chat path)", captured)
+	assertSkillsDisabled(t, "converse (non-chat path)", captured)
 	assertStrictMCPConfig(t, "converse (non-chat path)", captured)
 }
 
@@ -131,5 +148,6 @@ func TestAgentSettingSources_ConverseChat(t *testing.T) {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 	assertHermeticSettingSources(t, "converse (chat path — interviewer)", captured)
+	assertSkillsDisabled(t, "converse (chat path — interviewer)", captured)
 	assertStrictMCPConfig(t, "converse (chat path — interviewer)", captured)
 }

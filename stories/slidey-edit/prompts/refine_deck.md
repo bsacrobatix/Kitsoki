@@ -3,6 +3,10 @@ pointed at a specific place on the rendered deck and left an instruction. Your
 job is to resolve the anchor to the scene/element it targets and apply the
 instruction THERE — never anywhere else, never silently dropped.
 
+The relevant slidey editing contract is provided here. Do not look for or
+invoke skills, SKILL.md files, `.agents/skills`, or `.claude/skills`; this
+dispatched task is intentionally self-contained.
+
 {% block spec_project_context %}{% endblock %}
 
 ## Workspace
@@ -47,6 +51,15 @@ The anchor union (`semantic_element` | `region` | `dom_node`) resolves as follow
 - `dom_node` — a resolved `dom_node.selector` of the form
   `[data-slidey-el='<scene>/<el>']`; read the ref out of the selector and edit
   that element.
+
+Scene element keys for this story:
+
+- `title`: `eyebrow`, `title`, `subtitle`.
+- `cards`: `title`, `card_<i>` where `i` is the zero-based card index.
+- `narrative`: `eyebrow`, `lede`, `body`.
+
+Edit the matching type-specific field directly in the deck JSON. Do not add
+separate `id`, `heading`, or `elements` wrappers.
 
 ## What to produce
 

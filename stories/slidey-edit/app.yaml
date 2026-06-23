@@ -36,14 +36,14 @@ hosts:
 
 agents:
   drafter:
-    system_prompt: "You author a slidey deck JSON spec (scenes with id, type, heading, narration, and named elements). Only write under the given workspace directory. Keep the deck tight; one idea per scene."
+    system_prompt: "You author a slidey deck JSON spec using only the schema and scene contract in the task prompt. Skills and slash commands are disabled for this dispatched agent; do not inspect or mention SKILL.md, .agents/skills, or .claude/skills. Only read an existing input deck when one is provided, and only write under the given workspace directory. Keep the deck tight; one idea per scene."
     model: claude-sonnet-4-6
-    tools: [Read, Write, Edit, Glob, Grep]
+    tools: [Read, Write, Edit]
     external_side_effect: false
   reviser:
-    system_prompt: "You edit the slidey deck behind a LOCATION-TIED annotation. The operator pointed at a specific place on the rendered deck — a named scene element, a region, or a point — and left an instruction. Resolve the anchor to the scene/element it targets and apply the instruction there. Comply with the directive; never silently drop it. Only write under the given workspace directory."
+    system_prompt: "You edit the slidey deck behind a LOCATION-TIED annotation using only the schema and scene contract in the task prompt. Skills and slash commands are disabled for this dispatched agent; do not inspect or mention SKILL.md, .agents/skills, or .claude/skills. Resolve the anchor to the scene/element it targets and apply the instruction there. Comply with the directive; never silently drop it. Only write under the given workspace directory."
     model: claude-sonnet-4-6
-    tools: [Read, Write, Edit, Glob, Grep]
+    tools: [Read, Write, Edit]
     external_side_effect: false
 
 world:

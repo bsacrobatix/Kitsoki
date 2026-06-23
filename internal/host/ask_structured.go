@@ -92,6 +92,7 @@ func AskStructured(ctx context.Context, opts AskStructuredOptions) (json.RawMess
 		"--mcp-config", cfgPath,
 	}
 	cliArgs = appendSettingSourcesFlag(cliArgs)
+	cliArgs = appendDisableSlashCommandsFlag(cliArgs)
 	cliArgs = appendStrictMCPConfigFlag(cliArgs)
 	if strings.TrimSpace(opts.Model) != "" {
 		cliArgs = append(cliArgs, "--model", opts.Model)

@@ -90,6 +90,15 @@ func TestAlwaysDeniedTools_HeadlessAskUserQuestion(t *testing.T) {
 	})
 }
 
+// TestAgentCLI_DisablesSkills locks in that story-dispatched Claude Code agents
+// do not receive the skill/slash-command surface. Skills are useful for Codex
+// itself, but a story agent should be driven by the story's prompt and declared
+// tools, with any relevant skill content copied deterministically into context.
+func TestAgentCLI_DisablesSkills(t *testing.T) {
+	args := buildBaseCLIArgs(t.Context(), sysprompt.Task, map[string]any{}, Agent{})
+	require.Contains(t, args, "--disable-slash-commands")
+}
+
 func indexOf(s []string, v string) int {
 	for i, x := range s {
 		if x == v {

@@ -510,6 +510,14 @@ func appendSettingSourcesFlag(cliArgs []string) []string {
 	return append(cliArgs, "--setting-sources", agentSettingSources)
 }
 
+// appendDisableSlashCommandsFlag disables Claude Code slash commands, which is
+// also the CLI's documented switch for disabling skills. Story-dispatched agents
+// must follow the story's deterministic prompt and tool surface, not stop to
+// discover or invoke project/user skills.
+func appendDisableSlashCommandsFlag(cliArgs []string) []string {
+	return append(cliArgs, "--disable-slash-commands")
+}
+
 // appendStrictMCPConfigFlag pins --strict-mcp-config so the agent subprocess uses
 // ONLY the MCP servers kitsoki attaches via --mcp-config (the structured-output
 // `submit` validator and, when present, the operator-ask bridge) and IGNORES every
