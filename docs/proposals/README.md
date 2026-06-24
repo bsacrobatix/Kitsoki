@@ -60,6 +60,21 @@ thought.
 
 ## Current proposals
 
+- [`kitsoki-github-agent.md`](kitsoki-github-agent.md) — **epic.** `@kitsoki` in
+  a GitHub issue or PR dispatches a kitsoki run, observable + driveable through a
+  public trace/artifact web service, with kitsoki reporting progress back to the
+  thread. Six slices: GitHub ingress + comment substrate
+  ([`gh-event-ingress.md`](gh-event-ingress.md), runtime), job dispatch
+  ([`gh-job-dispatch.md`](gh-job-dispatch.md), runtime), the PR-autopilot story
+  ([`pr-autopilot-story.md`](pr-autopilot-story.md), story), a persistent
+  trace+artifact service ([`trace-artifact-service.md`](trace-artifact-service.md),
+  tracing), the web viewer + operator-drive surface
+  ([`gh-web-operator-viewer.md`](gh-web-operator-viewer.md), tui), and the
+  tour-driven demo + slidey composite
+  ([`kitsoki-github-demo.md`](kitsoki-github-demo.md)). Round-1 decisions: poll
+  ingest, Postgres state + filesystem artifacts, Postgres job locking,
+  owner-only driving, GitHub-native auth (App token + OAuth). Nothing
+  implemented yet.
 - [`session-mining-backend-generalization.md`](session-mining-backend-generalization.md)
   — **epic.** Generalize session mining from Claude Code-shaped ingestion into a
   backend-normal corpus for Claude Code, Codex, kitsoki traces, and imported
