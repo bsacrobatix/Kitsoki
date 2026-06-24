@@ -61,6 +61,16 @@ def run():
     cns, _ = pricing.message_cost(uns, "claude-sonnet-4-6")
     approx(cns, c5, "unsplit cache write defaults to 5m rate")
 
+    # non-Anthropic bake-off candidates resolve to their own rate rows, compute a
+    # nonzero cost, and are flagged inexact (estimated rows -> cost_exact=false).
+    for mid in ("hf:zai-org/GLM-5.2", "gpt-5.5"):
+        cand_usd, cand_exact = pricing.message_cost(
+            {"input_tokens": 1000, "output_tokens": 500}, mid)
+        p, _ = pricing.price_for(mid)
+        check(p is not pricing.FALLBACK_PRICE, "%s must resolve its own row, not fallback" % mid)
+        check(cand_usd > 0, "%s must compute a nonzero cost: %r" % (mid, cand_usd))
+        check(not cand_exact, "%s is an ESTIMATE row -> must be flagged inexact" % mid)
+
     # unknown model -> fallback tier, flagged inexact
     _, ex = pricing.message_cost(usage, "claude-fable-5")
     check(not ex, "unknown model must be flagged inexact (fallback-priced)")

@@ -43,6 +43,15 @@ on prompt incantations to enforce structure.
   cost-report`): the deterministic story cost vs the real raw-agentic
   cost of the same operations, with a per-intent distribution.
 
+- **[bugfix-bakeoff.md](bugfix-bakeoff.md)** — the *does it work better*.
+  A 2×4 factorial (kitsoki pipeline vs. a naive single multi-stage prompt,
+  across GLM-5.2 / Opus 4.8 / Sonnet 4.6 / GPT-5.5) over 5 real bugs, each
+  from its hermetic parent-commit baseline and graded against the fix's own
+  regression test as a hidden oracle. Asks the headline question: **is
+  structure worth more than a bigger model?** Framework at
+  [`tools/bugfix-bakeoff/`](../../tools/bugfix-bakeoff/). _(template — awaiting
+  live-run data.)_
+
 - **[routing-model-cost-study.md](routing-model-cost-study.md)** — the
   model-selection lever after deterministic routing has already done its
   job. Mines real Kitsoki turns into a routing corpus, compares available

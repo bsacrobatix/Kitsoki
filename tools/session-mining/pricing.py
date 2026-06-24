@@ -30,6 +30,11 @@ class Price:
     cache_write_5m: float  # ephemeral 5-minute cache write (1.25x input)
     cache_write_1h: float  # ephemeral 1-hour cache write (2x input)
     cache_read: float      # cache read (0.1x input)
+    # True when one or more rates are a best-known ESTIMATE rather than a
+    # confirmed published list price. The row still resolves for its model id,
+    # but price_for()/message_cost() flag is_exact=False so the caller discloses
+    # the estimate instead of treating the dollar figure as authoritative.
+    is_estimate: bool = False
 
 
 # Keyed by a model-id prefix; longest matching prefix wins (see price_for).
@@ -40,6 +45,28 @@ PRICING: dict[str, Price] = {
     "claude-sonnet-4": Price(3.0, 15.0, 3.75, 6.0, 0.30),
     # Haiku 4.5 — cheap tier.
     "claude-haiku-4": Price(1.0, 5.0, 1.25, 2.0, 0.10),
+
+    # --- Non-Anthropic bake-off candidates (see tools/bugfix-bakeoff) --------
+    # These models are billed by their own providers, NOT the Anthropic API, so
+    # the cache-tier split below is a pragmatic mapping onto the same Price shape
+    # rather than five independently published rates. All numbers are best-known
+    # public USD/1M-token rates as of 2026-06 and are flagged is_estimate=True so
+    # downstream cost_exact resolves to false (SCHEMA: "false => priced from an
+    # added/est rate row"). Update + clear the flag once rates are confirmed.
+    #
+    # GLM-5.2 served via synthetic.new (model id `hf:zai-org/GLM-5.2`).
+    # ESTIMATE (2026-06): synthetic.new does not publish a per-token GLM-5.2 list
+    # price (flat-subscription gateway); these mirror published GLM-4.x-class
+    # open-weight serving rates. input/output set from that band; cache tiers
+    # derived with the Anthropic multipliers (write_5m=1.25x, write_1h=2x,
+    # read=0.1x) since synthetic.new doesn't bill a separate cache tier.
+    "hf:zai-org/GLM-5.2": Price(0.60, 2.20, 0.75, 1.20, 0.06, is_estimate=True),
+    # GPT-5.5 served via codex (model id `gpt-5.5`).
+    # ESTIMATE (2026-06): public OpenAI GPT-5.5 list price not yet confirmed in
+    # this table; input/output set from the GPT-5-class band and cache_read from
+    # OpenAI's cached-input discount. cache_write tiers derived with the same
+    # Anthropic multipliers for shape parity (OpenAI bills no cache-write fee).
+    "gpt-5.5": Price(1.25, 10.0, 1.5625, 2.50, 0.125, is_estimate=True),
 }
 
 # Models with no published price we model: fall back to this tier and FLAG it so
@@ -64,8 +91,10 @@ def cold_premium(model: str) -> tuple[float, float]:
 
 
 def price_for(model: str) -> tuple[Price, bool]:
-    """Return (price, is_exact). is_exact=False means we used the fallback tier
-    for an unrecognised model and the caller should disclose it."""
+    """Return (price, is_exact). is_exact=False means either we used the fallback
+    tier for an unrecognised model OR the resolved row is a best-known ESTIMATE
+    (Price.is_estimate) rather than a confirmed published rate — in both cases the
+    caller should disclose it."""
     if not model:
         return FALLBACK_PRICE, False
     best, blen = None, -1
@@ -74,7 +103,7 @@ def price_for(model: str) -> tuple[Price, bool]:
             best, blen = price, len(prefix)
     if best is None:
         return FALLBACK_PRICE, False
-    return best, True
+    return best, not best.is_estimate
 
 
 def message_cost(usage: dict, model: str) -> tuple[float, bool]:
