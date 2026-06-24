@@ -19,7 +19,7 @@
 # file, and is never recorded in any trace.
 
 # Point new sessions at one of the profiles below by default (optional).
-# default_profile: synthetic-claude
+# default_profile: codex-native
 
 harness_profiles:
   # claude-code pointed at synthetic.new (Anthropic-compatible endpoint).
@@ -54,8 +54,8 @@ harness_profiles:
   # reasoning effort for codex is not wired (it ignores --effort), so no efforts.
   codex-native:
     backend: codex
-    model: gpt-5-codex
-    models: [gpt-5-codex, gpt-5]
+    model: gpt-5.5
+    models: [gpt-5-codex, gpt-5, gpt-5.5]
 
   # A local llama.cpp model via the builtin plugin (no backend CLI forked).
   llama-local:
