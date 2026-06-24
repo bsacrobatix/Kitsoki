@@ -60,7 +60,7 @@ const STEPS: {
   effort?: string;
 }[] = [
   { profile: "claude-native", reply: "Claude", model: "opus", effort: "high", caption: "Native Anthropic Claude Code", sub: "Pick the model (opus) and the reasoning effort (high)." },
-  { profile: "synthetic-claude", reply: "GLM-5.2", model: "hf:zai-org/GLM-5.2", caption: "claude-code on synthetic.new", sub: "Pick a specific always-on model — hf:zai-org/GLM-5.2." },
+  { profile: "synthetic-claude", reply: "GLM-5.1", model: "hf:zai-org/GLM-5.2", caption: "claude-code on synthetic.new", sub: "Pick a specific always-on model — hf:zai-org/GLM-5.2." },
   { profile: "codex-native", reply: "Codex", model: "gpt-5", caption: "codex on your subscription", sub: "A different backend CLI — with its own models." },
 ];
 

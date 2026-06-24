@@ -44,6 +44,7 @@ func tourCmd() *cobra.Command {
 		fps          int
 		viewportW    int
 		viewportH    int
+		chromePath   string
 	)
 
 	cmd := &cobra.Command{
@@ -161,15 +162,16 @@ the missing MP4).`,
 			// ── Render ───────────────────────────────────────────────────────
 			fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: rendering tour (%d steps) → %s\n", len(manifest.Steps), outDir)
 			res, runErr := tour.Run(cmd.Context(), tour.Config{
-				Manifest:  manifest,
-				Handler:   handler,
-				OutDir:    outDir,
-				VideoBase: binding.VideoBase,
-				Pace:      pace,
-				Headless:  headless,
-				ViewportW: viewportW,
-				ViewportH: viewportH,
-				FPS:       fps,
+				Manifest:   manifest,
+				Handler:    handler,
+				OutDir:     outDir,
+				VideoBase:  binding.VideoBase,
+				Pace:       pace,
+				Headless:   headless,
+				ViewportW:  viewportW,
+				ViewportH:  viewportH,
+				FPS:        fps,
+				ChromePath: chromePath,
 			})
 			if res != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: %d frames, %d chapters, %d screenshots\n",
@@ -200,6 +202,7 @@ the missing MP4).`,
 	cmd.Flags().IntVar(&fps, "fps", 30, "output MP4 frame rate")
 	cmd.Flags().IntVar(&viewportW, "width", 1600, "viewport / video width")
 	cmd.Flags().IntVar(&viewportH, "height", 900, "viewport / video height")
+	cmd.Flags().StringVar(&chromePath, "chrome-path", os.Getenv("KITSOKI_TOUR_CHROME_PATH"), "Chrome/Chromium executable path (default $KITSOKI_TOUR_CHROME_PATH or auto-discover)")
 
 	return cmd
 }

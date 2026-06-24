@@ -12,8 +12,11 @@ related:
   - dev-story-bugfix
   - dev-story-prd-design
 demo:
+  external: true
   # Binary-native render: `kitsoki tour --feature gears-bugfix`. The spec is a
   # skipped stub that satisfies the features:check spec<->feature bijection.
+  # Keep this out of the Pages record/stage loop while stories/gears-bugfix is
+  # skipped by app loading due to its imported @exit:not-reproducible contract.
   spec: tests/playwright/gears-bugfix-video.spec.ts
   artifactDir: gears-bugfix
   videoBase: gears-bugfix-demo
