@@ -13,7 +13,7 @@
     "suite_pass": false,
     "quality": "solved",
     "adjudicated": true,
-    "adjudication_note": "After 1 guidance turn, refuses session B naming the owner. Turn-1 in-memory map did not fence. Oracle false-fails on canonical wording."
+    "adjudication_note": "After 1 guidance turn, refuses session B naming the owner. Oracle false-fails on canonical wording."
   },
   "compliance": {
     "reproduced_red": true,

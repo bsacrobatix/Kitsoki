@@ -13,7 +13,7 @@
     "suite_pass": false,
     "quality": "solved",
     "adjudicated": true,
-    "adjudication_note": "Refuses session B naming the owner; threaded session_id through host_dispatch.go like the canonical fix. Oracle false-fails only on canonical wording."
+    "adjudication_note": "Refuses session B naming the owner; threaded session_id through host_dispatch.go like the canonical fix. Oracle false-fails on canonical wording."
   },
   "compliance": {
     "reproduced_red": true,
@@ -29,7 +29,7 @@
     "cache_read_tokens": 3347915,
     "cache_write_tokens": 140344,
     "total_tokens": 3546998,
-    "cost_usd": 12.009338,
+    "cost_usd": 4.003113,
     "cost_exact": true,
     "wall_time_s": 299.0,
     "guidance_turns": 1

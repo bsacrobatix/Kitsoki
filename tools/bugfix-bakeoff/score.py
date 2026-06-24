@@ -441,8 +441,9 @@ def _kitsoki_usage_events(transcript):
             usage = meta.get("usage") if isinstance(meta, dict) else None
             if usage is None:
                 usage = payload.get("usage")
+            native = meta.get("cost_usd") if isinstance(meta, dict) else None
             if isinstance(usage, dict) and usage:
-                yield payload.get("model", ""), usage
+                yield payload.get("model", ""), usage, native
 
 
 def extract_kitsoki(transcript):
@@ -453,7 +454,10 @@ def extract_kitsoki(transcript):
     tot = dict(input_tokens=0, output_tokens=0, cache_read_tokens=0,
                cache_write_tokens=0, cost_usd=0.0, cost_exact=True, note="")
     saw = False
-    for model, usage in _kitsoki_usage_events(transcript):
+    native_sum = 0.0          # kitsoki's own per-call meta.cost_usd (authoritative)
+    native_all = True         # True only if EVERY usage event carried a native cost
+    priced_sum = 0.0          # our pricing-table fallback
+    for model, usage, native in _kitsoki_usage_events(transcript):
         saw = True
         tot["input_tokens"] += usage.get("input_tokens", 0)
         tot["output_tokens"] += usage.get("output_tokens", 0)
@@ -461,8 +465,21 @@ def extract_kitsoki(transcript):
         tot["cache_write_tokens"] += usage.get("cache_creation_input_tokens", 0)
         priced_model = _MODEL_ALIAS.get(model, model)
         usd, exact = pricing.message_cost(usage, priced_model)
-        tot["cost_usd"] += usd
+        priced_sum += usd
         tot["cost_exact"] = tot["cost_exact"] and exact
+        if isinstance(native, (int, float)):
+            native_sum += native
+        else:
+            native_all = False
+    # Prefer kitsoki's recorded per-call cost (the authoritative figure the
+    # engine itself accounts) when every event carries it; fall back to our
+    # pricing-table derivation otherwise. Native cost is exact-by-construction.
+    if native_all:
+        tot["cost_usd"] = native_sum
+        tot["cost_exact"] = True
+        tot["note"] = "cost from native meta.cost_usd"
+    else:
+        tot["cost_usd"] = priced_sum
     if not saw:
         z = dict(_ZERO_METRICS)
         z["note"] = "kitsoki trace carried no agent usage events"
