@@ -370,6 +370,12 @@ func ghIssueSummary(raw map[string]any) map[string]any {
 // dev-story's `drive` arc routes on `ticket_type == 'bug'|'feature'|'epic'`,
 // and an empty type silently falls through to the no-op self-loop. A
 // GitHub-sourced ticket must always classify to *some* pipeline.
+// GHClassifyType is the exported entry point onto ghClassifyType: it maps a
+// `gh issue ... --json labels,title` row to a bug|feature|epic class for the
+// GitHub-agent router. Exported (rather than duplicated) so router.go reuses
+// the single source of truth for label/title classification.
+func GHClassifyType(raw map[string]any) string { return ghClassifyType(raw) }
+
 func ghClassifyType(raw map[string]any) string {
 	for _, name := range ghLabelNames(raw) {
 		switch strings.ToLower(strings.TrimSpace(name)) {
