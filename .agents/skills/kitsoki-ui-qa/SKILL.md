@@ -292,6 +292,43 @@ A ready-to-edit feature/scenarios pair for a VS Code embed lives at
 `templates/vscode-feature.md` + `templates/vscode-scenarios.yaml` (the worked
 example behind the `vscode-tour` gate above).
 
+## rrweb-embedded slidey composite deck evidence
+
+A new reusable deliverable shape: a **slidey composite deck** — section/title
+slides + chapters authored in slidey, with one or more **embedded act windows**
+that play a captured rrweb clip of a kitsoki surface (seek-rasterized into the
+deck during render). QA the rendered **deck MP4** exactly like any other demo
+video — the gate is unchanged — but mind these composite-specific points:
+
+- **Sample at ≥2fps** (`qa.sh ... --scene` denser, or hand `extract-frames.sh
+  --interval 0.5`). The embedded act scenes are rrweb **seek-rasterized**, so the
+  deck holds a frame and steps it; a ≤1fps sample can land between rasterized
+  steps and miss the legible window of an act window (same rule the demo skill
+  pins for replay videos). Title/section slides are static and forgiving, but the
+  embedded windows need the higher floor.
+- **Each embedded act window must be non-blank.** The #1 composite failure is an
+  act window that renders as an empty/uniform pane (the rrweb clip failed to load
+  or seek, leaving the embed slot blank) while the surrounding deck chrome looks
+  perfect. Treat a blank where an act surface is expected as `fail` — author a
+  scenario step per act window asserting its real content is visible, and lean on
+  `blank-scan.sh` (advisory; promote with `--blank-strict` for a deck where the
+  act windows are the whole point). A deck-frame background or letterbox bars
+  around the embed are legit (background buckets are ignored by the scan); a flat
+  block **inside** the act slot is the defect.
+- **Section/title slides + chapters must be present.** Write scenarios asserting
+  the deck's title slide, each section/divider slide, and that chapter
+  boundaries exist (the deck MP4 should carry a `<video>.chapters.json` sidecar —
+  `pacing-scan.sh` auto-runs over it; a composite missing its chapters or with a
+  flashed-by act window will surface as a pacing flag).
+- **Capture mechanism is invisible to QA.** An **adapter-captured** clip (an app
+  driving slidey's tour engine through its own ADAPTER — e.g.
+  `tools/runstatus/src/tour/kitsoki-tour-adapter.cjs` +
+  `act2-webviewer.tour.json`, whose output is
+  `act2-webviewer.rrweb.json`) is QA'd **identically** to a harness-captured one.
+  Do not special-case it, do not assert on adapter/capture internals — QA judges
+  the rendered pixels of the deck MP4 against the scenarios, full stop. The same
+  blank/pacing/legibility gates apply regardless of how the clip was produced.
+
 ## The tools (`scripts/`)
 
 | Script | Does | LLM? |

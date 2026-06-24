@@ -739,9 +739,11 @@ it only for a surface rrweb can't capture (`<canvas>`/`<video>`/WebGL).
 
 ### 1. Produce an rrweb clip per act
 
-There are **two capture engines**; pick by surface. Both emit a `*.rrweb.json`
-log whose scenes are marked with in-log `slidey.chapter` custom events, so the
-deck's `"chapters": "auto"` derives lower-thirds with **no sidecar**.
+**Capture with slidey's own tour engine whenever you can** — both the static path
+and the SPA-drive path below run through it now (the SPA case via a small app
+adapter), so slidey stamps `slidey.chapter` events natively and the deck's
+`"chapters": "auto"` derives lower-thirds with **no sidecar**. The kitsoki rrweb
+harness fork is the **fallback** for what an adapter still can't express.
 
 - **Static / app-agnostic surface (a `file://` fixture, any plain page) → slidey's
   own tour engine.** It drives a time-based storyboard and stamps `slidey.chapter`
@@ -757,24 +759,53 @@ deck's `"chapters": "auto"` derives lower-thirds with **no sidecar**.
   existing `src/tour/*-manifest.ts`'s step ids/labels/dwellMs so the deck and the
   live overlay can't drift. (Worked: `act1-github.tour.json` walking the static
   `gh-thread.html` GitHub-thread fixture.)
-- **A kitsoki SPA drive that needs the composer / intent routing / tour overlay →
-  the kitsoki rrweb capture harness** (slidey's tour engine has no vocabulary for
-  `typeAndSend` prose→slot-intent routing, the `__kitsokiSubmitIntent` verb seam,
-  or `__startTourWithSteps`). Fork the act's `*-video.spec.ts` drive and add
-  `installCapture`/`dumpCapture`/`writeEvents` from
-  `_helpers/rrweb-replay.ts` — exactly as `slidey-pm-idea-rrweb-capture.spec.ts`
-  does — driving a **real no-LLM `kitsoki web` replay** server. Stamp the chapter
-  markers yourself at each step boundary so the clip is self-describing:
-  ```ts
-  await page.evaluate(([id, title]) =>
-    window.rrweb.record.addCustomEvent("slidey.chapter", { id, title }),
-    [step.id, step.title]);
-  ```
-  Write the clip straight to `<deck-dir>/clips/<act>.rrweb.json`. (Worked:
-  `github-demo-act2-rrweb-capture.spec.ts` → `act2-webviewer.rrweb.json`.)
-  The **canvas/video boundary still applies** (see the rrweb section above): a
-  tour with a `<canvas>`/`<video>`/WebGL tile can't rrweb-capture and stays on the
-  MP4 path — embed it via `"src"` instead of `"rrweb"`.
+- **A kitsoki SPA drive that needs the composer / intent routing → ship a small
+  slidey tour ADAPTER, then capture with slidey's own engine.** slidey's tour
+  engine now has an **adapter seam** (proposal `docs/proposals/extensible-tour-engine.md`,
+  shipped to slidey main `c303cc0`): an app registers its own step verbs +
+  advance strategies, so the surfaces slidey core can't express (`typeAndSend`
+  prose→slot-intent routing, the `__kitsokiSubmitIntent` verb seam, a state-gated
+  advance) become ordinary tour steps. This collapses Act 2 back onto **one
+  capture path** — slidey injects `slidey.chapter` events **natively** (no
+  hand-stamping), and the same `tour.json` drives both freeze-frame PNG iteration
+  and the shippable rrweb clip. Prefer this over the harness fork.
+  - **Worked example** (kitsoki Act 2 of the @kitsoki GitHub-loop demo):
+    - adapter:  `tools/runstatus/src/tour/kitsoki-tour-adapter.cjs` —
+      `actions: { composeAndSend, submitIntent }` + `advancers: { 'state-match' }`
+      (waits the run's `state-badge` to a named machine state).
+    - tour:     `tools/runstatus/src/tour/act2-webviewer.tour.json` —
+      `"adapter": "./kitsoki-tour-adapter.cjs"` (module path resolved RELATIVE TO
+      THE SPEC FILE via `ctx.resolve`); steps use the adapter verbs in `drive:[]`
+      and the `state-match` advancer.
+    - clip:     `docs/proposals/demo-assets/kitsoki-github/deck/clips/act2-webviewer.rrweb.json`
+      (adapter-captured; written straight into `<deck-dir>/clips/`).
+  - **Capture** with slidey's engine (rrweb format, app-free core):
+    ```bash
+    node /Users/brad/code/slidey/src/index.js capture \
+      tools/runstatus/src/tour/act2-webviewer.tour.json \
+      docs/proposals/demo-assets/kitsoki-github/deck/clips/act2-webviewer.rrweb.json \
+      --format rrweb --adapter ./tools/runstatus/src/tour/kitsoki-tour-adapter.cjs
+    ```
+    (a CLI `--adapter` path is resolved against CWD; the spec's `adapter` field is
+    resolved relative to the spec. `captureToRrweb(tour, out, { adapter })` also
+    takes an adapter OBJECT, which wins over the spec field.) Adapter interface +
+    `{ baseAdapter, normalizeAdapter, registerAdapter, resolveAdapter }` are
+    documented at the `slidey/tour-adapter` subpath.
+  - **kitsoki rrweb harness fork = fallback only.** Keep the
+    `installCapture`/`dumpCapture`/`writeEvents` harness fork (worked:
+    `slidey-pm-idea-rrweb-capture.spec.ts`) ONLY for what an adapter still can't
+    express — e.g. reusing the app's `__startTourWithSteps` narration overlay, or a
+    drive that needs Playwright APIs the slidey engine doesn't surface. If you do
+    fork, stamp the chapter markers yourself:
+    ```ts
+    await page.evaluate(([id, title]) =>
+      window.rrweb.record.addCustomEvent("slidey.chapter", { id, title }),
+      [step.id, step.title]);
+    ```
+  - The **canvas/video boundary still applies** to BOTH paths (see the rrweb
+    section above): a tour with a `<canvas>`/`<video>`/WebGL tile can't
+    rrweb-capture and stays on the MP4 path — embed it via `"src"` instead of
+    `"rrweb"`.
 
 > **The `WEB_CHAT_PACE=0` trap.** A fast-validate run **overwrites the clip with a
 > collapsed-timing flash**. Always re-run the capture at watch speed (the default)
@@ -939,8 +970,12 @@ make mcp-qa           # vision QA gate (GATED: local claude CLI)
   `tools/runstatus/src/tour/agent-actions-manifest.ts`
 - **Slidey rrweb-embedded composite (preferred multi-act deliverable):**
   `docs/proposals/demo-assets/kitsoki-github/deck/kitsoki-github.deck.json` +
-  `deck/clips/*.rrweb.json` + `deck/tours/act1-github.tour.json` +
-  `tools/runstatus/tests/playwright/github-demo-{act2-rrweb-capture,composite}.spec.ts`;
+  `deck/clips/*.rrweb.json` + `deck/tours/act1-github.tour.json`;
+  Act 2 via the **slidey tour adapter** —
+  `tools/runstatus/src/tour/kitsoki-tour-adapter.cjs` +
+  `tools/runstatus/src/tour/act2-webviewer.tour.json` (composer/intent SPA drive,
+  one slidey capture path); composite gate
+  `tools/runstatus/tests/playwright/github-demo-composite.spec.ts`;
   richer reference `.artifacts/slidey-hybrid/dev-story-hybrid.json`; scene menu in
   the `slidey-authoring` skill
 - **Cross-site / multi-act demo (legacy ffmpeg concat):** `gh-issue-review-video.spec.ts` +
