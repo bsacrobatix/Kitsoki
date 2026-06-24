@@ -154,39 +154,86 @@ async function runDrive(page: Page, actions: TourStep["drive"]): Promise<void> {
   }
 }
 
+// The InputBar's composer send() emits the room's ACTIVE text-intent directly
+// (e.g. core__prd__discuss {message}), NOT free-text routing — so the message
+// only reaches the PRD discuss when the composer is bound to the PRD room's
+// intent. The trap: after a navigation (core__go_prd → core.prd.idle) the
+// `current-state` testid and the session.view available-intents update on
+// different ticks; for a render window the composer is still bound to the
+// OUTGOING dev-story landing room's `work` intent (placeholder "Describe
+// Work…"). Typing then emits `work` → the landing_agent, not the discuss.
+//
+// waitForComposerSettled blocks until the composer is bound to the room we are
+// about to talk to: a single visible primary input whose placeholder is NOT the
+// landing "Describe Work…" surface, held steady across two polls.
+const LANDING_PLACEHOLDER_RE = /describe work/i;
+async function waitForComposerSettled(page: Page, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastKey = "";
+  let stableCount = 0;
+  while (Date.now() < deadline) {
+    const snap = await page.evaluate(() => {
+      const composer = document.querySelector('[data-testid="composer-input"]') as HTMLElement | null;
+      const floor = document.querySelector('[data-testid="text-floor-input"]') as HTMLElement | null;
+      const pick = composer ?? floor;
+      const vis = (el: HTMLElement | null) =>
+        !!el && el.getBoundingClientRect().height > 0 && getComputedStyle(el).visibility !== "hidden";
+      return {
+        hasComposer: vis(composer),
+        hasFloor: vis(floor),
+        placeholder: pick ? (pick.getAttribute("placeholder") ?? "") : "",
+        key: pick ? `${composer ? "c" : "f"}:${pick.getAttribute("placeholder") ?? ""}` : "",
+      };
+    });
+    const single = (snap.hasComposer ? 1 : 0) + (snap.hasFloor ? 1 : 0) === 1;
+    const notLanding = !LANDING_PLACEHOLDER_RE.test(snap.placeholder);
+    if (single && notLanding && snap.key !== "" && snap.key === lastKey) {
+      stableCount++;
+      if (stableCount >= 2) return;
+    } else {
+      stableCount = 0;
+    }
+    lastKey = snap.key;
+    await page.waitForTimeout(150);
+  }
+  diag(`waitForComposerSettled: timed out (last key="${lastKey}")`);
+}
+
+// typeAndSend drives a FREE-TEXT turn through InteractiveView's own store hook
+// (`window.__kitsokiSendText` → store.sendText → session.turn → the replay
+// recording routes the utterance to its slot-bearing intent). This is the
+// SANCTIONED tour-driving path: it goes through the view's reactive store so the
+// chat transcript AND the InputBar re-render for the new room — unlike poking the
+// DOM composer + clicking send, which (a) emits whatever stale text-intent the
+// InputBar is still bound to during the post-navigation render window (the
+// dev-story landing `work` intent → landing_agent), and (b) leaves the view
+// stale after an out-of-band transition. The composer settle below still gives
+// the camera a clean frame; the hook is what actually routes the turn.
 async function typeAndSend(page: Page, text: string): Promise<void> {
-  const filled = await page.evaluate((t) => {
-    const input =
-      (document.querySelector('[data-testid="composer-input"]') as HTMLInputElement | null) ??
-      (document.querySelector('[data-testid="text-floor-input"]') as HTMLInputElement | null);
-    if (!input) return false;
-    input.focus();
-    input.value = t;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+  await waitForComposerSettled(page);
+  const ok = await page.evaluate(async (t) => {
+    const fn = (window as unknown as { __kitsokiSendText?: (s: string) => Promise<void> }).__kitsokiSendText;
+    if (!fn) return false;
+    await fn(t);
     return true;
   }, text);
-  if (!filled) throw new Error("composer-input not found (no composer or text floor)");
-  await page.waitForTimeout(200);
-  const sent = await page.evaluate(() => {
-    const btn =
-      (document.querySelector('[data-testid="composer-send"]') as HTMLElement | null) ??
-      (document.querySelector('[data-testid="text-floor-send"]') as HTMLElement | null);
-    if (!btn) return false;
-    btn.click();
-    return true;
-  });
-  if (!sent) throw new Error("composer-send not found");
+  if (!ok) throw new Error("__kitsokiSendText hook not present (InteractiveView not mounted?)");
 }
 
 async function clickIntent(page: Page, intent: string): Promise<void> {
-  const ok = await page.evaluate((id) => {
-    const btn = document.querySelector(`[data-testid="intent-btn-${id}"]`) as HTMLElement | null;
-    if (!btn) return false;
-    btn.scrollIntoView({ block: "center" });
-    btn.click();
+  // Drive the explicit intent through the same reactive store path the InputBar
+  // buttons use (`window.__kitsokiSubmitIntent`), so the view re-renders for the
+  // resulting room. Equivalent to clicking the rendered intent/choice button but
+  // immune to the button not yet being present during a render tick.
+  const ok = await page.evaluate(async (name) => {
+    const fn = (window as unknown as {
+      __kitsokiSubmitIntent?: (n: string, s?: Record<string, unknown>) => Promise<void>;
+    }).__kitsokiSubmitIntent;
+    if (!fn) return false;
+    await fn(name, {});
     return true;
   }, intent);
-  if (!ok) throw new Error(`intent button ${intent} not found`);
+  if (!ok) throw new Error(`__kitsokiSubmitIntent hook not present for ${intent}`);
 }
 
 async function waitForState(page: Page, state: string, timeoutMs: number): Promise<void> {
