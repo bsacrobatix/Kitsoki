@@ -45,7 +45,8 @@ const argv = process.argv.slice(2);
 if (!argv.length) { usage('missing <clip.rrweb.json | dir>'); }
 const src = argv[0];
 const opt = {
-  out: '', minDwell: 1200, coalesce: 150, sigMinAdds: 4, sigMinText: 24,
+  out: '', minDwell: 1200, maxDwell: 2600, msPerChar: 16,
+  coalesce: 150, sigMinAdds: 4, sigMinText: 24,
   tailWindow: 4000, failOnFind: false,
 };
 for (let i = 1; i < argv.length; i++) {
@@ -54,6 +55,8 @@ for (let i = 1; i < argv.length; i++) {
   switch (a) {
     case '--out': opt.out = argv[++i]; break;
     case '--min-dwell': opt.minDwell = num(); break;
+    case '--max-dwell': opt.maxDwell = num(); break;
+    case '--per-char': opt.msPerChar = num(); break;
     case '--coalesce': opt.coalesce = num(); break;
     case '--sig-min-adds': opt.sigMinAdds = num(); break;
     case '--sig-min-text': opt.sigMinText = num(); break;
@@ -106,7 +109,7 @@ function scanClip(path) {
   const tEnd = events[events.length - 1].timestamp;
   const durationMs = tEnd - t0;
 
-  // Significant content reveals, as relative-ms timestamps.
+  // Significant content reveals, with the text length they put on screen.
   const reveals = [];
   for (const e of events) {
     if (e.type !== 3 || !e.data || e.data.source !== 0) continue;
@@ -114,20 +117,25 @@ function scanClip(path) {
     if (!Array.isArray(adds) || !adds.length) continue;
     const { nodes, maxText } = contentAdds(adds);
     if (nodes >= opt.sigMinAdds || maxText >= opt.sigMinText) {
-      reveals.push(e.timestamp - t0);
+      reveals.push({ ts: e.timestamp - t0, textLen: maxText });
     }
   }
 
-  // Coalesce reveals within --coalesce ms into groups (one logical render).
+  // Coalesce reveals within --coalesce ms into groups (one logical render); a
+  // group's text weight is the longest text block it revealed.
   const groups = [];
-  for (const ts of reveals) {
-    if (groups.length && ts - groups[groups.length - 1].endMs <= opt.coalesce) {
-      groups[groups.length - 1].endMs = ts;
-      groups[groups.length - 1].count++;
+  for (const r of reveals) {
+    if (groups.length && r.ts - groups[groups.length - 1].endMs <= opt.coalesce) {
+      const g = groups[groups.length - 1];
+      g.endMs = r.ts; g.count++; g.textLen = Math.max(g.textLen, r.textLen);
     } else {
-      groups.push({ atMs: ts, endMs: ts, count: 1 });
+      groups.push({ atMs: r.ts, endMs: r.ts, count: 1, textLen: r.textLen });
     }
   }
+
+  // Required dwell scales with the text shown — a long typed answer needs real
+  // reading time, or the transcript scrolls past it before it can be read.
+  const requiredDwell = (textLen) => Math.min(opt.maxDwell, opt.minDwell + Math.max(0, textLen) * opt.msPerChar);
 
   // Dwell per group = gap to the next group's start; last group runs to clip end.
   const flagged = [];
@@ -135,12 +143,16 @@ function scanClip(path) {
     const start = groups[i].atMs;
     const nextStart = i + 1 < groups.length ? groups[i + 1].atMs : durationMs;
     const dwellMs = Math.round(nextStart - start);
+    const need = Math.round(requiredDwell(groups[i].textLen));
     groups[i].dwellMs = dwellMs;
-    if (dwellMs < opt.minDwell) {
+    groups[i].requiredMs = need;
+    if (dwellMs < need) {
       flagged.push({
-        index: i, atMs: Math.round(start), dwellMs,
+        index: i, atMs: Math.round(start), dwellMs, requiredMs: need, textLen: groups[i].textLen,
         inTail: start >= durationMs - opt.tailWindow,
-        issue: `content reveal on screen ${dwellMs}ms < ${opt.minDwell}ms readable dwell — flashes by before the next message/scroll`,
+        issue: `content reveal on screen ${dwellMs}ms < ${need}ms readable dwell` +
+          (groups[i].textLen >= opt.sigMinText ? ` (${groups[i].textLen} chars of text)` : '') +
+          ' — flashes by before the next message/scroll',
       });
     }
   }
