@@ -11,37 +11,27 @@ version: 1
 # oracle_test = the regression test ADDED by the fix; it is the grader's hidden
 # oracle (NOT placed in the candidate's tree until scoring): RED at baseline,
 # must be GREEN after a real fix. oracle_kind picks the runner.
+#
+# NOTE on bug selection (pre-flight finding, 2026-06-24): of the 6 marathon
+# "real fixes", only #9/#12/#14 are genuinely RED at `<fix>^` (bug present).
+# #1/#2/#8 were DROPPED as degenerate — their marathon commit landed a
+# regression test atop an already-merged behavioral fix, so the oracle passes
+# GREEN at the baseline (no bug to reproduce). That non-armed-gate observation
+# is itself a dogfood-honesty finding captured in the case study.
+#   #1 031c8bda^ 0b4ac40d  GREEN (real runtime fix db7b283f predates; lint only)
+#   #2 e0f77582^ 2c62f06b  GREEN (all 3 repro funcs pass without the fix)
+#   #8 82734e37^ f4f322ea  GREEN (both repro funcs pass without the fix)
 bugs:
-  - id: bug1
-    ticket: issues/bugs/2026-05-14T103205Z-tui-view-render-before-bind.md
-    title: "TUI view templates render BEFORE on_enter binds — first frame shows '(pending)'"
-    severity: P2
-    component: tui
-    fix_sha: 031c8bda
-    baseline_sha: 0b4ac40d
-    oracle_test: internal/orchestrator/render_before_bind_repro_test.go
-    oracle_kind: go            # `go test -run` the added test
-    affected_test_pkgs: [./internal/app/..., ./internal/orchestrator/...]
-  - id: bug2
-    ticket: issues/bugs/2026-05-14T120000Z-glamour-cap-prose-views.md
-    title: "Prose view blocks don't expand past their hand-wrapped width on wide terminals"
-    severity: P3
-    component: tui
-    fix_sha: e0f77582
-    baseline_sha: 2c62f06b
-    oracle_test: internal/tui/repro_glamour_cap_prose_test.go
-    oracle_kind: go
-    affected_test_pkgs: [./internal/tui/..., ./internal/render/...]
-  - id: bug8
-    ticket: issues/bugs/2026-06-03T121407Z-agent-decide-silent-abandon-empty-artifact.md
-    title: "agent.decide with no submit routes to success with an empty artifact instead of failing"
+  - id: bug9
+    ticket: issues/bugs/2026-06-03T121409Z-concurrent-dogfood-sessions-share-checkout-destructive-git.md
+    title: "Concurrent dogfood sessions share one checkout — destructive git (WIP clobbered)"
     severity: P1
-    component: runtime
-    fix_sha: 82734e37
-    baseline_sha: f4f322ea
-    oracle_test: internal/host/agent_decide_empty_artifact_repro_test.go
-    oracle_kind: go
-    affected_test_pkgs: [./internal/host/..., ./internal/mcp/...]
+    component: host
+    fix_sha: 67ac5fb1
+    baseline_sha: ea2ca55a
+    oracle_test: internal/host/concurrent_checkout_repro_test.go
+    oracle_kind: go            # behavioral RED: session B create not refused
+    affected_test_pkgs: [./internal/host/..., ./internal/orchestrator/...]
   - id: bug12
     ticket: issues/bugs/2026-06-10T141756Z-decide-postcmd-captured-submit-reported-abandoned.md
     title: "host.agent.decide with validator.post_cmd reports 'abandoned' when the payload WAS captured"

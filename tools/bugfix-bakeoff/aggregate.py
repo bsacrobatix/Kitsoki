@@ -117,7 +117,10 @@ def build_agenteval_reports(manifest, cells, generated_at):
     for bug_id, bug_cells in sorted(by_bug.items()):
         candidates = []
         for c in sorted(bug_cells, key=lambda x: (x["candidate"], x["treatment"])):
-            passed = c["outcome"]["oracle_pass"]
+            # pass tracks the (possibly adjudicated) quality, not the raw oracle:
+            # a behaviorally-correct fix that an wording-coupled oracle false-fails
+            # but a judge adjudicated `solved` should count as a pass here.
+            passed = c["outcome"]["quality"] == "solved"
             candidates.append({
                 "profile": f"{c['candidate']}|{c['treatment']}",
                 "model": c.get("model", ""),

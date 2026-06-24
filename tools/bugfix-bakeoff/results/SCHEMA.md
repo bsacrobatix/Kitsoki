@@ -22,7 +22,10 @@ these shapes.
     "oracle_status": "pass|fail|noncompile|absent",
     "build_pass": true,             // go build ./... (go bugs) — n/a -> null
     "suite_pass": true,             // affected_test_pkgs green (no regressions)
-    "quality": "solved|partial|failed"   // solved = oracle+build+suite all green
+    "quality": "solved|partial|failed",  // solved = oracle+build+suite all green;
+                                    // MAY be human/LLM-overridden (see adjudicated)
+    "adjudicated": false,           // true => quality was overridden by a human/LLM
+    "adjudication_note": ""         // rationale for the override (empty otherwise)
   },
 
   "compliance": {
@@ -56,6 +59,15 @@ these shapes.
 `partial` = oracle_pass but a regression or build issue, OR bug plausibly fixed
 but oracle noncompiles against the candidate's differing implementation (note it);
 `failed` = oracle_fail.
+
+**Adjudication.** Some oracles are wording/implementation-coupled (they assert a
+literal substring or symbol from the canonical fix) and so false-fail a
+behaviorally-correct fix. A human or LLM judge may override `quality` via
+`score.py --adjudication <solved|partial|failed> --adjudication-note "<why>"`.
+The override sets `outcome.quality` to the adjudicated value, `adjudicated=true`,
+and records the rationale — but `oracle_status` ALWAYS keeps the raw automated
+result (e.g. `fail`), so the JSON never lies about what the oracle did. The
+aggregate rollups (solve_rate etc.) key on the possibly-adjudicated `quality`.
 
 ## Aggregate — `results/summary.json`
 

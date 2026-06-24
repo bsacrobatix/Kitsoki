@@ -93,8 +93,17 @@ if [ "$MODE" = "run" ]; then
 
   [ -n "$INVOKER" ] || { echo "run_cell: unknown candidate '$CAND'" >&2; exit 1; }
 
-  # --- prepare the (isolated) worktree -------------------------------------
-  WT_PATH="$("$SCRIPT_DIR/prepare.sh" "$BUG" "$CAND" "$TREAT")"
+  # --- worktree -------------------------------------------------------------
+  # Turn 1 (no guidance) prepares a fresh isolated worktree. A guidance turn
+  # RESUMES the same session and must REUSE the existing worktree (which now
+  # holds turn-1's work, committed or not) — re-preparing would refuse it as
+  # dirty/off-baseline and the resume would never run.
+  if [ -z "$GUIDANCE" ]; then
+    WT_PATH="$("$SCRIPT_DIR/prepare.sh" "$BUG" "$CAND" "$TREAT")"
+  else
+    WT_PATH="$REPO_ROOT/.worktrees/bakeoff-${BUG}-${CAND}-${TREAT}"
+    [ -d "$WT_PATH" ] || { echo "run_cell: no worktree to resume at $WT_PATH (run turn 1 first)" >&2; exit 1; }
+  fi
   echo "run_cell: worktree = $WT_PATH" >&2
 fi
 
@@ -161,7 +170,9 @@ run_single_claude_p() {
     # ── turn 1: the staged prompt ──
     echo "run_cell: [COST] claude -p turn 1 (model=$MODEL) in $WT_PATH" >&2
     out="$(cd "$WT_PATH" && claude -p "$(cat "$PROMPT_FILE")" \
-            --output-format json --model "$MODEL")"
+            --output-format json --model "$MODEL" \
+            --permission-mode acceptEdits \
+            --allowedTools Bash Edit Write Read Glob Grep MultiEdit)"
     turns=1
   else
     # ── resumed guidance turn (operator-decided after an oracle check) ──
@@ -171,7 +182,9 @@ run_single_claude_p() {
     [ "$n" -lt "$MAX_TURNS" ] || { echo "run_cell: max_guidance_turns=$MAX_TURNS reached" >&2; exit 1; }
     echo "run_cell: [COST] claude -p --resume $sid guidance turn $((n+1))" >&2
     out="$(cd "$WT_PATH" && claude -p --resume "$sid" "$GUIDANCE" \
-            --output-format json --model "$MODEL")"
+            --output-format json --model "$MODEL" \
+            --permission-mode acceptEdits \
+            --allowedTools Bash Edit Write Read Glob Grep MultiEdit)"
     turns=$((n+1))
   fi
 
