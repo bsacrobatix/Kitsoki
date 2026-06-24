@@ -49,8 +49,9 @@ on prompt incantations to enforce structure.
   from its hermetic parent-commit baseline and graded against the fix's own
   regression test as a hidden oracle. Asks the headline question: **is
   structure worth more than a bigger model?** Framework at
-  [`tools/bugfix-bakeoff/`](../../tools/bugfix-bakeoff/). _(template — awaiting
-  live-run data.)_
+  [`tools/bugfix-bakeoff/`](../../tools/bugfix-bakeoff/). _(methodology
+  validated + first `bug9` results; full grid pending — structure proved
+  more thorough, not automatically cheaper.)_
 
 - **[routing-model-cost-study.md](routing-model-cost-study.md)** — the
   model-selection lever after deterministic routing has already done its
