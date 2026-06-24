@@ -41,6 +41,17 @@ Before submitting:
   disk, recorded shell session, screen capture).
 - `involved_components[*].name` must be a real component / module / service
   in the codebase; phantom components corrupt downstream context.
+- **Your reproduction must be RED *now*, on the unfixed tree.** Write a test
+  (or runnable script) that asserts the CORRECT behaviour, then run it and
+  confirm it FAILS against the current buggy code. A test that already passes
+  before any fix is a *characterization* test, not a reproduction — it never
+  proves the bug, and the pipeline's regression gate will reject the run. Put
+  the exact command that runs it in `steps`, and quote the failing output in
+  `actual_outcome`. If you cannot make it fail, the bug is not reproduced —
+  say so honestly in `summary_markdown` rather than submitting a green test.
+- Assert *behaviour*, not a specific implementation. The fix may be written a
+  different way than you expect; your test should pass for ANY correct fix, so
+  avoid pinning internal symbols, exact error strings, or one mechanism.
 - `summary_markdown` is what a human reviewer will read in the checkpoint
   inbox — write it for them, not for yourself.{% endblock %}
 
