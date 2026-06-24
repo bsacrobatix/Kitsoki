@@ -3,10 +3,16 @@
   "meta": {
     "title": "@kitsoki — a GitHub-native agent",
     "mode": "pitch",
-    "resolution": { "width": 1600, "height": 900 },
+    "resolution": {
+      "width": 1600,
+      "height": 900
+    },
     "narration": {
       "voice": "en-AU-NatashaNeural",
-      "pronunciations": { "kitsoki": "kit-SOH-kee", "GitHub": "GIT-hub" }
+      "pronunciations": {
+        "kitsoki": "kit-SOH-kee",
+        "GitHub": "GIT-hub"
+      }
     },
     "personas": [
       {
@@ -23,7 +29,7 @@
         "role": "GitHub-native agent",
         "intro": "Reads the mention, dispatches a story, and works the loop — one rolling status, one linkable run, every step on the record.",
         "color": "#e0a23a",
-        "glyph": "🦊"
+        "avatar": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIiB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJLaXRzb2tpIG1lc2Egc3VuIChzaW1wbGlmaWVkKSI+CiAgPGNpcmNsZSBjeD0iNTAiIGN5PSIzMiIgcj0iMTgiIGZpbGw9IiNlMGEyM2EiLz4KICA8ZyBzdHJva2U9IiNlMGEyM2EiIHN0cm9rZS13aWR0aD0iNiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIj4KICAgIDxsaW5lIHgxPSI3OCIgeTE9IjMyIiB4Mj0iNzEiIHkyPSIzMiIvPgogICAgPGxpbmUgeDE9IjcwIiB5MT0iMTIiIHgyPSI2NSIgeTI9IjE3Ii8+CiAgICA8bGluZSB4MT0iNTAiIHkxPSI0IiB4Mj0iNTAiIHkyPSIxMSIvPgogICAgPGxpbmUgeDE9IjMwIiB5MT0iMTIiIHgyPSIzNSIgeTI9IjE3Ii8+CiAgICA8bGluZSB4MT0iMjIiIHkxPSIzMiIgeDI9IjI5IiB5Mj0iMzIiLz4KICA8L2c+CiAgPHBhdGggZD0iTTggODQgTDggNzQgTDM2IDc0IEwzNiA1OSBMNjQgNTkgTDY0IDc0IEw5MiA3NCBMOTIgODQgWiIgZmlsbD0iI2E4NDkyYiIvPgogIDxyZWN0IHg9IjgiIHk9Ijg0IiB3aWR0aD0iODQiIGhlaWdodD0iOCIgZmlsbD0iIzdkMmUxYyIvPgo8L3N2Zz4K"
       }
     ]
   },
@@ -39,7 +45,10 @@
       "type": "personas",
       "variant": "cast",
       "title": "The cast",
-      "personas": ["maintainer", "kitsoki"],
+      "personas": [
+        "maintainer",
+        "kitsoki"
+      ],
       "caption": "Two actors, one thread — every hand-off a comment, every run a linkable, replayable record.",
       "narration": "Two actors share one GitHub thread: a maintainer who mentions kitsoki, and kitsoki, a GitHub-native agent. Every hand-off is a comment, and every run is a linkable, replayable record."
     },
@@ -48,12 +57,36 @@
       "variant": "use-cases",
       "title": "Who does what",
       "cases": [
-        { "who": "maintainer", "action": "Mentions @kitsoki on a labelled issue or PR", "detail": "the only ingress — no App to install" },
-        { "who": "kitsoki", "action": "Reads the label and dispatches the right story", "detail": "bug → bugfix, feature → PRD/design" },
-        { "who": "kitsoki", "action": "Watches CI, pushes fixes, rebases conflicts", "detail": "the PR loop, unsupervised" },
-        { "who": "kitsoki", "action": "Implements reviewer comments, resolves threads", "detail": "or asks first when unsure" },
-        { "who": "maintainer", "action": "Opens the run link into the kitsoki viewer", "detail": "the live trace, by handle" },
-        { "who": "maintainer", "action": "Drives the run from the composer", "detail": "the operator surface" }
+        {
+          "who": "maintainer",
+          "action": "Mentions @kitsoki on a labelled issue or PR",
+          "detail": "the only ingress — no App to install"
+        },
+        {
+          "who": "kitsoki",
+          "action": "Reads the label and dispatches the right story",
+          "detail": "bug → bugfix, feature → PRD/design"
+        },
+        {
+          "who": "kitsoki",
+          "action": "Watches CI, pushes fixes, rebases conflicts",
+          "detail": "the PR loop, unsupervised"
+        },
+        {
+          "who": "kitsoki",
+          "action": "Implements reviewer comments, resolves threads",
+          "detail": "or asks first when unsure"
+        },
+        {
+          "who": "maintainer",
+          "action": "Opens the run link into the kitsoki viewer",
+          "detail": "the live trace, by handle"
+        },
+        {
+          "who": "maintainer",
+          "action": "Drives the run from the composer",
+          "detail": "the operator surface"
+        }
       ],
       "narration": "Across the loop, the maintainer mentions kitsoki and later opens and drives the run. kitsoki reads the label, dispatches the right story, works the pull request — watching CI, pushing fixes, rebasing conflicts, implementing reviewer comments — and asks first when it is not sure."
     },
@@ -69,10 +102,26 @@
       "variant": "use-cases",
       "title": "On the thread",
       "cases": [
-        { "who": "maintainer", "action": "Mentions @kitsoki on a bug-labelled issue", "detail": "mention ingress" },
-        { "who": "kitsoki", "action": "Acks with one …/run/<job-id> link", "detail": "one mention, one job, one link" },
-        { "who": "kitsoki", "action": "Routes a feature issue to the design track", "detail": "label → story dispatch" },
-        { "who": "kitsoki", "action": "Watches CI, rebases, implements, or asks", "detail": "the PR loop on one rolling status" }
+        {
+          "who": "maintainer",
+          "action": "Mentions @kitsoki on a bug-labelled issue",
+          "detail": "mention ingress"
+        },
+        {
+          "who": "kitsoki",
+          "action": "Acks with one …/run/<job-id> link",
+          "detail": "one mention, one job, one link"
+        },
+        {
+          "who": "kitsoki",
+          "action": "Routes a feature issue to the design track",
+          "detail": "label → story dispatch"
+        },
+        {
+          "who": "kitsoki",
+          "action": "Watches CI, rebases, implements, or asks",
+          "detail": "the PR loop on one rolling status"
+        }
       ],
       "caption": "Eight beats on a single thread — single-voice status, never a comment flood.",
       "narration": "On the thread, a bug-labelled mention is the ingress. kitsoki acks with one run link, routes a feature issue to the design track, then works the pull request — all on a single rolling status comment, never a flood."
@@ -99,9 +148,21 @@
       "variant": "use-cases",
       "title": "In the viewer",
       "cases": [
-        { "who": "maintainer", "action": "Opens the run link into the observer", "detail": "the live trace streams" },
-        { "who": "maintainer", "action": "Types prose into the composer", "detail": "routed to slot-bearing intents" },
-        { "who": "kitsoki", "action": "Lands each turn; the state badge advances", "detail": "the operator-drive surface" }
+        {
+          "who": "maintainer",
+          "action": "Opens the run link into the observer",
+          "detail": "the live trace streams"
+        },
+        {
+          "who": "maintainer",
+          "action": "Types prose into the composer",
+          "detail": "routed to slot-bearing intents"
+        },
+        {
+          "who": "kitsoki",
+          "action": "Lands each turn; the state badge advances",
+          "detail": "the operator-drive surface"
+        }
       ],
       "caption": "The run is public and drivable — the trace by handle, the composer as the operator seat.",
       "narration": "The maintainer opens the run link into the observer and watches the live trace stream. Then they type prose straight into the composer; the recording routes it to the slot-bearing intents, and the state badge advances as each turn lands."
