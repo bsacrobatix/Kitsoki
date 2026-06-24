@@ -24,6 +24,9 @@
     <OperatorQuestionModal />
     <!-- Global bug-report review surface: capture → review → file. -->
     <BugReportModal />
+    <!-- Global fullscreen artifact viewer: full-screens a produced markdown
+         artifact (PRD, design, summary) so it can be opened and scrolled. -->
+    <ArtifactModal />
   </template>
 </template>
 
@@ -40,6 +43,7 @@ import InboxPanel from "./components/InboxPanel.vue";
 import InboxToast from "./components/InboxToast.vue";
 import OperatorQuestionModal from "./components/OperatorQuestionModal.vue";
 import BugReportModal from "./components/BugReportModal.vue";
+import ArtifactModal from "./components/ArtifactModal.vue";
 import PointPage from "./views/PointPage.vue";
 import { useTourStore } from "./stores/tour.js";
 import { useInboxStore } from "./stores/inbox.js";
