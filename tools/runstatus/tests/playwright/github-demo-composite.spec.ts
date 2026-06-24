@@ -2,41 +2,37 @@
  * github-demo composite — Act 3 of the @kitsoki GitHub-loop demo (epic
  * kitsoki-github-agent, demo slice #6).
  *
- * Renders ONE slidey presentation deck that brackets the two recorded act clips
- * with title / section slides ("One loop, two sides" / "The GitHub side" /
- * "The kitsoki side" / "One loop"). The deck is
+ * Renders ONE slidey pitch deck that interleaves title / personas (cast +
+ * use-cases) / section slides ("The GitHub side" / "The kitsoki side" /
+ * "One loop") around TWO rrweb-EMBEDDED `video` scenes — NOT MP4. The deck is
  *   docs/proposals/demo-assets/kitsoki-github/deck/kitsoki-github.deck.json
- * with two `video` scenes embedding the DEFAULT-PACE act MP4s staged under
- *   docs/proposals/demo-assets/kitsoki-github/baked/{act1-github,act2-webviewer}.mp4
- * (each with its sibling <act>.mp4.chapters.json so `chapters: auto` derives
- * deck-styled lower-thirds — kitsoki's ChapterRecorder/writeChapters already
- * emits exactly the sidecar shape slidey consumes, so no conversion).
+ * and the two `video` scenes embed rrweb DOM-session logs staged under
+ *   docs/proposals/demo-assets/kitsoki-github/deck/clips/{act1-github,act2-webviewer}.rrweb.json
+ * Each clip carries IN-LOG `slidey.chapter` custom events, so `chapters:"auto"`
+ * derives deck-styled lower-thirds with no sidecar (Act 1 from slidey's rrweb
+ * tour engine; Act 2 stamped by github-demo-act2-rrweb-capture.spec.ts).
  *
- * The render is driven through the SAME slidey pipeline that host.slidey.render
- * discovers (hosts.md §host.slidey.render: $SLIDEY_HOME/src/index.js, else the
- * `slidey` binary on PATH). We shell out to that binary directly here so the
- * composite can be produced and validated without standing up a kitsoki server
- * — the bytes and the chapter sidecar are identical to the host-call path.
- * No LLM, no GitHub, no network: deterministic ffmpeg-backed render only.
+ * The render is driven through the SAME slidey pipeline host.slidey.render
+ * discovers ($SLIDEY_HOME/src/index.js, else the `slidey` binary on PATH). We
+ * shell out directly so the composite can be produced + validated without a
+ * kitsoki server — the bytes are identical to the host-call path. The baked
+ * render seek-rasterizes each rrweb log via Replayer.goto(t): real motion, no
+ * MP4 input. No LLM, no GitHub, no network: deterministic render only.
  *
  * Output (gitignored): .artifacts/github-demo/composite/kitsoki-github.mp4 plus
- * the slidey-emitted kitsoki-github.mp4.chapters.json sidecar. The composite QA
- * gate (.context/qa/composite-*) runs pacing-scan --pacing-strict against that
- * sidecar, so the embedded act clips MUST be the default-pace shippable cuts,
- * never the WEB_CHAT_PACE=0 *.fast.mp4 (a fast clip would ship a flash).
+ * the slidey-emitted kitsoki-github.mp4.chapters.json sidecar + per-second QA
+ * frames so the embedded video scenes can be proven non-blank.
  *
- * BLOCKED-SAFE: if either act MP4 is not staged under baked/ yet, the deck is
- * still valid but un-renderable; the test SKIPS with a precise message rather
- * than failing, so the deck+spec land correctly ahead of the act captures.
+ * BLOCKED-SAFE: if either rrweb clip is missing, the deck is still valid but
+ * un-renderable; the render test SKIPS with a precise message (record Act 1 via
+ * the slidey tour engine, Act 2 via github-demo-act2-rrweb-capture.spec.ts).
  *
- * Validate (no MP4 render, deck shape only):  pass --list / --validate via the
- *   companion `github-demo composite deck validates` test (always runs, even
- *   when act clips are absent).
- * Render (full MP4, ~minutes):  pnpm exec playwright test github-demo-composite
- *   --project=chromium   (runs the render test only when both act clips exist).
+ * Validate (no render, deck shape only): the always-on `deck validates` test.
+ * Render (full MP4, ~minutes — rrweb rasterize is slow):
+ *   pnpm exec playwright test github-demo-composite --project=chromium
  */
 import { test, expect } from "@playwright/test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -51,26 +47,29 @@ const DECK = path.join(
   "deck",
   "kitsoki-github.deck.json",
 );
-const BAKED_DIR = path.join(
+const CLIPS_DIR = path.join(
   repoRoot,
   "docs",
   "proposals",
   "demo-assets",
   "kitsoki-github",
-  "baked",
+  "deck",
+  "clips",
 );
-const ACT1 = path.join(BAKED_DIR, "act1-github.mp4");
-const ACT2 = path.join(BAKED_DIR, "act2-webviewer.mp4");
+const ACT1 = path.join(CLIPS_DIR, "act1-github.rrweb.json");
+const ACT2 = path.join(CLIPS_DIR, "act2-webviewer.rrweb.json");
 
 const OUT_DIR = path.join(repoRoot, ".artifacts", "github-demo", "composite");
 const OUT_MP4 = path.join(OUT_DIR, "kitsoki-github.mp4");
 const OUT_CHAPTERS = `${OUT_MP4}.chapters.json`;
+const FRAMES_DIR = path.join(OUT_DIR, "frames");
 
 // Resolve the slidey entrypoint exactly as host.slidey.render does:
-// $SLIDEY_HOME/src/index.js first, else the `slidey` binary on PATH.
+// $SLIDEY_HOME/src/index.js first, else the `slidey` binary on PATH. Default to
+// the sibling slidey checkout so the spec runs without SLIDEY_HOME exported.
 function slideyArgv(rest: string[]): { cmd: string; args: string[] } {
-  const home = process.env.SLIDEY_HOME;
-  if (home && fs.existsSync(path.join(home, "src", "index.js"))) {
+  const home = process.env.SLIDEY_HOME || path.resolve(repoRoot, "..", "slidey");
+  if (fs.existsSync(path.join(home, "src", "index.js"))) {
     return { cmd: process.execPath, args: [path.join(home, "src", "index.js"), ...rest] };
   }
   return { cmd: "slidey", args: rest };
@@ -86,64 +85,40 @@ function runSlidey(rest: string[], timeoutMs: number): string {
   });
 }
 
-type Chapter = {
-  index: number;
-  id?: string;
-  label?: string;
-  start_ms: number;
-  end_ms: number;
-  source_ref?: unknown;
-};
+type RrwebEvent = { type?: number; timestamp?: number; data?: { tag?: string } };
 
-// Parse slidey's `--list` table for the start offset (ms) of each VIDEO scene,
-// in scene order. The table rows look like:
-//   "   2  video            6.0s   56.6s  | (1 cues) …"
-// We key only on the `video` type so the composite-timeline offsets come from
-// slidey's own authoritative layout (narration/transition padding included),
-// not a hand-maintained guess.
-function videoSceneStartsMs(): number[] {
-  const out = runSlidey([DECK, "--list"], 120_000);
-  const starts: number[] = [];
-  for (const line of out.split("\n")) {
-    const m = line.match(/^\s*\d+\s+video\s+([\d.]+)s\s/);
-    if (m) starts.push(Math.round(parseFloat(m[1]) * 1000));
-  }
-  return starts;
-}
-
-function loadActChapters(p: string): Chapter[] {
+/** Load an rrweb log (bare array or {events:[...]}). */
+function loadEvents(p: string): RrwebEvent[] {
   const raw = JSON.parse(fs.readFileSync(p, "utf8"));
-  const list = Array.isArray(raw) ? raw : raw?.chapters;
-  return Array.isArray(list) ? (list as Chapter[]) : [];
+  return Array.isArray(raw) ? raw : Array.isArray(raw?.events) ? raw.events : [];
 }
 
-// Derive + write the composite <out.mp4>.chapters.json from the two act
-// sidecars, each lifted onto the composite timeline at its video scene's start.
-function writeCompositeChapters(): void {
-  const starts = videoSceneStartsMs();
-  const actSidecars = [`${ACT1}.chapters.json`, `${ACT2}.chapters.json`];
-  const composite: Chapter[] = [];
-  let idx = 0;
-  for (let i = 0; i < actSidecars.length; i++) {
-    const offset = starts[i] ?? 0;
-    const sidecar = actSidecars[i];
-    if (!fs.existsSync(sidecar)) continue;
-    for (const ch of loadActChapters(sidecar)) {
-      composite.push({
-        ...ch,
-        index: idx++,
-        start_ms: ch.start_ms + offset,
-        end_ms: ch.end_ms + offset,
-      });
-    }
-  }
-  fs.writeFileSync(OUT_CHAPTERS, JSON.stringify(composite, null, 2) + "\n", "utf8");
+/** Wall-clock span of an rrweb log, ms. */
+function clipDurationMs(p: string): number {
+  const ev = loadEvents(p);
+  const ts = ev.map((e) => e.timestamp).filter((t): t is number => typeof t === "number");
+  return ts.length < 2 ? 0 : Math.max(...ts) - Math.min(...ts);
 }
 
-test.describe("github-demo composite (slidey deck)", () => {
-  // Always-on: proves the deck is structurally valid and renderable shape —
-  // runs even when the act clips are not yet staged. `--list` validates the
-  // spec and prints the scene/duration table without a full render.
+/** Count in-log slidey.chapter custom events (type 5, tag slidey.chapter). */
+function clipChapterCount(p: string): number {
+  return loadEvents(p).filter((e) => e.type === 5 && e.data?.tag === "slidey.chapter").length;
+}
+
+/** MP4 duration via ffprobe (seconds → ms). */
+function mp4DurationMs(p: string): number {
+  const r = spawnSync(
+    "ffprobe",
+    ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", p],
+    { encoding: "utf8" },
+  );
+  const sec = parseFloat((r.stdout || "").trim());
+  return Number.isFinite(sec) ? Math.round(sec * 1000) : 0;
+}
+
+test.describe("github-demo composite (rrweb-embedded slidey deck)", () => {
+  // Always-on: proves the deck is structurally valid + rrweb-embedded — runs
+  // even when the clips are absent. `--list` validates the spec without render.
   test("github-demo composite deck validates", () => {
     expect(fs.existsSync(DECK), `deck missing at ${DECK}`).toBeTruthy();
 
@@ -151,71 +126,133 @@ test.describe("github-demo composite (slidey deck)", () => {
     expect(spec?.meta?.mode, "meta.mode MUST be 'pitch' or every frame renders blank").toBe(
       "pitch",
     );
-    // Bracketing structure: 4 title/section slides + 2 video scenes.
-    const types = (spec.scenes as Array<{ type: string }>).map((s) => s.type);
-    expect(types.filter((t) => t === "title").length).toBe(4);
-    expect(types.filter((t) => t === "video").length).toBe(2);
     // Capture==render viewport invariant (1600x900) so video scenes letterbox-clean.
     expect(spec.meta.resolution).toEqual({ width: 1600, height: 900 });
 
-    // slidey --list parses + validates the spec; tolerate absent act clips
-    // (the table still lists scenes — only the MP4 render needs the bytes).
+    const scenes = spec.scenes as Array<{ type: string; src?: string; rrweb?: string }>;
+    const videos = scenes.filter((s) => s.type === "video");
+    // Exactly two video scenes, BOTH rrweb-embedded, NEITHER MP4.
+    expect(videos.length).toBe(2);
+    for (const v of videos) {
+      expect(v.rrweb, "video scene must embed an rrweb log").toBeTruthy();
+      expect(v.src, "video scene must NOT reference a baked MP4 (rrweb only)").toBeFalsy();
+    }
+    expect(videos.map((v) => v.rrweb)).toEqual([
+      "clips/act1-github.rrweb.json",
+      "clips/act2-webviewer.rrweb.json",
+    ]);
+    // Section slides per the storyboard.
+    const titles = scenes
+      .filter((s) => s.type === "title")
+      .map((s) => (s as { title?: string }).title);
+    for (const want of ["The GitHub side", "The kitsoki side", "Mention to merge"]) {
+      expect(titles, `missing section slide "${want}"`).toContain(want);
+    }
+
+    // slidey --list parses + validates the spec without rasterizing the clips.
     let out = "";
     try {
-      out = runSlidey([DECK, "--list"], 120_000);
+      out = runSlidey([DECK, "--list"], 180_000);
     } catch (err) {
       const e = err as { stdout?: string; stderr?: string; message?: string };
       out = `${e.stdout ?? ""}\n${e.stderr ?? ""}\n${e.message ?? ""}`;
-      // A missing src clip can make --list non-zero; that is the blocked case,
-      // not a deck defect. Only fail on a genuine spec/parse error.
-      expect(
-        /error|invalid|unexpected token|SyntaxError/i.test(out) &&
-          !/act1-github\.mp4|act2-webviewer\.mp4|ENOENT/i.test(out),
-        `slidey rejected the deck spec:\n${out}`,
-      ).toBeFalsy();
     }
+    expect(/SyntaxError|unexpected token|invalid spec/i.test(out), `slidey rejected the deck:\n${out}`).toBeFalsy();
   });
 
-  // Full render — only when both default-pace act clips are staged under baked/.
-  test("github-demo composite renders to MP4 + chapter sidecar", () => {
-    test.setTimeout(900_000); // a full MP4 render is ~7-12 min
+  // Full render — only when both rrweb clips are staged under clips/.
+  test("github-demo composite renders to MP4 + chapter sidecar (non-blank)", () => {
+    test.setTimeout(1_200_000); // rrweb seek-rasterize is slow
 
-    const haveActs = fs.existsSync(ACT1) && fs.existsSync(ACT2);
+    const haveClips = fs.existsSync(ACT1) && fs.existsSync(ACT2);
     test.skip(
-      !haveActs,
-      `act clips not staged — expected ${ACT1} and ${ACT2}. Record Act 1 ` +
-        `(github-demo-issuepr.spec.ts) + Act 2 (github-demo-webviewer.spec.ts) ` +
-        `at DEFAULT pace, then copy the shippable <act>.mp4 + <act>.mp4.chapters.json ` +
-        `into baked/. Deck + spec are authored and validated; render is blocked on the clips.`,
+      !haveClips,
+      `rrweb clips not staged — expected ${ACT1} and ${ACT2}. Record Act 1 via ` +
+        `slidey's rrweb tour engine (.artifacts/github-rrweb-tours/act1-github.tour.json) ` +
+        `and Act 2 via github-demo-act2-rrweb-capture.spec.ts, both into deck/clips/.`,
     );
+
+    // Each clip must be non-empty and carry in-log chapters (chapters:"auto").
+    const dur1 = clipDurationMs(ACT1);
+    const dur2 = clipDurationMs(ACT2);
+    expect(dur1, "Act 1 clip is empty/zero-length").toBeGreaterThan(1000);
+    expect(dur2, "Act 2 clip is empty/zero-length").toBeGreaterThan(1000);
+    expect(clipChapterCount(ACT1), "Act 1 clip carries no in-log chapters").toBeGreaterThanOrEqual(1);
+    expect(clipChapterCount(ACT2), "Act 2 clip carries no in-log chapters").toBeGreaterThanOrEqual(1);
+    const clipSumMs = dur1 + dur2;
 
     fs.mkdirSync(OUT_DIR, { recursive: true });
     for (const f of [OUT_MP4, OUT_CHAPTERS]) {
       if (fs.existsSync(f)) fs.rmSync(f);
     }
+    fs.rmSync(FRAMES_DIR, { recursive: true, force: true });
+    fs.mkdirSync(FRAMES_DIR, { recursive: true });
 
-    runSlidey([DECK, OUT_MP4], 900_000);
+    // Render the rrweb-embedded deck → MP4 + slidey's own chapter sidecar.
+    runSlidey([DECK, OUT_MP4], 1_200_000);
 
-    // Assert the rendered MP4 first (slidey's job).
     expect(fs.existsSync(OUT_MP4), `render produced no MP4 at ${OUT_MP4}`).toBeTruthy();
     expect(fs.statSync(OUT_MP4).size, "rendered MP4 is empty").toBeGreaterThan(10_000);
 
-    // Emit the composite chapter sidecar. slidey consumes each act clip's
-    // <src>.chapters.json for lower-third CAPTIONS, but its deck-render path does
-    // not WRITE an aggregate <out.mp4>.chapters.json for the composite timeline.
-    // We derive it here — the deliverable per the proposal's flow-fixtures bullet
-    // 3 — by lifting each video scene's act sidecar onto the composite timeline
-    // at the scene's start offset (read from slidey's own `--list` table, the
-    // authoritative render-time scene layout) so seeking the composite by chapter
-    // is honest end-to-end.
-    writeCompositeChapters();
+    // Duration > the SUM of the two clip durations: the composite carries both
+    // embedded clips IN FULL plus the bracketing title/persona/cta scenes.
+    const compMs = mp4DurationMs(OUT_MP4);
     expect(
-      fs.existsSync(OUT_CHAPTERS),
-      `no composite chapter sidecar derived at ${OUT_CHAPTERS}`,
-    ).toBeTruthy();
+      compMs,
+      `composite (${compMs}ms) must exceed the clip-duration sum (${clipSumMs}ms)`,
+    ).toBeGreaterThan(clipSumMs);
 
-    const chapters = JSON.parse(fs.readFileSync(OUT_CHAPTERS, "utf8"));
-    const list = Array.isArray(chapters) ? chapters : chapters?.chapters;
+    // Chapter sidecar: slidey emits <out>.mp4.chapters.json for a deck render.
+    expect(fs.existsSync(OUT_CHAPTERS), `no chapter sidecar at ${OUT_CHAPTERS}`).toBeTruthy();
+    const raw = JSON.parse(fs.readFileSync(OUT_CHAPTERS, "utf8"));
+    const list = Array.isArray(raw) ? raw : raw?.chapters;
     expect(Array.isArray(list) && list.length > 0, "chapter sidecar carries no chapters").toBeTruthy();
+
+    // Non-blank proof: extract 1fps frames and assert the frames inside each
+    // embedded video scene's composite time window are visually busy. A blank
+    // rasterize (the classic rrweb "missing player CSS" failure) yields
+    // near-uniform, tiny PNGs; a real reconstructed UI frame is tens of KB+.
+    const r = spawnSync(
+      "ffmpeg",
+      ["-y", "-loglevel", "error", "-i", OUT_MP4, "-vf", "fps=1", path.join(FRAMES_DIR, "f-%04d.png")],
+      { encoding: "utf8" },
+    );
+    expect(r.status, `frame extraction failed: ${r.stderr?.slice(0, 300)}`).toBe(0);
+
+    const frames = fs
+      .readdirSync(FRAMES_DIR)
+      .filter((f) => f.endsWith(".png"))
+      .map((f) => ({
+        name: f,
+        sec: parseInt(f.match(/f-(\d+)\.png/)?.[1] ?? "0", 10),
+        size: fs.statSync(path.join(FRAMES_DIR, f)).size,
+      }));
+    expect(frames.length, "no frames extracted from composite").toBeGreaterThan(10);
+
+    // Video scene start offsets (sec) from slidey's --list table, in order.
+    const listOut = runSlidey([DECK, "--list"], 180_000);
+    const videoStarts: number[] = [];
+    for (const line of listOut.split("\n")) {
+      const m = line.match(/^\s*\d+\s+video\s+([\d.]+)s\s/);
+      if (m) videoStarts.push(parseFloat(m[1]));
+    }
+    expect(videoStarts.length, "expected 2 video scenes in --list").toBe(2);
+
+    const BLANK_FLOOR = 15_000;
+    const windows = [
+      { start: videoStarts[0], dur: dur1 / 1000, label: "Act 1 (GitHub)" },
+      { start: videoStarts[1], dur: dur2 / 1000, label: "Act 2 (kitsoki)" },
+    ];
+    for (const w of windows) {
+      const inWin = frames.filter(
+        (f) => f.sec >= Math.floor(w.start) + 1 && f.sec <= Math.ceil(w.start + w.dur),
+      );
+      expect(inWin.length, `no frames inside the ${w.label} video window`).toBeGreaterThan(0);
+      const max = Math.max(...inWin.map((f) => f.size));
+      expect(
+        max,
+        `${w.label} embedded video appears BLANK (max frame ${max}B < ${BLANK_FLOOR}B floor)`,
+      ).toBeGreaterThan(BLANK_FLOOR);
+    }
   });
 });

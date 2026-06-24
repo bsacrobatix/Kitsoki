@@ -1,61 +1,134 @@
 {
-  "_comment": "Composite deck for the @kitsoki GitHub-loop demo (epic kitsoki-github-agent, demo slice #6). One slidey presentation deck bracketing the two recorded act clips with title/section slides. The two `video` scenes embed the DEFAULT-PACE shippable MP4s recorded by github-demo-issuepr.spec.ts (Act 1, the GitHub side) and github-demo-webviewer.spec.ts (Act 2, the kitsoki side); each act clip ships a sibling <act>.mp4.chapters.json so `chapters: auto` derives deck-styled lower-thirds with no conversion. Render with host.slidey.render(spec_path, format: mp4) (or the slidey CLI) -> narrated MP4 + .chapters.json sidecar. `src` paths resolve relative to THIS deck JSON, so ../baked/<act>.mp4 are the staged act clips. meta.mode:pitch is REQUIRED (without it every frame renders blank). meta.resolution matches the 1600x900 Playwright capture viewport so video scenes letterbox-clean under fit:contain.",
+  "_comment": "Composite deck for the @kitsoki GitHub-loop demo (epic kitsoki-github-agent, demo slice #6). One slidey pitch deck that interleaves title / personas (cast + use-cases) / section slides around TWO rrweb-embedded `video` scenes — NOT MP4. Modeled on .artifacts/slidey-hybrid/dev-story-hybrid.json. The Act-1 clip (the GitHub side) is captured by slidey's rrweb tour engine over the gh-thread.html fixture (.artifacts/github-rrweb-tours/act1-github.tour.json → clips/act1-github.rrweb.json); the Act-2 clip (the kitsoki side) is captured by the kitsoki rrweb harness driving a real `kitsoki web` replay server (tools/runstatus/tests/playwright/github-demo-act2-rrweb-capture.spec.ts → clips/act2-webviewer.rrweb.json). Both clips carry in-log slidey.chapter custom events, so `chapters:auto` derives deck-styled lower-thirds with no sidecar. `rrweb` paths resolve relative to THIS deck JSON. Baked render seek-rasterizes each clip via Replayer.goto(t). meta.mode:pitch is REQUIRED (without it every frame renders blank). meta.resolution matches the 1600x900 capture viewport so embedded video letterboxes clean. Render: node /Users/brad/code/slidey/src/index.js kitsoki-github.deck.json <out>.mp4 → narrated MP4 + .chapters.json sidecar.",
   "meta": {
+    "title": "@kitsoki — a GitHub-native agent",
     "mode": "pitch",
     "resolution": { "width": 1600, "height": 900 },
     "narration": {
       "voice": "en-AU-NatashaNeural",
       "pronunciations": { "kitsoki": "kit-SOH-kee", "GitHub": "GIT-hub" }
-    }
+    },
+    "personas": [
+      {
+        "id": "maintainer",
+        "name": "Mara",
+        "role": "Maintainer",
+        "intro": "Mentions @kitsoki on an issue or PR and reviews what comes back — no App, no webhook to wire up.",
+        "color": "#58a6ff",
+        "glyph": "🧑‍💻"
+      },
+      {
+        "id": "kitsoki",
+        "name": "kitsoki",
+        "role": "GitHub-native agent",
+        "intro": "Reads the mention, dispatches a story, and works the loop — one rolling status, one linkable run, every step on the record.",
+        "color": "#e0a23a",
+        "glyph": "🦊"
+      }
+    ]
   },
   "scenes": [
     {
       "type": "title",
       "eyebrow": "@kitsoki on GitHub",
-      "title": "One loop, two sides",
+      "title": "@kitsoki — a GitHub-native agent",
       "subtitle": "A mention becomes a job becomes a PR — no App, no webhook, no LLM",
-      "narration": "Watch the @ kitsoki GitHub loop, end to end."
+      "narration": "This is the @ kitsoki GitHub loop, end to end. A mention becomes a job becomes a pull request — with no GitHub App, no webhook, and no model in the loop at replay time."
+    },
+    {
+      "type": "personas",
+      "variant": "cast",
+      "title": "The cast",
+      "personas": ["maintainer", "kitsoki"],
+      "caption": "Two actors, one thread — every hand-off a comment, every run a linkable, replayable record.",
+      "narration": "Two actors share one GitHub thread: a maintainer who mentions kitsoki, and kitsoki, a GitHub-native agent. Every hand-off is a comment, and every run is a linkable, replayable record."
+    },
+    {
+      "type": "personas",
+      "variant": "use-cases",
+      "title": "Who does what",
+      "cases": [
+        { "who": "maintainer", "action": "Mentions @kitsoki on a labelled issue or PR", "detail": "the only ingress — no App to install" },
+        { "who": "kitsoki", "action": "Reads the label and dispatches the right story", "detail": "bug → bugfix, feature → PRD/design" },
+        { "who": "kitsoki", "action": "Watches CI, pushes fixes, rebases conflicts", "detail": "the PR loop, unsupervised" },
+        { "who": "kitsoki", "action": "Implements reviewer comments, resolves threads", "detail": "or asks first when unsure" },
+        { "who": "maintainer", "action": "Opens the run link into the kitsoki viewer", "detail": "the live trace, by handle" },
+        { "who": "maintainer", "action": "Drives the run from the composer", "detail": "the operator surface" }
+      ],
+      "narration": "Across the loop, the maintainer mentions kitsoki and later opens and drives the run. kitsoki reads the label, dispatches the right story, works the pull request — watching CI, pushing fixes, rebasing conflicts, implementing reviewer comments — and asks first when it is not sure."
     },
     {
       "type": "title",
       "eyebrow": "Act one",
       "title": "The GitHub side",
-      "subtitle": "Issues and PRs, driven by @ kitsoki",
-      "narration": "First, the GitHub side."
+      "subtitle": "Issues and PRs, driven by @kitsoki",
+      "narration": "First, the GitHub side — issues and pull requests, driven entirely by an at-mention."
+    },
+    {
+      "type": "personas",
+      "variant": "use-cases",
+      "title": "On the thread",
+      "cases": [
+        { "who": "maintainer", "action": "Mentions @kitsoki on a bug-labelled issue", "detail": "mention ingress" },
+        { "who": "kitsoki", "action": "Acks with one …/run/<job-id> link", "detail": "one mention, one job, one link" },
+        { "who": "kitsoki", "action": "Routes a feature issue to the design track", "detail": "label → story dispatch" },
+        { "who": "kitsoki", "action": "Watches CI, rebases, implements, or asks", "detail": "the PR loop on one rolling status" }
+      ],
+      "caption": "Eight beats on a single thread — single-voice status, never a comment flood.",
+      "narration": "On the thread, a bug-labelled mention is the ingress. kitsoki acks with one run link, routes a feature issue to the design track, then works the pull request — all on a single rolling status comment, never a flood."
     },
     {
       "type": "video",
-      "src": "../baked/act1-github.mp4",
-      "mode": "fullscreen",
-      "fit": "contain",
+      "mode": "embedded",
+      "eyebrow": "Act 1 · the GitHub side",
+      "title": "Mention → dispatch → PR loop",
+      "rrweb": "clips/act1-github.rrweb.json",
       "chapters": "auto",
-      "narration": [
-        { "at": 0, "text": "A user mentions kitsoki on a bug-labelled issue." }
-      ]
+      "caption": "A faithful GitHub thread: mention ingress through a status edited to done",
+      "narration": "Here it plays out on the thread: the mention lands, kitsoki acks with a run link, dispatches by label, watches CI and pushes a fix, rebases a conflict, implements a reviewer's change, asks for guidance when unsure, and edits one rolling status to done."
     },
     {
       "type": "title",
       "eyebrow": "Act two",
       "title": "The kitsoki side",
       "subtitle": "The web viewer and the operator drive",
-      "narration": "Now, the kitsoki side."
+      "narration": "Now, the kitsoki side — the same job, opened in the web viewer and driven from the composer."
+    },
+    {
+      "type": "personas",
+      "variant": "use-cases",
+      "title": "In the viewer",
+      "cases": [
+        { "who": "maintainer", "action": "Opens the run link into the observer", "detail": "the live trace streams" },
+        { "who": "maintainer", "action": "Types prose into the composer", "detail": "routed to slot-bearing intents" },
+        { "who": "kitsoki", "action": "Lands each turn; the state badge advances", "detail": "the operator-drive surface" }
+      ],
+      "caption": "The run is public and drivable — the trace by handle, the composer as the operator seat.",
+      "narration": "The maintainer opens the run link into the observer and watches the live trace stream. Then they type prose straight into the composer; the recording routes it to the slot-bearing intents, and the state badge advances as each turn lands."
     },
     {
       "type": "video",
-      "src": "../baked/act2-webviewer.mp4",
-      "mode": "fullscreen",
-      "fit": "contain",
+      "mode": "embedded",
+      "eyebrow": "Act 2 · the kitsoki side",
+      "title": "Live trace → operator drive",
+      "rrweb": "clips/act2-webviewer.rrweb.json",
       "chapters": "auto",
-      "narration": [
-        { "at": 0, "text": "Click the run link and the live trace streams." }
-      ]
+      "caption": "Real kitsoki web, no-LLM replay: live trace, composer prose, advancing state",
+      "narration": "This is a real kitsoki web server in no-LLM replay: the observer streams the live trace, the operator types the idea into the composer, and the run advances state by state — the same job from the GitHub thread, now under the operator's hand."
     },
     {
       "type": "title",
       "eyebrow": "One loop",
       "title": "Mention to merge",
       "subtitle": "GitHub thread and kitsoki UI, the same job",
-      "narration": "One mention, one job, one linkable run."
+      "narration": "One mention, one job, one linkable run — the GitHub thread and the kitsoki UI are two views of the same loop, from mention to merge."
+    },
+    {
+      "type": "cta",
+      "narration": "And the whole film is a no-LLM, byte-deterministic replay: the runtime is a state machine, and the model is just a traceable callee.",
+      "wordmark": "kitsoki",
+      "tagline": "A mention becomes a job becomes a PR — every step on the record",
+      "url": "the runtime is a state machine; the model is a traceable callee"
     }
   ]
 }
