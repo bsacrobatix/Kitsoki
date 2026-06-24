@@ -39,6 +39,7 @@ import {
   cinematicGoto,
   ChapterRecorder,
   writeChapters,
+  showArtifact,
   type WebServer,
 } from "./_helpers/server.js";
 import { installCapture, dumpCapture, writeEvents } from "./_helpers/rrweb-replay.js";
@@ -357,6 +358,12 @@ test("slidey architect-design rrweb capture (baseline + event stream)", async ()
     }
 
     await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 5000 });
+
+    // ── Full-screen the published design and scroll through it ───────────────
+    diag("opening published design artifact");
+    chapters.open("sad-design-artifact", "Published design — full document", CHAPTER_SOURCE);
+    await showArtifact(page, "stories/slidey-dev/assets/architect_design-doc.md");
+    diag("design artifact shown + scrolled");
 
     const { events, viewport } = await dumpCapture(page);
     diag(`rrweb captured ${events.length} events @ ${viewport.width}x${viewport.height} dsf=${viewport.deviceScaleFactor}`);

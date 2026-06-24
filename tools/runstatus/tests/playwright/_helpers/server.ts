@@ -81,6 +81,63 @@ export function dwell(page: Page, ms: number): Promise<void> {
 }
 
 /**
+ * Full-screen a produced markdown artifact and ease-scroll it top→bottom, then
+ * close — the demo-target "every artifact is full-screened via the modal to show
+ * the full content" beat, reused by every phase capture (PRD, design,
+ * decomposition, bugfix summary, PR summary).
+ *
+ * Driven through the global `__openArtifact` hook (ArtifactModal, mounted in
+ * App.vue) which full-screens MarkdownModal on the given `.md` path (read via
+ * runstatus.file.read). The dwells and the scroll are FIXED (not PACE-scaled):
+ * the conversation is captured lean (WEB_CHAT_PACE=0) and the readable dwells are
+ * added deterministically by `slidey rrweb-repace`, but the document read-through
+ * must stay smooth/legible regardless of capture pace.
+ */
+export async function showArtifact(
+  page: Page,
+  artifactPath: string,
+  opts: { scrollMs?: number; topDwellMs?: number; endDwellMs?: number } = {},
+): Promise<void> {
+  const scrollMs = opts.scrollMs ?? 5200;
+  const topDwellMs = opts.topDwellMs ?? 1600;
+  const endDwellMs = opts.endDwellMs ?? 1600;
+  await page.evaluate((p) => {
+    (window as unknown as { __openArtifact?: (s: string) => void }).__openArtifact?.(p);
+  }, artifactPath);
+  await expect(page.getByTestId("markdown-modal")).toBeVisible({ timeout: 8000 });
+  // Wait for the markdown to actually render (the modal fetches the file via RPC)
+  // and to be tall enough to scroll.
+  await page.waitForFunction(() => {
+    const el = document.querySelector('[data-testid="markdown-modal-body"] .mm-md') as HTMLElement | null;
+    return !!el && el.scrollHeight > el.clientHeight - 1;
+  }, undefined, { timeout: 8000 });
+  await page.waitForTimeout(topDwellMs); // read the top of the document
+  await page.evaluate(async (ms) => {
+    const el = document.querySelector('[data-testid="markdown-modal-body"]') as HTMLElement | null;
+    if (!el) return;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 2) return;
+    const from = el.scrollTop;
+    const t0 = performance.now();
+    await new Promise<void>((res) => {
+      const tick = (now: number) => {
+        const p = Math.min(1, (now - t0) / ms);
+        const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+        el.scrollTop = from + (max - from) * eased;
+        if (p < 1) requestAnimationFrame(tick);
+        else res();
+      };
+      requestAnimationFrame(tick);
+    });
+  }, scrollMs);
+  await page.waitForTimeout(endDwellMs); // rest on the end of the document
+  await page.evaluate(() => {
+    (window as unknown as { __closeArtifact?: () => void }).__closeArtifact?.();
+  });
+  await expect(page.getByTestId("markdown-modal")).toHaveCount(0, { timeout: 5000 });
+}
+
+/**
  * Navigate to `url`, confirm the surface has actually rendered (optional URL
  * regex and/or testid anchor), then SETTLE so the frame is watchable.
  *

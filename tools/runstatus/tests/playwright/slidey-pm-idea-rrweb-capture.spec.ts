@@ -39,6 +39,7 @@ import {
   cinematicGoto,
   ChapterRecorder,
   writeChapters,
+  showArtifact,
   type WebServer,
 } from "./_helpers/server.js";
 import { installCapture, dumpCapture, writeEvents } from "./_helpers/rrweb-replay.js";
@@ -286,46 +287,6 @@ async function ease(page: Page, to: number, ms: number): Promise<void> {
   );
 }
 
-// Open the published PRD artifact full-screen, ease-scroll it top→bottom so the
-// whole document is read on camera, then close — the demo-target "every artifact
-// is full-screened via the modal" beat. Driven through the global __openArtifact
-// hook (ArtifactModal), scrolled via a self-contained rAF ease on the modal body.
-async function showArtifact(page: Page, artifactPath: string, scrollMs: number): Promise<void> {
-  await page.evaluate((p) => {
-    (window as unknown as { __openArtifact?: (s: string) => void }).__openArtifact?.(p);
-  }, artifactPath);
-  await expect(page.getByTestId("markdown-modal")).toBeVisible({ timeout: 8000 });
-  // Wait for the markdown to actually render (the modal fetches the file via RPC).
-  await page.waitForFunction(() => {
-    const el = document.querySelector('[data-testid="markdown-modal-body"] .mm-md') as HTMLElement | null;
-    return !!el && el.scrollHeight > el.clientHeight - 1;
-  }, undefined, { timeout: 8000 });
-  await dwell(page, 1600); // read the top of the document
-  await page.evaluate(async (ms) => {
-    const el = document.querySelector('[data-testid="markdown-modal-body"]') as HTMLElement | null;
-    if (!el) return;
-    const max = el.scrollHeight - el.clientHeight;
-    if (max <= 2) return;
-    const from = el.scrollTop;
-    const t0 = performance.now();
-    await new Promise<void>((res) => {
-      const tick = (now: number) => {
-        const p = Math.min(1, (now - t0) / ms);
-        const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
-        el.scrollTop = from + (max - from) * eased;
-        if (p < 1) requestAnimationFrame(tick);
-        else res();
-      };
-      requestAnimationFrame(tick);
-    });
-  }, scrollMs);
-  await dwell(page, 1600); // rest on the end of the document
-  await page.evaluate(() => {
-    (window as unknown as { __closeArtifact?: () => void }).__closeArtifact?.();
-  });
-  await expect(page.getByTestId("markdown-modal")).toHaveCount(0, { timeout: 5000 });
-}
-
 function routeKindFromUrl(url: string): "interactive" | "any" | "home" {
   if (url.includes("/chat")) return "interactive";
   if (/#\/s\/[0-9a-f-]{36}$/.test(url)) return "any";
@@ -420,10 +381,7 @@ test("slidey PM-idea rrweb capture (baseline + event stream)", async () => {
     // ── Full-screen the published PRD and scroll through it ──────────────────
     diag("opening published PRD artifact");
     chapters.open("spm-prd-artifact", "Published PRD — full document", CHAPTER_SOURCE);
-    // Fixed (un-paced) scroll: the document read-through must stay smooth/legible
-    // even when the conversation is captured lean (WEB_CHAT_PACE=0) and the
-    // readable dwells are added deterministically by `slidey rrweb-repace`.
-    await showArtifact(page, PRD_PATH, 5200);
+    await showArtifact(page, PRD_PATH);
     await shot(page, "spm-prd-artifact");
     await dwell(page, 600);
     diag("PRD artifact shown + scrolled");
