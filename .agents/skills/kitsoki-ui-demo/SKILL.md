@@ -1,6 +1,6 @@
 ---
 name: kitsoki-ui-demo
-description: 'Produce a deterministic, no-LLM demo / tour video of the kitsoki web UI (plus per-scene screenshots and a shareable MP4 / GIF / contact sheet) by driving a real `kitsoki web` server through Playwright. Use when asked to make, record, refresh, or author a tour demo video, feature-spotlight tour, walkthrough video, demo, or screen-capture of the kitsoki browser UI — whether a tour of one feature (golden example: agent-actions), the generic onboarding tour, or a full-product walkthrough. Triggers on phrasings like "make a tour demo video", "record a demo of <feature>", "feature tour video", "walkthrough video".'
+description: 'Produce a deterministic, no-LLM demo / tour video of the kitsoki web UI (plus per-scene screenshots and a shareable MP4 / GIF / contact sheet) by driving a real `kitsoki web` server through Playwright. Use when asked to make, record, refresh, or author a tour demo video, feature-spotlight tour, walkthrough video, demo, or screen-capture of the kitsoki browser UI — whether a tour of one feature (golden example: agent-actions), the generic onboarding tour, or a full-product walkthrough. Also covers turning a REAL LLM-driven dogfood session into a deterministic demo: generating the no-LLM flow fixture + host cassette from a recorded trace via `kitsoki trace to-flow` (no hand-authoring, no LLM re-interpretation). Triggers on phrasings like "make a tour demo video", "record a demo of <feature>", "feature tour video", "walkthrough video", "turn this dogfood trace/session into a demo video".'
 ---
 
 # Kitsoki UI demo videos
@@ -44,6 +44,64 @@ flow tests (see [[feedback_no_llm_tests]] and `docs/web/README.md` →
 > for `<canvas>`/`<video>`/WebGL surfaces) and the **rrweb capture → replay-render**
 > mode (capture the DOM stream once, re-render server-free + offline, frame-exact)
 > — see **[rrweb capture → replay-render](#rrweb-capture--replay-render-deterministic-server-free-mode)**.
+
+## Start from a real dogfood trace (generate the flow + cassette — don't hand-author)
+
+A demo's no-LLM `--flow` fixture + `--host-cassette` do **not** have to be written
+by hand. If the scenario you want to film already happened as a **real,
+LLM-driven session** (a dogfood run, a bugfix pipeline, a live drive), convert
+its recorded trace into the replay artifacts deterministically — no LLM
+re-interpretation, no transcription by hand:
+
+```bash
+# 1. Find the recorded session trace (JSONL). Live/record sessions write one to:
+#      ~/.kitsoki/sessions/<app>/<session-id>.jsonl
+#    or capture a fresh one via the MCP `session.trace` tool / `--trace-out`.
+
+# 2. Convert the trace → a flow fixture (+ sibling host cassette) — a pure transform:
+kitsoki trace to-flow <trace.jsonl> \
+  --app ../app.yaml \
+  --out stories/<story>/flows/<scenario>.yaml
+#   → writes <scenario>.yaml and (when the trace had host calls)
+#     <scenario>.cassette.yaml beside it, referenced via host_cassette:.
+
+# 3. Verify it replays no-LLM and capture a fresh trace:
+kitsoki test flows stories/<story>/app.yaml --flows stories/<story>/flows/<scenario>.yaml \
+  --trace-out .artifacts/<scenario>/replay.jsonl
+```
+
+The generated flow is exactly what the recording pipeline already consumes — point
+`kitsoki web --flow stories/<story>/flows/<scenario>.yaml` (or a `*-video.spec.ts`
+spec's `--flow` arg) at it and record as below. Two properties make this a clean
+fit for demos:
+
+- **Each `machine.transition` → one turn** (resolved intent name + slots,
+  verbatim, in order). The LLM/semantic routing decision is *not* re-run on
+  replay — the resolved intent is re-driven directly, so it's deterministic and
+  free.
+- **`display_input:` preserves the operator's real free-text words** (from the
+  trace's `turn.input`), so a conversation demo's user bubbles — and the strings
+  you type into the composer — are the operator's actual utterance, not a
+  synthetic `[intent] <name>`. This is what makes a trace-derived conversation
+  video followable (see [Demoing human usage](#demoing-human-usage--the-conversation-must-be-followable)).
+
+**Caveats, all by design** (full discussion + the trace→fixture mapping table:
+[`docs/tracing/trace-format.md` §11](../../tracing/trace-format.md#11-kitsoki-trace-to-flow--trace--replayable-flow-fixture)):
+
+- The converter emits **no `expect_state` / `expect_world`** (story-drift
+  tolerance). Add expectations by hand only if you want to pin a known-drift-free
+  path.
+- Per-call-varying agent/host responses replay correctly because each recorded
+  call becomes one **ordered** cassette episode (not `replay:any`) — the i-th call
+  consumes the i-th episode.
+- If the *current* story routes a turn into a room that didn't exist when the
+  trace was recorded, that room's `on_enter` may need a host call the cassette
+  has no episode for → a hard cassette miss / `on_error` bounce. That's honest
+  drift, not a tooling fault: re-record the trace against the current story.
+
+Once the flow + cassette exist, everything below (spec, pacing, MP4) is unchanged
+— the source of the fixture (hand-authored vs trace-derived) is invisible to the
+recorder.
 
 ## Prerequisites (once)
 
@@ -802,6 +860,10 @@ make mcp-qa           # vision QA gate (GATED: local claude CLI)
 - Shared helpers (video→MP4, server, pacing): `tests/playwright/_helpers/server.ts`
 - Playwright config + globalSetup: `tools/runstatus/playwright.config.ts`,
   `tools/runstatus/tests/playwright/_helpers/`
+- **Trace → flow/cassette generator (start a demo from a real dogfood session):**
+  `kitsoki trace to-flow` — CLI in `cmd/kitsoki/trace.go` (`traceToFlowCmd`),
+  transform in `internal/testrunner/fromtrace.go` (`ConvertTraceToFlow`),
+  authoritative docs in `docs/tracing/trace-format.md` §11
 - No-LLM posture + UI surfaces: `docs/web/README.md`
 - File:// snapshot artifacts (static, no server): `_helpers/artifact.ts`
 
