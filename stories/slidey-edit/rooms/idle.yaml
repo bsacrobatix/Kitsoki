@@ -42,12 +42,21 @@ states:
       edit_existing:
         - target: drafting
           effects:
+            # Resolve the operator's deck reference to a concrete spec_path.
+            # A bare name prefers <decks_dir>/<name>.slidey.json and falls back
+            # to .json only when the .slidey.json variant is absent (checked via
+            # ctx.fs.exists); a reference already ending in .json is verbatim.
+            - invoke: host.starlark.run
+              id: resolve_deck
+              with:
+                script: scripts/resolve_deck.star
+                inputs:
+                  spec_path: "{{ slots.spec_path }}"
+                  summary:   "{{ slots.summary ?? '' }}"
+                  decks_dir: "{{ world.decks_dir }}"
+              bind:
+                source_deck: source_deck
             - set:
-                source_deck:
-                  # A bare name (no .json suffix) resolves under decks_dir;
-                  # a full path / filename is used verbatim.
-                  spec_path: "{{ hasSuffix(slots.spec_path, '.json') ? slots.spec_path : world.decks_dir + '/' + slots.spec_path + '.json' }}"
-                  summary: "{{ slots.summary ?? 'Existing slidey deck' }}"
                 draft_feedback: "{{ slots.feedback ?? '' }}"
                 # deck is the drafting result/cache. Clear it so once: does
                 # not mistake the existing input deck for completed output.

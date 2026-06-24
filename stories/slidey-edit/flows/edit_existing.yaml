@@ -33,6 +33,11 @@ host_handlers:
 
   host.starlark.run:
     by_call:
+      resolve_deck:
+        data:
+          source_deck:
+            spec_path: "stories/slidey-edit/baked/deck.json"
+            summary: "Spatial-annotation explainer deck (3 scenes)."
       seed_annotation:
         data:
           annotation:
