@@ -140,6 +140,26 @@ pipeline removes that failure mode structurally, not by hoping the model behaves
    which promotes them to a blocking gate — the same advisory/strict shape as
    `blank-scan`. This is the deterministic catch for "the pacing is terrible" that
    no amount of frame-by-frame vision review can see.
+7b. **Embedded-rrweb pacing check (deterministic, no LLM).** A tour can be embedded
+   as a native **rrweb** clip (a slidey `video` scene replaying a `.rrweb.json`
+   log) rather than an MP4 — and then BOTH prior pacing defenses are blind: there
+   is no chapter sidecar for `pacing-scan.sh` to read, and the frame sampler sees
+   each end-state frame looking correct. The defect this misses: a captured
+   conversation plays fine for most of its length, then the **last few messages /
+   the final artifact all flush in under a second** — "the last 3-5 messages are
+   super-rushed." That is invisible to interpretation; it lives only in the rrweb
+   **event timeline**. `rrweb-pacing-scan.mjs` (pure structural parse, no LLM, no
+   ffmpeg) reads the clip directly: a *content reveal* is an incremental DOM
+   mutation whose `adds` introduce a substantial block (clears `--sig-min-adds` /
+   `--sig-min-text`); reveals within `--coalesce` ms are one logical render; each
+   reveal must hold for `--min-dwell` ms (default 1200) before the next, and a
+   burst inside the final `--tail-window` ms is reported as the rushed *tail*. Pass
+   `--rrweb <clip.rrweb.json | dir>` to `qa.sh`; flags are **advisory** (a
+   "rrweb-pacing warnings" table) unless `--rrweb-strict` promotes them to a
+   blocking gate — same advisory/strict shape as `blank-scan`/`pacing-scan`. The
+   fix when it fires: give the capture an end-of-conversation dwell, or re-pace the
+   clip deterministically with `slidey rrweb-repace <in> <out>` (which mirrors this
+   scan's significance definition, so a re-paced clip clears the gate).
 8. **Stuck-placeholder check.** A panel can sit on a *transient* placeholder
    forever — a "Loading…" spinner whose loading flag is never lowered — and every
    single frame of it still looks "fine," so blank-scan (mostly themed bg) and a
@@ -296,13 +316,14 @@ example behind the `vscode-tour` gate above).
 
 | Script | Does | LLM? |
 |---|---|---|
-| `qa.sh <video> --feature F --scenarios S [--frames D] [--out D] [--model M] [--max-frames N] [--scene TH] [--blank-min-coverage F] [--chapters F] [--pacing-min N] [--no-adversary] [--strict] [--blank-strict] [--pacing-strict]` | One-shot wrapper; exit code is the gate. `--scene` / `--blank-min-coverage` pass through to extract-frames / blank-scan (tune for full-editor videos — see above) | via review |
+| `qa.sh <video> --feature F --scenarios S [--frames D] [--out D] [--model M] [--max-frames N] [--scene TH] [--blank-min-coverage F] [--chapters F] [--pacing-min N] [--rrweb CLIP\|DIR] [--rrweb-min-dwell N] [--no-adversary] [--strict] [--blank-strict] [--pacing-strict] [--rrweb-strict]` | One-shot wrapper; exit code is the gate. `--scene` / `--blank-min-coverage` pass through to extract-frames / blank-scan (tune for full-editor videos — see above); `--rrweb` runs the embedded-tour pacing scan on the clip(s) | via review |
 | `extract-frames.sh <video> <out-dir> [--scene TH] [--interval S] [--dedup MS] [--max N] [--width W]` | Deterministic scene-change + periodic-floor frames + `frames.json` | no |
 | `blank-scan.sh <frames-dir\|image> [--out scan.json] [--grid WxH] [--quant N] [--min-coverage F] [--empty-coverage F] [--fail-on-find]` | Deterministic monochrome-region detector → `blank-scan.json` (flags any large flat block of one colour, or a near-empty frame) | no |
 | `pacing-scan.sh <chapters.json> [--out scan.json] [--min-ms N] [--min-total-ms N] [--fail-on-find]` | Deterministic chapter-duration detector → `pacing-scan.json` (flags narrated moments that flash by below the readable-window floor) | no |
+| `rrweb-pacing-scan.mjs <clip.rrweb.json\|dir> [--out scan.json] [--min-dwell N] [--coalesce N] [--sig-min-adds N] [--sig-min-text N] [--tail-window N] [--fail-on-find]` | Deterministic embedded-rrweb timeline scan → `rrweb-pacing-scan.json` (flags content reveals crammed below the readable dwell — the rushed-last-messages defect a frame sampler / chapter scan can't see) | no |
 | `placeholder-scan.sh <frames-dir\|image\|video> [--out scan.json] [--pattern RE] [--min-fraction F] [--min-run N] [--fail-on-find]` | Deterministic OCR stuck-placeholder detector → flags a placeholder (default `\bloading\b`) that persists across a long unbroken run / large fraction of frames — a "Loading…" that never resolves. Skips (advisory) if `tesseract` is absent | no (OCR) |
 | `qa-review.sh --frames D --feature F --scenarios S --out V [--model M] [--no-adversary]` | Read-only vision agent → evidence-cited `verdict.json` + adversarial re-check | **yes** |
-| `report.sh <verdict.json> [--out report.md] [--strict] [--blank-scan scan.json] [--blank-strict] [--pacing-scan scan.json] [--pacing-strict]` | `verdict.json` (+ optional scans) → `qa-report.md`; recomputes the gate exit code | no |
+| `report.sh <verdict.json> [--out report.md] [--strict] [--blank-scan scan.json] [--blank-strict] [--pacing-scan scan.json] [--pacing-strict] [--rrweb-scan scan.json] [--rrweb-strict]` | `verdict.json` (+ optional scans) → `qa-report.md`; recomputes the gate exit code | no |
 
 Defaults: review model `claude-opus-4-8` (override `--model claude-sonnet-4-6`
 for faster/cheaper); `--max-frames 48`; `--strict` makes every scenario blocking.
