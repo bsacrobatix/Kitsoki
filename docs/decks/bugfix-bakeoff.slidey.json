@@ -64,68 +64,107 @@
   },
   {
    "type": "table",
-   "title": "bug9 (P1 shared-checkout) \u2014 the full 4\u00d72 matrix",
+   "title": "bug9 \u2014 single-prompt + guidance",
    "columns": [
     "Model",
-    "single-prompt + guidance",
-    "kitsoki pipeline"
+    "Outcome",
+    "Turns",
+    "Cost"
    ],
    "rows": [
     [
      "GLM-5.2",
-     "\u2014 (quota-blocked)",
-     "\u2014 (quota-blocked)"
+     "\u2014",
+     "\u2014",
+     "quota-blocked"
     ],
     [
      "Opus 4.8",
-     "solved \u00b7 0 turns \u00b7 $4.00 \u00b7 299s",
-     "solved \u00b7 $7.73 \u00b7 1056s \u00b7 +regression test"
+     "solved",
+     "0",
+     "$4.00"
     ],
     [
      "Sonnet 4.6",
-     "solved \u00b7 1 turn \u00b7 $3.02 \u00b7 288s",
-     "failed* \u00b7 shipped a 65-test-breaking fix"
+     "solved",
+     "1",
+     "$3.02"
     ],
     [
      "GPT-5.5",
-     "\u2014 (pending)",
-     "\u2014 (pending)"
+     "pending",
+     "\u2014",
+     "\u2014"
     ]
    ],
-   "narration": "Reading down: kitsoki vs single-prompt. Reading across: model vs model. *Sonnet/kitsoki ran on the PRE-hardening prompts and shipped a broken fix \u2014 the finding that forced the implementer self-verify + honest-test_author hardening (commit d210ea67). Re-run pending. GLM-5.2 is blocked on synthetic.new rate limits; the session is staged to resume on recovery.",
-   "hold": 480
+   "narration": "The naive baseline: one staged prompt, oracle-gated guidance turns counted. Opus solved it cold; Sonnet needed one behavioural nudge for a third of the cost.",
+   "hold": 360
   },
   {
    "type": "table",
-   "title": "Full grid coverage \u2014 3 bugs \u00d7 4 models \u00d7 2 treatments (24 cells)",
+   "title": "bug9 \u2014 kitsoki pipeline",
    "columns": [
-    "Bug",
-    "single cells",
-    "kitsoki cells",
-    "status"
+    "Model",
+    "Outcome",
+    "Cost",
+    "Note"
    ],
    "rows": [
     [
-     "bug9  \u00b7 shared-checkout (P1)",
-     "opus\u2713 sonnet\u2713 \u00b7 glm/gpt \u2013",
-     "opus\u2713 sonnet\u2717* \u00b7 glm\u26d4 gpt \u2013",
-     "4 real cells"
+     "GLM-5.2",
+     "\u2014",
+     "\u2014",
+     "quota-blocked"
     ],
     [
-     "bug12 \u00b7 decide post_cmd (P1)",
-     "queued (launch failed)",
-     "not yet run",
-     "pending"
+     "Opus 4.8",
+     "solved",
+     "$7.73",
+     "wrote a regression test"
     ],
     [
-     "bug14 \u00b7 web bg-completion (P2)",
-     "queued (launch failed)",
-     "not yet run",
-     "pending"
+     "Sonnet 4.6",
+     "failed",
+     "\u2014",
+     "broke 65 tests (pre-hardening)"
+    ],
+    [
+     "GPT-5.5",
+     "pending",
+     "\u2014",
+     "\u2014"
     ]
    ],
-   "narration": "Methodology validated end-to-end on bug9; the rest of the grid is queued. GLM cells await quota; bug12/bug14 await a re-launch. The harness is manifest-driven and resumable \u2014 each missing cell re-runs without redoing the rest, and the committed summary.json regenerates this deck offline.",
-   "hold": 420
+   "narration": "The structured pipeline: pricier, but it wrote its own regression test and parked safely at the gate. Sonnet's failure here \u2014 a 65-test-breaking fix \u2014 is what forced the prompt hardening (commit d210ea67).",
+   "hold": 360
+  },
+  {
+   "type": "table",
+   "title": "Grid coverage \u2014 24 cells (3 bugs \u00d7 4 models \u00d7 2)",
+   "columns": [
+    "Bug",
+    "Cells run",
+    "Status"
+   ],
+   "rows": [
+    [
+     "bug9 (P1)",
+     "4 / 8",
+     "opus+sonnet done \u00b7 GLM blocked \u00b7 GPT pending"
+    ],
+    [
+     "bug12 (P1)",
+     "0 / 8",
+     "queued"
+    ],
+    [
+     "bug14 (P2)",
+     "0 / 8",
+     "queued"
+    ]
+   ],
+   "narration": "Methodology validated end-to-end on bug9; the rest is queued. The harness is resumable \u2014 each cell re-runs independently and the committed summary.json regenerates this deck offline.",
+   "hold": 300
   },
   {
    "type": "narrative",
