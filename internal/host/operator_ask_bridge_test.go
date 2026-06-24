@@ -67,7 +67,15 @@ func TestOperatorAskListener_UsesSocketSafeTempDir(t *testing.T) {
 }
 
 func TestOperatorAskListener_RespectsSocketDirOverride(t *testing.T) {
-	dir, err := os.MkdirTemp("/private/tmp", "ks-opask")
+	// A SHORT base dir keeps the unix socket path under the sun_path limit
+	// (t.TempDir()/os.TempDir() can be too long on macOS → bind fails). Prefer
+	// macOS's /private/tmp, falling back to /tmp on Linux CI where the former
+	// does not exist (otherwise MkdirTemp errors and the test hard-fails).
+	base := "/private/tmp"
+	if _, statErr := os.Stat(base); statErr != nil {
+		base = "/tmp"
+	}
+	dir, err := os.MkdirTemp(base, "ks-opask")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	t.Setenv("KITSOKI_OPERATOR_ASK_SOCKET_DIR", dir)
