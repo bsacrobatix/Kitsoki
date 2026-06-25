@@ -358,7 +358,7 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 	// Wave 3-agent: write AgentCalled to the JSONL sink at dispatch time.
 	appendAgentCalledEvent(ctx, callStart, callID, question, calledPayload)
 
-	chat, err := cs.Get(ctx, chatID)
+	chat, err := cs.GetOrEnsure(ctx, chatID)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("host.agent.converse: get chat %s: %v", chatID, err)}, nil
 	}
