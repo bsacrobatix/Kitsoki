@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/testrunner"
@@ -25,6 +26,9 @@ type Dispatcher struct {
 	Routes   LabelStoryMap
 	Comments *CommentStore
 	WorkerID string
+	// PublicBaseURL, when set, replaces the local kitsoki:// run placeholder
+	// with a browser-openable URL: <base>/run/<job_id>.
+	PublicBaseURL string
 	// SpawnFn runs the mapped story for a claimed job in no-LLM posture.
 	// Defaults to RunStorySession (testrunner.RunFlows-backed); injectable for
 	// tests (spy / assertion).
@@ -93,6 +97,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 		spawn = RunStorySession
 	}
 	result, spawnErr := spawn(ctx, route, job)
+	if url := publicRunURL(d.PublicBaseURL, job.JobID); url != "" {
+		result.RunURL = url
+	}
 
 	finalState := jobs.GHDone
 	errMsg := ""
@@ -120,6 +127,14 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 
 	job, _ = d.Jobs.GetJob(ctx, job.JobID)
 	return job, spawnErr
+}
+
+func publicRunURL(baseURL, jobID string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" || strings.TrimSpace(jobID) == "" {
+		return ""
+	}
+	return baseURL + "/run/" + jobID
 }
 
 // RunStorySession is the default SpawnFn: it points testrunner.RunFlows at the

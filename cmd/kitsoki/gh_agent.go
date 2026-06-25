@@ -27,6 +27,7 @@ func newGHAgentCmd() *cobra.Command {
 		Short: "Drive the @kitsoki GitHub mention -> dispatch -> run -> ack loop",
 	}
 	cmd.AddCommand(newGHAgentPollCmd())
+	cmd.AddCommand(newGHAgentServeCmd())
 	return cmd
 }
 
@@ -37,6 +38,7 @@ func newGHAgentPollCmd() *cobra.Command {
 		dbPath         string
 		trigger        string
 		worker         string
+		publicBaseURL  string
 		useGitHubApp   bool
 		appID          int64
 		installationID int64
@@ -80,11 +82,12 @@ func newGHAgentPollCmd() *cobra.Command {
 			}
 
 			d := &ghagent.Dispatcher{
-				Jobs:     store,
-				Routes:   ghagent.DefaultLabelStoryMap(),
-				Comments: &ghagent.CommentStore{Exec: host.GitHubTicketHandler, Repo: repo},
-				WorkerID: worker,
-				SpawnFn:  ghagent.RunStorySession,
+				Jobs:          store,
+				Routes:        ghagent.DefaultLabelStoryMap(),
+				Comments:      &ghagent.CommentStore{Exec: host.GitHubTicketHandler, Repo: repo},
+				WorkerID:      worker,
+				PublicBaseURL: publicBaseURL,
+				SpawnFn:       ghagent.RunStorySession,
 			}
 
 			for _, m := range mentions {
@@ -103,6 +106,7 @@ func newGHAgentPollCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dbPath, "db", "", "sqlite path for the gh_jobs store (default in-memory)")
 	cmd.Flags().StringVar(&trigger, "trigger", ghagent.DefaultMentionTrigger, "mention trigger literal")
 	cmd.Flags().StringVar(&worker, "worker", "gh-agent-1", "worker id holding the claim")
+	cmd.Flags().StringVar(&publicBaseURL, "public-base-url", "", "public URL base used in ack run links, e.g. https://kitsoki-test.slothattax.me")
 	cmd.Flags().BoolVar(&useGitHubApp, "github-app", false, "authenticate as a GitHub App installation (mints GH_TOKEN); off keeps the offline path")
 	cmd.Flags().Int64Var(&appID, "gh-app-id", 0, "GitHub App id (overrides KITSOKI_GH_APP_ID)")
 	cmd.Flags().Int64Var(&installationID, "gh-app-installation-id", 0, "installation id (overrides KITSOKI_GH_APP_INSTALLATION_ID)")

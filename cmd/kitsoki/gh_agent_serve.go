@@ -1,0 +1,343 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"html"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"kitsoki/internal/ghagent"
+	"kitsoki/internal/ghagent/githubapp"
+	"kitsoki/internal/host"
+	"kitsoki/internal/inbox"
+	"kitsoki/internal/jobs"
+
+	_ "modernc.org/sqlite"
+)
+
+func newGHAgentServeCmd() *cobra.Command {
+	var (
+		repo           string
+		dbPath         string
+		addr           string
+		publicBaseURL  string
+		trigger        string
+		worker         string
+		pollInterval   time.Duration
+		webhookSecret  string
+		useGitHubApp   bool
+		appID          int64
+		installationID int64
+		appKeyFile     string
+	)
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Run the hosted @kitsoki GitHub agent",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			if strings.TrimSpace(dbPath) == "" {
+				return fmt.Errorf("gh-agent serve: --db is required")
+			}
+			if strings.TrimSpace(publicBaseURL) == "" {
+				return fmt.Errorf("gh-agent serve: --public-base-url is required")
+			}
+			restoreGHToken, err := setupGitHubAppAuth(ctx, useGitHubApp, appID, installationID, appKeyFile)
+			if err != nil {
+				return err
+			}
+			defer restoreGHToken()
+
+			db, err := sql.Open("sqlite", dbPath)
+			if err != nil {
+				return fmt.Errorf("gh-agent: open db %q: %w", dbPath, err)
+			}
+			defer db.Close()
+			store, err := jobs.NewGHJobStore(db)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(webhookSecret) == "" {
+				webhookSecret = os.Getenv(githubapp.EnvWebhookSecret)
+			}
+			opts := ghAgentServeOptions{
+				Repo:          repo,
+				Addr:          addr,
+				PublicBaseURL: publicBaseURL,
+				Trigger:       trigger,
+				Worker:        worker,
+				PollInterval:  pollInterval,
+				WebhookSecret: webhookSecret,
+			}
+			return runGHAgentServe(ctx, store, opts)
+		},
+	}
+	cmd.Flags().StringVar(&repo, "repo", "", "owner/repo slug to poll/comment")
+	cmd.Flags().StringVar(&dbPath, "db", "", "sqlite path for durable gh_jobs state")
+	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:8787", "HTTP listen address")
+	cmd.Flags().StringVar(&publicBaseURL, "public-base-url", "", "public URL base used in ack run links")
+	cmd.Flags().StringVar(&trigger, "trigger", ghagent.DefaultMentionTrigger, "mention trigger literal")
+	cmd.Flags().StringVar(&worker, "worker", "gh-agent-1", "worker id holding the claim")
+	cmd.Flags().DurationVar(&pollInterval, "poll-interval", 30*time.Second, "poll fallback interval; set 0 to disable polling")
+	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret; defaults to KITSOKI_GH_WEBHOOK_SECRET")
+	cmd.Flags().BoolVar(&useGitHubApp, "github-app", false, "authenticate as a GitHub App installation (mints GH_TOKEN)")
+	cmd.Flags().Int64Var(&appID, "gh-app-id", 0, "GitHub App id (overrides KITSOKI_GH_APP_ID)")
+	cmd.Flags().Int64Var(&installationID, "gh-app-installation-id", 0, "installation id (overrides KITSOKI_GH_APP_INSTALLATION_ID)")
+	cmd.Flags().StringVar(&appKeyFile, "gh-app-key-file", "", "path to the App's RSA private key .pem (overrides KITSOKI_GH_APP_PRIVATE_KEY_FILE)")
+	return cmd
+}
+
+type ghAgentServeOptions struct {
+	Repo          string
+	Addr          string
+	PublicBaseURL string
+	Trigger       string
+	Worker        string
+	PollInterval  time.Duration
+	WebhookSecret string
+}
+
+func runGHAgentServe(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, "ok\n")
+	})
+	mux.HandleFunc("/run/", ghAgentRunHandler(store))
+	mux.HandleFunc("/gh-agent/webhook", ghAgentWebhookHandler(store, opts))
+
+	srv := &http.Server{Addr: opts.Addr, Handler: mux}
+	errc := make(chan error, 1)
+	go func() {
+		err := srv.ListenAndServe()
+		if err == http.ErrServerClosed {
+			err = nil
+		}
+		errc <- err
+	}()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+
+	if opts.PollInterval > 0 {
+		go runGHAgentPollLoop(ctx, store, opts)
+	}
+	fmt.Fprintf(os.Stdout, "gh-agent: serving %s (public %s)\n", opts.Addr, opts.PublicBaseURL)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-errc:
+		return err
+	}
+}
+
+func runGHAgentPollLoop(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) {
+	ticker := time.NewTicker(opts.PollInterval)
+	defer ticker.Stop()
+	for {
+		if err := runGHAgentPollOnce(ctx, store, opts); err != nil {
+			fmt.Fprintf(os.Stderr, "gh-agent: poll: %v\n", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runGHAgentPollOnce(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
+	items, err := pollInboxItems(ctx, opts.Repo, "")
+	if err != nil {
+		return err
+	}
+	for _, mention := range ghagent.FilterMentions(items, opts.Repo, opts.Trigger) {
+		if _, err := dispatchGHAgentMention(ctx, store, opts, mention, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "gh-agent: dispatch %s: %v\n", mention.OriginRef, err)
+		}
+	}
+	return nil
+}
+
+func ghAgentWebhookHandler(store *jobs.GHJobStore, opts ghAgentServeOptions) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4<<20))
+		if err != nil {
+			http.Error(w, "read body", http.StatusBadRequest)
+			return
+		}
+		if !githubapp.VerifyWebhookSignature(opts.WebhookSecret, body, r.Header.Get("X-Hub-Signature-256")) {
+			http.Error(w, "bad signature", http.StatusUnauthorized)
+			return
+		}
+		mention, labels, ok, err := webhookMention(body, opts.Repo, opts.Trigger)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if !ok {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = io.WriteString(w, "ignored\n")
+			return
+		}
+		job, err := dispatchGHAgentMention(r.Context(), store, opts, mention, labels)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":      true,
+			"job_id":  job.JobID,
+			"state":   job.State,
+			"run_url": job.RunURL,
+		})
+	}
+}
+
+func dispatchGHAgentMention(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions, mention ghagent.Mention, labels []string) (*jobs.GHJob, error) {
+	d := &ghagent.Dispatcher{
+		Jobs:          store,
+		Routes:        ghagent.DefaultLabelStoryMap(),
+		Comments:      &ghagent.CommentStore{Exec: host.GitHubTicketHandler, Repo: mention.Repo},
+		WorkerID:      opts.Worker,
+		PublicBaseURL: opts.PublicBaseURL,
+		SpawnFn:       ghagent.RunStorySession,
+	}
+	return d.Dispatch(ctx, mention, labels)
+}
+
+func ghAgentRunHandler(store *jobs.GHJobStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		jobID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/run/"), "/")
+		if jobID == "" {
+			http.NotFound(w, r)
+			return
+		}
+		job, err := store.GetJob(r.Context(), jobID)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<!doctype html>
+<html><head><meta charset="utf-8"><title>kitsoki run %s</title>
+<style>body{font:16px/1.45 system-ui,sans-serif;max-width:860px;margin:48px auto;padding:0 24px;color:#17202a}dt{font-weight:700;margin-top:14px}dd{margin:4px 0 0}code{background:#f3f5f7;padding:2px 5px;border-radius:4px}</style></head>
+<body><h1>kitsoki GitHub run</h1><dl>
+<dt>Job</dt><dd><code>%s</code></dd>
+<dt>Origin</dt><dd><code>%s</code></dd>
+<dt>Story</dt><dd><code>%s</code></dd>
+<dt>State</dt><dd><code>%s</code></dd>
+<dt>Issue / PR</dt><dd>%s #%s</dd>
+<dt>Updated</dt><dd>%s</dd>
+</dl></body></html>`,
+			html.EscapeString(job.JobID),
+			html.EscapeString(job.JobID),
+			html.EscapeString(job.OriginRef),
+			html.EscapeString(job.Story),
+			html.EscapeString(job.State),
+			html.EscapeString(job.ObjectKind),
+			html.EscapeString(job.ObjectNumber),
+			html.EscapeString(job.UpdatedAt.Format(time.RFC3339)),
+		)
+	}
+}
+
+func webhookMention(body []byte, fallbackRepo, trigger string) (ghagent.Mention, []string, bool, error) {
+	var payload struct {
+		Action     string `json:"action"`
+		Repository struct {
+			FullName string `json:"full_name"`
+		} `json:"repository"`
+		Issue struct {
+			Number  int    `json:"number"`
+			Title   string `json:"title"`
+			HTMLURL string `json:"html_url"`
+			Labels  []struct {
+				Name string `json:"name"`
+			} `json:"labels"`
+			PullRequest *struct{} `json:"pull_request"`
+		} `json:"issue"`
+		PullRequest struct {
+			Number  int    `json:"number"`
+			Title   string `json:"title"`
+			HTMLURL string `json:"html_url"`
+			Labels  []struct {
+				Name string `json:"name"`
+			} `json:"labels"`
+		} `json:"pull_request"`
+		Comment struct {
+			Body    string `json:"body"`
+			HTMLURL string `json:"html_url"`
+			User    struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		} `json:"comment"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ghagent.Mention{}, nil, false, fmt.Errorf("parse webhook payload: %w", err)
+	}
+	if payload.Action == "deleted" || payload.Action == "unassigned" {
+		return ghagent.Mention{}, nil, false, nil
+	}
+	if strings.TrimSpace(trigger) == "" {
+		trigger = ghagent.DefaultMentionTrigger
+	}
+	if !strings.Contains(strings.ToLower(payload.Comment.Body), strings.ToLower(trigger)) {
+		return ghagent.Mention{}, nil, false, nil
+	}
+	repo := strings.TrimSpace(payload.Repository.FullName)
+	if repo == "" {
+		repo = fallbackRepo
+	}
+	if repo == "" {
+		return ghagent.Mention{}, nil, false, fmt.Errorf("webhook payload has no repository.full_name and --repo is empty")
+	}
+
+	item := host.GitHubInboxItem{Kind: "issue", Author: payload.Comment.User.Login, Title: payload.Comment.Body, URL: payload.Comment.HTMLURL}
+	var labels []string
+	switch {
+	case payload.PullRequest.Number > 0:
+		item.Kind = "pr"
+		item.Number = fmt.Sprintf("%d", payload.PullRequest.Number)
+		if item.URL == "" {
+			item.URL = payload.PullRequest.HTMLURL
+		}
+		for _, l := range payload.PullRequest.Labels {
+			labels = append(labels, l.Name)
+		}
+	case payload.Issue.Number > 0:
+		if payload.Issue.PullRequest != nil {
+			item.Kind = "pr"
+		}
+		item.Number = fmt.Sprintf("%d", payload.Issue.Number)
+		if item.URL == "" {
+			item.URL = payload.Issue.HTMLURL
+		}
+		for _, l := range payload.Issue.Labels {
+			labels = append(labels, l.Name)
+		}
+	default:
+		return ghagent.Mention{}, nil, false, fmt.Errorf("webhook payload has no issue or pull_request number")
+	}
+	mention := ghagent.Mention{
+		Item:      item,
+		Repo:      repo,
+		OriginRef: inbox.GitHubOriginRef(repo, item),
+		Trigger:   trigger,
+	}
+	return mention, labels, true, nil
+}
