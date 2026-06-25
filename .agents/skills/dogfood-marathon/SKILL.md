@@ -26,6 +26,13 @@ and **trust only an independent verify** — never the maker's self-report.
 Run the whole loop through the **`kitsoki-mcp-driver`** agent — the studio MCP is
 the only write surface; you never touch the filesystem to drive the story.
 
+> **Headless?** The in-process Agent/subagent path does NOT attach the studio MCP
+> (it inherits the parent's empty MCP set → "No MCP servers configured"). To drive
+> from a script/cron/another agent, use the raw-`claude -p` primitive
+> [`tools/mcp-drive/drive.sh`](../../../tools/mcp-drive/README.md) (`--mcp-config`
+> + `--strict-mcp-config`); the live worker model is chosen per session by
+> `session.new {profile, harness:"live"}`. See MEMORY `mcp-first-delegation-runbook`.
+
 1. **Pick the case** and pin its **baseline**. The baseline is the buggy state
    the pipeline must reproduce against — for a merged-fix case that is the fix's
    PARENT commit (`<fix>^`); for a live ticket it is current main (or the SHA the

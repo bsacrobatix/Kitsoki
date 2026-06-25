@@ -16,6 +16,7 @@ a report + narrated slidey deck.
 - [`docs/case-studies/query-string-bakeoff.md`](../../../docs/case-studies/query-string-bakeoff.md) — the worked reference run (GPT-5.5 solved query-string 3/3).
 - [`tools/mcp-drive/README.md`](../../../tools/mcp-drive/README.md) — the headless MCP delegation primitive (`drive.sh`).
 - [`stories/bench-bugfix/app.yaml`](../../../stories/bench-bugfix/app.yaml) — the generic bugfix instance you drive.
+- [`stories/repo-bakeoff`](../../../stories/repo-bakeoff) — the drivable workflow that wraps this whole method (configure → arm oracles → run cells → score → deck); run it with `kitsoki run stories/repo-bakeoff/app.yaml`.
 - MEMORY: `mcp-first-delegation-runbook` (the live-drive recipe + tuning knobs), `bakeoff-dogfood-framework`, `workflow-gate-on-independent-verify`.
 
 The discipline that makes results worth anything: **the oracle is the verdict**

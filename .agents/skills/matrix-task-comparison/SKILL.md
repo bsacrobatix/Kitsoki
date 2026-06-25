@@ -11,6 +11,13 @@ reference implementation — the worked first instance — is
 [`tools/bugfix-bakeoff/`](../../../tools/bugfix-bakeoff/) (kitsoki's `bugfix`
 pipeline vs a naive single prompt, across an Opus/Sonnet/GLM/GPT model grid, on
 real fixed bugs). This skill is the reusable *method*; cite those files, do not
+<!-- For an EXTERNAL repo (not kitsoki's own bugs) — "should I use kitsoki for my
+project?" — use the [`external-repo-bakeoff`](../external-repo-bakeoff/SKILL.md)
+skill + [`tools/bugfix-bakeoff/external`](../../../tools/bugfix-bakeoff/external)
+(bench.py + drive_cell.sh), and the [`stories/repo-bakeoff`](../../../stories/repo-bakeoff)
+drivable workflow. The live drive there uses the headless MCP primitive
+[`tools/mcp-drive/drive.sh`](../../../tools/mcp-drive/README.md). -->
+
 re-derive them, and do **not** hardcode the bug9/12/14 specifics into a new
 study.
 

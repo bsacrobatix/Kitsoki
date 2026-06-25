@@ -189,6 +189,34 @@ def verify(m, only_bug, repo_dir):
     return 0 if ok else 1
 
 
+def summarize(m, results_dir):
+    """Roll up every results/cells/<bug>-<cand>-*.json into a by-candidate summary
+    (solved/partial/failed counts + solve_rate). Free, deterministic — consumed by
+    the repo-bakeoff story's scoring room and the report/deck builder."""
+    cells_dir = HERE / results_dir / "cells"
+    cells = []
+    for f in sorted(cells_dir.glob("*.json")) if cells_dir.exists() else []:
+        try:
+            cells.append(json.loads(f.read_text()))
+        except Exception:
+            continue
+    by = {}
+    for c in cells:
+        cand = c.get("candidate", "?")
+        q = (c.get("outcome", {}) or {}).get("quality", "?")
+        b = by.setdefault(cand, {"n": 0, "solved": 0, "partial": 0, "failed": 0})
+        b["n"] += 1
+        if q in b:
+            b[q] += 1
+    for cand, b in by.items():
+        b["solve_rate"] = round(b["solved"] / b["n"], 3) if b["n"] else 0.0
+    out = {"project": m["project"]["id"], "cells": cells, "rollup": {"by_candidate": by},
+           "summary_path": str((HERE / results_dir / "summary.json"))}
+    (HERE / results_dir / "summary.json").write_text(json.dumps(out, indent=2))
+    print(json.dumps(out))
+    return 0
+
+
 def trace_cost(trace):
     """Sum the worker cost + tokens from a live kitsoki trace.
     Metered providers carry payload.meta.cost_usd; subscription auth carries
@@ -248,10 +276,15 @@ def main():
     mt.add_argument("--bug")     # optional: emit one bug's drive facts
     c = sub.add_parser("cost")   # worker cost/tokens from a live trace
     c.add_argument("--trace", required=True)
+    sm = sub.add_parser("summarize")  # roll up results/cells/*.json by candidate
+    sm.add_argument("--project", required=True)
+    sm.add_argument("--results", default="results", help="results dir (cells/ under it)")
     a = ap.parse_args()
 
     if a.cmd == "cost":
         sys.exit(trace_cost(a.trace))
+    if a.cmd == "summarize":
+        sys.exit(summarize(load(a.project), a.results))
 
     m = load(a.project)
     if a.cmd == "score":

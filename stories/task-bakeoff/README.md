@@ -1,5 +1,7 @@
 # task-bakeoff — orchestrate a matrix task comparison, deck the report
 
+> Sibling: for an EXTERNAL repo (onboard a third-party project + fix real bugs), see [`stories/repo-bakeoff`](../repo-bakeoff/README.md) (wraps `tools/bugfix-bakeoff/external`).
+
 A kitsoki story that wraps the **`matrix-task-comparison`** method
 (`.agents/skills/matrix-task-comparison/SKILL.md`) and its reference harness
 (`tools/bugfix-bakeoff/`) into a drivable workflow that ends in a **baked
