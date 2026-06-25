@@ -7,7 +7,7 @@
  * Used by oregon-trail-e2e.spec.ts and tour-video.spec.ts.
  *
  * IMPORTANT: the binary serves the SPA via go:embed, so a fresh UI requires
- * `make build && cp ./kitsoki bin/kitsoki` before recording — an un-rebuilt
+ * `make build-bin` before recording — an un-rebuilt
  * bin/kitsoki serves a stale bundle.
  */
 import { spawn, spawnSync, type ChildProcess } from "child_process";
@@ -237,7 +237,7 @@ export async function startWebServer(opts: {
   if (opts.config) checkPaths.push(opts.config);
   for (const p of checkPaths) {
     if (!fs.existsSync(p)) {
-      const hint = p === BIN ? " (run 'make build && cp ./kitsoki bin/kitsoki', or unset KITSOKI_WEB_GO_RUN to use go run)" : "";
+      const hint = p === BIN ? " (run 'make build-bin', or unset KITSOKI_WEB_GO_RUN to use go run)" : "";
       throw new Error(`missing required path: ${p}${hint}`);
     }
   }

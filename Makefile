@@ -5,6 +5,16 @@ PKG       := ./cmd/kitsoki
 # keeps the classic ~/bin. Override with `make install INSTALLDIR=...`.
 INSTALLDIR ?= $(if $(filter Darwin,$(shell uname -s)),$(HOME)/.local/bin,$(HOME)/bin)
 
+# codesign_adhoc <binary>: on macOS, force a fresh ad-hoc code signature on a
+# just-built binary. Go's linker-internal ad-hoc signature is rejected as
+# invalid by recent macOS (≥26) on some lazily-faulted code pages, and copying a
+# binary invalidates it outright — either way the kernel SIGKILLs it (exit 137,
+# no output) when it executes the affected path. An explicit `codesign --force
+# --sign -` pass produces a CodeDirectory taskgated accepts. No-op off darwin.
+define codesign_adhoc
+	@if [ "$$(uname -s)" = "Darwin" ]; then codesign --force --sign - "$(1)" >/dev/null 2>&1 && echo "codesign: ad-hoc signed $(1)" || echo "codesign: WARN could not sign $(1)"; fi
+endef
+
 # Runstatus SPA: built by vite (pnpm) under tools/runstatus, then staged into
 # the Go embed dir so the binary can serve it (status serve) and inline it into
 # HTML artifacts (export-status). The staged file is gitignored; a committed
@@ -72,6 +82,20 @@ check-deps:
 # toolkit.
 build: check-deps web embed-stories embed-skills
 	go build -o $(BINARY) $(PKG)
+	$(call codesign_adhoc,$(BINARY))
+
+# build-bin produces the binary the Playwright/VS Code demo specs SPAWN
+# (bin/kitsoki), the canonical alternative to the footgun `cp ./kitsoki
+# bin/kitsoki`. NEVER `cp` the binary on macOS: copying a Go linker-signed
+# Mach-O invalidates its ad-hoc signature and macOS (Gatekeeper/taskgated)
+# SIGKILLs the spawned child the moment it faults in an unsigned code page —
+# e.g. the story-load path — so `kitsoki web --stories-dir …` dies with exit
+# 137 and ZERO output. Building straight to the target (then a defensive
+# ad-hoc re-sign) keeps the signature valid.
+build-bin: web embed-stories embed-skills
+	@mkdir -p bin
+	go build -o bin/kitsoki $(PKG)
+	$(call codesign_adhoc,bin/kitsoki)
 
 install: check-deps web embed-stories embed-skills
 	@mkdir -p $(INSTALLDIR)

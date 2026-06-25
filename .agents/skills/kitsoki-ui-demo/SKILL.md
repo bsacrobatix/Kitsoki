@@ -106,12 +106,20 @@ recorder.
 ## Prerequisites (once)
 
 ```bash
-make build                                  # bundle the SPA into ./kitsoki + bin/kitsoki
-cp ./kitsoki bin/kitsoki                    # the specs spawn bin/kitsoki
+make build-bin                              # stage SPA/stories + build bin/kitsoki (the specs spawn it), ad-hoc signed
 pnpm -C tools/runstatus playwright:install  # chromium + ffmpeg for Playwright (once)
 ```
 
-`make build` is **mandatory before every recording** — the SPA is `go:embed`'d
+**Never `cp ./kitsoki bin/kitsoki`.** On macOS, copying a Go linker-signed
+Mach-O invalidates its ad-hoc code signature; macOS then SIGKILLs the spawned
+server the instant it faults in an affected code page (e.g. the story-load
+path), so `kitsoki web --stories-dir …` dies with **exit 137 and zero output** —
+a silent landmine. `make build-bin` builds straight to `bin/kitsoki` and ad-hoc
+re-signs it, so the signature stays valid. (Plain `make build` produces the
+signed `./kitsoki`; it's `make build-bin` that yields the spawn binary the specs
+need.)
+
+`make build-bin` is **mandatory before every recording** — the SPA is `go:embed`'d
 into the binary, so an un-rebuilt binary serves a stale UI. Rebuild after any
 change under `tools/runstatus/src/`.
 
@@ -469,7 +477,7 @@ What makes it the template:
 
 ```bash
 # 1. Rebuild the SPA into the binary (mandatory — go:embed)
-make build && cp ./kitsoki bin/kitsoki
+make build-bin   # build bin/kitsoki (ad-hoc signed; NEVER cp ./kitsoki — invalidates the sig → SIGKILL)
 
 # 2. Validate fast (assertions only, no dwells)
 cd tools/runstatus && WEB_CHAT_PACE=0 pnpm exec playwright test agent-actions-video --project=chromium
@@ -608,7 +616,7 @@ mutation-dense tours.
 ### Run it
 
 ```bash
-make build && cp ./kitsoki bin/kitsoki   # rebuild (go:embed) — capture drives a live server
+make build-bin   # stage + build bin/kitsoki (ad-hoc signed; NEVER cp — that SIGKILLs on macOS)
 
 # 1. CAPTURE (one live drive) → .artifacts/rrweb-eval/<tour>/<tour>.rrweb.json (+ .capture.json sidecar)
 cd tools/runstatus && pnpm exec playwright test agent-actions-rrweb-capture --project=chromium
