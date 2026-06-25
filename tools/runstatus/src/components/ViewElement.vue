@@ -424,6 +424,7 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
       <!-- video/* → native player with Range-request support for seeking -->
       <video
         v-if="mediaMime.startsWith('video/')"
+        :key="mediaHandle"
         class="ve-media-video"
         data-testid="media-video"
         controls
@@ -449,6 +450,7 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
       <!-- image/* → lazy-loaded image -->
       <img
         v-else-if="mediaMime.startsWith('image/')"
+        :key="mediaHandle"
         class="ve-media-image"
         loading="lazy"
         :src="artifactUrl(mediaHandle)"
@@ -458,6 +460,7 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
       <!-- application/pdf → inline frame -->
       <iframe
         v-else-if="mediaMime === 'application/pdf'"
+        :key="mediaHandle"
         class="ve-media-iframe"
         :src="artifactUrl(mediaHandle)"
         :title="mediaCaption || mediaHandle"
@@ -468,7 +471,13 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
            the static Slidey bundle can boot. MUST precede the text/html branch
            because a slideshow's MIME is text/html. -->
       <template v-else-if="isSlideshow">
+        <!-- :key on the content-addressed handle forces Vue to REPLACE the
+             iframe DOM node when a refine re-renders the deck (the handle's
+             hash changes). Without it Vue patches src on the SAME element and
+             the browser keeps showing the stale cached render — the user-visible
+             "the deck never updates after I edit it" bug. -->
         <iframe
+          :key="mediaHandle"
           class="ve-media-iframe"
           data-testid="media-slideshow-frame"
           sandbox="allow-scripts"
@@ -487,6 +496,7 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
       <!-- text/html → sandboxed frame with scripts, no same-origin access -->
       <iframe
         v-else-if="mediaMime === 'text/html'"
+        :key="mediaHandle"
         class="ve-media-iframe"
         sandbox="allow-scripts"
         :src="artifactUrl(mediaHandle)"
