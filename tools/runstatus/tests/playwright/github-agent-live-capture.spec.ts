@@ -25,7 +25,7 @@ import {
   SETTLE_MS,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
-import { installCurtain, liftCurtain, makeCaption } from "./_helpers/demo.js";
+import { captureDiagnostics, installCurtain, liftCurtain, makeCaption } from "./_helpers/demo.js";
 
 type CaptureStep = {
   id: string;
@@ -112,25 +112,35 @@ test("capture live GitHub-agent evidence", async () => {
   const page: Page = await context.newPage();
   const video = page.video();
   const shot = makeShot(artifactDir);
+  const diag = captureDiagnostics(page, artifactDir);
   const chapters = new ChapterRecorder();
 
   try {
+    diag.mark("install-curtain");
     await tryInstallCurtain(page, plan.curtainTitle || "Live @kitsoki GitHub App POC");
 
     for (const [idx, step] of plan.steps.entries()) {
+      diag.mark(`step ${step.id}: goto`);
       chapters.open(step.id, step.title, SPEC_REF);
       await page.goto(step.url, { waitUntil: "domcontentloaded", timeout: 45000 });
       if (step.waitForText) {
+        diag.mark(`step ${step.id}: wait ${step.waitForText}`);
         await page.getByText(step.waitForText, { exact: false }).first().waitFor({ timeout: 30000 });
       }
       await dwell(page, SETTLE_MS);
       if (idx === 0) {
+        diag.mark(`step ${step.id}: lift-curtain`);
         await tryLiftCurtain(page);
       }
+      diag.mark(`step ${step.id}: caption`);
       const caption = await tryMakeCaption(page);
       await caption(step.title, step.caption || step.url, step.dwellMs ?? 5000);
+      diag.mark(`step ${step.id}: screenshot`);
       await shot(page, step.id);
     }
+  } catch (e) {
+    diag.onThrow(e);
+    throw e;
   } finally {
     await context.close();
     const mp4 = await saveVideoAsMp4(video, artifactDir, videoName);
