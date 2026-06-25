@@ -122,9 +122,14 @@ func TestGHAgentRunHandlersShowUsefulJobSummary(t *testing.T) {
 	}
 	body := htmlRec.Body.String()
 	for _, want := range []string{
+		job.JobID,
+		"github:o/r/issue/42",
 		"stories/bugfix",
+		string(jobs.GHDone),
+		"issue #42",
 		"https://github.com/o/r/issues/42",
 		"https://github.com/o/r/issues/42#issuecomment-1",
+		"Updated",
 		"/api/run/" + job.JobID,
 	} {
 		if !strings.Contains(body, want) {
@@ -148,8 +153,20 @@ func TestGHAgentRunHandlersShowUsefulJobSummary(t *testing.T) {
 	if got["comment_url"] != "https://github.com/o/r/issues/42#issuecomment-1" {
 		t.Fatalf("comment_url = %v", got["comment_url"])
 	}
+	if got["origin_ref"] != "github:o/r/issue/42" {
+		t.Fatalf("origin_ref = %v", got["origin_ref"])
+	}
+	if got["story"] != "stories/bugfix" {
+		t.Fatalf("story = %v", got["story"])
+	}
+	if got["object_kind"] != "issue" || got["object_number"] != "42" {
+		t.Fatalf("object = %v #%v", got["object_kind"], got["object_number"])
+	}
 	if got["state"] != jobs.GHDone {
 		t.Fatalf("state = %v", got["state"])
+	}
+	if got["updated_at"] == "" {
+		t.Fatalf("updated_at missing: %v", got)
 	}
 }
 
