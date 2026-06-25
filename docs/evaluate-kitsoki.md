@@ -71,6 +71,18 @@ a live model to improvise.
 
 ## What Kitsoki beats
 
+The current agent market is converging on "give an agent a task, a repo, and
+tools." Kitsoki's bet is different: keep the repeatable workflow outside the
+agent, and call agents only where the state machine says interpretation or
+implementation is needed.
+
+| Product | Strongest fit | Where Kitsoki is different |
+|---|---|---|
+| [OpenClaw](https://openclaw.ai/) | A self-hosted personal or team assistant that acts through chat apps, integrations, memory, background tasks, and a machine it can control. | OpenClaw is optimized for broad digital assistance. Kitsoki is narrower and stricter: author-declared rooms, intents, host contracts, deterministic flow tests, and replayable traces for workflows where you need to prove what happened. |
+| [OpenCode](https://opencode.ai/) | An open-source coding agent for terminal, IDE, and desktop use, with broad model-provider support and parallel coding sessions. | OpenCode is a strong agent surface. Kitsoki is the workflow layer around agents: it decides when an agent is called, what authority it has, how its result is validated, and how the whole run replays without live model spend. |
+| [Devin](https://docs.devin.ai/get-started/devin-intro) autonomous agents | Delegating software tasks to an autonomous AI engineer that can write, run, and test code, including ticket work, feature work, bug fixes, and parallel agent fleets. | Devin sells an autonomous worker. Kitsoki sells a deterministic process: reproduce, propose, implement, test, review, validate, and handoff are explicit graph states with operator gates and cassettes, so the process can be audited and improved independently of the worker. |
+| [GitHub Copilot cloud agent](https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent) / GitHub cloud agents | Assigning GitHub-native tasks to a cloud agent that researches, plans, edits on a branch, runs in an ephemeral GitHub Actions-powered environment, and can open or prepare pull requests. | Copilot cloud agent is excellent when the GitHub issue-to-branch loop is the product boundary. Kitsoki is for workflows that cross surfaces, require custom gates, need non-GitHub transports, or must replay the same conversational state machine in web, TUI, MCP, tests, and demos. |
+
 | Alternative | What it is good at | Where Kitsoki is different |
 |---|---|---|
 | A coding agent | Open-ended implementation work in a repo | Kitsoki keeps the workflow, gates, host contracts, operator pauses, and audit trail outside the model. |
