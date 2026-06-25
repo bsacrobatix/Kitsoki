@@ -320,24 +320,18 @@ function buildDeck(args) {
       eyebrow: "Live GitHub App POC",
       title: "@kitsoki on GitHub",
       subtitle: "Live GitHub App on kitsoki-test: real mentions, webhook deliveries, App comments, and hosted run pages",
-      narration:
-        `This deck is built from live evidence notes and captured clips. The front door is the live GitHub App on kitsoki-test at ${bug.webhookURL}. Static GitHub fixtures are not used as proof.`,
     },
     {
       type: "title",
       eyebrow: "Section 1",
       title: "Live GitHub front door",
       subtitle: `Real bsacrobatix/Kitsoki mentions delivered to ${bug.webhookURL}`,
-      narration:
-        `The live front door is proven by real GitHub issues and pull requests delivered to ${bug.webhookURL}: bug ${bug.sourceURL}, feature ${feature.sourceURL}, guidance ${guidance.sourceURL}, and PR ${pr.sourceURL}.`,
     },
     {
       type: "title",
       eyebrow: "Section 2",
       title: "Dispatch and run link",
       subtitle: "One claimed job, one story route, one public /run/<job-id> URL",
-      narration:
-        `Each live proof links to kitsoki-test: ${bug.runURL}, ${feature.runURL}, ${guidance.runURL}, and ${pr.runURL}.`,
     },
   ];
 
@@ -347,7 +341,6 @@ function buildDeck(args) {
       eyebrow: c.section,
       title: c.title,
       subtitle: c.subtitle,
-      narration: c.narration,
     });
     scenes.push(mediaScene(args.out, c, evidence.get(c.slug), media.get(c.slug)));
   }
@@ -357,8 +350,6 @@ function buildDeck(args) {
     eyebrow: "Section 7",
     title: "Slidey developer arc",
     subtitle: "Existing QA-passed bugfix, feature refine, and PR clips",
-    narration:
-      "The GitHub POC is the front door. The next section connects it to the existing Slidey developer workflow evidence.",
   });
   scenes.push(developerArcScene(args, args.out));
   scenes.push({
@@ -366,8 +357,6 @@ function buildDeck(args) {
     eyebrow: "Section 8",
     title: "What remains",
     subtitle: "Full PR autopilot, artifact gallery, OAuth operator drive, review-thread resolve",
-    narration:
-      "This POC proves live GitHub App ingress, story dispatch, App comments, and hosted run links. Full PR autopilot, artifact galleries, OAuth operator drive, and review-thread resolution remain future product work.",
   });
   scenes.push({
     type: "cta",
@@ -375,7 +364,7 @@ function buildDeck(args) {
     tagline: "Proven now: live GitHub App ingress, story dispatch, comments, run links",
     url: "Future: PR autopilot, artifacts, OAuth drive, review-thread resolve",
     narration:
-      "The boundary is explicit: the POC proves the live GitHub front door and run-link loop, and it does not claim the full future autopilot.",
+      "Live GitHub to linked runs. Autopilot remains future work.",
   });
 
   return {
