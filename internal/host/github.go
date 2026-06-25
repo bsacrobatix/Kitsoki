@@ -37,7 +37,8 @@ import (
 // dispatch site — see internal/host/host.go::Get.
 //
 // Required args:
-//   - op (string): one of create, search, get, comment, transition, list_mine.
+//   - op (string): one of create, search, get, comment, comment_edit,
+//     transition, list_mine.
 //
 // Optional args (all ops):
 //   - repo (string): the `owner/repo` slug for the `--repo` flag.  When
@@ -63,6 +64,8 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 		return ghTicketGet(ctx, args)
 	case "comment":
 		return ghTicketComment(ctx, args)
+	case "comment_edit":
+		return ghTicketCommentEdit(ctx, args)
 	case "transition":
 		return ghTicketTransition(ctx, args)
 	case "list_mine":
@@ -216,6 +219,53 @@ func ghTicketComment(ctx context.Context, args map[string]any) (Result, error) {
 		return Result{Error: fmt.Sprintf("ticket.comment: %s", strings.TrimSpace(stderr))}, nil
 	}
 	commentURL := lastNonEmptyLine(stdout)
+	return Result{Data: map[string]any{
+		"ok":         true,
+		"comment_id": commentURL,
+	}}, nil
+}
+
+// ghTicketCommentEdit implements ticket.comment_edit via the GitHub REST issue
+// comments endpoint. gh's issue-comment subcommand does not expose editing an
+// arbitrary comment id, so this uses `gh api` with the same gh auth context.
+//
+// Input args: comment_id (string — accepts a raw id, an API URL, or a web URL
+// with #issuecomment-N), body (string), repo (string, required unless
+// comment_id is an API URL containing /repos/owner/repo/).
+// Output Data: ok (bool), comment_id (string).
+func ghTicketCommentEdit(ctx context.Context, args map[string]any) (Result, error) {
+	commentID, _ := args["comment_id"].(string)
+	body, _ := args["body"].(string)
+	repo, id := splitIssueCommentID(commentID)
+	if repo == "" {
+		if r, _ := args["repo"].(string); r != "" {
+			repo = r
+		}
+	}
+	if strings.TrimSpace(id) == "" {
+		return Result{Error: "ticket.comment_edit: comment_id argument is required"}, nil
+	}
+	if strings.TrimSpace(repo) == "" {
+		return Result{Error: "ticket.comment_edit: repo argument is required"}, nil
+	}
+	if strings.TrimSpace(body) == "" {
+		return Result{Error: "ticket.comment_edit: body argument is required"}, nil
+	}
+	path := fmt.Sprintf("repos/%s/issues/comments/%s", repo, id)
+	stdout, stderr, code, err := cliExec(ctx, "", "gh", "api", path, "-X", "PATCH", "-f", "body="+body)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("ticket.comment_edit: exec: %v", err)}, nil
+	}
+	if code != 0 {
+		return Result{Error: fmt.Sprintf("ticket.comment_edit: %s", strings.TrimSpace(stderr))}, nil
+	}
+	commentURL := commentID
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(stdout), &raw); err == nil {
+		if url, _ := raw["html_url"].(string); strings.TrimSpace(url) != "" {
+			commentURL = url
+		}
+	}
 	return Result{Data: map[string]any{
 		"ok":         true,
 		"comment_id": commentURL,
@@ -433,4 +483,30 @@ func splitIssueID(id string) (string, string) {
 		return strings.TrimSuffix(id[:hash], "/"), strings.TrimPrefix(id[hash+1:], "#")
 	}
 	return "", strings.TrimPrefix(id, "#")
+}
+
+// splitIssueCommentID extracts the GitHub issue-comment id from the forms we
+// store in gh_jobs.comment_id. It also recovers owner/repo from API URLs, where
+// the path includes /repos/<owner>/<repo>/issues/comments/<id>.
+func splitIssueCommentID(commentID string) (repo, id string) {
+	commentID = strings.TrimSpace(commentID)
+	if commentID == "" {
+		return "", ""
+	}
+	if marker := "#issuecomment-"; strings.Contains(commentID, marker) {
+		parts := strings.Split(commentID, marker)
+		return "", strings.TrimSpace(parts[len(parts)-1])
+	}
+	const apiPrefix = "/repos/"
+	if i := strings.Index(commentID, apiPrefix); i >= 0 {
+		rest := commentID[i+len(apiPrefix):]
+		parts := strings.Split(rest, "/")
+		if len(parts) >= 5 && parts[2] == "issues" && parts[3] == "comments" {
+			return parts[0] + "/" + parts[1], parts[4]
+		}
+	}
+	if slash := strings.LastIndex(commentID, "/"); slash >= 0 {
+		return "", strings.TrimSpace(commentID[slash+1:])
+	}
+	return "", commentID
 }

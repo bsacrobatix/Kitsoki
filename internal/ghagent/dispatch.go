@@ -54,8 +54,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 		// Re-mention: attach. Update the ack carrying the existing run_url.
 		meta := Meta{JobID: job.JobID, OriginRef: job.OriginRef, Story: job.Story, State: job.State, RunURL: job.RunURL}
 		if d.Comments != nil && job.CommentID != "" {
-			_, _ = d.Comments.Update(ctx, mention.Item.Number, job.CommentID,
+			nextID, _ := d.Comments.Update(ctx, mention.Item.Number, job.CommentID,
 				fmt.Sprintf("Already on it — attached to existing run for `%s`.", job.OriginRef), meta)
+			if nextID != "" && nextID != job.CommentID {
+				_ = d.Jobs.SetComment(ctx, job.JobID, nextID)
+				job.CommentID = nextID
+			}
 		}
 		return job, nil
 	}
@@ -63,7 +67,24 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 	// Won: classify + post the initial ack.
 	route, ok := d.Routes.Classify(mention, labels)
 	if !ok {
-		_ = d.Jobs.Advance(ctx, job.JobID, jobs.GHAwaitingGuidance, "unclassifiable mention")
+		if err := d.Jobs.Advance(ctx, job.JobID, jobs.GHAwaitingGuidance, "unclassifiable mention"); err != nil {
+			return nil, err
+		}
+		job.State = jobs.GHAwaitingGuidance
+		if d.Comments != nil {
+			meta := Meta{JobID: job.JobID, OriginRef: job.OriginRef, State: jobs.GHAwaitingGuidance}
+			commentID, err := d.Comments.Post(ctx, mention.Item.Number,
+				"I need a bit more direction before I can route this. Please add a `bug`, `feature`, or `enhancement` label, or reply with the path you want me to take.", meta)
+			if err != nil {
+				return nil, err
+			}
+			if commentID != "" {
+				if err := d.Jobs.SetComment(ctx, job.JobID, commentID); err != nil {
+					return nil, err
+				}
+				job.CommentID = commentID
+			}
+		}
 		job, _ = d.Jobs.GetJob(ctx, job.JobID)
 		return job, nil
 	}
@@ -122,7 +143,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 		if spawnErr != nil {
 			prose = fmt.Sprintf("Run failed: %s", spawnErr.Error())
 		}
-		_, _ = d.Comments.Update(ctx, mention.Item.Number, job.CommentID, prose, meta)
+		nextID, _ := d.Comments.Update(ctx, mention.Item.Number, job.CommentID, prose, meta)
+		if nextID != "" && nextID != job.CommentID {
+			_ = d.Jobs.SetComment(ctx, job.JobID, nextID)
+			job.CommentID = nextID
+		}
 	}
 
 	job, _ = d.Jobs.GetJob(ctx, job.JobID)

@@ -19,6 +19,7 @@ func TestGitHubTicket_RegisteredAsBuiltin(t *testing.T) {
 		"host.gh.ticket.search",
 		"host.gh.ticket.get",
 		"host.gh.ticket.comment",
+		"host.gh.ticket.comment_edit",
 		"host.gh.ticket.transition",
 		"host.gh.ticket.list_mine",
 	} {
@@ -343,6 +344,46 @@ func TestGitHubTicket_Comment_BodyRequired(t *testing.T) {
 	}
 	if res.Error == "" {
 		t.Fatal("expected domain error when body missing")
+	}
+}
+
+func TestGitHubTicket_CommentEdit_Happy(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
+	fr.responses["gh api repos/o/r/issues/comments/1"] = fakeResp{
+		stdout: `{"html_url":"https://github.com/o/r/issues/42#issuecomment-1"}`,
+	}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
+		"op":         "comment_edit",
+		"repo":       "o/r",
+		"comment_id": "https://github.com/o/r/issues/42#issuecomment-1",
+		"body":       "Updated status.",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if res.Data["ok"] != true {
+		t.Fatalf("ok: %v", res.Data["ok"])
+	}
+	if got := res.Data["comment_id"]; got != "https://github.com/o/r/issues/42#issuecomment-1" {
+		t.Fatalf("comment_id: %v", got)
+	}
+	found := false
+	for _, c := range fr.calls {
+		if strings.Contains(c, "api repos/o/r/issues/comments/1 -X PATCH") &&
+			strings.Contains(c, "body=Updated status.") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected gh api PATCH call, got: %v", fr.calls)
 	}
 }
 

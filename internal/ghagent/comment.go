@@ -76,20 +76,39 @@ func (c *CommentStore) Post(ctx context.Context, issueID, body string, meta Meta
 	return commentID, nil
 }
 
-// Update edits the existing status comment in place. Round-1: host.gh.ticket has
-// no native comment-edit verb, so Update re-posts the updated body via
-// op=comment while carrying commentID forward in the fenced block — the
-// edit-in-place contract is satisfied at the substrate level. Returns the
-// (unchanged) commentID.
+// Update edits the existing status comment in place. If commentID is empty, or
+// the edit op fails, it falls back to posting a new comment so the run still
+// reports progress in the GitHub thread.
 func (c *CommentStore) Update(ctx context.Context, issueID, commentID, body string, meta Meta) (string, error) {
-	_, err := c.Exec(ctx, map[string]any{
+	rendered := renderBody(body, meta)
+	if strings.TrimSpace(commentID) != "" {
+		res, err := c.Exec(ctx, map[string]any{
+			"op":         "comment_edit",
+			"comment_id": commentID,
+			"repo":       c.Repo,
+			"body":       rendered,
+		})
+		if err == nil && res.Error == "" {
+			if nextID, _ := res.Data["comment_id"].(string); strings.TrimSpace(nextID) != "" {
+				return nextID, nil
+			}
+			return commentID, nil
+		}
+	}
+	res, err := c.Exec(ctx, map[string]any{
 		"op":   "comment",
 		"id":   issueID,
 		"repo": c.Repo,
-		"body": renderBody(body, meta),
+		"body": rendered,
 	})
 	if err != nil {
 		return commentID, fmt.Errorf("ghagent: update comment: %w", err)
+	}
+	if res.Error != "" {
+		return commentID, fmt.Errorf("ghagent: update comment: %s", res.Error)
+	}
+	if nextID, _ := res.Data["comment_id"].(string); strings.TrimSpace(nextID) != "" {
+		return nextID, nil
 	}
 	return commentID, nil
 }

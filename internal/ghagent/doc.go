@@ -18,9 +18,9 @@
 //     host cliExec seam so tests replay from cassettes, offline and free.
 //   - The PR path ships ONE real beat (pr_status read + status comment), not a
 //     full pr-autopilot story.
-//   - True in-place comment edits are approximated by carrying the comment id
-//     forward in a fenced ```kitsoki block and re-posting; a `gh issue comment
-//     --edit-last` host verb is deferred.
+//   - Rolling status comments edit the first ack in place through
+//     host.gh.ticket's comment_edit op, with a repost fallback when editing is
+//     unavailable.
 //
 // # Pieces
 //

@@ -43,6 +43,7 @@ func stubGHCli(t *testing.T, issuesJSON, prsJSON string) func() {
 // real gh — no network, no cassette file needed.
 type recordingComments struct {
 	mu        sync.Mutex
+	ops       []string
 	bodies    []string
 	commentID string
 }
@@ -50,6 +51,8 @@ type recordingComments struct {
 func (r *recordingComments) handler(_ context.Context, args map[string]any) (host.Result, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	op, _ := args["op"].(string)
+	r.ops = append(r.ops, op)
 	if body, _ := args["body"].(string); body != "" {
 		r.bodies = append(r.bodies, body)
 	}
@@ -134,9 +137,13 @@ func TestDispatch_MentionToAckLoop(t *testing.T) {
 	// host.GHParseMetadata round-trips job_id + origin_ref + story + run_url.
 	rec.mu.Lock()
 	bodies := append([]string(nil), rec.bodies...)
+	ops := append([]string(nil), rec.ops...)
 	rec.mu.Unlock()
 	if len(bodies) < 2 {
 		t.Fatalf("want >=2 ack comments (post + update), got %d", len(bodies))
+	}
+	if !containsString(ops, "comment_edit") {
+		t.Fatalf("final status should edit the first comment, ops=%v", ops)
 	}
 	last := bodies[len(bodies)-1]
 	meta := host.GHParseMetadata(last)
@@ -175,6 +182,67 @@ func TestDispatch_MentionToAckLoop(t *testing.T) {
 	}
 	if job2.CommentID != job.CommentID {
 		t.Errorf("re-mention comment id drift: %q vs %q", job2.CommentID, job.CommentID)
+	}
+}
+
+func TestDispatch_UnclassifiedMentionPostsGuidance(t *testing.T) {
+	ctx := context.Background()
+	mention := Mention{
+		Item: host.GitHubInboxItem{
+			Kind:   "issue",
+			Number: "99",
+			Title:  "@kitsoki please handle this broad initiative",
+		},
+		Repo:      "o/r",
+		OriginRef: "github:o/r/issue/99",
+		Trigger:   DefaultMentionTrigger,
+	}
+
+	store := newGHJobStore(t)
+	rec := &recordingComments{commentID: "https://github.com/o/r/issues/99#issuecomment-2"}
+	d := &Dispatcher{
+		Jobs:     store,
+		Routes:   DefaultLabelStoryMap(),
+		Comments: &CommentStore{Exec: rec.handler, Repo: "o/r"},
+		WorkerID: "worker-guidance",
+		SpawnFn: func(ctx context.Context, route Route, j *jobs.GHJob) (RunResult, error) {
+			t.Fatalf("ambiguous mention should park for guidance, not spawn route %+v", route)
+			return RunResult{}, nil
+		},
+	}
+
+	job, err := d.Dispatch(ctx, mention, []string{"epic"})
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if job.State != jobs.GHAwaitingGuidance {
+		t.Fatalf("State = %q, want %q", job.State, jobs.GHAwaitingGuidance)
+	}
+	if job.Story != "" {
+		t.Fatalf("Story = %q, want empty while awaiting guidance", job.Story)
+	}
+	if job.CommentID == "" {
+		t.Fatal("guidance comment id was not stored")
+	}
+	rec.mu.Lock()
+	ops := append([]string(nil), rec.ops...)
+	bodies := append([]string(nil), rec.bodies...)
+	rec.mu.Unlock()
+	if len(ops) != 1 || ops[0] != "comment" {
+		t.Fatalf("guidance should post one comment, ops=%v", ops)
+	}
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "need a bit more direction") {
+		t.Fatalf("guidance body missing expected prose:\n%v", bodies)
+	}
+	meta := host.GHParseMetadata(bodies[0])
+	if meta == nil {
+		t.Fatalf("guidance body missing metadata:\n%s", bodies[0])
+	}
+	if meta["state"] != jobs.GHAwaitingGuidance {
+		t.Fatalf("meta state = %v, want %s", meta["state"], jobs.GHAwaitingGuidance)
+	}
+	if meta["origin_ref"] != "github:o/r/issue/99" {
+		t.Fatalf("meta origin_ref = %v", meta["origin_ref"])
 	}
 }
 
@@ -224,4 +292,13 @@ func TestDispatch_PRBeat(t *testing.T) {
 	if n < 1 {
 		t.Errorf("pr beat posted no status comment")
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
