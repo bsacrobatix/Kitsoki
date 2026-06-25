@@ -44,8 +44,18 @@ states:
       - set:
           _record_status: ""
           _record_error: ""
+      - when: "world.auto_start_next == true && world.board_route != 'done' && world.current_item_id != ''"
+        emit_intent: next_item
     on:
       next_item:
+        - when: "world.board_route == 'done'"
+          target: report
+          effects:
+            - set: { auto_start_next: false }
+        - target: policy_check
+          effects:
+            - set: { auto_start_next: false }
+      start_first:
         - when: "world.board_route == 'done'"
           target: report
         - target: policy_check

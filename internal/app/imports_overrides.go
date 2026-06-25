@@ -147,8 +147,10 @@ func rebaseEffectPaths(states map[string]*State, childDir string) {
 func rebaseEffectPathsInEffects(effs []Effect, childDir string) {
 	for i := range effs {
 		rebaseWithMap(effs[i].With, childDir)
+		rebaseEffectPathsInEffects(effs[i].Effects, childDir)
 		for j := range effs[i].OnComplete {
 			rebaseWithMap(effs[i].OnComplete[j].With, childDir)
+			rebaseEffectPathsInEffects(effs[i].OnComplete[j].Effects, childDir)
 		}
 	}
 }
@@ -220,6 +222,9 @@ func applyPromptOverridesToEffects(effs []Effect, resolved map[string]string) {
 		}
 		if len(effs[i].OnComplete) > 0 {
 			applyPromptOverridesToEffects(effs[i].OnComplete, resolved)
+		}
+		if len(effs[i].Effects) > 0 {
+			applyPromptOverridesToEffects(effs[i].Effects, resolved)
 		}
 	}
 }

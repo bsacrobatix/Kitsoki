@@ -774,6 +774,51 @@ states:
 	return appPath
 }
 
+func writeChoiceToPlainStory(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	appPath := dir + "/app.yaml"
+	const body = `app:
+  id: studio-choice-to-plain-test
+  version: 0.1.0
+  title: "Studio Choice To Plain Test"
+
+intents:
+  advance:
+    title: "Advance"
+  look:
+    title: "Look"
+
+root: pick
+
+states:
+  pick:
+    view:
+      - heading: "Picker"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "Stale choice", intent: advance }
+            - { label: "Look", intent: look }
+    on:
+      advance:
+        - target: plain
+      look:
+        - target: .
+
+  plain:
+    view:
+      - heading: "Destination"
+      - prose: "Destination body."
+    on:
+      look:
+        - target: .
+`
+	require.NoError(t, os.WriteFile(appPath, []byte(body), 0o644))
+	return appPath
+}
+
 func writeSlowBackgroundJobStory(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -910,6 +955,58 @@ func TestRenderTUI_EqualsComposer(t *testing.T) {
 	assert.Equal(t, driveFrame.ANSI, rt.Frame.ANSI, "render.tui ansi == the composed drive frame")
 	assert.Equal(t, driveFrame.Metadata.State, rt.Frame.Metadata.State)
 	assert.Equal(t, driveFrame.Width, rt.Frame.Width)
+}
+
+func TestRenderTUI_DropsStaleChoiceAfterDirectTransition(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+	appPath := writeChoiceToPlainStory(t)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": appPath,
+		"harness":    "replay",
+		"trace":      t.TempDir() + "/trace.jsonl",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new: %s", contentText(res))
+	var ok studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
+
+	res, err = callTool(ctx, cs, "render.tui", map[string]any{
+		"handle": ok.Handle,
+		"cols":   100,
+		"rows":   30,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "initial render.tui: %s", contentText(res))
+	var rendered studio.RenderTUIResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &rendered))
+	require.Contains(t, rendered.Frame.Text, "Stale choice")
+
+	res, err = callTool(ctx, cs, "session.submit", map[string]any{
+		"handle": ok.Handle,
+		"intent": "advance",
+		"cols":   100,
+		"rows":   30,
+	})
+	require.NoError(t, err)
+	submitted := driveResult(t, res)
+	require.Equal(t, "plain", submitted.Outcome.State)
+	require.Contains(t, submitted.Frame.Text, "Destination body")
+	require.NotContains(t, submitted.Frame.Text, "Stale choice")
+
+	res, err = callTool(ctx, cs, "render.tui", map[string]any{
+		"handle": ok.Handle,
+		"cols":   100,
+		"rows":   30,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "post-transition render.tui: %s", contentText(res))
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &rendered))
+	assert.Contains(t, rendered.Frame.Text, "Destination body")
+	assert.NotContains(t, rendered.Frame.Text, "Stale choice")
+	assert.Equal(t, []string{"look"}, rendered.Frame.Metadata.AllowedIntents)
 }
 
 // TestRenderTUI_SpecForm renders an explicit {story_path, state} spec — a state

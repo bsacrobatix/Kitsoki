@@ -2480,6 +2480,17 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 
 	case orchestrator.ModeTransitioned, orchestrator.ModeCompleted:
 		m.currentState = out.NewState
+		// A choice widget belongs to exactly one rendered room. A natural
+		// free-text turn can advance while a prior room picker is active; close
+		// it before inspecting the new typed view so stale choices cannot render
+		// over the destination state.
+		if m.choice.IsActive() {
+			m.choice.Close()
+			m.transcript.FinalizeLive("")
+			if m.mode == ModeChoosing {
+				m.mode = ModeOnPath
+			}
+		}
 		// Swap the transcript buffer if this transition crossed a
 		// room boundary (each room keeps its own transcript buffer).
 		// No-op when prev/new share a top-level segment.

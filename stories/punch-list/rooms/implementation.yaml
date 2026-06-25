@@ -39,32 +39,32 @@ states:
               implementation_status: "{{ world.last_job_result.submitted.status }}"
               implementation_trace_path: "{{ world.last_job_result.submitted.trace_path }}"
               implementation_model: "{{ world.last_job_result.submitted.model }}"
-          - when: "world.current_item.require_trace_model == true && (world.last_job_result.submitted.trace_path == '' || world.last_job_result.submitted.model != world.current_item.model)"
+          - when: "world.current_item.require_trace_model == true && (((world.current_item.implementation_trace_path ?? '') != '' && world.last_job_result.submitted.trace_path != world.current_item.implementation_trace_path) || world.last_job_result.submitted.model != world.current_item.model)"
             set:
-              last_error: "Implementation drive did not provide required trace/model evidence for {{ world.current_item.id }} (wanted model {{ world.current_item.model }}, got {{ world.last_job_result.submitted.model }}; trace {{ world.last_job_result.submitted.trace_path }})."
-          - when: "world.current_item.require_trace_model == true && (world.last_job_result.submitted.trace_path == '' || world.last_job_result.submitted.model != world.current_item.model)"
+              last_error: "Implementation drive did not provide required trace/model evidence for {{ world.current_item.id }} (wanted model {{ world.current_item.model }} and trace {{ world.current_item.implementation_trace_path }}, got model {{ world.last_job_result.submitted.model }} and trace {{ world.last_job_result.submitted.trace_path }})."
+          - when: "world.current_item.require_trace_model == true && (((world.current_item.implementation_trace_path ?? '') != '' && world.last_job_result.submitted.trace_path != world.current_item.implementation_trace_path) || world.last_job_result.submitted.model != world.current_item.model)"
             target: needs_human
           - when: "world.last_job_result.submitted.status != 'passed'"
             set:
               last_error: "Implementation ended {{ world.last_job_result.submitted.status }} for {{ world.current_item.id }}: {{ world.last_job_result.submitted.summary }}"
           - when: "world.last_job_result.submitted.status != 'passed'"
             target: needs_human
-          - when: "world.last_job_result.submitted.status == 'passed'"
+          - when: "world.last_job_result.submitted.status == 'passed' && (world.current_item.require_trace_model != true || (((world.current_item.implementation_trace_path ?? '') == '' || world.last_job_result.submitted.trace_path == world.current_item.implementation_trace_path) && world.last_job_result.submitted.model == world.current_item.model))"
             target: verify
         on_error: needs_human
     on:
       implementation_done:
-        - when: "world.current_item.require_trace_model == true && (world.implementation_trace_path == '' || world.implementation_model != world.current_item.model)"
+        - when: "world.current_item.require_trace_model == true && (((world.current_item.implementation_trace_path ?? '') != '' && world.implementation_trace_path != world.current_item.implementation_trace_path) || world.implementation_model != world.current_item.model)"
           target: needs_human
           effects:
             - set:
-                last_error: "Implementation drive did not provide required trace/model evidence for {{ world.current_item.id }} (wanted model {{ world.current_item.model }}, got {{ world.implementation_model }}; trace {{ world.implementation_trace_path }})."
+                last_error: "Implementation drive did not provide required trace/model evidence for {{ world.current_item.id }} (wanted model {{ world.current_item.model }} and trace {{ world.current_item.implementation_trace_path }}, got model {{ world.implementation_model }} and trace {{ world.implementation_trace_path }})."
         - when: "world.implementation_status != 'passed'"
           target: needs_human
           effects:
             - set:
                 last_error: "Implementation ended {{ world.implementation_status }} for {{ world.current_item.id }}: {{ world.implementation_result.summary }}"
-        - when: "world.implementation_status == 'passed'"
+        - when: "world.implementation_status == 'passed' && (world.current_item.require_trace_model != true || (((world.current_item.implementation_trace_path ?? '') == '' || world.implementation_trace_path == world.current_item.implementation_trace_path) && world.implementation_model == world.current_item.model))"
           target: verify
       look:
         - target: .

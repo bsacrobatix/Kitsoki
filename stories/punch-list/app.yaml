@@ -22,13 +22,13 @@ agents:
     system_prompt: "You are driving a punch-list item through Kitsoki Studio MCP like a human operator. Use the requested story, harness, profile, model, and explicit trace path. Prefer natural language turns. Record the final state, trace path, model evidence, findings, and any MCP/story friction. Do not self-grade implementation success; the verify room gates it."
     model: gpt-5.5
     tools: [Read, Grep, Glob, Bash, Edit, Write]
-    external_side_effect: true
+    external_side_effect: false
     bash_profile: { sandboxed_write: ".worktrees" }
   implementer:
     system_prompt: "You are running the implementation part of a punch-list item through the requested Kitsoki story. Use the requested profile/model policy and explicit trace. Return only concrete handoff data: status, story, trace_path, worktree, branch, model evidence, and findings. Verification happens separately."
     model: gpt-5.5
     tools: [Read, Grep, Glob, Bash, Edit, Write]
-    external_side_effect: true
+    external_side_effect: false
     bash_profile: { sandboxed_write: ".worktrees" }
 
 world:
@@ -58,6 +58,7 @@ world:
   report_path:          { type: string, default: "" }
   report_summary:       { type: string, default: "" }
   board_route:          { type: string, default: "" }
+  auto_start_next:      { type: bool,   default: false }
   processed_count:      { type: int,    default: 0 }
   passed_count:         { type: int,    default: 0 }
   partial_count:        { type: int,    default: 0 }
@@ -81,6 +82,10 @@ intents:
     description: "Process the next pending item, or finish when the list is drained."
     examples: ["next", "continue", "process the next item"]
     priority: 80
+  start_first:
+    description: "Load the board and immediately process the first pending item."
+    examples: ["start the first item", "go ahead and start the first item", "run the first item", "begin with the first item"]
+    priority: 85
   retry:
     description: "Retry from the board after a needs-human stop."
     examples: ["retry", "try again", "resume"]

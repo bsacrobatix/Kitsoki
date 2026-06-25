@@ -73,9 +73,9 @@ states:
       # `priority`, and no host emits it on this branch.
       - heading: 'Tickets{% if world.ticket_query %} (filter: {{ world.ticket_query }}){% endif %}'
       - code: |
-          {% if world.ticket_results|length == 0 %}(none — file one in issues/bugs/)
+          {% if world.ticket_results|default:""|length == 0 %}(none — file one in issues/bugs/)
           {% else %} #     St  Sev  Filed       Title
-          {% for t in world.ticket_results %}{% if t.status %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% for t in world.ticket_results|default:"" %}{% if t.status %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
           {% endif %}{% endfor %}{% endif %}
       # Readiness banner — two sibling elements with mutually-exclusive
       # `when:` guards. The ready case is a `heading:` (style-guide §1
@@ -294,7 +294,11 @@ states:
           pairs:
             "Searching for": "{{ world.ticket_query }}"
       - heading: "Results"
-      - code: '{{ world.ticket_results|default:"(empty)" }}'
+      - code: |
+          {% if world.ticket_results|default:""|length == 0 %}(empty)
+          {% else %} #     St  Sev  Filed       Title
+          {% for t in world.ticket_results|default:"" %}{% if t.status %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% endif %}{% endfor %}{% endif %}
       - choice:
           mode: single
           prompt: "Actions"

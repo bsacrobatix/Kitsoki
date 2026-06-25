@@ -23,7 +23,7 @@ return concrete handoff evidence. Independent verification will decide pass/fail
    - story: `{{ args.item.implementation_story }}`
    - harness: `{{ args.item.harness }}`
    - profile: `{{ args.item.profile }}`
-   - trace: `{{ args.item.trace_path }}`
+   - trace: `{{ args.item.implementation_trace_path }}`
 2. Drive it with natural operator text, using the implementation prompt:
    - `{{ args.item.implementation_prompt }}`
 3. Capture the worktree, branch, changed files, and any story/MCP/usability friction.
@@ -36,7 +36,7 @@ include:
 {
   "status": "passed | partial | failed | skipped",
   "story": "{{ args.item.implementation_story }}",
-  "trace_path": "{{ args.item.trace_path }}",
+  "trace_path": "{{ args.item.implementation_trace_path }}",
   "model": "{{ args.item.model }}",
   "profile": "{{ args.item.profile }}",
   "worktree": "<path if created>",

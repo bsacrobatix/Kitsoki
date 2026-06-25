@@ -8,6 +8,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timezone
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -56,6 +57,10 @@ def default_state_path(manifest_path: str) -> str:
     return str(Path(".artifacts/punch-list") / f"{base}.state.json")
 
 
+def default_run_id() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
 def is_llm_spending_command(cmd: str) -> bool:
     lowered = (cmd or "").lower()
     if not lowered.strip():
@@ -72,7 +77,7 @@ def is_llm_spending_command(cmd: str) -> bool:
     return any(re.search(p, lowered) for p in patterns)
 
 
-def normalize_manifest(doc: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
+def normalize_manifest(doc: dict[str, Any], run_id: str | None = None) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
     errors: list[str] = []
     if not isinstance(doc, dict):
         return [], ["manifest must be a mapping"], {}
@@ -84,8 +89,12 @@ def normalize_manifest(doc: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
     defaults.setdefault("profile", "codex-native")
     defaults.setdefault("model", "gpt-5.5")
     defaults.setdefault("trace_root", ".artifacts/punch-list/traces")
+    defaults.setdefault("reuse_trace_paths", False)
     defaults.setdefault("require_gpt55", True)
     defaults.setdefault("require_trace_model", True)
+    if run_id is None:
+        run_id = str(defaults.get("trace_run_id") or default_run_id())
+    defaults["trace_run_id"] = run_id
 
     seen: set[str] = set()
     items: list[dict[str, Any]] = []
@@ -160,8 +169,12 @@ def normalize_manifest(doc: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
         if normalized.get("gate_command") and is_llm_spending_command(normalized.get("gate_command", "")):
             errors.append(f"{item_id}: gate_command appears to invoke an LLM or live run")
 
-        trace_root = str(normalized.get("trace_root") or ".artifacts/punch-list/traces")
-        normalized["trace_path"] = str(Path(trace_root) / f"{item_id}.jsonl")
+        trace_root = Path(str(normalized.get("trace_root") or ".artifacts/punch-list/traces"))
+        trace_dir = trace_root if normalized.get("reuse_trace_paths") else trace_root / run_id
+        if not normalized.get("trace_path"):
+            normalized["trace_path"] = str(trace_dir / f"{item_id}.jsonl")
+        if not normalized.get("implementation_trace_path"):
+            normalized["implementation_trace_path"] = str(trace_dir / f"{item_id}-implementation.jsonl")
         items.append(normalized)
 
     items.sort(key=lambda it: (int(it.get("priority") or 0), str(it.get("id") or "")))

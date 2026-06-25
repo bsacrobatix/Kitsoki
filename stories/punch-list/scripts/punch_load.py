@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import sys
 
-from punch_lib import default_state_path, load_yaml_or_json, normalize_manifest, write_state
+from punch_lib import default_run_id, default_state_path, load_yaml_or_json, normalize_manifest, write_state
 
 
 def main() -> None:
@@ -18,7 +18,8 @@ def main() -> None:
 
     try:
         doc = load_yaml_or_json(manifest_path)
-        items, errors, defaults = normalize_manifest(doc)
+        run_id = default_run_id()
+        items, errors, defaults = normalize_manifest(doc, run_id=run_id)
     except Exception as exc:  # noqa: BLE001
         print(json.dumps({"items": [], "item_count": "0", "state_path": state_path, "error": f"parse failed: {exc}"}))
         return
@@ -26,6 +27,7 @@ def main() -> None:
     state = {
         "manifest_path": manifest_path,
         "defaults": defaults,
+        "run_id": run_id,
         "items": items,
         "results": {"items": []},
         "error": "\n".join(errors),

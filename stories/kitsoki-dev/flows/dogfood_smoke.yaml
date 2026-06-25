@@ -50,6 +50,7 @@ turns:
   # which is bound at the kitsoki-dev instance to host.gh.ticket.
   - intent: { name: core__search_tickets, slots: { query: "open kitsoki bugs" } }
     expect_state: core.ticket_searching
+    expect_view_matches: "TUI view templates render BEFORE on_enter binds"
 
   # Land back at main.
   - intent: { name: core__go_main, slots: {} }

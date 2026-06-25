@@ -6,14 +6,15 @@ states:
       - heading: "Punch-list · load"
       - prose: "Manifest: {{ world.manifest_path }}"
       - prose: "Loaded {{ world.item_count|default:'(pending)' }} item(s)."
-        when: "world.load_error == ''"
-      - prose: "Load error: {{ world.load_error }}"
-        when: "world.load_error != ''"
+        when: "(world.load_error ?? '') == ''"
+      - prose: "Load error: {{ world.load_error ?? '(pending)' }}"
+        when: "(world.load_error ?? '') != ''"
       - choice:
           mode: single
           prompt: "Actions"
           items:
             - { label: "next", intent: next_item, hint: "enter the board" }
+            - { label: "start first", intent: start_first, hint: "enter the board and process the first item" }
             - { label: "quit", intent: quit }
             - { label: "look", intent: look }
     on_enter:
@@ -34,11 +35,19 @@ states:
         on_error: needs_human
     on:
       next_item:
-        - when: "world.load_error != ''"
+        - when: "(world.load_error ?? '') != ''"
           target: needs_human
           effects:
             - set: { last_error: "{{ world.load_error }}" }
         - target: board
+      start_first:
+        - when: "(world.load_error ?? '') != ''"
+          target: needs_human
+          effects:
+            - set: { last_error: "{{ world.load_error }}" }
+        - target: board
+          effects:
+            - set: { auto_start_next: true }
       quit:
         - target: "@exit:abandoned"
       look:
