@@ -1666,10 +1666,13 @@ The handler runs `--validate` against the spec before the full render. A
 validation failure sets `Result.Error` rather than attempting a broken render.
 For an `mp4` render the handler also emits a [chapter sidecar](#the-chapter-sidecar)
 beside the output (`<output>.chapters.json`) mapping each slidey scene back to
-the moment it produced. Slidey itself emits a sibling `<output>.semantic.json`
-declaring the deck's addressable scene elements (and stamps `data-slidey-el`) —
-the producer half of the [unified annotation](artifact-annotation.md) plugin
-contract; `host.artifacts_dir` travels it with the media.
+the moment it produced. For annotation, an **interactive** `html` deck is the
+live producer half of the [unified annotation](artifact-annotation.md) contract:
+the rendered deck speaks the [embed protocol](artifact-annotation.md#the-embed-protocol-live-producer-surfaces)
+(`~/code/slidey/web/embed-annotate.js`), so picks come from the live slide — no
+static `<output>.semantic.json` sidecar is emitted. (A baked producer may still
+ship the static [semantic-sidecar](artifact-annotation.md#the-semantic-sidecar-plugin-contract),
+which `host.artifacts_dir` travels with the media.)
 
 **Example (render then emit):**
 
