@@ -16,7 +16,8 @@
 # overlaps, and asserts the side-effects that USED to leak now do not:
 #   turn 1: NO host.run uniquify, NO host.agent.search/references, NO
 #           002/003 artifact writes; design_workspace stays empty.
-#   turn 2: change_existing → design_refine pointing the workspace at the
+#   turn 2: accidental confirm stays put and explains that overlap selection is required.
+#   turn 3: change_existing → design_refine pointing the workspace at the
 #           EXISTING draft, with no uniquify/materialize folder minted.
 
 test_kind: flow
@@ -82,6 +83,16 @@ turns:
     # these may fire on the scan turn now.
     expect_no_host_calls: [host.agent.search, host.artifacts_dir]
 
+  # Accidental confirm while overlaps exist stays put and explains the required
+  # action instead of silently bouncing.
+  - intent: { name: confirm, slots: {} }
+    expect_state: design_search
+    expect_world:
+      design_overlap_decision: ""
+      design_workspace: ""
+      last_error: "This idea overlaps existing work. Choose an amend option, or explicitly select 'new design anyway' if you want a duplicate."
+    expect_view_matches: "Choose an amend option"
+
   # Continue the pre-existing case. The existing draft becomes the workspace and
   # we drop straight into refine — no uniquify/materialize folder is minted.
   - intent: { name: change_existing, slots: { target: "docs/proposals/.workspace/tamagotchi-pet-ui/" } }
@@ -90,6 +101,7 @@ turns:
       design_overlap_decision: "change_existing"
       design_change_target:    "docs/proposals/.workspace/tamagotchi-pet-ui/"
       design_workspace:        "docs/proposals/.workspace/tamagotchi-pet-ui/"
+      last_error: ""
     expect_host_calls:
       - handler: host.run
         args: { call: "amend_workspace" }
