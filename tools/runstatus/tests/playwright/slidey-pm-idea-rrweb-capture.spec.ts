@@ -287,6 +287,51 @@ async function ease(page: Page, to: number, ms: number): Promise<void> {
   );
 }
 
+// Collapse / expand the right-hand trace column. The PRD conversation reads best
+// with the chat full-width (the developer-facing trace is noise while a PM talks
+// through an idea), so we minimise the column once the conversation starts and
+// re-open it at the very end to show the completed state graph + trace. Idempotent:
+// only clicks when the current state differs from `want` (reads aria-expanded).
+async function setTraceColumn(page: Page, want: "collapsed" | "expanded"): Promise<void> {
+  // Click via JS, not a real .click(): during the tour the overlay backdrop sits
+  // over the header and intercepts a pointer click on the toggle (Playwright then
+  // hangs on actionability). The toggle is a plain button — a direct .click() on
+  // the element is equivalent and immune to the backdrop.
+  const changed = await page.evaluate((wantCollapsed) => {
+    const btn = document.querySelector('[data-testid="trace-column-toggle"]') as HTMLButtonElement | null;
+    if (!btn) return false;
+    const expanded = btn.getAttribute("aria-expanded") === "true";
+    if (expanded === wantCollapsed) {
+      btn.click();
+      return true;
+    }
+    return false;
+  }, want === "collapsed");
+  if (changed) await dwell(page, paced(900));
+}
+
+// Ease the trace timeline through its rows so the camera reads the completed
+// trace (the end-of-tour "show the whole story graph + trace" beat).
+async function scrollTraceTimeline(page: Page, ms: number): Promise<void> {
+  await page.evaluate(async (d) => {
+    const el = document.querySelector('[data-testid="trace-timeline"]') as HTMLElement | null;
+    if (!el) return;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 2) return;
+    await new Promise<void>((res) => {
+      const t0 = performance.now();
+      const tick = (now: number) => {
+        const p = Math.min(1, (now - t0) / d);
+        const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+        el.scrollTop = max * e;
+        if (p < 1) requestAnimationFrame(tick);
+        else res();
+      };
+      requestAnimationFrame(tick);
+    });
+  }, ms);
+}
+
 function routeKindFromUrl(url: string): "interactive" | "any" | "home" {
   if (url.includes("/chat")) return "interactive";
   if (/#\/s\/[0-9a-f-]{36}$/.test(url)) return "any";
@@ -328,6 +373,7 @@ test("slidey PM-idea rrweb capture (baseline + event stream)", async () => {
     await expect(page.getByTestId("tour-overlay")).toBeVisible({ timeout: 8000 });
 
     let pngIdx = 0;
+    let traceCollapsed = false;
     for (const step of SLIDEY_PM_IDEA_TOUR_STEPS) {
       const routeKind = routeKindFromUrl(page.url());
       if (step.route !== "any" && step.route !== routeKind) {
@@ -350,6 +396,13 @@ test("slidey PM-idea rrweb capture (baseline + event stream)", async () => {
         chapters.open(step.id, step.title, CHAPTER_SOURCE);
         await dwell(page, step.dwellMs ?? 3000);
       }
+      // Once the PRD conversation is underway, minimise the trace column so the
+      // chat reads full-width for the rest of the discovery → publish walk.
+      if (step.route === "interactive" && !traceCollapsed) {
+        await setTraceColumn(page, "collapsed");
+        traceCollapsed = true;
+      }
+
       pngIdx++;
       void pngIdx;
       await shot(page, step.id);
@@ -377,6 +430,17 @@ test("slidey PM-idea rrweb capture (baseline + event stream)", async () => {
     }
 
     await expect(page.getByTestId("tour-overlay")).toHaveCount(0, { timeout: 5000 });
+
+    // ── Re-open the trace column: show the completed state graph + scroll the
+    //    whole trace (the developer-facing proof that every step was real). ────
+    diag("re-opening trace column for the completed-graph beat");
+    chapters.open("spm-trace-review", "The completed story graph + trace", CHAPTER_SOURCE);
+    await setTraceColumn(page, "expanded");
+    await expect(page.getByTestId("trace-timeline").first()).toBeVisible({ timeout: 8000 });
+    await dwell(page, paced(1800)); // hold on the completed state diagram
+    await scrollTraceTimeline(page, paced(3200)); // ease through the trace rows
+    await dwell(page, paced(1500));
+    await shot(page, "spm-trace-review");
 
     // ── Full-screen the published PRD and scroll through it ──────────────────
     diag("opening published PRD artifact");
