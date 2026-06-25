@@ -49,6 +49,7 @@ const DEFAULT_EVIDENCE_DIR = ".context";
 const DEFAULT_MEDIA_ROOT = ".artifacts/github-agent-live";
 const DEFAULT_DECK = ".artifacts/github-agent-live/live-github-agent.deck.json";
 const DEFAULT_HTML = ".artifacts/github-agent-live/live-github-agent.html";
+const DEFAULT_DECK_VIDEO = ".artifacts/github-agent-live/live-github-agent.mp4";
 
 function usage() {
   console.error(`usage: scripts/verify-gh-agent-live-poc.mjs [options]
@@ -58,12 +59,14 @@ Options:
   --media-root <dir>             default ${DEFAULT_MEDIA_ROOT}
   --deck <deck.json>             default ${DEFAULT_DECK}
   --html <deck.html>             default ${DEFAULT_HTML}
+  --deck-video <deck.mp4>        default ${DEFAULT_DECK_VIDEO}
   --developer-arc-media <path>   required unless already referenced by deck
   --json-out <path>              write machine-readable report
   --allow-missing-db             do not require the gh_jobs row block
   --allow-missing-media          do not require clips, chapters, or developer media
   --allow-missing-deck           do not require the generated Slidey deck
   --allow-missing-html           do not require the exported self-contained HTML deck
+  --allow-missing-deck-video     do not require the rendered deck MP4/chapter sidecar
   --allow-nonlive-urls           skip live URL host validation (tests only)
   -h, --help                     show this help
 
@@ -76,7 +79,9 @@ Strict final proof inputs:
   <media-root>/<case>/<video>.mp4
   <media-root>/<case>/<video>.mp4.chapters.json
   <deck>
-  <html>`);
+  <html>
+  <deck-video>
+  <deck-video>.chapters.json`);
 }
 
 function parseArgs(argv) {
@@ -85,12 +90,14 @@ function parseArgs(argv) {
     mediaRoot: DEFAULT_MEDIA_ROOT,
     deck: DEFAULT_DECK,
     html: DEFAULT_HTML,
+    deckVideo: DEFAULT_DECK_VIDEO,
     developerArcMedia: "",
     jsonOut: "",
     allowMissingDB: false,
     allowMissingMedia: false,
     allowMissingDeck: false,
     allowMissingHTML: false,
+    allowMissingDeckVideo: false,
     allowNonliveUrls: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -107,6 +114,9 @@ function parseArgs(argv) {
         break;
       case "--html":
         args.html = argv[++i];
+        break;
+      case "--deck-video":
+        args.deckVideo = argv[++i];
         break;
       case "--developer-arc-media":
         args.developerArcMedia = argv[++i];
@@ -125,6 +135,9 @@ function parseArgs(argv) {
         break;
       case "--allow-missing-html":
         args.allowMissingHTML = true;
+        break;
+      case "--allow-missing-deck-video":
+        args.allowMissingDeckVideo = true;
         break;
       case "--allow-nonlive-urls":
         args.allowNonliveUrls = true;
@@ -184,6 +197,7 @@ function makeReport() {
     cases: {},
     deck: null,
     html: null,
+    deckVideo: null,
     media: {},
     fail(message) {
       this.ok = false;
@@ -443,6 +457,24 @@ function checkHTML(args, report) {
   }
 }
 
+function checkDeckVideo(args, report) {
+  const chapters = `${args.deckVideo}.chapters.json`;
+  report.deckVideo = { path: args.deckVideo, chapters };
+  if (!fs.existsSync(args.deckVideo)) {
+    if (!args.allowMissingDeckVideo) report.fail(`missing rendered deck MP4 ${args.deckVideo}`);
+  } else if (fs.statSync(args.deckVideo).size === 0) {
+    report.fail(`rendered deck MP4 is empty: ${args.deckVideo}`);
+  }
+  if (!fs.existsSync(chapters)) {
+    if (!args.allowMissingDeckVideo) report.fail(`missing rendered deck chapter sidecar ${chapters}`);
+  } else {
+    const parsed = readJSONFile(chapters, report, "rendered deck chapter sidecar");
+    if (parsed && (!Array.isArray(parsed) || parsed.length < 8)) {
+      report.fail(`rendered deck chapter sidecar should contain at least 8 chapters, got ${Array.isArray(parsed) ? parsed.length : "non-array"}`);
+    }
+  }
+}
+
 function main() {
   let args;
   try {
@@ -467,6 +499,7 @@ function main() {
   }
   checkDeck(args, report);
   checkHTML(args, report);
+  checkDeckVideo(args, report);
 
   if (args.jsonOut) {
     fs.mkdirSync(path.dirname(args.jsonOut), { recursive: true });

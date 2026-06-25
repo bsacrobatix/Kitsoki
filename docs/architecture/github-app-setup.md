@@ -189,8 +189,8 @@ scripts/run-gh-agent-live-poc.sh \
 The script deploys current code unless `--skip-deploy` is set, creates the bug,
 feature, and guidance issues, comments on the supplied PR, waits for the VM
 `gh_jobs` rows, writes `.context/live-poc-*.md`, builds capture plans, optionally
-records the clips, and builds, exports, and verifies the live deck when
-`--developer-arc-media` is supplied.
+records the clips, and builds, exports, renders, verifies, and prepares QA for
+the live deck when `--developer-arc-media` is supplied.
 
 After all four live case clips and the developer-arc media exist, build the
 Slidey deck scaffold from the evidence and media:
@@ -209,6 +209,12 @@ Export the generated deck spec to the self-contained HTML artifact:
 scripts/export-gh-agent-live-deck-html.sh
 ```
 
+Render the same deck to an MP4 for the gated QA pass:
+
+```
+scripts/render-gh-agent-live-deck-video.sh
+```
+
 Finally, verify the whole proof bundle before sharing the deck:
 
 ```
@@ -219,7 +225,19 @@ scripts/verify-gh-agent-live-poc.mjs \
 The verifier is read-only and strict by default. It checks the four `.context`
 evidence notes, `/api/run` JSON, read-only `gh_jobs` rows, capture plans, MP4
 clips, chapter sidecars, developer-arc media, generated Slidey deck, and
-self-contained HTML export.
+self-contained HTML export, rendered deck MP4, and deck chapter sidecar.
+
+Prepare the gated `kitsoki-ui-qa` feature/scenario files:
+
+```
+scripts/write-gh-agent-live-qa-plan.mjs
+```
+
+The script writes `.context/qa-gh-agent-live-feature.md` and
+`.context/qa-gh-agent-live-scenarios.yaml`, then prints the `qa.sh` command to
+run after the final deck MP4 or labeled frames exist. Do not wire that QA command
+into automated tests; it uses the local vision reviewer and must stay
+operator-gated.
 
 ## g. Production
 
