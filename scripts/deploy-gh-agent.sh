@@ -33,6 +33,8 @@ scp_cmd=(scp "$OUT" "$REMOTE:$REMOTE_TMP")
 install_cmd=(ssh "$REMOTE" "install -m 755 '$REMOTE_TMP' '$REMOTE_BIN' && rm -f '$REMOTE_TMP'")
 ssh_cmd=(ssh "$REMOTE" "chmod 755 '$REMOTE_BIN' && systemctl restart '$SERVICE'")
 health_cmd=(curl -fsS "$PUBLIC_BASE_URL/healthz")
+HEALTH_ATTEMPTS="${KITSOKI_GH_AGENT_HEALTH_ATTEMPTS:-12}"
+HEALTH_SLEEP_SECONDS="${KITSOKI_GH_AGENT_HEALTH_SLEEP_SECONDS:-2}"
 
 print_cmd() {
 	printf '%q ' "$@"
@@ -48,6 +50,20 @@ checksum_file() {
 	fi
 }
 
+wait_for_health() {
+	local attempt
+	for attempt in $(seq 1 "$HEALTH_ATTEMPTS"); do
+		if "${health_cmd[@]}"; then
+			return 0
+		fi
+		if [ "$attempt" -lt "$HEALTH_ATTEMPTS" ]; then
+			sleep "$HEALTH_SLEEP_SECONDS"
+		fi
+	done
+	echo "health check failed after $HEALTH_ATTEMPTS attempt(s): ${health_cmd[*]}" >&2
+	return 1
+}
+
 remote_checksum_cmd=(ssh "$REMOTE" "sha256sum '$REMOTE_BIN' | awk '{print \$1}'")
 
 cat <<EOF
@@ -57,7 +73,7 @@ deploy-gh-agent:
   install:$(print_cmd "${install_cmd[@]}")
   start:  $(print_cmd "${ssh_cmd[@]}")
   verify: local sha256 == remote sha256 via $(print_cmd "${remote_checksum_cmd[@]}")
-  health: $(print_cmd "${health_cmd[@]}")
+  health: $(print_cmd "${health_cmd[@]}") (up to $HEALTH_ATTEMPTS attempts)
 EOF
 
 if [ "$YES" -ne 1 ]; then
@@ -85,4 +101,4 @@ if [ "$local_sha" != "$remote_sha" ]; then
 fi
 echo "checksum ok: $remote_sha"
 "${ssh_cmd[@]}"
-"${health_cmd[@]}"
+wait_for_health

@@ -318,6 +318,12 @@ func githubObjectURL(job *jobs.GHJob) string {
 // Anchoring on go.mod (rather than hardcoded ../ counts) keeps the on-disk
 // story + cassette paths robust to where the test binary runs from.
 func repoRoot() (string, error) {
+	if envRoot := strings.TrimSpace(os.Getenv("KITSOKI_REPO")); envRoot != "" {
+		if _, err := os.Stat(filepath.Join(envRoot, "go.mod")); err == nil {
+			return envRoot, nil
+		}
+	}
+
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return "", errors.New("ghagent: cannot resolve caller for repo root")

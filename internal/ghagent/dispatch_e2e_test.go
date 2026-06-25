@@ -126,6 +126,22 @@ turns: []
 	}
 }
 
+func TestRepoRootPrefersKitsokiRepoEnv(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fake\n"), 0o600); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	t.Setenv("KITSOKI_REPO", dir)
+
+	got, err := repoRoot()
+	if err != nil {
+		t.Fatalf("repoRoot: %v", err)
+	}
+	if got != dir {
+		t.Fatalf("repoRoot = %q, want KITSOKI_REPO %q", got, dir)
+	}
+}
+
 // TestDispatch_MentionToAckLoop drives the FULL @kitsoki loop end-to-end across
 // package boundaries: cliExec-stubbed ingress -> FilterMentions -> Classify ->
 // Claim (SQLite) -> Dispatcher -> a REAL no-LLM story spawn via

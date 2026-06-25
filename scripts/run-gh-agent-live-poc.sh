@@ -349,7 +349,8 @@ if not isinstance(row, dict):
     raise SystemExit(1)
 if row.get("state") != expected_state:
     if row.get("state") == "failed":
-        print(f"job failed before reaching {expected_state}: {row.get('err_msg','')}", file=sys.stderr)
+        err_msg = row.get("err_msg", "")
+        print(f"job failed before reaching {expected_state}: {err_msg}", file=sys.stderr)
     raise SystemExit(1)
 for key in ("job_id", "run_url", "comment_id"):
     if not str(row.get(key) or "").strip():
