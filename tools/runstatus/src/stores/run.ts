@@ -128,6 +128,17 @@ export const useRunStore = defineStore("run", () => {
   // dispatches it didn't originate — e.g. an annotation sent from a media
   // ViewElement, which calls submitIntent directly rather than the chat input.
   const busy = ref(false);
+  // The latest place an embedded artifact reports it is showing (the generic
+  // `embed:view` protocol — see lib/embedView.ts). `embedScope` is the opaque
+  // token a refine carries as the `current_scene` slot so the edit targets the
+  // slide/view the operator is actually looking at; `embedLabel` is for display.
+  // Producer-neutral: kitsoki never interprets the scope.
+  const embedScope = ref<string>("");
+  const embedLabel = ref<string>("");
+  function setEmbedView(view: { scope: string; label?: string }): void {
+    embedScope.value = view.scope;
+    embedLabel.value = view.label ?? "";
+  }
   // currentView is the latest TurnResult (the current room's view + menu).
   const currentView = ref<TurnResult | null>(null);
   // allowedIntents is the enriched per-intent menu of the current room.
@@ -858,6 +869,9 @@ export const useRunStore = defineStore("run", () => {
     allowedIntents,
     pendingStream,
     busy,
+    embedScope,
+    embedLabel,
+    setEmbedView,
     harnessProfiles,
     harnessModel,
     harnessEffort,

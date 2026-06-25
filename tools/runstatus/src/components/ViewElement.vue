@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, onMounted, onBeforeUnmount } from "vue";
 import { useRoute } from "vue-router";
+import { installEmbedViewListener } from "../lib/embedView.js";
 import type { ViewElement } from "../types.js";
 import { createDataSource } from "../data/source.js";
 import type { AnnotationAnchor, MediaKind } from "../lib/annotationAnchor.js";
@@ -13,6 +14,19 @@ import { useRunStore } from "../stores/run.js";
 // directly) makes the annotation appear as a normal user message in the main
 // chat and streams the agent's edit + re-render back as the reply.
 const _run = useRunStore();
+
+// Track which place the embedded artifact (e.g. the live deck) reports it is
+// showing, via the generic `embed:view` postMessage protocol. The latest scope
+// rides a refine as `current_scene` so the edit targets the slide the operator
+// is actually looking at. Producer-neutral — kitsoki never interprets the scope.
+let _teardownEmbedView: (() => void) | null = null;
+onMounted(() => {
+  _teardownEmbedView = installEmbedViewListener((view) => _run.setEmbedView(view));
+});
+onBeforeUnmount(() => {
+  _teardownEmbedView?.();
+  _teardownEmbedView = null;
+});
 
 // Current route — used only to recover the active sessionId so a rendered video
 // can link to its /review feedback surface (the room view renders inline in
@@ -224,7 +238,12 @@ async function sendAnnotation(): Promise<void> {
         _ds,
         _sessionId.value,
         annotateIntent.value,
-        { [annotateFeedbackSlot.value]: text },
+        {
+          [annotateFeedbackSlot.value]: text,
+          // The slide the operator is looking at (from the deck's embed:view
+          // reports), so the refine targets THAT slide — not a guessed default.
+          ...(_run.embedScope ? { current_scene: _run.embedScope } : {}),
+        },
         // No displayLabel: the user bubble derives its text from the feedback
         // slot. Passing the instruction as BOTH label and slot rendered it
         // twice ("<text>: <text>").
