@@ -264,7 +264,7 @@ onboard-smoke: install
 # network + git + node/npm + an installed `kitsoki`. The cost-bearing LLM cells
 # stay operator-run. See tools/bugfix-bakeoff/external/ + the case study.
 qs-bakeoff: install
-	go test -tags qsbakeoff -run TestQueryStringBakeoff -count=1 -v ./tools/bugfix-bakeoff/external/
+	go test -tags qsbakeoff -run TestExternalBakeoff -count=1 -v ./tools/bugfix-bakeoff/external/
 
 # cost-report builds the per-story cost-savings report (the reusable form of
 # docs/case-studies/git-ops-cost.md): the deterministic story cost (agent spend
