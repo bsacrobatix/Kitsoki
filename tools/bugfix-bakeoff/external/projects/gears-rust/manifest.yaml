@@ -8,8 +8,8 @@
 #
 # This corpus is the stable reference captured from the 2026-06 gears-rust dogfood
 # marathon (10 bugs, all shipped + independently verified) + the hard-case stress
-# run (H1 FAIL / H2 PASS / H3 PASS / H4 STALL). Provenance:
-#   .context/gears-marathon-log.md · .context/gears-hard-cases-report.md
+# run (H1 FAIL / H2 PASS / H3 PASS / H4 STALL). Provenance, the full corpus table,
+# and the H1/H4 findings live in this project's README.md (committed, durable).
 #
 # GATED: the arming check builds Rust (cargo) against a LOCAL checkout of a heavy,
 # PRIVATE repo — never cloned in `make test`. Run against a local mirror:

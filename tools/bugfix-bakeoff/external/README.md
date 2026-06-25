@@ -55,9 +55,8 @@ monorepo — captured from the 2026-06 gears-rust dogfood marathon + hard-case r
 The four armable fixtures (bug1/4/5/9) prove RED@baseline → GREEN@fix; the rest
 of the marathon + hard-case corpus is captured under `reference_only:` in the
 manifest (copy-in / overlay oracles, to be auto-armed once `bench.py` grows an
-`inject: insert-at-marker` mode). Provenance:
-[`.context/gears-marathon-log.md`](../../../.context/gears-marathon-log.md) +
-[`.context/gears-hard-cases-report.md`](../../../.context/gears-hard-cases-report.md).
+`inject: insert-at-marker` mode). Provenance, the full corpus table, and the
+H1/H4 findings are in [`projects/gears-rust/README.md`](projects/gears-rust/README.md).
 
 ## The deterministic good/bad detector — `bench.py`
 
