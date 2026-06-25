@@ -53,6 +53,15 @@ on prompt incantations to enforce structure.
   validated + first `bug9` results; full grid pending — structure proved
   more thorough, not automatically cheaper.)_
 
+- **[query-string-bakeoff.md](query-string-bakeoff.md)** — *should I use
+  kitsoki for **my** project?* The bake-off pointed at a real third-party repo
+  ([`sindresorhus/query-string`](https://github.com/sindresorhus/query-string),
+  small/simple but mature — 274 commits, 90 releases): onboard it, fix 3
+  real filed-issue bugs, and grade each fix deterministically against the
+  regression test the real PR shipped. Gated reproducible scaffold at
+  [`tools/bugfix-bakeoff/external/`](../../tools/bugfix-bakeoff/external/)
+  (`make qs-bakeoff`); cost-vs-real-fix cells are operator-run.
+
 - **[routing-model-cost-study.md](routing-model-cost-study.md)** — the
   model-selection lever after deterministic routing has already done its
   job. Mines real Kitsoki turns into a routing corpus, compares available

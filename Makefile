@@ -48,7 +48,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup build install uninstall test test-flows onboard-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup build install uninstall test test-flows onboard-smoke qs-bakeoff starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
 
@@ -255,6 +255,16 @@ test-flows:
 # tools/onboard-smoke/README.md. Depends on a current install.
 onboard-smoke: install
 	go test -tags onboardsmoke -run TestOnboardPinnedRepo -count=1 -v ./tools/onboard-smoke/
+
+# qs-bakeoff is the EXTERNAL-project bake-off scaffold check ("should I use
+# kitsoki for my project?"): clone a pinned mature third-party JS repo
+# (sindresorhus/query-string), onboard it via the embedded dev-story, and prove
+# the 3 hidden-oracle good/bad detectors are armed (RED at baseline, GREEN at the
+# real fix) — DETERMINISTIC, no LLM, no cost. NOT part of `make test`; needs
+# network + git + node/npm + an installed `kitsoki`. The cost-bearing LLM cells
+# stay operator-run. See tools/bugfix-bakeoff/external/ + the case study.
+qs-bakeoff: install
+	go test -tags qsbakeoff -run TestQueryStringBakeoff -count=1 -v ./tools/bugfix-bakeoff/external/
 
 # cost-report builds the per-story cost-savings report (the reusable form of
 # docs/case-studies/git-ops-cost.md): the deterministic story cost (agent spend
