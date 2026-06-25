@@ -104,7 +104,7 @@ function requireStatus(label, value, predicate, expected) {
   }
 }
 
-function buildPlan(caseSlug, markdown) {
+function buildPlan(caseSlug, markdown, artifactDir) {
   const cfg = CASES[caseSlug];
   if (!cfg) {
     throw new Error(`unknown case ${caseSlug}`);
@@ -146,7 +146,7 @@ function buildPlan(caseSlug, markdown) {
   requireStatus("Remote DB", field(markdown, "Remote DB"), (v) => v === "ok", "ok");
 
   return {
-    artifactDir: `.artifacts/github-agent-live/${caseSlug}`,
+    artifactDir,
     videoName: cfg.videoName,
     curtainTitle: cfg.curtainTitle,
     steps: [
@@ -204,7 +204,8 @@ function main() {
   const outPath = args.out || `.artifacts/github-agent-live/capture-plan-${caseSlug}.json`;
   try {
     const markdown = fs.readFileSync(evidencePath, "utf8");
-    const plan = buildPlan(caseSlug, markdown);
+    const artifactDir = path.join(path.dirname(outPath), caseSlug);
+    const plan = buildPlan(caseSlug, markdown, artifactDir);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, `${JSON.stringify(plan, null, 2)}\n`);
     console.log(`wrote ${outPath}`);

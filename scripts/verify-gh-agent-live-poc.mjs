@@ -427,8 +427,9 @@ function checkMedia(args, c, report) {
   } else {
     const plan = readJSONFile(planPath, report, `${c.slug} capture plan`);
     if (plan) {
-      if (plan.artifactDir !== `.artifacts/github-agent-live/${c.slug}`) {
-        report.fail(`${c.slug}: capture plan artifactDir ${plan.artifactDir} does not match case`);
+      const expectedArtifactDir = path.join(args.mediaRoot, c.slug);
+      if (plan.artifactDir !== expectedArtifactDir) {
+        report.fail(`${c.slug}: capture plan artifactDir ${plan.artifactDir} does not match ${expectedArtifactDir}`);
       }
       if (!Array.isArray(plan.steps) || plan.steps.length < 4) {
         report.fail(`${c.slug}: capture plan must have at least four steps`);

@@ -195,6 +195,11 @@ the live deck when `--developer-arc-media` is supplied.
 Live mode fails before any deploy or GitHub mutation if the PR URL is missing,
 is not a pull request URL for the selected repo, if `--developer-arc-media` points
 at a missing file, or if `--capture` is requested without `pnpm` on `PATH`.
+It also writes a run-level audit summary at
+`.context/live-poc-run-<stamp>.md` tying together the created GitHub URLs, job
+ids, evidence notes, capture plans, and final review commands. For isolated
+smoke runs, set `KITSOKI_GH_AGENT_EVIDENCE_DIR`,
+`KITSOKI_GH_AGENT_MEDIA_ROOT`, and `KITSOKI_GH_AGENT_LIVE_SUMMARY`.
 
 After all four live case clips and the developer-arc media exist, build the
 Slidey deck scaffold from the evidence and media:

@@ -19,6 +19,9 @@ BUG_LABEL="${KITSOKI_GH_AGENT_BUG_LABEL:-bug}"
 FEATURE_LABEL="${KITSOKI_GH_AGENT_FEATURE_LABEL:-enhancement}"
 WAIT_SECONDS="${KITSOKI_GH_AGENT_WAIT_SECONDS:-180}"
 POLL_SECONDS="${KITSOKI_GH_AGENT_POLL_SECONDS:-5}"
+EVIDENCE_DIR="${KITSOKI_GH_AGENT_EVIDENCE_DIR:-.context}"
+MEDIA_ROOT="${KITSOKI_GH_AGENT_MEDIA_ROOT:-.artifacts/github-agent-live}"
+SUMMARY="${KITSOKI_GH_AGENT_LIVE_SUMMARY:-.context/live-poc-run-$RUN_STAMP.md}"
 
 YES=0
 DO_DEPLOY=1
@@ -52,6 +55,9 @@ Environment:
   KITSOKI_GH_AGENT_FEATURE_LABEL
   KITSOKI_GH_AGENT_WAIT_SECONDS
   KITSOKI_GH_AGENT_POLL_SECONDS
+  KITSOKI_GH_AGENT_EVIDENCE_DIR
+  KITSOKI_GH_AGENT_MEDIA_ROOT
+  KITSOKI_GH_AGENT_LIVE_SUMMARY
   KITSOKI_GH_AGENT_PR_URL
   KITSOKI_GH_AGENT_DEVELOPER_ARC_MEDIA
 EOF
@@ -189,6 +195,97 @@ else:
     print(data.get(field,""))' "$field"
 }
 
+init_summary() {
+	if [ "$YES" -ne 1 ]; then
+		return 0
+	fi
+	mkdir -p "$(dirname "$SUMMARY")"
+	local head branch
+	head="$(git rev-parse --short HEAD 2>/dev/null || true)"
+	branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+	cat >"$SUMMARY" <<EOF
+# Live GitHub Agent POC Run $RUN_STAMP
+
+- Repo: \`$REPO\`
+- Branch/head: \`$branch\` / \`$head\`
+- Public base URL: \`$PUBLIC_BASE_URL\`
+- Webhook URL: \`${PUBLIC_BASE_URL%/}/gh-agent/webhook\`
+- Remote: \`$REMOTE\`
+- Remote DB: \`$REMOTE_DB\`
+- Deploy: \`$([ "$DO_DEPLOY" -eq 1 ] && echo yes || echo skipped)\`
+- Capture: \`$([ "$DO_CAPTURE" -eq 1 ] && echo yes || echo no)\`
+- PR URL: ${PR_URL:-"-"}
+- Developer arc media: ${DEVELOPER_ARC_MEDIA:-"-"}
+
+## Cases
+
+EOF
+}
+
+append_case_summary() {
+	if [ "$YES" -ne 1 ]; then
+		return 0
+	fi
+	local slug="$1"
+	local source_url="$2"
+	local mention_url="$3"
+	local comment_url="$4"
+	local job_id="$5"
+	local evidence="$EVIDENCE_DIR/live-poc-$slug.md"
+	local plan="$MEDIA_ROOT/capture-plan-$slug.json"
+	cat >>"$SUMMARY" <<EOF
+### $slug
+
+- Source URL: $source_url
+- Mention URL: $mention_url
+- Kitsoki comment URL: ${comment_url:-"-"}
+- Job ID: \`$job_id\`
+- Evidence: \`$evidence\`
+- Capture plan: \`$plan\`
+
+EOF
+}
+
+finish_summary() {
+	if [ "$YES" -ne 1 ]; then
+		return 0
+	fi
+	if [ -n "$DEVELOPER_ARC_MEDIA" ]; then
+		cat >>"$SUMMARY" <<EOF
+## Final Artifacts
+
+- Deck spec: \`.artifacts/github-agent-live/live-github-agent.deck.json\`
+- Self-contained HTML: \`.artifacts/github-agent-live/live-github-agent.html\`
+- Rendered deck MP4: \`.artifacts/github-agent-live/live-github-agent.mp4\`
+- QA feature: \`.context/qa-gh-agent-live-feature.md\`
+- QA scenarios: \`.context/qa-gh-agent-live-scenarios.yaml\`
+
+EOF
+	else
+		cat >>"$SUMMARY" <<EOF
+## Final Artifacts
+
+Not generated in this run because \`--developer-arc-media\` was not supplied.
+
+EOF
+	fi
+	cat >>"$SUMMARY" <<EOF
+## Gates
+
+\`\`\`sh
+scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --developer-arc-media ${DEVELOPER_ARC_MEDIA:-'<path-to-slidey-developer-arc-mp4-or-rrweb>'}
+scripts/write-gh-agent-live-qa-plan.mjs
+.agents/skills/kitsoki-ui-qa/scripts/qa.sh .artifacts/github-agent-live/live-github-agent.mp4 --feature .context/qa-gh-agent-live-feature.md --scenarios .context/qa-gh-agent-live-scenarios.yaml --strict --pacing-strict
+\`\`\`
+
+## Review Notes
+
+- PASS/FAIL:
+- Non-blocking advisories:
+EOF
+	echo "wrote $SUMMARY"
+}
+
 query_job_by_origin() {
 	local origin="$1"
 	ssh "$REMOTE" "python3 - '$REMOTE_DB' '$origin'" <<'PY'
@@ -269,7 +366,11 @@ create_issue_case() {
 			--mention-url "$mention_url" \
 			--comment-url "${comment_url:-$mention_url}" \
 			--remote-db
-		scripts/build-gh-agent-capture-plan.mjs --case "$slug"
+		scripts/build-gh-agent-capture-plan.mjs \
+			--case "$slug" \
+			--evidence "$EVIDENCE_DIR/live-poc-$slug.md" \
+			--out "$MEDIA_ROOT/capture-plan-$slug.json"
+		append_case_summary "$slug" "$issue_url" "$mention_url" "${comment_url:-$mention_url}" "$job_id"
 	else
 		if [ -n "$label" ]; then
 			print_cmd gh issue create --repo "$REPO" --title "$title" --body "$body" --label "$label"
@@ -279,7 +380,7 @@ create_issue_case() {
 		print_cmd gh issue comment "<$slug-issue-number>" --repo "$REPO" --body "$mention"
 		printf 'wait for origin_ref github:%s/issue/<%s-issue-number>\n' "$REPO" "$slug"
 		print_cmd scripts/collect-gh-agent-poc-evidence.sh --case "$slug" --job-id "<$slug-job-id>" --source-url "<$slug-issue-url>" --mention-url "<$slug-mention-url>" --comment-url "<$slug-kitsoki-comment-url>" --remote-db
-		print_cmd scripts/build-gh-agent-capture-plan.mjs --case "$slug"
+		print_cmd scripts/build-gh-agent-capture-plan.mjs --case "$slug" --evidence "$EVIDENCE_DIR/live-poc-$slug.md" --out "$MEDIA_ROOT/capture-plan-$slug.json"
 	fi
 }
 
@@ -300,12 +401,16 @@ run_pr_case() {
 			--mention-url "$mention_url" \
 			--comment-url "${comment_url:-$mention_url}" \
 			--remote-db
-		scripts/build-gh-agent-capture-plan.mjs --case pr-status
+		scripts/build-gh-agent-capture-plan.mjs \
+			--case pr-status \
+			--evidence "$EVIDENCE_DIR/live-poc-pr-status.md" \
+			--out "$MEDIA_ROOT/capture-plan-pr-status.json"
+		append_case_summary pr-status "$PR_URL" "$mention_url" "${comment_url:-$mention_url}" "$job_id"
 	else
 		print_cmd gh issue comment "<pr-number-from---pr-url>" --repo "$REPO" --body "$mention"
 		printf 'wait for origin_ref github:%s/pr/<pr-number>\n' "$REPO"
 		print_cmd scripts/collect-gh-agent-poc-evidence.sh --case pr-status --job-id "<pr-status-job-id>" --source-url "${PR_URL:-<pr-url>}" --mention-url "<pr-mention-url>" --comment-url "<pr-kitsoki-comment-url>" --remote-db
-		print_cmd scripts/build-gh-agent-capture-plan.mjs --case pr-status
+		print_cmd scripts/build-gh-agent-capture-plan.mjs --case pr-status --evidence "$EVIDENCE_DIR/live-poc-pr-status.md" --out "$MEDIA_ROOT/capture-plan-pr-status.json"
 	fi
 }
 
@@ -318,7 +423,12 @@ run-gh-agent-live-poc:
   stamp:       $RUN_STAMP
   public_url:  $PUBLIC_BASE_URL
   remote:      $REMOTE
+  evidence:    $EVIDENCE_DIR
+  media:       $MEDIA_ROOT
+  summary:     $SUMMARY
 EOF
+
+init_summary
 
 if [ "$DO_DEPLOY" -eq 1 ]; then
 	run_or_print scripts/deploy-gh-agent.sh --yes
@@ -357,22 +467,24 @@ run_pr_case
 
 if [ "$DO_CAPTURE" -eq 1 ]; then
 	for case_slug in bug-issue feature-issue guidance pr-status; do
-		run_capture_or_print ".artifacts/github-agent-live/capture-plan-$case_slug.json"
+		run_capture_or_print "$MEDIA_ROOT/capture-plan-$case_slug.json"
 	done
 fi
 
 if [ -n "$DEVELOPER_ARC_MEDIA" ]; then
-	run_or_print scripts/build-gh-agent-live-deck.mjs --developer-arc-media "$DEVELOPER_ARC_MEDIA"
+	run_or_print scripts/build-gh-agent-live-deck.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --developer-arc-media "$DEVELOPER_ARC_MEDIA"
 	run_or_print scripts/export-gh-agent-live-deck-html.sh
 	run_or_print scripts/render-gh-agent-live-deck-video.sh
-	run_or_print scripts/verify-gh-agent-live-poc.mjs --developer-arc-media "$DEVELOPER_ARC_MEDIA"
+	run_or_print scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --developer-arc-media "$DEVELOPER_ARC_MEDIA"
 	run_or_print scripts/write-gh-agent-live-qa-plan.mjs
+	finish_summary
 else
-	print_cmd scripts/build-gh-agent-live-deck.mjs --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
+	print_cmd scripts/build-gh-agent-live-deck.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
 	print_cmd scripts/export-gh-agent-live-deck-html.sh
 	print_cmd scripts/render-gh-agent-live-deck-video.sh
-	print_cmd scripts/verify-gh-agent-live-poc.mjs --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
+	print_cmd scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
 	print_cmd scripts/write-gh-agent-live-qa-plan.mjs
+	finish_summary
 fi
 
 cat <<'EOF'
