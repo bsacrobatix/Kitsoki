@@ -84,6 +84,34 @@ so the maker edits the prepared worktree directly). Proven template adapted from
 
 ---
 
+## 2026-06-25 — bug4 SHIPPED ✅ (2/10)
+
+bug4 = `fix(errors): support convert for different error types to CanonicalError`
+(e21d79ab, pkg `cf-modkit-canonical-errors`, baseline c7a95be5). Oracle = the real
+PR's `From<io::Error>`/`From<serde_json::Error>` tests; RED at baseline = compile-fail
+(`From<serde_json::Error>` not impl, E0277). Same drive template, gpt-5.5.
+
+- Pipeline `finished`/`open-PR`, 3 forward turns. Maker added `From<std::io::Error>`
+  (→500/"Internal") + `From<serde_json::Error>` (→400/"Invalid Argument", serde msg as
+  detail) in `src/error.rs` (commit `f9641874`, +12), authored its own regression test
+  (commit `47c8e00f`); 11 tests pass.
+- **INDEPENDENT VERIFY = PASS** — my hidden oracle (`verify/bug4-oracle.rs`) GREEN
+  (3/3) against the maker fix (was compile-fail RED at baseline).
+- tokens ~1.72M; wall ≈615s.
+
+### Finding (bug4)
+- **F4 (Rust CI gate):** the bench `bf__ci_log` build gate ran `go build ./...` in a
+  Rust worktree → `directory prefix . does not contain main module`. Non-fatal (the
+  scoped cargo `test_cmd` gates are authoritative and passed), but the story's default
+  build-check is Go-shaped; for a generic dev-story it should derive the build/test
+  command from the project profile (gears-rust-dev's `project-profile.yaml`) or the
+  passed `test_cmd`, not hardcode Go. Generic hardening candidate (helps any non-Go repo).
+- F3 (`ticket.transition: <id> not found`) recurred — confirmed systematic bench-mode
+  cosmetic, not per-case.
+
+### Next
+- bug5 (resource-group allowed_memberships RG-prefix). Pin, RED-check, drive.
+
 ### (bootstrap) Next
 - Drive bug1 through `stories/bugfix` live via `kitsoki-mcp-driver`
   (`harness:live`, explicit `trace:`, `base=e3ab3c27`, scoped `test_cmd`, fresh

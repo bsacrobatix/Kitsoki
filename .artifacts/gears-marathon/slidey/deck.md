@@ -2,7 +2,7 @@
 
 ## Fully-autonomous kitsoki dev-story over real merged-fix baselines
 
-**1 / 10 bugs shipped** — each independently verified against the real PR's hidden regression-test oracle.
+**2 / 10 bugs shipped** — each independently verified against the real PR's hidden regression-test oracle.
 
 ---
 
@@ -23,6 +23,18 @@
 - fix: `516f14bc`  ·  tokens: `2308868`  ·  wall: `854s`
 
 - hidden oracle gh4115 GREEN; maker authored own regression test; 1-file fix
+
+---
+
+## bug4 — ✅ SHIPPED
+
+**errors: support convert for different error types to CanonicalError**
+
+- baseline RED: `true`  ·  candidate: `gpt-5.5`  ·  exit: `finished/open-PR`
+
+- fix: `f9641874`  ·  tokens: `1724703`  ·  wall: `615s`
+
+- hidden oracle (From io/serde_json) GREEN; +12 line fix; own regression test
 
 ---
 

@@ -35,9 +35,12 @@ cases:
     confirmed_red: false
   - id: bug4
     fix_sha: e21d79ab
-    package: cf-errors
+    baseline_sha: c7a95be5   # e21d79ab^
+    package: cf-modkit-canonical-errors
+    oracle_test: tests/oracle_bug4.rs (From<io::Error>/From<serde_json::Error>)
     title: "errors: support convert for different error types to CanonicalError"
-    confirmed_red: false
+    test_cmd: "cargo test -p cf-modkit-canonical-errors --test error"
+    confirmed_red: true   # 2026-06-25: From<serde_json::Error> not impl -> compile-fail
   - id: bug5
     fix_sha: 8737281d
     package: cf-resource-group
