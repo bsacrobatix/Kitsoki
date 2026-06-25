@@ -90,6 +90,32 @@ repro commands; don't "fix" it.
 | per-case worktree | one fresh worktree per case, never shared | shared worktree IS bug #9 |
 | maker model = profile | set the model via session `profile:`, not story `model:` | profile supersedes the agent-def (`claude-native`→opus, `claude-sonnet`→sonnet, `synthetic-claude`→GLM, `codex-native`→gpt) |
 | needs-human park | un-instrumented ticket parks at needs-human | expected RED→GREEN discipline; human verifies+merges |
+| CLEAN pre-flight | before each case `git worktree remove --force` AND `git branch -D fix/<id>` | removing only the worktree dir leaves the branch; `workspace.create` silently REATTACHES it → the run inherits a prior run's commits (bug already "fixed" → not-reproducible). Delete BOTH. |
+| heartbeat watchdog | watch the trace mtime; kill on stall, NOT on wall-clock | a live run can legitimately take hours; a STUCK one stops growing the trace. See below. |
+
+### Background runs: clean pre-flight + a heartbeat watchdog
+
+A long live dogfood is driven by a background agent and can run for **hours** —
+that's fine *as long as it's making external progress*. The failure to guard
+against is the agent getting **truly stuck** (a blocked studio call, a hung
+maker, an owner-marker collision) and waiting forever with no signal.
+
+- **Pre-flight CLEAN** (per case): `git worktree remove --force .worktrees/bf-<id>`
+  AND `git branch -D fix/<id>` AND `git worktree prune`. Removing only the
+  worktree leaves the branch for `workspace.create` to reattach — a poisoned run.
+- **Monitor via the FILESYSTEM, not the MCP.** Read-only studio calls block
+  behind a concurrent live turn (filed bug), so don't poll `studio.handles` to
+  check on a run. Peek the worktree `git log` and the trace JSONL mtime instead.
+- **Heartbeat watchdog** — launch it in the background ALONGSIDE the dogfood,
+  pointed at the run's trace; when it exits STALLED, `TaskStop` the stuck agent
+  and report (don't wait):
+  ```sh
+  # dogfood writes its trace to .artifacts/<run>/trace.jsonl (--trace-out / driver)
+  .agents/skills/dogfood-marathon/scripts/heartbeat-watch.sh \
+    .artifacts/<run>/trace.jsonl 600 60   # STALL=10min no-growth, POLL=60s
+  ```
+  A healthy run refreshes the trace every turn, so the watchdog never trips on a
+  genuinely-busy multi-hour run — only on a stuck one.
 
 ## Improve WITHOUT overfitting (the core discipline)
 
