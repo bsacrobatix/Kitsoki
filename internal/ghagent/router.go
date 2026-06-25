@@ -1,7 +1,7 @@
 package ghagent
 
 import (
-	"kitsoki/internal/host"
+	"strings"
 )
 
 // StoryPRBeat is the sentinel story value for the minimal PR autopilot beat.
@@ -35,27 +35,42 @@ func DefaultLabelStoryMap() LabelStoryMap {
 }
 
 // Classify maps a mention to a Route. PR objects route to the "pr" entry
-// regardless of label; issues classify via host.GHClassifyType (label-then-title
-// logic). Returns (Route, true) on a confident match, (_, false) when the class
-// has no configured route (the caller posts guidance and parks — deferred to
-// the guidance arc).
+// regardless of label; issues classify only on explicit bug/feature/epic labels
+// or title markers. Unlike host.GHClassifyType, this intentionally does not
+// default ambiguous issues to bug: a live @kitsoki mention with no clear signal
+// should ask for guidance rather than guess.
 func (m LabelStoryMap) Classify(mention Mention, labels []string) (Route, bool) {
 	if mention.Item.Kind == "pr" {
 		r, ok := m["pr"]
 		return r, ok
 	}
-	class := host.GHClassifyType(map[string]any{
-		"labels": labelsToAny(labels),
-		"title":  mention.Item.Title,
-	})
+	class := classifyMentionIssue(labels, mention.Item.Title)
+	if class == "" {
+		return Route{}, false
+	}
 	r, ok := m[class]
 	return r, ok
 }
 
-func labelsToAny(labels []string) []any {
-	out := make([]any, 0, len(labels))
-	for _, l := range labels {
-		out = append(out, l)
+func classifyMentionIssue(labels []string, title string) string {
+	for _, label := range labels {
+		switch strings.ToLower(strings.TrimSpace(label)) {
+		case "bug", "kind:bug", "type:bug":
+			return "bug"
+		case "feature", "enhancement", "kind:feature", "type:feature":
+			return "feature"
+		case "epic", "kind:epic", "type:epic":
+			return "epic"
+		}
 	}
-	return out
+	switch t := strings.ToLower(strings.TrimSpace(title)); {
+	case strings.HasPrefix(t, "bug:") || strings.Contains(t, "[bug]"):
+		return "bug"
+	case strings.HasPrefix(t, "feature:") || strings.Contains(t, "[feature]"):
+		return "feature"
+	case strings.HasPrefix(t, "epic:") || strings.Contains(t, "[epic]"):
+		return "epic"
+	default:
+		return ""
+	}
 }

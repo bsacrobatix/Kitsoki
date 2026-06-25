@@ -246,6 +246,104 @@ func TestDispatch_UnclassifiedMentionPostsGuidance(t *testing.T) {
 	}
 }
 
+func TestDispatch_UnlabelledMentionPostsGuidance(t *testing.T) {
+	ctx := context.Background()
+	mention := Mention{
+		Item: host.GitHubInboxItem{
+			Kind:   "issue",
+			Number: "100",
+			Title:  "@kitsoki please take a look",
+		},
+		Repo:      "o/r",
+		OriginRef: "github:o/r/issue/100",
+		Trigger:   DefaultMentionTrigger,
+	}
+
+	store := newGHJobStore(t)
+	rec := &recordingComments{commentID: "https://github.com/o/r/issues/100#issuecomment-3"}
+	d := &Dispatcher{
+		Jobs:     store,
+		Routes:   DefaultLabelStoryMap(),
+		Comments: &CommentStore{Exec: rec.handler, Repo: "o/r"},
+		WorkerID: "worker-guidance-unlabelled",
+		SpawnFn: func(ctx context.Context, route Route, j *jobs.GHJob) (RunResult, error) {
+			t.Fatalf("unlabelled mention should ask guidance, not spawn route %+v", route)
+			return RunResult{}, nil
+		},
+	}
+
+	job, err := d.Dispatch(ctx, mention, nil)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if job.State != jobs.GHAwaitingGuidance {
+		t.Fatalf("State = %q, want %q", job.State, jobs.GHAwaitingGuidance)
+	}
+	rec.mu.Lock()
+	bodies := append([]string(nil), rec.bodies...)
+	rec.mu.Unlock()
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "need a bit more direction") {
+		t.Fatalf("guidance body missing expected prose:\n%v", bodies)
+	}
+}
+
+func TestDispatch_FeatureDevStoryBeat(t *testing.T) {
+	ctx := context.Background()
+	mention := Mention{
+		Item: host.GitHubInboxItem{
+			Kind:   "issue",
+			Number: "99",
+			Title:  "@kitsoki draft the design direction",
+		},
+		Repo:      "o/r",
+		OriginRef: "github:o/r/issue/99",
+		Trigger:   DefaultMentionTrigger,
+	}
+
+	store := newGHJobStore(t)
+	rec := &recordingComments{commentID: "https://github.com/o/r/issues/99#issuecomment-4"}
+	d := &Dispatcher{
+		Jobs:          store,
+		Routes:        DefaultLabelStoryMap(),
+		Comments:      &CommentStore{Exec: rec.handler, Repo: "o/r"},
+		WorkerID:      "worker-feature",
+		PublicBaseURL: "https://kitsoki-test.slothattax.me",
+		SpawnFn:       RunStorySession,
+	}
+
+	job, err := d.Dispatch(ctx, mention, []string{"enhancement"})
+	if err != nil {
+		t.Fatalf("Dispatch feature: %v", err)
+	}
+	if job.State != jobs.GHDone {
+		t.Fatalf("feature job State = %q, want %q", job.State, jobs.GHDone)
+	}
+	if job.Story != "stories/dev-story" {
+		t.Fatalf("feature job Story = %q, want stories/dev-story", job.Story)
+	}
+	if !strings.HasPrefix(job.RunURL, "https://kitsoki-test.slothattax.me/run/") {
+		t.Fatalf("RunURL = %q, want public run URL", job.RunURL)
+	}
+	rec.mu.Lock()
+	ops := append([]string(nil), rec.ops...)
+	bodies := append([]string(nil), rec.bodies...)
+	rec.mu.Unlock()
+	if !containsString(ops, "comment_edit") {
+		t.Fatalf("feature final status should edit the first comment, ops=%v", ops)
+	}
+	last := bodies[len(bodies)-1]
+	meta := host.GHParseMetadata(last)
+	if meta == nil {
+		t.Fatalf("feature final comment missing metadata:\n%s", last)
+	}
+	if meta["story"] != "stories/dev-story" {
+		t.Fatalf("meta story = %v", meta["story"])
+	}
+	if meta["run_url"] != job.RunURL {
+		t.Fatalf("meta run_url = %v, want %s", meta["run_url"], job.RunURL)
+	}
+}
+
 // TestDispatch_PRBeat routes a pr-kind mention to the minimal pr-autopilot beat:
 // one host.git pr_status read through the real engine + one status comment.
 func TestDispatch_PRBeat(t *testing.T) {
