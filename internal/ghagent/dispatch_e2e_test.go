@@ -3,9 +3,13 @@ package ghagent
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/goccy/go-yaml"
 
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
@@ -71,6 +75,54 @@ func newGHJobStore(t *testing.T) *jobs.GHJobStore {
 		t.Fatalf("NewGHJobStore: %v", err)
 	}
 	return store
+}
+
+func TestMaterializeJobFlowFixtureOverlaysJobWorld(t *testing.T) {
+	dir := t.TempDir()
+	fixture := filepath.Join(dir, "flow.yaml")
+	if err := os.WriteFile(fixture, []byte(`test_kind: flow
+initial_world:
+  gh_job_id: job-stub
+  gh_origin_ref: github:o/r/pr/7
+  repo: o/r
+  pr_id: "7"
+turns: []
+`), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	path, cleanup, err := materializeJobFlowFixture(fixture, &jobs.GHJob{
+		JobID:        "job-live",
+		OriginRef:    "github:o/r/pr/77",
+		Repo:         "o/r",
+		ObjectKind:   "pr",
+		ObjectNumber: "77",
+	})
+	if err != nil {
+		t.Fatalf("materializeJobFlowFixture: %v", err)
+	}
+	defer cleanup()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read materialized fixture: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse materialized fixture: %v", err)
+	}
+	initialWorld, _ := doc["initial_world"].(map[string]any)
+	for k, want := range map[string]string{
+		"gh_job_id":     "job-live",
+		"gh_origin_ref": "github:o/r/pr/77",
+		"repo":          "o/r",
+		"pr_id":         "77",
+		"thread":        "github:o/r/pr/77",
+	} {
+		if got := initialWorld[k]; got != want {
+			t.Fatalf("initial_world[%s] = %v, want %q\n%s", k, got, want, string(raw))
+		}
+	}
 }
 
 // TestDispatch_MentionToAckLoop drives the FULL @kitsoki loop end-to-end across
@@ -292,11 +344,11 @@ func TestDispatch_FeatureDevStoryBeat(t *testing.T) {
 	mention := Mention{
 		Item: host.GitHubInboxItem{
 			Kind:   "issue",
-			Number: "99",
+			Number: "123",
 			Title:  "@kitsoki draft the design direction",
 		},
 		Repo:      "o/r",
-		OriginRef: "github:o/r/issue/99",
+		OriginRef: "github:o/r/issue/123",
 		Trigger:   DefaultMentionTrigger,
 	}
 
@@ -342,6 +394,9 @@ func TestDispatch_FeatureDevStoryBeat(t *testing.T) {
 	if meta["run_url"] != job.RunURL {
 		t.Fatalf("meta run_url = %v, want %s", meta["run_url"], job.RunURL)
 	}
+	if job.ObjectNumber != "123" {
+		t.Fatalf("ObjectNumber = %q, want dynamic issue number", job.ObjectNumber)
+	}
 }
 
 // TestDispatch_PRBeat routes a pr-kind mention to the minimal pr-autopilot beat:
@@ -349,7 +404,7 @@ func TestDispatch_FeatureDevStoryBeat(t *testing.T) {
 func TestDispatch_PRBeat(t *testing.T) {
 	ctx := context.Background()
 
-	prsJSON := `[{"number":7,"title":"@kitsoki review this PR","author":{"login":"bob"},"url":"https://github.com/o/r/pull/7"}]`
+	prsJSON := `[{"number":77,"title":"@kitsoki review this PR","author":{"login":"bob"},"url":"https://github.com/o/r/pull/77"}]`
 	restore := stubGHCli(t, `[]`, prsJSON)
 	defer restore()
 
@@ -365,7 +420,7 @@ func TestDispatch_PRBeat(t *testing.T) {
 	}
 
 	store := newGHJobStore(t)
-	rec := &recordingComments{commentID: "https://github.com/o/r/pull/7#issuecomment-9"}
+	rec := &recordingComments{commentID: "https://github.com/o/r/pull/77#issuecomment-9"}
 	d := &Dispatcher{
 		Jobs:     store,
 		Routes:   DefaultLabelStoryMap(),
@@ -383,6 +438,9 @@ func TestDispatch_PRBeat(t *testing.T) {
 	}
 	if job.Story != StoryPRBeat {
 		t.Errorf("pr job Story = %q, want %q", job.Story, StoryPRBeat)
+	}
+	if job.ObjectNumber != "77" {
+		t.Errorf("pr job ObjectNumber = %q, want dynamic PR number", job.ObjectNumber)
 	}
 	rec.mu.Lock()
 	n := len(rec.bodies)

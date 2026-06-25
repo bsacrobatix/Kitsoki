@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/goccy/go-yaml"
+
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/testrunner"
 )
@@ -187,12 +189,18 @@ func RunStorySession(ctx context.Context, route Route, job *jobs.GHJob) (RunResu
 		beatFixture = filepath.Join(root, "internal", "ghagent", "testdata", base+".beat.yaml")
 	}
 
-	report, err := testrunner.RunFlows(ctx, appPath, beatFixture, testrunner.FlowOptions{})
+	flowFixture, cleanup, err := materializeJobFlowFixture(beatFixture, job)
+	if err != nil {
+		return RunResult{}, err
+	}
+	defer cleanup()
+
+	report, err := testrunner.RunFlows(ctx, appPath, flowFixture, testrunner.FlowOptions{})
 	if err != nil {
 		return RunResult{}, fmt.Errorf("ghagent: run story %q: %w", route.Story, err)
 	}
 	if report.Passed < 1 {
-		return RunResult{}, fmt.Errorf("ghagent: story %q ran no passing turn (passed=%d failed=%d)", route.Story, report.Passed, report.Failed)
+		return RunResult{}, fmt.Errorf("ghagent: story %q ran no passing turn (passed=%d failed=%d): %s", route.Story, report.Passed, report.Failed, summarizeFlowFailures(report))
 	}
 
 	turns := 0
@@ -204,6 +212,95 @@ func RunStorySession(ctx context.Context, route Route, job *jobs.GHJob) (RunResu
 		FinalState: "passed",
 		Turns:      turns,
 	}, nil
+}
+
+func summarizeFlowFailures(report *testrunner.FlowReport) string {
+	if report == nil {
+		return "no report"
+	}
+	var parts []string
+	for _, result := range report.Results {
+		if result.Passed || result.Skipped {
+			continue
+		}
+		label := filepath.Base(result.File)
+		for _, turn := range result.Turns {
+			for _, failure := range turn.Failures {
+				parts = append(parts, label+": "+failure)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return "no failure details"
+	}
+	return strings.Join(parts, "; ")
+}
+
+func materializeJobFlowFixture(fixturePath string, job *jobs.GHJob) (string, func(), error) {
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		return "", func() {}, fmt.Errorf("ghagent: read flow fixture %q: %w", fixturePath, err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return "", func() {}, fmt.Errorf("ghagent: parse flow fixture %q: %w", fixturePath, err)
+	}
+	initialWorld, _ := doc["initial_world"].(map[string]any)
+	if initialWorld == nil {
+		initialWorld = map[string]any{}
+		doc["initial_world"] = initialWorld
+	}
+	for k, v := range jobFlowWorld(job) {
+		if strings.TrimSpace(v) != "" {
+			initialWorld[k] = v
+		}
+	}
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return "", func() {}, fmt.Errorf("ghagent: render job flow fixture: %w", err)
+	}
+	dir, err := os.MkdirTemp("", "kitsoki-ghagent-flow-*")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("ghagent: create temp flow dir: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	path := filepath.Join(dir, filepath.Base(fixturePath))
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("ghagent: write job flow fixture: %w", err)
+	}
+	return path, cleanup, nil
+}
+
+func jobFlowWorld(job *jobs.GHJob) map[string]string {
+	out := map[string]string{
+		"gh_job_id":     job.JobID,
+		"gh_origin_ref": job.OriginRef,
+		"repo":          job.Repo,
+		"thread":        job.OriginRef,
+	}
+	switch job.ObjectKind {
+	case "pr":
+		out["pr_id"] = job.ObjectNumber
+	case "issue":
+		out["ticket_id"] = job.ObjectNumber
+		out["ticket_url"] = githubObjectURL(job)
+	}
+	return out
+}
+
+func githubObjectURL(job *jobs.GHJob) string {
+	repo := strings.TrimSpace(job.Repo)
+	number := strings.TrimSpace(job.ObjectNumber)
+	if repo == "" || number == "" {
+		return ""
+	}
+	switch job.ObjectKind {
+	case "pr":
+		return "https://github.com/" + repo + "/pull/" + number
+	default:
+		return "https://github.com/" + repo + "/issues/" + number
+	}
 }
 
 // repoRoot walks up from this source file's directory to the nearest go.mod.

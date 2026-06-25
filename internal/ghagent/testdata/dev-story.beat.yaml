@@ -24,7 +24,6 @@ turns:
   - intent: { name: drive, slots: {} }
     expect_state: impl.idle
     expect_world:
-      impl__ticket_id: "99"
       impl__ticket_title: "Draft the GitHub-agent POC direction"
 
 expect_no_errors: true
