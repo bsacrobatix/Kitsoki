@@ -98,6 +98,36 @@ if [[ ! "$case_slug" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
 	exit 2
 fi
 
+normalize_comment_url() {
+	local source="$1"
+	local comment="$2"
+	local id=""
+
+	comment="${comment#"${comment%%[![:space:]]*}"}"
+	comment="${comment%"${comment##*[![:space:]]}"}"
+	if [ -z "$comment" ]; then
+		return 0
+	fi
+	if [[ "$comment" == *"#issuecomment-"* ]]; then
+		printf '%s\n' "$comment"
+		return 0
+	fi
+	if [[ "$comment" =~ ^[0-9]+$ ]]; then
+		id="$comment"
+	elif [[ "$comment" =~ /issues/comments/([0-9]+) ]]; then
+		id="${BASH_REMATCH[1]}"
+	elif [[ "$comment" =~ /([0-9]+)$ ]]; then
+		id="${BASH_REMATCH[1]}"
+	fi
+	if [ -n "$id" ] && [[ "$source" =~ ^https://github\.com/[^/]+/[^/]+/(issues|pull)/[0-9]+/?$ ]]; then
+		printf '%s#issuecomment-%s\n' "${source%/}" "$id"
+		return 0
+	fi
+	printf '%s\n' "$comment"
+}
+
+comment_url="$(normalize_comment_url "$source_url" "$comment_url")"
+
 api_url="${PUBLIC_BASE_URL%/}/api/run/$job_id"
 run_url="${PUBLIC_BASE_URL%/}/run/$job_id"
 webhook_url="${PUBLIC_BASE_URL%/}/gh-agent/webhook"
