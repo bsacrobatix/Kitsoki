@@ -204,7 +204,9 @@ It also writes a run-level audit summary at
 `.context/live-poc-run-<stamp>.md` tying together the created GitHub URLs, job
 ids, evidence notes, capture plans, and final review commands. For isolated
 smoke runs, set `KITSOKI_GH_AGENT_EVIDENCE_DIR`,
-`KITSOKI_GH_AGENT_MEDIA_ROOT`, and `KITSOKI_GH_AGENT_LIVE_SUMMARY`.
+`KITSOKI_GH_AGENT_MEDIA_ROOT`, `KITSOKI_GH_AGENT_DECK_JSON`,
+`KITSOKI_GH_AGENT_DECK_HTML`, `KITSOKI_GH_AGENT_DECK_VIDEO`, and
+`KITSOKI_GH_AGENT_LIVE_SUMMARY`.
 
 After all four live case clips and the developer-arc media exist, build the
 Slidey deck scaffold from the evidence and media:

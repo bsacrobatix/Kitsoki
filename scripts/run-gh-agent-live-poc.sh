@@ -21,6 +21,9 @@ WAIT_SECONDS="${KITSOKI_GH_AGENT_WAIT_SECONDS:-180}"
 POLL_SECONDS="${KITSOKI_GH_AGENT_POLL_SECONDS:-5}"
 EVIDENCE_DIR="${KITSOKI_GH_AGENT_EVIDENCE_DIR:-.context}"
 MEDIA_ROOT="${KITSOKI_GH_AGENT_MEDIA_ROOT:-.artifacts/github-agent-live}"
+DECK_JSON="${KITSOKI_GH_AGENT_DECK_JSON:-.artifacts/github-agent-live/live-github-agent.deck.json}"
+DECK_HTML="${KITSOKI_GH_AGENT_DECK_HTML:-.artifacts/github-agent-live/live-github-agent.html}"
+DECK_VIDEO="${KITSOKI_GH_AGENT_DECK_VIDEO:-.artifacts/github-agent-live/live-github-agent.mp4}"
 SUMMARY="${KITSOKI_GH_AGENT_LIVE_SUMMARY:-.context/live-poc-run-$RUN_STAMP.md}"
 
 YES=0
@@ -57,6 +60,9 @@ Environment:
   KITSOKI_GH_AGENT_POLL_SECONDS
   KITSOKI_GH_AGENT_EVIDENCE_DIR
   KITSOKI_GH_AGENT_MEDIA_ROOT
+  KITSOKI_GH_AGENT_DECK_JSON
+  KITSOKI_GH_AGENT_DECK_HTML
+  KITSOKI_GH_AGENT_DECK_VIDEO
   KITSOKI_GH_AGENT_LIVE_SUMMARY
   KITSOKI_GH_AGENT_PR_URL
   KITSOKI_GH_AGENT_DEVELOPER_ARC_MEDIA
@@ -254,9 +260,9 @@ finish_summary() {
 		cat >>"$SUMMARY" <<EOF
 ## Final Artifacts
 
-- Deck spec: \`.artifacts/github-agent-live/live-github-agent.deck.json\`
-- Self-contained HTML: \`.artifacts/github-agent-live/live-github-agent.html\`
-- Rendered deck MP4: \`.artifacts/github-agent-live/live-github-agent.mp4\`
+- Deck spec: \`$DECK_JSON\`
+- Self-contained HTML: \`$DECK_HTML\`
+- Rendered deck MP4: \`$DECK_VIDEO\`
 - QA feature: \`.context/qa-gh-agent-live-feature.md\`
 - QA scenarios: \`.context/qa-gh-agent-live-scenarios.yaml\`
 
@@ -273,9 +279,9 @@ EOF
 ## Gates
 
 \`\`\`sh
-scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --developer-arc-media ${DEVELOPER_ARC_MEDIA:-'<path-to-slidey-developer-arc-mp4-or-rrweb>'}
+scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --html "$DECK_HTML" --deck-video "$DECK_VIDEO" --developer-arc-media ${DEVELOPER_ARC_MEDIA:-'<path-to-slidey-developer-arc-mp4-or-rrweb>'}
 scripts/write-gh-agent-live-qa-plan.mjs
-.agents/skills/kitsoki-ui-qa/scripts/qa.sh .artifacts/github-agent-live/live-github-agent.mp4 --feature .context/qa-gh-agent-live-feature.md --scenarios .context/qa-gh-agent-live-scenarios.yaml --strict --pacing-strict
+.agents/skills/kitsoki-ui-qa/scripts/qa.sh "$DECK_VIDEO" --feature .context/qa-gh-agent-live-feature.md --scenarios .context/qa-gh-agent-live-scenarios.yaml --strict --pacing-strict
 \`\`\`
 
 ## Review Notes
@@ -425,6 +431,9 @@ run-gh-agent-live-poc:
   remote:      $REMOTE
   evidence:    $EVIDENCE_DIR
   media:       $MEDIA_ROOT
+  deck_json:   $DECK_JSON
+  deck_html:   $DECK_HTML
+  deck_video:  $DECK_VIDEO
   summary:     $SUMMARY
 EOF
 
@@ -472,18 +481,18 @@ if [ "$DO_CAPTURE" -eq 1 ]; then
 fi
 
 if [ -n "$DEVELOPER_ARC_MEDIA" ]; then
-	run_or_print scripts/build-gh-agent-live-deck.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --developer-arc-media "$DEVELOPER_ARC_MEDIA"
-	run_or_print scripts/export-gh-agent-live-deck-html.sh
-	run_or_print scripts/render-gh-agent-live-deck-video.sh
-	run_or_print scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --developer-arc-media "$DEVELOPER_ARC_MEDIA"
-	run_or_print scripts/write-gh-agent-live-qa-plan.mjs
+	run_or_print scripts/build-gh-agent-live-deck.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --out "$DECK_JSON" --developer-arc-media "$DEVELOPER_ARC_MEDIA"
+	run_or_print scripts/export-gh-agent-live-deck-html.sh --deck "$DECK_JSON" --out "$DECK_HTML"
+	run_or_print scripts/render-gh-agent-live-deck-video.sh --deck "$DECK_JSON" --out "$DECK_VIDEO"
+	run_or_print scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --html "$DECK_HTML" --deck-video "$DECK_VIDEO" --developer-arc-media "$DEVELOPER_ARC_MEDIA"
+	run_or_print scripts/write-gh-agent-live-qa-plan.mjs --video "$DECK_VIDEO"
 	finish_summary
 else
-	print_cmd scripts/build-gh-agent-live-deck.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
-	print_cmd scripts/export-gh-agent-live-deck-html.sh
-	print_cmd scripts/render-gh-agent-live-deck-video.sh
-	print_cmd scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
-	print_cmd scripts/write-gh-agent-live-qa-plan.mjs
+	print_cmd scripts/build-gh-agent-live-deck.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --out "$DECK_JSON" --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
+	print_cmd scripts/export-gh-agent-live-deck-html.sh --deck "$DECK_JSON" --out "$DECK_HTML"
+	print_cmd scripts/render-gh-agent-live-deck-video.sh --deck "$DECK_JSON" --out "$DECK_VIDEO"
+	print_cmd scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --html "$DECK_HTML" --deck-video "$DECK_VIDEO" --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
+	print_cmd scripts/write-gh-agent-live-qa-plan.mjs --video "$DECK_VIDEO"
 	finish_summary
 fi
 
