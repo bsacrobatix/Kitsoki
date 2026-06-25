@@ -1,82 +1,84 @@
-# External-project bake-off — "should I use kitsoki for MY project?"
+# External-project bug-fix benchmark — "should I use kitsoki for MY project?"
 
 The parent [`tools/bugfix-bakeoff`](../README.md) compares kitsoki's `bugfix`
 pipeline against a naive single-prompt agent on **kitsoki's own** bugs. This
-`external/` subtree generalises that to the question a prospective user actually
-asks: *if I onboard my repo and let kitsoki fix a bug, do I get a good fix — and
-at what cost compared to the real one?*
+`external/` subtree generalises that into a **repo-agnostic benchmarking tool**:
+point it at any open-source repo, onboard it, let a model fix real filed-issue
+bugs through the kitsoki pipeline, and grade each fix **deterministically**
+against the regression test the real PR shipped.
 
-It runs the same study against a real, third-party OSS repo:
-**[`sindresorhus/query-string`](https://github.com/sindresorhus/query-string)** —
-small/simple (one ~558-LOC parser, `base.js`) yet **mature** (274 commits, 90
-releases, since 2013), with a deep filed-issue → fixing-PR → regression-test
-history. That makes it an honest stand-in for a customer repo.
+Use it to evaluate kitsoki's prompts/patterns on real-world code, and to answer
+the prospective-user question: *if I onboard my repo and let kitsoki fix a bug,
+do I get a good fix — and at what cost compared to the real one?*
 
-## The pieces
+## Layout (add a repo = drop a manifest)
 
-| File | What |
-|---|---|
-| `query-string/manifest.yaml` | the 3 pinned bugs (issue, PR, `fix_sha`, `baseline_sha`, oracle, the ticket the pipeline is fed) |
-| `query-string/oracles/qs{1,2,3}.test.js` | the regression test the real PR shipped, **isolated** — the hidden good/bad oracle |
-| `score_qs.sh` | the **deterministic** good/bad detector — overlays the hidden oracle on a candidate tree, runs `ava`, exits 0 iff GREEN |
-| `query_string_bakeoff_test.go` | the gated reproducible test (`make qs-bakeoff`): clone → onboard → arm-oracle RED → real-fix GREEN |
+```
+external/
+  bench.py                       # generic grader + fixture verifier (manifest-driven)
+  bench_test.go                  # gated reproducible check (make qs-bakeoff): onboard + arm oracles
+  projects/<name>/
+    manifest.yaml                # repo + bugs + oracle-injection contract
+    oracles/<bug>.test.js        # the regression test the real PR shipped, isolated
+```
 
-## The 3 bugs
+To benchmark a **new** repo, add `projects/<name>/manifest.yaml` (repo URL,
+install/test commands, the per-bug `baseline_sha`/`fix_sha`/`oracle_test`/
+`oracle_match`, and a one-line `oracle.run` for the test runner) plus the
+isolated oracle files. No code changes — `bench.py` and `bench_test.go` discover
+it. The shipped reference project is
+[`projects/query-string`](projects/query-string) (sindresorhus/query-string —
+small/simple, one ~558-LOC parser, yet mature: 274 commits, 90 releases).
 
-| id | issue / PR | bug | `baseline_sha` (= `fix^`) | `fix_sha` |
-|----|------------|-----|---------------------------|-----------|
-| qs1 | [#336](https://github.com/sindresorhus/query-string/issues/336) | encoded separator `%7C` splits a single value into an array | `2e1f45a` | `ec67fea` |
-| qs2 | [#404](https://github.com/sindresorhus/query-string/issues/404) / [#406](https://github.com/sindresorhus/query-string/pull/406) | `types` schema ignored with `arrayFormat: comma` + single item | `88e1e36` | `3e61882` |
-| qs3 | [#392](https://github.com/sindresorhus/query-string/pull/392) | `bracket-separator` mis-parses a single URL-encoded value | `4287e77` | `19c43d4` |
+## The deterministic good/bad detector — `bench.py`
 
-Each baseline is the fix commit's first parent, so the checkout is
-byte-reproducible and the bug is present. The oracle is **kept out of the
-candidate's tree until scoring**.
+```sh
+# grade a candidate fix (a worktree carrying the model's source edit):
+python3 bench.py score --project query-string --bug qs1 --tree <worktree> \
+    --out results/cells/qs1-<cand>-<treat>.json
+#   exit 0 ⇔ oracle GREEN (good fix) · exit 1 ⇔ RED (bug remains)
 
-## The deterministic good/bad detector
+# verify every fixture is armed (RED@baseline, GREEN@real-fix):
+python3 bench.py verify --project query-string
+```
 
-`score_qs.sh --bug qs1 --tree <candidate-worktree>`:
+`score` copies the candidate tree (never mutates it), links a prebuilt
+`node_modules` (`QS_NODE_MODULES=…` to skip re-install), appends the **hidden
+oracle** into the manifest's `oracle.target`, runs `oracle.run` → GREEN/RED, and
+also runs the full `test_cmd` suite as a secondary signal. Cells follow the
+shared [`results/SCHEMA.md`](../results/SCHEMA.md).
 
-1. copies the candidate tree (never mutates it), links a prebuilt `node_modules`
-   (`QS_NODE_MODULES=…` to skip a re-install);
-2. appends the **hidden oracle** (`oracles/qs1.test.js`) to `test/parse.js`;
-3. runs `npx ava --match "<title>"` → **GREEN = good fix, RED = bug remains**
-   (the script's exit code is the verdict);
-4. also runs the full `ava` suite as an *informational* regression signal.
-
-> **Oracle is primary, suite is secondary — by design.** For qs1/qs2 a *correct*
-> behavioral fix legitimately flips one PRE-EXISTING test's expectation (the real
-> PR edited it too). So a source-only correct fix scores `partial` (oracle GREEN,
-> suite RED) until the candidate also updates that test. That gap is exactly the
-> quality signal the bake-off surfaces: kitsoki's pipeline runs the full suite
+> **Oracle is primary, suite is secondary — by design.** For some bugs a
+> *correct* behavioral fix legitimately flips one PRE-EXISTING test's expectation
+> (the real PR edited it too), so a source-only fix scores `partial` (oracle
+> GREEN, suite RED) until the candidate also updates that test. That gap is the
+> quality signal the benchmark surfaces: kitsoki's pipeline runs the full suite
 > and updates the affected test (→ `solved`); a careless single-prompt may not
-> (→ `partial`). Verified: qs1/qs2 source-only fix → `partial`, qs3 → `solved`.
+> (→ `partial`). Verified on query-string: qs1/qs2 source-only fix → `partial`,
+> qs3 → `solved`.
 
 ## Run the gated scaffold check (deterministic, free)
 
 ```sh
-make qs-bakeoff      # ~32s: clone + onboard + arm all 3 oracles (RED->GREEN)
+make qs-bakeoff   # per project: clone + onboard via embedded dev-story + arm every oracle
 ```
 
-Excluded from `make test` by the `qsbakeoff` build tag. It needs network, git,
-node/npm, and an installed `kitsoki`. It proves the fixtures are armed and the
-scorer is honest **before** any LLM is spent.
+Excluded from `make test` (the `qsbakeoff` build tag). Needs network, git,
+node/npm, python3+pyyaml, and an installed `kitsoki`. It proves onboarding works
+and every fixture is armed **before** any LLM is spent.
 
-## Run a cost-bearing cell (operator-only, real LLM)
+## Run cost-bearing LLM cells (operator-only)
 
-Same model as the parent bake-off — drive `stories/bugfix` (kitsoki treatment)
-or a single multi-stage prompt (control) under a candidate model, from the bug's
-`baseline_sha` worktree, then score the resulting tree:
+Drive the kitsoki bugfix pipeline live under a harness profile against a prepared
+baseline worktree, then grade the result. The headless delegation primitive is
+[`tools/mcp-drive/drive.sh`](../../mcp-drive/README.md) (raw `claude -p` with the
+studio MCP attached); the live worker model is chosen by `session.new {profile,
+harness:"live"}` — `codex-native` → GPT-5.5, `synthetic-claude` → GLM-5.2. The
+generic bugfix instance is [`stories/bench-bugfix`](../../../stories/bench-bugfix)
+(seed `workspace_id:""` so the implementer edits the prepared worktree directly).
+Score the resulting worktree with `bench.py score … --out results/cells/<cell>.json`;
+its `cost_usd` comes from the kitsoki trace (`payload.meta.cost_usd`) — the exact
+price of the proposed fix, lined up against the real maintainer fix.
 
-```sh
-# after the agent leaves its fix in <worktree>:
-QS_NODE_MODULES=/path/to/query-string/node_modules \
-  tools/bugfix-bakeoff/external/score_qs.sh \
-    --bug qs1 --tree <worktree> --candidate opus-4.8 --treatment kitsoki \
-    --out results/cells/qs1-opus-4.8-kitsoki.json
-```
-
-Cells use the shared [`results/SCHEMA.md`](../results/SCHEMA.md), so
-`aggregate.py` + the report/deck tooling consume them unchanged. The cost is read
-from the kitsoki trace (`payload.meta.cost_usd`) — the **exact** price of the
-fix kitsoki would propose, lined up against the real maintainer fix.
+See [`docs/case-studies/query-string-bakeoff.md`](../../../docs/case-studies/query-string-bakeoff.md)
+for the worked GPT-5.5-vs-GLM-5.2 study.

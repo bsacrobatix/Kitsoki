@@ -26,6 +26,15 @@ project:
   maturity: { commits: 274, releases: 90, since: 2013 }
   # one shared onboarding: dev-story discovers stack=node, test=`npm test`.
   onboard_app: "@kitsoki/dev-story"
+  # Full test suite — the SECONDARY (informational) regression signal.
+  test_cmd: "npx ava"
+  # Generic oracle-injection contract (consumed by bench.py). The deterministic
+  # grader appends the bug's isolated oracle test into `target`, then runs `run`
+  # ({target}/{match} substituted) — exit 0 ⇒ GREEN (good fix). This is the one
+  # knob a NEW project overrides for its runner (jest/pytest/cargo/go test/…).
+  oracle:
+    target: test/parse.js
+    run: 'npx ava {target} --match "{match}"'
 
 # Each bug runs from a hermetic baseline = the fixing commit's first parent
 # (`fix_sha^`), so the bug is present. oracle_test = the regression test the real

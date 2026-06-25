@@ -49,8 +49,9 @@ It is kept out of the candidate's tree until scoring.
 ## The deterministic good/bad detector
 
 A fix is graded with **no LLM and no judgment call**:
-[`score_qs.sh`](../../tools/bugfix-bakeoff/external/score_qs.sh) overlays the
-hidden oracle onto the candidate's tree and runs it.
+[`bench.py`](../../tools/bugfix-bakeoff/external/bench.py) overlays the
+hidden oracle onto the candidate's tree and runs it
+(`python3 bench.py score --project query-string --bug qs1 --tree <worktree>`).
 
 ```
 GREEN oracle  -> the fix is behaviorally correct (bug gone)
@@ -116,7 +117,7 @@ cells (operator-only, never in CI), exactly like the parent bake-off:
 
 1. From a bug's `baseline_sha` worktree, drive `stories/bugfix` under a candidate
    model (kitsoki treatment) **or** a single multi-stage prompt (control).
-2. Score the resulting tree with `score_qs.sh … --out results/cells/<cell>.json`.
+2. Score the resulting tree with `bench.py score … --out results/cells/<cell>.json`.
 3. The cell's `cost_usd` comes from the kitsoki trace
    (`payload.meta.cost_usd`) — the exact price of the proposed fix.
 
