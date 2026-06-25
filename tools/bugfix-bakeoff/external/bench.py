@@ -84,7 +84,11 @@ def materialize(tree, dest, node_modules=None):
 
 def score(m, bug, tree, out, candidate, treatment):
     proj = m["project"]
-    oracle_cfg = proj["oracle"]
+    # Per-bug `oracle:` overrides the project default (target/run/match/inject).
+    # A heterogeneous repo (gears-rust: per-bug crate + cargo features +
+    # standalone test file) sets these per bug; a uniform repo (query-string)
+    # uses the project default. Back-compat: no per-bug block ⇒ project default.
+    oracle_cfg = {**proj.get("oracle", {}), **bug.get("oracle", {})}
     oracle_file = m["_dir"] / bug["oracle_test"]
     if not oracle_file.exists():
         sys.exit(f"oracle missing: {oracle_file}")
@@ -92,11 +96,19 @@ def score(m, bug, tree, out, candidate, treatment):
     scratch = Path(tempfile.mkdtemp(prefix="bench-"))
     try:
         materialize(tree, scratch)
-        # Inject the hidden oracle into the target test file.
+        # Inject the hidden oracle. `inject: append` (default) appends into an
+        # EXISTING shared test file (query-string's test/parse.js); `inject:
+        # write` CREATES a standalone test file at `target` (a Rust
+        # tests/oracle_<bug>.rs calling public API). Both keep the oracle out of
+        # the candidate tree until scoring.
         target = scratch / oracle_cfg["target"]
-        with open(target, "a") as f:
-            f.write(f"\n// ---- injected hidden oracle ({bug['id']}) ----\n")
-            f.write(oracle_file.read_text())
+        if oracle_cfg.get("inject", "append") == "write":
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(oracle_file.read_text())
+        else:
+            with open(target, "a") as f:
+                f.write(f"\n// ---- injected hidden oracle ({bug['id']}) ----\n")
+                f.write(oracle_file.read_text())
 
         run_cmd = oracle_cfg["run"].replace("{target}", oracle_cfg["target"]) \
                                    .replace("{match}", bug.get("oracle_match", ""))
@@ -104,7 +116,9 @@ def score(m, bug, tree, out, candidate, treatment):
         oracle_pass = oracle_r.returncode == 0
 
         suite_pass = None
-        if proj.get("test_cmd"):
+        # `suite: false` skips the heavy secondary full-suite signal (e.g. a
+        # whole-workspace `cargo test`); the hidden oracle stays primary.
+        if proj.get("test_cmd") and proj.get("suite", True):
             suite_r = sh(proj["test_cmd"], cwd=scratch, quiet=True)
             suite_pass = suite_r.returncode == 0
 
@@ -169,6 +183,14 @@ def verify(m, only_bug, repo_dir):
 
         work = Path(tempfile.mkdtemp(prefix="bench-verify-"))
         for b in bugs:
+            # Isolate the compiled-artifact cache PER FIXTURE. A shared
+            # CARGO_TARGET_DIR cross-contaminates: two bugs pin DIFFERENT baselines
+            # of the same workspace, so a dep (e.g. cf-modkit-canonical-errors)
+            # compiled for bug1's newer baseline would leak its rlib into bug4's
+            # older baseline and falsely turn its RED oracle GREEN. A per-bug dir
+            # keeps RED+GREEN of the SAME fixture fast (shared deps) while staying
+            # correct across fixtures. (cargo-only; harmless for other runners.)
+            os.environ["CARGO_TARGET_DIR"] = str(work / f"{b['id']}-target")
             red = work / f"{b['id']}-red"
             export(repo, b["baseline_sha"], red)
             red_green = score(m, b, red, None, "real-fix", "oracle") == 0
@@ -303,6 +325,7 @@ def main():
             print(json.dumps({
                 "id": p["id"], "repo": p["repo"],
                 "onboard_app": p.get("onboard_app", "@kitsoki/dev-story"),
+                "local_only": bool(p.get("local_only", False)),
                 "baselines": [b["baseline_sha"] for b in m["bugs"]],
                 "bugs": [b["id"] for b in m["bugs"]],
             }))

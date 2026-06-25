@@ -31,6 +31,7 @@ type projectMeta struct {
 	ID         string   `json:"id"`
 	Repo       string   `json:"repo"`
 	OnboardApp string   `json:"onboard_app"`
+	LocalOnly  bool     `json:"local_only"`
 	Baselines  []string `json:"baselines"`
 	Bugs       []string `json:"bugs"`
 }
@@ -55,6 +56,9 @@ func TestExternalBakeoff(t *testing.T) {
 		name := filepath.Base(filepath.Dir(mf))
 		t.Run(name, func(t *testing.T) {
 			meta := metaFor(t, name)
+			if meta.LocalOnly {
+				t.Skipf("%s is local_only (heavy/private clone) — arm it via `make gears-bakeoff` (gearsbakeoff tag)", name)
+			}
 
 			// 1. Onboard a checkout via the embedded dev-story.
 			t.Run("onboard", func(t *testing.T) {

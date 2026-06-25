@@ -26,9 +26,38 @@ To benchmark a **new** repo, add `projects/<name>/manifest.yaml` (repo URL,
 install/test commands, the per-bug `baseline_sha`/`fix_sha`/`oracle_test`/
 `oracle_match`, and a one-line `oracle.run` for the test runner) plus the
 isolated oracle files. No code changes — `bench.py` and `bench_test.go` discover
-it. The shipped reference project is
+it. The shipped reference projects are
 [`projects/query-string`](projects/query-string) (sindresorhus/query-string —
-small/simple, one ~558-LOC parser, yet mature: 274 commits, 90 releases).
+small/simple, one ~558-LOC parser, yet mature: 274 commits, 90 releases) and
+[`projects/gears-rust`](projects/gears-rust) (a large, mature, **private** Rust
+monorepo — captured from the 2026-06 gears-rust dogfood marathon + hard-case run).
+
+### Heterogeneous / heavy / private repos (gears-rust)
+
+`gears-rust` exercises the parts of the contract a uniform JS repo doesn't:
+- **per-bug `oracle:`** — each fixture pins its own crate + cargo invocation
+  (and `--features`), overriding the project default; `bench.py` merges per-bug
+  over project.
+- **`inject: write`** — the oracle is a STANDALONE `tests/oracle_<bug>.rs` calling
+  the crate's public API, written (not appended) into the candidate tree.
+- **`suite: false`** — skip the (multi-minute) whole-workspace `cargo test`
+  secondary signal; the hidden oracle is the only signal.
+- **`local_only: true`** — heavy + private, so it is NOT cloned by the
+  `qsbakeoff` loop (`TestExternalBakeoff` skips it). Arm it against a LOCAL
+  checkout via the gated `gearsbakeoff` test, which clones a throwaway
+  `--local --no-checkout` mirror (so the grader's fix-source checkout never
+  dirties your working tree) and shares a `CARGO_TARGET_DIR`:
+
+  ```sh
+  GEARS_RUST_REPO=~/code/gears-rust make gears-bakeoff
+  ```
+
+The four armable fixtures (bug1/4/5/9) prove RED@baseline → GREEN@fix; the rest
+of the marathon + hard-case corpus is captured under `reference_only:` in the
+manifest (copy-in / overlay oracles, to be auto-armed once `bench.py` grows an
+`inject: insert-at-marker` mode). Provenance:
+[`.context/gears-marathon-log.md`](../../../.context/gears-marathon-log.md) +
+[`.context/gears-hard-cases-report.md`](../../../.context/gears-hard-cases-report.md).
 
 ## The deterministic good/bad detector — `bench.py`
 
