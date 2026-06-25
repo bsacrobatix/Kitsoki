@@ -59,6 +59,10 @@ host_handlers:
     data: { ok: true, submitted: { summary_title: "ok", summary_markdown: "ok", outcome: "pass", status: "passed", verdict: "accept", intent: "accept", confidence: 0.9 } }
   host.run:
     by_call:
+      # the synthesis commit (implementing/on_enter): polls + git add -A + commits
+      # the reproducer's RED test as the discrete pre-fix tip.
+      commit_repro_test:
+        data: { ok: true, exit_code: 0, stdout_json: { sha: "t00ba12", committed: true } }
       # testing's PRE-FIX regression gate, run on HEAD~1 (= the committed test,
       # no fix) — RED: the bug reproduces.
       regression_gate_exec:

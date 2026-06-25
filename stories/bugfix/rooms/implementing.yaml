@@ -121,6 +121,48 @@ states:
           landing_gate:    "{{ world.reproduction_artifact.repro_command }}"
           repro_committed: true
 
+      # Commit the reproducer's RED test as the DISCRETE pre-fix commit — BEFORE
+      # the implementer applies the fix, so the only dirty change is the test and
+      # `git add -A` captures it whatever path the reproducer actually wrote (the
+      # reproducer's reported repro_test_paths proved unreliable — a path-specific
+      # `git add` silently no-op'd while the file WAS on disk). Two hard problems
+      # this solves that a plain iface.vcs.commit couldn't:
+      #   (1) the maker backend (codex) flushes the reproducer's just-written file
+      #       to the worktree at an UNBOUNDED later moment — so we POLL git status
+      #       (up to ~12s) for any non-owner change before staging;
+      #   (2) the reported test path may not match the real one — so we stage ALL
+      #       (minus the .kitsoki-owner sentinel), which is safe because nothing
+      #       else is dirty yet (the implementer hasn't run).
+      # Synthesis path only (repro_committed latched above). A stray no-commit is
+      # caught by testing's HEAD~1 gate (GREEN → needs-human) — never a false ship.
+      - when: "world.repro_committed && world.workdir != ''"
+        invoke: host.run
+        id: commit_repro_test
+        with:
+          cmd: bash
+          args:
+            - "-c"
+            - |
+              set +e
+              export GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
+              WT="{{ world.workdir }}"
+              for i in $(seq 1 60); do
+                DIRTY=$(git -C "$WT" status --porcelain 2>/dev/null | grep -v '\.kitsoki-owner')
+                [ -n "$DIRTY" ] && break
+                sleep 0.2
+              done
+              cd "$WT" || { printf '{"sha":"","committed":false}\n'; exit 0; }
+              git add -A
+              git reset -q -- .kitsoki-owner 2>/dev/null
+              if git diff --cached --quiet; then
+                printf '{"sha":"","committed":false}\n'
+              else
+                git commit -q -m "test(repro): RED reproducer for {{ world.ticket_id }}" >/dev/null 2>&1
+                printf '{"sha":"%s","committed":true}\n' "$(git -C "$WT" rev-parse HEAD)"
+              fi
+          cwd: "{{ world.workdir }}"
+        on_error: idle
+
       # Apply the proposed fix. The agent runs with cwd=workdir
       # (the bugfix worktree), reads the proposal artifact, and uses
       # Edit/Write to make the actual code changes. Without this
@@ -161,27 +203,6 @@ states:
               cycle:            "{{ world.cycle }}"
         bind:
           implement_artifact: submitted
-        on_error: idle
-
-      # Commit the synthesised reproducer test as a DISCRETE pre-fix commit NOW —
-      # after the implementer agent has run, so the maker backend's sandbox has
-      # synced the reproducer's RED-test file back to the worktree (provably
-      # durable once the implementer, which read+wrote this same worktree, has
-      # completed). Stage ONLY the test paths so this commit holds the test and
-      # NOT the fix; the fix lands in the next commit below, making this the
-      # pre-fix tip that testing's HEAD~1 RED gate reads. Synthesis path only
-      # (repro_committed latched above). Idempotent on re-entry (already-committed
-      # test → no-op). A stray no-op is caught by the HEAD~1 gate (GREEN →
-      # needs-human), never a false ship.
-      - when: |
-          world.repro_committed && world.workdir != '' &&
-          len(world.reproduction_artifact.repro_test_paths ?? []) > 0
-        invoke: iface.vcs.commit
-        id: commit_repro_test
-        with:
-          message: "test(repro): RED reproducer for {{ world.ticket_id }}"
-          files:   "{{ world.reproduction_artifact.repro_test_paths }}"
-          cwd:     "{{ world.workdir }}"
         on_error: idle
 
       - when: "world.workdir != ''"

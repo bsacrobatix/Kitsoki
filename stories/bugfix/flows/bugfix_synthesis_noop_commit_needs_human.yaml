@@ -35,11 +35,7 @@ host_handlers:
   host.append_to_file: { data: { ok: true } }
   host.inbox.add:      { data: { ok: true } }
   host.git_worktree:   { data: { ok: true, log: "", path: ".worktrees/noop-fix" } }
-  # The synthesis test commit NO-OPS (sha:""). Every other git call returns a sha.
-  host.git:
-    by_call:
-      commit_repro_test: { data: { ok: true, sha: "", diff: "" } }
-    default: { data: { ok: true, sha: "abc", diff: "" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
   host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
   host.agent.task:
     data:
@@ -62,6 +58,9 @@ host_handlers:
     data: { ok: true, submitted: { summary_title: "ok", summary_markdown: "ok", outcome: "pass", status: "passed", verdict: "accept", intent: "accept", confidence: 0.9 } }
   host.run:
     by_call:
+      # the synthesis commit NO-OPS (nothing staged — test never flushed / wrong path).
+      commit_repro_test:
+        data: { ok: true, exit_code: 0, stdout_json: { sha: "", committed: false } }
       # HEAD~1 gate runs (gate_command was latched) but the test isn't there → GREEN.
       regression_gate_exec:
         data:
