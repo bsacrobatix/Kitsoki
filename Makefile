@@ -38,7 +38,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup build install uninstall test test-flows starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup build install uninstall test test-flows onboard-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
 
@@ -223,6 +223,14 @@ test-flows:
 		printf '\n-- flows: %s\n' "$$app"; \
 		./.kitsoki-flows test flows "$$app" || rc=1; \
 	done; rm -f ./.kitsoki-flows; exit $$rc
+
+# onboard-smoke is a gated, reproducible end-to-end test: clone a PINNED
+# open-source repo and onboard it to a fully working kitsoki environment via the
+# binary's EMBEDDED dev-story (no kitsoki checkout). NOT part of `make test` —
+# it needs network + git + an installed `kitsoki` binary. See
+# tools/onboard-smoke/README.md. Depends on a current install.
+onboard-smoke: install
+	go test -tags onboardsmoke -run TestOnboardPinnedRepo -count=1 -v ./tools/onboard-smoke/
 
 # cost-report builds the per-story cost-savings report (the reusable form of
 # docs/case-studies/git-ops-cost.md): the deterministic story cost (agent spend

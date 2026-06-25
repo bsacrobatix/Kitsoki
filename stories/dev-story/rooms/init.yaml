@@ -363,22 +363,29 @@ states:
       # Install the kitsoki agent toolkit (skills + shared subagents) and
       # register the studio MCP into the target checkout, so an onboarded
       # project is a fully working kitsoki environment (not just config files).
-      # Best-effort: a tools-install hiccup must not fail the file apply, so
-      # there is no on_error bounce — the result is surfaced read-only below.
+      # This is load-bearing: a failed install (e.g. the toolkit was not staged
+      # into the binary, or the command errored) must NOT silently pass as
+      # "applied" — `fail_on_error: true` makes a non-zero exit set the host
+      # error, and `on_error` routes to a loud read-out the operator can retry.
+      # `kitsoki` resolves via host.run's kitsoki-bin-on-PATH (the running
+      # binary), independent of the operator's login PATH.
       - invoke: host.run
         once: true
         id: install_tools
         with:
-          cmd: bash
+          cmd: kitsoki
           args:
-            - "-lc"
-            - 'kitsoki project-tools install --json --target "$1"'
-            - "install_tools"
+            - "project-tools"
+            - "install"
+            - "--json"
+            - "--target"
             - "{{ world.init_target_path }}"
+          fail_on_error: true
         bind:
           init_tools_ok: "ok"
           init_tools_output: "stdout"
           init_tools_result: "stdout_json"
+        on_error: init_tools_failed
     on:
       init_applied:
         - when: "world.init_apply_result.status == 'applied'"
@@ -467,6 +474,81 @@ states:
             - set:
                 last_error: "project onboarding closed"
                 prev_state: "init_apply_failed"
+      look:
+        - target: .
+
+  init_tools_failed:
+    description: "Config + instance were written, but the toolkit + studio MCP install failed."
+    relevant_world:
+      - init_target_path
+      - init_project_title
+      - init_apply_result
+      - init_tools_output
+      - init_profile_status
+    view:
+      - banner:
+          text:     "PROJECT ONBOARDING"
+          subtitle: "toolkit + MCP install failed"
+          color:    "#EF4444"
+      - prose: >-
+          The onboarding files were written, but installing the kitsoki agent
+          toolkit (skills + subagents) and registering the studio MCP did not
+          complete. Without it this checkout has config but cannot drive kitsoki
+          (no .mcp.json, no skills/agents). If the binary reports the toolkit was
+          not staged, rebuild with `make embed-skills` (wired into `make
+          install`). You can retry, or continue and install it later by hand with
+          `kitsoki project-tools install --target {{ world.init_target_path }}`.
+      - kv:
+          pairs:
+            Target:   "{{ world.init_target_path }}"
+            Project:  "{{ world.init_project_title }}"
+            Config:   "{{ world.init_apply_result.config_path|default:'' }}"
+            Instance: "{{ world.init_apply_result.instance_path|default:'' }}"
+      - heading: "Output"
+        when: "world.init_tools_output != ''"
+      - code: "{{ world.init_tools_output }}"
+        when: "world.init_tools_output != ''"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "retry"
+              hint:   "rerun apply + toolkit/MCP install"
+              intent: confirm_init
+            - label:  "continue"
+              hint:   "proceed without the toolkit (install it by hand later)"
+              intent: init_applied
+            - label:  "quit"
+              hint:   "back to the workbench"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    on:
+      confirm_init:
+        - target: init_apply
+          effects:
+            - set:
+                init_apply_result: {}
+                init_apply_ok: false
+                init_apply_output: ""
+                init_tools_result: {}
+                init_tools_ok: false
+                init_tools_output: ""
+                init_profile_status: "applying"
+                last_error: ""
+      init_applied:
+        - target: init_done
+          effects:
+            - set:
+                init_profile_status: "applied-no-tools"
+                last_error: "onboarding applied; toolkit + MCP install skipped (run `kitsoki project-tools install` to finish)"
+      quit:
+        - target: landing
+          effects:
+            - set:
+                last_error: "project onboarding closed"
+                prev_state: "init_tools_failed"
       look:
         - target: .
 

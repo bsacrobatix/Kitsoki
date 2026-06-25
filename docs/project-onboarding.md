@@ -7,12 +7,15 @@ repository — any language, any stack — from "kitsoki is on my PATH" to a
 dev-story instance, the studio MCP registered for your coding agent, and the
 kitsoki skill/agent toolkit installed.
 
-> **The 30-second version.** From your project root:
+> **The 30-second version.** From your project root, with only the `kitsoki`
+> binary on PATH (no kitsoki checkout needed):
 > ```sh
-> kitsoki run /path/to/Kitsoki/stories/dev-story/app.yaml   # → type: onboard .
+> kitsoki run @kitsoki/dev-story      # → type: onboard .
 > ```
-> Walk the four onboarding rooms (review → apply) and you're done. The rest of
-> this page explains what that produces and the standalone command behind it.
+> `@kitsoki/dev-story` resolves the onboarding app from the binary's **embedded**
+> story library. Walk the four onboarding rooms (review → apply) and you're done.
+> The rest of this page explains what that produces and the standalone command
+> behind it.
 
 ---
 
@@ -51,16 +54,22 @@ dependency.
 
 The [dev-story](../stories/dev-story/README.md) hub ships a four-room onboarding
 pipeline that **discovers** your project, lets you **review** the profile, then
-**applies** everything above. Run the dev-story app from your project root and
-type an onboarding request:
+**applies** everything above. Run the **embedded** dev-story from your project
+root — no kitsoki checkout required, only the binary on PATH — and type an
+onboarding request:
 
 ```sh
 cd ~/code/my-project
-kitsoki run /path/to/Kitsoki/stories/dev-story/app.yaml
+kitsoki run @kitsoki/dev-story
 #   > onboard .                 # or: onboard ~/code/my-project
 #   > continue                  # review the discovered profile
 #   > continue (confirm)        # apply: writes config + instance + toolkit + MCP
 ```
+
+If the toolkit + MCP install fails (e.g. the binary was built without `make
+embed-skills`), onboarding routes to a loud `init_tools_failed` read-out — it
+will **not** silently report success — from which you can retry or finish later
+with `kitsoki project-tools install`.
 
 Discovery infers the project id, title, stack, and dev/test/build commands; the
 apply step writes the files and runs the toolkit + MCP install. The full
@@ -71,7 +80,7 @@ fixture — are in
 Headless equivalent (no TUI), useful for scripting or CI:
 
 ```sh
-APP=/path/to/Kitsoki/stories/dev-story/app.yaml
+APP=@kitsoki/dev-story
 kitsoki session create   --app "$APP" --key local:onboard
 kitsoki session continue --app "$APP" --key local:onboard \
     --intent work --slots '{"request":"onboard /abs/path/to/my-project"}'
