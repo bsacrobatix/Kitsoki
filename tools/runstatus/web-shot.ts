@@ -18,12 +18,17 @@
  *               viewport equals the render viewport — the rrweb invariant.
  *   --assert-text <text>  Optional, repeatable. Fails if the settled page text
  *               does not contain the string before screenshot.
+ *   --semantic-out <path> Optional. Writes window.__kitsokiVisual.observe() as
+ *               compact JSON when the app helper is installed.
+ *   --rrweb-out <path> Optional. Writes window.__kitsokiVisual.recording() as a
+ *               Slidey-compatible rrweb envelope when available.
  *
  * The settle logic mirrors the LIVE Playwright specs' _helpers (waitUntil
  * domcontentloaded + a settle beat for the SPA mount + RPC hydration), so a
  * web-shot looks like a tour/spec frame rather than a half-painted page.
  */
 import { chromium } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
 
 /** Fixed default viewport — the DEMO_VIEWPORT the skills' _helpers/demo.ts uses. */
 const DEFAULT_VIEWPORT = { width: 1600, height: 900 } as const;
@@ -33,6 +38,8 @@ interface Args {
   out: string;
   viewport: { width: number; height: number };
   assertText: string[];
+  semanticOut?: string;
+  rrwebOut?: string;
 }
 
 /** Parse `--key value` argv into the typed Args, with --viewport WxH. */
@@ -60,7 +67,7 @@ function parseArgs(argv: string[]): Args {
     if (!match) throw new Error(`web-shot.ts: --viewport must be WxH (got ${vp})`);
     viewport = { width: Number(match[1]), height: Number(match[2]) };
   }
-  return { url, out, viewport, assertText };
+  return { url, out, viewport, assertText, semanticOut: m.get("semantic-out"), rrwebOut: m.get("rrweb-out") };
 }
 
 async function main(): Promise<void> {
@@ -88,6 +95,23 @@ async function main(): Promise<void> {
       if (!bodyText.includes(text)) {
         throw new Error(`web-shot.ts: expected settled page text to contain ${JSON.stringify(text)}`);
       }
+    }
+
+    if (args.semanticOut) {
+      const semantic = await page.evaluate(() => {
+        const helper = (window as Window & { __kitsokiVisual?: { observe: () => unknown } }).__kitsokiVisual;
+        return helper ? helper.observe() : { ok: false, error: "window.__kitsokiVisual is not installed" };
+      });
+      await writeFile(args.semanticOut, `${JSON.stringify(semantic, null, 2)}\n`, "utf8");
+      process.stderr.write(`web-shot: wrote ${args.semanticOut} semantic observation\n`);
+    }
+    if (args.rrwebOut) {
+      const rrweb = await page.evaluate(() => {
+        const helper = (window as Window & { __kitsokiVisual?: { recording: () => unknown } }).__kitsokiVisual;
+        return helper ? helper.recording() : { schemaVersion: 1, source: "kitsoki-visual-record", events: [] };
+      });
+      await writeFile(args.rrwebOut, `${JSON.stringify(rrweb)}\n`, "utf8");
+      process.stderr.write(`web-shot: wrote ${args.rrwebOut} rrweb envelope\n`);
     }
 
     await page.screenshot({ path: args.out, fullPage: false });

@@ -214,7 +214,7 @@ docs land):
 				srvOpts = append(srvOpts, studio.ReadOnly())
 			}
 			srv := studio.NewServer(sess, srvOpts...)
-			srv.SetWebShot(mcpWebShotFunc(sess, ""))
+			srv.SetWebShotResult(mcpWebShotResultFunc(sess, ""))
 
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 			defer cancel()
@@ -273,14 +273,30 @@ type mcpWebShotOptions struct {
 }
 
 func mcpWebShotFunc(sess *studio.StudioSession, repoRoot string) studio.WebShotFunc {
-	return mcpWebShotFuncWithOptions(sess, mcpWebShotOptions{RepoRoot: repoRoot})
+	resultFn := mcpWebShotResultFuncWithOptions(sess, mcpWebShotOptions{RepoRoot: repoRoot})
+	return func(ctx context.Context, spec studio.WebRenderSpec) ([]byte, error) {
+		res, err := resultFn(ctx, spec)
+		return res.PNG, err
+	}
+}
+
+func mcpWebShotResultFunc(sess *studio.StudioSession, repoRoot string) studio.WebShotResultFunc {
+	return mcpWebShotResultFuncWithOptions(sess, mcpWebShotOptions{RepoRoot: repoRoot})
 }
 
 func mcpWebShotFuncWithOptions(sess *studio.StudioSession, opts mcpWebShotOptions) studio.WebShotFunc {
+	resultFn := mcpWebShotResultFuncWithOptions(sess, opts)
 	return func(ctx context.Context, spec studio.WebRenderSpec) ([]byte, error) {
+		res, err := resultFn(ctx, spec)
+		return res.PNG, err
+	}
+}
+
+func mcpWebShotResultFuncWithOptions(sess *studio.StudioSession, opts mcpWebShotOptions) studio.WebShotResultFunc {
+	return func(ctx context.Context, spec studio.WebRenderSpec) (studio.WebShotResult, error) {
 		wsSpec := spec.ToWebshotSpec()
 		if wsSpec.SessionID == "" {
-			return nil, fmt.Errorf("kitsoki mcp render.web currently supports live handles; use kitsoki web-shot with a no-LLM flow for story/state screenshots")
+			return studio.WebShotResult{}, fmt.Errorf("kitsoki mcp render.web currently supports live handles; use kitsoki web-shot with a no-LLM flow for story/state screenshots")
 		}
 		repoRoot := opts.RepoRoot
 		if repoRoot == "" {
@@ -290,11 +306,11 @@ func mcpWebShotFuncWithOptions(sess *studio.StudioSession, opts mcpWebShotOption
 			repoRoot = kitrepo.Resolve()
 		}
 		if repoRoot == "" {
-			return nil, fmt.Errorf("could not locate the kitsoki checkout for tools/runstatus/web-shot.ts; set %s", kitrepo.EnvVar)
+			return studio.WebShotResult{}, fmt.Errorf("could not locate the kitsoki checkout for tools/runstatus/web-shot.ts; set %s", kitrepo.EnvVar)
 		}
 		helper := filepath.Join(repoRoot, "tools", "runstatus", "web-shot.ts")
 		if _, err := os.Stat(helper); err != nil {
-			return nil, fmt.Errorf("web-shot helper not found at %s: %w", helper, err)
+			return studio.WebShotResult{}, fmt.Errorf("web-shot helper not found at %s: %w", helper, err)
 		}
 
 		provider := studio.NewRunstatusProvider(sess)
@@ -309,10 +325,11 @@ func mcpWebShotFuncWithOptions(sess *studio.StudioSession, opts mcpWebShotOption
 		if browser == nil {
 			browser = &webshot.NodeInvoker{RepoRoot: repoRoot}
 		}
-		return webshot.Shot(ctx, wsSpec, webshot.Options{
+		res, err := webshot.ShotWithSemantic(ctx, wsSpec, webshot.Options{
 			Server:        serverFactory(handler),
 			Browser:       browser,
 			HealthTimeout: opts.HealthTimeout,
 		})
+		return studio.WebShotResult{PNG: res.PNG, SemanticJSON: res.SemanticJSON, RRWebJSON: res.RRWebJSON}, err
 	}
 }

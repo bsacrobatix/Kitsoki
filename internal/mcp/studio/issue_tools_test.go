@@ -14,8 +14,8 @@ package studio_test
 import (
 	"bytes"
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"image/png"
 	"os"
 	"testing"
@@ -131,6 +131,54 @@ func TestIssueCreate_BundlesEvidenceAndFiles(t *testing.T) {
 	}
 	assert.Equal(t, out.Labels, filer.got.Labels, "filer got the final labels")
 	assert.Equal(t, "[MCP gap] session.drive cannot do X", filer.got.Title)
+}
+
+func TestIssueCreate_BundlesStoppedVisualRecording(t *testing.T) {
+	ctx := context.Background()
+	srv, filer, dir := newIssueServer(t)
+	srv.SetWebShotResult(func(ctx context.Context, spec studio.WebRenderSpec) (studio.WebShotResult, error) {
+		return studio.WebShotResult{
+			PNG:          synthPNG(t),
+			SemanticJSON: []byte(`{"ok":true,"actions":[{"handle":"testid:intent-btn-go","bbox":{"x":1,"y":1,"width":2,"height":2}}]}`),
+			RRWebJSON:    []byte(`{"schemaVersion":1,"source":"kitsoki-visual-record","events":[{"type":4}]}`),
+		}, nil
+	})
+	cs := connectInProcess(ctx, t, srv)
+	handle := openCloak(ctx, t, cs)
+	visual := openVisual(ctx, t, cs, handle, "web")
+
+	res, err := callTool(ctx, cs, "visual.record", map[string]any{
+		"action":        "start",
+		"visual_handle": visual,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "visual.record start: %s", contentText(res))
+	var started studio.VisualRecordOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &started))
+	_ = snapshotInfo(ctx, t, cs, visual, "full")
+	res, err = callTool(ctx, cs, "visual.record", map[string]any{
+		"action":       "stop",
+		"recording_id": started.RecordingID,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "visual.record stop: %s", contentText(res))
+
+	res, err = callTool(ctx, cs, "issue.create", map[string]any{
+		"title":                     "Visual regression evidence",
+		"body":                      "The visual loop failed.",
+		"include_visual_recordings": []string{started.RecordingID},
+	})
+	require.NoError(t, err)
+	out := issueResult(t, res)
+	require.Len(t, out.Assets, 3)
+	for _, p := range out.Assets {
+		assert.FileExists(t, p)
+		assert.Contains(t, p, dir)
+	}
+	assert.Contains(t, filer.got.Body, "Visual recording `"+started.RecordingID+"`")
+	assert.Contains(t, filer.got.Body, "timeline.json")
+	assert.Contains(t, filer.got.Body, "capture.semantic.json")
+	assert.Contains(t, filer.got.Body, "session.rrweb.json")
 }
 
 // TestIssueCreate_AddsAutonomousLabelByDefault proves source-autonomous is

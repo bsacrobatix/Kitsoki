@@ -88,7 +88,7 @@ func TestMCPWebShotFunc_RendersLiveStudioHandle(t *testing.T) {
 	require.NoError(t, os.WriteFile(helper, []byte("// test helper\n"), 0o644))
 
 	browser := &fakeWebShotBrowser{png: []byte("png")}
-	fn := mcpWebShotFuncWithOptions(sess, mcpWebShotOptions{
+	fn := mcpWebShotResultFuncWithOptions(sess, mcpWebShotOptions{
 		RepoRoot: repoRoot,
 		Browser:  browser,
 		Server: func(h http.Handler) webshot.ServerProvider {
@@ -97,9 +97,11 @@ func TestMCPWebShotFunc_RendersLiveStudioHandle(t *testing.T) {
 		},
 	})
 
-	png, err := fn(ctx, studio.WebRenderSpec{SessionID: string(sh.SID), Query: map[string]string{"chat": "chat-123"}})
+	result, err := fn(ctx, studio.WebRenderSpec{SessionID: string(sh.SID), Query: map[string]string{"chat": "chat-123"}})
 	require.NoError(t, err)
-	assert.Equal(t, []byte("png"), png)
+	assert.Equal(t, []byte("png"), result.PNG)
+	assert.JSONEq(t, `{"ok":true}`, string(result.SemanticJSON))
+	assert.JSONEq(t, `{"schemaVersion":1,"events":[{"type":4},{"type":2}]}`, string(result.RRWebJSON))
 	assert.Equal(t, "http://127.0.0.1:12345#/s/"+string(sh.SID)+"?chat=chat-123", browser.url)
 }
 
@@ -141,6 +143,16 @@ type fakeWebShotBrowser struct {
 
 func (b *fakeWebShotBrowser) Capture(_ context.Context, req webshot.CaptureRequest) error {
 	b.url = req.URL
+	if req.SemanticOutPath != "" {
+		if err := os.WriteFile(req.SemanticOutPath, []byte(`{"ok":true}`), 0o644); err != nil {
+			return err
+		}
+	}
+	if req.RRWebOutPath != "" {
+		if err := os.WriteFile(req.RRWebOutPath, []byte(`{"schemaVersion":1,"events":[{"type":4},{"type":2}]}`), 0o644); err != nil {
+			return err
+		}
+	}
 	return os.WriteFile(req.OutPath, b.png, 0o644)
 }
 

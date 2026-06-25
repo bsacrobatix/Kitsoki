@@ -66,6 +66,12 @@ func (n *NodeInvoker) Capture(ctx context.Context, req CaptureRequest) error {
 		"--out", req.OutPath,
 		"--viewport", req.Viewport.String(),
 	}
+	if req.SemanticOutPath != "" {
+		args = append(args, "--semantic-out", req.SemanticOutPath)
+	}
+	if req.RRWebOutPath != "" {
+		args = append(args, "--rrweb-out", req.RRWebOutPath)
+	}
 	for _, text := range req.AssertText {
 		args = append(args, "--assert-text", text)
 	}
@@ -78,6 +84,16 @@ func tempPNGPath() (string, error) {
 	f, err := os.CreateTemp("", "kitsoki-webshot-*.png")
 	if err != nil {
 		return "", fmt.Errorf("webshot: temp file: %w", err)
+	}
+	name := f.Name()
+	_ = f.Close()
+	return name, nil
+}
+
+func tempJSONPath() (string, error) {
+	f, err := os.CreateTemp("", "kitsoki-webshot-*.json")
+	if err != nil {
+		return "", fmt.Errorf("webshot: temp semantic file: %w", err)
 	}
 	name := f.Name()
 	_ = f.Close()

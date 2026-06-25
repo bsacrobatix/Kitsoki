@@ -29,6 +29,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,9 +94,9 @@ func (srv *Server) registerIssueTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name: "issue.create",
 		Description: "File a GitHub issue natively from the studio, bundling evidence the studio produces. " +
-			"{title, body?, labels?, repo?, handle?, include_trace?, trace_limit?, include_inspect?, assets?}. " +
+			"{title, body?, labels?, repo?, handle?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?}. " +
 			"Renders any requested assets (kind: tui_png|web|tui_text) to the artifacts dir and references them by relative path; " +
-			"optionally bundles a handle's trace + inspect snapshot into the body; always adds the source-autonomous label. " +
+			"optionally bundles a handle's trace/inspect snapshot and stopped visual.record artifact bundles into the body; always adds the source-autonomous label. " +
 			"Returns {ok, url, number, labels[], assets[]}.",
 	}, srv.handleIssueCreate)
 }
@@ -132,6 +133,9 @@ type IssueCreateArgs struct {
 	IncludeTrace   bool   `json:"include_trace,omitempty"`
 	TraceLimit     int    `json:"trace_limit,omitempty"`
 	IncludeInspect bool   `json:"include_inspect,omitempty"`
+	// IncludeVisualRecordings copies stopped visual.record artifact bundles into
+	// this issue's artifact directory and links them in the body.
+	IncludeVisualRecordings []string `json:"include_visual_recordings,omitempty"`
 
 	Assets []IssueAssetSpec `json:"assets,omitempty"`
 }
@@ -206,6 +210,12 @@ func (srv *Server) handleIssueCreate(
 	if rerr != nil {
 		return rerr, nil, nil
 	}
+	visualPaths, visualMD, rerr := srv.issueVisualRecordings(dir, args.IncludeVisualRecordings)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	assetPaths = append(assetPaths, visualPaths...)
+	assetMD = append(assetMD, visualMD...)
 
 	// 3. Compose the body and file it.
 	body := composeIssueBody(args.Body, contextMD, assetMD)
@@ -320,6 +330,58 @@ func (srv *Server) renderAsset(ctx context.Context, a IssueAssetSpec) ([]byte, s
 	default:
 		return nil, "", buildToolError(ErrBadRequest, fmt.Sprintf("issue.create: unknown asset kind %q", a.Kind))
 	}
+}
+
+func (srv *Server) issueVisualRecordings(issueDir string, ids []string) ([]string, []string, *mcpsdk.CallToolResult) {
+	if len(ids) == 0 {
+		return nil, nil, nil
+	}
+	outDir := filepath.Join(issueDir, "visual-recordings")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return nil, nil, buildToolError(ErrBadRequest, fmt.Sprintf("issue.create: mkdir visual recordings: %v", err))
+	}
+	var paths, md []string
+	for _, id := range ids {
+		rec, rerr := srv.resolveStoppedVisualRecording(id)
+		if rerr != nil {
+			return nil, nil, rerr
+		}
+		srcs, err := srv.writeVisualRecordingArtifacts(rec)
+		if err != nil {
+			return nil, nil, buildToolError(ErrBadRequest, fmt.Sprintf("issue.create: visual recording %q: %v", id, err))
+		}
+		recDir := filepath.Join(outDir, rec.ID)
+		if err := os.MkdirAll(recDir, 0o755); err != nil {
+			return nil, nil, buildToolError(ErrBadRequest, fmt.Sprintf("issue.create: mkdir visual recording %q: %v", id, err))
+		}
+		md = append(md, fmt.Sprintf("- Visual recording `%s` (%d events, %s)", rec.ID, len(rec.Events), rec.Kind))
+		for _, src := range srcs {
+			dst := filepath.Join(recDir, filepath.Base(src))
+			if err := copyFile(dst, src); err != nil {
+				return nil, nil, buildToolError(ErrBadRequest, fmt.Sprintf("issue.create: copy visual recording %q: %v", id, err))
+			}
+			paths = append(paths, dst)
+			md = append(md, fmt.Sprintf("  - [%s](%s)", filepath.Base(dst), dst))
+		}
+	}
+	return paths, md, nil
+}
+
+func copyFile(dst, src string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // issueContext bundles a driving handle's trace + inspect snapshot into a

@@ -1699,11 +1699,20 @@ func summariseTrace(history store.History, n int) []TurnSummaryItem {
 
 // ── web shot seam ────────────────────────────────────────────────────────────
 
-// WebShotFunc is the injectable render.web seam: given a webshot.Spec it returns
-// a PNG. The production wiring (cmd/kitsoki) builds a webshot.Shot over a real
-// HandlerServer + NodeInvoker; a test injects a stub that returns a synthetic PNG
-// with no browser. Nil means render.web degrades to text (no browser host).
+// WebShotFunc is the compatibility form of the injectable render.web seam: given
+// a webshot.Spec it returns a PNG. New visual callers use WebShotResultFunc so
+// the same browser pass can also return a compact semantic observation.
 type WebShotFunc func(ctx context.Context, spec WebRenderSpec) ([]byte, error)
+
+// WebShotResult is the screenshot plus optional page-side semantic observation.
+type WebShotResult struct {
+	PNG          []byte
+	SemanticJSON []byte
+	RRWebJSON    []byte
+}
+
+// WebShotResultFunc is the richer render.web seam used by visual.snapshot.
+type WebShotResultFunc func(ctx context.Context, spec WebRenderSpec) (WebShotResult, error)
 
 // WebRenderSpec is the studio's render.web target: a story + state + world OR a
 // live handle's session. It is mapped to a webshot.Spec by the production seam;

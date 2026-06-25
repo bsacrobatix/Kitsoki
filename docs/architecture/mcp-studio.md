@@ -3,14 +3,14 @@
 `kitsoki mcp` is a stdio [MCP](https://modelcontextprotocol.io) server an
 **external** LLM client (Claude Code, Claude Desktop, an IDE agent) attaches
 to. It gives that agent the three things it needs to build a kitsoki story:
-**author** it, **drive** a live session of it, and **see** the rendered
-result — terminal *and* browser — over one connection.
+**author** it, **drive** a live session of it, and **see / interact with** the
+rendered result — terminal *and* browser — over one connection.
 
 It is distinct from the narrow per-app server: [`kitsoki serve`](../../internal/mcp/server.go)
 exposes a single `transition` tool that drives one app's state machine.
 `kitsoki mcp` is the authoring/introspection *control plane* — its state is an
 authoring **workspace** plus zero-or-more live **driving sessions**, exposed as
-the `studio.*`, `story.*`, `session.*`, `chat.*`, `render.*`, and `issue.*`
+the `studio.*`, `story.*`, `session.*`, `chat.*`, `render.*`, `visual.*`, and `issue.*`
 tool families. It is a sibling of
 `kitsoki serve` and the [operator-ask bridge](operator-ask.md): same
 `github.com/modelcontextprotocol/go-sdk`, same `StdioTransport`, same
@@ -254,6 +254,107 @@ That path needs a staged runstatus SPA (`make web`) and local Playwright
 dependencies. Story/state spec screenshots still belong to `kitsoki web-shot`,
 where a no-LLM flow or host cassette can define the deterministic web session.
 
+### `visual.*` — interact visually without screenshot spam
+
+`visual.*` is the token-efficient interaction layer for vision-capable coding
+agents. It deliberately does **not** expose raw Playwright/Puppeteer control to
+the model. The default loop is compact structured JSON first, one targeted PNG
+only when needed, then deterministic actions through the same session/runtime
+seams as `session.*`.
+
+| Tool | Shape | Purpose |
+|---|---|---|
+| `visual.open` | `{kind:web\|tui\|vscode, handle, viewport?, mode?} → {visual_handle}` | bind a logical visual surface to an existing driving handle |
+| `visual.observe` | `{visual_handle, cols?, rows?} → {state, frame preview, actions[], regions[], metadata, image_available}` | cheap default context; no image bytes |
+| `visual.snapshot` | `{visual_handle, region?, overlay?, scale?, format?, max_pixels?, query?, assert_text?}` | return one targeted PNG plus JSON metadata including `image_id`/hash, original/display dimensions, crop bbox, scale factor, visible action handles, and, for web/vscode, the compact semantic observation; TUI uses the terminal rasterizer |
+| `visual.act` | `{visual_handle, action?, action_handle?, image_id?, point?, text?, key?, value?, region?, delta?, intent?, slots?, command?}` | perform deterministic `submit`, `continue`, `type`, `press`, `select`, `scroll`, `command`, or anchored `pixel_click` actions and return the post-action frame/outcome |
+| `visual.diff` | `{from_image_id, to_image_id}` | compare retained snapshot pixels/metadata and return changed-region hints plus a changed pixel bbox without another image |
+| `visual.record` | `{action:start\|stop, visual_handle?, recording_id?, mode?}` | capture a semantic evidence ledger and write `timeline.json` + `capture.semantic.json`; web recordings also write `session.rrweb.json` after a snapshot captures the rolling rrweb buffer |
+
+The implementation is intentionally handle-backed: `web` and `vscode` surfaces
+snapshot the real runstatus web view for the open session, while `tui` surfaces
+snapshot the composed terminal frame. Browser lifetime remains behind the
+existing `webShot` seam; tests inject stub PNG/semantic results, so the tool
+surface is covered without Chromium or a real LLM. Snapshot image bytes are sent
+only by the snapshot call; the server retains compact `image_id` metadata for
+diffing and recorded evidence.
+
+The runstatus SPA installs `window.__kitsokiVisual` at boot. It exposes a small
+semantic helper: `observe()` returns stable action handles from interactive
+elements (`data-testid` identity when present, ARIA role/label, disabled state,
+and bounding box), named regions (`chat`, `graph`, `trace`, `inbox`,
+`composer`, `modal`), viewport/route/focus, and dirty-region hints from
+`MutationObserver` + route changes. `tools/runstatus/web-shot.ts` can write this
+sidecar with `--semantic-out` during the same browser pass that captures the
+PNG, and the Go `internal/webshot` seam returns it as `ShotWithSemantic`.
+`visual.observe` uses the same compact sidecar, when the browser seam is wired,
+to return helper-derived action handles, region bboxes, focus, viewport, and
+dirty-region hints as JSON only. `visual.snapshot` filters that sidecar to the
+known compact keys before placing it in MCP metadata, so clients get
+action/region context without a DOM dump.
+When a web/vscode snapshot names a semantic `region` such as `chat` or `trace`,
+the returned PNG is cropped to that region's bbox. `overlay:"action_ids"` draws
+visible affordance boxes from the semantic action inventory; `overlay:"regions"`
+draws known region boxes. `max_pixels` enforces a hard image budget after crop
+while preserving aspect ratio; absent an explicit budget, `scale:"medium"` (the
+default) caps screenshots, `scale:"small"` caps more aggressively, and
+`scale:"native"` preserves pixels. All of this is done server-side against the
+already captured PNG, so the model sees only the targeted pixels it asked for.
+
+Pixel actions are intentionally anchored. `visual.act {action:"pixel_click"}`
+requires a recent `image_id` and a `point` in that returned image's coordinate
+space. The server hit-tests only the retained semantic action boxes and then
+submits the resolved deterministic handle (for runstatus, `intent-btn-*` testids
+map back to Kitsoki intents). A free-floating arbitrary click is not part of the
+normal action loop; the model must first ask for a frame that defines the
+coordinate system.
+
+Text entry is deterministic without owning a browser input element. `type`
+buffers text on the visual handle without advancing the story; `press` with
+`key:"Enter"` submits the buffered text through the same `session.drive` route
+as the web composer, while `Escape` clears and `Backspace` edits the buffer.
+`select` submits an explicit intent with slots (plus optional `value`) through
+the direct submit path. `scroll` is treated as a viewport hint: it records the
+region/delta, returns the current frame unchanged, and sets `needs_snapshot`
+because only a later observation/snapshot can prove what is visible after a
+client-side scroll.
+
+For `tui` handles, `visual.observe` includes an xterm-like terminal wrapper under
+`frame.terminal`: bounded `rows[]` are the cell grid in terminal coordinates,
+`dirty_rows[]` identifies rows worth re-reading, `actions[]` maps active intent
+handles to cell-coordinate bounding boxes, `focus` names the current input
+region, and `slash_commands[]` lists the safe command candidates surfaced by
+`visual.act {action:"command"}`. This is still JSON-only; `visual.snapshot`
+rasterizes the same composed frame to PNG only when pixels are needed.
+
+Longer-lived web recordings align with Slidey's canonical rrweb formats: rrweb
+is the durable motion/evidence substrate, `slidey.chapter` custom events mark
+reviewable spans, and PNGs remain targeted stills for vision-model ambiguity.
+The runstatus SPA already keeps a masked rolling rrweb buffer for bug reports;
+`window.__kitsokiVisual.recording()` wraps that buffer in the same envelope
+spine Slidey consumes (`schemaVersion`, `source`, `viewport`, timing fields,
+`events`). During an active `visual.record`, a web `visual.snapshot` captures
+that envelope through `web-shot.ts --rrweb-out`; `visual.record stop` writes the
+latest envelope as `session.rrweb.json` alongside the semantic ledger. Future
+chapter markers should reuse Slidey's `slidey.chapter` custom event convention
+rather than defining a second recording format.
+
+The contract for agent clients is:
+
+1. Call `visual.observe` first.
+2. Use `visual.act` for listed `intent:<name>` action handles whenever possible.
+3. Call `visual.snapshot` only for layout, visual ambiguity, or UI failures.
+4. Prefer `region`, `overlay`, and `max_pixels` over full-frame native
+   screenshots when the client knows what it needs to inspect.
+5. Use `pixel_click` only with an `image_id` from the latest relevant snapshot;
+   prefer listed action handles when available.
+6. Use `visual.record` around exploratory work that may need review; the sidecar
+   captures observations, actions, image ids, hashes, and, for web surfaces,
+   a masked rrweb replay when a snapshot occurred during the recording.
+
+This keeps PNGs useful for vision models without turning every step into a large
+image or accessibility-tree payload.
+
 ### `issue.*` — file a gap (with evidence bundled)
 
 The agent that drives kitsoki through this MCP has no shell and no write tools,
@@ -265,7 +366,7 @@ the evidence, it bundles it in.
 
 | Tool | Shape | Wraps |
 |---|---|---|
-| `issue.create` | `{title, body?, labels?, repo?, handle?, include_trace?, trace_limit?, include_inspect?, assets?} → {url, number, labels[], assets[]}` | render assets → `.artifacts`, bundle a handle's trace + inspect, then the injectable `IssueFiler` (prod: `gh`) |
+| `issue.create` | `{title, body?, labels?, repo?, handle?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?} → {url, number, labels[], assets[]}` | render assets → `.artifacts`, bundle a handle's trace/inspect and stopped visual recordings, then the injectable `IssueFiler` (prod: `gh`) |
 
 Three things happen server-side so the agent never handles bytes:
 
@@ -279,6 +380,12 @@ Three things happen server-side so the agent never handles bytes:
 - **context** — with a `handle` and `include_trace` / `include_inspect`, the
   session's trace tail (the same `session.trace` returns) and inspect snapshot
   are folded into the body, so a gap report is reproducible by construction.
+- **visual recordings** — `include_visual_recordings:["rec1", ...]` copies each
+  stopped `visual.record` bundle into the issue artifact directory and links its
+  `timeline.json`, `capture.semantic.json`, and optional `session.rrweb.json`.
+  This is the no-raw-browser-state path for filing a visual failure: semantic
+  state/action history plus the masked rrweb replay, without dumping DOMs into
+  the issue body.
 - **file** — the composed `{repo, title, body, labels}` goes to the injected
   [`IssueFiler`](../../internal/mcp/studio/issue_tools.go) seam. The
   `source-autonomous` label is always applied (first) so agent-filed issues are

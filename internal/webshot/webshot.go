@@ -137,10 +137,12 @@ type ServerProvider interface {
 // CaptureRequest is the browser-invoker's input: the served URL to screenshot,
 // the output file path, and the fixed viewport (capture == render).
 type CaptureRequest struct {
-	URL        string
-	OutPath    string
-	Viewport   Viewport
-	AssertText []string
+	URL             string
+	OutPath         string
+	SemanticOutPath string
+	RRWebOutPath    string
+	Viewport        Viewport
+	AssertText      []string
 }
 
 // BrowserInvoker rasterises a served URL to a PNG written at OutPath. The
@@ -163,6 +165,15 @@ type Options struct {
 	HealthTimeout time.Duration
 }
 
+// Result is the browser capture payload. PNG is always populated on success;
+// SemanticJSON is populated only when the browser helper was asked for the
+// compact window.__kitsokiVisual observation and the app exposed it.
+type Result struct {
+	PNG          []byte
+	SemanticJSON []byte
+	RRWebJSON    []byte
+}
+
 // Shot returns a PNG of the kitsoki web SPA at the state named by spec. It
 // resolves the served base URL via opts.Server, constructs the target URL
 // (the home surface for a spec form, the session route for the live form),
@@ -173,22 +184,34 @@ type Options struct {
 // one fails loudly instead of trying to launch a browser. The CLI
 // (cmd/kitsoki/web_shot.go) wires the real [HandlerServer] + [NodeInvoker].
 func Shot(ctx context.Context, spec Spec, opts Options) ([]byte, error) {
+	res, err := ShotWithSemantic(ctx, spec, opts)
+	if err != nil {
+		return nil, err
+	}
+	return res.PNG, nil
+}
+
+// ShotWithSemantic returns the screenshot plus the optional compact semantic
+// observation emitted by tools/runstatus/web-shot.ts. It uses the same browser
+// pass for both artifacts, keeping model-facing callers away from Playwright
+// while avoiding a second page load.
+func ShotWithSemantic(ctx context.Context, spec Spec, opts Options) (Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := spec.validate(); err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	if opts.Server == nil {
-		return nil, errors.New("webshot: Options.Server is required")
+		return Result{}, errors.New("webshot: Options.Server is required")
 	}
 	if opts.Browser == nil {
-		return nil, errors.New("webshot: Options.Browser is required")
+		return Result{}, errors.New("webshot: Options.Browser is required")
 	}
 
 	base, stop, err := opts.Server.Serve(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("webshot: serve: %w", err)
+		return Result{}, fmt.Errorf("webshot: serve: %w", err)
 	}
 	if stop != nil {
 		defer stop()
@@ -196,32 +219,52 @@ func Shot(ctx context.Context, spec Spec, opts Options) ([]byte, error) {
 
 	target, err := TargetURL(base, spec)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 
 	tmp, err := tempPNGPath()
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	defer removeFile(tmp)
+	semanticTmp, err := tempJSONPath()
+	if err != nil {
+		return Result{}, err
+	}
+	defer removeFile(semanticTmp)
+	rrwebTmp, err := tempJSONPath()
+	if err != nil {
+		return Result{}, err
+	}
+	defer removeFile(rrwebTmp)
 
 	if err := opts.Browser.Capture(ctx, CaptureRequest{
-		URL:        target,
-		OutPath:    tmp,
-		Viewport:   spec.viewport(),
-		AssertText: spec.AssertText,
+		URL:             target,
+		OutPath:         tmp,
+		SemanticOutPath: semanticTmp,
+		RRWebOutPath:    rrwebTmp,
+		Viewport:        spec.viewport(),
+		AssertText:      spec.AssertText,
 	}); err != nil {
-		return nil, fmt.Errorf("webshot: capture: %w", err)
+		return Result{}, fmt.Errorf("webshot: capture: %w", err)
 	}
 
 	png, err := readFile(tmp)
 	if err != nil {
-		return nil, fmt.Errorf("webshot: read capture %q: %w", tmp, err)
+		return Result{}, fmt.Errorf("webshot: read capture %q: %w", tmp, err)
 	}
 	if len(png) == 0 {
-		return nil, fmt.Errorf("webshot: capture produced an empty file %q", tmp)
+		return Result{}, fmt.Errorf("webshot: capture produced an empty file %q", tmp)
 	}
-	return png, nil
+	semantic, err := readFile(semanticTmp)
+	if err != nil {
+		semantic = nil
+	}
+	rrweb, err := readFile(rrwebTmp)
+	if err != nil {
+		rrweb = nil
+	}
+	return Result{PNG: png, SemanticJSON: semantic, RRWebJSON: rrweb}, nil
 }
 
 // TargetURL builds the SPA URL to screenshot for spec against base. The SPA uses

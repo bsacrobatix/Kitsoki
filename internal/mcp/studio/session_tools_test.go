@@ -275,15 +275,30 @@ func TestSessionNew_HostCassetteBacksDirectSubmitRun(t *testing.T) {
 	require.Equal(t, "board", board.Outcome.State)
 	require.Contains(t, board.Frame.Text, "Pending 10")
 
-	var current studio.TurnResponse
 	for i := 0; i < 10; i++ {
-		current = submit("next_item")
-		require.True(t, current.OK, "item %d should process", i+1)
+		current := submit("next_item")
+		require.True(t, current.OK, "item %d should start processing", i+1)
+		for guard := 0; current.Outcome.State != "board" && guard < 8; guard++ {
+			switch current.Outcome.State {
+			case "policy_check":
+				current = submit("policy_ok")
+			case "drive":
+				current = submit("drive_done")
+			case "implementation":
+				current = submit("implementation_done")
+			case "verify":
+				current = submit("verify_done")
+			default:
+				t.Fatalf("item %d reached unexpected state %q", i+1, current.Outcome.State)
+			}
+			require.True(t, current.OK, "item %d internal transition should succeed", i+1)
+		}
+		require.Equal(t, "board", current.Outcome.State, "item %d should return to board", i+1)
+		board = current
 	}
-	if current.Outcome.State == "board" {
-		require.Contains(t, current.Frame.Text, "Processed 10")
-		current = submit("next_item")
-	}
+	require.Contains(t, board.Frame.Text, "Processed 10")
+
+	current := submit("next_item")
 	require.True(t, current.OK)
 	require.Equal(t, "report", current.Outcome.State)
 	require.Contains(t, current.Frame.Text, "10 passed, 0 partial, 0 failed, 0 skipped, 0 pending")
