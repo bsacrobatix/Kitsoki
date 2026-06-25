@@ -225,7 +225,10 @@ async function sendAnnotation(): Promise<void> {
         _sessionId.value,
         annotateIntent.value,
         { [annotateFeedbackSlot.value]: text },
-        text,
+        // No displayLabel: the user bubble derives its text from the feedback
+        // slot. Passing the instruction as BOTH label and slot rendered it
+        // twice ("<text>: <text>").
+        undefined,
         {
           anchor,
           annotation: { mediaHandle: mediaHandle.value, anchor },
