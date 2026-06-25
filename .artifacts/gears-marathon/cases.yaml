@@ -50,10 +50,13 @@ cases:
     test_cmd: "cargo test -p cyberware-resource-group --test domain_unit_test"
     confirmed_red: true   # 2026-06-25: validate_membership_type_code absent -> compile-fail
   - id: bug6
-    fix_sha: 26ad613f
-    package: cf-account-management
-    title: "account-management: derive effective realm + children-list filter parity"
-    confirmed_red: false
+    fix_sha: ba166a57   # REPURPOSED from 26ad613f (account-mgmt was heavy/multi-concern)
+    baseline_sha: 4fe14125   # ba166a57^
+    package: cf-modkit-odata
+    oracle_test: odata_parse_tests::oracle_bug6_single_char_identifier_parses (copy-in snippet)
+    title: "odata: allow one-char identifier (PEG grammar required >=2 chars)"
+    test_cmd: "cargo test -p cf-modkit-odata --lib odata_parse_tests"
+    confirmed_red: true   # 2026-06-25: parse_str(\"x eq 1\") Err at baseline
   - id: bug7
     fix_sha: f0873f75
     package: cf-account-management

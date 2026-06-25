@@ -2,7 +2,7 @@
 
 ## Fully-autonomous kitsoki dev-story over real merged-fix baselines
 
-**3 / 10 bugs shipped** — each independently verified against the real PR's hidden regression-test oracle.
+**4 / 10 bugs shipped** — each independently verified against the real PR's hidden regression-test oracle.
 
 ---
 
@@ -47,6 +47,18 @@
 - fix: `2a7c929d`  ·  tokens: `2279672`  ·  wall: `704s`
 
 - hidden oracle 4/4 GREEN; added validate_membership_type_code; matches real PR approach
+
+---
+
+## bug6 — ✅ SHIPPED
+
+**odata: allow one-char identifier (PEG grammar required >=2 chars)**
+
+- baseline RED: `true`  ·  candidate: `gpt-5.5`  ·  exit: `finished/open-PR`
+
+- fix: `dbf44514`  ·  tokens: `1380786`  ·  wall: `470s`
+
+- hidden oracle GREEN; PEG + to * identical to real fix; own regression test
 
 ---
 

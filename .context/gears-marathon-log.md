@@ -134,6 +134,34 @@ bug5 = `fix(resource-group): drop RG-prefix requirement for allowed_memberships`
 ### Next
 - bug6 (account-management effective realm + children-list parity). Pin, RED-check, drive.
 
+## 2026-06-25 — bug6 SHIPPED ✅ (4/10)
+
+**Repurposed bug6** away from account-management (26ad613f — heavy, 11 files, DB-backed
+integration oracle, multi-concern; bad focused case) to **ba166a57** `fix(odata): allow
+one-char identifier` (pkg `cf-modkit-odata`, baseline 4fe14125). Marathon discipline:
+prefer focused single-package behavioural oracles; account-mgmt cases deferred.
+
+- Oracle is a crate-internal unit test (copy-in to `src/odata_parse_tests.rs`, run, `git
+  checkout` to remove — the classic "hidden oracle in at scoring, out after"). RED at
+  baseline: `parse_str("x eq 1")` → parse error.
+- Pipeline `finished`/`open-PR`, 3 forward turns, gpt-5.5. Maker changed the PEG
+  `identifier` rule trailing repetition `+`→`*` — **byte-identical to the real
+  maintainer fix** — and authored `single_character_identifier`; 95 lib tests pass.
+- **INDEPENDENT VERIFY = PASS** — copy-in oracle GREEN.
+- F4 (Go `go build ./...` CI gate in Rust worktree) recurred — systematic, confirmed.
+
+### Cumulative so far (4/4 attempts → 4 SHIPPED, 0 fail)
+gpt-5.5 over `stories/bench-bugfix`, all hidden-oracle-verified. bug1 toolkit · bug4
+errors · bug5 resource-group · bug6 odata. Every fix matches or equals the real PR's
+approach; pipeline shape stable (reproduce→propose→implement→accept→test→review→done,
+3 forward turns). Systematic findings: F1 (no cost in gpt traces), F3 (bench
+ticket.transition cosmetic), F4 (Go-shaped CI gate).
+
+### Next
+- bug7+: more focused libs cases (odata literal-escaping 88eb054d; modkit-db c3c96ac7;
+  mine 2-3 more). Then consider a second candidate (opus/glm) on a shipped bug for the
+  matrix axis.
+
 ### (bootstrap) Next
 - Drive bug1 through `stories/bugfix` live via `kitsoki-mcp-driver`
   (`harness:live`, explicit `trace:`, `base=e3ab3c27`, scoped `test_cmd`, fresh
