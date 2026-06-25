@@ -39,6 +39,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"kitsoki/internal/host"
 )
@@ -218,11 +219,22 @@ func (s *Server) handleTurnStream(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
+	// Heartbeat: a turn whose work emits no stream events (e.g. a
+	// host.agent.task reviser that runs 50–70s with no streamed narration)
+	// would leave the SSE connection idle the whole time. A dev proxy or the
+	// browser can drop a silent stream before the terminal `done` frame arrives,
+	// leaving the chat bubble stuck on "…". A periodic ping keeps the connection
+	// alive; the client ignores the unknown frame type.
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
+
 loop:
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-heartbeat.C:
+			emit(turnStreamFrame{Type: "ping"})
 		case ev, ok := <-ch:
 			if !ok {
 				break loop
