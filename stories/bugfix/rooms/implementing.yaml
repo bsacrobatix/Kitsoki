@@ -98,34 +98,20 @@ states:
       # ── SYNTHESISE the regression gate (autonomous from a bare bug report) ──
       # When the ticket carried NO repro_command (gate_command empty), the
       # reproducer authored a RED test (a prior phase) and emitted a structured
-      # repro_command + repro_test_paths. Commit that test as a DISCRETE pre-fix
-      # commit HERE — after workspace.sync and BEFORE the implementer applies the
-      # fix below — so the test commit is the pre-fix tip and testing's HEAD~1 RED
-      # gate works exactly as for a ticket-supplied repro_command. This is the
-      # right spot because under autonomous llm_then_human the reproducing→
-      # proposing→implementing chain COLLAPSES into one turn; by the time
-      # implementing's on_enter runs (after sync) the async reproducer's test file
-      # is provably on disk (the earlier proposing-room attempt raced the flush and
-      # no-op'd). Guarded on gate_command=='' so a ticket-supplied repro_command is
-      # untouched; latched by repro_committed (one-shot). The latch is unconditional
-      # (not commit-sha-gated): if the commit somehow staged nothing, the test never
-      # becomes a discrete pre-fix commit, so testing's HEAD~1 gate finds it GREEN →
-      # @exit:needs-human — never a false ship. That deterministic gate is the
-      # backstop, so we don't need to read the commit's sha (which an on_enter bind
-      # wouldn't expose to this same pass anyway).
-      - when: |
-          world.gate_command == '' && world.workdir != '' &&
-          !world.repro_committed &&
-          (world.reproduction_artifact.bug_verified ?? false) &&
-          (world.reproduction_artifact.repro_command ?? '') != '' &&
-          len(world.reproduction_artifact.repro_test_paths ?? []) > 0
-        invoke: iface.vcs.commit
-        id: commit_repro_test
-        with:
-          message: "test(repro): RED reproducer for {{ world.ticket_id }}"
-          files:   "{{ world.reproduction_artifact.repro_test_paths }}"
-          cwd:     "{{ world.workdir }}"
-        on_error: idle
+      # repro_command + repro_test_paths. DERIVE the gate from it here; the test
+      # itself is committed as a discrete pre-fix commit AFTER the implementer
+      # agent runs (below) — NOT before. Why after: the maker agents run on the
+      # codex/claude backend in their own sandbox and their file writes sync back
+      # to the worktree at an UNBOUNDED later moment, so the reproducer's RED test
+      # is not reliably on disk early in this room (three earlier placements —
+      # reproducing's accept arc, proposing/on_enter, and here-before-the-agent —
+      # all raced the sync-back and the commit no-op'd). The implementer agent
+      # itself reads+writes the same worktree, so once IT completes the sync-back
+      # is provably done and the test is durable. Guarded on gate_command=='' so a
+      # ticket-supplied repro_command is untouched; latched (one-shot). The latch
+      # is unconditional: if the test never becomes a discrete pre-fix commit,
+      # testing's HEAD~1 gate finds it GREEN → @exit:needs-human — never a false
+      # ship. That deterministic gate is the backstop.
       - when: |
           world.gate_command == '' && !world.repro_committed &&
           (world.reproduction_artifact.repro_command ?? '') != '' &&
@@ -175,6 +161,27 @@ states:
               cycle:            "{{ world.cycle }}"
         bind:
           implement_artifact: submitted
+        on_error: idle
+
+      # Commit the synthesised reproducer test as a DISCRETE pre-fix commit NOW —
+      # after the implementer agent has run, so the maker backend's sandbox has
+      # synced the reproducer's RED-test file back to the worktree (provably
+      # durable once the implementer, which read+wrote this same worktree, has
+      # completed). Stage ONLY the test paths so this commit holds the test and
+      # NOT the fix; the fix lands in the next commit below, making this the
+      # pre-fix tip that testing's HEAD~1 RED gate reads. Synthesis path only
+      # (repro_committed latched above). Idempotent on re-entry (already-committed
+      # test → no-op). A stray no-op is caught by the HEAD~1 gate (GREEN →
+      # needs-human), never a false ship.
+      - when: |
+          world.repro_committed && world.workdir != '' &&
+          len(world.reproduction_artifact.repro_test_paths ?? []) > 0
+        invoke: iface.vcs.commit
+        id: commit_repro_test
+        with:
+          message: "test(repro): RED reproducer for {{ world.ticket_id }}"
+          files:   "{{ world.reproduction_artifact.repro_test_paths }}"
+          cwd:     "{{ world.workdir }}"
         on_error: idle
 
       - when: "world.workdir != ''"
