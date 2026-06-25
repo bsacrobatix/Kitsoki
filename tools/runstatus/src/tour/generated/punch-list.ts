@@ -3,6 +3,7 @@
 
 import { type TourStep } from "../types.js";
 
+// Re-export so a Playwright spec can import the step type alongside the array.
 export type { TourStep };
 
 export const PUNCH_LIST_TOUR_STEPS: readonly TourStep[] = [

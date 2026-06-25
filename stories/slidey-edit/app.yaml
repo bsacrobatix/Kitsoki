@@ -82,6 +82,13 @@ world:
   refine_feedback:  { type: string, default: "" }   # inline instruction override (no anchor change)
   refine_result:    { type: object, default: {} }   # {edited:[...], summary}
   last_refine_summary: { type: string, default: "" } # reviser's one-line summary of the last edit (shown in reviewing)
+  # ── slide targeting + gate (which slide the operator is looking at) ──────────
+  current_scene:    { type: string, default: "" }   # the viewed scene the embed plugin reports (authoritative slide)
+  scene_index:      { type: int,    default: -1 }    # resolved target scene (resolve_scene.star); -1 = none identified
+  scene_label:      { type: string, default: "" }    # human label for the targeted slide
+  scene:            { type: object, default: {} }    # the targeted scene's current JSON (fed to the reviser)
+  refine_gate:      { type: bool,   default: false } # gate verdict: edit stayed on the targeted slide
+  refine_message:   { type: string, default: "" }    # gate-composed summary (reviser's on success; honest note otherwise)
   addressed:        { type: object, default: { items: [] } }  # {items:[{anchor_label, instruction, deck_handle}]}
   cycle:            { type: int,    default: 0 }
   refine_budget:    { type: int,    default: 6 }
@@ -129,6 +136,10 @@ intents:
     priority: 70
     slots:
       feedback: { type: string, required: false }
+      current_scene:
+        type: string
+        required: false
+        description: "The scene index the operator is viewing (reported by the embed plugin), so the edit lands on that slide."
   rerender:
     description: "Re-render the current deck without editing it."
     examples: ["rerender", "render again"]

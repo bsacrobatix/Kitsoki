@@ -111,6 +111,11 @@ pure no-LLM post-processing.
   overlays, then accept only after the deterministic site build passes.
 - Missing media never fails a build — pages degrade to poster + placeholder,
   so docs-only iteration works with an empty `.artifacts/`.
+- The media organization contract is documented in
+  [`docs/media/README.md`](../media/README.md) and checked by `make media-check`
+  (also part of `make test` when Node/pnpm dependencies are installed). It
+  verifies feature demo paths, staged `public/media/<feature>/` shape, and
+  Slidey rrweb deck embeds without recording videos or invoking an LLM.
 
 Targets: `make site` (build, base `/Kitsoki/`), `make site-dev` (HMR),
 `make site-full` (demos + site), `make site-clean`.

@@ -383,7 +383,7 @@ fetch-llama-server:
 #                   (runs inside `make build` and `make test` — a stale manifest
 #                   can never be embedded into the binary)
 #   features-index  emit the site/QA contract to .artifacts/features/
-.PHONY: features features-check features-index demo-feature feature-qa
+.PHONY: features features-check features-index media-check demo-feature feature-qa
 features:
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:gen
 
@@ -393,13 +393,15 @@ features-check:
 features-index:
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:index
 
+media-check: features-index
+	node $(SITE_DIR)/scripts/check-media.mjs --index .artifacts/features/features-index.json
+
 # demo-feature records ONE feature's demo video at watch-speed and renders the
 # GIF + contact sheet. Spec + artifact paths come from the feature catalog.
 # Usage: make demo-feature FEATURE=agent-actions
 FEATURE ?=
-demo-feature: build
+demo-feature: build-bin
 	@test -n "$(FEATURE)" || { echo "usage: make demo-feature FEATURE=<id>" >&2; exit 1; }
-	@mkdir -p bin && cp $(BINARY) bin/$(BINARY)
 	@cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
 	@set -e; \
 	demo=$$(cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/generate.ts --print-demo $(FEATURE)); \
@@ -480,13 +482,11 @@ mcp-qa:
 # anything unchanged. demos-force re-records everything. See
 # scripts/record-demos.sh for the stamp design.
 .PHONY: demos demos-force site-full
-demos: build features-index
-	@mkdir -p bin && cp $(BINARY) bin/$(BINARY)
+demos: build-bin features-index
 	@cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
 	./scripts/record-demos.sh
 
-demos-force: build features-index
-	@mkdir -p bin && cp $(BINARY) bin/$(BINARY)
+demos-force: build-bin features-index
 	@cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
 	./scripts/record-demos.sh --force
 

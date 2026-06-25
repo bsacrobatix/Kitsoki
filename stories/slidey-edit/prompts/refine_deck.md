@@ -17,6 +17,23 @@ dispatched task is intentionally self-contained.
 
 {{ args.deck.spec_path }} — {{ args.deck.summary }}
 
+## The slide you are editing (edit ONLY this one)
+
+The operator is looking at **{{ args.scene_label|default:"(slide not identified)" }}**
+— scene index **{{ args.scene_index }}**. Apply the instruction to THIS slide and
+no other. Every element you edit MUST be on scene {{ args.scene_index }} (its refs
+are `{{ args.scene_index }}/<el>`). Do not touch any other scene.
+
+If `args.scene_index` is `-1` the slide could not be identified — do NOT guess a
+slide; make no change and report `edited: []` with a summary saying you need the
+operator to point at a slide.
+
+This slide's CURRENT content (edit it in place at the spec path above):
+
+```json
+{{ args.scene }}
+```
+
 ## The annotation
 
 The operator's annotation anchor and instruction:

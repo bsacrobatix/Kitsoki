@@ -94,9 +94,12 @@ states:
         - target: refining
           effects:
             # An inline feedback note overrides the baked annotation's instruction;
-            # the anchor (where the operator pointed) is unchanged.
+            # the anchor (where the operator pointed) is unchanged. current_scene
+            # is the slide the operator is viewing (reported by the embed plugin)
+            # — it makes the refine target THAT slide, overriding any stale seed.
             - set:
                 refine_feedback: "{{ slots.feedback ?? '' }}"
+                current_scene: "{{ slots.current_scene ?? '' }}"
       rerender:
         - target: rendering
           effects:
