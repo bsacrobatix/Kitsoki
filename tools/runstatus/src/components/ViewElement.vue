@@ -20,12 +20,21 @@ const _run = useRunStore();
 // rides a refine as `current_scene` so the edit targets the slide the operator
 // is actually looking at. Producer-neutral — kitsoki never interprets the scope.
 let _teardownEmbedView: (() => void) | null = null;
+function onKeydown(ev: KeyboardEvent): void {
+  // Esc dismisses the composer (parking the draft), like a click outside it.
+  if (ev.key === "Escape" && pendingAnchor.value) {
+    ev.stopPropagation();
+    dismissComposer();
+  }
+}
 onMounted(() => {
   _teardownEmbedView = installEmbedViewListener((view) => _run.setEmbedView(view));
+  window.addEventListener("keydown", onKeydown);
 });
 onBeforeUnmount(() => {
   _teardownEmbedView?.();
   _teardownEmbedView = null;
+  window.removeEventListener("keydown", onKeydown);
 });
 
 // Current route — used only to recover the active sessionId so a rendered video
@@ -163,6 +172,17 @@ function anchorLabel(anchor: AnnotationAnchor): string {
     : (anchor.target?.kind ?? "annotation");
 }
 
+/** A stable key for an anchor, used to remember a half-typed instruction per
+ *  spot: dismissing the composer (click-outside / Esc) parks the draft here, and
+ *  re-picking the SAME element restores it. */
+function anchorKey(anchor: AnnotationAnchor): string {
+  return anchor.target?.kind === "semantic_element"
+    ? `el:${anchor.target.ref}`
+    : JSON.stringify(anchor.target ?? {});
+}
+/** Per-spot parked instruction drafts (keyed by anchorKey). */
+const drafts = ref<Record<string, string>>({});
+
 /** Open the annotator. Probe the semantic sidecar ONCE: a non-null map means the
  *  media (even an mp4 deck) carries producer-declared elements, so render with
  *  the slidey path (poster backdrop + SemanticOverlay) regardless of the base
@@ -199,6 +219,7 @@ function closeAnnotate(): void {
   annotateError.value = null;
   pendingAnchor.value = null;
   instruction.value = "";
+  drafts.value = {};
 }
 
 /** The annotator emitted an anchor — STAGE it (don't dispatch yet) so the
@@ -207,12 +228,38 @@ function closeAnnotate(): void {
 function onAnchor(anchor: AnnotationAnchor): void {
   if (annotateBusy.value) return;
   pendingAnchor.value = anchor;
+  // Restore any instruction parked for THIS spot (re-picking the same element
+  // brings back what you'd typed before dismissing); a fresh spot starts blank.
+  instruction.value = drafts.value[anchorKey(anchor)] ?? "";
   annotateError.value = null;
   annotateSent.value = null;
 }
 
-/** Discard the staged anchor and return to picking. */
+/** Dismiss the composer WITHOUT discarding work: park the half-typed instruction
+ *  under this spot's key so re-picking it restores the text, then unstage. Fired
+ *  by a click outside the composer or Esc — the "close the input box" affordance.
+ *  No-op when nothing is staged. */
+function dismissComposer(): void {
+  const anchor = pendingAnchor.value;
+  if (!anchor || annotateBusy.value) return;
+  const text = instruction.value.trim();
+  if (text) drafts.value = { ...drafts.value, [anchorKey(anchor)]: instruction.value };
+  else {
+    const next = { ...drafts.value };
+    delete next[anchorKey(anchor)];
+    drafts.value = next;
+  }
+  pendingAnchor.value = null;
+}
+
+/** Discard the staged anchor AND its draft, returning to a clean pick. */
 function clearPending(): void {
+  const anchor = pendingAnchor.value;
+  if (anchor) {
+    const next = { ...drafts.value };
+    delete next[anchorKey(anchor)];
+    drafts.value = next;
+  }
   pendingAnchor.value = null;
   instruction.value = "";
 }
@@ -572,6 +619,16 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
           @anchor="onAnchor"
         />
 
+        <!-- Click-outside backdrop: while the composer is open, a click anywhere
+             off it dismisses the input box (parking any typed draft for re-pick),
+             so the operator isn't forced to hunt for a button. -->
+        <div
+          v-if="pendingAnchor"
+          class="ve-media-annotate-backdrop"
+          data-testid="media-annotate-backdrop"
+          @click="dismissComposer"
+        ></div>
+
         <!-- Composer: once an anchor is picked, the operator describes what they
              want changed THERE, then Sends. This is what turns a pick into a
              real edit (the AnnotateIntent runs with this instruction). -->
@@ -580,9 +637,19 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
           class="ve-media-annotate-composer"
           data-testid="media-annotate-composer"
         >
-          <span class="ve-media-annotate-pointed">
-            Pointed at: <strong>{{ anchorLabel(pendingAnchor) }}</strong>
-          </span>
+          <div class="ve-media-annotate-pointed-row">
+            <span class="ve-media-annotate-pointed">
+              Pointed at: <strong>{{ anchorLabel(pendingAnchor) }}</strong>
+            </span>
+            <button
+              type="button"
+              class="ve-media-annotate-dismiss"
+              data-testid="media-annotate-dismiss"
+              title="Dismiss (keeps your text for this spot) — Esc"
+              aria-label="Dismiss"
+              @click="dismissComposer"
+            >×</button>
+          </div>
           <textarea
             v-model="instruction"
             class="ve-media-annotate-input"
@@ -608,7 +675,7 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
               data-testid="media-annotate-repick"
               :disabled="annotateBusy"
               @click="clearPending"
-            >Pick a different spot</button>
+            >Clear &amp; pick another</button>
           </div>
         </div>
 
@@ -914,9 +981,39 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
   box-shadow: 0 8px 28px rgba(15, 20, 30, 0.28);
 }
 
+/* Transparent click-catcher covering the whole panel while the composer is open;
+   a click anywhere off the composer (which sits above it at a higher z-index)
+   dismisses the input box. */
+.ve-media-annotate-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: transparent;
+  cursor: default;
+}
+
+.ve-media-annotate-pointed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+}
 .ve-media-annotate-pointed {
   font-size: 12px;
   color: var(--k-fg-muted, #4a5160);
+}
+.ve-media-annotate-dismiss {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--k-fg-muted, #6b7280);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 0.15em;
+  cursor: pointer;
+}
+.ve-media-annotate-dismiss:hover {
+  color: var(--k-fg, #1f2430);
 }
 
 .ve-media-annotate-input {
