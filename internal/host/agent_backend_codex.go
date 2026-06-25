@@ -104,8 +104,14 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 
 		switch flag {
 		case "-p", "--verbose", "--exclude-dynamic-system-prompt-sections", "--no-session-persistence",
-			"--disable-slash-commands":
+			"--disable-slash-commands", "--strict-mcp-config":
 			// Dropped: no codex equivalent (or supplied differently).
+			// `--strict-mcp-config` is a claude-only boolean (restrict MCP to the
+			// --mcp-config file). codex exec rejects it ("unexpected argument
+			// '--strict-mcp-config'", exit 2) — which silently burned every
+			// acceptance attempt in ~60ms and made codex-profile sessions
+			// "impossible" (validator submit never ran). codex registers the
+			// validator MCP via the `-c mcp_servers.*` overrides below instead.
 		case "--permission-mode", "--setting-sources", "--effort",
 			"--allowedTools", "--disallowedTools":
 			// Dropped along with their value. (Tool-scoping is a parity gap;
@@ -175,7 +181,10 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 	if m := strings.TrimSpace(model); m != "" && !isClaudeModelID(m) {
 		args = append(args, "-m", m)
 	}
-	if strings.TrimSpace(workingDir) != "" {
+	// `-C/--cd <DIR>` is accepted by `codex exec` but NOT by `codex exec resume`
+	// (the resume subcommand rejects it: "unexpected argument '-C'"). On a
+	// resume the working root is fixed by the recorded session, so omit it.
+	if strings.TrimSpace(workingDir) != "" && strings.TrimSpace(resumeID) == "" {
 		args = append(args, "-C", workingDir)
 	}
 	// Convert each MCP server in the --mcp-config file into codex `-c` overrides.

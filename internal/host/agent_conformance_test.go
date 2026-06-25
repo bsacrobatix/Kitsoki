@@ -276,6 +276,7 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 			"--permission-mode", "bypassPermissions",
 			"--setting-sources", "project,local",
 			"--disable-slash-commands",
+			"--strict-mcp-config",
 			"--append-system-prompt", "SYS-PROMPT",
 			"--model", "some-model",
 			"--effort", "low",
@@ -317,7 +318,7 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		}
 
 		// Claude-only flags must be gone.
-		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--disable-slash-commands", "--effort", "--verbose", "--append-system-prompt", "--mcp-config", "stream-json", "--output-format"} {
+		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--disable-slash-commands", "--effort", "--verbose", "--append-system-prompt", "--mcp-config", "stream-json", "--output-format", "--strict-mcp-config"} {
 			if strings.Contains(got, dropped) {
 				t.Errorf("codex args still contain dropped flag %q: %v", dropped, inv.Args)
 			}
@@ -327,6 +328,20 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		resume := cb.TranslateInvocation([]string{"-p", "--resume", "uuid-123"}, "p", "")
 		if len(resume.Args) < 3 || resume.Args[0] != "exec" || resume.Args[1] != "resume" || resume.Args[2] != "uuid-123" {
 			t.Errorf("codex --resume not in `exec resume <id>` form; args=%v", resume.Args)
+		}
+		// `codex exec resume` rejects -C/--cd ("unexpected argument '-C'"), which
+		// failed every retry attempt. -C must be omitted when resuming (the
+		// working root is fixed by the recorded session).
+		resumeWithWD := cb.TranslateInvocation([]string{"-p", "--resume", "uuid-123"}, "p", wd)
+		for i, a := range resumeWithWD.Args {
+			if a == "-C" {
+				t.Errorf("codex exec resume must not pass -C; args=%v", resumeWithWD.Args)
+			}
+			_ = i
+		}
+		// Non-resume still passes -C (codex exec accepts it).
+		if !hasFlagValue(cb.TranslateInvocation([]string{"-p"}, "p", wd).Args, "-C", wd) {
+			t.Errorf("codex exec (non-resume) must pass -C %s", wd)
 		}
 	})
 }
