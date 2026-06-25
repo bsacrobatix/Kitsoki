@@ -61,12 +61,12 @@ const (
 func (srv *Server) registerSessionTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.new",
-		Description: "Open a new driving session for a story. {story_path, harness?:replay|live, cassette?, trace?, profile?}. Defaults to harness:replay (no LLM); a replay miss is a hard error, never a silent live call. profile selects a configured harness backend (synthetic, codex, …) for a live session. initial_world seeds story world vars for a headless parameterized drive. Returns {handle, state}.",
+		Description: "Open a new driving session for a story. {story_path, harness?:replay|live, cassette?, host_cassette?, trace?, profile?}. Defaults to harness:replay (no LLM); a replay miss is a hard error, never a silent live call. cassette is a routing recording; host_cassette stubs host.* calls. profile selects a configured harness backend (synthetic, codex, …) for a live session. initial_world seeds story world vars for a headless parameterized drive. Returns {handle, state}.",
 	}, srv.handleSessionNew)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.attach",
-		Description: "Co-drive an existing keyed session via the external-attach bridge. {story_path, key, harness?, cassette?, trace?, profile?}. Returns {handle, state}.",
+		Description: "Co-drive an existing keyed session via the external-attach bridge. {story_path, key, harness?, cassette?, host_cassette?, trace?, profile?}. Returns {handle, state}.",
 	}, srv.handleSessionAttach)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -149,6 +149,9 @@ type SessionNewArgs struct {
 	Harness string `json:"harness,omitempty"`
 	// Cassette is the replay recording for a replay-mode handle.
 	Cassette string `json:"cassette,omitempty"`
+	// HostCassette is a host_cassette file that stubs host.* calls while the
+	// selected harness still owns free-text routing (or direct-submit replay).
+	HostCassette string `json:"host_cassette,omitempty"`
 	// Trace overrides the JSONL trace path (default: a fresh temp trace).
 	Trace string `json:"trace,omitempty"`
 	// Key requests a specific handle key (default: auto-assigned s<N>).
@@ -165,11 +168,12 @@ type SessionNewArgs struct {
 
 // SessionAttachArgs is the input to session.attach.
 type SessionAttachArgs struct {
-	StoryPath string `json:"story_path"`
-	Key       string `json:"key"`
-	Harness   string `json:"harness,omitempty"`
-	Cassette  string `json:"cassette,omitempty"`
-	Trace     string `json:"trace,omitempty"`
+	StoryPath    string `json:"story_path"`
+	Key          string `json:"key"`
+	Harness      string `json:"harness,omitempty"`
+	Cassette     string `json:"cassette,omitempty"`
+	HostCassette string `json:"host_cassette,omitempty"`
+	Trace        string `json:"trace,omitempty"`
 	// Profile selects the harness profile (see SessionNewArgs.Profile).
 	Profile string `json:"profile,omitempty"`
 }
@@ -325,6 +329,7 @@ func (srv *Server) handleSessionNew(
 		Key:            args.Key,
 		Mode:           HarnessMode(args.Harness),
 		RecordingPath:  args.Cassette,
+		HostCassette:   args.HostCassette,
 		StoryPath:      args.StoryPath,
 		TracePath:      tracePath,
 		Profile:        args.Profile,
@@ -369,6 +374,7 @@ func (srv *Server) handleSessionAttach(
 		Key:            args.Key,
 		Mode:           HarnessMode(args.Harness),
 		RecordingPath:  args.Cassette,
+		HostCassette:   args.HostCassette,
 		StoryPath:      args.StoryPath,
 		TracePath:      tracePath,
 		Profile:        args.Profile,
@@ -1075,7 +1081,7 @@ func (srv *Server) specFrame(ctx context.Context, storyPath, state string, world
 	}
 	// No harness, no profiles, no seed: a spec render is a pure re-render and
 	// never calls orch.Turn or dispatches an agent.
-	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "", nil, srv.importResolver, nil, nil)
+	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "", nil, "", srv.importResolver, nil, nil)
 	if err != nil {
 		return tui.Frame{}, err
 	}

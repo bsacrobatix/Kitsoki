@@ -140,10 +140,14 @@ turns:
       passed_count: 1
       current_item_id: policy-demo
   - intent: { name: next_item, slots: {} }
-    expect_state: report
+    expect_state: board
     expect_world:
       processed_count: 2
       passed_count: 2
+      pending_count: 0
+  - intent: { name: next_item, slots: {} }
+    expect_state: report
+    expect_world:
       report_summary: "2 passed, 0 partial, 0 failed, 0 skipped, 0 pending"
 
 expect_terminal: false

@@ -29,6 +29,10 @@ states:
         emit_intent: verify_done
     on:
       verify_done:
-        - target: record
+        - target: board
+          effects:
+            - set:
+                _record_status: "{{ world.verify_status }}"
+                _record_error: "{{ world.verify_result.summary }}"
       look:
         - target: .

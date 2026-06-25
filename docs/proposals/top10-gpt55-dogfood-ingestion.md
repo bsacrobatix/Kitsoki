@@ -1,6 +1,6 @@
 # Epic: Top-10 GPT-5.5 dogfood ingestion
 
-**Status:** Draft v1. `stories/punch-list/` shipped; the top-10 manifest and item runs remain.
+**Status:** Draft v1. `stories/punch-list/` shipped; the top-10 manifest now lives at `stories/punch-list/testdata/top10_gpt55.yaml`; item runs remain.
 **Kind:**   epic
 **Slices:** 10 (0/10 shipped)
 
@@ -179,7 +179,7 @@ Each item should leave:
           findings, and per-item summaries.
 
 ## 2. First pass: prove entrypoints and friction
-- [ ] 2.1 Author the top-10 `punch-list/v1` manifest.
+- [x] 2.1 Author the top-10 `punch-list/v1` manifest.
 - [ ] 2.2 Run #1 through punch-list; capture the load bug.
 - [ ] 2.3 Run #5 project-init through punch-list once #1 is fixed.
 - [ ] 2.4 Run #8 and #9 routing phrases through punch-list.

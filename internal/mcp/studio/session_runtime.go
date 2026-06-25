@@ -33,6 +33,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/chathost"
 	"kitsoki/internal/chats"
+	"kitsoki/internal/clock"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
@@ -42,6 +43,7 @@ import (
 	"kitsoki/internal/runstatus"
 	rsserver "kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
+	"kitsoki/internal/testrunner"
 	"kitsoki/internal/tui"
 )
 
@@ -161,7 +163,7 @@ func (rt *sessionRuntime) Close() {
 // backend (synthetic, codex, …) instead of the static default — the same
 // remap `kitsoki turn --profile` applies. An empty map leaves the session on the
 // legacy default-backend path (selectedProfile is then ignored).
-func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, resolver app.ImportResolver, chatStore *chats.Store, configureHosts HostRegistryConfigurer) (*sessionRuntime, error) {
+func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, hostCassette string, resolver app.ImportResolver, chatStore *chats.Store, configureHosts HostRegistryConfigurer) (*sessionRuntime, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -250,6 +252,12 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 		if err := configureHosts(hostReg); err != nil {
 			rt.Close()
 			return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: configure host registry: %v", err)}
+		}
+	}
+	if hostCassette != "" {
+		if err := applyStudioHostCassette(hostReg, hostCassette, sink); err != nil {
+			rt.Close()
+			return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: apply host cassette: %v", err)}
 		}
 	}
 	if err := hostReg.ValidateAllowList(def.Hosts); err != nil {
@@ -346,6 +354,25 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	}
 
 	return rt, nil
+}
+
+func applyStudioHostCassette(hostReg *host.Registry, cassettePath string, sink store.EventSink) error {
+	cas, err := testrunner.LoadCassette(cassettePath)
+	if err != nil {
+		return fmt.Errorf("load host cassette: %w", err)
+	}
+	stateOf := func() string { return "" }
+	seen := map[string]bool{}
+	for _, ep := range cas.Episodes {
+		hn, ok := ep.Match["handler"].(string)
+		if !ok || hn == "" || seen[hn] {
+			continue
+		}
+		seen[hn] = true
+		fallback, _ := hostReg.Get(hn)
+		hostReg.Replace(hn, testrunner.BuildCassetteDispatcherWithSink(cas, hn, stateOf, fallback, nil, clock.Real(), sink, nil))
+	}
+	return nil
 }
 
 // newComposerModel seeds the headless TUI model used solely as the slice-1

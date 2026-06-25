@@ -37,8 +37,10 @@ import (
 )
 
 const (
-	cloakApp      = "../../../testdata/apps/cloak/app.yaml"
-	cloakCassette = "../../../testdata/apps/cloak/recording.yaml"
+	cloakApp                   = "../../../testdata/apps/cloak/app.yaml"
+	cloakCassette              = "../../../testdata/apps/cloak/recording.yaml"
+	punchListApp               = "../../../stories/punch-list/app.yaml"
+	punchListTop10HostCassette = "../../../stories/punch-list/cassettes/top10_gpt55.cassette.yaml"
 )
 
 // failingLive is a live harness that fails loudly if RunTurn is ever called.
@@ -229,6 +231,62 @@ func TestSessionNew_ReplayWithoutCassetteAllowsDirectSubmitOnly(t *testing.T) {
 	assert.False(t, driven.OK)
 	assert.Equal(t, "error", driven.Outcome.Mode)
 	assert.Contains(t, driven.Outcome.Error, "noRouteHarness")
+}
+
+func TestSessionNew_HostCassetteBacksDirectSubmitRun(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path":    punchListApp,
+		"harness":       "replay",
+		"host_cassette": punchListTop10HostCassette,
+		"trace":         t.TempDir() + "/trace.jsonl",
+		"initial_world": map[string]any{
+			"manifest_path": "stories/punch-list/testdata/top10_gpt55.yaml",
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new with host_cassette should open: %s", contentText(res))
+	var ok studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
+	require.Equal(t, "idle", ok.State)
+
+	submit := func(intent string) studio.TurnResponse {
+		t.Helper()
+		res, err := callTool(ctx, cs, "session.submit", map[string]any{
+			"handle": ok.Handle,
+			"intent": intent,
+			"cols":   100,
+			"rows":   30,
+		})
+		require.NoError(t, err)
+		return driveResult(t, res)
+	}
+
+	started := submit("start")
+	require.True(t, started.OK)
+	require.Equal(t, "load", started.Outcome.State)
+	require.Contains(t, started.Frame.Text, "Loaded 10 item(s).")
+
+	board := submit("next_item")
+	require.True(t, board.OK)
+	require.Equal(t, "board", board.Outcome.State)
+	require.Contains(t, board.Frame.Text, "Pending 10")
+
+	var current studio.TurnResponse
+	for i := 0; i < 10; i++ {
+		current = submit("next_item")
+		require.True(t, current.OK, "item %d should process", i+1)
+	}
+	if current.Outcome.State == "board" {
+		require.Contains(t, current.Frame.Text, "Processed 10")
+		current = submit("next_item")
+	}
+	require.True(t, current.OK)
+	require.Equal(t, "report", current.Outcome.State)
+	require.Contains(t, current.Frame.Text, "10 passed, 0 partial, 0 failed, 0 skipped, 0 pending")
 }
 
 func TestSessionSubmit_StreamsProgressNotifications(t *testing.T) {

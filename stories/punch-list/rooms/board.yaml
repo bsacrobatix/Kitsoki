@@ -44,8 +44,6 @@ states:
       - set:
           _record_status: ""
           _record_error: ""
-      - when: "world.board_route == 'done'"
-        emit_intent: backlog_drained
     on:
       next_item:
         - when: "world.board_route == 'done'"

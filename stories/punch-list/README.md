@@ -37,3 +37,7 @@ Run the focused no-LLM checks:
 ```bash
 go run ./cmd/kitsoki test flows stories/punch-list/app.yaml
 ```
+
+The durable 10-item GPT-5.5 dogfood manifest lives at
+`testdata/top10_gpt55.yaml`; the deterministic demo/regression flow is
+`flows/happy_top10_gpt55.yaml`.

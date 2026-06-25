@@ -2,7 +2,7 @@
  * Punch-list story tour video.
  *
  * Records the catalog-backed punch-list tour against the story's deterministic
- * happy_two_items flow. The flow stubs live driver calls, so this recording
+ * top-10 GPT-5.5 flow. The flow stubs live driver calls, so this recording
  * never calls a real LLM.
  */
 import { test, expect, chromium, type Browser, type BrowserContext, type Page, type Locator } from "@playwright/test";
@@ -28,7 +28,7 @@ import { PUNCH_LIST_TOUR_STEPS, type TourStep } from "../../src/tour/generated/p
 const CHAPTER_SOURCE = "features/punch-list.yaml";
 const ADDR = demoAddr(7762);
 const STORY_DIR = path.join(repoRoot, "stories", "punch-list");
-const FLOW = path.join(STORY_DIR, "flows", "happy_two_items.yaml");
+const FLOW = path.join(STORY_DIR, "flows", "happy_top10_gpt55.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "punch-list");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
 
@@ -105,14 +105,30 @@ test.describe("punch-list tour video", () => {
           await waitForState(page, "board");
           await expect(page.getByText(/Processed 1/)).toBeVisible({ timeout: 15000 });
         }
-        if (step.id === "pl-second-item") {
-          await clickIntent(page, "next_item");
+        if (step.id === "pl-midpoint") {
+          for (let i = 0; i < 4; i++) {
+            await clickIntent(page, "next_item");
+            await waitForState(page, "board");
+          }
+          await expect(page.getByText(/Processed 5/)).toBeVisible({ timeout: 15000 });
+        }
+        if (step.id === "pl-final-pending") {
+          for (let i = 0; i < 4; i++) {
+            await clickIntent(page, "next_item");
+            await waitForState(page, "board");
+          }
           await waitForState(page, "board");
-          await expect(page.getByText(/Processed 2/)).toBeVisible({ timeout: 15000 });
+          await expect(page.getByText(/Processed 9/)).toBeVisible({ timeout: 15000 });
+          await expect(page.getByText(/story-qa-workflow/)).toBeVisible({ timeout: 15000 });
         }
         if (step.id === "pl-report") {
           await clickIntent(page, "next_item");
+          await waitForState(page, "board");
+          await expect(page.getByText(/Processed 10/)).toBeVisible({ timeout: 15000 });
+          await expect(page.getByText(/Pending 0/)).toBeVisible({ timeout: 15000 });
+          await clickIntent(page, "next_item");
           await waitForState(page, "report");
+          await expect(page.getByText(/10 passed/)).toBeVisible({ timeout: 15000 });
         }
 
         if (step.waitForTarget) {
