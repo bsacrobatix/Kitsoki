@@ -14,7 +14,7 @@ flagged moment.
 It is the produce → review → refine cousin of [`ui-fix`](ui-fix.md) and the
 refine-arc cousin of `bugfix`, for video instead of code. It is slice 3 of the
 **Mockup Video Studio** epic; it consumes the slice-1 chapter sidecar and the
-shipped `visual-outputs` producers, and softly depends on the slice-2 web
+shipped media producers, and softly depends on the slice-2 web
 `/review` panel (without it, inline `refine feedback="…"` still drives the
 loop).
 

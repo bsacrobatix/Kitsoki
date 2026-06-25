@@ -88,12 +88,6 @@ thought.
   failure→success credit assignment ([`credit-assignment.md`](credit-assignment.md),
   tracing), and the **optimizer step + validation gate**
   ([`training-loop.md`](training-loop.md), runtime+story).
-- [`agent-action-transcripts.md`](agent-action-transcripts.md) — (tracing)
-  **implemented.** Per-call agent-action transcripts are now captured into
-  sidecars, referenced by `transcript_ref`, replayed/folded through cassettes,
-  served through `runstatus.session.transcript`, and rendered by the web
-  `AgentActions` drawer. Remaining work is lifecycle cleanup: migrate any
-  lasting design rationale into narrative docs and delete the proposal.
 - [`contextual-room-routing.md`](contextual-room-routing.md) — (runtime)
   make the final LLM routing tier classify unmatched room input as exactly one
   of: explicit intent with slots, read-only help, in-room free-form request, or
@@ -307,21 +301,6 @@ thought.
   [`docs/architecture/embeddings.md`](../architecture/embeddings.md) (substrate
   + `agent.search`) and [`docs/architecture/semantic-routing.md`](../architecture/semantic-routing.md)
   §6 (routing tier). Child slice files deleted.
-- [`visual-outputs.md`](visual-outputs.md) — **epic.** Make a visual output
-  a step produces (MP4 / PNG slideshow / slidey deck) a first-class,
-  **recorded** media artifact: emitted under `.artifacts/`, recorded in the
-  trace, shown inline in the web UI, pointed at in the TUI. **Implemented**;
-  this entry is retained only until the proposal is migrated/deleted.
-  Decomposed into three shipped slices:
-  - [`media-artifact-substrate.md`](media-artifact-substrate.md) (runtime) —
-    producer-agnostic core: a recorded `artifact` datapoint + opaque world
-    handle + a `media` typed-view element + minimal TUI pointer rendering.
-  - [`visual-producers.md`](visual-producers.md) (runtime) —
-    `host.slidey.render` + `host.contact_sheet` host calls wrapping the
-    existing standalone slidey + `contact-sheet.sh`, deterministically.
-  - [`web-media-rendering.md`](web-media-rendering.md) (tui) — Vue `media`
-    element (`<video>`/`<img>`/embed) + a `kitsoki web` route serving
-    artifact binaries (live) and sidecar files (static export).
 - [`view-rendering-readability.md`](view-rendering-readability.md) —
   **epic.** Make the typed element tree the single canonical view
   representation so prose reads cleanly across the TUI and the web,
@@ -341,19 +320,6 @@ thought.
   - [`view-proofing-tooling.md`](view-proofing-tooling.md) (tui) —
     `kitsoki view` + lint catalog + cross-env golden/property tests +
     authoring-skill wiring.
-- `ui-fix-story.md` — **story.** A new `stories/ui-fix/`
-  review→per-group fix pipeline over the `kitsoki-ui-review` skill's
-  `verdict.json`: a deterministic dedup (`host.starlark.run`) feeds an
-  interpretive **pattern-review** gate (`host.agent.decide` clusters 371
-  findings into ranked root-cause **groups** — never blind iteration), then a
-  loop fixes **one group per agent instance** (`host.agent.task` scoped to
-  `tools/runstatus/src/`) with a human diff checkpoint, a no-LLM geometry+axe
-  re-audit proving it cleared, and a **before/after slideshow/video per
-  group** via the shipped `visual-outputs` media seam (`host.contact_sheet` /
-  `host.slidey.render` → `media` element). `done` is a before/after gallery.
-  **Implemented** as `stories/ui-fix/` and documented in
-  [`docs/stories/ui-fix.md`](../stories/ui-fix.md). The proposal file is no
-  longer present; remove this index entry during proposal cleanup.
 - ~~story-editor-view (epic) + story-graph-api / story-editor-shell /
   agent-workbench (slices)~~ — **shipped.** The story editor surface
   (`/editor` route, BFS room list, hook / domain-model / typed-view detail,
@@ -363,8 +329,8 @@ thought.
 - [`mockup-video-studio.md`](mockup-video-studio.md) — **epic.** Author UI
   design-proposal walkthrough videos as a recorded process **and** improve
   them in the web UI: flag a scene or time-range, grab the frame, instruct
-  the LLM, watch the video re-render. Builds on the `visual-outputs` media
-  seam (slices 2–3 are prerequisites). Nothing implemented yet; decomposed
+  the LLM, watch the video re-render. Builds on the shipped media artifact
+  seam. Nothing implemented yet; decomposed
   into three slices:
   - [`video-frame-seam.md`](video-frame-seam.md) (runtime) — a
     producer-agnostic **chapter sidecar** (scene↔timestamp + `source_ref`) +
@@ -409,21 +375,6 @@ thought.
   Partially superseded: `stories/decompose/` has not shipped, but the
   work-decomposition skill and `stories/deliver/` cover a simpler
   validated-manifest path that hands briefs to `stories/fleet/`.
-- [`delivery-loop.md`](delivery-loop.md) — **epic.** Turn the hand-run
-  delivery pattern (scoped brief → background maker in an isolated worktree →
-  deterministic gate → lost-work-safe integrate → independent re-verify on the
-  *merged* commit → cleanup, fanned out behind a merge-lock) into kitsoki
-  stories. Implemented as `stories/git-ops/`, `stories/ship-it/`, and
-  `stories/fleet/`; the proposal should be migrated/deleted. Original slices:
-  **git-ops smoothing**
-  ([`git-ops-smoothing.md`](git-ops-smoothing.md), story — operand-as-slot, stop
-  swallowing failures, force/confirm cleanup, one-shot rebase-onto-moved-main),
-  **ship-it** ([`ship-it.md`](ship-it.md), story — imports cherny-loop + git-ops
-  + a new independent `verify` room, chaining configure→maker→integrate→re-verify
-  →cleanup→`shipped`\|`needs-human`), and **fleet** ([`fleet.md`](fleet.md), story
-  — fans ship-it over a `decomposition.yaml` brief list behind a merge-lock).
-  Consumes [`work-decomposition.md`](work-decomposition.md)'s output and lands its
-  deferred parallel-fan-out non-goal.
 - [`hybrid-session-driving.md`](hybrid-session-driving.md) — **runtime.** Let
   `kitsoki web` drive a live session (e.g. `stories/bugfix`) from the browser
   while Jira/Bitbucket keep receiving artifacts write-only. Decouples *driving*
