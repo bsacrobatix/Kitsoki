@@ -74,6 +74,11 @@ thought.
   sessions use `profile: codex-native` / `gpt-5.5`, not Claude. This now
   consumes the generic [`punch-list`](../stories/punch-list.md) story rather than a
   top-10-specific runner.
+- [`product-journey-eval.md`](product-journey-eval.md) — **epic.** Orchestrate a
+  skeptical, reproducible end-to-end product-journey evaluation run over a local,
+  production artifact of the product site/docs plus at least one real project
+  corpus (`gears-rust` first), with deterministic bug-oracle checks and
+  evidence artifacts.
 - [`session-mining-backend-generalization.md`](session-mining-backend-generalization.md)
   — **epic.** Generalize session mining from Claude Code-shaped ingestion into a
   backend-normal corpus for Claude Code, Codex, kitsoki traces, and imported

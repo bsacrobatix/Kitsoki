@@ -1,0 +1,47 @@
+{
+  "program": "Product journey evaluator",
+  "targets": [
+    {
+      "id": "gears-rust",
+      "label": "constructorfabric/gears-rust",
+      "stack": "rust",
+      "manifest": "tools/bugfix-bakeoff/external/projects/gears-rust/manifest.yaml",
+      "local_repo_env": "GEARS_RUST_REPO",
+      "run_command": "GEARS_RUST_REPO=<path> make gears-bakeoff",
+      "run_mode": "external-benchmark",
+      "pilot_bugs": ["bug1", "bug4", "bug5", "bug9"],
+      "status": "runner-ready",
+      "notes": "Sister project and first production slice. Uses existing external manifest + suite."
+    },
+    {
+      "id": "postgresql",
+      "label": "postgresql/postgresql",
+      "stack": "c",
+      "run_mode": "planned",
+      "status": "planned",
+      "notes": "Perspective check required: onboarding + at least one hidden-oracle-based journey scenario pending."
+    },
+    {
+      "id": "kubernetes",
+      "label": "kubernetes/kubernetes",
+      "stack": "go",
+      "run_mode": "planned",
+      "status": "planned",
+      "notes": "Perspective check required: project-size and CI-profile constraints not yet modeled in runner catalog."
+    }
+  ],
+  "perspectives": [
+    {
+      "id": "postgresql",
+      "owner": "sre",
+      "status": "planned",
+      "description": "Evaluate journey behavior for PostgreSQL project structures and docs + issue-to-fix corpus readiness"
+    },
+    {
+      "id": "kubernetes",
+      "owner": "platform",
+      "status": "planned",
+      "description": "Evaluate journey behavior for Kubernetes-style repos (monorepo/docs+CRD complexity)"
+    }
+  ]
+}

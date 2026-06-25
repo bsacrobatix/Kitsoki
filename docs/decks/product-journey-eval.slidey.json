@@ -1,0 +1,144 @@
+{
+    "_comment": "Run scaffolding deck for the exploratory product-journey pilot.",
+    "meta": {
+        "title": "Product Journey Eval",
+        "resolution": {
+            "width": 1920,
+            "height": 1080
+        },
+        "theme": "rose-pine-moon"
+    },
+    "scenes": [
+        {
+            "type": "title",
+            "eyebrow": "Kitsoki evaluation",
+            "title": "Product Journey Eval",
+            "subtitle": "Skeptical user path across site/docs/onboarding + real project bug corpus",
+            "narration": "Pilot implementation landed in a worktree under .worktrees so the branch stays isolated and reviewable.",
+            "hold": 2000
+        },
+        {
+            "type": "cards",
+            "variant": "grid",
+            "title": "Pilot state",
+            "narration": "The first milestone is runnable from local checkout: one entrypoint and explicit project catalog.",
+            "hold": 1700,
+            "cards": [
+                {
+                    "label": "Runner",
+                    "sub": "tools/product-journey/run.py",
+                    "style": "primary"
+                },
+                {
+                    "label": "Corpus",
+                    "sub": "gears-rust (4 armable fixtures) via existing external grader",
+                    "style": "secondary"
+                },
+                {
+                    "label": "Local checks",
+                    "sub": "status/check commands are deterministic and no-LLM by default",
+                    "style": "default"
+                },
+                {
+                    "label": "Perspectives",
+                    "sub": "postgresql and kubernetes added as planned follow-up lanes",
+                    "style": "default"
+                }
+            ]
+        },
+        {
+            "type": "narrative",
+            "eyebrow": "Runner checks",
+            "lede": "What we verified",
+            "body": "`python3 tools/product-journey/run.py --project gears-rust --mode check` succeeds for runner-mode targets and reports manifest-backed run command, while PostgreSQL and Kubernetes return planned-status checks for next-in-the-stack evidence capture.",
+            "narration": "The check surface is the minimum viable control for orchestrator automation: deterministic readiness before any model-driven runs.",
+            "hold": 2200
+        },
+        {
+            "type": "table",
+            "title": "Latest check state",
+            "columns": [
+                "Target",
+                "Status",
+                "Next action"
+            ],
+            "rows": [
+                {
+                    "cells": [
+                        "gears-rust",
+                        "runner-ready",
+                        "set GEARS_RUST_REPO and run: GEARS_RUST_REPO=<path> make gears-bakeoff"
+                    ]
+                },
+                {
+                    "cells": [
+                        "postgresql",
+                        "planned",
+                        "define manifest + deterministic scoring/oracle contract"
+                    ]
+                },
+                {
+                    "cells": [
+                        "kubernetes",
+                        "planned",
+                        "define size/CI constraints + manifest + perspective test harness"
+                    ]
+                }
+            ],
+            "variant": "data",
+            "caption": "Perspective checks stay explicit until each project gets a manifest/contract.",
+            "hold": 2200
+        },
+        {
+            "type": "table",
+            "title": "Local execution artifacts",
+            "columns": [
+                "Surface",
+                "State",
+                "Artifact/command"
+            ],
+            "rows": [
+                {
+                    "cells": [
+                        "Proposal",
+                        "implemented",
+                        "docs/proposals/product-journey-eval.md"
+                    ]
+                },
+                {
+                    "cells": [
+                        "Run log",
+                        "implemented",
+                        ".context/product-journey-runlog.md"
+                    ]
+                },
+                {
+                    "cells": [
+                        "Deck",
+                        "implemented",
+                        "docs/decks/product-journey-eval.slidey.json (preview in .artifacts/product-journey-eval/deck.html)"
+                    ]
+                }
+            ],
+            "variant": "data",
+            "caption": "Deck is source-of-truth JSON in docs; rendered HTML stays in .artifacts/.",
+            "hold": 2300
+        },
+        {
+            "type": "narrative",
+            "eyebrow": "Execution discipline",
+            "lede": "Next moves",
+            "body": "With this baseline stable, run `make web` (or a local `go run ./cmd/kitsoki web`) for A/B experiments, then switch `--project` to PostgreSQL and Kubernetes as those perspectives move to runner-ready with manifest-backed check/grade contracts.",
+            "narration": "Evidence-first approach: every check emits to `.context` and every pilot step is represented in the deck.",
+            "hold": 2000
+        },
+        {
+            "type": "narrative",
+            "eyebrow": "Current run",
+            "lede": "Execution status",
+            "body": "Ran the harness path locally: `python3 tools/product-journey/run.py` plus `--project gears-rust --mode check` and then PostgreSQL/Kubernetes checks. Gears is runner-ready and resolves the concrete command when `GEARS_RUST_REPO` is set; both perspectives stay planned pending manifests and oracle contracts. `make gears-bakeoff` is enabled and deterministic, but this sandbox cannot finish `git clone --local --no-checkout` in `/var/folders`, so the full run is intended for a non-sandboxed container.",
+            "narration": "The deck stays reviewable even when full live execution requires a less-restricted container runtime.",
+            "hold": 2200
+        }
+    ]
+}
