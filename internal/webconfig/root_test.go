@@ -95,7 +95,7 @@ func TestLoadRoot_FailFast(t *testing.T) {
 	}{
 		{
 			name:   "unknown import",
-			yaml:   "root:\n  import: gears-rust\n",
+			yaml:   "root:\n  import: example-app\n",
 			errSub: "not a known base story",
 		},
 		{
