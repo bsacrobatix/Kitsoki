@@ -779,9 +779,9 @@ intents:
     priority: 35
   go_idea:
     title: "New Idea"
-    description: "Start an ad hoc idea or proposal — no ticket required."
-    examples: ["idea", "new idea", "propose", "proposal", "ad hoc", "draft proposal", "i have an idea", "work on a proposal", "new proposal", "write a proposal"]
-    priority: 32
+    description: "Start or amend an ad hoc design/proposal — draft, review, clarify decisions, resolve proposal questions, or make a proposal ready for human review. No ticket required."
+    examples: ["idea", "new idea", "propose", "proposal", "ad hoc", "draft proposal", "i have an idea", "work on a proposal", "new proposal", "write a proposal", "design proposal", "start a design", "use the design workflow", "amend existing proposal", "proposal ready for review", "human review proposal", "resolve proposal questions", "tighten proposal narration", "audit this proposal", "fold decisions back into the design", "make this proposal terse and clear"]
+    priority: 50
   go_code_review:
     title: "Code Review"
     description: "Review a teammate's PR."
@@ -1208,9 +1208,14 @@ intents:
       feedback: { type: string, required: true }
   accept:
     title: "Accept & Publish"
-    description: "Accept the proposal draft and publish it."
+    description: "Publish the proposal draft and file a feature ticket."
     examples: ["accept", "approve", "looks good", "lgtm", "publish it"]
     priority: 85
+  accept_no_ticket:
+    title: "Publish Only"
+    description: "Publish the proposal draft without filing an implementation ticket."
+    examples: ["publish only", "save without ticket", "don't file a ticket", "no ticket"]
+    priority: 84
   proceed_new:
     title: "Create New"
     description: "No meaningful overlap — create a brand-new proposal."
@@ -1302,7 +1307,7 @@ intents:
   # to the LLM router and captures the whole utterance whole.
   work:
     title: "Describe Work"
-    description: "Describe a piece of work for the free-form workbench agent to pick up — explore code, draft a change, investigate a failure. Read-only until you approve a change."
+    description: "Describe implementation/debugging/investigation work for the free-form workbench agent to pick up — explore code, draft a code change, investigate a failure. Read-only until you approve a change. Do not use for proposal authoring, proposal review, design-workflow, or proposal-decision turns; those go to New Idea."
     examples: ["fix the login crash", "investigate why the build is slow", "look at how imports resolve and sketch a change", "refactor the loader", "add a test for the off-ramp"]
     priority: 45
     slots:

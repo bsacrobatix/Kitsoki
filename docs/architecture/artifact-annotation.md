@@ -118,7 +118,12 @@ producer → host    embed:pick      { producer, scope, ref, label, bbox }// the
 - `scope` — the opaque view token (slidey: the scene index). kitsoki tracks the
   latest in the run store (`embedScope`) and rides it on the refine as the
   `current_scene` slot, so the edit targets **the slide the operator is looking
-  at**. `ref` — the opaque element id (slidey: `<scene>/<field>`), turned into a
+  at**. This holds **even with no annotation**: a plain free-text refine typed in
+  the chat carries `embedScope` as a `current_scene` *supplement slot* on the turn
+  (`sendText` → the `turn` RPC's `slots` → `WithTurnSupplements` →
+  `orchestrator.WithSupplementSlots`, gap-filling only so the router's
+  classification wins). So "make the title bolder" lands on the viewed slide
+  without pointing at anything. `ref` — the opaque element id (slidey: `<scene>/<field>`), turned into a
   `semantic_element` anchor (same wire shape as a sidecar pick, via
   `serializeAnchor`), so it flows through the identical anchor pipeline.
 

@@ -92,6 +92,7 @@ import (
 	"kitsoki/internal/runstatus/web"
 	"kitsoki/internal/store"
 	"kitsoki/internal/userfacing"
+	"kitsoki/internal/world"
 )
 
 // bugRecorderCapacity is the number of most-recent /rpc request/response pairs
@@ -864,6 +865,12 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		input, _ := params["input"].(string)
 		ctx = s.withOperatorPrompter(ctx, params)
+		// A free-text turn may carry lightweight ambient slots (e.g. `current_scene`
+		// — the slide the operator is viewing) so the routed intent targets it with
+		// no annotation; gap-fill only (the harness classification wins).
+		if sl, ok := params["slots"].(map[string]any); ok && len(sl) > 0 {
+			ctx = WithTurnSupplements(ctx, world.Slots(sl))
+		}
 		out, err := entry.Driver.Turn(ctx, input)
 		if err != nil {
 			return nil, serverErr(err)

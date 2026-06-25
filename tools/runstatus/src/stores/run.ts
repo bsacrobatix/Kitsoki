@@ -693,9 +693,17 @@ export const useRunStore = defineStore("run", () => {
     let result: TurnResult;
     let capturedStream = "";
     let capturedItems: StreamItem[] | undefined;
+    // When the operator is viewing an embedded deck, ride the slide they're
+    // looking at as a `current_scene` supplement slot so a free-text refine
+    // targets THAT slide with no annotation needed (gap-fill only — the router's
+    // own classification wins). Producer-neutral: `embedScope` is an opaque token.
+    const viewSlots: Record<string, unknown> = embedScope.value
+      ? { current_scene: embedScope.value }
+      : {};
     if ("turnStream" in source) {
       const out = await runTurnStream(source as LiveSource, sessionId, "turn", {
         input: text,
+        ...(embedScope.value ? { slots: viewSlots } : {}),
       }, (routing, turn) => {
         userEntry.routing = routing;
         if (typeof turn === "number") userEntry.turn = turn;

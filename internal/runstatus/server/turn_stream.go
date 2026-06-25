@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/world"
 )
 
 // turnStreamFrame is one SSE data payload for the /rpc/turn-stream endpoint.
@@ -160,6 +161,13 @@ func (s *Server) handleTurnStream(w http.ResponseWriter, r *http.Request) {
 		if c2, ok := liftVisualAmbient(ctx, p); ok {
 			ctx = c2
 		}
+	}
+	// A free-text turn may carry lightweight ambient slots (e.g. `current_scene` —
+	// the deck slide the operator is currently looking at) so the routed intent
+	// targets it even with no annotation. Gap-fill only: the harness's own
+	// classification wins (see orchestrator.WithSupplementSlots).
+	if body.Method == "turn" && len(body.Slots) > 0 {
+		ctx = WithTurnSupplements(ctx, world.Slots(body.Slots))
 	}
 
 	type outcome struct {

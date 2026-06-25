@@ -79,7 +79,7 @@ states:
           pairs:
             Refiner: '{{ world.design_refine_analysis.summary|default:"(refiner running…)" }}'
         when: "world.design_brief_path != ''"
-      # The refiner's open questions. A `template:` (not `code:`) so long gap
+      # The refiner's suggested decisions. A `template:` (not `code:`) so long gap
       # text reflows in both surfaces — see design_search.yaml for the
       # paragraph-only / no-bold-no-bullets parity rationale.
       #
@@ -88,7 +88,7 @@ states:
       # verbatim — no forloop.Counter — so a resolved question dropping off the
       # list never renumbers the survivors.
       - template: |
-          Open questions the brief still needs to settle:
+          Suggested decisions to settle:
 
           {% for g in world.design_refine_analysis.gaps %}{{ g }}{% if not forloop.Last %}
 
@@ -98,7 +98,7 @@ states:
           pairs:
             Judge: '{{ world.design_brief_decision.verdict }} — {{ world.design_brief_decision.reason }}'
         when: "world.design_brief_decision.verdict != '' ?? false"
-      - prose: "The refiner's open questions above are advisory; the quality-gate asks below are the blockers — settle them to pass the brief check."
+      - prose: "Suggested decisions are advisory. The quality-gate asks below are the blockers."
         when: "world.design_brief_decision.verdict == 'clarify' ?? false"
       - heading: "Quality gate asks (these block a passing brief):"
         when: "world.design_brief_decision.verdict == 'clarify' ?? false"
