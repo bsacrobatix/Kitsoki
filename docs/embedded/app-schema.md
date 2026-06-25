@@ -516,16 +516,22 @@ state's context and posts an inbox notification.
 
 ### Lifecycle
 
-```
-submit turn              on_complete turn (synthetic, later)
-──────────────────────   ─────────────────────────────────────
-on_enter: fires          job goroutine exits (done/failed/cancelled)
-  background: true   →   orchestrator listener wakes
-  bind: last_job_id      world.last_job_id   = <id>      (re-set)
-  job starts async       world.last_job_status = "done"  (new)
-                         world.last_job_result = <data>  (new)
-                         on_complete: effects fire
-                         inbox notification posted
+```mermaid
+sequenceDiagram
+    participant Turn as submit turn
+    participant Job as background job
+    participant Orchestrator as orchestrator listener
+    participant World as world
+    participant Inbox as inbox
+
+    Turn->>World: bind last_job_id
+    Turn->>Job: start async invoke
+    Job-->>Orchestrator: exits done / failed / cancelled
+    Orchestrator->>World: set last_job_id
+    Orchestrator->>World: set last_job_status
+    Orchestrator->>World: set last_job_result
+    Orchestrator->>Turn: fire on_complete effects
+    Orchestrator->>Inbox: post notification
 ```
 
 ### Effect fields for background dispatch

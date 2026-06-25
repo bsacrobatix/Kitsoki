@@ -32,6 +32,23 @@ Kitsoki's advantage is control inversion:
 The result is not "the agent is smarter." The result is that fewer things need
 to be agent judgment in the first place.
 
+```mermaid
+flowchart TD
+    operator["Operator or external event"]
+    room["Current room<br/>declared intents + guards"]
+    direct{"Deterministic match?"}
+    model["LLM call<br/>narrow domain, scoped tools"]
+    result["Named intent / typed payload / artifact"]
+    runtime["Runtime applies transition<br/>effects + world mutation"]
+    trace["Structured trace<br/>replay + tests + audit"]
+
+    operator --> room --> direct
+    direct -->|"yes"| runtime
+    direct -->|"no, interpretation needed"| model --> result --> runtime
+    runtime --> trace
+    trace -. "flow fixtures / cassettes" .-> room
+```
+
 ## What to watch first
 
 1. **Agent action transcripts.** Watch the runtime reject a model submission,

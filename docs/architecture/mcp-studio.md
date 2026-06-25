@@ -35,17 +35,24 @@ handles:
   handle; `render.*` tools take a session handle **or** an explicit
   `{story_path, state, world?}` spec.
 
-```
-StudioSession (one MCP connection)
-├── workspace: WorkspaceHandle?          // a story dir under authoring (≤1)
-│     └── dir, cached app.Load result (AppDef + ValidationError[])
-└── sessions: map[handle]SessionHandle    // keyed driving sessions (0..n)
-      └── kitsoki SessionID, orchestrator, harness mode (replay|live), trace path
+```mermaid
+flowchart LR
+    client["client"]
+    mcp["kitsoki mcp<br/>stdio MCP"]
+    dispatch{"tool dispatch"}
+    story["story.*<br/>app.Load / graph.* / testrunner.RunFlows<br/>no LLM"]
+    session["session.*<br/>orch.Turn / SubmitDirect / ContinueTurn<br/>replay default"]
+    render["render.*<br/>ComposeFrame / shot raster / webshot.Shot<br/>read-only"]
+    workspace["WorkspaceHandle?<br/>dir + cached app.Load result"]
+    handles["SessionHandle map<br/>session id + orchestrator + harness + trace"]
 
-   client ──(stdio MCP)──▶ kitsoki mcp ──▶ tool dispatch ──▶ handle
-        story.*   → app.Load / graph.* / testrunner.RunFlows   (no LLM)
-        session.* → orch.Turn / SubmitDirect / ContinueTurn    (replay default)
-        render.*  → ComposeFrame / shot raster / webshot.Shot  (read-only)
+    client --> mcp --> dispatch
+    dispatch --> story
+    dispatch --> session
+    dispatch --> render
+    story --> workspace
+    session --> handles
+    render --> handles
 ```
 
 The server core records **nothing new**: each driving handle writes through the

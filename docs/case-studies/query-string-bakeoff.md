@@ -38,7 +38,7 @@ checkout is immune to later history movement.
 
 The exact regression test each real PR added is captured, isolated, as the
 **hidden oracle** in
-[`tools/bugfix-bakeoff/external/query-string/oracles/`](../../tools/bugfix-bakeoff/external/query-string/oracles).
+[`tools/bugfix-bakeoff/external/projects/query-string/oracles/`](../../tools/bugfix-bakeoff/external/projects/query-string/oracles).
 It is kept out of the candidate's tree until scoring.
 
 > Provenance note: qs1 and qs2 have a clean filed-issue → fixing-PR linkage. qs3

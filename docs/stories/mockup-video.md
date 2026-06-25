@@ -45,21 +45,17 @@ refine step dispatches on `source_ref.kind` (epic shared decision 1).
 
 ## Room graph
 
-```
-intake ──(converse: distil brief)──▶ brief-gate ──ok──▶ authoring
-   ▲                                    │clarify          │ accept
-   └────────────────────────────────────┘                ▼
-                                              ┌──── rendering ◀── rerender ──┐
-                                              │  deck → slidey ; tour → run  │
-                                              └──────────────────────────────┘
-                                                          │ (auto-advance once handle bound)
-                                                          ▼
-                                                       review
-                          media(video) + drained feedback.jsonl + checkpoint
-                          accept→done · refine→refining · rerender→rendering · quit→@exit:abandoned
-                                                          │ refine
-                                                          ▼
-                                                      refining ──▶ rendering
+```mermaid
+flowchart LR
+    intake -->|"converse: distil brief"| gate["brief-gate"]
+    gate -->|"clarify"| intake
+    gate -->|"ok"| authoring
+    authoring -->|"accept"| rendering
+    rendering -->|"deck -> slidey<br/>tour -> run"| review
+    review -->|"accept"| done
+    review -->|"refine"| refining --> rendering
+    review -->|"rerender"| rendering
+    review -->|"quit"| abandoned["@exit:abandoned"]
 ```
 
 ## Two media paths, one chapter shape

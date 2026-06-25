@@ -2,17 +2,32 @@
 
 One pipeline turns the feature catalog into every public-facing surface:
 
-```
-features/<id>.yaml ──codegen──► tools/runstatus/src/tour/generated/<id>.ts (committed)
-   │                               ├─► live tour overlay (web UI)
-   │                               └─► Playwright *-video.spec.ts ──► .artifacts/<dir>/
-   │                                     demo MP4 + NN-<step>.png + .chapters.json
-   │                                       └─► stitch-tour.mjs (product-tour sections)
-   │                                             ──► complete-product-tour.mp4 + merged rail
-   ├──codegen──► features-index.json + qa/<id>.{scenarios.yaml,feature.md}
-   └──────────► tools/site (VitePress)
-                   ├─► GitHub Pages  (base /Kitsoki/, full videos)
-                   └─► internal/helpdocs go:embed → `kitsoki web` /help/ (posters only)
+```mermaid
+flowchart LR
+    feature["features/&lt;id&gt;.yaml"]
+    tour["tools/runstatus/src/tour/generated/&lt;id&gt;.ts<br/>(committed)"]
+    overlay["live tour overlay<br/>(web UI)"]
+    spec["Playwright *-video.spec.ts"]
+    artifacts[".artifacts/&lt;dir&gt;/<br/>demo MP4 + step PNGs + chapters.json"]
+    stitch["stitch-tour.mjs<br/>(product-tour sections)"]
+    master["complete-product-tour.mp4<br/>+ merged rail"]
+    index["features-index.json<br/>+ qa/&lt;id&gt; scenarios and feature docs"]
+    site["tools/site<br/>(VitePress)"]
+    pages["GitHub Pages<br/>base /Kitsoki/, full videos"]
+    help["internal/helpdocs go:embed<br/>kitsoki web /help/, posters only"]
+
+    feature -->|"codegen"| tour
+    tour --> overlay
+    tour --> spec
+    spec --> artifacts
+    artifacts --> stitch --> master
+    feature -->|"codegen"| index
+    feature --> site
+    index --> site
+    artifacts --> site
+    master --> site
+    site --> pages
+    site --> help
 ```
 
 ## The feature catalog (`features/`)

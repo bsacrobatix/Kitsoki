@@ -256,19 +256,26 @@ vanished after load) is a Go error.
 
 ### Flow of one call
 
-```
-with.inputs ─▶ validate inputs against sidecar (types, required)
-                 │  bad shape ─▶ DomainError ─▶ Result.Error ─▶ on_error:
-                 ▼
-            sandboxed eval: main(ctx)
-                 │   ctx = { inputs, world(read-only), http, fs, probe }
-                 │   ctx.http.*       ─▶ HTTPClient (recording in prod / replay in tests)
-                 │   ctx.fs/ctx.probe ─▶ Inspector  (rooted+allow-listed / replay in tests)
-                 ▼
-            validate returned dict against sidecar outputs (declared + types)
-                 │  bad shape ─▶ DomainError ─▶ Result.Error ─▶ on_error:
-                 ▼
-            Result.Data = outputs (+ __http_exchanges) ─▶ effect bind:
+```mermaid
+flowchart TD
+    inputs["with.inputs"]
+    validateIn{"Validate against sidecar<br/>types + required"}
+    eval["sandboxed eval<br/>main(ctx)"]
+    http["ctx.http.*<br/>HTTPClient recording / replay"]
+    fs["ctx.fs / ctx.probe<br/>rooted allow-list / replay"]
+    validateOut{"Validate returned dict<br/>declared outputs + types"}
+    result["Result.Data<br/>outputs + __http_exchanges"]
+    bind["effect bind"]
+    domain["DomainError<br/>Result.Error -> on_error"]
+
+    inputs --> validateIn
+    validateIn -->|"bad shape"| domain
+    validateIn -->|"ok"| eval
+    eval --> http
+    eval --> fs
+    eval --> validateOut
+    validateOut -->|"bad shape"| domain
+    validateOut -->|"ok"| result --> bind
 ```
 
 ### Record / replay (HTTP cassettes)
@@ -1338,10 +1345,21 @@ Two input modes:
 - **`{paths: [...], base: "HEAD"}`** — review already-applied working-tree
   edits against a base (the "we edited this, review it" case).
 
-```
-room ──"review the diff?"──▶ invoke host.diff.open ──┬─ surface=ide      ─▶ verdict ∈ {accept,reject} ─▶ branch on verdict
-                                                     ├─ surface=difftool ─▶ verdict=null, reviewed ────▶ ask accept/refine (normal intent)
-                                                     └─ surface=none     ─▶ reviewed=false ────────────▶ render diff inline / open_file
+```mermaid
+flowchart LR
+    room["room<br/>review the diff?"]
+    open["invoke host.diff.open"]
+    ide["surface=ide<br/>verdict in {accept,reject}"]
+    difftool["surface=difftool<br/>verdict=null, reviewed"]
+    none["surface=none<br/>reviewed=false"]
+    branch["branch on verdict"]
+    ask["ask accept/refine<br/>normal intent"]
+    inline["render diff inline<br/>or open_file"]
+
+    room --> open
+    open --> ide --> branch
+    open --> difftool --> ask
+    open --> none --> inline
 ```
 
 **The moat.** The interpretive decision (does the operator accept?) is made

@@ -15,13 +15,14 @@ write, and the whole walk is gated by a no-LLM flow fixture.
 
 ## The rooms
 
-```
-landing ──(onboard <path>)──▶ init_discover ──▶ init ──(confirm)──▶ init_apply ──▶ init_done
-                                  │  on_enter        (review)          │  on_enter
-                                  │  init_discover.py                  │  init_apply.py
-                                  ▼                                    │  + project-tools install
-                            init_discover_failed                      ▼
-                                                                init_apply_failed
+```mermaid
+flowchart LR
+    landing -->|"onboard &lt;path&gt;"| init_discover
+    init_discover -->|"on_enter: init_discover.py"| init
+    init_discover --> init_discover_failed
+    init -->|"confirm / review"| init_apply
+    init_apply -->|"on_enter: init_apply.py<br/>+ project-tools install"| init_done
+    init_apply --> init_apply_failed
 ```
 
 Defined in [`stories/dev-story/rooms/init.yaml`](../../stories/dev-story/rooms/init.yaml).
