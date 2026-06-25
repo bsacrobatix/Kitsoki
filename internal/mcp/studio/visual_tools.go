@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -11,8 +12,10 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"io"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -317,6 +320,24 @@ type VisualDiffArgs struct {
 	ToImageID   string `json:"to_image_id"`
 }
 
+// VisualGitDiffArgs captures the same story scene at two git revisions and
+// compares the retained screenshots.
+type VisualGitDiffArgs struct {
+	Dir           string            `json:"dir"`
+	From          string            `json:"from"`
+	To            string            `json:"to"`
+	StoryPath     string            `json:"story_path"`
+	State         string            `json:"state"`
+	World         map[string]any    `json:"world,omitempty"`
+	Query         map[string]string `json:"query,omitempty"`
+	AssertText    []string          `json:"assert_text,omitempty"`
+	Region        string            `json:"region,omitempty"`
+	Overlay       string            `json:"overlay,omitempty"`
+	Scale         string            `json:"scale,omitempty"`
+	MaxPixels     int               `json:"max_pixels,omitempty"`
+	IncludeImages string            `json:"include_images,omitempty"`
+}
+
 // VisualDiffOK is a compact delta between retained snapshot metadata.
 type VisualDiffOK struct {
 	OK             bool        `json:"ok"`
@@ -327,6 +348,26 @@ type VisualDiffOK struct {
 	Reasons        []string    `json:"reasons,omitempty"`
 	ChangedRegions []string    `json:"changed_regions,omitempty"`
 	ChangedBBox    *VisualBBox `json:"changed_bbox,omitempty"`
+}
+
+// VisualGitDiffOK is the compact visual regression result. The screenshots stay
+// retained server-side and can be compared again with visual.diff via image IDs.
+type VisualGitDiffOK struct {
+	OK             bool               `json:"ok"`
+	RepoRoot       string             `json:"repo_root"`
+	From           string             `json:"from"`
+	To             string             `json:"to"`
+	StoryPath      string             `json:"story_path"`
+	State          string             `json:"state"`
+	FromImageID    string             `json:"from_image_id"`
+	ToImageID      string             `json:"to_image_id"`
+	Same           bool               `json:"same"`
+	Changed        bool               `json:"changed"`
+	Reasons        []string           `json:"reasons,omitempty"`
+	ChangedRegions []string           `json:"changed_regions,omitempty"`
+	ChangedBBox    *VisualBBox        `json:"changed_bbox,omitempty"`
+	FromSnapshot   VisualSnapshotInfo `json:"from_snapshot"`
+	ToSnapshot     VisualSnapshotInfo `json:"to_snapshot"`
 }
 
 // VisualRecordArgs starts or stops a semantic visual recording.
@@ -370,6 +411,10 @@ func (srv *Server) registerVisualTools() {
 		Name:        "visual.diff",
 		Description: "Compare two retained visual.snapshot image_ids and return compact metadata/changed-region hints without sending another image.",
 	}, srv.handleVisualDiff)
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "visual.git_diff",
+		Description: "Render the same web scene from two git revisions, retain both screenshots, and return compact visual diff metadata. {dir, from, to, story_path, state, world?, query?, assert_text?, region?, overlay?, scale?, max_pixels?, include_images?:none|from|to|both}. Uses git archive temp trees; no LLM.",
+	}, srv.handleVisualGitDiff)
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "visual.record",
 		Description: "Start or stop a bounded semantic visual recording for evidence. Writes JSON sidecars under .artifacts/visual (or the injected artifacts dir) without invoking an LLM.",
@@ -693,6 +738,10 @@ func (srv *Server) handleVisualDiff(
 	if rerr != nil {
 		return rerr, nil, nil
 	}
+	return nil, visualDiffImages(from, to), nil
+}
+
+func visualDiffImages(from, to *VisualImage) VisualDiffOK {
 	var reasons []string
 	if from.SHA256 != to.SHA256 {
 		reasons = append(reasons, "sha256 changed")
@@ -715,7 +764,7 @@ func (srv *Server) handleVisualDiff(
 	if bbox != nil {
 		changedRegions = []string{fmt.Sprintf("bbox:%d,%d,%d,%d", bbox.X, bbox.Y, bbox.Width, bbox.Height)}
 	}
-	return nil, VisualDiffOK{
+	return VisualDiffOK{
 		OK:             true,
 		FromImageID:    from.ID,
 		ToImageID:      to.ID,
@@ -724,7 +773,101 @@ func (srv *Server) handleVisualDiff(
 		Reasons:        reasons,
 		ChangedRegions: changedRegions,
 		ChangedBBox:    bbox,
-	}, nil
+	}
+}
+
+func (srv *Server) handleVisualGitDiff(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args VisualGitDiffArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	if strings.TrimSpace(args.Dir) == "" {
+		return buildToolError(ErrBadRequest, "visual.git_diff: dir is required"), nil, nil
+	}
+	if strings.TrimSpace(args.From) == "" || strings.TrimSpace(args.To) == "" {
+		return buildToolError(ErrBadRequest, "visual.git_diff: from and to are required"), nil, nil
+	}
+	if strings.TrimSpace(args.StoryPath) == "" || strings.TrimSpace(args.State) == "" {
+		return buildToolError(ErrBadRequest, "visual.git_diff: story_path and state are required"), nil, nil
+	}
+	includeImages, ok := normalizeGitDiffIncludeImages(args.IncludeImages)
+	if !ok {
+		return buildToolError(ErrBadRequest, "visual.git_diff: include_images must be none, from, to, or both"), nil, nil
+	}
+	shotResult := srv.webShotResult
+	if shotResult == nil && srv.webShot != nil {
+		shotResult = func(ctx context.Context, spec WebRenderSpec) (WebShotResult, error) {
+			png, err := srv.webShot(ctx, spec)
+			return WebShotResult{PNG: png}, err
+		}
+	}
+	if shotResult == nil {
+		return buildToolError(ErrBadRequest, "visual.git_diff: web image rendering needs a browser-capable host"), nil, nil
+	}
+	repoRoot, err := gitRepoRoot(ctx, args.Dir)
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.git_diff: %v", err)), nil, nil
+	}
+	storyRel, err := gitSceneStoryRel(repoRoot, args.StoryPath)
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.git_diff: %v", err)), nil, nil
+	}
+	fromRev, err := gitCommit(ctx, repoRoot, args.From)
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.git_diff: from: %v", err)), nil, nil
+	}
+	toRev, err := gitCommit(ctx, repoRoot, args.To)
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.git_diff: to: %v", err)), nil, nil
+	}
+	tmpRoot, err := os.MkdirTemp("", "kitsoki-visual-gitdiff-*")
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.git_diff: temp dir: %v", err)), nil, nil
+	}
+	defer os.RemoveAll(tmpRoot)
+	fromDir := filepath.Join(tmpRoot, "from")
+	toDir := filepath.Join(tmpRoot, "to")
+	if err := gitArchiveToDir(ctx, repoRoot, fromRev, fromDir); err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.git_diff: archive from: %v", err)), nil, nil
+	}
+	if err := gitArchiveToDir(ctx, repoRoot, toRev, toDir); err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.git_diff: archive to: %v", err)), nil, nil
+	}
+	fromPath := filepath.Join(fromDir, storyRel)
+	toPath := filepath.Join(toDir, storyRel)
+	if _, err := os.Stat(fromPath); err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.git_diff: from story_path %q: %v", storyRel, err)), nil, nil
+	}
+	if _, err := os.Stat(toPath); err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.git_diff: to story_path %q: %v", storyRel, err)), nil, nil
+	}
+	fromImage, fromInfo, fromPNG, err := srv.captureGitScene(ctx, shotResult, fromPath, fromRev, args)
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.git_diff: capture from: %v", err)), nil, nil
+	}
+	toImage, toInfo, toPNG, err := srv.captureGitScene(ctx, shotResult, toPath, toRev, args)
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.git_diff: capture to: %v", err)), nil, nil
+	}
+	diff := visualDiffImages(fromImage, toImage)
+	out := VisualGitDiffOK{
+		OK:             true,
+		RepoRoot:       repoRoot,
+		From:           fromRev,
+		To:             toRev,
+		StoryPath:      storyRel,
+		State:          args.State,
+		FromImageID:    fromImage.ID,
+		ToImageID:      toImage.ID,
+		Same:           diff.Same,
+		Changed:        diff.Changed,
+		Reasons:        diff.Reasons,
+		ChangedRegions: diff.ChangedRegions,
+		ChangedBBox:    diff.ChangedBBox,
+		FromSnapshot:   fromInfo,
+		ToSnapshot:     toInfo,
+	}
+	return visualGitDiffResult(req, out, fromPNG, toPNG, includeImages), nil, nil
 }
 
 func (srv *Server) handleVisualRecord(
@@ -753,6 +896,237 @@ func (srv *Server) handleVisualRecord(
 	default:
 		return buildToolError(ErrBadRequest, "visual.record: action must be start or stop"), nil, nil
 	}
+}
+
+func (srv *Server) captureGitScene(ctx context.Context, shotResult WebShotResultFunc, storyPath, rev string, args VisualGitDiffArgs) (*VisualImage, VisualSnapshotInfo, []byte, error) {
+	result, err := shotResult(ctx, WebRenderSpec{
+		StoryPath:  storyPath,
+		State:      args.State,
+		World:      args.World,
+		Query:      args.Query,
+		AssertText: args.AssertText,
+	})
+	if err != nil {
+		return nil, VisualSnapshotInfo{}, nil, err
+	}
+	if len(result.PNG) == 0 {
+		return nil, VisualSnapshotInfo{}, nil, fmt.Errorf("web renderer returned an empty PNG")
+	}
+	semantic := compactSemantic(result.SemanticJSON)
+	processed, err := processVisualPNG(result.PNG, args.Region, args.Overlay, args.Scale, args.MaxPixels, semantic)
+	if err != nil {
+		return nil, VisualSnapshotInfo{}, nil, err
+	}
+	vh := &VisualHandle{
+		ID:       "git:" + rev,
+		Kind:     VisualWeb,
+		Handle:   storyPath,
+		Viewport: processed.Original,
+		Mode:     "git_diff",
+		Created:  time.Now().UTC(),
+	}
+	image := srv.storeVisualImage(vh, args.Region, args.Overlay, args.Scale, processed.PNG, processed)
+	info := VisualSnapshotInfo{
+		OK:           true,
+		VisualHandle: vh.ID,
+		ImageID:      image.ID,
+		Kind:         string(VisualWeb),
+		Handle:       storyPath,
+		Region:       args.Region,
+		Overlay:      args.Overlay,
+		Scale:        args.Scale,
+		Format:       "png",
+		Width:        image.Width,
+		Height:       image.Height,
+		Original:     image.Original,
+		CropBBox:     image.CropBBox,
+		ScaleFactor:  image.ScaleFactor,
+		MaxPixels:    processed.MaxPixels,
+		Visible:      visualImageActionHandles(image.Actions),
+		Bytes:        image.Bytes,
+		SHA256:       image.SHA256,
+		Query:        args.Query,
+		Semantic:     semantic,
+	}
+	return image, info, processed.PNG, nil
+}
+
+func visualGitDiffResult(req *mcpsdk.CallToolRequest, out VisualGitDiffOK, fromPNG, toPNG []byte, include string) *mcpsdk.CallToolResult {
+	content := []mcpsdk.Content{&mcpsdk.TextContent{Text: mustJSON(out)}}
+	if !clientSupportsImages(req) {
+		return &mcpsdk.CallToolResult{Content: content}
+	}
+	switch strings.ToLower(strings.TrimSpace(include)) {
+	case "", "none":
+	case "from":
+		if len(fromPNG) > 0 {
+			content = append(content, &mcpsdk.ImageContent{Data: fromPNG, MIMEType: "image/png"})
+		}
+	case "to":
+		if len(toPNG) > 0 {
+			content = append(content, &mcpsdk.ImageContent{Data: toPNG, MIMEType: "image/png"})
+		}
+	case "both":
+		if len(fromPNG) > 0 {
+			content = append(content, &mcpsdk.ImageContent{Data: fromPNG, MIMEType: "image/png"})
+		}
+		if len(toPNG) > 0 {
+			content = append(content, &mcpsdk.ImageContent{Data: toPNG, MIMEType: "image/png"})
+		}
+	}
+	return &mcpsdk.CallToolResult{Content: content}
+}
+
+func normalizeGitDiffIncludeImages(v string) (string, bool) {
+	include := strings.ToLower(strings.TrimSpace(v))
+	if include == "" {
+		include = "none"
+	}
+	switch include {
+	case "none", "from", "to", "both":
+		return include, true
+	default:
+		return "", false
+	}
+}
+
+func gitRepoRoot(ctx context.Context, dir string) (string, error) {
+	out, err := gitOutput(ctx, dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
+	root := strings.TrimSpace(out)
+	if root == "" {
+		return "", fmt.Errorf("%q is not inside a git repository", dir)
+	}
+	return root, nil
+}
+
+func gitCommit(ctx context.Context, repoRoot, rev string) (string, error) {
+	out, err := gitOutput(ctx, repoRoot, "rev-parse", "--verify", strings.TrimSpace(rev)+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	commit := strings.TrimSpace(out)
+	if commit == "" {
+		return "", fmt.Errorf("empty resolved revision")
+	}
+	return commit, nil
+}
+
+func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+func gitSceneStoryRel(repoRoot, storyPath string) (string, error) {
+	path := filepath.Clean(storyPath)
+	if filepath.IsAbs(path) {
+		rel, err := filepath.Rel(repoRoot, path)
+		if err != nil {
+			return "", err
+		}
+		path = rel
+	}
+	if path == "." || path == "" {
+		return "", fmt.Errorf("story_path must name a file inside the repository")
+	}
+	if filepath.IsAbs(path) || strings.HasPrefix(path, ".."+string(filepath.Separator)) || path == ".." {
+		return "", fmt.Errorf("story_path %q must stay inside the repository", storyPath)
+	}
+	return filepath.ToSlash(path), nil
+}
+
+func gitArchiveToDir(ctx context.Context, repoRoot, rev, dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "archive", "--format=tar", rev)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr := &bytes.Buffer{}
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	tr := tar.NewReader(stdout)
+	readErr := extractTar(tr, dst)
+	waitErr := cmd.Wait()
+	if readErr != nil {
+		return readErr
+	}
+	if waitErr != nil {
+		return fmt.Errorf("git archive: %v: %s", waitErr, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func extractTar(tr *tar.Reader, dst string) error {
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		rel, ok := safeArchivePath(hdr.Name)
+		if !ok {
+			return fmt.Errorf("unsafe archive path %q", hdr.Name)
+		}
+		target := filepath.Join(dst, filepath.FromSlash(rel))
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777)
+			if err != nil {
+				return err
+			}
+			_, copyErr := io.Copy(f, tr)
+			closeErr := f.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+		case tar.TypeSymlink:
+			link, ok := safeArchivePath(hdr.Linkname)
+			if !ok {
+				return fmt.Errorf("unsafe archive symlink %q -> %q", hdr.Name, hdr.Linkname)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			if err := os.Symlink(filepath.FromSlash(link), target); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func safeArchivePath(p string) (string, bool) {
+	clean := pathCleanSlash(p)
+	if clean == "." || clean == "" || strings.HasPrefix(clean, "../") || clean == ".." || filepath.IsAbs(clean) {
+		return "", false
+	}
+	return clean, true
+}
+
+func pathCleanSlash(p string) string {
+	return filepath.ToSlash(filepath.Clean(filepath.FromSlash(p)))
 }
 
 func (srv *Server) visualWebSnapshot(ctx context.Context, req *mcpsdk.CallToolRequest, vh *VisualHandle, args VisualSnapshotArgs) (*mcpsdk.CallToolResult, any, error) {

@@ -8,6 +8,8 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,6 +36,7 @@ func TestVisualToolsListed(t *testing.T) {
 	assert.True(t, names["visual.snapshot"])
 	assert.True(t, names["visual.act"])
 	assert.True(t, names["visual.diff"])
+	assert.True(t, names["visual.git_diff"])
 	assert.True(t, names["visual.record"])
 }
 
@@ -384,6 +387,74 @@ func TestVisualDiff_ComparesRetainedSnapshots(t *testing.T) {
 	assert.Equal(t, []string{"bbox:2,1,1,1"}, diff.ChangedRegions)
 }
 
+func TestVisualGitDiff_CapturesTwoRevisionsAndDiffsScreenshots(t *testing.T) {
+	ctx := context.Background()
+	repo := t.TempDir()
+	storyRel := filepath.Join("stories", "demo", "app.yaml")
+	storyPath := filepath.Join(repo, storyRel)
+	require.NoError(t, os.MkdirAll(filepath.Dir(storyPath), 0o755))
+	gitRun(t, repo, "init")
+	gitRun(t, repo, "config", "user.email", "test@example.com")
+	gitRun(t, repo, "config", "user.name", "Test User")
+	require.NoError(t, os.WriteFile(storyPath, []byte("scene: one\n"), 0o644))
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "one")
+	from := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
+	require.NoError(t, os.WriteFile(storyPath, []byte("scene: two\n"), 0o644))
+	gitRun(t, repo, "commit", "-am", "two")
+	to := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
+
+	srv, _ := newReplayServer(t)
+	srv.SetWebShotResult(func(ctx context.Context, spec studio.WebRenderSpec) (studio.WebShotResult, error) {
+		data, err := os.ReadFile(spec.StoryPath)
+		require.NoError(t, err)
+		if strings.Contains(string(data), "scene: one") {
+			return studio.WebShotResult{PNG: pngOf(t, 2, 2, map[image.Point]color.RGBA{
+				{X: 0, Y: 0}: {R: 1, G: 2, B: 3, A: 255},
+			})}, nil
+		}
+		return studio.WebShotResult{PNG: pngOf(t, 2, 2, map[image.Point]color.RGBA{
+			{X: 1, Y: 1}: {R: 9, G: 8, B: 7, A: 255},
+		})}, nil
+	})
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := callTool(ctx, cs, "visual.git_diff", map[string]any{
+		"dir":            repo,
+		"from":           from,
+		"to":             to,
+		"story_path":     storyRel,
+		"state":          "idle",
+		"include_images": "both",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "visual.git_diff: %s", contentText(res))
+	require.Len(t, res.Content, 3, "text plus two requested image blocks")
+	var got studio.VisualGitDiffOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &got))
+	assert.True(t, got.OK)
+	assert.Equal(t, filepath.ToSlash(storyRel), got.StoryPath)
+	assert.Equal(t, from, got.From)
+	assert.Equal(t, to, got.To)
+	assert.NotEmpty(t, got.FromImageID)
+	assert.NotEmpty(t, got.ToImageID)
+	assert.True(t, got.Changed)
+	assert.False(t, got.Same)
+	assert.NotNil(t, got.ChangedBBox)
+	assert.Contains(t, got.Reasons, "pixels changed")
+
+	res, err = callTool(ctx, cs, "visual.diff", map[string]any{
+		"from_image_id": got.FromImageID,
+		"to_image_id":   got.ToImageID,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "visual.diff after git diff: %s", contentText(res))
+	var diff studio.VisualDiffOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &diff))
+	assert.True(t, diff.Changed)
+	assert.Equal(t, got.ChangedBBox, diff.ChangedBBox)
+}
+
 func TestVisualRecord_WritesSemanticSidecars(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -681,4 +752,12 @@ func pngOf(t *testing.T, width, height int, pixels map[image.Point]color.RGBA) [
 	var buf bytes.Buffer
 	require.NoError(t, png.Encode(&buf, img))
 	return buf.Bytes()
+}
+
+func gitRun(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	require.NoErrorf(t, err, "git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+	return string(out)
 }

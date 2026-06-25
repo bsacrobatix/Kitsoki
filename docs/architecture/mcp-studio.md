@@ -269,6 +269,7 @@ seams as `session.*`.
 | `visual.snapshot` | `{visual_handle, region?, overlay?, scale?, format?, max_pixels?, query?, assert_text?}` | return one targeted PNG plus JSON metadata including `image_id`/hash, original/display dimensions, crop bbox, scale factor, visible action handles, and, for web/vscode, the compact semantic observation; TUI uses the terminal rasterizer |
 | `visual.act` | `{visual_handle, action?, action_handle?, image_id?, point?, text?, key?, value?, region?, delta?, intent?, slots?, command?}` | perform deterministic `submit`, `continue`, `type`, `press`, `select`, `scroll`, `command`, or anchored `pixel_click` actions and return the post-action frame/outcome |
 | `visual.diff` | `{from_image_id, to_image_id}` | compare retained snapshot pixels/metadata and return changed-region hints plus a changed pixel bbox without another image |
+| `visual.git_diff` | `{dir, from, to, story_path, state, world?, query?, assert_text?, region?, overlay?, scale?, max_pixels?, include_images?:none\|from\|to\|both}` | materialize each git revision with `git archive`, render the same web scene from both trees, retain both screenshots, and return the same compact diff metadata plus image IDs |
 | `visual.record` | `{action:start\|stop, visual_handle?, recording_id?, mode?}` | capture a semantic evidence ledger and write `timeline.json` + `capture.semantic.json`; web recordings also write `session.rrweb.json` after a snapshot captures the rolling rrweb buffer |
 
 The implementation is intentionally handle-backed: `web` and `vscode` surfaces
@@ -278,6 +279,17 @@ existing `webShot` seam; tests inject stub PNG/semantic results, so the tool
 surface is covered without Chromium or a real LLM. Snapshot image bytes are sent
 only by the snapshot call; the server retains compact `image_id` metadata for
 diffing and recorded evidence.
+
+`visual.git_diff` is the git-aware visual regression path. The caller supplies a
+repository directory, two commit-ish values, a story path relative to that repo
+(or an absolute path inside it), and the state/world/query for the scene. The
+server resolves both commits, expands each tree into a temporary directory with
+`git archive` (no checkout and no source worktree mutation), renders the same
+web scene from each archive through the existing browser seam, stores both
+screenshots as retained images, and returns `{from_image_id,to_image_id,...}`
+plus the pixel/metadata diff. The default response is JSON-only; `include_images`
+can request `from`, `to`, or `both` PNG blocks for a vision-capable client when a
+human/model needs to inspect the actual frames.
 
 The runstatus SPA installs `window.__kitsokiVisual` at boot. It exposes a small
 semantic helper: `observe()` returns stable action handles from interactive
