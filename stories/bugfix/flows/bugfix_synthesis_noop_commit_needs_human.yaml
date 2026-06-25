@@ -1,18 +1,17 @@
-# bugfix_synthesis_noop_commit_needs_human — the synthesis must FAIL LOUDLY, not
-# false-ship, when the pre-fix test commit no-ops.
+# bugfix_synthesis_noop_commit_needs_human — the synthesis must NEVER false-ship
+# when the pre-fix test commit fails to land as a discrete commit.
 #
-# Regression guard for the defect the bare-report dogfood exposed: the synthesis
-# commit (iface.vcs.commit of the reproducer's authored test) no-ops gracefully
-# (ok:true, sha:"") when there is nothing to stage — e.g. the async reproducer's
-# file hadn't settled. The pipeline used to latch repro_committed + derive
-# gate_command ANYWAY, so the test shipped WITH the fix, HEAD~1 had no clean
-# pre-fix snapshot, and it dead-ended at needs-human with a confusing
-# "never RED" error. Now the latch is conditioned on a NON-EMPTY commit sha, so a
-# no-op commit ⇒ no synthesis ⇒ gate_command stays empty ⇒ the testing room's
-# never-RED ship guard routes to @exit:needs-human honestly (no false ship).
+# Regression guard for the defect a live bare-report dogfood exposed: the
+# synthesis commit (implementing/on_enter, iface.vcs.commit of the reproducer's
+# RED test) can no-op (ok:true, sha:"") when nothing stages. The latch is
+# UNCONDITIONAL (it derives gate_command regardless), so the deterministic
+# BACKSTOP is the testing room's HEAD~1 RED gate: if the test never became a
+# discrete pre-fix commit, HEAD~1 has no failing test → the gate runs GREEN →
+# regression_red_pre_fix:false → @exit:needs-human. Never a false ship.
 #
-# Same shape as bugfix_synthesizes_gate_and_ships, but the commit_repro_test call
-# is stubbed to return sha:"" (the no-op).
+# Here the commit_repro_test call returns sha:"" (no-op) AND the HEAD~1 gate is
+# stubbed GREEN (red:false) — simulating "the test is not at HEAD~1". The run must
+# dead-end at needs-human, NOT ship.
 
 test_kind: flow
 app: ../app.yaml
@@ -36,8 +35,7 @@ host_handlers:
   host.append_to_file: { data: { ok: true } }
   host.inbox.add:      { data: { ok: true } }
   host.git_worktree:   { data: { ok: true, log: "", path: ".worktrees/noop-fix" } }
-  # The synthesis test commit NO-OPS (sha:"") — nothing was committable. Every
-  # other git call (the implementer's fix commit, etc.) returns a real sha.
+  # The synthesis test commit NO-OPS (sha:""). Every other git call returns a sha.
   host.git:
     by_call:
       commit_repro_test: { data: { ok: true, sha: "", diff: "" } }
@@ -48,7 +46,7 @@ host_handlers:
       ok: true
       submitted:
         summary_title:    "Reproducer authored; fix applied"
-        summary_markdown: "Authored a RED reproducer, but its test file was not committable at the synthesis step (no-op commit). The fix is still applied."
+        summary_markdown: "Authored a RED reproducer, but the synthesis commit staged nothing (no-op). The fix is still applied."
         status:           "passed"
         outcome:          "pass"
         bug_verified:     true
@@ -64,29 +62,34 @@ host_handlers:
     data: { ok: true, submitted: { summary_title: "ok", summary_markdown: "ok", outcome: "pass", status: "passed", verdict: "accept", intent: "accept", confidence: 0.9 } }
   host.run:
     by_call:
-      # gate_command stays empty, so this never runs — but stub it RED in case.
+      # HEAD~1 gate runs (gate_command was latched) but the test isn't there → GREEN.
       regression_gate_exec:
-        data: { ok: true, exit_code: 0, stdout_json: { red: true, checked: true, log: "x" } }
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            red:     false
+            checked: true
+            log:     "ok (no failing test at HEAD~1 — the reproducer test was never a discrete pre-fix commit)"
 
 turns:
   - intent: { name: start,  slots: {} }
     expect_state: reproducing
   - intent: { name: accept, slots: {} }
     expect_state: proposing
-    # the synthesis commit ran but NO-OP'd → empty sha recorded.
-    expect_world:
-      commit_repro_sha: ""
   - intent: { name: accept, slots: {} }
     expect_state: implementing
-    # the latch did NOT fire (empty sha) — gate stays unsynthesised.
+    # the latch fires UNCONDITIONALLY (gate derived), even though the commit no-op'd.
     expect_world:
-      gate_command:    ""
-      repro_committed: false
+      gate_command:    "go test ./internal/host/ -run TestRepro -count=1"
+      repro_committed: true
   - intent: { name: accept, slots: {} }
     expect_state: testing
+    # the deterministic backstop: HEAD~1 gate ran GREEN (no discrete test commit).
     expect_world:
-      regression_red_pre_fix: false
-  # accept from testing: no RED-pre-fix proof → needs-human, NOT a false ship.
+      regression_gate_checked: true
+      regression_red_pre_fix:  false
+  # accept from testing: never-RED → needs-human, NOT a false ship.
   - intent: { name: accept, slots: {} }
     expect_state: __exit__needs-human
     expect_world:

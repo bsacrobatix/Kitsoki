@@ -61,28 +61,8 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [ticket_id, ticket_title, workspace_id, workdir, feature_branch, propose_fix_artifact, implement_artifact, reproduction_artifact, gate_command, repro_committed, commit_repro_sha]
+    relevant_world: [ticket_id, ticket_title, workspace_id, workdir, feature_branch, propose_fix_artifact, implement_artifact, reproduction_artifact, gate_command, landing_gate, repro_committed]
     on_enter:
-      # LATCH the synthesised gate (autonomous from a bare report). The proposing
-      # room committed the reproducer's RED test as a discrete pre-fix commit and
-      # bound its sha to commit_repro_sha (a prior pass — so the sha is visible
-      # here but was NOT visible to a same-pass step there). Latch the gate ONLY
-      # when that commit produced a REAL sha: iface.vcs.commit no-ops gracefully
-      # (ok:true, sha:"") when there is nothing to stage, and a no-op must NOT
-      # latch — else the test would ship WITH the fix, HEAD~1 would have no clean
-      # pre-fix snapshot, and the run would dead-end at needs-human (the regression
-      # the bare-report dogfood exposed). Empty sha ⇒ no synthesis ⇒ the ship guard
-      # catches it loudly, never a false ship. Runs BEFORE the implementer commits
-      # the fix below, so the test commit stays the pre-fix tip. Guarded on
-      # gate_command=='' so a ticket-supplied repro_command is untouched.
-      - when: |
-          world.gate_command == '' && !world.repro_committed &&
-          (world.commit_repro_sha ?? '') != ''
-        set:
-          gate_command:    "{{ world.reproduction_artifact.repro_command }}"
-          landing_gate:    "{{ world.reproduction_artifact.repro_command }}"
-          repro_committed: true
-
       # Self-heal the workspace before we touch it. bf.idle's auto-
       # create only runs when `!bf_autostart_attempted`, so once that
       # flag is pinned (which it is after the first attempt regardless
@@ -114,6 +94,46 @@ states:
         with:
           id: "{{ world.workspace_id }}"
         on_error: idle
+
+      # ── SYNTHESISE the regression gate (autonomous from a bare bug report) ──
+      # When the ticket carried NO repro_command (gate_command empty), the
+      # reproducer authored a RED test (a prior phase) and emitted a structured
+      # repro_command + repro_test_paths. Commit that test as a DISCRETE pre-fix
+      # commit HERE — after workspace.sync and BEFORE the implementer applies the
+      # fix below — so the test commit is the pre-fix tip and testing's HEAD~1 RED
+      # gate works exactly as for a ticket-supplied repro_command. This is the
+      # right spot because under autonomous llm_then_human the reproducing→
+      # proposing→implementing chain COLLAPSES into one turn; by the time
+      # implementing's on_enter runs (after sync) the async reproducer's test file
+      # is provably on disk (the earlier proposing-room attempt raced the flush and
+      # no-op'd). Guarded on gate_command=='' so a ticket-supplied repro_command is
+      # untouched; latched by repro_committed (one-shot). The latch is unconditional
+      # (not commit-sha-gated): if the commit somehow staged nothing, the test never
+      # becomes a discrete pre-fix commit, so testing's HEAD~1 gate finds it GREEN →
+      # @exit:needs-human — never a false ship. That deterministic gate is the
+      # backstop, so we don't need to read the commit's sha (which an on_enter bind
+      # wouldn't expose to this same pass anyway).
+      - when: |
+          world.gate_command == '' && world.workdir != '' &&
+          !world.repro_committed &&
+          (world.reproduction_artifact.bug_verified ?? false) &&
+          (world.reproduction_artifact.repro_command ?? '') != '' &&
+          len(world.reproduction_artifact.repro_test_paths ?? []) > 0
+        invoke: iface.vcs.commit
+        id: commit_repro_test
+        with:
+          message: "test(repro): RED reproducer for {{ world.ticket_id }}"
+          files:   "{{ world.reproduction_artifact.repro_test_paths }}"
+          cwd:     "{{ world.workdir }}"
+        on_error: idle
+      - when: |
+          world.gate_command == '' && !world.repro_committed &&
+          (world.reproduction_artifact.repro_command ?? '') != '' &&
+          len(world.reproduction_artifact.repro_test_paths ?? []) > 0
+        set:
+          gate_command:    "{{ world.reproduction_artifact.repro_command }}"
+          landing_gate:    "{{ world.reproduction_artifact.repro_command }}"
+          repro_committed: true
 
       # Apply the proposed fix. The agent runs with cwd=workdir
       # (the bugfix worktree), reads the proposal artifact, and uses
