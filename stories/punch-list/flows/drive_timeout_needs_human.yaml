@@ -12,7 +12,7 @@ host_handlers:
           ok: true
           exit_code: 0
           stdout_json:
-            state_path: ".artifacts/punch-list/start_first.state.json"
+            state_path: ".artifacts/punch-list/drive_timeout.state.json"
             item_count: "1"
             error: ""
             items:
@@ -43,24 +43,24 @@ host_handlers:
             policy_result: { status: ok, message: "profile/model/verifier policy passed" }
             error: ""
   host.agent.task:
+    delay: "9m"
     by_call:
       punch_drive-validate-punch-list:
-        delay: "20ms"
         data:
           ok: true
-          submitted: { status: passed, story: "stories/punch-list/app.yaml", trace_path: ".artifacts/punch-list/traces/validate-punch-list.jsonl", model: gpt-5.5, profile: codex-native, findings: [], summary: "loaded and observed" }
+          submitted: { status: passed, story: "stories/punch-list/app.yaml", trace_path: ".artifacts/punch-list/traces/validate-punch-list.jsonl", model: gpt-5.5, profile: codex-native, findings: [], summary: "eventually finished" }
 
 turns:
   - intent: { name: start, slots: {} }
     expect_state: load
   - intent: { name: start_first, slots: {} }
     expect_state: drive
-    expect_world:
-      current_item_id: validate-punch-list
-      auto_start_next: false
   - intent: { name: look, slots: {} }
-    advance_clock: "2s"
-    expect_state: verify
+    advance_clock: "9m"
+    expect_state: needs_human
+    expect_world:
+      drive_status: partial
+      last_error: "Drive timed out for validate-punch-list after 8 minutes without returning a handoff."
 
 expect_terminal: false
 expect_no_errors: true

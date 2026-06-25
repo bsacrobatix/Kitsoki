@@ -2,6 +2,9 @@ states:
   drive:
     description: "Drive the target story through Studio MCP."
     relevant_world: [current_item, drive_result, drive_job_id]
+    timeout:
+      after: "8m"
+      target: drive_timed_out
     view:
       - heading: "Punch-list · drive"
       - kv:
@@ -73,3 +76,27 @@ states:
           target: verify
       look:
         - target: .
+  drive_timed_out:
+    description: "The target story drive exceeded the operator patience budget."
+    view:
+      - heading: "Punch-list · drive timed out"
+      - prose: "The live driver did not return a result before the punch-list timeout."
+    on_enter:
+      - set:
+          drive_result:
+            status: "partial"
+            story: "{{ world.current_item.story }}"
+            trace_path: "{{ world.current_item.trace_path }}"
+            model: "{{ world.current_item.model }}"
+            profile: "{{ world.current_item.profile }}"
+            findings:
+              - "Drive job {{ world.drive_job_id }} exceeded the 8 minute punch-list timeout before returning a handoff."
+            summary: "Timed out waiting for the live driver handoff."
+          drive_status: "partial"
+          drive_trace_path: "{{ world.current_item.trace_path }}"
+          drive_model: "{{ world.current_item.model }}"
+          last_error: "Drive timed out for {{ world.current_item.id }} after 8 minutes without returning a handoff."
+      - emit_intent: drive_timeout
+    on:
+      drive_timeout:
+        - target: needs_human

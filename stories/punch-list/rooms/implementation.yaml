@@ -2,6 +2,9 @@ states:
   implementation:
     description: "Optionally run an implementation story for the current item."
     relevant_world: [current_item, implementation_result, implementation_job_id]
+    timeout:
+      after: "12m"
+      target: implementation_timed_out
     view:
       - heading: "Punch-list · implementation"
       - kv:
@@ -68,3 +71,27 @@ states:
           target: verify
       look:
         - target: .
+  implementation_timed_out:
+    description: "The implementation drive exceeded the operator patience budget."
+    view:
+      - heading: "Punch-list · implementation timed out"
+      - prose: "The implementation driver did not return a result before the punch-list timeout."
+    on_enter:
+      - set:
+          implementation_result:
+            status: "partial"
+            story: "{{ world.current_item.implementation_story }}"
+            trace_path: "{{ world.current_item.implementation_trace_path }}"
+            model: "{{ world.current_item.model }}"
+            profile: "{{ world.current_item.profile }}"
+            findings:
+              - "Implementation job {{ world.implementation_job_id }} exceeded the 12 minute punch-list timeout before returning a handoff."
+            summary: "Timed out waiting for the implementation handoff."
+          implementation_status: "partial"
+          implementation_trace_path: "{{ world.current_item.implementation_trace_path }}"
+          implementation_model: "{{ world.current_item.model }}"
+          last_error: "Implementation timed out for {{ world.current_item.id }} after 12 minutes without returning a handoff."
+      - emit_intent: implementation_timeout
+    on:
+      implementation_timeout:
+        - target: needs_human

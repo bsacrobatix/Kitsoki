@@ -121,6 +121,23 @@ func TestTemplateMatch_DevStoryTicketPickRow(t *testing.T) {
 	}
 }
 
+func TestTemplateMatch_PunchListTop10ManifestPhrase(t *testing.T) {
+	t.Parallel()
+	def, err := app.Load("../../stories/punch-list/app.yaml")
+	if err != nil {
+		t.Fatalf("load punch-list: %v", err)
+	}
+	m := mustCompile(t, def)
+	v := mustMatch(t, m, "idle", []string{"start"}, "Let's run the top 10 GPT-5.5 punch list manifest now.")
+	if v.Intent != "start" {
+		t.Fatalf("Intent: got %q, want start", v.Intent)
+	}
+	got, ok := v.Slots["manifest_path"].(string)
+	if !ok || got == "" {
+		t.Fatalf("Slots[manifest_path]: got %v (%T), want non-empty string", v.Slots["manifest_path"], v.Slots["manifest_path"])
+	}
+}
+
 // normalizeSpaces collapses runs of whitespace to one space. The
 // matcher's joinSurfaces puts a single space between tokens; this
 // helper just shields the assertion from any extra trimming.

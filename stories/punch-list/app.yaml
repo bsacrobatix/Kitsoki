@@ -75,6 +75,13 @@ intents:
   start:
     description: "Load a punch-list manifest and start processing it."
     examples: ["start", "begin", "load the punch list", "run this manifest"]
+    synonyms:
+      - "run {manifest_path}"
+      - "run the {manifest_path}"
+      - "let's run the {manifest_path} now"
+      - "load {manifest_path}"
+      - "load the {manifest_path}"
+      - "use {manifest_path}"
     priority: 90
     slots:
       manifest_path: { type: string, required: false }
@@ -109,6 +116,12 @@ intents:
     priority: 1
   implementation_done:
     description: "(internal) implementation drive completed."
+    priority: 1
+  drive_timeout:
+    description: "(internal) target story drive exceeded the punch-list timeout."
+    priority: 1
+  implementation_timeout:
+    description: "(internal) implementation drive exceeded the punch-list timeout."
     priority: 1
   verify_done:
     description: "(internal) independent verification completed."
