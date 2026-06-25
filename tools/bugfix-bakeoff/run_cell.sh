@@ -55,8 +55,10 @@ MANIFEST="$SCRIPT_DIR/bakeoff.yaml"
 REPO_ROOT="$(cd "$SCRIPT_DIR" && git rev-parse --show-toplevel)"
 PROMPT_FILE="$SCRIPT_DIR/prompts/${BUG}.md"
 SIDECAR_DIR="$SCRIPT_DIR/results/sidecars"
+THREAD_DIR="$REPO_ROOT/.artifacts/bugfix-bakeoff/threads"
 mkdir -p "$SIDECAR_DIR"
 SIDECAR="$SIDECAR_DIR/${BUG}-${CAND}-${TREAT}.env"
+THREAD_FILE="$THREAD_DIR/${BUG}-${CAND}-${TREAT}.md"
 
 # --- manifest helpers -------------------------------------------------------
 bug_field()  { python3 - "$MANIFEST" "$BUG"  "$1" bugs id <<'PY'
@@ -290,7 +292,7 @@ print_kitsoki_procedure() {
     initial_world: {
       ticket_id:    "$BUG",
       ticket_title: "$TITLE",
-      thread:       "$BUG",
+      thread:       "$THREAD_FILE",
       workdir:      "$WT_PATH",
       base_branch:  "main",
       bugfix_mode:  "full",

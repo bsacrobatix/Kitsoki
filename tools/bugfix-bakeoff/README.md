@@ -83,7 +83,9 @@ python3 score.py --bug $BUG --candidate $CAND --treatment $TREAT
 - **kitsoki** (all candidates) — driving `stories/bugfix` is studio-MCP /
   operator-driven. `run_cell.sh` seeds the bug ticket into the worktree and
   **prints the exact `session_new` args** (profile, model, effort, workdir, and
-  an `initial_world` carrying the ticket). After the drive, locate the trace:
+  an `initial_world` carrying the ticket). The pipeline thread is written under
+  `.artifacts/bugfix-bakeoff/threads/`, never as a bare file in the project
+  root. After the drive, locate the trace:
 
   ```bash
   ./run_cell.sh --locate bug1 opus-4.8 kitsoki

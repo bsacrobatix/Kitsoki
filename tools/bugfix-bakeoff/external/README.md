@@ -89,8 +89,10 @@ instance it drives is [`stories/bench-bugfix`](../../../stories/bench-bugfix).
 
 `--score` grades the worktree (`bench.py score`) and extracts the worker cost
 (`bench.py cost --trace …` → `cost_usd` for metered providers, token usage for
-subscription auth). The load-bearing knobs `drive_cell.sh` sets (each learned from
-a failure) are tabulated in the
+subscription auth). Pipeline thread files are written under
+`.artifacts/qs-bakeoff/threads/`, alongside the other per-cell cache/log output,
+so live runs do not create bare `bug*` files in the project root. The
+load-bearing knobs `drive_cell.sh` sets (each learned from a failure) are tabulated in the
 [`external-repo-bakeoff` skill](../../../.agents/skills/external-repo-bakeoff/SKILL.md);
 the key one is `workspace_id:""` so the implementer edits the prepared worktree
 directly instead of creating one against the wrong repo root.
