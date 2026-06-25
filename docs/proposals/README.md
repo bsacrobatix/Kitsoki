@@ -60,6 +60,11 @@ thought.
 
 ## Current proposals
 
+- [`top10-gpt55-dogfood-ingestion.md`](top10-gpt55-dogfood-ingestion.md)
+  — **epic.** Drive the current top-10 backlog through Kitsoki Studio MCP with
+  the right story entrypoint per item, real human-like operator turns,
+  trace-backed findings, and a strict implementation policy: live implementation
+  sessions use `profile: codex-native` / `gpt-5.5`, not Claude.
 - [`session-mining-backend-generalization.md`](session-mining-backend-generalization.md)
   — **epic.** Generalize session mining from Claude Code-shaped ingestion into a
   backend-normal corpus for Claude Code, Codex, kitsoki traces, and imported
