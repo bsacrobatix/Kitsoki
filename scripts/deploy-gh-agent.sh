@@ -13,6 +13,7 @@ cd "$ROOT"
 REMOTE="${KITSOKI_GH_AGENT_REMOTE:-root@206.189.84.218}"
 REMOTE_BIN="${KITSOKI_GH_AGENT_REMOTE_BIN:-/usr/local/bin/kitsoki}"
 REMOTE_TMP="${KITSOKI_GH_AGENT_REMOTE_TMP:-/tmp/kitsoki-ghagent.$$}"
+REMOTE_REPO="${KITSOKI_GH_AGENT_REMOTE_REPO:-/opt/kitsoki}"
 SERVICE="${KITSOKI_GH_AGENT_SERVICE:-kitsoki-gh-agent}"
 PUBLIC_BASE_URL="${KITSOKI_GH_AGENT_PUBLIC_BASE_URL:-https://kitsoki-test.slothattax.me}"
 OUT="${KITSOKI_GH_AGENT_BUILD_OUT:-/private/tmp/kitsoki-ghagent}"
@@ -31,6 +32,7 @@ fi
 build_cmd=(go build -o "$OUT" ./cmd/kitsoki)
 scp_cmd=(scp "$OUT" "$REMOTE:$REMOTE_TMP")
 install_cmd=(ssh "$REMOTE" "install -m 755 '$REMOTE_TMP' '$REMOTE_BIN' && rm -f '$REMOTE_TMP'")
+sync_repo_cmd=(ssh "$REMOTE" "mkdir -p '$REMOTE_REPO' && tar -x -C '$REMOTE_REPO'")
 ssh_cmd=(ssh "$REMOTE" "chmod 755 '$REMOTE_BIN' && systemctl restart '$SERVICE'")
 health_cmd=(curl -fsS "$PUBLIC_BASE_URL/healthz")
 HEALTH_ATTEMPTS="${KITSOKI_GH_AGENT_HEALTH_ATTEMPTS:-12}"
@@ -48,6 +50,10 @@ checksum_file() {
 	else
 		shasum -a 256 "$file" | awk '{print $1}'
 	fi
+}
+
+sync_repo() {
+	git archive --format=tar HEAD | "${sync_repo_cmd[@]}"
 }
 
 wait_for_health() {
@@ -71,6 +77,7 @@ deploy-gh-agent:
   build:  GOOS=linux GOARCH=amd64 GOCACHE=$GOCACHE $(print_cmd "${build_cmd[@]}")
   copy:   $(print_cmd "${scp_cmd[@]}")
   install:$(print_cmd "${install_cmd[@]}")
+  sync:   git archive --format=tar HEAD | $(print_cmd "${sync_repo_cmd[@]}")
   start:  $(print_cmd "${ssh_cmd[@]}")
   verify: local sha256 == remote sha256 via $(print_cmd "${remote_checksum_cmd[@]}")
   health: $(print_cmd "${health_cmd[@]}") (up to $HEALTH_ATTEMPTS attempts)
@@ -94,6 +101,7 @@ if [ "$local_sha" != "$remote_tmp_sha" ]; then
 	exit 1
 fi
 "${install_cmd[@]}"
+sync_repo
 remote_sha="$("${remote_checksum_cmd[@]}")"
 if [ "$local_sha" != "$remote_sha" ]; then
 	echo "remote binary checksum mismatch: local=$local_sha remote=$remote_sha" >&2
