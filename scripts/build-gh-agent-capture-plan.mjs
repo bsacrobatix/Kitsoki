@@ -90,16 +90,60 @@ function requireURL(name, value) {
   return value;
 }
 
+function requireLiveURL(name, value, predicate) {
+  const url = requireURL(name, value);
+  if (!predicate(url)) {
+    throw new Error(`${name} is not live POC evidence: ${url}`);
+  }
+  return url;
+}
+
+function requireStatus(label, value, predicate, expected) {
+  if (!predicate(value)) {
+    throw new Error(`${label} check is ${JSON.stringify(value)}, expected ${expected}`);
+  }
+}
+
 function buildPlan(caseSlug, markdown) {
   const cfg = CASES[caseSlug];
   if (!cfg) {
     throw new Error(`unknown case ${caseSlug}`);
   }
-  const sourceURL = requireURL("Source URL", field(markdown, "Source URL"));
-  const runURL = requireURL("Run URL", field(markdown, "Run URL"));
-  const apiURL = requireURL("API URL", field(markdown, "API URL"));
-  const commentURL = field(markdown, "Kitsoki comment URL");
-  const appCommentURL = /^https?:\/\//.test(commentURL) ? commentURL : sourceURL;
+  requireLiveURL(
+    "Webhook URL",
+    field(markdown, "Webhook URL"),
+    (u) => u === "https://kitsoki-test.slothattax.me/gh-agent/webhook",
+  );
+  const sourceURL = requireLiveURL(
+    "Source URL",
+    field(markdown, "Source URL"),
+    (u) => u.startsWith("https://github.com/bsacrobatix/Kitsoki/"),
+  );
+  const runURL = requireLiveURL(
+    "Run URL",
+    field(markdown, "Run URL"),
+    (u) => u.startsWith("https://kitsoki-test.slothattax.me/run/"),
+  );
+  const apiURL = requireLiveURL(
+    "API URL",
+    field(markdown, "API URL"),
+    (u) => u.startsWith("https://kitsoki-test.slothattax.me/api/run/"),
+  );
+  const appCommentURL = requireLiveURL(
+    "Kitsoki comment URL",
+    field(markdown, "Kitsoki comment URL"),
+    (u) => u.startsWith(sourceURL) && u.includes("#issuecomment-"),
+  );
+
+  requireStatus("Health", field(markdown, "Health"), (v) => v === "ok", "ok");
+  requireStatus(
+    "Run page",
+    field(markdown, "Run page"),
+    (v) => /^HTTP\/[0-9.]+ 2[0-9][0-9]\b/.test(v),
+    "HTTP 2xx",
+  );
+  requireStatus("API JSON", field(markdown, "API JSON"), (v) => v === "ok", "ok");
+  requireStatus("Remote DB", field(markdown, "Remote DB"), (v) => v === "ok", "ok");
 
   return {
     artifactDir: `.artifacts/github-agent-live/${caseSlug}`,
@@ -158,12 +202,16 @@ function main() {
   }
   const evidencePath = args.evidence || `.context/live-poc-${caseSlug}.md`;
   const outPath = args.out || `.artifacts/github-agent-live/capture-plan-${caseSlug}.json`;
-  const markdown = fs.readFileSync(evidencePath, "utf8");
-  const plan = buildPlan(caseSlug, markdown);
-
-  fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, `${JSON.stringify(plan, null, 2)}\n`);
-  console.log(`wrote ${outPath}`);
+  try {
+    const markdown = fs.readFileSync(evidencePath, "utf8");
+    const plan = buildPlan(caseSlug, markdown);
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, `${JSON.stringify(plan, null, 2)}\n`);
+    console.log(`wrote ${outPath}`);
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
 }
 
 main();
