@@ -154,9 +154,14 @@ not in kitsoki core.
 > → `on_error` → the rerender never fires. Always template these:
 > `spec_path: "{{ world.deck.spec_path }}"`. The same applies to a value a
 > transition-effect script needs from world — pass it as a resolved input, not via
-> `ctx.world` (which is a stale snapshot inside a transition effect). `kitsoki
-> trace --turn <n>` now prints each host call's resolved inputs + outputs, so an
-> unevaluated input shows verbatim there. Regression: `stories/slidey-edit/flows/refine_resolves_viewed_scene.yaml`.
+> `ctx.world` (which is a stale snapshot inside a transition effect). This is now
+> caught **at load**: `validateStarlarkEffects` rejects a bare-expression `inputs:`
+> value (and a literal that can't satisfy its declared sidecar type), so
+> `kitsoki validate <app.yaml>` — or any run/flow load — fails fast with a
+> "did you mean `{{ … }}`?" message instead of a silent runtime no-op. `kitsoki
+> trace --turn <n>` also prints each host call's resolved inputs + outputs, so an
+> unevaluated input shows verbatim there. Regression: `stories/slidey-edit/flows/refine_resolves_viewed_scene.yaml`
+> + `internal/app/loader_starlark_inputs_test.go`.
 
 ## Serving the companions
 

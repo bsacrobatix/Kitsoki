@@ -146,6 +146,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(materializeCmd())
 	root.AddCommand(projectProfileCmd())
 	root.AddCommand(projectToolsCmd())
+	root.AddCommand(validateCmd())
 
 	return root
 }
