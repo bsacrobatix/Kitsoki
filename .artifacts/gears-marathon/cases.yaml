@@ -43,9 +43,12 @@ cases:
     confirmed_red: true   # 2026-06-25: From<serde_json::Error> not impl -> compile-fail
   - id: bug5
     fix_sha: 8737281d
-    package: cf-resource-group
+    baseline_sha: 70d19538   # 8737281d^
+    package: cyberware-resource-group
+    oracle_test: tests/oracle_bug5.rs (validate_membership_type_code contract)
     title: "resource-group: drop RG-prefix requirement for allowed_memberships"
-    confirmed_red: false
+    test_cmd: "cargo test -p cyberware-resource-group --test domain_unit_test"
+    confirmed_red: true   # 2026-06-25: validate_membership_type_code absent -> compile-fail
   - id: bug6
     fix_sha: 26ad613f
     package: cf-account-management

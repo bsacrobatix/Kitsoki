@@ -2,7 +2,7 @@
 
 ## Fully-autonomous kitsoki dev-story over real merged-fix baselines
 
-**2 / 10 bugs shipped** — each independently verified against the real PR's hidden regression-test oracle.
+**3 / 10 bugs shipped** — each independently verified against the real PR's hidden regression-test oracle.
 
 ---
 
@@ -35,6 +35,18 @@
 - fix: `f9641874`  ·  tokens: `1724703`  ·  wall: `615s`
 
 - hidden oracle (From io/serde_json) GREEN; +12 line fix; own regression test
+
+---
+
+## bug5 — ✅ SHIPPED
+
+**resource-group: drop RG-prefix requirement for allowed_memberships**
+
+- baseline RED: `true`  ·  candidate: `gpt-5.5`  ·  exit: `finished/open-PR`
+
+- fix: `2a7c929d`  ·  tokens: `2279672`  ·  wall: `704s`
+
+- hidden oracle 4/4 GREEN; added validate_membership_type_code; matches real PR approach
 
 ---
 

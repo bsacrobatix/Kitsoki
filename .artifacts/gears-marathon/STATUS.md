@@ -1,6 +1,6 @@
 # gears-rust bugfix marathon — status
 
-**Shipped (independent-verify PASS): 2 / 10**
+**Shipped (independent-verify PASS): 3 / 10**
 
 Generated deterministically by `gen_table.py` from `cases.yaml` + `attempts.jsonl`.
 
@@ -10,7 +10,7 @@ Generated deterministically by `gen_table.py` from `cases.yaml` + `attempts.json
 | bug2 | oagw: close Pingora read pipe on streaming body limit  | 7845d2e5 | false |  |  |  |  |  |  |  |
 | bug3 | oagw: chunked transfer encoding for streaming request  | 9ca475ed | false |  |  |  |  |  |  |  |
 | bug4 | errors: support convert for different error types to C | e21d79ab | true | gpt-5.5 | finished/open-PR | PASS | 1724703 | None | 615 | hidden oracle (From io/serde_json) GREEN |
-| bug5 | resource-group: drop RG-prefix requirement for allowed | 8737281d | false |  |  |  |  |  |  |  |
+| bug5 | resource-group: drop RG-prefix requirement for allowed | 8737281d | true | gpt-5.5 | finished/open-PR | PASS | 2279672 | None | 704 | hidden oracle 4/4 GREEN; added validate_ |
 | bug6 | account-management: derive effective realm + children- | 26ad613f | false |  |  |  |  |  |  |  |
 | bug7 | account-management: claim/due predicate fences + IdP-r | f0873f75 | false |  |  |  |  |  |  |  |
 | bug8 | oagw: use gts id for upstream_id in API | 216a9ccd | false |  |  |  |  |  |  |  |

@@ -112,6 +112,28 @@ PR's `From<io::Error>`/`From<serde_json::Error>` tests; RED at baseline = compil
 ### Next
 - bug5 (resource-group allowed_memberships RG-prefix). Pin, RED-check, drive.
 
+## 2026-06-25 — bug5 SHIPPED ✅ (3/10)
+
+bug5 = `fix(resource-group): drop RG-prefix requirement for allowed_memberships`
+(8737281d, pkg `cyberware-resource-group`, baseline 70d19538). Oracle = the real PR's
+`validate_membership_type_code` contract tests; RED at baseline = compile-fail (fn absent).
+
+- Pipeline `finished`/`open-PR`, 3 forward turns, gpt-5.5. Maker added a
+  membership-specific validator `validate_membership_type_code` (no RG-prefix; still
+  rejects empty/>1024) and wired it into `create_type`/`update_type` ONLY — leaving
+  `req.code`/parent-types/add_membership/remove_membership untouched. **This matches the
+  real maintainer's fix approach.** Commit `2a7c929d`; own regression tests in
+  `type_service_test.rs`; 81 tests pass.
+- **INDEPENDENT VERIFY = PASS** — hidden oracle 4/4 GREEN (accepts external + RG-prefixed;
+  rejects empty + over-length).
+- tokens ~`see table`; wall ≈704s.
+- Note: `regression_red_pre_fix=false` (the maker's reproducer commit was a no-op — its
+  repro test landed as part of the implement commit, not a separate RED-first commit).
+  Independent oracle is authoritative; the gate technicality didn't block ship.
+
+### Next
+- bug6 (account-management effective realm + children-list parity). Pin, RED-check, drive.
+
 ### (bootstrap) Next
 - Drive bug1 through `stories/bugfix` live via `kitsoki-mcp-driver`
   (`harness:live`, explicit `trace:`, `base=e3ab3c27`, scoped `test_cmd`, fresh
