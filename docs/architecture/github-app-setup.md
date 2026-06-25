@@ -168,6 +168,29 @@ KITSOKI_GH_AGENT_LIVE_CAPTURE_PLAN=.artifacts/github-agent-live/capture-plan-bug
 pnpm -C tools/runstatus exec playwright test github-agent-live-capture --project=chromium
 ```
 
+To run the full four-case POC sequence from one guarded command, start with the
+dry run:
+
+```
+scripts/run-gh-agent-live-poc.sh --pr-url <throwaway-pr-url>
+```
+
+After reviewing the printed VM/GitHub mutations, run the live sequence only with
+explicit approval:
+
+```
+scripts/run-gh-agent-live-poc.sh \
+  --yes-live-mutations \
+  --pr-url <throwaway-pr-url> \
+  --capture \
+  --developer-arc-media <path-to-slidey-developer-arc-mp4-or-rrweb>
+```
+
+The script deploys current code unless `--skip-deploy` is set, creates the bug,
+feature, and guidance issues, comments on the supplied PR, waits for the VM
+`gh_jobs` rows, writes `.context/live-poc-*.md`, builds capture plans, optionally
+records the clips, and optionally builds the live deck.
+
 After all four live case clips and the developer-arc media exist, build the
 Slidey deck scaffold from the evidence and media:
 
