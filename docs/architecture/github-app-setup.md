@@ -129,9 +129,14 @@ The script performs:
 GOOS=linux GOARCH=amd64 GOCACHE=/private/tmp/kitsoki-gocache \
   go build -o /private/tmp/kitsoki-ghagent ./cmd/kitsoki
 scp /private/tmp/kitsoki-ghagent root@206.189.84.218:/usr/local/bin/kitsoki
+ssh root@206.189.84.218 "sha256sum /usr/local/bin/kitsoki | awk '{print \$1}'"
 ssh root@206.189.84.218 'chmod 755 /usr/local/bin/kitsoki && systemctl restart kitsoki-gh-agent'
 curl -fsS https://kitsoki-test.slothattax.me/healthz
 ```
+
+The deploy helper compares the local linux/amd64 build sha256 with the remote
+binary sha256 before restarting the service, so the live POC can prove the VM is
+running the binary just built from the current checkout.
 
 Useful read-only smoke checks:
 

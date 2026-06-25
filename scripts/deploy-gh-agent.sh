@@ -37,11 +37,23 @@ print_cmd() {
 	printf '\n'
 }
 
+checksum_file() {
+	local file="$1"
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$file" | awk '{print $1}'
+	else
+		shasum -a 256 "$file" | awk '{print $1}'
+	fi
+}
+
+remote_checksum_cmd=(ssh "$REMOTE" "sha256sum '$REMOTE_BIN' | awk '{print \$1}'")
+
 cat <<EOF
 deploy-gh-agent:
   build:  GOOS=linux GOARCH=amd64 GOCACHE=$GOCACHE $(print_cmd "${build_cmd[@]}")
   copy:   $(print_cmd "${scp_cmd[@]}")
   start:  $(print_cmd "${ssh_cmd[@]}")
+  verify: local sha256 == remote sha256 via $(print_cmd "${remote_checksum_cmd[@]}")
   health: $(print_cmd "${health_cmd[@]}")
 EOF
 
@@ -54,6 +66,13 @@ EOF
 fi
 
 GOOS=linux GOARCH=amd64 GOCACHE="$GOCACHE" "${build_cmd[@]}"
+local_sha="$(checksum_file "$OUT")"
 "${scp_cmd[@]}"
+remote_sha="$("${remote_checksum_cmd[@]}")"
+if [ "$local_sha" != "$remote_sha" ]; then
+	echo "remote binary checksum mismatch: local=$local_sha remote=$remote_sha" >&2
+	exit 1
+fi
+echo "checksum ok: $remote_sha"
 "${ssh_cmd[@]}"
 "${health_cmd[@]}"
