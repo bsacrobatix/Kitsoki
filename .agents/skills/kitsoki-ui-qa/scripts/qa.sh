@@ -39,7 +39,7 @@ shift || true
 
 feature="" scenarios="" frames="" outdir="" model="" max=48 chapters="" pacing_min="" scene="" blank_min_cov=""
 rrweb="" rrweb_min_dwell=""
-adv_flag="" strict_flag="" blank_strict_flag="" pacing_strict_flag="" rrweb_strict_flag=""
+adv_flag="" strict_flag="" blank_strict_flag="" pacing_strict_flag="" rrweb_strict_flag="" scroll_strict_flag=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --feature)     feature="$2"; shift 2 ;;
@@ -59,6 +59,7 @@ while [ $# -gt 0 ]; do
     --rrweb)         rrweb="$2"; shift 2 ;;
     --rrweb-min-dwell) rrweb_min_dwell="$2"; shift 2 ;;
     --rrweb-strict)  rrweb_strict_flag="--rrweb-strict"; shift ;;
+    --scroll-strict) scroll_strict_flag="--scroll-strict"; shift ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
 done
@@ -131,6 +132,18 @@ if [ -n "$rrweb" ]; then
   node "$here/rrweb-pacing-scan.mjs" "${rrweb_args[@]}" || true
 fi
 
+# 2e. Deterministic rrweb SCROLL-FOLLOWABILITY scan (no LLM) over the embedded
+#     conversation clip(s) — flags a snap-to-bottom capture where the transcript
+#     jumps past each message instead of easing through it (user inputs / the
+#     tops of long replies flash off-camera). This is the SCROLL dimension the
+#     time-only rrweb-pacing scan is structurally blind to. Same --rrweb input;
+#     advisory by default, --scroll-strict blocks.
+scroll_scan=""
+if [ -n "$rrweb" ]; then
+  scroll_scan="$outdir/rrweb-scroll-scan.json"
+  node "$here/rrweb-scroll-scan.mjs" "$rrweb" --out "$scroll_scan" || true
+fi
+
 # 3. Grounded, adversarially-verified vision review → verdict.json
 verdict="$outdir/verdict.json"
 review_args=( --frames "$frames_dir" --feature "$feature" \
@@ -145,6 +158,7 @@ report_args=( "$verdict" --out "$outdir/qa-report.md" $strict_flag \
   --blank-scan "$blank_scan" $blank_strict_flag )
 [ -n "$pacing_scan" ] && report_args+=( --pacing-scan "$pacing_scan" $pacing_strict_flag )
 [ -n "$rrweb_scan" ] && report_args+=( --rrweb-scan "$rrweb_scan" $rrweb_strict_flag )
+[ -n "$scroll_scan" ] && report_args+=( --scroll-scan "$scroll_scan" $scroll_strict_flag )
 "$here/report.sh" "${report_args[@]}"
 rc=$?
 echo
