@@ -142,7 +142,7 @@ kitsoki:
   story: dev-story
   instance:
     id: kitsoki
-    path: "stories/kitsoki-dev/app.yaml"
+    path: ".kitsoki/stories/kitsoki-dev/app.yaml"
     bindings:
       ticket: host.local_files.ticket
       vcs: host.git
@@ -192,7 +192,7 @@ setup_plan:
     - path: ".kitsoki/project-profile.yaml"
       action: create
       summary: "This profile — the declarative source of the dev-story instance."
-    - path: "stories/kitsoki-dev/app.yaml"
+    - path: ".kitsoki/stories/kitsoki-dev/app.yaml"
       action: create
       summary: "Generated dev-story instance with the bindings above (already exists for kitsoki; init would create it for a fresh project)."
     - path: ".kitsoki.yaml"

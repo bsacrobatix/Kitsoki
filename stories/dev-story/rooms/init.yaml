@@ -208,7 +208,7 @@ states:
           pairs:
             Conventions: "{{ world.init_conventions }}"
             Tracker:     "{{ world.init_tracker }}"
-            Writes:      ".kitsoki.yaml, .kitsoki/project-profile.yaml, stories/{{ world.init_project_id }}-dev/app.yaml"
+            Writes:      ".kitsoki.yaml, .kitsoki/project-profile.yaml, .kitsoki/stories/{{ world.init_project_id }}-dev/app.yaml"
       - heading: "Feedback"
         when: "world.init_feedback != ''"
       - prose: "{{ world.init_feedback }}"

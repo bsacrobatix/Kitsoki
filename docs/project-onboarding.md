@@ -27,10 +27,10 @@ travels with every clone and every collaborator.
 
 | Path | What | Why |
 |---|---|---|
-| `.kitsoki.yaml` | `story_dirs: [./stories]` + `default_story` | so `kitsoki` discovers your instance |
+| `.kitsoki.yaml` | `story_dirs: [./.kitsoki/stories]` + `default_story` | so `kitsoki` discovers your instance |
 | `.kitsoki/project-profile.yaml` | declarative profile (stack, commands, conventions, dev-story profile, onboarding baseline) | the discovered description of your project and the source for the implicit dev-story root |
-| `stories/<id>-dev/app.yaml` | a materialized dev-story **instance** that imports `@kitsoki/dev-story` | an editable snapshot for web discovery and project-local story extensions |
-| `stories/<id>-dev/README.md` | how to run the instance | — |
+| `.kitsoki/stories/<id>-dev/app.yaml` | a materialized dev-story **instance** that imports `@kitsoki/dev-story` | an editable snapshot for web discovery and project-local story extensions |
+| `.kitsoki/stories/<id>-dev/README.md` | how to run the instance | — |
 | `.mcp.json` | registers the **kitsoki studio MCP** server | so Claude Code / Cursor / any MCP client can drive kitsoki here |
 | `.agents/skills/<name>/` · `.agents/agents/<name>.md` | the kitsoki skill + subagent **toolkit** (source of truth) | the Codex-standard location |
 | `.claude/skills/<name>` · `.claude/agents/<name>.md` | relative symlinks into `.agents/` | so Claude Code discovers them |
@@ -117,14 +117,14 @@ instance:
 
 ```sh
 kitsoki run                                # profile-driven implicit dev-story root
-kitsoki run stories/<id>-dev/app.yaml      # materialized snapshot, useful once edited
+kitsoki run .kitsoki/stories/<id>-dev/app.yaml  # materialized snapshot, useful once edited
 ```
 
 The implicit root reads `.kitsoki/project-profile.yaml`: command gates,
 host-interface bindings, PRD/design placement, and ticket policy come from that
-single profile. The materialized `stories/<id>-dev/app.yaml` is still checked in
-so teams can extend it deliberately, but the profile is the reusable convention
-source.
+single profile. The materialized `.kitsoki/stories/<id>-dev/app.yaml` is still
+checked in so teams can extend it deliberately, but the profile is the reusable
+convention source.
 
 For reusable onboarding tests, keep `onboarding.baseline_commit` pinned to the
 commit before Kitsoki files were introduced and `first_onboarding_commit` pinned

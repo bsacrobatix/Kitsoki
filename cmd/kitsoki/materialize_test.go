@@ -110,7 +110,8 @@ func TestMaterializeCmd_RoundTripAndRefuseOverwrite(t *testing.T) {
 	root := testRepoRoot(t)
 	// Materialize's write root is a temp dir UNDER the repo root (not real
 	// stories/): @kitsoki/dev-story still resolves via findRepoRoot, while the
-	// transient stories/<slug> it writes can't race parallel stories/ walkers.
+	// transient .kitsoki/stories/<slug> it writes can't race parallel stories/
+	// walkers.
 	matRoot, err := os.MkdirTemp(root, "mat-cmd-")
 	if err != nil {
 		t.Fatalf("mkdtemp: %v", err)
@@ -231,7 +232,7 @@ func TestMaterializeCmd_AbortOnInvalidRoot(t *testing.T) {
 		t.Fatal("expected materialize to fail on invalid root.import")
 	}
 	// No app.yaml should have been written under the slug.
-	if _, statErr := os.Stat(filepath.Join(matRoot, "stories", slug, "app.yaml")); statErr == nil {
+	if _, statErr := os.Stat(filepath.Join(matRoot, ".kitsoki", "stories", slug, "app.yaml")); statErr == nil {
 		t.Fatal("materialize left a partial app.yaml after an invalid root")
 	}
 }

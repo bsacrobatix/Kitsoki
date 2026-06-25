@@ -236,7 +236,7 @@ kitsoki:
   story: dev-story
   instance:
     id: {data["project_id"]}-dev
-    path: stories/{data["project_id"]}-dev/app.yaml
+    path: .kitsoki/stories/{data["project_id"]}-dev/app.yaml
     bindings:
       ticket: host.local_files.ticket
       vcs: host.git
@@ -419,7 +419,7 @@ kitsoki:
   story: dev-story
   instance:
     id: slidey-dev
-    path: "stories/slidey-dev/app.yaml"
+    path: ".kitsoki/stories/slidey-dev/app.yaml"
     bindings:
       ticket: host.local_files.ticket
       vcs: host.git
@@ -441,12 +441,12 @@ setup_plan:
     - path: ".kitsoki/project-profile.yaml"
       action: create
       summary: "Declarative onboarding profile for Slidey."
-    - path: "stories/slidey-dev/app.yaml"
+    - path: ".kitsoki/stories/slidey-dev/app.yaml"
       action: create
       summary: "Materialized dev-story instance for Slidey."
     - path: ".kitsoki.yaml"
       action: create
-      summary: "Discover project-local stories under ./stories."
+      summary: "Discover project-local stories under ./.kitsoki/stories."
     - path: ".gitignore"
       action: merge
       summary: "Ignore local Kitsoki runtime/session artifacts."
@@ -460,7 +460,7 @@ setup_plan:
   verifications:
     - id: story-load
       kind: story
-      command: "kitsoki run stories/slidey-dev/app.yaml"
+      command: "kitsoki run .kitsoki/stories/slidey-dev/app.yaml"
       gate: required
     - id: unit-tests
       kind: tests
@@ -490,9 +490,9 @@ readiness:
 
 def config_yaml(project_id: str) -> str:
     return f"""story_dirs:
-  - ./stories
+  - ./.kitsoki/stories
 
-default_story: stories/{project_id}-dev/app.yaml
+default_story: .kitsoki/stories/{project_id}-dev/app.yaml
 project_profile: .kitsoki/project-profile.yaml
 """
 
@@ -521,7 +521,7 @@ Kitsoki dev-story instance for the {title} checkout.
 Run from the {title} repo root:
 
 ```sh
-kitsoki run stories/{story_id}/app.yaml
+kitsoki run .kitsoki/stories/{story_id}/app.yaml
 ```
 
 Or start the browser UI:
@@ -576,14 +576,14 @@ def main() -> int:
         except OSError:
             data["check_command"] = ""
     writes: list[str] = []
-    dirs = [".kitsoki", ".context", ".artifacts", ".worktrees", f"stories/{data['project_id']}-dev"]
+    dirs = [".kitsoki", ".kitsoki/stories", ".context", ".artifacts", ".worktrees", f".kitsoki/stories/{data['project_id']}-dev"]
     for rel in dirs:
         (root / rel).mkdir(parents=True, exist_ok=True)
 
     config_path = root / ".kitsoki.yaml"
     profile_path = root / ".kitsoki" / "project-profile.yaml"
-    instance_path = root / "stories" / f"{data['project_id']}-dev" / "app.yaml"
-    readme_path = root / "stories" / f"{data['project_id']}-dev" / "README.md"
+    instance_path = root / ".kitsoki" / "stories" / f"{data['project_id']}-dev" / "app.yaml"
+    readme_path = root / ".kitsoki" / "stories" / f"{data['project_id']}-dev" / "README.md"
     gitignore_path = root / ".gitignore"
 
     write_text(config_path, config_yaml(data["project_id"]), writes)

@@ -20,11 +20,11 @@ host_handlers:
         data:
           ok: true
           exit_code: 0
-          stdout: '{"status":"applied","config_path":"/Users/brad/code/slidey/.kitsoki.yaml","instance_path":"/Users/brad/code/slidey/stories/slidey-dev/app.yaml"}'
+          stdout: '{"status":"applied","config_path":"/Users/brad/code/slidey/.kitsoki.yaml","instance_path":"/Users/brad/code/slidey/.kitsoki/stories/slidey-dev/app.yaml"}'
           stdout_json:
             status: "applied"
             config_path: "/Users/brad/code/slidey/.kitsoki.yaml"
-            instance_path: "/Users/brad/code/slidey/stories/slidey-dev/app.yaml"
+            instance_path: "/Users/brad/code/slidey/.kitsoki/stories/slidey-dev/app.yaml"
       install_tools:
         # error (sibling of data) sets host.Result.Error, which fires the
         # invoke's on_error arc — the real RunHandler sets this same error on a
@@ -44,7 +44,7 @@ turns:
       init_apply_result:
         status: "applied"
         config_path: "/Users/brad/code/slidey/.kitsoki.yaml"
-        instance_path: "/Users/brad/code/slidey/stories/slidey-dev/app.yaml"
+        instance_path: "/Users/brad/code/slidey/.kitsoki/stories/slidey-dev/app.yaml"
       init_tools_ok: false
     expect_view_matches: "install failed"
 

@@ -32,18 +32,18 @@ host_handlers:
         data:
           ok: true
           exit_code: 0
-          stdout: '{"status":"applied","config_path":"/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml","profile_path":"/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml","instance_path":"/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/app.yaml","gitignore_path":"/tmp/kitsoki-init-fixtures/acme-rust/.gitignore","writes":["/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml","/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml","/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/app.yaml","/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/README.md"]}'
+          stdout: '{"status":"applied","config_path":"/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml","profile_path":"/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml","instance_path":"/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml","gitignore_path":"/tmp/kitsoki-init-fixtures/acme-rust/.gitignore","writes":["/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml","/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml","/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml","/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/README.md"]}'
           stdout_json:
             status: "applied"
             config_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
             profile_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
-            instance_path: "/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/app.yaml"
+            instance_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml"
             gitignore_path: "/tmp/kitsoki-init-fixtures/acme-rust/.gitignore"
             writes:
               - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
               - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
-              - "/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/app.yaml"
-              - "/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/README.md"
+              - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml"
+              - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/README.md"
       install_tools:
         data:
           ok: true
@@ -89,13 +89,13 @@ turns:
         status: "applied"
         config_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
         profile_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
-        instance_path: "/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/app.yaml"
+        instance_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml"
         gitignore_path: "/tmp/kitsoki-init-fixtures/acme-rust/.gitignore"
         writes:
           - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
           - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
-          - "/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/app.yaml"
-          - "/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/README.md"
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml"
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/README.md"
       init_tools_ok: true
     expect_view_matches: "studio MCP"
 
@@ -107,13 +107,13 @@ turns:
         status: "applied"
         config_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
         profile_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
-        instance_path: "/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/app.yaml"
+        instance_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml"
         gitignore_path: "/tmp/kitsoki-init-fixtures/acme-rust/.gitignore"
         writes:
           - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
           - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
-          - "/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/app.yaml"
-          - "/tmp/kitsoki-init-fixtures/acme-rust/stories/acme-rust-dev/README.md"
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml"
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/README.md"
     expect_view_matches: "acme-rust-dev"
 
 expect_no_errors: true

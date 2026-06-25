@@ -54,8 +54,8 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
 
 1. **`init_apply.py`** ([source](../../stories/dev-story/scripts/init_apply.py))
    — writes the checked-in onboarding files: `.kitsoki.yaml`,
-   `.kitsoki/project-profile.yaml`, `stories/<id>-dev/app.yaml` (+ README), and
-   appends the kitsoki runtime block to `.gitignore`. Binds
+   `.kitsoki/project-profile.yaml`, `.kitsoki/stories/<id>-dev/app.yaml` (+
+   README), and appends the kitsoki runtime block to `.gitignore`. Binds
    `init_apply_result` (the JSON report); a failure routes to
    `init_apply_failed`.
 
@@ -68,11 +68,11 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
    `internal/baseskills` (embedded toolkit; see
    [project-onboarding.md](../project-onboarding.md)).
 
-The generated `stories/<id>-dev/app.yaml` imports `@kitsoki/dev-story` from the
-binary's embedded story library and rebinds the providers to local
-implementations (`host.local_files.ticket`, `host.git`, `host.local`,
-`host.git_worktree`, `host.append_to_file`), so it runs standalone with only the
-`kitsoki` binary present.
+The generated `.kitsoki/stories/<id>-dev/app.yaml` imports
+`@kitsoki/dev-story` from the binary's embedded story library and rebinds the
+providers to local implementations (`host.local_files.ticket`, `host.git`,
+`host.local`, `host.git_worktree`, `host.append_to_file`), so it runs
+standalone with only the `kitsoki` binary present.
 
 ## The external-target profile
 
