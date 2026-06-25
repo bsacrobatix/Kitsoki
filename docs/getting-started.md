@@ -117,7 +117,45 @@ If anything here fails, the `kitsoki-web-debug` and
 
 ---
 
-## 4. Optional — a local LLM via llama.cpp
+## 4. Start using it from your coding agent — Studio MCP
+
+The easiest way to start using Kitsoki for real work is to attach the
+**studio MCP** to your coding agent. From Claude Code, Codex, Cursor, or
+another MCP client, the agent gets one control plane for Kitsoki:
+author stories, validate and flow-test them, drive live sessions, inspect
+traces, and render the TUI/web result.
+
+Claude Code can use the repo-local `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "kitsoki": {
+      "command": "kitsoki",
+      "args": ["mcp", "--stories-dir", "stories"]
+    }
+  }
+}
+```
+
+Codex uses its MCP config instead:
+
+```sh
+codex mcp add kitsoki -- kitsoki mcp --stories-dir stories
+codex mcp list
+```
+
+For story development and testing, start with the
+[Studio MCP dogfood recipe](recipes/studio-mcp-dogfood.md). It gives a
+practical loop for running a constrained driver agent that can only use
+`mcp__kitsoki__...` tools, then verifying the result with traces,
+`story.validate`, `story.test`, and no-LLM flow fixtures. This is the
+best first pattern when you want to improve stories through the same
+surface external users and non-Claude models will use.
+
+---
+
+## 5. Optional — a local LLM via llama.cpp
 
 By default the LLM decision points fork the `claude` CLI
 (`agent.claude`). You can instead route the **small, high-frequency**
@@ -226,7 +264,7 @@ everything that doesn't name it.
 
 ---
 
-## 5. Choosing the model & provider — harness profiles
+## 6. Choosing the model & provider — harness profiles
 
 A session can switch which LLM **backend/provider** and **model** answer it,
 live, without restarting. You declare named **harness profiles** in
@@ -289,11 +327,11 @@ Two non-obvious things, learned the hard way — read these before you debug a
 
 The example config also ships `synthetic-codex` (the codex-on-synthetic profile,
 which needs the `config.toml` step above) and `llama-local`
-([§4](#4-optional--a-local-llm-via-llamacpp)).
+([§5](#5-optional--a-local-llm-via-llamacpp)).
 
 ---
 
-## 6. Using kitsoki in another repo
+## 7. Using kitsoki in another repo
 
 Once `kitsoki` is installed (step 2) it's a single binary on your
 PATH — it isn't tied to this checkout. A *story* is just an `app.yaml`
@@ -341,7 +379,7 @@ cd "$KITSOKI_REPO"
 kitsoki run /Users/brad/code/Kitsoki/stories/<story>/app.yaml
 ```
 
-> If your demo story declares a `builtin.local_llm` agent (§4), the
+> If your demo story declares a `builtin.local_llm` agent (§5), the
 > same endpoint/managed rules apply regardless of which repo you run
 > from — the cache and sidecar are per-user, not per-repo.
 
