@@ -50,6 +50,18 @@ Before submitting:
   field, and quote the failing output in `actual_outcome`. If you cannot make it
   fail, the bug is not reproduced — say so honestly in `summary_markdown` rather
   than submitting a green test.
+- **Assert the ticket's end-to-end OUTCOME, not an intermediate signal.** Your
+  test must assert the observable behaviour the ticket promises — what the
+  caller / user / downstream system actually receives — NOT an implementation-side
+  proxy for it that merely correlates. A test that checks a *mechanism was engaged*
+  (a header was set, a code path ran, a flag flipped, a wire format was chosen) can
+  pass RED→GREEN while the real deliverable is still broken. If the ticket says
+  "X reaches Y intact", assert that **Y received the complete X** — not that the
+  sender framed it correctly. When the bug spans a boundary
+  (client→proxy→upstream, request→DB→read-back, API→serializer→response), assert at
+  the **far side** of that boundary, on the actual payload/value, for the happy
+  path AND each edge case the ticket names. A reproducer that asserts only the
+  near-side signal is exactly how an incomplete fix ships green.
 - **`repro_command` is load-bearing — it becomes the regression gate.** When the
   ticket carried no `repro_command` of its own, the pipeline COMMITS your test
   (the files you list in `repro_test_paths`) as the discrete pre-fix reproducer

@@ -55,6 +55,14 @@ Before submitting:
   on the next cycle.
 - `tests_added` must list new / modified test files. Reuse existing tests
   where possible; only add fresh ones if no existing test covers the bug.
+- **Check the test asserts the ticket's end-to-end OUTCOME, not a near-side
+  signal.** A green log is necessary but not sufficient: confirm the reproduction
+  actually asserts the observable deliverable the ticket promises (what the
+  caller / downstream / far side of the boundary receives), not merely that a
+  mechanism engaged (a header set, a code path hit, a wire format chosen). If the
+  test only checks the near-side signal while the ticket's real outcome could
+  still be broken, that is a `blocker` — the fix may be incomplete even though the
+  test is green. Name the missing far-side assertion in `blockers`.
 - `blockers` are review-grade objections that must be fixed before the
   PR can advance.
 
