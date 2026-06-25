@@ -654,7 +654,7 @@ episodes:
     handler: host.agent.task
     call: punch_drive-load-bug
   response:
-    data: &id003
+    data:
       ok: true
       submitted:
         status: passed
@@ -669,7 +669,7 @@ episodes:
     handler: host.agent.task
     call: punch_implementation-load-bug
   response:
-    data: &id004
+    data:
       ok: true
       submitted:
         status: passed
@@ -684,100 +684,253 @@ episodes:
     handler: host.agent.task
     call: punch_drive-capability-taxonomy
   response:
-    data: *id003
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/dev-story/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/capability-taxonomy.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: story driven through Studio MCP
 - id: punch_implementation-capability-taxonomy
   match:
     handler: host.agent.task
     call: punch_implementation-capability-taxonomy
   response:
-    data: *id004
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/cherny-loop/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/capability-taxonomy-impl.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: implementation story exercised
 - id: punch_drive-toolbox-enforcement
   match:
     handler: host.agent.task
     call: punch_drive-toolbox-enforcement
   response:
-    data: *id003
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/cherny-loop/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/toolbox-enforcement.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: story driven through Studio MCP
 - id: punch_implementation-toolbox-enforcement
   match:
     handler: host.agent.task
     call: punch_implementation-toolbox-enforcement
   response:
-    data: *id004
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/cherny-loop/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/toolbox-enforcement-impl.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: implementation story exercised
 - id: punch_drive-cassette-conformance
   match:
     handler: host.agent.task
     call: punch_drive-cassette-conformance
   response:
-    data: *id003
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/model-harness-eval/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/cassette-conformance.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: story driven through Studio MCP
 - id: punch_implementation-cassette-conformance
   match:
     handler: host.agent.task
     call: punch_implementation-cassette-conformance
   response:
-    data: *id004
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/cherny-loop/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/cassette-conformance-impl.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: implementation story exercised
 - id: punch_drive-project-init-hardening
   match:
     handler: host.agent.task
     call: punch_drive-project-init-hardening
   response:
-    data: *id003
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/dev-story/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/project-init-hardening.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: story driven through Studio MCP
 - id: punch_implementation-project-init-hardening
   match:
     handler: host.agent.task
     call: punch_implementation-project-init-hardening
   response:
-    data: *id004
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/cherny-loop/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/project-init-hardening-impl.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: implementation story exercised
 - id: punch_drive-session-mining-productization
   match:
     handler: host.agent.task
     call: punch_drive-session-mining-productization
   response:
-    data: *id003
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/dev-story-mining/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/session-mining-productization.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: story driven through Studio MCP
 - id: punch_implementation-session-mining-productization
   match:
     handler: host.agent.task
     call: punch_implementation-session-mining-productization
   response:
-    data: *id004
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/cherny-loop/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/session-mining-productization-impl.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: implementation story exercised
 - id: punch_drive-deliver-decomposition-decision
   match:
     handler: host.agent.task
     call: punch_drive-deliver-decomposition-decision
   response:
-    data: *id003
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/deliver/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/deliver-decomposition-decision.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: story driven through Studio MCP
 - id: punch_drive-contextual-routing-controls
   match:
     handler: host.agent.task
     call: punch_drive-contextual-routing-controls
   response:
-    data: *id003
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/routing-demo/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/contextual-routing-controls.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: story driven through Studio MCP
 - id: punch_implementation-contextual-routing-controls
   match:
     handler: host.agent.task
     call: punch_implementation-contextual-routing-controls
   response:
-    data: *id004
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/cherny-loop/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/contextual-routing-controls-impl.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: implementation story exercised
 - id: punch_drive-multi-hop-routing
   match:
     handler: host.agent.task
     call: punch_drive-multi-hop-routing
   response:
-    data: *id003
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/kitsoki-dev/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/multi-hop-routing.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: story driven through Studio MCP
 - id: punch_implementation-multi-hop-routing
   match:
     handler: host.agent.task
     call: punch_implementation-multi-hop-routing
   response:
-    data: *id004
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/cherny-loop/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/multi-hop-routing-impl.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: implementation story exercised
 - id: punch_drive-story-qa-workflow
   match:
     handler: host.agent.task
     call: punch_drive-story-qa-workflow
   response:
-    data: *id003
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/dogfood-marathon/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/story-qa-workflow.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: story driven through Studio MCP
 - id: punch_implementation-story-qa-workflow
   match:
     handler: host.agent.task
     call: punch_implementation-story-qa-workflow
   response:
-    data: *id004
+    data:
+      ok: true
+      submitted:
+        status: passed
+        story: stories/cherny-loop/app.yaml
+        trace_path: .artifacts/top10-dogfood/traces/story-qa-workflow-impl.jsonl
+        model: gpt-5.5
+        profile: codex-native
+        findings: []
+        summary: implementation story exercised
