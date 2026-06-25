@@ -639,6 +639,10 @@ Flow fixtures that exercise those imports carry `host.agent.decide:` and
 
 ## See also
 
+- [`docs/project-onboarding.md`](../../docs/project-onboarding.md) /
+  [`docs/stories/dev-story-onboarding.md`](../../docs/stories/dev-story-onboarding.md)
+  — the project onboarding pipeline (the `init` rooms) that installs a runnable
+  instance + studio MCP + skill/agent toolkit into a target repo.
 - [`docs/case-studies/bug-fix.md`](../../docs/case-studies/bug-fix.md)
   — the design.
 - [`docs/proposals/notes/dev-story-implementation-contract.md`](../../docs/proposals/notes/dev-story-implementation-contract.md)

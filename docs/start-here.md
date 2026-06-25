@@ -9,6 +9,7 @@ different paths. Use this page to pick the shortest useful route.
 |---|---|
 | Evaluating the idea | [`../README.md`](../README.md) -> [`architecture/concept.md`](architecture/concept.md) -> [`case-studies/bug-fix.md`](case-studies/bug-fix.md) |
 | Running kitsoki locally | [`../README.md`](../README.md#quickstart) -> [`getting-started.md`](getting-started.md) -> [`tracing/testing.md`](tracing/testing.md) |
+| Setting up kitsoki in your own project | [`getting-started.md`](getting-started.md) -> [`project-onboarding.md`](project-onboarding.md) -> [`stories/dev-story-onboarding.md`](stories/dev-story-onboarding.md) |
 | Writing a story | [`stories/architecture.md`](stories/architecture.md) -> [`recipes/`](recipes/README.md) -> [`stories/authoring.md`](stories/authoring.md) -> [`embedded/app-schema.md`](embedded/app-schema.md) |
 | Contributing to kitsoki | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`architecture/overview.md`](architecture/overview.md) -> [`architecture/developer-guide.md`](architecture/developer-guide.md) |
 | Debugging a session | [`tracing/README.md`](tracing/README.md) -> [`tracing/testing.md`](tracing/testing.md) -> [`tracing/trace-format.md`](tracing/trace-format.md) |

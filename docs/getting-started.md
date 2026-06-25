@@ -303,6 +303,13 @@ at. Host calls (`host.bash`, agent work, git operations) run in the
 `cwd:`. So the simplest way to drive another repo is to **run kitsoki
 from inside it**, passing the story by absolute path.
 
+> **Setting up a project for keeps?** The ad-hoc "run from inside it"
+> approach below is great for a one-off demo. To install a committed,
+> working kitsoki environment *into* your repo — a runnable dev-story
+> instance, the studio MCP registered for your coding agent, and the
+> skill/agent toolkit — use **project onboarding** instead:
+> [`project-onboarding.md`](project-onboarding.md).
+
 ### Example — a demo against `~/code/cyberware-rust`
 
 ```sh
