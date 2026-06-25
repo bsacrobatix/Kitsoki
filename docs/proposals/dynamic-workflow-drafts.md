@@ -6,7 +6,7 @@
 
 ## Why
 
-A dynamic workflow is only useful if the generated artifact is a first-class Kitsoki story before it runs. Today MCP can write and validate story files (`docs/architecture/mcp-studio.md:142`), and stories already map workflow concepts onto rooms, transitions, guards, world, host calls, and deciders (`docs/stories/architecture.md:963`). What is missing is a constrained scratch package format for generated workflows, plus invariants that reject unsafe or incomplete drafts before any session starts.
+A dynamic workflow is only useful if the generated artifact is a first-class Kitsoki story before it runs. Today MCP can write and validate story files (`docs/architecture/mcp-studio.md:152`), and stories already map workflow concepts onto rooms, transitions, guards, world, host calls, and deciders (`docs/stories/architecture.md:965`). What is missing is a constrained scratch package format for generated workflows, plus invariants that reject unsafe or incomplete drafts before any session starts.
 
 ## What changes
 
