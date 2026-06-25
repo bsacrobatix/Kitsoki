@@ -1,12 +1,12 @@
 # bench-bugfix — the provider-neutral `bugfix` pipeline, pointed at ANY repo for
-# benchmarking. A thin, GENERIC instance: unlike gears-bugfix (which bakes one
-# ticket for a demo), this bakes NOTHING — every field (ticket, workdir, test
+# benchmarking. A thin, GENERIC instance: it bakes NOTHING — every field
+# (ticket, workdir, test
 # command, judge mode) is seeded per session via `session.new {initial_world}`.
 # That makes it the reusable harness for the external bug-fix bake-off: drive it
 # live under any harness profile (codex-native → GPT-5.5, synthetic-claude →
 # GLM-5.2) against a prepared worktree, and grade the resulting fix.
 #
-# Host bindings are the local file/git/CI seam (same as gears-bugfix). The full
+# Host bindings are the local file/git/CI seam. The full
 # bug description is carried in `ticket_title` (the reproducing room forwards
 # ticket_id + ticket_title to the reproducer; no ticket file is read), so a rich
 # initial_world.ticket_title is all the model needs. judge_mode defaults to `llm`
@@ -91,7 +91,7 @@ world:
   # true ⇒ bf.idle does NOT auto-derive workspace_id/feature_branch/workdir or
   # auto-create a worktree (which would clobber the pre-prepared workdir and try
   # to create a worktree in the wrong repo). The driver seeds workdir +
-  # workspace_id + feature_branch and drives `start` explicitly (see gears-bugfix).
+  # workspace_id + feature_branch and drives `start` explicitly.
   bf_autostart_attempted: { type: bool, default: true }
 
 states:

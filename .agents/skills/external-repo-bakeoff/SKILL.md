@@ -72,6 +72,15 @@ ln -sfn <clone>/node_modules <cell>/node_modules   # reuse one install
 
 ## Phase 3 — Drive the pipeline LIVE (the tuning that gets good cases)
 
+**The one-command path** (codifies everything below — prefer it):
+```sh
+tools/bugfix-bakeoff/external/drive_cell.sh \
+    --project <name> --bug <bug> --candidate <key> --score
+```
+It reads the manifest + `candidates.yaml`, preps the baseline worktree, bakes in
+every `initial_world` knob, drives live via `drive.sh`, then scores + extracts
+cost. The rest of this phase is what it automates — read it to debug or extend.
+
 Drive `stories/bench-bugfix` through the **headless MCP primitive**
 `tools/mcp-drive/drive.sh` — NOT the in-process Agent tool (an in-process subagent
 inherits the parent's empty MCP set → "No MCP servers configured" → drives

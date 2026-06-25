@@ -1,0 +1,22 @@
+# Candidate models for the external bake-off — the provider/profile axis, shared
+# across every project. Each candidate names a kitsoki harness profile; the
+# profile's model supersedes the bench-bugfix agent-defs, so driving a session
+# under `profile` makes that model the worker (reproducer/implementer/judge).
+#
+# `short` is the branch/worktree suffix (bench-<bug>-<short>). Keep it filesystem
+# safe. Add a candidate by adding a profile to .kitsoki.local.yaml and a row here.
+#
+# Consumed by drive_cell.sh. Non-Claude providers are the point of the study
+# (does kitsoki's structure make a cheaper/open model competitive?), but any
+# configured profile works.
+candidates:
+  - key: gpt-5.5
+    short: gpt
+    profile: codex-native       # OpenAI Codex (ChatGPT subscription auth)
+    provider: openai-codex
+    metered: false              # subscription auth → trace carries no cost_usd
+  - key: glm-5.2
+    short: glm
+    profile: synthetic-claude   # GLM-5.2 via synthetic.new (Anthropic-format)
+    provider: synthetic.new
+    metered: true               # trace carries payload.meta.cost_usd

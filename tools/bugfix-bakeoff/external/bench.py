@@ -189,6 +189,36 @@ def verify(m, only_bug, repo_dir):
     return 0 if ok else 1
 
 
+def trace_cost(trace):
+    """Sum the worker cost + tokens from a live kitsoki trace.
+    Metered providers carry payload.meta.cost_usd; subscription auth carries
+    none, so we always also report token usage + agent-call count."""
+    if not os.path.exists(trace):
+        print(json.dumps({"error": "no trace", "trace": trace}))
+        return 1
+    cost = 0.0
+    tin = tout = calls = 0
+    for line in open(trace):
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        p = o.get("payload", {}) or {}
+        meta = p.get("meta", {}) if isinstance(p.get("meta"), dict) else {}
+        c = meta.get("cost_usd")
+        if isinstance(c, (int, float)):
+            cost += c
+        u = meta.get("usage", {}) if isinstance(meta.get("usage"), dict) else {}
+        tin += u.get("input_tokens", 0) or 0
+        tout += u.get("output_tokens", 0) or 0
+        if o.get("kind") == "agent.call.complete":
+            calls += 1
+    print(json.dumps({"trace": trace, "cost_usd": round(cost, 4),
+                      "input_tokens": tin, "output_tokens": tout,
+                      "agent_calls": calls, "metered": cost > 0}))
+    return 0
+
+
 def export(repo, sha, dest):
     Path(dest).mkdir(parents=True, exist_ok=True)
     p1 = subprocess.Popen(["git", "-C", str(repo), "archive", sha], stdout=subprocess.PIPE)
@@ -215,19 +245,34 @@ def main():
     v.add_argument("--repo-dir", help="prebuilt clone with node_modules to reuse")
     mt = sub.add_parser("meta")  # machine-readable project facts (for the Go runner)
     mt.add_argument("--project", required=True)
+    mt.add_argument("--bug")     # optional: emit one bug's drive facts
+    c = sub.add_parser("cost")   # worker cost/tokens from a live trace
+    c.add_argument("--trace", required=True)
     a = ap.parse_args()
+
+    if a.cmd == "cost":
+        sys.exit(trace_cost(a.trace))
 
     m = load(a.project)
     if a.cmd == "score":
         sys.exit(score(m, bug_of(m, a.bug), a.tree, a.out, a.candidate, a.treatment))
     elif a.cmd == "meta":
         p = m["project"]
-        print(json.dumps({
-            "id": p["id"], "repo": p["repo"],
-            "onboard_app": p.get("onboard_app", "@kitsoki/dev-story"),
-            "baselines": [b["baseline_sha"] for b in m["bugs"]],
-            "bugs": [b["id"] for b in m["bugs"]],
-        }))
+        if a.bug:
+            b = bug_of(m, a.bug)
+            print(json.dumps({
+                "id": p["id"], "repo": p["repo"], "install": p["install"],
+                "test_cmd": p.get("test_cmd", ""),
+                "bug": b["id"], "baseline_sha": b["baseline_sha"], "fix_sha": b["fix_sha"],
+                "title": b["title"], "ticket": b.get("ticket", b["title"]),
+            }))
+        else:
+            print(json.dumps({
+                "id": p["id"], "repo": p["repo"],
+                "onboard_app": p.get("onboard_app", "@kitsoki/dev-story"),
+                "baselines": [b["baseline_sha"] for b in m["bugs"]],
+                "bugs": [b["id"] for b in m["bugs"]],
+            }))
         sys.exit(0)
     else:
         sys.exit(verify(m, a.bug, a.repo_dir))

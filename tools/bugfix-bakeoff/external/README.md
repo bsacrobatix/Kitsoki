@@ -69,16 +69,31 @@ and every fixture is armed **before** any LLM is spent.
 
 ## Run cost-bearing LLM cells (operator-only)
 
-Drive the kitsoki bugfix pipeline live under a harness profile against a prepared
-baseline worktree, then grade the result. The headless delegation primitive is
-[`tools/mcp-drive/drive.sh`](../../mcp-drive/README.md) (raw `claude -p` with the
-studio MCP attached); the live worker model is chosen by `session.new {profile,
-harness:"live"}` — `codex-native` → GPT-5.5, `synthetic-claude` → GLM-5.2. The
-generic bugfix instance is [`stories/bench-bugfix`](../../../stories/bench-bugfix)
-(seed `workspace_id:""` so the implementer edits the prepared worktree directly).
-Score the resulting worktree with `bench.py score … --out results/cells/<cell>.json`;
-its `cost_usd` comes from the kitsoki trace (`payload.meta.cost_usd`) — the exact
-price of the proposed fix, lined up against the real maintainer fix.
+A whole cell — prepare the baseline worktree, drive the kitsoki bugfix pipeline
+live under a candidate model, grade it, extract cost — is **one command**:
+
+```sh
+tools/bugfix-bakeoff/external/drive_cell.sh \
+    --project query-string --bug qs1 --candidate gpt-5.5 --score
+#   --no-drive  prepares the worktree + prints the prompt only (free, for review)
+```
+
+`drive_cell.sh` reads the manifest (`bench.py meta`) + [`candidates.yaml`](candidates.yaml)
+(the model/profile axis), clones the repo once (reusing `node_modules`), bakes in
+every load-bearing `initial_world` knob (the recipe below), and delegates the live
+drive to [`tools/mcp-drive/drive.sh`](../../mcp-drive/README.md) (raw `claude -p`
+with the studio MCP attached). The **worker** model is chosen by `session.new
+{profile, harness:"live"}` — `codex-native` → GPT-5.5, `synthetic-claude` →
+GLM-5.2; the orchestrator (cheap sonnet) only advances the pipeline. The generic
+instance it drives is [`stories/bench-bugfix`](../../../stories/bench-bugfix).
+
+`--score` grades the worktree (`bench.py score`) and extracts the worker cost
+(`bench.py cost --trace …` → `cost_usd` for metered providers, token usage for
+subscription auth). The load-bearing knobs `drive_cell.sh` sets (each learned from
+a failure) are tabulated in the
+[`external-repo-bakeoff` skill](../../../.agents/skills/external-repo-bakeoff/SKILL.md);
+the key one is `workspace_id:""` so the implementer edits the prepared worktree
+directly instead of creating one against the wrong repo root.
 
 See [`docs/case-studies/query-string-bakeoff.md`](../../../docs/case-studies/query-string-bakeoff.md)
 for the worked GPT-5.5-vs-GLM-5.2 study.
