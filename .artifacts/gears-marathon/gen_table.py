@@ -24,7 +24,10 @@ def load_cases():
             cur = {"id": s.split("- id:")[1].strip()}
         elif cur is not None and ":" in s and not s.startswith("#"):
             k = s.split(":", 1)[0].strip()
-            v = s.split(":", 1)[1].strip().strip('"')
+            v = s.split(":", 1)[1]
+            if " #" in v:            # strip inline comment
+                v = v.split(" #", 1)[0]
+            v = v.strip().strip('"')
             if k in ("title", "package", "fix_sha", "baseline_sha", "confirmed_red"):
                 cur[k] = v
     if cur: cases.append(cur)
@@ -32,6 +35,7 @@ def load_cases():
 
 def load_attempts():
     p = os.path.join(HERE, "attempts.jsonl")
+    # latest attempt per bug, by file order (append-only journal).
     latest = {}
     if os.path.exists(p):
         for line in open(p):
@@ -39,19 +43,17 @@ def load_attempts():
             if not line:
                 continue
             r = json.loads(line)
-            latest[(r["bug"], r.get("candidate", ""), r.get("treatment", "kitsoki"))] = r
+            latest[r["bug"]] = r
     return latest
 
 def main():
     cases = load_cases()
     latest = load_attempts()
-    shipped = sum(1 for r in latest.values()
-                  if r.get("treatment") == "kitsoki" and r.get("verify") == "PASS")
+    shipped = sum(1 for r in latest.values() if r.get("verify") == "PASS")
     rows = []
     for c in cases:
         bug = c["id"]
-        r = latest.get((bug, "", "kitsoki")) or next(
-            (v for k, v in latest.items() if k[0] == bug and k[2] == "kitsoki"), None)
+        r = latest.get(bug)
         red = c.get("confirmed_red", "?")
         if r:
             verify = r.get("verify", "PENDING")
@@ -77,6 +79,39 @@ def main():
         out.append("| " + " | ".join(str(x) for x in row) + " |")
     open(os.path.join(HERE, "STATUS.md"), "w").write("\n".join(out) + "\n")
     print("\n".join(out))
+    emit_deck(cases, latest, shipped)
+
+def emit_deck(cases, latest, shipped):
+    """Deterministic slidey-deck SOURCE (markdown), one slide per bug + summary.
+    Rendered to HTML/MP4 by the slidey pipeline; regenerates with zero re-spend."""
+    d = []
+    d.append("# gears-rust bugfix marathon\n")
+    d.append("## Fully-autonomous kitsoki dev-story over real merged-fix baselines\n")
+    d.append(f"**{shipped} / 10 bugs shipped** — each independently verified against "
+             "the real PR's hidden regression-test oracle.\n")
+    d.append("---\n")
+    d.append("## Method\n")
+    d.append("- Baseline = the real fix's PARENT commit; bug confirmed RED there.\n"
+             "- Drive `stories/bugfix` LIVE via the kitsoki studio MCP "
+             "(`kitsoki-mcp-driver`); zero human edits.\n"
+             "- Independent verify: the real PR's regression test (HIDDEN from the maker) "
+             "must turn GREEN.\n")
+    d.append("---\n")
+    for c in cases:
+        r = latest.get(c["id"])
+        if not r:
+            continue
+        v = r.get("verify", "PENDING")
+        badge = {"PASS": "✅ SHIPPED", "FAIL": "❌ FAILED"}.get(v, "… in progress")
+        d.append(f"## {c['id']} — {badge}\n")
+        d.append(f"**{c.get('title','')}**\n")
+        d.append(f"- baseline RED: `{c.get('confirmed_red','?')}`  ·  "
+                 f"candidate: `{r.get('candidate','')}`  ·  exit: `{r.get('drive_exit','')}`\n")
+        d.append(f"- fix: `{r.get('fix_sha','')}`  ·  tokens: `{r.get('tokens','')}`  ·  "
+                 f"wall: `{r.get('wall_s','')}s`\n")
+        d.append(f"- {r.get('notes','')}\n")
+        d.append("---\n")
+    open(os.path.join(HERE, "slidey", "deck.md"), "w").write("\n".join(d) + "\n")
 
 if __name__ == "__main__":
     main()

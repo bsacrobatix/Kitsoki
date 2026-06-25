@@ -1,12 +1,12 @@
 # gears-rust bugfix marathon — status
 
-**Shipped (independent-verify PASS): 0 / 10**
+**Shipped (independent-verify PASS): 1 / 10**
 
 Generated deterministically by `gen_table.py` from `cases.yaml` + `attempts.jsonl`.
 
 | bug | title | fix_sha | RED? | cand | exit | verify | tokens | cost$ | wall_s | notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| bug1 | gh-4115: normalize underscore→dash for k8s env-var ove | a7080261 | false |  |  | PENDING |  |  |  | baseline RED confirmed (100!=50); drivin |
+| bug1 | gh-4115: normalize underscore→dash for k8s env-var ove | a7080261 | true | gpt-5.5 | finished/open-PR | PASS | 2308868 | None | 854 | hidden oracle gh4115 GREEN; maker author |
 | bug2 | oagw: close Pingora read pipe on streaming body limit  | 7845d2e5 | false |  |  |  |  |  |  |  |
 | bug3 | oagw: chunked transfer encoding for streaming request  | 9ca475ed | false |  |  |  |  |  |  |  |
 | bug4 | errors: support convert for different error types to C | e21d79ab | false |  |  |  |  |  |  |  |

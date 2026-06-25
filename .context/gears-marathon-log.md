@@ -44,7 +44,47 @@ driving. Flaky-timing test fixes deliberately excluded (non-deterministic oracle
 **Infra stood up.** `gen_table.py` (no-dep YAML/JSONL → STATUS.md), seeded
 `attempts.jsonl`, slidey deck scaffold under `slidey/`.
 
+## 2026-06-25 — bug1 SHIPPED ✅ (1/10)
+
+Drove bug1 through `stories/bench-bugfix` LIVE via `kitsoki-mcp-driver`, profile
+`codex-native` (gpt-5.5), against the prepared worktree
+`~/code/gears-rust/.worktrees/marathon-bug1-gpt` (baseline e3ab3c27, `workspace_id:""`
+so the maker edits the prepared worktree directly). Proven template adapted from
+`.artifacts/qs-bakeoff/drive-prompts/`.
+
+- **Pipeline:** reproduce → propose → implement → (operator accept) → testing →
+  reviewing → done → `finished` / status `fixed` / exit `open-PR`. 3 forward turns.
+- **Maker work:** RED-first reproducer (`left:100 right:50`, bug_verified=true) →
+  1-file fix in `libs/toolkit/src/bootstrap/config/mod.rs` (commit `516f14bc`,
+  +166/-13) reconciling underscore env aliases onto the dashed gear key; authored
+  its OWN regression test + underscore negative control; 63 tests pass; judge accept 0.93.
+- **INDEPENDENT VERIFY = PASS.** Copied the real gh-4115 PR test (`verify/bug1-oracle.rs`,
+  public-API only) into the maker's worktree → **GREEN** (was RED at baseline). Removed
+  it afterward to keep the maker tree pristine. The fix is correct by the hidden oracle,
+  not just the maker's self-report.
+- **Cost/tokens:** trace `traces/bug1-gpt-5.5.jsonl` — tokens ~2.31M total (in 2.29M /
+  out 21k); gpt/codex provider journals **no `cost_usd`** in the trace (finding).
+  Wall ≈ 854s incl. cold Rust builds.
+
+### Findings (bug1)
+- **F1 (cost):** codex/gpt traces carry no `payload.meta.cost_usd` → USD cost is
+  unrecoverable for that provider; tokens are the only consistent axis. (matrix-comparison cost accounting.)
+- **F2 (driver self-verify):** `kitsoki-mcp-driver`'s MCP surface has no trace-by-path
+  reader and no git/shell tool, so it cannot capture commit SHAs or run the oracle
+  itself — the operator must verify out-of-band. Expected per the "trust independent
+  verify, not agent return" discipline, but worth a studio read-only `git_status`/
+  `trace_read` affordance so the driver can self-report deliverable existence.
+- **F3 (bench ticket-tracker):** terminal `host.local_files.ticket.transition: bug1
+  not found` at `done→finished` — non-fatal in bench mode (no ticket file seeded);
+  state still reached `finished`. Cosmetic; the bench story should no-op the
+  transition when the ticket tracker has no record.
+
 ### Next
+- bug2 (oagw streaming body-limit pipe). Pin baseline, confirm RED, drive.
+
+---
+
+### (bootstrap) Next
 - Drive bug1 through `stories/bugfix` live via `kitsoki-mcp-driver`
   (`harness:live`, explicit `trace:`, `base=e3ab3c27`, scoped `test_cmd`, fresh
   per-case worktree), then independently verify with the bug1 oracle.
