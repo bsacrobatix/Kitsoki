@@ -1,64 +1,193 @@
 # Epic: Dynamic Workflows
 
-**Status:** Draft v1. No slices implemented yet.
+**Status:** Draft v1. Nothing implemented yet.
 **Kind:**   epic
 **Slices:** 4 (0/4 shipped)
 
 ## Why
 
-Claude's dynamic workflows make an agent write a JavaScript plan, decompose the task, and install validation gates. Kitsoki already has the safer substrate for that pattern: YAML stories, load-time validation, deterministic flow tests, host cassettes, JSONL traces, Studio MCP sessions, and a web UI that can track a live run. The missing product loop is letting an operator ask Kitsoki to synthesize a workflow, validate and execute it in the Kitsoki engine immediately, then promote the proven run into a reusable base story with starter fixtures.
+Operators sometimes need a one-off workflow before it is worth hand-authoring a
+durable story. The useful loop is: describe the task, get a Kitsoki YAML draft,
+validate it before launch, run it with normal trace/session visibility, then
+promote a successful run into a reusable story with starter deterministic
+artifacts. Kitsoki is already built around that progressive-determinism loop:
+ideas become traced runs, repeated decisions become rooms/intents/transitions,
+and the story gets more deterministic over time
+(`docs/architecture/concept.md:191`).
+
+Kitsoki also already has the safer substrate for dynamic workflows. A story is a
+superset of a workflow (`docs/stories/architecture.md:955`), story YAML maps
+workflow terms onto rooms, transitions, world, host handlers, sessions, and event
+logs (`docs/stories/architecture.md:963`), and Studio MCP exposes deterministic
+story authoring tools that wrap the same load/test APIs as the CLI
+(`docs/architecture/mcp-studio.md:142`, `internal/mcp/studio/story_tools.go:18`).
+The missing product loop is one shared dynamic-workflow service that MCP, CLI,
+TUI, and web can all call without creating separate generators or a second
+runtime.
 
 ## What changes
 
-Kitsoki gains a dynamic workflow lane across MCP, CLI, TUI, and web:
+Kitsoki gains a shared dynamic workflow lifecycle across MCP, CLI, TUI, and web:
 
 1. An operator describes a one-off workflow in natural language.
-2. Kitsoki creates a temporary story package in YAML, not JavaScript, with explicit rooms, intents, world schema, host calls, and validation gates.
-3. The draft is validated before it can run.
-4. The draft runs through the existing session engine, trace sink, cassettes, and runstatus UI.
-5. The operator can export the proven draft as a reusable base story, plus starter flow fixtures and host cassettes derived from the run.
+2. A dependency-injected dynamic workflow service creates a temporary story
+   package in YAML, not JavaScript, with explicit rooms, intents, world schema,
+   host calls, and validation gates.
+3. The service writes a scratch manifest containing workflow id, source task,
+   generator surface, model/profile, draft path, validation report hash, allowed
+   host capabilities, trace path, session handle, and promotion eligibility.
+4. The draft is validated with the existing story loader plus dynamic-specific
+   invariants before it can run.
+5. The validated draft runs through the existing session engine, trace sink,
+   cassettes, and runstatus UI.
+6. MCP, CLI, TUI, and web all receive the same receipt: manifest identity,
+   validation status, trace path, session handle, and tracking URL when a web
+   server is available.
+7. After a successful run, export copies the reviewed draft into a project-local
+   reusable story plus starter flow fixtures and host cassettes.
 
-The first implementation should be conservative: dynamic workflows are ordinary stories in a scratch namespace with extra provenance, promotion, and cleanup metadata. There is no second workflow interpreter.
+V1 ships MCP and CLI first. TUI and web are later adapters over the same service,
+not parallel generation paths. Internal base-story promotion is outside the
+default path and requires explicit operator approval after project-local export is
+proven.
+
+The first implementation should stay conservative: dynamic workflows are ordinary
+stories in a scratch namespace with extra provenance, validation, receipt,
+promotion, and cleanup metadata. There is no second workflow interpreter.
 
 ## Impact
 
 - **Spans:** runtime, story, tracing, TUI/web/CLI/MCP surface.
-- **Net surface:** new dynamic-workflow authoring session, new draft-story package convention, CLI/MCP/web/TUI entrypoints, runstatus tracking URL, promotion/export commands.
+- **Net surface:** shared dynamic workflow service, new draft-story package
+  convention, MCP/CLI create-run-status-export entrypoints, later TUI/web
+  adapters, runstatus tracking URL, promotion/export commands.
 - **Docs on ship:** `docs/architecture/mcp-studio.md`, `docs/stories/architecture.md`, `docs/stories/state-machine.md`, `docs/tracing/trace-format.md`, `docs/web/README.md`, and a new `docs/stories/dynamic-workflows.md`.
+- **Existing proposal set:** keep this epic as the index and amend the four child
+  proposals instead of publishing a second design:
+  `dynamic-workflow-drafts.md`, `dynamic-workflow-authoring-surfaces.md`,
+  `dynamic-workflow-tracking.md`, and `dynamic-workflow-promotion.md`.
+- **No-LLM verification:** automated coverage must use mocked generator output,
+  flow fixtures, replay harnesses, and host cassettes. Studio MCP and web already
+  document replay/flow modes that avoid live LLM calls
+  (`docs/architecture/mcp-studio.md:68`, `cmd/kitsoki/web.go:80`).
 
 ## Slices
 
 | # | Slice | Kind | Scope (one line) | Depends on | Status | File |
 |---|---|---|---|---|---|---|
-| 1 | Draft package and validator | runtime | Define the scratch story package, load invariants, provenance, and validation gate for generated workflows. | - | Draft | [`dynamic-workflow-drafts.md`](dynamic-workflow-drafts.md) |
-| 2 | Authoring and launch surfaces | story | Add the operator-facing lane across Studio MCP, CLI, TUI, and web that creates and starts a dynamic workflow. | 1 | Draft | [`dynamic-workflow-authoring-surfaces.md`](dynamic-workflow-authoring-surfaces.md) |
-| 3 | Tracking URL and execution receipts | tracing | Reuse sessions, traces, runstatus, and Studio MCP handles so every dynamic run has a durable receipt and browser URL. | 1, 2 | Draft | [`dynamic-workflow-tracking.md`](dynamic-workflow-tracking.md) |
-| 4 | Promotion and cassette export | tracing | Promote a successful scratch workflow into a reusable base story and starter deterministic artifacts. | 1, 3 | Draft | [`dynamic-workflow-promotion.md`](dynamic-workflow-promotion.md) |
+| 1 | Draft package and validator | runtime | Define the shared service core, scratch story package, manifest, load invariants, provenance, and validation gate for generated workflows. | - | Draft | [`dynamic-workflow-drafts.md`](dynamic-workflow-drafts.md) |
+| 2 | Authoring and launch surfaces | story | Add MCP/CLI-first entrypoints, then TUI/web adapters, that create and start dynamic workflows through the same service. | 1 | Draft | [`dynamic-workflow-authoring-surfaces.md`](dynamic-workflow-authoring-surfaces.md) |
+| 3 | Tracking URL and execution receipts | tracing | Reuse sessions, traces, runstatus, and Studio MCP handles so every dynamic run has one durable receipt and browser URL when available. | 1, 2 | Draft | [`dynamic-workflow-tracking.md`](dynamic-workflow-tracking.md) |
+| 4 | Promotion and cassette export | tracing | Promote a successful scratch workflow into a project-local reusable story and starter deterministic artifacts, with gated base-story export later. | 1, 3 | Draft | [`dynamic-workflow-promotion.md`](dynamic-workflow-promotion.md) |
 
 ## Sequencing
 
 ```text
-#1 draft package + validator
-  -> #2 authoring surfaces
-  -> #3 tracked execution URL
-  -> #4 promotion/export
+#1 shared service + draft package + validator
+  -> #2 MCP/CLI create + launch surfaces
+  -> #3 tracked execution URL + receipt parity
+  -> #4 project-local promotion/export
+       -> optional gated base-story promotion
 ```
 
-Slice 1 must land first because every surface should call the same validator and scratch-package writer. Slice 3 can begin once a scratch workflow can launch. Slice 4 waits until traces and run receipts are stable enough to export fixtures honestly.
+Slice 1 must land first because every surface calls the same service, validator,
+and scratch-package writer. Slice 2 should expose MCP and CLI before TUI/web so
+the shared API hardens without UI-specific coupling. Slice 3 can begin once a
+scratch workflow can launch, because Studio MCP already has trace-backed session
+handles (`docs/architecture/mcp-studio.md:157`) and runstatus already displays
+live traces, world diffs, host invocations, and rendered room views
+(`tools/runstatus/README.md:3`). Slice 4 waits until receipts and trace links are
+stable enough to export fixtures honestly.
 
 ## Shared decisions
 
-1. Dynamic workflows are Kitsoki stories, not a new language. The generated artifact is YAML plus scripts/cassettes that load through `app.Load`, `story.validate`, `story.test`, `session.new`, and `kitsoki web`.
-2. The interpretive seam is authoring only. Once a draft validates, execution uses ordinary transitions, effects, host calls, and deciders. Any LLM decision remains a declared `agent.*` call with trace records.
-3. Scratch drafts live under `.artifacts/dynamic-workflows/<id>/` by default. Promotion copies only reviewed files into `stories/<name>/` or `internal/basestories/stories/<name>/`.
-4. The tracking URL is a runstatus session URL. CLI and MCP return it when a web server is available; otherwise they return the trace path and a command to open it.
-5. Exported cassettes are starters, not claims of complete test coverage. Promotion should also write a TODO/checklist for missing gates and hand-authored fixture hardening.
+1. Dynamic workflows are Kitsoki stories, not a new language. The generated
+   artifact is YAML plus scripts/cassettes that load through `app.Load`,
+   `story.validate`, `story.test`, `session.new`, and `kitsoki web`.
+2. One shared dynamic workflow service owns create, validate, launch, status, and
+   export. MCP and CLI call it first; TUI and web call it later through adapters.
+3. The interpretive seam is authoring only. Once a draft validates, execution
+   uses ordinary transitions, effects, host calls, and deciders. Any LLM decision
+   remains a declared agent call with trace records, matching the existing
+   `session.drive` boundary (`docs/architecture/mcp-studio.md:159`).
+4. Scratch drafts live under `.artifacts/dynamic-workflows/<id>/` by default. The
+   manifest records workflow id, source task, generator surface, model/profile,
+   draft path, validation report hash, allowed host capabilities, trace path,
+   session handle, and promotion eligibility.
+5. The receipt shape is common across MCP, CLI, TUI, and web. It returns the
+   manifest identity, validation status, trace path, session handle, and a
+   runstatus session URL when a web server is available; otherwise it returns the
+   trace path and the best available open command.
+6. Promotion defaults to project-local `stories/<name>/`. Export to
+   `internal/basestories/stories/<name>/` is explicit, gated, and later.
+7. Exported flows and cassettes are starters, not claims of complete test
+   coverage. Promotion should write an export report with missing gates,
+   unresolved live decisions, and hand-authored fixture hardening tasks.
 
 ## Cross-cutting Open Questions
 
-1. Should the first authoring lane be a dev-story room, a direct MCP tool, or both? *Lean: both, with the MCP/CLI command using the same host function as the story room.*
-2. Should promotion target project-local `stories/` by default or internal base stories? *Lean: project-local by default; base-story promotion requires an explicit flag and clean review.*
-3. How much can cassette export infer automatically from a trace? *Lean: generate a starter fixture and mark unresolved live decisions rather than synthesizing false determinism.*
+1. Should Studio MCP expose first-class `workflow.*` tools, documented
+   `session.drive` commands in a dev-story room, or both? *Lean: first-class MCP
+   and CLI commands first, with any story room calling the same service.*
+2. What is the minimum safe launch posture for generated host calls? *Lean:
+   validation reports all mutating/external capabilities, and launch requires an
+   explicit allowed-capabilities set stored in the manifest.*
+3. How much can cassette export infer automatically from a trace? *Lean:
+   generate a starter fixture and mark unresolved live decisions rather than
+   synthesizing false determinism.*
+
+## Tasks
+
+```text
+## 1. Align the proposal set
+- [ ] 1.1 Amend `dynamic-workflow-drafts.md` around the shared service contract
+      and required manifest fields.
+- [ ] 1.2 Amend `dynamic-workflow-authoring-surfaces.md` so MCP/CLI ship first
+      and TUI/web are adapters over the same service.
+- [ ] 1.3 Amend `dynamic-workflow-tracking.md` so every surface returns one
+      receipt shape with workflow id, validation hash, trace/session pointers,
+      URL fallback, and promotion eligibility.
+- [ ] 1.4 Amend `dynamic-workflow-promotion.md` so project-local story export is
+      the default and base-story export is explicit and gated.
+
+## 2. Runtime/service slice
+- [ ] 2.1 Design and implement the dependency-injected dynamic workflow service
+      for create, validate, launch, status, and export orchestration.
+- [ ] 2.2 Define `.artifacts/dynamic-workflows/<id>/` package layout, manifest,
+      validation report, and receipt schemas.
+- [ ] 2.3 Add dynamic validation invariants on top of ordinary story loading:
+      path confinement, declared host capabilities, callable ids suitable for
+      fixture export, explicit agent schemas/contracts, and no promotion metadata
+      before review.
+- [ ] 2.4 Cover the service with deterministic tests using fake generator output,
+      replay harnesses, and host cassettes only.
+
+## 3. Surface slice
+- [ ] 3.1 Add MCP create/validate/launch/status/export tools or commands over the
+      shared service.
+- [ ] 3.2 Add CLI `kitsoki workflow create/run/status/export` commands over the
+      same service.
+- [ ] 3.3 Add the dev-story/TUI lane after MCP/CLI parity exists.
+- [ ] 3.4 Add the web action/modal after the receipt and URL behavior are stable.
+
+## 4. Tracking/export slice
+- [ ] 4.1 Emit dynamic workflow generated/validated/launched/url/export events
+      with hashes and artifact pointers, not full copied YAML blobs.
+- [ ] 4.2 Reuse runstatus session URLs when server context exists and return a
+      trace/open-command fallback in headless CLI or MCP contexts.
+- [ ] 4.3 Export a successful run into `stories/<slug>/` with starter flows,
+      starter host cassettes, and an export report listing unresolved decisions.
+- [ ] 4.4 Gate `internal/basestories/stories/<slug>/` export behind explicit
+      operator approval and clean validation.
+
+## 5. Documentation and cleanup
+- [ ] 5.1 Document the shipped operator workflow in
+      `docs/stories/dynamic-workflows.md`.
+- [ ] 5.2 Update MCP, CLI, tracing, web/runstatus, and story-testing docs with the
+      actual command/tool names and receipt schemas.
+- [ ] 5.3 Migrate implemented design into docs/ and trim/delete this proposal and
+      its child proposals when shipped.
+```
 
 ## Non-goals
 
@@ -66,3 +195,4 @@ Slice 1 must land first because every surface should call the same validator and
 - Keeping a second workflow runtime beside the story engine.
 - Auto-promoting generated workflows without operator review.
 - Replacing existing flow fixtures or hand-authored story QA.
+- Calling a real LLM from automated tests or examples.

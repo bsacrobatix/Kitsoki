@@ -49,16 +49,15 @@ states:
                 design_idea: "{{ world.design_seed_idea != '' ? world.design_seed_idea + ' — ' + slots.message : slots.message }}"
                 design_seed_idea: ""
                 last_error: ""
-            - invoke: host.agent.decide
+            - invoke: host.run
               id: name_slug
-              agent: agent.local_llm
               with:
-                prompt_path: prompts/design_slug.md
-                schema: schemas/slug.json
+                cmd: python3
                 args:
-                  idea: "{{ world.design_seed_idea != '' ? world.design_seed_idea + ' — ' + slots.message : slots.message }}"
+                  - "stories/dev-story/scripts/design_workspace.py"
+                  - "{{ world.design_seed_idea != '' ? world.design_seed_idea + ' — ' + slots.message : slots.message }}"
               bind:
-                design_slug: "submitted.slug"
+                design_slug: "stdout_json.slug"
               on_error: design
             # NB: the workspace folder is deliberately NOT minted here. The
             # scout (design_search.on_enter) runs FIRST, so an idea that
