@@ -17,6 +17,7 @@
       "id": "postgresql",
       "label": "postgresql/postgresql",
       "stack": "c",
+      "local_repo_env": "POSTGRESQL_REPO",
       "run_mode": "planned",
       "status": "planned",
       "notes": "Perspective check required: onboarding + at least one hidden-oracle-based journey scenario pending."
@@ -25,6 +26,7 @@
       "id": "kubernetes",
       "label": "kubernetes/kubernetes",
       "stack": "go",
+      "local_repo_env": "KUBERNETES_REPO",
       "run_mode": "planned",
       "status": "planned",
       "notes": "Perspective check required: project-size and CI-profile constraints not yet modeled in runner catalog."

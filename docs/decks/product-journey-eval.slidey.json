@@ -136,8 +136,8 @@
             "type": "narrative",
             "eyebrow": "Current run",
             "lede": "Execution status",
-            "body": "Ran the harness path locally: `python3 tools/product-journey/run.py` plus `--project gears-rust --mode check` and then PostgreSQL/Kubernetes checks. Gears is runner-ready and resolves the concrete command when `GEARS_RUST_REPO` is set; both perspectives stay planned pending manifests and oracle contracts. `make gears-bakeoff` is enabled and deterministic, but this sandbox cannot finish `git clone --local --no-checkout` in `/var/folders`, so the full run is intended for a non-sandboxed container.",
-            "narration": "The deck stays reviewable even when full live execution requires a less-restricted container runtime.",
+            "body": "Ran the harness path locally: `python3 tools/product-journey/run.py` plus `--project gears-rust --mode check` with `GEARS_RUST_REPO` set, and the runner now validates gears-rust through a no-local temp clone. PostgreSQL and Kubernetes remain planned because no local corpora exist for them in this checkout. The separate `tools/story-qa/run.py` wrapper now mirrors that same status and writes a transient report under `.context/`.",
+            "narration": "The deck stays reviewable even when some project corpora are not present locally; those gaps are surfaced as explicit plan items instead of silent successes.",
             "hold": 2200
         }
     ]

@@ -11,6 +11,8 @@ import json
 import os
 import subprocess
 import datetime
+import tempfile
+import shutil
 from pathlib import Path
 
 
@@ -42,6 +44,56 @@ def shell(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
         text=True,
         capture_output=True,
     )
+
+
+def clone_local_repo(src: str, prefix: str) -> Path:
+    clone_root = Path(tempfile.mkdtemp(prefix=prefix))
+    clone = clone_root / Path(src).name
+    result = shell([
+        "git",
+        "clone",
+        "--no-local",
+        "--no-checkout",
+        src,
+        str(clone),
+    ], ROOT)
+    if result.returncode != 0:
+        raise RuntimeError(result.stdout + result.stderr)
+    return clone
+
+
+def verify_external_project(project: dict, repo_path: str) -> dict:
+    bench = ROOT / "tools" / "bugfix-bakeoff" / "external" / "bench.py"
+    try:
+        clone = clone_local_repo(repo_path, f"{project['id']}-verify-")
+    except RuntimeError as exc:
+        return {
+            "status": "error",
+            "notes": f"{project['id']}: temp clone failed",
+            "output": str(exc),
+            "meta": _meta_value(project),
+        }
+
+    try:
+        result = shell(
+            ["python3", str(bench), "verify", "--project", project["id"], "--repo-dir", str(clone)],
+            ROOT,
+        )
+        if result.returncode != 0:
+            return {
+                "status": "error",
+                "notes": f"{project['id']}: benchmark verify failed",
+                "output": result.stdout + result.stderr,
+                "meta": _meta_value(project),
+            }
+        return {
+            "status": "validated",
+            "notes": f"{project['id']}: deterministic fixture verification passed from a no-local temp clone",
+            "output": result.stdout + result.stderr,
+            "meta": _meta_value(project),
+        }
+    finally:
+        shutil.rmtree(clone.parent, ignore_errors=True)
 
 
 def _meta_value(project):
@@ -111,9 +163,20 @@ def run_project_check(project):
         "Run command:",
         f"  {run_command}",
     ])
-    if project.get("run_mode") == "external-benchmark" and project.get("local_repo_env"):
-        if local_repo_path and Path(local_repo_path).exists():
-            checks.append("Gate: local repo env is set and present.")
+
+    if project.get("run_mode") == "external-benchmark" and local_repo_path and Path(local_repo_path).exists():
+        checks.append("Verifying fixture arming through a no-local temp clone.")
+        verify_report = verify_external_project(project, local_repo_path)
+        checks.append(f"Verify status: {verify_report['status']}")
+        checks.append(f"Verify notes: {verify_report['notes']}")
+        if "output" in verify_report and verify_report["output"]:
+            checks.append("Verify output:")
+            for line in verify_report["output"].splitlines():
+                checks.append(f"  {line}")
+        return {
+            **verify_report,
+            "next": checks,
+        }
 
     return {
         "status": "ready",
