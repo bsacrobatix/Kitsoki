@@ -123,6 +123,11 @@ export const useRunStore = defineStore("run", () => {
   const transcript = ref<TranscriptEntry[]>([]);
   // Streaming state: the ordered thinking/tool feed of the in-flight turn.
   const pendingStream = ref<StreamItem[]>([]);
+  // True while a store-driven turn is in flight (submit/turn/continue). A
+  // surface watches this to show the "agent is working" thinking bubble even for
+  // dispatches it didn't originate — e.g. an annotation sent from a media
+  // ViewElement, which calls submitIntent directly rather than the chat input.
+  const busy = ref(false);
   // currentView is the latest TurnResult (the current room's view + menu).
   const currentView = ref<TurnResult | null>(null);
   // allowedIntents is the enriched per-intent menu of the current room.
@@ -635,26 +640,31 @@ export const useRunStore = defineStore("run", () => {
       text: userText(intent, slots, displayLabel),
       ...(opts?.annotation ? { annotation: opts.annotation } : {}),
     });
-    let result: TurnResult;
-    let capturedStream = "";
-    let capturedItems: StreamItem[] | undefined;
-    if ("turnStream" in source) {
-      const out = await runTurnStream(source as LiveSource, sessionId, "submit", {
-        intent,
-        slots,
-        ...(opts?.anchor ? { anchor: opts.anchor } : {}),
-      });
-      result = out.result;
-      capturedStream = out.streamedText;
-      capturedItems = out.stream;
-    } else {
-      result = await source.submit(sessionId, intent, slots, opts?.anchor);
+    busy.value = true;
+    try {
+      let result: TurnResult;
+      let capturedStream = "";
+      let capturedItems: StreamItem[] | undefined;
+      if ("turnStream" in source) {
+        const out = await runTurnStream(source as LiveSource, sessionId, "submit", {
+          intent,
+          slots,
+          ...(opts?.anchor ? { anchor: opts.anchor } : {}),
+        });
+        result = out.result;
+        capturedStream = out.streamedText;
+        capturedItems = out.stream;
+      } else {
+        result = await source.submit(sessionId, intent, slots, opts?.anchor);
+      }
+      if (typeof result.turn_number === "number") {
+        await backfillTurnTrace(source, sessionId, result.turn_number);
+      }
+      applyTurnResult(result, capturedStream, capturedItems);
+      return result;
+    } finally {
+      busy.value = false;
     }
-    if (typeof result.turn_number === "number") {
-      await backfillTurnTrace(source, sessionId, result.turn_number);
-    }
-    applyTurnResult(result, capturedStream, capturedItems);
-    return result;
   }
 
   /**
@@ -847,6 +857,7 @@ export const useRunStore = defineStore("run", () => {
     currentView,
     allowedIntents,
     pendingStream,
+    busy,
     harnessProfiles,
     harnessModel,
     harnessEffort,

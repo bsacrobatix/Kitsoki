@@ -166,7 +166,7 @@
             @rewind="onRewind"
           />
           <!-- Streaming thinking bubble: visible while a turn is in flight -->
-          <div v-if="pending" class="iv__thinking" data-testid="thinking-bubble">
+          <div v-if="pending || store.busy" class="iv__thinking" data-testid="thinking-bubble">
             <div class="iv__thinking-avatar">A</div>
             <div class="iv__thinking-bubble">
               <div class="iv__thinking-head">
