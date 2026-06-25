@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -19,8 +20,9 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="kitsoki-profile-") as tmp:
         path = Path(tmp) / "project-profile.json"
         path.write_text(json.dumps(profile, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        kitsoki_bin = os.environ.get("KITSOKI_BIN", "kitsoki")
         proc = subprocess.run(
-            ["kitsoki", "project-profile", "validate", "--json", "--repo-root", str(target), str(path)],
+            [kitsoki_bin, "project-profile", "validate", "--json", "--repo-root", str(target), str(path)],
             check=False,
             text=True,
             stdout=subprocess.PIPE,
