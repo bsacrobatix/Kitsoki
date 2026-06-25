@@ -202,6 +202,17 @@ scripts/build-gh-agent-live-deck.mjs \
 The command is strict by default: it fails if required evidence notes, live URLs,
 case clips, or developer-arc media are missing.
 
+Finally, verify the whole proof bundle before sharing the deck:
+
+```
+scripts/verify-gh-agent-live-poc.mjs \
+  --developer-arc-media <path-to-slidey-developer-arc-mp4-or-rrweb>
+```
+
+The verifier is read-only and strict by default. It checks the four `.context`
+evidence notes, `/api/run` JSON, read-only `gh_jobs` rows, capture plans, MP4
+clips, chapter sidecars, developer-arc media, and generated Slidey deck.
+
 ## g. Production
 
 Identical under the **`constructorfabric`** org: create/install the same App
