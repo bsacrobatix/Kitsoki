@@ -27,6 +27,48 @@ def write_text(path: Path, content: str, writes: list[str]) -> None:
         writes.append(str(path))
 
 
+def yaml_scalar(value) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return json.dumps(value)
+    return json.dumps(value)
+
+
+def yaml_dump(value, indent: int = 0) -> str:
+    pad = " " * indent
+    if isinstance(value, dict):
+        lines = []
+        for key in sorted(value):
+            item = value[key]
+            if isinstance(item, (dict, list)):
+                lines.append(f"{pad}{key}:")
+                lines.append(yaml_dump(item, indent + 2))
+            else:
+                lines.append(f"{pad}{key}: {yaml_scalar(item)}")
+        return "\n".join(lines)
+    if isinstance(value, list):
+        if not value:
+            return pad + "[]"
+        lines = []
+        for item in value:
+            if isinstance(item, (dict, list)):
+                lines.append(f"{pad}-")
+                lines.append(yaml_dump(item, indent + 2))
+            else:
+                lines.append(f"{pad}- {yaml_scalar(item)}")
+        return "\n".join(lines)
+    return pad + yaml_scalar(value)
+
+
+def profile_yaml_from_draft(profile: dict) -> str:
+    return yaml_dump(profile).rstrip() + "\n"
+
+
 def append_gitignore(path: Path, writes: list[str]) -> None:
     additions = [
         ".kitsoki.local.yaml",
@@ -566,6 +608,16 @@ def main() -> int:
         "conventions": sys.argv[8],
         "tracker": sys.argv[9] if len(sys.argv) > 9 else "none",
     }
+    draft_profile = None
+    if len(sys.argv) > 10 and sys.argv[10].strip():
+        draft_profile = json.loads(sys.argv[10])
+        commands = draft_profile.get("commands") if isinstance(draft_profile, dict) else {}
+        if isinstance(commands, dict):
+            data["dev_command"] = commands.get("dev") or data["dev_command"]
+            data["test_command"] = commands.get("test") or data["test_command"]
+            data["build_command"] = commands.get("build") or data["build_command"]
+        if isinstance(draft_profile.get("title"), str):
+            data["project_title"] = draft_profile["title"]
     root = Path(data["target_path"])
     enrich_project_shape(data, root)
     makefile = root / "Makefile"
@@ -587,7 +639,10 @@ def main() -> int:
     gitignore_path = root / ".gitignore"
 
     write_text(config_path, config_yaml(data["project_id"]), writes)
-    write_text(profile_path, profile_yaml(data), writes)
+    if draft_profile is not None:
+        write_text(profile_path, profile_yaml_from_draft(draft_profile), writes)
+    else:
+        write_text(profile_path, profile_yaml(data), writes)
     write_text(instance_path, app_yaml(data), writes)
     write_text(readme_path, readme(data, str(profile_path)), writes)
     append_gitignore(gitignore_path, writes)

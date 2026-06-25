@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/projectprofile"
 )
 
 const sisterCommandTimeout = 2 * time.Minute
@@ -146,6 +147,7 @@ func runSisterReplay(t *testing.T, kitsokiRoot string, tc sisterCase) {
 	assertFile(t, work, instanceRel, `source: "@kitsoki/dev-story"`, "root: core")
 	assertFile(t, work, filepath.Join(".kitsoki", "stories", tc.projectID+"-dev", "README.md"), "kitsoki run "+filepath.ToSlash(instanceRel))
 	assertFile(t, work, filepath.Join(".kitsoki", "project-profile.yaml"), tc.wantProfile...)
+	assertProjectProfileValid(t, work, filepath.Join(".kitsoki", "project-profile.yaml"))
 
 	if _, err := os.Stat(filepath.Join(work, "stories", tc.projectID+"-dev", "app.yaml")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("root stories/%s-dev/app.yaml should not exist after onboarding; err=%v", tc.projectID, err)
@@ -160,6 +162,17 @@ func runSisterReplay(t *testing.T, kitsokiRoot string, tc sisterCase) {
 		if strings.Contains(status, forbidden) {
 			t.Fatalf("onboarding polluted root stories directory:\n%s", status)
 		}
+	}
+}
+
+func assertProjectProfileValid(t *testing.T, root, rel string) {
+	t.Helper()
+	res, err := projectprofile.ValidateFile(filepath.Join(root, rel), root)
+	if err != nil {
+		t.Fatalf("validate %s: %v", rel, err)
+	}
+	if !res.OK {
+		t.Fatalf("%s failed project-profile validation: schema=%v semantic=%v warnings=%v", rel, res.Schema, res.Semantic, res.Warnings)
 	}
 }
 

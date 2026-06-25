@@ -209,6 +209,15 @@ states:
             Conventions: "{{ world.init_conventions }}"
             Tracker:     "{{ world.init_tracker }}"
             Writes:      ".kitsoki.yaml, .kitsoki/project-profile.yaml, .kitsoki/stories/{{ world.init_project_id }}-dev/app.yaml"
+            Mode:        "{{ world.init_profile_mode }}"
+      - heading: "Profile Validation"
+        when: "world.init_profile_validation.ok"
+      - kv:
+          pairs:
+            Schema:   "passed"
+            Semantic: "passed"
+            Warnings: "{{ world.init_profile_validation.warnings|default:'[]' }}"
+        when: "world.init_profile_validation.ok"
       - heading: "Feedback"
         when: "world.init_feedback != ''"
       - prose: "{{ world.init_feedback }}"
@@ -222,6 +231,9 @@ states:
             - label:  "accept"
               hint:   "write the local Kitsoki onboarding files"
               intent: confirm_init
+            - label:  "LLM draft"
+              hint:   "draft a richer project profile, then validate schema + semantics"
+              intent: draft_profile
             - label:  "revise"
               hint:   "record feedback for the next profile draft"
               intent: revise_init
@@ -263,6 +275,22 @@ states:
                 init_profile_status: "needs-revision"
                 init_feedback: "{{ slots.feedback }}"
             - say: "Onboarding feedback recorded."
+      draft_profile:
+        - when: "world.init_project_id == ''"
+          target: .
+          guard_hint: "Discovery has not produced a project profile yet."
+          effects:
+            - set:
+                last_error: "Cannot draft an LLM profile until deterministic discovery produces a project id."
+        - target: init_profile_draft
+          effects:
+            - set:
+                init_profile_status: "drafting-with-llm"
+                init_profile_mode: "llm-draft"
+                init_profile_draft: {}
+                init_profile_validation: {}
+                init_profile_json: ""
+                last_error: ""
       init_discovered:
         - target: init_discover
           effects:
@@ -273,6 +301,10 @@ states:
                 init_apply_result: {}
                 init_apply_ok: false
                 init_apply_output: ""
+                init_profile_mode: "deterministic"
+                init_profile_draft: {}
+                init_profile_validation: {}
+                init_profile_json: ""
                 init_profile_status: "discovering"
                 last_error: ""
       quit:
@@ -281,6 +313,193 @@ states:
             - set:
                 last_error: "project onboarding closed"
                 prev_state: "init"
+      look:
+        - target: .
+
+  init_profile_draft:
+    description: "Ask an LLM for a richer project-profile/v1 candidate before validation."
+    relevant_world:
+      - init_discovery
+      - init_profile_draft
+      - init_target_path
+      - init_project_id
+      - init_feedback
+      - init_profile_status
+    view:
+      - banner:
+          text:     "PROJECT ONBOARDING"
+          subtitle: "LLM profile draft"
+          color:    "#8B5CF6"
+      - kv:
+          pairs:
+            Target:  "{{ world.init_target_path }}"
+            Project: "{{ world.init_project_title }}"
+            Status:  "{{ world.init_profile_status }}"
+      - prose: "Drafting a project-profile/v1 candidate from deterministic discovery and repository evidence."
+        when: "world.init_profile_draft.schema == ''"
+      - kv:
+          pairs:
+            Draft: "{{ world.init_profile_draft.id|default:'(pending)' }}"
+            Path:  "{{ world.init_profile_draft.kitsoki.instance.path|default:'(pending)' }}"
+        when: "world.init_profile_draft.schema != ''"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "validate"
+              hint: "run JSON Schema and semantic validation"
+              intent: profile_drafted
+              when: "world.init_profile_draft.schema != ''"
+            - label: "retry"
+              hint: "discard this draft and ask again"
+              intent: draft_profile
+            - label: "back"
+              hint: "return to deterministic profile review"
+              intent: quit
+            - label: "look"
+              hint: "re-render"
+              intent: look
+    on_enter:
+      - invoke: host.agent.decide
+        id: draft_profile
+        once: true
+        with:
+          prompt: prompts/init_profile_draft.md
+          schema: schemas/project-profile.json
+          agent: profile_drafter
+          args:
+            discovery:   "{{ world.init_discovery }}"
+            feedback:    "{{ world.init_feedback }}"
+            target_path: "{{ world.init_target_path }}"
+        bind:
+          init_profile_draft: submitted
+        on_error: init
+    on:
+      profile_drafted:
+        - when: "world.init_profile_draft.schema != ''"
+          target: init_profile_validate
+          effects:
+            - set:
+                init_profile_status: "validating-profile"
+                init_profile_validation: {}
+                init_profile_json: ""
+                last_error: ""
+        - default: true
+          target: .
+          effects:
+            - set:
+                last_error: "Profile draft is not ready yet."
+      draft_profile:
+        - target: .
+          effects:
+            - set:
+                init_profile_draft: {}
+                init_profile_validation: {}
+                init_profile_json: ""
+                last_error: ""
+      quit:
+        - target: init
+          effects:
+            - set:
+                init_profile_status: "draft"
+                init_profile_mode: "deterministic"
+                init_profile_draft: {}
+                init_profile_validation: {}
+                init_profile_json: ""
+      look:
+        - target: .
+
+  init_profile_validate:
+    description: "Validate an LLM-drafted project profile before it can be applied."
+    relevant_world:
+      - init_profile_draft
+      - init_profile_validation
+      - init_target_path
+      - init_project_id
+      - init_profile_status
+    view:
+      - banner:
+          text:     "PROJECT ONBOARDING"
+          subtitle: "schema + semantic validation"
+          color:    "#0EA5E9"
+      - kv:
+          pairs:
+            Target: "{{ world.init_target_path }}"
+            Draft:  "{{ world.init_profile_draft.id|default:'(pending)' }}"
+            Status: "{{ world.init_profile_status }}"
+      - prose: "The draft must pass the embedded project-profile JSON Schema and Kitsoki semantic checks before apply can use it."
+      - kv:
+          pairs:
+            OK:       "{{ world.init_profile_validation.ok|default:false }}"
+            Schema:   "{{ world.init_profile_validation.schema|default:'[]' }}"
+            Semantic: "{{ world.init_profile_validation.semantic|default:'[]' }}"
+            Warnings: "{{ world.init_profile_validation.warnings|default:'[]' }}"
+        when: "world.init_profile_validation != {}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "use draft"
+              hint: "return to review with this validated profile selected"
+              intent: profile_validated
+              when: "world.init_profile_validation.ok"
+            - label: "revise draft"
+              hint: "ask the LLM for a corrected profile"
+              intent: draft_profile
+            - label: "back"
+              hint: "return to deterministic profile review"
+              intent: quit
+            - label: "look"
+              hint: "re-render"
+              intent: look
+    on_enter:
+      - invoke: host.run
+        once: true
+        id: validate_profile
+        with:
+          cmd: bash
+          args:
+            - "-lc"
+            - 'python3 "$KITSOKI_APP_DIR/scripts/init_validate_profile.py" "$@"'
+            - "init_validate_profile"
+            - "{{ world.init_target_path }}"
+            - "{{ world.init_profile_draft }}"
+        bind:
+          init_profile_validation: "stdout_json"
+          init_profile_json: "stdout_json.profile_json"
+        on_error: init_profile_validate
+    on:
+      profile_validated:
+        - when: "world.init_profile_validation.ok"
+          target: init
+          effects:
+            - set:
+                init_profile_status: "draft"
+                init_profile_mode: "llm-validated"
+                last_error: ""
+        - default: true
+          target: .
+          effects:
+            - set:
+                last_error: "Profile validation has not passed."
+      draft_profile:
+        - target: init_profile_draft
+          effects:
+            - set:
+                init_profile_status: "drafting-with-llm"
+                init_profile_draft: {}
+                init_profile_validation: {}
+                init_profile_json: ""
+                last_error: ""
+      quit:
+        - target: init
+          effects:
+            - set:
+                init_profile_status: "draft"
+                init_profile_mode: "deterministic"
+                init_profile_draft: {}
+                init_profile_validation: {}
+                init_profile_json: ""
       look:
         - target: .
 
@@ -355,6 +574,7 @@ states:
             - "{{ world.init_build_command }}"
             - "{{ world.init_conventions }}"
             - "{{ world.init_tracker }}"
+            - "{{ world.init_profile_json }}"
         bind:
           init_apply_ok: "ok"
           init_apply_output: "stdout"

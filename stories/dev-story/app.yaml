@@ -162,6 +162,13 @@ agents:
     bash_profile: read-only
     external_side_effect: false
 
+  profile_drafter:
+    system_prompt: "You draft Kitsoki project-profile/v1 JSON for a target repository. Use the deterministic discovery as the floor, improve it only when the repository evidence supports the change, and preserve the architecture: the project owns .kitsoki/project-profile.yaml and .kitsoki/stories/<id>-dev/app.yaml, while the instance imports @kitsoki/dev-story. Return only schema-valid JSON through the submit tool."
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob]
+    bash_profile: read-only
+    external_side_effect: false
+
   # ── Design-pipeline personas (rooms/design*.yaml) ──────────────
   # One persona per pipeline step so the trace attributes model + token
   # usage per phase, the same discipline as stories/prd/. All are
@@ -616,6 +623,10 @@ world:
   init_tools_result:     { type: object, default: {} }
   init_tools_ok:         { type: bool, default: false }
   init_tools_output:     { type: string, default: "" }
+  init_profile_mode:     { type: string, default: "deterministic" }
+  init_profile_draft:    { type: object, default: {} }
+  init_profile_validation: { type: object, default: {} }
+  init_profile_json:     { type: string, default: "" }
 
   # ── Design pipeline (rooms/design*.yaml) ───────────────────────
   # 4-stage pipeline: intake → search → refine → draft+publish.
@@ -1007,6 +1018,19 @@ intents:
         type: string
         required: true
         description: "What should change in the onboarding profile."
+  draft_profile:
+    title: "Draft Onboarding Profile With LLM"
+    description: "Ask an LLM to draft a project-profile/v1 candidate, then validate it before applying."
+    examples: ["draft profile with llm", "use llm profile", "improve profile"]
+    priority: 45
+  profile_drafted:
+    description: "(internal) LLM profile draft completed — validate it."
+    examples: []
+    priority: 1
+  profile_validated:
+    description: "(internal) profile validation completed — return to review."
+    examples: []
+    priority: 1
   init_discovered:
     description: "(internal) project discovery completed — show the profile review."
     examples: []
