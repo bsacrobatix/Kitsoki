@@ -164,6 +164,12 @@ function requireURL(name, value, predicate, allowNonliveUrls) {
   return value;
 }
 
+function requireStatus(caseSlug, label, value, predicate, expected) {
+  if (!predicate(value)) {
+    throw new Error(`${caseSlug} ${label} check is ${JSON.stringify(value)}, expected ${expected}`);
+  }
+}
+
 function relativeMediaPath(deckOut, mediaPath) {
   const from = path.dirname(path.resolve(deckOut));
   const rel = path.relative(from, path.resolve(mediaPath));
@@ -173,6 +179,18 @@ function relativeMediaPath(deckOut, mediaPath) {
 function readEvidence(args, c) {
   const evidencePath = path.join(args.evidenceDir, `live-poc-${c.slug}.md`);
   const markdown = fs.readFileSync(evidencePath, "utf8");
+  const publicBaseURL = requireURL(
+    `${c.slug} Public base URL`,
+    field(markdown, "Public base URL"),
+    (u) => u === "https://kitsoki-test.slothattax.me",
+    args.allowNonliveUrls,
+  );
+  const webhookURL = requireURL(
+    `${c.slug} Webhook URL`,
+    field(markdown, "Webhook URL"),
+    (u) => u === "https://kitsoki-test.slothattax.me/gh-agent/webhook",
+    args.allowNonliveUrls,
+  );
   const sourceURL = requireURL(
     `${c.slug} Source URL`,
     field(markdown, "Source URL"),
@@ -196,6 +214,16 @@ function readEvidence(args, c) {
   if (!jobID) {
     throw new Error(`${c.slug} evidence is missing Job ID`);
   }
+  requireStatus(c.slug, "Health", field(markdown, "Health"), (v) => v === "ok", "ok");
+  requireStatus(
+    c.slug,
+    "Run page",
+    field(markdown, "Run page"),
+    (v) => /^HTTP\/[0-9.]+ 2[0-9][0-9]\b/.test(v),
+    "HTTP 2xx",
+  );
+  requireStatus(c.slug, "API JSON", field(markdown, "API JSON"), (v) => v === "ok", "ok");
+  requireStatus(c.slug, "Remote DB", field(markdown, "Remote DB"), (v) => v === "ok", "ok");
   const api = fencedJSON(markdown, `/api/run/${jobID}`);
   if (api) {
     if (api.run_url && api.run_url !== runURL) {
@@ -214,7 +242,7 @@ function readEvidence(args, c) {
       throw new Error(`${c.slug} API state ${api.state} does not match ${c.expectedState}`);
     }
   }
-  return { evidencePath, sourceURL, runURL, apiURL, commentURL, jobID, api };
+  return { evidencePath, publicBaseURL, webhookURL, sourceURL, runURL, apiURL, commentURL, jobID, api };
 }
 
 function requireMedia(args, c) {
@@ -290,9 +318,9 @@ function buildDeck(args) {
       type: "title",
       eyebrow: "Live GitHub App POC",
       title: "@kitsoki on GitHub",
-      subtitle: "Real mentions, real webhook deliveries, real App comments, real hosted run pages",
+      subtitle: "Live GitHub App on kitsoki-test: real mentions, webhook deliveries, App comments, and hosted run pages",
       narration:
-        "This deck is built from live evidence notes and captured clips. Static GitHub fixtures are not used as proof.",
+        `This deck is built from live evidence notes and captured clips. The front door is the live GitHub App on kitsoki-test at ${bug.webhookURL}. Static GitHub fixtures are not used as proof.`,
     },
     {
       type: "title",
@@ -300,7 +328,7 @@ function buildDeck(args) {
       title: "Live GitHub front door",
       subtitle: "A real GitHub user mentions @kitsoki on bsacrobatix/Kitsoki",
       narration:
-        `The live front door is proven by real GitHub issues and pull requests: bug ${bug.sourceURL}, feature ${feature.sourceURL}, guidance ${guidance.sourceURL}, and PR ${pr.sourceURL}.`,
+        `The live front door is proven by real GitHub issues and pull requests delivered to ${bug.webhookURL}: bug ${bug.sourceURL}, feature ${feature.sourceURL}, guidance ${guidance.sourceURL}, and PR ${pr.sourceURL}.`,
     },
     {
       type: "title",

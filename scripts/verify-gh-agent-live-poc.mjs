@@ -484,6 +484,12 @@ function checkDeck(args, report) {
       report.fail(`deck does not reference ${c.slug} run URL ${evidence.runURL}`);
     }
   }
+  if (!haystack.includes("Live GitHub App on kitsoki-test")) {
+    report.fail("deck does not explicitly identify the GitHub act as live GitHub App on kitsoki-test");
+  }
+  if (!haystack.includes("https://kitsoki-test.slothattax.me/gh-agent/webhook")) {
+    report.fail("deck does not reference the live GitHub App webhook URL");
+  }
   const hasDeveloperMedia =
     (args.developerArcMedia && haystack.includes(path.basename(args.developerArcMedia))) ||
     allStrings.some((s) => /developer|slidey/i.test(s) && /\.(mp4|rrweb\.json)$/i.test(s));
