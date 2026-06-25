@@ -226,6 +226,9 @@ The verifier is read-only and strict by default. It checks the four `.context`
 evidence notes, `/api/run` JSON, read-only `gh_jobs` rows, capture plans, MP4
 clips, chapter sidecars, developer-arc media, generated Slidey deck, and
 self-contained HTML export, rendered deck MP4, and deck chapter sidecar.
+The evidence notes must show `/healthz` returned `ok`, `/run/<job-id>` returned
+HTTP 2xx, `/api/run/<job-id>` returned JSON, and the VM `gh_jobs` row was fetched
+successfully with `created_at` / `updated_at` timestamps.
 
 Prepare the gated `kitsoki-ui-qa` feature/scenario files:
 

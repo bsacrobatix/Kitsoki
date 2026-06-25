@@ -75,6 +75,7 @@ Strict final proof inputs:
   <evidence-dir>/live-poc-feature-issue.md
   <evidence-dir>/live-poc-guidance.md
   <evidence-dir>/live-poc-pr-status.md
+  each evidence file must include ok health/API/remote-DB checks and HTTP 2xx run-page headers
   <media-root>/capture-plan-<case>.json
   <media-root>/<case>/<video>.mp4
   <media-root>/<case>/<video>.mp4.chapters.json
@@ -160,6 +161,10 @@ function field(markdown, label) {
   return match[1].replace(/^`|`$/g, "").trim();
 }
 
+function statusField(markdown, label) {
+  return field(markdown, label);
+}
+
 function fencedJSON(markdown, heading) {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`^## ${escaped}\\s*\\n\\n\`\`\`json\\n([\\s\\S]*?)\\n\`\`\``, "m");
@@ -221,14 +226,32 @@ function checkEvidence(args, c, report) {
 
   const markdown = fs.readFileSync(evidencePath, "utf8");
   const jobID = field(markdown, "Job ID");
+  const publicBaseURL = field(markdown, "Public base URL");
+  const webhookURL = field(markdown, "Webhook URL");
   const sourceURL = field(markdown, "Source URL");
   const mentionURL = field(markdown, "Mention URL");
   const runURL = field(markdown, "Run URL");
   const apiURL = field(markdown, "API URL");
   const commentURL = field(markdown, "Kitsoki comment URL");
-  Object.assign(entry, { jobID, sourceURL, mentionURL, runURL, apiURL, commentURL });
+  const health = statusField(markdown, "Health");
+  const runPage = statusField(markdown, "Run page");
+  const apiJSON = statusField(markdown, "API JSON");
+  const remoteDB = statusField(markdown, "Remote DB");
+  Object.assign(entry, {
+    jobID,
+    publicBaseURL,
+    webhookURL,
+    sourceURL,
+    mentionURL,
+    runURL,
+    apiURL,
+    commentURL,
+    checks: { health, runPage, apiJSON, remoteDB },
+  });
 
   for (const [label, value] of [
+    ["Public base URL", publicBaseURL],
+    ["Webhook URL", webhookURL],
     ["Job ID", jobID],
     ["Source URL", sourceURL],
     ["Mention URL", mentionURL],
@@ -239,6 +262,20 @@ function checkEvidence(args, c, report) {
     if (!value) report.fail(`${c.slug}: missing ${label}`);
   }
 
+  checkURL(
+    `${c.slug} Public base URL`,
+    publicBaseURL,
+    (u) => u === "https://kitsoki-test.slothattax.me",
+    report,
+    args.allowNonliveUrls,
+  );
+  checkURL(
+    `${c.slug} Webhook URL`,
+    webhookURL,
+    (u) => u === "https://kitsoki-test.slothattax.me/gh-agent/webhook",
+    report,
+    args.allowNonliveUrls,
+  );
   checkURL(
     `${c.slug} Source URL`,
     sourceURL,
@@ -262,6 +299,7 @@ function checkEvidence(args, c, report) {
     args.allowNonliveUrls,
   );
   checkURL(`${c.slug} Kitsoki comment URL`, commentURL, (u) => u.startsWith(sourceURL), report, args.allowNonliveUrls);
+  checkCollectedStatuses(report, c, { health, runPage, apiJSON, remoteDB }, args);
 
   const api = fencedJSON(markdown, `/api/run/${jobID}`);
   entry.api = api.value;
@@ -303,6 +341,21 @@ function checkEvidence(args, c, report) {
   return entry;
 }
 
+function checkCollectedStatuses(report, c, checks, args) {
+  if (checks.health !== "ok") {
+    report.fail(`${c.slug}: health check is ${JSON.stringify(checks.health)}, expected "ok"`);
+  }
+  if (!/^HTTP\/[0-9.]+ 2[0-9][0-9]\b/.test(checks.runPage)) {
+    report.fail(`${c.slug}: run page check is ${JSON.stringify(checks.runPage)}, expected HTTP 2xx`);
+  }
+  if (checks.apiJSON !== "ok") {
+    report.fail(`${c.slug}: API JSON check is ${JSON.stringify(checks.apiJSON)}, expected "ok"`);
+  }
+  if (!args.allowMissingDB && checks.remoteDB !== "ok") {
+    report.fail(`${c.slug}: remote DB check is ${JSON.stringify(checks.remoteDB)}, expected "ok"`);
+  }
+}
+
 function checkCaseJSON(report, c, value, ctx) {
   if (value.job_id && value.job_id !== ctx.jobID) {
     report.fail(`${ctx.where}: job_id ${value.job_id} does not match evidence ${ctx.jobID}`);
@@ -336,6 +389,13 @@ function checkCaseJSON(report, c, value, ctx) {
   }
   if (ctx.dbRow && !value.comment_id) {
     report.fail(`${ctx.where}: missing comment_id`);
+  }
+  if (ctx.dbRow) {
+    for (const fieldName of ["created_at", "updated_at"]) {
+      if (value[fieldName] === undefined || value[fieldName] === null || value[fieldName] === "") {
+        report.fail(`${ctx.where}: missing ${fieldName}`);
+      }
+    }
   }
 }
 
