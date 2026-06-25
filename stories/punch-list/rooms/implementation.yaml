@@ -1,0 +1,47 @@
+states:
+  implementation:
+    description: "Optionally run an implementation story for the current item."
+    relevant_world: [current_item, implementation_result]
+    view:
+      - heading: "Punch-list · implementation"
+      - kv:
+          pairs:
+            Item: '{{ world.current_item.id }}'
+            Story: '{{ world.current_item.implementation_story }}'
+            Status: '{{ world.implementation_result.status|default:"running" }}'
+            Trace: '{{ world.implementation_result.trace_path|default:"(pending)" }}'
+      - prose: "This is still gated by profile/model policy. The independent verify room decides the final item result."
+    on_enter:
+      - set:
+          implementation_result: {}
+          implementation_status: ""
+          implementation_trace_path: ""
+          implementation_model: ""
+      - invoke: host.agent.task
+        id: "punch_implementation-{{ world.current_item_id }}"
+        with:
+          agent: implementer
+          acceptance:
+            schema: schemas/drive_result.json
+          context:
+            item: "{{ world.current_item }}"
+            drive_result: "{{ world.drive_result }}"
+            instruction: "Drive the implementation_story through Studio MCP using the same profile/model policy. Return concrete trace/worktree/model evidence and findings."
+        bind:
+          implementation_result: submitted
+          implementation_status: submitted.status
+          implementation_trace_path: submitted.trace_path
+          implementation_model: submitted.model
+        on_error: verify
+      - when: "world.implementation_status != ''"
+        emit_intent: implementation_done
+    on:
+      implementation_done:
+        - when: "world.current_item.require_trace_model == true && (world.implementation_trace_path == '' || world.implementation_model != world.current_item.model)"
+          target: needs_human
+          effects:
+            - set:
+                last_error: "Implementation drive did not provide required trace/model evidence for {{ world.current_item.id }} (wanted model {{ world.current_item.model }}, got {{ world.implementation_model }}; trace {{ world.implementation_trace_path }})."
+        - target: verify
+      look:
+        - target: .

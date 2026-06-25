@@ -40,9 +40,16 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-command -v claude >/dev/null 2>&1 || { echo "claude CLI not on PATH" >&2; exit 1; }
 command -v jq     >/dev/null 2>&1 || { echo "jq not on PATH" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not on PATH" >&2; exit 1; }
+case "$model" in
+  gpt*|o*)
+    command -v codex >/dev/null 2>&1 || { echo "codex CLI not on PATH for GPT QA model: $model" >&2; exit 1; }
+    ;;
+  *)
+    command -v claude >/dev/null 2>&1 || { echo "claude CLI not on PATH" >&2; exit 1; }
+    ;;
+esac
 [ -d "$frames" ]      || { echo "no such frames dir: $frames" >&2; exit 1; }
 [ -f "$feature" ]     || { echo "no such feature file: $feature" >&2; exit 1; }
 [ -f "$scenarios" ]   || { echo "no such scenarios file: $scenarios" >&2; exit 1; }
@@ -103,15 +110,37 @@ extract_json() { python3 "$tmp/extract_json.py"; }
 call_claude_json() { # <promptfile> <label>
   local pf="$1" label="$2" attempt raw result json
   for attempt in 1 2; do
-    raw="$(claude -p \
-            --output-format json \
-            --model "$model" \
-            --permission-mode bypassPermissions \
-            --allowedTools "Read" \
-            --add-dir "$frames" \
-            < "$pf" 2>/dev/null)" || { echo "  ($label) claude invocation failed (attempt $attempt)" >&2; continue; }
-    result="$(printf '%s' "$raw" | jq -r '.result // .text // empty')"
-    [ -n "$result" ] || result="$raw"          # tolerate a bare-JSON CLI build
+    case "$model" in
+      gpt*|o*)
+        local codex_out="$tmp/codex-${label}-${attempt}.txt"
+        local image_args=()
+        while IFS= read -r frame; do
+          [ -n "$frame" ] && image_args+=( --image "$frames/$frame" )
+        done <<< "$frame_list"
+        if ! codex exec \
+              --model "$model" \
+              --cd "$(pwd)" \
+              --sandbox read-only \
+              --output-last-message "$codex_out" \
+              "${image_args[@]}" \
+              - < "$pf" >/dev/null 2>"${out%.json}.${label}.codex.stderr.txt"; then
+          echo "  ($label) codex invocation failed (attempt $attempt)" >&2
+          continue
+        fi
+        result="$(cat "$codex_out" 2>/dev/null || true)"
+        ;;
+      *)
+        raw="$(claude -p \
+                --output-format json \
+                --model "$model" \
+                --permission-mode bypassPermissions \
+                --allowedTools "Read" \
+                --add-dir "$frames" \
+                < "$pf" 2>/dev/null)" || { echo "  ($label) claude invocation failed (attempt $attempt)" >&2; continue; }
+        result="$(printf '%s' "$raw" | jq -r '.result // .text // empty')"
+        [ -n "$result" ] || result="$raw"          # tolerate a bare-JSON CLI build
+        ;;
+    esac
     if json="$(printf '%s' "$result" | extract_json)"; then
       printf '%s' "$json"
       return 0

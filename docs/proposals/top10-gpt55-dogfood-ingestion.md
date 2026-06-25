@@ -1,6 +1,6 @@
 # Epic: Top-10 GPT-5.5 dogfood ingestion
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Draft v1. `stories/punch-list/` shipped; the top-10 manifest and item runs remain.
 **Kind:**   epic
 **Slices:** 10 (0/10 shipped)
 
@@ -11,7 +11,7 @@ and process hardening. If we implement it directly from chat, we lose the main
 reason kitsoki exists: the work should be driven through kitsoki Studio MCP,
 using real operator turns, traces, cassettes, and friction findings. This epic
 turns the top-10 into a **`punch-list/v1` manifest** consumed by the generic
-[`punch-list.md`](punch-list.md) story, with the right story entrypoint per item
+[`punch-list`](../stories/punch-list.md) story, with the right story entrypoint per item
 and a strict model policy: **implementation attempts use GPT-5.5 through
 `codex-native`, not Claude**.
 
@@ -172,7 +172,7 @@ Each item should leave:
 
 ```
 ## 1. Prepare the punch-list runner
-- [ ] 1.1 Implement or dogfood `stories/punch-list/` from `punch-list.md`.
+- [x] 1.1 Implement and dogfood `stories/punch-list/`; it now parks when live driver handoff lacks required trace/model evidence.
 - [ ] 1.2 Verify Studio MCP `studio.ping` and available handles.
 - [ ] 1.3 Verify `codex-native` profile resolves to `gpt-5.5`.
 - [ ] 1.4 Add a run ledger under `.artifacts/top10-dogfood/` for traces,

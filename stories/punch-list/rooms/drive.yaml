@@ -1,0 +1,50 @@
+states:
+  drive:
+    description: "Drive the target story through Studio MCP."
+    relevant_world: [current_item, drive_result]
+    view:
+      - heading: "Punch-list · drive"
+      - kv:
+          pairs:
+            Item: '{{ world.current_item.id }}'
+            Story: '{{ world.current_item.story }}'
+            Mode: '{{ world.current_item.mode }}'
+            Trace: '{{ world.drive_result.trace_path|default:"(pending)" }}'
+            Status: '{{ world.drive_result.status|default:"driving" }}'
+      - prose: "The live driver uses Studio MCP and human phrasing. The result is only a handoff; verification decides pass/fail."
+    on_enter:
+      - set:
+          drive_result: {}
+          drive_status: ""
+          drive_trace_path: ""
+          drive_model: ""
+          drive_evidence_ok: false
+      - invoke: host.agent.task
+        id: "punch_drive-{{ world.current_item_id }}"
+        with:
+          agent: driver
+          acceptance:
+            schema: schemas/drive_result.json
+          context:
+            item: "{{ world.current_item }}"
+            instruction: "Drive the target story through Kitsoki Studio MCP. Use harness/profile/model/trace policy exactly. If you cannot prove the model or trace, return status partial with a finding."
+        bind:
+          drive_result: submitted
+          drive_status: submitted.status
+          drive_trace_path: submitted.trace_path
+          drive_model: submitted.model
+        on_error: verify
+      - when: "world.drive_status != ''"
+        emit_intent: drive_done
+    on:
+      drive_done:
+        - when: "world.current_item.require_trace_model == true && (world.drive_trace_path == '' || world.drive_model != world.current_item.model)"
+          target: needs_human
+          effects:
+            - set:
+                last_error: "Drive did not provide required trace/model evidence for {{ world.current_item.id }} (wanted model {{ world.current_item.model }}, got {{ world.drive_model }}; trace {{ world.drive_trace_path }})."
+        - when: "world.current_item.implementation_story != ''"
+          target: implementation
+        - target: verify
+      look:
+        - target: .

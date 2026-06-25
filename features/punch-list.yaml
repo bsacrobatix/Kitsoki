@@ -1,0 +1,140 @@
+# yaml-language-server: $schema=feature.schema.json
+id: punch-list
+kind: story-demo
+title: Punch-list story
+tagline: Run YAML worklists through Kitsoki stories with model policy and independent verification.
+summary: "The punch-list story consumes a punch-list/v1 manifest, enforces profile/model policy, delegates live story driving, gates results on deterministic verification, and writes a report. This demo drives the shipped story through a no-LLM flow so the loop is reproducible while the policy and evidence surfaces stay visible."
+promo:
+  order: 55
+docs:
+  - docs/stories/punch-list.md
+demo:
+  spec: tests/playwright/punch-list-video.spec.ts
+  artifactDir: punch-list
+  videoBase: punch-list-demo
+  posterStep: pl-home
+  story: stories/punch-list
+  flow: stories/punch-list/flows/happy_two_items.yaml
+tour:
+  export: PUNCH_LIST_TOUR_STEPS
+  steps:
+    - id: pl-home
+      route: home
+      title: Start with the punch-list story
+      body: "Punch-list is a generic worklist runner. A YAML manifest names the stories to drive, the model policy to enforce, and the deterministic checks that decide whether each item passes."
+      placement: center
+      kind: explain
+      advance: next
+      waitForTarget: home-view
+      dwellMs: 4200
+    - id: pl-story-card
+      route: home
+      target: story-card
+      title: One story, many work items
+      body: "This demo opens the punch-list story itself. The fixture seeds a two-item punch-list so the recording stays deterministic and free of live model calls."
+      placement: right
+      kind: explain
+      advance: next
+      waitForTarget: story-card
+      dwellMs: 4200
+    - id: pl-start-session
+      route: home
+      target: new-session-btn
+      title: Create the run
+      body: "Start a fresh session. The flow fixture supplies the manifest path and stubs the live driver, the same no-LLM posture used by story tests."
+      placement: right
+      kind: action
+      advance: route-match
+      advanceRoute: interactive
+      dwellMs: 3200
+    - id: pl-idle
+      route: interactive
+      target: chat-section
+      title: Choose the manifest
+      body: "The first room explains the contract: load punch-list/v1 YAML, enforce model policy, drive each item, verify independently, and produce a report."
+      placement: right
+      kind: explain
+      advance: next
+      waitForTarget: chat-section
+      dwellMs: 4500
+    - id: pl-load
+      route: interactive
+      target: current-state
+      title: Load and lint
+      body: "The start action parses the manifest and rejects bad policy before any live work can start: duplicate IDs, missing story paths, Claude profiles, and LLM-spending verifiers are blocked."
+      placement: bottom
+      kind: explain
+      advance: next
+      waitForTarget: current-state
+      dwellMs: 4800
+    - id: pl-board
+      route: interactive
+      target: chat-section
+      title: Board view
+      body: "The board shows processed, passed, partial, failed, skipped, and pending counts, then selects the next pending item by priority."
+      placement: right
+      kind: explain
+      advance: next
+      waitForTarget: chat-section
+      dwellMs: 4300
+    - id: pl-first-item
+      route: interactive
+      target: trace-timeline
+      title: One item at a time
+      body: "Processing an item walks through policy, drive, verify, and record. The live driver handoff must include trace and model evidence before verification is allowed to mark the item complete."
+      placement: left
+      kind: explain
+      advance: next
+      waitForTarget: trace-timeline
+      dwellMs: 5200
+    - id: pl-second-item
+      route: interactive
+      target: chat-section
+      title: Implementation items use the same policy
+      body: "The second fixture item includes an implementation story. The same GPT-5.5/Codex evidence gate applies to the implementation handoff before deterministic checks run."
+      placement: right
+      kind: explain
+      advance: next
+      waitForTarget: chat-section
+      dwellMs: 5200
+    - id: pl-report
+      route: interactive
+      target: chat-section
+      title: Report result
+      body: "When no pending items remain, punch-list writes a markdown report under .artifacts/punch-list/ with each item, status, story, trace path, and verifier summary."
+      placement: right
+      kind: explain
+      advance: next
+      waitForTarget: chat-section
+      dwellMs: 4800
+    - id: pl-done
+      route: interactive
+      title: Ready for real work
+      body: "The shipped story is generic: swap in any punch-list/v1 manifest, run it through Studio MCP, and trust deterministic verification plus trace/model evidence rather than a maker self-report."
+      placement: center
+      kind: explain
+      advance: next
+      dwellMs: 4300
+qa:
+  scenarios:
+    - id: tour-driven
+      title: The demo is a single tour-driven walkthrough
+      required: true
+      steps:
+        - A tour popover opens on the story library
+        - Tour popovers continue through the interactive punch-list run
+        - A final centered tour popover appears at the end
+    - id: manifest-board-loop
+      title: Manifest load and board loop are visible
+      required: true
+      steps:
+        - The punch-list story loads a manifest and shows a loaded item count
+        - The board view shows counts for processed, passed, failed, skipped, and pending items
+        - At least one selected item title is visible on the board
+    - id: policy-verification-report
+      title: Policy, verification, and report result are demonstrated
+      required: true
+      steps:
+        - The run advances through processing an item
+        - The report screen shows a passed summary
+        - The report path under .artifacts/punch-list is visible
