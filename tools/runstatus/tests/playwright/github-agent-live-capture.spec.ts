@@ -102,6 +102,27 @@ async function tryMakeCaption(page: Page): Promise<(title: string, sub?: string,
   }
 }
 
+async function tryStyleAPIProof(page: Page): Promise<void> {
+  try {
+    await page.addStyleTag({
+      content:
+        `html,body{margin:0;min-height:100%;background:#0b1220!important;color:#dbeafe!important;` +
+        `font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace!important}` +
+        `body{display:flex;align-items:center;justify-content:center;padding:56px!important}` +
+        `body::before{content:"Live /api/run job state";position:fixed;top:24px;left:50%;` +
+        `transform:translateX(-50%);font:700 22px ui-sans-serif,system-ui,sans-serif;` +
+        `color:#f8fafc;background:#111827;border:1px solid #334155;border-left:4px solid #38bdf8;` +
+        `border-radius:10px;padding:12px 18px;box-shadow:0 12px 32px rgba(0,0,0,.35)}` +
+        `pre{box-sizing:border-box;width:min(1180px,88vw);max-height:70vh;overflow:auto;` +
+        `white-space:pre-wrap;overflow-wrap:anywhere;background:#111827!important;color:#dbeafe!important;` +
+        `border:1px solid #334155;border-radius:14px;padding:28px 32px!important;` +
+        `font-size:18px!important;line-height:1.55!important;box-shadow:0 24px 70px rgba(0,0,0,.45)}`,
+    });
+  } catch (e) {
+    console.warn(`[live-capture] API proof styling skipped: ${String(e).slice(0, 240)}`);
+  }
+}
+
 test("capture live GitHub-agent evidence", async () => {
   test.skip(
     process.env.KITSOKI_GH_AGENT_LIVE_CAPTURE !== "1",
@@ -140,6 +161,10 @@ test("capture live GitHub-agent evidence", async () => {
       if (step.waitForText) {
         diag.mark(`step ${step.id}: wait ${step.waitForText}`);
         await page.getByText(step.waitForText, { exact: false }).first().waitFor({ timeout: 30000 });
+      }
+      if (step.id === "run-api") {
+        diag.mark(`step ${step.id}: style-api-proof`);
+        await tryStyleAPIProof(page);
       }
       await dwell(page, SETTLE_MS);
       diag.mark(`step ${step.id}: lift-curtain`);
