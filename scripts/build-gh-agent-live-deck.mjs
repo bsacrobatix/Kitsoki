@@ -142,7 +142,8 @@ function field(markdown, label) {
 
 function fencedJSON(markdown, heading) {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`^## ${escaped}\\s*\\n\\n\`\`\`json\\n([\\s\\S]*?)\\n\`\`\``, "m");
+  const headingPattern = heading.includes("`") ? escaped : `\`?${escaped}\`?`;
+  const re = new RegExp(`^## ${headingPattern}\\s*\\n\\n\`\`\`json\\n([\\s\\S]*?)\\n\`\`\``, "m");
   const match = markdown.match(re);
   if (!match) return null;
   const raw = match[1].trim();

@@ -167,7 +167,8 @@ function statusField(markdown, label) {
 
 function fencedJSON(markdown, heading) {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`^## ${escaped}\\s*\\n\\n\`\`\`json\\n([\\s\\S]*?)\\n\`\`\``, "m");
+  const headingPattern = heading.includes("`") ? escaped : `\`?${escaped}\`?`;
+  const re = new RegExp(`^## ${headingPattern}\\s*\\n\\n\`\`\`json\\n([\\s\\S]*?)\\n\`\`\``, "m");
   const match = markdown.match(re);
   if (!match) return { found: false, value: null, error: "" };
   const raw = match[1].trim();
@@ -413,6 +414,13 @@ function checkMedia(args, c, report) {
   const videoPath = path.join(args.mediaRoot, c.slug, c.videoName);
   const chaptersPath = `${videoPath}.chapters.json`;
   report.media[c.slug] = { planPath, videoPath, chaptersPath };
+  const evidence = report.cases[c.slug] || {};
+  const expectedSteps = [
+    ["github-thread", evidence.sourceURL],
+    ["app-comment", evidence.commentURL],
+    ["run-page", evidence.runURL],
+    ["run-api", evidence.apiURL],
+  ];
 
   if (!fs.existsSync(planPath)) {
     if (!args.allowMissingMedia) report.fail(`${c.slug}: missing capture plan ${planPath}`);
@@ -424,6 +432,20 @@ function checkMedia(args, c, report) {
       }
       if (!Array.isArray(plan.steps) || plan.steps.length < 4) {
         report.fail(`${c.slug}: capture plan must have at least four steps`);
+      } else {
+        for (const [id, expectedURL] of expectedSteps) {
+          const step = plan.steps.find((candidate) => candidate?.id === id);
+          if (!step) {
+            report.fail(`${c.slug}: capture plan missing ${id} step`);
+            continue;
+          }
+          if (expectedURL && step.url !== expectedURL) {
+            report.fail(`${c.slug}: capture plan ${id} URL ${step.url} does not match evidence ${expectedURL}`);
+          }
+          if (!step.waitForText) {
+            report.fail(`${c.slug}: capture plan ${id} step is missing waitForText`);
+          }
+        }
       }
     }
   }
@@ -435,7 +457,25 @@ function checkMedia(args, c, report) {
     if (!fs.existsSync(file)) {
       if (!args.allowMissingMedia) report.fail(`${c.slug}: missing ${label} ${file}`);
     } else if (fs.statSync(file).size === 0) {
-      report.warn(`${c.slug}: ${label} file is zero bytes: ${file}`);
+      report.fail(`${c.slug}: ${label} file is zero bytes: ${file}`);
+    }
+  }
+
+  if (fs.existsSync(chaptersPath)) {
+    const chapters = readJSONFile(chaptersPath, report, `${c.slug} chapters`);
+    if (chapters) {
+      if (!Array.isArray(chapters) || chapters.length < expectedSteps.length) {
+        report.fail(
+          `${c.slug}: chapters should contain at least ${expectedSteps.length} entries, got ${
+            Array.isArray(chapters) ? chapters.length : "non-array"
+          }`,
+        );
+      } else {
+        const ids = new Set(chapters.map((chapter) => chapter?.id).filter(Boolean));
+        for (const [id] of expectedSteps) {
+          if (!ids.has(id)) report.fail(`${c.slug}: chapters missing ${id}`);
+        }
+      }
     }
   }
 }
