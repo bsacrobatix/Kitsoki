@@ -201,6 +201,9 @@ The ambiguous guidance case still writes a public run URL before posting its
 guidance comment. The GitHub thread should show both the request for direction
 and a `https://kitsoki-test.slothattax.me/run/<job-id>` link, while the job state
 parks at `awaiting_guidance`.
+The live runner waits for each row to reach its expected proof state with both
+`run_url` and `comment_id` populated before collecting evidence, so capture plans
+point at the App response rather than the requester mention.
 
 Live mode fails before any deploy or GitHub mutation if the PR URL is missing,
 is not a pull request URL for the selected repo, if `--developer-arc-media` points

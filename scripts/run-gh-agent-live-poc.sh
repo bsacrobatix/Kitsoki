@@ -317,18 +317,45 @@ PY
 
 wait_for_job() {
 	local origin="$1"
+	local expected_state="$2"
 	local deadline=$((SECONDS + WAIT_SECONDS))
 	local row
 	while [ "$SECONDS" -le "$deadline" ]; do
 		row="$(query_job_by_origin "$origin" 2>/dev/null || true)"
 		if [ -n "$row" ] && [ "$row" != "null" ]; then
-			printf '%s\n' "$row"
-			return 0
+			if job_row_ready "$row" "$expected_state"; then
+				printf '%s\n' "$row"
+				return 0
+			fi
 		fi
 		sleep "$POLL_SECONDS"
 	done
-	echo "timed out waiting for $origin in $REMOTE_DB" >&2
+	echo "timed out waiting for $origin in $REMOTE_DB to reach $expected_state with run_url and comment_id" >&2
 	return 1
+}
+
+job_row_ready() {
+	local row="$1"
+	local expected_state="$2"
+	python3 -c 'import json
+import sys
+
+expected_state = sys.argv[1]
+try:
+    row = json.loads(sys.stdin.read())
+except Exception:
+    raise SystemExit(1)
+if not isinstance(row, dict):
+    raise SystemExit(1)
+if row.get("state") != expected_state:
+    if row.get("state") == "failed":
+        print(f"job failed before reaching {expected_state}: {row.get('err_msg','')}", file=sys.stderr)
+    raise SystemExit(1)
+for key in ("job_id", "run_url", "comment_id"):
+    if not str(row.get(key) or "").strip():
+        raise SystemExit(1)
+raise SystemExit(0)
+' "$expected_state" <<<"$row"
 }
 
 ensure_label() {
@@ -344,7 +371,11 @@ create_issue_case() {
 	local body="$3"
 	local label="$4"
 	local mention="$5"
-	local issue_url issue_num mention_url origin row job_id comment_url
+	local issue_url issue_num mention_url origin row job_id comment_url expected_state
+	expected_state="done"
+	if [ "$slug" = "guidance" ]; then
+		expected_state="awaiting_guidance"
+	fi
 
 	if [ -n "$label" ]; then
 		case "$slug" in
@@ -362,7 +393,7 @@ create_issue_case() {
 		issue_num="$(issue_number_from_url "$issue_url")"
 		mention_url="$(gh issue comment "$issue_num" --repo "$REPO" --body "$mention" | last_non_empty_line)"
 		origin="github:$REPO/issue/$issue_num"
-		row="$(wait_for_job "$origin")"
+		row="$(wait_for_job "$origin" "$expected_state")"
 		job_id="$(printf '%s' "$row" | json_field job_id)"
 		comment_url="$(printf '%s' "$row" | json_field comment_id)"
 		scripts/collect-gh-agent-poc-evidence.sh \
@@ -384,7 +415,7 @@ create_issue_case() {
 			print_cmd gh issue create --repo "$REPO" --title "$title" --body "$body"
 		fi
 		print_cmd gh issue comment "<$slug-issue-number>" --repo "$REPO" --body "$mention"
-		printf 'wait for origin_ref github:%s/issue/<%s-issue-number>\n' "$REPO" "$slug"
+		printf 'wait for origin_ref github:%s/issue/<%s-issue-number> to reach %s with run_url and comment_id\n' "$REPO" "$slug" "$expected_state"
 		print_cmd scripts/collect-gh-agent-poc-evidence.sh --case "$slug" --job-id "<$slug-job-id>" --source-url "<$slug-issue-url>" --mention-url "<$slug-mention-url>" --comment-url "<$slug-kitsoki-comment-url>" --remote-db
 		print_cmd scripts/build-gh-agent-capture-plan.mjs --case "$slug" --evidence "$EVIDENCE_DIR/live-poc-$slug.md" --out "$MEDIA_ROOT/capture-plan-$slug.json"
 	fi
@@ -397,7 +428,7 @@ run_pr_case() {
 		pr_num="$(issue_number_from_url "$PR_URL")"
 		mention_url="$(gh issue comment "$pr_num" --repo "$REPO" --body "$mention" | last_non_empty_line)"
 		origin="github:$REPO/pr/$pr_num"
-		row="$(wait_for_job "$origin")"
+		row="$(wait_for_job "$origin" "done")"
 		job_id="$(printf '%s' "$row" | json_field job_id)"
 		comment_url="$(printf '%s' "$row" | json_field comment_id)"
 		scripts/collect-gh-agent-poc-evidence.sh \
@@ -414,7 +445,7 @@ run_pr_case() {
 		append_case_summary pr-status "$PR_URL" "$mention_url" "${comment_url:-$mention_url}" "$job_id"
 	else
 		print_cmd gh issue comment "<pr-number-from---pr-url>" --repo "$REPO" --body "$mention"
-		printf 'wait for origin_ref github:%s/pr/<pr-number>\n' "$REPO"
+		printf 'wait for origin_ref github:%s/pr/<pr-number> to reach done with run_url and comment_id\n' "$REPO"
 		print_cmd scripts/collect-gh-agent-poc-evidence.sh --case pr-status --job-id "<pr-status-job-id>" --source-url "${PR_URL:-<pr-url>}" --mention-url "<pr-mention-url>" --comment-url "<pr-kitsoki-comment-url>" --remote-db
 		print_cmd scripts/build-gh-agent-capture-plan.mjs --case pr-status --evidence "$EVIDENCE_DIR/live-poc-pr-status.md" --out "$MEDIA_ROOT/capture-plan-pr-status.json"
 	fi
