@@ -81,6 +81,9 @@ Before spending live operator time, run the no-LLM dogfood smoke:
 python3 tools/product-journey/run.py --dogfood-smoke --seed demo
 ```
 
+Inside `stories/product-journey-qa/app.yaml`, submit
+`dogfood_smoke seed=demo` for the same proof with story-visible artifact paths.
+
 That single command composes the normal pieces: a 10-repo matrix, one concrete
 assignment run, representative demo evidence, review, run validation, matrix
 rollup, matrix validation, and a smoke-level Slidey deck under

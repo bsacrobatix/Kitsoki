@@ -11,6 +11,9 @@ It is intentionally no-LLM:
 - `matrix` calls `tools/product-journey/run.py --emit-matrix --json-output` to
   create the 10-repo GitHub assignment plan. Pass `target_proof_file=...` after
   `refresh_targets` when the matrix should embed current GitHub proof.
+- `dogfood_smoke` calls `tools/product-journey/run.py --dogfood-smoke
+  --json-output` to prove the no-LLM artifact loop from matrix creation through
+  assignment run, seeded evidence, review, validation, rollup, and Slidey decks.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix

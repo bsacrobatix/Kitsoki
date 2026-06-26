@@ -24,6 +24,13 @@ world:
   rollup_deck_path: { type: string, default: "" }
   rollup_markdown_path: { type: string, default: "" }
   rollup_summary: { type: object, default: {} }
+  dogfood_id:    { type: string, default: "" }
+  dogfood_dir:   { type: string, default: "" }
+  dogfood_report_path: { type: string, default: "" }
+  dogfood_deck_path: { type: string, default: "" }
+  dogfood_matrix_deck_path: { type: string, default: "" }
+  dogfood_run_deck_path: { type: string, default: "" }
+  dogfood_rollup_deck_path: { type: string, default: "" }
   run_id:         { type: string, default: "" }
   run_dir:        { type: string, default: "" }
   deck_path:      { type: string, default: "" }
@@ -65,6 +72,12 @@ intents:
       seed: { type: string, required: false }
       matrix_personas: { type: string, required: false }
       target_proof_file: { type: string, required: false }
+  dogfood_smoke:
+    description: "Run the deterministic no-LLM product-journey smoke from matrix through rollup and decks."
+    examples: ["dogfood smoke", "run dogfood smoke", "prove artifact loop"]
+    priority: 89
+    slots:
+      seed: { type: string, required: false }
   refresh_targets:
     description: "Refresh GitHub open-bug proof for the 10-repo target catalog."
     examples: ["refresh github targets", "check target bug counts", "prove target matrix"]
@@ -136,7 +149,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, refresh_targets, rollup, validate_matrix, attach, record, blocker, seed_demo, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, refresh_targets, rollup, validate_matrix, attach, record, blocker, seed_demo, review, validate, accept, quit, look]
 
 root: idle
 

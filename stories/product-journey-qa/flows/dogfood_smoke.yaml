@@ -1,0 +1,69 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+
+host_handlers:
+  host.run:
+    by_call:
+      dogfood_product_journey_smoke:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: passed
+            dogfood_id: dogfood-123
+            dogfood_dir: .artifacts/product-journey/dogfood/dogfood-123
+            report_path: .artifacts/product-journey/dogfood/dogfood-123/dogfood.json
+            summary_path: .artifacts/product-journey/dogfood/dogfood-123/dogfood.md
+            deck_path: .artifacts/product-journey/dogfood/dogfood-123/deck.slidey.json
+            matrix_dir: .artifacts/product-journey/matrices/matrix-123
+            matrix_deck_path: .artifacts/product-journey/matrices/matrix-123/deck.slidey.json
+            run_dir: .artifacts/product-journey/run-123
+            run_deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+            rollup_deck_path: .artifacts/product-journey/matrices/matrix-123/rollup.slidey.json
+            review_status: ready
+            run_validation_status: valid
+            matrix_validation_status: valid
+            matrix_validation_warnings: 1
+
+turns:
+  - intent:
+      name: dogfood_smoke
+      slots:
+        seed: story-smoke
+    expect_state: dogfood_created
+    expect_world:
+      status: dogfood_smoke_created
+      seed: story-smoke
+      dogfood_id: dogfood-123
+      dogfood_dir: .artifacts/product-journey/dogfood/dogfood-123
+      dogfood_report_path: .artifacts/product-journey/dogfood/dogfood-123/dogfood.json
+      dogfood_deck_path: .artifacts/product-journey/dogfood/dogfood-123/deck.slidey.json
+      dogfood_matrix_deck_path: .artifacts/product-journey/matrices/matrix-123/deck.slidey.json
+      dogfood_run_deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+      dogfood_rollup_deck_path: .artifacts/product-journey/matrices/matrix-123/rollup.slidey.json
+      matrix_dir: .artifacts/product-journey/matrices/matrix-123
+      run_dir: .artifacts/product-journey/run-123
+      deck_path: .artifacts/product-journey/dogfood/dogfood-123/deck.slidey.json
+      review_status: ready
+      validation_status: valid
+      validation_warnings: 1
+    expect_host_calls:
+      - handler: host.run
+        args: { call: dogfood_product_journey_smoke }
+
+  - intent: { name: look, slots: {} }
+    expect_state: dogfood_created
+    expect_world:
+      status: dogfood_smoke_created
+      dogfood_id: dogfood-123
+
+  - intent: { name: accept, slots: {} }
+    expect_state: done
+    expect_world:
+      status: done
+      dogfood_id: dogfood-123
+      dogfood_report_path: .artifacts/product-journey/dogfood/dogfood-123/dogfood.json
+      dogfood_deck_path: .artifacts/product-journey/dogfood/dogfood-123/deck.slidey.json
+
+expect_no_errors: true

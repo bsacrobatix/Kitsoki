@@ -1,0 +1,134 @@
+states:
+  dogfood_created:
+    description: "A deterministic product-journey dogfood smoke exists for review."
+    relevant_world: [seed, dogfood_id, dogfood_dir, dogfood_report_path, dogfood_deck_path, dogfood_matrix_deck_path, dogfood_run_deck_path, dogfood_rollup_deck_path, matrix_dir, run_dir, review_status, validation_status, validation_warnings, status]
+    view:
+      - banner:
+          text: "DOGFOOD SMOKE CREATED"
+          subtitle: "Review the one-command no-LLM proof of the product journey artifact loop."
+          color: "#7C2D12"
+      - kv:
+          pairs:
+            Smoke: '{{ world.dogfood_id|default:"(pending)" }}'
+            Seed: "{{ world.seed }}"
+            Smoke dir: '{{ world.dogfood_dir|default:"(pending)" }}'
+            Smoke report: '{{ world.dogfood_report_path|default:"(pending)" }}'
+            Smoke deck: '{{ world.dogfood_deck_path|default:"(pending)" }}'
+            Matrix dir: '{{ world.matrix_dir|default:"(pending)" }}'
+            Matrix deck: '{{ world.dogfood_matrix_deck_path|default:"(pending)" }}'
+            Run dir: '{{ world.run_dir|default:"(pending)" }}'
+            Run deck: '{{ world.dogfood_run_deck_path|default:"(pending)" }}'
+            Rollup deck: '{{ world.dogfood_rollup_deck_path|default:"(pending)" }}'
+            Review: '{{ world.review_status|default:"(pending)" }}'
+            Run validation: '{{ world.validation_status|default:"(pending)" }}'
+            Matrix validation warnings: "{{ world.validation_warnings }}"
+            Status: "{{ world.status }}"
+      - prose: "The smoke proves that matrix creation, assignment run creation, evidence aggregation, review, validation, matrix rollup, and Slidey deck generation compose without live LLM calls."
+      - prose: "Use it as an artifact-loop check before spending live visual MCP or cassette capture time; the seeded demo evidence is not product proof."
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "dogfood_smoke seed=..."
+              hint: "run the deterministic smoke again with a new seed"
+              intent: dogfood_smoke
+            - label: "start project=... persona=... seed=..."
+              hint: "create a concrete live/cassette run bundle after reviewing the smoke"
+              intent: start
+            - label: "accept"
+              hint: "finish with the smoke artifacts"
+              intent: accept
+            - label: "quit"
+              intent: quit
+            - label: "look"
+              intent: look
+    on:
+      dogfood_smoke:
+        - target: .
+          effects:
+            - set:
+                seed: "{{ slots.seed ?? world.seed }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
+                review_status: ""
+                review_summary: ""
+                status: "dogfood_smoking"
+            - invoke: host.run
+              id: dogfood_product_journey_smoke
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --dogfood-smoke
+                  - --json-output
+                  - --seed
+                  - "{{ slots.seed ?? world.seed }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                dogfood_id: "stdout_json.dogfood_id"
+                dogfood_dir: "stdout_json.dogfood_dir"
+                dogfood_report_path: "stdout_json.report_path"
+                dogfood_deck_path: "stdout_json.deck_path"
+                dogfood_matrix_deck_path: "stdout_json.matrix_deck_path"
+                dogfood_run_deck_path: "stdout_json.run_deck_path"
+                dogfood_rollup_deck_path: "stdout_json.rollup_deck_path"
+                matrix_dir: "stdout_json.matrix_dir"
+                run_dir: "stdout_json.run_dir"
+                deck_path: "stdout_json.deck_path"
+                review_status: "stdout_json.review_status"
+                validation_status: "stdout_json.run_validation_status"
+                validation_warnings: "stdout_json.matrix_validation_warnings"
+              on_error: dogfood_created
+            - set:
+                status: "dogfood_smoke_created"
+      start:
+        - target: run_created
+          effects:
+            - set:
+                project: "{{ slots.project ?? world.project }}"
+                persona: "{{ slots.persona ?? world.persona }}"
+                seed: "{{ slots.seed ?? world.seed }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
+                status: "creating"
+            - invoke: host.run
+              id: emit_product_journey_run
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --emit-run
+                  - --json-output
+                  - --project
+                  - "{{ slots.project ?? world.project }}"
+                  - --persona
+                  - "{{ slots.persona ?? world.persona }}"
+                  - --seed
+                  - "{{ slots.seed ?? world.seed }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                run_id: "stdout_json.run_id"
+                run_dir: "stdout_json.run_dir"
+                deck_path: "stdout_json.deck_path"
+                execution_plan_path: "stdout_json.execution_plan_path"
+                driver_plan_path: "stdout_json.driver_plan_path"
+                agent_brief_path: "stdout_json.agent_brief_path"
+                media_manifest_path: "stdout_json.media_manifest_path"
+                scenario_outcomes_path: "stdout_json.scenario_outcomes_path"
+              on_error: dogfood_created
+            - set:
+                status: "run_created"
+      accept:
+        - target: done
+          effects:
+            - set: { status: "done" }
+      quit:
+        - target: abandoned
+          effects:
+            - set: { status: "abandoned" }
+      look:
+        - target: .
