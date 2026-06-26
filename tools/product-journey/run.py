@@ -2296,6 +2296,32 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
                     "rollup summary scenario_outcomes does not match scenario_outcomes length",
                     f"summary={summary.get('scenario_outcomes')}, rows={len(rollup.get('scenario_outcomes', []))}",
                 )
+            quality_gates = rollup.get("quality_gates", [])
+            if summary.get("quality_gate_rows", 0) != len(quality_gates):
+                add_validation_issue(
+                    issues,
+                    "error",
+                    "rollup-quality-gates",
+                    "rollup summary quality_gate_rows does not match quality_gates length",
+                    f"summary={summary.get('quality_gate_rows')}, rows={len(quality_gates)}",
+                )
+            expected_gate_total = sum(row.get("runs", 0) for row in quality_gates)
+            if summary.get("quality_gate_total_runs", 0) != expected_gate_total:
+                add_validation_issue(
+                    issues,
+                    "error",
+                    "rollup-quality-gate-total",
+                    "rollup summary quality_gate_total_runs does not match quality gate rows",
+                    f"summary={summary.get('quality_gate_total_runs')}, rows={expected_gate_total}",
+                )
+            rollup_deck = load_json_for_validation(matrix_dir / "rollup.slidey.json", issues)
+            if rollup_deck and quality_gates and "Quality gates" not in deck_scene_eyebrows(rollup_deck):
+                add_validation_issue(
+                    issues,
+                    "error",
+                    "rollup-deck-quality-gates",
+                    "rollup.slidey.json is missing the quality gate scene",
+                )
 
     errors = sum(1 for issue in issues if issue["severity"] == "error")
     warnings = sum(1 for issue in issues if issue["severity"] == "warn")
@@ -2506,7 +2532,9 @@ def summarize_run_for_rollup(run_dir: Path) -> dict:
     findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"items": [], "summary": {}}
     outcomes = read_json(run_dir / "scenario-outcomes.json") if (run_dir / "scenario-outcomes.json").exists() else {"items": [], "summary": {}}
     review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {"status": "not_reviewed", "summary": ""}
+    driver_plan = read_json(run_dir / "driver-plan.json") if (run_dir / "driver-plan.json").exists() else {"scenarios": []}
     finding_summary = findings.get("summary", {})
+    quality_gates = summarize_quality_gates(evidence, outcomes, driver_plan)
     return {
         "run_id": run_json["run_id"],
         "run_dir": str(run_dir),
@@ -2528,7 +2556,44 @@ def summarize_run_for_rollup(run_dir: Path) -> dict:
         "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
         "scenario_outcomes": outcomes.get("items", []),
         "scenario_outcomes_summary": outcomes.get("summary", {}),
+        "quality_gates": quality_gates,
     }
+
+
+def summarize_quality_gates(evidence: dict, outcomes: dict, driver_plan: dict) -> list[dict]:
+    captured_evidence = {
+        (item.get("scenario", ""), item.get("kind", item.get("evidence_kind", "")))
+        for item in evidence.get("items", [])
+        if item.get("status") in {"captured", "validated"}
+    }
+    outcomes_by_scenario = {
+        item.get("scenario", ""): item
+        for item in outcomes.get("items", [])
+    }
+    rows = []
+    for scenario in driver_plan.get("scenarios", []):
+        gate = scenario.get("quality_gate", {})
+        minimum = gate.get("minimum_evidence", [])
+        present = [
+            item
+            for item in minimum
+            if (scenario.get("scenario", ""), item) in captured_evidence
+        ]
+        outcome = outcomes_by_scenario.get(scenario.get("scenario", ""), {})
+        blocked = outcome.get("outcome") == "blocked" or outcome.get("finding_counts", {}).get("blocked", 0) > 0
+        satisfied = bool(minimum) and len(present) >= len(minimum)
+        rows.append({
+            "scenario": scenario.get("scenario", ""),
+            "label": scenario.get("label", scenario.get("scenario", "")),
+            "minimum_evidence_count": len(minimum),
+            "present_minimum_evidence_count": len(present),
+            "missing_minimum_evidence": sorted(set(minimum) - set(present)),
+            "outcome": outcome.get("outcome", "not_started"),
+            "blocked": blocked,
+            "satisfied": satisfied,
+            "done_when": gate.get("done_when", ""),
+        })
+    return rows
 
 
 def aggregate_scenario_outcomes(runs: list[dict]) -> list[dict]:
@@ -2565,6 +2630,34 @@ def aggregate_scenario_outcomes(runs: list[dict]) -> list[dict]:
     return [by_scenario[key] for key in sorted(by_scenario)]
 
 
+def aggregate_quality_gates(runs: list[dict]) -> list[dict]:
+    by_scenario: dict[str, dict] = {}
+    for run in runs:
+        for gate in run.get("quality_gates", []):
+            scenario_id = gate.get("scenario", "")
+            row = by_scenario.setdefault(scenario_id, {
+                "scenario": scenario_id,
+                "label": gate.get("label", scenario_id),
+                "runs": 0,
+                "satisfied_runs": 0,
+                "blocked_runs": 0,
+                "present_minimum_evidence_count": 0,
+                "minimum_evidence_count": 0,
+                "missing_minimum_evidence": {},
+                "outcomes": {},
+            })
+            row["runs"] += 1
+            row["satisfied_runs"] += 1 if gate.get("satisfied") else 0
+            row["blocked_runs"] += 1 if gate.get("blocked") else 0
+            row["present_minimum_evidence_count"] += gate.get("present_minimum_evidence_count", 0)
+            row["minimum_evidence_count"] += gate.get("minimum_evidence_count", 0)
+            outcome = gate.get("outcome", "not_started")
+            row["outcomes"][outcome] = row["outcomes"].get(outcome, 0) + 1
+            for evidence_kind in gate.get("missing_minimum_evidence", []):
+                row["missing_minimum_evidence"][evidence_kind] = row["missing_minimum_evidence"].get(evidence_kind, 0) + 1
+    return [by_scenario[key] for key in sorted(by_scenario)]
+
+
 def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
     matrix = read_json(matrix_dir / "matrix.json")
     run_dirs = collect_rollup_runs(matrix, explicit_run_dirs)
@@ -2573,6 +2666,7 @@ def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
     reviewed = [run for run in runs if run["review_status"] != "not_reviewed"]
     ready = [run for run in runs if run["review_status"] == "ready"]
     scenario_outcomes = aggregate_scenario_outcomes(runs)
+    quality_gates = aggregate_quality_gates(runs)
     totals = {
         "runs_found": len(runs),
         "assignments": assignment_count,
@@ -2588,6 +2682,12 @@ def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
         "blocked_count": sum(run.get("blocked_count", 0) for run in runs),
         "scenario_outcomes": len(scenario_outcomes),
         "scenario_outcomes_with_findings": sum(1 for row in scenario_outcomes if row["findings_count"] > 0),
+        "quality_gate_rows": len(quality_gates),
+        "quality_gate_satisfied_runs": sum(row["satisfied_runs"] for row in quality_gates),
+        "quality_gate_total_runs": sum(row["runs"] for row in quality_gates),
+        "quality_gate_blocked_runs": sum(row["blocked_runs"] for row in quality_gates),
+        "quality_gate_present_minimum_evidence_count": sum(row["present_minimum_evidence_count"] for row in quality_gates),
+        "quality_gate_minimum_evidence_count": sum(row["minimum_evidence_count"] for row in quality_gates),
     }
     return {
         "matrix_id": matrix["matrix_id"],
@@ -2597,6 +2697,7 @@ def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
         "summary": totals,
         "runs": runs,
         "scenario_outcomes": scenario_outcomes,
+        "quality_gates": quality_gates,
         "missing_assignment_count": max(assignment_count - len(runs), 0),
         "artifacts": {
             "rollup": "rollup.json",
@@ -2618,6 +2719,7 @@ def render_rollup_summary(rollup: dict) -> str:
         f"- Evidence present: {summary['present_evidence_count']} / {summary['required_evidence_count']}",
         f"- Findings: {summary['findings_count']} (strengths {summary['strength_count']}, weaknesses {summary['weakness_count']}, issues {summary['issue_count']}, fixes {summary['fix_count']}, blocked {summary.get('blocked_count', 0)})",
         f"- Scenario outcome rows: {summary['scenario_outcomes']} ({summary['scenario_outcomes_with_findings']} with findings)",
+        f"- Quality gates: {summary.get('quality_gate_satisfied_runs', 0)} / {summary.get('quality_gate_total_runs', 0)} satisfied, {summary.get('quality_gate_blocked_runs', 0)} blocked, evidence {summary.get('quality_gate_present_minimum_evidence_count', 0)} / {summary.get('quality_gate_minimum_evidence_count', 0)}",
         "",
         "## Runs",
         "",
@@ -2629,6 +2731,7 @@ def render_rollup_summary(rollup: dict) -> str:
             f"- Run: `{run['run_id']}`",
             f"- Review: {run['review_status']} - {run['review_summary']}",
             f"- Evidence: {run['present_evidence_count']} / {run['required_evidence_count']}",
+            f"- Quality gates: {sum(1 for gate in run.get('quality_gates', []) if gate.get('satisfied'))} / {len(run.get('quality_gates', []))} satisfied",
             f"- Findings: {run['findings_count']}",
             f"- Deck: `{run['deck_path']}`",
             f"- Execution plan: `{run['execution_plan_path']}`",
@@ -2652,6 +2755,25 @@ def render_rollup_summary(rollup: dict) -> str:
             ])
     else:
         lines.append("- (no scenario outcomes found in matched runs)")
+    lines.extend(["", "## Quality Gates", ""])
+    if rollup.get("quality_gates"):
+        for row in rollup["quality_gates"]:
+            missing = ", ".join(f"{name}={count}" for name, count in sorted(row["missing_minimum_evidence"].items()))
+            outcome_counts = ", ".join(f"{name}={count}" for name, count in sorted(row["outcomes"].items()))
+            lines.extend([
+                f"### {row['label']}",
+                "",
+                f"- Scenario: `{row['scenario']}`",
+                f"- Runs: {row['runs']}",
+                f"- Satisfied: {row['satisfied_runs']} / {row['runs']}",
+                f"- Blocked: {row['blocked_runs']}",
+                f"- Minimum evidence: {row['present_minimum_evidence_count']} / {row['minimum_evidence_count']}",
+                f"- Missing minimum evidence: {missing or '(none)'}",
+                f"- Outcomes: {outcome_counts or '(none)'}",
+                "",
+            ])
+    else:
+        lines.append("- (no quality gate rows found in matched runs)")
     return "\n".join(lines) + "\n"
 
 
@@ -2672,6 +2794,10 @@ def render_rollup_deck(rollup: dict) -> dict:
         f"{row['scenario']}: evidence {row['present_evidence_count']}/{row['required_evidence_count']}, findings {row['findings_count']}, outcomes {', '.join(f'{name}={count}' for name, count in sorted(row['outcomes'].items()))}"
         for row in rollup["scenario_outcomes"][:12]
     ]
+    quality_gate_lines = [
+        f"{row['scenario']}: satisfied {row['satisfied_runs']}/{row['runs']}, minimum evidence {row['present_minimum_evidence_count']}/{row['minimum_evidence_count']}, blocked {row['blocked_runs']}"
+        for row in rollup.get("quality_gates", [])[:12]
+    ]
     return {
         "meta": {
             "mode": "report",
@@ -2690,7 +2816,7 @@ def render_rollup_deck(rollup: dict) -> dict:
                 "type": "narrative",
                 "eyebrow": "Coverage",
                 "title": "Evidence and readiness",
-                "body": f"Reviewed runs: {summary['reviewed_runs']}\nReady runs: {summary['ready_runs']}\nEvidence present: {summary['present_evidence_count']} / {summary['required_evidence_count']}\nMissing assignments: {rollup['missing_assignment_count']}",
+                "body": f"Reviewed runs: {summary['reviewed_runs']}\nReady runs: {summary['ready_runs']}\nEvidence present: {summary['present_evidence_count']} / {summary['required_evidence_count']}\nQuality gates satisfied: {summary.get('quality_gate_satisfied_runs', 0)} / {summary.get('quality_gate_total_runs', 0)}\nMissing assignments: {rollup['missing_assignment_count']}",
                 "narration": "This rollup shows whether the matrix has enough completed runs to review.",
             },
             {
@@ -2713,6 +2839,13 @@ def render_rollup_deck(rollup: dict) -> dict:
                 "title": "Cross-run scenario signals",
                 "body": "\n".join(scenario_lines) if scenario_lines else "No scenario outcomes found in matched runs.",
                 "narration": "Scenario-level rollups show which journeys are repeatedly weak across natural-use assignments.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Quality gates",
+                "title": "Cross-run proof coverage",
+                "body": "\n".join(quality_gate_lines) if quality_gate_lines else "No quality gate rows found in matched runs.",
+                "narration": "Quality gate rollups show which scenarios have enough minimum evidence to count as completed across the matrix.",
             },
         ],
     }

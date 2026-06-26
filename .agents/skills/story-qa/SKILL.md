@@ -114,7 +114,9 @@ That writes `.artifacts/product-journey/<run-id>/`, including
 `deck.slidey.json`, without calling a live LLM. Add `--publish-deck` when you
 want to update `docs/decks/product-journey-eval.slidey.json`.
 The rollup aggregates `scenario-outcomes.json` across runs so repeated weak
-scenarios stay visible at matrix-review time.
+scenarios stay visible at matrix-review time. It also aggregates each run's
+`quality_gate` rows so the matrix deck shows cross-run minimum-evidence
+coverage.
 Validate generated matrices before using them as the shared sweep contract:
 
 ```sh

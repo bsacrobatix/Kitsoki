@@ -194,7 +194,7 @@ func TestBugReport_CaptureIDPath_WithEvidence(t *testing.T) {
 	}
 
 	artifactsDir := filepath.Join(root, "issues", "bugs", id+".artifacts")
-	for _, f := range []string{"har.json", "rrweb.json", "console.json", "deck.slidey.json"} {
+	for _, f := range []string{"har.json", "rrweb.json", "console.json"} {
 		if _, err := os.Stat(filepath.Join(artifactsDir, f)); err != nil {
 			t.Fatalf("expected artifact %s: %v", f, err)
 		}
@@ -206,27 +206,6 @@ func TestBugReport_CaptureIDPath_WithEvidence(t *testing.T) {
 	}
 	if !strings.Contains(string(consoleData), "$HOME/secret.txt") {
 		t.Fatalf("console.json $HOME not substituted: %s", consoleData)
-	}
-	deckData, err := os.ReadFile(filepath.Join(artifactsDir, "deck.slidey.json"))
-	if err != nil {
-		t.Fatalf("read deck.slidey.json: %v", err)
-	}
-	var deck map[string]any
-	if err := json.Unmarshal(deckData, &deck); err != nil {
-		t.Fatalf("deck.slidey.json invalid: %v", err)
-	}
-	var hasRRWebPlayback bool
-	for _, scene := range deck["scenes"].([]any) {
-		m := scene.(map[string]any)
-		if m["type"] == "video" && m["rrweb"] == "rrweb.json" {
-			hasRRWebPlayback = true
-		}
-	}
-	if !hasRRWebPlayback {
-		t.Fatalf("deck.slidey.json missing rrweb playback scene: %s", deckData)
-	}
-	if !strings.Contains(mds, "./"+id+".artifacts/deck.slidey.json") {
-		t.Fatalf("md missing Slidey deck link: %s", mds)
 	}
 
 	// capture_id consumed: a second report with it falls back to fresh snapshot.
@@ -306,7 +285,7 @@ func TestBugReport_GitHubModeSavesDeveloperLocalArtifacts(t *testing.T) {
 		t.Fatalf("expected one artifact dir, got %d", len(entries))
 	}
 	artifactDir := filepath.Join(artifactsRoot, entries[0].Name())
-	for _, f := range []string{"har.json", "screenshot.png", "deck.slidey.json"} {
+	for _, f := range []string{"har.json", "screenshot.png"} {
 		if _, err := os.Stat(filepath.Join(artifactDir, f)); err != nil {
 			t.Fatalf("expected artifact %s: %v", f, err)
 		}
@@ -324,7 +303,6 @@ func TestBugReport_GitHubModeSavesDeveloperLocalArtifacts(t *testing.T) {
 		"These files are not uploaded to GitHub.",
 		".artifacts/bug-reports/" + entries[0].Name() + "/har.json",
 		".artifacts/bug-reports/" + entries[0].Name() + "/screenshot.png",
-		".artifacts/bug-reports/" + entries[0].Name() + "/deck.slidey.json",
 	} {
 		if !strings.Contains(issueArgv, want) {
 			t.Fatalf("issue create argv missing %q: %s", want, issueArgv)
