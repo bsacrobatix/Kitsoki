@@ -664,15 +664,27 @@ def build_run_bundle(
     findings = {"run_id": run_id, "items": [], "summary": {"strength": 0, "weakness": 0, "issue": 0, "fix": 0}}
     driver_journal = build_driver_journal(run_id, [])
     scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
+    present_evidence = [
+        item for item in evidence.get("items", [])
+        if item.get("status") in {"captured", "validated"}
+    ]
+    demo_evidence = [
+        item for item in present_evidence
+        if (item.get("source") or evidence_source(item.get("path", ""), item.get("notes", ""))) == "demo"
+    ]
+    proof_evidence = [item for item in present_evidence if is_proof_evidence(item)]
     metrics = {
         "run_id": run_id,
         "stage_count": len(stages),
         "scenario_count": len(scenario_items),
         "validated_stage_count": sum(1 for stage in stages if stage["status"] in {"validated", "cached_validated"}),
+        "captured_stage_count": sum(1 for stage in stages if stage["status"] == "captured"),
         "planned_stage_count": sum(1 for stage in stages if stage["status"] == "planned"),
         "required_evidence_count": evidence["summary"]["required"],
         "present_evidence_count": evidence["summary"]["present"],
         "missing_evidence_count": evidence["summary"]["missing"],
+        "demo_evidence_count": len(demo_evidence),
+        "proof_evidence_count": len(proof_evidence),
         "product_bugs_found": 0,
         "findings_count": 0,
         "strength_count": 0,
@@ -1517,6 +1529,7 @@ def build_execution_plan(run_json: dict, evidence: dict) -> dict:
 
 def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> dict:
     persona = run_json["persona"]
+    lens = persona_lens(persona)
     missing_evidence = [
         {"scenario": item["scenario"], "kind": item["kind"], "hint": evidence_capture_hint(item["kind"])}
         for item in evidence.get("items", [])
@@ -1539,6 +1552,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "description": persona["description"],
             "surface_preference": persona.get("surface_preference", ""),
             "risk_focus": persona.get("risk_focus", []),
+            "lens": lens,
         },
         "operating_rules": [
             "Read the current visual or Kitsoki frame before choosing the next action.",
@@ -1568,6 +1582,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
 
 
 def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict) -> dict:
+    lens = persona_lens(run_json["persona"])
     evidence_by_scenario: dict[str, list[dict]] = {}
     for item in evidence.get("items", []):
         evidence_by_scenario.setdefault(item["scenario"], []).append(item)
@@ -1597,8 +1612,13 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "persona_prompts": [
                 f"Act as {run_json['persona']['label']}: {run_json['persona']['description']}",
                 f"Risk focus: {', '.join(run_json['persona'].get('risk_focus', []))}",
+                f"Start from: {lens['starting_surface']}",
+                f"First skepticism check: {lens['first_question']}",
+                f"Escalate when: {lens['escalation_trigger']}",
+                f"Evidence emphasis: {lens['evidence_emphasis']}",
                 "Use natural operator phrasing where route quality or prompt quality is under test.",
             ],
+            "persona_lens": lens,
             "evidence": [
                 {
                     "kind": item["kind"],
@@ -1651,6 +1671,47 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict) -> d
     }
 
 
+def persona_lens(persona: dict) -> dict:
+    lenses = {
+        "core-maintainer": {
+            "starting_surface": "terminal-first; prefer TUI/session state before browser surfaces",
+            "first_question": "Will this produce a minimal, reviewable diff that follows the repository's style?",
+            "evidence_emphasis": "candidate diff, targeted tests, full-suite classification, and trace events for unexpected routing",
+            "escalation_trigger": "generated churn, hidden broad scope, missing deterministic test proof, or unclear ownership boundary",
+            "finding_bias": "Prefer reviewability, bisectability, and least-surprise findings over cosmetic notes.",
+        },
+        "dependency-debugger": {
+            "starting_surface": "web-first; begin from public issue/repro context and then enter the story surface",
+            "first_question": "How quickly can I reproduce the dependency bug and decide whether Kitsoki's fix is trustworthy?",
+            "evidence_emphasis": "reproduction steps, oracle output, key interaction video, and handoff artifacts",
+            "escalation_trigger": "unclear repro setup, missing oracle, ambiguous pass/fail state, or no handoff artifact for my app",
+            "finding_bias": "Favor time-to-repro, confidence, and downstream handoff clarity.",
+        },
+        "docs-minded-contributor": {
+            "starting_surface": "docs-first; follow the documented path before trying hidden commands",
+            "first_question": "Can I follow the docs without private repo context or tribal knowledge?",
+            "evidence_emphasis": "page URLs, screenshots, prerequisite commands, stale-link proof, and onboarding smoke results",
+            "escalation_trigger": "stale docs, missing prerequisites, broken media, or commands that require unexplained setup",
+            "finding_bias": "Prefer onboarding clarity, documented next actions, and confusing-copy findings.",
+        },
+        "ide-first-engineer": {
+            "starting_surface": "visual-first; use web, TUI PNG, or editor-like surfaces before terminal archaeology",
+            "first_question": "Can I understand current state and next action from the visible UI?",
+            "evidence_emphasis": "visual frames, retained image IDs, operator-question state, navigation traces, and key interaction video",
+            "escalation_trigger": "state that is only visible in logs, silent operator defaults, confusing navigation, or unreadable layout",
+            "finding_bias": "Favor visible-state, affordance, and navigation findings.",
+        },
+    }
+    default = {
+        "starting_surface": persona.get("surface_preference", "surface chosen by scenario"),
+        "first_question": f"What would a {persona.get('label', 'reviewer')} naturally try first, and what evidence proves the result?",
+        "evidence_emphasis": ", ".join(persona.get("risk_focus", [])) or "scenario minimum evidence",
+        "escalation_trigger": "the scenario cannot produce proof evidence or a clear blocker",
+        "finding_bias": "Tie findings to the persona risk focus and scenario success criteria.",
+    }
+    return lenses.get(persona.get("id", ""), default)
+
+
 def render_driver_plan(plan: dict) -> str:
     lines = [
         "# Product journey driver plan",
@@ -1695,6 +1756,14 @@ def render_driver_plan(plan: dict) -> str:
         lines.extend(["", "### Persona Prompts", ""])
         for prompt in scenario["persona_prompts"]:
             lines.append(f"- {prompt}")
+        lens = scenario.get("persona_lens", {})
+        if lens:
+            lines.extend(["", "### Persona Lens", ""])
+            lines.append(f"- Starting surface: {lens.get('starting_surface', '')}")
+            lines.append(f"- First question: {lens.get('first_question', '')}")
+            lines.append(f"- Evidence emphasis: {lens.get('evidence_emphasis', '')}")
+            lines.append(f"- Escalation trigger: {lens.get('escalation_trigger', '')}")
+            lines.append(f"- Finding bias: {lens.get('finding_bias', '')}")
         lines.extend(["", "### Evidence", ""])
         for item in scenario["evidence"]:
             playback = " playback" if item["playback_candidate"] else ""
@@ -1742,13 +1811,28 @@ def render_agent_brief(brief: dict) -> str:
         f"- Recommended driver: `{brief.get('recommended_agent', '.agents/agents/product-journey-qa-driver.md')}`",
         f"- Driver plan: `{brief.get('driver_plan_markdown', 'driver-plan.md')}`",
         "",
+    ]
+    lens = brief["persona_contract"].get("lens", {})
+    lines.extend(["## Persona Lens", ""])
+    if lens:
+        lines.extend([
+            f"- Starting surface: {lens.get('starting_surface', '')}",
+            f"- First question: {lens.get('first_question', '')}",
+            f"- Evidence emphasis: {lens.get('evidence_emphasis', '')}",
+            f"- Escalation trigger: {lens.get('escalation_trigger', '')}",
+            f"- Finding bias: {lens.get('finding_bias', '')}",
+        ])
+    else:
+        lines.append("- (not specified)")
+    lines.extend([
+        "",
         "## Mission",
         "",
         brief["mission"],
         "",
         "## Operating Rules",
         "",
-    ]
+    ])
     for rule in brief["operating_rules"]:
         lines.append(f"- {rule}")
     lines.extend(["", "## Scenario Order", ""])
@@ -2965,6 +3049,14 @@ def validate_run_bundle(run_dir: Path) -> dict:
         ]
         if missing_driver_scenario_keys:
             add_validation_issue(issues, "error", "driver-plan-scenario-required-keys", "driver-plan.json scenarios are missing required keys", ", ".join(missing_driver_scenario_keys))
+        missing_driver_lens_keys = [
+            f"{scenario.get('scenario', f'driver-scenario-{index}')}/{key}"
+            for index, scenario in enumerate(driver_scenarios, start=1)
+            for key in schema["driver_plan"]["persona_lens_required"]
+            if key not in scenario.get("persona_lens", {})
+        ]
+        if missing_driver_lens_keys:
+            add_validation_issue(issues, "error", "driver-plan-persona-lens", "driver-plan.json scenarios are missing persona lens keys", ", ".join(missing_driver_lens_keys))
         missing_gate_keys = [
             f"{scenario.get('scenario', f'driver-scenario-{index}')}/{key}"
             for index, scenario in enumerate(driver_scenarios, start=1)
@@ -3050,6 +3142,13 @@ def validate_run_bundle(run_dir: Path) -> dict:
             "agent-brief.json scenario order count does not match run.json scenarios",
             f"scenario_order={len(brief_scenarios)}, scenarios={len(scenarios)}",
         )
+    if agent_brief:
+        missing_brief_lens_keys = [
+            key for key in schema["agent_brief"]["persona_lens_required"]
+            if key not in agent_brief.get("persona_contract", {}).get("lens", {})
+        ]
+        if missing_brief_lens_keys:
+            add_validation_issue(issues, "error", "agent-brief-persona-lens", "agent-brief.json persona_contract is missing lens keys", ", ".join(missing_brief_lens_keys))
     if driver_handoff:
         missing_status_keys = [
             key for key in schema["driver_handoff"]["status_required"]

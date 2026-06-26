@@ -134,7 +134,9 @@ python3 tools/product-journey/run.py --validate-matrix \
 The bundle's `agent-brief.md`, `scenarios.json`, and `evidence.json` are the
 contract for live or cassette-backed MCP runs: each scenario names the story
 surface, required Kitsoki/visual MCP tools, expected evidence, and success
-criteria, while the brief states the persona and operating rules. Use
+criteria, while the brief states the persona, persona lens, and operating rules.
+The lens is the repeatable persona-specific bias for where to start, what to
+question first, what proof to emphasize, and when to escalate. Use
 `execution-plan.md` in the same bundle to follow the concrete MCP capture
 sequence and copy ready-to-fill `--attach-evidence` commands.
 Use `driver-handoff.md` when handing the run to the reusable driver agent; it

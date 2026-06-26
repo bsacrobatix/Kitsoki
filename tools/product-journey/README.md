@@ -127,8 +127,11 @@ Add `--publish-deck` when the generated deck should replace
 `docs/decks/product-journey-eval.slidey.json` for review.
 
 Use `agent-brief.md` as the live-driver handoff: it states the persona,
-operating rules, scenario order, MCP tools, success criteria, and missing
-evidence without implying planned steps are validated. The brief names
+operating rules, persona lens, scenario order, MCP tools, success criteria, and
+missing evidence without implying planned steps are validated. The lens makes
+the same scenario run differently for core maintainers, dependency debuggers,
+docs-minded contributors, and IDE-first engineers while keeping behavior
+repeatable. The brief names
 `.agents/agents/product-journey-qa-driver.md` as the reusable live/cassette
 driver for Kitsoki Studio MCP and visual MCP runs. Use `driver-plan.md` for the
 machine-readable harness, visual-surface, action-sequence, and gate contract,

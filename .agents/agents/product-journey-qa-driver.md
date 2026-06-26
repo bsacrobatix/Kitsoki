@@ -71,6 +71,10 @@ For each scenario in the bundle:
    `driver-plan.json` as the minimum proof contract: capture its
    `minimum_evidence`, satisfy `done_when`, or record a blocker matching one of
    the `block_if` conditions.
+   Also read `persona_lens`; it is the repeatable persona-specific bias for the
+   run. Use its starting surface, first skepticism question, evidence emphasis,
+   escalation trigger, and finding bias when choosing actions and deciding what
+   to record.
 2. Open or attach the appropriate Kitsoki session:
    - product discovery: visual web surface for the local product site;
    - onboarding / PRD / design / feature: `stories/dev-story/app.yaml`;
