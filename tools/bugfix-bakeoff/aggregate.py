@@ -50,19 +50,26 @@ def _avg(vals):
     return round(sum(vals) / len(vals), 6) if vals else 0.0
 
 
+def _m(c, key):
+    """metrics[key], tolerant of a cell that omits the block (None ⇒ _avg skips)."""
+    return (c.get("metrics") or {}).get(key)
+
+
 def _bucket(cells):
-    """The SCHEMA rollup bucket for a list of cells."""
+    """The SCHEMA rollup bucket for a list of cells. Tolerant of cells from the
+    external grader (bench.py), which may carry None metrics / unmeasured
+    compliance — _avg skips Nones rather than crashing."""
     n = len(cells)
-    solved = sum(1 for c in cells if c["outcome"]["quality"] == "solved")
+    solved = sum(1 for c in cells if (c.get("outcome") or {}).get("quality") == "solved")
     return {
         "n": n,
         "solved": solved,
         "solve_rate": round(solved / n, 6) if n else 0.0,
-        "avg_cost_usd": _avg([c["metrics"]["cost_usd"] for c in cells]),
-        "avg_total_tokens": _avg([c["metrics"]["total_tokens"] for c in cells]),
-        "avg_wall_time_s": _avg([c["metrics"]["wall_time_s"] for c in cells]),
-        "avg_guidance_turns": _avg([c["metrics"]["guidance_turns"] for c in cells]),
-        "avg_compliance": _avg([c["compliance"]["rate"] for c in cells]),
+        "avg_cost_usd": _avg([_m(c, "cost_usd") for c in cells]),
+        "avg_total_tokens": _avg([_m(c, "total_tokens") for c in cells]),
+        "avg_wall_time_s": _avg([_m(c, "wall_time_s") for c in cells]),
+        "avg_guidance_turns": _avg([_m(c, "guidance_turns") for c in cells]),
+        "avg_compliance": _avg([(c.get("compliance") or {}).get("rate") for c in cells]),
     }
 
 
@@ -76,7 +83,7 @@ def _group(cells, keyfn):
 def build_summary(manifest, cells, generated_at):
     return {
         "generated_at": generated_at,
-        "manifest": manifest.get("__path__", "tools/bugfix-bakeoff/bakeoff.yaml"),
+        "manifest": manifest.get("__path__", "tools/bugfix-bakeoff/external/projects/kitsoki/manifest.yaml"),
         "bugs": [
             {k: b.get(k) for k in
              ("id", "title", "severity", "component", "fix_sha",
@@ -131,9 +138,9 @@ def build_agenteval_reports(manifest, cells, generated_at):
                 "pass": passed,
                 "schema_valid_rate": 1.0,
                 "comparator_pass_rate": 1.0 if passed else 0.0,
-                "contract_conformance_rate": c["compliance"]["rate"],
-                "avg_cost_usd": c["metrics"]["cost_usd"],
-                "p95_cost_usd": c["metrics"]["cost_usd"],
+                "contract_conformance_rate": (c.get("compliance") or {}).get("rate"),
+                "avg_cost_usd": (c.get("metrics") or {}).get("cost_usd"),
+                "p95_cost_usd": (c.get("metrics") or {}).get("cost_usd"),
                 "examples_run": 1,
             })
         reports[bug_id] = {

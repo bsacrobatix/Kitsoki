@@ -54,7 +54,8 @@ print(",".join(lad))' "$HERE/candidates.yaml" "$ladder")"
   IFS=',' read -ra RUNGS <<< "$rungs_csv"
 fi
 
-echo "[escalate] project=$project bugs=[${BUGS[*]}] ladder=[${RUNGS[*]}]${dry:+ (dry-run)}" >&2
+label=""; [[ "$dry" == 1 ]] && label=" (dry-run)"
+echo "[escalate] project=$project bugs=[${BUGS[*]}] ladder=[${RUNGS[*]}]$label" >&2
 
 if [[ "$dry" == 1 ]]; then
   echo "Plan — each bug climbs until 'solved':"
@@ -81,9 +82,15 @@ for b in "${BUGS[@]}"; do
   solving=""; tried=0; best="failed"
   for r in "${RUNGS[@]}"; do
     tried=$((tried+1))
+    out="$CACHE_RESULTS/cells/$b-$r-kitsoki.json"
+    # Resumable: an already-`solved` cell short-circuits the (cost-bearing) drive,
+    # so re-running a partial ladder never re-spends a solved rung.
+    if [[ "$(quality_of "$out")" == "solved" ]]; then
+      echo "[escalate] $b @ $r already solved — skip drive" >&2
+      best="solved"; solving="$r"; break
+    fi
     echo "[escalate] $b @ rung $r …" >&2
     "$HERE/drive_cell.sh" --project "$project" --bug "$b" --candidate "$r" --score || true
-    out="$CACHE_RESULTS/cells/$b-$r-kitsoki.json"
     q="$(quality_of "$out")"
     echo "[escalate]   $b @ $r -> $q" >&2
     case "$q" in

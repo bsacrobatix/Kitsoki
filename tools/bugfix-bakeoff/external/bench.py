@@ -82,7 +82,70 @@ def materialize(tree, dest, node_modules=None):
         os.symlink(nm, dest / "node_modules")
 
 
-def score(m, bug, tree, out, candidate, treatment):
+def decide_quality(oracle_pass, suite_pass, suite_enabled):
+    """The deterministic cell grade.
+
+    oracle GREEN + (suite GREEN or suite not run) ⇒ solved. A suite-disabled
+    project (kitsoki/gears-rust: the hidden oracle is the ONLY signal) reaches
+    solved on the oracle alone — otherwise "suite not run" is conflated with
+    "suite failed" and the escalation ladder could never stop, always climbing to
+    the most expensive rung. oracle GREEN + suite RAN-and-RED ⇒ partial (a correct
+    fix that didn't update a pre-existing test). oracle RED ⇒ failed.
+    """
+    if not oracle_pass:
+        return "failed"
+    return "solved" if (suite_pass or not suite_enabled) else "partial"
+
+
+def read_trace_metrics(trace):
+    """Worker cost/tokens/agent-calls from a live kitsoki trace, or None-filled if
+    the trace is absent. Shared by `score` (to enrich a cell) and the `cost` cmd."""
+    found = bool(trace) and os.path.exists(trace)
+    cost = 0.0
+    tin = tout = calls = 0
+    if found:
+        for line in open(trace):
+            try:
+                o = json.loads(line)
+            except Exception:
+                continue
+            p = o.get("payload", {}) or {}
+            meta = p.get("meta", {}) if isinstance(p.get("meta"), dict) else {}
+            c = meta.get("cost_usd")
+            if isinstance(c, (int, float)):
+                cost += c
+            u = meta.get("usage", {}) if isinstance(meta.get("usage"), dict) else {}
+            tin += u.get("input_tokens", 0) or 0
+            tout += u.get("output_tokens", 0) or 0
+            if o.get("kind") == "agent.call.complete":
+                calls += 1
+    return {
+        "found": found,
+        "cost_usd": round(cost, 4) if found else None,
+        "total_tokens": (tin + tout) if found else None,
+        "input_tokens": tin if found else None,
+        "output_tokens": tout if found else None,
+        "agent_calls": calls if found else None,
+        "metered": cost > 0,
+    }
+
+
+def candidate_meta(candidates_path, key):
+    """Look up model/effort/provider for a candidate key from candidates.yaml.
+    Returns {} if the file or key is absent (back-compat for ad-hoc scoring)."""
+    if not candidates_path or not os.path.exists(candidates_path):
+        return {}
+    try:
+        d = yaml.safe_load(Path(candidates_path).read_text()) or {}
+    except Exception:
+        return {}
+    for c in d.get("candidates", []):
+        if c.get("key") == key:
+            return {k: c.get(k) for k in ("model", "effort", "provider")}
+    return {}
+
+
+def score(m, bug, tree, out, candidate, treatment, trace=None, candidates_path=None):
     proj = m["project"]
     # Per-bug `oracle:` overrides the project default (target/run/match/inject).
     # A heterogeneous repo (gears-rust: per-bug crate + cargo features +
@@ -126,28 +189,38 @@ def score(m, bug, tree, out, candidate, treatment):
         oracle_pass = oracle_r.returncode == 0
 
         suite_pass = None
-        # `suite: false` skips the heavy secondary full-suite signal (e.g. a
-        # whole-workspace `cargo test`); the hidden oracle stays primary.
-        if proj.get("test_cmd") and proj.get("suite", True):
+        # `suite: false` (or no test_cmd) skips the heavy secondary full-suite
+        # signal (e.g. a whole-workspace `cargo test`); the hidden oracle stays
+        # primary. Track whether the suite actually RAN, so "not run" is never
+        # conflated with "ran and failed".
+        suite_enabled = bool(proj.get("test_cmd") and proj.get("suite", True))
+        if suite_enabled:
             suite_r = sh(proj["test_cmd"], cwd=scratch, quiet=True)
             suite_pass = suite_r.returncode == 0
 
-        if oracle_pass:
-            quality = "solved" if suite_pass else "partial"
-        else:
-            quality = "failed"
+        quality = decide_quality(oracle_pass, suite_pass, suite_enabled)
 
         sys.stderr.write(
             f"[bench] {m['project']['id']}/{bug['id']} oracle="
             f"{'pass' if oracle_pass else 'fail'} suite={suite_pass} -> {quality}\n")
 
         if out:
+            # Full cell shape so the deck aggregator (aggregate.py) consumes it
+            # directly: metrics (worker cost/tokens from the trace) + compliance
+            # + the model/effort/provider axis. compliance.rate is None — the
+            # external grader does not measure contract conformance; the headline
+            # signals are outcome.quality + metrics.cost_usd.
+            tm = read_trace_metrics(trace)
+            cm = candidate_meta(candidates_path, candidate)
             Path(out).parent.mkdir(parents=True, exist_ok=True)
             Path(out).write_text(json.dumps({
                 "project": m["project"]["id"],
                 "bug": bug["id"],
                 "candidate": candidate,
                 "treatment": treatment,
+                "model": cm.get("model", ""),
+                "effort": cm.get("effort", ""),
+                "provider": cm.get("provider", ""),
                 "outcome": {
                     "oracle_pass": oracle_pass,
                     "oracle_status": "pass" if oracle_pass else "fail",
@@ -157,6 +230,15 @@ def score(m, bug, tree, out, candidate, treatment):
                     "adjudicated": False,
                     "adjudication_note": "",
                 },
+                "compliance": {"rate": None, "note": "not measured by the external grader"},
+                "metrics": {
+                    "cost_usd": tm["cost_usd"],
+                    "total_tokens": tm["total_tokens"],
+                    "wall_time_s": None,
+                    "guidance_turns": 0,
+                    "agent_calls": tm["agent_calls"],
+                },
+                "trace_found": tm["found"],
                 "notes": "external oracle; suite_pass is the SECONDARY signal "
                          "(a correct fix may legitimately update one pre-existing test)",
             }, indent=2))
@@ -263,32 +345,16 @@ def summarize(m, results_dir, deck=None, markdown=None):
 
 
 def trace_cost(trace):
-    """Sum the worker cost + tokens from a live kitsoki trace.
+    """Print the worker cost + tokens from a live kitsoki trace (the `cost` cmd).
     Metered providers carry payload.meta.cost_usd; subscription auth carries
     none, so we always also report token usage + agent-call count."""
     if not os.path.exists(trace):
         print(json.dumps({"error": "no trace", "trace": trace}))
         return 1
-    cost = 0.0
-    tin = tout = calls = 0
-    for line in open(trace):
-        try:
-            o = json.loads(line)
-        except Exception:
-            continue
-        p = o.get("payload", {}) or {}
-        meta = p.get("meta", {}) if isinstance(p.get("meta"), dict) else {}
-        c = meta.get("cost_usd")
-        if isinstance(c, (int, float)):
-            cost += c
-        u = meta.get("usage", {}) if isinstance(meta.get("usage"), dict) else {}
-        tin += u.get("input_tokens", 0) or 0
-        tout += u.get("output_tokens", 0) or 0
-        if o.get("kind") == "agent.call.complete":
-            calls += 1
-    print(json.dumps({"trace": trace, "cost_usd": round(cost, 4),
-                      "input_tokens": tin, "output_tokens": tout,
-                      "agent_calls": calls, "metered": cost > 0}))
+    tm = read_trace_metrics(trace)
+    print(json.dumps({"trace": trace, "cost_usd": tm["cost_usd"],
+                      "input_tokens": tm["input_tokens"], "output_tokens": tm["output_tokens"],
+                      "agent_calls": tm["agent_calls"], "metered": tm["metered"]}))
     return 0
 
 
@@ -312,6 +378,9 @@ def main():
     s.add_argument("--out")
     s.add_argument("--candidate", default="candidate")
     s.add_argument("--treatment", default="kitsoki")
+    s.add_argument("--trace", help="live trace to read worker cost/tokens from (for the cell metrics)")
+    s.add_argument("--candidates", default=str(HERE / "candidates.yaml"),
+                   help="candidates.yaml for model/effort/provider lookup by --candidate")
     v = sub.add_parser("verify")
     v.add_argument("--project", required=True)
     v.add_argument("--bug")
@@ -335,7 +404,8 @@ def main():
 
     m = load(a.project)
     if a.cmd == "score":
-        sys.exit(score(m, bug_of(m, a.bug), a.tree, a.out, a.candidate, a.treatment))
+        sys.exit(score(m, bug_of(m, a.bug), a.tree, a.out, a.candidate, a.treatment,
+                       trace=a.trace, candidates_path=a.candidates))
     elif a.cmd == "meta":
         p = m["project"]
         if a.bug:

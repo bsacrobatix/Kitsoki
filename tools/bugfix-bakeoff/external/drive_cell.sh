@@ -134,7 +134,8 @@ if [[ "$do_score" == 1 ]]; then
   out="$CACHE/results/cells/$bug-$cand-kitsoki.json"
   QS_NODE_MODULES="$clone/node_modules" python3 "$HERE/bench.py" score \
     --project "$project" --bug "$bug" --tree "$cell" \
-    --candidate "$cand" --treatment kitsoki --out "$out" || true
+    --candidate "$cand" --treatment kitsoki --out "$out" \
+    --trace "$trace" --candidates "$HERE/candidates.yaml" || true
   echo "[cell] cost: $(python3 "$HERE/bench.py" cost --trace "$trace")"
   echo "[cell] verdict: $(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["outcome"]["quality"])' "$out" 2>/dev/null || echo "?")"
 fi
