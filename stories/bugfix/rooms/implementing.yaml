@@ -98,17 +98,18 @@ states:
       # ── SYNTHESISE the regression gate (autonomous from a bare bug report) ──
       # When the ticket carried NO repro_command (gate_command empty), the
       # reproducer authored a RED test (a prior phase) and emitted a structured
-      # repro_command + repro_test_paths. DERIVE the gate from it here, then commit
-      # the test as a discrete pre-fix commit (commit_repro_test below) and run the
-      # deterministic GREEN→RED gate — all BEFORE the implementer agent. This is now
-      # safe because host.agent.task carries a DURABILITY BARRIER
-      # (internal/host/agent_task.go waitForAgentWorktreeWrites) that blocks the
-      # reproducer call until the maker backend's file writes have synced back to
-      # the worktree, so the reproducer's RED test is provably on disk by the time
-      # this room runs. (Historically the writes synced back at an UNBOUNDED later
-      # moment, so the commit had to wait for the implementer or hand-roll a poll —
-      # the barrier removes that race.) Guarded on gate_command=='' so a
-      # ticket-supplied repro_command is untouched; latched (one-shot). The latch
+      # repro_command + repro_test_paths. The deterministic GREEN→RED gate already
+      # ran in reproducing/on_enter (FIRST, before the LLM judge), so by here the
+      # reproduction is mechanically proven. DERIVE the regression gate_command from
+      # the artifact and commit the test as a discrete pre-fix commit
+      # (commit_repro_test below), BEFORE the implementer agent. This is safe because
+      # host.agent.task carries a DURABILITY BARRIER (internal/host/agent_task.go
+      # waitForAgentWorktreeWrites) that blocks the reproducer call until the maker
+      # backend's file writes have synced back to the worktree, so the reproducer's
+      # RED test is provably on disk. (Historically the writes synced back at an
+      # UNBOUNDED later moment, so the commit had to hand-roll a poll — the barrier
+      # removes that race.) Guarded on gate_command=='' so a ticket-supplied
+      # repro_command is untouched; latched (one-shot). The latch
       # is unconditional: if the test never becomes a discrete pre-fix commit,
       # testing's HEAD~1 gate finds it GREEN → @exit:needs-human — never a false
       # ship. That deterministic gate is the backstop.
@@ -158,99 +159,10 @@ states:
           cwd: "{{ world.workdir }}"
         on_error: idle
 
-      # DETERMINISTIC GREEN→RED gate (synthesis path). Runs AFTER the reproducer's
-      # RED test is committed as the discrete pre-fix tip (commit_repro_test above)
-      # and BEFORE the implementer spends any maker budget. Proves the first two
-      # legs of the GREEN→RED→GREEN lifecycle mechanically, off the project
-      # test_cmd + the synthesised repro_command — no pre-supplied oracle, so it
-      # is leak-safe in a bake-off:
-      #   GREEN (baseline): test_cmd on a HEAD~1 scratch worktree (the branch
-      #                     BEFORE the repro test) must exit 0 — the branch was
-      #                     clean, so the failure we induce is genuinely NEW.
-      #   RED   (reproducer): repro_command on the current tree (repro test present,
-      #                     fix not yet applied) must exit non-zero — the bug
-      #                     actually reproduces.
-      # repro_gate_ok = baseline_green && test_red. The GREEN(fix) leg is proven in
-      # `testing` (HEAD~1 RED→GREEN regression gate). !ok ⇒ restart_from reproducing
-      # with the verdict as feedback, BEFORE the implementer runs. Empty test_cmd ⇒
-      # skipped (LLM-only fallback). Scoped to repro_committed (synthesis path); a
-      # ticket-supplied repro_command keeps reproducing's pre-agent RED gate.
-      # Reuses testing's HEAD~1 scratch-worktree technique. See
-      # .context/green-red-green-repro-gate.md + flows/bugfix_green_red_green_gate.yaml.
-      - when: "world.repro_committed && world.test_cmd != '' && world.workdir != '' && !world.repro_gate_ran"
-        invoke: host.run
-        id: repro_det_gate
-        with:
-          cmd: bash
-          args:
-            - "-c"
-            - |
-              set +e
-              export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
-              WT="{{ world.workdir }}"
-              cd "$WT" || { jq -n '{ran:false,baseline_green:false,test_red:false,ok:false,summary:"gate skipped: workdir unavailable",log:""}'; exit 0; }
-              TESTCMD='{{ world.test_cmd }}'
-              REPRO='{{ world.gate_command }}'
-              # RED leg: the reproducer's command on the current tip (repro test
-              # present, no fix yet) must FAIL.
-              RED_EXIT=0; RED_OUT=$( bash -c "$REPRO" 2>&1 ) || RED_EXIT=$?
-              # GREEN baseline: the branch BEFORE the repro test (HEAD~1) must pass
-              # the suite. Materialise it in a detached scratch worktree.
-              PREFIX_SHA=$( git rev-parse 'HEAD~1' 2>/dev/null || echo "" )
-              BASE_EXIT=0; BASE_OUT=""
-              if [ -z "$PREFIX_SHA" ]; then
-                BASE_EXIT=99; BASE_OUT="no pre-test snapshot (HEAD~1 missing)"
-              else
-                SCRATCH="$WT-baseline-gate"
-                if git worktree add --detach "$SCRATCH" "$PREFIX_SHA" >/dev/null 2>&1; then
-                  BASE_OUT=$( (cd "$SCRATCH" && bash -c "$TESTCMD") 2>&1 ) || BASE_EXIT=$?
-                  git worktree remove --force "$SCRATCH" >/dev/null 2>&1 || true
-                else
-                  BASE_EXIT=98; BASE_OUT="could not materialise HEAD~1 scratch worktree"
-                fi
-              fi
-              RED=false;   [ "$RED_EXIT"  -ne 0 ] && RED=true
-              GREEN=false; [ "$BASE_EXIT" -eq 0 ] && GREEN=true
-              OK=false; { [ "$RED" = true ] && [ "$GREEN" = true ]; } && OK=true
-              if   [ "$OK" = true ];     then SUM="✅ GREEN→RED proven · baseline GREEN (test_cmd exit 0 on HEAD~1) → reproducer RED (repro_command exit $RED_EXIT)"
-              elif [ "$GREEN" != true ]; then SUM="❌ baseline NOT green — branch already failing (test_cmd exit $BASE_EXIT on HEAD~1) without the reproducer test; gate cannot trust this branch"
-              else                            SUM="❌ reproducer test did NOT fail (repro_command exit 0) — bug not reproduced"
-              fi
-              RED_TAIL=$( printf '%s' "$RED_OUT"  | tail -c 1500 )
-              BASE_TAIL=$( printf '%s' "$BASE_OUT" | tail -c 1500 )
-              LOG=$( printf 'baseline(GREEN) test_cmd exit=%s on HEAD~1 | reproducer(RED) repro_command exit=%s\n[reproducer/RED tail]\n%s\n[baseline/GREEN tail]\n%s' "$BASE_EXIT" "$RED_EXIT" "$RED_TAIL" "$BASE_TAIL" )
-              jq -n --arg sum "$SUM" --arg log "$LOG" --argjson green $GREEN --argjson red $RED --argjson ok $OK \
-                '{ran:true,baseline_green:$green,test_red:$red,ok:$ok,summary:$sum,log:$log}'
-          cwd: "{{ world.workdir }}"
-        bind:
-          repro_gate_ran:       "stdout_json.ran"
-          repro_baseline_green: "stdout_json.baseline_green"
-          repro_test_red:       "stdout_json.test_red"
-          repro_gate_ok:        "stdout_json.ok"
-          repro_gate_summary:   "stdout_json.summary"
-          repro_gate_log:       "stdout_json.log"
-        on_error: idle
-
-      # Post the deterministic verdict so it is legible in the trace + thread the
-      # moment the gate runs.
-      - when: "world.repro_gate_ran && world.repro_gate_summary != ''"
-        invoke: iface.transport.post
-        with:
-          thread:   "{{ world.thread }}"
-          title:    "Repro gate (GREEN→RED): {{ world.ticket_id }}"
-          body:     "{{ world.repro_gate_summary }}\n\n{{ world.repro_gate_log }}"
-          phase_id: "repro_gate_{{ world.ticket_id }}_{{ world.cycle }}"
-
-      # Deterministic bounce: the GREEN→RED proof FAILED (baseline not green, or
-      # the reproducer's test didn't fail). Restart from reproducing with the
-      # verdict as feedback BEFORE the implementer runs — never spend maker budget
-      # on an untrustworthy reproducer. The agent step below is skipped this turn.
-      - when: "world.repro_gate_ran && !world.repro_gate_ok"
-        emit_intent: restart_from
-        slots:
-          stage:    reproducing
-          feedback: "{{ world.repro_gate_summary }}"
-
+      # NOTE: the DETERMINISTIC GREEN→RED gate now runs in `reproducing/on_enter`
+      # (deterministic-FIRST, before the LLM quality judge) — host.agent.task carries
+      # a durability barrier so the reproducer's test is on disk there. This room only
+      # synthesises + commits that test (above) and applies the fix (below).
       # Apply the proposed fix. The agent runs with cwd=workdir
       # (the bugfix worktree), reads the proposal artifact, and uses
       # Edit/Write to make the actual code changes. Without this
@@ -305,7 +217,10 @@ states:
           # explicit add. files_changed comes from the
           # implementing artifact and is the agent's record of
           # everything it touched.
-          files: "{{ world.implement_artifact.files_changed }}"
+          # Include the synthesized reproducer test paths too. Args for later
+          # on_enter effects are evaluated before the implementer bind is visible,
+          # so use the already-bound proposal files plus the RED-test paths.
+          files: '{{ split(trim(join(world.propose_fix_artifact.affected_files ?? [], "\n") + "\n" + join(world.reproduction_artifact.repro_test_paths ?? [], "\n")), "\n") }}'
         on_error: idle
 
       # Guard on a title being bound: during the autonomous auto-advance

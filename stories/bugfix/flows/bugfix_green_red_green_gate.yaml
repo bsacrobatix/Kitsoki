@@ -79,23 +79,25 @@ host_handlers:
             log:            "baseline(GREEN) test_cmd exit=0 on HEAD~1 | reproducer(RED) repro_command exit=101"
 
 turns:
-  # start → reproducing (reproducer authors the artifact).
+  # start → reproducing. on_enter: reproducer authors the test (on disk via the
+  # durability barrier), then the DETERMINISTIC GREEN→RED gate runs FIRST and
+  # proves the lifecycle's first two legs — BEFORE the LLM judge.
   - intent: { name: start, slots: {} }
     expect_state: reproducing
-  # accept → proposing.
-  - intent: { name: accept, slots: {} }
-    expect_state: proposing
-  # accept → implementing. on_enter: synthesise+commit the repro test, then the
-  # DETERMINISTIC GREEN→RED gate runs and proves the lifecycle's first two legs.
-  - intent: { name: accept, slots: {} }
-    expect_state: implementing
     expect_world:
-      repro_committed:      true
       repro_gate_ran:       true
       repro_baseline_green: true
       repro_test_red:       true
       repro_gate_ok:        true
-  # accept → testing (gate passed; implementer applied the fix).
+  # accept → proposing.
+  - intent: { name: accept, slots: {} }
+    expect_state: proposing
+  # accept → implementing (synthesise + commit the repro test).
+  - intent: { name: accept, slots: {} }
+    expect_state: implementing
+    expect_world:
+      repro_committed: true
+  # accept → testing (implementer applied the fix).
   - intent: { name: accept, slots: {} }
     expect_state: testing
 

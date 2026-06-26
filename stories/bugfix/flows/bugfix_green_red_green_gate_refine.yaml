@@ -66,18 +66,13 @@ host_handlers:
             log:            "baseline(GREEN) test_cmd exit=2 on HEAD~1 | reproducer(RED) repro_command exit=101"
 
 turns:
+  # start → reproducing on_enter: reproducer authors a test, then the DETERMINISTIC
+  # gate runs FIRST and FAILS (baseline not green) → emit refine → re-author →
+  # gate fails again → … until the reproducing budget is exhausted → abandon. The
+  # deterministic gate NEVER lets an untrustworthy reproducer reach proposing/maker.
   - intent: { name: start, slots: {} }
-    expect_state: reproducing
-  - intent: { name: accept, slots: {} }
-    expect_state: proposing
-  # accept → implementing on_enter: synthesise+commit repro test, run the gate →
-  # !ok → restart_from reproducing BEFORE the implementer runs. The re-arm clears
-  # the synthesis + gate latches and carries the verdict as refine_feedback.
-  - intent: { name: accept, slots: {} }
-    expect_state: reproducing
+    expect_state: __exit__abandoned
     expect_world:
-      repro_committed:  false
-      repro_gate_ran:   false
-      refine_feedback:  "❌ baseline NOT green — branch already failing (test_cmd exit 2 on HEAD~1) without the reproducer test; gate cannot trust this branch"
+      abandon_reason: "reproducing_cycle_budget_exhausted"
 
 expect_no_errors: true
