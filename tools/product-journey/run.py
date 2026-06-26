@@ -2795,6 +2795,12 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "detail": ", ".join(missing_playback_refs),
         },
         {
+            "id": "playback-or-blocker",
+            "status": "pass" if playback_items or blocked_scenarios else "fail",
+            "summary": "The review deck has playback media or an explicit blocked-scenario reason for missing playback.",
+            "detail": f"playback_items={len(playback_items)}, blocked_scenarios={len(blocked_scenarios)}",
+        },
+        {
             "id": "findings-summary",
             "status": "pass" if finding_items else "fail",
             "summary": "Strengths, weaknesses, issues, or fixes are recorded.",

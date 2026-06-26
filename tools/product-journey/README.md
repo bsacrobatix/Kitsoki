@@ -263,7 +263,9 @@ python3 tools/product-journey/run.py --review-run \
 The review writes `review.json`, updates `metrics.json`, and adds a readiness
 scene to `deck.slidey.json`. Hard failures mean the bundle is still skeletal;
 warnings identify useful evidence quality improvements, such as missing key
-interaction video.
+interaction video. A bundle is not `ready` unless the deck has playback media
+or an explicit blocked-scenario finding explains why playback evidence could not
+be captured.
 
 Prepare the reusable driver handoff without spending live model calls:
 
