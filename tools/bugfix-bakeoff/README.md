@@ -108,13 +108,14 @@ param), so a ladder rung is just a candidate row pointing at a profile with that
 The result is `.artifacts/qs-bakeoff/results/escalation-<project>.tsv`:
 the cheapest solving rung per bug.
 
-> **Note — `kitsoki` (and any `local_only` project) is grade-only for now.**
-> `drive_cell.sh`/`escalate.sh` live-drive by cloning the repo + running its JS
-> install, so they don't yet drive a `local_only` Go/local checkout (they fail
-> fast with a clear message). Grade kitsoki-self deterministically with
-> `bench.py verify`/`score` against a `git clone --local` mirror. Live-driving
-> `local_only` repos is a tracked follow-up (drive against a local worktree,
-> toolchain-agnostic install).
+> **`local_only` projects (kitsoki-self, gears-rust) drive too.** They run against
+> a `git worktree` of THIS checkout at the bug's baseline — no clone, no JS
+> install (the Go/cargo toolchain is already local; a node sub-package like
+> `runstatus` installs at score time via the manifest's `oracle.setup`). So
+> `escalate.sh --project kitsoki --ladder default` works the same way; the cell
+> worktree lands under `.artifacts/qs-bakeoff/cells/`. You can still grade
+> deterministically without a drive via `bench.py verify`/`score` against a
+> `git clone --local` mirror.
 
 ## Report + deterministic slidey deck (offline, zero re-spend)
 
