@@ -1926,25 +1926,43 @@ def proof_gap_rows(run_json: dict, evidence: dict) -> list[dict]:
         if is_proof_evidence(item)
     }
     rows = []
+    run_dir_arg = f".artifacts/product-journey/{run_json.get('run_id', '<run-id>')}"
     for scenario in run_json.get("scenarios", []):
+        scenario_id = scenario.get("id", "")
         minimum = scenario_quality_gate(scenario.get("id", "")).get("minimum_evidence", [])
         captured_minimum = [
             kind for kind in minimum
-            if (scenario.get("id", ""), kind) in captured
+            if (scenario_id, kind) in captured
         ]
         proof_minimum = [
             kind for kind in minimum
-            if (scenario.get("id", ""), kind) in proof
+            if (scenario_id, kind) in proof
         ]
         missing = sorted(set(minimum) - set(proof_minimum))
         if missing:
             rows.append({
-                "scenario": scenario.get("id", ""),
+                "scenario": scenario_id,
                 "label": scenario.get("label", scenario.get("id", "")),
                 "proof_minimum_evidence_count": len(proof_minimum),
                 "captured_minimum_evidence_count": len(captured_minimum),
                 "minimum_evidence_count": len(minimum),
                 "missing_proof_evidence": missing,
+                "slots": [
+                    {
+                        "kind": kind,
+                        "capture_hint": evidence_capture_hint(kind),
+                        "attach_command": (
+                            "python3 tools/product-journey/run.py --attach-evidence "
+                            f"--run-dir {run_dir_arg} "
+                            f"--scenario {scenario_id} "
+                            f"--evidence-kind {kind} "
+                            "--evidence-path <path-or-retained-id> "
+                            "--evidence-source <retained|external|local|cassette> "
+                            f"--notes \"{evidence_capture_hint(kind)}\""
+                        ),
+                    }
+                    for kind in missing
+                ],
             })
     return rows
 
@@ -2067,6 +2085,9 @@ def render_driver_handoff(handoff: dict) -> str:
                 f"- `{row['scenario']}`: proof {row.get('proof_minimum_evidence_count', 0)} / "
                 f"{row.get('minimum_evidence_count', 0)} (captured {row.get('captured_minimum_evidence_count', 0)}); missing {missing}"
             )
+            for slot in row.get("slots", []):
+                lines.append(f"  - `{slot.get('kind', '')}`: {slot.get('capture_hint', '')}")
+                lines.append(f"    ```sh\n    {slot.get('attach_command', '')}\n    ```")
     else:
         lines.append("- (none)")
     lines.extend(["", "## Finalize", ""])
@@ -3318,6 +3339,42 @@ def validate_run_bundle(run_dir: Path) -> dict:
         expected_proof_minimum_count = expected_minimum_count - expected_missing_proof_count
         if len(handoff_missing_proof_evidence) != len(expected_proof_gaps):
             add_validation_issue(issues, "error", "driver-handoff-proof-gap-list", "driver-handoff.json missing proof evidence list is stale", f"expected={len(expected_proof_gaps)}, actual={len(handoff_missing_proof_evidence)}")
+        expected_proof_by_scenario = {
+            row.get("scenario", ""): row
+            for row in expected_proof_gaps
+        }
+        actual_proof_by_scenario = {
+            row.get("scenario", ""): row
+            for row in handoff_missing_proof_evidence
+        }
+        stale_proof_rows = []
+        missing_slot_details = []
+        for scenario_id, expected_row in expected_proof_by_scenario.items():
+            actual_row = actual_proof_by_scenario.get(scenario_id, {})
+            expected_missing = expected_row.get("missing_proof_evidence", [])
+            actual_missing = actual_row.get("missing_proof_evidence", [])
+            if actual_missing != expected_missing:
+                stale_proof_rows.append(
+                    f"{scenario_id}: expected={', '.join(expected_missing)}, actual={', '.join(actual_missing)}"
+                )
+            slots = actual_row.get("slots", [])
+            slot_by_kind = {slot.get("kind", ""): slot for slot in slots if isinstance(slot, dict)}
+            for kind in expected_missing:
+                slot = slot_by_kind.get(kind, {})
+                missing_keys = [
+                    key for key in schema["driver_handoff"]["missing_proof_slot_required"]
+                    if not slot.get(key)
+                ]
+                if missing_keys:
+                    missing_slot_details.append(f"{scenario_id}/{kind}: {', '.join(missing_keys)}")
+                command = slot.get("attach_command", "")
+                for token in ["--attach-evidence", f"--scenario {scenario_id}", f"--evidence-kind {kind}", "--evidence-source <retained|external|local|cassette>"]:
+                    if command and token not in command:
+                        missing_slot_details.append(f"{scenario_id}/{kind}: attach_command missing {token}")
+        if stale_proof_rows:
+            add_validation_issue(issues, "error", "driver-handoff-proof-gap-detail", "driver-handoff.json missing proof evidence details are stale", "; ".join(stale_proof_rows))
+        if missing_slot_details:
+            add_validation_issue(issues, "error", "driver-handoff-proof-slot-detail", "driver-handoff.json missing proof evidence slots are not actionable", "; ".join(missing_slot_details))
         for key, expected in [
             ("missing_proof_evidence_count", expected_missing_proof_count),
             ("minimum_evidence_count", expected_minimum_count),

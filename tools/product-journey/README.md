@@ -149,7 +149,10 @@ that names the driver agent, dispatch modes, missing evidence, and final gates
 without launching live LLM work. When demo or partial evidence is already
 attached, use the handoff's `Missing Proof Evidence` section as the live or
 cassette capture backlog; raw `missing_evidence` can be empty while proof-source
-quality gates are still unsatisfied.
+quality gates are still unsatisfied. Each missing proof row includes slot-level
+capture hints plus ready-to-fill `--attach-evidence` commands, so the driver can
+work directly from the handoff instead of reverse-engineering commands from the
+generic evidence list.
 Each scenario also carries a `quality_gate` with `minimum_evidence`,
 `done_when`, and `block_if` rules. Live/cassette drivers should satisfy that
 gate before calling a scenario done, or record a blocker tied to the matching
