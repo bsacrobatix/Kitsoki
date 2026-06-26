@@ -124,6 +124,21 @@ python3 tools/bugfix-bakeoff/external/bench.py readiness \
 Use `--armed` only when the selected fixtures were just verified by
 `make gears-history-smoke`, `make history-smoke`, or `bench.py verify`.
 
+To rehearse the blocked-provider report path without touching the normal live
+results directory, run:
+
+```sh
+make history-pending-smoke \
+  HISTORY_PROJECT=gears-rust \
+  HISTORY_BUGS=bug1 \
+  HISTORY_CANDIDATES=opus-4.8 \
+  HISTORY_PENDING_REASON="profile not configured on this machine"
+```
+
+This proves a pending cell rolls up into Markdown + Slidey JSON as `pending`.
+Use it only when no real model attempt happened; score real candidate worktrees
+with `drive_cell.sh --score`.
+
 ## Deterministic Arming
 
 Before spending on a live model, prove the corpus:

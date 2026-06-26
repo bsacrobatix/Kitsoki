@@ -48,7 +48,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup build install uninstall test test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke gears-history-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup build install uninstall test test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
 
@@ -295,6 +295,7 @@ HISTORY_REPO_DIR ?=
 HISTORY_BUGS ?=
 HISTORY_CANDIDATES ?=
 HISTORY_PREPARE_FIRST_CELL ?= 1
+HISTORY_PENDING_REASON ?= provider/profile blocked before model attempt
 history-smoke:
 	@test -n "$(HISTORY_PROJECT)" || (echo "HISTORY_PROJECT is required"; exit 1)
 	@test -n "$(HISTORY_BUGS)" || (echo "HISTORY_BUGS is required"; exit 1)
@@ -317,6 +318,24 @@ history-smoke:
 		python3 tools/bugfix-bakeoff/external/bench.py readiness --project "$(HISTORY_PROJECT)" --bug "$(HISTORY_BUGS)" $$repo_arg --candidate "$(HISTORY_CANDIDATES)" --armed --markdown ".artifacts/external-bakeoff/readiness/$(HISTORY_PROJECT).md"
 	GOCACHE=$$(pwd)/.cache/go-build go run ./cmd/kitsoki validate stories/repo-bakeoff/app.yaml
 	GOCACHE=$$(pwd)/.cache/go-build go run ./cmd/kitsoki test flows stories/repo-bakeoff/app.yaml
+
+# history-pending-smoke proves the no-cost blocked-provider path without
+# modifying the normal live results dir: write one pending cell in a temp result
+# root, summarize it, and render Markdown + Slidey JSON from that pending result.
+history-pending-smoke:
+	@test -n "$(HISTORY_PROJECT)" || (echo "HISTORY_PROJECT is required"; exit 1)
+	@test -n "$(HISTORY_BUGS)" || (echo "HISTORY_BUGS is required"; exit 1)
+	@test -n "$(HISTORY_CANDIDATES)" || (echo "HISTORY_CANDIDATES is required"; exit 1)
+	@tmp="$$(mktemp -d)"; \
+		first_bug="$(HISTORY_BUGS)"; first_bug="$${first_bug%%,*}"; \
+		first_candidate="$(HISTORY_CANDIDATES)"; first_candidate="$${first_candidate%%,*}"; \
+		cell="$$tmp/results/cells/$(HISTORY_PROJECT)-$$first_bug-$$first_candidate-kitsoki.json"; \
+		python3 tools/bugfix-bakeoff/external/bench.py pending --project "$(HISTORY_PROJECT)" --bug "$$first_bug" --candidate "$$first_candidate" --reason "$(HISTORY_PENDING_REASON)" --out "$$cell"; \
+		rel="$$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], os.path.join(os.getcwd(), "tools/bugfix-bakeoff/external")))' "$$tmp/results")"; \
+		python3 tools/bugfix-bakeoff/external/bench.py summarize --project "$(HISTORY_PROJECT)" --results "$$rel" --deck "$$tmp/deck.slidey.json" --markdown "$$tmp/report.md"; \
+		python3 -m json.tool "$$tmp/deck.slidey.json" >/dev/null; \
+		echo "pending smoke report: $$tmp/report.md"; \
+		sed -n '1,120p' "$$tmp/report.md"
 
 # gears-history-smoke is the reference private/heavy repo wrapper around the
 # generic history-smoke target. Override the bug/candidate matrix to match the

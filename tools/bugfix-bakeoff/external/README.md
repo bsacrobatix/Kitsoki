@@ -192,6 +192,23 @@ next action.
 Pass `--armed` only when the selected fixtures were just verified, for example
 by `make history-smoke` or `bench.py verify`.
 
+To prove the blocked-provider path without modifying the normal live results
+directory, run the pending smoke. It writes a pending cell to a temporary results
+directory, summarizes it, and renders Markdown + Slidey JSON from that pending
+result:
+
+```sh
+make history-pending-smoke \
+  HISTORY_PROJECT=gears-rust \
+  HISTORY_BUGS=bug1 \
+  HISTORY_CANDIDATES=opus-4.8 \
+  HISTORY_PENDING_REASON="profile not configured on this machine"
+```
+
+Use this only to validate reporting behavior or to rehearse the blocked-provider
+workflow. A real candidate worktree must still be scored with `drive_cell.sh
+--score`.
+
 ## Run cost-bearing LLM cells (operator-only)
 
 A whole cell — prepare the baseline worktree, drive the kitsoki bugfix pipeline
