@@ -40,6 +40,12 @@ host_handlers:
             persona_finding_bias: "Prefer onboarding clarity, documented next actions, and confusing-copy findings."
             proof_evidence_count: 0
             demo_evidence_count: 0
+            finding_total_count: 0
+            strength_count: 0
+            weakness_count: 0
+            issue_count: 0
+            fix_count: 0
+            blocked_count: 0
             missing_evidence_count: 30
             missing_proof_evidence_count: 30
             proof_minimum_evidence_count: 0
@@ -158,6 +164,12 @@ host_handlers:
             driver_event_count: 6
             present_evidence_count: 30
             findings_count: 5
+            finding_total_count: 5
+            strength_count: 1
+            weakness_count: 2
+            issue_count: 1
+            fix_count: 1
+            blocked_count: 0
       record_product_journey_driver_event:
         data:
           ok: true
@@ -533,6 +545,13 @@ turns:
       driver_handoff_path: .artifacts/product-journey/run-123/driver-handoff.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
       scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
+      finding_total_count: 5
+      strength_count: 1
+      weakness_count: 2
+      issue_count: 1
+      fix_count: 1
+      blocked_count: 0
+    expect_view_matches: "Finding matrix[\\s\\S]*5 total; strength 1, weakness 2, issue 1, fix 1, blocked 0"
     expect_host_calls:
       - handler: host.run
         args: { call: seed_product_journey_demo }

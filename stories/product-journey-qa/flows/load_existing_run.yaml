@@ -31,6 +31,12 @@ host_handlers:
             persona_finding_bias: "Favor visible-state, affordance, and navigation findings."
             proof_evidence_count: 1
             demo_evidence_count: 0
+            finding_total_count: 4
+            strength_count: 1
+            weakness_count: 1
+            issue_count: 1
+            fix_count: 1
+            blocked_count: 0
             missing_evidence_count: 29
             missing_proof_evidence_count: 29
             proof_minimum_evidence_count: 1
@@ -60,6 +66,12 @@ turns:
       project: vscode
       persona: ide-first-engineer
       seed: driver-load
+      finding_total_count: 4
+      strength_count: 1
+      weakness_count: 1
+      issue_count: 1
+      fix_count: 1
+      blocked_count: 0
       driver_handoff_path: .artifacts/product-journey/run-123/driver-handoff.md
       proof_evidence_count: 1
       missing_proof_evidence_count: 29
@@ -69,7 +81,7 @@ turns:
       driver_contract_summary: "Driver contract: 7 scenarios (product-discovery, project-onboarding, dependency-bugfix, prd-design, feature-implementation, +2 more); 7 missing-proof rows; 2 final gates. Inspect last_result.driver_scenarios, last_result.missing_proof_evidence, and last_result.driver_final_gates."
       next_driver_capture: "Next capture: product-discovery/checkpoint_rating. Rate whether the persona could proceed without private context."
       next_driver_attach_command: 'python3 tools/product-journey/run.py --attach-evidence --run-dir .artifacts/product-journey/run-123 --scenario product-discovery --evidence-kind checkpoint_rating --evidence-path <path-or-retained-id> --evidence-source <retained|external|local|cassette> --notes "Rate whether the persona could proceed without private context."'
-    expect_view_matches: "RUN CREATED[\\s\\S]*Driver handoff[\\s\\S]*driver-handoff.md[\\s\\S]*Starting surface[\\s\\S]*visual-first[\\s\\S]*Review checks[\\s\\S]*16 / 18 passed[\\s\\S]*Driver contract: 7 scenarios[\\s\\S]*last_result\\.driver_scenarios[\\s\\S]*last_result\\.driver_final_gates[\\s\\S]*Next capture: product-discovery/checkpoint_rating[\\s\\S]*--attach-evidence[\\s\\S]*--evidence-kind checkpoint_rating[\\s\\S]*project-onboarding"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Driver handoff[\\s\\S]*driver-handoff.md[\\s\\S]*Starting surface[\\s\\S]*visual-first[\\s\\S]*Finding matrix[\\s\\S]*4 total; strength 1, weakness 1, issue 1, fix 1, blocked 0[\\s\\S]*Review checks[\\s\\S]*16 / 18 passed[\\s\\S]*Driver contract: 7 scenarios[\\s\\S]*last_result\\.driver_scenarios[\\s\\S]*last_result\\.driver_final_gates[\\s\\S]*Next capture: product-discovery/checkpoint_rating[\\s\\S]*--attach-evidence[\\s\\S]*--evidence-kind checkpoint_rating[\\s\\S]*project-onboarding"
     expect_host_calls:
       - handler: host.run
         args: { call: load_product_journey_run }

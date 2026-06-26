@@ -87,6 +87,12 @@ world:
   persona_finding_bias: { type: string, default: "" }
   proof_evidence_count: { type: int, default: 0 }
   demo_evidence_count: { type: int, default: 0 }
+  finding_total_count: { type: int, default: 0 }
+  strength_count: { type: int, default: 0 }
+  weakness_count: { type: int, default: 0 }
+  issue_count: { type: int, default: 0 }
+  fix_count: { type: int, default: 0 }
+  blocked_count: { type: int, default: 0 }
   missing_evidence_count: { type: int, default: 0 }
   missing_proof_evidence_count: { type: int, default: 0 }
   proof_minimum_evidence_count: { type: int, default: 0 }

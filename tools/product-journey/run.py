@@ -2557,10 +2557,12 @@ def summarize_run_bundle(run_dir: Path) -> dict:
 
 def run_story_summary(run_dir: Path) -> dict:
     metrics = read_json(run_dir / "metrics.json") if (run_dir / "metrics.json").exists() else {}
+    findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"summary": {}}
     handoff = read_json(run_dir / "driver-handoff.json") if (run_dir / "driver-handoff.json").exists() else {}
     driver_plan = read_json(run_dir / "driver-plan.json") if (run_dir / "driver-plan.json").exists() else {}
     agent_brief = read_json(run_dir / "agent-brief.json") if (run_dir / "agent-brief.json").exists() else {}
     review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {}
+    finding_summary = findings.get("summary", {})
     lens = agent_brief.get("persona_contract", {}).get("lens", {})
     missing_proof_rows = handoff.get("missing_proof_evidence", [])
     missing_proof_summary = []
@@ -2590,6 +2592,12 @@ def run_story_summary(run_dir: Path) -> dict:
         "persona_finding_bias": lens.get("finding_bias", ""),
         "proof_evidence_count": metrics.get("proof_evidence_count", 0),
         "demo_evidence_count": metrics.get("demo_evidence_count", 0),
+        "finding_total_count": sum(finding_summary.get(kind, 0) for kind in ["strength", "weakness", "issue", "fix"]),
+        "strength_count": finding_summary.get("strength", metrics.get("strength_count", 0)),
+        "weakness_count": finding_summary.get("weakness", metrics.get("weakness_count", 0)),
+        "issue_count": finding_summary.get("issue", metrics.get("issue_count", 0)),
+        "fix_count": finding_summary.get("fix", metrics.get("fix_count", 0)),
+        "blocked_count": finding_summary.get("blocked", metrics.get("blocked_count", 0)),
         "missing_evidence_count": metrics.get("missing_evidence_count", handoff.get("status", {}).get("missing_evidence_count", 0)),
         "missing_proof_evidence_count": handoff.get("status", {}).get("missing_proof_evidence_count", 0),
         "proof_minimum_evidence_count": handoff.get("status", {}).get("proof_minimum_evidence_count", 0),
