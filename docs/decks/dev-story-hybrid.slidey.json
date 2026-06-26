@@ -55,8 +55,7 @@
         "role": "Developer",
         "intro": "Decomposes, fixes a mid-stream bug, refines, and ships — every step traceable.",
         "color": "#c97b4a",
-        "glyph": "🛠️",
-        "avatar": "data:image/svg+xml,%3Csvg xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22 viewBox%3D%220 0 200 200%22 width%3D%22200%22 height%3D%22200%22 role%3D%22img%22 aria-label%3D%22Kitsoki mesa sun avatar%22%3E %3Ccircle cx%3D%22100%22 cy%3D%22100%22 r%3D%2295%22 fill%3D%22%23f0e3c8%22 stroke%3D%22%23c97b4a%22 stroke-width%3D%229%22%2F%3E %3Cg transform%3D%22translate(28 32.3) scale(0.72)%22%3E %3Ccircle cx%3D%22100%22 cy%3D%2270%22 r%3D%2230%22 fill%3D%22%23e0a23a%22%2F%3E %3Cg stroke%3D%22%23e0a23a%22 stroke-width%3D%225%22 stroke-linecap%3D%22round%22%3E %3Cline x1%3D%22150%22 y1%3D%2270%22 x2%3D%22138%22 y2%3D%2270%22%2F%3E %3Cline x1%3D%22135%22 y1%3D%2235%22 x2%3D%22127%22 y2%3D%2243%22%2F%3E %3Cline x1%3D%22100%22 y1%3D%2220%22 x2%3D%22100%22 y2%3D%2232%22%2F%3E %3Cline x1%3D%2265%22 y1%3D%2235%22 x2%3D%2273%22 y2%3D%2243%22%2F%3E %3Cline x1%3D%2250%22 y1%3D%2270%22 x2%3D%2262%22 y2%3D%2270%22%2F%3E %3C%2Fg%3E %3Cpath d%3D%22M20 150 L20 120 L60 120 L60 105 L140 105 L140 120 L180 120 L180 150 Z%22 fill%3D%22%23a8492b%22%2F%3E %3Cpath d%3D%22M20 150 L180 150 L180 168 L20 168 Z%22 fill%3D%22%237d2e1c%22%2F%3E %3Crect x%3D%2292%22 y%3D%22120%22 width%3D%2216%22 height%3D%2230%22 fill%3D%22%233a2418%22%2F%3E %3C%2Fg%3E %3C%2Fsvg%3E"
+        "glyph": "🛠️"
       }
     ]
   },
