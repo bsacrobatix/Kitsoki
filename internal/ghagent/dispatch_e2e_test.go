@@ -74,6 +74,45 @@ func TestCommentUpdateRetriesWithoutPostingDuplicate(t *testing.T) {
 	}
 }
 
+func TestCommentPostRecoversExistingStatusComment(t *testing.T) {
+	ctx := context.Background()
+	var ops []string
+	comments := &CommentStore{
+		Repo:              "o/r",
+		MaxUpdateAttempts: 1,
+		Exec: func(_ context.Context, args map[string]any) (host.Result, error) {
+			op, _ := args["op"].(string)
+			ops = append(ops, op)
+			switch op {
+			case "get":
+				return host.Result{Data: map[string]any{
+					"comments": []any{
+						map[string]any{
+							"id":   "123",
+							"body": "old\n\n" + RenderMeta(Meta{JobID: "job-1", OriginRef: "github:o/r/issue/42"}),
+						},
+					},
+				}}, nil
+			case "comment_edit":
+				return host.Result{Data: map[string]any{"comment_id": "123"}}, nil
+			case "comment":
+				t.Fatalf("Post should edit the recovered status comment, not post a duplicate")
+			}
+			return host.Result{}, nil
+		},
+	}
+	id, err := comments.Post(ctx, "42", "new body", Meta{JobID: "job-1", OriginRef: "github:o/r/issue/42"})
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if id != "123" {
+		t.Fatalf("comment id = %q, want recovered id 123", id)
+	}
+	if strings.Join(ops, ",") != "get,comment_edit" {
+		t.Fatalf("ops = %v, want get then comment_edit", ops)
+	}
+}
+
 func TestDispatchFailureFilesIncident(t *testing.T) {
 	ctx := context.Background()
 	mention := Mention{
@@ -376,8 +415,8 @@ func TestDispatch_UnclassifiedMentionPostsGuidance(t *testing.T) {
 	ops := append([]string(nil), rec.ops...)
 	bodies := append([]string(nil), rec.bodies...)
 	rec.mu.Unlock()
-	if len(ops) != 1 || ops[0] != "comment" {
-		t.Fatalf("guidance should post one comment, ops=%v", ops)
+	if strings.Join(ops, ",") != "get,comment" {
+		t.Fatalf("guidance should check for an existing status comment then post once, ops=%v", ops)
 	}
 	if len(bodies) != 1 || !strings.Contains(bodies[0], "need a bit more direction") {
 		t.Fatalf("guidance body missing expected prose:\n%v", bodies)

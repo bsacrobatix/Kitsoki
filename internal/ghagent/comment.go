@@ -63,11 +63,15 @@ func renderBody(prose string, meta Meta) string {
 // captured from the host.gh.ticket result's data.comment_id. body carries the
 // prose; the fenced metadata block is appended automatically.
 func (c *CommentStore) Post(ctx context.Context, issueID, body string, meta Meta) (string, error) {
+	rendered := renderBody(body, meta)
+	if existingID := c.findExisting(ctx, issueID, meta); existingID != "" {
+		return c.Update(ctx, issueID, existingID, body, meta)
+	}
 	res, err := c.Exec(ctx, map[string]any{
 		"op":   "comment",
 		"id":   issueID,
 		"repo": c.Repo,
-		"body": renderBody(body, meta),
+		"body": rendered,
 	})
 	if err != nil {
 		return "", fmt.Errorf("ghagent: post comment: %w", err)
@@ -77,6 +81,49 @@ func (c *CommentStore) Post(ctx context.Context, issueID, body string, meta Meta
 	}
 	commentID, _ := res.Data["comment_id"].(string)
 	return commentID, nil
+}
+
+func (c *CommentStore) findExisting(ctx context.Context, issueID string, meta Meta) string {
+	if strings.TrimSpace(meta.JobID) == "" && strings.TrimSpace(meta.OriginRef) == "" {
+		return ""
+	}
+	res, err := c.Exec(ctx, map[string]any{
+		"op":   "get",
+		"id":   issueID,
+		"repo": c.Repo,
+	})
+	if err != nil || res.Error != "" {
+		return ""
+	}
+	comments, _ := res.Data["comments"].([]any)
+	for _, raw := range comments {
+		comment, _ := raw.(map[string]any)
+		body, _ := comment["body"].(string)
+		if !metaMatches(host.GHParseMetadata(body), meta) {
+			continue
+		}
+		for _, key := range []string{"html_url", "url", "comment_id", "id"} {
+			if v, ok := comment[key]; ok {
+				if id := strings.TrimSpace(fmt.Sprint(v)); id != "" {
+					return id
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func metaMatches(got map[string]any, want Meta) bool {
+	if got == nil {
+		return false
+	}
+	if strings.TrimSpace(want.JobID) != "" && strings.TrimSpace(fmt.Sprint(got["job_id"])) == want.JobID {
+		return true
+	}
+	if strings.TrimSpace(want.OriginRef) != "" && strings.TrimSpace(fmt.Sprint(got["origin_ref"])) == want.OriginRef {
+		return true
+	}
+	return false
 }
 
 // Update edits the existing status comment in place. It deliberately does not
