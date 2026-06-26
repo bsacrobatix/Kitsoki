@@ -3994,7 +3994,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
     }
 
 
-def validate_matrix_bundle(matrix_dir: Path) -> dict:
+def validate_matrix_bundle(matrix_dir: Path, strict_target_proof: bool = False) -> dict:
     schema = read_json(SCHEMA)
     issues: list[dict] = []
     required_files = schema["matrix_result"]["artifacts"]
@@ -4024,7 +4024,7 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
         if targets_without_proof:
             add_validation_issue(
                 issues,
-                "warn",
+                "error" if strict_target_proof else "warn",
                 "matrix-target-proof",
                 "Matrix targets do not include refreshed GitHub open-bug proof",
                 ", ".join(targets_without_proof),
@@ -6286,6 +6286,7 @@ def main() -> None:
     parser.add_argument("--rollup-matrix", action="store_true", help="Aggregate reviewed run bundles into a matrix rollup deck")
     parser.add_argument("--validate-run", action="store_true", help="Validate an existing run bundle without rewriting artifacts")
     parser.add_argument("--validate-matrix", action="store_true", help="Validate an existing matrix bundle without rewriting artifacts")
+    parser.add_argument("--strict-target-proof", action="store_true", help="With --validate-matrix, require refreshed GitHub proof for every target")
     parser.add_argument("--matrix-dir", default="", help="Existing .artifacts/product-journey/matrices/<matrix-id> directory")
     parser.add_argument("--rollup-run-dir", action="append", default=[], help="Run bundle directory to include in --rollup-matrix; repeatable")
     parser.add_argument(
@@ -6574,7 +6575,7 @@ def main() -> None:
         if not args.matrix_dir:
             raise SystemExit("--validate-matrix requires --matrix-dir")
         matrix_dir = run_dir_from_arg(args.matrix_dir)
-        result = validate_matrix_bundle(matrix_dir)
+        result = validate_matrix_bundle(matrix_dir, args.strict_target_proof)
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
             append_log(f"Validated matrix bundle {matrix_dir.name}: {result['status']}")

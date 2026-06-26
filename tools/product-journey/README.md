@@ -49,6 +49,9 @@ python3 tools/product-journey/run.py --emit-matrix --seed demo
 python3 tools/product-journey/run.py --emit-matrix --seed demo \
   --target-proof-file .artifacts/product-journey/target-proofs/<proof-id>
 python3 tools/product-journey/run.py --emit-matrix --seed demo --matrix-personas all
+python3 tools/product-journey/run.py --validate-matrix \
+  --matrix-dir .artifacts/product-journey/matrices/<matrix-id> \
+  --strict-target-proof
 ```
 
 Prove the no-LLM end-to-end artifact loop in one command:
@@ -102,6 +105,9 @@ popularity and license metadata. Feed that proof into `--emit-matrix` before a
 live scored sweep so the matrix records whether every target currently satisfies
 the 100-open-bug floor, configured stargazer floor, and open-source license
 contract.
+Use `--validate-matrix --strict-target-proof` before a live scored sweep; it
+turns missing refreshed GitHub proof into an error instead of a draft-planning
+warning.
 Each matrix assignment includes deterministic `scenario_tasks` that specialize
 the shared scenarios for the target repository, persona, stack, and bug query;
 use those prompts to keep natural-use runs repeatable instead of inventing a new

@@ -59,11 +59,15 @@ python3 tools/product-journey/run.py --refresh-github-targets --seed <seed>
 python3 tools/product-journey/run.py --emit-matrix --seed <seed> \
   --target-proof-file .artifacts/product-journey/target-proofs/<proof-id>
 python3 tools/product-journey/run.py --validate-matrix \
-  --matrix-dir .artifacts/product-journey/matrices/<matrix-id>
+  --matrix-dir .artifacts/product-journey/matrices/<matrix-id> \
+  --strict-target-proof
 ```
 
 Use `--matrix-personas all` when each target should be paired with every
-persona. The matrix is an assignment plan, not evidence that Kitsoki worked.
+persona. Use normal `--validate-matrix` for draft matrices; use
+`--strict-target-proof` before a live scored sweep so missing refreshed GitHub
+bug/star/license proof is an error. The matrix is an assignment plan, not
+evidence that Kitsoki worked.
 
 ## Run Bundle Workflow
 
@@ -110,6 +114,7 @@ Useful intents:
 - `record`
 - `blocker`
 - `driver_event`
+- `validate_matrix_strict`
 - `review`
 - `validate`
 

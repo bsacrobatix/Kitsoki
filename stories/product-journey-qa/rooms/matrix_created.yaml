@@ -46,6 +46,9 @@ states:
             - label: "validate_matrix"
               hint: "check matrix and rollup artifact consistency without rewriting artifacts"
               intent: validate_matrix
+            - label: "validate_matrix_strict"
+              hint: "require refreshed GitHub proof before using this as a live sweep contract"
+              intent: validate_matrix_strict
             - label: "accept"
               hint: "finish with the current matrix bundle"
               intent: accept
@@ -224,6 +227,32 @@ states:
               on_error: matrix_created
             - set:
                 status: "matrix_validated"
+      validate_matrix_strict:
+        - target: .
+          effects:
+            - set:
+                status: "validating_matrix_strict"
+            - invoke: host.run
+              id: validate_product_journey_matrix_strict
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --validate-matrix
+                  - --strict-target-proof
+                  - --json-output
+                  - --matrix-dir
+                  - "{{ world.matrix_dir }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                validation_status: "stdout_json.status"
+                validation_errors: "stdout_json.errors"
+                validation_warnings: "stdout_json.warnings"
+                validation_issue_summary: "stdout_json.validation_issue_summary"
+              on_error: matrix_created
+            - set:
+                status: "matrix_strict_validated"
       accept:
         - when: "world.validation_status == 'valid'"
           target: done
