@@ -15,6 +15,9 @@ import datetime
 import tempfile
 import shutil
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -28,6 +31,7 @@ SCHEMA = ROOT / "tools" / "product-journey" / "schema.json"
 LOG = ROOT / ".context" / "product-journey-runlog.md"
 ARTIFACT_ROOT = ROOT / ".artifacts" / "product-journey"
 MATRIX_ROOT = ARTIFACT_ROOT / "matrices"
+TARGET_PROOF_ROOT = ARTIFACT_ROOT / "target-proofs"
 DEFAULT_DECK = ROOT / "docs" / "decks" / "product-journey-eval.slidey.json"
 STAGES = [
     "discover_product",
@@ -168,6 +172,186 @@ def resolve_project(catalog: dict, github_targets: dict, project_id: str) -> dic
         + [t["id"] for t in github_targets["targets"]]
     )
     raise SystemExit(f"Unknown project '{project_id}'. Known: {known}")
+
+
+def github_issue_search_query(target: dict) -> str:
+    parsed = urllib.parse.urlparse(target.get("bug_query", ""))
+    params = urllib.parse.parse_qs(parsed.query)
+    query = params.get("q", [""])[0].strip()
+    if "repo:" not in query:
+        label = target.get("label", "")
+        if label:
+            query = f"repo:{label} {query}".strip()
+    return query
+
+
+def fetch_github_open_bug_count(target: dict) -> dict:
+    query = github_issue_search_query(target)
+    if not query:
+        return {
+            "target": target["id"],
+            "label": target["label"],
+            "status": "error",
+            "error": "missing bug_query search string",
+        }
+    url = "https://api.github.com/search/issues?" + urllib.parse.urlencode({
+        "q": query,
+        "per_page": "1",
+    })
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "kitsoki-product-journey-target-proof",
+        },
+    )
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return {
+            "target": target["id"],
+            "label": target["label"],
+            "status": "error",
+            "query": query,
+            "api_url": url,
+            "error": f"GitHub HTTP {exc.code}: {exc.reason}",
+        }
+    except (urllib.error.URLError, TimeoutError) as exc:
+        return {
+            "target": target["id"],
+            "label": target["label"],
+            "status": "error",
+            "query": query,
+            "api_url": url,
+            "error": str(exc),
+        }
+    count = int(payload.get("total_count", 0))
+    floor = int(target.get("open_bug_floor", 0))
+    return {
+        "target": target["id"],
+        "label": target["label"],
+        "status": "pass" if count >= floor else "fail",
+        "query": query,
+        "api_url": url,
+        "bug_query": target.get("bug_query", ""),
+        "open_bug_count": count,
+        "open_bug_floor": floor,
+        "checked_at": now_utc(),
+    }
+
+
+def refresh_github_target_proofs(github_targets: dict, seed: str) -> dict:
+    proof_id = f"{slug_timestamp()}-github-target-proof-{seed}"
+    proof_dir = TARGET_PROOF_ROOT / proof_id
+    proof_dir.mkdir(parents=True, exist_ok=False)
+    checks = [fetch_github_open_bug_count(target) for target in github_targets["targets"]]
+    passed = sum(1 for check in checks if check.get("status") == "pass")
+    failed = sum(1 for check in checks if check.get("status") == "fail")
+    errors = sum(1 for check in checks if check.get("status") == "error")
+    proof = {
+        "proof_id": proof_id,
+        "created_at": now_utc(),
+        "selection_contract": github_targets["selection_contract"],
+        "summary": {
+            "targets": len(checks),
+            "passed": passed,
+            "failed": failed,
+            "errors": errors,
+            "open_bug_floor": github_targets["selection_contract"].get("open_bug_floor", 100),
+        },
+        "checks": checks,
+        "artifacts": {
+            "proof": "target-proof.json",
+            "markdown": "target-proof.md",
+        },
+    }
+    write_json(proof_dir / "target-proof.json", proof)
+    (proof_dir / "target-proof.md").write_text(render_target_proof(proof), encoding="utf-8")
+    return {
+        "status": "target_proof_created",
+        "proof_id": proof_id,
+        "proof_dir": str(proof_dir),
+        "proof_path": str(proof_dir / "target-proof.json"),
+        "markdown_path": str(proof_dir / "target-proof.md"),
+        "passed": passed,
+        "failed": failed,
+        "errors": errors,
+        "target_count": len(checks),
+    }
+
+
+def render_target_proof(proof: dict) -> str:
+    lines = [
+        "# Product journey GitHub target proof",
+        "",
+        f"- Proof: `{proof['proof_id']}`",
+        f"- Created: {proof['created_at']}",
+        f"- Open bug floor: {proof['summary']['open_bug_floor']}",
+        f"- Passed: {proof['summary']['passed']} / {proof['summary']['targets']}",
+        f"- Failed: {proof['summary']['failed']}",
+        f"- Errors: {proof['summary']['errors']}",
+        "",
+        "## Targets",
+        "",
+    ]
+    for check in proof["checks"]:
+        lines.extend([
+            f"### {check['label']}",
+            "",
+            f"- Status: {check['status']}",
+            f"- Open bugs: {check.get('open_bug_count', 'unknown')} / floor {check.get('open_bug_floor', 'unknown')}",
+            f"- Query: `{check.get('query', '')}`",
+            f"- Checked: {check.get('checked_at', '')}",
+            f"- Error: {check.get('error', '')}",
+            "",
+        ])
+    return "\n".join(lines) + "\n"
+
+
+def load_target_proof(path: str) -> dict:
+    if not path:
+        return {}
+    proof_path = Path(path)
+    if not proof_path.is_absolute():
+        proof_path = ROOT / proof_path
+    if proof_path.is_dir():
+        proof_path = proof_path / "target-proof.json"
+    return read_json(proof_path)
+
+
+def merge_target_proofs(github_targets: dict, target_proof: dict) -> dict:
+    if not target_proof:
+        return github_targets
+    proof_by_target = {
+        check.get("target"): check
+        for check in target_proof.get("checks", [])
+    }
+    merged = dict(github_targets)
+    merged["targets"] = []
+    for target in github_targets["targets"]:
+        copied = dict(target)
+        check = proof_by_target.get(target["id"])
+        if check:
+            copied["selection_proof"] = {
+                "status": check.get("status", "error"),
+                "open_bug_count": check.get("open_bug_count"),
+                "open_bug_floor": check.get("open_bug_floor", target.get("open_bug_floor")),
+                "checked_at": check.get("checked_at", target_proof.get("created_at", "")),
+                "query": check.get("query", ""),
+                "source": target_proof.get("proof_id", ""),
+                "error": check.get("error", ""),
+            }
+        merged["targets"].append(copied)
+    merged["target_proof"] = {
+        "proof_id": target_proof.get("proof_id", ""),
+        "created_at": target_proof.get("created_at", ""),
+        "summary": target_proof.get("summary", {}),
+    }
+    return merged
 
 
 def target_status(project: dict) -> str:
@@ -442,6 +626,7 @@ def build_matrix_bundle(
         "seed": seed,
         "persona_mode": persona_mode,
         "selection_contract": github_targets["selection_contract"],
+        "target_proof": github_targets.get("target_proof", {}),
         "target_count": len(targets),
         "persona_count": len(personas) if persona_mode == "all" else 1,
         "assignment_count": len(assignments),
@@ -1753,6 +1938,37 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
             )
         if matrix.get("target_count") != len(matrix.get("targets", [])):
             add_validation_issue(issues, "error", "matrix-target-list", "matrix target_count does not match targets length", f"target_count={matrix.get('target_count')}, targets={len(matrix.get('targets', []))}")
+        targets_without_proof = [
+            target.get("id", f"target-{index}")
+            for index, target in enumerate(matrix.get("targets", []), start=1)
+            if not target.get("selection_proof")
+        ]
+        if targets_without_proof:
+            add_validation_issue(
+                issues,
+                "warn",
+                "matrix-target-proof",
+                "Matrix targets do not include refreshed GitHub open-bug proof",
+                ", ".join(targets_without_proof),
+            )
+        targets_below_floor = [
+            (
+                f"{target.get('id', f'target-{index}')}: "
+                f"{target.get('selection_proof', {}).get('open_bug_count', 'unknown')} < "
+                f"{target.get('selection_proof', {}).get('open_bug_floor', target.get('open_bug_floor', 'unknown'))}"
+            )
+            for index, target in enumerate(matrix.get("targets", []), start=1)
+            if target.get("selection_proof", {}).get("status") == "fail"
+        ]
+        if targets_below_floor:
+            add_validation_issue(issues, "error", "matrix-target-bug-floor", "GitHub proof shows targets below the open-bug floor", "; ".join(targets_below_floor))
+        targets_with_proof_errors = [
+            f"{target.get('id', f'target-{index}')}: {target.get('selection_proof', {}).get('error', '')}"
+            for index, target in enumerate(matrix.get("targets", []), start=1)
+            if target.get("selection_proof", {}).get("status") == "error"
+        ]
+        if targets_with_proof_errors:
+            add_validation_issue(issues, "error", "matrix-target-proof-error", "GitHub proof has target refresh errors", "; ".join(targets_with_proof_errors))
         if matrix.get("assignment_count") != len(matrix.get("assignments", [])):
             add_validation_issue(issues, "error", "matrix-assignment-list", "matrix assignment_count does not match assignments length", f"assignment_count={matrix.get('assignment_count')}, assignments={len(matrix.get('assignments', []))}")
         scenario_count = len(matrix.get("scenarios", []))
@@ -1833,6 +2049,7 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
 
 
 def render_matrix_summary(matrix: dict) -> str:
+    proof = matrix.get("target_proof", {})
     lines = [
         "# Product journey GitHub matrix",
         "",
@@ -1847,17 +2064,29 @@ def render_matrix_summary(matrix: dict) -> str:
         f"- Host: {matrix['selection_contract']['host']}",
         f"- Open bug floor: {matrix['selection_contract']['open_bug_floor']}",
         f"- Refresh: {matrix['selection_contract']['refresh_note']}",
+        f"- Target proof: {proof.get('proof_id', 'not refreshed')}",
+        f"- Target proof checked: {proof.get('created_at', '')}",
         "",
         "## Targets",
         "",
     ]
     for target in matrix["targets"]:
+        selection_proof = target.get("selection_proof", {})
+        if selection_proof:
+            proof_line = (
+                f"{selection_proof.get('status')} - "
+                f"{selection_proof.get('open_bug_count')} open bugs "
+                f"(floor {selection_proof.get('open_bug_floor')}, checked {selection_proof.get('checked_at')})"
+            )
+        else:
+            proof_line = "not refreshed"
         lines.extend([
             f"### {target['label']}",
             "",
             f"- Repo: {target['repo']}",
             f"- Stack: {target['stack']}",
             f"- Bug query: {target['bug_query']}",
+            f"- Selection proof: {proof_line}",
             f"- Status: {target['status']}",
             f"- Notes: {target['notes']}",
             "",
@@ -1889,8 +2118,20 @@ def render_matrix_summary(matrix: dict) -> str:
 
 def render_matrix_deck(matrix: dict) -> dict:
     target_lines = [
-        f"{target['label']} - {target['stack']} - bug floor {target['open_bug_floor']}+"
+        (
+            f"{target['label']} - {target['stack']} - "
+            f"{target.get('selection_proof', {}).get('open_bug_count', 'unrefreshed')} bugs / floor {target['open_bug_floor']}"
+        )
         for target in matrix["targets"]
+    ]
+    proof = matrix.get("target_proof", {})
+    proof_summary = proof.get("summary", {})
+    proof_lines = [
+        f"Proof: {proof.get('proof_id', 'not refreshed')}",
+        f"Checked: {proof.get('created_at', '')}",
+        f"Passed: {proof_summary.get('passed', 0)} / {proof_summary.get('targets', 0)}",
+        f"Failed: {proof_summary.get('failed', 0)}",
+        f"Errors: {proof_summary.get('errors', 0)}",
     ]
     assignment_lines = [
         f"{assignment['target']['label']} / {assignment['persona']['label']}"
@@ -1925,6 +2166,13 @@ def render_matrix_deck(matrix: dict) -> dict:
                 "title": "Popular GitHub repos with large bug queues",
                 "body": "\n".join(target_lines),
                 "narration": "Each target is selected for public GitHub usage, popularity, and a large bug-labeled issue corpus.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Target proof",
+                "title": "Open bug count evidence",
+                "body": "\n".join(proof_lines),
+                "narration": "Current GitHub proof is optional for no-LLM planning, but required before claiming the live matrix satisfies the open-bug floor.",
             },
             {
                 "type": "narrative",
@@ -2669,6 +2917,8 @@ def main() -> None:
     parser.add_argument("--run-log", action="store_true", help="Force a timestamped run log entry")
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
+    parser.add_argument("--refresh-github-targets", action="store_true", help="Query GitHub for current open bug counts and write a target-proof artifact")
+    parser.add_argument("--target-proof-file", default="", help="target-proof.json or target-proof directory to merge into --emit-matrix")
     parser.add_argument("--rollup-matrix", action="store_true", help="Aggregate reviewed run bundles into a matrix rollup deck")
     parser.add_argument("--validate-run", action="store_true", help="Validate an existing run bundle without rewriting artifacts")
     parser.add_argument("--validate-matrix", action="store_true", help="Validate an existing matrix bundle without rewriting artifacts")
@@ -2727,6 +2977,25 @@ def main() -> None:
     personas = load_personas(PERSONAS)
     scenarios = load_scenarios(SCENARIOS)
     github_targets = load_github_targets(GITHUB_TARGETS)
+
+    if args.refresh_github_targets:
+        result = refresh_github_target_proofs(github_targets, args.seed)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Refreshed GitHub target proof {result['proof_id']}: passed={result['passed']} failed={result['failed']} errors={result['errors']}")
+            if result["failed"] or result["errors"]:
+                raise SystemExit(1)
+            return
+        print(f"Product journey GitHub target proof: {result['proof_id']}")
+        print(f"Artifacts: {result['proof_dir']}")
+        print(f"Proof: {result['proof_path']}")
+        print(f"Passed: {result['passed']} / {result['target_count']}")
+        print(f"Failed: {result['failed']}")
+        print(f"Errors: {result['errors']}")
+        append_log(f"Refreshed GitHub target proof {result['proof_id']}: passed={result['passed']} failed={result['failed']} errors={result['errors']}")
+        if result["failed"] or result["errors"]:
+            raise SystemExit(1)
+        return
 
     if args.validate_run:
         if not args.run_dir:
@@ -2793,13 +3062,15 @@ def main() -> None:
         return
 
     if args.emit_matrix:
-        matrix_dir, matrix = build_matrix_bundle(github_targets, personas, scenarios, args.seed, args.matrix_personas)
+        github_targets_for_matrix = merge_target_proofs(github_targets, load_target_proof(args.target_proof_file))
+        matrix_dir, matrix = build_matrix_bundle(github_targets_for_matrix, personas, scenarios, args.seed, args.matrix_personas)
         if args.json_output:
             print(json.dumps({
                 "status": "matrix_created",
                 "matrix_id": matrix["matrix_id"],
                 "matrix_dir": str(matrix_dir),
                 "deck_path": str(matrix_dir / "deck.slidey.json"),
+                "target_proof": matrix.get("target_proof", {}),
                 "target_count": matrix["target_count"],
                 "assignment_count": matrix["assignment_count"],
                 "scenario_count": matrix["scenario_count"],

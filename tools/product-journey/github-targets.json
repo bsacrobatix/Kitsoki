@@ -29,14 +29,14 @@
       "notes": "Large Go monorepo with operational personas, heavy test surfaces, and issue labels."
     },
     {
-      "id": "node",
-      "label": "nodejs/node",
-      "repo": "https://github.com/nodejs/node",
-      "stack": "javascript/c++",
-      "bug_query": "https://github.com/nodejs/node/issues?q=is%3Aissue+state%3Aopen+label%3Abug",
+      "id": "home-assistant",
+      "label": "home-assistant/core",
+      "repo": "https://github.com/home-assistant/core",
+      "stack": "python",
+      "bug_query": "https://github.com/home-assistant/core/issues?q=is%3Aissue+state%3Aopen+label%3Abug",
       "open_bug_floor": 100,
       "status": "candidate",
-      "notes": "Runtime project with cross-platform build and regression-test expectations."
+      "notes": "Large automation project with device integrations, operator workflows, and a bug-labeled issue queue."
     },
     {
       "id": "tensorflow",

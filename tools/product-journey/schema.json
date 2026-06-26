@@ -37,7 +37,7 @@
     "scenario_required": ["scenario", "label", "primary_story", "harness", "visual_surface", "required_mcp", "evidence", "success_criteria", "attach_commands", "record_finding_command"]
   },
   "matrix_result": {
-    "required": ["matrix_id", "created_at", "seed", "target_count", "assignment_count", "scenario_count", "targets", "assignments", "artifacts"],
+    "required": ["matrix_id", "created_at", "seed", "selection_contract", "target_proof", "target_count", "assignment_count", "scenario_count", "targets", "assignments", "artifacts"],
     "artifacts": ["matrix.json", "matrix.md", "deck.slidey.json"],
     "target_count": 10,
     "assignment_required": ["id", "target", "persona", "scenarios", "scenario_tasks", "seed", "status", "evidence_dir", "emit_run_command"],
