@@ -1924,6 +1924,7 @@ archive ([`issues/DEPRECATED.md`](../../issues/DEPRECATED.md)). Implementation:
 
 See [`developer-guide.md` §5.2](developer-guide.md#52-adding-a-new-built-in-host-handler).
 The contract is small: implement `host.Handler` (a function with
-signature `func(ctx, args, store) (Result, error)`), document the
-`with:` and bind-able result keys, and register it in
-`internal/host/handlers.go`.
+signature `func(ctx context.Context, args map[string]any) (Result, error)`),
+document the `with:` and bind-able result keys, and register it in
+`internal/host/handlers.go`. Dependencies such as secrets are supplied through
+context.

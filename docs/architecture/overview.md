@@ -382,11 +382,12 @@ single tree of YAML files. Reviewers can do the same. When a
 collaborator (LLM or human) proposes a change, it's a diff against
 that tree, reviewable like any code change.
 
-Authors who want to evolve an app **while playing it** can use the
-TUI's edit mode: a free-text proposal kicks off a Claude session
-inside a shadow copy of the app directory; the resulting diff is
-shown for review; on accept, the app reloads in place. The entire
-cycle is in-process — no checkout, no restart.
+Authors who want to evolve an app while operating it use declared meta
+modes or Studio MCP instead of the removed TUI edit-mode overlay.
+`/meta` opens a meta chat against the running app and reloads applied
+edits in place when possible; `kitsoki mcp` exposes deterministic
+`story.read`, `story.write`, `story.validate`, `story.graph`, and
+`story.test` tools against an authoring workspace handle.
 
 ### 8.1 The LLM as an adversary
 
@@ -588,7 +589,8 @@ Authoring & testing:
 
 | Package | Purpose |
 |---|---|
-| `internal/authoring` | Edit-mode flow — shadow-copy app, run `claude -p`, diff, apply. |
+| `internal/metamode` | Controller, chat storage adapter, and turn context for declared `/meta` modes. |
+| `internal/mcp/studio` | Studio MCP facade: authoring workspace handles, deterministic `story.*` tools, and driving-session handles. |
 | `internal/testrunner` | Mode 1 (intent pass-rate) and Mode 2 (deterministic flow) test runners. |
 
 CLI:

@@ -23,7 +23,7 @@ states:
   reviewing:
     description: "Capturing the diff and asking the docs reviewer."
     view:
-      - prose: "Running the audit. The opus agent is reading docs/ against the recent diff."
+      - prose: "Running the audit. The reviewer is reading docs/ against the selected scope."
       - kv:
           pairs:
             "Commit":   '{{ world.commit_sha|default:"(probing…)" }}'
