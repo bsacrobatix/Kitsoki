@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"kitsoki/internal/host"
 )
@@ -12,8 +13,10 @@ import (
 // via host.gh.ticket. Exec is the host.Handler bound to host.gh.ticket (the DI
 // seam — a cassette dispatcher in tests, host.GitHubTicketHandler in prod).
 type CommentStore struct {
-	Exec host.Handler
-	Repo string
+	Exec              host.Handler
+	Repo              string
+	MaxUpdateAttempts int
+	RetryDelay        time.Duration
 }
 
 // Meta is the fenced ```kitsoki block payload echoed in every status comment.
@@ -76,12 +79,24 @@ func (c *CommentStore) Post(ctx context.Context, issueID, body string, meta Meta
 	return commentID, nil
 }
 
-// Update edits the existing status comment in place. If commentID is empty, or
-// the edit op fails, it falls back to posting a new comment so the run still
-// reports progress in the GitHub thread.
+// Update edits the existing status comment in place. It deliberately does not
+// fall back to posting a new comment: production duplicate control is more
+// important than noisy progress spam when GitHub edit calls flap.
 func (c *CommentStore) Update(ctx context.Context, issueID, commentID, body string, meta Meta) (string, error) {
 	rendered := renderBody(body, meta)
-	if strings.TrimSpace(commentID) != "" {
+	if strings.TrimSpace(commentID) == "" {
+		return commentID, fmt.Errorf("ghagent: update comment: comment_id is required for issue %s", issueID)
+	}
+	attempts := c.MaxUpdateAttempts
+	if attempts <= 0 {
+		attempts = 3
+	}
+	delay := c.RetryDelay
+	if delay <= 0 {
+		delay = 250 * time.Millisecond
+	}
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
 		res, err := c.Exec(ctx, map[string]any{
 			"op":         "comment_edit",
 			"comment_id": commentID,
@@ -94,21 +109,20 @@ func (c *CommentStore) Update(ctx context.Context, issueID, commentID, body stri
 			}
 			return commentID, nil
 		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("%s", res.Error)
+		}
+		if attempt < attempts {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return commentID, ctx.Err()
+			case <-timer.C:
+			}
+		}
 	}
-	res, err := c.Exec(ctx, map[string]any{
-		"op":   "comment",
-		"id":   issueID,
-		"repo": c.Repo,
-		"body": rendered,
-	})
-	if err != nil {
-		return commentID, fmt.Errorf("ghagent: update comment: %w", err)
-	}
-	if res.Error != "" {
-		return commentID, fmt.Errorf("ghagent: update comment: %s", res.Error)
-	}
-	if nextID, _ := res.Data["comment_id"].(string); strings.TrimSpace(nextID) != "" {
-		return nextID, nil
-	}
-	return commentID, nil
+	return commentID, fmt.Errorf("ghagent: update comment after %d attempt(s): %w", attempts, lastErr)
 }

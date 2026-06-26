@@ -35,6 +35,9 @@ type Dispatcher struct {
 	// Defaults to RunStorySession (testrunner.RunFlows-backed); injectable for
 	// tests (spy / assertion).
 	SpawnFn func(ctx context.Context, route Route, job *jobs.GHJob) (RunResult, error)
+	// IncidentFn files an operator-facing incident for non-recoverable failures.
+	// It is injected so tests stay offline and production can use host.gh.ticket.
+	IncidentFn func(ctx context.Context, job *jobs.GHJob, errMsg string) (string, error)
 }
 
 // Dispatch runs ONE mention end-to-end. On a fresh claim (won): Post the initial
@@ -56,8 +59,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 		// Re-mention: attach. Update the ack carrying the existing run_url.
 		meta := Meta{JobID: job.JobID, OriginRef: job.OriginRef, Story: job.Story, State: job.State, RunURL: job.RunURL}
 		if d.Comments != nil && job.CommentID != "" {
-			nextID, _ := d.Comments.Update(ctx, mention.Item.Number, job.CommentID,
+			nextID, updateErr := d.Comments.Update(ctx, mention.Item.Number, job.CommentID,
 				fmt.Sprintf("Already on it — attached to existing run for `%s`.", job.OriginRef), meta)
+			if updateErr != nil {
+				_ = d.Jobs.RecordEvent(ctx, job.JobID, "comment_update_failed", updateErr.Error())
+			}
 			if nextID != "" && nextID != job.CommentID {
 				_ = d.Jobs.SetComment(ctx, job.JobID, nextID)
 				job.CommentID = nextID
@@ -148,14 +154,28 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 		return nil, err
 	}
 	job.State = finalState
+	if spawnErr != nil && d.IncidentFn != nil {
+		if incidentURL, incidentErr := d.IncidentFn(ctx, job, errMsg); incidentErr == nil && strings.TrimSpace(incidentURL) != "" {
+			_ = d.Jobs.SetIncidentURL(ctx, job.JobID, incidentURL)
+			job.IncidentURL = incidentURL
+		} else if incidentErr != nil {
+			_ = d.Jobs.RecordEvent(ctx, job.JobID, "incident_failed", incidentErr.Error())
+		}
+	}
 
 	if d.Comments != nil && job.CommentID != "" {
 		meta := Meta{JobID: job.JobID, OriginRef: job.OriginRef, Story: route.Story, State: finalState, RunURL: job.RunURL}
 		prose := fmt.Sprintf("Done — `%s` finished in state `%s` (%d turn(s)).", route.Story, result.FinalState, result.Turns)
 		if spawnErr != nil {
 			prose = fmt.Sprintf("Run failed: %s", spawnErr.Error())
+			if job.IncidentURL != "" {
+				prose += "\n\nIncident: " + job.IncidentURL
+			}
 		}
-		nextID, _ := d.Comments.Update(ctx, mention.Item.Number, job.CommentID, prose, meta)
+		nextID, updateErr := d.Comments.Update(ctx, mention.Item.Number, job.CommentID, prose, meta)
+		if updateErr != nil {
+			_ = d.Jobs.RecordEvent(ctx, job.JobID, "comment_update_failed", updateErr.Error())
+		}
 		if nextID != "" && nextID != job.CommentID {
 			_ = d.Jobs.SetComment(ctx, job.JobID, nextID)
 			job.CommentID = nextID

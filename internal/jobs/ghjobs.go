@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"strings"
 	"time"
 
 	"kitsoki/internal/ulid"
@@ -43,9 +44,20 @@ type GHJob struct {
 	RunID        string
 	RunURL       string
 	CommentID    string
+	AttemptCount int
+	IncidentURL  string
 	ErrMsg       string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+// GHJobEvent records an operator-facing lifecycle transition for a GitHub job.
+type GHJobEvent struct {
+	ID        int64
+	JobID     string
+	State     string
+	Message   string
+	CreatedAt time.Time
 }
 
 // GHMention is the minimal mention shape the store needs to mint a job row.
@@ -79,6 +91,14 @@ func NewGHJobStore(db *sql.DB) (*GHJobStore, error) {
 	_, _ = db.Exec("PRAGMA busy_timeout=5000")
 	if _, err := db.Exec(ghJobsSchemaDDL); err != nil {
 		return nil, fmt.Errorf("jobs.NewGHJobStore: schema migration: %w", err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE gh_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE gh_jobs ADD COLUMN incident_url TEXT`,
+	} {
+		if _, err := db.Exec(stmt); err != nil && !isSQLiteDuplicateColumn(err) {
+			return nil, fmt.Errorf("jobs.NewGHJobStore: compatibility migration: %w", err)
+		}
 	}
 	return &GHJobStore{db: db}, nil
 }
@@ -135,6 +155,11 @@ func (s *GHJobStore) Claim(ctx context.Context, m GHMention, workerID string) (j
 	if err != nil {
 		return nil, false, fmt.Errorf("jobs.Claim: read-back: %w", err)
 	}
+	if won {
+		if err = insertGHJobEventTx(ctx, tx, job.JobID, GHClaimed, "claimed by "+workerID); err != nil {
+			return nil, false, fmt.Errorf("jobs.Claim: event: %w", err)
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		return nil, false, fmt.Errorf("jobs.Claim: commit: %w", err)
 	}
@@ -160,6 +185,9 @@ func (s *GHJobStore) Advance(ctx context.Context, jobID, newState, errMsg string
 	if err != nil {
 		return fmt.Errorf("jobs.Advance: %w", err)
 	}
+	if err := s.RecordEvent(ctx, jobID, newState, errMsg); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -170,6 +198,9 @@ func (s *GHJobStore) SetStory(ctx context.Context, jobID, story string) error {
 		story, time.Now().UnixMilli(), jobID)
 	if err != nil {
 		return fmt.Errorf("jobs.SetStory: %w", err)
+	}
+	if err := s.RecordEvent(ctx, jobID, "story", story); err != nil {
+		return err
 	}
 	return nil
 }
@@ -182,6 +213,9 @@ func (s *GHJobStore) SetComment(ctx context.Context, jobID, commentID string) er
 	if err != nil {
 		return fmt.Errorf("jobs.SetComment: %w", err)
 	}
+	if err := s.RecordEvent(ctx, jobID, "comment", commentID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -193,6 +227,105 @@ func (s *GHJobStore) SetRunURL(ctx context.Context, jobID, runID, runURL string)
 	if err != nil {
 		return fmt.Errorf("jobs.SetRunURL: %w", err)
 	}
+	if err := s.RecordEvent(ctx, jobID, "run_url", runURL); err != nil {
+		return err
+	}
+	return nil
+}
+
+// BumpAttempt increments the durable retry/escalation counter.
+func (s *GHJobStore) BumpAttempt(ctx context.Context, jobID string) (int, error) {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE gh_jobs SET attempt_count=attempt_count+1, updated_at=? WHERE job_id=?`,
+		time.Now().UnixMilli(), jobID)
+	if err != nil {
+		return 0, fmt.Errorf("jobs.BumpAttempt: %w", err)
+	}
+	job, err := s.GetJob(ctx, jobID)
+	if err != nil {
+		return 0, fmt.Errorf("jobs.BumpAttempt: read-back: %w", err)
+	}
+	if err := s.RecordEvent(ctx, jobID, "attempt", fmt.Sprintf("%d", job.AttemptCount)); err != nil {
+		return 0, err
+	}
+	return job.AttemptCount, nil
+}
+
+// SetIncidentURL records the operator incident created for a non-recoverable job.
+func (s *GHJobStore) SetIncidentURL(ctx context.Context, jobID, incidentURL string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE gh_jobs SET incident_url=?, updated_at=? WHERE job_id=?`,
+		incidentURL, time.Now().UnixMilli(), jobID)
+	if err != nil {
+		return fmt.Errorf("jobs.SetIncidentURL: %w", err)
+	}
+	if err := s.RecordEvent(ctx, jobID, "incident", incidentURL); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ListStuck returns active jobs that have not updated since cutoff.
+func (s *GHJobStore) ListStuck(ctx context.Context, cutoff time.Time, limit int) ([]*GHJob, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+ghJobCols+` FROM gh_jobs
+		  WHERE state IN (?, ?) AND updated_at < ?
+		  ORDER BY updated_at ASC LIMIT ?`,
+		GHClaimed, GHRunning, cutoff.UnixMilli(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("jobs.ListStuck: %w", err)
+	}
+	defer rows.Close()
+	var out []*GHJob
+	for rows.Next() {
+		job, err := scanGHJobScanner(rows)
+		if err != nil {
+			return nil, fmt.Errorf("jobs.ListStuck: scan: %w", err)
+		}
+		out = append(out, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("jobs.ListStuck: rows: %w", err)
+	}
+	return out, nil
+}
+
+// Events returns lifecycle events for jobID in insertion order.
+func (s *GHJobStore) Events(ctx context.Context, jobID string) ([]GHJobEvent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, job_id, state, message, created_at
+		   FROM gh_job_events WHERE job_id=? ORDER BY id ASC`, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("jobs.Events: %w", err)
+	}
+	defer rows.Close()
+	var events []GHJobEvent
+	for rows.Next() {
+		var ev GHJobEvent
+		var createdMs int64
+		if err := rows.Scan(&ev.ID, &ev.JobID, &ev.State, &ev.Message, &createdMs); err != nil {
+			return nil, fmt.Errorf("jobs.Events: scan: %w", err)
+		}
+		ev.CreatedAt = time.UnixMilli(createdMs)
+		events = append(events, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("jobs.Events: rows: %w", err)
+	}
+	return events, nil
+}
+
+// RecordEvent appends an operator-visible lifecycle note.
+func (s *GHJobStore) RecordEvent(ctx context.Context, jobID, state, message string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO gh_job_events (job_id, state, message, created_at) VALUES (?, ?, ?, ?)`,
+		jobID, state, message, time.Now().UnixMilli())
+	if err != nil {
+		return fmt.Errorf("jobs.RecordEvent: %w", err)
+	}
 	return nil
 }
 
@@ -202,7 +335,8 @@ type ghRowScanner interface {
 
 const ghJobCols = `job_id, origin_ref, repo, object_kind, object_number,
 	COALESCE(story,''), state, COALESCE(worker_id,''), COALESCE(run_id,''),
-	COALESCE(run_url,''), COALESCE(comment_id,''), COALESCE(err_msg,''),
+	COALESCE(run_url,''), COALESCE(comment_id,''), attempt_count,
+	COALESCE(incident_url,''), COALESCE(err_msg,''),
 	created_at, updated_at`
 
 func scanGHJob(ctx context.Context, q ghRowScanner, col, val string) (*GHJob, error) {
@@ -218,16 +352,35 @@ func scanGHJobTx(ctx context.Context, tx *sql.Tx, originRef string) (*GHJob, err
 }
 
 func scanGHJobRow(row *sql.Row) (*GHJob, error) {
+	return scanGHJobScanner(row)
+}
+
+type ghJobScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanGHJobScanner(row ghJobScanner) (*GHJob, error) {
 	var j GHJob
 	var createdMs, updatedMs int64
 	if err := row.Scan(
 		&j.JobID, &j.OriginRef, &j.Repo, &j.ObjectKind, &j.ObjectNumber,
 		&j.Story, &j.State, &j.WorkerID, &j.RunID, &j.RunURL, &j.CommentID,
-		&j.ErrMsg, &createdMs, &updatedMs,
+		&j.AttemptCount, &j.IncidentURL, &j.ErrMsg, &createdMs, &updatedMs,
 	); err != nil {
 		return nil, err
 	}
 	j.CreatedAt = time.UnixMilli(createdMs)
 	j.UpdatedAt = time.UnixMilli(updatedMs)
 	return &j, nil
+}
+
+func insertGHJobEventTx(ctx context.Context, tx *sql.Tx, jobID, state, message string) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO gh_job_events (job_id, state, message, created_at) VALUES (?, ?, ?, ?)`,
+		jobID, state, message, time.Now().UnixMilli())
+	return err
+}
+
+func isSQLiteDuplicateColumn(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "duplicate column")
 }

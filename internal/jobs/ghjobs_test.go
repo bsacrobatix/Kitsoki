@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -65,6 +66,70 @@ func TestClaim_WinThenAttach(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("gh_jobs row count = %d, want 1", count)
+	}
+}
+
+func TestGHJobEventsAndStuckListing(t *testing.T) {
+	ctx := context.Background()
+	s := newTestGHStore(t)
+	job, won, err := s.Claim(ctx, GHMention{
+		OriginRef:    "github:o/r/issue/9",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "9",
+	}, "w1")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if !won {
+		t.Fatal("first claim did not win")
+	}
+	if err := s.SetStory(ctx, job.JobID, "stories/bugfix"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Advance(ctx, job.JobID, GHRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE gh_jobs SET updated_at=? WHERE job_id=?`, time.Now().Add(-time.Hour).UnixMilli(), job.JobID); err != nil {
+		t.Fatalf("age job: %v", err)
+	}
+	stuck, err := s.ListStuck(ctx, time.Now().Add(-time.Minute), 10)
+	if err != nil {
+		t.Fatalf("ListStuck: %v", err)
+	}
+	if len(stuck) != 1 || stuck[0].JobID != job.JobID {
+		t.Fatalf("stuck=%+v, want job %s", stuck, job.JobID)
+	}
+	if _, err := s.BumpAttempt(ctx, job.JobID); err != nil {
+		t.Fatalf("BumpAttempt: %v", err)
+	}
+	if err := s.SetIncidentURL(ctx, job.JobID, "https://github.com/o/r/issues/123"); err != nil {
+		t.Fatalf("SetIncidentURL: %v", err)
+	}
+	events, err := s.Events(ctx, job.JobID)
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	var sawRunning, sawAttempt, sawIncident bool
+	for _, ev := range events {
+		switch ev.State {
+		case GHRunning:
+			sawRunning = true
+		case "attempt":
+			sawAttempt = true
+		case "incident":
+			sawIncident = true
+		}
+	}
+	if !sawRunning || !sawAttempt || !sawIncident {
+		t.Fatalf("events missing expected lifecycle states: %+v", events)
+	}
+	got, err := s.GetJob(ctx, job.JobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if got.AttemptCount != 1 || got.IncidentURL == "" {
+		t.Fatalf("attempt/incident not persisted: %+v", got)
 	}
 }
 

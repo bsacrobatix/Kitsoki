@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -25,18 +26,22 @@ import (
 
 func newGHAgentServeCmd() *cobra.Command {
 	var (
-		repo           string
-		dbPath         string
-		addr           string
-		publicBaseURL  string
-		trigger        string
-		worker         string
-		pollInterval   time.Duration
-		webhookSecret  string
-		useGitHubApp   bool
-		appID          int64
-		installationID int64
-		appKeyFile     string
+		repo              string
+		dbPath            string
+		addr              string
+		publicBaseURL     string
+		trigger           string
+		worker            string
+		pollInterval      time.Duration
+		reconcileInterval time.Duration
+		stuckAfter        time.Duration
+		maxAttempts       int
+		incidentRepo      string
+		webhookSecret     string
+		useGitHubApp      bool
+		appID             int64
+		installationID    int64
+		appKeyFile        string
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -68,13 +73,17 @@ func newGHAgentServeCmd() *cobra.Command {
 				webhookSecret = os.Getenv(githubapp.EnvWebhookSecret)
 			}
 			opts := ghAgentServeOptions{
-				Repo:          repo,
-				Addr:          addr,
-				PublicBaseURL: publicBaseURL,
-				Trigger:       trigger,
-				Worker:        worker,
-				PollInterval:  pollInterval,
-				WebhookSecret: webhookSecret,
+				Repo:              repo,
+				Addr:              addr,
+				PublicBaseURL:     publicBaseURL,
+				Trigger:           trigger,
+				Worker:            worker,
+				PollInterval:      pollInterval,
+				WebhookSecret:     webhookSecret,
+				ReconcileInterval: reconcileInterval,
+				StuckAfter:        stuckAfter,
+				MaxAttempts:       maxAttempts,
+				IncidentRepo:      incidentRepo,
 			}
 			return runGHAgentServe(ctx, store, opts)
 		},
@@ -86,6 +95,10 @@ func newGHAgentServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&trigger, "trigger", ghagent.DefaultMentionTrigger, "mention trigger literal")
 	cmd.Flags().StringVar(&worker, "worker", "gh-agent-1", "worker id holding the claim")
 	cmd.Flags().DurationVar(&pollInterval, "poll-interval", 30*time.Second, "poll fallback interval; set 0 to disable polling")
+	cmd.Flags().DurationVar(&reconcileInterval, "reconcile-interval", 1*time.Minute, "interval for stuck-job reconciliation; set 0 to disable")
+	cmd.Flags().DurationVar(&stuckAfter, "stuck-after", 15*time.Minute, "active job age without updates before retry/escalation")
+	cmd.Flags().IntVar(&maxAttempts, "max-attempts", 2, "stuck-job retries before marking failed and filing an incident")
+	cmd.Flags().StringVar(&incidentRepo, "incident-repo", "", "owner/repo for gh-agent incidents; defaults to --repo")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret; defaults to KITSOKI_GH_WEBHOOK_SECRET")
 	cmd.Flags().BoolVar(&useGitHubApp, "github-app", false, "authenticate as a GitHub App installation (mints GH_TOKEN)")
 	cmd.Flags().Int64Var(&appID, "gh-app-id", 0, "GitHub App id (overrides KITSOKI_GH_APP_ID)")
@@ -95,13 +108,17 @@ func newGHAgentServeCmd() *cobra.Command {
 }
 
 type ghAgentServeOptions struct {
-	Repo          string
-	Addr          string
-	PublicBaseURL string
-	Trigger       string
-	Worker        string
-	PollInterval  time.Duration
-	WebhookSecret string
+	Repo              string
+	Addr              string
+	PublicBaseURL     string
+	Trigger           string
+	Worker            string
+	PollInterval      time.Duration
+	WebhookSecret     string
+	ReconcileInterval time.Duration
+	StuckAfter        time.Duration
+	MaxAttempts       int
+	IncidentRepo      string
 }
 
 func runGHAgentServe(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
@@ -132,6 +149,9 @@ func runGHAgentServe(ctx context.Context, store *jobs.GHJobStore, opts ghAgentSe
 	if opts.PollInterval > 0 {
 		go runGHAgentPollLoop(ctx, store, opts)
 	}
+	if opts.ReconcileInterval > 0 && opts.StuckAfter > 0 {
+		go runGHAgentReconcileLoop(ctx, store, opts)
+	}
 	fmt.Fprintf(os.Stdout, "gh-agent: serving %s (public %s)\n", opts.Addr, opts.PublicBaseURL)
 	select {
 	case <-ctx.Done():
@@ -139,6 +159,56 @@ func runGHAgentServe(ctx context.Context, store *jobs.GHJobStore, opts ghAgentSe
 	case err := <-errc:
 		return err
 	}
+}
+
+func runGHAgentReconcileLoop(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) {
+	ticker := time.NewTicker(opts.ReconcileInterval)
+	defer ticker.Stop()
+	for {
+		if err := runGHAgentReconcileOnce(ctx, store, opts); err != nil {
+			fmt.Fprintf(os.Stderr, "gh-agent: reconcile: %v\n", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runGHAgentReconcileOnce(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
+	stuck, err := store.ListStuck(ctx, time.Now().Add(-opts.StuckAfter), 50)
+	if err != nil {
+		return err
+	}
+	maxAttempts := opts.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	for _, job := range stuck {
+		nextAttempt, err := store.BumpAttempt(ctx, job.JobID)
+		if err != nil {
+			return err
+		}
+		if nextAttempt <= maxAttempts {
+			if err := store.Advance(ctx, job.JobID, jobs.GHQueued, fmt.Sprintf("stuck job queued for retry after %s", opts.StuckAfter)); err != nil {
+				return err
+			}
+			continue
+		}
+		errMsg := fmt.Sprintf("job stuck in %s for more than %s after %d attempt(s)", job.State, opts.StuckAfter, nextAttempt)
+		if err := store.Advance(ctx, job.JobID, jobs.GHFailed, errMsg); err != nil {
+			return err
+		}
+		if strings.TrimSpace(job.IncidentURL) == "" {
+			if incidentURL, err := fileGHAgentIncident(ctx, opts, job, errMsg); err == nil && incidentURL != "" {
+				_ = store.SetIncidentURL(ctx, job.JobID, incidentURL)
+			} else if err != nil {
+				_ = store.RecordEvent(ctx, job.JobID, "incident_failed", err.Error())
+			}
+		}
+	}
+	return nil
 }
 
 func runGHAgentPollLoop(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) {
@@ -217,8 +287,66 @@ func dispatchGHAgentMention(ctx context.Context, store *jobs.GHJobStore, opts gh
 		WorkerID:      opts.Worker,
 		PublicBaseURL: opts.PublicBaseURL,
 		SpawnFn:       ghagent.RunStorySession,
+		IncidentFn: func(ctx context.Context, job *jobs.GHJob, errMsg string) (string, error) {
+			return fileGHAgentIncident(ctx, opts, job, errMsg)
+		},
 	}
 	return d.Dispatch(ctx, mention, labels)
+}
+
+func fileGHAgentIncident(ctx context.Context, opts ghAgentServeOptions, job *jobs.GHJob, errMsg string) (string, error) {
+	repo := strings.TrimSpace(opts.IncidentRepo)
+	if repo == "" {
+		repo = strings.TrimSpace(opts.Repo)
+	}
+	if repo == "" {
+		return "", nil
+	}
+	runURL := job.RunURL
+	if runURL == "" {
+		runURL = publicRunURLForServe(opts.PublicBaseURL, job.JobID)
+	}
+	body := fmt.Sprintf(`A hosted GitHub-agent job needs operator attention.
+
+- Job: %s
+- Origin: %s
+- Source: %s
+- State: %s
+- Story: %s
+- Run: %s
+
+Error:
+
+%s
+`, job.JobID, job.OriginRef, ghAgentJobSourceURL(job), job.State, job.Story, runURL, errMsg)
+	res, err := host.GitHubTicketHandler(ctx, map[string]any{
+		"op":        "create",
+		"repo":      repo,
+		"title":     "gh-agent incident: " + job.OriginRef,
+		"body":      body,
+		"labels":    []string{"source-autonomous", "comp:github-agent", "incident"},
+		"severity":  "P1",
+		"component": "github-agent",
+		"target":    "kitsoki",
+		"trace_ref": runURL,
+		"filed_by":  "kitsoki-gh-agent",
+	})
+	if err != nil {
+		return "", err
+	}
+	if res.Error != "" {
+		return "", errors.New(res.Error)
+	}
+	url, _ := res.Data["url"].(string)
+	return strings.TrimSpace(url), nil
+}
+
+func publicRunURLForServe(base, jobID string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" || strings.TrimSpace(jobID) == "" {
+		return ""
+	}
+	return base + "/run/" + jobID
 }
 
 func ghAgentRunHandler(store *jobs.GHJobStore) http.HandlerFunc {
@@ -233,6 +361,7 @@ func ghAgentRunHandler(store *jobs.GHJobStore) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
+		events, _ := store.Events(r.Context(), job.JobID)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		sourceURL := ghAgentJobSourceURL(job)
 		commentURL := job.CommentID
@@ -247,9 +376,11 @@ func ghAgentRunHandler(store *jobs.GHJobStore) http.HandlerFunc {
 <dt>State</dt><dd><span class="%s">%s</span></dd>
 <dt>Issue / PR</dt><dd>%s #%s</dd>
 <dt>Comment</dt><dd>%s</dd>
+<dt>Attempts</dt><dd>%d</dd>
+<dt>Incident</dt><dd>%s</dd>
 <dt>Error</dt><dd>%s</dd>
 <dt>Updated</dt><dd>%s</dd>
-</dl><p class="muted"><a href="/api/run/%s">JSON</a></p></body></html>`,
+</dl><h2>Timeline</h2>%s<p class="muted"><a href="/api/run/%s">JSON</a></p></body></html>`,
 			html.EscapeString(job.JobID),
 			html.EscapeString(job.JobID),
 			html.EscapeString(job.OriginRef),
@@ -260,8 +391,11 @@ func ghAgentRunHandler(store *jobs.GHJobStore) http.HandlerFunc {
 			html.EscapeString(job.ObjectKind),
 			html.EscapeString(job.ObjectNumber),
 			htmlLinkOrCode(commentURL),
+			job.AttemptCount,
+			htmlLinkOrCode(job.IncidentURL),
 			html.EscapeString(emptyAsDash(job.ErrMsg)),
 			html.EscapeString(job.UpdatedAt.Format(time.RFC3339)),
+			renderGHAgentEventsHTML(events),
 			html.EscapeString(job.JobID),
 		)
 	}
@@ -279,6 +413,7 @@ func ghAgentRunAPIHandler(store *jobs.GHJobStore) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
+		events, _ := store.Events(r.Context(), jobID)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"job_id":        job.JobID,
@@ -292,9 +427,12 @@ func ghAgentRunAPIHandler(store *jobs.GHJobStore) http.HandlerFunc {
 			"run_id":        job.RunID,
 			"run_url":       job.RunURL,
 			"comment_url":   job.CommentID,
+			"attempt_count": job.AttemptCount,
+			"incident_url":  job.IncidentURL,
 			"err_msg":       job.ErrMsg,
 			"created_at":    job.CreatedAt.Format(time.RFC3339),
 			"updated_at":    job.UpdatedAt.Format(time.RFC3339),
+			"events":        ghAgentEventsJSON(events),
 		})
 	}
 }
@@ -339,6 +477,41 @@ func emptyAsDash(v string) string {
 	return v
 }
 
+func renderGHAgentEventsHTML(events []jobs.GHJobEvent) string {
+	if len(events) == 0 {
+		return `<p class="muted">No lifecycle events recorded.</p>`
+	}
+	var b strings.Builder
+	b.WriteString(`<ol>`)
+	for _, ev := range events {
+		b.WriteString(`<li><code>`)
+		b.WriteString(html.EscapeString(ev.CreatedAt.Format(time.RFC3339)))
+		b.WriteString(`</code> <strong>`)
+		b.WriteString(html.EscapeString(ev.State))
+		b.WriteString(`</strong>`)
+		if strings.TrimSpace(ev.Message) != "" {
+			b.WriteString(` — `)
+			b.WriteString(html.EscapeString(ev.Message))
+		}
+		b.WriteString(`</li>`)
+	}
+	b.WriteString(`</ol>`)
+	return b.String()
+}
+
+func ghAgentEventsJSON(events []jobs.GHJobEvent) []map[string]any {
+	out := make([]map[string]any, 0, len(events))
+	for _, ev := range events {
+		out = append(out, map[string]any{
+			"id":         ev.ID,
+			"state":      ev.State,
+			"message":    ev.Message,
+			"created_at": ev.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	return out
+}
+
 func webhookMention(body []byte, fallbackRepo, trigger string) (ghagent.Mention, []string, bool, error) {
 	var payload struct {
 		Action     string `json:"action"`
@@ -349,6 +522,7 @@ func webhookMention(body []byte, fallbackRepo, trigger string) (ghagent.Mention,
 			Number  int    `json:"number"`
 			Title   string `json:"title"`
 			HTMLURL string `json:"html_url"`
+			Body    string `json:"body"`
 			Labels  []struct {
 				Name string `json:"name"`
 			} `json:"labels"`
@@ -358,10 +532,18 @@ func webhookMention(body []byte, fallbackRepo, trigger string) (ghagent.Mention,
 			Number  int    `json:"number"`
 			Title   string `json:"title"`
 			HTMLURL string `json:"html_url"`
+			Body    string `json:"body"`
 			Labels  []struct {
 				Name string `json:"name"`
 			} `json:"labels"`
 		} `json:"pull_request"`
+		Review struct {
+			Body    string `json:"body"`
+			HTMLURL string `json:"html_url"`
+			User    struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		} `json:"review"`
 		Comment struct {
 			Body    string `json:"body"`
 			HTMLURL string `json:"html_url"`
@@ -373,13 +555,15 @@ func webhookMention(body []byte, fallbackRepo, trigger string) (ghagent.Mention,
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return ghagent.Mention{}, nil, false, fmt.Errorf("parse webhook payload: %w", err)
 	}
-	if payload.Action == "deleted" || payload.Action == "unassigned" {
+	switch payload.Action {
+	case "deleted", "unassigned", "labeled", "unlabeled", "closed":
 		return ghagent.Mention{}, nil, false, nil
 	}
 	if strings.TrimSpace(trigger) == "" {
 		trigger = ghagent.DefaultMentionTrigger
 	}
-	if !strings.Contains(strings.ToLower(payload.Comment.Body), strings.ToLower(trigger)) {
+	mentionBody := firstNonEmpty(payload.Comment.Body, payload.Review.Body, payload.Issue.Title, payload.PullRequest.Title, payload.Issue.Body, payload.PullRequest.Body)
+	if !strings.Contains(strings.ToLower(mentionBody), strings.ToLower(trigger)) {
 		return ghagent.Mention{}, nil, false, nil
 	}
 	repo := strings.TrimSpace(payload.Repository.FullName)
@@ -390,7 +574,12 @@ func webhookMention(body []byte, fallbackRepo, trigger string) (ghagent.Mention,
 		return ghagent.Mention{}, nil, false, fmt.Errorf("webhook payload has no repository.full_name and --repo is empty")
 	}
 
-	item := host.GitHubInboxItem{Kind: "issue", Author: payload.Comment.User.Login, Title: payload.Comment.Body, URL: payload.Comment.HTMLURL}
+	item := host.GitHubInboxItem{
+		Kind:   "issue",
+		Author: firstNonEmpty(payload.Comment.User.Login, payload.Review.User.Login),
+		Title:  mentionBody,
+		URL:    firstNonEmpty(payload.Comment.HTMLURL, payload.Review.HTMLURL),
+	}
 	var labels []string
 	switch {
 	case payload.PullRequest.Number > 0:
@@ -423,4 +612,13 @@ func webhookMention(body []byte, fallbackRepo, trigger string) (ghagent.Mention,
 		Trigger:   trigger,
 	}
 	return mention, labels, true, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

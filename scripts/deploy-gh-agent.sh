@@ -10,12 +10,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-REMOTE="${KITSOKI_GH_AGENT_REMOTE:-root@206.189.84.218}"
+REMOTE="${KITSOKI_GH_AGENT_REMOTE:-}"
 REMOTE_BIN="${KITSOKI_GH_AGENT_REMOTE_BIN:-/usr/local/bin/kitsoki}"
 REMOTE_TMP="${KITSOKI_GH_AGENT_REMOTE_TMP:-/tmp/kitsoki-ghagent.$$}"
 REMOTE_REPO="${KITSOKI_GH_AGENT_REMOTE_REPO:-/opt/kitsoki}"
 SERVICE="${KITSOKI_GH_AGENT_SERVICE:-kitsoki-gh-agent}"
-PUBLIC_BASE_URL="${KITSOKI_GH_AGENT_PUBLIC_BASE_URL:-https://kitsoki-test.slothattax.me}"
+PUBLIC_BASE_URL="${KITSOKI_GH_AGENT_PUBLIC_BASE_URL:-}"
 OUT="${KITSOKI_GH_AGENT_BUILD_OUT:-/private/tmp/kitsoki-ghagent}"
 GOCACHE="${GOCACHE:-/private/tmp/kitsoki-gocache}"
 
@@ -26,6 +26,14 @@ if [ "${1:-}" = "--yes" ]; then
 fi
 if [ "$#" -ne 0 ]; then
 	echo "usage: scripts/deploy-gh-agent.sh [--yes]" >&2
+	exit 2
+fi
+if [ -z "$REMOTE" ]; then
+	echo "KITSOKI_GH_AGENT_REMOTE is required, for example deploy@gh-agent.example.com" >&2
+	exit 2
+fi
+if [ -z "$PUBLIC_BASE_URL" ]; then
+	echo "KITSOKI_GH_AGENT_PUBLIC_BASE_URL is required, for example https://gh-agent.example.com" >&2
 	exit 2
 fi
 

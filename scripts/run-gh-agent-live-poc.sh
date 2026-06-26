@@ -10,10 +10,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-REPO="${KITSOKI_GH_AGENT_REPO:-bsacrobatix/Kitsoki}"
-REMOTE="${KITSOKI_GH_AGENT_REMOTE:-root@206.189.84.218}"
+REPO="${KITSOKI_GH_AGENT_REPO:-}"
+REMOTE="${KITSOKI_GH_AGENT_REMOTE:-}"
 REMOTE_DB="${KITSOKI_GH_AGENT_REMOTE_DB:-/var/lib/kitsoki-gh-agent/gh-jobs.sqlite}"
-PUBLIC_BASE_URL="${KITSOKI_GH_AGENT_PUBLIC_BASE_URL:-https://kitsoki-test.slothattax.me}"
+PUBLIC_BASE_URL="${KITSOKI_GH_AGENT_PUBLIC_BASE_URL:-}"
 RUN_STAMP="${KITSOKI_GH_AGENT_LIVE_RUN_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
 BUG_LABEL="${KITSOKI_GH_AGENT_BUG_LABEL:-bug}"
 FEATURE_LABEL="${KITSOKI_GH_AGENT_FEATURE_LABEL:-enhancement}"
@@ -41,7 +41,7 @@ to the VM, waits for VM gh_jobs rows, and writes .context evidence notes.
 
 Options:
   --yes-live-mutations       actually mutate GitHub/VM state
-  --repo <owner/repo>        default bsacrobatix/Kitsoki
+  --repo <owner/repo>        required unless KITSOKI_GH_AGENT_REPO is set
   --pr-url <url>             required in live mode for the PR-status case
   --skip-deploy              do not call scripts/deploy-gh-agent.sh --yes
   --capture                  after evidence, record each case with Playwright
@@ -114,6 +114,14 @@ done
 
 if [ -z "$REPO" ]; then
 	echo "--repo must not be empty" >&2
+	exit 2
+fi
+if [ -z "$PUBLIC_BASE_URL" ]; then
+	echo "KITSOKI_GH_AGENT_PUBLIC_BASE_URL is required" >&2
+	exit 2
+fi
+if [ "$YES" -eq 1 ] && [ -z "$REMOTE" ]; then
+	echo "KITSOKI_GH_AGENT_REMOTE is required for live execution" >&2
 	exit 2
 fi
 

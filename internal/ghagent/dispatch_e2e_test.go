@@ -3,11 +3,13 @@ package ghagent
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/goccy/go-yaml"
 
@@ -39,6 +41,77 @@ func stubGHCli(t *testing.T, issuesJSON, prsJSON string) func() {
 			return "", "", 1, nil
 		}
 	})
+}
+
+func TestCommentUpdateRetriesWithoutPostingDuplicate(t *testing.T) {
+	ctx := context.Background()
+	var ops []string
+	calls := 0
+	comments := &CommentStore{
+		Repo:              "o/r",
+		MaxUpdateAttempts: 2,
+		RetryDelay:        time.Millisecond,
+		Exec: func(_ context.Context, args map[string]any) (host.Result, error) {
+			op, _ := args["op"].(string)
+			ops = append(ops, op)
+			calls++
+			return host.Result{Error: "temporary edit failure"}, nil
+		},
+	}
+	_, err := comments.Update(ctx, "42", "https://github.com/o/r/issues/42#issuecomment-1", "body", Meta{JobID: "j1"})
+	if err == nil {
+		t.Fatal("Update succeeded unexpectedly")
+	}
+	if calls != 2 {
+		t.Fatalf("calls=%d, want 2", calls)
+	}
+	for _, op := range ops {
+		if op != "comment_edit" {
+			t.Fatalf("Update posted a duplicate instead of editing only: ops=%v", ops)
+		}
+	}
+}
+
+func TestDispatchFailureFilesIncident(t *testing.T) {
+	ctx := context.Background()
+	mention := Mention{
+		Item: host.GitHubInboxItem{Kind: "issue", Number: "42", Title: "@kitsoki bug: broken"},
+		Repo: "o/r", OriginRef: "github:o/r/issue/42", Trigger: DefaultMentionTrigger,
+	}
+	store := newGHJobStore(t)
+	rec := &recordingComments{commentID: "https://github.com/o/r/issues/42#issuecomment-1"}
+	d := &Dispatcher{
+		Jobs:          store,
+		Routes:        DefaultLabelStoryMap(),
+		Comments:      &CommentStore{Exec: rec.handler, Repo: "o/r"},
+		WorkerID:      "worker-fail",
+		PublicBaseURL: "https://example.invalid",
+		SpawnFn: func(context.Context, Route, *jobs.GHJob) (RunResult, error) {
+			return RunResult{}, errors.New("boom")
+		},
+		IncidentFn: func(_ context.Context, job *jobs.GHJob, errMsg string) (string, error) {
+			if job.JobID == "" || !strings.Contains(errMsg, "boom") {
+				t.Fatalf("bad incident input: job=%+v err=%q", job, errMsg)
+			}
+			return "https://github.com/o/r/issues/500", nil
+		},
+	}
+	job, err := d.Dispatch(ctx, mention, []string{"bug"})
+	if err == nil {
+		t.Fatal("Dispatch succeeded unexpectedly")
+	}
+	if job.State != jobs.GHFailed {
+		t.Fatalf("State=%q, want failed", job.State)
+	}
+	if job.IncidentURL != "https://github.com/o/r/issues/500" {
+		t.Fatalf("IncidentURL=%q", job.IncidentURL)
+	}
+	rec.mu.Lock()
+	last := rec.bodies[len(rec.bodies)-1]
+	rec.mu.Unlock()
+	if !strings.Contains(last, "Incident: https://github.com/o/r/issues/500") {
+		t.Fatalf("final comment missing incident URL:\n%s", last)
+	}
 }
 
 // recordingComments is a host.Handler bound as the CommentStore.Exec seam. It

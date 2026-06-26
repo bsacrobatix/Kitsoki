@@ -10,8 +10,20 @@ CREATE TABLE IF NOT EXISTS gh_jobs (
     run_id        TEXT,
     run_url       TEXT,
     comment_id    TEXT,                     -- the rolling-status comment id (captured on first Post)
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    incident_url  TEXT,
     err_msg       TEXT,
     created_at    INTEGER NOT NULL,         -- unix ms
     updated_at    INTEGER NOT NULL
 ) STRICT;
 CREATE UNIQUE INDEX IF NOT EXISTS gh_jobs_origin ON gh_jobs(origin_ref);
+
+CREATE TABLE IF NOT EXISTS gh_job_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id     TEXT NOT NULL,
+    state      TEXT NOT NULL,
+    message    TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(job_id) REFERENCES gh_jobs(job_id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS gh_job_events_job ON gh_job_events(job_id, id);

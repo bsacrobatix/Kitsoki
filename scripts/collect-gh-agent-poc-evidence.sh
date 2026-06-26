@@ -10,8 +10,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-PUBLIC_BASE_URL="${KITSOKI_GH_AGENT_PUBLIC_BASE_URL:-https://kitsoki-test.slothattax.me}"
-REMOTE="${KITSOKI_GH_AGENT_REMOTE:-root@206.189.84.218}"
+PUBLIC_BASE_URL="${KITSOKI_GH_AGENT_PUBLIC_BASE_URL:-}"
+REMOTE="${KITSOKI_GH_AGENT_REMOTE:-}"
 REMOTE_DB="${KITSOKI_GH_AGENT_REMOTE_DB:-/var/lib/kitsoki-gh-agent/gh-jobs.sqlite}"
 OUT_DIR="${KITSOKI_GH_AGENT_EVIDENCE_DIR:-.context}"
 
@@ -36,8 +36,8 @@ Options:
   -h, --help            Show this help.
 
 Environment:
-  KITSOKI_GH_AGENT_PUBLIC_BASE_URL  default https://kitsoki-test.slothattax.me
-  KITSOKI_GH_AGENT_REMOTE           default root@206.189.84.218
+  KITSOKI_GH_AGENT_PUBLIC_BASE_URL  required public run service URL
+  KITSOKI_GH_AGENT_REMOTE           required only with --remote-db
   KITSOKI_GH_AGENT_REMOTE_DB        default /var/lib/kitsoki-gh-agent/gh-jobs.sqlite
   KITSOKI_GH_AGENT_EVIDENCE_DIR     default .context
 
@@ -91,6 +91,14 @@ done
 
 if [ -z "$case_slug" ] || [ -z "$job_id" ]; then
 	usage >&2
+	exit 2
+fi
+if [ -z "$PUBLIC_BASE_URL" ]; then
+	echo "KITSOKI_GH_AGENT_PUBLIC_BASE_URL is required" >&2
+	exit 2
+fi
+if [ "$with_remote_db" -eq 1 ] && [ -z "$REMOTE" ]; then
+	echo "KITSOKI_GH_AGENT_REMOTE is required with --remote-db" >&2
 	exit 2
 fi
 if [[ ! "$case_slug" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then

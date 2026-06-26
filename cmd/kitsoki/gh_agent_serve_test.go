@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 
 	_ "modernc.org/sqlite"
@@ -48,6 +50,39 @@ func TestWebhookMentionIssueComment(t *testing.T) {
 	}
 	if len(labels) != 1 || labels[0] != "bug" {
 		t.Fatalf("labels=%v", labels)
+	}
+}
+
+func TestWebhookMentionPullRequestReview(t *testing.T) {
+	body := []byte(`{
+	  "action":"submitted",
+	  "repository":{"full_name":"o/r"},
+	  "pull_request":{
+	    "number":77,
+	    "title":"Renderer cleanup",
+	    "html_url":"https://github.com/o/r/pull/77"
+	  },
+	  "review":{
+	    "body":"@kitsoki what is the status here?",
+	    "html_url":"https://github.com/o/r/pull/77#pullrequestreview-1",
+	    "user":{"login":"reviewer"}
+	  }
+	}`)
+	mention, _, ok, err := webhookMention(body, "", "@kitsoki")
+	if err != nil {
+		t.Fatalf("webhookMention: %v", err)
+	}
+	if !ok {
+		t.Fatal("review mention was ignored")
+	}
+	if mention.Item.Kind != "pr" || mention.Item.Number != "77" {
+		t.Fatalf("mention item=%+v", mention.Item)
+	}
+	if mention.Item.Author != "reviewer" {
+		t.Fatalf("author=%q", mention.Item.Author)
+	}
+	if mention.OriginRef != "github:o/r/pr/77" {
+		t.Fatalf("OriginRef=%q", mention.OriginRef)
 	}
 }
 
@@ -110,6 +145,12 @@ func TestGHAgentRunHandlersShowUsefulJobSummary(t *testing.T) {
 	if err := store.SetComment(ctx, job.JobID, "https://github.com/o/r/issues/42#issuecomment-1"); err != nil {
 		t.Fatalf("SetComment: %v", err)
 	}
+	if _, err := store.BumpAttempt(ctx, job.JobID); err != nil {
+		t.Fatalf("BumpAttempt: %v", err)
+	}
+	if err := store.SetIncidentURL(ctx, job.JobID, "https://github.com/o/r/issues/500"); err != nil {
+		t.Fatalf("SetIncidentURL: %v", err)
+	}
 	if err := store.Advance(ctx, job.JobID, jobs.GHDone, ""); err != nil {
 		t.Fatalf("Advance: %v", err)
 	}
@@ -129,6 +170,8 @@ func TestGHAgentRunHandlersShowUsefulJobSummary(t *testing.T) {
 		"issue #42",
 		"https://github.com/o/r/issues/42",
 		"https://github.com/o/r/issues/42#issuecomment-1",
+		"https://github.com/o/r/issues/500",
+		"Timeline",
 		"Updated",
 		"/api/run/" + job.JobID,
 	} {
@@ -167,6 +210,79 @@ func TestGHAgentRunHandlersShowUsefulJobSummary(t *testing.T) {
 	}
 	if got["updated_at"] == "" {
 		t.Fatalf("updated_at missing: %v", got)
+	}
+	if got["attempt_count"].(float64) != 1 {
+		t.Fatalf("attempt_count = %v", got["attempt_count"])
+	}
+	if got["incident_url"] != "https://github.com/o/r/issues/500" {
+		t.Fatalf("incident_url = %v", got["incident_url"])
+	}
+	events, ok := got["events"].([]any)
+	if !ok || len(events) == 0 {
+		t.Fatalf("events missing: %v", got["events"])
+	}
+}
+
+func TestGHAgentReconcileEscalatesStuckJobs(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	store, err := jobs.NewGHJobStore(db)
+	if err != nil {
+		t.Fatalf("NewGHJobStore: %v", err)
+	}
+	job, _, err := store.Claim(ctx, jobs.GHMention{
+		OriginRef:    "github:o/r/issue/88",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "88",
+	}, "worker-test")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if err := store.Advance(ctx, job.JobID, jobs.GHRunning, ""); err != nil {
+		t.Fatalf("Advance: %v", err)
+	}
+	old := time.Now().Add(-time.Hour).UnixMilli()
+	if _, err := db.ExecContext(ctx, `UPDATE gh_jobs SET updated_at=?, attempt_count=1 WHERE job_id=?`, old, job.JobID); err != nil {
+		t.Fatalf("age job: %v", err)
+	}
+	restore := host.SetExecRunnerForTest(func(_ context.Context, _ string, name string, args ...string) (string, string, int, error) {
+		if name != "gh" {
+			t.Fatalf("unexpected command %q", name)
+		}
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.HasPrefix(joined, "--version"):
+			return "gh version 2.0.0", "", 0, nil
+		case strings.HasPrefix(joined, "issue create"):
+			return "https://github.com/o/r/issues/501\n", "", 0, nil
+		default:
+			t.Fatalf("unexpected gh args: %s", joined)
+			return "", "", 1, nil
+		}
+	})
+	defer restore()
+	if err := runGHAgentReconcileOnce(ctx, store, ghAgentServeOptions{
+		Repo:          "o/r",
+		PublicBaseURL: "https://agent.example",
+		StuckAfter:    time.Minute,
+		MaxAttempts:   1,
+	}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	got, err := store.GetJob(ctx, job.JobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if got.State != jobs.GHFailed {
+		t.Fatalf("State=%q, want failed", got.State)
+	}
+	if got.IncidentURL != "https://github.com/o/r/issues/501" {
+		t.Fatalf("IncidentURL=%q", got.IncidentURL)
 	}
 }
 
