@@ -430,7 +430,7 @@ def preflight(m, repo_dir=None, candidate=None, candidates_path=None, bug_ids=No
 
 
 def collect_cells(results_dir):
-    cells_dir = HERE / results_dir / "cells"
+    cells_dir = (HERE / results_dir / "cells").resolve()
     cells = []
     for f in sorted(cells_dir.glob("*.json")) if cells_dir.exists() else []:
         try:
@@ -440,6 +440,21 @@ def collect_cells(results_dir):
         cell["_path"] = str(f)
         cells.append(cell)
     return cells, cells_dir
+
+
+def collect_prepared(results_dir, project, selected):
+    prepared_dir = ((HERE / results_dir).parent / "prepared").resolve()
+    prepared = []
+    for f in sorted(prepared_dir.glob("*.json")) if prepared_dir.exists() else []:
+        try:
+            item = json.loads(f.read_text())
+        except Exception:
+            continue
+        key = (item.get("bug"), item.get("candidate"))
+        if item.get("project") == project and key in selected:
+            item["_path"] = str(f)
+            prepared.append(item)
+    return prepared, prepared_dir
 
 
 def rollup_cells(cells):
@@ -479,6 +494,7 @@ def readiness(m, repo_dir=None, candidate=None, candidates_path=None, bug_ids=No
         if key in selected and cell.get("project") == m["project"]["id"]:
             matching.append(cell)
     completed = {(c.get("bug"), c.get("candidate")) for c in matching}
+    prepared, prepared_dir = collect_prepared(results_dir, m["project"]["id"], selected)
     missing = [
         {
             "bug": cmd["bug"],
@@ -494,6 +510,7 @@ def readiness(m, repo_dir=None, candidate=None, candidates_path=None, bug_ids=No
         "selected_cells": len(plan["commands"]),
         "scored_cells": len(matching),
         "missing_cells": len(missing),
+        "prepared_cells": len(prepared),
         "rollup": {"by_candidate": rollup_cells(matching)},
     }
     next_actions = []
@@ -515,6 +532,10 @@ def readiness(m, repo_dir=None, candidate=None, candidates_path=None, bug_ids=No
         },
         "drive_plan": plan,
         "results": result_summary,
+        "prepared": {
+            "dir": str(prepared_dir),
+            "cells": prepared,
+        },
         "missing": missing,
         "next_actions": next_actions,
     }
@@ -542,6 +563,7 @@ def write_readiness_markdown(report, markdown):
         f"Selected cells: {selected_cells}",
         f"Scored cells: {scored_cells}",
         f"Missing cells: {missing_cells}",
+        f"Prepared cells: {results.get('prepared_cells', 0)}",
         "",
         "## What This Proves",
         "",
@@ -580,6 +602,21 @@ def write_readiness_markdown(report, markdown):
         "## Drive Commands",
         "",
         plan.get("markdown", "(none)"),
+        "",
+        "## Prepared Cells",
+        "",
+    ])
+    prepared = report.get("prepared", {}).get("cells", [])
+    if prepared:
+        for p in prepared:
+            lines.append(
+                f"- `{p.get('bug')}` x `{p.get('candidate')}`: "
+                f"metadata `{p.get('_path')}`, prompt `{p.get('prompt')}`, "
+                f"worktree `{p.get('worktree')}`, trace `{p.get('trace')}`"
+            )
+    else:
+        lines.append("No prepared-cell metadata found yet. Run `drive_cell.sh --no-drive` or `make history-smoke` with first-cell preparation enabled.")
+    lines.extend([
         "",
         "## Missing Cells",
         "",

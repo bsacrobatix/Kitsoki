@@ -9,6 +9,7 @@ Run: python3 bench_grade_test.py   (exit 0 = pass). Guards two dogfood finds:
 """
 import importlib.util
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -236,6 +237,16 @@ def test_readiness_reports_missing_and_scored_cells():
         out_cell = results / "cells" / "demo-bug1-ready-kitsoki.json"
         with redirect_stdout(io.StringIO()):
             bench.pending_cell(manifest, "bug1", "ready", "provider blocked", str(out_cell))
+        prepared = root / "prepared" / "demo-bug2-ready.json"
+        prepared.parent.mkdir(parents=True)
+        prepared.write_text(json.dumps({
+            "project": "demo",
+            "bug": "bug2",
+            "candidate": "ready",
+            "worktree": str(root / "cells" / "demo-bug2-ready"),
+            "prompt": str(root / "prompts" / "demo-bug2-ready.md"),
+            "trace": str(root / "traces" / "demo-bug2-ready.jsonl"),
+        }))
         old_root = bench.REPO_ROOT
         bench.REPO_ROOT = root
         try:
@@ -259,15 +270,22 @@ def test_readiness_reports_missing_and_scored_cells():
         assert report["results"]["selected_cells"] == 2
         assert report["results"]["scored_cells"] == 1
         assert report["results"]["missing_cells"] == 1
+        assert report["results"]["prepared_cells"] == 1
         assert report["arming"]["verified"] is True
+        assert report["prepared"]["cells"][0]["bug"] == "bug2"
+        assert "/../" not in report["prepared"]["cells"][0]["_path"]
         assert report["missing"][0]["bug"] == "bug2"
         assert "bench.py pending" in report["missing"][0]["pending_command"]
         text = markdown.read_text()
         assert "Preflight: ready" in text
         assert "Arming: verified" in text
+        assert "Prepared cells: 1" in text
         assert "## What This Proves" in text
         assert "verified RED at the historical baseline and GREEN at the real fix" in text
         assert "not attempted or not recorded, not failed" in text
+        assert "## Prepared Cells" in text
+        assert "metadata `" in text
+        assert "demo-bug2-ready.json" in text
         assert "`bug2` x `ready`" in text
         assert "## Pending Alternatives" in text
         assert "--reason \"<reason>\"" in text
