@@ -60,6 +60,11 @@ world:
   dogfood_matrix_validation_warnings: { type: int, default: 0 }
   dogfood_run_validation_issue_summary: { type: string, default: "" }
   dogfood_matrix_validation_issue_summary: { type: string, default: "" }
+  driver_replay_scenario: { type: string, default: "" }
+  driver_replay_attached_evidence_count: { type: int, default: 0 }
+  driver_replay_media_manifest_path: { type: string, default: "" }
+  driver_replay_journal_path: { type: string, default: "" }
+  driver_replay_handoff_path: { type: string, default: "" }
   corpus_validation_status: { type: string, default: "" }
   corpus_validation_errors: { type: int, default: 0 }
   corpus_validation_warnings: { type: int, default: 0 }
@@ -139,6 +144,12 @@ intents:
     description: "Run the deterministic no-LLM product-journey smoke from matrix through rollup and decks."
     examples: ["dogfood smoke", "run dogfood smoke", "prove artifact loop"]
     priority: 89
+    slots:
+      seed: { type: string, required: false }
+  driver_replay_smoke:
+    description: "Run a deterministic no-LLM one-scenario reusable-driver replay with cassette proof evidence."
+    examples: ["driver replay smoke", "prove driver replay", "run cassette driver smoke"]
+    priority: 88
     slots:
       seed: { type: string, required: false }
   validate_corpus:
@@ -239,7 +250,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, validate_corpus, refresh_targets, load, rollup, validate_matrix, attach, record, blocker, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, validate_corpus, refresh_targets, load, rollup, validate_matrix, attach, record, blocker, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 

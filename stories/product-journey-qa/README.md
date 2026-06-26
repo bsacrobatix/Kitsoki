@@ -24,6 +24,10 @@ It is intentionally no-LLM:
 - `dogfood_smoke` calls `tools/product-journey/run.py --dogfood-smoke
   --json-output` to prove the no-LLM artifact loop from matrix creation through
   assignment run, seeded evidence, review, validation, rollup, and Slidey decks.
+- `driver_replay_smoke` calls `tools/product-journey/run.py
+  --driver-replay-smoke --json-output` to prove one reusable-driver scenario
+  with cassette-backed proof evidence, linked driver journal refs, media
+  manifest coverage, review, validation, and a compact Slidey smoke deck.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix

@@ -2268,6 +2268,8 @@ def is_external_artifact_ref(path: str) -> bool:
         "trace://",
         "mcp:",
         "mcp://",
+        "cassette:",
+        "cassette://",
     )
     return value.startswith(prefixes)
 
@@ -5262,6 +5264,224 @@ def dogfood_review_is_expected_demo_only(reviewed: dict) -> bool:
     return failed_checks <= {"quality-gates"}
 
 
+def driver_replay_review_is_expected_one_scenario(reviewed: dict) -> bool:
+    failed_checks = {
+        check.get("id", "")
+        for check in reviewed.get("checks", [])
+        if check.get("status") == "fail"
+    }
+    return failed_checks <= {"scenario-attempts", "driver-journal-coverage", "quality-gates"}
+
+
+def render_driver_replay_smoke_summary(report: dict) -> str:
+    review = report["review"]
+    validation = report["validation"]
+    lines = [
+        "# Product Journey Driver Replay Smoke",
+        "",
+        f"- Status: `{report['status']}`",
+        f"- Smoke: `{report['smoke_id']}`",
+        f"- Run: `{report['run']['run_id']}`",
+        f"- Scenario: `{report['scenario']['id']}`",
+        f"- Run dir: `{report['run']['run_dir']}`",
+        f"- Deck: `{report['run']['deck_path']}`",
+        f"- Driver journal: `{report['run']['driver_journal_path']}`",
+        f"- Media manifest: `{report['run']['media_manifest_path']}`",
+        f"- Review: `{review.get('review_status')}` - {review.get('summary')}",
+        f"- Validation: `{validation.get('status')}` - {validation.get('validation_issue_summary', '') or 'no issues'}",
+        "",
+        "## Attached Evidence",
+        "",
+    ]
+    for item in report["attached_evidence"]:
+        lines.append(f"- `{item['scenario']}/{item['kind']}`: `{item['path']}` ({item['source']})")
+    lines.extend([
+        "",
+        "## Expected Scope",
+        "",
+        "This smoke proves one cassette-backed driver scenario loop end to end. It is expected to leave other scenarios incomplete, so review failures must be limited to scenario coverage and quality-gate coverage.",
+    ])
+    return "\n".join(lines) + "\n"
+
+
+def render_driver_replay_smoke_deck(report: dict) -> dict:
+    review = report["review"]
+    validation = report["validation"]
+    attached = [
+        f"{item['kind']}: {item['path']}"
+        for item in report["attached_evidence"]
+    ]
+    return {
+        "title": "Product Journey Driver Replay Smoke",
+        "description": "No-LLM proof that one reusable driver scenario can attach proof evidence, journal the attempt, generate playback media, review, and validate.",
+        "slides": [
+            {
+                "type": "title",
+                "title": "Driver replay smoke",
+                "subtitle": report["scenario"]["id"],
+                "narration": "This deck summarizes a deterministic cassette-backed product journey driver replay.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Evidence",
+                "title": "Structured proof attached",
+                "body": "\n".join(f"- {line}" for line in attached),
+                "narration": "Each driver journal evidence reference is also attached as structured evidence.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Review",
+                "title": review.get("review_status", "unknown"),
+                "body": "\n".join([
+                    review.get("summary", ""),
+                    report.get("review_backlog_summary", ""),
+                ]),
+                "narration": "The run is not globally ready until the remaining scenarios are captured or blocked.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Validation",
+                "title": validation.get("status", "unknown"),
+                "body": validation.get("validation_issue_summary", "") or "No validation issues.",
+                "narration": "Validation must pass even when review honestly reports incomplete scenario coverage.",
+            },
+        ],
+    }
+
+
+def build_driver_replay_smoke(
+    catalog: dict,
+    github_targets: dict,
+    personas: list[dict],
+    scenarios: list[dict],
+    seed: str,
+) -> dict:
+    smoke_id = f"{slug_timestamp()}-driver-replay-{seed}"
+    smoke_dir = DOGFOOD_ROOT / smoke_id
+    smoke_dir.mkdir(parents=True, exist_ok=False)
+
+    run_dir, run_json = build_run_bundle(
+        catalog,
+        github_targets,
+        personas,
+        scenarios,
+        "vscode",
+        "core-maintainer",
+        f"{seed}-driver-replay",
+        "driver-replay-smoke",
+        publish_deck=None,
+    )
+    scenario_id = "bugfix"
+    bugfix_evidence = [
+        ("session_trace", f"cassette://product-journey/{run_json['run_id']}/bugfix/session-trace.jsonl"),
+        ("candidate_diff", f"cassette://product-journey/{run_json['run_id']}/bugfix/candidate.diff"),
+        ("oracle_result", f"cassette://product-journey/{run_json['run_id']}/bugfix/oracle-result.json"),
+        ("full_suite_result", f"cassette://product-journey/{run_json['run_id']}/bugfix/full-suite.json"),
+        ("key_interaction_video", f"cassette://product-journey/{run_json['run_id']}/bugfix/key-interaction.mp4"),
+    ]
+    attached_evidence = []
+    for kind, path in bugfix_evidence:
+        attach_evidence(
+            run_dir,
+            scenario_id,
+            kind,
+            path,
+            "captured",
+            "cassette",
+            f"driver replay cassette proof for {scenario_id}/{kind}",
+            publish_deck=None,
+        )
+        attached_evidence.append({
+            "scenario": scenario_id,
+            "kind": kind,
+            "path": path,
+            "source": "cassette",
+        })
+
+    record_driver_event(
+        run_dir,
+        scenario_id,
+        "replay",
+        "captured",
+        "Deterministic driver replay followed the bugfix scenario contract and attached every cassette-backed proof ref.",
+        "session.open,session.trace,render.tui,visual.observe",
+        ",".join(path for _, path in bugfix_evidence),
+        "",
+        publish_deck=None,
+    )
+    record_finding(
+        run_dir,
+        "strength",
+        "Replay driver can close one scenario loop",
+        "The driver replay attached every bugfix minimum-evidence slot and journaled the exact refs it produced.",
+        scenario_id,
+        "low",
+        bugfix_evidence[-1][1],
+        "observed",
+        publish_deck=None,
+    )
+    record_finding(
+        run_dir,
+        "weakness",
+        "Remaining scenarios still need live or cassette passes",
+        "The smoke proves one driver loop only; product discovery, onboarding, design, feature implementation, and product-bug reporting still need evidence or blockers.",
+        scenario_id,
+        "medium",
+        str(run_dir / "driver-handoff.md"),
+        "open",
+        publish_deck=None,
+    )
+    record_finding(
+        run_dir,
+        "issue",
+        "Global readiness should stay blocked until all scenarios are captured",
+        "Review must remain needs_evidence when only one scenario has proof, even though validation proves the artifact contract is internally consistent.",
+        scenario_id,
+        "medium",
+        str(run_dir / "review.json"),
+        "open",
+        publish_deck=None,
+    )
+
+    reviewed = review_run_bundle(run_dir, publish_deck=None)
+    validation = validate_run_bundle(run_dir)
+    review_is_expected = driver_replay_review_is_expected_one_scenario(reviewed)
+    status = "passed" if review_is_expected and validation.get("status") == "valid" else "failed"
+    report = {
+        "status": status,
+        "smoke_id": smoke_id,
+        "created_at": now_utc(),
+        "seed": seed,
+        "smoke_dir": str(smoke_dir),
+        "scenario": {
+            "id": scenario_id,
+            "expected_incomplete_review": review_is_expected,
+        },
+        "run": {
+            "run_id": run_json["run_id"],
+            "run_dir": str(run_dir),
+            "deck_path": str(run_dir / "deck.slidey.json"),
+            "driver_journal_path": str(run_dir / "driver-journal.md"),
+            "driver_handoff_path": str(run_dir / "driver-handoff.md"),
+            "media_manifest_path": str(run_dir / "media-manifest.json"),
+            "review_path": str(run_dir / "review.json"),
+        },
+        "attached_evidence": attached_evidence,
+        "review": reviewed,
+        "review_backlog_summary": reviewed.get("review_backlog_summary", ""),
+        "validation": validation,
+        "artifacts": {
+            "report": str(smoke_dir / "driver-replay-smoke.json"),
+            "summary": str(smoke_dir / "driver-replay-smoke.md"),
+            "deck": str(smoke_dir / "driver-replay-smoke.slidey.json"),
+        },
+    }
+    write_json(smoke_dir / "driver-replay-smoke.json", report)
+    (smoke_dir / "driver-replay-smoke.md").write_text(render_driver_replay_smoke_summary(report), encoding="utf-8")
+    write_json(smoke_dir / "driver-replay-smoke.slidey.json", render_driver_replay_smoke_deck(report))
+    return report
+
+
 def build_dogfood_smoke(
     catalog: dict,
     github_targets: dict,
@@ -5892,6 +6112,7 @@ def main() -> None:
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
     parser.add_argument("--dogfood-smoke", action="store_true", help="Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
+    parser.add_argument("--driver-replay-smoke", action="store_true", help="Run a deterministic no-LLM one-scenario driver replay smoke with cassette evidence")
     parser.add_argument("--validate-corpus", action="store_true", help="Validate personas, scenarios, and GitHub target catalog without writing artifacts")
     parser.add_argument("--refresh-github-targets", action="store_true", help="Query GitHub for current open bug counts and write a target-proof artifact")
     parser.add_argument("--target-proof-file", default="", help="target-proof.json or target-proof directory to merge into --emit-matrix")
@@ -6052,6 +6273,54 @@ def main() -> None:
         print(f"Run validation: {report['validation']['run']['status']} ({report['validation']['run']['warnings']} warnings)")
         print(f"Matrix validation: {report['validation']['matrix']['status']} ({report['validation']['matrix']['warnings']} warnings)")
         append_log(f"Ran product journey dogfood smoke {report['dogfood_id']}: {report['status']}")
+        if report["status"] != "passed":
+            raise SystemExit(1)
+        return
+
+    if args.driver_replay_smoke:
+        report = build_driver_replay_smoke(catalog, github_targets, personas, scenarios, args.seed)
+        if args.json_output:
+            reviewed = report["review"]
+            validation = report["validation"]
+            print(json.dumps({
+                "status": report["status"],
+                "smoke_id": report["smoke_id"],
+                "smoke_dir": report["smoke_dir"],
+                "report_path": report["artifacts"]["report"],
+                "summary_path": report["artifacts"]["summary"],
+                "deck_path": report["artifacts"]["deck"],
+                "run_dir": report["run"]["run_dir"],
+                "run_deck_path": report["run"]["deck_path"],
+                "driver_journal_path": report["run"]["driver_journal_path"],
+                "driver_handoff_path": report["run"]["driver_handoff_path"],
+                "media_manifest_path": report["run"]["media_manifest_path"],
+                "scenario": report["scenario"]["id"],
+                "attached_evidence_count": len(report["attached_evidence"]),
+                "review_status": reviewed.get("review_status"),
+                "review_summary": reviewed.get("summary"),
+                "review_passed": reviewed.get("review_passed_count", reviewed.get("passed", 0)),
+                "review_warnings": reviewed.get("warnings", 0),
+                "review_failed": reviewed.get("review_failed_count", reviewed.get("failed", 0)),
+                "review_total": reviewed.get("review_total_count", reviewed.get("total", 0)),
+                "review_backlog_summary": report.get("review_backlog_summary", ""),
+                "validation_status": validation.get("status"),
+                "validation_warnings": validation.get("warnings"),
+                "validation_issue_summary": validation.get("validation_issue_summary", ""),
+            }, sort_keys=True))
+            append_log(f"Ran product journey driver replay smoke {report['smoke_id']}: {report['status']}")
+            if report["status"] != "passed":
+                raise SystemExit(1)
+            return
+        print(f"Product journey driver replay smoke: {report['smoke_id']}")
+        print(f"Status: {report['status']}")
+        print(f"Artifacts: {report['smoke_dir']}")
+        print(f"Summary: {report['artifacts']['summary']}")
+        print(f"Smoke deck: {report['artifacts']['deck']}")
+        print(f"Run: {report['run']['run_dir']}")
+        print(f"Run deck: {report['run']['deck_path']}")
+        print(f"Review: {report['review']['summary']}")
+        print(f"Validation: {report['validation']['status']} ({report['validation']['warnings']} warnings)")
+        append_log(f"Ran product journey driver replay smoke {report['smoke_id']}: {report['status']}")
         if report["status"] != "passed":
             raise SystemExit(1)
         return
