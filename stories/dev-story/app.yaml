@@ -687,6 +687,8 @@ world:
   repo_root:             { type: string, default: "" }                        # external checkout root (forward-compat; ticket passthrough is the deferred gh-adapter slice)
   publish_durable_path:  { type: string, default: "docs/prd" }                # prd publish home (projected into the prd import)
   prd_doc_filename:      { type: string, default: "" }                        # fixed PRD filename for an external target (e.g. "PRD"); "" ⇒ slug-named
+  prd_mockup_path:       { type: string, default: "" }                        # optional feature-mockup HTML (relative to workdir); non-empty ⇒ prd_published emits + embeds it inline as the PRD's mockup. "" ⇒ no mockup (default for every instance).
+  mockup_handle:         { type: string, default: "" }                        # runtime bind: the content-addressed handle of the emitted PRD mockup (prd_published on_enter); "" ⇒ no mockup embedded.
   design_template_dir:   { type: string, default: "docs/proposals/templates" } # where the design author reads its doc templates
   design_durable_path:   { type: string, default: "docs/proposals" }          # design publish home
   design_doc_filename:   { type: string, default: "" }                        # fixed DESIGN filename for an external target (e.g. "DESIGN"); "" ⇒ slug-named
