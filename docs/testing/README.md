@@ -6,3 +6,6 @@
   profile tuning, report summaries, and session-mined route cases.
 - [`model-harness-eval-pilot.md`](model-harness-eval-pilot.md) — pilot process
   for comparing model/harness behavior with intent reports and agent evals.
+- [`open-source-repo-catalog.md`](open-source-repo-catalog.md) — landing page
+  for reusable OSS repo candidates, implemented external bake-off manifests,
+  harnesses, and durable results.
