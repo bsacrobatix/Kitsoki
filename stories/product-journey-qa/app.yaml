@@ -96,6 +96,9 @@ world:
   driver_event_id: { type: string, default: "" }
   review_status:  { type: string, default: "" }
   review_summary: { type: string, default: "" }
+  review_failed_count: { type: int, default: 0 }
+  review_warning_count: { type: int, default: 0 }
+  review_backlog_summary: { type: string, default: "" }
   validation_status: { type: string, default: "" }
   validation_errors: { type: int, default: 0 }
   validation_warnings: { type: int, default: 0 }

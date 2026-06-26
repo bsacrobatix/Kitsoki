@@ -2345,6 +2345,7 @@ def run_story_summary(run_dir: Path) -> dict:
     metrics = read_json(run_dir / "metrics.json") if (run_dir / "metrics.json").exists() else {}
     handoff = read_json(run_dir / "driver-handoff.json") if (run_dir / "driver-handoff.json").exists() else {}
     agent_brief = read_json(run_dir / "agent-brief.json") if (run_dir / "agent-brief.json").exists() else {}
+    review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {}
     lens = agent_brief.get("persona_contract", {}).get("lens", {})
     missing_proof_rows = handoff.get("missing_proof_evidence", [])
     missing_proof_summary = []
@@ -2353,6 +2354,19 @@ def run_story_summary(run_dir: Path) -> dict:
         missing_proof_summary.append(f"{row.get('scenario', '')}: {missing}")
     if len(missing_proof_rows) > 3:
         missing_proof_summary.append(f"+{len(missing_proof_rows) - 3} more scenarios")
+    review_checks = review.get("checks", [])
+    actionable_review = [
+        check for check in review_checks
+        if check.get("status") in {"fail", "warn"}
+    ]
+    actionable_review.sort(key=lambda check: {"fail": 0, "warn": 1}.get(check.get("status"), 2))
+    review_backlog = []
+    for check in actionable_review[:4]:
+        detail = check.get("detail", "")
+        suffix = f" ({detail})" if detail else ""
+        review_backlog.append(f"{check.get('status', 'unknown')}: {check.get('id', 'check')}{suffix}")
+    if len(actionable_review) > 4:
+        review_backlog.append(f"+{len(actionable_review) - 4} more review checks")
     return {
         "persona_starting_surface": lens.get("starting_surface", ""),
         "persona_first_question": lens.get("first_question", ""),
@@ -2366,6 +2380,9 @@ def run_story_summary(run_dir: Path) -> dict:
         "proof_minimum_evidence_count": handoff.get("status", {}).get("proof_minimum_evidence_count", 0),
         "minimum_evidence_count": handoff.get("status", {}).get("minimum_evidence_count", 0),
         "missing_proof_summary": "; ".join(missing_proof_summary),
+        "review_failed_count": review.get("summary_counts", {}).get("failed", 0),
+        "review_warning_count": review.get("summary_counts", {}).get("warned", 0),
+        "review_backlog_summary": "; ".join(review_backlog),
     }
 
 
