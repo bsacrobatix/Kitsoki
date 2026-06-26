@@ -61,7 +61,9 @@ The rollup writes `rollup.json`, `rollup.md`, and `rollup.slidey.json` into the
 matrix directory. Omit `--rollup-run-dir` to auto-discover run bundles whose
 project, persona, and seed match matrix assignments. Use the assignment
 `emit_run_command` in `matrix.json` or `matrix.md` when you want auto-discovery
-to pick up the run without extra flags.
+to pick up the run without extra flags. The rollup includes per-scenario
+outcome totals so repeated onboarding, bugfix, PRD/design, implementation, and
+product-bug gaps are visible across runs.
 
 This writes `.artifacts/product-journey/<run-id>/` with `run.json`,
 `journey.md`, `metrics.json`, `bugs.json`, `findings.json`,

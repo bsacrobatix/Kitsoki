@@ -1390,6 +1390,7 @@ def summarize_run_for_rollup(run_dir: Path) -> dict:
     metrics = read_json(run_dir / "metrics.json") if (run_dir / "metrics.json").exists() else {}
     evidence = read_json(run_dir / "evidence.json") if (run_dir / "evidence.json").exists() else {"items": [], "summary": {}}
     findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"items": [], "summary": {}}
+    outcomes = read_json(run_dir / "scenario-outcomes.json") if (run_dir / "scenario-outcomes.json").exists() else {"items": [], "summary": {}}
     review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {"status": "not_reviewed", "summary": ""}
     finding_summary = findings.get("summary", {})
     return {
@@ -1409,7 +1410,42 @@ def summarize_run_for_rollup(run_dir: Path) -> dict:
         "weakness_count": finding_summary.get("weakness", metrics.get("weakness_count", 0)),
         "issue_count": finding_summary.get("issue", metrics.get("issue_count", 0)),
         "fix_count": finding_summary.get("fix", metrics.get("fix_count", 0)),
+        "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
+        "scenario_outcomes": outcomes.get("items", []),
+        "scenario_outcomes_summary": outcomes.get("summary", {}),
     }
+
+
+def aggregate_scenario_outcomes(runs: list[dict]) -> list[dict]:
+    by_scenario: dict[str, dict] = {}
+    for run in runs:
+        for outcome in run.get("scenario_outcomes", []):
+            scenario_id = outcome.get("scenario", "")
+            row = by_scenario.setdefault(scenario_id, {
+                "scenario": scenario_id,
+                "label": outcome.get("label", scenario_id),
+                "runs": 0,
+                "present_evidence_count": 0,
+                "required_evidence_count": 0,
+                "findings_count": 0,
+                "strength_count": 0,
+                "weakness_count": 0,
+                "issue_count": 0,
+                "fix_count": 0,
+                "outcomes": {},
+            })
+            finding_counts = outcome.get("finding_counts", {})
+            row["runs"] += 1
+            row["present_evidence_count"] += outcome.get("present_evidence_count", 0)
+            row["required_evidence_count"] += outcome.get("required_evidence_count", 0)
+            row["strength_count"] += finding_counts.get("strength", 0)
+            row["weakness_count"] += finding_counts.get("weakness", 0)
+            row["issue_count"] += finding_counts.get("issue", 0)
+            row["fix_count"] += finding_counts.get("fix", 0)
+            row["findings_count"] += sum(finding_counts.values())
+            outcome_name = outcome.get("outcome", "unknown")
+            row["outcomes"][outcome_name] = row["outcomes"].get(outcome_name, 0) + 1
+    return [by_scenario[key] for key in sorted(by_scenario)]
 
 
 def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
@@ -1419,6 +1455,7 @@ def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
     assignment_count = matrix.get("assignment_count", 0)
     reviewed = [run for run in runs if run["review_status"] != "not_reviewed"]
     ready = [run for run in runs if run["review_status"] == "ready"]
+    scenario_outcomes = aggregate_scenario_outcomes(runs)
     totals = {
         "runs_found": len(runs),
         "assignments": assignment_count,
@@ -1431,6 +1468,8 @@ def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
         "weakness_count": sum(run["weakness_count"] for run in runs),
         "issue_count": sum(run["issue_count"] for run in runs),
         "fix_count": sum(run["fix_count"] for run in runs),
+        "scenario_outcomes": len(scenario_outcomes),
+        "scenario_outcomes_with_findings": sum(1 for row in scenario_outcomes if row["findings_count"] > 0),
     }
     return {
         "matrix_id": matrix["matrix_id"],
@@ -1439,6 +1478,7 @@ def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
         "matrix_deck_path": str(matrix_dir / "deck.slidey.json"),
         "summary": totals,
         "runs": runs,
+        "scenario_outcomes": scenario_outcomes,
         "missing_assignment_count": max(assignment_count - len(runs), 0),
         "artifacts": {
             "rollup": "rollup.json",
@@ -1459,6 +1499,7 @@ def render_rollup_summary(rollup: dict) -> str:
         f"- Ready runs: {summary['ready_runs']}",
         f"- Evidence present: {summary['present_evidence_count']} / {summary['required_evidence_count']}",
         f"- Findings: {summary['findings_count']} (strengths {summary['strength_count']}, weaknesses {summary['weakness_count']}, issues {summary['issue_count']}, fixes {summary['fix_count']})",
+        f"- Scenario outcome rows: {summary['scenario_outcomes']} ({summary['scenario_outcomes_with_findings']} with findings)",
         "",
         "## Runs",
         "",
@@ -1477,6 +1518,22 @@ def render_rollup_summary(rollup: dict) -> str:
         ])
     if not rollup["runs"]:
         lines.append("- (no run bundles matched this matrix)")
+    lines.extend(["", "## Scenario Outcomes", ""])
+    if rollup["scenario_outcomes"]:
+        for row in rollup["scenario_outcomes"]:
+            outcome_counts = ", ".join(f"{name}={count}" for name, count in sorted(row["outcomes"].items()))
+            lines.extend([
+                f"### {row['label']}",
+                "",
+                f"- Scenario: `{row['scenario']}`",
+                f"- Runs: {row['runs']}",
+                f"- Evidence: {row['present_evidence_count']} / {row['required_evidence_count']}",
+                f"- Findings: {row['findings_count']} (strengths {row['strength_count']}, weaknesses {row['weakness_count']}, issues {row['issue_count']}, fixes {row['fix_count']})",
+                f"- Outcomes: {outcome_counts or '(none)'}",
+                "",
+            ])
+    else:
+        lines.append("- (no scenario outcomes found in matched runs)")
     return "\n".join(lines) + "\n"
 
 
@@ -1492,6 +1549,10 @@ def render_rollup_deck(rollup: dict) -> dict:
         f"Issues: {summary['issue_count']}\n"
         f"Fixes: {summary['fix_count']}"
     )
+    scenario_lines = [
+        f"{row['scenario']}: evidence {row['present_evidence_count']}/{row['required_evidence_count']}, findings {row['findings_count']}, outcomes {', '.join(f'{name}={count}' for name, count in sorted(row['outcomes'].items()))}"
+        for row in rollup["scenario_outcomes"][:12]
+    ]
     return {
         "meta": {
             "mode": "report",
@@ -1526,6 +1587,13 @@ def render_rollup_deck(rollup: dict) -> dict:
                 "title": "Strengths, weaknesses, issues, fixes",
                 "body": findings_body,
                 "narration": "Finding counts are aggregated from the per-run findings files.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Scenario outcomes",
+                "title": "Cross-run scenario signals",
+                "body": "\n".join(scenario_lines) if scenario_lines else "No scenario outcomes found in matched runs.",
+                "narration": "Scenario-level rollups show which journeys are repeatedly weak across natural-use assignments.",
             },
         ],
     }

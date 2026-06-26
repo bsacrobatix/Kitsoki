@@ -92,6 +92,8 @@ python3 tools/product-journey/run.py --rollup-matrix \
 That writes `.artifacts/product-journey/<run-id>/`, including
 `deck.slidey.json`, without calling a live LLM. Add `--publish-deck` when you
 want to update `docs/decks/product-journey-eval.slidey.json`.
+The rollup aggregates `scenario-outcomes.json` across runs so repeated weak
+scenarios stay visible at matrix-review time.
 
 The bundle's `agent-brief.md`, `scenarios.json`, and `evidence.json` are the
 contract for live or cassette-backed MCP runs: each scenario names the story
