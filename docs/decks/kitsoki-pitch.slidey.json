@@ -679,47 +679,35 @@
       "panels": [
         {
           "label": "Without structure",
-          "viewBox": "0 0 760 560",
+          "viewBox": "0 0 760 550",
           "nodes": [
             {
               "id": "agent",
               "label": "Agent",
-              "sub": "chatty model",
-              "lines": [
-                "free-form plan",
-                "invents steps"
-              ],
-              "x": 80,
+              "sub": "free-form plan",
+              "x": 90,
               "y": 40,
-              "w": 600,
-              "h": 120,
+              "w": 540,
+              "h": 112,
               "style": "primary"
             },
             {
               "id": "tool",
               "label": "Tools",
-              "sub": "shell / repo",
-              "lines": [
-                "direct actions",
-                "no replay"
-              ],
-              "x": 80,
-              "y": 220,
-              "w": 600,
-              "h": 120
+              "sub": "direct actions",
+              "x": 90,
+              "y": 214,
+              "w": 540,
+              "h": 112
             },
             {
               "id": "review",
               "label": "Review",
               "sub": "late correction",
-              "lines": [
-                "drift noticed",
-                "after the fact"
-              ],
-              "x": 80,
-              "y": 400,
-              "w": 600,
-              "h": 120
+              "x": 90,
+              "y": 388,
+              "w": 540,
+              "h": 112
             }
           ],
           "edges": [
@@ -738,7 +726,7 @@
               "to": "agent",
               "label": "redo",
               "style": "back",
-              "bus": 700,
+              "bus": 660,
               "lift": -18,
               "land": 18
             }
@@ -747,48 +735,35 @@
         },
         {
           "label": "With Kitsoki",
-          "viewBox": "0 0 760 560",
+          "viewBox": "0 0 760 550",
           "nodes": [
             {
               "id": "runtime",
               "label": "Runtime",
               "sub": "owns the plan",
-              "lines": [
-                "typed steps",
-                "bounded jobs"
-              ],
-              "x": 80,
+              "x": 90,
               "y": 40,
-              "w": 600,
-              "h": 120,
+              "w": 540,
+              "h": 112,
               "style": "primary"
             },
             {
               "id": "work",
               "label": "Work item",
               "sub": "stateful step",
-              "lines": [
-                "reproduce",
-                "implement"
-              ],
-              "x": 80,
-              "y": 220,
-              "w": 600,
-              "h": 120
+              "x": 90,
+              "y": 214,
+              "w": 540,
+              "h": 112
             },
             {
               "id": "gate",
               "label": "Gate",
               "sub": "prove it",
-              "lines": [
-                "test",
-                "review",
-                "replay"
-              ],
-              "x": 80,
-              "y": 400,
-              "w": 600,
-              "h": 120,
+              "x": 90,
+              "y": 388,
+              "w": 540,
+              "h": 112,
               "style": "secondary"
             }
           ],
@@ -808,7 +783,7 @@
               "to": "runtime",
               "label": "feedback",
               "style": "back",
-              "bus": 700,
+              "bus": 640,
               "lift": -18,
               "land": 18
             }
