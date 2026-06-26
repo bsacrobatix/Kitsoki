@@ -529,19 +529,43 @@ def write_readiness_markdown(report, markdown):
     pre = report["preflight"]
     plan = report["drive_plan"]
     results = report["results"]
+    arming = report.get("arming", {})
+    missing_cells = results["missing_cells"]
+    scored_cells = results["scored_cells"]
+    selected_cells = results["selected_cells"]
     markdown.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         f"# {report['project']} repo-history readiness",
         "",
         f"Preflight: {'ready' if pre.get('ok') else 'blocked'}",
-        f"Arming: {'verified' if report.get('arming', {}).get('verified') else 'not captured'}",
-        f"Selected cells: {results['selected_cells']}",
-        f"Scored cells: {results['scored_cells']}",
-        f"Missing cells: {results['missing_cells']}",
+        f"Arming: {'verified' if arming.get('verified') else 'not captured'}",
+        f"Selected cells: {selected_cells}",
+        f"Scored cells: {scored_cells}",
+        f"Missing cells: {missing_cells}",
+        "",
+        "## What This Proves",
+        "",
+    ]
+    if pre.get("ok"):
+        lines.append("- The project manifest, selected bugs, local checkout, and selected candidates passed preflight.")
+    else:
+        lines.append("- Preflight is blocked; fix setup errors before arming fixtures or driving live cells.")
+    if arming.get("verified"):
+        lines.append("- The selected fixtures were verified RED at the historical baseline and GREEN at the real fix.")
+    else:
+        lines.append("- RED/GREEN arming was not captured in this readiness command; run the verify command before live cells.")
+    if missing_cells:
+        lines.append(
+            f"- {missing_cells} of {selected_cells} selected cells have no result artifact yet; "
+            "that means not attempted or not recorded, not failed."
+        )
+    elif selected_cells:
+        lines.append("- Every selected cell has a scored or pending result artifact.")
+    lines.extend([
         "",
         "## Setup",
         "",
-    ]
+    ])
     if pre.get("errors"):
         lines.extend(["Errors:", ""])
         lines.extend(f"- {e}" for e in pre.get("errors", []))

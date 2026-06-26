@@ -263,6 +263,9 @@ def test_readiness_reports_missing_and_scored_cells():
         text = markdown.read_text()
         assert "Preflight: ready" in text
         assert "Arming: verified" in text
+        assert "## What This Proves" in text
+        assert "verified RED at the historical baseline and GREEN at the real fix" in text
+        assert "not attempted or not recorded, not failed" in text
         assert "`bug2` x `ready`" in text
         assert "## Pending Alternatives" in text
         assert "--reason \"<reason>\"" in text
