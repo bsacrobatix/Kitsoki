@@ -137,7 +137,12 @@ docs land):
   { "mcpServers": { "kitsoki": { "command": "kitsoki",
       "args": ["mcp", "--stories-dir", "<dir>"] } } }`,
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			defer func() {
+				if err != nil {
+					writeMCPStartupError(err, dbPath, storiesDir, workspace, flowPath)
+				}
+			}()
 			if dbPath == "" {
 				dbPath = defaultDBPath()
 			}
@@ -238,6 +243,41 @@ docs land):
 	cmd.Flags().BoolVar(&readOnly, "read-only", false,
 		"omit the story-mutating tool (story.write); read + replay-driving tools stay available (the meta-mode Q&A surface)")
 	return cmd
+}
+
+func writeMCPStartupError(err error, dbPath, storiesDir, workspace, flowPath string) {
+	if err == nil {
+		return
+	}
+	const dir = ".artifacts/logs"
+	if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+		fmt.Fprintf(os.Stderr, "kitsoki: mcp startup failed: %v (also failed to create %s: %v)\n", err, dir, mkErr)
+		return
+	}
+	now := time.Now().UTC()
+	body := fmt.Sprintf(
+		"timestamp: %s\nerror: %v\ncwd: %s\ndb: %s\nstories_dir: %s\nworkspace: %s\nflow: %s\n",
+		now.Format(time.RFC3339Nano),
+		err,
+		mcpGetwd(),
+		dbPath,
+		storiesDir,
+		workspace,
+		flowPath,
+	)
+	name := filepath.Join(dir, "mcp-startup-"+now.Format("20060102-150405")+".log")
+	_ = os.WriteFile(name, []byte(body), 0o644)
+	latest := filepath.Join(dir, "mcp-startup-latest.log")
+	_ = os.WriteFile(latest, []byte(body), 0o644)
+	fmt.Fprintf(os.Stderr, "kitsoki: mcp startup failed; wrote %s: %v\n", latest, err)
+}
+
+func mcpGetwd() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "(unknown: " + err.Error() + ")"
+	}
+	return wd
 }
 
 // mcpAttachEntry builds the .mcp.json mcpServers entry that drops this binary in
