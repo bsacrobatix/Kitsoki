@@ -105,7 +105,9 @@ to pick up the run without extra flags. The rollup includes per-scenario
 outcome totals so repeated onboarding, bugfix, PRD/design, implementation, and
 product-bug gaps are visible across runs. It also aggregates scenario
 `quality_gate` coverage so the matrix deck shows which journeys have enough
-proof-source minimum evidence to count as completed.
+proof-source minimum evidence to count as completed, plus a missing-proof
+evidence backlog that names the evidence kinds still needing live visual MCP or
+cassette-backed capture.
 Validate a generated matrix before using it as the sweep contract:
 
 ```sh

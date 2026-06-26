@@ -3453,6 +3453,24 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
                     "rollup summary quality_gate_proof_minimum_evidence_count does not match quality gate rows",
                     f"summary={summary.get('quality_gate_proof_minimum_evidence_count')}, rows={expected_gate_proof}",
                 )
+            missing_proof_evidence = rollup.get("missing_proof_evidence", [])
+            if summary.get("missing_proof_evidence_rows", 0) != len(missing_proof_evidence):
+                add_validation_issue(
+                    issues,
+                    "error",
+                    "rollup-missing-proof-evidence-rows",
+                    "rollup summary missing_proof_evidence_rows does not match missing_proof_evidence length",
+                    f"summary={summary.get('missing_proof_evidence_rows')}, rows={len(missing_proof_evidence)}",
+                )
+            expected_missing_proof = sum(row.get("missing_runs", 0) for row in missing_proof_evidence)
+            if summary.get("quality_gate_missing_proof_evidence_count", 0) != expected_missing_proof:
+                add_validation_issue(
+                    issues,
+                    "error",
+                    "rollup-missing-proof-evidence-total",
+                    "rollup summary quality_gate_missing_proof_evidence_count does not match missing proof rows",
+                    f"summary={summary.get('quality_gate_missing_proof_evidence_count')}, rows={expected_missing_proof}",
+                )
             rollup_deck = load_json_for_validation(matrix_dir / "rollup.slidey.json", issues)
             validate_slidey_deck_shape(rollup_deck, {"items": []}, issues)
             if rollup_deck and quality_gates and "Quality gates" not in deck_scene_eyebrows(rollup_deck):
@@ -3463,7 +3481,7 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
                     "rollup.slidey.json is missing the quality gate scene",
                 )
             rollup_scene_eyebrows = deck_scene_eyebrows(rollup_deck)
-            for expected in ["Coverage", "Runs", "Findings", "Scenario outcomes", "Quality gates"]:
+            for expected in ["Coverage", "Runs", "Findings", "Scenario outcomes", "Quality gates", "Missing proof"]:
                 if rollup_deck and expected not in rollup_scene_eyebrows:
                     add_validation_issue(issues, "error", "rollup-deck-scene", "rollup.slidey.json is missing a required rollup review scene", expected)
 
@@ -3828,6 +3846,21 @@ def aggregate_quality_gates(runs: list[dict]) -> list[dict]:
     return [by_scenario[key] for key in sorted(by_scenario)]
 
 
+def aggregate_missing_proof_evidence(quality_gates: list[dict]) -> list[dict]:
+    rows = []
+    for gate in quality_gates:
+        missing = gate.get("missing_proof_minimum_evidence", {})
+        for evidence_kind, count in missing.items():
+            rows.append({
+                "scenario": gate.get("scenario", ""),
+                "label": gate.get("label", gate.get("scenario", "")),
+                "evidence_kind": evidence_kind,
+                "missing_runs": count,
+                "runs": gate.get("runs", 0),
+            })
+    return sorted(rows, key=lambda row: (-row["missing_runs"], row["scenario"], row["evidence_kind"]))
+
+
 def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
     matrix = read_json(matrix_dir / "matrix.json")
     run_dirs = collect_rollup_runs(matrix, explicit_run_dirs)
@@ -3837,6 +3870,7 @@ def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
     ready = [run for run in runs if run["review_status"] == "ready"]
     scenario_outcomes = aggregate_scenario_outcomes(runs)
     quality_gates = aggregate_quality_gates(runs)
+    missing_proof_evidence = aggregate_missing_proof_evidence(quality_gates)
     totals = {
         "runs_found": len(runs),
         "assignments": assignment_count,
@@ -3859,6 +3893,8 @@ def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
         "quality_gate_present_minimum_evidence_count": sum(row["present_minimum_evidence_count"] for row in quality_gates),
         "quality_gate_proof_minimum_evidence_count": sum(row["proof_minimum_evidence_count"] for row in quality_gates),
         "quality_gate_minimum_evidence_count": sum(row["minimum_evidence_count"] for row in quality_gates),
+        "quality_gate_missing_proof_evidence_count": sum(row["missing_runs"] for row in missing_proof_evidence),
+        "missing_proof_evidence_rows": len(missing_proof_evidence),
     }
     return {
         "matrix_id": matrix["matrix_id"],
@@ -3869,6 +3905,7 @@ def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
         "runs": runs,
         "scenario_outcomes": scenario_outcomes,
         "quality_gates": quality_gates,
+        "missing_proof_evidence": missing_proof_evidence,
         "missing_assignment_count": max(assignment_count - len(runs), 0),
         "artifacts": {
             "rollup": "rollup.json",
@@ -3891,6 +3928,7 @@ def render_rollup_summary(rollup: dict) -> str:
         f"- Findings: {summary['findings_count']} (strengths {summary['strength_count']}, weaknesses {summary['weakness_count']}, issues {summary['issue_count']}, fixes {summary['fix_count']}, blocked {summary.get('blocked_count', 0)})",
         f"- Scenario outcome rows: {summary['scenario_outcomes']} ({summary['scenario_outcomes_with_findings']} with findings)",
         f"- Quality gates: {summary.get('quality_gate_satisfied_runs', 0)} / {summary.get('quality_gate_total_runs', 0)} satisfied, {summary.get('quality_gate_blocked_runs', 0)} blocked, proof evidence {summary.get('quality_gate_proof_minimum_evidence_count', 0)} / {summary.get('quality_gate_minimum_evidence_count', 0)} (captured {summary.get('quality_gate_present_minimum_evidence_count', 0)})",
+        f"- Missing proof evidence rows: {summary.get('missing_proof_evidence_rows', 0)} ({summary.get('quality_gate_missing_proof_evidence_count', 0)} missing run-slots)",
         "",
         "## Runs",
         "",
@@ -3945,6 +3983,14 @@ def render_rollup_summary(rollup: dict) -> str:
             ])
     else:
         lines.append("- (no quality gate rows found in matched runs)")
+    lines.extend(["", "## Missing Proof Evidence", ""])
+    if rollup.get("missing_proof_evidence"):
+        for row in rollup["missing_proof_evidence"]:
+            lines.append(
+                f"- `{row['scenario']}` / `{row['evidence_kind']}`: missing in {row['missing_runs']} / {row['runs']} runs"
+            )
+    else:
+        lines.append("- (none)")
     return "\n".join(lines) + "\n"
 
 
@@ -3969,6 +4015,10 @@ def render_rollup_deck(rollup: dict) -> dict:
         f"{row['scenario']}: satisfied {row['satisfied_runs']}/{row['runs']}, proof evidence {row['proof_minimum_evidence_count']}/{row['minimum_evidence_count']}, blocked {row['blocked_runs']}"
         for row in rollup.get("quality_gates", [])[:12]
     ]
+    missing_proof_lines = [
+        f"{row['scenario']} / {row['evidence_kind']}: missing {row['missing_runs']}/{row['runs']} runs"
+        for row in rollup.get("missing_proof_evidence", [])[:16]
+    ]
     return {
         "meta": {
             "mode": "report",
@@ -3987,7 +4037,7 @@ def render_rollup_deck(rollup: dict) -> dict:
                 "type": "narrative",
                 "eyebrow": "Coverage",
                 "title": "Evidence and readiness",
-                "body": f"Reviewed runs: {summary['reviewed_runs']}\nReady runs: {summary['ready_runs']}\nEvidence present: {summary['present_evidence_count']} / {summary['required_evidence_count']}\nQuality gates satisfied: {summary.get('quality_gate_satisfied_runs', 0)} / {summary.get('quality_gate_total_runs', 0)}\nMissing assignments: {rollup['missing_assignment_count']}",
+                "body": f"Reviewed runs: {summary['reviewed_runs']}\nReady runs: {summary['ready_runs']}\nEvidence present: {summary['present_evidence_count']} / {summary['required_evidence_count']}\nProof evidence: {summary.get('quality_gate_proof_minimum_evidence_count', 0)} / {summary.get('quality_gate_minimum_evidence_count', 0)}\nQuality gates satisfied: {summary.get('quality_gate_satisfied_runs', 0)} / {summary.get('quality_gate_total_runs', 0)}\nMissing proof rows: {summary.get('missing_proof_evidence_rows', 0)}\nMissing assignments: {rollup['missing_assignment_count']}",
                 "narration": "This rollup shows whether the matrix has enough completed runs to review.",
             },
             {
@@ -4017,6 +4067,13 @@ def render_rollup_deck(rollup: dict) -> dict:
                 "title": "Cross-run proof coverage",
                 "body": "\n".join(quality_gate_lines) if quality_gate_lines else "No quality gate rows found in matched runs.",
                 "narration": "Quality gate rollups show which scenarios have enough proof-source minimum evidence to count as completed across the matrix.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Missing proof",
+                "title": "Evidence backlog",
+                "body": "\n".join(missing_proof_lines) if missing_proof_lines else "No missing proof evidence across reviewed runs.",
+                "narration": "The missing proof scene shows which evidence kinds still need live visual MCP or cassette-backed capture.",
             },
         ],
     }

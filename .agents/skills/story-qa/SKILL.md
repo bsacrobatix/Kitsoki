@@ -122,7 +122,8 @@ want to update `docs/decks/product-journey-eval.slidey.json`.
 The rollup aggregates `scenario-outcomes.json` across runs so repeated weak
 scenarios stay visible at matrix-review time. It also aggregates each run's
 `quality_gate` rows so the matrix deck shows cross-run proof-source
-minimum-evidence coverage.
+minimum-evidence coverage and a missing-proof evidence backlog for the live
+visual MCP or cassette captures still needed before the sweep is representative.
 Validate generated matrices before using them as the shared sweep contract:
 
 ```sh
