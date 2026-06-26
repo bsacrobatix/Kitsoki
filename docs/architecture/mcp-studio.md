@@ -189,13 +189,13 @@ deterministic direct path or a read.
 |---|---|---|
 | `session.new` | `{story_path, harness?, cassette?, trace?} → {handle, state}` | open a driving handle (default `harness:replay`) |
 | `session.attach` | `{story_path, key, …} → {handle, state}` | co-drive an existing keyed session via the external-attach bridge |
-| `session.drive` | `{handle, input} → {outcome, frame}` | **free text** → `orch.Turn` (interpretive route) |
+| `session.drive` | `{handle, input, async_after_ms?} → {outcome, frame} \| {running} \| {awaiting_operator}` | **free text** → `orch.Turn` (interpretive route); returns `running` after a bounded wait instead of letting long live turns time out |
 | `session.submit` | `{handle, intent, slots?} → {outcome, frame}` | `SubmitDirect` — pick a menu intent |
 | `session.continue` | `{handle, slots} → {outcome, frame}` | `ContinueTurn` — supply missing slots |
 | `session.answer` | `{handle, question_id, answers} → {outcome, frame} \| {awaiting_operator}` | resume a parked operator-ask (see below) |
-| `session.status` | `{handle} → {state, allowed_intents, status?, last_error?, exit?}` | compact, overflow-proof snapshot — **never embeds world**; reads only the well-known keys `status`/`last_error`/`exit` from the world. Use instead of `session.inspect` when the world may hold multi-KB LLM artifacts. |
+| `session.status` | `{handle} → {state, allowed_intents, running?, status?, last_error?, exit?}` | compact, overflow-proof snapshot — **never embeds world**; reads only the well-known keys `status`/`last_error`/`exit` from the world. Use instead of `session.inspect` when the world may hold multi-KB LLM artifacts. |
 | `session.teleport` | `{handle, notification_id} → {outcome, frame}` | jump to an inbox notification's saved target and mark it read |
-| `session.inspect` | `{handle, omit_world?, max_value_len?} → {state, world, allowed_intents, last_view, async, jobs[], notifications[], pending_drives[], backgrounded_chats[], operator_questions[], mining_proposals[], last_turns[]}` | `buildInspectOutput` + session JobStore / ChatStore / trace side channel (read-only); `omit_world:true` drops world entirely; `max_value_len:N` truncates each value to N chars with `…` |
+| `session.inspect` | `{handle, omit_world?, max_value_len?} → {state, world, allowed_intents, last_view, async, running?, jobs[], notifications[], pending_drives[], backgrounded_chats[], operator_questions[], mining_proposals[], last_turns[]}` | `buildInspectOutput` + session JobStore / ChatStore / trace side channel (read-only); `omit_world:true` drops world entirely; `max_value_len:N` truncates each value to N chars with `…` |
 | `session.command` | `{handle, command, cols?, rows?} → {frame}` | run a deterministic TUI slash command such as `/work --all` against the handle |
 | `session.trace` | `{handle, since?, until?, limit?, truncate_payload?, kinds?} → {events[], last_turn}` | the session's JSONL trace (read-only); `truncate_payload:N` caps event payloads; `kinds` filters to specific event kinds |
 | `chat.show` | `{chat_id, handle?, session_id?, since_seq?} → {context?, chat, pty?, messages[]}` | read-only focused context for a selected async chat/subagent; `chat.display_scope_key` is the operator-facing scope label |
@@ -204,6 +204,17 @@ Every drive/submit/continue returns **both** the structured `TurnOutcome` (mode,
 new state, allowed intents, slots needed) **and** the rendered `Frame` — so the
 agent reasons on metadata and *sees* the screen in one call.
 
+Long live `session.drive` calls are bounded by default. If a turn is still
+executing after the wait window, the tool returns
+`{ok:true, running:{handle,input,started_at_unix_micro,poll:"session.status"}}`
+while the same turn continues in the session runtime. Clients should poll
+`session.status` first; it repeats the same compact `running` object until the
+turn settles, then exposes the folded state and allowed intents. Use
+`session.inspect` when the driver needs a reacquire snapshot: it also exposes
+`running` and increments `async.running_drive` while the turn is active. The
+default wait is 25 seconds; pass `async_after_ms` to lower or raise it for one
+call, or a negative value to disable early return and wait synchronously.
+
 `session.command` exists for TUI-only operator surfaces that are not
 orchestrator turns, especially smoke-testing `/work --all` and `/chat show
 <id>` through MCP. It uses the live TUI slash dispatcher and rejects commands
@@ -211,7 +222,8 @@ that return an asynchronous terminal side effect, such as attaching to tmux.
 
 `session.inspect` also carries compact per-handle background-job and inbox
 projections. `async` summarizes running, awaiting-input, terminal, unread,
-unread action-required, and operator-question counts; `jobs[]` shows the
+unread action-required, in-flight drive, and operator-question counts; `jobs[]`
+shows the
 session's job IDs, kinds, statuses, origin states, errors, clarification schema,
 and timestamps;
 `notifications[]` shows active inbox rows, including `action_required` items and
@@ -225,8 +237,8 @@ same `questions[]`, `question_id`, and `session.answer` reacquire hint as
 currently pending proposal-review rows. This is the structured MCP surface for
 an external agent to inspect the chosen handle after `studio.work` has ranked
 the global queue, notice required operator input, and reacquire or switch to the
-task through `session.teleport`, `chat.show`, or `session.answer` without
-scraping the TUI frame or decoding trace events.
+task through `session.teleport`, `chat.show`, `session.answer`, or
+`session.status` polling without scraping the TUI frame or decoding trace events.
 
 Story-authored `host.chat.drive` effects are stamped with the originating
 session and state before the host handler enqueues the drive, so ordinary

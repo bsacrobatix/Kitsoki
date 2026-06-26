@@ -215,7 +215,7 @@ func TestStoryTestReproducesFlows(t *testing.T) {
 	assert.Greater(t, got.Passed, 0, "fixtures ran")
 	require.NotEmpty(t, got.Results, "per-fixture results present")
 	for _, r := range got.Results {
-		assert.True(t, r.Passed || r.Skipped, "fixture %s passed or skipped; failures=%v", r.File, r.Failures)
+		assert.True(t, r.Passed || r.Skipped, "fixture %s passed or skipped; failure_count=%d failures=%v", r.File, r.FailureCount, r.Failures)
 	}
 }
 

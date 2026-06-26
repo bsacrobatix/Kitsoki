@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -52,9 +53,20 @@ import (
 // family fall back to when the caller omits cols/rows — the same 100×30
 // `kitsoki drive` defaults so a studio frame matches a CLI frame byte-for-byte.
 const (
-	defaultCols = 100
-	defaultRows = 30
+	defaultCols            = 100
+	defaultRows            = 30
+	defaultDriveAsyncAfter = 25 * time.Second
 )
+
+func driveAsyncAfter(ms int) time.Duration {
+	if ms < 0 {
+		return 0
+	}
+	if ms == 0 {
+		return defaultDriveAsyncAfter
+	}
+	return time.Duration(ms) * time.Millisecond
+}
 
 // registerSessionTools wires the session.* and render.* tools onto the server.
 // Called from NewServer after the story.* tools so they share one registry.
@@ -71,7 +83,7 @@ func (srv *Server) registerSessionTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.drive",
-		Description: "Submit FREE TEXT to a driving handle; it is routed through the orchestrator turn loop (the one interpretive seam). {handle, input, cols?, rows?}. Returns {outcome, frame} — the structured turn result AND the rendered screen. The frame does NOT carry world; read it on demand with session.world (lists keys; returns one value) or session.inspect (full snapshot). This keeps the transition result small in deep-import rooms.",
+		Description: "Submit FREE TEXT to a driving handle; it is routed through the orchestrator turn loop (the one interpretive seam). {handle, input, cols?, rows?, async_after_ms?}. Returns {outcome, frame}, {awaiting_operator}, or {running}; when running is returned, poll session.status until running disappears. The frame does NOT carry world; read it on demand with session.world or session.inspect.",
 	}, srv.handleSessionDrive)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -91,7 +103,7 @@ func (srv *Server) registerSessionTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.status",
-		Description: "Compact, overflow-proof snapshot of a driving handle: {handle} → {state, allowed_intents, status?, last_error?, exit?}. Never embeds world or rendered views. status/last_error/exit are read from well-known world keys when present. Use this instead of session.inspect when the world may hold large LLM artifacts.",
+		Description: "Compact, overflow-proof snapshot of a driving handle: {handle} → {state, allowed_intents, running?, status?, last_error?, exit?}. Never embeds world or rendered views. running repeats an in-flight bounded session.drive until it settles. status/last_error/exit are read from well-known world keys when present.",
 	}, srv.handleSessionStatus)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -188,10 +200,11 @@ type SessionOpenOK struct {
 
 // SessionDriveArgs is the input to session.drive.
 type SessionDriveArgs struct {
-	Handle string `json:"handle"`
-	Input  string `json:"input"`
-	Cols   int    `json:"cols,omitempty"`
-	Rows   int    `json:"rows,omitempty"`
+	Handle       string `json:"handle"`
+	Input        string `json:"input"`
+	Cols         int    `json:"cols,omitempty"`
+	Rows         int    `json:"rows,omitempty"`
+	AsyncAfterMS int    `json:"async_after_ms,omitempty"`
 }
 
 // SessionSubmitArgs is the input to session.submit.
@@ -279,6 +292,10 @@ type TurnResponse struct {
 	// fallback path). Outcome/Frame are zero in that case — the turn has not
 	// settled yet.
 	AwaitingOperator *AwaitingOperator `json:"awaiting_operator,omitempty"`
+	// Running is non-nil when the turn is still executing in the background.
+	// Poll session.status/session.inspect or the trace; the session model is
+	// folded as soon as the background turn settles.
+	Running *RunningDrive `json:"running,omitempty"`
 }
 
 // AwaitingOperator is the suspend/resume status carried on a session.drive /
@@ -288,6 +305,16 @@ type TurnResponse struct {
 type AwaitingOperator struct {
 	QuestionID string                           `json:"question_id"`
 	Questions  []kitsokimcp.OperatorAskQuestion `json:"questions"`
+}
+
+// RunningDrive tells MCP clients that session.drive accepted the turn but
+// returned early before it settled, avoiding client-side tool-call timeouts on
+// long live agent work.
+type RunningDrive struct {
+	Handle             string `json:"handle"`
+	Input              string `json:"input,omitempty"`
+	StartedAtUnixMicro int64  `json:"started_at_unix_micro,omitempty"`
+	Poll               string `json:"poll"`
 }
 
 // SessionAnswerArgs is the input to session.answer (the fallback resume).
@@ -421,10 +448,14 @@ func (srv *Server) handleSessionDrive(
 		return nil, turnResponse(out, frame, rt.lastTurnErr), nil
 	}
 
-	res, pq, turnDone, err := rt.driveSuspendable(ctx, args.Input, cols, rows)
+	wait := driveAsyncAfter(args.AsyncAfterMS)
+	res, pq, turnDone, running, err := rt.driveSuspendable(ctx, args.Input, cols, rows, wait)
 	if err != nil {
 		progress.Error(ctx, args.Handle, err)
 		return buildToolError(ErrBadRequest, fmt.Sprintf("session.drive: %v", err)), nil, nil
+	}
+	if running != nil {
+		return nil, runningResponse(args.Handle, args.Input, running), nil
 	}
 	if !turnDone {
 		progress.AwaitingOperator(ctx, args.Handle)
@@ -488,6 +519,29 @@ func (srv *Server) handleSessionAnswer(
 func awaitingResponse(pq *pendingQuestion) TurnResponse {
 	ao := awaitingOperator(pq)
 	return TurnResponse{OK: true, AwaitingOperator: &ao}
+}
+
+func runningResponse(handle, input string, r *runningDrive) TurnResponse {
+	return TurnResponse{
+		OK:      true,
+		Running: runningDriveWire(handle, input, r),
+	}
+}
+
+func runningDriveWire(handle, fallbackInput string, r *runningDrive) *RunningDrive {
+	if r == nil {
+		return nil
+	}
+	input := r.input
+	if input == "" {
+		input = fallbackInput
+	}
+	return &RunningDrive{
+		Handle:             handle,
+		Input:              input,
+		StartedAtUnixMicro: r.startedAt.UnixMicro(),
+		Poll:               "session.status",
+	}
 }
 
 func (srv *Server) handleSessionSubmit(
@@ -564,6 +618,10 @@ type SessionStatusResult struct {
 	OK             bool     `json:"ok"`
 	State          string   `json:"state"`
 	AllowedIntents []string `json:"allowed_intents"`
+	// Running is present when a previous session.drive accepted a turn and
+	// returned early after its bounded wait while the turn continues in the
+	// background.
+	Running *RunningDrive `json:"running,omitempty"`
 	// Status is world["status"] when present (a story-level status string).
 	Status string `json:"status,omitempty"`
 	// LastError is world["last_error"] when present (the last agent/host error).
@@ -590,6 +648,7 @@ type InspectResult struct {
 	AllowedIntents    []string               `json:"allowed_intents"`
 	LastView          string                 `json:"last_view"`
 	Async             *AsyncInspectSummary   `json:"async,omitempty"`
+	Running           *RunningDrive          `json:"running,omitempty"`
 	Jobs              []JobInspectItem       `json:"jobs,omitempty"`
 	Notifications     []InboxInspectItem     `json:"notifications,omitempty"`
 	PendingDrives     []PendingDriveItem     `json:"pending_drives,omitempty"`
@@ -615,6 +674,7 @@ type AsyncInspectSummary struct {
 	BackgroundedChats           int `json:"backgrounded_chats"`
 	OperatorQuestions           int `json:"operator_questions"`
 	MiningProposals             int `json:"mining_proposals"`
+	RunningDrive                int `json:"running_drive"`
 }
 
 // JobInspectItem is a compact, structured projection of one background job.
@@ -729,7 +789,7 @@ func (srv *Server) handleSessionStatus(
 	if rerr != nil {
 		return rerr, nil, nil
 	}
-	result, err := rt.status(ctx)
+	result, err := rt.status(ctx, args.Handle)
 	if err != nil {
 		return buildToolError(ErrBadRequest, err.Error()), nil, nil
 	}
@@ -1234,7 +1294,18 @@ func resolveTracePath(override string) (string, error) {
 // allowed intents from the orchestrator (same sources as inspect), then reads
 // only the well-known keys status/last_error/exit from the world — never the
 // full world map — so the result stays small regardless of world size.
-func (rt *sessionRuntime) status(ctx context.Context) (SessionStatusResult, error) {
+func (rt *sessionRuntime) status(ctx context.Context, handle string) (SessionStatusResult, error) {
+	if running, snap := rt.runningDriveSnapshot(handle); running != nil {
+		result := SessionStatusResult{
+			OK:             true,
+			State:          snap.state,
+			AllowedIntents: append([]string(nil), snap.allowedIntents...),
+			Running:        running,
+		}
+		addStatusWorldKeys(&result, snap.world)
+		return result, nil
+	}
+
 	j, err := rt.orch.LoadJourney(rt.sid)
 	if err != nil {
 		return SessionStatusResult{}, fmt.Errorf("session.status: load journey: %w", err)
@@ -1248,22 +1319,27 @@ func (rt *sessionRuntime) status(ctx context.Context) (SessionStatusResult, erro
 		OK:             true,
 		State:          string(j.State),
 		AllowedIntents: allowedNames,
+		Running:        rt.runningDrive(handle),
 	}
+	addStatusWorldKeys(&result, j.World.Vars)
+	return result, nil
+}
+
+func addStatusWorldKeys(result *SessionStatusResult, vars map[string]any) {
 	// Read only the well-known world keys.
-	if v, ok := j.World.Vars["status"]; ok {
+	if v, ok := vars["status"]; ok {
 		if s, isStr := v.(string); isStr {
 			result.Status = s
 		}
 	}
-	if v, ok := j.World.Vars["last_error"]; ok {
+	if v, ok := vars["last_error"]; ok {
 		if s, isStr := v.(string); isStr {
 			result.LastError = s
 		}
 	}
-	if v, ok := j.World.Vars["exit"]; ok {
+	if v, ok := vars["exit"]; ok {
 		result.Exit = v
 	}
-	return result, nil
 }
 
 // truncateWorldValues returns a copy of the world map where each string value
@@ -1297,11 +1373,46 @@ func truncateWorldValues(world map[string]any, maxLen int) map[string]any {
 	return out
 }
 
+func cloneAnyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 // inspect builds the session.inspect snapshot from the live orchestrator —
 // state/world from the journey, the allowed-intent menu from the machine, the
 // current rendered view, background jobs, inbox notifications, and a tail of
 // turn summaries from the trace. Read-only.
 func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int, handle string) (InspectResult, error) {
+	if running, snap := rt.runningDriveSnapshot(handle); running != nil {
+		jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, asyncErr := rt.inspectAsync(ctx)
+		if asyncErr != nil {
+			return InspectResult{}, asyncErr
+		}
+		operatorQuestions := rt.pendingOperatorQuestions()
+		return InspectResult{
+			OK:                true,
+			State:             snap.state,
+			World:             snap.world,
+			AllowedIntents:    append([]string(nil), snap.allowedIntents...),
+			LastView:          snap.lastView,
+			Async:             asyncSummaryOrNil(summarizeAsync(jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, operatorQuestions, nil, running)),
+			Running:           running,
+			Jobs:              jobs,
+			Notifications:     notifications,
+			PendingDrives:     pendingDrives,
+			BackgroundedChats: backgroundedChats,
+			OperatorQuestions: inspectOperatorQuestions(handle, operatorQuestions),
+			MiningProposals:   nil,
+			LastTurns:         nil,
+		}, nil
+	}
+
 	j, err := rt.orch.LoadJourney(rt.sid)
 	if err != nil {
 		return InspectResult{}, fmt.Errorf("session.inspect: load journey: %w", err)
@@ -1320,6 +1431,7 @@ func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int, handle str
 		return InspectResult{}, asyncErr
 	}
 	operatorQuestions := rt.pendingOperatorQuestions()
+	running := rt.runningDrive(handle)
 	miningProposals := pendingMiningProposals(handle, rt.history())
 	return InspectResult{
 		OK:                true,
@@ -1327,7 +1439,8 @@ func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int, handle str
 		World:             j.World.Vars,
 		AllowedIntents:    allowedNames,
 		LastView:          view,
-		Async:             asyncSummaryOrNil(summarizeAsync(jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, operatorQuestions, miningProposals)),
+		Async:             asyncSummaryOrNil(summarizeAsync(jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, operatorQuestions, miningProposals, running)),
+		Running:           running,
 		Jobs:              jobs,
 		Notifications:     notifications,
 		PendingDrives:     pendingDrives,
@@ -1522,13 +1635,16 @@ func (rt *sessionRuntime) inspectBackgroundedChats(ctx context.Context, in []cha
 	return out
 }
 
-func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, unreadNotifications map[jobs.NotificationSeverity]int, pendingDrives []PendingDriveItem, backgroundedChats []BackgroundedChatItem, operatorQuestions []pendingQuestion, miningProposals []MiningProposalItem) AsyncInspectSummary {
+func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, unreadNotifications map[jobs.NotificationSeverity]int, pendingDrives []PendingDriveItem, backgroundedChats []BackgroundedChatItem, operatorQuestions []pendingQuestion, miningProposals []MiningProposalItem, running *RunningDrive) AsyncInspectSummary {
 	out := AsyncInspectSummary{
 		JobsTotal:          len(jobRows),
 		NotificationsTotal: len(notifications),
 		BackgroundedChats:  len(backgroundedChats),
 		OperatorQuestions:  len(operatorQuestions),
 		MiningProposals:    len(miningProposals),
+	}
+	if running != nil {
+		out.RunningDrive = 1
 	}
 	for _, j := range jobRows {
 		switch j.Status {
@@ -1614,10 +1730,42 @@ func pendingMiningProposals(handle string, history store.History) []MiningPropos
 }
 
 func (rt *sessionRuntime) pendingOperatorQuestions() []pendingQuestion {
-	if rt == nil || rt.inFlight == nil {
+	if rt == nil {
 		return nil
 	}
-	return rt.inFlight.snapshotPending()
+	rt.mu.Lock()
+	broker := rt.inFlight
+	rt.mu.Unlock()
+	if broker == nil {
+		return nil
+	}
+	return broker.snapshotPending()
+}
+
+func (rt *sessionRuntime) runningDrive(handle string) *RunningDrive {
+	running, _ := rt.runningDriveSnapshot(handle)
+	return running
+}
+
+func (rt *sessionRuntime) runningDriveSnapshot(handle string) (*RunningDrive, driveSnapshot) {
+	if rt == nil {
+		return nil, driveSnapshot{}
+	}
+	rt.mu.Lock()
+	broker := rt.inFlight
+	rt.mu.Unlock()
+	if broker == nil {
+		return nil, driveSnapshot{}
+	}
+	running := runningDriveWire(handle, "", broker.snapshotRunning())
+	if running == nil {
+		return nil, driveSnapshot{}
+	}
+	snap, ok := broker.snapshotState()
+	if !ok {
+		return nil, driveSnapshot{}
+	}
+	return running, snap
 }
 
 func inspectOperatorQuestions(handle string, questions []pendingQuestion) []OperatorQuestionItem {

@@ -55,6 +55,7 @@ type WorkSummary struct {
 	BackgroundedChats           int `json:"backgrounded_chats"`
 	OperatorQuestions           int `json:"operator_questions"`
 	MiningProposals             int `json:"mining_proposals"`
+	RunningDrive                int `json:"running_drive"`
 }
 
 // WorkSessionSummary is one open driving session's async headline.
@@ -145,8 +146,9 @@ func (srv *Server) work(ctx context.Context, args WorkArgs) (WorkResult, error) 
 			return WorkResult{}, err
 		}
 		operatorQuestions := rt.pendingOperatorQuestions()
+		running := rt.runningDrive(sh.Key)
 		miningProposals := pendingMiningProposals(sh.Key, rt.history())
-		async := summarizeAsync(jobRows, notifications, unread, pendingDrives, backgroundedChats, operatorQuestions, miningProposals)
+		async := summarizeAsync(jobRows, notifications, unread, pendingDrives, backgroundedChats, operatorQuestions, miningProposals, running)
 		out.Sessions = append(out.Sessions, WorkSessionSummary{
 			Handle:    sh.Key,
 			SessionID: string(sh.SID),
@@ -226,6 +228,7 @@ func addSummary(sum *WorkSummary, async AsyncInspectSummary) {
 	sum.BackgroundedChats += async.BackgroundedChats
 	sum.OperatorQuestions += async.OperatorQuestions
 	sum.MiningProposals += async.MiningProposals
+	sum.RunningDrive += async.RunningDrive
 }
 
 func workItemsForNotifications(sh *SessionHandle, state string, notifications []InboxInspectItem, includeQuiet bool) []WorkItem {

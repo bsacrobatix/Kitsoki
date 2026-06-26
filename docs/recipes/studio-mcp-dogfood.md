@@ -110,12 +110,20 @@ Use this sequence unless the story's README says otherwise:
    ```
 
 3. Prefer `session.submit` for deterministic menu choices. Use `session.drive`
-   only when you are intentionally testing free-text routing.
-4. Check state with `session.status`, then targeted `session.world` reads. Use
+   only when you are intentionally testing free-text routing. Long live turns
+   may return `{running}` instead of `{outcome, frame}`; this means the turn was
+   accepted and is still executing, not that it failed.
+4. When `session.drive` returns `running`, poll `session.status` for the same
+   handle. While the turn is active, `status.running` repeats the handle, input,
+   start time, and `poll:"session.status"` hint. When the turn settles,
+   `status.running` disappears and `state` / `allowed_intents` reflect the new
+   machine state. Use `session.inspect` when you need a fuller reacquire
+   snapshot; it also exposes `running` and `async.running_drive`.
+5. Check state with `session.status`, then targeted `session.world` reads. Use
    `session.inspect` only when you need the full snapshot.
-5. On surprises, read `session.trace`. The trace is the ground truth for routing,
+6. On surprises, read `session.trace`. The trace is the ground truth for routing,
    host calls, agent calls, and swallowed `on_error` arcs.
-6. Close abandoned sessions with `session.close`, especially before reusing a
+7. Close abandoned sessions with `session.close`, especially before reusing a
    trace path.
 
 The profile chooses the worker model. For example, `profile: "codex-native"` can
@@ -200,6 +208,15 @@ codex mcp list
 Then restart or reconnect Claude/Codex so the attached server is the new binary.
 If the tool list says connected but tools are unavailable, suspect a schema
 registration failure and smoke with `kitsoki mcp-test`.
+
+If a client process times out or disconnects while a turn is still running, do
+not start a second MCP server and expect to inspect that handle: studio handles
+are process-local. Prefer the returned `running` polling path while the
+connection is alive. For cross-process monitoring, read the trace file directly:
+
+```sh
+go run ./cmd/kitsoki trace status .artifacts/mcp-dogfood/<run>.trace.jsonl --json
+```
 
 ## Part 2: Logical Guide
 

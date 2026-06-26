@@ -504,7 +504,7 @@ func (srv *Server) handleVisualObserve(
 	if rr != nil {
 		return rr, nil, nil
 	}
-	status, err := rt.status(ctx)
+	status, err := rt.status(ctx, "")
 	if err != nil {
 		return buildToolError(ErrBadRequest, err.Error()), nil, nil
 	}

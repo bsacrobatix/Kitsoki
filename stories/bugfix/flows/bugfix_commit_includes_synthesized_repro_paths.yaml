@@ -1,6 +1,7 @@
 # bugfix_commit_includes_synthesized_repro_paths — when a bare bug report causes
-# the reproducer to author a RED test, the implementation commit must include
-# that test even if the implementer reports only production files.
+# the reproducer to author a RED test, the pipeline must first commit that test
+# as the discrete pre-fix reproducer commit, then stage the full implementation
+# worktree delta even if the implementer reports only production files.
 
 test_kind: flow
 app: ../app.yaml

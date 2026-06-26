@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -112,13 +113,18 @@ type sessionRuntime struct {
 	// turn-level failure the agent should see, not a transport error.
 	lastTurnErr error
 
-	// inFlight is the suspend broker for an operator-ask-parked turn (the
-	// session.answer fallback). Non-nil only while a suspendable drive is parked
-	// awaiting the operator; cleared when the turn goroutine completes. Single
-	// in-flight suspendable turn per handle (the handle is single-writer).
+	// inFlight is the suspend broker for a drive that has not settled yet: either
+	// parked on operator-ask (session.answer fallback) or still running after
+	// session.drive returned a bounded-wait response. Single in-flight turn per
+	// handle.
 	inFlight *suspendBroker
 
 	closers []func()
+}
+
+type runningDrive struct {
+	input     string
+	startedAt time.Time
 }
 
 type studioBackgroundObserver struct {
@@ -464,12 +470,21 @@ func (rt *sessionRuntime) driveElicit(ctx context.Context, input string, cols, r
 // The background ctx is the host-supplied ctx wrapped with the operator-ask
 // timeout (inside the bridge), so a never-answered park falls through to the
 // headless tool-error path on its own.
-func (rt *sessionRuntime) driveSuspendable(ctx context.Context, input string, cols, rows int) (res turnResult, pq *pendingQuestion, turnDone bool, err error) {
+func (rt *sessionRuntime) driveSuspendable(ctx context.Context, input string, cols, rows int, wait time.Duration) (res turnResult, pq *pendingQuestion, turnDone bool, running *runningDrive, err error) {
+	rt.mu.Lock()
 	if rt.inFlight != nil {
-		return turnResult{}, nil, false, fmt.Errorf("a turn is already awaiting the operator; answer it with session.answer before driving again")
+		rt.mu.Unlock()
+		return turnResult{}, nil, false, nil, fmt.Errorf("a turn is already running or awaiting the operator; wait for it to finish or answer it with session.answer before driving again")
 	}
-	broker := newSuspendBroker()
+	startedAt := time.Now()
+	snap, snapErr := rt.driveSnapshot()
+	if snapErr != nil {
+		rt.mu.Unlock()
+		return turnResult{}, nil, false, nil, snapErr
+	}
+	broker := newSuspendBroker(input, startedAt, snap)
 	rt.inFlight = broker
+	rt.mu.Unlock()
 	prompter := newStudioOperatorPrompter(&suspendTransport{broker: broker})
 
 	// The turn goroutine owns rt.model mutation; it runs to completion (possibly
@@ -484,29 +499,71 @@ func (rt *sessionRuntime) driveSuspendable(ctx context.Context, input string, co
 	go func() {
 		out, frame := rt.drive(turnCtx, input, cols, rows)
 		broker.finish(turnResult{outcome: out, frame: frame, err: rt.lastTurnErr})
+		rt.clearInFlightIf(broker)
 	}()
 
-	r, q, werr := broker.waitNext(ctx)
+	waitCtx := ctx
+	var cancelWait context.CancelFunc
+	if wait > 0 {
+		waitCtx, cancelWait = context.WithTimeout(ctx, wait)
+		defer cancelWait()
+	}
+	r, q, werr := broker.waitNext(waitCtx)
 	if werr != nil {
+		if wait > 0 && werr == context.DeadlineExceeded {
+			return turnResult{}, nil, false, &runningDrive{startedAt: startedAt}, nil
+		}
 		cancelTurn()
-		rt.inFlight = nil
+		rt.clearInFlightIf(broker)
 		// The drive ctx was cancelled before a result/question; cancel the turn
 		// context too so a timed-out MCP call does not keep writing late trace/model
 		// updates behind the client's back.
-		return turnResult{}, nil, false, werr
+		return turnResult{}, nil, false, nil, werr
 	}
 	if q != nil {
-		return turnResult{}, q, false, nil
+		return turnResult{}, q, false, nil, nil
 	}
-	rt.inFlight = nil
-	return r, nil, true, nil
+	rt.clearInFlightIf(broker)
+	return r, nil, true, nil, nil
+}
+
+func (rt *sessionRuntime) clearInFlightIf(broker *suspendBroker) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.inFlight == broker {
+		rt.inFlight = nil
+	}
+}
+
+func (rt *sessionRuntime) driveSnapshot() (driveSnapshot, error) {
+	j, err := rt.orch.LoadJourney(rt.sid)
+	if err != nil {
+		return driveSnapshot{}, fmt.Errorf("session.drive: load pre-drive snapshot: %w", err)
+	}
+	allowed := rt.orch.AllowedIntents(j.State, j.World)
+	allowedNames := make([]string, 0, len(allowed))
+	for _, ai := range allowed {
+		allowedNames = append(allowedNames, ai.Name)
+	}
+	view, verr := rt.orch.RenderState(j.State, j.World)
+	if verr != nil {
+		view = fmt.Sprintf("<render error: %v>", verr)
+	}
+	return driveSnapshot{
+		state:          string(j.State),
+		world:          cloneAnyMap(j.World.Vars),
+		allowedIntents: allowedNames,
+		lastView:       view,
+	}, nil
 }
 
 // resumeSuspendable delivers the operator's answer to a parked question and
 // blocks until the turn completes or parks on the NEXT operator-ask. It is the
 // runtime half of session.answer: deliver → waitNext → {outcome | awaiting}.
 func (rt *sessionRuntime) resumeSuspendable(ctx context.Context, questionID string, answers map[string]any) (res turnResult, pq *pendingQuestion, turnDone bool, ok bool, err error) {
+	rt.mu.Lock()
 	broker := rt.inFlight
+	rt.mu.Unlock()
 	if broker == nil {
 		return turnResult{}, nil, false, false, nil
 	}
@@ -520,7 +577,7 @@ func (rt *sessionRuntime) resumeSuspendable(ctx context.Context, questionID stri
 	if q != nil {
 		return turnResult{}, q, false, true, nil
 	}
-	rt.inFlight = nil
+	rt.clearInFlightIf(broker)
 	return r, nil, true, true, nil
 }
 
@@ -607,6 +664,14 @@ func (rt *sessionRuntime) frame(cols, rows int) tui.Frame {
 func (rt *sessionRuntime) worldVars() (map[string]any, error) {
 	if rt.orch == nil {
 		return nil, fmt.Errorf("session.world: runtime has no orchestrator")
+	}
+	rt.mu.Lock()
+	broker := rt.inFlight
+	rt.mu.Unlock()
+	if broker != nil {
+		if snap, ok := broker.snapshotState(); ok {
+			return snap.world, nil
+		}
 	}
 	j, err := rt.orch.LoadJourney(rt.sid)
 	if err != nil {

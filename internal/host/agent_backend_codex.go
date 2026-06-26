@@ -83,7 +83,6 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 		mcpConfig    string
 		sessionID    string // --session-id (first call) — codex has no equivalent
 		resumeID     string // --resume <id> → `exec resume <id>`
-		readOnly     bool
 	)
 
 	// Split a "--flag=value" element into ("--flag","value"); leave others.
@@ -122,10 +121,8 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 			// Dropped along with their value. (Tool-scoping is a parity gap;
 			// codex runs with the bypass flag set below.)
 		case "--disallowedTools":
-			// Codex has no direct equivalent, but a read-only story agent reaches
-			// here with Write/Edit/Bash disallowed. Preserve that posture by
-			// selecting codex's read-only sandbox instead of bypassing all gates.
-			readOnly = readOnly || codexDisallowsMutators(val)
+			// Codex has no direct equivalent. Kitsoki's read-only posture is
+			// enforced by the story/tooling layer; see the bypass rationale below.
 		case "--output-format":
 			// Always normalized to codex's --json below.
 		case "--session-id":
@@ -168,22 +165,17 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 		args = append(args, "resume", id)
 	}
 	args = append(args, "--json", "--skip-git-repo-check")
-	if readOnly {
-		args = append(args, "--sandbox", "read-only")
-	} else {
-		// `codex exec` auto-cancels EVERY MCP tool call ("user cancelled MCP
-		// tool call") in non-interactive mode — verified live (2026-06-11)
-		// against codex-cli 0.139.0 across approval_policy="never", every
-		// sandbox mode, per-server trust keys, and both ephemeral (-c) and
-		// persisted (`codex mcp add`) registration. The ONLY way to let the
-		// validator `submit` tool actually execute is to disable codex's
-		// approval+sandbox gate. Since the MCP-submit path is load-bearing for
-		// parity (schema validation + nudge/abandonment recovery + post_cmd
-		// verifiers), we run codex with the bypass flag for non-read-only calls.
-		// Read-only story agents preserve their declared posture with
-		// `--sandbox read-only` above.
-		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
-	}
+	// `codex exec` auto-cancels EVERY MCP tool call ("user cancelled MCP tool
+	// call") in non-interactive mode — verified live (2026-06-11) against
+	// codex-cli 0.139.0 across approval_policy="never", every sandbox mode,
+	// per-server trust keys, and both ephemeral (-c) and persisted (`codex mcp
+	// add`) registration. The ONLY way to let the validator `submit` tool and
+	// the operator-ask/write-mode MCP bridge execute is to disable codex's
+	// approval+sandbox gate. Kitsoki's read-only posture is still expressed via
+	// --disallowedTools / Bash MCP policy; relying on Codex's read-only sandbox
+	// preempts Kitsoki's own write-mode opt-in and makes MCP-only dogfood unable
+	// to apply an operator-granted edit.
+	args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 
 	// Forward the model ONLY when it is not a claude model id (reuse the shared
 	// helper). Stories/router specify claude model names; passing those to codex
@@ -223,16 +215,6 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 	}
 
 	return Invocation{Args: args, Stdin: prompt, WorkingDir: workingDir}
-}
-
-func codexDisallowsMutators(csv string) bool {
-	for _, raw := range strings.Split(csv, ",") {
-		switch strings.TrimSpace(raw) {
-		case "Write", "Edit", "Bash":
-			return true
-		}
-	}
-	return false
 }
 
 // codexMCPConfigArgs reads a claude-shaped --mcp-config JSON file

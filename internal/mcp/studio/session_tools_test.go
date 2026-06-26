@@ -54,6 +54,22 @@ func (f *failingLive) RunTurn(_ context.Context, _ harness.TurnInput) (mcpsdk.Ca
 }
 func (f *failingLive) Close() error { return nil }
 
+type sleepyLive struct {
+	delay time.Duration
+}
+
+func (s sleepyLive) RunTurn(ctx context.Context, in harness.TurnInput) (mcpsdk.CallToolParams, error) {
+	select {
+	case <-time.After(s.delay):
+	case <-ctx.Done():
+		return mcpsdk.CallToolParams{}, ctx.Err()
+	}
+	args := map[string]any{"intent": "go", "confidence": 1.0, "slots": map[string]any{"direction": "west"}}
+	return mcpsdk.CallToolParams{Name: "transition", Arguments: args}, nil
+}
+
+func (s sleepyLive) Close() error { return nil }
+
 // replayBuilder is the production-equivalent harness builder for these tests: it
 // builds a real no-LLM ReplayHarness for replay mode (so orch.Turn replays the
 // cassette) and FAILS for live, proving a default-mode handle never reaches live.
@@ -150,6 +166,77 @@ func TestSessionDrive_GoldenTranscript(t *testing.T) {
 
 	// "go south" lit the bar (the cloak was hung), the canonical cloak win path.
 	require.Equal(t, "bar.lit", golden[len(golden)-1].state)
+}
+
+func TestSessionDrive_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
+	ctx := context.Background()
+	sess := studio.NewStudioSession(func(mode studio.HarnessMode, _, _ string) (harness.Harness, error) {
+		require.Equal(t, studio.HarnessLive, mode)
+		return sleepyLive{delay: 120 * time.Millisecond}, nil
+	})
+	srv := studio.NewServer(sess)
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": cloakApp,
+		"harness":    "live",
+		"trace":      t.TempDir() + "/trace.jsonl",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new: %s", contentText(res))
+	var ok studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
+
+	start := time.Now()
+	res, err = callTool(ctx, cs, "session.drive", map[string]any{
+		"handle":         ok.Handle,
+		"input":          "go west",
+		"async_after_ms": 20,
+	})
+	require.NoError(t, err)
+	tr := driveResult(t, res)
+	require.True(t, tr.OK)
+	require.NotNil(t, tr.Running, "slow turns return a running status before the MCP client times out")
+	require.Equal(t, ok.Handle, tr.Running.Handle)
+	require.Equal(t, "go west", tr.Running.Input)
+	require.Less(t, time.Since(start), 100*time.Millisecond)
+
+	res, err = callTool(ctx, cs, "session.status", map[string]any{"handle": ok.Handle})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.status: %s", contentText(res))
+	var runningStatus studio.SessionStatusResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &runningStatus))
+	require.NotNil(t, runningStatus.Running, "session.status exposes the in-flight drive for polling")
+	assert.Equal(t, ok.Handle, runningStatus.Running.Handle)
+	assert.Equal(t, "go west", runningStatus.Running.Input)
+
+	res, err = callTool(ctx, cs, "session.inspect", map[string]any{"handle": ok.Handle, "omit_world": true})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.inspect: %s", contentText(res))
+	var runningInspect studio.InspectResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &runningInspect))
+	require.NotNil(t, runningInspect.Running, "session.inspect exposes the in-flight drive for reacquire")
+	require.NotNil(t, runningInspect.Async)
+	assert.Equal(t, 1, runningInspect.Async.RunningDrive)
+
+	require.Eventually(t, func() bool {
+		res, err := callTool(ctx, cs, "session.status", map[string]any{"handle": ok.Handle})
+		if err != nil || res.IsError {
+			return false
+		}
+		var status studio.SessionStatusResult
+		if json.Unmarshal([]byte(contentText(res)), &status) != nil {
+			return false
+		}
+		return status.State == "cloakroom" && status.Running == nil
+	}, time.Second, 20*time.Millisecond)
+
+	res, err = callTool(ctx, cs, "session.status", map[string]any{"handle": ok.Handle})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.status: %s", contentText(res))
+	var settledStatus studio.SessionStatusResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &settledStatus))
+	assert.Nil(t, settledStatus.Running, "running marker is removed after the turn settles")
 }
 
 // ─── 2.2 no-live-fallthrough ─────────────────────────────────────────────────

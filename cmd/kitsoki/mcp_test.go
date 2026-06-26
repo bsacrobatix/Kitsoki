@@ -156,13 +156,16 @@ func (b *fakeWebShotBrowser) Capture(_ context.Context, req webshot.CaptureReque
 	return os.WriteFile(req.OutPath, b.png, 0o644)
 }
 
-func TestMCPTestServerArgs_DefaultsMirrorMCPCmd(t *testing.T) {
-	args := studioMCPTestServerArgs(nil, "/work/stories", "/work/story", true)
-	assert.Equal(t, []string{"mcp", "--stories-dir", "/work/stories", "--workspace", "/work/story", "--read-only"}, args)
+func TestMCPTestServerArgs_DefaultsUseIsolatedDB(t *testing.T) {
+	args := studioMCPTestServerArgs(nil, "/work/stories", "/work/story", true, "/tmp/kitsoki-mcp-test-root")
+	require.Len(t, args, 8)
+	assert.Equal(t, []string{"mcp", "--stories-dir", "/work/stories", "--workspace", "/work/story", "--read-only", "--db"}, args[:7])
+	assert.Contains(t, args[7], "/tmp/kitsoki-mcp-test-root/kitsoki-mcp-test-")
+	assert.Contains(t, args[7], "/sessions.db")
 }
 
 func TestMCPTestServerArgs_OverrideWins(t *testing.T) {
-	args := studioMCPTestServerArgs([]string{"mcp", "--workspace", "custom"}, "/ignored", "/ignored-too", true)
+	args := studioMCPTestServerArgs([]string{"mcp", "--workspace", "custom"}, "/ignored", "/ignored-too", true, "/ignored-temp")
 	assert.Equal(t, []string{"mcp", "--workspace", "custom"}, args)
 }
 

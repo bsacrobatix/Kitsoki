@@ -330,11 +330,11 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 			"-p", "--permission-mode", "default", "--disallowedTools", "Write,Edit,Bash,AskUserQuestion",
 		}, "read only", wd)
 		readOnlyArgs := strings.Join(readOnly.Args, " ")
-		if !hasFlagValue(readOnly.Args, "--sandbox", "read-only") {
-			t.Errorf("codex read-only invocation must pass --sandbox read-only; args=%v", readOnly.Args)
+		if hasFlagValue(readOnly.Args, "--sandbox", "read-only") {
+			t.Errorf("codex read-only invocation must not use codex's sandbox; Kitsoki owns write-mode mediation; args=%v", readOnly.Args)
 		}
-		if strings.Contains(readOnlyArgs, "--dangerously-bypass-approvals-and-sandbox") {
-			t.Errorf("codex read-only invocation must not bypass approvals/sandbox; args=%v", readOnly.Args)
+		if !strings.Contains(readOnlyArgs, "--dangerously-bypass-approvals-and-sandbox") {
+			t.Errorf("codex read-only invocation must bypass codex approvals so Kitsoki MCP submit/write-mode tools work; args=%v", readOnly.Args)
 		}
 		// MCP config converted to `-c mcp_servers.*` overrides.
 		mustContain(t, got, `mcp_servers.kitsoki-validator.command="/bin/kitsoki"`)

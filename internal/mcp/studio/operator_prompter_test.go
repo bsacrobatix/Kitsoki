@@ -204,9 +204,10 @@ states:
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
-	_, _, turnDone, err := sh.Runtime.driveSuspendable(ctx, "route slowly", 100, 30)
+	_, _, turnDone, running, err := sh.Runtime.driveSuspendable(ctx, "route slowly", 100, 30, 0)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.False(t, turnDone)
+	require.Nil(t, running)
 	require.Nil(t, sh.Runtime.inFlight, "a pre-park timeout must not leave the handle awaiting an answer")
 
 	select {
@@ -229,9 +230,10 @@ func TestStudioOperatorAsk_FallbackProtocol(t *testing.T) {
 	sh := openProbe(t, srv)
 
 	// Drive: the turn parks on the operator-ask → awaiting_operator (no settle).
-	res, pq, turnDone, err := sh.Runtime.driveSuspendable(context.Background(), "ask the operator", 100, 30)
+	res, pq, turnDone, running, err := sh.Runtime.driveSuspendable(context.Background(), "ask the operator", 100, 30, 0)
 	require.NoError(t, err)
 	require.False(t, turnDone, "the turn must park on the operator-ask, not settle")
+	require.Nil(t, running)
 	require.NotNil(t, pq)
 	require.NotEmpty(t, pq.id, "a question id correlates the park with the answer")
 	require.Len(t, pq.questions, 1)
@@ -285,6 +287,7 @@ func TestStudioOperatorAsk_FallbackOverMCP(t *testing.T) {
 	require.False(t, res.IsError, "studio.work: %s", textOf(res))
 	require.NoError(t, json.Unmarshal([]byte(textOf(res)), &work))
 	assert.Equal(t, 1, work.Summary.OperatorQuestions)
+	assert.Equal(t, 0, work.Summary.RunningDrive)
 	assert.Equal(t, 1, work.Summary.NeedsAttention)
 	require.Len(t, work.Items, 1)
 	assert.Equal(t, "operator_question", work.Items[0].Kind)
@@ -297,6 +300,16 @@ func TestStudioOperatorAsk_FallbackOverMCP(t *testing.T) {
 	assert.Equal(t, "s1", work.Items[0].Reacquire.Args["handle"])
 	assert.Equal(t, qid, work.Items[0].Reacquire.Args["question_id"])
 
+	var status SessionStatusResult
+	res, err = cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "session.status",
+		Arguments: map[string]any{"handle": "s1"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.status: %s", textOf(res))
+	require.NoError(t, json.Unmarshal([]byte(textOf(res)), &status))
+	require.Nil(t, status.Running, "compact polling must not report a parked operator-ask as running")
+
 	var inspect InspectResult
 	res, err = cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
 		Name:      "session.inspect",
@@ -305,6 +318,8 @@ func TestStudioOperatorAsk_FallbackOverMCP(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, res.IsError, "session.inspect: %s", textOf(res))
 	require.NoError(t, json.Unmarshal([]byte(textOf(res)), &inspect))
+	require.Nil(t, inspect.Running, "a parked operator-ask is awaiting_operator, not a generic running drive")
+	assert.Equal(t, 0, inspect.Async.RunningDrive)
 	assert.Equal(t, 1, inspect.Async.OperatorQuestions)
 	require.Len(t, inspect.OperatorQuestions, 1)
 	assert.Equal(t, qid, inspect.OperatorQuestions[0].QuestionID)
@@ -436,9 +451,10 @@ func TestStudioOperatorAsk_TimeoutDegrades(t *testing.T) {
 	sh := openProbe(t, srv)
 
 	// Drive parks on the operator-ask → awaiting_operator (the turn is alive).
-	res, pq, turnDone, err := sh.Runtime.driveSuspendable(context.Background(), "ask the operator", 100, 30)
+	res, pq, turnDone, running, err := sh.Runtime.driveSuspendable(context.Background(), "ask the operator", 100, 30, 0)
 	require.NoError(t, err)
 	require.False(t, turnDone, "the turn parks awaiting the operator")
+	require.Nil(t, running)
 	require.NotNil(t, pq)
 	_ = res
 
