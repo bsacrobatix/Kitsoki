@@ -51,7 +51,7 @@
       },
       {
         "id": "dev",
-        "name": "Devin",
+        "name": "Andy",
         "role": "Developer",
         "intro": "Decomposes, fixes a mid-stream bug, refines, and ships — every step traceable.",
         "color": "#c97b4a",
