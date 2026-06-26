@@ -8,23 +8,24 @@ it mints a short-lived **App JWT** (RS256, stdlib crypto), exchanges it for an
 existing `gh`/`git` CLI path (the `host.cliExec` seam) authenticates as the
 installation — no per-user PATs.
 
-Test install: the **`bsacrobatix`** org. Production is identical under
-**`constructorfabric`** later. See
+Test install examples may use a throwaway org/repo, but production uses the
+same commands with `KITSOKI_GH_AGENT_REPO` and
+`KITSOKI_GH_AGENT_PUBLIC_BASE_URL` set for the target installation. See
 [`docs/proposals/kitsoki-github-agent.md`](../proposals/kitsoki-github-agent.md)
 shared decision #1 for the auth/permissions decision.
 The controlled live proof flow is
 [`docs/scenarios/github-agent-live-poc.md`](../scenarios/github-agent-live-poc.md).
 
-The live POC runs the hosted webhook service on the test VM:
+The hosted webhook service is parameterized by environment:
 
-- Public base URL: `https://kitsoki-test.slothattax.me`
-- Webhook URL: `https://kitsoki-test.slothattax.me/gh-agent/webhook`
+- Public base URL: `$KITSOKI_GH_AGENT_PUBLIC_BASE_URL`
+- Webhook URL: `$KITSOKI_GH_AGENT_PUBLIC_BASE_URL/gh-agent/webhook`
 - Systemd service: `kitsoki-gh-agent.service`
 - Durable job DB: `/var/lib/kitsoki-gh-agent/gh-jobs.sqlite`
 
-## a. Create the App (under `bsacrobatix`)
+## a. Create the App
 
-`bsacrobatix` org → **Settings → Developer settings → GitHub Apps → New GitHub
+Target org → **Settings → Developer settings → GitHub Apps → New GitHub
 App**.
 
 - **GitHub App name:** `kitsoki` (or `kitsoki-test`).
@@ -40,7 +41,7 @@ App**.
 
 ## b. Webhook
 
-- **Webhook URL:** `https://kitsoki-test.slothattax.me/gh-agent/webhook`
+- **Webhook URL:** `$KITSOKI_GH_AGENT_PUBLIC_BASE_URL/gh-agent/webhook`
 - **Webhook secret:** generate one and save it; it becomes
   `KITSOKI_GH_WEBHOOK_SECRET`. Payloads are HMAC-verified by
   `githubapp.VerifyWebhookSignature` against `X-Hub-Signature-256`.
@@ -70,10 +71,10 @@ After creating the App:
 
 ## d. Install on a test repo + find the Installation ID
 
-1. App settings → **Install App** → install on `bsacrobatix`, scoped to a
-   throwaway test repo (e.g. `bsacrobatix/kitsoki-sandbox`).
+1. App settings → **Install App** → install on the target org, scoped to the
+   selected repo.
 2. The **Installation ID** is the trailing number in the post-install URL:
-   `https://github.com/organizations/bsacrobatix/settings/installations/<INSTALLATION_ID>`.
+   `https://github.com/organizations/<org>/settings/installations/<INSTALLATION_ID>`.
 
    Or list installations with the App JWT:
 
@@ -89,10 +90,10 @@ Flags override the env (`--gh-app-id`, `--gh-app-installation-id`,
 
 ```
 go run ./cmd/kitsoki gh-agent serve \
-  --repo bsacrobatix/Kitsoki \
+  --repo "$KITSOKI_GH_AGENT_REPO" \
   --db /var/lib/kitsoki-gh-agent/gh-jobs.sqlite \
   --addr 127.0.0.1:8787 \
-  --public-base-url https://kitsoki-test.slothattax.me \
+  --public-base-url "$KITSOKI_GH_AGENT_PUBLIC_BASE_URL" \
   --poll-interval 0 \
   --github-app
 ```
@@ -106,8 +107,8 @@ dispatcher path:
 
 ```
 go run ./cmd/kitsoki gh-agent poll \
-  --repo bsacrobatix/Kitsoki \
-  --public-base-url https://kitsoki-test.slothattax.me \
+  --repo "$KITSOKI_GH_AGENT_REPO" \
+  --public-base-url "$KITSOKI_GH_AGENT_PUBLIC_BASE_URL" \
   --github-app
 ```
 
@@ -130,13 +131,13 @@ The script performs:
 ```
 GOOS=linux GOARCH=amd64 GOCACHE=/private/tmp/kitsoki-gocache \
   go build -o /private/tmp/kitsoki-ghagent ./cmd/kitsoki
-scp /private/tmp/kitsoki-ghagent root@206.189.84.218:/tmp/kitsoki-ghagent.<pid>
-ssh root@206.189.84.218 "sha256sum /tmp/kitsoki-ghagent.<pid> | awk '{print \$1}'"
-ssh root@206.189.84.218 "install -m 755 /tmp/kitsoki-ghagent.<pid> /usr/local/bin/kitsoki && rm -f /tmp/kitsoki-ghagent.<pid>"
-git archive --format=tar HEAD | ssh root@206.189.84.218 "mkdir -p /opt/kitsoki && tar -x -C /opt/kitsoki"
-ssh root@206.189.84.218 "sha256sum /usr/local/bin/kitsoki | awk '{print \$1}'"
-ssh root@206.189.84.218 'chmod 755 /usr/local/bin/kitsoki && systemctl restart kitsoki-gh-agent'
-curl -fsS https://kitsoki-test.slothattax.me/healthz
+scp /private/tmp/kitsoki-ghagent "$KITSOKI_GH_AGENT_REMOTE:/tmp/kitsoki-ghagent.<pid>"
+ssh "$KITSOKI_GH_AGENT_REMOTE" "sha256sum /tmp/kitsoki-ghagent.<pid> | awk '{print \$1}'"
+ssh "$KITSOKI_GH_AGENT_REMOTE" "install -m 755 /tmp/kitsoki-ghagent.<pid> /usr/local/bin/kitsoki && rm -f /tmp/kitsoki-ghagent.<pid>"
+git archive --format=tar HEAD | ssh "$KITSOKI_GH_AGENT_REMOTE" "mkdir -p /opt/kitsoki && tar -x -C /opt/kitsoki"
+ssh "$KITSOKI_GH_AGENT_REMOTE" "sha256sum /usr/local/bin/kitsoki | awk '{print \$1}'"
+ssh "$KITSOKI_GH_AGENT_REMOTE" 'chmod 755 /usr/local/bin/kitsoki && systemctl restart kitsoki-gh-agent'
+curl -fsS "$KITSOKI_GH_AGENT_PUBLIC_BASE_URL/healthz"
 ```
 
 The deploy helper uploads to a temporary path, compares the local linux/amd64
@@ -149,9 +150,9 @@ relying on direct overwrite of the running executable.
 Useful read-only smoke checks:
 
 ```
-curl -fsS https://kitsoki-test.slothattax.me/healthz
-ssh root@206.189.84.218 'systemctl is-active kitsoki-gh-agent && systemctl is-active caddy'
-ssh root@206.189.84.218 'python3 - <<'"'"'PY'"'"'
+curl -fsS "$KITSOKI_GH_AGENT_PUBLIC_BASE_URL/healthz"
+ssh "$KITSOKI_GH_AGENT_REMOTE" 'systemctl is-active kitsoki-gh-agent && systemctl is-active caddy'
+ssh "$KITSOKI_GH_AGENT_REMOTE" 'python3 - <<'"'"'PY'"'"'
 import sqlite3
 conn = sqlite3.connect("file:/var/lib/kitsoki-gh-agent/gh-jobs.sqlite?mode=ro", uri=True)
 for row in conn.execute("select job_id, origin_ref, story, state, run_url, comment_id, err_msg from gh_jobs order by created_at desc limit 10"):
@@ -207,7 +208,7 @@ when `--developer-arc-media` is supplied.
 
 The ambiguous guidance case still writes a public run URL before posting its
 guidance comment. The GitHub thread should show both the request for direction
-and a `https://kitsoki-test.slothattax.me/run/<job-id>` link, while the job state
+and a `$KITSOKI_GH_AGENT_PUBLIC_BASE_URL/run/<job-id>` link, while the job state
 parks at `awaiting_guidance`.
 The live runner waits for each row to reach its expected proof state with both
 `run_url` and `comment_id` populated before collecting evidence, so capture plans

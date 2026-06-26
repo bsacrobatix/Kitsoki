@@ -23,9 +23,9 @@ authority.
 
 - **Requester:** the GitHub user who creates the test issues or PR comment.
 - **GitHub App:** the installed `@kitsoki` App on the throwaway test repo.
-- **Hosted agent:** `kitsoki-gh-agent.service` on the test VM.
+- **Hosted agent:** `kitsoki-gh-agent.service` on the configured host.
 - **Kitsoki stories:** the no-LLM dispatch routes used by the POC.
-- **Run viewer:** `https://kitsoki-test.slothattax.me/run/<job-id>`.
+- **Run viewer:** `$KITSOKI_GH_AGENT_PUBLIC_BASE_URL/run/<job-id>`.
 - **Deck:** a Slidey source deck embedding rrweb logs.
 
 ## Preconditions
@@ -110,7 +110,7 @@ A run is acceptable only when:
 - Capture plans point at the App response and run URL, not only at the
   requester mention.
 - The Slidey deck exists at the `.slidey.json` path and references the live
-  GitHub App on `kitsoki-test`.
+  GitHub App webhook for the configured public base URL.
 - The deck references rrweb source clips for the GitHub cases.
 - The rrweb clips are tour-driven evidence, not five-second passive holds on
   disconnected pages.

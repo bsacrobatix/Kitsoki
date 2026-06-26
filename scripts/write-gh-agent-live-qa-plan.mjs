@@ -21,6 +21,9 @@ Options:
   --scenarios <yaml>   default ${DEFAULT_SCENARIOS}
   --video <mp4>        default ${DEFAULT_VIDEO}
   --frames <dir>       optional labeled frame dir for qa.sh --frames
+  --repo <owner/repo>  expected repo; defaults to KITSOKI_GH_AGENT_REPO or <owner/repo>
+  --public-base-url <url>
+                       expected service URL; defaults to KITSOKI_GH_AGENT_PUBLIC_BASE_URL or <public-base-url>
   -h, --help           show this help
 
 Writes:
@@ -38,6 +41,8 @@ function parseArgs(argv) {
     scenarios: DEFAULT_SCENARIOS,
     video: DEFAULT_VIDEO,
     frames: DEFAULT_FRAMES,
+    repo: process.env.KITSOKI_GH_AGENT_REPO || "<owner/repo>",
+    publicBaseURL: process.env.KITSOKI_GH_AGENT_PUBLIC_BASE_URL || "<public-base-url>",
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -54,6 +59,12 @@ function parseArgs(argv) {
       case "--frames":
         args.frames = argv[++i];
         break;
+      case "--repo":
+        args.repo = argv[++i];
+        break;
+      case "--public-base-url":
+        args.publicBaseURL = argv[++i];
+        break;
       case "-h":
       case "--help":
         args.help = true;
@@ -65,7 +76,12 @@ function parseArgs(argv) {
   return args;
 }
 
-function featureMarkdown() {
+function normalizeBaseURL(value) {
+  return String(value || "").replace(/\/+$/, "");
+}
+
+function featureMarkdown(args) {
+  const publicBaseURL = normalizeBaseURL(args.publicBaseURL);
   return `# QA Feature: Live @kitsoki GitHub Agent Slidey Deck
 
 ## What This Is
@@ -78,16 +94,16 @@ from the current POC run:
 - evidence notes: \`.context/live-poc-*.md\`
 
 The deck must prove the live GitHub App loop, not the old static GitHub fixture.
-The GitHub evidence must come from real \`bsacrobatix/Kitsoki\` issues/PRs,
+The GitHub evidence must come from real \`${args.repo}\` issues/PRs,
 real \`@kitsoki\` comments, real App-authenticated kitsoki replies, real public
-\`https://kitsoki-test.slothattax.me/run/<job-id>\` links, the live
-\`https://kitsoki-test.slothattax.me/gh-agent/webhook\` front door, and
+\`${publicBaseURL}/run/<job-id>\` links, the live
+\`${publicBaseURL}/gh-agent/webhook\` front door, and
 VM-backed job state captured in the evidence notes.
 
 ## What The Evidence Should Show
 
 1. A real GitHub user mentions \`@kitsoki\` on a live issue or PR.
-2. The deck identifies the live GitHub App webhook on kitsoki-test.
+2. The deck identifies the live GitHub App webhook.
 3. kitsoki comments back as the GitHub App with a public run link.
 4. The run link opens the hosted kitsoki run page.
 5. The bug, feature, guidance, and PR-status cases are each distinct and named.
@@ -105,15 +121,16 @@ unless those capabilities are visibly implemented in the captured evidence.
 `;
 }
 
-function scenariosYAML() {
+function scenariosYAML(args) {
+  const publicBaseURL = normalizeBaseURL(args.publicBaseURL);
   return `scenarios:
   - id: live-github-front-door
     title: "GitHub act uses live GitHub evidence, not the fixture"
     required: true
     steps:
-      - "The deck title or opening section identifies '@kitsoki on GitHub' or 'live GitHub App' and references kitsoki-test."
-      - "The opening GitHub section visibly references the live webhook URL https://kitsoki-test.slothattax.me/gh-agent/webhook or clearly states that real mentions are delivered to that live kitsoki-test webhook."
-      - "A real GitHub issue or pull request page from bsacrobatix/Kitsoki is visible, not gh-thread.html or a static fixture/mock page."
+      - "The deck title or opening section identifies '@kitsoki on GitHub' or 'live GitHub App' and references ${publicBaseURL}."
+      - "The opening GitHub section visibly references the live webhook URL ${publicBaseURL}/gh-agent/webhook or clearly states that real mentions are delivered to that live webhook."
+      - "A real GitHub issue or pull request page from ${args.repo} is visible, not gh-thread.html or a static fixture/mock page."
       - "A visible comment includes '@kitsoki' from the requester and a kitsoki App response on the same real thread."
 
   - id: run-link-loop
@@ -121,7 +138,7 @@ function scenariosYAML() {
     required: true
     steps:
       - "A kitsoki App-authenticated comment is visible in the GitHub thread."
-      - "The comment visibly includes a https://kitsoki-test.slothattax.me/run/ link."
+      - "The comment visibly includes a ${publicBaseURL}/run/ link."
       - "The hosted run page opens and shows a kitsoki GitHub run summary rather than a blank or unrelated page."
 
   - id: bug-feature-guidance-pr-distinct
@@ -200,8 +217,8 @@ function main() {
     }
     fs.mkdirSync(path.dirname(file), { recursive: true });
   }
-  fs.writeFileSync(args.feature, featureMarkdown());
-  fs.writeFileSync(args.scenarios, scenariosYAML());
+  fs.writeFileSync(args.feature, featureMarkdown(args));
+  fs.writeFileSync(args.scenarios, scenariosYAML(args));
   console.log(`wrote ${args.feature}`);
   console.log(`wrote ${args.scenarios}`);
   console.log("");

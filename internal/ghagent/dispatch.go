@@ -2,6 +2,7 @@ package ghagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
+	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/testrunner"
 )
@@ -20,6 +22,7 @@ type RunResult struct {
 	RunURL     string
 	FinalState string // story terminal state, for the ack
 	Turns      int
+	Summary    string
 }
 
 // Dispatcher claims a job for a mention and spawns the mapped story no-LLM.
@@ -166,6 +169,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 	if d.Comments != nil && job.CommentID != "" {
 		meta := Meta{JobID: job.JobID, OriginRef: job.OriginRef, Story: route.Story, State: finalState, RunURL: job.RunURL}
 		prose := fmt.Sprintf("Done — `%s` finished in state `%s` (%d turn(s)).", route.Story, result.FinalState, result.Turns)
+		if strings.TrimSpace(result.Summary) != "" {
+			prose = result.Summary
+		}
 		if spawnErr != nil {
 			prose = fmt.Sprintf("Run failed: %s", spawnErr.Error())
 			if job.IncidentURL != "" {
@@ -194,30 +200,25 @@ func publicRunURL(baseURL, jobID string) string {
 	return baseURL + "/run/" + jobID
 }
 
-// RunStorySession is the default SpawnFn: it points testrunner.RunFlows at the
-// route's story app.yaml + the per-job beat fixture (authored under
-// internal/ghagent/testdata/<story>.beat.yaml) and asserts the story ran >=1
-// turn. This is the REAL no-LLM session spawn — RunFlows builds the real machine
-// and replays turns through the real state machine, every host call cassette-
-// served. Returns a synthesized RunResult.
+// RunStorySession is the default SpawnFn. Issue routes point
+// testrunner.RunFlows at the route's story app.yaml + the per-job beat fixture
+// (authored under internal/ghagent/testdata/<story>.beat.yaml) and assert the
+// story ran >=1 turn. The PR-status route reads the live PR through host.git's
+// pr_status seam so the GitHub comment reports the actual PR state.
 func RunStorySession(ctx context.Context, route Route, job *jobs.GHJob) (RunResult, error) {
+	if route.Story == StoryPRBeat {
+		return RunPRStatusBeat(ctx, job)
+	}
+
 	root, err := repoRoot()
 	if err != nil {
 		return RunResult{}, err
 	}
 
 	var appPath, beatFixture string
-	switch route.Story {
-	case StoryPRBeat:
-		// The minimal pr-autopilot beat is a self-contained fixture (no story
-		// app.yaml). It declares its own thin app inline-by-reference.
-		appPath = filepath.Join(root, "internal", "ghagent", "testdata", "pr-beat.app.yaml")
-		beatFixture = filepath.Join(root, "internal", "ghagent", "testdata", "pr-beat.beat.yaml")
-	default:
-		appPath = filepath.Join(root, route.Story, "app.yaml")
-		base := filepath.Base(route.Story) // e.g. "bugfix"
-		beatFixture = filepath.Join(root, "internal", "ghagent", "testdata", base+".beat.yaml")
-	}
+	appPath = filepath.Join(root, route.Story, "app.yaml")
+	base := filepath.Base(route.Story) // e.g. "bugfix"
+	beatFixture = filepath.Join(root, "internal", "ghagent", "testdata", base+".beat.yaml")
 
 	flowFixture, cleanup, err := materializeJobFlowFixture(beatFixture, job)
 	if err != nil {
@@ -242,6 +243,74 @@ func RunStorySession(ctx context.Context, route Route, job *jobs.GHJob) (RunResu
 		FinalState: "passed",
 		Turns:      turns,
 	}, nil
+}
+
+// RunPRStatusBeat is the production PR-status path. It reads the actual PR
+// status through host.git/gh and returns a human-readable summary for the
+// rolling GitHub comment.
+func RunPRStatusBeat(ctx context.Context, job *jobs.GHJob) (RunResult, error) {
+	res, err := host.GitVCSHandler(ctx, map[string]any{
+		"op":    "pr_status",
+		"repo":  job.Repo,
+		"pr_id": job.ObjectNumber,
+	})
+	if err != nil {
+		return RunResult{}, err
+	}
+	if res.Error != "" {
+		return RunResult{}, errors.New(res.Error)
+	}
+	stateRaw, _ := res.Data["state"].(string)
+	return RunResult{
+		RunURL:     "kitsoki://run/" + job.JobID,
+		FinalState: "pr_status_read",
+		Turns:      1,
+		Summary:    summarizePRStatus(job, stateRaw),
+	}, nil
+}
+
+func summarizePRStatus(job *jobs.GHJob, stateRaw string) string {
+	type check struct {
+		Name       string `json:"name"`
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+	}
+	var parsed struct {
+		State             string  `json:"state"`
+		StatusCheckRollup []check `json:"statusCheckRollup"`
+	}
+	state := strings.TrimSpace(stateRaw)
+	if err := json.Unmarshal([]byte(stateRaw), &parsed); err == nil {
+		if strings.TrimSpace(parsed.State) != "" {
+			state = parsed.State
+		}
+	}
+	if state == "" {
+		state = "unknown"
+	}
+	var checks []string
+	for _, c := range parsed.StatusCheckRollup {
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			name = "check"
+		}
+		outcome := firstNonEmpty(c.Conclusion, c.Status, "unknown")
+		checks = append(checks, fmt.Sprintf("%s=%s", name, outcome))
+	}
+	checkLine := "No status checks reported."
+	if len(checks) > 0 {
+		checkLine = "Checks: " + strings.Join(checks, ", ") + "."
+	}
+	return fmt.Sprintf("PR #%s status: `%s`. %s", job.ObjectNumber, state, checkLine)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func summarizeFlowFailures(report *testrunner.FlowReport) string {

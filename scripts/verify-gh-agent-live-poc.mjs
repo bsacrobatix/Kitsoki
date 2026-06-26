@@ -62,6 +62,8 @@ Options:
   --html <deck.html>             optional exported HTML bundle to verify
   --deck-video <deck.mp4>        optional rendered export to verify
   --developer-arc-media <path>   rrweb log required unless already referenced by deck
+  --public-base-url <url>        expected public service base; defaults to KITSOKI_GH_AGENT_PUBLIC_BASE_URL or first evidence file
+  --repo <owner/repo>            expected GitHub repo; defaults to KITSOKI_GH_AGENT_REPO or first evidence file
   --json-out <path>              write machine-readable report
   --allow-missing-db             do not require the gh_jobs row block
   --allow-missing-media          do not require rrweb logs or developer media
@@ -98,6 +100,8 @@ function parseArgs(argv) {
     html: "",
     deckVideo: "",
     developerArcMedia: "",
+    publicBaseURL: process.env.KITSOKI_GH_AGENT_PUBLIC_BASE_URL || "",
+    repo: process.env.KITSOKI_GH_AGENT_REPO || "",
     jsonOut: "",
     allowMissingDB: false,
     allowMissingMedia: false,
@@ -126,6 +130,12 @@ function parseArgs(argv) {
         break;
       case "--developer-arc-media":
         args.developerArcMedia = argv[++i];
+        break;
+      case "--public-base-url":
+        args.publicBaseURL = argv[++i];
+        break;
+      case "--repo":
+        args.repo = argv[++i];
         break;
       case "--json-out":
         args.jsonOut = argv[++i];
@@ -185,9 +195,37 @@ function fencedJSON(markdown, heading) {
   }
 }
 
+function githubRepoFromURL(sourceURL) {
+  const match = String(sourceURL || "").match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\//);
+  return match ? match[1] : "";
+}
+
 function githubOriginRef(sourceURL, objectKind, objectNumber) {
+  const repo = githubRepoFromURL(sourceURL);
   const segment = objectKind === "pr" ? "pr" : "issue";
-  return `github:bsacrobatix/Kitsoki/${segment}/${objectNumber || sourceURL.split("/").pop()}`;
+  return `github:${repo}/${segment}/${objectNumber || sourceURL.split("/").pop()}`;
+}
+
+function normalizeBaseURL(value) {
+  return String(value || "").replace(/\/+$/, "");
+}
+
+function expectedPublicBaseURL(args, observed) {
+  const normalized = normalizeBaseURL(observed);
+  if (!normalized) return "";
+  if (!args.publicBaseURL) {
+    args.publicBaseURL = normalized;
+  }
+  return normalizeBaseURL(args.publicBaseURL);
+}
+
+function expectedRepo(args, observedSourceURL) {
+  const repo = githubRepoFromURL(observedSourceURL);
+  if (!repo) return "";
+  if (!args.repo) {
+    args.repo = repo;
+  }
+  return args.repo;
 }
 
 function checkURL(name, value, predicate, report, allowNonliveUrls) {
@@ -255,6 +293,10 @@ function checkEvidence(args, c, report) {
     checks: { health, runPage, apiJSON, remoteDB },
   });
 
+  const expectedBase = expectedPublicBaseURL(args, publicBaseURL);
+  const expectedWebhook = expectedBase ? `${expectedBase}/gh-agent/webhook` : "";
+  const expectedRepoSlug = expectedRepo(args, sourceURL);
+
   for (const [label, value] of [
     ["Public base URL", publicBaseURL],
     ["Webhook URL", webhookURL],
@@ -271,21 +313,21 @@ function checkEvidence(args, c, report) {
   checkURL(
     `${c.slug} Public base URL`,
     publicBaseURL,
-    (u) => u === "https://kitsoki-test.slothattax.me",
+    (u) => normalizeBaseURL(u) === expectedBase,
     report,
     args.allowNonliveUrls,
   );
   checkURL(
     `${c.slug} Webhook URL`,
     webhookURL,
-    (u) => u === "https://kitsoki-test.slothattax.me/gh-agent/webhook",
+    (u) => u === expectedWebhook,
     report,
     args.allowNonliveUrls,
   );
   checkURL(
     `${c.slug} Source URL`,
     sourceURL,
-    (u) => u.startsWith("https://github.com/bsacrobatix/Kitsoki/") && u.includes(c.sourcePathPart),
+    (u) => githubRepoFromURL(u) === expectedRepoSlug && u.includes(c.sourcePathPart),
     report,
     args.allowNonliveUrls,
   );
@@ -293,14 +335,14 @@ function checkEvidence(args, c, report) {
   checkURL(
     `${c.slug} Run URL`,
     runURL,
-    (u) => u.startsWith("https://kitsoki-test.slothattax.me/run/"),
+    (u) => u.startsWith(`${expectedBase}/run/`),
     report,
     args.allowNonliveUrls,
   );
   checkURL(
     `${c.slug} API URL`,
     apiURL,
-    (u) => u.startsWith("https://kitsoki-test.slothattax.me/api/run/"),
+    (u) => u.startsWith(`${expectedBase}/api/run/`),
     report,
     args.allowNonliveUrls,
   );
@@ -640,11 +682,14 @@ function checkDeck(args, report) {
       report.fail(`deck does not reference ${c.slug} run URL ${evidence.runURL}`);
     }
   }
-  if (!haystack.includes("Live GitHub App on kitsoki-test")) {
-    report.fail("deck does not explicitly identify the GitHub act as live GitHub App on kitsoki-test");
+  if (!haystack.includes("Live GitHub App")) {
+    report.fail("deck does not explicitly identify the GitHub act as a live GitHub App");
   }
-  if (!haystack.includes("https://kitsoki-test.slothattax.me/gh-agent/webhook")) {
-    report.fail("deck does not reference the live GitHub App webhook URL");
+  const webhookURLs = CASES.map((c) => report.cases[c.slug]?.webhookURL).filter(Boolean);
+  for (const webhookURL of webhookURLs) {
+    if (!haystack.includes(webhookURL)) {
+      report.fail(`deck does not reference the live GitHub App webhook URL ${webhookURL}`);
+    }
   }
   const sectionOne = Array.isArray(deck.scenes)
     ? deck.scenes.find((scene) => scene?.title === "Live GitHub front door")
@@ -655,7 +700,8 @@ function checkDeck(args, report) {
     subtitle: sectionOne?.subtitle,
     caption: sectionOne?.caption,
   }).join("\n");
-  if (!sectionOneVisible.includes("https://kitsoki-test.slothattax.me/gh-agent/webhook")) {
+  const firstWebhook = webhookURLs[0] || "";
+  if (firstWebhook && !sectionOneVisible.includes(firstWebhook)) {
     report.fail("deck Section 1 does not visibly reference the live GitHub App webhook URL");
   }
   const hasDeveloperMedia =

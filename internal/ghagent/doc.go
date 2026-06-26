@@ -12,15 +12,14 @@
 //
 // # Boundaries / non-goals (round 1)
 //
-//   - Single-shot poll only (`kitsoki gh-agent poll`); the long-running serve
-//     daemon/timer is deferred.
-//   - No GitHub-App auth, webhooks, or HMAC; all gh/git I/O flows through the
-//     host cliExec seam so tests replay from cassettes, offline and free.
-//   - The PR path ships ONE real beat (pr_status read + status comment), not a
-//     full pr-autopilot story.
+//   - The serve daemon handles GitHub-App webhook ingress; polling remains as a
+//     fallback/diagnostic producer.
+//   - All gh/git I/O flows through host seams so tests stay offline and free.
+//   - The PR path ships a real pr_status read + status comment, not a full
+//     rebase/review-thread PR-autopilot story.
 //   - Rolling status comments edit the first ack in place through
-//     host.gh.ticket's comment_edit op, with a repost fallback when editing is
-//     unavailable.
+//     host.gh.ticket's comment_edit op with bounded retries; edit failures are
+//     recorded on the run instead of posting duplicate comments.
 //
 // # Pieces
 //
@@ -32,7 +31,7 @@
 // # Concurrency note
 //
 // testrunner.RunFlows publishes KITSOKI_APP_DIR as a process global, so
-// concurrent Dispatch of multiple mentions in one process can cross-contaminate.
-// The round-1 single-shot poll dispatches mentions sequentially; per-job
-// KITSOKI_APP_DIR isolation is a prerequisite before the serve daemon is built.
+// concurrent story Dispatch of multiple issue mentions in one process can
+// cross-contaminate. The serve loop dispatches synchronously today; per-job
+// KITSOKI_APP_DIR isolation is required before parallel story workers.
 package ghagent

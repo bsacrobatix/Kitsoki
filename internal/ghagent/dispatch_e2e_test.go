@@ -36,6 +36,8 @@ func stubGHCli(t *testing.T, issuesJSON, prsJSON string) func() {
 			return issuesJSON, "", 0, nil
 		case strings.HasPrefix(joined, "pr list"):
 			return prsJSON, "", 0, nil
+		case strings.HasPrefix(joined, "pr view"):
+			return `{"state":"OPEN","statusCheckRollup":[{"name":"ci","conclusion":"SUCCESS"}]}`, "", 0, nil
 		default:
 			t.Fatalf("unexpected gh args: %s", joined)
 			return "", "", 1, nil
@@ -506,8 +508,8 @@ func TestDispatch_FeatureDevStoryBeat(t *testing.T) {
 	}
 }
 
-// TestDispatch_PRBeat routes a pr-kind mention to the minimal pr-autopilot beat:
-// one host.git pr_status read through the real engine + one status comment.
+// TestDispatch_PRBeat routes a pr-kind mention to the PR status beat: one real
+// host.git pr_status read through the gh CLI seam + one status comment.
 func TestDispatch_PRBeat(t *testing.T) {
 	ctx := context.Background()
 
@@ -576,6 +578,9 @@ func TestDispatch_PRBeat(t *testing.T) {
 	}
 	if meta["origin_ref"] != "github:o/r/pr/77" {
 		t.Fatalf("meta origin_ref = %v", meta["origin_ref"])
+	}
+	if !strings.Contains(last, "PR #77 status: `OPEN`") || !strings.Contains(last, "ci=SUCCESS") {
+		t.Fatalf("PR final comment missing status reasoning:\n%s", last)
 	}
 }
 

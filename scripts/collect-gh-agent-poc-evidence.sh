@@ -183,7 +183,7 @@ job_id = sys.argv[2]
 cols = [
     "job_id", "origin_ref", "repo", "object_kind", "object_number",
     "story", "state", "worker_id", "run_id", "run_url", "comment_id",
-    "err_msg", "created_at", "updated_at",
+    "attempt_count", "incident_url", "err_msg", "created_at", "updated_at",
 ]
 conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
 conn.row_factory = sqlite3.Row

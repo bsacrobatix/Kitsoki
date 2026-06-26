@@ -94,6 +94,15 @@ function requireLiveURL(name, value, predicate) {
   return url;
 }
 
+function normalizeBaseURL(value) {
+  return String(value || "").replace(/\/+$/, "");
+}
+
+function githubRepoFromURL(sourceURL) {
+  const match = String(sourceURL || "").match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\//);
+  return match ? match[1] : "";
+}
+
 function requireStatus(label, value, predicate, expected) {
   if (!predicate(value)) {
     throw new Error(`${label} check is ${JSON.stringify(value)}, expected ${expected}`);
@@ -105,25 +114,27 @@ function buildPlan(caseSlug, markdown, artifactDir) {
   if (!cfg) {
     throw new Error(`unknown case ${caseSlug}`);
   }
+  const publicBaseURL = normalizeBaseURL(requireURL("Public base URL", field(markdown, "Public base URL")));
+  const expectedWebhookURL = `${publicBaseURL}/gh-agent/webhook`;
   requireLiveURL(
     "Webhook URL",
     field(markdown, "Webhook URL"),
-    (u) => u === "https://kitsoki-test.slothattax.me/gh-agent/webhook",
+    (u) => u === expectedWebhookURL,
   );
   const sourceURL = requireLiveURL(
     "Source URL",
     field(markdown, "Source URL"),
-    (u) => u.startsWith("https://github.com/bsacrobatix/Kitsoki/"),
+    (u) => githubRepoFromURL(u) !== "",
   );
   const runURL = requireLiveURL(
     "Run URL",
     field(markdown, "Run URL"),
-    (u) => u.startsWith("https://kitsoki-test.slothattax.me/run/"),
+    (u) => u.startsWith(`${publicBaseURL}/run/`),
   );
   const apiURL = requireLiveURL(
     "API URL",
     field(markdown, "API URL"),
-    (u) => u.startsWith("https://kitsoki-test.slothattax.me/api/run/"),
+    (u) => u.startsWith(`${publicBaseURL}/api/run/`),
   );
   const appCommentURL = requireLiveURL(
     "Kitsoki comment URL",
@@ -157,7 +168,7 @@ function buildPlan(caseSlug, markdown, artifactDir) {
         title: "App-authenticated kitsoki comment",
         url: appCommentURL,
         caption: "kitsoki comments back with a public run link.",
-        waitForText: "kitsoki-test.slothattax.me/run/",
+        waitForText: `${new URL(publicBaseURL).host}/run/`,
       },
       {
         id: "run-page",

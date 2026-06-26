@@ -4,8 +4,8 @@
  * captured rrweb clips.
  *
  * Strict mode is the default: all evidence notes and media files must exist,
- * and evidence URLs must point at the live bsacrobatix/Kitsoki + kitsoki-test
- * surfaces. Use --allow-missing-media only to emit a draft scaffold.
+ * and evidence URLs must point at a consistent live GitHub repo + public
+ * gh-agent service. Use --allow-missing-media only to emit a draft scaffold.
  */
 
 import fs from "node:fs";
@@ -195,6 +195,15 @@ function requireURL(name, value, predicate, allowNonliveUrls) {
   return value;
 }
 
+function normalizeBaseURL(value) {
+  return String(value || "").replace(/\/+$/, "");
+}
+
+function githubRepoFromURL(sourceURL) {
+  const match = String(sourceURL || "").match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\//);
+  return match ? match[1] : "";
+}
+
 function requireStatus(caseSlug, label, value, predicate, expected) {
   if (!predicate(value)) {
     throw new Error(`${caseSlug} ${label} check is ${JSON.stringify(value)}, expected ${expected}`);
@@ -210,34 +219,43 @@ function relativeMediaPath(deckOut, mediaPath) {
 function readEvidence(args, c) {
   const evidencePath = path.join(args.evidenceDir, `live-poc-${c.slug}.md`);
   const markdown = fs.readFileSync(evidencePath, "utf8");
+  const observedBase = normalizeBaseURL(field(markdown, "Public base URL"));
+  if (!args.expectedPublicBaseURL) {
+    args.expectedPublicBaseURL = observedBase;
+  }
   const publicBaseURL = requireURL(
     `${c.slug} Public base URL`,
     field(markdown, "Public base URL"),
-    (u) => u === "https://kitsoki-test.slothattax.me",
+    (u) => normalizeBaseURL(u) === args.expectedPublicBaseURL,
     args.allowNonliveUrls,
   );
+  const expectedWebhookURL = `${normalizeBaseURL(publicBaseURL)}/gh-agent/webhook`;
   const webhookURL = requireURL(
     `${c.slug} Webhook URL`,
     field(markdown, "Webhook URL"),
-    (u) => u === "https://kitsoki-test.slothattax.me/gh-agent/webhook",
+    (u) => u === expectedWebhookURL,
     args.allowNonliveUrls,
   );
+  const observedRepo = githubRepoFromURL(field(markdown, "Source URL"));
+  if (!args.expectedRepo) {
+    args.expectedRepo = observedRepo;
+  }
   const sourceURL = requireURL(
     `${c.slug} Source URL`,
     field(markdown, "Source URL"),
-    (u) => u.startsWith("https://github.com/bsacrobatix/Kitsoki/"),
+    (u) => githubRepoFromURL(u) === args.expectedRepo,
     args.allowNonliveUrls,
   );
   const runURL = requireURL(
     `${c.slug} Run URL`,
     field(markdown, "Run URL"),
-    (u) => u.startsWith("https://kitsoki-test.slothattax.me/run/"),
+    (u) => u.startsWith(`${normalizeBaseURL(publicBaseURL)}/run/`),
     args.allowNonliveUrls,
   );
   const apiURL = requireURL(
     `${c.slug} API URL`,
     field(markdown, "API URL"),
-    (u) => u.startsWith("https://kitsoki-test.slothattax.me/api/run/"),
+    (u) => u.startsWith(`${normalizeBaseURL(publicBaseURL)}/api/run/`),
     args.allowNonliveUrls,
   );
   const commentURL = field(markdown, "Kitsoki comment URL");
@@ -355,13 +373,13 @@ function buildDeck(args) {
       type: "title",
       eyebrow: "Live GitHub App POC",
       title: "@kitsoki on GitHub",
-      subtitle: "Live GitHub App on kitsoki-test: real mentions, webhook deliveries, App comments, and hosted run pages",
+      subtitle: `Live GitHub App on ${new URL(bug.publicBaseURL).host}: real mentions, webhook deliveries, App comments, and hosted run pages`,
     },
     {
       type: "title",
       eyebrow: "Section 1",
       title: "Live GitHub front door",
-      subtitle: `Real bsacrobatix/Kitsoki mentions delivered to ${bug.webhookURL}`,
+      subtitle: `Real ${args.expectedRepo || "GitHub"} mentions delivered to ${bug.webhookURL}`,
     },
     {
       type: "title",
