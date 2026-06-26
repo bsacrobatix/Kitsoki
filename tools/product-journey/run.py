@@ -4244,7 +4244,7 @@ def render_deck(
     captured = []
     if evidence is not None:
         captured = [
-            f"{item['scenario']} / {item['kind']}: {item.get('path', '')}"
+            f"{item['scenario']} / {item['kind']} [{item.get('source', evidence_source(item.get('path', ''), item.get('notes', '')))}]: {item.get('path', '')}"
             for item in evidence.get("items", [])
             if item.get("status") in {"captured", "validated"} and item.get("path")
         ]
@@ -4276,7 +4276,11 @@ def render_deck(
     review_body = "Not reviewed yet."
     if review is not None:
         review_lines = [review.get("summary", "No review summary.")]
-        for check in review.get("checks", [])[:8]:
+        sorted_checks = sorted(
+            review.get("checks", []),
+            key=lambda check: {"fail": 0, "warn": 1, "pass": 2}.get(check.get("status", ""), 3),
+        )
+        for check in sorted_checks[:10]:
             review_lines.append(f"{check.get('status', 'unknown')}: {check.get('id', 'check')} - {check.get('summary', '')}")
         review_body = "\n".join(review_lines)
     execution_lines = []
@@ -4299,6 +4303,11 @@ def render_deck(
             for item in evidence_items_for_gates
             if item.get("status") in {"captured", "validated"}
         }
+        proof_evidence = {
+            (item.get("scenario", ""), item.get("kind", item.get("evidence_kind", "")))
+            for item in evidence_items_for_gates
+            if is_proof_evidence(item)
+        }
         outcomes_by_scenario = {
             item.get("scenario", ""): item
             for item in scenario_outcomes.get("items", [])
@@ -4311,9 +4320,15 @@ def render_deck(
                 for item in minimum
                 if (scenario.get("scenario", ""), item) in captured_evidence
             ]
+            proof = [
+                item
+                for item in minimum
+                if (scenario.get("scenario", ""), item) in proof_evidence
+            ]
             outcome = outcomes_by_scenario.get(scenario.get("scenario", ""), {})
             proof_gate_lines.append(
-                f"{scenario.get('scenario', '')}: {len(present)}/{len(minimum)} minimum evidence, "
+                f"{scenario.get('scenario', '')}: proof {len(proof)}/{len(minimum)} minimum evidence "
+                f"(captured {len(present)}), "
                 f"outcome {outcome.get('outcome', 'not_started')} - {gate.get('done_when', '')}"
             )
     driver_body = "\n".join(driver_lines) if driver_lines else "Driver plan not generated yet."
