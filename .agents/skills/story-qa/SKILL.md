@@ -75,6 +75,18 @@ python3 tools/product-journey/run.py --emit-matrix --seed demo \
   --target-proof-file .artifacts/product-journey/target-proofs/<proof-id>
 ```
 
+Before spending live operator time, run the no-LLM dogfood smoke:
+
+```sh
+python3 tools/product-journey/run.py --dogfood-smoke --seed demo
+```
+
+That single command composes the normal pieces: a 10-repo matrix, one concrete
+assignment run, representative demo evidence, review, run validation, matrix
+rollup, matrix validation, and a smoke-level Slidey deck under
+`.artifacts/product-journey/dogfood/<dogfood-id>/`. Treat it as an artifact-loop
+proof only; it does not replace live visual MCP or cassette evidence.
+
 Use `--matrix-personas all` when every persona should run against every target.
 The matrix is a no-LLM assignment plan; before a live scored sweep, refresh each
 target's current open bug count from its `bug_query` with

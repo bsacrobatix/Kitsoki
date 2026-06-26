@@ -32,6 +32,7 @@ LOG = ROOT / ".context" / "product-journey-runlog.md"
 ARTIFACT_ROOT = ROOT / ".artifacts" / "product-journey"
 MATRIX_ROOT = ARTIFACT_ROOT / "matrices"
 TARGET_PROOF_ROOT = ARTIFACT_ROOT / "target-proofs"
+DOGFOOD_ROOT = ARTIFACT_ROOT / "dogfood"
 DEFAULT_DECK = ROOT / "docs" / "decks" / "product-journey-eval.slidey.json"
 STAGES = [
     "discover_product",
@@ -2564,6 +2565,198 @@ def write_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
     }
 
 
+def render_dogfood_smoke_summary(report: dict) -> str:
+    validation = report["validation"]
+    review = report["review"]
+    rollup = report["rollup"]
+    lines = [
+        "# Product journey dogfood smoke",
+        "",
+        f"- Smoke: `{report['dogfood_id']}`",
+        f"- Created: {report['created_at']}",
+        f"- Seed: `{report['seed']}`",
+        f"- Status: `{report['status']}`",
+        f"- Matrix: `{report['matrix']['matrix_id']}`",
+        f"- Run: `{report['run']['run_id']}`",
+        f"- Assignment: `{report['assignment']['id']}`",
+        "",
+        "## Artifacts",
+        "",
+        f"- Matrix dir: `{report['matrix']['matrix_dir']}`",
+        f"- Matrix deck: `{report['matrix']['deck_path']}`",
+        f"- Run dir: `{report['run']['run_dir']}`",
+        f"- Run deck: `{report['run']['deck_path']}`",
+        f"- Run agent brief: `{report['run']['agent_brief_path']}`",
+        f"- Rollup deck: `{rollup['deck_path']}`",
+        f"- Smoke deck: `{report['artifacts']['deck']}`",
+        "",
+        "## Gates",
+        "",
+        f"- Review: {review['review_status']} - {review['summary']}",
+        f"- Run validation: {validation['run']['status']} ({validation['run']['errors']} errors, {validation['run']['warnings']} warnings)",
+        f"- Matrix validation: {validation['matrix']['status']} ({validation['matrix']['errors']} errors, {validation['matrix']['warnings']} warnings)",
+        f"- Rollup runs: {rollup['runs_found']} / {rollup['assignments']}",
+        f"- Rollup evidence: {rollup['present_evidence_count']} / {rollup['required_evidence_count']}",
+        "",
+        "## Notes",
+        "",
+    ]
+    for note in report["notes"]:
+        lines.append(f"- {note}")
+    return "\n".join(lines) + "\n"
+
+
+def render_dogfood_smoke_deck(report: dict) -> dict:
+    validation = report["validation"]
+    review = report["review"]
+    rollup = report["rollup"]
+    artifact_body = "\n".join([
+        f"Matrix: {report['matrix']['matrix_dir']}",
+        f"Matrix deck: {report['matrix']['deck_path']}",
+        f"Run: {report['run']['run_dir']}",
+        f"Run deck: {report['run']['deck_path']}",
+        f"Agent brief: {report['run']['agent_brief_path']}",
+        f"Rollup deck: {rollup['deck_path']}",
+    ])
+    gate_body = "\n".join([
+        f"Review: {review['review_status']}",
+        f"Review checks: {review['passed']}/{review['total']} passed, {review['warnings']} warnings, {review['failed']} failures",
+        f"Run validation: {validation['run']['status']} ({validation['run']['errors']} errors)",
+        f"Matrix validation: {validation['matrix']['status']} ({validation['matrix']['errors']} errors, {validation['matrix']['warnings']} warnings)",
+        f"Rollup runs: {rollup['runs_found']} / {rollup['assignments']}",
+    ])
+    return {
+        "meta": {
+            "mode": "report",
+            "title": "Product Journey Dogfood Smoke",
+            "phase": "dogfood-smoke",
+            "resolution": {"width": 1920, "height": 1080},
+        },
+        "scenes": [
+            {
+                "type": "title",
+                "title": "Product Journey Dogfood Smoke",
+                "subtitle": f"{report['assignment']['target']['label']} · {report['assignment']['persona']['label']}",
+                "narration": "A deterministic no-LLM proof that the product journey matrix, run, review, validation, rollup, and deck artifacts compose end to end.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Assignment",
+                "title": report["assignment"]["id"],
+                "body": "\n".join([
+                    f"Target: {report['assignment']['target']['label']}",
+                    f"Persona: {report['assignment']['persona']['label']}",
+                    f"Seed: {report['assignment']['seed']}",
+                    f"Scenarios: {report['matrix']['scenario_count']}",
+                ]),
+                "narration": "The smoke uses the first deterministic matrix assignment as a representative end-to-end bundle.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Gates",
+                "title": report["status"],
+                "body": gate_body,
+                "narration": "The smoke is only successful when the generated run and matrix validate and the run passes the review gate.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Artifacts",
+                "title": "Reviewable outputs",
+                "body": artifact_body,
+                "narration": "The smoke emits the same review surfaces a live or cassette-backed product journey run will use.",
+            },
+        ],
+    }
+
+
+def build_dogfood_smoke(
+    catalog: dict,
+    github_targets: dict,
+    personas: list[dict],
+    scenarios: list[dict],
+    seed: str,
+) -> dict:
+    dogfood_id = f"{slug_timestamp()}-dogfood-{seed}"
+    dogfood_dir = DOGFOOD_ROOT / dogfood_id
+    dogfood_dir.mkdir(parents=True, exist_ok=False)
+
+    matrix_dir, matrix = build_matrix_bundle(github_targets, personas, scenarios, f"{seed}-matrix", "primary")
+    assignment = matrix["assignments"][0]
+    run_dir, run_json = build_run_bundle(
+        catalog,
+        github_targets,
+        personas,
+        scenarios,
+        assignment["target"]["id"],
+        assignment["persona"]["id"],
+        assignment["seed"],
+        "dogfood-smoke",
+        publish_deck=None,
+    )
+    seeded = seed_demo_evidence(run_dir, publish_deck=None)
+    reviewed = review_run_bundle(run_dir, publish_deck=None)
+    run_validation = validate_run_bundle(run_dir)
+    rollup = write_matrix_rollup(matrix_dir, [str(run_dir)])
+    matrix_validation = validate_matrix_bundle(matrix_dir)
+    status = "passed" if (
+        reviewed["review_status"] == "ready"
+        and run_validation["status"] == "valid"
+        and matrix_validation["status"] == "valid"
+    ) else "failed"
+    report = {
+        "status": status,
+        "dogfood_id": dogfood_id,
+        "created_at": now_utc(),
+        "seed": seed,
+        "dogfood_dir": str(dogfood_dir),
+        "matrix": {
+            "matrix_id": matrix["matrix_id"],
+            "matrix_dir": str(matrix_dir),
+            "deck_path": str(matrix_dir / "deck.slidey.json"),
+            "scenario_count": matrix["scenario_count"],
+            "assignment_count": matrix["assignment_count"],
+            "target_count": matrix["target_count"],
+        },
+        "assignment": {
+            "id": assignment["id"],
+            "seed": assignment["seed"],
+            "target": assignment["target"],
+            "persona": assignment["persona"],
+        },
+        "run": {
+            "run_id": run_json["run_id"],
+            "run_dir": str(run_dir),
+            "deck_path": str(run_dir / "deck.slidey.json"),
+            "execution_plan_path": str(run_dir / "execution-plan.md"),
+            "driver_plan_path": str(run_dir / "driver-plan.md"),
+            "agent_brief_path": str(run_dir / "agent-brief.md"),
+            "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
+            "media_manifest_path": str(run_dir / "media-manifest.json"),
+        },
+        "seeded": seeded,
+        "review": reviewed,
+        "validation": {
+            "run": run_validation,
+            "matrix": matrix_validation,
+        },
+        "rollup": rollup,
+        "notes": [
+            "This smoke is deterministic and does not call a live LLM.",
+            "Demo evidence placeholders prove aggregation and deck shape only; live visual MCP or cassette evidence is still required for product claims.",
+            "Matrix validation may warn when current GitHub target proof has not been refreshed with --refresh-github-targets.",
+        ],
+        "artifacts": {
+            "report": str(dogfood_dir / "dogfood.json"),
+            "summary": str(dogfood_dir / "dogfood.md"),
+            "deck": str(dogfood_dir / "deck.slidey.json"),
+        },
+    }
+    write_json(dogfood_dir / "dogfood.json", report)
+    (dogfood_dir / "dogfood.md").write_text(render_dogfood_smoke_summary(report), encoding="utf-8")
+    write_json(dogfood_dir / "deck.slidey.json", render_dogfood_smoke_deck(report))
+    return report
+
+
 def render_journey(run_json: dict) -> str:
     lines = [
         "# Product journey dry run",
@@ -3012,6 +3205,7 @@ def main() -> None:
     parser.add_argument("--run-log", action="store_true", help="Force a timestamped run log entry")
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
+    parser.add_argument("--dogfood-smoke", action="store_true", help="Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
     parser.add_argument("--refresh-github-targets", action="store_true", help="Query GitHub for current open bug counts and write a target-proof artifact")
     parser.add_argument("--target-proof-file", default="", help="target-proof.json or target-proof directory to merge into --emit-matrix")
     parser.add_argument("--rollup-matrix", action="store_true", help="Aggregate reviewed run bundles into a matrix rollup deck")
@@ -3073,6 +3267,47 @@ def main() -> None:
     personas = load_personas(PERSONAS)
     scenarios = load_scenarios(SCENARIOS)
     github_targets = load_github_targets(GITHUB_TARGETS)
+
+    if args.dogfood_smoke:
+        report = build_dogfood_smoke(catalog, github_targets, personas, scenarios, args.seed)
+        if args.json_output:
+            print(json.dumps({
+                "status": report["status"],
+                "dogfood_id": report["dogfood_id"],
+                "dogfood_dir": report["dogfood_dir"],
+                "report_path": report["artifacts"]["report"],
+                "summary_path": report["artifacts"]["summary"],
+                "deck_path": report["artifacts"]["deck"],
+                "matrix_dir": report["matrix"]["matrix_dir"],
+                "matrix_deck_path": report["matrix"]["deck_path"],
+                "run_dir": report["run"]["run_dir"],
+                "run_deck_path": report["run"]["deck_path"],
+                "rollup_deck_path": report["rollup"]["deck_path"],
+                "review_status": report["review"]["review_status"],
+                "run_validation_status": report["validation"]["run"]["status"],
+                "matrix_validation_status": report["validation"]["matrix"]["status"],
+                "matrix_validation_warnings": report["validation"]["matrix"]["warnings"],
+            }, sort_keys=True))
+            append_log(f"Ran product journey dogfood smoke {report['dogfood_id']}: {report['status']}")
+            if report["status"] != "passed":
+                raise SystemExit(1)
+            return
+        print(f"Product journey dogfood smoke: {report['dogfood_id']}")
+        print(f"Status: {report['status']}")
+        print(f"Artifacts: {report['dogfood_dir']}")
+        print(f"Summary: {report['artifacts']['summary']}")
+        print(f"Smoke deck: {report['artifacts']['deck']}")
+        print(f"Matrix: {report['matrix']['matrix_dir']}")
+        print(f"Run: {report['run']['run_dir']}")
+        print(f"Run deck: {report['run']['deck_path']}")
+        print(f"Rollup deck: {report['rollup']['deck_path']}")
+        print(f"Review: {report['review']['summary']}")
+        print(f"Run validation: {report['validation']['run']['status']}")
+        print(f"Matrix validation: {report['validation']['matrix']['status']} ({report['validation']['matrix']['warnings']} warnings)")
+        append_log(f"Ran product journey dogfood smoke {report['dogfood_id']}: {report['status']}")
+        if report["status"] != "passed":
+            raise SystemExit(1)
+        return
 
     if args.refresh_github_targets:
         result = refresh_github_target_proofs(github_targets, args.seed)

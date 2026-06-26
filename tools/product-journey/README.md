@@ -40,6 +40,20 @@ python3 tools/product-journey/run.py --emit-matrix --seed demo \
 python3 tools/product-journey/run.py --emit-matrix --seed demo --matrix-personas all
 ```
 
+Prove the no-LLM end-to-end artifact loop in one command:
+
+```sh
+python3 tools/product-journey/run.py --dogfood-smoke --seed demo
+```
+
+This creates a 10-repo matrix, turns the first deterministic assignment into a
+run bundle, seeds representative demo evidence, reviews and validates the run,
+rolls it back into the matrix, validates the matrix, and writes a smoke report
+under `.artifacts/product-journey/dogfood/<dogfood-id>/`. It also emits a
+smoke-level Slidey deck plus the normal run, matrix, and rollup decks. The demo
+evidence proves aggregation and deck shape only; live visual MCP or cassette
+evidence is still required before making product claims.
+
 This writes `.artifacts/product-journey/matrices/<matrix-id>/` with
 `matrix.json`, `matrix.md`, and `deck.slidey.json`. The source target list lives
 in `github-targets.json`; `--refresh-github-targets` writes
