@@ -323,12 +323,22 @@
       "narration": "Building this is harder than it looks. Agents drift. State machines can't parse text."
     },
     {
-      "type": "narrative",
-      "eyebrow": "Cat Wrangling",
-      "lede": "Orchestrating agents without structure is exactly this.",
-      "body": "Agents drift without shared structure. One invents extra steps. Another skips the gate. Kitsoki ends this by owning the plan in the runtime, assigning bounded jobs, and testing every path from day one.",
-      "hold": 195,
-      "narration": "Orchestrating agents without structure is cat wrangling. Kitsoki ends the wrangling by keeping the runtime in charge."
+      "type": "cards",
+      "variant": "grid",
+      "title": "Cat wrangling",
+      "narration": "Orchestrating agents without structure is cat wrangling. Kitsoki ends the wrangling by keeping the runtime in charge.",
+      "cards": [
+        {
+          "label": "Without structure",
+          "sub": "Agents drift, invent steps, and skip gates.",
+          "style": "primary"
+        },
+        {
+          "label": "With Kitsoki",
+          "sub": "The runtime owns the plan, bounds the jobs, and tests every path.",
+          "style": "secondary"
+        }
+      ]
     },
     {
       "type": "diagram-svg",
