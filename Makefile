@@ -48,7 +48,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup build install uninstall test test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff gears-history-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup build install uninstall test test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke gears-history-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
 
@@ -284,22 +284,39 @@ qs-bakeoff: install
 gears-bakeoff:
 	go test -tags gearsbakeoff -run TestGearsBakeoff -count=1 -v ./tools/bugfix-bakeoff/external/
 
-# gears-history-smoke is the free product-path smoke for the repo-history
-# training loop on gears-rust: harness unit checks, candidate/profile preflight,
-# scoped RED/GREEN arming, exact drive-command rendering, and repo-bakeoff story
-# flow validation. It never calls a real LLM. Override the bug/candidate matrix
-# to match the live cell you intend to run.
+# history-smoke is the free product-path smoke for any external repo-history
+# training manifest: harness unit checks, candidate/profile preflight, scoped
+# RED/GREEN arming, exact drive-command rendering, and repo-bakeoff story flow
+# validation. It never calls a real LLM.
+#   make history-smoke HISTORY_PROJECT=query-string HISTORY_BUGS=qs1 HISTORY_CANDIDATES=gpt-5.5
+#   make history-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR=~/code/gears-rust HISTORY_BUGS=bug1 HISTORY_CANDIDATES=opus-4.8
+HISTORY_PROJECT ?=
+HISTORY_REPO_DIR ?=
+HISTORY_BUGS ?=
+HISTORY_CANDIDATES ?=
+history-smoke:
+	@test -n "$(HISTORY_PROJECT)" || (echo "HISTORY_PROJECT is required"; exit 1)
+	@test -n "$(HISTORY_BUGS)" || (echo "HISTORY_BUGS is required"; exit 1)
+	@test -n "$(HISTORY_CANDIDATES)" || (echo "HISTORY_CANDIDATES is required"; exit 1)
+	python3 tools/bugfix-bakeoff/external/bench_grade_test.py
+	@if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
+		python3 tools/bugfix-bakeoff/external/bench.py preflight --project "$(HISTORY_PROJECT)" --bug "$(HISTORY_BUGS)" $$repo_arg --candidate "$(HISTORY_CANDIDATES)"
+	@if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
+		python3 tools/bugfix-bakeoff/external/bench.py verify --project "$(HISTORY_PROJECT)" --bug "$(HISTORY_BUGS)" $$repo_arg
+	@if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
+		python3 tools/bugfix-bakeoff/external/bench.py drive-plan --project "$(HISTORY_PROJECT)" --bug "$(HISTORY_BUGS)" $$repo_arg --candidate "$(HISTORY_CANDIDATES)"
+	GOCACHE=$$(pwd)/.cache/go-build go run ./cmd/kitsoki validate stories/repo-bakeoff/app.yaml
+	GOCACHE=$$(pwd)/.cache/go-build go run ./cmd/kitsoki test flows stories/repo-bakeoff/app.yaml
+
+# gears-history-smoke is the reference private/heavy repo wrapper around the
+# generic history-smoke target. Override the bug/candidate matrix to match the
+# live cell you intend to run.
 #   GEARS_RUST_REPO=~/code/gears-rust make gears-history-smoke
 GEARS_HISTORY_BUGS ?= bug1
 GEARS_HISTORY_CANDIDATES ?= opus-4.8
 gears-history-smoke:
 	@test -n "$(GEARS_RUST_REPO)" || (echo "GEARS_RUST_REPO must point at a local gears-rust checkout"; exit 1)
-	python3 tools/bugfix-bakeoff/external/bench_grade_test.py
-	python3 tools/bugfix-bakeoff/external/bench.py preflight --project gears-rust --bug "$(GEARS_HISTORY_BUGS)" --repo-dir "$(GEARS_RUST_REPO)" --candidate "$(GEARS_HISTORY_CANDIDATES)"
-	python3 tools/bugfix-bakeoff/external/bench.py verify --project gears-rust --bug "$(GEARS_HISTORY_BUGS)" --repo-dir "$(GEARS_RUST_REPO)"
-	python3 tools/bugfix-bakeoff/external/bench.py drive-plan --project gears-rust --bug "$(GEARS_HISTORY_BUGS)" --repo-dir "$(GEARS_RUST_REPO)" --candidate "$(GEARS_HISTORY_CANDIDATES)"
-	GOCACHE=$$(pwd)/.cache/go-build go run ./cmd/kitsoki validate stories/repo-bakeoff/app.yaml
-	GOCACHE=$$(pwd)/.cache/go-build go run ./cmd/kitsoki test flows stories/repo-bakeoff/app.yaml
+	$(MAKE) history-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(GEARS_RUST_REPO)" HISTORY_BUGS="$(GEARS_HISTORY_BUGS)" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)"
 
 # cost-report builds the per-story cost-savings report (the reusable form of
 # docs/case-studies/git-ops-cost.md): the deterministic story cost (agent spend

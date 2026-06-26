@@ -139,6 +139,32 @@ Excluded from `make test` (the `qsbakeoff` build tag). Needs network, git,
 node/npm, python3+pyyaml, and an installed `kitsoki`. It proves onboarding works
 and every fixture is armed **before** any LLM is spent.
 
+For a repo owner preparing a specific live matrix, use the generic product-path
+smoke. It is also deterministic and free: it runs the harness unit checks,
+preflights the selected project/bug/candidate matrix, verifies the selected
+oracles RED@baseline/GREEN@fix, renders exact `drive_cell.sh --score` commands,
+and validates the `repo-bakeoff` story flows.
+
+```sh
+make history-smoke \
+  HISTORY_PROJECT=query-string \
+  HISTORY_BUGS=qs1 \
+  HISTORY_CANDIDATES=gpt-5.5
+```
+
+For a private or local-only repo, include the checkout path:
+
+```sh
+make history-smoke \
+  HISTORY_PROJECT=gears-rust \
+  HISTORY_REPO_DIR=~/code/gears-rust \
+  HISTORY_BUGS=bug1 \
+  HISTORY_CANDIDATES=opus-4.8
+```
+
+`make gears-history-smoke` is the preconfigured gears-rust shortcut. If the
+generic smoke fails, fix that blocker before running cost-bearing cells.
+
 ## Run cost-bearing LLM cells (operator-only)
 
 A whole cell — prepare the baseline worktree, drive the kitsoki bugfix pipeline

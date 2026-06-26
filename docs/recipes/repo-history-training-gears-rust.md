@@ -64,9 +64,10 @@ Use the same bug list you plan to run in the matrix. A one-bug smoke should pass
 `--bug bug1`; the drivable `repo-bakeoff` story does this automatically from
 `world.bugs`.
 
-For the full product-path smoke, run the bundled target. It covers the harness
-unit checks, candidate/profile preflight, scoped RED/GREEN arming, drive-command
-rendering, and the `repo-bakeoff` story flows without calling a live model:
+For the full product-path smoke, run the bundled target. It delegates to the
+generic `history-smoke` gate and covers the harness unit checks,
+candidate/profile preflight, scoped RED/GREEN arming, drive-command rendering,
+and the `repo-bakeoff` story flows without calling a live model:
 
 ```sh
 GEARS_RUST_REPO=/Users/brad/code/gears-rust make gears-history-smoke
@@ -80,6 +81,17 @@ GEARS_RUST_REPO=/Users/brad/code/gears-rust \
 GEARS_HISTORY_BUGS=bug1,bug4 \
 GEARS_HISTORY_CANDIDATES=opus-4.8,gpt-5.3-spark \
 make gears-history-smoke
+```
+
+For another repo, use the generic target directly after adding a manifest and
+oracles under `tools/bugfix-bakeoff/external/projects/<name>/`:
+
+```sh
+make history-smoke \
+  HISTORY_PROJECT=<name> \
+  HISTORY_REPO_DIR=/path/to/private-or-local-checkout \
+  HISTORY_BUGS=<bug-id> \
+  HISTORY_CANDIDATES=<candidate-key>
 ```
 
 If this target fails, do not run live cells. Its failures are setup or story
