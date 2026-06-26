@@ -183,6 +183,10 @@ artifact and feeds the Slidey playback scene with structured media entries.
 Embeddable video, rrweb, and image evidence also produce standalone
 `Playback evidence` scenes in `deck.slidey.json`, so review can jump directly to
 key interactions instead of scraping paths from prose.
+The generated deck also includes a `Persona lens` scene so cross-run review can
+compare why a core maintainer, dependency debugger, docs-minded contributor, or
+IDE-first engineer started from different surfaces and weighted evidence
+differently.
 Scenario outcomes summarize evidence coverage and finding counts per scenario
 so onboarding, bugfix, PRD/design, feature implementation, and product-bug gaps
 stay visible independently of the bundle-level review status.

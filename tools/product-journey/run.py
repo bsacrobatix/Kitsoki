@@ -3363,7 +3363,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
 
     validate_slidey_deck_shape(deck, media_manifest, issues)
     scene_eyebrows = deck_scene_eyebrows(deck)
-    for expected in ["Driver plan", "Video playback", "Scenario outcomes", "Proof gates"]:
+    for expected in ["Persona lens", "Driver plan", "Video playback", "Scenario outcomes", "Proof gates"]:
         if deck and expected not in scene_eyebrows:
             add_validation_issue(issues, "error", "deck-scene", "deck.slidey.json is missing a required review scene", expected)
     playback_count = media_manifest.get("summary", {}).get("playback_items", 0) if media_manifest else 0
@@ -4532,6 +4532,14 @@ def render_deck(
         for item in finding_items[:12]
     ]
     findings_body = "\n".join(finding_lines) if finding_lines else "No strengths, weaknesses, issues, or fixes recorded yet."
+    lens = persona_lens(run_json["persona"])
+    persona_body = (
+        f"Starting surface: {lens['starting_surface']}\n"
+        f"First question: {lens['first_question']}\n"
+        f"Evidence emphasis: {lens['evidence_emphasis']}\n"
+        f"Escalation trigger: {lens['escalation_trigger']}\n"
+        f"Finding bias: {lens['finding_bias']}"
+    )
     outcome_lines = []
     if scenario_outcomes is not None:
         outcome_lines = [
@@ -4613,6 +4621,13 @@ def render_deck(
             "title": run_json["run_id"],
             "body": "\n".join(stage_lines),
             "narration": "The run records every expected stage before live or cassette evidence is attached.",
+        },
+        {
+            "type": "narrative",
+            "eyebrow": "Persona lens",
+            "title": run_json["persona"]["label"],
+            "body": persona_body,
+            "narration": "The persona lens explains how this reviewer should start, what they should question first, and which evidence matters most.",
         },
         {
             "type": "narrative",
