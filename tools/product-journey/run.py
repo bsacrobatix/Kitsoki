@@ -148,7 +148,7 @@ def _meta_value(project):
         "notes": project.get("notes", ""),
         "manifest": project.get("manifest"),
     }
-    for key in ["repo", "stack", "bug_query", "open_bug_floor", "source"]:
+    for key in ["repo", "stack", "license_spdx", "bug_query", "open_bug_floor", "source"]:
         if project.get(key) is not None:
             meta[key] = project[key]
     return meta
@@ -272,12 +272,20 @@ def fetch_github_target_proof(target: dict, selection_contract: dict) -> dict:
     forks = int(repo_payload.get("forks_count", 0))
     watchers = int(repo_payload.get("subscribers_count", repo_payload.get("watchers_count", 0)))
     license_info = repo_payload.get("license") or {}
+    reported_license = license_info.get("spdx_id") or license_info.get("key") or ""
+    expected_license = target.get("license_spdx", "")
+    effective_license = reported_license
+    license_source = "github"
+    if reported_license in {"", "NOASSERTION"} and expected_license:
+        effective_license = expected_license
+        license_source = "catalog"
     bug_floor_ok = count >= floor
     popularity_ok = stargazers >= stargazer_floor
+    license_ok = bool(effective_license and effective_license != "NOASSERTION")
     return {
         "target": target["id"],
         "label": target["label"],
-        "status": "pass" if bug_floor_ok and popularity_ok else "fail",
+        "status": "pass" if bug_floor_ok and popularity_ok and license_ok else "fail",
         "query": query,
         "api_url": issue_url,
         "repo_api_url": repo_url,
@@ -288,7 +296,11 @@ def fetch_github_target_proof(target: dict, selection_contract: dict) -> dict:
         "stargazer_floor": stargazer_floor,
         "forks_count": forks,
         "watchers_count": watchers,
-        "license": license_info.get("spdx_id") or license_info.get("key") or "",
+        "license": effective_license,
+        "reported_license": reported_license,
+        "expected_license": expected_license,
+        "license_source": license_source,
+        "license_ok": license_ok,
         "popularity_ok": popularity_ok,
         "bug_floor_ok": bug_floor_ok,
         "checked_at": now_utc(),
@@ -314,6 +326,7 @@ def refresh_github_target_proofs(github_targets: dict, seed: str) -> dict:
             "errors": errors,
             "open_bug_floor": github_targets["selection_contract"].get("open_bug_floor", 100),
             "stargazer_floor": github_targets["selection_contract"].get("stargazer_floor", 0),
+            "license": github_targets["selection_contract"].get("license", "open-source"),
         },
         "checks": checks,
         "artifacts": {
@@ -363,6 +376,8 @@ def render_target_proof(proof: dict) -> str:
             f"- Forks: {check.get('forks_count', 'unknown')}",
             f"- Watchers: {check.get('watchers_count', 'unknown')}",
             f"- License: {check.get('license', '')}",
+            f"- License source: {check.get('license_source', '')}",
+            f"- License OK: {check.get('license_ok', '')}",
             f"- Query: `{check.get('query', '')}`",
             f"- Checked: {check.get('checked_at', '')}",
             f"- Error: {check.get('error', '')}",
@@ -404,6 +419,10 @@ def merge_target_proofs(github_targets: dict, target_proof: dict) -> dict:
                 "forks_count": check.get("forks_count"),
                 "watchers_count": check.get("watchers_count"),
                 "license": check.get("license", ""),
+                "reported_license": check.get("reported_license", ""),
+                "expected_license": check.get("expected_license", ""),
+                "license_source": check.get("license_source", ""),
+                "license_ok": check.get("license_ok"),
                 "popularity_ok": check.get("popularity_ok"),
                 "bug_floor_ok": check.get("bug_floor_ok"),
                 "checked_at": check.get("checked_at", target_proof.get("created_at", "")),
@@ -918,7 +937,7 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
     targets = github_targets.get("targets", [])
     persona_required = ["id", "label", "description", "surface_preference", "risk_focus"]
     scenario_required = ["id", "label", "stage", "task", "primary_story", "required_mcp", "evidence", "success_criteria"]
-    target_required = ["id", "label", "repo", "stack", "bug_query", "open_bug_floor", "status", "notes"]
+    target_required = ["id", "label", "repo", "stack", "license_spdx", "bug_query", "open_bug_floor", "status", "notes"]
     allowed_mcp = {"visual.open", "visual.observe", "visual.act", "session.open", "session.inspect", "render.tui"}
     required_scenarios = {
         "product-discovery",
@@ -986,6 +1005,8 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
     selection_contract = github_targets.get("selection_contract", {})
     if selection_contract.get("host") != "github.com":
         add_corpus_issue(issues, "error", "target-selection-host", "GitHub target selection contract must use github.com", selection_contract.get("host", ""))
+    if selection_contract.get("license") != "open-source":
+        add_corpus_issue(issues, "error", "target-selection-license", "GitHub target selection contract must require open-source licensing", selection_contract.get("license", ""))
     if selection_contract.get("open_bug_floor", 0) < 100:
         add_corpus_issue(issues, "error", "target-selection-bug-floor", "Selection open_bug_floor is below the natural-use floor", str(selection_contract.get("open_bug_floor", "")))
     if len(targets) != expected_targets:
@@ -1001,6 +1022,8 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
             add_corpus_issue(issues, "error", "target-repo", "GitHub target repo must be a github.com owner/name URL", f"{target_id}: {repo}")
         if target.get("open_bug_floor", 0) < 100:
             add_corpus_issue(issues, "error", "target-open-bug-floor", "GitHub target open_bug_floor is below the natural-use floor", f"{target_id}: {target.get('open_bug_floor')}")
+        if target.get("license_spdx", "") in {"", "NOASSERTION"}:
+            add_corpus_issue(issues, "error", "target-license", "GitHub target must declare an open-source SPDX license", f"{target_id}: {target.get('license_spdx', '')}")
         issue_query = github_issue_search_query(target).lower()
         if "bug" not in issue_query:
             add_corpus_issue(issues, "warn", "target-bug-query", "GitHub target bug query does not include an explicit bug term or bug label", f"{target_id}: {target.get('bug_query', '')}")
@@ -3129,6 +3152,19 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
         ]
         if targets_below_popularity_floor:
             add_validation_issue(issues, "error", "matrix-target-popularity-floor", "GitHub proof shows targets below the popularity floor", "; ".join(targets_below_popularity_floor))
+        targets_without_license_proof = [
+            (
+                f"{target.get('id', f'target-{index}')}: "
+                f"{target.get('selection_proof', {}).get('license', 'unknown')}"
+            )
+            for index, target in enumerate(matrix.get("targets", []), start=1)
+            if (
+                target.get("selection_proof")
+                and target.get("selection_proof", {}).get("license_ok") is False
+            )
+        ]
+        if targets_without_license_proof:
+            add_validation_issue(issues, "error", "matrix-target-license", "GitHub proof does not show open-source license coverage", "; ".join(targets_without_license_proof))
         targets_with_proof_errors = [
             f"{target.get('id', f'target-{index}')}: {target.get('selection_proof', {}).get('error', '')}"
             for index, target in enumerate(matrix.get("targets", []), start=1)
@@ -3265,6 +3301,7 @@ def render_matrix_summary(matrix: dict) -> str:
         "## Selection Contract",
         "",
         f"- Host: {matrix['selection_contract']['host']}",
+        f"- License: {matrix['selection_contract'].get('license', 'not set')}",
         f"- Open bug floor: {matrix['selection_contract']['open_bug_floor']}",
         f"- Stargazer floor: {matrix['selection_contract'].get('stargazer_floor', 'not set')}",
         f"- Refresh: {matrix['selection_contract']['refresh_note']}",
@@ -3283,6 +3320,7 @@ def render_matrix_summary(matrix: dict) -> str:
                 f"(floor {selection_proof.get('open_bug_floor')}), "
                 f"{selection_proof.get('stargazers_count', 'unknown')} stars "
                 f"(floor {selection_proof.get('stargazer_floor', matrix['selection_contract'].get('stargazer_floor', 'unknown'))}, "
+                f"license {selection_proof.get('license', 'unknown')} via {selection_proof.get('license_source', 'unknown')}, "
                 f"checked {selection_proof.get('checked_at')})"
             )
         else:

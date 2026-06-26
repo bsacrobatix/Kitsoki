@@ -71,9 +71,10 @@ This writes `.artifacts/product-journey/matrices/<matrix-id>/` with
 in `github-targets.json`; `--refresh-github-targets` writes
 `.artifacts/product-journey/target-proofs/<proof-id>/target-proof.json` with
 current GitHub API counts for each target's `bug_query` plus repository
-popularity metadata. Feed that proof into `--emit-matrix` before a live scored
-sweep so the matrix records whether every target currently satisfies the
-100-open-bug floor and configured stargazer floor.
+popularity and license metadata. Feed that proof into `--emit-matrix` before a
+live scored sweep so the matrix records whether every target currently satisfies
+the 100-open-bug floor, configured stargazer floor, and open-source license
+contract.
 Each matrix assignment includes deterministic `scenario_tasks` that specialize
 the shared scenarios for the target repository, persona, stack, and bug query;
 use those prompts to keep natural-use runs repeatable instead of inventing a new
