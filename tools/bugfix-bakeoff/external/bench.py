@@ -337,21 +337,124 @@ def summarize(m, results_dir, deck=None, markdown=None):
     out = {"project": m["project"]["id"], "cells": cells, "rollup": {"by_candidate": by},
            "summary_path": str((HERE / results_dir / "summary.json"))}
     summary_path = HERE / results_dir / "summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(out, indent=2))
     if deck:
-        root = HERE.parents[2]
-        cmd = [
-            sys.executable,
-            str(root / "tools" / "report-deck" / "deterministic_deck.py"),
-            "--kind", "external-summary",
-            "--input", str(summary_path),
-            "--out", deck,
-        ]
-        if markdown:
-            cmd += ["--markdown", markdown]
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, text=True)
+        write_external_deck(out, Path(deck), markdown=Path(markdown) if markdown else None)
+        out["deck"] = {
+            "spec_path": deck,
+            "summary": external_headline(out),
+        }
+    if markdown:
+        out["markdown"] = markdown
     print(json.dumps(out))
     return 0
+
+
+def external_headline(summary):
+    by = summary.get("rollup", {}).get("by_candidate", {})
+    total = sum(v.get("n", 0) for v in by.values())
+    solved = sum(v.get("solved", 0) for v in by.values())
+    return f"{summary.get('project', 'project')} bake-off: {solved}/{total} solved"
+
+
+def write_external_deck(summary, deck_path, markdown=None):
+    """Write a small deterministic Slidey report directly from the external
+    summary. Kept local to this harness so repo-bakeoff does not depend on an
+    optional shared deck builder being installed in a consumer checkout."""
+    project = summary.get("project", "project")
+    cells = summary.get("cells", [])
+    by = summary.get("rollup", {}).get("by_candidate", {})
+    headline = external_headline(summary)
+    rows = []
+    for cand, bucket in sorted(by.items()):
+        n = bucket.get("n", 0)
+        solved = bucket.get("solved", 0)
+        partial = bucket.get("partial", 0)
+        failed = bucket.get("failed", 0)
+        rate = bucket.get("solve_rate", 0)
+        rows.append({"cells": [cand, str(n), str(solved), str(partial), str(failed), f"{rate:.0%}"]})
+    bug_rows = []
+    for c in sorted(cells, key=lambda item: (item.get("bug", ""), item.get("candidate", ""))):
+        outcome = c.get("outcome", {}) or {}
+        metrics = c.get("metrics", {}) or {}
+        cost = metrics.get("cost_usd")
+        cost_text = "subscription/unknown" if cost is None else f"${cost:.4f}"
+        bug_rows.append({
+            "cells": [
+                c.get("bug", ""),
+                c.get("candidate", ""),
+                outcome.get("quality", ""),
+                "pass" if outcome.get("oracle_pass") else "fail",
+                cost_text,
+            ]
+        })
+    deck = {
+        "meta": {
+            "title": f"{project} repo-history bake-off",
+            "resolution": {"width": 1920, "height": 1080},
+            "theme": "rose-pine-moon",
+        },
+        "scenes": [
+            {
+                "type": "title",
+                "eyebrow": "Kitsoki repo-history training",
+                "title": f"{project} bug-fix bake-off",
+                "subtitle": headline,
+                "narration": headline,
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Method",
+                "lede": "History becomes deterministic training material.",
+                "body": (
+                    "Each case pins a historical baseline and grades candidate fixes "
+                    "with the real regression oracle. Live model cells are driven "
+                    "through Kitsoki; this report is generated offline from scored JSON."
+                ),
+            },
+            {
+                "type": "table",
+                "title": "Candidate rollup",
+                "variant": "data",
+                "columns": ["Candidate", "Cells", "Solved", "Partial", "Failed", "Solve rate"],
+                "rows": rows,
+            },
+            {
+                "type": "table",
+                "title": "Cell verdicts",
+                "variant": "data",
+                "columns": ["Bug", "Candidate", "Quality", "Oracle", "Cost"],
+                "rows": bug_rows,
+            },
+        ],
+    }
+    deck_path.parent.mkdir(parents=True, exist_ok=True)
+    deck_path.write_text(json.dumps(deck, indent=2) + "\n")
+    if markdown:
+        markdown.parent.mkdir(parents=True, exist_ok=True)
+        lines = [
+            f"# {project} repo-history bake-off",
+            "",
+            headline,
+            "",
+            "## Candidate rollup",
+            "",
+            "| Candidate | Cells | Solved | Partial | Failed | Solve rate |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+        for cand, bucket in sorted(by.items()):
+            lines.append(
+                f"| {cand} | {bucket.get('n', 0)} | {bucket.get('solved', 0)} | "
+                f"{bucket.get('partial', 0)} | {bucket.get('failed', 0)} | "
+                f"{bucket.get('solve_rate', 0):.0%} |"
+            )
+        lines.extend(["", "## Cell verdicts", "", "| Bug | Candidate | Quality | Oracle |", "|---|---|---|---|"])
+        for c in sorted(cells, key=lambda item: (item.get("bug", ""), item.get("candidate", ""))):
+            outcome = c.get("outcome", {}) or {}
+            oracle = "pass" if outcome.get("oracle_pass") else "fail"
+            lines.append(f"| {c.get('bug', '')} | {c.get('candidate', '')} | {outcome.get('quality', '')} | {oracle} |")
+        markdown.write_text("\n".join(lines) + "\n")
 
 
 def trace_cost(trace):

@@ -189,7 +189,7 @@ python3 bench.py summarize --project query-string \
   --markdown ../../../.artifacts/query-string-bakeoff/2026-06-26t00-00-00z/report.md
 ```
 
-The deck builder reads `results/summary.json` and uses the shared
-`tools/report-deck/deterministic_deck.py` structure. Generated deck specs,
-HTML/MP4 renders, and review artifacts should stay under `.artifacts/<job>/<run>/`
-so reruns do not clobber older reports.
+The external summarizer writes a compact deterministic Slidey spec and Markdown
+report directly from `results/summary.json`. Generated deck specs, HTML/MP4
+renders, and review artifacts should stay under `.artifacts/<job>/<run>/` so
+reruns do not clobber older reports.

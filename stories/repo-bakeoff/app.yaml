@@ -22,8 +22,8 @@
 #              never in CI/auto (AGENTS.md no-LLM rule). Tracks the roster.
 #   scoring    deterministic: read the per-cell verdicts the harness wrote
 #              (results/cells/*.json) into a summary. host.run, free.
-#   reporting  deterministic: build the slidey deck spec from the summary
-#              (baked baked/deck.json is the no-LLM stand-in — a real deck).
+#   reporting  deterministic: present the generated markdown report + slidey
+#              deck spec from the summary.
 #   slideshow  deterministic: host.slidey.render → static-HTML deck + sidecar to
 #              host.artifacts_dir (EXACTLY slidey-edit's rendering room).
 #   done       gallery: the rendered report deck + the headline rollup.
@@ -52,6 +52,7 @@ world:
   repo:          { type: string, default: "" }               # echoed from the manifest
   repo_dir:      { type: string, default: "" }               # local checkout for private/local_only projects
   results_dir:   { type: string, default: "../../../.artifacts/external-bakeoff/results" } # relative to harness_dir
+  report_dir:    { type: string, default: "../../../.artifacts/external-bakeoff/report" }  # relative to harness_dir
   generated_at:  { type: string, default: "1970-01-01T00:00:00Z" }
 
   # ── The matrix (two axes) ────────────────────────────────────────────────────
@@ -71,7 +72,7 @@ world:
   summary:      { type: object, default: {} }
   summary_path: { type: string, default: "" }
 
-  # ── Report / deck (baked = a real slidey deck) ───────────────────────────────
+  # ── Report / deck ────────────────────────────────────────────────────────────
   deck:           { type: object, default: { spec_path: "stories/repo-bakeoff/baked/deck.json", summary: "External-repo bake-off report." } }
   report_markdown: { type: string, default: "" }
   deck_handle:     { type: string, default: "" }

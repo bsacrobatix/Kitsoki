@@ -136,7 +136,17 @@ python3 bench.py summarize \
 
 The summary is deterministic and free. It rolls up whatever live-driver cell JSON
 exists into solved / partial / failed counts and stores
-`.artifacts/external-bakeoff/results/summary.json`.
+`.artifacts/external-bakeoff/results/summary.json`. The same scoring step also
+writes:
+
+```text
+.artifacts/external-bakeoff/report/report.md
+.artifacts/external-bakeoff/report/deck.slidey.json
+```
+
+Those artifacts are generated from the scored cell JSON. They should not be
+edited by hand or committed unless you are deliberately publishing a frozen case
+study.
 
 ## Outputs
 
@@ -147,6 +157,8 @@ The external harness writes generated artifacts under:
   cells/<project>-<bug>-<candidate>/
   traces/<project>-<bug>-<candidate>.jsonl
   results/cells/<project>-<bug>-<candidate>-kitsoki.json
+  report/report.md
+  report/deck.slidey.json
   threads/<project>-<bug>-<candidate>.md
 ```
 

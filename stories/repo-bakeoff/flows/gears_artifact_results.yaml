@@ -66,6 +66,10 @@ host_handlers:
                   failed: 0
                   solve_rate: 1.0
             summary_path: .artifacts/external-bakeoff/results/summary.json
+            deck:
+              spec_path: .artifacts/external-bakeoff/report/deck.slidey.json
+              summary: "gears-rust bake-off: 1/1 solved"
+            markdown: .artifacts/external-bakeoff/report/report.md
 
 turns:
   - intent: { name: start, slots: {} }
@@ -90,6 +94,9 @@ turns:
     expect_state: reporting
     expect_world:
       summary_path: .artifacts/external-bakeoff/results/summary.json
-      report_markdown: "External-repo bake-off · project gears-rust · 1 cells rolled up by candidate."
+      deck:
+        spec_path: .artifacts/external-bakeoff/report/deck.slidey.json
+        summary: "gears-rust bake-off: 1/1 solved"
+      report_markdown: .artifacts/external-bakeoff/report/report.md
 
 expect_no_errors: true

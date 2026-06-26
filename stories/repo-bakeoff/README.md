@@ -35,8 +35,8 @@ idle ─start─▶ configure ─accept─▶ prepare ─accept─▶ running �
 | `configure` | deterministic | Declare the matrix (bugs × candidates); compute the cell roster; optionally carry `repo_dir` for private/local repos. |
 | `prepare` | **deterministic · free · real** | `host.run → bench.py verify [--repo-dir ...]` arms every hidden oracle (RED@baseline / GREEN@real-fix) — proves the bake-off is valid **before** any LLM is spent. |
 | `running` | stub | Tracks the roster. The cost-bearing per-cell drive (`drive_cell.sh --candidate <m> --score`) is run **manually** — the only cost-bearing step. |
-| `scoring` | deterministic | `host.run → bench.py summarize --results <artifact-results-dir>` rolls the per-cell verdicts up by candidate (solved/partial/failed + solve_rate). |
-| `reporting` | deterministic | Assemble the report + select the slidey deck spec (baked = a real deck). |
+| `scoring` | deterministic | `host.run → bench.py summarize --results <artifact-results-dir> --deck <report-dir>/deck.slidey.json --markdown <report-dir>/report.md` rolls the per-cell verdicts up and writes project-specific report artifacts. |
+| `reporting` | deterministic | Present the generated report markdown path and Slidey deck spec. |
 | `slideshow` | deterministic | `host.slidey.render` → static-HTML deck + sidecar to `host.artifacts_dir` (exactly slidey-edit's rendering room). |
 | `done` | gallery | The rendered report deck + the headline rollup. |
 
@@ -69,4 +69,6 @@ tools/bugfix-bakeoff/external/drive_cell.sh \
 By default `drive_cell.sh` writes generated results under
 `.artifacts/external-bakeoff/results/`. The story's `results_dir` defaults to the
 same directory, expressed relative to `harness_dir`, so `scoring` summarizes the
-actual live-driver output instead of the checked-in reference results.
+actual live-driver output instead of the checked-in reference results. `scoring`
+also writes `.artifacts/external-bakeoff/report/report.md` and
+`.artifacts/external-bakeoff/report/deck.slidey.json`.
