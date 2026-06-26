@@ -323,22 +323,151 @@
       "narration": "Building this is harder than it looks. Agents drift. State machines can't parse text."
     },
     {
-      "type": "cards",
-      "variant": "grid",
+      "type": "diagram-svg",
       "title": "Cat wrangling",
       "narration": "Orchestrating agents without structure is cat wrangling. Kitsoki ends the wrangling by keeping the runtime in charge.",
-      "cards": [
+      "panels": [
         {
           "label": "Without structure",
-          "sub": "Agents drift, invent steps, and skip gates.",
-          "style": "primary"
+          "viewBox": "0 0 760 560",
+          "nodes": [
+            {
+              "id": "agent",
+              "label": "Agent",
+              "sub": "chatty model",
+              "lines": [
+                "free-form plan",
+                "invents steps"
+              ],
+              "x": 80,
+              "y": 40,
+              "w": 600,
+              "h": 120,
+              "style": "primary"
+            },
+            {
+              "id": "tool",
+              "label": "Tools",
+              "sub": "shell / repo",
+              "lines": [
+                "direct actions",
+                "no replay"
+              ],
+              "x": 80,
+              "y": 220,
+              "w": 600,
+              "h": 120
+            },
+            {
+              "id": "review",
+              "label": "Review",
+              "sub": "late correction",
+              "lines": [
+                "drift noticed",
+                "after the fact"
+              ],
+              "x": 80,
+              "y": 400,
+              "w": 600,
+              "h": 120
+            }
+          ],
+          "edges": [
+            {
+              "from": "agent",
+              "to": "tool",
+              "label": "tries"
+            },
+            {
+              "from": "tool",
+              "to": "review",
+              "label": "hope"
+            },
+            {
+              "from": "review",
+              "to": "agent",
+              "label": "redo",
+              "style": "back",
+              "bus": 700,
+              "lift": -18,
+              "land": 18
+            }
+          ],
+          "caption": "The work is improvised in the moment, so drift only shows up after the damage is done."
         },
         {
           "label": "With Kitsoki",
-          "sub": "The runtime owns the plan, bounds the jobs, and tests every path.",
-          "style": "secondary"
+          "viewBox": "0 0 760 560",
+          "nodes": [
+            {
+              "id": "runtime",
+              "label": "Runtime",
+              "sub": "owns the plan",
+              "lines": [
+                "typed steps",
+                "bounded jobs"
+              ],
+              "x": 80,
+              "y": 40,
+              "w": 600,
+              "h": 120,
+              "style": "primary"
+            },
+            {
+              "id": "work",
+              "label": "Work item",
+              "sub": "stateful step",
+              "lines": [
+                "reproduce",
+                "implement"
+              ],
+              "x": 80,
+              "y": 220,
+              "w": 600,
+              "h": 120
+            },
+            {
+              "id": "gate",
+              "label": "Gate",
+              "sub": "prove it",
+              "lines": [
+                "test",
+                "review",
+                "replay"
+              ],
+              "x": 80,
+              "y": 400,
+              "w": 600,
+              "h": 120,
+              "style": "secondary"
+            }
+          ],
+          "edges": [
+            {
+              "from": "runtime",
+              "to": "work",
+              "label": "assigns"
+            },
+            {
+              "from": "work",
+              "to": "gate",
+              "label": "submits"
+            },
+            {
+              "from": "gate",
+              "to": "runtime",
+              "label": "feedback",
+              "style": "back",
+              "bus": 700,
+              "lift": -18,
+              "land": 18
+            }
+          ],
+          "caption": "The runtime keeps the plan explicit, the work bounded, and the feedback attached."
         }
-      ]
+      ],
+      "caption": "Kitsoki removes the wrangling by putting the runtime between intent and action.",
+      "hold": 195
     },
     {
       "type": "diagram-svg",
