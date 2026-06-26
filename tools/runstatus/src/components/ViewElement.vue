@@ -58,15 +58,6 @@ function artifactUrl(handle: string): string {
   return _ds.artifactUrl(handle);
 }
 
-function withQuery(url: string, params: Record<string, string>): string {
-  const entries = Object.entries(params).filter(([, v]) => v !== "");
-  if (entries.length === 0) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}${entries
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-    .join("&")}`;
-}
-
 const props = defineProps<{ element: ViewElement }>();
 
 const el = computed(() => props.element);
@@ -113,12 +104,6 @@ const mediaMime = computed<string>(() => {
 // the slidey poster+overlay substrate.
 const isSlideshow = computed<boolean>(
   () => (el.value.MediaKind ?? "").toLowerCase() === "slideshow"
-);
-const slideshowUrl = computed<string>(() =>
-  withQuery(artifactUrl(mediaHandle.value), {
-    scene: _run.embedScope,
-    step: _run.embedStep,
-  })
 );
 
 // ── Annotate affordance (unified ArtifactAnnotator) ──────────────────────────
@@ -584,7 +569,7 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
           class="ve-media-iframe"
           data-testid="media-slideshow-frame"
           sandbox="allow-scripts"
-          :src="slideshowUrl"
+          :src="artifactUrl(mediaHandle)"
           :title="mediaCaption || mediaHandle"
         />
         <a
