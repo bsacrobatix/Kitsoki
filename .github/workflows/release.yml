@@ -19,8 +19,8 @@ permissions:
   contents: write # create the GitHub Release and upload assets
 
 jobs:
-  release:
-    name: Build & publish binaries
+  build:
+    name: Build binaries
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -117,6 +117,86 @@ jobs:
           name: kitsoki-binaries
           path: dist/*
           retention-days: 7
+
+  native-smoke:
+    name: Native smoke (${{ matrix.target }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runs-on: ubuntu-latest
+            archive: kitsoki_linux_amd64.tar.gz
+            command: |
+              set -euo pipefail
+              mkdir -p smoke
+              tar -C smoke -xzf "dist/${ARCHIVE}"
+              ./smoke/kitsoki version
+              ./smoke/kitsoki --help >/dev/null
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+            archive: kitsoki_linux_arm64.tar.gz
+            command: |
+              set -euo pipefail
+              mkdir -p smoke
+              tar -C smoke -xzf "dist/${ARCHIVE}"
+              ./smoke/kitsoki version
+              ./smoke/kitsoki --help >/dev/null
+          - target: darwin-arm64
+            runs-on: macos-14
+            archive: kitsoki_darwin_arm64.tar.gz
+            command: |
+              set -euo pipefail
+              mkdir -p smoke
+              tar -C smoke -xzf "dist/${ARCHIVE}"
+              ./smoke/kitsoki version
+              ./smoke/kitsoki --help >/dev/null
+          - target: darwin-amd64
+            runs-on: macos-13
+            archive: kitsoki_darwin_amd64.tar.gz
+            command: |
+              set -euo pipefail
+              mkdir -p smoke
+              tar -C smoke -xzf "dist/${ARCHIVE}"
+              ./smoke/kitsoki version
+              ./smoke/kitsoki --help >/dev/null
+          - target: windows-amd64
+            runs-on: windows-latest
+            archive: kitsoki_windows_amd64.zip
+            command: |
+              New-Item -ItemType Directory -Force smoke | Out-Null
+              Expand-Archive -Path "dist/$env:ARCHIVE" -DestinationPath smoke -Force
+              & .\smoke\kitsoki.exe version
+              & .\smoke\kitsoki.exe --help | Out-Null
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 10
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: kitsoki-binaries
+          path: dist
+
+      - name: Smoke packaged binary
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+        shell: ${{ startsWith(matrix.target, 'windows') && 'pwsh' || 'bash' }}
+        run: ${{ matrix.command }}
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - build
+      - native-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: kitsoki-binaries
+          path: dist
 
       # Only publish a Release on an actual tag push, never on the dispatch
       # dry-run.
