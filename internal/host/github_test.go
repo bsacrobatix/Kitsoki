@@ -102,7 +102,7 @@ func TestListGitHubInboxItems_Happy(t *testing.T) {
 	fr.responses["gh issue list --repo acme/repo --state open --assignee @me --limit 25 --json number,title,assignees,url"] = fakeResp{
 		stdout: `[{"number":7,"title":"Assigned issue","url":"https://github.com/acme/repo/issues/7","assignees":[{"login":"brad"}]}]`,
 	}
-	fr.responses["gh pr list --repo acme/repo --state open --review-requested @me --limit 25 --json number,title,author,url"] = fakeResp{
+	fr.responses["gh pr list --repo acme/repo --state open --search review-requested:@me --limit 25 --json number,title,author,url"] = fakeResp{
 		stdout: `[{"number":42,"title":"Review this","url":"https://github.com/acme/repo/pull/42","author":{"login":"alice"}}]`,
 	}
 	restore := host.SetExecRunnerForTest(fr.run)
