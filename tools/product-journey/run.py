@@ -5346,9 +5346,13 @@ def render_driver_replay_smoke_deck(report: dict) -> dict:
         for item in report["attached_evidence"]
     ]
     return {
-        "title": "Product Journey Driver Replay Smoke",
-        "description": "No-LLM proof that one reusable driver scenario can attach proof evidence, journal the attempt, generate playback media, review, and validate.",
-        "slides": [
+        "meta": {
+            "mode": "report",
+            "title": "Product Journey Driver Replay Smoke",
+            "phase": "driver-replay-smoke",
+            "resolution": {"width": 1920, "height": 1080},
+        },
+        "scenes": [
             {
                 "type": "title",
                 "title": "Driver replay smoke",
@@ -5419,9 +5423,13 @@ def render_driver_replay_sweep_deck(report: dict) -> dict:
         for row in report["scenarios"]
     ]
     return {
-        "title": "Product Journey Driver Replay Sweep",
-        "description": "No-LLM cassette-backed proof that every reusable product-journey scenario can attach proof evidence, journal the driver attempt, provide playback, review, and validate.",
-        "slides": [
+        "meta": {
+            "mode": "report",
+            "title": "Product Journey Driver Replay Sweep",
+            "phase": "driver-replay-sweep",
+            "resolution": {"width": 1920, "height": 1080},
+        },
+        "scenes": [
             {
                 "type": "title",
                 "title": "Driver replay sweep",
@@ -5531,7 +5539,12 @@ def build_driver_replay_sweep(
     }
     write_json(sweep_dir / "driver-replay-sweep.json", report)
     (sweep_dir / "driver-replay-sweep.md").write_text(render_driver_replay_sweep_summary(report), encoding="utf-8")
-    write_json(sweep_dir / "driver-replay-sweep.slidey.json", render_driver_replay_sweep_deck(report))
+    deck = render_driver_replay_sweep_deck(report)
+    deck_issues: list[dict] = []
+    validate_slidey_deck_shape(deck, {"items": []}, deck_issues)
+    if deck_issues:
+        raise SystemExit(f"driver replay sweep deck validation failed: {validation_issue_summary(deck_issues)}")
+    write_json(sweep_dir / "driver-replay-sweep.slidey.json", deck)
     return report
 
 
@@ -5669,7 +5682,12 @@ def build_driver_replay_smoke(
     }
     write_json(smoke_dir / "driver-replay-smoke.json", report)
     (smoke_dir / "driver-replay-smoke.md").write_text(render_driver_replay_smoke_summary(report), encoding="utf-8")
-    write_json(smoke_dir / "driver-replay-smoke.slidey.json", render_driver_replay_smoke_deck(report))
+    deck = render_driver_replay_smoke_deck(report)
+    deck_issues: list[dict] = []
+    validate_slidey_deck_shape(deck, {"items": []}, deck_issues)
+    if deck_issues:
+        raise SystemExit(f"driver replay smoke deck validation failed: {validation_issue_summary(deck_issues)}")
+    write_json(smoke_dir / "driver-replay-smoke.slidey.json", deck)
     return report
 
 
