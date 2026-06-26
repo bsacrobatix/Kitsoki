@@ -246,6 +246,7 @@ host_handlers:
             quality_gate_minimum_evidence_count: 25
             missing_proof_evidence_rows: 12
             quality_gate_missing_proof_evidence_count: 19
+            missing_proof_handoff_summary: "bugfix/candidate_diff: vscode/docs-minded-contributor -> .artifacts/product-journey/run-123/driver-handoff.md; bugfix/full_suite_result: vscode/docs-minded-contributor -> .artifacts/product-journey/run-123/driver-handoff.md; bugfix/key_interaction_video: vscode/docs-minded-contributor -> .artifacts/product-journey/run-123/driver-handoff.md; +9 more proof rows in rollup.md"
             missing_assignment_count: 9
       validate_product_journey_matrix:
         data:
@@ -347,7 +348,8 @@ turns:
       rollup_quality_gate_minimum_evidence_count: 25
       rollup_missing_proof_evidence_rows: 12
       rollup_quality_gate_missing_proof_evidence_count: 19
-    expect_view_matches: "Rollup runs[\\s\\S]*1 / 10[\\s\\S]*Rollup outcomes[\\s\\S]*1 persona rows; 5 scenario rows[\\s\\S]*Rollup driver journal[\\s\\S]*6 events across 4 scenarios; 8 refs; 1 blocked[\\s\\S]*Rollup proof gates[\\s\\S]*1 / 5 satisfied; proof 6 / 25[\\s\\S]*Rollup proof backlog[\\s\\S]*12 rows; 19 missing run-slots"
+      rollup_missing_proof_handoff_summary: "bugfix/candidate_diff: vscode/docs-minded-contributor -> .artifacts/product-journey/run-123/driver-handoff.md; bugfix/full_suite_result: vscode/docs-minded-contributor -> .artifacts/product-journey/run-123/driver-handoff.md; bugfix/key_interaction_video: vscode/docs-minded-contributor -> .artifacts/product-journey/run-123/driver-handoff.md; +9 more proof rows in rollup.md"
+    expect_view_matches: "Rollup runs[\\s\\S]*1 / 10[\\s\\S]*Rollup outcomes[\\s\\S]*1 persona rows; 5 scenario rows[\\s\\S]*Rollup driver journal[\\s\\S]*6 events across 4 scenarios; 8 refs; 1 blocked[\\s\\S]*Rollup proof gates[\\s\\S]*1 / 5 satisfied; proof 6 / 25[\\s\\S]*Rollup proof backlog[\\s\\S]*12 rows; 19 missing run-slots[\\s\\S]*bugfix/candidate_diff[\\s\\S]*driver-handoff.md"
     expect_host_calls:
       - handler: host.run
         args: { call: rollup_product_journey_matrix }

@@ -4599,6 +4599,24 @@ def render_rollup_deck(rollup: dict) -> dict:
     }
 
 
+def rollup_handoff_backlog_summary(rollup: dict, limit: int = 3) -> str:
+    lines = []
+    for row in rollup.get("missing_proof_evidence", [])[:limit]:
+        affected = row.get("affected_runs", [])
+        if affected:
+            first = affected[0]
+            lines.append(
+                f"{row.get('scenario', '')}/{row.get('evidence_kind', '')}: "
+                f"{first.get('project', '')}/{first.get('persona', '')} -> {first.get('driver_handoff_path', '')}"
+            )
+        else:
+            lines.append(f"{row.get('scenario', '')}/{row.get('evidence_kind', '')}: no affected run link")
+    remaining = len(rollup.get("missing_proof_evidence", [])) - limit
+    if remaining > 0:
+        lines.append(f"+{remaining} more proof rows in rollup.md")
+    return "; ".join(lines)
+
+
 def write_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
     rollup = build_matrix_rollup(matrix_dir, explicit_run_dirs)
     write_json(matrix_dir / "rollup.json", rollup)
@@ -4613,6 +4631,7 @@ def write_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
         "deck_path": str(matrix_dir / "rollup.slidey.json"),
         **rollup["summary"],
         "missing_assignment_count": rollup["missing_assignment_count"],
+        "missing_proof_handoff_summary": rollup_handoff_backlog_summary(rollup),
     }
 
 

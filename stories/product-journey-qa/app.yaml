@@ -43,6 +43,7 @@ world:
   rollup_quality_gate_minimum_evidence_count: { type: int, default: 0 }
   rollup_missing_proof_evidence_rows: { type: int, default: 0 }
   rollup_quality_gate_missing_proof_evidence_count: { type: int, default: 0 }
+  rollup_missing_proof_handoff_summary: { type: string, default: "" }
   dogfood_id:    { type: string, default: "" }
   dogfood_dir:   { type: string, default: "" }
   dogfood_report_path: { type: string, default: "" }
