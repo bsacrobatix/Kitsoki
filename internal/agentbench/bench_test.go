@@ -1,0 +1,221 @@
+package agentbench
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestScoreTracePassesBudgetsAndExpectations(t *testing.T) {
+	trace := writeTrace(t,
+		event("2026-06-26T01:00:00Z", "agent.stream", "rooms/decompose", map[string]any{
+			"tool":    "Read",
+			"preview": "docs/proposals/example.md",
+			"input":   map[string]any{"file_path": "docs/proposals/example.md"},
+		}),
+		event("2026-06-26T01:00:02Z", "agent.stream", "rooms/decompose", map[string]any{
+			"thinking": "checking constraints",
+		}),
+		event("2026-06-26T01:00:05Z", "agent.stream", "rooms/decompose", map[string]any{
+			"tool": "mcp__validator__submit",
+		}),
+		event("2026-06-26T01:00:06Z", "agent.stream", "rooms/lint", map[string]any{
+			"type":           "result",
+			"input_tokens":   1200,
+			"output_tokens":  300,
+			"total_cost_usd": 0.02,
+		}),
+	)
+
+	report, err := ScoreTrace(trace, Case{
+		ID: "deliver-decompose",
+		Budgets: Budgets{
+			MaxWallSeconds:    10,
+			MaxToolCalls:      3,
+			MaxReadCalls:      1,
+			MaxFilesRead:      1,
+			MaxInputTokens:    2000,
+			MaxOutputTokens:   500,
+			MaxCostUSD:        0.05,
+			MaxThinkingEvents: 1,
+		},
+		Expectations: Expectations{
+			RequireSubmit:  true,
+			FinalState:     "rooms/lint",
+			ForbiddenTools: []string{"Agent", "Task", "AskUserQuestion"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Passed {
+		t.Fatalf("expected pass, got failures: %v", report.Failures)
+	}
+	if report.Metrics.ToolCallsTotal != 2 {
+		t.Fatalf("tool calls = %d", report.Metrics.ToolCallsTotal)
+	}
+	if got := strings.Join(report.Metrics.FilesRead, ","); got != "docs/proposals/example.md" {
+		t.Fatalf("files read = %q", got)
+	}
+	if !report.Metrics.Submitted {
+		t.Fatalf("submit not detected")
+	}
+}
+
+func TestScoreTraceFailsBudgetsAndForbiddenTools(t *testing.T) {
+	trace := writeTrace(t,
+		event("2026-06-26T01:00:00Z", "agent.stream", "rooms/decompose", map[string]any{
+			"tool": "Agent",
+		}),
+		event("2026-06-26T01:02:00Z", "agent.stream", "rooms/decompose", map[string]any{
+			"type":           "result",
+			"input_tokens":   426758,
+			"output_tokens":  13059,
+			"total_cost_usd": 2.464055,
+		}),
+	)
+
+	report, err := ScoreTrace(trace, Case{
+		ID: "glm-regression",
+		Budgets: Budgets{
+			MaxWallSeconds:  30,
+			MaxToolCalls:    0,
+			MaxInputTokens:  150000,
+			MaxOutputTokens: 8000,
+			MaxCostUSD:      1,
+		},
+		Expectations: Expectations{
+			RequireSubmit:  true,
+			ForbiddenTools: []string{"Agent", "Task", "AskUserQuestion"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Passed {
+		t.Fatalf("expected failure")
+	}
+	assertFailureContains(t, report.Failures, "wall_seconds")
+	assertFailureContains(t, report.Failures, "input_tokens")
+	assertFailureContains(t, report.Failures, "output_tokens")
+	assertFailureContains(t, report.Failures, "cost_usd")
+	assertFailureContains(t, report.Failures, "forbidden tool \"Agent\"")
+	assertFailureContains(t, report.Failures, "required submit")
+}
+
+func TestLoadManifestAndSelectCase(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "bench.yaml")
+	if err := os.WriteFile(manifest, []byte(`version: agent_bench/v1
+cases:
+  - id: one
+    trace: one.trace.jsonl
+  - id: two
+    trace: two.trace.jsonl
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := m.Case("two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Trace != "two.trace.jsonl" {
+		t.Fatalf("trace = %q", c.Trace)
+	}
+	if _, err := m.Case(""); err == nil {
+		t.Fatalf("expected ambiguous empty case id to fail")
+	}
+}
+
+func TestScoreManifestCaseTreatsTraceOverrideAsCallerPath(t *testing.T) {
+	dir := t.TempDir()
+	manifestDir := filepath.Join(dir, "manifest")
+	if err := os.Mkdir(manifestDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	trace := filepath.Join(dir, "override.trace.jsonl")
+	if err := os.WriteFile(trace, []byte(`{"ts":"2026-06-26T01:00:00Z","kind":"agent.stream","state_path":"done","payload":{"tool":"mcp__validator__submit"}}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(manifestDir, "bench.yaml")
+	if err := os.WriteFile(manifest, []byte(`version: agent_bench/v1
+cases:
+  - id: one
+    trace: missing-relative.trace.jsonl
+    expectations:
+      require_submit: true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report, err := ScoreManifestCase(manifest, "one", trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Passed {
+		t.Fatalf("expected override trace to pass: %v", report.Failures)
+	}
+}
+
+func TestRunManifestCaseRequiresLiveGate(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "bench.yaml")
+	if err := os.WriteFile(manifest, []byte(`version: agent_bench/v1
+cases:
+  - id: one
+    trace: one.trace.jsonl
+    run:
+      command: ["echo", "hello"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := RunManifestCase(RunOptions{ManifestPath: manifest, CaseID: "one"})
+	if err == nil || !strings.Contains(err.Error(), "live-gated") {
+		t.Fatalf("expected live gate error, got %v", err)
+	}
+}
+
+func assertFailureContains(t *testing.T, failures []string, want string) {
+	t.Helper()
+	for _, f := range failures {
+		if strings.Contains(f, want) {
+			return
+		}
+	}
+	t.Fatalf("failures %v did not contain %q", failures, want)
+}
+
+func writeTrace(t *testing.T, events ...map[string]any) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "trace.jsonl")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	for _, ev := range events {
+		b, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Write(append(b, '\n')); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return path
+}
+
+func event(ts, kind, state string, payload map[string]any) map[string]any {
+	return map[string]any{
+		"ts":         ts,
+		"kind":       kind,
+		"state_path": state,
+		"payload":    payload,
+	}
+}
