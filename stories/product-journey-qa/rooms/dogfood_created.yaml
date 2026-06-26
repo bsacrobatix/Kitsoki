@@ -277,6 +277,7 @@ states:
                 driver_contract_summary: "stdout_json.driver_contract_summary"
                 next_driver_capture: "stdout_json.next_driver_capture"
                 next_driver_attach_command: "stdout_json.next_driver_attach_command"
+                next_driver_blocker_command: "stdout_json.next_driver_blocker_command"
               on_error: dogfood_created
             - set:
                 status: "run_created"

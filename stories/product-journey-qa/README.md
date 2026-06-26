@@ -74,9 +74,11 @@ Use `driver-handoff.md` when handing the bundle to
 `.agents/agents/product-journey-qa-driver.md`; it names the run directory,
 driver inputs, dispatch modes, missing evidence, and final review/validation
 commands without spending live model calls.
-Loaded runs expose `last_result.next_driver_capture` plus
-`last_result.next_driver_attach_command` so the reusable driver can begin with
-the first missing proof slot directly from story state.
+Loaded runs expose `last_result.next_driver_capture`,
+`last_result.next_driver_attach_command`, and
+`last_result.next_driver_blocker_command` so the reusable driver can begin with
+the first missing proof slot directly from story state and can record an honest
+blocker instead of faking evidence.
 Use `driver-journal.md` to review the driver's attempted actions, MCP tools,
 evidence references, blockers, and per-scenario status before judging whether a
 run reflects natural product usage.

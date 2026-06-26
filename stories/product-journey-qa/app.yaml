@@ -111,6 +111,7 @@ world:
   driver_contract_summary: { type: string, default: "" }
   next_driver_capture: { type: string, default: "" }
   next_driver_attach_command: { type: string, default: "" }
+  next_driver_blocker_command: { type: string, default: "" }
   scenario:       { type: string, default: "" }
   evidence_kind:  { type: string, default: "" }
   evidence_path:  { type: string, default: "" }

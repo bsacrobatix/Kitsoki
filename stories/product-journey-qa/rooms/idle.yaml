@@ -355,6 +355,7 @@ states:
                 driver_contract_summary: "stdout_json.driver_contract_summary"
                 next_driver_capture: "stdout_json.next_driver_capture"
                 next_driver_attach_command: "stdout_json.next_driver_attach_command"
+                next_driver_blocker_command: "stdout_json.next_driver_blocker_command"
               on_error: idle
             - set:
                 status: "run_created"
@@ -415,6 +416,7 @@ states:
                 driver_contract_summary: "stdout_json.driver_contract_summary"
                 next_driver_capture: "stdout_json.next_driver_capture"
                 next_driver_attach_command: "stdout_json.next_driver_attach_command"
+                next_driver_blocker_command: "stdout_json.next_driver_blocker_command"
                 review_status: "stdout_json.review_status"
                 review_summary: "stdout_json.review_summary"
                 review_passed_count: "stdout_json.review_passed_count"

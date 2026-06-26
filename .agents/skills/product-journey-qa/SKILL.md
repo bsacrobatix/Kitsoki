@@ -84,9 +84,10 @@ Then hand it to the reusable driver:
 1. Read `agent-brief.md`, `driver-plan.md`, and `driver-handoff.md`.
 2. Use `.agents/agents/product-journey-qa-driver.md` for live/cassette MCP
    capture.
-3. Attach evidence with `--attach-evidence` or the story `attach` intent.
+3. Attach evidence with `--attach-evidence` or the story `attach` intent;
+   loaded runs also expose `last_result.next_driver_attach_command`.
 4. Record findings with `--record-finding`; record honest blockers with
-   `--record-blocker`.
+   `--record-blocker` or `last_result.next_driver_blocker_command`.
 5. Record each attempt with `--record-driver-event` or the story `driver_event`
    intent.
 6. Run:
@@ -106,8 +107,8 @@ Useful intents:
 
 - `validate_corpus`
 - `matrix seed=... matrix_personas=primary|all`
-- `driver_replay_smoke scenario=... seed=...`
-- `driver_replay_sweep seed=...`
+- `driver_replay_smoke scenario=... persona=... seed=...`
+- `driver_replay_sweep persona=... seed=...`
 - `start project=... persona=... seed=...`
 - `load run_dir=...`
 - `handoff`
