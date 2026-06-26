@@ -53,6 +53,8 @@ world:
   dogfood_rollup_deck_path: { type: string, default: "" }
   dogfood_review_warnings: { type: int, default: 0 }
   dogfood_review_failed: { type: int, default: 0 }
+  dogfood_review_passed: { type: int, default: 0 }
+  dogfood_review_total: { type: int, default: 0 }
   dogfood_review_backlog_summary: { type: string, default: "" }
   dogfood_run_validation_warnings: { type: int, default: 0 }
   dogfood_matrix_validation_warnings: { type: int, default: 0 }
@@ -99,8 +101,10 @@ world:
   driver_event_id: { type: string, default: "" }
   review_status:  { type: string, default: "" }
   review_summary: { type: string, default: "" }
+  review_passed_count: { type: int, default: 0 }
   review_failed_count: { type: int, default: 0 }
   review_warning_count: { type: int, default: 0 }
+  review_total_count: { type: int, default: 0 }
   review_backlog_summary: { type: string, default: "" }
   validation_status: { type: string, default: "" }
   validation_errors: { type: int, default: 0 }

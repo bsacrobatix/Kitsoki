@@ -67,4 +67,6 @@ Scenario-level evidence and finding summaries are written to
 `scenario-outcomes.md` for review and matrix rollups.
 Run `review` before `validate`; review refreshes derived artifacts and only
 marks a run ready when every scenario has evidence or an explicit blocker, while
-validation deliberately catches stale or inconsistent bundles.
+validation deliberately catches stale or inconsistent bundles. The story view
+surfaces review pass/total/fail/warn counts so operators can tell whether a run
+is progressing against the full review gate set without opening `review.json`.

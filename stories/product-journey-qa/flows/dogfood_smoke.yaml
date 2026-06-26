@@ -25,7 +25,9 @@ host_handlers:
             corpus_validation_errors: 0
             corpus_validation_warnings: 0
             review_status: needs_evidence
-            review_summary: "needs_evidence: 14/17 checks passed, 2 warnings, 1 failures"
+            review_summary: "needs_evidence: 15/18 checks passed, 2 warnings, 1 failures"
+            review_passed: 15
+            review_total: 18
             review_warnings: 2
             review_failed: 1
             review_backlog_summary: "fail: quality-gates (bugfix (3/5)); warn: non-demo-evidence (proof=0, demo=25)"
@@ -57,7 +59,9 @@ turns:
       run_dir: .artifacts/product-journey/run-123
       deck_path: .artifacts/product-journey/dogfood/dogfood-123/deck.slidey.json
       review_status: needs_evidence
-      review_summary: "needs_evidence: 14/17 checks passed, 2 warnings, 1 failures"
+      review_summary: "needs_evidence: 15/18 checks passed, 2 warnings, 1 failures"
+      dogfood_review_passed: 15
+      dogfood_review_total: 18
       dogfood_review_warnings: 2
       dogfood_review_failed: 1
       dogfood_review_backlog_summary: "fail: quality-gates (bugfix (3/5)); warn: non-demo-evidence (proof=0, demo=25)"
@@ -68,7 +72,7 @@ turns:
     expect_host_calls:
       - handler: host.run
         args: { call: dogfood_product_journey_smoke }
-    expect_view_matches: "Review checks[\\s\\S]*1 failed; 2 warnings[\\s\\S]*fail: quality-gates[\\s\\S]*warn: non-demo-evidence"
+    expect_view_matches: "Review checks[\\s\\S]*15 / 18 passed; 1 failed; 2 warnings[\\s\\S]*fail: quality-gates[\\s\\S]*warn: non-demo-evidence"
 
   - intent: { name: look, slots: {} }
     expect_state: dogfood_created

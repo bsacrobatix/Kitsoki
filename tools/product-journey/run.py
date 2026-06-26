@@ -2401,8 +2401,10 @@ def run_story_summary(run_dir: Path) -> dict:
         "proof_minimum_evidence_count": handoff.get("status", {}).get("proof_minimum_evidence_count", 0),
         "minimum_evidence_count": handoff.get("status", {}).get("minimum_evidence_count", 0),
         "missing_proof_summary": "; ".join(missing_proof_summary),
+        "review_passed_count": review.get("summary_counts", {}).get("passed", 0),
         "review_failed_count": review.get("summary_counts", {}).get("failed", 0),
         "review_warning_count": review.get("summary_counts", {}).get("warned", 0),
+        "review_total_count": review.get("summary_counts", {}).get("total", 0),
         "review_backlog_summary": "; ".join(review_backlog),
     }
 
@@ -5711,8 +5713,10 @@ def main() -> None:
                 "corpus_validation_warnings": report["corpus_validation"]["warnings"],
                 "review_status": report["review"]["review_status"],
                 "review_summary": report["review"]["summary"],
+                "review_passed": report["review"].get("review_passed_count", report["review"].get("passed", 0)),
                 "review_warnings": report["review"]["warnings"],
                 "review_failed": report["review"].get("review_failed_count", report["review"].get("failed", 0)),
+                "review_total": report["review"].get("review_total_count", report["review"].get("total", 0)),
                 "review_backlog_summary": report["review"].get("review_backlog_summary", ""),
                 "run_validation_status": report["validation"]["run"]["status"],
                 "run_validation_warnings": report["validation"]["run"]["warnings"],
