@@ -3612,6 +3612,18 @@ def validate_run_bundle(run_dir: Path) -> dict:
         })
         if invalid_check_statuses:
             add_validation_issue(issues, "error", "review-check-status", "review.json has unknown check statuses", ", ".join(invalid_check_statuses))
+        expected_review_checks = set(schema.get("review_check_ids", []))
+        actual_review_checks = {
+            check.get("id", "")
+            for check in review.get("checks", [])
+            if check.get("id", "")
+        }
+        missing_review_checks = sorted(expected_review_checks - actual_review_checks)
+        extra_review_checks = sorted(actual_review_checks - expected_review_checks)
+        if missing_review_checks:
+            add_validation_issue(issues, "error", "review-check-contract", "review.json is missing required review checks", ", ".join(missing_review_checks))
+        if extra_review_checks:
+            add_validation_issue(issues, "warn", "review-check-extra", "review.json has checks outside the schema contract", ", ".join(extra_review_checks))
 
     validate_slidey_deck_shape(deck, media_manifest, issues)
     scene_eyebrows = deck_scene_eyebrows(deck)

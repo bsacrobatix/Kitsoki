@@ -257,6 +257,10 @@ python3 tools/product-journey/run.py --validate-run \
   --run-dir .artifacts/product-journey/<run-id>
 ```
 
+The validator also checks that `review.json` contains the full schema-required
+review gate set, including `driver-action-contract`; rerun `--review-run` when
+an older bundle is missing a newly added review gate.
+
 The `tools/story-qa/run.py` runner also writes a transient pointer report under
 `.context/` and a durable review bundle under `.artifacts/story-qa/<run>/`
 containing `report.md`, `summary.json`, and `deck.slidey.json`. The deck is

@@ -304,9 +304,9 @@ python3 tools/product-journey/run.py --validate-run \
 ```
 
 The validator checks required files, JSON shape, scenario/evidence/media
-consistency, metrics freshness, review statuses, and Slidey review scenes
-without rewriting the bundle. If it fails, run `--review-run` again after fixing
-or attaching the missing artifact.
+consistency, metrics freshness, review statuses, required review gate IDs, and
+Slidey review scenes without rewriting the bundle. If it fails, run
+`--review-run` again after fixing or attaching the missing artifact.
 
 For `gears-rust`, this prints the existing external-bakeoff readiness signal and
 the local-only verification command. If you have a local checkout, it also
