@@ -495,6 +495,7 @@ def readiness(m, repo_dir=None, candidate=None, candidates_path=None, bug_ids=No
             matching.append(cell)
     completed = {(c.get("bug"), c.get("candidate")) for c in matching}
     prepared, prepared_dir = collect_prepared(results_dir, m["project"]["id"], selected)
+    prepared_keys = {(p.get("bug"), p.get("candidate")) for p in prepared}
     missing = [
         {
             "bug": cmd["bug"],
@@ -505,12 +506,22 @@ def readiness(m, repo_dir=None, candidate=None, candidates_path=None, bug_ids=No
         for cmd in plan["commands"]
         if (cmd["bug"], cmd["candidate"]) not in completed
     ]
+    unprepared = [
+        {
+            "bug": cmd["bug"],
+            "candidate": cmd["candidate"],
+            "command": cmd["command"].replace(" --score", " --no-drive"),
+        }
+        for cmd in plan["commands"]
+        if (cmd["bug"], cmd["candidate"]) not in prepared_keys
+    ]
     result_summary = {
         "cells_dir": str(cells_dir),
         "selected_cells": len(plan["commands"]),
         "scored_cells": len(matching),
         "missing_cells": len(missing),
         "prepared_cells": len(prepared),
+        "unprepared_cells": len(unprepared),
         "rollup": {"by_candidate": rollup_cells(matching)},
     }
     next_actions = []
@@ -522,6 +533,8 @@ def readiness(m, repo_dir=None, candidate=None, candidates_path=None, bug_ids=No
         next_actions.append("run the listed drive_cell.sh --score commands, or mark blocked providers with bench.py pending")
     else:
         next_actions.append("run bench.py summarize or advance repo-bakeoff scoring to generate the report/deck")
+    if unprepared:
+        next_actions.append("optional: run the listed drive_cell.sh --no-drive commands to prepare missing handoff metadata before live spend")
     out = {
         "ok": pre["ok"],
         "project": m["project"]["id"],
@@ -536,6 +549,7 @@ def readiness(m, repo_dir=None, candidate=None, candidates_path=None, bug_ids=No
             "dir": str(prepared_dir),
             "cells": prepared,
         },
+        "unprepared": unprepared,
         "missing": missing,
         "next_actions": next_actions,
     }
@@ -566,6 +580,7 @@ def write_readiness_markdown(report, markdown):
         f"Scored cells: {scored_cells}",
         f"Missing cells: {missing_cells}",
         f"Prepared cells: {results.get('prepared_cells', 0)}",
+        f"Unprepared cells: {results.get('unprepared_cells', 0)}",
         "",
         "## What This Proves",
         "",
@@ -621,6 +636,12 @@ def write_readiness_markdown(report, markdown):
             )
     else:
         lines.append("No prepared-cell metadata found yet. Run `drive_cell.sh --no-drive` or `make history-smoke` with first-cell preparation enabled.")
+    if report.get("unprepared"):
+        lines.extend(["", "## Unprepared Cells", ""])
+        lines.append("These selected cells do not have prepared handoff metadata yet. This is optional before `--score`, but useful for review:")
+        lines.append("")
+        for item in report["unprepared"]:
+            lines.append(f"- `{item['bug']}` x `{item['candidate']}`: `{item['command']}`")
     lines.extend([
         "",
         "## Missing Cells",

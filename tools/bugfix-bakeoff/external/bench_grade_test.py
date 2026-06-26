@@ -271,8 +271,11 @@ def test_readiness_reports_missing_and_scored_cells():
         assert report["results"]["scored_cells"] == 1
         assert report["results"]["missing_cells"] == 1
         assert report["results"]["prepared_cells"] == 1
+        assert report["results"]["unprepared_cells"] == 1
         assert report["arming"]["verified"] is True
         assert report["prepared"]["cells"][0]["bug"] == "bug2"
+        assert report["unprepared"][0]["bug"] == "bug1"
+        assert "--no-drive" in report["unprepared"][0]["command"]
         assert "/../" not in report["prepared"]["cells"][0]["_path"]
         assert report["missing"][0]["bug"] == "bug2"
         assert "bench.py pending" in report["missing"][0]["pending_command"]
@@ -280,12 +283,15 @@ def test_readiness_reports_missing_and_scored_cells():
         assert "Preflight: ready" in text
         assert "Arming: verified" in text
         assert "Prepared cells: 1" in text
+        assert "Unprepared cells: 1" in text
         assert "## What This Proves" in text
         assert "verified RED at the historical baseline and GREEN at the real fix" in text
         assert "not attempted or not recorded, not failed" in text
         assert "## Prepared Cells" in text
         assert "metadata `" in text
         assert "demo-bug2-ready.json" in text
+        assert "## Unprepared Cells" in text
+        assert "--no-drive" in text
         assert "`bug2` x `ready`" in text
         assert "## Pending Alternatives" in text
         assert "--reason \"<reason>\"" in text
@@ -301,6 +307,7 @@ def test_readiness_markdown_uses_singular_missing_cell_wording():
             "scored_cells": 0,
             "missing_cells": 1,
             "prepared_cells": 0,
+            "unprepared_cells": 1,
         },
         "arming": {"verified": True},
         "missing": [{
@@ -310,6 +317,11 @@ def test_readiness_markdown_uses_singular_missing_cell_wording():
             "pending_command": "pending",
         }],
         "prepared": {"cells": []},
+        "unprepared": [{
+            "bug": "bug1",
+            "candidate": "ready",
+            "command": "drive --no-drive",
+        }],
         "next_actions": ["drive it"],
     }
     with tempfile.TemporaryDirectory() as td:
