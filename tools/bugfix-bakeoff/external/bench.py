@@ -554,6 +554,8 @@ def write_readiness_markdown(report, markdown):
     missing_cells = results["missing_cells"]
     scored_cells = results["scored_cells"]
     selected_cells = results["selected_cells"]
+    def noun(n, singular, plural=None):
+        return singular if n == 1 else (plural or f"{singular}s")
     markdown.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         f"# {report['project']} repo-history readiness",
@@ -577,8 +579,11 @@ def write_readiness_markdown(report, markdown):
     else:
         lines.append("- RED/GREEN arming was not captured in this readiness command; run the verify command before live cells.")
     if missing_cells:
+        selected_label = noun(selected_cells, "selected cell")
+        result_label = noun(missing_cells, "result artifact")
+        verb = "has" if missing_cells == 1 else "have"
         lines.append(
-            f"- {missing_cells} of {selected_cells} selected cells have no result artifact yet; "
+            f"- {missing_cells} of {selected_cells} {selected_label} {verb} no {result_label} yet; "
             "that means not attempted or not recorded, not failed."
         )
     elif selected_cells:

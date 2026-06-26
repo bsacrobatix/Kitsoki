@@ -291,6 +291,35 @@ def test_readiness_reports_missing_and_scored_cells():
         assert "--reason \"<reason>\"" in text
 
 
+def test_readiness_markdown_uses_singular_missing_cell_wording():
+    report = {
+        "project": "demo",
+        "preflight": {"ok": True, "errors": [], "warnings": []},
+        "drive_plan": {"markdown": "- `bug1` x `ready`: `drive`"},
+        "results": {
+            "selected_cells": 1,
+            "scored_cells": 0,
+            "missing_cells": 1,
+            "prepared_cells": 0,
+        },
+        "arming": {"verified": True},
+        "missing": [{
+            "bug": "bug1",
+            "candidate": "ready",
+            "command": "drive",
+            "pending_command": "pending",
+        }],
+        "prepared": {"cells": []},
+        "next_actions": ["drive it"],
+    }
+    with tempfile.TemporaryDirectory() as td:
+        markdown = Path(td) / "ready.md"
+        bench.write_readiness_markdown(report, markdown)
+        text = markdown.read_text()
+        assert "1 of 1 selected cell has no result artifact yet" in text
+        assert "1 of 1 selected cells have no result artifacts yet" not in text
+
+
 def test_drive_cell_preflight_scopes_to_requested_bug():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
