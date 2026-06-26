@@ -135,13 +135,38 @@ def verify_external_project(project: dict, repo_path: str) -> dict:
 
 
 def _meta_value(project):
-    return {
+    meta = {
         "id": project["id"],
         "label": project.get("label", project["id"]),
-        "status": project["status"],
-        "notes": project["notes"],
+        "status": project.get("status", "planned"),
+        "notes": project.get("notes", ""),
         "manifest": project.get("manifest"),
     }
+    for key in ["repo", "stack", "bug_query", "open_bug_floor", "source"]:
+        if project.get(key) is not None:
+            meta[key] = project[key]
+    return meta
+
+
+def resolve_project(catalog: dict, github_targets: dict, project_id: str) -> dict:
+    target = next((t for t in catalog["targets"] if t["id"] == project_id), None)
+    if target is not None:
+        resolved = dict(target)
+        resolved.setdefault("source", "catalog")
+        return resolved
+
+    target = next((t for t in github_targets["targets"] if t["id"] == project_id), None)
+    if target is not None:
+        resolved = dict(target)
+        resolved.setdefault("source", "github-targets")
+        resolved.setdefault("run_mode", "github-matrix")
+        return resolved
+
+    known = ", ".join(
+        [t["id"] for t in catalog["targets"]]
+        + [t["id"] for t in github_targets["targets"]]
+    )
+    raise SystemExit(f"Unknown project '{project_id}'. Known: {known}")
 
 
 def target_status(project: dict) -> str:
@@ -149,6 +174,8 @@ def target_status(project: dict) -> str:
         return "ready-heavy-check"
     if project.get("run_mode") == "external-benchmark" and project.get("status") == "validated":
         return "cached_validated"
+    if project.get("source") == "github-targets" or project.get("run_mode") == "github-matrix":
+        return "planned"
     return project.get("status", "planned")
 
 
@@ -172,16 +199,16 @@ def stage_plan(project: dict, scenarios: list[dict]) -> list[dict]:
         stage_scenarios = [scenario["id"] for scenario in scenarios if scenario["stage"] == stage]
         if stage == "score_and_report":
             status = readiness
-            evidence.append(project.get("manifest") or project.get("validation_command") or "catalog target")
+            evidence.append(project.get("manifest") or project.get("validation_command") or project.get("bug_query") or "catalog target")
         elif stage in {"discover_product", "follow_tutorial", "file_product_issue"}:
             status = "planned"
             evidence.append("requires visual MCP/browser evidence in live or cassette run")
         elif stage == "onboard_project":
             status = "planned"
-            evidence.append(project.get("manifest") or "project onboarding fixture pending")
+            evidence.append(project.get("manifest") or project.get("repo") or "project onboarding fixture pending")
         elif stage in {"plan_project_work", "fix_bug"}:
             status = readiness if project.get("manifest") else "planned"
-            evidence.append(project.get("manifest") or "bug/design fixture pending")
+            evidence.append(project.get("manifest") or project.get("bug_query") or "bug/design fixture pending")
         stages.append({"id": stage, "status": status, "evidence": evidence, "scenarios": stage_scenarios})
     return stages
 
@@ -229,6 +256,7 @@ def evidence_plan(run_json: dict) -> dict:
 
 def build_run_bundle(
     catalog: dict,
+    github_targets: dict,
     personas: list[dict],
     scenarios: list[dict],
     project_id: str,
@@ -237,10 +265,7 @@ def build_run_bundle(
     mode: str,
     publish_deck: Optional[Path],
 ) -> tuple[Path, dict]:
-    target = next((t for t in catalog["targets"] if t["id"] == project_id), None)
-    if target is None:
-        known = ", ".join(t["id"] for t in catalog["targets"])
-        raise SystemExit(f"Unknown project '{project_id}'. Known: {known}")
+    target = resolve_project(catalog, github_targets, project_id)
     persona = select_persona(personas, persona_id, f"{project_id}:{seed}")
     created_at = now_utc()
     run_id = f"{slug_timestamp()}-{project_id}-{persona['id']}-{seed}"
@@ -274,6 +299,10 @@ def build_run_bundle(
             "Visual MCP, Kitsoki session driving, and video evidence are represented as planned stages until a live or cassette run supplies artifacts.",
         ],
     }
+    if target.get("source") == "github-targets":
+        run_json["notes"].append(
+            "This project came from the GitHub matrix; refresh open bug counts before a live scored sweep."
+        )
     evidence = evidence_plan(run_json)
     findings = {"run_id": run_id, "items": [], "summary": {"strength": 0, "weakness": 0, "issue": 0, "fix": 0}}
     metrics = {
@@ -1234,7 +1263,7 @@ def write_report(catalog: dict, generated_at: str, report_path: Path, deck_path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project", default="gears-rust", help="Project id from catalog")
+    parser.add_argument("--project", default="gears-rust", help="Project id from catalog or github-targets")
     parser.add_argument(
         "--mode",
         default="status",
@@ -1451,7 +1480,17 @@ def main() -> None:
 
     if args.emit_run:
         publish_deck = DEFAULT_DECK if args.publish_deck else None
-        run_dir, run_json = build_run_bundle(catalog, personas, scenarios, args.project, args.persona, args.seed, "dry-run", publish_deck)
+        run_dir, run_json = build_run_bundle(
+            catalog,
+            github_targets,
+            personas,
+            scenarios,
+            args.project,
+            args.persona,
+            args.seed,
+            "dry-run",
+            publish_deck,
+        )
         if args.json_output:
             print(json.dumps({
                 "status": "created",

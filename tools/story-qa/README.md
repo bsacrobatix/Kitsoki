@@ -58,6 +58,11 @@ python3 tools/product-journey/run.py --emit-matrix --seed demo
 Use `--matrix-personas all` when every persona should be assigned to every
 target. The matrix is a planning artifact; refresh current GitHub bug counts
 from each target's `bug_query` before a live scored run.
+Then launch an assignment run with the target `id` and persona from the matrix:
+
+```sh
+python3 tools/product-journey/run.py --emit-run --project vscode --persona docs-minded-contributor --seed demo-01
+```
 
 Add `--publish-deck` when the generated deck should replace
 `docs/decks/product-journey-eval.slidey.json`.
