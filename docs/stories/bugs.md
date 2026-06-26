@@ -123,7 +123,9 @@ section. Bugs filed from the web UI's Meta-menu *Report bug* surface
 populate this automatically: the body carries the operator's description
 plus `## Error state` and `## Console (recent)` sections, and the artifacts
 folder additionally holds `rrweb.json` (a masked session replay) and
-`console.json` alongside `screenshot.png` and `har.json` (see
+`console.json` alongside `screenshot.png`, `har.json`, and
+`deck.slidey.json` (a deterministic review deck with artifact links and an
+embedded rrweb playback when present; see
 [`../tui/web-ui.md`](../tui/web-ui.md)). The convention and the glob-safety
 verification are documented in
 [`issues/README.md`](../../issues/README.md) (the authoritative source)

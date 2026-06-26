@@ -167,6 +167,20 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 				return nil, serverErr(fmt.Errorf("write console.json: %w", wErr))
 			}
 		}
+		if wErr := writeBugReportDeck(filepath.Join(artifactsDir, "deck.slidey.json"), bugReportDeckInput{
+			Title:         title,
+			ID:            id,
+			Severity:      severity,
+			TraceRef:      traceRef,
+			Body:          body,
+			ReproSteps:    repro,
+			HasScreenshot: wroteScreenshot,
+			HasRRWeb:      len(rrwebJSON) > 0,
+			HasConsole:    len(consoleJSON) > 0,
+			HasHAR:        true,
+		}); wErr != nil {
+			return nil, serverErr(fmt.Errorf("write deck.slidey.json: %w", wErr))
+		}
 	} else {
 		return nil, serverErr(fmt.Errorf("mkdir artifacts: %w", mkErr))
 	}
@@ -177,6 +191,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 		hasScreenshot: wroteScreenshot,
 		hasRRWeb:      len(rrwebJSON) > 0,
 		hasConsole:    len(consoleJSON) > 0,
+		hasDeck:       true,
 	}
 	if appendErr := appendArtifactsSection(absPath, id, arts, depth, capacity); appendErr != nil {
 		return nil, serverErr(fmt.Errorf("append artifacts section: %w", appendErr))
@@ -227,6 +242,21 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 			return nil, serverErr(fmt.Errorf("github bug: write artifact %s: %w", artifact.base, err))
 		}
 	}
+	if err := writeBugReportDeck(filepath.Join(artifactsDir, "deck.slidey.json"), bugReportDeckInput{
+		Title:         title,
+		ID:            prefix,
+		Severity:      severity,
+		TraceRef:      traceRef,
+		Body:          body,
+		ReproSteps:    repro,
+		HasScreenshot: len(png) > 0,
+		HasRRWeb:      len(rrwebJSON) > 0,
+		HasConsole:    len(consoleJSON) > 0,
+		HasHAR:        len(harJSON) > 0,
+	}); err != nil {
+		return nil, serverErr(fmt.Errorf("github bug: write deck.slidey.json: %w", err))
+	}
+	ev = append(ev, host.EvidenceFile{Name: "deck.slidey.json", Path: filepath.ToSlash(filepath.Join(displayRoot, prefix, "deck.slidey.json")), Label: "Slidey review deck"})
 
 	full := body
 	if len(repro) > 0 {
@@ -341,6 +371,7 @@ type artifactLinks struct {
 	hasScreenshot bool
 	hasRRWeb      bool
 	hasConsole    bool
+	hasDeck       bool
 }
 
 // appendArtifactsSection appends a "## Artifacts" block to the bug markdown,
@@ -358,6 +389,9 @@ func appendArtifactsSection(absPath, id string, arts artifactLinks, depth, capac
 	if arts.hasConsole {
 		fmt.Fprintf(&sb, "- Console log: ./%s.artifacts/console.json\n", id)
 	}
+	if arts.hasDeck {
+		fmt.Fprintf(&sb, "- Slidey review deck: ./%s.artifacts/deck.slidey.json\n", id)
+	}
 	fmt.Fprintf(&sb, "\nThe HAR retains the %d most-recent /rpc exchange(s) (ring-buffer capacity %d).\n", depth, capacity)
 
 	f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -367,6 +401,123 @@ func appendArtifactsSection(absPath, id string, arts artifactLinks, depth, capac
 	defer f.Close()
 	_, err = f.WriteString(sb.String())
 	return err
+}
+
+type bugReportDeckInput struct {
+	Title         string
+	ID            string
+	Severity      string
+	TraceRef      string
+	Body          string
+	ReproSteps    []string
+	HasScreenshot bool
+	HasRRWeb      bool
+	HasConsole    bool
+	HasHAR        bool
+}
+
+func writeBugReportDeck(path string, in bugReportDeckInput) error {
+	deck := map[string]any{
+		"version": "1",
+		"title":   in.Title,
+		"theme":   "kitsoki-report",
+		"scenes": []map[string]any{
+			{
+				"type":     "title",
+				"eyebrow":  "Kitsoki bug report",
+				"title":    in.Title,
+				"subtitle": "Deterministic review deck for " + in.ID,
+				"hold":     1800,
+			},
+			bugStatusScene(in),
+			bugEvidenceScene(in),
+		},
+	}
+	scenes := deck["scenes"].([]map[string]any)
+	if len(in.ReproSteps) > 0 {
+		scenes = append(scenes, bugReproducerScene(in.ReproSteps))
+	}
+	if in.HasRRWeb {
+		scenes = append(scenes, map[string]any{
+			"type":     "video",
+			"mode":     "embedded",
+			"eyebrow":  "Captured playback",
+			"title":    "Session replay",
+			"caption":  "Masked rrweb playback captured by the web bug reporter.",
+			"rrweb":    "rrweb.json",
+			"chapters": "auto",
+			"hold":     2400,
+		})
+	}
+	deck["scenes"] = scenes
+	data, err := json.MarshalIndent(deck, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(path, data, 0o644)
+}
+
+func bugStatusScene(in bugReportDeckInput) map[string]any {
+	items := []map[string]any{
+		{"label": "Report", "status": "done", "detail": in.ID},
+		{"label": "Severity", "status": statusForPresent(in.Severity), "detail": nonEmpty(in.Severity, "not specified")},
+		{"label": "Trace reference", "status": statusForPresent(in.TraceRef), "detail": nonEmpty(in.TraceRef, "not provided")},
+		{"label": "Operator summary", "status": statusForPresent(in.Body), "detail": firstLine(in.Body)},
+	}
+	return map[string]any{"type": "objectives", "title": "Bug status", "items": items}
+}
+
+func bugEvidenceScene(in bugReportDeckInput) map[string]any {
+	items := []map[string]any{}
+	if in.HasHAR {
+		items = append(items, map[string]any{"label": "HAR capture", "status": "done", "detail": "har.json"})
+	}
+	if in.HasRRWeb {
+		items = append(items, map[string]any{"label": "Session replay", "status": "done", "detail": "rrweb.json"})
+	}
+	if in.HasConsole {
+		items = append(items, map[string]any{"label": "Console log", "status": "done", "detail": "console.json"})
+	}
+	if in.HasScreenshot {
+		items = append(items, map[string]any{"label": "Screenshot", "status": "done", "detail": "screenshot.png"})
+	}
+	items = append(items, map[string]any{"label": "Slidey review deck", "status": "done", "detail": "deck.slidey.json"})
+	return map[string]any{"type": "evidence", "title": "Review artifacts", "items": items}
+}
+
+func bugReproducerScene(steps []string) map[string]any {
+	rows := make([]map[string]any, 0, len(steps))
+	for i, step := range steps {
+		rows = append(rows, map[string]any{
+			"step":   fmt.Sprintf("%d", i+1),
+			"action": step,
+		})
+	}
+	return map[string]any{
+		"type":    "table",
+		"title":   "Reproducer",
+		"columns": []string{"step", "action"},
+		"rows":    rows,
+	}
+}
+
+func statusForPresent(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "pending"
+	}
+	return "done"
+}
+
+func firstLine(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "not provided"
+	}
+	if i := strings.IndexByte(value, '\n'); i >= 0 {
+		value = value[:i]
+	}
+	return value
 }
 
 // consoleEntry is one captured browser console line.
