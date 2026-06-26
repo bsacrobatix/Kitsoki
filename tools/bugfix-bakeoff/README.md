@@ -97,9 +97,9 @@ external/drive_cell.sh --project <name> --bug <id> --candidate glm-5.2 --score
 stopping at the first rung that reaches `solved`:
 
 ```sh
-external/escalate.sh --project kitsoki --ladder default          # COST
-external/escalate.sh --project kitsoki --ladder default --dry-run # free: print the plan
-external/escalate.sh --project kitsoki --rungs glm-5.2,glm-5.2-high,opus-4.8
+external/escalate.sh --project query-string --ladder default          # COST
+external/escalate.sh --project query-string --ladder default --dry-run # free: print the plan
+external/escalate.sh --project query-string --rungs gpt-5.3-spark,glm-5.2,opus-4.8
 ```
 
 Effort is a property of the harness **profile** (`session.new` has no effort
@@ -107,6 +107,14 @@ param), so a ladder rung is just a candidate row pointing at a profile with that
 (model, effort). See the header of [`external/candidates.yaml`](external/candidates.yaml).
 The result is `.artifacts/qs-bakeoff/results/escalation-<project>.tsv`:
 the cheapest solving rung per bug.
+
+> **Note — `kitsoki` (and any `local_only` project) is grade-only for now.**
+> `drive_cell.sh`/`escalate.sh` live-drive by cloning the repo + running its JS
+> install, so they don't yet drive a `local_only` Go/local checkout (they fail
+> fast with a clear message). Grade kitsoki-self deterministically with
+> `bench.py verify`/`score` against a `git clone --local` mirror. Live-driving
+> `local_only` repos is a tracked follow-up (drive against a local worktree,
+> toolchain-agnostic install).
 
 ## Report + deterministic slidey deck (offline, zero re-spend)
 

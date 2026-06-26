@@ -64,9 +64,15 @@ candidates:
 # bench.py oracle verdict). The default ladder climbs model AND effort: cheap
 # model → same model higher effort → bigger model → biggest model high effort.
 # Override per run with `escalate.sh --ladder <name>` or `--rungs k1,k2,...`.
+#
+# `default` uses ONLY profiles that ship configured (codex-spark, synthetic-claude,
+# codex-native, claude-native) so it runs out-of-the-box. The effort rungs
+# (*-high) need an extra profile in .kitsoki.local.yaml (copy the base profile,
+# set effort: high), so they live in their own ladder, NOT in default — a ladder
+# must never reference an unconfigured profile or the drive fails at that rung.
 ladders:
-  default: [gpt-5.3-spark, glm-5.2, glm-5.2-high, gpt-5.5, opus-4.8]
-  # Pure effort sweep on one model (needs the -high profile configured):
+  default: [gpt-5.3-spark, glm-5.2, gpt-5.5, opus-4.8]
+  # Pure effort sweep on one model (needs the synthetic-claude-high profile):
   effort-only: [glm-5.2, glm-5.2-high]
   # Cheapest-viable open model only:
   open: [glm-5.2, glm-5.2-high]

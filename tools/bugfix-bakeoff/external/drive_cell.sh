@@ -51,6 +51,22 @@ for c in d["candidates"]:
 profile="$(cand_field profile)"; short="$(cand_field short)"
 [[ -n "$profile" ]] || { echo "unknown candidate '$cand' in candidates.yaml" >&2; exit 2; }
 
+# --- fail fast (before any clone/spend) ---------------------------------------
+# local_only projects (kitsoki-self, gears-rust) aren't live-drivable here yet:
+# drive_cell clones $repo + runs the JS install. Grade them with bench.py
+# score/verify against a throwaway local mirror instead (see the project README).
+if [[ "$(jget local_only)" == "True" || "$(jget local_only)" == "true" ]]; then
+  echo "[cell] '$project' is local_only — not live-drivable via drive_cell yet." >&2
+  echo "       Grade it deterministically: bench.py verify/score against a 'git clone --local' mirror." >&2
+  exit 2
+fi
+# the candidate's profile must be configured, or session_new fails late + cryptic.
+if ! grep -qE "^  ${profile}:[[:space:]]*$" "$REPO_ROOT/.kitsoki.yaml" "$REPO_ROOT/.kitsoki.local.yaml" 2>/dev/null; then
+  echo "[cell] profile '$profile' (candidate $cand) not found in .kitsoki.yaml/.kitsoki.local.yaml." >&2
+  echo "       Add it (see .kitsoki.local.yaml.example) before driving this candidate." >&2
+  exit 2
+fi
+
 # rich ticket_title: pack the full bug description (the reproducer is fed only
 # ticket_id + ticket_title; no ticket file). One line, quotes stripped.
 desc="$(printf '%s — %s' "$title" "$(printf '%s' "$ticket" | tr '\n' ' ' | sed 's/  */ /g')" | sed 's/"/\\"/g')"

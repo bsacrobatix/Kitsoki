@@ -411,14 +411,14 @@ def main():
         if a.bug:
             b = bug_of(m, a.bug)
             print(json.dumps({
-                "id": p["id"], "repo": p["repo"], "install": p["install"],
-                "test_cmd": p.get("test_cmd", ""),
-                "bug": b["id"], "baseline_sha": b["baseline_sha"], "fix_sha": b["fix_sha"],
-                "title": b["title"], "ticket": b.get("ticket", b["title"]),
+                "id": p["id"], "repo": p.get("repo", "."), "install": p.get("install", ""),
+                "test_cmd": p.get("test_cmd", ""), "local_only": bool(p.get("local_only", False)),
+                "bug": b["id"], "baseline_sha": b["baseline_sha"], "fix_sha": b.get("fix_sha", ""),
+                "title": b.get("title", b["id"]), "ticket": b.get("ticket", b.get("title", b["id"])),
             }))
         else:
             print(json.dumps({
-                "id": p["id"], "repo": p["repo"],
+                "id": p["id"], "repo": p.get("repo", "."),
                 "onboard_app": p.get("onboard_app", "@kitsoki/dev-story"),
                 "local_only": bool(p.get("local_only", False)),
                 "baselines": [b["baseline_sha"] for b in m["bugs"]],
