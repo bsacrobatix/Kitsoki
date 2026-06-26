@@ -36,6 +36,7 @@ const CASES = {
     curtainTitle: "Live @kitsoki guidance resume POC",
     threadTitle: "Real guidance resume thread",
     threadCaption: "The ambiguous issue first parks for guidance, then a label resumes the same job into a completed bugfix route.",
+    appCommentWaitText: "Live @kitsoki POC bug label",
     runTitle: "Guidance resume run page",
     apiTitle: "Guidance resume run JSON",
   },
@@ -175,7 +176,7 @@ function buildPlan(caseSlug, markdown, artifactDir) {
         title: "App-authenticated kitsoki comment",
         url: appCommentURL,
         caption: "kitsoki comments back with a public run link.",
-        waitForText: `${new URL(publicBaseURL).host}/run/`,
+        waitForText: cfg.appCommentWaitText || `${new URL(publicBaseURL).host}/run/`,
       },
       {
         id: "run-page",
