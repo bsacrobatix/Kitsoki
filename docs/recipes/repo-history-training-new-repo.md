@@ -121,6 +121,9 @@ make history-pending-smoke \
 This writes a pending cell to a temp directory, summarizes it, and validates the
 generated Markdown + Slidey JSON. Use this only for pre-attempt blockers. If a
 model produced a candidate worktree, score that worktree instead.
+For a reference repo wrapper, include this rehearsal in the full no-cost smoke
+after readiness so one command proves both the live-cell handoff path and the
+report/deck fallback.
 
 ## 5. Drive Live Cells Only On Approval
 
@@ -174,6 +177,8 @@ A repo-history training path is ready to cite when:
 - the manifest and oracle files are committed;
 - `make history-smoke ...` passes for the intended matrix;
 - readiness shows clean preflight and verified arming;
+- the full no-cost smoke validates pending report/deck generation without
+  touching the normal live results directory;
 - every selected cell is either scored from a live model attempt or honestly
   marked `pending` for a pre-attempt provider/profile blocker;
 - `bench.py summarize` produces a deterministic Markdown report and Slidey JSON;

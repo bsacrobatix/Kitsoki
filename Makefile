@@ -371,11 +371,13 @@ gears-history-smoke:
 
 # gears-history-full-smoke is the no-cost full-corpus proof for the armable
 # gears-rust fixtures. It verifies all four RED/GREEN oracles, renders the full
-# live command matrix, prepares every selected prompt/worktree, and runs the
-# repo-bakeoff flow checks.
+# live command matrix, prepares every selected prompt/worktree, validates
+# deterministic pending report/deck generation, and runs the repo-bakeoff flow
+# checks.
 gears-history-full-smoke:
 	@test -n "$(GEARS_RUST_REPO)" || (echo "GEARS_RUST_REPO must point at a local gears-rust checkout"; exit 1)
 	$(MAKE) history-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(GEARS_RUST_REPO)" HISTORY_BUGS="bug1,bug4,bug5,bug9" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)" HISTORY_PREPARE_ALL_CELLS=1
+	$(MAKE) history-pending-smoke HISTORY_PROJECT=gears-rust HISTORY_BUGS="bug1,bug4,bug5,bug9" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)" HISTORY_PENDING_REASON="provider/profile blocked before model attempt"
 
 # cost-report builds the per-story cost-savings report (the reusable form of
 # docs/case-studies/git-ops-cost.md): the deterministic story cost (agent spend

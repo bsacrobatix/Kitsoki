@@ -98,8 +98,9 @@ GEARS_RUST_REPO=/Users/brad/code/gears-rust make gears-history-full-smoke
 That verifies `bug1,bug4,bug5,bug9` RED@baseline/GREEN@fix, renders the full
 live command matrix, prepares every selected prompt/worktree, writes readiness,
 asserts every selected cell has fresh prepared metadata with zero
-stale/unprepared handoffs, and validates the `repo-bakeoff` story flows. It is
-still no-LLM, but it runs more cargo work than the one-bug smoke.
+stale/unprepared handoffs, validates the `repo-bakeoff` story flows, and
+rehearses deterministic pending report/deck generation. It is still no-LLM, but
+it runs more cargo work than the one-bug smoke.
 
 For another repo, use the generic target directly after adding a manifest and
 oracles under `tools/bugfix-bakeoff/external/projects/<name>/`:
@@ -169,6 +170,9 @@ make history-pending-smoke \
 This proves a pending cell rolls up into Markdown + Slidey JSON as `pending`.
 Use it only when no real model attempt happened; score real candidate worktrees
 with `drive_cell.sh --score`.
+The full gears smoke runs this rehearsal after the full readiness gate, so one
+command proves both the live-cell handoff path and the no-cost reporting
+fallback.
 
 ## Deterministic Arming
 

@@ -210,7 +210,9 @@ That uses the same generic smoke over the four armable fixtures
 `bug1,bug4,bug5,bug9`. Because it runs with
 `HISTORY_PREPARE_ALL_CELLS=1`, the smoke also asserts from the readiness JSON
 that every selected cell has fresh prepared metadata and that stale/unprepared
-handoffs are zero.
+handoffs are zero. It then runs `history-pending-smoke`, which validates the
+deterministic Markdown + Slidey JSON report path from a pre-attempt pending
+result without touching the normal live results directory.
 
 To regenerate that readiness report without rerunning RED/GREEN arming, call the
 harness directly. This is useful after adding scored or pending cell JSON:
