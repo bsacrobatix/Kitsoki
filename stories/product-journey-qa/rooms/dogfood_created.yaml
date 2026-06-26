@@ -157,6 +157,7 @@ states:
                 minimum_evidence_count: "stdout_json.minimum_evidence_count"
                 missing_proof_summary: "stdout_json.missing_proof_summary"
                 driver_contract_summary: "stdout_json.driver_contract_summary"
+                next_driver_capture: "stdout_json.next_driver_capture"
               on_error: dogfood_created
             - set:
                 status: "run_created"

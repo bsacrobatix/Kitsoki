@@ -952,6 +952,7 @@ def validate_story_driver_contract_bindings(issues: list[dict]) -> None:
         add_corpus_issue(issues, "error", "story-bindings", "Product journey story rooms directory is missing", str(rooms_dir))
         return
     missing_contract_binds = []
+    missing_next_capture_binds = []
     for path in sorted(rooms_dir.glob("*.yaml")):
         lines = path.read_text(encoding="utf-8").splitlines()
         in_bind = False
@@ -974,6 +975,11 @@ def validate_story_driver_contract_bindings(issues: list[dict]) -> None:
                     and 'driver_contract_summary: "stdout_json.driver_contract_summary"' not in block
                 ):
                     missing_contract_binds.append(f"{path.relative_to(ROOT)}:{bind_start}")
+                if (
+                    'driver_contract_summary: "stdout_json.driver_contract_summary"' in block
+                    and 'next_driver_capture: "stdout_json.next_driver_capture"' not in block
+                ):
+                    missing_next_capture_binds.append(f"{path.relative_to(ROOT)}:{bind_start}")
                 in_bind = False
             if in_bind:
                 bind_lines.append(line)
@@ -984,6 +990,11 @@ def validate_story_driver_contract_bindings(issues: list[dict]) -> None:
                 and 'driver_contract_summary: "stdout_json.driver_contract_summary"' not in block
             ):
                 missing_contract_binds.append(f"{path.relative_to(ROOT)}:{bind_start}")
+            if (
+                'driver_contract_summary: "stdout_json.driver_contract_summary"' in block
+                and 'next_driver_capture: "stdout_json.next_driver_capture"' not in block
+            ):
+                missing_next_capture_binds.append(f"{path.relative_to(ROOT)}:{bind_start}")
     if missing_contract_binds:
         add_corpus_issue(
             issues,
@@ -991,6 +1002,14 @@ def validate_story_driver_contract_bindings(issues: list[dict]) -> None:
             "story-driver-contract-bindings",
             "Run-result story binds must preserve driver_contract_summary with missing_proof_summary",
             ", ".join(missing_contract_binds),
+        )
+    if missing_next_capture_binds:
+        add_corpus_issue(
+            issues,
+            "error",
+            "story-next-driver-capture-bindings",
+            "Run-result story binds must preserve next_driver_capture with driver_contract_summary",
+            ", ".join(missing_next_capture_binds),
         )
 
 
@@ -2080,7 +2099,8 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
             f"Drive product journey QA for run_dir={run_dir_arg}. Open or attach "
             "stories/product-journey-qa/app.yaml, submit "
             f"`load run_dir={run_dir_arg}`, then inspect story world `last_result.driver_scenarios`, "
-            "`last_result.missing_proof_evidence`, and `last_result.driver_final_gates`. Use Kitsoki Studio MCP and visual MCP "
+            "`last_result.next_driver_capture`, `last_result.missing_proof_evidence`, and "
+            "`last_result.driver_final_gates`. Use Kitsoki Studio MCP and visual MCP "
             "to capture proof-source evidence or blockers, record findings, then run review and validation."
         ),
         "finalize_commands": [
@@ -2433,6 +2453,20 @@ def build_driver_contract_summary(driver_plan: dict, handoff: dict) -> str:
     )
 
 
+def build_next_driver_capture(handoff: dict) -> str:
+    for row in handoff.get("missing_proof_evidence", []):
+        scenario = row.get("scenario", "")
+        slots = row.get("slots", [])
+        if not scenario or not slots:
+            continue
+        slot = slots[0]
+        kind = slot.get("kind", "")
+        hint = slot.get("capture_hint", "")
+        if kind:
+            return f"Next capture: {scenario}/{kind}. {hint}".strip()
+    return ""
+
+
 def summarize_run_bundle(run_dir: Path) -> dict:
     run_json = read_json(run_dir / "run.json")
     review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {}
@@ -2482,6 +2516,7 @@ def summarize_run_bundle(run_dir: Path) -> dict:
         "driver_final_gates": final_gates,
         "missing_proof_evidence": missing_proof_evidence,
         "driver_contract_summary": driver_contract_summary,
+        "next_driver_capture": build_next_driver_capture(handoff),
         "suggested_prompt": handoff.get("suggested_prompt", ""),
     } | run_story_summary(run_dir)
 
@@ -2527,6 +2562,7 @@ def run_story_summary(run_dir: Path) -> dict:
         "minimum_evidence_count": handoff.get("status", {}).get("minimum_evidence_count", 0),
         "missing_proof_summary": "; ".join(missing_proof_summary),
         "driver_contract_summary": build_driver_contract_summary(driver_plan, handoff) if driver_plan else "",
+        "next_driver_capture": build_next_driver_capture(handoff),
         "review_passed_count": review.get("summary_counts", {}).get("passed", 0),
         "review_failed_count": review.get("summary_counts", {}).get("failed", 0),
         "review_warning_count": review.get("summary_counts", {}).get("warned", 0),
@@ -3656,6 +3692,8 @@ def validate_run_bundle(run_dir: Path) -> dict:
             add_validation_issue(issues, "error", "driver-handoff-final-gates", "driver-handoff.json finalize commands do not match driver-plan final gates")
         if not driver_handoff.get("suggested_prompt", "").strip():
             add_validation_issue(issues, "error", "driver-handoff-prompt", "driver-handoff.json suggested_prompt is empty")
+        elif "last_result.next_driver_capture" not in driver_handoff.get("suggested_prompt", ""):
+            add_validation_issue(issues, "error", "driver-handoff-prompt", "driver-handoff.json suggested_prompt does not mention next_driver_capture")
 
     if run_json and driver_plan and driver_handoff:
         summary = summarize_run_bundle(run_dir)
@@ -3663,6 +3701,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
         summary_missing_proof = summary.get("missing_proof_evidence", [])
         summary_final_gates = summary.get("driver_final_gates", [])
         summary_contract = summary.get("driver_contract_summary", "")
+        summary_next_capture = summary.get("next_driver_capture", "")
         if len(summary_scenarios) != len(driver_scenarios):
             add_validation_issue(
                 issues,
@@ -3693,6 +3732,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "loaded-driver-contract-review",
                 "summarize-run review_status does not match review.json",
                 f"expected={review.get('status')}, actual={summary.get('review_status')}",
+            )
+        expected_next_capture = build_next_driver_capture(driver_handoff)
+        if summary_next_capture != expected_next_capture:
+            add_validation_issue(
+                issues,
+                "error",
+                "loaded-driver-next-capture",
+                "summarize-run next_driver_capture does not match driver-handoff.json",
+                f"expected={expected_next_capture}, actual={summary_next_capture}",
             )
         missing_summary_tokens = [
             token for token in [

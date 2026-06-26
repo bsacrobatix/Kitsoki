@@ -232,6 +232,7 @@ states:
                 minimum_evidence_count: "stdout_json.minimum_evidence_count"
                 missing_proof_summary: "stdout_json.missing_proof_summary"
                 driver_contract_summary: "stdout_json.driver_contract_summary"
+                next_driver_capture: "stdout_json.next_driver_capture"
               on_error: idle
             - set:
                 status: "run_created"
@@ -284,6 +285,7 @@ states:
                 minimum_evidence_count: "stdout_json.minimum_evidence_count"
                 missing_proof_summary: "stdout_json.missing_proof_summary"
                 driver_contract_summary: "stdout_json.driver_contract_summary"
+                next_driver_capture: "stdout_json.next_driver_capture"
                 review_status: "stdout_json.review_status"
                 review_summary: "stdout_json.review_summary"
                 review_passed_count: "stdout_json.review_passed_count"
