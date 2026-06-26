@@ -31,6 +31,8 @@ func agentBenchScoreCmd() *cobra.Command {
 	var caseID string
 	var trace string
 	var jsonOut string
+	var markdownOut string
+	var slideyOut string
 	cmd := &cobra.Command{
 		Use:          "score <bench.yaml>",
 		Short:        "Score an existing trace without calling a provider",
@@ -41,7 +43,13 @@ func agentBenchScoreCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := writeAgentBenchReport(jsonOut, report); err != nil {
+			if err := writeAgentBenchReportArtifacts(agentBenchArtifactOptions{
+				JSONOut:     jsonOut,
+				MarkdownOut: markdownOut,
+				SlideyOut:   slideyOut,
+				JSONPayload: report,
+				Report:      report,
+			}); err != nil {
 				return err
 			}
 			if err := printAgentBenchReport(cmd, report); err != nil {
@@ -56,6 +64,8 @@ func agentBenchScoreCmd() *cobra.Command {
 	cmd.Flags().StringVar(&caseID, "case", "", "case id to score; optional for single-case manifests")
 	cmd.Flags().StringVar(&trace, "trace", "", "override trace path")
 	cmd.Flags().StringVar(&jsonOut, "json-out", "", "write machine-readable report JSON")
+	cmd.Flags().StringVar(&markdownOut, "markdown-out", "", "write reviewable report Markdown")
+	cmd.Flags().StringVar(&slideyOut, "slidey-out", "", "write a Slidey JSON report deck")
 	return cmd
 }
 
@@ -63,6 +73,8 @@ func agentBenchRunCmd() *cobra.Command {
 	var caseID string
 	var trace string
 	var jsonOut string
+	var markdownOut string
+	var slideyOut string
 	var live bool
 	cmd := &cobra.Command{
 		Use:          "run <bench.yaml>",
@@ -79,7 +91,13 @@ func agentBenchRunCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := writeAgentBenchReport(jsonOut, report); err != nil {
+			if err := writeAgentBenchReportArtifacts(agentBenchArtifactOptions{
+				JSONOut:     jsonOut,
+				MarkdownOut: markdownOut,
+				SlideyOut:   slideyOut,
+				JSONPayload: report,
+				Report:      report.Report,
+			}); err != nil {
 				return err
 			}
 			if report.Stdout != "" {
@@ -100,19 +118,45 @@ func agentBenchRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&caseID, "case", "", "case id to run; optional for single-case manifests")
 	cmd.Flags().StringVar(&trace, "trace", "", "override trace path")
 	cmd.Flags().StringVar(&jsonOut, "json-out", "", "write machine-readable report JSON")
+	cmd.Flags().StringVar(&markdownOut, "markdown-out", "", "write reviewable report Markdown")
+	cmd.Flags().StringVar(&slideyOut, "slidey-out", "", "write a Slidey JSON report deck")
 	cmd.Flags().BoolVar(&live, "live", false, "execute the manifest command; may call live providers")
 	return cmd
 }
 
-func writeAgentBenchReport(path string, report any) error {
-	if path == "" {
-		return nil
+type agentBenchArtifactOptions struct {
+	JSONOut     string
+	MarkdownOut string
+	SlideyOut   string
+	JSONPayload any
+	Report      agentbench.Report
+}
+
+func writeAgentBenchReportArtifacts(opts agentBenchArtifactOptions) error {
+	if opts.JSONOut != "" {
+		b, err := json.MarshalIndent(opts.JSONPayload, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(opts.JSONOut, append(b, '\n'), 0o644); err != nil {
+			return err
+		}
 	}
-	b, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return err
+	if opts.MarkdownOut != "" {
+		if err := os.WriteFile(opts.MarkdownOut, []byte(agentbench.MarkdownReport(opts.Report)), 0o644); err != nil {
+			return err
+		}
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	if opts.SlideyOut != "" {
+		b, err := agentbench.SlideyDeckJSON(opts.Report)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(opts.SlideyOut, append(b, '\n'), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func printAgentBenchReport(cmd *cobra.Command, report agentbench.Report) error {

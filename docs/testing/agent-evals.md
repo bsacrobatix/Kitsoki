@@ -84,12 +84,17 @@ quota regressions around `host.agent.*` calls. It is deliberately separate from
 real traces against budgets such as token count, cost, tool calls, read fanout,
 elapsed time, final state, and whether a structured submit occurred.
 
+The broader prompt/tool/task-shape hardening loop is documented in
+[Model Task Engineering](model-task-engineering.md).
+
 The default command is offline and CI-safe:
 
 ```sh
 go run ./cmd/kitsoki agent-bench score stories/deliver/agent-bench/decompose_glm.yaml \
   --trace .artifacts/dogfood-four-bugs/deliver-glm-post-host.trace.jsonl \
-  --json-out .artifacts/agent-bench/deliver-decompose-glm52/report.json
+  --json-out .artifacts/agent-bench/deliver-decompose-glm52/report.json \
+  --markdown-out .artifacts/agent-bench/deliver-decompose-glm52/report.md \
+  --slidey-out .artifacts/agent-bench/deliver-decompose-glm52/deck.slidey.json
 ```
 
 If any budget or expectation fails, the command exits non-zero and prints the

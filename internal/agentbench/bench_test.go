@@ -244,6 +244,48 @@ cases:
 	}
 }
 
+func TestMarkdownReportAndSlideyDeckSummarizeScore(t *testing.T) {
+	report := Report{
+		CaseID:   "glm-task",
+		Trace:    ".artifacts/glm.trace.jsonl",
+		Passed:   false,
+		Failures: []string{"input_tokens 200 exceeds budget 100"},
+		Metrics: Metrics{
+			Events:             4,
+			AgentStreamEvents:  2,
+			InputTokens:        200,
+			OutputTokens:       50,
+			TotalTokens:        250,
+			CostUSD:            0.12,
+			ToolCallsTotal:     3,
+			ReadCalls:          2,
+			FilesRead:          []string{"docs/proposals/example.md"},
+			ToolCallsByName:    map[string]int{"Read": 2, "Edit": 1},
+			FinalState:         "configure",
+			Submitted:          true,
+			AgentCallsStarted:  1,
+			AgentCallsFinished: 1,
+		},
+	}
+	md := MarkdownReport(report)
+	for _, want := range []string{"# Agent Bench: glm-task", "Status: FAIL", "input_tokens 200", "`Read`: 2", "`docs/proposals/example.md`"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown report missing %q:\n%s", want, md)
+		}
+	}
+	deck, err := SlideyDeckJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(deck, &decoded); err != nil {
+		t.Fatalf("invalid slidey json: %v\n%s", err, deck)
+	}
+	if decoded["title"] != "Agent Bench: glm-task" {
+		t.Fatalf("deck title = %v", decoded["title"])
+	}
+}
+
 func TestRunManifestCaseRequiresLiveGate(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "bench.yaml")

@@ -9,6 +9,9 @@ import (
 
 func TestAgentBenchScoreCommand(t *testing.T) {
 	dir := t.TempDir()
+	jsonOut := filepath.Join(dir, "report.json")
+	markdownOut := filepath.Join(dir, "report.md")
+	slideyOut := filepath.Join(dir, "deck.slidey.json")
 	trace := filepath.Join(dir, "trace.jsonl")
 	if err := os.WriteFile(trace, []byte(`{"ts":"2026-06-26T01:00:00Z","kind":"agent.stream","state_path":"rooms/decompose","payload":{"tool":"mcp__validator__submit"}}
 {"ts":"2026-06-26T01:00:01Z","kind":"agent.stream","state_path":"rooms/lint","payload":{"type":"result","input_tokens":100,"output_tokens":20,"total_cost_usd":0.001}}
@@ -30,12 +33,24 @@ cases:
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := execRoot(t, "agent-bench", "score", manifest)
+	out, err := execRoot(t, "agent-bench", "score", manifest, "--json-out", jsonOut, "--markdown-out", markdownOut, "--slidey-out", slideyOut)
 	if err != nil {
 		t.Fatalf("agent-bench score: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "PASS smoke") {
 		t.Fatalf("unexpected output:\n%s", out)
+	}
+	for _, path := range []string{jsonOut, markdownOut, slideyOut} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected artifact %s: %v", path, err)
+		}
+	}
+	md, err := os.ReadFile(markdownOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(md), "# Agent Bench: smoke") {
+		t.Fatalf("unexpected markdown:\n%s", md)
 	}
 }
 
