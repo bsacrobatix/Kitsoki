@@ -292,6 +292,7 @@ def test_readiness_reports_missing_and_scored_cells():
         assert report["prepared"]["cells"][0]["bug"] == "bug2"
         assert report["unprepared"][0]["bug"] == "bug1"
         assert "--no-drive" in report["unprepared"][0]["command"]
+        assert "--no-drive" in report["prepared"]["stale"][0]["command"]
         assert "/../" not in report["prepared"]["cells"][0]["_path"]
         assert report["missing"][0]["bug"] == "bug2"
         assert "bench.py pending" in report["missing"][0]["pending_command"]
@@ -309,6 +310,7 @@ def test_readiness_reports_missing_and_scored_cells():
         assert "demo-bug2-ready.json" in text
         assert "## Stale Prepared Metadata" in text
         assert "demo-bug1-ready.json" in text
+        assert "refresh with `" in text
         assert "## Unprepared Cells" in text
         assert "--no-drive" in text
         assert "`bug2` x `ready`" in text

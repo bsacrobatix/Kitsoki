@@ -505,6 +505,14 @@ def readiness(m, repo_dir=None, candidate=None, candidates_path=None, bug_ids=No
     completed = {(c.get("bug"), c.get("candidate")) for c in matching}
     prepared, stale_prepared, prepared_dir = collect_prepared(results_dir, m["project"]["id"], selected)
     prepared_keys = {(p.get("bug"), p.get("candidate")) for p in prepared}
+    command_by_key = {
+        (cmd["bug"], cmd["candidate"]): cmd["command"]
+        for cmd in plan["commands"]
+    }
+    for item in stale_prepared:
+        key = (item.get("bug"), item.get("candidate"))
+        if key in command_by_key:
+            item["command"] = command_by_key[key].replace(" --score", " --no-drive")
     missing = [
         {
             "bug": cmd["bug"],
@@ -655,7 +663,10 @@ def write_readiness_markdown(report, markdown):
         lines.append("")
         for p in stale:
             missing = ", ".join(p.get("missing_paths", []))
-            lines.append(f"- `{p.get('bug')}` x `{p.get('candidate')}`: metadata `{p.get('_path')}` missing {missing}")
+            line = f"- `{p.get('bug')}` x `{p.get('candidate')}`: metadata `{p.get('_path')}` missing {missing}"
+            if p.get("command"):
+                line += f"; refresh with `{p.get('command')}`"
+            lines.append(line)
     if report.get("unprepared"):
         lines.extend(["", "## Unprepared Cells", ""])
         lines.append("These selected cells do not have prepared handoff metadata yet. This is optional before `--score`, but useful for review:")
