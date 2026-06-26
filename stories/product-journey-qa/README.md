@@ -24,3 +24,5 @@ The generated run bundle under `.artifacts/product-journey/<run-id>/` is the
 handoff point for visual MCP, Studio MCP, oracle results, and Slidey review.
 Use `agent-brief.md` inside that bundle to drive the live persona session, then
 use `execution-plan.md` to copy the generated `--attach-evidence` commands.
+Captured media is indexed in `media-manifest.json` so the generated Slidey deck
+can expose playback-ready videos and screenshots without scraping prose.

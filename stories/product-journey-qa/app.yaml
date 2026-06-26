@@ -25,6 +25,7 @@ world:
   deck_path:      { type: string, default: "" }
   execution_plan_path: { type: string, default: "" }
   agent_brief_path: { type: string, default: "" }
+  media_manifest_path: { type: string, default: "" }
   scenario:       { type: string, default: "" }
   evidence_kind:  { type: string, default: "" }
   evidence_path:  { type: string, default: "" }

@@ -12,7 +12,12 @@
   ],
   "run_result": {
     "required": ["run_id", "created_at", "mode", "project", "persona", "stages", "scenarios", "artifacts"],
-    "artifacts": ["run.json", "journey.md", "metrics.json", "bugs.json", "findings.json", "evidence.json", "scenarios.json", "execution-plan.json", "execution-plan.md", "agent-brief.json", "agent-brief.md", "review.json", "deck.slidey.json"]
+    "artifacts": ["run.json", "journey.md", "metrics.json", "bugs.json", "findings.json", "evidence.json", "media-manifest.json", "scenarios.json", "execution-plan.json", "execution-plan.md", "agent-brief.json", "agent-brief.md", "review.json", "deck.slidey.json"]
+  },
+  "media_manifest": {
+    "required": ["run_id", "items", "summary"],
+    "item_required": ["scenario", "evidence_kind", "media_kind", "path", "status", "playback"],
+    "media_kinds": ["video", "image", "trace", "document", "artifact"]
   },
   "agent_brief": {
     "required": ["run_id", "project", "persona", "mission", "persona_contract", "operating_rules", "scenario_order", "missing_evidence", "finalize_commands"],

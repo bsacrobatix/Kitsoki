@@ -99,6 +99,9 @@ surface, required Kitsoki/visual MCP tools, expected evidence, and success
 criteria, while the brief states the persona and operating rules. Use
 `execution-plan.md` in the same bundle to follow the concrete MCP capture
 sequence and copy ready-to-fill `--attach-evidence` commands.
+Captured screenshots, videos, traces, and documents are indexed in
+`media-manifest.json`; the generated Slidey deck uses that manifest for
+playback-ready media entries.
 
 After capturing evidence, attach it back to the bundle:
 

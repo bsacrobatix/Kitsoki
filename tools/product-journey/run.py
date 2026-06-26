@@ -290,6 +290,7 @@ def build_run_bundle(
             "bugs": "bugs.json",
             "findings": "findings.json",
             "evidence": "evidence.json",
+            "media_manifest": "media-manifest.json",
             "scenarios": "scenarios.json",
             "execution_plan": "execution-plan.json",
             "agent_brief": "agent-brief.json",
@@ -307,6 +308,7 @@ def build_run_bundle(
             "This project came from the GitHub matrix; refresh open bug counts before a live scored sweep."
         )
     evidence = evidence_plan(run_json)
+    media_manifest = build_media_manifest(run_json, evidence)
     execution_plan = build_execution_plan(run_json, evidence)
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     findings = {"run_id": run_id, "items": [], "summary": {"strength": 0, "weakness": 0, "issue": 0, "fix": 0}}
@@ -332,7 +334,7 @@ def build_run_bundle(
     }
     bugs = {"run_id": run_id, "items": []}
     journey = render_journey(run_json)
-    deck = render_deck(run_json, metrics, evidence=evidence, findings=findings, execution_plan=execution_plan)
+    deck = render_deck(run_json, metrics, evidence=evidence, findings=findings, execution_plan=execution_plan, media_manifest=media_manifest)
 
     write_json(run_dir / "run.json", run_json)
     (run_dir / "journey.md").write_text(journey, encoding="utf-8")
@@ -340,6 +342,7 @@ def build_run_bundle(
     write_json(run_dir / "bugs.json", bugs)
     write_json(run_dir / "findings.json", findings)
     write_json(run_dir / "evidence.json", evidence)
+    write_json(run_dir / "media-manifest.json", media_manifest)
     write_json(run_dir / "scenarios.json", {"run_id": run_id, "items": scenario_items})
     write_json(run_dir / "execution-plan.json", execution_plan)
     (run_dir / "execution-plan.md").write_text(render_execution_plan(execution_plan), encoding="utf-8")
@@ -477,6 +480,54 @@ def evidence_capture_hint(kind: str) -> str:
         "reproduction_steps": "Save deterministic reproduction steps.",
     }
     return hints.get(kind, "Save this evidence artifact and attach it to the run.")
+
+
+def media_kind(evidence_kind: str, artifact_path: str) -> str:
+    value = f"{evidence_kind} {artifact_path}".lower()
+    suffix = Path(artifact_path).suffix.lower()
+    if "video" in value or suffix in {".mp4", ".mov", ".webm", ".gif"}:
+        return "video"
+    if "screenshot" in value or "png" in value or suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+        return "image"
+    if "trace" in value or suffix in {".jsonl", ".trace"}:
+        return "trace"
+    if suffix in {".md", ".txt", ".json", ".yaml", ".yml"}:
+        return "document"
+    return "artifact"
+
+
+def build_media_manifest(run_json: dict, evidence: dict) -> dict:
+    items = []
+    for item in evidence.get("items", []):
+        artifact_path = item.get("path", "")
+        if item.get("status") not in {"captured", "validated"} or not artifact_path:
+            continue
+        kind = media_kind(item.get("kind", ""), artifact_path)
+        items.append({
+            "scenario": item.get("scenario", ""),
+            "evidence_kind": item.get("kind", ""),
+            "media_kind": kind,
+            "path": artifact_path,
+            "status": item.get("status", ""),
+            "notes": item.get("notes", ""),
+            "playback": kind in {"video", "image"},
+        })
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item["media_kind"]] = counts.get(item["media_kind"], 0) + 1
+    return {
+        "run_id": run_json["run_id"],
+        "items": items,
+        "summary": {
+            "total": len(items),
+            "playback_items": sum(1 for item in items if item["playback"]),
+            "video": counts.get("video", 0),
+            "image": counts.get("image", 0),
+            "trace": counts.get("trace", 0),
+            "document": counts.get("document", 0),
+            "artifact": counts.get("artifact", 0),
+        },
+    }
 
 
 def build_execution_plan(run_json: dict, evidence: dict) -> dict:
@@ -768,6 +819,8 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
 
     write_json(run_dir / "run.json", run_json)
     write_json(run_dir / "evidence.json", evidence)
+    media_manifest = build_media_manifest(run_json, evidence)
+    write_json(run_dir / "media-manifest.json", media_manifest)
     write_json(run_dir / "findings.json", findings)
     write_json(run_dir / "review.json", review)
     write_json(run_dir / "metrics.json", metrics)
@@ -779,7 +832,7 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     write_json(run_dir / "agent-brief.json", agent_brief)
     (run_dir / "agent-brief.md").write_text(render_agent_brief(agent_brief), encoding="utf-8")
     (run_dir / "journey.md").write_text(render_journey(run_json), encoding="utf-8")
-    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan)
+    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan, media_manifest)
     write_json(run_dir / "deck.slidey.json", deck)
     if publish_deck is not None:
         publish_deck.parent.mkdir(parents=True, exist_ok=True)
@@ -904,6 +957,7 @@ def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "deck_path": str(run_dir / "deck.slidey.json"),
         "execution_plan_path": str(run_dir / "execution-plan.md"),
         "agent_brief_path": str(run_dir / "agent-brief.md"),
+        "media_manifest_path": str(run_dir / "media-manifest.json"),
         "evidence_added": len(demo_evidence),
         "findings_added": findings_added,
         "present_evidence_count": metrics.get("present_evidence_count", 0),
@@ -927,6 +981,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "bugs.json",
         "findings.json",
         "evidence.json",
+        "media-manifest.json",
         "scenarios.json",
         "execution-plan.json",
         "execution-plan.md",
@@ -936,12 +991,11 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "deck.slidey.json",
     ]
     evidence_items = evidence.get("items", [])
+    media_manifest = build_media_manifest(run_json, evidence)
     present_items = [item for item in evidence_items if item.get("status") in {"captured", "validated"}]
     rejected_items = [item for item in evidence_items if item.get("status") == "rejected"]
-    video_items = [
-        item for item in present_items
-        if "video" in item.get("kind", "") or "video" in item.get("path", "")
-    ]
+    video_items = [item for item in media_manifest["items"] if item["media_kind"] == "video"]
+    playback_items = [item for item in media_manifest["items"] if item["playback"]]
     finding_items = findings.get("items", [])
     finding_kinds = {item.get("kind") for item in finding_items}
 
@@ -969,6 +1023,12 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "status": "pass" if video_items else "warn",
             "summary": "At least one key interaction video is attached for Slidey playback.",
             "detail": f"video_items={len(video_items)}",
+        },
+        {
+            "id": "media-manifest",
+            "status": "pass" if playback_items else "warn",
+            "summary": "Captured visual media is listed in the playback manifest.",
+            "detail": f"playback_items={len(playback_items)}",
         },
         {
             "id": "findings-summary",
@@ -1014,6 +1074,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "checks": checks,
     }
     write_json(run_dir / "review.json", review)
+    write_json(run_dir / "media-manifest.json", media_manifest)
     metrics["review_status"] = status
     metrics["review_passed_checks"] = passed
     metrics["review_total_checks"] = len(checks)
@@ -1023,7 +1084,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     write_json(run_dir / "agent-brief.json", agent_brief)
     (run_dir / "agent-brief.md").write_text(render_agent_brief(agent_brief), encoding="utf-8")
-    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan)
+    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan, media_manifest)
     write_json(run_dir / "deck.slidey.json", deck)
     if publish_deck is not None:
         publish_deck.parent.mkdir(parents=True, exist_ok=True)
@@ -1037,6 +1098,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "deck_path": str(run_dir / "deck.slidey.json"),
         "execution_plan_path": str(run_dir / "execution-plan.md"),
         "agent_brief_path": str(run_dir / "agent-brief.md"),
+        "media_manifest_path": str(run_dir / "media-manifest.json"),
         "passed": passed,
         "warnings": warned,
         "failed": failed,
@@ -1404,6 +1466,7 @@ def render_deck(
     findings: Optional[dict] = None,
     review: Optional[dict] = None,
     execution_plan: Optional[dict] = None,
+    media_manifest: Optional[dict] = None,
 ) -> dict:
     stage_lines = [f"{stage['id']}: {stage['status']}" for stage in run_json["stages"]]
     scenario_lines = [
@@ -1417,11 +1480,17 @@ def render_deck(
             for item in evidence.get("items", [])
             if item.get("status") in {"captured", "validated"} and item.get("path")
         ]
-    video_lines = [line for line in captured if "video" in line]
-    if not video_lines:
-        video_body = "No clips attached yet. Expected clips: product discovery, onboarding, bugfix, PRD/design, feature implementation, and product bug filing."
+    playback_items = []
+    if media_manifest is not None:
+        playback_items = [item for item in media_manifest.get("items", []) if item.get("playback")]
+    playback_lines = [
+        f"{item['scenario']} / {item['evidence_kind']} ({item['media_kind']}): {item['path']}"
+        for item in playback_items
+    ]
+    if not playback_lines:
+        playback_body = "No playback media attached yet. Expected media: product discovery screenshots, onboarding frames, bugfix video, PRD/design captures, feature implementation captures, and product bug filing evidence."
     else:
-        video_body = "\n".join(video_lines)
+        playback_body = "\n".join(playback_lines[:12])
     captured_body = "\n".join(captured[:12]) if captured else "No evidence attached yet."
     finding_items = findings.get("items", []) if findings is not None else []
     finding_lines = [
@@ -1502,8 +1571,9 @@ def render_deck(
                 "type": "narrative",
                 "eyebrow": "Video playback",
                 "title": "Key interactions",
-                "body": video_body,
-                "narration": "Slidey scenes reserve space for key interaction playback once visual evidence is captured.",
+                "body": playback_body,
+                "media": playback_items[:12],
+                "narration": "Slidey scenes carry structured playback media for key visual interactions.",
             },
             {
                 "type": "narrative",
@@ -1937,6 +2007,7 @@ def main() -> None:
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
+                "media_manifest_path": str(run_dir / "media-manifest.json"),
                 "published_deck_path": str(publish_deck) if publish_deck is not None else "",
             }, sort_keys=True))
             append_log(f"Recorded {args.finding_kind} finding for {run_dir.name}: {args.title}")
@@ -1984,6 +2055,7 @@ def main() -> None:
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
+                "media_manifest_path": str(run_dir / "media-manifest.json"),
                 "published_deck_path": str(publish_deck) if publish_deck is not None else "",
             }, sort_keys=True))
             append_log(f"Attached evidence {args.scenario}/{args.evidence_kind} to {run_dir.name}")
@@ -2019,6 +2091,7 @@ def main() -> None:
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
+                "media_manifest_path": str(run_dir / "media-manifest.json"),
                 "published_deck_path": str(publish_deck) if publish_deck is not None else "",
             }, sort_keys=True))
             append_log(f"Emitted dry-run bundle {run_json['run_id']}")
