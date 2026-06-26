@@ -126,8 +126,9 @@ repo:
   candidate/profile preflight, scoped oracle arming, exact `drive_cell.sh`
   command rendering, free first-cell `drive_cell.sh --no-drive` preparation, and
   `repo-bakeoff` story flow validation. `make gears-history-smoke` is the
-  preconfigured gears-rust wrapper. The smoke also writes a readiness Markdown
-  audit under `.artifacts/external-bakeoff/readiness/`.
+  preconfigured gears-rust wrapper, and `make gears-history-full-smoke` covers
+  all four armable gears-rust fixtures. The smoke also writes a readiness
+  Markdown audit under `.artifacts/external-bakeoff/readiness/`.
 - `stories/repo-bakeoff` wraps the deterministic prepare, run-command handoff,
   scoring, reporting, and Slidey deck generation path without running live LLM
   cells in tests.
@@ -382,7 +383,8 @@ the stories, not in the runner.
 - [x] Ship the gears-rust bugfix reference path with a local-only manifest,
       RED/GREEN arming, `repo-bakeoff` deterministic flow fixtures, exact
       live-cell command rendering, generated report/deck output, and a no-cost
-      `make history-smoke` product-path gate with a gears-rust wrapper.
+      `make history-smoke` product-path gate with gears-rust one-fixture and
+      full-corpus wrappers.
 - [ ] Add a corpus-label design that extends `internal/mining` and the
       session-mining backend-generalization proposal instead of creating a new
       corpus.
