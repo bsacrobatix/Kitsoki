@@ -1136,6 +1136,31 @@ def driver_action_sequence(required_mcp: list[str]) -> list[str]:
     return sequence
 
 
+def resolve_mcp_tools(capability: str) -> list[str]:
+    mapping = {
+        "visual.open": ["mcp__kitsoki__visual_open"],
+        "visual.observe": ["mcp__kitsoki__visual_observe"],
+        "visual.act": ["mcp__kitsoki__visual_act"],
+        "session.open": ["mcp__kitsoki__session_new", "mcp__kitsoki__session_attach"],
+        "session.status": ["mcp__kitsoki__session_status"],
+        "session.submit": ["mcp__kitsoki__session_submit", "mcp__kitsoki__session_drive"],
+        "session.drive": ["mcp__kitsoki__session_drive"],
+        "session.inspect": ["mcp__kitsoki__session_inspect", "mcp__kitsoki__session_world", "mcp__kitsoki__session_trace"],
+        "session.trace": ["mcp__kitsoki__session_trace"],
+        "render.tui": ["mcp__kitsoki__render_tui", "mcp__kitsoki__render_tui_png"],
+    }
+    return mapping.get(capability, [])
+
+
+def resolved_mcp_tools(capabilities: list[str]) -> list[str]:
+    tools: list[str] = []
+    for capability in capabilities:
+        for tool in resolve_mcp_tools(capability):
+            if tool not in tools:
+                tools.append(tool)
+    return tools
+
+
 def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -> list[dict]:
     scenario_id = scenario["id"]
     evidence_dir = scenario.get(
@@ -1143,24 +1168,33 @@ def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -
         f"evidence/{run_json['project']['id']}--{run_json['persona']['id']}/{scenario_id}",
     )
     required_mcp = scenario.get("required_mcp", [])
+    open_tools = [
+        tool for tool in ["session.open", "visual.open"]
+        if tool in required_mcp
+    ] or ["session.status"]
+    read_tools = [
+        tool for tool in ["session.status", "render.tui", "visual.observe"]
+        if tool == "session.status" or tool in required_mcp
+    ]
+    act_tools = [
+        tool for tool in ["session.submit", "session.drive", "visual.act", "session.trace"]
+        if tool in {"session.submit", "session.trace"} or tool in required_mcp
+    ]
+    capture_tools = ["visual.observe", "render.tui", "session.trace"]
     return [
         {
             "id": "open_surface",
             "goal": "Open or attach the Kitsoki/product surface named by the scenario.",
-            "tools": [
-                tool for tool in ["session.open", "visual.open"]
-                if tool in required_mcp
-            ] or ["session.status"],
+            "tools": open_tools,
+            "resolved_tools": resolved_mcp_tools(open_tools),
             "evidence": [],
             "record": "Record the handle, URL, or reason this surface could not be opened.",
         },
         {
             "id": "read_current_frame",
             "goal": "Observe the exact operator-visible state before acting.",
-            "tools": [
-                tool for tool in ["session.status", "render.tui", "visual.observe"]
-                if tool == "session.status" or tool in required_mcp
-            ],
+            "tools": read_tools,
+            "resolved_tools": resolved_mcp_tools(read_tools),
             "evidence": [
                 item["kind"]
                 for item in evidence_items
@@ -1171,10 +1205,8 @@ def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -
         {
             "id": "act_as_persona",
             "goal": "Take the next natural persona action and preserve route/interaction evidence.",
-            "tools": [
-                tool for tool in ["session.submit", "session.drive", "visual.act", "session.trace"]
-                if tool in {"session.submit", "session.trace"} or tool in required_mcp
-            ],
+            "tools": act_tools,
+            "resolved_tools": resolved_mcp_tools(act_tools),
             "evidence": [
                 item["kind"]
                 for item in evidence_items
@@ -1185,7 +1217,8 @@ def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -
         {
             "id": "capture_required_evidence",
             "goal": "Attach every minimum-evidence slot or record the matching quality-gate blocker.",
-            "tools": ["visual.observe", "render.tui", "session.trace"],
+            "tools": capture_tools,
+            "resolved_tools": resolved_mcp_tools(capture_tools),
             "evidence": [item["kind"] for item in evidence_items],
             "record": "Use attach commands for captured evidence; use blocker command for honest gaps.",
         },
@@ -1193,6 +1226,7 @@ def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -
             "id": "journal_attempt",
             "goal": "Append the driver's actual attempt, tools used, evidence references, and blockers.",
             "tools": ["story.driver_event", "tools/product-journey/run.py --record-driver-event"],
+            "resolved_tools": [],
             "evidence": ["driver-journal.md"],
             "record": "Journal the attempt even when the scenario only produced a blocker.",
         },
@@ -1607,6 +1641,7 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "harness": driver_harness(scenario["primary_story"]),
             "visual_surface": driver_visual_surface(scenario["primary_story"], required_mcp),
             "required_mcp": required_mcp,
+            "resolved_mcp_tools": resolved_mcp_tools(required_mcp),
             "action_sequence": driver_action_sequence(required_mcp),
             "driver_actions": driver_actions(scenario, run_json, evidence_items),
             "persona_prompts": [
@@ -1731,6 +1766,7 @@ def render_driver_plan(plan: dict) -> str:
             f"- Harness: `{scenario['harness']}`",
             f"- Visual surface: `{scenario['visual_surface']}`",
             f"- MCP: {', '.join(scenario['required_mcp'])}",
+            f"- MCP tools: {', '.join(scenario.get('resolved_mcp_tools', [])) or '(none)'}",
             f"- Evidence dir: `{scenario['evidence_dir']}`",
             "",
             scenario["task_prompt"],
@@ -1743,12 +1779,14 @@ def render_driver_plan(plan: dict) -> str:
         lines.extend(["", "### Driver Actions", ""])
         for action in scenario.get("driver_actions", []):
             tools = ", ".join(action.get("tools", [])) or "(none)"
+            resolved_tools = ", ".join(action.get("resolved_tools", [])) or "(none)"
             evidence_refs = ", ".join(action.get("evidence", [])) or "(none)"
             lines.extend([
                 f"#### {action['id']}",
                 "",
                 f"- Goal: {action['goal']}",
                 f"- Tools: {tools}",
+                f"- MCP tools: {resolved_tools}",
                 f"- Evidence: {evidence_refs}",
                 f"- Record: {action['record']}",
                 "",
@@ -3120,6 +3158,25 @@ def validate_run_bundle(run_dir: Path) -> dict:
         })
         if missing_driver_actions:
             add_validation_issue(issues, "error", "driver-plan-actions", "driver-plan.json scenarios are missing driver_actions", ", ".join(missing_driver_actions))
+        missing_resolved_tools = sorted({
+            scenario.get("scenario", f"driver-scenario-{index}")
+            for index, scenario in enumerate(driver_scenarios, start=1)
+            if scenario.get("required_mcp") and not scenario.get("resolved_mcp_tools")
+        })
+        if missing_resolved_tools:
+            add_validation_issue(issues, "error", "driver-plan-resolved-mcp-tools", "driver-plan.json scenarios are missing resolved MCP tool names", ", ".join(missing_resolved_tools))
+        unresolved_action_tools = []
+        for index, scenario in enumerate(driver_scenarios, start=1):
+            scenario_id = scenario.get("scenario", f"driver-scenario-{index}")
+            for action in scenario.get("driver_actions", []):
+                canonical = [
+                    tool for tool in action.get("tools", [])
+                    if tool.startswith(("session.", "render.", "visual."))
+                ]
+                if canonical and not action.get("resolved_tools"):
+                    unresolved_action_tools.append(f"{scenario_id}/{action.get('id', 'action')}")
+        if unresolved_action_tools:
+            add_validation_issue(issues, "error", "driver-plan-action-resolved-tools", "driver-plan.json actions are missing resolved MCP tool names", ", ".join(unresolved_action_tools))
         missing_journal_commands = sorted({
             scenario.get("scenario", f"driver-scenario-{index}")
             for index, scenario in enumerate(driver_scenarios, start=1)

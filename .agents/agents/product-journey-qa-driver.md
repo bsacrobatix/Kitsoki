@@ -67,8 +67,8 @@ story `blocker` intent. Do not silently substitute a fake pass.
 For each scenario in the bundle:
 
 1. Read the scenario task, primary story, `driver_actions`, required MCP tools,
-   evidence slots, and success criteria. Treat the scenario `quality_gate` in
-   `driver-plan.json` as the minimum proof contract: capture its
+   `resolved_mcp_tools`, evidence slots, and success criteria. Treat the
+   scenario `quality_gate` in `driver-plan.json` as the minimum proof contract: capture its
    `minimum_evidence`, satisfy `done_when`, or record a blocker matching one of
    the `block_if` conditions.
    Also read `persona_lens`; it is the repeatable persona-specific bias for the
@@ -86,8 +86,9 @@ For each scenario in the bundle:
    action handles.
 4. Follow the generated `driver_actions` in order: open the surface, read the
    current frame, act as the persona, capture required evidence, and journal the
-   attempt. If one action cannot proceed, record the exact blocker and still
-   journal the attempt.
+   attempt. Use each action's `resolved_tools` as the concrete Kitsoki MCP tool
+   list for the abstract `tools` capability names. If one action cannot proceed,
+   record the exact blocker and still journal the attempt.
 5. Capture every requested evidence slot with an artifact reference:
    - visual state: retained `image_id`, screenshot path, or web frame reference;
    - TUI state: `render.tui` text or `render.tui_png` path;

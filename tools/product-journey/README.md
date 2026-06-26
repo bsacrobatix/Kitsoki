@@ -138,6 +138,8 @@ repeatable. The brief names
 `.agents/agents/product-journey-qa-driver.md` as the reusable live/cassette
 driver for Kitsoki Studio MCP and visual MCP runs. Use `driver-plan.md` for the
 machine-readable harness, visual-surface, action-sequence, and gate contract,
+including `resolved_mcp_tools` and per-action `resolved_tools` entries that map
+scenario-level aliases like `session.open` to concrete Kitsoki MCP tool names,
 `driver-journal.md` for the auditable record of what the driver actually tried,
 `execution-plan.md` for the detailed evidence slots and ready-to-fill
 `--attach-evidence` commands, and `driver-handoff.md` as the operator handoff
