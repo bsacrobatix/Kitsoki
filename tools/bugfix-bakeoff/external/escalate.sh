@@ -82,7 +82,7 @@ for b in "${BUGS[@]}"; do
   solving=""; tried=0; best="failed"
   for r in "${RUNGS[@]}"; do
     tried=$((tried+1))
-    out="$CACHE_RESULTS/cells/$b-$r-kitsoki.json"
+    out="$CACHE_RESULTS/cells/$project-$b-$r-kitsoki.json"
     # Resumable: an already-`solved` cell short-circuits the (cost-bearing) drive,
     # so re-running a partial ladder never re-spends a solved rung.
     if [[ "$(quality_of "$out")" == "solved" ]]; then

@@ -49,19 +49,20 @@ A **cell** = `(task × candidate × contender)`. Three axes:
 
 - **Structure axis (the contenders).** The approaches under test, e.g. kitsoki
   pipeline vs naive single-prompt+guidance; or two stories; or pipeline-vs-pipeline.
-  (`bakeoff.yaml: treatments` → `[kitsoki, single]`.)
+  (`manifest.yaml: treatments` → `[kitsoki, single]`.)
 - **Candidate axis (harness/model).** Each `{key, profile, model, effort,
   provider, invoker}` — e.g. GLM-5.2 / Opus-4.8 / Sonnet-4.6 / GPT-5.5, each a
-  configured kitsoki profile. (`bakeoff.yaml: candidates`.) `invoker` decides
+  configured kitsoki profile. (`candidates.yaml`.) `invoker` decides
   *how* a control cell runs: `claude_p` → `claude -p`; `session` → studio-MCP.
 - **Task axis.** The tasks/cases — for the bake-off, real fixed bugs, each with a
   `baseline_sha`, a hidden `oracle_test`, and `affected_test_pkgs`.
 
 **One hermetic worktree per cell** — never shared.
-`prepare.sh` cuts `.worktrees/bakeoff-<task>-<candidate>-<contender>` detached at
-the task's `baseline_sha`. A shared checkout *is* concurrent-checkout bug #9 —
-hard-isolate by `(task, candidate, contender)`. `prepare.sh` is idempotent (clean
-worktree at the right SHA = no-op; dirty/off-baseline refused without `--force`).
+`drive_cell.sh` cuts the per-cell worktree (a detached `git worktree add` on its
+own branch, keyed by `(project, task, candidate)`) at the task's `baseline_sha`
+before driving. A shared checkout *is* concurrent-checkout bug #9 — hard-isolate
+by `(task, candidate, contender)`. Re-running `drive_cell.sh` reuses an existing
+worktree at the right SHA.
 
 ## MANDATORY pre-flight — confirm each baseline is genuinely RED
 
@@ -87,9 +88,10 @@ A baseline that is GREEN is a study finding (note it), not a cell to run.
 ## The hidden oracle + adjudication
 
 - **Hidden oracle.** Each task's oracle = the real fix's own regression test,
-  kept **out of the candidate's tree**. `score.py` copies it in from the fix
-  commit (`git show <fix_sha>:<oracle>`), runs it, and **removes** it so the tree
-  is never polluted. The candidate must never see it (that would leak the answer).
+  kept **out of the candidate's tree**. `bench.py score` overlays it (the isolated
+  oracle test file injected/written into a throwaway scratch copy of the candidate
+  tree), runs it there, and never touches the candidate worktree, so the tree is
+  never polluted. The candidate must never see it (that would leak the answer).
 - **Oracles are often wording/impl-coupled** → they false-fail a behaviourally
   correct fix done a different way (Opus refused with different wording; the
   kitsoki pipeline used a per-session-path approach where the oracle asserted a
@@ -125,7 +127,7 @@ Per `results/SCHEMA.md`, every cell scores three families:
   `reproduced_red`, `added_regression_test`, `suite_green`, `in_scope`,
   `stage_order`. **Diff `baseline..HEAD` ∪ working tree**, not just `git status` —
   candidates often *commit* their fix+test, leaving status clean (`changed_files`
-  in `score.py`).
+  in `bench.py`).
 - **Cost — one consistent basis.** This is the axle the whole study turns on:
   - **kitsoki traces** carry an authoritative per-call `payload.meta.cost_usd` —
     **sum the native figure** (`extract_kitsoki` prefers it; exact by construction).
@@ -136,7 +138,8 @@ Per `results/SCHEMA.md`, every cell scores three families:
     table reproduces kitsoki's native cost to ~0.4%.
   - **Tokens are the provider-neutral primary axis; USD second.** `cost_extract`
     only reads Claude Code `message.usage` (returns zero on kitsoki traces); so
-    `score.py` *sniffs* format (top-level `kind` ⇒ kitsoki) and dispatches.
+    `bench.py` *sniffs* format (a `kind: agent.call.complete` line ⇒ kitsoki) and
+    dispatches.
   Also: `wall_time_s` and `guidance_turns`.
 
 ## Running cells (the cost-bearing step — manual, never CI/auto)
@@ -241,8 +244,10 @@ them, it does not reimplement scoring/pricing.
     only at scoring, then remove.
 12. **Coupled oracle false-fails** — adjudicate on behaviour; keep raw `oracle_status`.
 13. **MCP-driven sessions may not journal a discoverable local trace** —
-    `run_cell.sh --locate` reports `trace_found=false`; that absence is a finding,
-    not a script bug.
+    `drive_cell.sh` writes the trace path directly (`$CACHE/traces/<cellkey>.jsonl`,
+    echoed as `trace=…`) and passes it as the session's explicit `trace:`; if the
+    session still leaves that file empty/absent, that absence is a finding, not a
+    script bug.
 
 ## No-LLM testing rule (load-bearing — [AGENTS.md](../../../AGENTS.md))
 
