@@ -73,8 +73,10 @@ func classifyCodexItem(item map[string]any, ce *classifiedEvent) {
 		}
 
 	case "reasoning":
-		// Reasoning prose, surfaced as narration for the trace (defensive: the
-		// summary may live under "text" or "summary").
+		// Reasoning prose is backend-neutral assistant activity. Surface it
+		// with the same type Claude uses so TUI/web/VS Code consumers do not
+		// need provider-specific branches to render thinking.
+		ce.Type = "assistant"
 		if t, _ := item["text"].(string); t != "" {
 			ce.Text = t
 		} else if s, _ := item["summary"].(string); s != "" {
