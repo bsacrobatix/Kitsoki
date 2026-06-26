@@ -24,6 +24,7 @@ CATALOG = ROOT / "tools" / "product-journey" / "catalog.json"
 PERSONAS = ROOT / "tools" / "product-journey" / "personas.json"
 SCENARIOS = ROOT / "tools" / "product-journey" / "scenarios.json"
 GITHUB_TARGETS = ROOT / "tools" / "product-journey" / "github-targets.json"
+SCHEMA = ROOT / "tools" / "product-journey" / "schema.json"
 LOG = ROOT / ".context" / "product-journey-runlog.md"
 ARTIFACT_ROOT = ROOT / ".artifacts" / "product-journey"
 MATRIX_ROOT = ARTIFACT_ROOT / "matrices"
@@ -295,6 +296,7 @@ def build_run_bundle(
             "media_manifest": "media-manifest.json",
             "scenarios": "scenarios.json",
             "execution_plan": "execution-plan.json",
+            "execution_plan_markdown": "execution-plan.md",
             "agent_brief": "agent-brief.json",
             "agent_brief_markdown": "agent-brief.md",
             "review": "review.json",
@@ -1241,6 +1243,294 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     }
 
 
+def add_validation_issue(issues: list[dict], severity: str, check_id: str, message: str, detail: str = "") -> None:
+    issues.append({
+        "severity": severity,
+        "id": check_id,
+        "message": message,
+        "detail": detail,
+    })
+
+
+def validate_required_keys(data: dict, required: list[str], issues: list[dict], check_id: str, label: str) -> None:
+    missing = [key for key in required if key not in data]
+    if missing:
+        add_validation_issue(issues, "error", check_id, f"{label} is missing required keys", ", ".join(missing))
+
+
+def load_json_for_validation(path: Path, issues: list[dict]) -> dict:
+    if not path.exists():
+        add_validation_issue(issues, "error", "missing-json", "Required JSON file is missing", path.name)
+        return {}
+    try:
+        return read_json(path)
+    except json.JSONDecodeError as exc:
+        add_validation_issue(issues, "error", "invalid-json", "JSON file cannot be parsed", f"{path.name}: {exc}")
+        return {}
+
+
+def deck_scene_eyebrows(deck: dict) -> set[str]:
+    return {
+        scene.get("eyebrow", "")
+        for scene in deck.get("scenes", [])
+        if isinstance(scene, dict)
+    }
+
+
+def validate_run_bundle(run_dir: Path) -> dict:
+    schema = read_json(SCHEMA)
+    issues: list[dict] = []
+    required_files = schema["run_result"]["artifacts"]
+
+    for name in required_files:
+        if not (run_dir / name).exists():
+            add_validation_issue(issues, "error", "required-file", "Required run artifact is missing", name)
+
+    run_json = load_json_for_validation(run_dir / "run.json", issues)
+    metrics = load_json_for_validation(run_dir / "metrics.json", issues)
+    evidence = load_json_for_validation(run_dir / "evidence.json", issues)
+    media_manifest = load_json_for_validation(run_dir / "media-manifest.json", issues)
+    scenarios_json = load_json_for_validation(run_dir / "scenarios.json", issues)
+    execution_plan = load_json_for_validation(run_dir / "execution-plan.json", issues)
+    agent_brief = load_json_for_validation(run_dir / "agent-brief.json", issues)
+    scenario_outcomes = load_json_for_validation(run_dir / "scenario-outcomes.json", issues)
+    review = load_json_for_validation(run_dir / "review.json", issues)
+    deck = load_json_for_validation(run_dir / "deck.slidey.json", issues)
+
+    if run_json:
+        validate_required_keys(run_json, schema["run_result"]["required"], issues, "run-required-keys", "run.json")
+        artifact_values = set(run_json.get("artifacts", {}).values())
+        missing_artifact_refs = [name for name in required_files if name not in artifact_values]
+        if missing_artifact_refs:
+            add_validation_issue(
+                issues,
+                "error",
+                "run-artifact-map",
+                "run.json artifacts map does not reference every required artifact",
+                ", ".join(missing_artifact_refs),
+            )
+
+    for payload, schema_key, label in [
+        (media_manifest, "media_manifest", "media-manifest.json"),
+        (agent_brief, "agent_brief", "agent-brief.json"),
+        (execution_plan, "execution_plan", "execution-plan.json"),
+        (scenario_outcomes, "scenario_outcomes", "scenario-outcomes.json"),
+    ]:
+        if payload:
+            validate_required_keys(payload, schema[schema_key]["required"], issues, f"{schema_key}-required-keys", label)
+
+    scenarios = run_json.get("scenarios", []) if run_json else []
+    scenario_ids = {scenario.get("id", "") for scenario in scenarios}
+    scenario_rows = scenarios_json.get("items", []) if scenarios_json else []
+    evidence_items = evidence.get("items", []) if evidence else []
+    media_items = media_manifest.get("items", []) if media_manifest else []
+    outcome_items = scenario_outcomes.get("items", []) if scenario_outcomes else []
+    execution_steps = execution_plan.get("steps", []) if execution_plan else []
+    brief_scenarios = agent_brief.get("scenario_order", []) if agent_brief else []
+
+    if scenarios_json and len(scenario_rows) != len(scenarios):
+        add_validation_issue(
+            issues,
+            "error",
+            "scenario-count",
+            "scenarios.json item count does not match run.json scenarios",
+            f"scenarios.json={len(scenario_rows)}, run.json={len(scenarios)}",
+        )
+    if scenario_outcomes and len(outcome_items) != len(scenarios):
+        add_validation_issue(
+            issues,
+            "error",
+            "scenario-outcome-count",
+            "scenario-outcomes.json item count does not match run.json scenarios",
+            f"outcomes={len(outcome_items)}, scenarios={len(scenarios)}",
+        )
+    if execution_plan and len(execution_steps) != len(scenarios):
+        add_validation_issue(
+            issues,
+            "error",
+            "execution-plan-count",
+            "execution-plan.json step count does not match run.json scenarios",
+            f"steps={len(execution_steps)}, scenarios={len(scenarios)}",
+        )
+    if agent_brief and len(brief_scenarios) != len(scenarios):
+        add_validation_issue(
+            issues,
+            "error",
+            "agent-brief-count",
+            "agent-brief.json scenario order count does not match run.json scenarios",
+            f"scenario_order={len(brief_scenarios)}, scenarios={len(scenarios)}",
+        )
+
+    required_evidence = {
+        (item.get("scenario", ""), item.get("kind", ""))
+        for item in evidence_items
+    }
+    declared_evidence = {
+        (scenario.get("id", ""), evidence_kind)
+        for scenario in scenarios
+        for evidence_kind in scenario.get("evidence", [])
+    }
+    if declared_evidence - required_evidence:
+        missing = sorted(f"{scenario}/{kind}" for scenario, kind in declared_evidence - required_evidence)
+        add_validation_issue(issues, "error", "evidence-contract", "evidence.json is missing declared scenario evidence slots", ", ".join(missing))
+    if required_evidence - declared_evidence:
+        extra = sorted(f"{scenario}/{kind}" for scenario, kind in required_evidence - declared_evidence)
+        add_validation_issue(issues, "warn", "evidence-contract-extra", "evidence.json has slots not declared by run.json scenarios", ", ".join(extra))
+
+    unknown_scenario_refs = sorted({
+        item.get("scenario", "")
+        for item in [*evidence_items, *media_items, *outcome_items]
+        if item.get("scenario", "") and item.get("scenario", "") not in scenario_ids
+    })
+    if unknown_scenario_refs:
+        add_validation_issue(issues, "error", "unknown-scenario-ref", "Artifacts reference unknown scenarios", ", ".join(unknown_scenario_refs))
+
+    present_evidence = {
+        (item.get("scenario", ""), item.get("kind", ""), item.get("path", ""))
+        for item in evidence_items
+        if item.get("status") in {"captured", "validated"} and item.get("path")
+    }
+    media_refs = {
+        (item.get("scenario", ""), item.get("evidence_kind", ""), item.get("path", ""))
+        for item in media_items
+    }
+    if present_evidence - media_refs:
+        missing = sorted(f"{scenario}/{kind}:{path}" for scenario, kind, path in present_evidence - media_refs)
+        add_validation_issue(issues, "error", "media-manifest-coverage", "media-manifest.json is missing captured evidence items", ", ".join(missing))
+
+    schema_media_kinds = set(schema["media_manifest"]["media_kinds"])
+    invalid_media_kinds = sorted({
+        item.get("media_kind", "")
+        for item in media_items
+        if item.get("media_kind", "") not in schema_media_kinds
+    })
+    if invalid_media_kinds:
+        add_validation_issue(issues, "error", "media-kind", "media-manifest.json uses unknown media kinds", ", ".join(invalid_media_kinds))
+
+    schema_outcomes = set(schema["scenario_outcomes"]["outcomes"])
+    invalid_outcomes = sorted({
+        item.get("outcome", "")
+        for item in outcome_items
+        if item.get("outcome", "") not in schema_outcomes
+    })
+    if invalid_outcomes:
+        add_validation_issue(issues, "error", "scenario-outcome-kind", "scenario-outcomes.json uses unknown outcome values", ", ".join(invalid_outcomes))
+
+    expected_metrics = {
+        "scenario_count": len(scenarios),
+        "required_evidence_count": len(evidence_items),
+        "present_evidence_count": len([
+            item for item in evidence_items if item.get("status") in {"captured", "validated"}
+        ]),
+    }
+    for key, expected in expected_metrics.items():
+        if metrics and metrics.get(key) != expected:
+            add_validation_issue(issues, "error", "metrics-consistency", f"metrics.json {key} is stale or inconsistent", f"expected={expected}, actual={metrics.get(key)}")
+
+    if review and review.get("status") not in schema["review_statuses"]:
+        add_validation_issue(issues, "error", "review-status", "review.json has an unknown status", review.get("status", ""))
+    if review:
+        invalid_check_statuses = sorted({
+            check.get("status", "")
+            for check in review.get("checks", [])
+            if check.get("status", "") not in schema["review_check_statuses"]
+        })
+        if invalid_check_statuses:
+            add_validation_issue(issues, "error", "review-check-status", "review.json has unknown check statuses", ", ".join(invalid_check_statuses))
+
+    scene_eyebrows = deck_scene_eyebrows(deck)
+    for expected in ["Video playback", "Scenario outcomes"]:
+        if deck and expected not in scene_eyebrows:
+            add_validation_issue(issues, "error", "deck-scene", "deck.slidey.json is missing a required review scene", expected)
+    playback_count = media_manifest.get("summary", {}).get("playback_items", 0) if media_manifest else 0
+    video_scenes = [
+        scene for scene in deck.get("scenes", [])
+        if isinstance(scene, dict) and scene.get("eyebrow") == "Video playback"
+    ] if deck else []
+    if playback_count and not any(scene.get("media") for scene in video_scenes):
+        add_validation_issue(issues, "error", "deck-media", "Video playback scene has no media entries despite manifest playback items", f"playback_items={playback_count}")
+
+    errors = sum(1 for issue in issues if issue["severity"] == "error")
+    warnings = sum(1 for issue in issues if issue["severity"] == "warn")
+    return {
+        "status": "valid" if errors == 0 else "invalid",
+        "run_dir": str(run_dir),
+        "checked_artifacts": len(required_files),
+        "errors": errors,
+        "warnings": warnings,
+        "issues": issues,
+    }
+
+
+def validate_matrix_bundle(matrix_dir: Path) -> dict:
+    schema = read_json(SCHEMA)
+    issues: list[dict] = []
+    required_files = schema["matrix_result"]["artifacts"]
+    for name in required_files:
+        if not (matrix_dir / name).exists():
+            add_validation_issue(issues, "error", "required-file", "Required matrix artifact is missing", name)
+
+    matrix = load_json_for_validation(matrix_dir / "matrix.json", issues)
+    deck = load_json_for_validation(matrix_dir / "deck.slidey.json", issues)
+    if matrix:
+        validate_required_keys(matrix, schema["matrix_result"]["required"], issues, "matrix-required-keys", "matrix.json")
+        if matrix.get("target_count") != schema["matrix_result"]["target_count"]:
+            add_validation_issue(
+                issues,
+                "error",
+                "matrix-target-count",
+                "matrix target count does not match the 10-repo contract",
+                f"expected={schema['matrix_result']['target_count']}, actual={matrix.get('target_count')}",
+            )
+        if matrix.get("target_count") != len(matrix.get("targets", [])):
+            add_validation_issue(issues, "error", "matrix-target-list", "matrix target_count does not match targets length", f"target_count={matrix.get('target_count')}, targets={len(matrix.get('targets', []))}")
+        if matrix.get("assignment_count") != len(matrix.get("assignments", [])):
+            add_validation_issue(issues, "error", "matrix-assignment-list", "matrix assignment_count does not match assignments length", f"assignment_count={matrix.get('assignment_count')}, assignments={len(matrix.get('assignments', []))}")
+        scenario_count = len(matrix.get("scenarios", []))
+        if matrix.get("scenario_count") != scenario_count:
+            add_validation_issue(issues, "error", "matrix-scenario-list", "matrix scenario_count does not match scenarios length", f"scenario_count={matrix.get('scenario_count')}, scenarios={scenario_count}")
+        missing_commands = [
+            assignment.get("id", f"assignment-{index}")
+            for index, assignment in enumerate(matrix.get("assignments", []), start=1)
+            if not assignment.get("emit_run_command")
+        ]
+        if missing_commands:
+            add_validation_issue(issues, "error", "matrix-emit-command", "Matrix assignments are missing emit_run_command", ", ".join(missing_commands))
+
+    if deck and len(deck.get("scenes", [])) < 3:
+        add_validation_issue(issues, "warn", "matrix-deck-scenes", "Matrix deck has very few scenes", f"scenes={len(deck.get('scenes', []))}")
+
+    rollup_files = schema["matrix_rollup"]["artifacts"]
+    present_rollup_files = [name for name in rollup_files if (matrix_dir / name).exists()]
+    if present_rollup_files:
+        missing_rollup_files = [name for name in rollup_files if not (matrix_dir / name).exists()]
+        if missing_rollup_files:
+            add_validation_issue(issues, "error", "rollup-required-file", "Partial matrix rollup artifacts are present", ", ".join(missing_rollup_files))
+        rollup = load_json_for_validation(matrix_dir / "rollup.json", issues)
+        if rollup:
+            validate_required_keys(rollup, schema["matrix_rollup"]["required"], issues, "rollup-required-keys", "rollup.json")
+            summary = rollup.get("summary", {})
+            if summary.get("scenario_outcomes", 0) != len(rollup.get("scenario_outcomes", [])):
+                add_validation_issue(
+                    issues,
+                    "error",
+                    "rollup-scenario-outcomes",
+                    "rollup summary scenario_outcomes does not match scenario_outcomes length",
+                    f"summary={summary.get('scenario_outcomes')}, rows={len(rollup.get('scenario_outcomes', []))}",
+                )
+
+    errors = sum(1 for issue in issues if issue["severity"] == "error")
+    warnings = sum(1 for issue in issues if issue["severity"] == "warn")
+    return {
+        "status": "valid" if errors == 0 else "invalid",
+        "matrix_dir": str(matrix_dir),
+        "checked_artifacts": len(required_files) + len(present_rollup_files),
+        "errors": errors,
+        "warnings": warnings,
+        "issues": issues,
+    }
+
+
 def render_matrix_summary(matrix: dict) -> str:
     lines = [
         "# Product journey GitHub matrix",
@@ -2050,6 +2340,8 @@ def main() -> None:
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
     parser.add_argument("--rollup-matrix", action="store_true", help="Aggregate reviewed run bundles into a matrix rollup deck")
+    parser.add_argument("--validate-run", action="store_true", help="Validate an existing run bundle without rewriting artifacts")
+    parser.add_argument("--validate-matrix", action="store_true", help="Validate an existing matrix bundle without rewriting artifacts")
     parser.add_argument("--matrix-dir", default="", help="Existing .artifacts/product-journey/matrices/<matrix-id> directory")
     parser.add_argument("--rollup-run-dir", action="append", default=[], help="Run bundle directory to include in --rollup-matrix; repeatable")
     parser.add_argument(
@@ -2105,6 +2397,52 @@ def main() -> None:
     personas = load_personas(PERSONAS)
     scenarios = load_scenarios(SCENARIOS)
     github_targets = load_github_targets(GITHUB_TARGETS)
+
+    if args.validate_run:
+        if not args.run_dir:
+            raise SystemExit("--validate-run requires --run-dir")
+        run_dir = run_dir_from_arg(args.run_dir)
+        result = validate_run_bundle(run_dir)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Validated run bundle {run_dir.name}: {result['status']}")
+            if result["status"] != "valid":
+                raise SystemExit(1)
+            return
+        print(f"Validation status: {result['status']}")
+        print(f"Artifacts: {run_dir}")
+        print(f"Errors: {result['errors']}")
+        print(f"Warnings: {result['warnings']}")
+        for issue in result["issues"]:
+            detail = f" ({issue['detail']})" if issue.get("detail") else ""
+            print(f"- {issue['severity']}: {issue['id']}: {issue['message']}{detail}")
+        append_log(f"Validated run bundle {run_dir.name}: {result['status']}")
+        if result["status"] != "valid":
+            raise SystemExit(1)
+        return
+
+    if args.validate_matrix:
+        if not args.matrix_dir:
+            raise SystemExit("--validate-matrix requires --matrix-dir")
+        matrix_dir = run_dir_from_arg(args.matrix_dir)
+        result = validate_matrix_bundle(matrix_dir)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Validated matrix bundle {matrix_dir.name}: {result['status']}")
+            if result["status"] != "valid":
+                raise SystemExit(1)
+            return
+        print(f"Validation status: {result['status']}")
+        print(f"Artifacts: {matrix_dir}")
+        print(f"Errors: {result['errors']}")
+        print(f"Warnings: {result['warnings']}")
+        for issue in result["issues"]:
+            detail = f" ({issue['detail']})" if issue.get("detail") else ""
+            print(f"- {issue['severity']}: {issue['id']}: {issue['message']}{detail}")
+        append_log(f"Validated matrix bundle {matrix_dir.name}: {result['status']}")
+        if result["status"] != "valid":
+            raise SystemExit(1)
+        return
 
     if args.rollup_matrix:
         if not args.matrix_dir:

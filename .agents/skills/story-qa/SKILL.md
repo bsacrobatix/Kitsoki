@@ -94,6 +94,12 @@ That writes `.artifacts/product-journey/<run-id>/`, including
 want to update `docs/decks/product-journey-eval.slidey.json`.
 The rollup aggregates `scenario-outcomes.json` across runs so repeated weak
 scenarios stay visible at matrix-review time.
+Validate generated matrices before using them as the shared sweep contract:
+
+```sh
+python3 tools/product-journey/run.py --validate-matrix \
+  --matrix-dir .artifacts/product-journey/matrices/<matrix-id>
+```
 
 The bundle's `agent-brief.md`, `scenarios.json`, and `evidence.json` are the
 contract for live or cassette-backed MCP runs: each scenario names the story
@@ -132,6 +138,13 @@ python3 tools/product-journey/run.py --review-run \
 
 The gate writes `review.json`, updates `metrics.json`, and adds a Slidey scene
 with hard failures and softer evidence-quality warnings.
+Then run the read-only bundle validator so stale derived files or schema drift
+fail deterministically before review:
+
+```sh
+python3 tools/product-journey/run.py --validate-run \
+  --run-dir .artifacts/product-journey/<run-id>
+```
 
 The `tools/story-qa/run.py` runner also writes a transient pointer report under
 `.context/` and a durable review bundle under `.artifacts/story-qa/<run>/`

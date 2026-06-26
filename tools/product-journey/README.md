@@ -64,6 +64,12 @@ project, persona, and seed match matrix assignments. Use the assignment
 to pick up the run without extra flags. The rollup includes per-scenario
 outcome totals so repeated onboarding, bugfix, PRD/design, implementation, and
 product-bug gaps are visible across runs.
+Validate a generated matrix before using it as the sweep contract:
+
+```sh
+python3 tools/product-journey/run.py --validate-matrix \
+  --matrix-dir .artifacts/product-journey/matrices/<matrix-id>
+```
 
 This writes `.artifacts/product-journey/<run-id>/` with `run.json`,
 `journey.md`, `metrics.json`, `bugs.json`, `findings.json`,
@@ -132,6 +138,19 @@ The review writes `review.json`, updates `metrics.json`, and adds a readiness
 scene to `deck.slidey.json`. Hard failures mean the bundle is still skeletal;
 warnings identify useful evidence quality improvements, such as missing key
 interaction video.
+
+After review, run the read-only validator before treating the artifacts as a
+stable contract for a live or cassette-backed run:
+
+```sh
+python3 tools/product-journey/run.py --validate-run \
+  --run-dir .artifacts/product-journey/<run-id>
+```
+
+The validator checks required files, JSON shape, scenario/evidence/media
+consistency, metrics freshness, review statuses, and Slidey review scenes
+without rewriting the bundle. If it fails, run `--review-run` again after fixing
+or attaching the missing artifact.
 
 For `gears-rust`, this prints the existing external-bakeoff readiness signal and
 the local-only verification command. If you have a local checkout, it also
