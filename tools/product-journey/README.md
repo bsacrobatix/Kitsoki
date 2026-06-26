@@ -88,6 +88,17 @@ so a matrix assignment can become a concrete run bundle:
 python3 tools/product-journey/run.py --emit-run --project vscode --persona docs-minded-contributor --seed demo-01
 ```
 
+To reconnect a Kitsoki story session or MCP-only driver to an existing bundle,
+load it through the story:
+
+```text
+load run_dir=.artifacts/product-journey/<run-id>
+```
+
+The story calls `--summarize-run --json-output` so the driver can see the run
+paths, persona lens, review counts, compact `driver_scenarios`, final gates, and
+proof backlog through `session.world last_result` before attaching evidence.
+
 After one or more assignment runs have captured evidence and been reviewed,
 roll them back up into the matrix:
 

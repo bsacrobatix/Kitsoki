@@ -2027,10 +2027,11 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
             "live or cassette-backed driver pass, then attach evidence and run review + validation."
         ),
         "suggested_prompt": (
-            f"Drive product journey QA for run_dir={run_dir_arg}. Read agent-brief.md, driver-plan.md, "
-            "execution-plan.md, and the Missing Proof Evidence section in driver-handoff.md. Use Kitsoki "
-            "Studio MCP and visual MCP to capture proof-source evidence or blockers, record findings, then "
-            "run review and validation."
+            f"Drive product journey QA for run_dir={run_dir_arg}. Open or attach "
+            "stories/product-journey-qa/app.yaml, submit "
+            f"`load run_dir={run_dir_arg}`, then inspect story world `last_result.driver_scenarios`, "
+            "`last_result.missing_proof_evidence`, and `last_result.driver_final_gates`. Use Kitsoki Studio MCP and visual MCP "
+            "to capture proof-source evidence or blockers, record findings, then run review and validation."
         ),
         "finalize_commands": [
             f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
@@ -2360,6 +2361,55 @@ def prepare_driver_handoff(run_dir: Path, publish_deck: Optional[Path] = None) -
     }
     result.update(run_story_summary(run_dir))
     return result
+
+
+def summarize_run_bundle(run_dir: Path) -> dict:
+    run_json = read_json(run_dir / "run.json")
+    review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {}
+    driver_plan = read_json(run_dir / "driver-plan.json") if (run_dir / "driver-plan.json").exists() else {}
+    handoff = read_json(run_dir / "driver-handoff.json") if (run_dir / "driver-handoff.json").exists() else {}
+    driver_scenarios = []
+    for scenario in driver_plan.get("scenarios", []):
+        driver_scenarios.append({
+            "scenario": scenario.get("scenario", ""),
+            "label": scenario.get("label", ""),
+            "primary_story": scenario.get("primary_story", ""),
+            "task_prompt": scenario.get("task_prompt", ""),
+            "harness": scenario.get("harness", ""),
+            "visual_surface": scenario.get("visual_surface", ""),
+            "resolved_mcp_tools": scenario.get("resolved_mcp_tools", []),
+            "driver_actions": scenario.get("driver_actions", []),
+            "persona_lens": scenario.get("persona_lens", {}),
+            "evidence": scenario.get("evidence", []),
+            "quality_gate": scenario.get("quality_gate", {}),
+            "attach_commands": scenario.get("attach_commands", []),
+            "record_finding_command": scenario.get("record_finding_command", ""),
+            "record_blocker_command": scenario.get("record_blocker_command", ""),
+            "journal_command": scenario.get("journal_command", ""),
+            "success_criteria": scenario.get("success_criteria", []),
+        })
+    return {
+        "status": "run_loaded",
+        "run_id": run_json["run_id"],
+        "run_dir": str(run_dir),
+        "project": run_json["project"]["id"],
+        "persona": run_json["persona"]["id"],
+        "seed": run_json.get("seed", ""),
+        "deck_path": str(run_dir / "deck.slidey.json"),
+        "execution_plan_path": str(run_dir / "execution-plan.md"),
+        "driver_plan_path": str(run_dir / "driver-plan.md"),
+        "driver_journal_path": str(run_dir / "driver-journal.md"),
+        "agent_brief_path": str(run_dir / "agent-brief.md"),
+        "driver_handoff_path": str(run_dir / "driver-handoff.md"),
+        "media_manifest_path": str(run_dir / "media-manifest.json"),
+        "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
+        "review_status": review.get("status", ""),
+        "review_summary": review.get("summary", ""),
+        "driver_scenarios": driver_scenarios,
+        "driver_final_gates": driver_plan.get("final_gates", []),
+        "missing_proof_evidence": handoff.get("missing_proof_evidence", []),
+        "suggested_prompt": handoff.get("suggested_prompt", ""),
+    } | run_story_summary(run_dir)
 
 
 def run_story_summary(run_dir: Path) -> dict:
@@ -5637,6 +5687,7 @@ def main() -> None:
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
     parser.add_argument("--review-run", action="store_true", help="Review an existing run bundle for readiness")
     parser.add_argument("--driver-handoff", action="store_true", help="Refresh and print the product-journey QA driver handoff artifact")
+    parser.add_argument("--summarize-run", action="store_true", help="Print the story-load summary for an existing run bundle")
     parser.add_argument("--run-dir", default="", help="Existing .artifacts/product-journey/<run-id> directory")
     parser.add_argument("--scenario", default="", help="Scenario id for --attach-evidence")
     parser.add_argument("--evidence-kind", default="", help="Evidence kind for --attach-evidence")
@@ -5860,6 +5911,23 @@ def main() -> None:
         print(f"Runs: {rollup['runs_found']} / {rollup['assignments']}")
         print(f"Evidence: {rollup['present_evidence_count']} / {rollup['required_evidence_count']}")
         append_log(f"Emitted matrix rollup {rollup['matrix_id']}")
+        return
+
+    if args.summarize_run:
+        if not args.run_dir:
+            raise SystemExit("--summarize-run requires --run-dir")
+        run_dir = run_dir_from_arg(args.run_dir)
+        result = summarize_run_bundle(run_dir)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Loaded run bundle {run_dir.name}")
+            return
+        print(f"Product journey run: {result['run_id']}")
+        print(f"Artifacts: {run_dir}")
+        print(f"Deck: {result['deck_path']}")
+        print(f"Driver handoff: {result['driver_handoff_path']}")
+        print(f"Missing proof: {result['missing_proof_evidence_count']}")
+        append_log(f"Loaded run bundle {run_dir.name}")
         return
 
     if args.emit_matrix:

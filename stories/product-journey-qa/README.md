@@ -11,6 +11,13 @@ It is intentionally no-LLM:
 - `refresh_targets` calls `tools/product-journey/run.py
   --refresh-github-targets --json-output` to write a GitHub target-proof
   artifact for the 100-open-bug and popularity matrix contract.
+- `load` calls `tools/product-journey/run.py --summarize-run --json-output` to
+  load an existing run bundle into the story. This is the MCP-only driver entry
+  point when the reusable driver receives a `run_dir` and needs to attach
+  evidence through Kitsoki instead of reading files directly. After `load`, the
+  story world `last_result` contains `driver_scenarios`,
+  `missing_proof_evidence`, and `driver_final_gates` for the driver to inspect
+  through MCP.
 - `matrix` calls `tools/product-journey/run.py --emit-matrix --json-output` to
   create the 10-repo GitHub assignment plan. Pass `target_proof_file=...` after
   `refresh_targets` when the matrix should embed current GitHub proof.

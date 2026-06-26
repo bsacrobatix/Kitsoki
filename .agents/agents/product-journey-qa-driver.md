@@ -23,9 +23,14 @@ The caller should give you one of:
 - or a product-journey story session already pointing at a run.
 
 If you only receive a `run_dir`, use the product-journey story or caller-provided
-brief text to recover the scenario order. Do not invent missing scenario
-contracts. If the bundle is missing the brief/plan/evidence contract, record that
-as a blocker finding through the product-journey story if a story session exists.
+brief text to recover the scenario order. With MCP-only tools, open
+`stories/product-journey-qa/app.yaml` and submit `load run_dir=<run_dir>` before
+trying to attach evidence, record findings, or run gates. Then read the story
+world `last_result.driver_scenarios`, `last_result.missing_proof_evidence`, and
+`last_result.driver_final_gates`; those are the MCP-visible copy of the bundle
+contract. Do not invent missing scenario contracts. If the bundle is missing the
+brief/plan/evidence contract, record that as a blocker finding through the
+product-journey story if a story session exists.
 
 ## Transport Discipline
 
@@ -119,8 +124,9 @@ reference.
 Use the `stories/product-journey-qa/app.yaml` story as the write surface for run
 state whenever possible:
 
-1. Open or attach a product-journey QA story session seeded with the existing
-   run.
+1. Open or attach a product-journey QA story session. If the session is not
+   already pointing at the bundle, submit `load run_dir=<run_dir>` first and
+   inspect `last_result` from the story world for the driver contract.
 2. Read `driver-handoff.md` and prioritize `Missing Proof Evidence`; those rows
    are the proof-source gaps left after demo or partial evidence has been
    attached.

@@ -36,6 +36,9 @@ states:
             - label: "refresh_targets seed=..."
               hint: "write a GitHub target-proof artifact for bug-count and popularity floors"
               intent: refresh_targets
+            - label: "load run_dir=..."
+              hint: "load an existing run bundle so a driver can attach evidence through this story"
+              intent: load
             - label: "look"
               intent: look
     on:
@@ -231,5 +234,63 @@ states:
               on_error: idle
             - set:
                 status: "run_created"
+      load:
+        - target: run_created
+          effects:
+            - set:
+                run_dir: "{{ slots.run_dir }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
+                validation_issue_summary: ""
+                status: "loading"
+            - invoke: host.run
+              id: load_product_journey_run
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --summarize-run
+                  - --json-output
+                  - --run-dir
+                  - "{{ slots.run_dir }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                run_id: "stdout_json.run_id"
+                run_dir: "stdout_json.run_dir"
+                project: "stdout_json.project"
+                persona: "stdout_json.persona"
+                seed: "stdout_json.seed"
+                deck_path: "stdout_json.deck_path"
+                execution_plan_path: "stdout_json.execution_plan_path"
+                driver_plan_path: "stdout_json.driver_plan_path"
+                driver_journal_path: "stdout_json.driver_journal_path"
+                agent_brief_path: "stdout_json.agent_brief_path"
+                driver_handoff_path: "stdout_json.driver_handoff_path"
+                media_manifest_path: "stdout_json.media_manifest_path"
+                scenario_outcomes_path: "stdout_json.scenario_outcomes_path"
+                persona_starting_surface: "stdout_json.persona_starting_surface"
+                persona_first_question: "stdout_json.persona_first_question"
+                persona_evidence_emphasis: "stdout_json.persona_evidence_emphasis"
+                persona_escalation_trigger: "stdout_json.persona_escalation_trigger"
+                persona_finding_bias: "stdout_json.persona_finding_bias"
+                proof_evidence_count: "stdout_json.proof_evidence_count"
+                demo_evidence_count: "stdout_json.demo_evidence_count"
+                missing_evidence_count: "stdout_json.missing_evidence_count"
+                missing_proof_evidence_count: "stdout_json.missing_proof_evidence_count"
+                proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
+                minimum_evidence_count: "stdout_json.minimum_evidence_count"
+                missing_proof_summary: "stdout_json.missing_proof_summary"
+                review_status: "stdout_json.review_status"
+                review_summary: "stdout_json.review_summary"
+                review_passed_count: "stdout_json.review_passed_count"
+                review_failed_count: "stdout_json.review_failed_count"
+                review_warning_count: "stdout_json.review_warning_count"
+                review_total_count: "stdout_json.review_total_count"
+                review_backlog_summary: "stdout_json.review_backlog_summary"
+              on_error: idle
+            - set:
+                status: "run_loaded"
       look:
         - target: .

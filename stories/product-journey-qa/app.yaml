@@ -148,6 +148,12 @@ intents:
     priority: 87
     slots:
       seed: { type: string, required: false }
+  load:
+    description: "Load an existing product-journey run bundle into the story so the reusable driver can attach evidence."
+    examples: ["load run", "open run bundle", "load run_dir=.artifacts/product-journey/run-123"]
+    priority: 86
+    slots:
+      run_dir: { type: string, required: true }
   rollup:
     description: "Create or refresh the matrix rollup deck."
     examples: ["rollup", "create rollup", "refresh matrix rollup"]
@@ -230,7 +236,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, validate_corpus, refresh_targets, rollup, validate_matrix, attach, record, blocker, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, validate_corpus, refresh_targets, load, rollup, validate_matrix, attach, record, blocker, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 
