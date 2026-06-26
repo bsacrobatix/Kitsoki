@@ -64,6 +64,28 @@ Use the same bug list you plan to run in the matrix. A one-bug smoke should pass
 `--bug bug1`; the drivable `repo-bakeoff` story does this automatically from
 `world.bugs`.
 
+For the full product-path smoke, run the bundled target. It covers the harness
+unit checks, candidate/profile preflight, scoped RED/GREEN arming, drive-command
+rendering, and the `repo-bakeoff` story flows without calling a live model:
+
+```sh
+GEARS_RUST_REPO=/Users/brad/code/gears-rust make gears-history-smoke
+```
+
+By default this smokes `bug1` with `opus-4.8`. Override the matrix before a live
+run so the free proof matches the cell you intend to drive:
+
+```sh
+GEARS_RUST_REPO=/Users/brad/code/gears-rust \
+GEARS_HISTORY_BUGS=bug1,bug4 \
+GEARS_HISTORY_CANDIDATES=opus-4.8,gpt-5.3-spark \
+make gears-history-smoke
+```
+
+If this target fails, do not run live cells. Its failures are setup or story
+quality blockers: missing profiles, missing local commits, broken oracles,
+stale flow fixtures, or drive commands that no longer match the harness.
+
 ## Deterministic Arming
 
 Before spending on a live model, prove the corpus:

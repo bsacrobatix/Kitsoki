@@ -1,10 +1,11 @@
 # Epic: repo history as training material
 
-**Status:** Draft v2. Feasibility-reviewed against the current mining,
-bakeoff, agent-eval, and trainable-story substrates; nothing implemented here
-yet.
+**Status:** Draft v3. Feasibility-reviewed against the current mining,
+bakeoff, agent-eval, and trainable-story substrates. The gears-rust bugfix
+reference path is now implemented as a product smoke; the broader generic
+corpus/task-case/precedent slices remain draft.
 **Kind:**   epic
-**Slices:** 5 (0/5 shipped; not yet cut)
+**Slices:** 5 generic slices remain draft; 1 shipped bugfix reference path
 
 ## Why
 
@@ -110,6 +111,30 @@ The end state is a Kitsoki that treats repository history as training data for
 its own stories: the corpus is curated, training examples are named, task cases
 are armed, selection is traceable, and improvements are validated by flow
 fixtures, agent evals, or deterministic project oracles.
+
+## Shipped reference path: gears-rust bugfix training
+
+The bugfix lane now has a durable, no-cost reference path for a heavy/private
+repo:
+
+- `tools/bugfix-bakeoff/external/projects/gears-rust/manifest.yaml` captures
+  four armable historical fixes plus reference-only marathon and hard-case
+  examples.
+- `make gears-bakeoff` proves the hidden oracles are RED at the historical
+  baseline and GREEN after the real fix against a local checkout.
+- `make gears-history-smoke` is the product-path smoke: harness unit tests,
+  candidate/profile preflight, scoped oracle arming, exact `drive_cell.sh`
+  command rendering, and `repo-bakeoff` story flow validation.
+- `stories/repo-bakeoff` wraps the deterministic prepare, run-command handoff,
+  scoring, reporting, and Slidey deck generation path without running live LLM
+  cells in tests.
+- `docs/recipes/repo-history-training-gears-rust.md` is the repo-owner recipe
+  for repeating the path on gears-rust or another private repo.
+
+This shipped path is intentionally still a bugfix-lane specialization. It proves
+the process discipline this epic wants to generalize, but it does not replace
+the remaining corpus, generic task-case, precedent-selection, and workflow
+integration slices below.
 
 ## Reuse and extension targets
 
@@ -266,8 +291,9 @@ This is the bugfix-bakeoff discipline generalized across lanes.
 
 | # | Slice | Kind | Scope (one line) | Depends on | Status | File |
 |---|---|---|---|---|---|---|
+| 0 | gears-rust bugfix reference path | tooling + story + docs | Product-smoke the repo-history loop on a heavy/private Rust repo using the existing external bakeoff contract | — | Shipped | [`../recipes/repo-history-training-gears-rust.md`](../recipes/repo-history-training-gears-rust.md) |
 | 1 | Corpus and labels | tracing + runtime | Extend the existing mining corpus with repo-history sources, case labels, source refs, and precedent indexes | — | Draft | `repo-history-corpus.md` |
-| 2 | Generic task/oracle manifests | runtime + tooling | Extract the bugfix-bakeoff case/oracle/cell/result contract into a lane-neutral manifest and scorer interface | 1 | Draft | `repo-history-task-cases.md` |
+| 2 | Generic task/oracle manifests | runtime + tooling | Extract the bugfix-bakeoff case/oracle/cell/result contract into a lane-neutral manifest and scorer interface | 1 | Draft; informed by shipped gears-rust reference | `repo-history-task-cases.md` |
 | 3 | Precedent selection | story + tracing | Let stories request, inject, and trace selected examples/anti-patterns from the corpus | 1 | Draft | `repo-history-precedent-selection.md` |
 | 4 | Gated autonomous runner | runtime + story | Run armed task cases through cheap-to-expensive ladders, resumably, with no-cost verification/reporting and operator-approved live cells | 2, 3 | Draft | `repo-history-runner.md` |
 | 5 | Workflow integrations | story + docs | Wire onboarding, bugfix, spec/design, implementation, docs review, and SDLC stories to the shared precedent/task-case loop | 3, 4 | Draft | `repo-history-workflows.md` |
@@ -350,6 +376,10 @@ the stories, not in the runner.
 
 - [ ] Cut the five slices into child proposals, keeping this file as the epic
       index only.
+- [x] Ship the gears-rust bugfix reference path with a local-only manifest,
+      RED/GREEN arming, `repo-bakeoff` deterministic flow fixtures, exact
+      live-cell command rendering, generated report/deck output, and a no-cost
+      `make gears-history-smoke` product-path gate.
 - [ ] Add a corpus-label design that extends `internal/mining` and the
       session-mining backend-generalization proposal instead of creating a new
       corpus.
