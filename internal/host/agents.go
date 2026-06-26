@@ -107,6 +107,16 @@ type Provider struct {
 	Env    map[string]string
 }
 
+// QuotaControl describes a local, provider-neutral throttle for one resolved
+// profile. Zero values are ignored; callers may set only concurrency, only a
+// token bucket, or both.
+type QuotaControl struct {
+	Window          string
+	TokensPerWindow int64
+	MaxConcurrent   int
+	ReserveTokens   int64
+}
+
 // providersKey is the unexported context key for the injected providers map.
 type providersKey struct{}
 
@@ -223,13 +233,14 @@ type activeProfileKey struct{}
 type ActiveProfile struct {
 	Name     string
 	Provider Provider
+	Quota    QuotaControl
 }
 
 // WithActiveProfile installs the session's active harness profile onto ctx. A
 // zero-value profile (no name, empty provider) is a no-op so callers needn't
 // guard the no-profiles case.
 func WithActiveProfile(ctx context.Context, p ActiveProfile) context.Context {
-	if p.Name == "" && p.Provider.Model == "" && p.Provider.Effort == "" && len(p.Provider.Env) == 0 {
+	if p.Name == "" && p.Provider.Model == "" && p.Provider.Effort == "" && len(p.Provider.Env) == 0 && p.Quota == (QuotaControl{}) {
 		return ctx
 	}
 	return context.WithValue(ctx, activeProfileKey{}, p)

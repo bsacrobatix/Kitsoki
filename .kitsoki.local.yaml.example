@@ -41,6 +41,15 @@ harness_profiles:
     model: hf:zai-org/GLM-5.2
     models: [hf:zai-org/GLM-5.2]
     models_endpoint: https://api.synthetic.new/openai/v1/models
+    # Local guardrail: keep one GLM call active per kitsoki process and reserve
+    # a conservative token window so a long pipeline can finish before other
+    # jobs pile onto the same synthetic.new key. Raise tokens_per_window or
+    # max_concurrent when your plan has a higher published limit.
+    quota:
+      window: 1m
+      tokens_per_window: 120000
+      max_concurrent: 1
+      reserve_tokens: 30000
     env:
       ANTHROPIC_BASE_URL: https://api.synthetic.new/anthropic
       ANTHROPIC_AUTH_TOKEN: "${SYNTHETIC_API_KEY}"
@@ -55,6 +64,11 @@ harness_profiles:
     model: hf:zai-org/GLM-5.2
     models: [hf:zai-org/GLM-5.2]
     models_endpoint: https://api.synthetic.new/openai/v1/models
+    quota:
+      window: 1m
+      tokens_per_window: 120000
+      max_concurrent: 1
+      reserve_tokens: 30000
     env:
       OPENAI_BASE_URL: https://api.synthetic.new/openai/v1
       OPENAI_API_KEY: "${SYNTHETIC_API_KEY}"

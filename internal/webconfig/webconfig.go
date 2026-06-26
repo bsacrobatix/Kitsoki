@@ -281,9 +281,25 @@ type HarnessProfile struct {
 	// + ANTHROPIC_AUTH_TOKEN to retarget claude at synthetic.new). ${VAR}-expanded
 	// at load time. Never recorded in traces.
 	Env map[string]string `yaml:"env,omitempty"`
+	// Quota, when present, enables kitsoki-side throttling before calls reach the
+	// provider. It is intentionally provider-neutral: a profile may describe an
+	// API-token bucket, a subscription request bucket, or any other local budget
+	// we can estimate and update from observed usage.
+	Quota *QuotaControl `yaml:"quota,omitempty"`
 	// Plugin routes the profile through an agent plugin (e.g. builtin.local_llm
 	// for llama.cpp) instead of forking a backend CLI. Optional.
 	Plugin string `yaml:"plugin,omitempty"`
+}
+
+// QuotaControl configures the local provider limiter for a harness profile.
+// Window is a Go duration string (for example "1m"). TokensPerWindow caps the
+// estimated tokens started inside that window; MaxConcurrent caps simultaneous
+// calls; ReserveTokens is a floor for calls whose prompt estimate is tiny.
+type QuotaControl struct {
+	Window          string `yaml:"window,omitempty"`
+	TokensPerWindow int64  `yaml:"tokens_per_window,omitempty"`
+	MaxConcurrent   int    `yaml:"max_concurrent,omitempty"`
+	ReserveTokens   int64  `yaml:"reserve_tokens,omitempty"`
 }
 
 var validBackends = map[string]bool{"": true, "claude": true, "copilot": true, "codex": true}
@@ -715,6 +731,22 @@ func (cfg *WebConfig) resolveHarnessProfiles() error {
 			}
 			if len(p.Efforts) > 0 && !contains(p.Efforts, p.Effort) {
 				return fmt.Errorf("harness_profiles.%s: effort %q is not in its efforts catalog", name, p.Effort)
+			}
+		}
+		if p.Quota != nil {
+			if p.Quota.Window != "" {
+				if _, err := time.ParseDuration(p.Quota.Window); err != nil {
+					return fmt.Errorf("harness_profiles.%s: quota.window %q is not a valid duration: %w", name, p.Quota.Window, err)
+				}
+			}
+			if p.Quota.TokensPerWindow < 0 {
+				return fmt.Errorf("harness_profiles.%s: quota.tokens_per_window must not be negative", name)
+			}
+			if p.Quota.MaxConcurrent < 0 {
+				return fmt.Errorf("harness_profiles.%s: quota.max_concurrent must not be negative", name)
+			}
+			if p.Quota.ReserveTokens < 0 {
+				return fmt.Errorf("harness_profiles.%s: quota.reserve_tokens must not be negative", name)
 			}
 		}
 		cfg.HarnessProfiles[name] = p
