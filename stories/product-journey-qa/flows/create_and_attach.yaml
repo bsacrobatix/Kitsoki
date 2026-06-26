@@ -11,7 +11,7 @@ host_handlers:
           exit_code: 0
           stdout_json:
             status: valid
-            personas: 4
+            personas: 5
             scenarios: 6
             targets: 10
             errors: 0

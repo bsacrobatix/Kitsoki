@@ -29,8 +29,9 @@ The durable surfaces are:
 - Proof evidence sources are `local`, `retained`, `external`, and `cassette`.
   `demo` evidence exercises aggregation only; it is not product proof.
 - Preserve the persona lens. A core maintainer, dependency debugger,
-  docs-minded contributor, and IDE-first engineer should start from different
-  surfaces, ask different first questions, and weigh evidence differently.
+  docs-minded contributor, IDE-first engineer, and hobbyist contributor should
+  start from different surfaces, ask different first questions, and weigh
+  evidence differently.
 - Every scenario attempt needs a driver journal event, even when it ends in a
   blocker.
 - A bundle is not discussion-ready until `--review-run` and `--validate-run`

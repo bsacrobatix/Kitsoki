@@ -1824,6 +1824,13 @@ def persona_lens(persona: dict) -> dict:
             "escalation_trigger": "state that is only visible in logs, silent operator defaults, confusing navigation, or unreadable layout",
             "finding_bias": "Favor visible-state, affordance, and navigation findings.",
         },
+        "hobbyist-contributor": {
+            "starting_surface": "docs-and-web-first; avoid repo archaeology until the product gives a concrete next step",
+            "first_question": "Can I make meaningful progress in a short spare-time session without knowing the repository's internal conventions?",
+            "evidence_emphasis": "setup commands, first-success proof, small issue selection, key interaction video, and explicit stop points",
+            "escalation_trigger": "unclear prerequisites, long-running setup, ambiguous next action, or work that expands beyond a small contribution",
+            "finding_bias": "Favor time-budget, setup-friction, and beginner-safe next-step findings.",
+        },
     }
     default = {
         "starting_surface": persona.get("surface_preference", "surface chosen by scenario"),

@@ -27,6 +27,13 @@
       "description": "Expects editor and visual surfaces to explain state without terminal archaeology.",
       "surface_preference": "vscode-first",
       "risk_focus": ["visual state", "operator questions", "navigation clarity"]
+    },
+    {
+      "id": "hobbyist-contributor",
+      "label": "Hobbyist contributor",
+      "description": "Contributes in spare time and needs a low-context path from issue selection to a credible small change.",
+      "surface_preference": "docs-and-web-first",
+      "risk_focus": ["time budget", "setup friction", "clear next step"]
     }
   ]
 }
