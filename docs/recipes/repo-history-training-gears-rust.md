@@ -117,10 +117,11 @@ stale flow fixtures, or drive commands that no longer match the harness.
 When it passes, it also writes a review artifact at
 `.artifacts/external-bakeoff/readiness/gears-rust.md` with preflight status,
 the selected live-cell commands, existing scored/pending cells, missing cells,
-prepared/unprepared handoff counts, pending-cell command templates for true
-provider/profile blockers, and the next action. `Unprepared cells` means a
-selected cell does not yet have no-drive handoff metadata; it does not mean the
-cell failed. The prepared cells are under
+prepared/stale/unprepared handoff counts, pending-cell command templates for
+true provider/profile blockers, and the next action. `Unprepared cells` means a
+selected cell does not yet have no-drive handoff metadata; `Stale prepared
+cells` means the metadata exists but points at missing prompt/worktree/preflight
+paths. Neither means the cell failed. The prepared cells are under
 `.artifacts/external-bakeoff/cells/`, with the delegated MCP prompt under
 `.artifacts/external-bakeoff/drive-prompts/`. The same step writes
 `.artifacts/external-bakeoff/prepared/<project>-<bug>-<candidate>.json` with the
