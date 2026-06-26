@@ -148,6 +148,23 @@ type CaptureRequest struct {
 	RRWebOutPath    string
 	Viewport        Viewport
 	AssertText      []string
+	Action          Action
+}
+
+// Action is an optional browser action to perform after the page settles and
+// before semantic/screenshot output is captured.
+type Action struct {
+	Kind         string
+	ActionHandle string
+	Point        *Point
+	Button       string
+	Modifiers    []string
+}
+
+// Point is a viewport pixel coordinate.
+type Point struct {
+	X int
+	Y int
 }
 
 // BrowserInvoker rasterises a served URL to a PNG written at OutPath. The
@@ -260,6 +277,80 @@ func ShotWithSemantic(ctx context.Context, spec Spec, opts Options) (Result, err
 	}
 	if len(png) == 0 {
 		return Result{}, fmt.Errorf("webshot: capture produced an empty file %q", tmp)
+	}
+	semantic, err := readFile(semanticTmp)
+	if err != nil {
+		semantic = nil
+	}
+	rrweb, err := readFile(rrwebTmp)
+	if err != nil {
+		rrweb = nil
+	}
+	return Result{PNG: png, SemanticJSON: semantic, RRWebJSON: rrweb}, nil
+}
+
+// ActWithSemantic performs one browser action against the served SPA and returns
+// the post-action compact semantic observation plus a screenshot. It uses the
+// same server/browser seams as ShotWithSemantic so visual MCP actions exercise
+// the real web surface without owning a persistent browser.
+func ActWithSemantic(ctx context.Context, spec Spec, action Action, opts Options) (Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := spec.validate(); err != nil {
+		return Result{}, err
+	}
+	if opts.Server == nil {
+		return Result{}, errors.New("webshot: Options.Server is required")
+	}
+	if opts.Browser == nil {
+		return Result{}, errors.New("webshot: Options.Browser is required")
+	}
+	if strings.TrimSpace(action.Kind) == "" {
+		return Result{}, errors.New("webshot: action kind is required")
+	}
+
+	base, stop, err := opts.Server.Serve(ctx)
+	if err != nil {
+		return Result{}, fmt.Errorf("webshot: serve: %w", err)
+	}
+	if stop != nil {
+		defer stop()
+	}
+	target, err := TargetURL(base, spec)
+	if err != nil {
+		return Result{}, err
+	}
+	tmp, err := tempPNGPath()
+	if err != nil {
+		return Result{}, err
+	}
+	defer removeFile(tmp)
+	semanticTmp, err := tempJSONPath()
+	if err != nil {
+		return Result{}, err
+	}
+	defer removeFile(semanticTmp)
+	rrwebTmp, err := tempJSONPath()
+	if err != nil {
+		return Result{}, err
+	}
+	defer removeFile(rrwebTmp)
+
+	if err := opts.Browser.Capture(ctx, CaptureRequest{
+		URL:             target,
+		OutPath:         tmp,
+		SemanticOutPath: semanticTmp,
+		RRWebOutPath:    rrwebTmp,
+		Viewport:        spec.viewport(),
+		AssertText:      spec.AssertText,
+		Action:          action,
+	}); err != nil {
+		return Result{}, fmt.Errorf("webshot: action capture: %w", err)
+	}
+	png, err := readFile(tmp)
+	if err != nil {
+		return Result{}, fmt.Errorf("webshot: read action capture %q: %w", tmp, err)
 	}
 	semantic, err := readFile(semanticTmp)
 	if err != nil {

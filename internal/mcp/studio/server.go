@@ -73,6 +73,8 @@ type Server struct {
 	// the page-side compact semantic observation when the browser helper emits
 	// one. Kept separate so existing render.web tests can inject only WebShotFunc.
 	webShotResult WebShotResultFunc
+	// webAct performs browser actions for web/vscode visual.act targets.
+	webAct WebActFunc
 	// readOnly drops the only story-tree mutation tool (story.write) from the
 	// registry. The read tools (story.read/validate/graph/test), the session
 	// driving tools (session.*, replay-default → no LLM, no story-file
@@ -197,6 +199,10 @@ func (srv *Server) SetWebShotResult(fn WebShotResultFunc) {
 		return res.PNG, err
 	}
 }
+
+// SetWebAct injects the browser action seam used by visual.act for web/vscode
+// handles.
+func (srv *Server) SetWebAct(fn WebActFunc) { srv.webAct = fn }
 
 // Run starts the studio server on the StdioTransport and blocks until the context
 // is done or the peer disconnects. This is the entry point for `kitsoki mcp`.
