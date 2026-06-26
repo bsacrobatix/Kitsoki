@@ -287,7 +287,7 @@ function openFiled(): void {
 function shouldIgnorePointReport(target: HTMLElement): boolean {
   if (
     target.closest(
-      ".meta-launcher, .br-backdrop, input, textarea, select, button, a, [contenteditable='true'], [role='textbox']"
+      ".meta-launcher, .br-backdrop, input, textarea, select, [contenteditable='true'], [role='textbox']"
     )
   ) {
     return true;

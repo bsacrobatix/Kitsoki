@@ -292,6 +292,8 @@ type VisualActArgs struct {
 	Point        *VisualPoint   `json:"point,omitempty"`
 	Text         string         `json:"text,omitempty"`
 	Key          string         `json:"key,omitempty"`
+	Button       string         `json:"button,omitempty"`
+	Modifiers    []string       `json:"modifiers,omitempty"`
 	Value        any            `json:"value,omitempty"`
 	Region       string         `json:"region,omitempty"`
 	Delta        int            `json:"delta,omitempty"`
@@ -671,12 +673,20 @@ func (srv *Server) handleVisualAct(
 		if intent == "" {
 			intent = intentFromActionHandle(args.ActionHandle)
 		}
+		if intent == "" && (vh.Kind == VisualWeb || vh.Kind == VisualVSCode) {
+			return srv.visualWebAct(ctx, vh, args, action, cols, rows)
+		}
 		if intent == "" {
 			return buildToolError(ErrBadRequest, "visual.act: submit/click requires intent or action_handle intent:<name>"), nil, nil
 		}
 		out, frame := rt.submit(ctx, intent, args.Slots, cols, rows)
 		srv.recordVisualEvent(vh.ID, VisualRecordEvent{At: time.Now().UTC().Format(time.RFC3339Nano), Type: "act", Action: action, Data: map[string]any{"intent": intent}})
 		return nil, visualActResult(vh, action, out, frame, rt.lastTurnErr), nil
+	case "contextmenu", "right_click":
+		if vh.Kind != VisualWeb && vh.Kind != VisualVSCode {
+			return buildToolError(ErrBadRequest, "visual.act: contextmenu is only supported for web/vscode visual handles"), nil, nil
+		}
+		return srv.visualWebAct(ctx, vh, args, action, cols, rows)
 	case "select":
 		intent := args.Intent
 		if intent == "" {
@@ -729,7 +739,7 @@ func (srv *Server) handleVisualAct(
 			NeedsSnapshot:  false,
 		}, nil
 	default:
-		return buildToolError(ErrBadRequest, "visual.act: action must be submit, click, pixel_click, type, press, select, scroll, continue, or command"), nil, nil
+		return buildToolError(ErrBadRequest, "visual.act: action must be submit, click, contextmenu, right_click, pixel_click, type, press, select, scroll, continue, or command"), nil, nil
 	}
 }
 
@@ -1245,6 +1255,100 @@ func applyVisualSemantic(out *VisualObserveOK, semantic map[string]any, errs []s
 	if regions := semanticVisualRegions(semantic); len(regions) > 0 {
 		out.Regions = regions
 	}
+}
+
+func (srv *Server) visualWebAct(ctx context.Context, vh *VisualHandle, args VisualActArgs, action string, cols, rows int) (*mcpsdk.CallToolResult, any, error) {
+	if srv.webAct == nil {
+		return buildToolError(ErrBadRequest, "visual.act: web browser actions need a browser-capable host (none attached)"), nil, nil
+	}
+	if strings.TrimSpace(args.ActionHandle) == "" && args.Point == nil {
+		return buildToolError(ErrBadRequest, "visual.act: web action requires action_handle or point"), nil, nil
+	}
+	spec, rerr := srv.webSpec(RenderArgs{Handle: vh.Handle})
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	button := strings.TrimSpace(args.Button)
+	if button == "" && (action == "contextmenu" || action == "right_click") {
+		button = "right"
+	}
+	webAction := WebActionSpec{
+		Kind:         action,
+		ActionHandle: strings.TrimSpace(args.ActionHandle),
+		Point:        args.Point,
+		Button:       button,
+		Modifiers:    normalizeWebModifiers(args.Modifiers),
+	}
+	result, err := srv.webAct(ctx, spec, webAction)
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("visual.act: %v", err)), nil, nil
+	}
+	frame := srv.visualPostActionFrame(ctx, vh, cols, rows)
+	semantic := compactSemantic(result.SemanticJSON)
+	changed := []string{"viewport"}
+	if dirty := stringSliceFromAny(semantic["dirty_regions"]); len(dirty) > 0 {
+		changed = dirty
+	}
+	srv.recordVisualEvent(vh.ID, VisualRecordEvent{
+		At:     time.Now().UTC().Format(time.RFC3339Nano),
+		Type:   "act",
+		Action: action,
+		Data: map[string]any{
+			"action_handle": webAction.ActionHandle,
+			"button":        webAction.Button,
+			"modifiers":     webAction.Modifiers,
+			"point":         webAction.Point,
+			"semantic":      semantic,
+		},
+	})
+	return nil, VisualActOK{
+		OK:             true,
+		VisualHandle:   vh.ID,
+		Kind:           string(vh.Kind),
+		Handle:         vh.Handle,
+		Action:         action,
+		Frame:          frame,
+		ChangedRegions: changed,
+		NeedsSnapshot:  true,
+	}, nil
+}
+
+func (srv *Server) visualPostActionFrame(ctx context.Context, vh *VisualHandle, cols, rows int) FrameResult {
+	rt, rr := srv.resolveRuntime(vh.Handle)
+	if rr != nil {
+		return FrameResult{Width: cols, Height: rows}
+	}
+	return frameResult(rt.frame(cols, rows))
+}
+
+func normalizeWebModifiers(mods []string) []string {
+	out := make([]string, 0, len(mods))
+	seen := map[string]bool{}
+	for _, mod := range mods {
+		switch strings.ToLower(strings.TrimSpace(mod)) {
+		case "alt", "option":
+			if !seen["Alt"] {
+				out = append(out, "Alt")
+				seen["Alt"] = true
+			}
+		case "control", "ctrl":
+			if !seen["Control"] {
+				out = append(out, "Control")
+				seen["Control"] = true
+			}
+		case "meta", "cmd", "command":
+			if !seen["Meta"] {
+				out = append(out, "Meta")
+				seen["Meta"] = true
+			}
+		case "shift":
+			if !seen["Shift"] {
+				out = append(out, "Shift")
+				seen["Shift"] = true
+			}
+		}
+	}
+	return out
 }
 
 func (srv *Server) visualTUISnapshot(ctx context.Context, req *mcpsdk.CallToolRequest, vh *VisualHandle, args VisualSnapshotArgs) (*mcpsdk.CallToolResult, any, error) {

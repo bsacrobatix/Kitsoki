@@ -93,6 +93,40 @@ describe("MetaButton — Report bug", () => {
     });
   });
 
+  it("Alt+click reports button text instead of ignoring or activating it", async () => {
+    const store = useBugReportStore();
+    const trigger = vi.spyOn(store, "trigger").mockImplementation(async () => {
+      store.status = "reviewing";
+    });
+    const host = document.createElement("div");
+    host.innerHTML = `<button data-testid="translated-button">Guardar cambios</button>`;
+    document.body.appendChild(host);
+    const button = host.querySelector(
+      '[data-testid="translated-button"]'
+    ) as HTMLButtonElement;
+    const activated = vi.fn();
+    button.addEventListener("click", activated);
+
+    mount(MetaButton, { attachTo: document.body });
+    button.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        altKey: true,
+        clientX: 42,
+        clientY: 77,
+      })
+    );
+    await flushPromises();
+
+    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(activated).not.toHaveBeenCalled();
+    expect(trigger.mock.calls[0][0].placement).toMatchObject({
+      selector: '[data-testid="translated-button"]',
+      text: "Guardar cambios",
+    });
+  });
+
   it("ignores Alt+click inside editable fields", async () => {
     const store = useBugReportStore();
     const trigger = vi.spyOn(store, "trigger").mockResolvedValue();

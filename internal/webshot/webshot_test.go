@@ -403,6 +403,66 @@ func TestNodeInvoker_BuildsAssertTextArgv(t *testing.T) {
 	}
 }
 
+func TestNodeInvoker_BuildsActionArgv(t *testing.T) {
+	rec := &recordingRunner{}
+	inv := &NodeInvoker{RepoRoot: "/repo", Runner: rec}
+	err := inv.Capture(context.Background(), CaptureRequest{
+		URL:      "http://127.0.0.1:9/#/",
+		OutPath:  "/tmp/out.png",
+		Viewport: Viewport{Width: 1600, Height: 900},
+		Action: Action{
+			Kind:         "click",
+			ActionHandle: "testid:edit-story-btn",
+			Button:       "left",
+			Modifiers:    []string{"Alt"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	joined := strings.Join(rec.args, " ")
+	for _, want := range []string{
+		"--action click",
+		"--action-handle testid:edit-story-btn",
+		"--button left",
+		"--modifier Alt",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv %q missing %q", joined, want)
+		}
+	}
+}
+
+func TestNodeInvoker_BuildsPointActionArgv(t *testing.T) {
+	rec := &recordingRunner{}
+	inv := &NodeInvoker{RepoRoot: "/repo", Runner: rec}
+	err := inv.Capture(context.Background(), CaptureRequest{
+		URL:      "http://127.0.0.1:9/#/",
+		OutPath:  "/tmp/out.png",
+		Viewport: Viewport{Width: 1600, Height: 900},
+		Action: Action{
+			Kind:      "contextmenu",
+			Point:     &Point{X: 12, Y: 34},
+			Button:    "right",
+			Modifiers: []string{"Alt"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	joined := strings.Join(rec.args, " ")
+	for _, want := range []string{
+		"--action contextmenu",
+		"--point 12,34",
+		"--button right",
+		"--modifier Alt",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv %q missing %q", joined, want)
+		}
+	}
+}
+
 type recordingRunner struct {
 	dir, name string
 	args      []string

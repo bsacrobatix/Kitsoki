@@ -215,6 +215,7 @@ docs land):
 			}
 			srv := studio.NewServer(sess, srvOpts...)
 			srv.SetWebShotResult(mcpWebShotResultFunc(sess, ""))
+			srv.SetWebAct(mcpWebActFunc(sess, ""))
 
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 			defer cancel()
@@ -326,6 +327,62 @@ func mcpWebShotResultFuncWithOptions(sess *studio.StudioSession, opts mcpWebShot
 			browser = &webshot.NodeInvoker{RepoRoot: repoRoot}
 		}
 		res, err := webshot.ShotWithSemantic(ctx, wsSpec, webshot.Options{
+			Server:        serverFactory(handler),
+			Browser:       browser,
+			HealthTimeout: opts.HealthTimeout,
+		})
+		return studio.WebShotResult{PNG: res.PNG, SemanticJSON: res.SemanticJSON, RRWebJSON: res.RRWebJSON}, err
+	}
+}
+
+func mcpWebActFunc(sess *studio.StudioSession, repoRoot string) studio.WebActFunc {
+	return mcpWebActFuncWithOptions(sess, mcpWebShotOptions{RepoRoot: repoRoot})
+}
+
+func mcpWebActFuncWithOptions(sess *studio.StudioSession, opts mcpWebShotOptions) studio.WebActFunc {
+	return func(ctx context.Context, spec studio.WebRenderSpec, action studio.WebActionSpec) (studio.WebShotResult, error) {
+		wsSpec := spec.ToWebshotSpec()
+		if wsSpec.SessionID == "" {
+			return studio.WebShotResult{}, fmt.Errorf("kitsoki mcp visual.act currently supports live handles")
+		}
+		repoRoot := opts.RepoRoot
+		if repoRoot == "" {
+			repoRoot = os.Getenv(kitrepo.EnvVar)
+		}
+		if repoRoot == "" {
+			repoRoot = kitrepo.Resolve()
+		}
+		if repoRoot == "" {
+			return studio.WebShotResult{}, fmt.Errorf("could not locate the kitsoki checkout for tools/runstatus/web-shot.ts; set %s", kitrepo.EnvVar)
+		}
+		helper := filepath.Join(repoRoot, "tools", "runstatus", "web-shot.ts")
+		if _, err := os.Stat(helper); err != nil {
+			return studio.WebShotResult{}, fmt.Errorf("web-shot helper not found at %s: %w", helper, err)
+		}
+
+		provider := studio.NewRunstatusProvider(sess)
+		handler := rsserver.NewMulti(provider).Handler()
+		serverFactory := opts.Server
+		if serverFactory == nil {
+			serverFactory = func(h http.Handler) webshot.ServerProvider {
+				return &webshot.HandlerServer{Handler: h, HealthTimeout: opts.HealthTimeout}
+			}
+		}
+		browser := opts.Browser
+		if browser == nil {
+			browser = &webshot.NodeInvoker{RepoRoot: repoRoot}
+		}
+		var point *webshot.Point
+		if action.Point != nil {
+			point = &webshot.Point{X: action.Point.X, Y: action.Point.Y}
+		}
+		res, err := webshot.ActWithSemantic(ctx, wsSpec, webshot.Action{
+			Kind:         action.Kind,
+			ActionHandle: action.ActionHandle,
+			Point:        point,
+			Button:       action.Button,
+			Modifiers:    action.Modifiers,
+		}, webshot.Options{
 			Server:        serverFactory(handler),
 			Browser:       browser,
 			HealthTimeout: opts.HealthTimeout,

@@ -1727,6 +1727,19 @@ type WebShotResult struct {
 // WebShotResultFunc is the richer render.web seam used by visual.snapshot.
 type WebShotResultFunc func(ctx context.Context, spec WebRenderSpec) (WebShotResult, error)
 
+// WebActFunc performs a browser action against a web render target and returns
+// the post-action screenshot/semantic observation.
+type WebActFunc func(ctx context.Context, spec WebRenderSpec, action WebActionSpec) (WebShotResult, error)
+
+// WebActionSpec is the studio-level browser action used by visual.act.
+type WebActionSpec struct {
+	Kind         string
+	ActionHandle string
+	Point        *VisualPoint
+	Button       string
+	Modifiers    []string
+}
+
 // WebRenderSpec is the studio's render.web target: a story + state + world OR a
 // live handle's session. It is mapped to a webshot.Spec by the production seam;
 // kept as a studio type so the studio package does not force every render.web

@@ -602,6 +602,72 @@ func TestVisualAct_SubmitAdvancesDeterministically(t *testing.T) {
 	assert.Equal(t, "cloakroom", after.State)
 }
 
+func TestVisualAct_WebSemanticClickUsesBrowserActionWithModifiers(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	var gotSpec studio.WebRenderSpec
+	var gotAction studio.WebActionSpec
+	srv.SetWebAct(func(ctx context.Context, spec studio.WebRenderSpec, action studio.WebActionSpec) (studio.WebShotResult, error) {
+		gotSpec = spec
+		gotAction = action
+		return studio.WebShotResult{
+			PNG:          synthPNG(t),
+			SemanticJSON: []byte(`{"ok":true,"dirty_regions":["modal"],"focused":"[data-testid=\"bug-modal\"]"}`),
+		}, nil
+	})
+	cs := connectInProcess(ctx, t, srv)
+	handle := openCloak(ctx, t, cs)
+	visual := openVisual(ctx, t, cs, handle, "web")
+
+	res, err := callTool(ctx, cs, "visual.act", map[string]any{
+		"visual_handle": visual,
+		"action":        "click",
+		"action_handle": "testid:edit-story-btn",
+		"modifiers":     []any{"Alt"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "visual.act web semantic click: %s", contentText(res))
+
+	var got studio.VisualActOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &got))
+	assert.True(t, got.OK)
+	assert.Equal(t, []string{"modal"}, got.ChangedRegions)
+	assert.True(t, got.NeedsSnapshot)
+	assert.NotEmpty(t, gotSpec.SessionID)
+	assert.Equal(t, "click", gotAction.Kind)
+	assert.Equal(t, "testid:edit-story-btn", gotAction.ActionHandle)
+	assert.Equal(t, []string{"Alt"}, gotAction.Modifiers)
+}
+
+func TestVisualAct_WebContextMenuUsesRightButton(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	var gotAction studio.WebActionSpec
+	srv.SetWebAct(func(ctx context.Context, spec studio.WebRenderSpec, action studio.WebActionSpec) (studio.WebShotResult, error) {
+		gotAction = action
+		return studio.WebShotResult{PNG: synthPNG(t), SemanticJSON: []byte(`{"ok":true}`)}, nil
+	})
+	cs := connectInProcess(ctx, t, srv)
+	handle := openCloak(ctx, t, cs)
+	visual := openVisual(ctx, t, cs, handle, "web")
+
+	res, err := callTool(ctx, cs, "visual.act", map[string]any{
+		"visual_handle": visual,
+		"action":        "contextmenu",
+		"point":         map[string]any{"x": 24, "y": 48},
+		"modifiers":     []any{"option"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "visual.act web contextmenu: %s", contentText(res))
+
+	assert.Equal(t, "contextmenu", gotAction.Kind)
+	assert.Equal(t, "right", gotAction.Button)
+	require.NotNil(t, gotAction.Point)
+	assert.Equal(t, 24, gotAction.Point.X)
+	assert.Equal(t, 48, gotAction.Point.Y)
+	assert.Equal(t, []string{"Alt"}, gotAction.Modifiers)
+}
+
 func TestVisualAct_TypeThenPressEnterRoutesBufferedText(t *testing.T) {
 	ctx := context.Background()
 	srv, _ := newReplayServer(t)
