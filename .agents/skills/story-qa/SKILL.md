@@ -138,7 +138,9 @@ criteria, while the brief states the persona and operating rules. Use
 sequence and copy ready-to-fill `--attach-evidence` commands.
 Use `driver-handoff.md` when handing the run to the reusable driver agent; it
 names the run directory, driver inputs, dispatch modes, missing evidence, and
-final gates without launching a live LLM by itself.
+final gates without launching a live LLM by itself. Its `Missing Proof Evidence`
+section is the capture backlog for live or cassette-backed work, even when
+demo evidence has filled every raw evidence slot.
 Use `driver-journal.md` after a driver pass to inspect what the reusable driver
 actually attempted, which MCP tools or retained references it used, which
 blockers it hit, and which scenarios were captured or skipped.

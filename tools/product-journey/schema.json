@@ -38,8 +38,8 @@
     "quality_gate_required": ["minimum_evidence", "done_when", "block_if"]
   },
   "driver_handoff": {
-    "required": ["run_id", "created_at", "driver_agent", "run_dir", "project", "persona", "status", "inputs", "dispatch_modes", "operator_warning", "suggested_prompt", "finalize_commands", "missing_evidence"],
-    "status_required": ["review_status", "present_evidence_count", "required_evidence_count", "missing_evidence_count", "findings_count"],
+    "required": ["run_id", "created_at", "driver_agent", "run_dir", "project", "persona", "status", "inputs", "dispatch_modes", "operator_warning", "suggested_prompt", "finalize_commands", "missing_evidence", "missing_proof_evidence"],
+    "status_required": ["review_status", "present_evidence_count", "required_evidence_count", "missing_evidence_count", "proof_evidence_count", "proof_minimum_evidence_count", "minimum_evidence_count", "missing_proof_evidence_count", "findings_count"],
     "inputs_required": ["agent_brief", "driver_plan", "driver_journal", "execution_plan", "evidence", "scenario_outcomes", "media_manifest"],
     "dispatch_modes": ["replay", "record", "live"]
   },

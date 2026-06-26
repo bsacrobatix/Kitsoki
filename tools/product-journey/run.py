@@ -1792,6 +1792,41 @@ def render_agent_brief(brief: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def proof_gap_rows(run_json: dict, evidence: dict) -> list[dict]:
+    captured = {
+        (item.get("scenario", ""), item.get("kind", item.get("evidence_kind", "")))
+        for item in evidence.get("items", [])
+        if item.get("status") in {"captured", "validated"}
+    }
+    proof = {
+        (item.get("scenario", ""), item.get("kind", item.get("evidence_kind", "")))
+        for item in evidence.get("items", [])
+        if is_proof_evidence(item)
+    }
+    rows = []
+    for scenario in run_json.get("scenarios", []):
+        minimum = scenario_quality_gate(scenario.get("id", "")).get("minimum_evidence", [])
+        captured_minimum = [
+            kind for kind in minimum
+            if (scenario.get("id", ""), kind) in captured
+        ]
+        proof_minimum = [
+            kind for kind in minimum
+            if (scenario.get("id", ""), kind) in proof
+        ]
+        missing = sorted(set(minimum) - set(proof_minimum))
+        if missing:
+            rows.append({
+                "scenario": scenario.get("id", ""),
+                "label": scenario.get("label", scenario.get("id", "")),
+                "proof_minimum_evidence_count": len(proof_minimum),
+                "captured_minimum_evidence_count": len(captured_minimum),
+                "minimum_evidence_count": len(minimum),
+                "missing_proof_evidence": missing,
+            })
+    return rows
+
+
 def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: dict) -> dict:
     run_dir_arg = f".artifacts/product-journey/{run_json['run_id']}"
     missing_evidence = [
@@ -1799,6 +1834,13 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
         for item in evidence.get("items", [])
         if item.get("status") == "missing"
     ]
+    missing_proof_evidence = proof_gap_rows(run_json, evidence)
+    minimum_evidence_count = sum(
+        len(scenario_quality_gate(scenario.get("id", "")).get("minimum_evidence", []))
+        for scenario in run_json.get("scenarios", [])
+    )
+    missing_proof_evidence_count = sum(len(row["missing_proof_evidence"]) for row in missing_proof_evidence)
+    proof_minimum_evidence_count = minimum_evidence_count - missing_proof_evidence_count
     return {
         "run_id": run_json["run_id"],
         "created_at": now_utc(),
@@ -1811,6 +1853,10 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
             "present_evidence_count": metrics.get("present_evidence_count", 0),
             "required_evidence_count": metrics.get("required_evidence_count", 0),
             "missing_evidence_count": len(missing_evidence),
+            "proof_evidence_count": metrics.get("proof_evidence_count", 0),
+            "proof_minimum_evidence_count": proof_minimum_evidence_count,
+            "minimum_evidence_count": minimum_evidence_count,
+            "missing_proof_evidence_count": missing_proof_evidence_count,
             "findings_count": metrics.get("findings_count", 0),
         },
         "inputs": {
@@ -1842,14 +1888,16 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
         ),
         "suggested_prompt": (
             f"Drive product journey QA for run_dir={run_dir_arg}. Read agent-brief.md, driver-plan.md, "
-            "and execution-plan.md. Use Kitsoki Studio MCP and visual MCP to capture evidence or blockers, "
-            "record findings, then run review and validation."
+            "execution-plan.md, and the Missing Proof Evidence section in driver-handoff.md. Use Kitsoki "
+            "Studio MCP and visual MCP to capture proof-source evidence or blockers, record findings, then "
+            "run review and validation."
         ),
         "finalize_commands": [
             f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
             f"python3 tools/product-journey/run.py --validate-run --run-dir {run_dir_arg}",
         ],
         "missing_evidence": missing_evidence,
+        "missing_proof_evidence": missing_proof_evidence,
     }
 
 
@@ -1864,6 +1912,7 @@ def render_driver_handoff(handoff: dict) -> str:
         f"- Persona: `{handoff['persona']['label']}`",
         f"- Review: `{handoff['status']['review_status']}`",
         f"- Evidence: {handoff['status']['present_evidence_count']} / {handoff['status']['required_evidence_count']}",
+        f"- Proof evidence: {handoff['status'].get('proof_evidence_count', 0)} attached; minimum proof {handoff['status'].get('proof_minimum_evidence_count', 0)} / {handoff['status'].get('minimum_evidence_count', 0)}",
         f"- Findings: {handoff['status']['findings_count']}",
         "",
         "## Operator Warning",
@@ -1886,6 +1935,16 @@ def render_driver_handoff(handoff: dict) -> str:
     if handoff["missing_evidence"]:
         for item in handoff["missing_evidence"][:25]:
             lines.append(f"- `{item['scenario']}` / `{item['kind']}`: {item['hint']}")
+    else:
+        lines.append("- (none)")
+    lines.extend(["", "## Missing Proof Evidence", ""])
+    if handoff.get("missing_proof_evidence"):
+        for row in handoff["missing_proof_evidence"][:25]:
+            missing = ", ".join(f"`{kind}`" for kind in row.get("missing_proof_evidence", []))
+            lines.append(
+                f"- `{row['scenario']}`: proof {row.get('proof_minimum_evidence_count', 0)} / "
+                f"{row.get('minimum_evidence_count', 0)} (captured {row.get('captured_minimum_evidence_count', 0)}); missing {missing}"
+            )
     else:
         lines.append("- (none)")
     lines.extend(["", "## Finalize", ""])
@@ -2845,6 +2904,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
     driver_events = driver_journal.get("items", []) if driver_journal else []
     brief_scenarios = agent_brief.get("scenario_order", []) if agent_brief else []
     handoff_missing_evidence = driver_handoff.get("missing_evidence", []) if driver_handoff else []
+    handoff_missing_proof_evidence = driver_handoff.get("missing_proof_evidence", []) if driver_handoff else []
 
     if scenarios_json and len(scenario_rows) != len(scenarios):
         add_validation_issue(
@@ -3025,7 +3085,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
         if review and driver_handoff.get("status", {}).get("review_status") != review.get("status"):
             add_validation_issue(issues, "error", "driver-handoff-review-status", "driver-handoff.json review status is stale", f"handoff={driver_handoff.get('status', {}).get('review_status')}, review={review.get('status')}")
         if metrics:
-            for key in ["present_evidence_count", "required_evidence_count", "findings_count"]:
+            for key in ["present_evidence_count", "required_evidence_count", "proof_evidence_count", "findings_count"]:
                 if driver_handoff.get("status", {}).get(key) != metrics.get(key):
                     add_validation_issue(issues, "error", "driver-handoff-metrics", f"driver-handoff.json {key} is stale or inconsistent", f"expected={metrics.get(key)}, actual={driver_handoff.get('status', {}).get(key)}")
         actual_missing_count = len([
@@ -3036,6 +3096,22 @@ def validate_run_bundle(run_dir: Path) -> dict:
             add_validation_issue(issues, "error", "driver-handoff-missing-count", "driver-handoff.json missing evidence count is stale", f"expected={actual_missing_count}, actual={driver_handoff.get('status', {}).get('missing_evidence_count')}")
         if len(handoff_missing_evidence) != actual_missing_count:
             add_validation_issue(issues, "error", "driver-handoff-missing-list", "driver-handoff.json missing evidence list is stale", f"expected={actual_missing_count}, actual={len(handoff_missing_evidence)}")
+        expected_proof_gaps = proof_gap_rows(run_json or {"scenarios": []}, evidence or {"items": []})
+        expected_missing_proof_count = sum(len(row["missing_proof_evidence"]) for row in expected_proof_gaps)
+        expected_minimum_count = sum(
+            len(scenario_quality_gate(scenario.get("id", "")).get("minimum_evidence", []))
+            for scenario in scenarios
+        )
+        expected_proof_minimum_count = expected_minimum_count - expected_missing_proof_count
+        if len(handoff_missing_proof_evidence) != len(expected_proof_gaps):
+            add_validation_issue(issues, "error", "driver-handoff-proof-gap-list", "driver-handoff.json missing proof evidence list is stale", f"expected={len(expected_proof_gaps)}, actual={len(handoff_missing_proof_evidence)}")
+        for key, expected in [
+            ("missing_proof_evidence_count", expected_missing_proof_count),
+            ("minimum_evidence_count", expected_minimum_count),
+            ("proof_minimum_evidence_count", expected_proof_minimum_count),
+        ]:
+            if driver_handoff.get("status", {}).get(key) != expected:
+                add_validation_issue(issues, "error", "driver-handoff-proof-metrics", f"driver-handoff.json {key} is stale or inconsistent", f"expected={expected}, actual={driver_handoff.get('status', {}).get(key)}")
         if driver_plan and driver_handoff.get("finalize_commands") != driver_plan.get("final_gates"):
             add_validation_issue(issues, "error", "driver-handoff-final-gates", "driver-handoff.json finalize commands do not match driver-plan final gates")
         if not driver_handoff.get("suggested_prompt", "").strip():

@@ -116,21 +116,24 @@ state whenever possible:
 
 1. Open or attach a product-journey QA story session seeded with the existing
    run.
-2. Submit `attach` for each evidence artifact:
+2. Read `driver-handoff.md` and prioritize `Missing Proof Evidence`; those rows
+   are the proof-source gaps left after demo or partial evidence has been
+   attached.
+3. Submit `attach` for each evidence artifact:
    `scenario`, `evidence_kind`, `evidence_path`, `source`, `notes`.
    Use `retained`, `external`, `local`, or `cassette` for real proof evidence;
    reserve `demo` for deterministic placeholder evidence.
-3. Submit `record` for each finding:
+4. Submit `record` for each finding:
    `finding_kind`, `title`, `summary`, `scenario`, `severity`,
    `evidence_path`.
-4. Submit `blocker` for each attempted scenario that could not capture evidence:
+5. Submit `blocker` for each attempted scenario that could not capture evidence:
    `scenario`, `title`, `summary`, `evidence_path`.
-5. When using CLI fallback or when a story intent is not available, append
+6. When using CLI fallback or when a story intent is not available, append
    `--record-driver-event` after each scenario attempt. Every `evidence_refs`
    value on a captured or validated driver event must also be attached with
    `attach`; journal-only evidence refs fail validation.
-6. Submit `review`.
-7. Submit `validate`.
+7. Submit `review`.
+8. Submit `validate`.
 
 If you cannot access the story session that owns the run, report the exact
 `tools/product-journey/run.py --attach-evidence` / `--record-finding` commands
