@@ -313,9 +313,15 @@ history-smoke:
 		if [ "$(HISTORY_PREPARE_ALL_CELLS)" != "1" ]; then bugs="$${bugs%%,*}"; candidates="$${candidates%%,*}"; fi; \
 		if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
 		cache="$${EXTERNAL_BAKEOFF_CACHE:-.artifacts/external-bakeoff}"; \
+		mkdir -p .artifacts/external-bakeoff/readiness; \
+		handoff_json=".artifacts/external-bakeoff/readiness/$(HISTORY_PROJECT)-handoffs.json"; \
+		if ! tools/bugfix-bakeoff/external/prepare_handoffs.sh --project "$(HISTORY_PROJECT)" --bug "$$bugs" --candidate "$$candidates" $$repo_arg --markdown ".artifacts/external-bakeoff/readiness/$(HISTORY_PROJECT)-handoffs.md" > "$$handoff_json"; then \
+			cat "$$handoff_json"; \
+			exit 1; \
+		fi; \
+		cat "$$handoff_json"; \
 		for bug in $$(printf '%s' "$$bugs" | tr ',' ' '); do \
 			for candidate in $$(printf '%s' "$$candidates" | tr ',' ' '); do \
-				tools/bugfix-bakeoff/external/drive_cell.sh --project "$(HISTORY_PROJECT)" --bug "$$bug" --candidate "$$candidate" $$repo_arg --no-drive; \
 				python3 -c 'import json, sys; path, bug = sys.argv[1:3]; data = json.load(open(path)); assert data.get("bugs") == [bug], "cell preflight should be scoped to %s, got %r" % (bug, data.get("bugs"))' "$$cache/preflight/$(HISTORY_PROJECT)-$$bug-$$candidate.json" "$$bug"; \
 				python3 -c 'import json, pathlib, sys; path, project, bug, candidate = sys.argv[1:5]; data = json.load(open(path)); assert data.get("project") == project and data.get("bug") == bug and data.get("candidate") == candidate, data; assert pathlib.Path(data["prompt"]).exists(), data["prompt"]; assert pathlib.Path(data["worktree"]).exists(), data["worktree"]; assert pathlib.Path(data["preflight"]).exists(), data["preflight"]' "$$cache/prepared/$(HISTORY_PROJECT)-$$bug-$$candidate.json" "$(HISTORY_PROJECT)" "$$bug" "$$candidate"; \
 			done; \
@@ -332,16 +338,6 @@ history-smoke:
 		if [ "$(HISTORY_PREPARE_ALL_CELLS)" = "1" ]; then \
 			python3 -c 'import json, sys; data = json.load(open(sys.argv[1])); results = data["results"]; assert results["prepared_cells"] == results["selected_cells"], results; assert results["stale_prepared_cells"] == 0, results; assert results["unprepared_cells"] == 0, results' "$$readiness_json"; \
 		fi
-	@if [ "$(HISTORY_PREPARE_FIRST_CELL)" = "1" ] || [ "$(HISTORY_PREPARE_ALL_CELLS)" = "1" ]; then \
-		bugs="$(HISTORY_BUGS)"; candidates="$(HISTORY_CANDIDATES)"; \
-		if [ "$(HISTORY_PREPARE_ALL_CELLS)" != "1" ]; then bugs="$${bugs%%,*}"; candidates="$${candidates%%,*}"; fi; \
-		handoff_json=".artifacts/external-bakeoff/readiness/$(HISTORY_PROJECT)-handoffs.json"; \
-		if ! python3 tools/bugfix-bakeoff/external/bench.py audit-handoffs --project "$(HISTORY_PROJECT)" --bug "$$bugs" --candidate "$$candidates" --markdown ".artifacts/external-bakeoff/readiness/$(HISTORY_PROJECT)-handoffs.md" > "$$handoff_json"; then \
-			cat "$$handoff_json"; \
-			exit 1; \
-		fi; \
-		cat "$$handoff_json"; \
-	fi
 	GOCACHE=$$(pwd)/.cache/go-build go run ./cmd/kitsoki validate stories/repo-bakeoff/app.yaml
 	GOCACHE=$$(pwd)/.cache/go-build go run ./cmd/kitsoki test flows stories/repo-bakeoff/app.yaml
 

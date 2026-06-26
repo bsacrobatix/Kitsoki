@@ -43,7 +43,8 @@ for bug in $(printf '%s' "$bugs" | tr ',' ' '); do
       --bug "$bug" \
       --candidate "$candidate" \
       "${repo_args[@]}" \
-      --no-drive
+      --no-drive \
+      1>&2
   done
 done
 

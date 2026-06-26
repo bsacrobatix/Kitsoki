@@ -439,6 +439,80 @@ def test_drive_cell_preflight_scopes_to_requested_bug():
             shutil.rmtree(manifest_dir, ignore_errors=True)
 
 
+def test_prepare_handoffs_wraps_no_drive_and_audit():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        repo = root / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        (repo / "lib.txt").write_text("baseline\n")
+        subprocess.run(["git", "add", "lib.txt"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "baseline"],
+            cwd=repo,
+            check=True,
+        )
+        baseline = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+
+        project = "prepare-handoffs-demo"
+        manifest_dir = Path(HERE) / "projects" / project
+        cache = root / "cache"
+        markdown = root / "handoffs.md"
+        try:
+            (manifest_dir / "oracles").mkdir(parents=True)
+            (manifest_dir / "oracles" / "bug1.test").write_text("oracle")
+            (manifest_dir / "manifest.yaml").write_text(
+                "project:\n"
+                f"  id: {project}\n"
+                "  repo: local\n"
+                "  local_only: true\n"
+                "bugs:\n"
+                "  - id: bug1\n"
+                "    title: wrapped no-drive prep\n"
+                "    ticket: prepare a scoped handoff without leaking the oracle\n"
+                f"    baseline_sha: {baseline}\n"
+                f"    fix_sha: {baseline}\n"
+                "    oracle_test: oracles/bug1.test\n"
+                "  - id: bug2\n"
+                f"    baseline_sha: {baseline}\n"
+                f"    fix_sha: {baseline}\n"
+                "    oracle_test: oracles/missing.test\n"
+            )
+            rel_results = os.path.relpath(cache / "results", Path(HERE))
+            env = {**os.environ, "EXTERNAL_BAKEOFF_CACHE": str(cache)}
+            r = subprocess.run(
+                [
+                    str(Path(HERE) / "prepare_handoffs.sh"),
+                    "--project", project,
+                    "--bug", "bug1",
+                    "--candidate", "opus-4.8",
+                    "--repo-dir", str(repo),
+                    "--results", rel_results,
+                    "--markdown", str(markdown),
+                ],
+                cwd=Path(HERE).parents[2],
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            assert r.returncode == 0, r.stdout + r.stderr
+            audit = json_load(r.stdout)
+            assert audit["ok"] is True
+            assert audit["selected_cells"] == 1
+            assert audit["prepared_cells"] == 1
+            assert audit["missing_prepared_cells"] == 0
+            assert markdown.exists()
+            preflight = json_load((cache / "preflight" / f"{project}-bug1-opus-4.8.json").read_text())
+            assert preflight["bugs"] == ["bug1"]
+            prepared = json_load((cache / "prepared" / f"{project}-bug1-opus-4.8.json").read_text())
+            assert Path(prepared["prompt"]).exists()
+            assert Path(prepared["worktree"]).exists()
+            assert not (cache / "prepared" / f"{project}-bug2-opus-4.8.json").exists()
+        finally:
+            shutil.rmtree(manifest_dir, ignore_errors=True)
+
+
 def test_audit_handoffs_rejects_oracle_and_real_fix_leaks():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
