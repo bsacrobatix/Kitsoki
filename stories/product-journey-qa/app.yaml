@@ -24,6 +24,21 @@ world:
   rollup_deck_path: { type: string, default: "" }
   rollup_markdown_path: { type: string, default: "" }
   rollup_summary: { type: object, default: {} }
+  rollup_runs_found: { type: int, default: 0 }
+  rollup_assignments: { type: int, default: 0 }
+  rollup_reviewed_runs: { type: int, default: 0 }
+  rollup_ready_runs: { type: int, default: 0 }
+  rollup_missing_assignment_count: { type: int, default: 0 }
+  rollup_present_evidence_count: { type: int, default: 0 }
+  rollup_required_evidence_count: { type: int, default: 0 }
+  rollup_persona_outcomes: { type: int, default: 0 }
+  rollup_scenario_outcomes: { type: int, default: 0 }
+  rollup_quality_gate_satisfied_runs: { type: int, default: 0 }
+  rollup_quality_gate_total_runs: { type: int, default: 0 }
+  rollup_quality_gate_proof_minimum_evidence_count: { type: int, default: 0 }
+  rollup_quality_gate_minimum_evidence_count: { type: int, default: 0 }
+  rollup_missing_proof_evidence_rows: { type: int, default: 0 }
+  rollup_quality_gate_missing_proof_evidence_count: { type: int, default: 0 }
   dogfood_id:    { type: string, default: "" }
   dogfood_dir:   { type: string, default: "" }
   dogfood_report_path: { type: string, default: "" }

@@ -1,7 +1,7 @@
 states:
   matrix_created:
     description: "A product-journey GitHub matrix exists; waiting for assignment runs."
-    relevant_world: [seed, matrix_id, matrix_dir, matrix_personas, target_proof_file, deck_path, rollup_path, rollup_deck_path, rollup_markdown_path, validation_status, validation_errors, validation_warnings, status]
+    relevant_world: [seed, matrix_id, matrix_dir, matrix_personas, target_proof_file, deck_path, rollup_path, rollup_deck_path, rollup_markdown_path, rollup_runs_found, rollup_assignments, rollup_reviewed_runs, rollup_ready_runs, rollup_missing_assignment_count, rollup_present_evidence_count, rollup_required_evidence_count, rollup_persona_outcomes, rollup_scenario_outcomes, rollup_quality_gate_satisfied_runs, rollup_quality_gate_total_runs, rollup_quality_gate_proof_minimum_evidence_count, rollup_quality_gate_minimum_evidence_count, rollup_missing_proof_evidence_rows, rollup_quality_gate_missing_proof_evidence_count, validation_status, validation_errors, validation_warnings, status]
     view:
       - banner:
           text: "MATRIX CREATED"
@@ -16,6 +16,12 @@ states:
             Matrix dir: '{{ world.matrix_dir|default:"(pending)" }}'
             Deck: '{{ world.deck_path|default:"(pending)" }}'
             Rollup: '{{ world.rollup_deck_path|default:"(pending)" }}'
+            Rollup runs: "{{ world.rollup_runs_found }} / {{ world.rollup_assignments }}"
+            Rollup readiness: "{{ world.rollup_reviewed_runs }} reviewed; {{ world.rollup_ready_runs }} ready; {{ world.rollup_missing_assignment_count }} missing assignments"
+            Rollup evidence: "{{ world.rollup_present_evidence_count }} / {{ world.rollup_required_evidence_count }}"
+            Rollup outcomes: "{{ world.rollup_persona_outcomes }} persona rows; {{ world.rollup_scenario_outcomes }} scenario rows"
+            Rollup proof gates: "{{ world.rollup_quality_gate_satisfied_runs }} / {{ world.rollup_quality_gate_total_runs }} satisfied; proof {{ world.rollup_quality_gate_proof_minimum_evidence_count }} / {{ world.rollup_quality_gate_minimum_evidence_count }}"
+            Rollup proof backlog: "{{ world.rollup_missing_proof_evidence_rows }} rows; {{ world.rollup_quality_gate_missing_proof_evidence_count }} missing run-slots"
             Validation: '{{ world.validation_status|default:"(not validated)" }}'
             Validation errors: "{{ world.validation_errors }}"
             Validation warnings: "{{ world.validation_warnings }}"
@@ -161,6 +167,21 @@ states:
                 rollup_deck_path: "stdout_json.deck_path"
                 rollup_markdown_path: "stdout_json.markdown_path"
                 deck_path: "stdout_json.deck_path"
+                rollup_runs_found: "stdout_json.runs_found"
+                rollup_assignments: "stdout_json.assignments"
+                rollup_reviewed_runs: "stdout_json.reviewed_runs"
+                rollup_ready_runs: "stdout_json.ready_runs"
+                rollup_missing_assignment_count: "stdout_json.missing_assignment_count"
+                rollup_present_evidence_count: "stdout_json.present_evidence_count"
+                rollup_required_evidence_count: "stdout_json.required_evidence_count"
+                rollup_persona_outcomes: "stdout_json.persona_outcomes"
+                rollup_scenario_outcomes: "stdout_json.scenario_outcomes"
+                rollup_quality_gate_satisfied_runs: "stdout_json.quality_gate_satisfied_runs"
+                rollup_quality_gate_total_runs: "stdout_json.quality_gate_total_runs"
+                rollup_quality_gate_proof_minimum_evidence_count: "stdout_json.quality_gate_proof_minimum_evidence_count"
+                rollup_quality_gate_minimum_evidence_count: "stdout_json.quality_gate_minimum_evidence_count"
+                rollup_missing_proof_evidence_rows: "stdout_json.missing_proof_evidence_rows"
+                rollup_quality_gate_missing_proof_evidence_count: "stdout_json.quality_gate_missing_proof_evidence_count"
               on_error: matrix_created
             - set:
                 status: "rollup_created"

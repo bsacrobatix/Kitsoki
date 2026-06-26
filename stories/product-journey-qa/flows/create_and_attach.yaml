@@ -231,6 +231,14 @@ host_handlers:
             present_evidence_count: 6
             required_evidence_count: 25
             findings_count: 4
+            persona_outcomes: 1
+            scenario_outcomes: 5
+            quality_gate_satisfied_runs: 1
+            quality_gate_total_runs: 5
+            quality_gate_proof_minimum_evidence_count: 6
+            quality_gate_minimum_evidence_count: 25
+            missing_proof_evidence_rows: 12
+            quality_gate_missing_proof_evidence_count: 19
             missing_assignment_count: 9
       validate_product_journey_matrix:
         data:
@@ -313,6 +321,22 @@ turns:
       rollup_deck_path: .artifacts/product-journey/matrices/matrix-123/rollup.slidey.json
       rollup_markdown_path: .artifacts/product-journey/matrices/matrix-123/rollup.md
       deck_path: .artifacts/product-journey/matrices/matrix-123/rollup.slidey.json
+      rollup_runs_found: 1
+      rollup_assignments: 10
+      rollup_reviewed_runs: 1
+      rollup_ready_runs: 1
+      rollup_missing_assignment_count: 9
+      rollup_present_evidence_count: 6
+      rollup_required_evidence_count: 25
+      rollup_persona_outcomes: 1
+      rollup_scenario_outcomes: 5
+      rollup_quality_gate_satisfied_runs: 1
+      rollup_quality_gate_total_runs: 5
+      rollup_quality_gate_proof_minimum_evidence_count: 6
+      rollup_quality_gate_minimum_evidence_count: 25
+      rollup_missing_proof_evidence_rows: 12
+      rollup_quality_gate_missing_proof_evidence_count: 19
+    expect_view_matches: "Rollup runs[\\s\\S]*1 / 10[\\s\\S]*Rollup outcomes[\\s\\S]*1 persona rows; 5 scenario rows[\\s\\S]*Rollup proof gates[\\s\\S]*1 / 5 satisfied; proof 6 / 25[\\s\\S]*Rollup proof backlog[\\s\\S]*12 rows; 19 missing run-slots"
     expect_host_calls:
       - handler: host.run
         args: { call: rollup_product_journey_matrix }
