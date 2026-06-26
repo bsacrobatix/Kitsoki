@@ -29,7 +29,8 @@ No LLM, no cost. Two subcommands:
   bench.py completion --project <name> --bug <id[,id]> --candidate <key[,key]>
       Print an explicit repo-history completion verdict from readiness/results:
       no-cost ready, ready to drive live, complete with pending, or live scored.
-      Free/no-LLM.
+      Add --require-result-evidence or --require-live-scored to fail publishing
+      gates when the current artifacts are not sufficient. Free/no-LLM.
 
 A project is described entirely by its manifest (see projects/query-string/
 manifest.yaml): project.{repo,install,test_cmd,oracle.{target,run}} and
@@ -1026,7 +1027,8 @@ def build_completion_report(m, repo_dir=None, candidate=None, candidates_path=No
 
 def completion(m, repo_dir=None, candidate=None, candidates_path=None, bug_ids=None,
                results_dir="../../../.artifacts/external-bakeoff/results",
-               markdown=None, armed=False):
+               markdown=None, armed=False, require_result_evidence=False,
+               require_live_scored=False):
     report = build_completion_report(
         m,
         repo_dir=repo_dir,
@@ -1040,7 +1042,14 @@ def completion(m, repo_dir=None, candidate=None, candidates_path=None, bug_ids=N
         write_completion_markdown(report, Path(markdown))
         report["markdown"] = markdown
     print(json.dumps(report, indent=2))
-    return 0 if report["checks"]["preflight_ok"] else 1
+    checks = report["checks"]
+    if not checks["preflight_ok"]:
+        return 1
+    if require_result_evidence and not checks["result_evidence_complete"]:
+        return 1
+    if require_live_scored and not checks["live_scored"]:
+        return 1
+    return 0
 
 
 def write_completion_markdown(report, markdown):
@@ -1513,6 +1522,10 @@ def main():
     cp.add_argument("--markdown", help="optional Markdown completion report")
     cp.add_argument("--armed", action="store_true",
                     help="mark selected fixtures as already verified RED@baseline/GREEN@fix")
+    cp.add_argument("--require-result-evidence", action="store_true",
+                    help="exit nonzero unless every selected cell has a current scored or pending result")
+    cp.add_argument("--require-live-scored", action="store_true",
+                    help="exit nonzero unless every selected cell has a current non-pending scored result")
     cp.add_argument("--candidates", default=str(HERE / "candidates.yaml"),
                     help="candidates.yaml for candidate/profile lookup")
     ah = sub.add_parser("audit-handoffs")
@@ -1569,7 +1582,9 @@ def main():
         sys.exit(completion(m, repo_dir=a.repo_dir, candidate=a.candidate,
                             candidates_path=a.candidates, bug_ids=a.bug,
                             results_dir=a.results, markdown=a.markdown,
-                            armed=a.armed))
+                            armed=a.armed,
+                            require_result_evidence=a.require_result_evidence,
+                            require_live_scored=a.require_live_scored))
     if a.cmd == "audit-handoffs":
         sys.exit(audit_handoffs(m, results_dir=a.results, candidate=a.candidate,
                                 bug_ids=a.bug, markdown=a.markdown))

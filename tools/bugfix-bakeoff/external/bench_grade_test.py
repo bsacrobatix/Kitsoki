@@ -230,6 +230,7 @@ def test_pending_cell_rolls_up_separately_from_failures():
                     bug_ids="bug1",
                     results_dir=rel,
                     armed=True,
+                    require_result_evidence=True,
                 )
         finally:
             bench.REPO_ROOT = old_root
@@ -242,6 +243,23 @@ def test_pending_cell_rolls_up_separately_from_failures():
         assert completion["results"]["pending_cells"] == 1
         assert completion["results"]["attempted_cells"] == 0
         assert any("pending" in b for b in completion["blockers"])
+
+        old_root = bench.REPO_ROOT
+        bench.REPO_ROOT = root
+        try:
+            with redirect_stdout(io.StringIO()):
+                rc = bench.completion(
+                    manifest,
+                    candidate="cheap",
+                    candidates_path=str(candidates),
+                    bug_ids="bug1",
+                    results_dir=rel,
+                    armed=True,
+                    require_live_scored=True,
+                )
+        finally:
+            bench.REPO_ROOT = old_root
+        assert rc == 1
 
 
 def test_readiness_reports_missing_and_scored_cells():
@@ -407,6 +425,23 @@ def test_readiness_reports_missing_and_scored_cells():
         assert "Live scored capability result: no" in completion_text
         assert "## Drive Commands" in completion_text
         assert "## Pending Commands" in completion_text
+
+        old_root = bench.REPO_ROOT
+        bench.REPO_ROOT = root
+        try:
+            with redirect_stdout(io.StringIO()):
+                rc = bench.completion(
+                    manifest,
+                    candidate="ready",
+                    candidates_path=str(candidates),
+                    bug_ids="bug1,bug2",
+                    results_dir=rel,
+                    armed=True,
+                    require_result_evidence=True,
+                )
+        finally:
+            bench.REPO_ROOT = old_root
+        assert rc == 1
 
 
 def test_readiness_markdown_uses_singular_missing_cell_wording():

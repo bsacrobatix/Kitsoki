@@ -177,6 +177,9 @@ For the current full no-cost reference run, completion should say
 `No-cost ready: yes` and `Ready to drive live: yes`, while
 `Result evidence complete` and `Live scored capability result` remain `no`
 until every selected cell has a current scored or pending result artifact.
+Use `--require-result-evidence` to fail until those scored/pending artifacts
+exist. Use `--require-live-scored` to fail until every selected cell is a
+non-pending scored result; that is the gate for claiming live model capability.
 
 To rehearse the blocked-provider report path without touching the normal live
 results directory, run:

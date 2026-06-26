@@ -249,6 +249,19 @@ python3 tools/bugfix-bakeoff/external/bench.py completion \
   --markdown .artifacts/external-bakeoff/readiness/gears-rust-completion.md
 ```
 
+For CI or a publish gate, make the verdict enforceable:
+
+```sh
+# Accept scored cells and honest pre-attempt pending cells.
+python3 tools/bugfix-bakeoff/external/bench.py completion ... --require-result-evidence
+
+# Require every selected cell to be a non-pending scored result.
+python3 tools/bugfix-bakeoff/external/bench.py completion ... --require-live-scored
+```
+
+Use `--require-result-evidence` before publishing an accounting/completion
+report. Use `--require-live-scored` before claiming model capability.
+
 The readiness report is an audit index, not a substitute for arming or scoring:
 it shows preflight errors/warnings, exact drive commands, existing scored cells,
 missing cells, pending-cell command templates for blocked providers, and the

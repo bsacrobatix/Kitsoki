@@ -130,6 +130,9 @@ python3 tools/bugfix-bakeoff/external/bench.py completion \
 `Result evidence complete: yes` means every selected cell has a current scored
 or pending result artifact. `Live scored capability result: yes` is stricter:
 every selected cell has a current non-pending scored result.
+For automated gates, add `--require-result-evidence` before publishing a
+completion/accounting report, or `--require-live-scored` before making a model
+capability claim.
 
 ## 4. Rehearse Blocked-Provider Reporting
 
@@ -208,6 +211,10 @@ A repo-history training path is ready to cite when:
 - readiness shows clean preflight and verified arming;
 - the completion report says `No-cost ready: yes` before spend and
   `Result evidence complete: yes` before publishing a result;
+- `bench.py completion --require-result-evidence ...` passes before publishing
+  any completion/accounting report;
+- `bench.py completion --require-live-scored ...` passes before claiming the
+  selected model reliably fixes the repo;
 - the full no-cost smoke validates pending report/deck generation without
   touching the normal live results directory;
 - every selected cell is either scored from a live model attempt or honestly
