@@ -19,13 +19,8 @@ import json
 import math
 import os
 import re
-import subprocess
 import sys
 from collections import defaultdict
-from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_json(path):
@@ -907,7 +902,7 @@ def render_markdown(summary, intent_summaries=None, coverage_summaries=None, rea
     w("3. Run offline validation first: `go run ./cmd/kitsoki eval run stories/<story>/evals/<call>.yaml`.")
     w("4. Run larger no-cost validations: static intent suites with `kitsoki test intents --harness static --json ...` and committed transcript coverage jobs such as `tools/session-mining/examples/git-ops/run.sh --keep ...`.")
     w("5. Run any cost-bearing live harness matrix only by explicit operator action, then save provider evidence as `agent_eval_report` JSON under `.artifacts/` for review or `evals/reports/<call>/` when accepted.")
-    w("6. Rerun this report: `python3 tools/session-mining/eval_pilot_report.py --root stories --intent-root .artifacts/eval-pilot/intent-reports --coverage-root .artifacts/eval-pilot --markdown .context/model-harness-eval-pilot.md --deck .artifacts/eval-pilot/index.html --slidey-spec .artifacts/eval-pilot/deck.slidey.json --summary .artifacts/eval-pilot/summary.json`.")
+    w("6. Rerun this report: `python3 tools/session-mining/eval_pilot_report.py --root stories --intent-root .artifacts/eval-pilot/intent-reports --coverage-root .artifacts/eval-pilot --markdown .context/model-harness-eval-pilot.md --deck .artifacts/eval-pilot/index.html --summary .artifacts/eval-pilot/summary.json`.")
     w("")
     w("## Interpretation limits")
     w("")
@@ -1116,33 +1111,13 @@ def write(path, content):
         fh.write(content)
 
 
-def write_slidey_spec(path, summary):
-    builder = ROOT / "tools" / "report-deck" / "deterministic_deck.py"
-    subprocess.run(
-        [
-            sys.executable,
-            str(builder),
-            "--kind",
-            "eval-pilot",
-            "--input-json",
-            json.dumps(summary, sort_keys=True),
-            "--out",
-            path,
-        ],
-        cwd=ROOT,
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Render an offline model/harness eval pilot report.")
     ap.add_argument("--root", default="stories", help="root to scan for stories/*/evals reports")
     ap.add_argument("--intent-root", help="root containing kitsoki test intents JSON reports")
     ap.add_argument("--coverage-root", help="root containing session-mining coverage job dirs")
     ap.add_argument("--markdown", help="write Markdown report")
-    ap.add_argument("--deck", help="write legacy slide-style HTML deck")
-    ap.add_argument("--slidey-spec", help="write deterministic Slidey JSON deck spec")
+    ap.add_argument("--deck", help="write slide-style HTML deck")
     ap.add_argument("--summary", help="write machine-readable summary JSON")
     args = ap.parse_args(argv)
 
@@ -1165,11 +1140,9 @@ def main(argv=None):
         write(args.markdown, render_markdown(summary, intent_summaries, coverage_summaries, readiness))
     if args.deck:
         write(args.deck, render_deck(summary, intent_summaries, coverage_summaries, readiness))
-    if args.slidey_spec:
-        write_slidey_spec(args.slidey_spec, summary)
     if args.summary:
         write(args.summary, json.dumps(summary, indent=2, sort_keys=True) + "\n")
-    if not (args.markdown or args.deck or args.slidey_spec or args.summary):
+    if not (args.markdown or args.deck or args.summary):
         sys.stdout.write(render_markdown(summary))
     return 0
 

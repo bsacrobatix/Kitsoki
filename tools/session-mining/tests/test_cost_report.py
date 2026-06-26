@@ -173,31 +173,6 @@ def run():
     check("# Per-story cost report" in md, "report has a title")
     check("| story | story cost |" in md, "report has a summary table header")
 
-    # --- structured summary + deterministic Slidey writer -------------------
-    summary = cr.build_summary([], [], markdown_path=".artifacts/cost-report/cost-report.md")
-    check(summary["tool"] == "tools/session-mining/cost_report.py", "summary records source tool")
-    check(summary["markdown_path"].endswith("cost-report.md"), "summary links markdown path")
-    check(summary["stories"] == [], "empty summary has no story rows")
-    with tempfile.TemporaryDirectory() as d:
-        deck_path = os.path.join(d, "deck.slidey.json")
-        cr.write_slidey_spec(deck_path, {
-            "markdown_path": ".artifacts/cost-report/cost-report.md",
-            "stories": [{
-                "name": "git-ops",
-                "measured": True,
-                "recorded": True,
-                "story_cost_usd": 0.01,
-                "savings_median_usd": 0.49,
-                "baseline": {"ops_sampled": 2, "median_usd": 0.5, "p90_usd": 0.7, "reprocessing_tokens": 1000},
-                "intents": [{"operation": "git commit", "n": 2, "median_usd": 0.5, "p90_usd": 0.7, "sessions": 1}],
-            }],
-        })
-        with open(deck_path, encoding="utf-8") as fh:
-            deck = json.load(fh)
-        check(deck["meta"]["title"] == "Per-story Cost Report", "slidey deck title")
-        savings = [s for s in deck["scenes"] if s.get("title") == "Per-story savings"][0]
-        check(savings["rows"][0]["cells"][0] == "git-ops", "slidey deck contains story row")
-
     if failures:
         print("FAIL (%d):" % len(failures))
         for f in failures:
