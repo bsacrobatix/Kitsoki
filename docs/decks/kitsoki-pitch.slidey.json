@@ -1,5 +1,5 @@
 {
-  "_comment": "Kitsoki concept pitch. Leads with control inversion and the proofs a coding-agent skeptic can't dismiss: the runtime overrules the model mid-call, ~78% of turns never call the LLM, edits hot-reload and replay byte-for-byte as tests, and the workflow runs where work already lives. After the one-prompt strawman it credits the Cherny loop (loop engineering: a gated, budgeted agent loop that converges) and argues phases-not-prompts is that idea generalized into a composable graph. The phases arc then shows the gates routing review failures back to implement, plan, or reproduce \u2014 and that this can loop multiple times.",
+  "_comment": "Kitsoki concept pitch. Leads with control inversion and the proofs a coding-agent skeptic can't dismiss: the runtime overrules the model mid-call, edits hot-reload and replay byte-for-byte as tests, and the workflow runs where work already lives. After the one-prompt strawman it credits the Cherny loop (loop engineering: a gated, budgeted agent loop that converges) and argues phases-not-prompts is that idea generalized into a composable graph. The phases arc then shows the gates routing review failures back to implement, plan, or reproduce — and that this can loop multiple times.",
   "meta": {
     "mode": "pitch",
     "title": "Kitsoki",
@@ -660,7 +660,7 @@
           ]
         }
       ],
-      "caption": "One YAML state machine drives every surface \u2014 the same flow runs in a terminal and in a real ticket thread.",
+      "caption": "One YAML state machine drives every surface — the same flow runs in a terminal and in a real ticket thread.",
       "hold": 210,
       "narration": "One YAML state machine drives every surface. GitHub, Jira, Slack, or your terminal."
     },
@@ -805,7 +805,7 @@
             {
               "id": "llm",
               "label": "LLM",
-              "sub": "plan \u00b7 reason \u00b7 decide",
+              "sub": "plan · reason · decide",
               "x": 70,
               "y": 50,
               "w": 320,
@@ -873,7 +873,7 @@
           "caption": "Runtime holds the plan; LLM is called as a sub-task."
         }
       ],
-      "caption": "The arrow that matters is the LLM's return arrow \u2014 a typed intent, not a free-form action.",
+      "caption": "The arrow that matters is the LLM's return arrow — a typed intent, not a free-form action.",
       "hold": 210,
       "narration": "Kitsoki flips control. The runtime is in charge. The LLM is called only when interpretation is needed."
     },
@@ -958,7 +958,7 @@
             },
             {
               "id": "gate",
-              "label": "gate \u00b7 checker",
+              "label": "gate · checker",
               "sub": "script (exit 0) or agent",
               "lines": [
                 "pass = goal actually met"
@@ -971,7 +971,7 @@
             {
               "id": "done",
               "label": "done",
-              "sub": "goal met \u2014 or budget ceiling hit",
+              "sub": "goal met — or budget ceiling hit",
               "x": 70,
               "y": 660,
               "w": 640,
@@ -991,7 +991,7 @@
             {
               "from": "gate",
               "to": "done",
-              "gate": "\u2713 pass"
+              "gate": "✓ pass"
             },
             {
               "from": "gate",
@@ -999,12 +999,12 @@
               "style": "back",
               "bus": 860,
               "lift": 18,
-              "label": "fail \u00b7 feed the reason forward"
+              "label": "fail · feed the reason forward"
             }
           ]
         }
       ],
-      "caption": "Loop engineering, after Boris Cherny: an agent iterates toward a goal until a gate proves it's actually met \u2014 or a budget ceiling stops it. Launch it once; it converges on its own.",
+      "caption": "Loop engineering, after Boris Cherny: an agent iterates toward a goal until a gate proves it's actually met — or a budget ceiling stops it. Launch it once; it converges on its own.",
       "hold": 240,
       "narration": "A Cherny loop gives an agent a goal, checker, and budget. Each failed gate feeds the next try.",
       "instant": true
@@ -1012,7 +1012,7 @@
     {
       "type": "narrative",
       "eyebrow": "Loop engineering, generalized",
-      "body": "Kitsoki the conclusion of this idea \u2014 a graph of these loops.",
+      "body": "Kitsoki the conclusion of this idea — a graph of these loops.",
       "lede": "A Cherny loop solves one goal with one gate and one budget. Kitsoki turns each phase into a separate gated loop, then composes those loops into a durable workflow that can be reused and improved.",
       "hold": 210,
       "narration": "Kitsoki generalizes that loop: every phase gets a gate and budget, then composes into a graph."
@@ -1022,7 +1022,7 @@
       "title": "vs."
     },
     {
-      "_comment": "Scene 7\u201313: full graph shown throughout; one item highlighted per slide.",
+      "_comment": "Scene 7–13: full graph shown throughout; one item highlighted per slide.",
       "type": "diagram-svg",
       "title": "Phases, not prompts",
       "panels": [
@@ -1035,8 +1035,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -1049,7 +1049,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -1062,7 +1062,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -1074,7 +1074,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 approve or refine"
+                "read-only · approve or refine"
               ],
               "x": 70,
               "y": 730,
@@ -1086,24 +1086,24 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails"
+              "gate": "gate · test fails"
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved"
+              "gate": "gate · approved"
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass"
+              "gate": "gate · tests pass"
             }
           ]
         }
       ],
-      "caption": "Phase 1: read-only \u2014 confirm the bug exists before any code changes.",
+      "caption": "Phase 1: read-only — confirm the bug exists before any code changes.",
       "hold": 120,
-      "narration": "Four phases, three gates \u2014 starting with reproduce.",
+      "narration": "Four phases, three gates — starting with reproduce.",
       "seamless": true,
       "instant": true
     },
@@ -1120,8 +1120,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -1133,7 +1133,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -1146,7 +1146,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -1158,7 +1158,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 approve or refine"
+                "read-only · approve or refine"
               ],
               "x": 70,
               "y": 730,
@@ -1170,23 +1170,23 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails",
+              "gate": "gate · test fails",
               "highlighted": true
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved"
+              "gate": "gate · approved"
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass"
+              "gate": "gate · tests pass"
             }
           ]
         }
       ],
-      "caption": "Deterministic gate: the test must fail first \u2014 no planning until the bug is proven reproducible. A script decides, not a judgment.",
+      "caption": "Deterministic gate: the test must fail first — no planning until the bug is proven reproducible. A script decides, not a judgment.",
       "hold": 90,
       "narration": "The first gate: test must fail before planning begins.",
       "seamless": true,
@@ -1206,8 +1206,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -1219,7 +1219,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -1233,7 +1233,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -1245,7 +1245,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 approve or refine"
+                "read-only · approve or refine"
               ],
               "x": 70,
               "y": 730,
@@ -1257,24 +1257,24 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails"
+              "gate": "gate · test fails"
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved"
+              "gate": "gate · approved"
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass"
+              "gate": "gate · tests pass"
             }
           ]
         }
       ],
-      "caption": "Phase 2: propose the fix approach \u2014 requires operator sign-off before proceeding.",
+      "caption": "Phase 2: propose the fix approach — requires operator sign-off before proceeding.",
       "hold": 120,
-      "narration": "Plan proposes the fix \u2014 awaiting operator sign-off.",
+      "narration": "Plan proposes the fix — awaiting operator sign-off.",
       "seamless": true,
       "skipTitle": true,
       "instant": true
@@ -1292,8 +1292,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -1305,7 +1305,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -1318,7 +1318,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -1330,7 +1330,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 approve or refine"
+                "read-only · approve or refine"
               ],
               "x": 70,
               "y": 730,
@@ -1342,18 +1342,18 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails"
+              "gate": "gate · test fails"
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved",
+              "gate": "gate · approved",
               "highlighted": true
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass"
+              "gate": "gate · tests pass"
             }
           ]
         }
@@ -1378,8 +1378,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -1391,7 +1391,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -1404,7 +1404,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -1417,7 +1417,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 approve or refine"
+                "read-only · approve or refine"
               ],
               "x": 70,
               "y": 730,
@@ -1429,24 +1429,24 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails"
+              "gate": "gate · test fails"
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved"
+              "gate": "gate · approved"
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass"
+              "gate": "gate · tests pass"
             }
           ]
         }
       ],
-      "caption": "Phase 3: writes to an isolated worktree \u2014 scoped to code changes only.",
+      "caption": "Phase 3: writes to an isolated worktree — scoped to code changes only.",
       "hold": 120,
-      "narration": "Implement writes to a scoped worktree \u2014 isolated from main.",
+      "narration": "Implement writes to a scoped worktree — isolated from main.",
       "seamless": true,
       "skipTitle": true,
       "instant": true
@@ -1464,8 +1464,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -1477,7 +1477,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -1490,7 +1490,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -1502,7 +1502,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 approve or refine"
+                "read-only · approve or refine"
               ],
               "x": 70,
               "y": 730,
@@ -1514,23 +1514,23 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails"
+              "gate": "gate · test fails"
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved"
+              "gate": "gate · approved"
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass",
+              "gate": "gate · tests pass",
               "highlighted": true
             }
           ]
         }
       ],
-      "caption": "Deterministic gate: the tests must pass \u2014 review only sees working code. A script decides, for free.",
+      "caption": "Deterministic gate: the tests must pass — review only sees working code. A script decides, for free.",
       "hold": 90,
       "narration": "Gate: tests must pass before sending to human review.",
       "seamless": true,
@@ -1550,8 +1550,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -1563,7 +1563,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -1576,7 +1576,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -1589,7 +1589,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 approve or refine"
+                "read-only · approve or refine"
               ],
               "x": 70,
               "y": 730,
@@ -1601,17 +1601,17 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails"
+              "gate": "gate · test fails"
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved"
+              "gate": "gate · approved"
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass"
+              "gate": "gate · tests pass"
             },
             {
               "from": "implement",
@@ -1626,7 +1626,7 @@
           ]
         }
       ],
-      "caption": "Layer 1 is mechanical: the gate just runs the tests. They fail \u2014 or won't even run against the harness \u2014 and implement retries itself, in place. No human, no step backward.",
+      "caption": "Layer 1 is mechanical: the gate just runs the tests. They fail — or won't even run against the harness — and implement retries itself, in place. No human, no step backward.",
       "hold": 165,
       "narration": "Tests fail? Implement loops in place and fixes the code.",
       "seamless": true,
@@ -1646,8 +1646,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -1659,7 +1659,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -1672,7 +1672,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -1684,7 +1684,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 approve or refine"
+                "read-only · approve or refine"
               ],
               "x": 70,
               "y": 730,
@@ -1697,22 +1697,22 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails"
+              "gate": "gate · test fails"
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved"
+              "gate": "gate · approved"
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass"
+              "gate": "gate · tests pass"
             }
           ]
         }
       ],
-      "caption": "The last gate is different: review is an agent \u2014 an adversarial judgment, not a script. It can approve the work, or send it back.",
+      "caption": "The last gate is different: review is an agent — an adversarial judgment, not a script. It can approve the work, or send it back.",
       "hold": 165,
       "narration": "Agent review can approve or send the work back.",
       "skipTitle": true,
@@ -1731,8 +1731,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -1744,7 +1744,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -1757,7 +1757,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -1769,7 +1769,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 adversarial judgment"
+                "read-only · adversarial judgment"
               ],
               "x": 70,
               "y": 730,
@@ -1780,7 +1780,7 @@
             {
               "id": "merge",
               "label": "merge",
-              "sub": "\u2192 main",
+              "sub": "→ main",
               "x": 70,
               "y": 950,
               "w": 580,
@@ -1791,29 +1791,29 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails"
+              "gate": "gate · test fails"
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved"
+              "gate": "gate · approved"
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass"
+              "gate": "gate · tests pass"
             },
             {
               "from": "review",
               "to": "merge",
-              "gate": "agent \u00b7 approve?",
+              "gate": "agent · approve?",
               "agent": true,
               "highlighted": true
             }
           ]
         }
       ],
-      "caption": "Three deterministic gates (orange) are scripts \u2014 exact, free, incorruptible. The last gate is an agent (violet): an adversarial review for what no test can encode. Pass, and it merges.",
+      "caption": "Three deterministic gates (orange) are scripts — exact, free, incorruptible. The last gate is an agent (violet): an adversarial review for what no test can encode. Pass, and it merges.",
       "hold": 210,
       "narration": "Most gates are deterministic scripts. The final gate is agent review for quality no test can encode.",
       "skipTitle": true,
@@ -1832,8 +1832,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -1845,7 +1845,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -1858,7 +1858,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -1871,7 +1871,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 approve or refine"
+                "read-only · approve or refine"
               ],
               "x": 70,
               "y": 730,
@@ -1883,17 +1883,17 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails"
+              "gate": "gate · test fails"
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved"
+              "gate": "gate · approved"
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass"
+              "gate": "gate · tests pass"
             },
             {
               "from": "review",
@@ -1907,7 +1907,7 @@
           ]
         }
       ],
-      "caption": "Just a missed case \u2014 back to implement. The plan and root cause stand.",
+      "caption": "Just a missed case — back to implement. The plan and root cause stand.",
       "hold": 150,
       "narration": "Missed edge case: back to implement. Same plan, same diagnosis.",
       "seamless": false,
@@ -1927,8 +1927,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -1940,7 +1940,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -1954,7 +1954,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -1966,7 +1966,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 approve or refine"
+                "read-only · approve or refine"
               ],
               "x": 70,
               "y": 730,
@@ -1978,17 +1978,17 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails"
+              "gate": "gate · test fails"
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved"
+              "gate": "gate · approved"
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass"
+              "gate": "gate · tests pass"
             },
             {
               "from": "review",
@@ -2002,7 +2002,7 @@
           ]
         }
       ],
-      "caption": "The fix was wrong \u2014 back to plan. Re-plan against what review learned.",
+      "caption": "The fix was wrong — back to plan. Re-plan against what review learned.",
       "hold": 150,
       "narration": "Wrong plan: back to plan and choose another approach.",
       "seamless": true,
@@ -2022,8 +2022,8 @@
               "label": "reproduce",
               "sub": "haiku",
               "lines": [
-                "read-only \u00b7 ticket + repo",
-                "\u2192 failing test fixture"
+                "read-only · ticket + repo",
+                "→ failing test fixture"
               ],
               "x": 70,
               "y": 10,
@@ -2036,7 +2036,7 @@
               "label": "plan",
               "sub": "opus",
               "lines": [
-                "\u2192 fix plan (operator approval)"
+                "→ fix plan (operator approval)"
               ],
               "x": 70,
               "y": 260,
@@ -2049,7 +2049,7 @@
               "sub": "sonnet",
               "lines": [
                 "worktree write only",
-                "\u2192 commit"
+                "→ commit"
               ],
               "x": 70,
               "y": 480,
@@ -2061,7 +2061,7 @@
               "label": "review",
               "sub": "opus",
               "lines": [
-                "read-only \u00b7 approve or refine"
+                "read-only · approve or refine"
               ],
               "x": 70,
               "y": 730,
@@ -2073,17 +2073,17 @@
             {
               "from": "reproduce",
               "to": "plan",
-              "gate": "gate \u00b7 test fails"
+              "gate": "gate · test fails"
             },
             {
               "from": "plan",
               "to": "implement",
-              "gate": "gate \u00b7 approved"
+              "gate": "gate · approved"
             },
             {
               "from": "implement",
               "to": "review",
-              "gate": "gate \u00b7 tests pass"
+              "gate": "gate · tests pass"
             },
             {
               "from": "review",
@@ -2097,7 +2097,7 @@
           ]
         }
       ],
-      "caption": "The root cause was wrong \u2014 back to reproduce. Investigate before planning again.",
+      "caption": "The root cause was wrong — back to reproduce. Investigate before planning again.",
       "hold": 150,
       "narration": "Wrong root cause: back to reproduce before planning again.",
       "seamless": true,
@@ -2105,54 +2105,7 @@
       "instant": true
     },
     {
-      "type": "narrative",
-      "eyebrow": "Semantic routing",
-      "body": "Three layers route most turns without the LLM.",
-      "lede": "Synonyms catch common commands. Slot templates catch common shape patterns. The LLM is called only if both miss \u2014 and 78% of turns still don't reach it.",
-      "hold": 195,
-      "narration": "Three semantic layers route most turns. Synonyms first, slot templates next, the LLM only as fallback."
-    },
-    {
-      "type": "trace",
-      "title": "Deterministic first",
-      "turns": [
-        {
-          "user": "kick off the next bug",
-          "layers": [
-            {
-              "name": "synonym",
-              "result": "MISS"
-            },
-            {
-              "name": "slot",
-              "result": "MISS"
-            },
-            {
-              "name": "LLM",
-              "result": "HIT",
-              "ms": 240
-            }
-          ],
-          "intent": "pickup_bug"
-        },
-        {
-          "user": "review",
-          "layers": [
-            {
-              "name": "synonym",
-              "result": "HIT"
-            }
-          ],
-          "intent": "review_bug",
-          "no_llm": true
-        }
-      ],
-      "caption": "Synonyms and slot templates handle the common cases. The LLM is only called when they miss.",
-      "hold": 210,
-      "narration": "First turn calls the LLM. Second hits a synonym: no LLM."
-    },
-    {
-      "_comment": "P1 \u2014 the host rejects the model mid-call. The single hardest beat for a coding-agent skeptic to dismiss: their model is its own authority.",
+      "_comment": "P1 — the host rejects the model mid-call. The single hardest beat for a coding-agent skeptic to dismiss: their model is its own authority.",
       "type": "diagram-svg",
       "title": "The runtime overrules the model",
       "panels": [
@@ -2205,7 +2158,7 @@
             {
               "from": "runtime",
               "to": "llm",
-              "label": "reject \u00b7 re-prompt",
+              "label": "reject · re-prompt",
               "side": "left"
             },
             {
@@ -2216,7 +2169,7 @@
           ]
         }
       ],
-      "caption": "Even when the LLM is called, the runtime validates the answer \u2014 and can reject and re-prompt it mid-call.",
+      "caption": "Even when the LLM is called, the runtime validates the answer — and can reject and re-prompt it mid-call.",
       "hold": 240,
       "narration": "When the LLM is called, the runtime polices it. Off-contract decisions are rejected; valid ones hit the trace.",
       "instant": true
@@ -2225,7 +2178,7 @@
       "type": "narrative",
       "eyebrow": "The dev loop",
       "body": "Author locally. Replay. Deploy.",
-      "lede": "Edit the YAML and the running machine hot-reloads. Each turn replays byte-for-byte without an LLM call \u2014 the spec itself is the regression test. Attach it to GitHub Issues or Jira with one config change.",
+      "lede": "Edit the YAML and the running machine hot-reloads. Each turn replays byte-for-byte without an LLM call — the spec itself is the regression test. Attach it to GitHub Issues or Jira with one config change.",
       "hold": 180,
       "narration": "Author locally. Edits hot-reload, turns replay without the LLM, then attach GitHub or Jira."
     },
@@ -2246,7 +2199,7 @@
             {
               "author": "kitsoki",
               "role": "bot",
-              "body": "Plan updated:\n\u2022 added negative test for service-account JWT\n\u2022 tightened middleware match"
+              "body": "Plan updated:\n• added negative test for service-account JWT\n• tightened middleware match"
             }
           ]
         },
@@ -2263,7 +2216,7 @@
             {
               "author": "kitsoki",
               "role": "bot",
-              "body": "Acknowledged. Pushing fix\u2026\n\n\u2713 pushed  a3f8d2c \u00b7 refactor(auth): use ternary in service-account check"
+              "body": "Acknowledged. Pushing fix…\n\n✓ pushed  a3f8d2c · refactor(auth): use ternary in service-account check"
             }
           ]
         }
@@ -2273,12 +2226,586 @@
       "narration": "Developers drive workflows from where the work lives. Comment on a ticket to refine. Comment on a pull request to push a fix."
     },
     {
-      "type": "stat",
-      "value": "78%",
-      "label": "of turns route deterministically \u2014 without calling the LLM.",
-      "detail": "Measured across the cloak, oregon-trail, and dev-story stories.",
-      "hold": 150,
-      "narration": "Across our stories, seventy-eight percent of turns route without an LLM call."
+      "type": "narrative",
+      "eyebrow": "Proof from dogfood",
+      "body": "The bakeoff became a story-improvement harness.",
+      "lede": "It started as a comparison: Kitsoki bugfix pipeline versus a single prompt. It turned into a repeatable way to mine real bugs, arm hidden oracles, drive live cells, score outcomes, and feed story changes back into the system.",
+      "hold": 210,
+      "narration": "The bakeoff started as a comparison. It became a repeatable story improvement harness."
+    },
+    {
+      "type": "diagram-svg",
+      "title": "From runs to training data",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1420 560",
+          "nodes": [
+            {
+              "id": "runs",
+              "label": "live runs",
+              "sub": "marathons",
+              "lines": [
+                "real repos",
+                "real failures"
+              ],
+              "x": 40,
+              "y": 185,
+              "w": 400,
+              "h": 180
+            },
+            {
+              "id": "cases",
+              "label": "task cases",
+              "sub": "RED / GREEN",
+              "lines": [
+                "baseline",
+                "hidden oracle"
+              ],
+              "x": 510,
+              "y": 185,
+              "w": 400,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "harness",
+              "label": "harness",
+              "sub": "score + report",
+              "lines": [
+                "free checks",
+                "gated live cells"
+              ],
+              "x": 980,
+              "y": 185,
+              "w": 400,
+              "h": 180
+            }
+          ],
+          "edges": [
+            {
+              "from": "runs",
+              "to": "cases"
+            },
+            {
+              "from": "cases",
+              "to": "harness"
+            }
+          ]
+        }
+      ],
+      "caption": "Every useful run becomes an armed case: pinned baseline, hidden oracle, scored result, and a traceable story change.",
+      "hold": 240,
+      "narration": "The run is not just anecdote. It becomes a task case with a baseline, oracle, result, and training signal.",
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "The harness contract",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1220 760",
+          "nodes": [
+            {
+              "id": "baseline",
+              "label": "baseline",
+              "sub": "prove RED",
+              "lines": [
+                "bug is present"
+              ],
+              "x": 70,
+              "y": 70,
+              "w": 440,
+              "h": 150
+            },
+            {
+              "id": "oracle",
+              "label": "oracle",
+              "sub": "withheld test",
+              "lines": [
+                "real PR signal"
+              ],
+              "x": 710,
+              "y": 70,
+              "w": 440,
+              "h": 150
+            },
+            {
+              "id": "cell",
+              "label": "cell",
+              "sub": "task x model",
+              "lines": [
+                "fresh worktree",
+                "explicit trace"
+              ],
+              "x": 360,
+              "y": 300,
+              "w": 500,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "score",
+              "label": "score",
+              "sub": "oracle + cost",
+              "lines": [
+                "solved / partial / failed"
+              ],
+              "x": 360,
+              "y": 580,
+              "w": 500,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "baseline",
+              "to": "cell"
+            },
+            {
+              "from": "oracle",
+              "to": "cell"
+            },
+            {
+              "from": "cell",
+              "to": "score",
+              "label": "score"
+            }
+          ]
+        }
+      ],
+      "caption": "A cell is hermetic and reproducible. If the fixture is not armed, it cannot enter the live runner.",
+      "hold": 240,
+      "narration": "The harness contract is simple. Prove the baseline is red, withhold the oracle, drive one hermetic cell, then score the result.",
+      "instant": true
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "No-cost first",
+      "body": "Spend only after the case is armed.",
+      "lede": "The free path verifies fixtures, preflights candidates, prepares worktrees, renders exact drive commands, and validates the repo-bakeoff story flow. Live LLM cells are the explicit gated step, not the default test path.",
+      "hold": 210,
+      "narration": "The important process change is no-cost first. Verify and prepare everything before spending on a live cell."
+    },
+    {
+      "type": "diagram-svg",
+      "title": "gears-rust marathon",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1220 680",
+          "nodes": [
+            {
+              "id": "repo",
+              "label": "gears-rust",
+              "sub": "Rust monorepo",
+              "lines": [
+                "heavy crates",
+                "per-bug oracles"
+              ],
+              "x": 70,
+              "y": 90,
+              "w": 470,
+              "h": 180
+            },
+            {
+              "id": "result",
+              "label": "10 / 10",
+              "sub": "shipped + verified",
+              "lines": [
+                "real baselines",
+                "real PR tests"
+              ],
+              "x": 680,
+              "y": 90,
+              "w": 470,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "corpus",
+              "label": "corpus",
+              "sub": "4 armed + 6 reference",
+              "lines": [
+                "RED at baseline",
+                "GREEN at fix"
+              ],
+              "x": 375,
+              "y": 400,
+              "w": 470,
+              "h": 180
+            }
+          ],
+          "edges": [
+            {
+              "from": "repo",
+              "to": "result",
+              "label": "marathon"
+            },
+            {
+              "from": "result",
+              "to": "corpus",
+              "label": "captured"
+            }
+          ]
+        }
+      ],
+      "caption": "Ten real gears-rust fixes went through the pipeline and passed independent oracle verification; the corpus now backs repeatable harness checks.",
+      "hold": 240,
+      "narration": "The gears-rust marathon shipped and independently verified ten out of ten real fixes, then captured the evidence as a reusable corpus.",
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Hard cases made the harness honest",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1280 620",
+          "nodes": [
+            {
+              "id": "h2",
+              "label": "H2",
+              "sub": "PASS",
+              "x": 80,
+              "y": 145,
+              "w": 230,
+              "h": 125,
+              "style": "primary"
+            },
+            {
+              "id": "h3",
+              "label": "H3",
+              "sub": "PASS",
+              "x": 380,
+              "y": 145,
+              "w": 230,
+              "h": 125,
+              "style": "primary"
+            },
+            {
+              "id": "h1",
+              "label": "H1",
+              "sub": "FAIL",
+              "lines": [
+                "wrong signal"
+              ],
+              "x": 680,
+              "y": 145,
+              "w": 260,
+              "h": 150
+            },
+            {
+              "id": "h4",
+              "label": "H4",
+              "sub": "STALL",
+              "lines": [
+                "hung call"
+              ],
+              "x": 1010,
+              "y": 145,
+              "w": 230,
+              "h": 150
+            },
+            {
+              "id": "fixes",
+              "label": "generic fixes",
+              "sub": "not case patches",
+              "lines": [
+                "end-to-end reproducer",
+                "watchdog design"
+              ],
+              "x": 375,
+              "y": 410,
+              "w": 530,
+              "h": 180,
+              "style": "primary"
+            }
+          ],
+          "edges": [
+            {
+              "from": "h1",
+              "to": "fixes",
+              "label": "finding"
+            },
+            {
+              "from": "h4",
+              "to": "fixes",
+              "label": "finding"
+            }
+          ]
+        }
+      ],
+      "caption": "The stress run did not inflate the score. It exposed one incomplete fix and one stalled maker call, then turned both into generic pipeline hardening.",
+      "hold": 240,
+      "narration": "The hard-case run was useful because it failed honestly. Two passed, one failed, one stalled, and both problems became generic pipeline fixes.",
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "query-string live bakeoff",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1280 650",
+          "nodes": [
+            {
+              "id": "qs1",
+              "label": "qs1",
+              "sub": "solved",
+              "lines": [
+                "oracle PASS",
+                "suite PASS"
+              ],
+              "x": 75,
+              "y": 130,
+              "w": 300,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "qs2",
+              "label": "qs2",
+              "sub": "solved",
+              "lines": [
+                "oracle PASS",
+                "suite PASS"
+              ],
+              "x": 490,
+              "y": 130,
+              "w": 300,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "qs3",
+              "label": "qs3",
+              "sub": "solved",
+              "lines": [
+                "oracle PASS",
+                "suite PASS"
+              ],
+              "x": 905,
+              "y": 130,
+              "w": 300,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "rollup",
+              "label": "3 / 3",
+              "sub": "GPT-5.5 cells",
+              "lines": [
+                "33 agent calls",
+                "3.74M in · 34K out"
+              ],
+              "x": 380,
+              "y": 430,
+              "w": 520,
+              "h": 180
+            }
+          ],
+          "edges": [
+            {
+              "from": "qs1",
+              "to": "rollup"
+            },
+            {
+              "from": "qs2",
+              "to": "rollup",
+              "label": "roll up"
+            },
+            {
+              "from": "qs3",
+              "to": "rollup"
+            }
+          ]
+        }
+      ],
+      "caption": "The query-string run is small but complete: three external parser bugs, three hidden-oracle passes, full suite green each time.",
+      "hold": 240,
+      "narration": "For query-string, the GPT five point five Kitsoki run solved three out of three cells, with oracle and suite passing each time.",
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Failure modes became product features",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1280 820",
+          "nodes": [
+            {
+              "id": "baseline",
+              "label": "baseline",
+              "sub": "already green",
+              "lines": [
+                "drop before spend"
+              ],
+              "x": 80,
+              "y": 75,
+              "w": 470,
+              "h": 150
+            },
+            {
+              "id": "shared",
+              "label": "checkout",
+              "sub": "shared state",
+              "lines": [
+                "one worktree per cell"
+              ],
+              "x": 730,
+              "y": 75,
+              "w": 470,
+              "h": 150
+            },
+            {
+              "id": "trace",
+              "label": "trace",
+              "sub": "cost evidence",
+              "lines": [
+                "explicit path"
+              ],
+              "x": 80,
+              "y": 305,
+              "w": 470,
+              "h": 150
+            },
+            {
+              "id": "suite",
+              "label": "tests",
+              "sub": "unrelated reds",
+              "lines": [
+                "scope the command"
+              ],
+              "x": 730,
+              "y": 305,
+              "w": 470,
+              "h": 150
+            },
+            {
+              "id": "story",
+              "label": "story hardening",
+              "sub": "generic only",
+              "lines": [
+                "prompt · gate · fixture"
+              ],
+              "x": 390,
+              "y": 610,
+              "w": 500,
+              "h": 150,
+              "style": "primary"
+            }
+          ],
+          "edges": [
+            {
+              "from": "baseline",
+              "to": "story"
+            },
+            {
+              "from": "shared",
+              "to": "story"
+            },
+            {
+              "from": "trace",
+              "to": "story"
+            },
+            {
+              "from": "suite",
+              "to": "story"
+            }
+          ]
+        }
+      ],
+      "caption": "The harness is built from scars: every recurring failure mode became a deterministic check, a runtime rule, or a story prompt change.",
+      "hold": 240,
+      "narration": "The harness is not theory. It is a list of failure modes we turned into product behavior.",
+      "instant": true
+    },
+    {
+      "type": "diagram-svg",
+      "title": "Stories train like models",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1280 620",
+          "nodes": [
+            {
+              "id": "trace",
+              "label": "trace",
+              "sub": "run record",
+              "lines": [
+                "cost",
+                "decisions"
+              ],
+              "x": 70,
+              "y": 190,
+              "w": 340,
+              "h": 220
+            },
+            {
+              "id": "oracle",
+              "label": "oracle",
+              "sub": "grade",
+              "lines": [
+                "PASS",
+                "FAIL",
+                "STALL"
+              ],
+              "x": 470,
+              "y": 190,
+              "w": 340,
+              "h": 220,
+              "style": "primary"
+            },
+            {
+              "id": "diff",
+              "label": "story diff",
+              "sub": "improvement",
+              "lines": [
+                "prompt",
+                "gate",
+                "fixture"
+              ],
+              "x": 870,
+              "y": 190,
+              "w": 340,
+              "h": 220
+            }
+          ],
+          "edges": [
+            {
+              "from": "trace",
+              "to": "oracle"
+            },
+            {
+              "from": "oracle",
+              "to": "diff"
+            },
+            {
+              "from": "diff",
+              "to": "trace",
+              "label": "re-run",
+              "style": "back",
+              "bus": 490,
+              "lift": 40
+            }
+          ]
+        }
+      ],
+      "caption": "The training example is not a prompt snippet. It is the whole loop: trace, oracle, outcome, story diff, and replayable proof.",
+      "hold": 240,
+      "narration": "Stories train like models, but the training example is operational: trace, oracle, outcome, story diff, and replayable proof.",
+      "instant": true
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "What changed",
+      "body": "The demo is no longer a claim about agents. It is an evidence loop.",
+      "lede": "Kitsoki can take a real project, mine or curate cases, prove each case is armed, run candidate models through the same workflow, score the result, and turn the failures into story improvements without hiding cost or regressions.",
+      "hold": 220,
+      "narration": "The point is the evidence loop. Real projects, armed cases, live candidate runs, scored outcomes, and story improvements."
     },
     {
       "type": "thread",
@@ -2292,7 +2819,7 @@
             {
               "author": "kitsoki",
               "role": "bot",
-              "body": "Test-review converted from LLM call \u2192 deterministic script.\n\nTrace showed 47 identical calls; replaced with a 12-line script."
+              "body": "Test-review converted from LLM call → deterministic script.\n\nTrace showed 47 identical calls; replaced with a 12-line script."
             }
           ]
         },
@@ -2304,7 +2831,7 @@
             {
               "author": "alice",
               "role": "dev",
-              "body": "feedback for kitsoki \u2014 you're being way too verbose in the comments"
+              "body": "feedback for kitsoki — you're being way too verbose in the comments"
             },
             {
               "author": "kitsoki",
@@ -2321,22 +2848,22 @@
             {
               "author": "kitsoki",
               "role": "bot",
-              "body": "Indexed your team's internal tooling and docs:\n\u2022 runbook RUN-042 \u2192 embedded in the auth-fix prompt\n\u2022 stand-validate command \u2192 wrapped as a host call"
+              "body": "Indexed your team's internal tooling and docs:\n• runbook RUN-042 → embedded in the auth-fix prompt\n• stand-validate command → wrapped as a host call"
             }
           ]
         }
       ],
-      "caption": "The trace tells the author where the LLM keeps being asked the same question. Each conversion is one diff against the YAML \u2014 and the system absorbs your existing tools as it goes.",
+      "caption": "The trace tells the author where the LLM keeps being asked the same question. Each conversion is one diff against the YAML — and the system absorbs your existing tools as it goes.",
       "hold": 300,
       "narration": "Kitsoki improves with use. It converts repeated LLM calls into scripts. It accepts your feedback. And it indexes your team's existing tools."
     },
     {
       "type": "cta",
       "wordmark": "Kitsoki",
-      "tagline": "Prove what the model did \u2014 and what it couldn't",
+      "tagline": "Prove what the model did — and what it couldn't",
       "url": "github.com/constructorfabric/Kitsoki",
       "hold": 180,
-      "narration": "Kitsoki \u2014 prove what the model did, and what it couldn't."
+      "narration": "Kitsoki — prove what the model did, and what it couldn't."
     }
   ]
 }
