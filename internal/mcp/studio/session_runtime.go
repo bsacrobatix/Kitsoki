@@ -655,6 +655,117 @@ func (rt *sessionRuntime) history() store.History {
 	return rt.sink.History()
 }
 
+// releaseWorktreeOwners clears any .kitsoki-owner sentinel that still names
+// this session. A session may have created a worktree through host.git_worktree
+// during its lifetime; session.close must release that ownership marker so a
+// later session can re-use the ticket-local checkout after the owner exits.
+// This is best-effort and deliberately narrow: only sentinels that match the
+// closing session id are removed.
+func (rt *sessionRuntime) releaseWorktreeOwners() {
+	if rt == nil || rt.orch == nil {
+		return
+	}
+	vars, err := rt.worldVars()
+	if err != nil {
+		vars = nil
+	}
+	hist := rt.history()
+	for i := len(hist) - 1; i >= 0; i-- {
+		ev := hist[i]
+		if ev.Kind != store.HostReturned || len(ev.Payload) == 0 {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		if fmt.Sprint(payload["namespace"]) != "host.git_worktree" {
+			continue
+		}
+		path := extractWorktreePath(payload)
+		if path == "" {
+			continue
+		}
+		if clearWorktreeOwner(path, worktreeOwnerIDs(vars, string(rt.sid))...) {
+			return
+		}
+	}
+	if vars == nil {
+		return
+	}
+
+	var candidates []string
+	if repo, _ := vars["repo"].(string); strings.TrimSpace(repo) != "" {
+		if workspaceID, _ := vars["workspace_id"].(string); strings.TrimSpace(workspaceID) != "" {
+			candidates = append(candidates, filepath.Join(repo, ".worktrees", workspaceID))
+		}
+	}
+	if worktreePath, _ := vars["worktree_path"].(string); strings.TrimSpace(worktreePath) != "" {
+		candidates = append(candidates, worktreePath)
+	}
+
+	for _, candidate := range candidates {
+		if clearWorktreeOwner(candidate, worktreeOwnerIDs(vars, string(rt.sid))...) {
+			return
+		}
+	}
+}
+
+func extractWorktreePath(payload map[string]any) string {
+	if data, ok := payload["data"].(map[string]any); ok {
+		if path, _ := data["path"].(string); strings.TrimSpace(path) != "" {
+			return path
+		}
+		if path, _ := data["worktree_path"].(string); strings.TrimSpace(path) != "" {
+			return path
+		}
+	}
+	if path, _ := payload["path"].(string); strings.TrimSpace(path) != "" {
+		return path
+	}
+	if path, _ := payload["worktree_path"].(string); strings.TrimSpace(path) != "" {
+		return path
+	}
+	return ""
+}
+
+func worktreeOwnerIDs(vars map[string]any, fallback string) []string {
+	seen := map[string]bool{}
+	var ids []string
+	if vars != nil {
+		if sid, _ := vars["session_id"].(string); strings.TrimSpace(sid) != "" {
+			ids = append(ids, strings.TrimSpace(sid))
+			seen[strings.TrimSpace(sid)] = true
+		}
+	}
+	if fallback = strings.TrimSpace(fallback); fallback != "" && !seen[fallback] {
+		ids = append(ids, fallback)
+	}
+	return ids
+}
+
+func clearWorktreeOwner(path string, ownerIDs ...string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" || len(ownerIDs) == 0 {
+		return false
+	}
+	ownerPath := filepath.Join(path, ".kitsoki-owner")
+	b, err := os.ReadFile(ownerPath)
+	if err != nil {
+		return false
+	}
+	owner := strings.TrimSpace(string(b))
+	for _, sid := range ownerIDs {
+		if strings.TrimSpace(sid) != "" && owner == strings.TrimSpace(sid) {
+			if err := os.Remove(ownerPath); err != nil {
+				return false
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // AppDef implements runstatus/server.Source for the browser surface used by
 // render.web.
 func (rt *sessionRuntime) AppDef() *app.AppDef { return rt.def }

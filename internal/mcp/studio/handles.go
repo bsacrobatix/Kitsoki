@@ -452,6 +452,7 @@ func (ss *StudioSession) CloseSession(key string) error {
 	// orchestrator, trace sink, and harness together. Only close the harness
 	// directly for a metadata-only handle (no runtime), to avoid a double-close.
 	if sh.Runtime != nil {
+		sh.Runtime.releaseWorktreeOwners()
 		sh.Runtime.Close()
 	} else if sh.Harness != nil {
 		_ = sh.Harness.Close()
