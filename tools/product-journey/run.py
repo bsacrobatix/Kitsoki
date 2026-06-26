@@ -2861,8 +2861,13 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
         if empty_prompts:
             add_validation_issue(issues, "error", "matrix-empty-task-prompt", "Matrix scenario tasks include empty prompts", ", ".join(empty_prompts))
 
+    validate_slidey_deck_shape(deck, {"items": []}, issues)
     if deck and len(deck.get("scenes", [])) < 3:
         add_validation_issue(issues, "warn", "matrix-deck-scenes", "Matrix deck has very few scenes", f"scenes={len(deck.get('scenes', []))}")
+    matrix_scene_eyebrows = deck_scene_eyebrows(deck)
+    for expected in ["Selection", "Target proof", "Personas", "Scenarios", "Task prompts", "Execution"]:
+        if deck and expected not in matrix_scene_eyebrows:
+            add_validation_issue(issues, "error", "matrix-deck-scene", "deck.slidey.json is missing a required matrix review scene", expected)
 
     rollup_files = schema["matrix_rollup"]["artifacts"]
     present_rollup_files = [name for name in rollup_files if (matrix_dir / name).exists()]
@@ -2901,6 +2906,7 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
                     f"summary={summary.get('quality_gate_total_runs')}, rows={expected_gate_total}",
                 )
             rollup_deck = load_json_for_validation(matrix_dir / "rollup.slidey.json", issues)
+            validate_slidey_deck_shape(rollup_deck, {"items": []}, issues)
             if rollup_deck and quality_gates and "Quality gates" not in deck_scene_eyebrows(rollup_deck):
                 add_validation_issue(
                     issues,
@@ -2908,6 +2914,10 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
                     "rollup-deck-quality-gates",
                     "rollup.slidey.json is missing the quality gate scene",
                 )
+            rollup_scene_eyebrows = deck_scene_eyebrows(rollup_deck)
+            for expected in ["Coverage", "Runs", "Findings", "Scenario outcomes", "Quality gates"]:
+                if rollup_deck and expected not in rollup_scene_eyebrows:
+                    add_validation_issue(issues, "error", "rollup-deck-scene", "rollup.slidey.json is missing a required rollup review scene", expected)
 
     errors = sum(1 for issue in issues if issue["severity"] == "error")
     warnings = sum(1 for issue in issues if issue["severity"] == "warn")
