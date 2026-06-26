@@ -67,7 +67,8 @@ Use the same bug list you plan to run in the matrix. A one-bug smoke should pass
 For the full product-path smoke, run the bundled target. It delegates to the
 generic `history-smoke` gate and covers the harness unit checks,
 candidate/profile preflight, scoped RED/GREEN arming, drive-command rendering,
-and the `repo-bakeoff` story flows without calling a live model:
+first-cell worktree/prompt preparation via `drive_cell.sh --no-drive`, and the
+`repo-bakeoff` story flows without calling a live model:
 
 ```sh
 GEARS_RUST_REPO=/Users/brad/code/gears-rust make gears-history-smoke
@@ -100,7 +101,11 @@ stale flow fixtures, or drive commands that no longer match the harness.
 When it passes, it also writes a review artifact at
 `.artifacts/external-bakeoff/readiness/gears-rust.md` with preflight status,
 the selected live-cell commands, existing scored/pending cells, missing cells,
-and the next action.
+and the next action. The first selected cell is prepared under
+`.artifacts/external-bakeoff/cells/`, with the delegated MCP prompt under
+`.artifacts/external-bakeoff/drive-prompts/`, so the operator can inspect the
+exact setup before spending on a live drive. Set `HISTORY_PREPARE_FIRST_CELL=0`
+to skip that free preparation step.
 
 Regenerate that readiness report after adding results without rerunning the
 cargo-backed RED/GREEN arming step:

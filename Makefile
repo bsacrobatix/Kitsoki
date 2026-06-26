@@ -294,6 +294,7 @@ HISTORY_PROJECT ?=
 HISTORY_REPO_DIR ?=
 HISTORY_BUGS ?=
 HISTORY_CANDIDATES ?=
+HISTORY_PREPARE_FIRST_CELL ?= 1
 history-smoke:
 	@test -n "$(HISTORY_PROJECT)" || (echo "HISTORY_PROJECT is required"; exit 1)
 	@test -n "$(HISTORY_BUGS)" || (echo "HISTORY_BUGS is required"; exit 1)
@@ -305,6 +306,12 @@ history-smoke:
 		python3 tools/bugfix-bakeoff/external/bench.py verify --project "$(HISTORY_PROJECT)" --bug "$(HISTORY_BUGS)" $$repo_arg
 	@if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
 		python3 tools/bugfix-bakeoff/external/bench.py drive-plan --project "$(HISTORY_PROJECT)" --bug "$(HISTORY_BUGS)" $$repo_arg --candidate "$(HISTORY_CANDIDATES)"
+	@if [ "$(HISTORY_PREPARE_FIRST_CELL)" = "1" ]; then \
+		first_bug="$(HISTORY_BUGS)"; first_bug="$${first_bug%%,*}"; \
+		first_candidate="$(HISTORY_CANDIDATES)"; first_candidate="$${first_candidate%%,*}"; \
+		if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
+		tools/bugfix-bakeoff/external/drive_cell.sh --project "$(HISTORY_PROJECT)" --bug "$$first_bug" --candidate "$$first_candidate" $$repo_arg --no-drive; \
+	fi
 	@mkdir -p .artifacts/external-bakeoff/readiness
 	@if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
 		python3 tools/bugfix-bakeoff/external/bench.py readiness --project "$(HISTORY_PROJECT)" --bug "$(HISTORY_BUGS)" $$repo_arg --candidate "$(HISTORY_CANDIDATES)" --armed --markdown ".artifacts/external-bakeoff/readiness/$(HISTORY_PROJECT).md"

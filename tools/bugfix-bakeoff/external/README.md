@@ -143,7 +143,8 @@ For a repo owner preparing a specific live matrix, use the generic product-path
 smoke. It is also deterministic and free: it runs the harness unit checks,
 preflights the selected project/bug/candidate matrix, verifies the selected
 oracles RED@baseline/GREEN@fix, renders exact `drive_cell.sh --score` commands,
-and validates the `repo-bakeoff` story flows.
+prepares the first selected cell with `drive_cell.sh --no-drive`, and validates
+the `repo-bakeoff` story flows.
 
 ```sh
 make history-smoke \
@@ -166,6 +167,10 @@ make history-smoke \
 generic smoke fails, fix that blocker before running cost-bearing cells.
 It also writes a review artifact under
 `.artifacts/external-bakeoff/readiness/<project>.md`.
+The free first-cell preparation writes the baseline worktree under
+`.artifacts/external-bakeoff/cells/` and the delegated Studio MCP prompt under
+`.artifacts/external-bakeoff/drive-prompts/`; set
+`HISTORY_PREPARE_FIRST_CELL=0` to skip it.
 
 To regenerate that readiness report without rerunning RED/GREEN arming, call the
 harness directly. This is useful after adding scored or pending cell JSON:
