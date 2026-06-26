@@ -71,7 +71,10 @@ flow tests (see [[feedback_no_llm_tests]] and `docs/web/README.md` →
 > trigger demos, gate the captured rrweb logs by seeking the stamped peak/shrink
 > events and inspecting the replayed iframe; do not rely on a screenshot of the
 > live capture page or on a free-running CSS animation that rrweb pause cannot
-> sample deterministically.
+> sample deterministically. On pages with multiple matching mentions, call the
+> helper on the specific target element for the current narrative beat, not on
+> `body`; otherwise every match breathes at the start of the clip instead of in
+> the sequence the viewer is supposed to follow.
 >
 > **Make dense evidence readable with capture-only DOM overlays.** For comments,
 > JSON, code blocks, ticket metadata, and other small text boxes, use

@@ -9,6 +9,8 @@ const OUT_DIR = path.join(repoRoot, ".artifacts", "github-agent-live-zoom-qa");
 const CASES = ["bug-issue", "feature-issue", "guidance", "guidance-resume", "pr-status"] as const;
 const MENTION_BREATH_TAG = "kitsoki.mention_breath";
 
+test.setTimeout(60_000);
+
 type RrwebEvent = {
   type?: number;
   timestamp?: number;
@@ -105,6 +107,7 @@ test("live GitHub readable zooms replay with correct colors", async ({ page }) =
         const smallEvents = mentionEvents.filter((event) => event.data?.payload?.phase === "small");
         expect(peakEvents.length, `${caseSlug}/${file} should stamp @kitsoki breathing peak phase`).toBeGreaterThan(0);
         expect(smallEvents.length, `${caseSlug}/${file} should stamp @kitsoki breathing shrink phase`).toBeGreaterThan(0);
+        assertMentionBreathSequence(caseSlug, file, peakEvents);
         for (let i = 0; i < peakEvents.length; i += 1) {
           const mention = peakEvents[i];
           const seekMs = Math.max(0, (mention.timestamp ?? firstTimestamp) - firstTimestamp + 520);
@@ -178,6 +181,34 @@ test("live GitHub readable zooms replay with correct colors", async ({ page }) =
   expect(checked, "expected at least one readable zoom in live rrweb logs").toBeGreaterThan(0);
   console.log(`[github-agent-live-zoom-qa] checked ${checked} zoom frame(s); screenshots in ${OUT_DIR}`);
 });
+
+function assertMentionBreathSequence(caseSlug: string, file: string, peakEvents: RrwebEvent[]): void {
+  const ordered = peakEvents
+    .map((event) => ({
+      context: event.data?.payload?.context ?? "",
+      timestamp: event.timestamp ?? 0,
+      count: event.data?.payload?.count ?? 0,
+    }))
+    .filter((event) => event.count > 0)
+    .sort((a, b) => a.timestamp - b.timestamp);
+  const contexts = ordered.map((event) => event.context);
+  expect(contexts, `${caseSlug}/${file} should not use the old page-wide mention breath context`).not.toContain("github-thread:thread");
+  const required =
+    caseSlug === "pr-status"
+      ? ["github-thread:requester-comment"]
+      : ["github-thread:title", "github-thread:opening-comment", "github-thread:requester-comment"];
+  for (const context of required) {
+    expect(contexts, `${caseSlug}/${file} missing ordered mention cue ${context}`).toContain(context);
+  }
+  expect(new Set(contexts).size, `${caseSlug}/${file} should cue each visible mention beat separately`).toBe(required.length);
+  if (required.length < 2) return;
+  const indexOf = (context: string): number => ordered.findIndex((event) => event.context === context);
+  expect(indexOf("github-thread:title"), `${caseSlug}/${file} title mention cue should appear first`).toBeLessThan(indexOf("github-thread:opening-comment"));
+  expect(indexOf("github-thread:opening-comment"), `${caseSlug}/${file} opening comment cue should precede requester cue`).toBeLessThan(indexOf("github-thread:requester-comment"));
+  const timestampOf = (context: string): number => ordered.find((event) => event.context === context)?.timestamp ?? 0;
+  expect(timestampOf("github-thread:opening-comment") - timestampOf("github-thread:title"), `${caseSlug}/${file} title/opening mention cues should be separate beats`).toBeGreaterThan(900);
+  expect(timestampOf("github-thread:requester-comment") - timestampOf("github-thread:opening-comment"), `${caseSlug}/${file} opening/requester mention cues should be separate beats`).toBeGreaterThan(900);
+}
 
 async function readMentionBreathState(page: Page): Promise<{
   count: number;

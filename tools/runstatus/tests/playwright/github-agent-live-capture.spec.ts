@@ -485,6 +485,19 @@ async function annotatedGithubCommentBeat(
   return shown;
 }
 
+async function mentionBreathBeat(
+  textBreath: TextBreath,
+  selector: string | null,
+  context: string,
+): Promise<void> {
+  if (!selector) return;
+  await textBreath(selector, {
+    pattern: "@kitsoki",
+    eventTag: MENTION_BREATH_TAG,
+    context,
+  });
+}
+
 async function zoomBeat(
   page: Page,
   caption: Beat,
@@ -547,7 +560,6 @@ async function zoomBeat(
 }
 
 async function tourGithubThread(page: Page, step: CaptureStep, caption: Beat, spotlight: Spotlight, zoom: ReadableZoom, textBreath: TextBreath): Promise<void> {
-  await textBreath("body", { pattern: "@kitsoki", eventTag: MENTION_BREATH_TAG, context: `${step.id}:thread` });
   const title = await markFirstSelector(page, "issue-title", [
     "[data-testid='issue-title']",
     "bdi.js-issue-title",
@@ -555,11 +567,13 @@ async function tourGithubThread(page: Page, step: CaptureStep, caption: Beat, sp
     ".gh-header-title",
     "h1",
   ]);
+  await mentionBreathBeat(textBreath, title, `${step.id}:title`);
   await annotatedBeat(page, caption, spotlight, title, step.title, "Start where the requester worked: the live GitHub thread.", 2300);
   await dwell(page, 1500);
 
   const issueComment = await markFirstGithubComment(page, "issue-opening-comment");
   if (issueComment.selector) {
+    await mentionBreathBeat(textBreath, issueComment.selector, `${step.id}:opening-comment`);
     await zoomBeat(
       page,
       caption,
@@ -581,6 +595,7 @@ async function tourGithubThread(page: Page, step: CaptureStep, caption: Beat, sp
     "The whole requester comment is selected, not only the mention token.",
     2600,
   );
+  await mentionBreathBeat(textBreath, mentionComment.selector, `${step.id}:requester-comment`);
   await zoomBeat(
     page,
     caption,
@@ -639,11 +654,11 @@ async function tourAppComment(page: Page, step: CaptureStep, caption: Beat, spot
     caption,
     zoom,
     appComment.selector,
-    "Readable App comment",
-    "This is the exact GitHub comment a requester sees, enlarged with author and GitHub styling intact.",
+    "Read the App response",
+    "The zoomed copy makes the story, state, job id, and run URL readable while keeping GitHub chrome accurate.",
     3200,
   );
-  await dwell(page, 1700);
+  await dwell(page, 1800);
 
   await annotatedTextBeat(
     page,
@@ -651,11 +666,13 @@ async function tourAppComment(page: Page, step: CaptureStep, caption: Beat, spot
     "https://kitsoki-test.slothattax.me/run/",
     "app-run-link",
     "Run link is the user's next click",
-    "This is the durable bridge from the GitHub thread to kitsoki's hosted evidence.",
-    2600,
+    "The visible link is the proof surface the requester can open.",
+    2300,
   );
-  await dwell(page, 1700);
+  await dwell(page, 1500);
 }
+
+
 
 async function tourRunPage(page: Page, step: CaptureStep, caption: Beat, spotlight: Spotlight, zoom: ReadableZoom): Promise<void> {
   const heading = await markFirstSelector(page, "run-heading", ["h1", "main h2", "body"]);
@@ -871,7 +888,7 @@ test("capture live GitHub-agent evidence", async () => {
       await page.goto(step.url, { waitUntil: "domcontentloaded", timeout: 45000 });
       if (step.waitForText) {
         diag.mark(`step ${step.id}: wait ${step.waitForText}`);
-        await page.getByText(step.waitForText, { exact: false }).first().waitFor({ timeout: 30000 });
+        await page.getByText(step.waitForText, { exact: false }).first().waitFor({ state: "attached", timeout: 30000 });
       }
       if (step.id === "run-api") {
         diag.mark(`step ${step.id}: style-api-proof`);

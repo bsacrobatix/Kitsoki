@@ -207,15 +207,14 @@ export async function makeTextBreath(page: Page): Promise<TextBreath> {
   await page.addStyleTag({
     content:
       `.kitsoki-text-breath{display:inline-block;position:relative;z-index:1;padding:.02em .18em;margin:0 .02em;` +
-      `border-radius:.34em;color:#58a6ff!important;background:linear-gradient(90deg,rgba(251,191,36,.28),rgba(56,189,248,.2));` +
-      `font-weight:900!important;transform:scale(1);transform-origin:center;` +
-      `transition:transform .38s cubic-bezier(.2,.78,.25,1),filter .38s cubic-bezier(.2,.78,.25,1),` +
-      `box-shadow .38s cubic-bezier(.2,.78,.25,1),background .38s cubic-bezier(.2,.78,.25,1)}` +
-      `.kitsoki-text-breath.kitsoki-text-breath--big{transform:scale(1.28);filter:drop-shadow(0 0 10px rgba(251,191,36,.9));` +
-      `box-shadow:0 0 0 3px rgba(251,191,36,.34),0 0 24px rgba(251,191,36,.82);` +
-      `background:linear-gradient(90deg,rgba(251,191,36,.46),rgba(56,189,248,.28))}` +
-      `.kitsoki-text-breath.kitsoki-text-breath--small{transform:scale(.94);filter:drop-shadow(0 0 2px rgba(251,191,36,.45));` +
-      `box-shadow:0 0 0 1px rgba(251,191,36,.2)}`,
+      `border-radius:.24em;border:1px solid rgba(251,191,36,.3);background-color:rgba(251,191,36,.08);` +
+      `font-weight:normal!important;transform:scale(1);transform-origin:center;` +
+      `transition:transform .38s cubic-bezier(.2,.78,.25,1),border-color .38s cubic-bezier(.2,.78,.25,1),` +
+      `background-color .38s cubic-bezier(.2,.78,.25,1),font-weight .38s cubic-bezier(.2,.78,.25,1)}` +
+      `.kitsoki-text-breath.kitsoki-text-breath--big{transform:scale(1.28);font-weight:900!important;` +
+      `border-color:rgba(251,191,36,.9);background-color:rgba(251,191,36,.2)}` +
+      `.kitsoki-text-breath.kitsoki-text-breath--small{transform:scale(.94);font-weight:normal!important;` +
+      `border-color:rgba(251,191,36,.15);background-color:rgba(251,191,36,.04)}`,
   });
   return async (rootSelector = "body", options = {}) => {
     const result = await page.evaluate(
@@ -496,7 +495,7 @@ export async function makeReadableZoom(page: Page): Promise<ReadableZoom> {
         const sourceRadius = normalizeRadius(style.borderRadius);
         const rawSourceColor = source.color || targetStyle.color || style.color || "#0f172a";
         const rawSourceBackground = source.background || readableBackground(source.backgroundElement, rawSourceColor, pageBackground);
-        const themeAdjusted = shouldUseDarkFocusSurface(rawSourceBackground);
+        const themeAdjusted = shouldUseDarkFocusSurface(rawSourceBackground, pageBackground);
         const sourceBackground = themeAdjusted ? "#0d1117" : rawSourceBackground;
         const sourceColor = themeAdjusted && colorLuminance(rawSourceColor) < 0.55 ? "#e6edf3" : rawSourceColor;
         const baseFont = parseFloat(targetStyle.fontSize || style.fontSize) || 16;
@@ -889,8 +888,8 @@ export async function makeReadableZoom(page: Page): Promise<ReadableZoom> {
           if (isOpaqueColor(pageBg)) return pageBg;
           return colorLuminance(foreground) > 0.55 ? "#0d1117" : "#ffffff";
         }
-        function shouldUseDarkFocusSurface(targetBg: string): boolean {
-          return colorLuminance(targetBg) > 0.72;
+        function shouldUseDarkFocusSurface(targetBg: string, pageBg: string): boolean {
+          return colorLuminance(pageBg) < 0.4 && colorLuminance(targetBg) > 0.72;
         }
         function retintForDarkFocusSurface(root: HTMLElement): void {
           root.style.backgroundColor = "#0d1117";
@@ -924,7 +923,7 @@ export async function makeReadableZoom(page: Page): Promise<ReadableZoom> {
           if (isOpaqueColor(bodyBg)) return bodyBg;
           const htmlBg = window.getComputedStyle(document.documentElement).backgroundColor;
           if (isOpaqueColor(htmlBg)) return htmlBg;
-          return "rgba(0, 0, 0, 0)";
+          return "rgb(255, 255, 255)";
         }
         function isOpaqueColor(value: string): boolean {
           if (!value || value === "transparent") return false;
