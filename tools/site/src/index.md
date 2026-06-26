@@ -13,6 +13,9 @@ hero:
       text: Evaluate Kitsoki
       link: /guide/evaluate-kitsoki.html
     - theme: alt
+      text: Download
+      link: /download.html
+    - theme: alt
       text: Watch the proof
       link: /features/
 ---

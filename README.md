@@ -56,6 +56,11 @@ outside the intent alphabet you declare.
 
 ## Quickstart
 
+Prebuilt downloads are published on
+[GitHub Releases](https://github.com/bsacrobatix/Kitsoki/releases/latest) for
+macOS, Linux, and Windows. The product site has the platform list at
+[Download Kitsoki](https://bsacrobatix.github.io/Kitsoki/download.html).
+
 ### 1. Build
 
 ```sh

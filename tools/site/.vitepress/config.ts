@@ -34,6 +34,7 @@ function localizedThemeConfig(locale: LocaleCode) {
     nav: [
       { text: info.text.nav.features, link: prefixed(locale, "/features/") },
       { text: info.text.nav.guide, link: "/guide/" },
+      { text: "Download", link: "/download.html" },
     ],
     sidebar: {
       [prefixed(locale, "/features/")]: featuresSidebar(locale),

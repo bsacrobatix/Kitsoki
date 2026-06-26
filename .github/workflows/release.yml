@@ -55,7 +55,7 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          mkdir -p dist
+          mkdir -p build dist
           targets="darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64"
           for t in $targets; do
             os="${t%/*}"; arch="${t#*/}"
@@ -75,6 +75,39 @@ jobs:
           done
           (cd dist && sha256sum * > checksums.txt)
           ls -la dist
+
+      - uses: docker/setup-qemu-action@v3
+
+      - name: Smoke release artifacts
+        run: |
+          set -euo pipefail
+          sha256sum -c dist/checksums.txt
+
+          rm -rf smoke
+          mkdir -p smoke
+
+          for archive in dist/kitsoki_${{ github.ref_name }}_*.tar.gz; do
+            name="$(basename "$archive" .tar.gz)"
+            mkdir -p "smoke/$name"
+            tar -C "smoke/$name" -xzf "$archive"
+            test -x "smoke/$name/kitsoki"
+          done
+
+          for archive in dist/kitsoki_${{ github.ref_name }}_*.zip; do
+            name="$(basename "$archive" .zip)"
+            mkdir -p "smoke/$name"
+            unzip -q "$archive" -d "smoke/$name"
+            test -f "smoke/$name/kitsoki.exe"
+          done
+
+          for arch in amd64 arm64; do
+            name="kitsoki_${{ github.ref_name }}_linux_${arch}"
+            docker run --rm --platform "linux/${arch}" \
+              -v "$PWD/smoke/$name:/work:ro" \
+              -w /work \
+              ubuntu:24.04 \
+              ./kitsoki version
+          done
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
