@@ -231,6 +231,7 @@ states:
                 proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
                 minimum_evidence_count: "stdout_json.minimum_evidence_count"
                 missing_proof_summary: "stdout_json.missing_proof_summary"
+                driver_contract_summary: "stdout_json.driver_contract_summary"
               on_error: idle
             - set:
                 status: "run_created"

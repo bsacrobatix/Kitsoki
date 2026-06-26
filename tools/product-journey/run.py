@@ -2363,6 +2363,26 @@ def prepare_driver_handoff(run_dir: Path, publish_deck: Optional[Path] = None) -
     return result
 
 
+def build_driver_contract_summary(driver_plan: dict, handoff: dict) -> str:
+    driver_scenarios = driver_plan.get("scenarios", [])
+    final_gates = driver_plan.get("final_gates", [])
+    missing_proof_evidence = handoff.get("missing_proof_evidence", [])
+    scenario_ids = ", ".join(
+        scenario.get("scenario", "")
+        for scenario in driver_scenarios[:5]
+        if scenario.get("scenario", "")
+    )
+    if len(driver_scenarios) > 5:
+        scenario_ids = f"{scenario_ids}, +{len(driver_scenarios) - 5} more"
+    return (
+        f"Driver contract: {len(driver_scenarios)} scenarios"
+        f"{f' ({scenario_ids})' if scenario_ids else ''}; "
+        f"{len(missing_proof_evidence)} missing-proof rows; "
+        f"{len(final_gates)} final gates. Inspect last_result.driver_scenarios, "
+        "last_result.missing_proof_evidence, and last_result.driver_final_gates."
+    )
+
+
 def summarize_run_bundle(run_dir: Path) -> dict:
     run_json = read_json(run_dir / "run.json")
     review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {}
@@ -2390,16 +2410,7 @@ def summarize_run_bundle(run_dir: Path) -> dict:
         })
     final_gates = driver_plan.get("final_gates", [])
     missing_proof_evidence = handoff.get("missing_proof_evidence", [])
-    scenario_ids = ", ".join(scenario["scenario"] for scenario in driver_scenarios[:5])
-    if len(driver_scenarios) > 5:
-        scenario_ids = f"{scenario_ids}, +{len(driver_scenarios) - 5} more"
-    driver_contract_summary = (
-        f"Driver contract: {len(driver_scenarios)} scenarios"
-        f"{f' ({scenario_ids})' if scenario_ids else ''}; "
-        f"{len(missing_proof_evidence)} missing-proof rows; "
-        f"{len(final_gates)} final gates. Inspect last_result.driver_scenarios, "
-        "last_result.missing_proof_evidence, and last_result.driver_final_gates."
-    )
+    driver_contract_summary = build_driver_contract_summary(driver_plan, handoff)
     return {
         "status": "run_loaded",
         "run_id": run_json["run_id"],
@@ -2428,6 +2439,7 @@ def summarize_run_bundle(run_dir: Path) -> dict:
 def run_story_summary(run_dir: Path) -> dict:
     metrics = read_json(run_dir / "metrics.json") if (run_dir / "metrics.json").exists() else {}
     handoff = read_json(run_dir / "driver-handoff.json") if (run_dir / "driver-handoff.json").exists() else {}
+    driver_plan = read_json(run_dir / "driver-plan.json") if (run_dir / "driver-plan.json").exists() else {}
     agent_brief = read_json(run_dir / "agent-brief.json") if (run_dir / "agent-brief.json").exists() else {}
     review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {}
     lens = agent_brief.get("persona_contract", {}).get("lens", {})
@@ -2464,6 +2476,7 @@ def run_story_summary(run_dir: Path) -> dict:
         "proof_minimum_evidence_count": handoff.get("status", {}).get("proof_minimum_evidence_count", 0),
         "minimum_evidence_count": handoff.get("status", {}).get("minimum_evidence_count", 0),
         "missing_proof_summary": "; ".join(missing_proof_summary),
+        "driver_contract_summary": build_driver_contract_summary(driver_plan, handoff) if driver_plan else "",
         "review_passed_count": review.get("summary_counts", {}).get("passed", 0),
         "review_failed_count": review.get("summary_counts", {}).get("failed", 0),
         "review_warning_count": review.get("summary_counts", {}).get("warned", 0),

@@ -137,6 +137,7 @@ states:
                 proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
                 minimum_evidence_count: "stdout_json.minimum_evidence_count"
                 missing_proof_summary: "stdout_json.missing_proof_summary"
+                driver_contract_summary: "stdout_json.driver_contract_summary"
                 evidence_source: "stdout_json.evidence_source"
               on_error: run_created
             - set:
@@ -201,6 +202,7 @@ states:
                 proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
                 minimum_evidence_count: "stdout_json.minimum_evidence_count"
                 missing_proof_summary: "stdout_json.missing_proof_summary"
+                driver_contract_summary: "stdout_json.driver_contract_summary"
               on_error: run_created
             - set:
                 status: "finding_recorded"
@@ -260,6 +262,7 @@ states:
                 proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
                 minimum_evidence_count: "stdout_json.minimum_evidence_count"
                 missing_proof_summary: "stdout_json.missing_proof_summary"
+                driver_contract_summary: "stdout_json.driver_contract_summary"
               on_error: run_created
             - set:
                 status: "blocker_recorded"
@@ -325,6 +328,7 @@ states:
                 proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
                 minimum_evidence_count: "stdout_json.minimum_evidence_count"
                 missing_proof_summary: "stdout_json.missing_proof_summary"
+                driver_contract_summary: "stdout_json.driver_contract_summary"
               on_error: run_created
             - set:
                 status: "driver_event_recorded"
@@ -370,6 +374,7 @@ states:
                 proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
                 minimum_evidence_count: "stdout_json.minimum_evidence_count"
                 missing_proof_summary: "stdout_json.missing_proof_summary"
+                driver_contract_summary: "stdout_json.driver_contract_summary"
               on_error: run_created
             - set:
                 status: "demo_seeded"
@@ -422,6 +427,7 @@ states:
                 proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
                 minimum_evidence_count: "stdout_json.minimum_evidence_count"
                 missing_proof_summary: "stdout_json.missing_proof_summary"
+                driver_contract_summary: "stdout_json.driver_contract_summary"
               on_error: run_created
             - set:
                 status: "reviewed"
@@ -467,6 +473,7 @@ states:
                 proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
                 minimum_evidence_count: "stdout_json.minimum_evidence_count"
                 missing_proof_summary: "stdout_json.missing_proof_summary"
+                driver_contract_summary: "stdout_json.driver_contract_summary"
               on_error: run_created
             - set:
                 status: "handoff_ready"

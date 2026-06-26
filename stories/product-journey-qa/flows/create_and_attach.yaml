@@ -45,6 +45,7 @@ host_handlers:
             proof_minimum_evidence_count: 0
             minimum_evidence_count: 25
             missing_proof_summary: "project-onboarding: generated_config_diff, onboarding_smoke_result"
+            driver_contract_summary: "Driver contract: 6 scenarios (product-discovery, project-onboarding, bugfix, prd-design, feature-implementation, +1 more); 6 missing-proof rows; 2 final gates. Inspect last_result.driver_scenarios, last_result.missing_proof_evidence, and last_result.driver_final_gates."
       emit_product_journey_matrix:
         data:
           ok: true
@@ -404,7 +405,8 @@ turns:
       proof_minimum_evidence_count: 0
       minimum_evidence_count: 25
       missing_proof_summary: "project-onboarding: generated_config_diff, onboarding_smoke_result"
-    expect_view_matches: "Starting surface[\\s\\S]*docs-first[\\s\\S]*Proof evidence[\\s\\S]*minimum 0 / 25[\\s\\S]*project-onboarding"
+      driver_contract_summary: "Driver contract: 6 scenarios (product-discovery, project-onboarding, bugfix, prd-design, feature-implementation, +1 more); 6 missing-proof rows; 2 final gates. Inspect last_result.driver_scenarios, last_result.missing_proof_evidence, and last_result.driver_final_gates."
+    expect_view_matches: "Starting surface[\\s\\S]*docs-first[\\s\\S]*Proof evidence[\\s\\S]*minimum 0 / 25[\\s\\S]*project-onboarding[\\s\\S]*Driver contract: 6 scenarios[\\s\\S]*last_result\\.driver_scenarios"
     expect_host_calls:
       - handler: host.run
         args: { call: emit_product_journey_run }
