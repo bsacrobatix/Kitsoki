@@ -19,6 +19,7 @@ external/
   bench_test.go                  # gated reproducible check (make qs-bakeoff): onboard + arm oracles
   candidates.yaml                # the model/effort axis + named escalation ladders
   drive_cell.sh                  # run ONE cell live (COST)
+  prepare_handoffs.sh            # prepare/audit selected no-drive cell handoffs (FREE)
   escalate.sh                    # run a project's bugs up a cheap→expensive ladder (COST)
   projects/<name>/
     manifest.yaml                # repo + bugs + oracle-injection contract
@@ -181,6 +182,17 @@ Prepared handoffs are audited in the same smoke. The audit writes
 the readiness report, then fails if metadata points at missing files, the MCP
 prompt is missing required worktree/profile/bug context, or the prompt leaks
 hidden oracle paths/content or real-fix commit/source hints.
+The story path uses the same no-cost wrapper directly:
+
+```sh
+tools/bugfix-bakeoff/external/prepare_handoffs.sh \
+  --project gears-rust \
+  --bug bug1,bug4 \
+  --candidate opus-4.8 \
+  --repo-dir ~/code/gears-rust \
+  --markdown .artifacts/external-bakeoff/readiness/gears-rust-handoffs.md
+```
+
 The readiness report separates missing scored results from handoff prep:
 `Missing cells` still need `drive_cell.sh --score` or an honest `pending`
 record. `Unprepared cells` need `drive_cell.sh --no-drive` if you want their

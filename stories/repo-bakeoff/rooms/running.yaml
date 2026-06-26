@@ -16,7 +16,7 @@
 states:
   running:
     description: "Tracking the cell roster (cost-bearing cells run manually via drive_cell.sh)."
-    relevant_world: [project, repo_dir, bugs, candidates, cells, cells_total, cells_ran, harness_dir, results_dir, cell_commands_markdown]
+    relevant_world: [project, repo_dir, bugs, candidates, cells, cells_total, cells_ran, harness_dir, results_dir, handoffs_ready, handoff_audit_markdown, cell_commands_markdown]
     view:
       - heading: "Bake-off · running (cell roster)"
       - kv:
@@ -25,7 +25,9 @@ states:
             Ran:     "{{ world.cells_ran }}"
             Harness: "{{ world.harness_dir }}"
             Results: "{{ world.results_dir }}"
-      - prose: "Each cell is run manually; these are the exact cost-bearing commands for the selected matrix:\n{{ world.cell_commands_markdown|default:\"(commands pending)\" }}\nAccept once the cell verdicts are written to the results directory."
+            Handoffs: '{% if world.handoffs_ready %}audited{% else %}not ready{% endif %}'
+            Handoff audit: "{{ world.handoff_audit_markdown }}"
+      - prose: "Each cell is run manually after the no-drive handoff audit passes; these are the exact cost-bearing commands for the selected matrix:\n{{ world.cell_commands_markdown|default:\"(commands pending)\" }}\nAccept once the cell verdicts are written to the results directory."
       - choice:
           mode: single
           prompt: "Actions"
