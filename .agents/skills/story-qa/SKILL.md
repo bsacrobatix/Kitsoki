@@ -208,6 +208,9 @@ python3 tools/product-journey/run.py --record-blocker \
 
 The review gate only treats the run as ready when each scenario has captured
 evidence or an explicit blocker.
+Captured or validated driver journal `evidence_refs` must also be attached with
+`--attach-evidence`; journal-only refs fail validation because they cannot feed
+the media manifest, quality gates, or Slidey playback scenes.
 
 Use `--seed-demo-evidence` only for deterministic no-LLM deck-shape dogfood
 before a live visual MCP run.

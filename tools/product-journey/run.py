@@ -2001,6 +2001,23 @@ def missing_local_artifact_refs(run_dir: Path, items: list[dict]) -> list[str]:
     return sorted(missing)
 
 
+def unattached_driver_evidence_refs(evidence: dict, driver_journal: dict) -> list[str]:
+    attached = {
+        (item.get("scenario", ""), item.get("path", ""))
+        for item in evidence.get("items", [])
+        if item.get("status") in {"captured", "validated"} and item.get("path")
+    }
+    missing = []
+    for event in driver_journal.get("items", []):
+        if event.get("status") not in {"captured", "validated"}:
+            continue
+        scenario = event.get("scenario", "")
+        for ref in event.get("evidence_refs", []):
+            if ref and (scenario, ref) not in attached:
+                missing.append(f"{event.get('id', 'driver-event')}/{scenario}:{ref}")
+    return sorted(missing)
+
+
 def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None) -> None:
     run_json = read_json(run_dir / "run.json")
     evidence = read_json(run_dir / "evidence.json")
@@ -2493,6 +2510,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         if scenario.get("id", "") not in journaled_scenarios
         and scenario.get("id", "") not in blocked_scenarios
     ]
+    missing_driver_evidence_refs = unattached_driver_evidence_refs(evidence, driver_journal)
     scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
     driver_plan = build_driver_plan(run_json, evidence, execution_plan)
     quality_gates = summarize_quality_gates(evidence, scenario_outcomes, driver_plan)
@@ -2526,6 +2544,12 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "status": "pass" if not missing_driver_journal else "fail",
             "summary": "Every non-blocked scenario has a driver journal event.",
             "detail": ", ".join(missing_driver_journal),
+        },
+        {
+            "id": "driver-evidence-linked",
+            "status": "pass" if not missing_driver_evidence_refs else "fail",
+            "summary": "Captured driver journal evidence refs are attached as structured evidence.",
+            "detail": ", ".join(missing_driver_evidence_refs),
         },
         {
             "id": "captured-evidence",
@@ -2949,6 +2973,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
             add_validation_issue(issues, "error", "driver-journal-scenario", "driver-journal.json events reference unknown scenarios", ", ".join(unknown_driver_scenarios))
         if driver_journal.get("summary", {}).get("events") != len(driver_events):
             add_validation_issue(issues, "error", "driver-journal-summary", "driver-journal.json summary events is stale", f"expected={len(driver_events)}, actual={driver_journal.get('summary', {}).get('events')}")
+        unattached_refs = unattached_driver_evidence_refs(evidence or {"items": []}, driver_journal)
+        if unattached_refs:
+            add_validation_issue(
+                issues,
+                "error",
+                "driver-journal-evidence-refs",
+                "driver-journal.json captured evidence refs are not attached in evidence.json",
+                ", ".join(unattached_refs),
+            )
     if agent_brief and len(brief_scenarios) != len(scenarios):
         add_validation_issue(
             issues,

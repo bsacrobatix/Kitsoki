@@ -166,7 +166,7 @@ host_handlers:
           stdout_json:
             status: reviewed
             review_status: needs_evidence
-            summary: "needs_evidence: 12/15 checks passed, 2 warnings, 1 failures"
+            summary: "needs_evidence: 13/16 checks passed, 2 warnings, 1 failures"
             run_dir: .artifacts/product-journey/run-123
             review_path: .artifacts/product-journey/run-123/review.json
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
@@ -469,7 +469,7 @@ turns:
     expect_world:
       status: reviewed
       review_status: needs_evidence
-      review_summary: "needs_evidence: 12/15 checks passed, 2 warnings, 1 failures"
+      review_summary: "needs_evidence: 13/16 checks passed, 2 warnings, 1 failures"
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
       driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md

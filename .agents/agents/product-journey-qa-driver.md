@@ -126,7 +126,9 @@ state whenever possible:
 4. Submit `blocker` for each attempted scenario that could not capture evidence:
    `scenario`, `title`, `summary`, `evidence_path`.
 5. When using CLI fallback or when a story intent is not available, append
-   `--record-driver-event` after each scenario attempt.
+   `--record-driver-event` after each scenario attempt. Every `evidence_refs`
+   value on a captured or validated driver event must also be attached with
+   `attach`; journal-only evidence refs fail validation.
 6. Submit `review`.
 7. Submit `validate`.
 
