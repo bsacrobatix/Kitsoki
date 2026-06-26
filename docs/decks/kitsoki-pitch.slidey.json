@@ -2458,6 +2458,120 @@
       "instant": true
     },
     {
+      "type": "table",
+      "title": "gears-rust bugs 1-5",
+      "columns": [
+        "Case",
+        "Package",
+        "Real fix",
+        "Verify"
+      ],
+      "rows": [
+        {
+          "cells": [
+            "bug1",
+            "toolkit",
+            "a7080261",
+            "PASS"
+          ]
+        },
+        {
+          "cells": [
+            "bug2",
+            "grpc",
+            "6e954c6f",
+            "PASS"
+          ]
+        },
+        {
+          "cells": [
+            "bug3",
+            "macros",
+            "17cc2fcd",
+            "PASS"
+          ]
+        },
+        {
+          "cells": [
+            "bug4",
+            "errors",
+            "e21d79ab",
+            "PASS"
+          ]
+        },
+        {
+          "cells": [
+            "bug5",
+            "resource-group",
+            "8737281d",
+            "PASS"
+          ]
+        }
+      ],
+      "variant": "data",
+      "caption": "First half of the gears-rust marathon: five pinned real fixes, five independent oracle passes.",
+      "hold": 300,
+      "narration": "The first half of the gears-rust marathon is traceable to concrete cases, packages, real fix commits, and independent oracle passes.",
+      "instant": true
+    },
+    {
+      "type": "table",
+      "title": "gears-rust bugs 6-10",
+      "columns": [
+        "Case",
+        "Package",
+        "Real fix",
+        "Verify"
+      ],
+      "rows": [
+        {
+          "cells": [
+            "bug6",
+            "odata",
+            "ba166a57",
+            "PASS"
+          ]
+        },
+        {
+          "cells": [
+            "bug7",
+            "auth",
+            "7ed1c603",
+            "PASS"
+          ]
+        },
+        {
+          "cells": [
+            "bug8",
+            "modkit-db",
+            "c3c96ac7",
+            "PASS"
+          ]
+        },
+        {
+          "cells": [
+            "bug9",
+            "modkit",
+            "aba9d854",
+            "PASS"
+          ]
+        },
+        {
+          "cells": [
+            "bug10",
+            "mini-chat",
+            "7563f5cd",
+            "PASS"
+          ]
+        }
+      ],
+      "variant": "data",
+      "caption": "Second half: the same pipeline shape held across five more packages, with no human edits to the fixes.",
+      "hold": 300,
+      "narration": "The second half kept the same pipeline shape across five more packages, again with independent oracle passes and no human edits to the fixes.",
+      "instant": true
+    },
+    {
       "type": "diagram-svg",
       "title": "Hard cases made the harness honest",
       "panels": [
@@ -2544,6 +2658,55 @@
       "instant": true
     },
     {
+      "type": "table",
+      "title": "hard-case stress bugs",
+      "columns": [
+        "Case",
+        "Package",
+        "Verdict",
+        "Finding"
+      ],
+      "rows": [
+        {
+          "cells": [
+            "H1",
+            "oagw",
+            "FAIL",
+            "wrong signal"
+          ]
+        },
+        {
+          "cells": [
+            "H2",
+            "account",
+            "PASS",
+            "oracle green"
+          ]
+        },
+        {
+          "cells": [
+            "H3",
+            "account",
+            "PASS",
+            "oracle green"
+          ]
+        },
+        {
+          "cells": [
+            "H4",
+            "resource-group",
+            "STALL",
+            "watchdog gap"
+          ]
+        }
+      ],
+      "variant": "data",
+      "caption": "The stress bakeoff stayed honest: H1 and H4 became product hardening, not hidden score inflation.",
+      "hold": 300,
+      "narration": "The hard-case bakeoff is traceable too. Two passed, one failed with the wrong signal, and one stalled because the runner lacked a watchdog.",
+      "instant": true
+    },
+    {
       "type": "diagram-svg",
       "title": "query-string live bakeoff",
       "panels": [
@@ -2556,13 +2719,12 @@
               "label": "qs1",
               "sub": "solved",
               "lines": [
-                "oracle PASS",
-                "suite PASS"
+                "oracle + suite PASS"
               ],
-              "x": 75,
-              "y": 130,
-              "w": 300,
-              "h": 180,
+              "x": 90,
+              "y": 45,
+              "w": 330,
+              "h": 135,
               "style": "primary"
             },
             {
@@ -2570,13 +2732,12 @@
               "label": "qs2",
               "sub": "solved",
               "lines": [
-                "oracle PASS",
-                "suite PASS"
+                "oracle + suite PASS"
               ],
-              "x": 490,
-              "y": 130,
-              "w": 300,
-              "h": 180,
+              "x": 90,
+              "y": 250,
+              "w": 330,
+              "h": 135,
               "style": "primary"
             },
             {
@@ -2584,13 +2745,12 @@
               "label": "qs3",
               "sub": "solved",
               "lines": [
-                "oracle PASS",
-                "suite PASS"
+                "oracle + suite PASS"
               ],
-              "x": 905,
-              "y": 130,
-              "w": 300,
-              "h": 180,
+              "x": 90,
+              "y": 455,
+              "w": 330,
+              "h": 135,
               "style": "primary"
             },
             {
@@ -2601,25 +2761,26 @@
                 "33 agent calls",
                 "3.74M in · 34K out"
               ],
-              "x": 380,
-              "y": 430,
-              "w": 520,
+              "x": 720,
+              "y": 240,
+              "w": 470,
               "h": 180
             }
           ],
           "edges": [
             {
               "from": "qs1",
-              "to": "rollup"
+              "to": "rollup",
+              "side": "left"
             },
             {
               "from": "qs2",
-              "to": "rollup",
-              "label": "roll up"
+              "to": "rollup"
             },
             {
               "from": "qs3",
-              "to": "rollup"
+              "to": "rollup",
+              "side": "right"
             }
           ]
         }
@@ -2627,6 +2788,47 @@
       "caption": "The query-string run is small but complete: three external parser bugs, three hidden-oracle passes, full suite green each time.",
       "hold": 240,
       "narration": "For query-string, the GPT five point five Kitsoki run solved three out of three cells, with oracle and suite passing each time.",
+      "instant": true
+    },
+    {
+      "type": "table",
+      "title": "query-string bug traceability",
+      "columns": [
+        "Case",
+        "Issue / PR",
+        "Baseline",
+        "Bug"
+      ],
+      "rows": [
+        {
+          "cells": [
+            "qs1",
+            "#336",
+            "2e1f45a",
+            "encoded separator"
+          ]
+        },
+        {
+          "cells": [
+            "qs2",
+            "#404 / #406",
+            "88e1e36",
+            "typed comma array"
+          ]
+        },
+        {
+          "cells": [
+            "qs3",
+            "PR #392",
+            "4287e77",
+            "bracket separator"
+          ]
+        }
+      ],
+      "variant": "data",
+      "caption": "Each query-string cell starts from the real fix parent and is graded by the real regression test kept out of the maker tree.",
+      "hold": 300,
+      "narration": "The query-string bakeoff is also traceable: three real filed bugs or pull requests, three pinned baselines, and hidden regression-test grading.",
       "instant": true
     },
     {
