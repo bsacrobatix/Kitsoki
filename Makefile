@@ -295,6 +295,7 @@ HISTORY_REPO_DIR ?=
 HISTORY_BUGS ?=
 HISTORY_CANDIDATES ?=
 HISTORY_PREPARE_FIRST_CELL ?= 1
+HISTORY_PREPARE_ALL_CELLS ?= 0
 HISTORY_PENDING_REASON ?= provider/profile blocked before model attempt
 history-smoke:
 	@test -n "$(HISTORY_PROJECT)" || (echo "HISTORY_PROJECT is required"; exit 1)
@@ -307,14 +308,18 @@ history-smoke:
 		python3 tools/bugfix-bakeoff/external/bench.py verify --project "$(HISTORY_PROJECT)" --bug "$(HISTORY_BUGS)" $$repo_arg
 	@if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
 		python3 tools/bugfix-bakeoff/external/bench.py drive-plan --project "$(HISTORY_PROJECT)" --bug "$(HISTORY_BUGS)" $$repo_arg --candidate "$(HISTORY_CANDIDATES)"
-	@if [ "$(HISTORY_PREPARE_FIRST_CELL)" = "1" ]; then \
-		first_bug="$(HISTORY_BUGS)"; first_bug="$${first_bug%%,*}"; \
-		first_candidate="$(HISTORY_CANDIDATES)"; first_candidate="$${first_candidate%%,*}"; \
+	@if [ "$(HISTORY_PREPARE_FIRST_CELL)" = "1" ] || [ "$(HISTORY_PREPARE_ALL_CELLS)" = "1" ]; then \
+		bugs="$(HISTORY_BUGS)"; candidates="$(HISTORY_CANDIDATES)"; \
+		if [ "$(HISTORY_PREPARE_ALL_CELLS)" != "1" ]; then bugs="$${bugs%%,*}"; candidates="$${candidates%%,*}"; fi; \
 		if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
-		tools/bugfix-bakeoff/external/drive_cell.sh --project "$(HISTORY_PROJECT)" --bug "$$first_bug" --candidate "$$first_candidate" $$repo_arg --no-drive; \
 		cache="$${EXTERNAL_BAKEOFF_CACHE:-.artifacts/external-bakeoff}"; \
-		python3 -c 'import json, sys; path, first_bug = sys.argv[1:3]; data = json.load(open(path)); assert data.get("bugs") == [first_bug], "first-cell preflight should be scoped to %s, got %r" % (first_bug, data.get("bugs"))' "$$cache/preflight/$(HISTORY_PROJECT)-$$first_bug-$$first_candidate.json" "$$first_bug"; \
-		python3 -c 'import json, pathlib, sys; path, project, bug, candidate = sys.argv[1:5]; data = json.load(open(path)); assert data.get("project") == project and data.get("bug") == bug and data.get("candidate") == candidate, data; assert pathlib.Path(data["prompt"]).exists(), data["prompt"]; assert pathlib.Path(data["worktree"]).exists(), data["worktree"]; assert pathlib.Path(data["preflight"]).exists(), data["preflight"]' "$$cache/prepared/$(HISTORY_PROJECT)-$$first_bug-$$first_candidate.json" "$(HISTORY_PROJECT)" "$$first_bug" "$$first_candidate"; \
+		for bug in $$(printf '%s' "$$bugs" | tr ',' ' '); do \
+			for candidate in $$(printf '%s' "$$candidates" | tr ',' ' '); do \
+				tools/bugfix-bakeoff/external/drive_cell.sh --project "$(HISTORY_PROJECT)" --bug "$$bug" --candidate "$$candidate" $$repo_arg --no-drive; \
+				python3 -c 'import json, sys; path, bug = sys.argv[1:3]; data = json.load(open(path)); assert data.get("bugs") == [bug], "cell preflight should be scoped to %s, got %r" % (bug, data.get("bugs"))' "$$cache/preflight/$(HISTORY_PROJECT)-$$bug-$$candidate.json" "$$bug"; \
+				python3 -c 'import json, pathlib, sys; path, project, bug, candidate = sys.argv[1:5]; data = json.load(open(path)); assert data.get("project") == project and data.get("bug") == bug and data.get("candidate") == candidate, data; assert pathlib.Path(data["prompt"]).exists(), data["prompt"]; assert pathlib.Path(data["worktree"]).exists(), data["worktree"]; assert pathlib.Path(data["preflight"]).exists(), data["preflight"]' "$$cache/prepared/$(HISTORY_PROJECT)-$$bug-$$candidate.json" "$(HISTORY_PROJECT)" "$$bug" "$$candidate"; \
+			done; \
+		done; \
 	fi
 	@mkdir -p .artifacts/external-bakeoff/readiness
 	@if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
@@ -352,11 +357,11 @@ gears-history-smoke:
 
 # gears-history-full-smoke is the no-cost full-corpus proof for the armable
 # gears-rust fixtures. It verifies all four RED/GREEN oracles, renders the full
-# live command matrix, prepares the first cell prompt/worktree, and runs the
+# live command matrix, prepares every selected prompt/worktree, and runs the
 # repo-bakeoff flow checks.
 gears-history-full-smoke:
 	@test -n "$(GEARS_RUST_REPO)" || (echo "GEARS_RUST_REPO must point at a local gears-rust checkout"; exit 1)
-	$(MAKE) history-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(GEARS_RUST_REPO)" HISTORY_BUGS="bug1,bug4,bug5,bug9" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)"
+	$(MAKE) history-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(GEARS_RUST_REPO)" HISTORY_BUGS="bug1,bug4,bug5,bug9" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)" HISTORY_PREPARE_ALL_CELLS=1
 
 # cost-report builds the per-story cost-savings report (the reusable form of
 # docs/case-studies/git-ops-cost.md): the deterministic story cost (agent spend
