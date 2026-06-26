@@ -946,6 +946,54 @@ def duplicate_values(values: list[str]) -> list[str]:
     return sorted(duplicates)
 
 
+def validate_story_driver_contract_bindings(issues: list[dict]) -> None:
+    rooms_dir = ROOT / "stories" / "product-journey-qa" / "rooms"
+    if not rooms_dir.exists():
+        add_corpus_issue(issues, "error", "story-bindings", "Product journey story rooms directory is missing", str(rooms_dir))
+        return
+    missing_contract_binds = []
+    for path in sorted(rooms_dir.glob("*.yaml")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        in_bind = False
+        bind_start = 0
+        bind_lines: list[str] = []
+        bind_indent = 0
+        for index, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip(" "))
+            if stripped == "bind:":
+                in_bind = True
+                bind_start = index
+                bind_lines = []
+                bind_indent = indent
+                continue
+            if in_bind and stripped and indent <= bind_indent:
+                block = "\n".join(bind_lines)
+                if (
+                    'missing_proof_summary: "stdout_json.missing_proof_summary"' in block
+                    and 'driver_contract_summary: "stdout_json.driver_contract_summary"' not in block
+                ):
+                    missing_contract_binds.append(f"{path.relative_to(ROOT)}:{bind_start}")
+                in_bind = False
+            if in_bind:
+                bind_lines.append(line)
+        if in_bind:
+            block = "\n".join(bind_lines)
+            if (
+                'missing_proof_summary: "stdout_json.missing_proof_summary"' in block
+                and 'driver_contract_summary: "stdout_json.driver_contract_summary"' not in block
+            ):
+                missing_contract_binds.append(f"{path.relative_to(ROOT)}:{bind_start}")
+    if missing_contract_binds:
+        add_corpus_issue(
+            issues,
+            "error",
+            "story-driver-contract-bindings",
+            "Run-result story binds must preserve driver_contract_summary with missing_proof_summary",
+            ", ".join(missing_contract_binds),
+        )
+
+
 def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_targets: dict) -> dict:
     schema = read_json(SCHEMA)
     issues: list[dict] = []
@@ -1042,6 +1090,8 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
         issue_query = github_issue_search_query(target).lower()
         if "bug" not in issue_query:
             add_corpus_issue(issues, "warn", "target-bug-query", "GitHub target bug query does not include an explicit bug term or bug label", f"{target_id}: {target.get('bug_query', '')}")
+
+    validate_story_driver_contract_bindings(issues)
 
     errors = sum(1 for issue in issues if issue["severity"] == "error")
     warnings = sum(1 for issue in issues if issue["severity"] == "warn")
