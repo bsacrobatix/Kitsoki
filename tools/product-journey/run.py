@@ -3594,6 +3594,61 @@ def validate_run_bundle(run_dir: Path) -> dict:
         if not driver_handoff.get("suggested_prompt", "").strip():
             add_validation_issue(issues, "error", "driver-handoff-prompt", "driver-handoff.json suggested_prompt is empty")
 
+    if run_json and driver_plan and driver_handoff:
+        summary = summarize_run_bundle(run_dir)
+        summary_scenarios = summary.get("driver_scenarios", [])
+        summary_missing_proof = summary.get("missing_proof_evidence", [])
+        summary_final_gates = summary.get("driver_final_gates", [])
+        summary_contract = summary.get("driver_contract_summary", "")
+        if len(summary_scenarios) != len(driver_scenarios):
+            add_validation_issue(
+                issues,
+                "error",
+                "loaded-driver-contract",
+                "summarize-run driver_scenarios count does not match driver-plan.json",
+                f"expected={len(driver_scenarios)}, actual={len(summary_scenarios)}",
+            )
+        if len(summary_missing_proof) != len(handoff_missing_proof_evidence):
+            add_validation_issue(
+                issues,
+                "error",
+                "loaded-driver-contract",
+                "summarize-run missing_proof_evidence count does not match driver-handoff.json",
+                f"expected={len(handoff_missing_proof_evidence)}, actual={len(summary_missing_proof)}",
+            )
+        if summary_final_gates != driver_plan.get("final_gates", []):
+            add_validation_issue(
+                issues,
+                "error",
+                "loaded-driver-contract",
+                "summarize-run driver_final_gates do not match driver-plan.json",
+            )
+        if review and summary.get("review_status") != review.get("status"):
+            add_validation_issue(
+                issues,
+                "error",
+                "loaded-driver-contract-review",
+                "summarize-run review_status does not match review.json",
+                f"expected={review.get('status')}, actual={summary.get('review_status')}",
+            )
+        missing_summary_tokens = [
+            token for token in [
+                "Driver contract:",
+                "last_result.driver_scenarios",
+                "last_result.missing_proof_evidence",
+                "last_result.driver_final_gates",
+            ]
+            if token not in summary_contract
+        ]
+        if missing_summary_tokens:
+            add_validation_issue(
+                issues,
+                "error",
+                "loaded-driver-contract-summary",
+                "summarize-run driver_contract_summary does not point drivers at the MCP-visible contract",
+                ", ".join(missing_summary_tokens),
+            )
+
     required_evidence = {
         (item.get("scenario", ""), item.get("kind", ""))
         for item in evidence_items
