@@ -51,6 +51,8 @@ world:
   dogfood_run_deck_path: { type: string, default: "" }
   dogfood_rollup_deck_path: { type: string, default: "" }
   dogfood_review_warnings: { type: int, default: 0 }
+  dogfood_review_failed: { type: int, default: 0 }
+  dogfood_review_backlog_summary: { type: string, default: "" }
   dogfood_run_validation_warnings: { type: int, default: 0 }
   dogfood_matrix_validation_warnings: { type: int, default: 0 }
   corpus_validation_status: { type: string, default: "" }

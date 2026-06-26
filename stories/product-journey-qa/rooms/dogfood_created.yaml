@@ -1,7 +1,7 @@
 states:
   dogfood_created:
     description: "A deterministic product-journey dogfood smoke exists for review."
-    relevant_world: [seed, dogfood_id, dogfood_dir, dogfood_report_path, dogfood_deck_path, dogfood_matrix_deck_path, dogfood_run_deck_path, dogfood_rollup_deck_path, matrix_dir, run_dir, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, review_status, review_summary, dogfood_review_warnings, validation_status, dogfood_run_validation_warnings, dogfood_matrix_validation_warnings, status]
+    relevant_world: [seed, dogfood_id, dogfood_dir, dogfood_report_path, dogfood_deck_path, dogfood_matrix_deck_path, dogfood_run_deck_path, dogfood_rollup_deck_path, matrix_dir, run_dir, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, review_status, review_summary, dogfood_review_warnings, dogfood_review_failed, dogfood_review_backlog_summary, validation_status, dogfood_run_validation_warnings, dogfood_matrix_validation_warnings, status]
     view:
       - banner:
           text: "DOGFOOD SMOKE CREATED"
@@ -22,12 +22,13 @@ states:
             Corpus validation: '{{ world.corpus_validation_status|default:"(pending)" }}'
             Corpus warnings: "{{ world.corpus_validation_warnings }}"
             Review: '{{ world.review_status|default:"(pending)" }}'
-            Review warnings: "{{ world.dogfood_review_warnings }}"
+            Review checks: "{{ world.dogfood_review_failed }} failed; {{ world.dogfood_review_warnings }} warnings"
             Run validation: '{{ world.validation_status|default:"(pending)" }}'
             Run validation warnings: "{{ world.dogfood_run_validation_warnings }}"
             Matrix validation warnings: "{{ world.dogfood_matrix_validation_warnings }}"
             Status: "{{ world.status }}"
       - prose: "The smoke proves that matrix creation, assignment run creation, evidence aggregation, review, validation, matrix rollup, and Slidey deck generation compose without live LLM calls."
+      - prose: '{{ world.dogfood_review_backlog_summary|default:"Open the smoke report or run deck review for actionable review checks." }}'
       - prose: "Use it as an artifact-loop check before spending live visual MCP or cassette capture time; the seeded demo evidence is not product proof."
       - choice:
           mode: single
@@ -87,6 +88,8 @@ states:
                 review_status: "stdout_json.review_status"
                 review_summary: "stdout_json.review_summary"
                 dogfood_review_warnings: "stdout_json.review_warnings"
+                dogfood_review_failed: "stdout_json.review_failed"
+                dogfood_review_backlog_summary: "stdout_json.review_backlog_summary"
                 validation_status: "stdout_json.run_validation_status"
                 validation_warnings: "stdout_json.run_validation_warnings"
                 dogfood_run_validation_warnings: "stdout_json.run_validation_warnings"

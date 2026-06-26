@@ -27,6 +27,8 @@ host_handlers:
             review_status: needs_evidence
             review_summary: "needs_evidence: 14/17 checks passed, 2 warnings, 1 failures"
             review_warnings: 2
+            review_failed: 1
+            review_backlog_summary: "fail: quality-gates (bugfix (3/5)); warn: non-demo-evidence (proof=0, demo=25)"
             run_validation_status: valid
             run_validation_warnings: 1
             matrix_validation_status: valid
@@ -57,6 +59,8 @@ turns:
       review_status: needs_evidence
       review_summary: "needs_evidence: 14/17 checks passed, 2 warnings, 1 failures"
       dogfood_review_warnings: 2
+      dogfood_review_failed: 1
+      dogfood_review_backlog_summary: "fail: quality-gates (bugfix (3/5)); warn: non-demo-evidence (proof=0, demo=25)"
       validation_status: valid
       validation_warnings: 1
       dogfood_run_validation_warnings: 1
@@ -64,6 +68,7 @@ turns:
     expect_host_calls:
       - handler: host.run
         args: { call: dogfood_product_journey_smoke }
+    expect_view_matches: "Review checks[\\s\\S]*1 failed; 2 warnings[\\s\\S]*fail: quality-gates[\\s\\S]*warn: non-demo-evidence"
 
   - intent: { name: look, slots: {} }
     expect_state: dogfood_created

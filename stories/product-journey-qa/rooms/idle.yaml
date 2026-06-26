@@ -161,6 +161,8 @@ states:
                 review_status: "stdout_json.review_status"
                 review_summary: "stdout_json.review_summary"
                 dogfood_review_warnings: "stdout_json.review_warnings"
+                dogfood_review_failed: "stdout_json.review_failed"
+                dogfood_review_backlog_summary: "stdout_json.review_backlog_summary"
                 validation_status: "stdout_json.run_validation_status"
                 validation_warnings: "stdout_json.run_validation_warnings"
                 dogfood_run_validation_warnings: "stdout_json.run_validation_warnings"
